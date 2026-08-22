@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+._*
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+*.secret
+working.secret
+
+# Generated dependencies and build output
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+coverage/

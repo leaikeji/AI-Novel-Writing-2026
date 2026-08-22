@@ -1,0 +1,214 @@
+Window: "作家助手", App: 作家助手.
+0 标准窗口 作家助手, Secondary Actions: Raise
+	1 container 作家助手
+		2 container
+			3 HTML 内容 作家助手, URL: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/decorateCenter
+				4 container
+					5 container
+						6 图像
+						7 文本 作家助手
+						8 图像
+						9 文本 刑侦1988：档案里被抹掉的人
+						10 链接
+						11 图像
+						12 文本 最新文章-阅文作家专区_阅文作家专区_作家助手
+						13 链接
+						14 图像
+						15 文本 神助社区
+						16 链接
+						17 图像
+						18 文本 作家咨询-阅文作家专区
+						19 链接
+					20 container
+						21 文本 本地实时保存中
+						22 图像
+					23 图像
+					24 container
+						25 container
+							26 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+							27 文本 小三黑的夏天
+						28 link Description: 小说作品, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books
+						29 link Description: 短剧剧本, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/dramas
+						30 link Description: 码字统计, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/code-word-statistics
+						31 link Description: 码字好友, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/Friends
+						32 container
+							33 图像
+							34 文本 阅创学堂
+						35 container
+							36 图像
+							37 文本 神助社区
+						38 link Description: 任务中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/task-center
+						39 link Description: 墨水商店, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/ink-shop
+						40 link Description: 邀请卡, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/invitation-user
+						41 link Description: 装扮中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/decorateCenter
+						42 container
+							43 图像
+							44 文本 消息通知
+						45 按钮
+							46 图像
+						47 按钮
+							48 图像
+						49 按钮
+							50 图像
+						51 按钮
+							52 图像
+					53 HTML 内容 装扮中心, URL: pcwrite.yuewen.com/authorh5/workbench/decorate-center/avatar-frame
+						54 container
+							55 文本 装扮中心
+							56 link Description: 头像框, Value: pcwrite.yuewen.com/authorh5/workbench/decorate-center/avatar-frame
+							57 container
+								58 文本 默认
+								59 按钮 (disabled) 使用中
+							60 container
+								61 text 新春挂件 活动限定
+								62 按钮 使用
+							63 container
+								64 text 666 学员专属
+								65 按钮 去获取
+							66 container
+								67 text 逢考必过 学员专属
+								68 按钮 去获取
+							69 container
+								70 text 吃瓜群众 学员专属
+								71 按钮 去获取
+							72 container
+								73 text 多球蛋筒 学员专属
+								74 按钮 去获取
+							75 container
+								76 text 发财 学员专属
+								77 按钮 去获取
+							78 container
+								79 text 毕业 学员专属
+								80 按钮 去获取
+							81 container
+								82 text 高级多球冰激凌 学员专属
+								83 按钮 去获取
+							84 container
+								85 text KN95 学员专属
+								86 按钮 去获取
+							87 container
+								88 text 创作学堂-普通 学员专属
+								89 按钮 去获取
+							90 container
+								91 text 单身贵狗 学员专属
+								92 按钮 去获取
+							93 container
+								94 text 健康符 学员专属
+								95 按钮 去获取
+							96 container
+								97 text 锦鲤 学员专属
+								98 按钮 去获取
+							99 container
+								100 text 奶昔 学员专属
+								101 按钮 去获取
+							102 container
+								103 text 牛奶冰棍 学员专属
+								104 按钮 去获取
+							105 container
+								106 text 牛气冲天 学员专属
+								107 按钮 去获取
+							108 container
+								109 text 女神驾到 学员专属
+								110 按钮 去获取
+							111 container
+								112 text 平安符 学员专属
+								113 按钮 去获取
+							114 container
+								115 text 普通蛋卷 学员专属
+								116 按钮 去获取
+							117 container
+								118 text 双锦鲤 学员专属
+								119 按钮 去获取
+							120 container
+								121 text 求桃花 学员专属
+								122 按钮 去获取
+							123 container
+								124 text 兔耳朵 学员专属
+								125 按钮 去获取
+							126 container
+								127 text 外科口罩 学员专属
+								128 按钮 去获取
+							129 container
+								130 text 熊猫 学员专属
+								131 按钮 去获取
+							132 container
+								133 text 盐水冰棍 学员专属
+								134 按钮 去获取
+					135 container Notifications alt+T
+						136 内容列表
+			137 HTML 内容 write-app, URL: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/write.html#/chapter/36623549507570907/98337289150718567
+				138 container
+					139 container
+						140 按钮 字体
+							141 图像
+							142 文本 字体
+						143 按钮 背景
+							144 图像
+							145 文本 背景
+						146 按钮
+							147 图像
+						148 按钮
+							149 图像
+						150 按钮 一键排版
+							151 图像
+							152 文本 一键排版
+						153 按钮 插入
+							154 图像
+							155 文本 插入
+						156 按钮 输入
+							157 文本 输入
+						158 按钮 全屏
+							159 图像
+							160 文本 全屏
+						161 按钮 闭关
+							162 图像
+							163 文本 闭关
+						164 按钮 查找替换
+							165 图像
+							166 文本 查找替换
+						167 按钮 取名
+							168 图像
+							169 文本 取名
+						170 按钮 画师
+							171 图像
+							172 文本 画师
+						173 按钮 历史
+							174 图像
+							175 文本 历史
+						176 按钮 发布|投稿至阅文
+						177 按钮 发布至其他平台
+					178 container
+						179 container
+							180 文本栏 (settable, string) 全书
+						181 按钮 新建章
+						182 按钮 新建卷
+						183 container
+							184 按钮 草稿
+							185 container
+								186 文本 筛选
+								187 按钮
+									188 图像
+							189 按钮
+								190 图像
+							191 按钮
+								192 图像
+							193 按钮
+								194 图像
+						195 外框
+							196 文本栏 (settable, string) for screen reader
+							197 container
+								198 开合三角标记 作品相关 0章
+									199 文本 作品相关
+									200 文本 0章
+								201 开合三角标记 第一卷 4章
+									202 文本 第一卷
+									203 文本 4章
+								204 link Description: 第1章 河底的凝视 3144, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/write.html#/chapter/36623549507570907/98311190513501198
+								205 link Description: 第2章 抽屉里的档案 2577, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/write.html#/chapter/36623549507570907/98312340205791515
+								206 link Description: 第3章 淤泥之下 3459, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/write.html#/chapter/36623549507570907/98336531340645139
+								207 link Description: 第4章 第一块拼图 3266, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/write.html#/chapter/36623549507570907/98337289150718567
+						208 按钮
+					209 container
+						210 container
+							211 container
+								212 文本输入区 (settable, string) Value: 第4章 第一块拼图, Placeholder: 请输入章节号与章节名。示例: 第10章 “天降奇缘”

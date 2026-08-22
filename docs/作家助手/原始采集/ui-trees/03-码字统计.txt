@@ -1,0 +1,223 @@
+Window: "作家助手", App: 作家助手.
+0 标准窗口 作家助手, Secondary Actions: Raise
+	1 container 作家助手
+		2 container
+			3 HTML 内容 作家助手, URL: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/code-word-statistics
+				4 container
+					5 container
+						6 图像
+						7 文本 作家助手
+						8 图像
+						9 文本 刑侦1988：档案里被抹掉的人
+						10 链接
+					11 container
+						12 文本 已同步
+						13 图像
+					14 图像
+					15 container
+						16 container
+							17 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+							18 文本 小三黑的夏天
+						19 link Description: 小说作品, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books
+						20 link Description: 短剧剧本, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/dramas
+						21 link Description: 码字统计, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/code-word-statistics
+						22 link Description: 码字好友, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/Friends
+						23 container
+							24 图像
+							25 文本 阅创学堂
+						26 container
+							27 图像
+							28 文本 神助社区
+						29 link Description: 任务中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/task-center
+						30 link Description: 墨水商店, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/ink-shop
+						31 link Description: 邀请卡, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/invitation-user
+						32 link Description: 装扮中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/decorateCenter
+						33 container
+							34 图像
+							35 文本 消息通知
+						36 按钮
+							37 图像
+						38 按钮
+							39 图像
+						40 按钮
+							41 图像
+						42 按钮
+							43 图像
+					44 container
+						45 文本 码字统计
+						46 container
+							47 组合框
+							48 文本 全部设备 
+							49 图像
+						50 文本 统计所有设备字数总和，字数更新于今天 11:26
+						51 图像
+						52 text 今日码字 08/14 全部设备 0 字 你想看到的风景尽在你的笔下
+						53 按钮 7天
+						54 按钮 15天
+						55 按钮 30天
+						56 text 7日平均 2 字 7日最高 13 字 7日累计 13 字
+						57 图像
+						58 按钮 码字日历
+						59 按钮 (disabled) 发布日历
+						60 按钮
+							61 图像
+						62 文本 2026年08月
+						63 按钮
+							64 图像
+						65 表格
+							66 row
+								67 列标题
+									68 文本 一
+								69 列标题
+									70 文本 二
+								71 列标题
+									72 文本 三
+								73 列标题
+									74 文本 四
+								75 列标题
+									76 文本 五
+								77 列标题
+									78 文本 六
+								79 列标题
+									80 文本 日
+							81 row
+								82 单元格 2026-07-27
+									83 文本 27
+								84 单元格 2026-07-28
+									85 文本 28
+								86 单元格 2026-07-29
+									87 文本 29
+								88 单元格 2026-07-30
+									89 文本 30
+								90 单元格 2026-07-31
+									91 文本 31
+								92 单元格 2026-08-01
+									93 文本 1
+								94 单元格 2026-08-02
+									95 文本 2
+							96 row
+								97 单元格 2026-08-03
+									98 文本 3
+								99 单元格 2026-08-04
+									100 文本 4
+								101 单元格 2026-08-05
+									102 文本 5
+								103 单元格 2026-08-06
+									104 文本 6
+								105 单元格 2026-08-07
+									106 文本 7
+								107 单元格 2026-08-08
+									108 文本 8
+								109 单元格 2026-08-09
+									110 container
+										111 text 9 13
+							112 row
+								113 单元格 2026-08-10
+									114 文本 10
+								115 单元格 2026-08-11
+									116 文本 11
+								117 单元格 2026-08-12
+									118 文本 12
+								119 单元格 2026-08-13
+									120 文本 13
+								121 单元格 2026-08-14
+									122 文本 今
+								123 单元格 2026-08-15
+									124 文本 15
+								125 单元格 2026-08-16
+									126 文本 16
+							127 row
+								128 单元格 2026-08-17
+									129 文本 17
+								130 单元格 2026-08-18
+									131 文本 18
+								132 单元格 2026-08-19
+									133 文本 19
+								134 单元格 2026-08-20
+									135 文本 20
+								136 单元格 2026-08-21
+									137 文本 21
+								138 单元格 2026-08-22
+									139 文本 22
+								140 单元格 2026-08-23
+									141 文本 23
+							142 row
+								143 单元格 2026-08-24
+									144 文本 24
+								145 单元格 2026-08-25
+									146 文本 25
+								147 单元格 2026-08-26
+									148 文本 26
+								149 单元格 2026-08-27
+									150 文本 27
+								151 单元格 2026-08-28
+									152 文本 28
+								153 单元格 2026-08-29
+									154 文本 29
+								155 单元格 2026-08-30
+									156 文本 30
+							157 row
+								158 单元格 2026-08-31
+									159 文本 31
+								160 单元格 2026-09-01
+									161 文本 1
+								162 单元格 2026-09-02
+									163 文本 2
+								164 单元格 2026-09-03
+									165 文本 3
+								166 单元格 2026-09-04
+									167 文本 4
+								168 单元格 2026-09-05
+									169 文本 5
+								170 单元格 2026-09-06
+									171 文本 6
+						172 文本 完成计划
+						173 文本 未完成计划
+						174 图像
+						175 文本 码字日历数据与福利无关
+						176 container
+							177 组合框
+							178 text 书籍 刑侦1988：档案里被抹掉的人
+						179 未加标签的图片 /con_cover_draft10003.png
+						180 文本 8月日均码字
+						181 container
+							182 text 13 字/天 ，比上月  +13
+						183 文本 存稿
+						184 图像
+						185 text 15,575  字
+						186 文本 存稿折算假期
+						187 图像
+						188 text 15  天
+						189 未加标签的图片 /code_plan_calendar-CWfKe6jH.png
+						190 文本 码字计划
+						191 container
+							192 text 1,000 字/天
+						193 文本 今日目标
+						194 container
+							195 text 1,000 字
+						196 文本 今日
+						197 文本 本周
+						198 文本 本月
+						199 按钮 设置计划
+						200 文本 码字周报
+						201 按钮 周报历史
+							202 文本 周报历史
+							203 图像
+						204 text 每周一11:00更新 08/03-08/09 总码字时长 12 分钟
+						205 图像
+						206 text 累计字数 13 字
+						207 图像
+						208 text 超越作家 50 %
+						209 图像
+						210 text 最晚码字 周日晚上 22:47 翻开新篇 走出过去，开启崭新的未来。
+					211 container Notifications alt+T
+						212 内容列表
+	213 关闭按钮
+	214 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	215 最小化按钮
+216 menu bar
+	217 作家助手
+	218 编辑
+	219 窗口
+
+The focused UI element is 21 link Description: 码字统计, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/code-word-statistics

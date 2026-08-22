@@ -1,0 +1,196 @@
+Window: "作家助手", App: 作家助手.
+0 标准窗口 作家助手, Secondary Actions: Raise
+	1 container 作家助手
+		2 container
+			3 HTML 内容 作家助手, URL: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/decorateCenter
+				4 container
+					5 container
+						6 图像
+						7 文本 作家助手
+						8 图像
+						9 文本 刑侦1988：档案里被抹掉的人
+						10 链接
+						11 图像
+						12 文本 最新文章-阅文作家专区_阅文作家专区_作家助手
+						13 链接
+						14 图像
+						15 文本 神助社区
+						16 链接
+						17 图像
+						18 文本 作家咨询-阅文作家专区
+						19 链接
+					20 container
+						21 文本 已同步
+						22 图像
+					23 container
+						24 container
+							25 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+							26 文本 小三黑的夏天
+						27 link Description: 小说作品, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books
+						28 link Description: 短剧剧本, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/dramas
+						29 link Description: 码字统计, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/code-word-statistics
+						30 link Description: 码字好友, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/Friends
+						31 container
+							32 图像
+							33 文本 阅创学堂
+						34 container
+							35 图像
+							36 文本 神助社区
+						37 link Description: 任务中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/task-center
+						38 link Description: 墨水商店, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/ink-shop
+						39 link Description: 邀请卡, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/invitation-user
+						40 link Description: 装扮中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/decorateCenter
+						41 container
+							42 图像
+							43 文本 消息通知
+						44 按钮
+							45 图像
+						46 按钮
+							47 图像
+						48 按钮
+							49 图像
+						50 按钮
+							51 图像
+					52 HTML 内容 装扮中心, URL: pcwrite.yuewen.com/authorh5/workbench/decorate-center/avatar-frame
+						53 container
+							54 文本 装扮中心
+							55 link Description: 头像框, Value: pcwrite.yuewen.com/authorh5/workbench/decorate-center/avatar-frame
+							56 container
+								57 文本 默认
+								58 按钮 (disabled) 使用中
+							59 container
+								60 text 新春挂件 活动限定
+								61 按钮 使用
+							62 container
+								63 text 666 学员专属
+								64 按钮 去获取
+							65 container
+								66 text 逢考必过 学员专属
+								67 按钮 去获取
+							68 container
+								69 text 吃瓜群众 学员专属
+								70 按钮 去获取
+							71 container
+								72 text 多球蛋筒 学员专属
+								73 按钮 去获取
+							74 container
+								75 text 发财 学员专属
+								76 按钮 去获取
+							77 container
+								78 text 毕业 学员专属
+								79 按钮 去获取
+							80 container
+								81 text 高级多球冰激凌 学员专属
+								82 按钮 去获取
+							83 container
+								84 text KN95 学员专属
+								85 按钮 去获取
+							86 container
+								87 text 创作学堂-普通 学员专属
+								88 按钮 去获取
+							89 container
+								90 text 单身贵狗 学员专属
+								91 按钮 去获取
+							92 container
+								93 text 健康符 学员专属
+								94 按钮 去获取
+							95 container
+								96 text 锦鲤 学员专属
+								97 按钮 去获取
+							98 container
+								99 text 奶昔 学员专属
+								100 按钮 去获取
+							101 container
+								102 text 牛奶冰棍 学员专属
+								103 按钮 去获取
+							104 container
+								105 text 牛气冲天 学员专属
+								106 按钮 去获取
+							107 container
+								108 text 女神驾到 学员专属
+								109 按钮 去获取
+							110 container
+								111 text 平安符 学员专属
+								112 按钮 去获取
+							113 container
+								114 text 普通蛋卷 学员专属
+								115 按钮 去获取
+							116 container
+								117 text 双锦鲤 学员专属
+								118 按钮 去获取
+							119 container
+								120 text 求桃花 学员专属
+								121 按钮 去获取
+							122 container
+								123 text 兔耳朵 学员专属
+								124 按钮 去获取
+							125 container
+								126 text 外科口罩 学员专属
+								127 按钮 去获取
+							128 container
+								129 text 熊猫 学员专属
+								130 按钮 去获取
+							131 container
+								132 text 盐水冰棍 学员专属
+								133 按钮 去获取
+					134 container Notifications alt+T
+						135 内容列表
+			136 HTML 内容 作家咨询-阅文作家专区, URL: write.qq.com/portal/dashboard/authorConsult
+				137 container
+					138 内容列表
+						139 link Description: 工作台, Value: write.qq.com/portal/dashboard
+						140 link Description: 作品管理, Value: write.qq.com/portal/dashboard/books
+						141 link Description: 数据中心, Value: write.qq.com/portal/dashboard/takeindex
+						142 link Description: 稿酬收入, Value: write.qq.com/portal/dashboard/income-all
+						143 link Description: 劳务收入, Value: write.qq.com/portal/dashboard/labor
+						144 link Description: 互动管理, Value: write.qq.com/portal/dashboard/interactive-manage
+						145 link Description: 兑换商城, Value: write.qq.com/portal/dashboard/exchange
+						146 link Description: 消息通知, Value: write.qq.com/portal/dashboard/authorConsult
+					147 link Description: 作家咨询, Value: javascript:
+					148 link Description: 服务通知, Value: write.qq.com/portal/community/notify
+					149 link Description: 添加咨询, Help: 新咨询, Value: javascript:void(0)
+					150 组合框 (settable, string)
+						151 按钮 2026年 
+							152 文本 2026年
+							153 文本 
+					154 按钮 清空
+					155 按钮 全部已读
+					156 内容列表
+						157 container
+							158 文本 
+							159 标题 系统消息, Value: 4
+								160 文本 系统消息
+							161 text 亲爱的作家您好！您的昵称已经更新为"小三黑的夏天"，祝您创作愉快! 2026-08-09 20:40
+							162 link Description: 删除, Help: 删除, Value: write.qq.com/portal/dashboard/authorConsult#
+					163 container
+						164 图像
+						165 (selected) 第1页，共1页
+						166 图像
+					167 container
+						168 link Description: 帮助中心, Value: mecho.yuewen.com/echo/11506/aichat?authorAppTranslucentMode=1&authorAppLeftButtonType=4&isTranslucent=true
+						169 link Description: 联系我们, Value: help.yuewen.com/
+						170 link Description: 关于我们, Value: yuewen.com/#&copyright
+						171 link Description: 诚聘英才, Value: join.yuewen.com/
+						172 link Description: 版权信息, Value: write.qq.com/portal/copyright
+						173 link Description: 漏洞提交, Value: security.tencent.com/
+						174 link Description: 热门问答, Value: write.qq.com/ask
+					175 文本 Copyright © 2026 write.qq.com All Rights Reserved 上海阅文信息技术有限公司 版权所有 本网站由腾讯云提供服务器和带宽支持 客服和举报电话：010-59357051
+					176 container
+						177 文本 沪网文【2020】4526-308号 
+						178 link Description: 粤公网安备 44030002000001号, Value: beian.gov.cn/portal/registerSystemInfo?recordcode=44030002000001
+						179 文本  增值电信业务经营许可证：粤B2-20090059 互联网ICP备案号：
+						180 link Description: 粤B2-20090059-5, Value: beian.miit.gov.cn/#/Integrated/index
+						181 link Description: 营业执照, Value: imgservices-1252317822.image.myqcloud.com/coco/s07082025/85bb2117.ia49fb.webp
+					182 link Description: 网警网络110, Value: cyberpolice.mps.gov.cn/wfjb/
+					183 link Description: 可信网站身份验证, Value: ss.knet.cn/verifyseal.dll?sn=2010051300100001081&ct=df&a=1&pa=337337
+					184 link Description: 中央网信办违反和不良信息举报中心, Value: 12377.cn/
+					185 link Description: 上海市互联网违反和不良信息举报中心, Value: shjbzx.cn/
+	186 关闭按钮
+	187 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	188 最小化按钮
+189 menu bar
+	190 作家助手
+	191 编辑
+	192 窗口
+
+The focused UI element is 136 HTML 内容 作家咨询-阅文作家专区, URL: write.qq.com/portal/dashboard/authorConsult

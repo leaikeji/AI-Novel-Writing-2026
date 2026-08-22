@@ -1,0 +1,132 @@
+Window: "作家助手", App: 作家助手.
+0 标准窗口 作家助手, Secondary Actions: Raise
+	1 container 作家助手
+		2 container
+			3 HTML 内容 作家助手, URL: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books
+				4 container
+					5 container
+						6 图像
+						7 文本 作家助手
+						8 图像
+						9 文本 刑侦1988：档案里被抹掉的人
+						10 链接
+					11 container
+						12 文本 同步中
+						13 图像
+					14 图像
+					15 container
+						16 container
+							17 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+							18 文本 小三黑的夏天
+						19 link Description: 小说作品, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books
+						20 link Description: 短剧剧本, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/dramas
+						21 link Description: 码字统计, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/code-word-statistics
+						22 link Description: 码字好友, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/Friends
+						23 container
+							24 图像
+							25 文本 阅创学堂
+						26 container
+							27 图像
+							28 文本 神助社区
+						29 link Description: 任务中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/task-center
+						30 link Description: 墨水商店, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/ink-shop
+						31 link Description: 邀请卡, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/invitation-user
+						32 link Description: 装扮中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/decorateCenter
+						33 container
+							34 图像
+							35 文本 消息通知
+						36 按钮
+							37 图像
+						38 按钮
+							39 图像
+						40 按钮
+							41 图像
+						42 按钮
+							43 图像
+					44 container
+						45 图像
+						46 container
+						47 container
+							48 图像
+							49 text 做任务赚墨水  (1/22)
+							50 按钮
+								51 link file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/task-center
+							52 container
+								53 文本 周一
+								54 图像
+								55 文本 +5
+							56 按钮 (disabled) 已领
+							57 container
+								58 文本 周二
+								59 图像
+								60 文本 +5
+							61 按钮 (disabled) 已领
+							62 container
+								63 文本 周三
+								64 图像
+								65 文本 +5
+							66 按钮 补签
+							67 container
+								68 文本 今天
+								69 图像
+								70 文本 +5
+							71 按钮 签到
+							72 container
+								73 文本 周五
+								74 图像
+								75 文本 +5
+							76 文本 未开启
+							77 container
+								78 文本 周六
+								79 图像
+								80 文本 +5
+							81 文本 未开启
+							82 container
+								83 文本 周日
+								84 图像
+								85 文本 +5
+							86 文本 未开启
+						87 container
+							88 未加标签的图片 /invite_card_background-D2Yrs6ld.svg
+							89 文本 得300墨水等
+							90 按钮 分享口令
+						91 container
+							92 图像
+							93 text 新建 私密作品、阅文作品、分组
+							94 图像
+						95 container
+							96 图像
+							97 text 导入 本地导入私密作品
+						98 container
+							99 图像
+							100 text 投稿阅文 编辑直投，投稿后仅编辑可见
+						101 container
+							102 图像
+							103 text 模板中心 总纲、细纲、开头应有尽有
+						104 container
+							105 组合框
+							106 文本 全部作品
+						107 按钮 已隐藏
+							108 图像
+							109 文本 已隐藏
+						110 按钮 回收站
+							111 图像
+							112 文本 回收站
+						113 container
+							114 图像 刑侦1988：档案里被抹掉的人
+							115 文本 私密
+							116 标题 刑侦1988：档案里被抹掉的人, Value: 3
+								117 文本 刑侦1988：档案里被抹掉的人
+								118 图像
+							119 文本 1.2万字
+					120 container Notifications alt+T
+						121 内容列表
+	122 关闭按钮
+	123 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	124 最小化按钮
+125 menu bar
+	126 作家助手
+	127 编辑
+	128 窗口
+
+The focused UI element is 3 HTML 内容 作家助手, URL: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books

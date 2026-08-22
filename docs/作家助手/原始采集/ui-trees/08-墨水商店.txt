@@ -1,0 +1,191 @@
+Window: "作家助手", App: 作家助手.
+0 标准窗口 作家助手, Secondary Actions: Raise
+	1 container 作家助手
+		2 container
+			3 HTML 内容 作家助手, URL: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/ink-shop
+				4 container
+					5 container
+						6 图像
+						7 文本 作家助手
+						8 图像
+						9 文本 刑侦1988：档案里被抹掉的人
+						10 链接
+						11 图像
+						12 文本 最新文章-阅文作家专区_阅文作家专区_作家助手
+						13 链接
+						14 图像
+						15 文本 神助社区
+						16 链接
+					17 container
+						18 文本 已同步
+						19 图像
+					20 container
+						21 container
+							22 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+							23 文本 小三黑的夏天
+						24 link Description: 小说作品, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books
+						25 link Description: 短剧剧本, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/dramas
+						26 link Description: 码字统计, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/code-word-statistics
+						27 link Description: 码字好友, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/Friends
+						28 container
+							29 图像
+							30 文本 阅创学堂
+						31 container
+							32 图像
+							33 文本 神助社区
+						34 link Description: 任务中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/task-center
+						35 link Description: 墨水商店, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/ink-shop
+						36 link Description: 邀请卡, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/invitation-user
+						37 link Description: 装扮中心, Value: file:///Applications/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B.app/Contents/Resources/app/authorwrite_5.19.0.asar/out/renderer/index.html#/books/decorateCenter
+						38 container
+							39 图像
+							40 文本 消息通知
+						41 按钮
+							42 图像
+						43 按钮
+							44 图像
+						45 按钮
+							46 图像
+						47 按钮
+							48 图像
+					49 HTML 内容 墨水兑换, URL: …
+						50 container
+							51 container
+								52 link Description: 任务中心, Value: pcwrite.yuewen.com/authorh5/workbench/ink-shop/task-center
+								53 link Description: 墨水商店, Value: pcwrite.yuewen.com/authorh5/workbench/ink-shop/ink-store/ink-exchange
+								54 link Description: 邀请卡, Value: pcwrite.yuewen.com/authorh5/workbench/ink-shop/ink-code
+							55 按钮 0.00 积分
+								56 文本 0.00
+								57 文本 积分
+								58 图像
+							59 文本 我的墨水
+							60 图像
+							61 图像
+							62 文本 115
+							63 按钮 兑换
+								64 文本 兑换
+							65 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+							66 标题 【妙笔通鉴·问全书】使用权限, Value: 3
+								67 文本 【妙笔通鉴·问全书】使用权限
+							68 文本 兑换问全书30天使用权限，剩余天数小于90天可兑换
+							69 container
+								70 text 300  1000 墨水 / 30天
+							71 按钮 立即兑换
+							72 未加标签的图片 /knowledge.png
+							73 标题 【妙笔通鉴·个人资料库】使用权限, Value: 3
+								74 文本 【妙笔通鉴·个人资料库】使用权限
+							75 文本 兑换个人资料库30天使用权限，剩余天数小于90天可兑换
+							76 container
+								77 text 200  500 墨水 / 30天
+							78 按钮 立即兑换
+							79 未加标签的图片 /full.png
+							80 标题 【妙笔通鉴·问全书】书籍数量, Value: 3
+								81 文本 【妙笔通鉴·问全书】书籍数量
+							82 文本 支持扩展添加妙笔通鉴书籍数量啦，书籍不够用这里加加加～
+							83 container
+								84 text 500  墨水 / 本
+							85 按钮 立即兑换
+							86 未加标签的图片 /nickname.png
+							87 标题 昵称名称修改, Value: 3
+								88 文本 昵称名称修改
+							89 文本 每月可以自由更换昵称名称1次
+							90 container
+								91 text 2000  墨水
+							92 按钮 立即兑换
+							93 未加标签的图片 /luckyEgg.png
+							94 标题 开运扭蛋, Value: 3
+								95 文本 开运扭蛋
+							96 文本 实体签名书、写作专属皮肤等奖品等你来拿
+							97 图像
+							98 文本 新的大奖Switch已入池!
+							99 container
+								100 text 200  墨水 /次
+							101 按钮 去扭蛋
+							102 未加标签的图片 /skin.png
+							103 标题 写作皮肤, Value: 3
+								104 文本 写作皮肤
+							105 文本 使用这个皮肤后真是文思泉涌，下笔有神
+							106 container
+								107 text 1000  墨水
+							108 按钮 立即兑换
+							109 未加标签的图片 /font.png
+							110 标题 自定义字体数量, Value: 3
+								111 文本 自定义字体数量
+							112 文本 支持扩展添加字体数量上限啦，字体爱好者不要错过喔
+							113 container
+								114 text 500  墨水 /个
+							115 按钮 立即兑换
+							116 未加标签的图片 /52e8a65f.b23kvr.png
+							117 标题 阅读币兑换券, Value: 3
+								118 文本 阅读币兑换券
+							119 文本 阅读币应有尽有，快来兑换吧
+							120 container
+								121 text 可兑换阅读币  0
+							122 按钮 立即使用
+							123 未加标签的图片 /vip.png
+							124 标题 阅创学堂会员体验卡, Value: 3
+								125 文本 阅创学堂会员体验卡
+							126 文本 阅文起点创作学堂会员体验资格，可以在体验天数内免费享受部分权益
+							127 container
+								128 text 200  墨水
+							129 按钮 立即兑换
+							130 未加标签的图片 /202405141932_skin.png
+							131 标题 自定义皮肤, Value: 3
+								132 文本 自定义皮肤
+							133 文本 我的皮肤我做主，想换哪个换哪个
+							134 container
+								135 text 500  墨水 /个
+							136 按钮 立即兑换
+							137 未加标签的图片 /spell.png
+							138 标题 自习室冠名, Value: 3
+								139 文本 自习室冠名
+							140 文本 拥有它，你就是这一天拼字星球中最靓的仔
+							141 container
+								142 text 10000  墨水  本月剩余  20
+							143 按钮 立即兑换
+							144 未加标签的图片 /privcover2.png
+							145 标题 私密作品自助定义封面, Value: 3
+								146 文本 私密作品自助定义封面
+							147 文本 20,000张正版图片任意使用，自助定义封面滤镜/封面特效/书名字体/书名颜色等
+							148 container
+								149 text 5  墨水 /次
+							150 按钮 立即兑换
+							151 文本 任务记录
+							152 container
+								153 组合框
+								154 文本 3个月内
+							155 container
+								156 组合框
+								157 文本 全部类型
+							158 内容列表
+								159 文本 时间
+								160 文本 记录来源
+								161 文本 明细
+							162 内容列表
+								163 文本 2026-08-11 01:50
+								164 文本 每日签到
+								165 container
+									166 text + 5
+							167 内容列表
+								168 文本 2026-08-10 23:52
+								169 文本 主线任务奖励
+								170 container
+									171 text + 100
+							172 内容列表
+								173 文本 2026-08-10 01:20
+								174 文本 每日签到
+								175 container
+									176 text + 5
+							177 内容列表
+								178 文本 2026-08-09 20:39
+								179 文本 每日签到
+								180 container
+									181 text + 5
+							182 内容列表
+								183 按钮 (disabled) left
+									184 图像 left
+								185 文本 1
+								186 按钮 (disabled) right
+									187 图像 right
+					188 container Notifications alt+T
+						189 内容列表
