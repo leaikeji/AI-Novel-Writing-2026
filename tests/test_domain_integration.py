@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.models import Document, IntelligenceCommitBatch, Novel, StoryFact
 from backend.services import (
     CandidateConflictError,
+    ValidationError,
     adopt_candidate,
     commit_intelligence_items,
     complete_chapter_generation,
@@ -17,7 +18,9 @@ from backend.services import (
     DraftConflictError,
     RestorationPlanConflictError,
     create_checkpoint,
+    create_document,
     create_novel,
+    create_volume,
     get_document,
     get_novel_context,
     list_story_facts,
@@ -151,6 +154,52 @@ def test_create_novel_is_ready_to_write(session: Session) -> None:
     assert document["revisions"][0]["revision_number"] == 1
     assert session.scalar(select(Novel).where(Novel.id == UUID(novel["id"]))) is not None
     assert session.scalar(select(Document).where(Document.id == document_id)) is not None
+
+
+def test_novel_scoped_queries_and_commands_never_cross_books(session: Session) -> None:
+    first = create_novel(session, "pytest-隔离甲")
+    second = create_novel(session, "pytest-隔离乙")
+    first_id = UUID(first["id"])
+    second_id = UUID(second["id"])
+    first_document_id = UUID(first["tree"][0]["documents"][0]["id"])
+    second_document_id = UUID(second["tree"][0]["documents"][0]["id"])
+    second_volume_id = UUID(second["tree"][0]["id"])
+
+    save_draft(
+        session,
+        first_document_id,
+        expected_draft_version=1,
+        content_markdown="甲书独有线索：蓝色纸鹤。",
+    )
+    save_draft(
+        session,
+        second_document_id,
+        expected_draft_version=1,
+        content_markdown="乙书独有线索：铜制罗盘。",
+    )
+
+    assert [item["document_id"] for item in search_novel(session, first_id, "蓝色纸鹤")] == [
+        str(first_document_id)
+    ]
+    assert search_novel(session, first_id, "铜制罗盘") == []
+    assert search_novel(session, second_id, "蓝色纸鹤") == []
+
+    with pytest.raises(ValidationError, match="does not belong"):
+        get_novel_context(session, first_id, document_id=second_document_id)
+
+    with pytest.raises(ValidationError, match="does not belong"):
+        create_document(
+            session,
+            first_id,
+            "不应跨书创建",
+            volume_id=second_volume_id,
+        )
+    session.rollback()
+
+    created_volume = create_volume(session, first_id, "甲书第二卷")
+    assert created_volume["novel_id"] == str(first_id)
+    assert get_novel_context(session, first_id)["novel"]["title"] == "pytest-隔离甲"
+    assert get_novel_context(session, second_id)["novel"]["title"] == "pytest-隔离乙"
 
 
 def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
