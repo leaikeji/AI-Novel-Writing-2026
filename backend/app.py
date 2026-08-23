@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 from uuid import UUID
 
@@ -12,7 +10,13 @@ from qwenpaw.pawapp import PawApp, get_ctx
 from sqlalchemy.orm import Session
 
 from .contracts import APP_ID, APP_VERSION
+from .creative_api import router as creative_router
 from .database import database_status, get_session
+from .model_runtime import (
+    configured_model_audit,
+    parse_model_json,
+    reply_model_audit,
+)
 from .schemas import (
     AdoptCandidateRequest,
     CheckpointRequest,
@@ -71,6 +75,7 @@ from .services import (
 
 pawapp = PawApp(name="AI小说世界2026", app_id=APP_ID)
 router = APIRouter()
+router.include_router(creative_router)
 
 
 def _raise_domain(error: Exception) -> None:
@@ -110,34 +115,6 @@ def _raise_domain(error: Exception) -> None:
     raise error
 
 
-def _model_json(text: str) -> dict[str, Any]:
-    candidate = text.strip()
-    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
-    if fenced:
-        candidate = fenced.group(1).strip()
-    try:
-        payload = json.loads(candidate)
-        if isinstance(payload, list):
-            return {"items": payload}
-        if isinstance(payload, dict):
-            return payload
-    except json.JSONDecodeError:
-        pass
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(candidate):
-        if character not in "[{":
-            continue
-        try:
-            payload, _ = decoder.raw_decode(candidate[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, list):
-            return {"items": payload}
-        if isinstance(payload, dict):
-            return payload
-    raise ValidationError("模型没有返回可解析的情报 JSON")
-
-
 @router.get("/health")
 def health() -> dict[str, object]:
     database = database_status()
@@ -148,6 +125,8 @@ def health() -> dict[str, object]:
         "database": database,
         "ai_candidate_generation_enabled": True,
         "ai_authoritative_write_enabled": False,
+        "required_generation_model": "MiniMax-M3",
+        "model_verification_mode": "agent-config+provider-usage",
         "vector_retrieval_enabled": False,
     }
 
@@ -377,20 +356,31 @@ async def generation_jobs_create_body(
             document_id,
             expected_brief_version=request.expected_brief_version,
             force_new=request.force_new,
+            asset_ids=request.asset_ids,
+            preset_id=request.preset_id,
+            requested_model_id=request.requested_model_id,
         )
         if job["state"] == "ready" and job.get("candidate"):
             return job
+        configured_model = configured_model_audit(ctx.agent_id)
         prompt = build_chapter_generation_prompt(job["generation_context_snapshot"])
+        generation_session_id = f"novel-generation:{job['id']}"
         reply = await ctx.chat(
             prompt,
             skill="prose-writing",
-            session_id=f"novel-generation:{job['id']}",
+            session_id=generation_session_id,
         )
+        actual_model = reply_model_audit(
+            reply,
+            session_id=generation_session_id,
+        ).ensure_matches(configured_model)
         return complete_chapter_generation(
             session,
             UUID(str(job["id"])),
             content_markdown=reply.text,
-            model_profile_fingerprint=f"qwenpaw-agent:{ctx.agent_id}",
+            model_profile_fingerprint=actual_model.fingerprint,
+            actual_model_id=actual_model.model_id,
+            provider_profile=actual_model.provider_id,
         )
     except Exception as error:
         session.rollback()
@@ -488,12 +478,18 @@ async def intelligence_proposals_create(
         if proposal["state"] in {"ready", "partially_accepted", "accepted", "rejected"}:
             return proposal
         prompt = build_intelligence_prompt(session, UUID(str(proposal["id"])))
+        configured_model = configured_model_audit(ctx.agent_id)
+        intelligence_session_id = f"novel-intelligence:{proposal['id']}"
         reply = await ctx.chat(
             prompt,
             skill="story-bible",
-            session_id=f"novel-intelligence:{proposal['id']}",
+            session_id=intelligence_session_id,
         )
-        payload = _model_json(reply.text)
+        actual_model = reply_model_audit(
+            reply,
+            session_id=intelligence_session_id,
+        ).ensure_matches(configured_model)
+        payload = parse_model_json(reply.text)
         raw_items = payload.get("items", [])
         if not isinstance(raw_items, list):
             raise ValidationError("模型情报 JSON 的 items 必须是数组")
@@ -501,7 +497,9 @@ async def intelligence_proposals_create(
             session,
             UUID(str(proposal["id"])),
             items=[item for item in raw_items if isinstance(item, dict)],
-            model_profile_fingerprint=f"qwenpaw-agent:{ctx.agent_id}",
+            model_profile_fingerprint=actual_model.fingerprint,
+            actual_model_id=actual_model.model_id,
+            provider_profile=actual_model.provider_id,
         )
     except Exception as error:
         session.rollback()

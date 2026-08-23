@@ -49,6 +49,9 @@ class SaveChapterBriefRequest(BaseModel):
 class GenerateChapterRequest(BaseModel):
     expected_brief_version: int = Field(ge=1)
     force_new: bool = False
+    asset_ids: list[UUID] = Field(default_factory=list, max_length=500)
+    preset_id: UUID | None = None
+    requested_model_id: str = Field(default="MiniMax-M3", min_length=1, max_length=120)
 
 
 class AdoptCandidateRequest(BaseModel):

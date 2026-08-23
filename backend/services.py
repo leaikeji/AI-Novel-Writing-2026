@@ -25,6 +25,9 @@ from .models import (
     IntelligenceProposal,
     IntelligenceProposalItem,
     Novel,
+    AssetPreset,
+    AssetPresetItem,
+    PrivateAsset,
     StoryFact,
     Volume,
 )
@@ -74,6 +77,8 @@ class RestorationPlanConflictError(DomainError):
 
 
 CURRENT_FACT_STATUSES = ("active", "source_restored")
+MINIMAX_M3_MODEL_ID = "MiniMax-M3"
+MINIMUM_COMPLETED_CHAPTER_CHARACTERS = 3000
 
 
 def content_hash(markdown: str) -> str:
@@ -102,6 +107,8 @@ def _document_payload(document: Document, working: DocumentWorkingCopy) -> dict[
         "kind": document.kind,
         "title": document.title,
         "position": document.position,
+        "status": document.status,
+        "version": document.version,
         "draft_version": working.draft_version,
         "base_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
         "content_markdown": working.content_markdown,
@@ -245,6 +252,14 @@ def _generation_job_payload(
         "base_draft_version": job.base_draft_version,
         "base_content_hash": job.base_content_hash,
         "model_profile_fingerprint": job.model_profile_fingerprint,
+        "asset_snapshot": job.asset_snapshot,
+        "requested_model_id": job.requested_model_id,
+        "actual_model_id": job.actual_model_id,
+        "provider_profile": job.provider_profile,
+        "target_visible_character_count": job.target_visible_character_count,
+        "output_visible_character_count": job.output_visible_character_count,
+        "validation_state": job.validation_state,
+        "attempt": job.attempt,
         "failure_message": job.failure_message,
         "candidate": _candidate_payload(candidate) if candidate else None,
         "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -301,6 +316,9 @@ def _intelligence_proposal_payload(
         "input_hash": proposal.input_hash,
         "state": proposal.state,
         "source_current": source_current,
+        "requested_model_id": proposal.requested_model_id,
+        "actual_model_id": proposal.actual_model_id,
+        "provider_profile": proposal.provider_profile,
         "model_profile_fingerprint": proposal.model_profile_fingerprint,
         "failure_message": proposal.failure_message,
         "items": [_intelligence_item_payload(item) for item in items],
@@ -437,6 +455,12 @@ def list_novels(session: Session) -> list[dict[str, Any]]:
                 "id": str(novel.id),
                 "title": novel.title,
                 "description": novel.description,
+                "writing_type": novel.writing_type,
+                "audience": novel.audience,
+                "genre": novel.genre,
+                "subgenre": novel.subgenre,
+                "cover_mode": novel.cover_mode,
+                "cover_asset_id": str(novel.cover_asset_id) if novel.cover_asset_id else None,
                 "version": novel.version,
                 "chapter_count": len(documents),
                 "visible_character_count": total_characters,
@@ -453,6 +477,21 @@ def get_novel(session: Session, novel_id: UUID) -> dict[str, Any]:
         "id": str(novel.id),
         "title": novel.title,
         "description": novel.description,
+        "writing_type": novel.writing_type,
+        "audience": novel.audience,
+        "genre": novel.genre,
+        "subgenre": novel.subgenre,
+        "idea": novel.idea,
+        "template_key": novel.template_key,
+        "template_name": novel.template_name,
+        "template_data": novel.template_data,
+        "cover_mode": novel.cover_mode,
+        "cover_asset_id": str(novel.cover_asset_id) if novel.cover_asset_id else None,
+        "outline_target_chapters": novel.outline_target_chapters,
+        "highlight": novel.highlight,
+        "background": novel.background,
+        "main_plot": novel.main_plot,
+        "story_ledger_version": novel.story_ledger_version,
         "version": novel.version,
         "created_at": novel.created_at.isoformat() if novel.created_at else None,
         "updated_at": novel.updated_at.isoformat() if novel.updated_at else None,
@@ -619,6 +658,7 @@ def _generation_snapshot(
     document: Document,
     working: DocumentWorkingCopy,
     brief: ChapterBrief,
+    asset_snapshot: list[dict[str, Any]],
 ) -> dict[str, Any]:
     context = get_novel_context(
         session, document.novel_id, document_id=document.id, max_chars=30_000
@@ -644,7 +684,49 @@ def _generation_snapshot(
         },
         "previous_context": context["documents"],
         "story_facts": context["story_facts"],
+        "private_assets": asset_snapshot,
     }
+
+
+def _generation_asset_snapshot(
+    session: Session,
+    *,
+    asset_ids: list[UUID] | None,
+    preset_id: UUID | None,
+) -> list[dict[str, Any]]:
+    combined = list(asset_ids or [])
+    if preset_id is not None:
+        preset = session.get(AssetPreset, preset_id)
+        if preset is None or preset.archived:
+            raise ValidationError("资料预设不存在或已删除")
+        combined.extend(
+            session.scalars(
+                select(AssetPresetItem.asset_id)
+                .where(AssetPresetItem.preset_id == preset_id)
+                .order_by(AssetPresetItem.position)
+            ).all()
+        )
+    unique_ids = list(dict.fromkeys(combined))
+    if not unique_ids:
+        return []
+    assets = session.scalars(
+        select(PrivateAsset).where(
+            PrivateAsset.id.in_(unique_ids), PrivateAsset.archived.is_(False)
+        )
+    ).all()
+    by_id = {asset.id: asset for asset in assets}
+    if set(unique_ids) != set(by_id):
+        raise ValidationError("生成资料包含不存在或已删除的私有库条目")
+    return [
+        {
+            "id": str(by_id[asset_id].id),
+            "asset_type": by_id[asset_id].asset_type,
+            "title": by_id[asset_id].title,
+            "content": by_id[asset_id].content,
+            "version": by_id[asset_id].version,
+        }
+        for asset_id in unique_ids
+    ]
 
 
 def start_chapter_generation(
@@ -653,6 +735,9 @@ def start_chapter_generation(
     *,
     expected_brief_version: int,
     force_new: bool = False,
+    asset_ids: list[UUID] | None = None,
+    preset_id: UUID | None = None,
+    requested_model_id: str = MINIMAX_M3_MODEL_ID,
 ) -> dict[str, Any]:
     document = _require_document(session, document_id)
     if document.kind != "chapter":
@@ -662,10 +747,25 @@ def start_chapter_generation(
         raise ValidationError("请先保存章节任务书")
     if brief.version != expected_brief_version:
         raise BriefConflictError(_brief_payload(brief, document_id))
+    normalized_model = re.sub(r"[^a-z0-9]", "", requested_model_id.lower())
+    if normalized_model != "minimaxm3":
+        raise ValidationError("本项目的正文生成模型固定为 MiniMax M3")
     working = session.get(DocumentWorkingCopy, document_id)
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
-    snapshot = _generation_snapshot(session, document, working, brief)
+    asset_snapshot = _generation_asset_snapshot(
+        session, asset_ids=asset_ids, preset_id=preset_id
+    )
+    snapshot = _generation_snapshot(session, document, working, brief, asset_snapshot)
+    acceptance_target = max(
+        MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
+        brief.target_word_count,
+    )
+    snapshot["acceptance"] = {
+        "minimum_visible_character_count": MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
+        "target_visible_character_count": acceptance_target,
+    }
+    attempt = 1
     if force_new:
         previous_attempts = session.scalar(
             select(func.count(ChapterGenerationJob.id)).where(
@@ -675,7 +775,8 @@ def start_chapter_generation(
                 ChapterGenerationJob.base_content_hash == working.content_hash,
             )
         )
-        snapshot["generation_attempt"] = int(previous_attempts or 0) + 1
+        attempt = int(previous_attempts or 0) + 1
+        snapshot["generation_attempt"] = attempt
     serialized = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     input_hash = content_hash(serialized)
     existing = session.scalar(
@@ -703,6 +804,10 @@ def start_chapter_generation(
         base_draft_version=working.draft_version,
         base_content_hash=working.content_hash,
         generation_context_snapshot=snapshot,
+        asset_snapshot=asset_snapshot,
+        requested_model_id=MINIMAX_M3_MODEL_ID,
+        target_visible_character_count=acceptance_target,
+        attempt=attempt,
     )
     session.add(job)
     session.commit()
@@ -711,6 +816,14 @@ def start_chapter_generation(
 
 def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
     brief = snapshot["brief"]
+    acceptance = snapshot.get("acceptance") or {}
+    target_visible_character_count = max(
+        MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
+        int(
+            acceptance.get("target_visible_character_count")
+            or brief["target_word_count"]
+        ),
+    )
     roles = brief["role_constraints"]
     previous_context = snapshot.get("previous_context", [])
     context_text = "\n\n".join(
@@ -720,13 +833,17 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
         f"- {fact['subject']}｜{fact['predicate']}｜{fact['object']}"
         for fact in snapshot.get("story_facts", [])
     )
+    asset_text = "\n".join(
+        f"- [{asset['asset_type']}] {asset['title']}：{asset['content']}"
+        for asset in snapshot.get("private_assets", [])
+    )
     return f"""你正在为作者生成一份可审阅的章节正文候选。请遵循 prose-writing Skill。
 
 只输出小说正文，不要解释、不要写标题、不要使用 Markdown 代码围栏，也不要声称已经保存。
 
 作品：{snapshot['novel']['title']}
 章节：{snapshot['chapter']['title']}
-目标字数：约 {brief['target_word_count']} 个中文可见字符
+目标字数：至少 {target_visible_character_count} 个中文可见字符；不得少于该值
 本章期望：{brief['expectation_text'] or '按章纲推进，不额外扩张设定'}
 章节大纲：
 {brief['outline_text'] or '无固定章纲，保持前文连续并形成完整章节推进'}
@@ -739,6 +856,9 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
 
 已确认故事事实：
 {facts_text or '- 暂无结构化故事事实'}
+
+本次作者选用的私有库资料：
+{asset_text or '- 未选择，按章纲与前文创作'}
 
 截至本章的上下文（可能包含本章当前工作稿，仅作连续性参考）：
 {context_text or '暂无前文'}
@@ -775,6 +895,8 @@ def complete_chapter_generation(
     *,
     content_markdown: str,
     model_profile_fingerprint: str = "qwenpaw-active-agent",
+    actual_model_id: str,
+    provider_profile: str,
 ) -> dict[str, Any]:
     job = session.scalar(
         select(ChapterGenerationJob)
@@ -789,6 +911,30 @@ def complete_chapter_generation(
     if existing is not None:
         return _generation_job_payload(session, job)
     candidate_text = _clean_model_candidate(content_markdown)
+    normalized_model = re.sub(r"[^a-z0-9]", "", actual_model_id.lower())
+    if normalized_model != "minimaxm3":
+        job.state = "failed"
+        job.actual_model_id = actual_model_id
+        job.provider_profile = provider_profile
+        job.failure_message = "实际模型不是 MiniMax M3，正文结果已作废"
+        job.completed_at = datetime.now(timezone.utc)
+        session.commit()
+        raise ValidationError(job.failure_message)
+    output_visible_character_count = visible_character_count(candidate_text)
+    if output_visible_character_count < job.target_visible_character_count:
+        job.state = "failed"
+        job.model_profile_fingerprint = model_profile_fingerprint
+        job.actual_model_id = actual_model_id
+        job.provider_profile = provider_profile
+        job.output_visible_character_count = output_visible_character_count
+        job.validation_state = "below_target"
+        job.failure_message = (
+            f"正文仅有{output_visible_character_count}个可见字符，"
+            f"低于{job.target_visible_character_count}字门槛，必须整章重写"
+        )
+        job.completed_at = datetime.now(timezone.utc)
+        session.commit()
+        raise ValidationError(job.failure_message)
     base_content = str(job.generation_context_snapshot["chapter"]["base_content_markdown"])
     candidate = CandidateRevision(
         id=uuid4(),
@@ -805,6 +951,10 @@ def complete_chapter_generation(
     )
     job.state = "ready"
     job.model_profile_fingerprint = model_profile_fingerprint
+    job.actual_model_id = actual_model_id
+    job.provider_profile = provider_profile
+    job.output_visible_character_count = output_visible_character_count
+    job.validation_state = "meets_target"
     job.completed_at = datetime.now(timezone.utc)
     session.add(candidate)
     session.commit()
@@ -847,6 +997,14 @@ def adopt_candidate(
     )
     if candidate is None:
         raise NotFoundError(f"candidate {candidate_id} not found")
+    generation_job = session.get(ChapterGenerationJob, candidate.generation_job_id)
+    if (
+        generation_job is None
+        or generation_job.validation_state != "meets_target"
+        or generation_job.output_visible_character_count
+        < generation_job.target_visible_character_count
+    ):
+        raise ValidationError("正文候选未达到3000字验收门槛，不能采用")
     document = _require_document(session, candidate.document_id)
     working = session.scalar(
         select(DocumentWorkingCopy)
@@ -1209,6 +1367,8 @@ def complete_intelligence_proposal(
     *,
     items: list[dict[str, Any]],
     model_profile_fingerprint: str = "qwenpaw-active-agent",
+    actual_model_id: str,
+    provider_profile: str,
 ) -> dict[str, Any]:
     proposal = session.scalar(
         select(IntelligenceProposal)
@@ -1235,6 +1395,14 @@ def complete_intelligence_proposal(
     )
     if existing:
         return _intelligence_proposal_payload(session, proposal)
+    normalized_model = re.sub(r"[^a-z0-9]", "", actual_model_id.lower())
+    if normalized_model != "minimaxm3":
+        proposal.state = "failed"
+        proposal.actual_model_id = actual_model_id
+        proposal.provider_profile = provider_profile
+        proposal.failure_message = "实际模型不是 MiniMax M3，情报结果已作废"
+        session.commit()
+        raise ValidationError(proposal.failure_message)
     normalized: list[IntelligenceProposalItem] = []
     for position, raw in enumerate(items[:200], start=1):
         item_type = str(raw.get("item_type", "fact")).strip()
@@ -1269,6 +1437,9 @@ def complete_intelligence_proposal(
         )
     session.add_all(normalized)
     proposal.state = "ready"
+    proposal.requested_model_id = MINIMAX_M3_MODEL_ID
+    proposal.actual_model_id = actual_model_id
+    proposal.provider_profile = provider_profile
     proposal.model_profile_fingerprint = model_profile_fingerprint
     proposal.failure_message = None
     session.commit()

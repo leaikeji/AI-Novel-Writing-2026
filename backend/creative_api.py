@@ -1,0 +1,880 @@
+"""HTTP routes for the complete long-form creation workflow."""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from qwenpaw.pawapp import get_ctx
+from sqlalchemy.orm import Session
+
+from .creative_schemas import (
+    CompleteVersionedRequest,
+    CreateAssetPresetRequest,
+    CreateChapterDraftRequest,
+    CreateCharacterRequest,
+    CreateExportRequest,
+    CreateForeshadowRequest,
+    CreateNovelDraftRequest,
+    CreatePrivateAssetRequest,
+    CreateRelationshipRequest,
+    CreateStorylineRequest,
+    DeleteVolumeRequest,
+    ReorderChaptersRequest,
+    ReorderVolumesRequest,
+    StartCreativeGenerationRequest,
+    UpdateAssetPresetRequest,
+    UpdateChapterDraftRequest,
+    UpdateCharacterRequest,
+    UpdateDocumentMetadataRequest,
+    UpdateForeshadowRequest,
+    UpdateNovelDraftRequest,
+    UpdateOutlineDraftRequest,
+    UpdatePrivateAssetRequest,
+    UpdateRelationshipRequest,
+    UpdateStorylineRequest,
+    UpdateVolumeRequest,
+)
+from .creative_services import (
+    EntityConflictError,
+    archive_asset_preset,
+    archive_private_asset,
+    build_creative_generation_prompt,
+    build_novel_export,
+    complete_chapter_creation_draft,
+    complete_creative_generation,
+    complete_novel_creation_draft,
+    complete_outline_draft,
+    create_asset_preset,
+    create_character_relationship,
+    create_foreshadow,
+    create_novel_character,
+    create_private_asset,
+    create_storyline,
+    delete_character_relationship,
+    delete_document,
+    delete_foreshadow,
+    delete_novel_character,
+    delete_storyline,
+    delete_volume,
+    fail_creative_generation,
+    get_novel_creation_draft,
+    get_or_create_chapter_creation_draft,
+    get_or_create_novel_creation_draft,
+    get_or_create_outline_draft,
+    list_asset_presets,
+    list_character_relationships,
+    list_creative_generations,
+    list_foreshadows,
+    list_novel_characters,
+    list_private_assets,
+    list_storylines,
+    reorder_chapters,
+    reorder_volumes,
+    start_creative_generation,
+    update_asset_preset,
+    update_chapter_creation_draft,
+    update_character_relationship,
+    update_document_metadata,
+    update_foreshadow,
+    update_novel_character,
+    update_novel_creation_draft,
+    update_outline_draft,
+    update_private_asset,
+    update_storyline,
+    update_volume,
+)
+from .database import get_session
+from .model_runtime import (
+    ModelVerificationError,
+    configured_model_audit,
+    parse_model_json,
+    reply_model_audit,
+)
+from .services import NotFoundError, ValidationError
+
+
+router = APIRouter()
+
+
+def _raise(error: Exception) -> None:
+    if isinstance(error, EntityConflictError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": "entity_conflict", "current": error.current},
+        ) from error
+    if isinstance(error, NotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    if isinstance(error, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+        ) from error
+    raise error
+
+
+@router.post("/creation-drafts", status_code=status.HTTP_201_CREATED)
+def creation_drafts_create(
+    request: CreateNovelDraftRequest, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return get_or_create_novel_creation_draft(session, request.draft_key)
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/creation-drafts/{draft_id}")
+def creation_drafts_get(
+    draft_id: UUID, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return get_novel_creation_draft(session, draft_id)
+    except Exception as error:
+        _raise(error)
+        raise
+
+
+@router.patch("/creation-drafts/{draft_id}")
+def creation_drafts_update(
+    draft_id: UUID,
+    request: UpdateNovelDraftRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_novel_creation_draft(
+            session,
+            draft_id,
+            expected_version=request.expected_version,
+            step=request.step,
+            data_patch=request.data_patch,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/creation-drafts/{draft_id}/complete", status_code=status.HTTP_201_CREATED)
+def creation_drafts_complete(
+    draft_id: UUID,
+    request: CompleteVersionedRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return complete_novel_creation_draft(
+            session, draft_id, expected_version=request.expected_version
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/private-assets")
+def private_assets_index(
+    asset_type: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    session: Session = Depends(get_session),
+) -> list[dict[str, object]]:
+    try:
+        return list_private_assets(
+            session, asset_type=asset_type, include_archived=include_archived
+        )
+    except Exception as error:
+        _raise(error)
+        raise
+
+
+@router.post("/private-assets", status_code=status.HTTP_201_CREATED)
+def private_assets_create(
+    request: CreatePrivateAssetRequest, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return create_private_asset(
+            session,
+            asset_type=request.asset_type,
+            title=request.title,
+            content=request.content,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/private-assets/{asset_id}")
+def private_assets_update(
+    asset_id: UUID,
+    request: UpdatePrivateAssetRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_private_asset(
+            session,
+            asset_id,
+            expected_version=request.expected_version,
+            title=request.title,
+            content=request.content,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/private-assets/{asset_id}")
+def private_assets_delete(
+    asset_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return archive_private_asset(session, asset_id, expected_version=expected_version)
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/asset-presets")
+def asset_presets_index(
+    include_archived: bool = Query(default=False), session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    return list_asset_presets(session, include_archived=include_archived)
+
+
+@router.post("/asset-presets", status_code=status.HTTP_201_CREATED)
+def asset_presets_create(
+    request: CreateAssetPresetRequest, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return create_asset_preset(
+            session,
+            title=request.title,
+            description=request.description,
+            asset_ids=request.asset_ids,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/asset-presets/{preset_id}")
+def asset_presets_update(
+    preset_id: UUID,
+    request: UpdateAssetPresetRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_asset_preset(
+            session,
+            preset_id,
+            expected_version=request.expected_version,
+            title=request.title,
+            description=request.description,
+            asset_ids=request.asset_ids,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/asset-presets/{preset_id}")
+def asset_presets_delete(
+    preset_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return archive_asset_preset(session, preset_id, expected_version=expected_version)
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/outline-draft")
+def outline_drafts_get(
+    novel_id: UUID, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return get_or_create_outline_draft(session, novel_id)
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.patch("/novels/{novel_id}/outline-draft")
+def outline_drafts_update(
+    novel_id: UUID,
+    request: UpdateOutlineDraftRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_outline_draft(
+            session,
+            novel_id,
+            expected_version=request.expected_version,
+            step=request.step,
+            target_chapter_count=request.target_chapter_count,
+            background_text=request.background_text,
+            characters=request.characters,
+            plot_text=request.plot_text,
+            highlight_text=request.highlight_text,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/outline-draft/complete")
+def outline_drafts_complete(
+    novel_id: UUID,
+    request: CompleteVersionedRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return complete_outline_draft(
+            session, novel_id, expected_version=request.expected_version
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/characters")
+def characters_index(
+    novel_id: UUID, session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    return list_novel_characters(session, novel_id)
+
+
+@router.post("/novels/{novel_id}/characters", status_code=status.HTTP_201_CREATED)
+def characters_create(
+    novel_id: UUID,
+    request: CreateCharacterRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return create_novel_character(
+            session,
+            novel_id,
+            role_type=request.role_type,
+            name=request.name,
+            description=request.description,
+            details=request.details,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/novels/{novel_id}/characters/{character_id}")
+def characters_update(
+    novel_id: UUID,
+    character_id: UUID,
+    request: UpdateCharacterRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_novel_character(
+            session,
+            novel_id,
+            character_id,
+            expected_version=request.expected_version,
+            role_type=request.role_type,
+            name=request.name,
+            description=request.description,
+            details=request.details,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/novels/{novel_id}/characters/{character_id}")
+def characters_delete(
+    novel_id: UUID,
+    character_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    try:
+        delete_novel_character(
+            session, novel_id, character_id, expected_version=expected_version
+        )
+        return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/relationships")
+def relationships_index(
+    novel_id: UUID, session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    return list_character_relationships(session, novel_id)
+
+
+@router.post("/novels/{novel_id}/relationships", status_code=status.HTTP_201_CREATED)
+def relationships_create(
+    novel_id: UUID,
+    request: CreateRelationshipRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return create_character_relationship(
+            session,
+            novel_id,
+            source_character_id=request.source_character_id,
+            target_character_id=request.target_character_id,
+            relation_type=request.relation_type,
+            description=request.description,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/novels/{novel_id}/relationships/{relationship_id}")
+def relationships_update(
+    novel_id: UUID,
+    relationship_id: UUID,
+    request: UpdateRelationshipRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_character_relationship(
+            session,
+            novel_id,
+            relationship_id,
+            expected_version=request.expected_version,
+            relation_type=request.relation_type,
+            description=request.description,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/novels/{novel_id}/relationships/{relationship_id}")
+def relationships_delete(
+    novel_id: UUID,
+    relationship_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    try:
+        delete_character_relationship(
+            session, novel_id, relationship_id, expected_version=expected_version
+        )
+        return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/storylines")
+def storylines_index(
+    novel_id: UUID, session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    return list_storylines(session, novel_id)
+
+
+@router.post("/novels/{novel_id}/storylines", status_code=status.HTTP_201_CREATED)
+def storylines_create(
+    novel_id: UUID,
+    request: CreateStorylineRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return create_storyline(
+            session,
+            novel_id,
+            storyline_type=request.storyline_type,
+            title=request.title,
+            description=request.description,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/novels/{novel_id}/storylines/{storyline_id}")
+def storylines_update(
+    novel_id: UUID,
+    storyline_id: UUID,
+    request: UpdateStorylineRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_storyline(
+            session,
+            novel_id,
+            storyline_id,
+            expected_version=request.expected_version,
+            storyline_type=request.storyline_type,
+            title=request.title,
+            description=request.description,
+            status=request.status,
+            progress=request.progress,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/novels/{novel_id}/storylines/{storyline_id}")
+def storylines_delete(
+    novel_id: UUID,
+    storyline_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    try:
+        delete_storyline(session, novel_id, storyline_id, expected_version=expected_version)
+        return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/foreshadows")
+def foreshadows_index(
+    novel_id: UUID, session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    return list_foreshadows(session, novel_id)
+
+
+@router.post("/novels/{novel_id}/foreshadows", status_code=status.HTTP_201_CREATED)
+def foreshadows_create(
+    novel_id: UUID,
+    request: CreateForeshadowRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return create_foreshadow(
+            session, novel_id, title=request.title, content=request.content
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/novels/{novel_id}/foreshadows/{foreshadow_id}")
+def foreshadows_update(
+    novel_id: UUID,
+    foreshadow_id: UUID,
+    request: UpdateForeshadowRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_foreshadow(
+            session,
+            novel_id,
+            foreshadow_id,
+            expected_version=request.expected_version,
+            title=request.title,
+            content=request.content,
+            status=request.status,
+            progress=request.progress,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/novels/{novel_id}/foreshadows/{foreshadow_id}")
+def foreshadows_delete(
+    novel_id: UUID,
+    foreshadow_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    try:
+        delete_foreshadow(session, novel_id, foreshadow_id, expected_version=expected_version)
+        return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/chapter-drafts", status_code=status.HTTP_201_CREATED)
+def chapter_drafts_create(
+    novel_id: UUID,
+    request: CreateChapterDraftRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return get_or_create_chapter_creation_draft(
+            session,
+            novel_id=novel_id,
+            volume_id=request.volume_id,
+            draft_key=request.draft_key,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.patch("/chapter-drafts/{draft_id}")
+def chapter_drafts_update(
+    draft_id: UUID,
+    request: UpdateChapterDraftRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_chapter_creation_draft(
+            session,
+            draft_id,
+            expected_version=request.expected_version,
+            step=request.step,
+            title=request.title,
+            target_character_count=request.target_character_count,
+            expectation_text=request.expectation_text,
+            outline_text=request.outline_text,
+            data_patch=request.data_patch,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/chapter-drafts/{draft_id}/complete", status_code=status.HTTP_201_CREATED)
+def chapter_drafts_complete(
+    draft_id: UUID,
+    request: CompleteVersionedRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return complete_chapter_creation_draft(
+            session, draft_id, expected_version=request.expected_version
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/creative-generations", status_code=status.HTTP_201_CREATED)
+async def creative_generations_create(
+    request: StartCreativeGenerationRequest,
+    ctx=Depends(get_ctx),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    job: dict[str, object] | None = None
+    try:
+        job = start_creative_generation(
+            session,
+            scope_type=request.scope_type,
+            scope_id=request.scope_id,
+            kind=request.kind,
+            input_snapshot=request.input_snapshot,
+            novel_id=request.novel_id,
+            document_id=request.document_id,
+            target_character_count=request.target_character_count,
+            requested_model_id=request.requested_model_id,
+            force_new=request.force_new,
+        )
+        if job["state"] != "running":
+            return job
+        configured_model = configured_model_audit(ctx.agent_id)
+        generation_session_id = f"novel-creative-generation:{job['id']}"
+        reply = await ctx.chat(
+            build_creative_generation_prompt(job),
+            skill="story-bible",
+            session_id=generation_session_id,
+        )
+        actual_model = reply_model_audit(
+            reply,
+            session_id=generation_session_id,
+        ).ensure_matches(configured_model)
+        return complete_creative_generation(
+            session,
+            UUID(str(job["id"])),
+            actual_model_id=actual_model.model_id,
+            provider_profile=actual_model.provider_id,
+            output_text=reply.text,
+            output_json=parse_model_json(reply.text),
+        )
+    except Exception as error:
+        session.rollback()
+        if job is not None and job.get("id"):
+            try:
+                failed = fail_creative_generation(
+                    session,
+                    UUID(str(job["id"])),
+                    failure_message=str(error),
+                )
+            except Exception:
+                session.rollback()
+                failed = job
+            if isinstance(error, ModelVerificationError):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={"type": "model_verification_failed", "job": failed},
+                ) from error
+        _raise(error)
+        raise
+
+
+@router.get("/creative-generations")
+def creative_generations_index(
+    scope_type: str = Query(min_length=1, max_length=40),
+    scope_id: UUID = Query(),
+    session: Session = Depends(get_session),
+) -> list[dict[str, object]]:
+    return list_creative_generations(session, scope_type=scope_type, scope_id=scope_id)
+
+
+@router.put("/novels/{novel_id}/volumes/{volume_id}")
+def volumes_update(
+    novel_id: UUID,
+    volume_id: UUID,
+    request: UpdateVolumeRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_volume(
+            session,
+            novel_id,
+            volume_id,
+            expected_version=request.expected_version,
+            title=request.title,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/novels/{novel_id}/volumes/{volume_id}")
+def volumes_delete(
+    novel_id: UUID,
+    volume_id: UUID,
+    request: DeleteVolumeRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    try:
+        delete_volume(
+            session,
+            novel_id,
+            volume_id,
+            expected_version=request.expected_version,
+            move_documents_to=request.move_documents_to,
+        )
+        return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/volumes/reorder")
+def volumes_reorder(
+    novel_id: UUID,
+    request: ReorderVolumesRequest,
+    session: Session = Depends(get_session),
+) -> list[dict[str, object]]:
+    try:
+        return reorder_volumes(
+            session, novel_id, ordered_volume_ids=request.ordered_volume_ids
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/novels/{novel_id}/documents/{document_id}")
+def documents_update_metadata(
+    novel_id: UUID,
+    document_id: UUID,
+    request: UpdateDocumentMetadataRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_document_metadata(
+            session,
+            novel_id,
+            document_id,
+            expected_version=request.expected_version,
+            title=request.title,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.delete("/novels/{novel_id}/documents/{document_id}")
+def documents_delete(
+    novel_id: UUID,
+    document_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    try:
+        delete_document(
+            session, novel_id, document_id, expected_version=expected_version
+        )
+        return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/chapters/reorder")
+def chapters_reorder(
+    novel_id: UUID,
+    request: ReorderChaptersRequest,
+    session: Session = Depends(get_session),
+) -> list[dict[str, object]]:
+    try:
+        return reorder_chapters(
+            session,
+            novel_id,
+            ordered_document_ids=request.ordered_document_ids,
+            volume_by_document=request.volume_by_document,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/exports", status_code=status.HTTP_201_CREATED)
+def exports_create(
+    novel_id: UUID,
+    request: CreateExportRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return build_novel_export(
+            session, novel_id, export_format=request.export_format
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise

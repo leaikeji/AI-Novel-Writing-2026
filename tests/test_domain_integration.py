@@ -7,7 +7,42 @@ import pytest
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
-from backend.models import Document, IntelligenceCommitBatch, Novel, StoryFact
+from backend.creative_services import (
+    EntityConflictError,
+    archive_private_asset,
+    build_novel_export,
+    complete_chapter_creation_draft,
+    complete_creative_generation,
+    complete_novel_creation_draft,
+    complete_outline_draft,
+    create_asset_preset,
+    create_foreshadow,
+    create_novel_character,
+    create_private_asset,
+    create_storyline,
+    delete_volume,
+    get_or_create_chapter_creation_draft,
+    get_or_create_novel_creation_draft,
+    get_or_create_outline_draft,
+    list_creative_generations,
+    list_novel_characters,
+    list_storylines,
+    reorder_chapters,
+    reorder_volumes,
+    snapshot_private_assets,
+    start_creative_generation,
+    update_chapter_creation_draft,
+    update_novel_creation_draft,
+    update_outline_draft,
+    update_private_asset,
+)
+from backend.models import (
+    CandidateRevision,
+    Document,
+    IntelligenceCommitBatch,
+    Novel,
+    StoryFact,
+)
 from backend.services import (
     CandidateConflictError,
     ValidationError,
@@ -21,8 +56,11 @@ from backend.services import (
     create_document,
     create_novel,
     create_volume,
+    get_chapter_brief,
     get_document,
+    get_novel,
     get_novel_context,
+    list_chapter_generation_jobs,
     list_story_facts,
     preview_restore_revision,
     restore_revision,
@@ -36,6 +74,54 @@ from backend.services import (
 
 TEST_DATABASE_URL = os.environ.get("AI_NOVEL_TEST_DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(not TEST_DATABASE_URL, reason="integration database not configured")
+MINIMAX_MODEL_ID = "MiniMax-M3"
+MINIMAX_PROVIDER_ID = "minimax-cn"
+
+
+def _long_chapter(opening: str, *, paragraphs: int = 90) -> str:
+    body = [opening]
+    body.extend(
+        (
+            f"第{index}个场景里，人物沿着既定线索继续行动，环境、对话与选择都产生新的因果；"
+            f"这一段保留编号{index}，让测试正文具有可核对的独立内容。"
+        )
+        for index in range(1, paragraphs + 1)
+    )
+    return "\n\n".join(body)
+
+
+def _create_long_novel_via_wizard(
+    session: Session,
+    *,
+    draft_key: str,
+    title: str,
+    audience: str = "female",
+    genre: str = "年代言情",
+) -> dict[str, object]:
+    draft = get_or_create_novel_creation_draft(session, draft_key)
+    draft = update_novel_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+        step=6,
+        data_patch={
+            "writing_type": "long",
+            "audience": audience,
+            "genre": genre,
+            "subgenre": "成长",
+            "idea": "人物在时代变化中重新选择人生，并为每次选择承担后果。",
+            "template_key": "growth-romance",
+            "template_name": "成长型长篇",
+            "template_data": {"structure": "起承转合"},
+            "title": title,
+            "cover_mode": "system",
+        },
+    )
+    return complete_novel_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+    )
 
 
 @pytest.fixture
@@ -45,7 +131,24 @@ def session():
         yield database_session
         database_session.rollback()
         database_session.execute(
+            text(
+                "DELETE FROM creative_generation_jobs WHERE "
+                "novel_id IN (SELECT id FROM novels WHERE title LIKE 'pytest-%') OR "
+                "scope_id IN (SELECT id FROM novel_creation_drafts "
+                "WHERE draft_key LIKE 'pytest-%')"
+            )
+        )
+        database_session.execute(
             text("DELETE FROM novels WHERE title LIKE 'pytest-%'")
+        )
+        database_session.execute(
+            text("DELETE FROM novel_creation_drafts WHERE draft_key LIKE 'pytest-%'")
+        )
+        database_session.execute(
+            text("DELETE FROM asset_presets WHERE title LIKE 'pytest-%'")
+        )
+        database_session.execute(
+            text("DELETE FROM private_assets WHERE title LIKE 'pytest-%'")
         )
         database_session.commit()
     engine.dispose()
@@ -63,7 +166,11 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
                 "'story_facts','novel_chunks','media_assets','chapter_briefs',"
                 "'chapter_generation_jobs','candidate_revisions','intelligence_proposals',"
                 "'intelligence_proposal_items','intelligence_commit_batches',"
-                "'derived_source_bindings')"
+                "'derived_source_bindings','novel_creation_drafts','private_assets',"
+                "'asset_presets','asset_preset_items','outline_drafts',"
+                "'novel_characters','character_relationships','storylines',"
+                "'foreshadows','chapter_creation_drafts','creative_generation_jobs',"
+                "'novel_exports')"
             )
         )
     }
@@ -84,7 +191,39 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
         "intelligence_proposal_items",
         "intelligence_commit_batches",
         "derived_source_bindings",
+        "novel_creation_drafts",
+        "private_assets",
+        "asset_presets",
+        "asset_preset_items",
+        "outline_drafts",
+        "novel_characters",
+        "character_relationships",
+        "storylines",
+        "foreshadows",
+        "chapter_creation_drafts",
+        "creative_generation_jobs",
+        "novel_exports",
     }
+
+    generation_columns = {
+        row[0]
+        for row in session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema='public' AND table_name='chapter_generation_jobs'"
+            )
+        )
+    }
+    assert {
+        "asset_snapshot",
+        "requested_model_id",
+        "actual_model_id",
+        "provider_profile",
+        "target_visible_character_count",
+        "output_visible_character_count",
+        "validation_state",
+        "attempt",
+    } <= generation_columns
 
 
 def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
@@ -225,8 +364,12 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
     completed = complete_chapter_generation(
         session,
         UUID(job["id"]),
-        content_markdown="雨水敲着窗。江述翻过信封，邮戳日期写着明天。",
+        content_markdown=_long_chapter(
+            "雨水敲着窗。江述翻过信封，邮戳日期写着明天。"
+        ),
         model_profile_fingerprint="pytest-model",
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
     )
     candidate = completed["candidate"]
 
@@ -267,6 +410,8 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
                 "confidence": 61,
             },
         ],
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
     )
     assert list_story_facts(session, novel_id) == []
 
@@ -315,6 +460,8 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
                 "confidence": 99,
             }
         ],
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
     )
     selected_a = [UUID(proposal_a["items"][0]["id"])]
     committed_a = commit_intelligence_items(
@@ -360,6 +507,8 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
                 "confidence": 99,
             }
         ],
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
     )
     commit_intelligence_items(
         session,
@@ -442,7 +591,11 @@ def test_candidate_adoption_rejects_a_changed_working_copy(session: Session) -> 
         session, document_id, expected_brief_version=brief["version"]
     )
     completed = complete_chapter_generation(
-        session, UUID(job["id"]), content_markdown="这是一份旧基线候选。"
+        session,
+        UUID(job["id"]),
+        content_markdown=_long_chapter("这是一份旧基线候选。"),
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
     )
     save_draft(
         session,
@@ -459,3 +612,509 @@ def test_candidate_adoption_rejects_a_changed_working_copy(session: Session) -> 
         )
     session.rollback()
     assert get_document(session, document_id)["content_markdown"].startswith("作者在模型运行时")
+
+
+def test_six_step_creation_is_persisted_validated_and_idempotent(
+    session: Session,
+) -> None:
+    draft = get_or_create_novel_creation_draft(session, "pytest-六步建书")
+    incomplete = update_novel_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+        step=4,
+        data_patch={"writing_type": "long", "audience": "female", "title": "不完整"},
+    )
+    with pytest.raises(ValidationError, match="题材"):
+        complete_novel_creation_draft(
+            session,
+            UUID(incomplete["id"]),
+            expected_version=incomplete["version"],
+        )
+    session.rollback()
+
+    completed = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-六步建书",
+        title="pytest-六步建书成品",
+    )
+    novel = completed["novel"]
+    assert completed["draft"]["state"] == "completed"
+    assert novel["audience"] == "female"
+    assert novel["genre"] == "年代言情"
+    assert len(novel["tree"]) == 1
+    assert novel["tree"][0]["documents"] == []
+
+    replayed = complete_novel_creation_draft(
+        session,
+        UUID(completed["draft"]["id"]),
+        expected_version=1,
+    )
+    assert replayed["novel"]["id"] == novel["id"]
+
+    with pytest.raises(EntityConflictError):
+        update_novel_creation_draft(
+            session,
+            UUID(completed["draft"]["id"]),
+            expected_version=1,
+            step=6,
+            data_patch={"title": "不应覆盖"},
+        )
+    session.rollback()
+
+
+def test_private_library_presets_produce_immutable_generation_snapshots(
+    session: Session,
+) -> None:
+    plot = create_private_asset(
+        session,
+        asset_type="plot",
+        title="pytest-桥段",
+        content="旧车站误认与重逢。",
+    )
+    style = create_private_asset(
+        session,
+        asset_type="writing_style",
+        title="pytest-文风",
+        content="克制、具象、少用空泛抒情。",
+    )
+    preset = create_asset_preset(
+        session,
+        title="pytest-年代言情组合",
+        description="桥段和文风组合",
+        asset_ids=[UUID(plot["id"]), UUID(style["id"])],
+    )
+    frozen = snapshot_private_assets(
+        session,
+        asset_ids=[],
+        preset_id=UUID(preset["id"]),
+    )
+    assert [item["title"] for item in frozen] == ["pytest-桥段", "pytest-文风"]
+    assert frozen[0]["version"] == 1
+
+    updated = update_private_asset(
+        session,
+        UUID(plot["id"]),
+        expected_version=plot["version"],
+        title="pytest-桥段",
+        content="旧车站误认、错过与十年后重逢。",
+    )
+    refreshed = snapshot_private_assets(
+        session,
+        asset_ids=[UUID(updated["id"])],
+    )
+    assert frozen[0]["content"] == "旧车站误认与重逢。"
+    assert refreshed[0]["version"] == 2
+
+    archive_private_asset(
+        session,
+        UUID(style["id"]),
+        expected_version=style["version"],
+    )
+    with pytest.raises(ValidationError, match="不存在或已删除"):
+        snapshot_private_assets(
+            session,
+            asset_ids=[],
+            preset_id=UUID(preset["id"]),
+        )
+    session.rollback()
+
+
+def test_outline_completion_materializes_roles_and_updates_main_storyline(
+    session: Session,
+) -> None:
+    created = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-大纲建书",
+        title="pytest-五步大纲",
+    )
+    novel_id = UUID(created["novel"]["id"])
+    outline = get_or_create_outline_draft(session, novel_id)
+    outline = update_outline_draft(
+        session,
+        novel_id,
+        expected_version=outline["version"],
+        step=5,
+        target_chapter_count=10,
+        background_text="一九八八年的县城高中，升学与家庭变迁交织。",
+        characters=[
+            {"name": "林知夏", "role_type": "main", "description": "重返高三"},
+            {"name": "顾明川", "role_type": "main", "description": "理科尖子生"},
+        ],
+        plot_text="两人从互相试探到共同改变家庭命运。",
+        highlight_text="重返一九八八，把错过的青春重新写一遍。",
+    )
+    first = complete_outline_draft(
+        session,
+        novel_id,
+        expected_version=outline["version"],
+    )
+    assert first["novel"]["outline_target_chapters"] == 10
+    assert [item["name"] for item in first["characters"]] == ["林知夏", "顾明川"]
+
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="顾老师",
+        description="班主任",
+        details={},
+    )
+    outline = update_outline_draft(
+        session,
+        novel_id,
+        expected_version=first["outline"]["version"],
+        step=5,
+        characters=[
+            {"name": "顾明川", "role_type": "main", "description": "承担家庭压力"},
+            {"name": "林知夏", "role_type": "main", "description": "主动修正遗憾"},
+            {"name": "沈青", "role_type": "supporting", "description": "同桌"},
+        ],
+        plot_text="两人先修正报名档案，再面对家庭与高考的双重抉择。",
+    )
+    second = complete_outline_draft(
+        session,
+        novel_id,
+        expected_version=outline["version"],
+    )
+    characters = list_novel_characters(session, novel_id)
+    assert [item["name"] for item in characters] == [
+        "顾明川",
+        "林知夏",
+        "沈青",
+        "顾老师",
+    ]
+    assert len({item["position"] for item in characters}) == 4
+    main_line = next(
+        item for item in list_storylines(session, novel_id) if item["storyline_type"] == "main"
+    )
+    assert main_line["description"] == second["novel"]["main_plot"]
+
+
+def test_six_step_chapter_creation_rejects_cross_book_references(
+    session: Session,
+) -> None:
+    first = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-章节甲建书",
+        title="pytest-章节甲",
+    )
+    second = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-章节乙建书",
+        title="pytest-章节乙",
+    )
+    first_id = UUID(first["novel"]["id"])
+    second_id = UUID(second["novel"]["id"])
+    first_role = create_novel_character(
+        session,
+        first_id,
+        role_type="main",
+        name="林知夏",
+        description="主角",
+        details={},
+    )
+    second_role = create_novel_character(
+        session,
+        second_id,
+        role_type="main",
+        name="陆沉舟",
+        description="另一书主角",
+        details={},
+    )
+    first_line = create_storyline(
+        session,
+        first_id,
+        storyline_type="main",
+        title="高考报名线",
+        description="核对报名档案",
+    )
+    second_line = create_storyline(
+        session,
+        second_id,
+        storyline_type="main",
+        title="异世界远征线",
+        description="不应进入甲书",
+    )
+    first_foreshadow = create_foreshadow(
+        session,
+        first_id,
+        title="被改动的档案",
+        content="报名表上的联系人被人替换。",
+    )
+
+    draft = get_or_create_chapter_creation_draft(
+        session,
+        novel_id=first_id,
+        volume_id=None,
+        draft_key="pytest-章节甲-第一章",
+    )
+    draft = update_chapter_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+        step=6,
+        title="第一章 被改动的报名表",
+        target_character_count=3000,
+        expectation_text="发现档案异常，但暂不揭示幕后人。",
+        outline_text="林知夏与顾老师核对报名表，确认联系人栏被改动。",
+        data_patch={
+            "storyline_ids": [second_line["id"]],
+            "required_role_ids": [first_role["id"]],
+            "optional_role_ids": [],
+            "foreshadow_ids": [first_foreshadow["id"]],
+        },
+    )
+    with pytest.raises(ValidationError, match="故事线包含其他小说"):
+        complete_chapter_creation_draft(
+            session,
+            UUID(draft["id"]),
+            expected_version=draft["version"],
+        )
+    session.rollback()
+
+    draft = update_chapter_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+        step=6,
+        data_patch={
+            "storyline_ids": [first_line["id"]],
+            "required_role_ids": [first_role["id"]],
+            "optional_role_ids": [],
+            "foreshadow_ids": [first_foreshadow["id"]],
+        },
+    )
+    completed = complete_chapter_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+    )
+    document_id = UUID(completed["document"]["id"])
+    assert completed["document"]["volume_id"] is not None
+    assert get_chapter_brief(session, document_id)["target_word_count"] == 3000
+    replayed = complete_chapter_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=1,
+    )
+    assert replayed["document"]["id"] == completed["document"]["id"]
+
+    with pytest.raises(ValidationError, match="已属于其他小说"):
+        get_or_create_chapter_creation_draft(
+            session,
+            novel_id=second_id,
+            volume_id=None,
+            draft_key="pytest-章节甲-第一章",
+        )
+    session.rollback()
+    assert second_role["novel_id"] == str(second_id)
+
+
+def test_generation_requires_verified_minimax_and_three_thousand_characters(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-MiniMax门槛")
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    brief = save_chapter_brief(
+        session,
+        document_id,
+        expected_version=0,
+        target_word_count=2500,
+        expectation_text="建立冲突",
+        outline_text="人物发现关键证据。",
+        forbidden_text="",
+        role_constraints={},
+    )
+    with pytest.raises(ValidationError, match="固定为 MiniMax M3"):
+        start_chapter_generation(
+            session,
+            document_id,
+            expected_brief_version=brief["version"],
+            requested_model_id="MiniMax-M30",
+        )
+    session.rollback()
+
+    first_job = start_chapter_generation(
+        session,
+        document_id,
+        expected_brief_version=brief["version"],
+    )
+    assert first_job["target_visible_character_count"] == 3000
+    with pytest.raises(ValidationError, match="必须整章重写"):
+        complete_chapter_generation(
+            session,
+            UUID(first_job["id"]),
+            content_markdown="这一章太短。",
+            actual_model_id=MINIMAX_MODEL_ID,
+            provider_profile=MINIMAX_PROVIDER_ID,
+        )
+    failed = list_chapter_generation_jobs(session, document_id)[0]
+    assert failed["state"] == "failed"
+    assert failed["validation_state"] == "below_target"
+    assert session.scalar(
+        select(func.count(CandidateRevision.id)).where(
+            CandidateRevision.generation_job_id == UUID(first_job["id"])
+        )
+    ) == 0
+
+    second_job = start_chapter_generation(
+        session,
+        document_id,
+        expected_brief_version=brief["version"],
+        force_new=True,
+    )
+    completed = complete_chapter_generation(
+        session,
+        UUID(second_job["id"]),
+        content_markdown=_long_chapter("人物终于找到能够推进调查的关键证据。"),
+        model_profile_fingerprint="qwenpaw:provider-usage:minimax-cn:MiniMax-M3",
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
+    )
+    assert completed["attempt"] == 2
+    assert completed["state"] == "ready"
+    assert completed["validation_state"] == "meets_target"
+    assert completed["output_visible_character_count"] >= 3000
+    assert completed["actual_model_id"] == MINIMAX_MODEL_ID
+
+
+def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
+    session: Session,
+) -> None:
+    draft = get_or_create_novel_creation_draft(session, "pytest-创作生成")
+    snapshot = {
+        "audience": "female",
+        "genre": "年代言情",
+        "idea": "重回一九八八年的高三。",
+    }
+    with pytest.raises(ValidationError, match="固定为 MiniMax M3"):
+        start_creative_generation(
+            session,
+            scope_type="novel_creation",
+            scope_id=UUID(draft["id"]),
+            kind="novel_naming",
+            input_snapshot=snapshot,
+            requested_model_id="qwen3.7-plus",
+        )
+    session.rollback()
+
+    first = start_creative_generation(
+        session,
+        scope_type="novel_creation",
+        scope_id=UUID(draft["id"]),
+        kind="novel_naming",
+        input_snapshot=snapshot,
+    )
+    with pytest.raises(ValidationError, match="实际模型不是 MiniMax M3"):
+        complete_creative_generation(
+            session,
+            UUID(first["id"]),
+            actual_model_id="qwen3.7-plus",
+            provider_profile="bailian",
+            output_json={"titles": ["错误模型书名"]},
+        )
+
+    second = start_creative_generation(
+        session,
+        scope_type="novel_creation",
+        scope_id=UUID(draft["id"]),
+        kind="novel_naming",
+        input_snapshot=snapshot,
+        force_new=True,
+    )
+    second = complete_creative_generation(
+        session,
+        UUID(second["id"]),
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
+        output_text='{"titles":["风从一九八八的操场吹来"]}',
+        output_json={"titles": ["风从一九八八的操场吹来"]},
+    )
+    history = list_creative_generations(
+        session,
+        scope_type="novel_creation",
+        scope_id=UUID(draft["id"]),
+    )
+    assert {item["state"] for item in history} == {"failed", "ready"}
+    assert second["attempt"] == 2
+    assert second["actual_model_id"] == MINIMAX_MODEL_ID
+    assert second["input_snapshot"] == snapshot
+
+
+def test_volume_chapter_reorder_delete_guard_and_export_structure(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-卷章导出")
+    novel_id = UUID(novel["id"])
+    first_volume_id = UUID(novel["tree"][0]["id"])
+    first_document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    second_volume = create_volume(session, novel_id, "第二卷")
+    second_volume_id = UUID(second_volume["id"])
+    second_document = create_document(
+        session,
+        novel_id,
+        "第二章",
+        volume_id=second_volume_id,
+    )
+    ungrouped = create_document(session, novel_id, "卷外章")
+    for document_id, opening in (
+        (first_document_id, "第一章正文。"),
+        (UUID(second_document["id"]), "第二章正文。"),
+        (UUID(ungrouped["id"]), "卷外章正文。"),
+    ):
+        save_draft(
+            session,
+            document_id,
+            expected_draft_version=1,
+            content_markdown=_long_chapter(opening),
+        )
+
+    initial_export = build_novel_export(session, novel_id, export_format="markdown")
+    assert "## 第一卷" in initial_export["content"]
+    assert "## 第二卷" in initial_export["content"]
+    assert "## 未分卷" in initial_export["content"]
+    assert initial_export["metadata"]["chapter_count"] == 3
+
+    reordered_volumes = reorder_volumes(
+        session,
+        novel_id,
+        ordered_volume_ids=[second_volume_id, first_volume_id],
+    )
+    assert [item["title"] for item in reordered_volumes] == ["第二卷", "第一卷"]
+    reordered_chapters = reorder_chapters(
+        session,
+        novel_id,
+        ordered_document_ids=[
+            UUID(ungrouped["id"]),
+            UUID(second_document["id"]),
+            first_document_id,
+        ],
+        volume_by_document={str(ungrouped["id"]): first_volume_id},
+    )
+    assert [item["title"] for item in reordered_chapters] == [
+        "卷外章",
+        "第二章",
+        "第一章",
+    ]
+    moved_export = build_novel_export(session, novel_id, export_format="text")
+    assert moved_export["metadata"]["ungrouped_chapter_count"] == 0
+    assert moved_export["metadata"]["chapter_count"] == 3
+
+    current_second_volume = reordered_volumes[0]
+    delete_volume(
+        session,
+        novel_id,
+        second_volume_id,
+        expected_version=current_second_volume["version"],
+        move_documents_to=first_volume_id,
+    )
+    remaining = get_novel(session, novel_id)["tree"][0]
+    with pytest.raises(ValidationError, match="至少需要保留一个分卷"):
+        delete_volume(
+            session,
+            novel_id,
+            UUID(remaining["id"]),
+            expected_version=remaining["version"],
+        )
+    session.rollback()
