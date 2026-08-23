@@ -103,6 +103,7 @@ class DocumentRevision(Base):
     __table_args__ = (
         UniqueConstraint("document_id", "revision_number", name="uq_document_revision_number"),
         Index("ix_document_revisions_document_created", "document_id", "created_at"),
+        Index("ix_document_revisions_restored_from", "restored_from_revision_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -111,6 +112,9 @@ class DocumentRevision(Base):
     )
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
     parent_revision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
+    )
+    restored_from_revision_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
     )
     content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
@@ -306,6 +310,81 @@ class IntelligenceProposalItem(Base):
     committed_story_fact_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("story_facts.id", ondelete="SET NULL")
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IntelligenceCommitBatch(Base):
+    """One idempotent, author-approved write into the story ledger."""
+
+    __tablename__ = "intelligence_commit_batches"
+    __table_args__ = (
+        UniqueConstraint("proposal_id", "commit_key", name="uq_intelligence_commit_key"),
+        Index("ix_intelligence_commit_revision", "chapter_revision_id", "state"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    proposal_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("intelligence_proposals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    chapter_revision_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("document_revisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    commit_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="committing")
+    accepted_item_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    inverse_operations: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    expected_story_ledger_version: Mapped[int | None] = mapped_column(BigInteger)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DerivedSourceBinding(Base):
+    """Validity and provenance for a fact derived from one chapter revision."""
+
+    __tablename__ = "derived_source_bindings"
+    __table_args__ = (
+        UniqueConstraint(
+            "derived_entity_type",
+            "derived_entity_id",
+            "source_chapter_revision_id",
+            name="uq_derived_source_entity_revision",
+        ),
+        Index("ix_derived_source_document_validity", "source_chapter_id", "validity_state"),
+        Index("ix_derived_source_revision", "source_chapter_revision_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    derived_entity_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="story_fact"
+    )
+    derived_entity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("story_facts.id", ondelete="CASCADE"), nullable=False
+    )
+    source_chapter_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    source_chapter_revision_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("document_revisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    proposal_item_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("intelligence_proposal_items.id", ondelete="SET NULL"),
+    )
+    commit_batch_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("intelligence_commit_batches.id", ondelete="SET NULL"),
+    )
+    validity_state: Mapped[str] = mapped_column(String(30), nullable=False, default="current")
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

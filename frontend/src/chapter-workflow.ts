@@ -1,4 +1,5 @@
 import { ApiError, apiRequest } from "./api";
+import { factStatusLabel, factTypeLabel } from "./presenters";
 import {
   CandidateRecord,
   ChapterBriefRecord,
@@ -332,9 +333,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setProposals(loaded);
     const selected = loaded[0] ?? null;
     setSelectedProposal(selected);
-    setSelectedItemIds(
-      selected?.items.filter((item) => item.review_state === "pending").map((item) => item.id) ?? [],
-    );
+    setSelectedItemIds([]);
     return loaded;
   };
 
@@ -370,9 +369,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       );
       await loadProposals();
       setSelectedProposal(proposal);
-      setSelectedItemIds(
-        proposal.items.filter((item) => item.review_state === "pending").map((item) => item.id),
-      );
+      setSelectedItemIds([]);
       setIntelligenceOpen(true);
       onStatus("候选情报已生成，等待逐条确认");
     } catch (reason) {
@@ -387,9 +384,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
 
   const selectProposal = (proposal: IntelligenceProposalRecord) => {
     setSelectedProposal(proposal);
-    setSelectedItemIds(
-      proposal.items.filter((item) => item.review_state === "pending").map((item) => item.id),
-    );
+    setSelectedItemIds([]);
   };
 
   const toggleItem = (itemId: string, checked: boolean) => {
@@ -773,6 +768,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
               React.createElement(
                 "section",
                 { style: { minWidth: 0, maxHeight: 520, overflow: "auto" } },
+                React.createElement(Alert, {
+                  type: "info",
+                  showIcon: true,
+                  message: "候选默认不选中；请逐条确认后再写入故事账本。",
+                  style: { marginBottom: 10 },
+                }),
                 selectedProposal && !selectedProposal.source_current
                   ? React.createElement(Alert, {
                       type: "error",
@@ -797,6 +798,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
                             React.createElement(Checkbox, {
                               checked: item.review_state === "accepted" || selectedItemIds.includes(item.id),
                               disabled: item.review_state !== "pending" || !selectedProposal?.source_current,
+                              "aria-label": `选择情报：${item.suggested_payload.subject}，${item.suggested_payload.predicate}，${item.suggested_payload.object}`,
                               onChange: (event: any) => toggleItem(item.id, event.target.checked),
                             }),
                             React.createElement(
@@ -805,7 +807,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
                               React.createElement(
                                 Space,
                                 { wrap: true },
-                                React.createElement(Tag, null, item.item_type),
+                                React.createElement(Tag, null, factTypeLabel(item.item_type)),
                                 React.createElement(Tag, { color: stateColor(item.review_state) }, stateLabel(item.review_state)),
                                 React.createElement(Typography.Text, { type: "secondary" }, `置信度 ${item.confidence}`),
                               ),
@@ -857,11 +859,15 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
                 title: React.createElement(
                   Space,
                   { wrap: true },
-                  React.createElement(Tag, null, fact.fact_type),
-                  React.createElement(Tag, { color: fact.status === "active" ? "success" : "default" }, fact.status),
+                  React.createElement(Tag, null, factTypeLabel(fact.fact_type)),
+                  React.createElement(
+                    Tag,
+                    { color: fact.status === "active" || fact.status === "source_restored" ? "success" : "warning" },
+                    factStatusLabel(fact.status),
+                  ),
                   React.createElement(Typography.Text, { strong: true }, `${fact.subject} · ${fact.predicate}`),
                 ),
-                description: `${fact.object_text}${fact.source_revision_id ? ` · 来源版本 ${fact.source_revision_id.slice(0, 8)}` : ""}`,
+                description: fact.object_text,
               }),
             ),
           }),

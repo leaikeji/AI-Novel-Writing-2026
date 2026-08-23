@@ -3,6 +3,7 @@ export interface RevisionSummary {
   document_id: string;
   revision_number: number;
   parent_revision_id: string | null;
+  restored_from_revision_id: string | null;
   content_hash: string;
   source: string;
   visible_character_count: number;
@@ -161,4 +162,33 @@ export interface StoryFactRecord {
   source_revision_id: string | null;
   status: string;
   created_at: string | null;
+}
+
+export interface RestorePreviewFactRecord {
+  id: string;
+  fact_type: string;
+  subject: string;
+  predicate: string;
+  object_text: string;
+  status: string;
+}
+
+export interface RestorePreviewRecord {
+  document_id: string;
+  expected_draft_version: number;
+  fact_plan_hash: string;
+  current_revision: RevisionSummary | null;
+  target_revision: RevisionSummary;
+  working_copy_dirty: boolean;
+  unified_diff: string;
+  will_deactivate: RestorePreviewFactRecord[];
+  will_reactivate: RestorePreviewFactRecord[];
+  will_remain_current: RestorePreviewFactRecord[];
+  available_commit_batches: Array<{
+    id: string;
+    proposal_id: string;
+    chapter_revision_id: string;
+    state: string;
+    accepted_item_ids: string[];
+  }>;
 }

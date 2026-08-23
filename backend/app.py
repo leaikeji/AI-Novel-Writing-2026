@@ -33,6 +33,7 @@ from .services import (
     DraftConflictError,
     NotFoundError,
     ProposalSupersededError,
+    RestorationPlanConflictError,
     ValidationError,
     adopt_candidate,
     build_chapter_generation_prompt,
@@ -56,6 +57,7 @@ from .services import (
     list_intelligence_proposals,
     list_novels,
     list_story_facts,
+    preview_restore_revision,
     reject_candidate,
     review_intelligence_item,
     restore_revision,
@@ -95,6 +97,11 @@ def _raise_domain(error: Exception) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"type": "proposal_superseded", "proposal": error.proposal},
+        ) from error
+    if isinstance(error, RestorationPlanConflictError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": "restoration_plan_conflict", "current": error.current},
         ) from error
     if isinstance(error, NotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
@@ -287,9 +294,23 @@ def revisions_restore(
             document_id,
             revision_id,
             expected_draft_version=request.expected_draft_version,
+            expected_fact_plan_hash=request.expected_fact_plan_hash,
         )
     except Exception as error:
         session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.get("/documents/{document_id}/revisions/{revision_id}/restore-preview")
+def revisions_restore_preview(
+    document_id: UUID,
+    revision_id: UUID,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return preview_restore_revision(session, document_id, revision_id)
+    except Exception as error:
         _raise_domain(error)
         raise
 

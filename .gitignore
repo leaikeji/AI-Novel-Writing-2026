@@ -29,3 +29,6 @@ coverage/
 .ruff_cache/
 playwright-report/
 test-results/
+
+# Local database safety snapshots
+audit/db-backups/

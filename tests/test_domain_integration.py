@@ -4,10 +4,10 @@ import os
 from uuid import UUID
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
-from backend.models import Document, Novel
+from backend.models import Document, IntelligenceCommitBatch, Novel, StoryFact
 from backend.services import (
     CandidateConflictError,
     adopt_candidate,
@@ -15,11 +15,13 @@ from backend.services import (
     complete_chapter_generation,
     complete_intelligence_proposal,
     DraftConflictError,
+    RestorationPlanConflictError,
     create_checkpoint,
     create_novel,
     get_document,
     get_novel_context,
     list_story_facts,
+    preview_restore_revision,
     restore_revision,
     save_chapter_brief,
     save_draft,
@@ -57,7 +59,8 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
                 "('novels','documents','document_working_copies','document_revisions',"
                 "'story_facts','novel_chunks','media_assets','chapter_briefs',"
                 "'chapter_generation_jobs','candidate_revisions','intelligence_proposals',"
-                "'intelligence_proposal_items')"
+                "'intelligence_proposal_items','intelligence_commit_batches',"
+                "'derived_source_bindings')"
             )
         )
     }
@@ -76,6 +79,8 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
         "candidate_revisions",
         "intelligence_proposals",
         "intelligence_proposal_items",
+        "intelligence_commit_batches",
+        "derived_source_bindings",
     }
 
 
@@ -121,7 +126,11 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
         UUID(checkpoint["revision"]["id"]),
         expected_draft_version=4,
     )
-    assert restored["revision"]["revision_number"] == 3
+    assert restored["preserved_revision"]["revision_number"] == 3
+    assert restored["preserved_revision"]["source"] == "pre_restore_checkpoint"
+    assert restored["preserved_revision"]["content_markdown"].endswith("烧掉了那封信。")
+    assert restored["revision"]["revision_number"] == 4
+    assert restored["revision"]["parent_revision_id"] == restored["preserved_revision"]["id"]
     assert restored["revision"]["source"] == "manual_restore"
     assert restored["document"]["content_markdown"].endswith("一封信。")
 
@@ -222,6 +231,149 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
     assert len(facts) == 1
     assert facts[0]["subject"] == "信封邮戳"
     assert facts[0]["source_revision_id"] == adopted["revision"]["id"]
+
+
+def test_restore_reactivates_target_facts_without_duplicate_commits(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-版本事实事务")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+
+    saved_a = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="版本 A：蓝色车票留在抽屉里。",
+    )
+    revision_a = create_checkpoint(
+        session, document_id, expected_draft_version=saved_a["draft_version"]
+    )["revision"]
+    proposal_a = start_intelligence_proposal(
+        session, document_id, revision_id=UUID(revision_a["id"])
+    )
+    proposal_a = complete_intelligence_proposal(
+        session,
+        UUID(proposal_a["id"]),
+        items=[
+            {
+                "item_type": "fact",
+                "subject": "车票",
+                "predicate": "颜色",
+                "object": "蓝色",
+                "source_text": "蓝色车票",
+                "reasoning_summary": "版本 A 的专属事实",
+                "confidence": 99,
+            }
+        ],
+    )
+    selected_a = [UUID(proposal_a["items"][0]["id"])]
+    committed_a = commit_intelligence_items(
+        session, UUID(proposal_a["id"]), accepted_item_ids=selected_a
+    )
+    replayed_a = commit_intelligence_items(
+        session, UUID(proposal_a["id"]), accepted_item_ids=selected_a
+    )
+    assert replayed_a["commit_batch"]["id"] == committed_a["commit_batch"]["id"]
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 1
+    assert session.scalar(
+        select(func.count(IntelligenceCommitBatch.id)).where(
+            IntelligenceCommitBatch.proposal_id == UUID(proposal_a["id"])
+        )
+    ) == 1
+
+    current = get_document(session, document_id)
+    saved_b = save_draft(
+        session,
+        document_id,
+        expected_draft_version=current["draft_version"],
+        content_markdown="版本 B：银色怀表埋在旧桥下。",
+    )
+    revision_b = create_checkpoint(
+        session, document_id, expected_draft_version=saved_b["draft_version"]
+    )["revision"]
+    proposal_b = start_intelligence_proposal(
+        session, document_id, revision_id=UUID(revision_b["id"])
+    )
+    proposal_b = complete_intelligence_proposal(
+        session,
+        UUID(proposal_b["id"]),
+        items=[
+            {
+                "item_type": "fact",
+                "subject": "怀表",
+                "predicate": "位置",
+                "object": "旧桥下",
+                "source_text": "银色怀表埋在旧桥下",
+                "reasoning_summary": "版本 B 的专属事实",
+                "confidence": 99,
+            }
+        ],
+    )
+    commit_intelligence_items(
+        session,
+        UUID(proposal_b["id"]),
+        accepted_item_ids=[UUID(proposal_b["items"][0]["id"])],
+    )
+
+    before_restore = {fact["subject"]: fact["status"] for fact in list_story_facts(session, novel_id)}
+    assert before_restore == {"怀表": "active", "车票": "source_superseded"}
+
+    preview = preview_restore_revision(session, document_id, UUID(revision_a["id"]))
+    assert [fact["subject"] for fact in preview["will_deactivate"]] == ["怀表"]
+    assert [fact["subject"] for fact in preview["will_reactivate"]] == ["车票"]
+    assert len(preview["available_commit_batches"]) == 1
+
+    with pytest.raises(RestorationPlanConflictError):
+        restore_revision(
+            session,
+            document_id,
+            UUID(revision_a["id"]),
+            expected_draft_version=preview["expected_draft_version"],
+            expected_fact_plan_hash="0" * 64,
+        )
+    session.rollback()
+    assert get_document(session, document_id)["base_revision_id"] == revision_b["id"]
+
+    restored = restore_revision(
+        session,
+        document_id,
+        UUID(revision_a["id"]),
+        expected_draft_version=preview["expected_draft_version"],
+        expected_fact_plan_hash=preview["fact_plan_hash"],
+    )
+    assert restored["revision"]["restored_from_revision_id"] == revision_a["id"]
+    after_restore = {fact["subject"]: fact["status"] for fact in list_story_facts(session, novel_id)}
+    assert after_restore == {"怀表": "source_superseded", "车票": "source_restored"}
+    assert [fact["subject"] for fact in get_novel_context(session, novel_id)["story_facts"]] == ["车票"]
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 2
+    proposal_ids = [UUID(proposal_a["id"]), UUID(proposal_b["id"])]
+    assert session.scalar(
+        select(func.count(IntelligenceCommitBatch.id)).where(
+            IntelligenceCommitBatch.proposal_id.in_(proposal_ids)
+        )
+    ) == 2
+
+    second_preview = preview_restore_revision(session, document_id, UUID(revision_a["id"]))
+    restore_revision(
+        session,
+        document_id,
+        UUID(revision_a["id"]),
+        expected_draft_version=second_preview["expected_draft_version"],
+        expected_fact_plan_hash=second_preview["fact_plan_hash"],
+    )
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 2
+    assert session.scalar(
+        select(func.count(IntelligenceCommitBatch.id)).where(
+            IntelligenceCommitBatch.proposal_id.in_(proposal_ids)
+        )
+    ) == 2
 
 
 def test_candidate_adoption_rejects_a_changed_working_copy(session: Session) -> None:

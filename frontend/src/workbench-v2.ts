@@ -7,12 +7,19 @@ import {
   RecoveryDraft,
   saveRecoveryDraft,
 } from "./recovery";
-import { NOVEL_COVER_URL } from "./styles";
+import {
+  factStatusLabel,
+  factTypeLabel,
+  isClueFactType,
+  revisionSourceLabel,
+  selectFactView,
+} from "./presenters";
 import { workbenchStore } from "./store";
 import {
   DocumentRecord,
   NovelRecord,
   NovelSummary,
+  RestorePreviewRecord,
   StoryFactRecord,
   VolumeRecord,
 } from "./types";
@@ -54,31 +61,6 @@ const {
 
 type ProjectSection = "chapters" | "outline" | "roles" | "clues" | "settings";
 
-const DEMO_OUTLINE = [
-  ["亮点与简介", "一盒来自明日的录音带，会在每次播放后改写现实记录。夜班员林默必须在不断变动的城市档案中，追查父亲失踪的真相。"],
-  ["故事背景设定", "临江市档案馆建在九十年代的旧防空工程上。公开图纸只有地下两层，旧验收单却记录着 B2 的十个封存间；每天凌晨三点四十七分，档案系统会短暂出现一批不存在的记录。"],
-  ["故事主要情节", "林默收到写有自己名字的未来磁带，循着录音里的风机频率找到不存在的 B2。他每确认一段真相，现实就会失去一段共同记忆，最终必须在救回父亲与保住城市记忆之间作出选择。"],
-] as const;
-
-const DEMO_SETTINGS = [
-  ["世界规则", "录音只记录尚未发生、却已经被某种选择锁定的未来。播放会让现实向录音靠拢，重复播放则会抹除与听者关系最深的一段公共记忆。"],
-  ["核心地点", "临江市档案馆、地下 B2 封存区、旧磁带修复室、凌晨停运的七码头站。每个地点都对应一种不同的记忆损耗。"],
-  ["创作边界", "悬疑优先，超自然机制保持可验证；不使用无代价复活，不以梦境推翻既有情节，不让关键答案依赖突然出现的新人物。"],
-  ["叙事风格", "近距离第三人称，克制、冷静，强调声音、纸张、潮气和旧机器的触感。章节结尾留下可追踪的新证据，而不是纯情绪悬念。"],
-] as const;
-
-const DEMO_ROLES = [
-  ["林默", "夜班档案员", "谨慎、强迫性核对细节；正在追查父亲失踪与未来磁带的关联。"],
-  ["郭晓霞", "磁带修复师", "行动果断，保留着一段不属于自己的记忆，是林默唯一稳定的外部校验。"],
-  ["王建国", "档案馆主任", "熟悉 B2 的旧工程，却持续否认封存区存在；对林默既保护又防备。"],
-] as const;
-
-const DEMO_CLUES = [
-  ["主线", "不存在的 B2", "旧图纸、消防验收单与电梯检修日志都指向地下第三层，但馆内所有人都否认它存在。", "推进中"],
-  ["伏笔", "03:47 的空白录音", "每盘未来磁带在三点四十七分都会出现同一段十三秒空白，背景里藏着老式风机的低频。", "待回收"],
-  ["人物线", "父亲留下的编号 27", "林默父亲失踪前最后签出的并非档案，而是一盘从未入库的母带。", "已揭示 40%"],
-] as const;
-
 
 function currentQuery(): URLSearchParams {
   const query = new URLSearchParams(window.location.search);
@@ -113,13 +95,15 @@ function firstDocument(novel: NovelRecord): DocumentRecord | undefined {
 
 
 function novelCover(title: string, className = "anw-cover"): unknown {
-  if (title === "封存区没有明天") {
-    return h("img", { className, src: NOVEL_COVER_URL, alt: `${title}封面` });
-  }
   return h(
     "div",
-    { className: className === "anw-cover" ? "anw-cover-fallback" : "anw-book-cover-empty" },
-    h("span", null, "未设置封面"),
+    {
+      className: className === "anw-cover" ? "anw-cover-fallback" : "anw-book-cover-empty",
+      role: "img",
+      "aria-label": `${title}尚未设置封面`,
+    },
+    h("span", { className: "anw-cover-monogram", "aria-hidden": "true" }, title.slice(0, 1) || "书"),
+    h("span", { className: "anw-cover-empty-label" }, "未设置封面"),
   );
 }
 
@@ -217,8 +201,32 @@ export function NovelLibraryPage() {
         "nav",
         { className: "anw-quick-nav", "aria-label": "创作中心导航" },
         h("button", { type: "button", className: "anw-quick-item is-active" }, h(BookOutlined), "我的作品"),
-        h("button", { type: "button", className: "anw-quick-item" }, h(DatabaseOutlined), "故事资料库"),
-        h("button", { type: "button", className: "anw-quick-item" }, h(BulbOutlined), "创作灵感"),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "anw-quick-item",
+            disabled: true,
+            title: "故事资料库将在资料实体化后开放",
+            "aria-label": "故事资料库，暂未开放",
+          },
+          h(DatabaseOutlined),
+          "故事资料库",
+          h("span", { className: "anw-soon-badge" }, "待开放"),
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "anw-quick-item",
+            disabled: true,
+            title: "创作灵感功能正在建设",
+            "aria-label": "创作灵感，暂未开放",
+          },
+          h(BulbOutlined),
+          "创作灵感",
+          h("span", { className: "anw-soon-badge" }, "待开放"),
+        ),
       ),
       loading
         ? h("div", { className: "anw-empty-library" }, h(Spin), h("p", null, "正在载入作品…"))
@@ -296,6 +304,7 @@ export function NovelLibraryPage() {
           size: "large",
           value: title,
           maxLength: 240,
+          "aria-label": "小说名称",
           placeholder: "小说名称",
           onChange: (event: any) => setTitle(event.target.value),
           onPressEnter: createNovel,
@@ -349,6 +358,7 @@ export function NovelWorkbench() {
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [projectFacts, setProjectFacts] = React.useState([] as StoryFactRecord[]);
+  const [projectFactsLoading, setProjectFactsLoading] = React.useState(false);
   const timerRef = React.useRef(null as ReturnType<typeof setTimeout> | null);
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
@@ -406,30 +416,44 @@ export function NovelWorkbench() {
 
   React.useEffect(() => {
     if (!novel || (section !== "roles" && section !== "clues")) return;
+    let cancelled = false;
+    setProjectFactsLoading(true);
     void apiRequest<StoryFactRecord[]>(`/novels/${novel.id}/story-facts`)
-      .then(setProjectFacts)
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "加载故事资料失败"));
+      .then((facts) => { if (!cancelled) setProjectFacts(facts); })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "加载故事资料失败");
+      })
+      .finally(() => { if (!cancelled) setProjectFactsLoading(false); });
+    return () => { cancelled = true; };
   }, [novel?.id, section]);
 
   const saveNow = React.useCallback(async (markdown: string): Promise<DocumentRecord | null> => {
     const active = documentRef.current;
     if (!active) return null;
+    if (active.content_markdown === markdown) {
+      setSaveState("已保存");
+      return active;
+    }
     setSaveState("正在保存…");
     try {
       const saved = await apiRequest<DocumentRecord>(`/documents/${active.id}/draft`, {
         method: "PATCH",
         body: JSON.stringify({ expected_draft_version: active.draft_version, content_markdown: markdown }),
       });
-      documentRef.current = saved;
-      setDocument(saved);
+      const merged = {
+        ...saved,
+        revisions: saved.revisions ?? active.revisions ?? [],
+      };
+      documentRef.current = merged;
+      setDocument(merged);
       if (contentRef.current === markdown) {
         setSaveState("已保存");
-        await clearRecoveryDraft(saved.id);
+        await clearRecoveryDraft(merged.id);
       } else {
         setSaveState("有新内容待保存");
         timerRef.current = setTimeout(() => void saveNow(contentRef.current), 100);
       }
-      return saved;
+      return merged;
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) {
         setConflict((reason.detail as ConflictDetail).current);
@@ -524,27 +548,103 @@ export function NovelWorkbench() {
     }
   };
 
-  const restore = async (revisionId: string) => {
+  const restore = async (revisionId: string, preview: RestorePreviewRecord) => {
     const active = documentRef.current;
     if (!active) return;
     setBusy(true);
     try {
       const result = await apiRequest<{ document: DocumentRecord }>(
         `/documents/${active.id}/revisions/${revisionId}/restore`,
-        { method: "POST", body: JSON.stringify({ expected_draft_version: active.draft_version }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_draft_version: preview.expected_draft_version,
+            expected_fact_plan_hash: preview.fact_plan_hash,
+          }),
+        },
       );
       documentRef.current = result.document;
       contentRef.current = result.document.content_markdown;
       setDocument(result.document);
       setContent(result.document.content_markdown);
       setHistoryOpen(false);
-      setSaveState("已恢复为新版本");
+      setSaveState(
+        preview.will_reactivate.length
+          ? `已恢复正文，并重新启用 ${preview.will_reactivate.length} 条故事资料`
+          : "已恢复为新版本",
+      );
       await clearRecoveryDraft(result.document.id);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "恢复失败");
+      if (
+        reason instanceof ApiError
+        && reason.status === 409
+        && (reason.detail as { type?: string })?.type === "restoration_plan_conflict"
+      ) {
+        setError("恢复预览期间故事资料发生变化，请重新预览后再确认。");
+      } else {
+        setError(reason instanceof Error ? reason.message : "恢复失败");
+      }
     } finally {
       setBusy(false);
     }
+  };
+
+  const confirmRestore = async (revision: DocumentRecord["revisions"][number]) => {
+    const saved = await saveNow(contentRef.current);
+    if (!saved) return;
+    setBusy(true);
+    let preview: RestorePreviewRecord;
+    try {
+      preview = await apiRequest<RestorePreviewRecord>(
+        `/documents/${saved.id}/revisions/${revision.id}/restore-preview`,
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "无法建立恢复预览");
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+    Modal.confirm({
+      className: "anw-modal",
+      title: `恢复版本 ${revision.revision_number}？`,
+      width: 680,
+      content: h(
+        "div",
+        { className: "anw-restore-confirm" },
+        h("p", null, `将以“${revisionSourceLabel(revision.source)}”版本建立一份新的当前版本。`),
+        h("p", null, `目标正文 ${revision.visible_character_count} 字；当前版本和后续版本仍会保留。`),
+        h(
+          "div",
+          { className: "anw-restore-impact", role: "status", "aria-label": "故事资料恢复影响" },
+          h("strong", null, "故事资料同步"),
+          h(
+            "ul",
+            null,
+            h("li", null, `退出当前故事：${preview.will_deactivate.length} 条`),
+            h("li", null, `随目标版本重新启用：${preview.will_reactivate.length} 条`),
+            h("li", null, `保持有效：${preview.will_remain_current.length} 条`),
+            h("li", null, `可复用采用批次：${preview.available_commit_batches.length} 个`),
+          ),
+        ),
+        preview.working_copy_dirty
+          ? h(Alert, {
+              type: "warning",
+              showIcon: true,
+              message: "当前工作稿尚未建立正式版本；确认恢复时会先自动建立一份“恢复前保护版本”。",
+            })
+          : null,
+        h(
+          "details",
+          { className: "anw-restore-diff" },
+          h("summary", null, preview.unified_diff ? "查看正文差异" : "正文内容与当前版本相同"),
+          preview.unified_diff ? h("pre", null, preview.unified_diff) : null,
+        ),
+      ),
+      okText: "恢复并同步故事资料",
+      cancelText: "取消",
+      okButtonProps: { className: "anw-primary-button" },
+      onOk: () => restore(revision.id, preview),
+    });
   };
 
   const copyContext = async () => {
@@ -595,18 +695,19 @@ export function NovelWorkbench() {
     setEditorOpen(false);
     rememberWorkbenchRoute(novel.id);
     window.history.replaceState(null, "", workbenchUrl(novel.id, undefined, next));
-    if (next === "roles" || next === "clues") {
-      try { setProjectFacts(await apiRequest<StoryFactRecord[]>(`/novels/${novel.id}/story-facts`)); }
-      catch (reason) { setError(reason instanceof Error ? reason.message : "加载故事资料失败"); }
-    }
   };
 
   const backToProject = () => {
     if (!novel) return;
+    const nextSection: ProjectSection = document?.kind === "outline"
+      ? "outline"
+      : document?.kind === "setting"
+        ? "settings"
+        : "chapters";
     setEditorOpen(false);
-    setSection("chapters");
+    setSection(nextSection);
     rememberWorkbenchRoute(novel.id);
-    window.history.replaceState(null, "", workbenchUrl(novel.id));
+    window.history.replaceState(null, "", workbenchUrl(novel.id, undefined, nextSection));
   };
 
   if (!queryNovelId) {
@@ -702,8 +803,17 @@ export function NovelWorkbench() {
                 ...document.revisions.map((revision: DocumentRecord["revisions"][number]) => h(
                   "div",
                   { key: revision.id, className: "anw-info-card", style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 } },
-                  h("div", null, h("strong", null, `版本 ${revision.revision_number}`), h("div", { className: "anw-panel-subtitle" }, `${revision.source} · ${revision.visible_character_count} 字`)),
-                  h(Button, { size: "small", onClick: () => restore(revision.id) }, "恢复为新版本"),
+                  h(
+                    "div",
+                    null,
+                    h("strong", { className: "anw-version-title" }, `版本 ${revision.revision_number}`),
+                    h("div", { className: "anw-panel-subtitle" }, `${revisionSourceLabel(revision.source)} · ${revision.visible_character_count} 字`),
+                  ),
+                  h(
+                    Button,
+                    { size: "small", loading: busy, onClick: () => void confirmRestore(revision) },
+                    "恢复为新版本",
+                  ),
                 )),
               )
             : h(Empty, { description: "暂无版本" }),
@@ -716,71 +826,114 @@ export function NovelWorkbench() {
     .filter((item: DocumentRecord) => item.kind === "chapter");
   const structuredDocuments = (novel?.tree ?? []).flatMap((volume: VolumeRecord) => volume.documents)
     .filter((item: DocumentRecord) => item.kind === (section === "settings" ? "setting" : "outline"));
-  const activeFacts = projectFacts.filter((fact: StoryFactRecord) => fact.status === "active");
+  const chapterOrder = new Map(
+    chapterDocuments.map((item: DocumentRecord, index: number) => [item.id, index + 1]),
+  );
+  const roleFactView = selectFactView(
+    projectFacts,
+    (fact: StoryFactRecord) => fact.fact_type === "character_state",
+  );
   const roleMap = new Map<string, StoryFactRecord[]>();
-  for (const fact of activeFacts) {
+  for (const fact of roleFactView.facts) {
     const list = roleMap.get(fact.subject) ?? [];
     list.push(fact);
     roleMap.set(fact.subject, list);
   }
+  const clueFactView = selectFactView(
+    projectFacts,
+    (fact: StoryFactRecord) => isClueFactType(fact.fact_type),
+  );
 
   const renderPanelBody = (): unknown => {
     if (section === "chapters") {
-      const availableVolumes = (novel?.tree ?? []).filter((volume: VolumeRecord) => volume.id || volume.documents.some((item: DocumentRecord) => item.kind === "chapter"));
-      const volumeTiles = availableVolumes.length > 1
-        ? availableVolumes
-        : [...availableVolumes, { id: "demo-volume", title: "第二卷 改写痕迹", position: 2, version: 1, documents: [] as DocumentRecord[] }];
-      const demoChapters = [
-        "第2章 录音里的第三个人",
-        "第3章 不存在的 B2",
-        "第4章 被删掉的值班表",
-        "第5章 从未出生的人",
-      ];
+      const volumeTiles = (novel?.tree ?? []).filter(
+        (volume: VolumeRecord) => volume.id !== null
+          || volume.documents.some((item: DocumentRecord) => item.kind === "chapter"),
+      );
       return h(
         "div",
         { className: "anw-chapter-dashboard" },
         h("h3", { className: "anw-subsection-title" }, "分卷管理"),
+        volumeTiles.length
+          ? h(
+              "div",
+              { className: "anw-volume-overview" },
+              ...volumeTiles.map((volume: VolumeRecord, volumeIndex: number) => {
+                const count = volume.documents.filter((item: DocumentRecord) => item.kind === "chapter").length;
+                return h(
+                  "article",
+                  { key: volume.id ?? "ungrouped", className: "anw-volume-tile" },
+                  h("div", { className: "anw-volume-index" }, volume.id ? String(volumeIndex + 1).padStart(2, "0") : "—"),
+                  h("div", { className: "anw-volume-name" }, volume.title),
+                  h("div", { className: "anw-volume-count" }, `${count} 章`),
+                  volume.id
+                    ? h(
+                        "div",
+                        { className: "anw-volume-actions" },
+                        h(Button, { size: "small", type: "text", disabled: true, title: "分卷编辑暂未开放" }, "编辑"),
+                        h(Button, { size: "small", type: "text", danger: true, disabled: true, title: "分卷删除暂未开放" }, "删除"),
+                      )
+                    : null,
+                );
+              }),
+            )
+          : h(Empty, { description: "还没有分卷" }),
         h(
           "div",
-          { className: "anw-volume-overview" },
-          ...volumeTiles.slice(0, 2).map((volume: VolumeRecord, volumeIndex: number) => {
-            const count = volume.documents.filter((item: DocumentRecord) => item.kind === "chapter").length;
-            return h(
-              "article",
-              { key: volume.id ?? "ungrouped", className: "anw-volume-tile" },
-              h("div", { className: "anw-volume-index" }, String(volumeIndex + 1).padStart(2, "0")),
-              h("div", { className: "anw-volume-name" }, volume.title),
-              h("div", { className: "anw-volume-count" }, `${count || (volume.id === "demo-volume" ? 4 : 1)} 章`),
-              h("div", { className: "anw-volume-actions" }, h(Button, { size: "small", type: "text" }, "编辑"), h(Button, { size: "small", type: "text", danger: true }, "删除")),
-            );
-          }),
+          { className: "anw-subsection-row" },
+          h("h3", { className: "anw-subsection-title" }, "章节目录"),
+          h("span", { className: "anw-panel-subtitle" }, `共 ${chapterDocuments.length} 章`),
         ),
-        h("div", { className: "anw-subsection-row" }, h("h3", { className: "anw-subsection-title" }, "章节目录"), h("span", { className: "anw-panel-subtitle" }, "第一卷 · 未来回声")),
-        h(
-          "div",
-          { className: "anw-chapter-list anw-chapter-shelf" },
-          ...chapterDocuments.map((item: DocumentRecord, index: number) => h(
-            "button",
-            { key: item.id, type: "button", className: "anw-chapter-row", onClick: () => selectDocument(item.id) },
-            h("span", { className: "anw-chapter-number" }, String(index + 1).padStart(2, "0")),
-            h("span", { className: "anw-chapter-row-title" }, item.title),
-            h("span", { className: "anw-chapter-row-meta" }, `${item.visible_character_count} 字`),
-            h("span", { className: "anw-chapter-row-meta is-ready" }, "已保存"),
-          )),
-          ...demoChapters.slice(Math.max(0, chapterDocuments.length - 1)).map((title, index) => h(
-            "button",
-            { key: title, type: "button", className: "anw-chapter-row is-demo" },
-            h("span", { className: "anw-chapter-number" }, String(chapterDocuments.length + index + 1).padStart(2, "0")),
-            h("span", { className: "anw-chapter-row-title" }, title),
-            h("span", { className: "anw-chapter-row-meta" }, `${1380 + index * 127} 字`),
-            h("span", { className: "anw-chapter-row-meta" }, index === demoChapters.length - 1 ? "最新" : "已保存"),
-          )),
-        ),
+        volumeTiles.length
+          ? h(
+              "div",
+              { className: "anw-chapter-volume-list" },
+              ...volumeTiles.map((volume: VolumeRecord) => {
+                const volumeChapters = volume.documents.filter((item: DocumentRecord) => item.kind === "chapter");
+                return h(
+                  "section",
+                  { key: `chapters:${volume.id ?? "ungrouped"}`, className: "anw-chapter-volume-section" },
+                  h(
+                    "div",
+                    { className: "anw-chapter-group-header" },
+                    h("strong", null, volume.title),
+                    h("span", null, `${volumeChapters.length} 章`),
+                  ),
+                  volumeChapters.length
+                    ? h(
+                        "div",
+                        { className: "anw-chapter-list anw-chapter-shelf" },
+                        ...volumeChapters.map((item: DocumentRecord) => h(
+                          "button",
+                          { key: item.id, type: "button", className: "anw-chapter-row", onClick: () => selectDocument(item.id) },
+                          h("span", { className: "anw-chapter-number" }, String(chapterOrder.get(item.id) ?? 0).padStart(2, "0")),
+                          h("span", { className: "anw-chapter-row-title" }, item.title),
+                          h("span", { className: "anw-chapter-row-meta" }, `${item.visible_character_count} 字`),
+                          h("span", { className: "anw-chapter-row-meta is-ready" }, "已保存"),
+                        )),
+                      )
+                    : h("div", { className: "anw-inline-empty" }, "本卷还没有章节"),
+                );
+              }),
+            )
+          : null,
       );
     }
 
     if (section === "outline" || section === "settings") {
-      const demoSections = section === "outline" ? DEMO_OUTLINE : DEMO_SETTINGS;
+      if (structuredDocuments.length === 0) {
+        const kind = section === "settings" ? "setting" : "outline";
+        return h(
+          "div",
+          { className: "anw-empty-panel" },
+          h(Empty, { description: section === "settings" ? "还没有世界设定" : "还没有故事大纲" }),
+          h(
+            Button,
+            { className: "anw-primary-button", onClick: () => void createStructuredDocument(kind) },
+            section === "settings" ? "创建世界设定" : "创建故事大纲",
+          ),
+        );
+      }
       return h(
         "div",
         { className: "anw-content-sections" },
@@ -790,54 +943,92 @@ export function NovelWorkbench() {
           h("h3", { className: "anw-info-card-title" }, item.title),
           h("p", { className: "anw-info-card-copy" }, item.content_markdown || "点击进入编辑并补充内容。"),
         )),
-        ...demoSections.slice(structuredDocuments.length).map(([title, copy]) => h(
-          "article",
-          { key: title, className: "anw-info-card" },
-          h("div", { className: "anw-card-tools" }, h(EditOutlined)),
-          h("h3", { className: "anw-info-card-title" }, title),
-          h("p", { className: "anw-info-card-copy" }, copy),
-        )),
       );
     }
 
     if (section === "roles") {
       const actualRoles = Array.from(roleMap.entries()).map(([name, facts]) => [name, "故事角色", facts.slice(0, 2).map((fact) => `${fact.predicate}：${fact.object_text}`).join("；")] as const);
-      const roles = actualRoles.length ? actualRoles : DEMO_ROLES;
       return h(
         "div",
         { className: "anw-entity-group" },
-        h("div", { className: "anw-subsection-row" }, h("h3", { className: "anw-entity-heading" }, `角色列表（${roles.length}）`), h("div", { className: "anw-segmented" }, h("button", { className: "is-active" }, "角色卡"), h("button", null, "关系图"))),
         h(
           "div",
-          { className: "anw-entity-grid" },
-          ...roles.map(([name, identity, copy]) => h(
-            "article",
-            { key: name, className: "anw-entity-card" },
-            h("div", { className: "anw-avatar" }, name.slice(0, 1)),
-            h("div", { className: "anw-entity-name" }, name),
-            h("div", { className: "anw-role-identity" }, identity),
-            h("div", { className: "anw-entity-copy" }, copy),
-            h("div", { className: "anw-role-footer" }, h("span", null, "当前状态"), h("strong", null, "活跃")),
-          )),
+          { className: "anw-subsection-row" },
+          h("h3", { className: "anw-entity-heading" }, `角色列表（${actualRoles.length}）`),
+          h(
+            "div",
+            { className: "anw-segmented" },
+            h("button", { type: "button", className: "is-active" }, "角色卡"),
+            h("button", { type: "button", disabled: true, title: "关系实体化后开放" }, "关系图"),
+          ),
         ),
+        projectFactsLoading
+          ? h("div", { className: "anw-loading-panel" }, h(Spin), h("span", null, "正在载入角色资料…"))
+          : h(
+              React.Fragment,
+              null,
+              roleFactView.state === "stale"
+                ? h(Alert, { type: "warning", showIcon: true, message: "这些角色资料来自旧版本正文，当前仅供复核。", style: { marginBottom: 14 } })
+                : null,
+              actualRoles.length
+                ? h(
+                    "div",
+                    { className: "anw-entity-grid" },
+                    ...actualRoles.map(([name, identity, copy]) => h(
+                      "article",
+                      { key: name, className: `anw-entity-card ${roleFactView.state === "stale" ? "is-stale" : ""}` },
+                      h("div", { className: "anw-avatar" }, name.slice(0, 1)),
+                      h("div", { className: "anw-entity-name" }, name),
+                      h("div", { className: "anw-role-identity" }, identity),
+                      h("div", { className: "anw-entity-copy" }, copy),
+                      h(
+                        "div",
+                        { className: "anw-role-footer" },
+                        h("span", null, "资料状态"),
+                        h("strong", { className: roleFactView.state === "stale" ? "is-stale" : "" }, roleFactView.state === "stale" ? "待复核" : "当前有效"),
+                      ),
+                    )),
+                  )
+                : h(Empty, { description: "故事账本中还没有已确认的人物状态" }),
+            ),
       );
     }
 
-    const clueFacts = activeFacts.filter((fact: StoryFactRecord) => ["foreshadow", "storyline_event", "clue", "fact"].includes(fact.fact_type));
-    const clues = clueFacts.length
-      ? clueFacts.map((fact: StoryFactRecord) => [fact.fact_type, `${fact.subject} · ${fact.predicate}`, fact.object_text, "推进中"] as const)
-      : DEMO_CLUES;
     return h(
       "div",
       { className: "anw-clue-board" },
-      h("div", { className: "anw-segmented anw-clue-tabs" }, h("button", { className: "is-active" }, "全部"), h("button", null, "主线"), h("button", null, "支线"), h("button", null, "感情线"), h("button", null, "伏笔")),
-      h("div", { className: "anw-content-sections" }, ...clues.map(([kind, title, copy, state]: readonly [string, string, string, string]) => h(
-        "article",
-        { key: title, className: "anw-clue-card" },
-        h("span", { className: "anw-clue-kind" }, kind),
-        h("div", { className: "anw-clue-content" }, h("h3", null, title), h("p", null, copy)),
-        h("span", { className: "anw-clue-state" }, state),
-      ))),
+      h(
+        "div",
+        { className: "anw-segmented anw-clue-tabs", "aria-label": "线索分类" },
+        h("button", { type: "button", className: "is-active" }, "全部"),
+        ...["主线", "支线", "感情线", "伏笔"].map((label) => h(
+          "button",
+          { key: label, type: "button", disabled: true, title: "完成线路实体化后开放分类筛选" },
+          label,
+        )),
+      ),
+      projectFactsLoading
+        ? h("div", { className: "anw-loading-panel" }, h(Spin), h("span", null, "正在载入线索资料…"))
+        : h(
+            React.Fragment,
+            null,
+            clueFactView.state === "stale"
+              ? h(Alert, { type: "warning", showIcon: true, message: "这些线索来自旧版本正文，当前仅供复核。", style: { marginBottom: 14 } })
+              : null,
+            clueFactView.facts.length
+              ? h(
+                  "div",
+                  { className: "anw-content-sections" },
+                  ...clueFactView.facts.map((fact: StoryFactRecord) => h(
+                    "article",
+                    { key: fact.id, className: `anw-clue-card ${clueFactView.state === "stale" ? "is-stale" : ""}` },
+                    h("span", { className: "anw-clue-kind" }, factTypeLabel(fact.fact_type)),
+                    h("div", { className: "anw-clue-content" }, h("h3", null, `${fact.subject} · ${fact.predicate}`), h("p", null, fact.object_text)),
+                    h("span", { className: `anw-clue-state ${clueFactView.state === "stale" ? "is-stale" : ""}` }, factStatusLabel(fact.status)),
+                  )),
+                )
+              : h(Empty, { description: "故事账本中还没有已确认的线索或伏笔" }),
+          ),
     );
   };
 

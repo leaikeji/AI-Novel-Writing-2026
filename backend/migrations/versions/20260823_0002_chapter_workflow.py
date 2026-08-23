@@ -26,8 +26,8 @@ def upgrade() -> None:
         sa.Column("outline_text", sa.Text(), nullable=False),
         sa.Column("forbidden_text", sa.Text(), nullable=False),
         sa.Column("role_constraints", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["document_id"], ["documents.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("document_id"),
@@ -50,7 +50,7 @@ def upgrade() -> None:
         ),
         sa.Column("model_profile_fingerprint", sa.String(length=160), nullable=False),
         sa.Column("failure_message", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True)),
         sa.ForeignKeyConstraint(["base_revision_id"], ["document_revisions.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["document_id"], ["documents.id"], ondelete="CASCADE"),
@@ -78,7 +78,7 @@ def upgrade() -> None:
         sa.Column("content_hash", sa.String(length=64), nullable=False),
         sa.Column("state", sa.String(length=30), nullable=False),
         sa.Column("adopted_revision_id", postgresql.UUID(as_uuid=True)),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("decided_at", sa.DateTime(timezone=True)),
         sa.ForeignKeyConstraint(["adopted_revision_id"], ["document_revisions.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["base_revision_id"], ["document_revisions.id"], ondelete="SET NULL"),
@@ -102,7 +102,7 @@ def upgrade() -> None:
         sa.Column("state", sa.String(length=30), nullable=False),
         sa.Column("model_profile_fingerprint", sa.String(length=160), nullable=False),
         sa.Column("failure_message", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("reviewed_at", sa.DateTime(timezone=True)),
         sa.ForeignKeyConstraint(
             ["chapter_revision_id"], ["document_revisions.id"], ondelete="CASCADE"
@@ -131,7 +131,7 @@ def upgrade() -> None:
         sa.Column("reasoning_summary", sa.Text(), nullable=False),
         sa.Column("review_state", sa.String(length=30), nullable=False),
         sa.Column("committed_story_fact_id", postgresql.UUID(as_uuid=True)),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(
             ["committed_story_fact_id"], ["story_facts.id"], ondelete="SET NULL"
         ),

@@ -34,6 +34,7 @@ class CheckpointRequest(BaseModel):
 
 class RestoreRevisionRequest(BaseModel):
     expected_draft_version: int = Field(ge=1)
+    expected_fact_plan_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class SaveChapterBriefRequest(BaseModel):

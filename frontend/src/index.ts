@@ -10,7 +10,6 @@ import { ensureNovelStyles } from "./styles";
 
 
 const React = window.QwenPaw.host.React;
-const { CloseOutlined, RobotOutlined } = window.QwenPaw.host.antdIcons;
 
 
 ensureNovelStyles();
@@ -23,7 +22,6 @@ function isNovelWorkbenchChat(): boolean {
 
 function wrapNativeChat(Inner: any) {
   return function NativeChatWithNovelWorkbench() {
-    const [chatOpen, setChatOpen] = React.useState(false);
     if (!isNovelWorkbenchChat()) {
       return React.createElement(Inner);
     }
@@ -32,31 +30,12 @@ function wrapNativeChat(Inner: any) {
       "div",
       {
         "data-ai-novel-workbench": "active",
-        className: `anw-workbench-frame ${chatOpen ? "has-chat" : ""}`,
+        className: "anw-workbench-frame",
       },
       React.createElement(
         "section",
         { className: "anw-workbench-main" },
         React.createElement(NovelWorkbench),
-      ),
-      chatOpen
-        ? React.createElement(
-            "section",
-            { "aria-label": "QwenPaw 原生 AI 助手", className: "anw-native-chat" },
-            React.createElement(Inner),
-          )
-        : null,
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "anw-chat-toggle",
-          onClick: () => setChatOpen((value: boolean) => !value),
-          "aria-label": chatOpen ? "关闭 AI 助手" : "打开 AI 助手",
-        },
-        React.createElement(chatOpen ? CloseOutlined : RobotOutlined),
-        " ",
-        chatOpen ? "关闭助手" : "AI 助手",
       ),
     );
   };

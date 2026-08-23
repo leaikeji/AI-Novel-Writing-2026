@@ -1,12 +1,6 @@
 const STYLE_ID = "ai-novel-world-2026-ui";
 
 
-export const NOVEL_COVER_URL = new URL(
-  "../assets/novel-cover-fengcunqu.jpg",
-  import.meta.url,
-).href;
-
-
 export function ensureNovelStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
@@ -112,6 +106,8 @@ export function ensureNovelStyles(): void {
     }
 
     .anw-quick-item.is-active { color: var(--anw-orange-strong); background: var(--anw-orange-soft); }
+    .anw-quick-item:disabled { cursor:not-allowed; opacity:.58; }
+    .anw-soon-badge { border-radius:999px; padding:2px 6px; color:#747b87; background:#eef0f3; font-size:9px; font-weight:700; }
 
     .anw-library-grid { display:grid; width:min(760px,100%); gap:22px; margin:0 auto; }
 
@@ -147,6 +143,8 @@ export function ensureNovelStyles(): void {
 
     .anw-cover-fallback {
       display: flex;
+      flex-direction: column;
+      gap: 10px;
       width: 154px;
       height: 212px;
       align-items: center;
@@ -160,6 +158,8 @@ export function ensureNovelStyles(): void {
       line-height: 1.6;
       text-align: center;
     }
+    .anw-cover-monogram { display:flex; width:52px; height:52px; align-items:center; justify-content:center; border-radius:15px; color:#fff; background:linear-gradient(135deg,#ff8a65,#ff5d2a); font-size:24px; font-weight:850; box-shadow:0 10px 20px rgba(255,93,42,.2); }
+    .anw-cover-empty-label { font-size:11px; }
 
     .anw-novel-meta { display: flex; min-width: 0; flex-direction: column; padding-top: 4px; }
     .anw-novel-title { margin: 0 0 12px; color: var(--anw-ink); font-size: 24px; line-height: 1.35; }
@@ -225,7 +225,7 @@ export function ensureNovelStyles(): void {
 
     .anw-book-rail-top { padding: 18px; }
     .anw-book-cover-large { width: 100%; aspect-ratio: 2 / 2.72; border-radius: 14px; object-fit: cover; box-shadow: 0 12px 24px rgba(12, 26, 48, .18); }
-    .anw-book-cover-empty { display:flex; width:100%; aspect-ratio:2/2.72; align-items:center; justify-content:center; border-radius:14px; color:#8a9099; background:#eef1f4; }
+    .anw-book-cover-empty { display:flex; width:100%; aspect-ratio:2/2.72; flex-direction:column; gap:10px; align-items:center; justify-content:center; border-radius:14px; color:#8a9099; background:#eef1f4; }
     .anw-book-title { margin: 17px 0 7px; color: var(--anw-ink); font-size: 20px; }
     .anw-book-description { color: var(--anw-muted); font-size: 12px; line-height: 1.7; }
     .anw-book-counts { display: flex; gap: 16px; margin-top: 13px; color: #535a66; font-size: 13px; }
@@ -285,7 +285,7 @@ export function ensureNovelStyles(): void {
     .anw-chapter-dashboard { display:grid; gap:18px; }
     .anw-subsection-title { margin:0; color:var(--anw-ink); font-size:16px; }
     .anw-subsection-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
-    .anw-volume-overview { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .anw-volume-overview { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; }
     .anw-volume-tile { position:relative; min-height:132px; overflow:hidden; border:1px solid var(--anw-line); border-radius:14px; padding:20px 92px 18px 20px; background:linear-gradient(145deg,#fff,#fafbfc); }
     .anw-volume-index { position:absolute; right:16px; top:9px; color:#f0f1f3; font-size:58px; font-weight:900; line-height:1; }
     .anw-volume-actions { position:absolute; right:10px; bottom:10px; display:flex; }
@@ -309,31 +309,46 @@ export function ensureNovelStyles(): void {
       text-align: left;
     }
     .anw-chapter-row:hover { background: #fff8f5; }
-    .anw-chapter-row.is-demo { cursor:default; }
     .anw-chapter-number { color:#b2b6bd; font-size:12px; font-weight:750; }
     .anw-chapter-row-title { overflow: hidden; color: var(--anw-ink); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
     .anw-chapter-row-meta { color: var(--anw-muted); font-size: 12px; white-space: nowrap; }
+    .anw-chapter-volume-list { display:grid; gap:14px; }
+    .anw-chapter-volume-section { overflow:hidden; border:1px solid var(--anw-line); border-radius:14px; background:#fff; }
+    .anw-chapter-group-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; color:var(--anw-muted); background:#fafbfc; font-size:12px; }
+    .anw-chapter-group-header strong { color:var(--anw-ink); font-size:13px; }
+    .anw-inline-empty { padding:18px; color:var(--anw-muted); text-align:center; font-size:12px; }
 
     .anw-content-sections { display: grid; gap: 16px; }
     .anw-info-card { position:relative; border: 1px solid #f0dfd7; border-radius: 14px; padding: 22px 24px; background: #fffaf6; }
     .anw-card-tools { position:absolute; right:18px; top:17px; display:flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:8px; color:#8c929d; background:#fff; box-shadow:var(--anw-shadow-soft); }
     .anw-info-card-title { margin: 0 0 10px; padding-left: 12px; border-left: 4px solid var(--anw-orange); color: var(--anw-ink); font-size: 16px; }
     .anw-info-card-copy { margin: 0; color: #515762; font-size: 14px; line-height: 1.85; white-space: pre-wrap; }
+    .anw-version-title { color:var(--anw-ink) !important; font-size:14px; }
+    .anw-restore-confirm p { margin:0 0 8px; color:inherit; line-height:1.7; opacity:.78; }
+    .anw-restore-impact { margin:14px 0; border:1px solid #f0dfd7; border-radius:12px; padding:14px 16px; background:#fffaf6; }
+    .anw-restore-impact strong { color:var(--anw-ink); }
+    .anw-restore-impact ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 20px; margin:10px 0 0; padding-left:20px; color:#555d69; }
+    .anw-restore-diff { margin-top:14px; border-top:1px solid var(--anw-line); padding-top:12px; }
+    .anw-restore-diff summary { color:var(--anw-orange-strong); cursor:pointer; font-weight:650; }
+    .anw-restore-diff pre { max-height:220px; margin:10px 0 0; overflow:auto; border-radius:10px; padding:12px; color:#4e5561; background:#f7f8fa; font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; }
 
     .anw-entity-group { margin-bottom: 24px; }
     .anw-entity-heading { margin: 0 0 12px; color: var(--anw-ink); font-size: 16px; }
     .anw-entity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .anw-entity-card { min-width: 0; border: 1px solid var(--anw-line); border-radius: 14px; padding: 18px; background: #fff; box-shadow: var(--anw-shadow-soft); }
+    .anw-entity-card.is-stale,.anw-clue-card.is-stale { border-style:dashed; background:#fffaf4; }
     .anw-avatar { display:flex; width:44px; height:44px; align-items:center; justify-content:center; border-radius:50%; color:#fff; background:var(--anw-orange); font-size:18px; font-weight:800; }
     .anw-entity-name { margin: 10px 0 3px; color: var(--anw-ink); font-weight: 750; }
     .anw-role-identity { color:var(--anw-orange-strong); font-size:12px; font-weight:700; }
     .anw-entity-copy { min-height:56px; margin-top:10px; overflow: hidden; color: var(--anw-muted); font-size: 12px; line-height: 1.65; text-overflow: ellipsis; }
     .anw-role-footer { display:flex; align-items:center; justify-content:space-between; margin-top:14px; padding-top:12px; border-top:1px solid var(--anw-line); color:var(--anw-muted); font-size:11px; }
     .anw-role-footer strong { color:var(--anw-success); font-size:12px; }
+    .anw-role-footer strong.is-stale,.anw-clue-state.is-stale { color:#b76b1c; }
 
     .anw-segmented { display:flex; gap:4px; padding:4px; border-radius:10px; background:#f1f2f4; }
     .anw-segmented button { border:0; border-radius:7px; padding:6px 12px; color:#747a84; background:transparent; cursor:pointer; font-size:12px; }
     .anw-segmented button.is-active { color:var(--anw-ink); background:#fff; box-shadow:0 2px 7px rgba(20,28,43,.08); }
+    .anw-segmented button:disabled { cursor:not-allowed; opacity:.45; }
     .anw-clue-board { display:grid; gap:16px; }
     .anw-clue-tabs { width:fit-content; max-width:100%; overflow-x:auto; }
     .anw-clue-card { display:grid; grid-template-columns:64px minmax(0,1fr) auto; align-items:start; gap:16px; border:1px solid var(--anw-line); border-radius:14px; padding:18px; background:#fff; box-shadow:var(--anw-shadow-soft); }
@@ -341,6 +356,9 @@ export function ensureNovelStyles(): void {
     .anw-clue-content h3 { margin:0 0 7px; color:var(--anw-ink); font-size:15px; }
     .anw-clue-content p { margin:0; color:var(--anw-muted); font-size:12px; line-height:1.7; }
     .anw-clue-state { color:var(--anw-success); font-size:12px; white-space:nowrap; }
+
+    .anw-empty-panel,.anw-loading-panel { display:flex; min-height:300px; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
+    .anw-loading-panel { color:var(--anw-muted); font-size:12px; }
 
     .anw-empty-state { display:flex; min-height: 330px; flex-direction:column; align-items:center; justify-content:center; padding:36px; color:var(--anw-muted); text-align:center; }
     .anw-empty-state strong { margin-bottom:8px; color:#646b76; font-size:18px; }
@@ -373,7 +391,7 @@ export function ensureNovelStyles(): void {
     .anw-save-state.is-error { color:#b43c2a; background:#fff0ec; }
 
     .anw-editor-scroll { flex:1; min-height:0; overflow:auto; padding:18px 16px 98px; }
-    .anw-editor-paper { width:min(880px,100%); min-height:100%; margin:0 auto; border:1px solid var(--anw-line); border-radius:18px; padding:36px 42px 54px; background:#fff; box-shadow:var(--anw-shadow); }
+    .anw-editor-paper { display:flex; width:min(880px,100%); min-height:100%; flex-direction:column; margin:0 auto; border:1px solid var(--anw-line); border-radius:18px; padding:36px 42px 54px; background:#fff; box-shadow:var(--anw-shadow); }
     .anw-editor-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding-bottom:20px; border-bottom:1px solid var(--anw-line); }
     .anw-editor-title { margin:0 0 8px; color:var(--anw-ink); font-size:27px; }
     .anw-editor-count { color:var(--anw-muted); font-size:13px; }
@@ -381,6 +399,7 @@ export function ensureNovelStyles(): void {
     .anw-editor-textarea {
       width:100%;
       min-height:560px;
+      flex:1;
       resize:none;
       border:0;
       outline:0;
@@ -410,28 +429,10 @@ export function ensureNovelStyles(): void {
     .anw-app .anw-workflow-buttons .qwenpaw-btn.anw-generate-button { color:#fff!important; border-color:#ff7043!important; background:#ff7043!important; font-weight:750; }
     .anw-app .anw-workflow-buttons .qwenpaw-btn.anw-intel-button { color:#fff!important; border-color:#07986b!important; background:#07986b!important; }
 
-    .anw-chat-toggle {
-      position:absolute;
-      z-index:30;
-      right:18px;
-      bottom:18px;
-      height:36px;
-      border:0;
-      border-radius:10px;
-      padding:0 13px;
-      color:#fff;
-      background:#202530;
-      box-shadow:var(--anw-shadow-soft);
-      cursor:pointer;
-      font-weight:700;
-    }
-    .anw-workbench-frame { position:relative; display:grid; height:100%; min-height:0; overflow:hidden; background:var(--anw-canvas); }
+    .anw-workbench-frame { position:relative; display:grid; grid-template-columns:minmax(0,1fr); height:100%; min-height:0; overflow:hidden; background:var(--anw-canvas); }
     .anw-workbench-main > .qwenpaw-spin-nested-loading,
     .anw-workbench-main > .qwenpaw-spin-nested-loading > .qwenpaw-spin-container { height:100%; min-height:0; }
-    .anw-workbench-frame.has-chat { grid-template-columns:minmax(620px, 1fr) minmax(380px, 36%); }
-    .anw-workbench-frame:not(.has-chat) { grid-template-columns:minmax(0,1fr); }
     .anw-workbench-main { min-width:0; min-height:0; overflow:hidden; }
-    .anw-native-chat { min-width:0; min-height:0; overflow:hidden; border-left:1px solid var(--anw-line); background:#fff; }
 
     .anw-modal .qwenpaw-modal-content { overflow:hidden; border-radius:18px; }
     .anw-modal .qwenpaw-modal-header { padding:20px 22px 14px; border-bottom:1px solid var(--anw-line); }
@@ -443,8 +444,6 @@ export function ensureNovelStyles(): void {
       .anw-library-grid { grid-template-columns:1fr; }
       .anw-project { grid-template-columns:220px minmax(0,1fr); padding:14px; }
       .anw-entity-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-      .anw-workbench-frame.has-chat { grid-template-columns:minmax(0,1fr); }
-      .anw-workbench-frame.has-chat .anw-native-chat { position:absolute; z-index:25; top:0; right:0; bottom:0; width:min(430px,92vw); box-shadow:-12px 0 34px rgba(20,28,43,.18); }
     }
 
     @media (max-width: 720px) {
@@ -495,7 +494,6 @@ export function ensureNovelStyles(): void {
       .anw-editor-footer { right:12px; bottom:10px; left:12px; overflow-x:auto; justify-content:flex-start; }
       .anw-workflow-buttons { flex-wrap:nowrap; justify-content:flex-start; padding:7px; }
       .anw-workflow-buttons .qwenpaw-btn { flex:0 0 auto; }
-      .anw-chat-toggle { right:12px; bottom:76px; }
     }
   `;
   document.head.appendChild(style);

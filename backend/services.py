@@ -17,9 +17,11 @@ from .models import (
     CandidateRevision,
     ChapterBrief,
     ChapterGenerationJob,
+    DerivedSourceBinding,
     Document,
     DocumentRevision,
     DocumentWorkingCopy,
+    IntelligenceCommitBatch,
     IntelligenceProposal,
     IntelligenceProposalItem,
     Novel,
@@ -65,6 +67,15 @@ class ProposalSupersededError(DomainError):
         self.proposal = proposal
 
 
+class RestorationPlanConflictError(DomainError):
+    def __init__(self, current: dict[str, Any]):
+        super().__init__("restoration fact plan is no longer current")
+        self.current = current
+
+
+CURRENT_FACT_STATUSES = ("active", "source_restored")
+
+
 def content_hash(markdown: str) -> str:
     return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
 
@@ -107,6 +118,11 @@ def _revision_payload(revision: DocumentRevision, *, include_content: bool = Fal
         "revision_number": revision.revision_number,
         "parent_revision_id": (
             str(revision.parent_revision_id) if revision.parent_revision_id else None
+        ),
+        "restored_from_revision_id": (
+            str(revision.restored_from_revision_id)
+            if revision.restored_from_revision_id
+            else None
         ),
         "content_hash": revision.content_hash,
         "source": revision.source,
@@ -269,9 +285,13 @@ def _intelligence_proposal_payload(
     source_revision = session.get(DocumentRevision, proposal.chapter_revision_id)
     source_current = bool(
         working
-        and working.base_revision_id == proposal.chapter_revision_id
         and source_revision
         and working.content_hash == source_revision.content_hash
+        and working.base_revision_id
+        and (
+            current_revision := session.get(DocumentRevision, working.base_revision_id)
+        ) is not None
+        and current_revision.content_hash == source_revision.content_hash
     )
     return {
         "id": str(proposal.id),
@@ -286,6 +306,41 @@ def _intelligence_proposal_payload(
         "items": [_intelligence_item_payload(item) for item in items],
         "created_at": proposal.created_at.isoformat() if proposal.created_at else None,
         "reviewed_at": proposal.reviewed_at.isoformat() if proposal.reviewed_at else None,
+    }
+
+
+def _intelligence_commit_key(
+    proposal_id: UUID,
+    accepted_item_ids: set[UUID],
+    item_overrides: dict[str, dict[str, object]],
+) -> str:
+    selected_overrides = {
+        str(item_id): item_overrides.get(str(item_id), {})
+        for item_id in sorted(accepted_item_ids, key=str)
+    }
+    canonical = json.dumps(
+        {
+            "proposal_id": str(proposal_id),
+            "accepted_item_ids": sorted(str(item_id) for item_id in accepted_item_ids),
+            "item_overrides": selected_overrides,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _intelligence_commit_batch_payload(batch: IntelligenceCommitBatch) -> dict[str, Any]:
+    return {
+        "id": str(batch.id),
+        "proposal_id": str(batch.proposal_id),
+        "chapter_revision_id": str(batch.chapter_revision_id),
+        "commit_key": batch.commit_key,
+        "state": batch.state,
+        "accepted_item_ids": batch.accepted_item_ids,
+        "committed_at": batch.committed_at.isoformat() if batch.committed_at else None,
+        "reverted_at": batch.reverted_at.isoformat() if batch.reverted_at else None,
     }
 
 
@@ -696,13 +751,19 @@ def _clean_model_candidate(text: str) -> str:
     if fenced:
         candidate = fenced.group(1).strip()
     # The host agent can occasionally append its own status capsule after the prose.
-    # Strip only a final, standalone capsule with known orchestration wording so an
-    # author's legitimate in-story brackets are never touched.
+    # Strip only final standalone capsules with known orchestration wording so an
+    # author's legitimate in-story brackets are never touched. Older host builds
+    # occasionally emitted the wrong opening glyph, so both variants are accepted.
+    capsule_pattern = (
+        r"[⟦⟧][^\n⟧]*(?:正文候选|待作者审阅|状态：|禁区检查)[^\n⟧]*⟧"
+    )
     candidate = re.sub(
-        r"\n*\s*⟧[^\n]*(?:正文候选|待作者审阅|状态：)[^\n]*⟧\s*$",
+        rf"(?:\n*\s*{capsule_pattern}\s*)+$",
         "",
         candidate,
     ).strip()
+    if re.search(capsule_pattern, candidate):
+        raise ValidationError("模型正文中混入了系统状态说明，请重新生成候选")
     if not candidate:
         raise ValidationError("模型没有返回可用正文")
     return candidate
@@ -829,7 +890,10 @@ def adopt_candidate(
     )
     session.add(revision)
     session.flush()
-    _supersede_intelligence_for_document(session, candidate.document_id)
+    _supersede_intelligence_for_document(
+        session, candidate.document_id, invalidate_committed_facts=False
+    )
+    _reconcile_story_facts_for_revision(session, candidate.document_id, revision)
     working.base_revision_id = revision.id
     working.content_markdown = candidate.content_markdown
     working.content_hash = candidate.content_hash
@@ -858,6 +922,156 @@ def reject_candidate(session: Session, candidate_id: UUID) -> dict[str, Any]:
     return _candidate_payload(candidate)
 
 
+def _fact_summary(fact: StoryFact, status: str) -> dict[str, Any]:
+    return {
+        "id": str(fact.id),
+        "fact_type": fact.fact_type,
+        "subject": fact.subject,
+        "predicate": fact.predicate,
+        "object_text": fact.object_text,
+        "status": status,
+    }
+
+
+def _document_fact_binding_rows(
+    session: Session, document_id: UUID, *, lock: bool = False
+) -> list[tuple[DerivedSourceBinding, StoryFact]]:
+    statement = (
+        select(DerivedSourceBinding, StoryFact)
+        .join(StoryFact, StoryFact.id == DerivedSourceBinding.derived_entity_id)
+        .where(
+            DerivedSourceBinding.source_chapter_id == document_id,
+            DerivedSourceBinding.derived_entity_type == "story_fact",
+        )
+        .order_by(DerivedSourceBinding.created_at, DerivedSourceBinding.id)
+    )
+    if lock:
+        statement = statement.with_for_update(of=DerivedSourceBinding)
+    return [(row[0], row[1]) for row in session.execute(statement).all()]
+
+
+def _restore_fact_plan(
+    session: Session,
+    document: Document,
+    working: DocumentWorkingCopy,
+    target_revision: DocumentRevision,
+    *,
+    lock: bool = False,
+) -> dict[str, Any]:
+    rows = _document_fact_binding_rows(session, document.id, lock=lock)
+    currently_effective = {"current", "source_restored"}
+    deactivate: list[dict[str, Any]] = []
+    reactivate: list[dict[str, Any]] = []
+    remain_current: list[dict[str, Any]] = []
+    plan_bindings: list[tuple[str, str, str]] = []
+    for binding, fact in rows:
+        matches_target = binding.source_content_hash == target_revision.content_hash
+        is_current = binding.validity_state in currently_effective
+        plan_bindings.append(
+            (str(binding.id), binding.validity_state, binding.source_content_hash)
+        )
+        if is_current and not matches_target:
+            deactivate.append(_fact_summary(fact, binding.validity_state))
+        elif not is_current and matches_target:
+            reactivate.append(_fact_summary(fact, binding.validity_state))
+        elif is_current and matches_target:
+            remain_current.append(_fact_summary(fact, binding.validity_state))
+
+    batches = session.scalars(
+        select(IntelligenceCommitBatch)
+        .join(
+            DocumentRevision,
+            DocumentRevision.id == IntelligenceCommitBatch.chapter_revision_id,
+        )
+        .where(
+            DocumentRevision.document_id == document.id,
+            DocumentRevision.content_hash == target_revision.content_hash,
+            IntelligenceCommitBatch.state == "committed",
+        )
+        .order_by(IntelligenceCommitBatch.committed_at, IntelligenceCommitBatch.id)
+    ).all()
+    current_revision = (
+        session.get(DocumentRevision, working.base_revision_id)
+        if working.base_revision_id
+        else None
+    )
+    plan_material = {
+        "document_id": str(document.id),
+        "target_revision_id": str(target_revision.id),
+        "target_content_hash": target_revision.content_hash,
+        "current_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
+        "working_content_hash": working.content_hash,
+        "expected_draft_version": working.draft_version,
+        "bindings": sorted(plan_bindings),
+        "commit_batches": sorted(str(batch.id) for batch in batches),
+    }
+    fact_plan_hash = hashlib.sha256(
+        json.dumps(plan_material, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    current_markdown = working.content_markdown
+    body_diff = "".join(
+        unified_diff(
+            current_markdown.splitlines(keepends=True),
+            target_revision.content_markdown.splitlines(keepends=True),
+            fromfile="当前工作稿",
+            tofile=f"目标版本 {target_revision.revision_number}",
+        )
+    )
+    return {
+        "document_id": str(document.id),
+        "expected_draft_version": working.draft_version,
+        "fact_plan_hash": fact_plan_hash,
+        "current_revision": (
+            _revision_payload(current_revision) if current_revision is not None else None
+        ),
+        "target_revision": _revision_payload(target_revision),
+        "working_copy_dirty": bool(
+            current_revision is None or working.content_hash != current_revision.content_hash
+        ),
+        "unified_diff": body_diff,
+        "will_deactivate": deactivate,
+        "will_reactivate": reactivate,
+        "will_remain_current": remain_current,
+        "available_commit_batches": [
+            _intelligence_commit_batch_payload(batch) for batch in batches
+        ],
+    }
+
+
+def preview_restore_revision(
+    session: Session, document_id: UUID, revision_id: UUID
+) -> dict[str, Any]:
+    document = _require_document(session, document_id)
+    target_revision = session.get(DocumentRevision, revision_id)
+    if target_revision is None or target_revision.document_id != document_id:
+        raise NotFoundError(f"revision {revision_id} not found for document {document_id}")
+    working = session.get(DocumentWorkingCopy, document_id)
+    if working is None:
+        raise NotFoundError(f"working copy for document {document_id} not found")
+    return _restore_fact_plan(session, document, working, target_revision)
+
+
+def _reconcile_story_facts_for_revision(
+    session: Session,
+    document_id: UUID,
+    target_revision: DocumentRevision,
+    *,
+    restored: bool = False,
+) -> None:
+    now = datetime.now(timezone.utc)
+    for binding, fact in _document_fact_binding_rows(session, document_id, lock=True):
+        if binding.source_content_hash == target_revision.content_hash:
+            binding.validity_state = "source_restored" if restored else "current"
+            binding.invalidated_at = None
+            binding.restored_at = now if restored else None
+            fact.status = "source_restored" if restored else "active"
+        else:
+            binding.validity_state = "source_superseded"
+            binding.invalidated_at = now
+            binding.restored_at = None
+            fact.status = "source_superseded"
+
+
 def _supersede_intelligence_for_document(
     session: Session, document_id: UUID, *, invalidate_committed_facts: bool = True
 ) -> None:
@@ -871,14 +1085,24 @@ def _supersede_intelligence_for_document(
         proposal.state = "superseded"
     if not invalidate_committed_facts:
         return
+    now = datetime.now(timezone.utc)
+    bound_fact_ids: set[UUID] = set()
+    for binding, fact in _document_fact_binding_rows(session, document_id, lock=True):
+        binding.validity_state = "source_superseded"
+        binding.invalidated_at = now
+        binding.restored_at = None
+        fact.status = "source_superseded"
+        bound_fact_ids.add(fact.id)
     revision_ids = select(DocumentRevision.id).where(DocumentRevision.document_id == document_id)
-    facts = session.scalars(
+    legacy_facts = session.scalars(
         select(StoryFact).where(
-            StoryFact.source_revision_id.in_(revision_ids), StoryFact.status == "active"
+            StoryFact.source_revision_id.in_(revision_ids),
+            StoryFact.status.in_(CURRENT_FACT_STATUSES),
         )
     ).all()
-    for fact in facts:
-        fact.status = "source_superseded"
+    for fact in legacy_facts:
+        if fact.id not in bound_fact_ids:
+            fact.status = "source_superseded"
 
 
 def start_intelligence_proposal(
@@ -897,14 +1121,31 @@ def start_intelligence_proposal(
     input_hash = content_hash(f"{revision.content_hash}:{extractor_profile}")
     existing = session.scalar(
         select(IntelligenceProposal).where(
-            IntelligenceProposal.chapter_revision_id == revision_id,
+            IntelligenceProposal.document_id == document_id,
             IntelligenceProposal.input_hash == input_hash,
-        )
+        ).order_by(IntelligenceProposal.created_at)
     )
     if existing is not None:
-        if existing.state == "failed":
+        existing_items = session.scalars(
+            select(IntelligenceProposalItem).where(
+                IntelligenceProposalItem.proposal_id == existing.id
+            )
+        ).all()
+        if existing.state == "failed" and not existing_items:
             existing.state = "running"
             existing.failure_message = None
+            session.commit()
+        elif existing.state == "superseded":
+            pending = sum(1 for item in existing_items if item.review_state == "pending")
+            accepted = sum(1 for item in existing_items if item.review_state == "accepted")
+            if pending:
+                existing.state = "partially_accepted" if accepted else "ready"
+            elif accepted:
+                existing.state = "accepted"
+            elif existing_items:
+                existing.state = "rejected"
+            else:
+                existing.state = "running"
             session.commit()
         return _intelligence_proposal_payload(session, existing)
     proposal = IntelligenceProposal(
@@ -931,7 +1172,10 @@ def build_intelligence_prompt(session: Session, proposal_id: UUID) -> str:
         raise NotFoundError(f"revision {proposal.chapter_revision_id} not found")
     existing_facts = session.scalars(
         select(StoryFact)
-        .where(StoryFact.novel_id == proposal.novel_id, StoryFact.status == "active")
+        .where(
+            StoryFact.novel_id == proposal.novel_id,
+            StoryFact.status.in_(CURRENT_FACT_STATUSES),
+        )
         .order_by(StoryFact.created_at)
         .limit(200)
     ).all()
@@ -1092,6 +1336,14 @@ def commit_intelligence_items(
     accepted_item_ids: list[UUID],
     item_overrides: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, Any]:
+    proposal_snapshot = session.get(IntelligenceProposal, proposal_id)
+    if proposal_snapshot is None:
+        raise NotFoundError(f"intelligence proposal {proposal_id} not found")
+    working = session.scalar(
+        select(DocumentWorkingCopy)
+        .where(DocumentWorkingCopy.document_id == proposal_snapshot.document_id)
+        .with_for_update()
+    )
     proposal = session.scalar(
         select(IntelligenceProposal)
         .where(IntelligenceProposal.id == proposal_id)
@@ -1099,13 +1351,18 @@ def commit_intelligence_items(
     )
     if proposal is None:
         raise NotFoundError(f"intelligence proposal {proposal_id} not found")
-    working = session.get(DocumentWorkingCopy, proposal.document_id)
     revision = session.get(DocumentRevision, proposal.chapter_revision_id)
+    current_revision = (
+        session.get(DocumentRevision, working.base_revision_id)
+        if working and working.base_revision_id
+        else None
+    )
     if (
         working is None
         or revision is None
-        or working.base_revision_id != proposal.chapter_revision_id
+        or current_revision is None
         or working.content_hash != revision.content_hash
+        or current_revision.content_hash != revision.content_hash
     ):
         proposal.state = "superseded"
         session.commit()
@@ -1120,6 +1377,36 @@ def commit_intelligence_items(
     if not selected or not selected.issubset(known_ids):
         raise ValidationError("accepted intelligence item ids do not belong to this proposal")
     overrides = item_overrides or {}
+    commit_key = _intelligence_commit_key(proposal.id, selected, overrides)
+    existing_batch = session.scalar(
+        select(IntelligenceCommitBatch).where(
+            IntelligenceCommitBatch.proposal_id == proposal.id,
+            IntelligenceCommitBatch.commit_key == commit_key,
+        )
+    )
+    if existing_batch is not None and existing_batch.state == "committed":
+        payload = _intelligence_proposal_payload(session, proposal)
+        payload["commit_batch"] = _intelligence_commit_batch_payload(existing_batch)
+        session.commit()
+        return payload
+
+    batch = existing_batch or IntelligenceCommitBatch(
+        id=uuid4(),
+        proposal_id=proposal.id,
+        chapter_revision_id=proposal.chapter_revision_id,
+        commit_key=commit_key,
+        state="committing",
+        accepted_item_ids=sorted(str(item_id) for item_id in selected),
+        inverse_operations={"created_story_fact_ids": []},
+    )
+    if existing_batch is None:
+        session.add(batch)
+        session.flush()
+    else:
+        batch.state = "committing"
+        batch.accepted_item_ids = sorted(str(item_id) for item_id in selected)
+        batch.inverse_operations = {"created_story_fact_ids": []}
+    created_fact_ids: list[str] = []
     for item in items:
         if item.id not in selected:
             continue
@@ -1145,12 +1432,27 @@ def commit_intelligence_items(
                 "source_text": item.source_text,
                 "reasoning_summary": item.reasoning_summary,
                 "model_suggestion": item.suggested_payload,
+                "commit_batch_id": str(batch.id),
             },
             source_revision_id=proposal.chapter_revision_id,
             status="active",
         )
         session.add(fact)
         session.flush()
+        session.add(
+            DerivedSourceBinding(
+                id=uuid4(),
+                derived_entity_type="story_fact",
+                derived_entity_id=fact.id,
+                source_chapter_id=proposal.document_id,
+                source_chapter_revision_id=proposal.chapter_revision_id,
+                source_content_hash=revision.content_hash,
+                proposal_item_id=item.id,
+                commit_batch_id=batch.id,
+                validity_state="current",
+            )
+        )
+        created_fact_ids.append(str(fact.id))
         item.review_state = "accepted"
         item.suggested_payload = {
             "subject": subject,
@@ -1165,8 +1467,13 @@ def commit_intelligence_items(
     else:
         proposal.state = "accepted" if accepted else "rejected"
     proposal.reviewed_at = datetime.now(timezone.utc)
+    batch.state = "committed"
+    batch.inverse_operations = {"created_story_fact_ids": created_fact_ids}
+    batch.committed_at = proposal.reviewed_at
     session.commit()
-    return _intelligence_proposal_payload(session, proposal)
+    result = _intelligence_proposal_payload(session, proposal)
+    result["commit_batch"] = _intelligence_commit_batch_payload(batch)
+    return result
 
 
 def list_story_facts(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
@@ -1260,7 +1567,10 @@ def create_checkpoint(
     )
     session.add(revision)
     session.flush()
-    _supersede_intelligence_for_document(session, document_id)
+    _supersede_intelligence_for_document(
+        session, document_id, invalidate_committed_facts=False
+    )
+    _reconcile_story_facts_for_revision(session, document_id, revision)
     working.base_revision_id = revision.id
     working.draft_version += 1
     session.commit()
@@ -1273,6 +1583,7 @@ def restore_revision(
     revision_id: UUID,
     *,
     expected_draft_version: int,
+    expected_fact_plan_hash: str | None = None,
 ) -> dict[str, Any]:
     document = _require_document(session, document_id)
     source_revision = session.get(DocumentRevision, revision_id)
@@ -1287,16 +1598,48 @@ def restore_revision(
         raise NotFoundError(f"working copy for document {document_id} not found")
     if working.draft_version != expected_draft_version:
         raise DraftConflictError(_document_payload(document, working))
+    fact_plan = _restore_fact_plan(
+        session, document, working, source_revision, lock=True
+    )
+    if (
+        expected_fact_plan_hash is not None
+        and expected_fact_plan_hash != fact_plan["fact_plan_hash"]
+    ):
+        raise RestorationPlanConflictError(fact_plan)
     latest_number = session.scalar(
         select(func.max(DocumentRevision.revision_number)).where(
             DocumentRevision.document_id == document_id
         )
     )
+    next_revision_number = int(latest_number or 0) + 1
+    current_revision = (
+        session.get(DocumentRevision, working.base_revision_id)
+        if working.base_revision_id
+        else None
+    )
+    preserved_revision: DocumentRevision | None = None
+    restore_parent_id = working.base_revision_id
+    if current_revision is None or working.content_hash != current_revision.content_hash:
+        preserved_revision = DocumentRevision(
+            id=uuid4(),
+            document_id=document_id,
+            revision_number=next_revision_number,
+            parent_revision_id=working.base_revision_id,
+            content_markdown=working.content_markdown,
+            content_text=markdown_to_text(working.content_markdown),
+            content_hash=working.content_hash,
+            source="pre_restore_checkpoint",
+        )
+        session.add(preserved_revision)
+        session.flush()
+        restore_parent_id = preserved_revision.id
+        next_revision_number += 1
     restored = DocumentRevision(
         id=uuid4(),
         document_id=document_id,
-        revision_number=int(latest_number or 0) + 1,
-        parent_revision_id=working.base_revision_id,
+        revision_number=next_revision_number,
+        parent_revision_id=restore_parent_id,
+        restored_from_revision_id=source_revision.id,
         content_markdown=source_revision.content_markdown,
         content_text=source_revision.content_text,
         content_hash=source_revision.content_hash,
@@ -1304,13 +1647,27 @@ def restore_revision(
     )
     session.add(restored)
     session.flush()
-    _supersede_intelligence_for_document(session, document_id)
+    _supersede_intelligence_for_document(
+        session, document_id, invalidate_committed_facts=False
+    )
+    _reconcile_story_facts_for_revision(
+        session, document_id, restored, restored=True
+    )
     working.base_revision_id = restored.id
     working.content_markdown = restored.content_markdown
     working.content_hash = restored.content_hash
     working.draft_version += 1
     session.commit()
-    return {"document": get_document(session, document_id), "revision": _revision_payload(restored, include_content=True)}
+    return {
+        "document": get_document(session, document_id),
+        "revision": _revision_payload(restored, include_content=True),
+        "preserved_revision": (
+            _revision_payload(preserved_revision, include_content=True)
+            if preserved_revision is not None
+            else None
+        ),
+        "restoration_plan": fact_plan,
+    }
 
 
 def get_revision(session: Session, document_id: UUID, revision_id: UUID) -> dict[str, Any]:
@@ -1395,7 +1752,10 @@ def get_novel_context(
     selected.reverse()
     facts = session.scalars(
         select(StoryFact)
-        .where(StoryFact.novel_id == novel_id, StoryFact.status == "active")
+        .where(
+            StoryFact.novel_id == novel_id,
+            StoryFact.status.in_(CURRENT_FACT_STATUSES),
+        )
         .order_by(StoryFact.created_at)
         .limit(200)
     ).all()
