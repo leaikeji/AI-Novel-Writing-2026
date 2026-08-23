@@ -28,6 +28,7 @@ const {
   Space,
   Spin,
   Tag,
+  Tabs,
   Typography,
 } = host.antd;
 const {
@@ -43,6 +44,7 @@ const TextArea = Input.TextArea;
 interface ChapterWorkflowProps {
   novel: NovelRecord;
   document: DocumentRecord;
+  onPrepareGeneration?: () => Promise<DocumentRecord | null>;
   onDocumentChanged: (document: DocumentRecord, status: string) => void;
   onError: (message: string) => void;
   onStatus: (message: string) => void;
@@ -161,10 +163,13 @@ function field(
 
 
 export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
-  const { novel, document, onDocumentChanged, onError, onStatus } = props;
+  const { novel, document, onPrepareGeneration, onDocumentChanged, onError, onStatus } = props;
   const [brief, setBrief] = React.useState(null as ChapterBriefRecord | null);
   const [briefForm, setBriefForm] = React.useState(EMPTY_BRIEF_FORM);
   const [briefOpen, setBriefOpen] = React.useState(false);
+  const [assetPickerOpen, setAssetPickerOpen] = React.useState(false);
+  const [assetTab, setAssetTab] = React.useState("plot");
+  const [generatingOpen, setGeneratingOpen] = React.useState(false);
   const [jobsOpen, setJobsOpen] = React.useState(false);
   const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
   const [ledgerOpen, setLedgerOpen] = React.useState(false);
@@ -185,6 +190,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setSelectedProposal(null);
     setSelectedItemIds([]);
     setBriefOpen(false);
+    setAssetPickerOpen(false);
+    setAssetTab("plot");
+    setGeneratingOpen(false);
     setJobsOpen(false);
     setIntelligenceOpen(false);
     setLedgerOpen(false);
@@ -206,35 +214,41 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       await loadBrief();
       setBriefOpen(true);
     } catch (reason) {
-      onError(errorMessage(reason, "加载章节任务书失败"));
+      onError(errorMessage(reason, "加载章纲失败"));
     } finally {
       setBusyAction("");
     }
   };
 
+  const persistBrief = async (
+    currentBrief: ChapterBriefRecord,
+    form: BriefFormState,
+  ): Promise<ChapterBriefRecord> => apiRequest<ChapterBriefRecord>(
+    `/documents/${document.id}/chapter-brief`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        expected_version: currentBrief.version,
+        target_word_count: form.targetWordCount,
+        expectation_text: form.expectationText,
+        outline_text: form.outlineText,
+        forbidden_text: form.forbiddenText,
+        role_constraints: formRoleConstraints(form),
+      }),
+    },
+  );
+
   const saveBrief = async () => {
     setBusyAction("brief-save");
     try {
-      const saved = await apiRequest<ChapterBriefRecord>(
-        `/documents/${document.id}/chapter-brief`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            expected_version: brief?.version ?? 0,
-            target_word_count: briefForm.targetWordCount,
-            expectation_text: briefForm.expectationText,
-            outline_text: briefForm.outlineText,
-            forbidden_text: briefForm.forbiddenText,
-            role_constraints: formRoleConstraints(briefForm),
-          }),
-        },
-      );
+      const currentBrief = brief ?? await loadBrief();
+      const saved = await persistBrief(currentBrief, briefForm);
       setBrief(saved);
       setBriefForm(briefToForm(saved));
       setBriefOpen(false);
-      onStatus("章节任务书已保存");
+      onStatus("章纲已保存");
     } catch (reason) {
-      onError(errorMessage(reason, "保存章节任务书失败"));
+      onError(errorMessage(reason, "保存章纲失败"));
     } finally {
       setBusyAction("");
     }
@@ -262,16 +276,42 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  const generateCandidate = async () => {
+  const openGenerationOptions = () => {
+    const open = () => setAssetPickerOpen(true);
+    if (document.visible_character_count === 0) {
+      open();
+      return;
+    }
+    Modal.confirm({
+      className: "anw-modal",
+      title: "确认重新生成",
+      content: "重新生成将替换当前正文，确定要继续吗？",
+      okText: "确定",
+      cancelText: "取消",
+      onOk: open,
+    });
+  };
+
+  const ensureBrief = async (): Promise<ChapterBriefRecord> => {
+    const currentBrief = brief ?? await loadBrief();
+    if (currentBrief.version > 0) return currentBrief;
+    const saved = await persistBrief(currentBrief, briefToForm(currentBrief));
+    setBrief(saved);
+    setBriefForm(briefToForm(saved));
+    return saved;
+  };
+
+  const generateBody = async () => {
+    setAssetPickerOpen(false);
+    setGeneratingOpen(true);
     setBusyAction("generate");
     try {
-      const currentBrief = brief ?? await loadBrief();
-      if (currentBrief.version === 0) {
-        setBriefOpen(true);
-        onStatus("请先填写并保存章节任务书");
-        return;
+      if (onPrepareGeneration) {
+        const prepared = await onPrepareGeneration();
+        if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       }
-      onStatus("AI 正在生成候选稿；当前正文不会被修改");
+      const currentBrief = await ensureBrief();
+      onStatus("AI 正在创作章节内容…");
       const job = await apiRequest<GenerationJobRecord>(
         `/documents/${document.id}/generation-jobs/body?agent_id=ai-novel-writer`,
         {
@@ -282,14 +322,21 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           }),
         },
       );
-      const loaded = await loadJobs();
-      setSelectedCandidate(job.candidate ?? loaded.find((item) => item.candidate)?.candidate ?? null);
-      setJobsOpen(true);
-      onStatus("AI 候选稿已生成，尚未写入正文");
+      if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
+      const result = await apiRequest<{ document: DocumentRecord; candidate: CandidateRecord }>(
+        `/candidates/${job.candidate.id}/adopt`,
+        {
+          method: "POST",
+          body: JSON.stringify({ expected_draft_version: job.candidate.base_draft_version }),
+        },
+      );
+      setSelectedCandidate(result.candidate);
+      onDocumentChanged(result.document, "正文生成完成");
     } catch (reason) {
-      onError(errorMessage(reason, "生成候选稿失败"));
-      onStatus("候选生成失败，正文未变化");
+      onError(errorMessage(reason, "生成正文失败"));
+      onStatus("正文生成失败");
     } finally {
+      setGeneratingOpen(false);
       setBusyAction("");
     }
   };
@@ -454,18 +501,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       { size: 8, wrap: true, className: "anw-workflow-panel" },
       React.createElement(
         Button,
+        { className: "anw-generate-button", icon: React.createElement(BookOutlined), onClick: openGenerationOptions, loading: busyAction === "generate" },
+        document.visible_character_count > 0 ? "重新生成" : "生成正文",
+      ),
+      React.createElement(
+        Button,
         { icon: React.createElement(FileTextOutlined), onClick: openBrief, loading: busyAction === "brief-load" },
         "修改章纲",
-      ),
-      React.createElement(
-        Button,
-        { className: "anw-generate-button", icon: React.createElement(BookOutlined), onClick: generateCandidate, loading: busyAction === "generate" },
-        "生成正文",
-      ),
-      React.createElement(
-        Button,
-        { icon: React.createElement(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load" },
-        "候选",
       ),
       React.createElement(
         Button,
@@ -483,8 +525,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       {
         open: briefOpen,
         className: "anw-modal",
-        title: `章节任务书 · ${document.title}`,
-        width: 760,
+        title: "编辑章纲",
+        width: 680,
         style: { top: 24 },
         styles: { body: { maxHeight: "calc(100vh - 190px)", overflowY: "auto" } },
         onCancel: () => setBriefOpen(false),
@@ -493,23 +535,36 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           React.createElement(
             Button,
             { key: "save", type: "primary", loading: busyAction === "brief-save", onClick: saveBrief },
-            "保存任务书",
+            "保存章纲",
           ),
         ],
       },
       React.createElement(
         Space,
-        { direction: "vertical", size: 14, style: { width: "100%" } },
-        React.createElement(Alert, {
-          type: "info",
-          showIcon: true,
-          message: "任务书是生成控制面；修改后只影响新的候选，不会改正文。",
-        }),
+        { direction: "vertical", size: 18, style: { width: "100%" } },
+        React.createElement(
+          Typography.Text,
+          { className: "anw-outline-chapter-label" },
+          document.title,
+        ),
+        field(
+          "章节大纲",
+          React.createElement(TextArea, {
+            rows: 11,
+            "aria-label": "章节大纲",
+            value: briefForm.outlineText,
+            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({
+              ...current,
+              outlineText: event.target.value,
+            })),
+            placeholder: "请输入章节大纲...",
+          }),
+        ),
         field(
           "目标字数",
           React.createElement(InputNumber, {
-            min: 200,
-            max: 20000,
+            min: 500,
+            max: 10000,
             step: 100,
             "aria-label": "目标字数",
             value: briefForm.targetWordCount,
@@ -519,79 +574,71 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
             })),
             style: { width: 180 },
           }),
+          "建议范围：500-10000字",
         ),
-        field(
-          "本章期望",
-          React.createElement(TextArea, {
-            rows: 3,
-            "aria-label": "本章期望",
-            value: briefForm.expectationText,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({
-              ...current,
-              expectationText: event.target.value,
-            })),
-            placeholder: "本章要推进什么、读者应该获得什么感受",
-          }),
+      ),
+    ),
+    React.createElement(
+      Modal,
+      {
+        open: assetPickerOpen,
+        className: "anw-modal anw-asset-modal",
+        title: "选择私有库配置",
+        width: 760,
+        style: { top: 36 },
+        onCancel: () => setAssetPickerOpen(false),
+        footer: [
+          React.createElement(Button, { key: "skip", onClick: generateBody }, "跳过"),
+          React.createElement(Button, { key: "generate", type: "primary", onClick: generateBody }, "确认生成"),
+        ],
+      },
+      React.createElement(
+        "section",
+        { className: "anw-asset-picker" },
+        React.createElement(
+          Typography.Paragraph,
+          { type: "secondary", className: "anw-asset-picker-copy" },
+          "可为本次正文选择桥段、写作风格、特色词汇或热梗奇思；也可以直接跳过。",
         ),
-        field(
-          "章节大纲",
-          React.createElement(TextArea, {
-            rows: 7,
-            "aria-label": "章节大纲",
-            value: briefForm.outlineText,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({
-              ...current,
-              outlineText: event.target.value,
-            })),
-            placeholder: "按场景或节拍填写；可以完全手写",
-          }),
-        ),
-        field(
-          "内容禁区",
-          React.createElement(TextArea, {
-            rows: 2,
-            "aria-label": "内容禁区",
-            value: briefForm.forbiddenText,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({
-              ...current,
-              forbiddenText: event.target.value,
-            })),
-            placeholder: "不能提前揭示的真相、不能新增的规则等",
-          }),
-        ),
-        React.createElement(Divider, { style: { marginBlock: 2 } }, "角色约束（逗号、顿号或换行分隔）"),
-        field(
-          "必须出场 required",
-          React.createElement(Input, {
-            "aria-label": "必须出场角色",
-            value: briefForm.requiredRoles,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, requiredRoles: event.target.value })),
-          }),
-        ),
-        field(
-          "允许出场 allowed",
-          React.createElement(Input, {
-            "aria-label": "允许出场角色",
-            value: briefForm.allowedRoles,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, allowedRoles: event.target.value })),
-          }),
-        ),
-        field(
-          "仅上下文 context-only",
-          React.createElement(Input, {
-            "aria-label": "仅上下文角色",
-            value: briefForm.contextOnlyRoles,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, contextOnlyRoles: event.target.value })),
-          }),
-        ),
-        field(
-          "禁止出现 forbidden",
-          React.createElement(Input, {
-            "aria-label": "禁止出现角色",
-            value: briefForm.forbiddenRoles,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, forbiddenRoles: event.target.value })),
-          }),
-        ),
+        React.createElement(Tabs, {
+          activeKey: assetTab,
+          onChange: setAssetTab,
+          items: [
+            ["plot", "桥段"],
+            ["style", "写作风格"],
+            ["vocabulary", "特色词汇"],
+            ["idea", "热梗奇思"],
+          ].map(([key, label]) => ({
+            key,
+            label,
+            children: React.createElement(
+              "div",
+              { className: "anw-asset-empty" },
+              React.createElement(Empty, { description: `暂无可选${label}` }),
+            ),
+          })),
+        }),
+      ),
+    ),
+    React.createElement(
+      Modal,
+      {
+        open: generatingOpen,
+        className: "anw-modal anw-generating-modal",
+        width: 520,
+        centered: true,
+        closable: false,
+        maskClosable: false,
+        keyboard: false,
+        footer: null,
+      },
+      React.createElement(
+        "section",
+        { className: "anw-generation-progress" },
+        React.createElement(Spin, { size: "large" }),
+        React.createElement("h2", null, "AI 正在创作章节内容"),
+        React.createElement("p", null, "正在分析前文、章纲和章节情节，请稍候…"),
+        React.createElement("span", null, "生成完成后将自动显示在正文编辑器中"),
       ),
     ),
     React.createElement(

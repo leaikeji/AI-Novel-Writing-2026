@@ -755,7 +755,7 @@ def _clean_model_candidate(text: str) -> str:
     # author's legitimate in-story brackets are never touched. Older host builds
     # occasionally emitted the wrong opening glyph, so both variants are accepted.
     capsule_pattern = (
-        r"[⟦⟧][^\n⟧]*(?:正文候选|待作者审阅|状态：|禁区检查)[^\n⟧]*⟧"
+        r"[⟦⟧][^\n⟧]*(?:正文候选|续写候选|待作者审阅|状态：|禁区检查|锚点：)[^\n⟧]*⟧"
     )
     candidate = re.sub(
         rf"(?:\n*\s*{capsule_pattern}\s*)+$",

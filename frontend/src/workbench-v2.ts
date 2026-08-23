@@ -785,6 +785,7 @@ export function NovelWorkbench() {
               ? h(ChapterWorkflowPanel, {
                   novel,
                   document,
+                  onPrepareGeneration: () => saveNow(contentRef.current),
                   onDocumentChanged: applyWorkflowDocument,
                   onError: setError,
                   onStatus: setSaveState,

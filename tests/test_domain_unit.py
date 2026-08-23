@@ -23,8 +23,10 @@ def test_content_hash_changes_with_author_text() -> None:
 
 def test_clean_model_candidate_removes_only_final_agent_status_capsule() -> None:
     prose = "门内传来一声轻响。\n\n⟦ 第3章正文候选｜已完成；禁区检查通过｜待作者审阅 ⟧"
+    continuation = "雨声盖住了铃响。\n\n⟧ 第一章续写候选｜约2000字｜锚点：招工通知 ⟧"
 
     assert _clean_model_candidate(prose) == "门内传来一声轻响。"
+    assert _clean_model_candidate(continuation) == "雨声盖住了铃响。"
     assert _clean_model_candidate("他在纸上写下⟧不要回头⟧。") == "他在纸上写下⟧不要回头⟧。"
 
 

@@ -434,11 +434,46 @@ export function ensureNovelStyles(): void {
     .anw-workbench-main > .qwenpaw-spin-nested-loading > .qwenpaw-spin-container { height:100%; min-height:0; }
     .anw-workbench-main { min-width:0; min-height:0; overflow:hidden; }
 
-    .anw-modal .qwenpaw-modal-content { overflow:hidden; border-radius:18px; }
-    .anw-modal .qwenpaw-modal-header { padding:20px 22px 14px; border-bottom:1px solid var(--anw-line); }
-    .anw-modal .qwenpaw-modal-title { color:var(--anw-ink); font-size:18px; }
-    .anw-modal .qwenpaw-modal-body { color:var(--anw-text); background:#fff; }
-    .anw-modal .qwenpaw-modal-footer { padding:14px 20px 18px; border-top:1px solid var(--anw-line); }
+    .anw-modal .qwenpaw-modal-content { overflow:hidden; border-radius:18px; color:var(--anw-text)!important; background:#fff!important; box-shadow:0 22px 70px rgba(17,24,39,.2); }
+    .anw-modal .qwenpaw-modal-header { padding:20px 22px 14px; border-bottom:1px solid var(--anw-line); background:#fff!important; }
+    .anw-modal .qwenpaw-modal-title { color:var(--anw-ink)!important; font-size:18px; }
+    .anw-modal .qwenpaw-modal-close { color:#8a909d!important; }
+    .anw-modal .qwenpaw-modal-body { color:var(--anw-text)!important; background:#fff!important; }
+    .anw-modal .qwenpaw-modal-footer { padding:14px 20px 18px; border-top:1px solid var(--anw-line); background:#fff!important; }
+    .anw-modal .qwenpaw-typography { color:var(--anw-text); }
+    .anw-modal .qwenpaw-input,
+    .anw-modal .qwenpaw-input-number,
+    .anw-modal .qwenpaw-input-number-input { color:var(--anw-text)!important; border-color:#dfe3e8!important; background:#fff!important; }
+    .anw-modal .qwenpaw-input::placeholder { color:#a3a8b1!important; }
+    .anw-modal .qwenpaw-input:focus,
+    .anw-modal .qwenpaw-input-focused,
+    .anw-modal .qwenpaw-input-number-focused { border-color:var(--anw-orange)!important; box-shadow:0 0 0 2px rgba(255,112,67,.12)!important; }
+    .anw-outline-chapter-label { display:inline-flex; width:fit-content; border-radius:999px; padding:5px 10px; color:var(--anw-orange-strong)!important; background:var(--anw-orange-soft); font-size:12px; font-weight:750; }
+    .anw-asset-picker-copy { margin:0 0 8px!important; color:var(--anw-muted)!important; line-height:1.7; }
+    .anw-asset-modal .qwenpaw-tabs-tab { color:#69707c!important; }
+    .anw-asset-modal .qwenpaw-tabs-tab-active .qwenpaw-tabs-tab-btn { color:var(--anw-orange-strong)!important; }
+    .anw-asset-modal .qwenpaw-tabs-ink-bar { background:var(--anw-orange)!important; }
+    .anw-asset-empty { display:flex; min-height:290px; align-items:center; justify-content:center; border:1px dashed #e1e4e9; border-radius:14px; background:#fafbfc; }
+    .anw-generation-progress { display:flex; min-height:230px; flex-direction:column; align-items:center; justify-content:center; padding:20px; text-align:center; }
+    .anw-generation-progress h2 { margin:22px 0 8px; color:var(--anw-ink); font-size:21px; }
+    .anw-generation-progress p { margin:0 0 10px; color:#555d69; }
+    .anw-generation-progress span { color:var(--anw-muted); font-size:12px; }
+
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-content,
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-header,
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-body,
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-footer { color:var(--anw-text)!important; background-color:#fff!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-title { color:var(--anw-ink)!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-close { color:#8a909d!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-input,
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-input-number,
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-input-number-input { color:var(--anw-text)!important; border-color:#dfe3e8!important; background-color:#fff!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-input::placeholder { color:#a3a8b1!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-typography { color:var(--anw-text)!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-tabs-tab { color:#69707c!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-tabs-tab-active .qwenpaw-tabs-tab-btn { color:var(--anw-orange-strong)!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-footer .qwenpaw-btn:not(.qwenpaw-btn-primary) { color:#555d69!important; border-color:#dfe3e8!important; background:#fff!important; box-shadow:none!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-modal .qwenpaw-modal-footer .qwenpaw-btn-primary { color:#fff!important; border-color:var(--anw-orange)!important; background:var(--anw-orange)!important; }
 
     @media (max-width: 980px) {
       .anw-library-grid { grid-template-columns:1fr; }
