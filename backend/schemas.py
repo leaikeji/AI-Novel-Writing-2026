@@ -34,3 +34,34 @@ class CheckpointRequest(BaseModel):
 
 class RestoreRevisionRequest(BaseModel):
     expected_draft_version: int = Field(ge=1)
+
+
+class SaveChapterBriefRequest(BaseModel):
+    expected_version: int = Field(ge=0)
+    target_word_count: int = Field(ge=200, le=20_000)
+    expectation_text: str = Field(default="", max_length=12_000)
+    outline_text: str = Field(default="", max_length=30_000)
+    forbidden_text: str = Field(default="", max_length=8_000)
+    role_constraints: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class GenerateChapterRequest(BaseModel):
+    expected_brief_version: int = Field(ge=1)
+    force_new: bool = False
+
+
+class AdoptCandidateRequest(BaseModel):
+    expected_draft_version: int = Field(ge=1)
+
+
+class ExtractIntelligenceRequest(BaseModel):
+    revision_id: UUID
+
+
+class ReviewIntelligenceItemRequest(BaseModel):
+    review_state: str = Field(pattern="^(pending|rejected)$")
+
+
+class CommitIntelligenceRequest(BaseModel):
+    accepted_item_ids: list[UUID] = Field(min_length=1, max_length=200)
+    item_overrides: dict[str, dict[str, object]] = Field(default_factory=dict)

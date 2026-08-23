@@ -2,38 +2,68 @@
 
 from __future__ import annotations
 
+import json
+import re
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from qwenpaw.pawapp import PawApp
+from qwenpaw.pawapp import PawApp, get_ctx
 from sqlalchemy.orm import Session
 
 from .contracts import APP_ID, APP_VERSION
 from .database import database_status, get_session
 from .schemas import (
+    AdoptCandidateRequest,
     CheckpointRequest,
+    CommitIntelligenceRequest,
     CreateDocumentRequest,
     CreateNovelRequest,
     CreateVolumeRequest,
+    ExtractIntelligenceRequest,
+    GenerateChapterRequest,
+    ReviewIntelligenceItemRequest,
     RestoreRevisionRequest,
     SaveDraftRequest,
+    SaveChapterBriefRequest,
 )
 from .services import (
+    BriefConflictError,
+    CandidateConflictError,
     DraftConflictError,
     NotFoundError,
+    ProposalSupersededError,
     ValidationError,
+    adopt_candidate,
+    build_chapter_generation_prompt,
+    build_intelligence_prompt,
+    commit_intelligence_items,
+    complete_chapter_generation,
+    complete_intelligence_proposal,
     create_checkpoint,
     create_document,
     create_novel,
     create_volume,
+    fail_chapter_generation,
+    fail_intelligence_proposal,
+    get_candidate,
+    get_chapter_brief,
     get_document,
     get_novel,
     get_novel_context,
     get_revision,
+    list_chapter_generation_jobs,
+    list_intelligence_proposals,
     list_novels,
+    list_story_facts,
+    reject_candidate,
+    review_intelligence_item,
     restore_revision,
     save_draft,
+    save_chapter_brief,
     search_novel,
+    start_chapter_generation,
+    start_intelligence_proposal,
 )
 
 
@@ -47,11 +77,58 @@ def _raise_domain(error: Exception) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail={"type": "draft_conflict", "current": error.current},
         ) from error
+    if isinstance(error, BriefConflictError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": "brief_conflict", "current": error.current},
+        ) from error
+    if isinstance(error, CandidateConflictError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "candidate_conflict",
+                "current": error.current,
+                "candidate": error.candidate,
+            },
+        ) from error
+    if isinstance(error, ProposalSupersededError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": "proposal_superseded", "proposal": error.proposal},
+        ) from error
     if isinstance(error, NotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     if isinstance(error, ValidationError):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
     raise error
+
+
+def _model_json(text: str) -> dict[str, Any]:
+    candidate = text.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
+    if fenced:
+        candidate = fenced.group(1).strip()
+    try:
+        payload = json.loads(candidate)
+        if isinstance(payload, list):
+            return {"items": payload}
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(candidate):
+        if character not in "[{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(candidate[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, list):
+            return {"items": payload}
+        if isinstance(payload, dict):
+            return payload
+    raise ValidationError("模型没有返回可解析的情报 JSON")
 
 
 @router.get("/health")
@@ -62,7 +139,8 @@ def health() -> dict[str, object]:
         "version": APP_VERSION,
         "status": "ready" if database["connected"] else "degraded",
         "database": database,
-        "ai_write_enabled": False,
+        "ai_candidate_generation_enabled": True,
+        "ai_authoritative_write_enabled": False,
         "vector_retrieval_enabled": False,
     }
 
@@ -212,6 +290,262 @@ def revisions_restore(
         )
     except Exception as error:
         session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.get("/documents/{document_id}/chapter-brief")
+def chapter_brief_get(
+    document_id: UUID, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return get_chapter_brief(session, document_id)
+    except Exception as error:
+        _raise_domain(error)
+        raise
+
+
+@router.put("/documents/{document_id}/chapter-brief")
+def chapter_brief_save(
+    document_id: UUID,
+    request: SaveChapterBriefRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return save_chapter_brief(
+            session,
+            document_id,
+            expected_version=request.expected_version,
+            target_word_count=request.target_word_count,
+            expectation_text=request.expectation_text,
+            outline_text=request.outline_text,
+            forbidden_text=request.forbidden_text,
+            role_constraints=request.role_constraints,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.get("/documents/{document_id}/generation-jobs")
+def generation_jobs_index(
+    document_id: UUID, session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    try:
+        return list_chapter_generation_jobs(session, document_id)
+    except Exception as error:
+        _raise_domain(error)
+        raise
+
+
+@router.post(
+    "/documents/{document_id}/generation-jobs/body",
+    status_code=status.HTTP_201_CREATED,
+)
+async def generation_jobs_create_body(
+    document_id: UUID,
+    request: GenerateChapterRequest,
+    ctx=Depends(get_ctx),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    job: dict[str, Any] | None = None
+    try:
+        job = start_chapter_generation(
+            session,
+            document_id,
+            expected_brief_version=request.expected_brief_version,
+            force_new=request.force_new,
+        )
+        if job["state"] == "ready" and job.get("candidate"):
+            return job
+        prompt = build_chapter_generation_prompt(job["generation_context_snapshot"])
+        reply = await ctx.chat(
+            prompt,
+            skill="prose-writing",
+            session_id=f"novel-generation:{job['id']}",
+        )
+        return complete_chapter_generation(
+            session,
+            UUID(str(job["id"])),
+            content_markdown=reply.text,
+            model_profile_fingerprint=f"qwenpaw-agent:{ctx.agent_id}",
+        )
+    except Exception as error:
+        session.rollback()
+        if job is not None:
+            try:
+                failed = fail_chapter_generation(session, UUID(str(job["id"])), str(error))
+            except Exception:
+                session.rollback()
+                failed = job
+            if not isinstance(
+                error,
+                (
+                    BriefConflictError,
+                    CandidateConflictError,
+                    DraftConflictError,
+                    NotFoundError,
+                    ValidationError,
+                ),
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={"type": "generation_failed", "job": failed},
+                ) from error
+        _raise_domain(error)
+        raise
+
+
+@router.get("/candidates/{candidate_id}")
+def candidates_get(
+    candidate_id: UUID, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return get_candidate(session, candidate_id)
+    except Exception as error:
+        _raise_domain(error)
+        raise
+
+
+@router.post("/candidates/{candidate_id}/adopt", status_code=status.HTTP_201_CREATED)
+def candidates_adopt(
+    candidate_id: UUID,
+    request: AdoptCandidateRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return adopt_candidate(
+            session,
+            candidate_id,
+            expected_draft_version=request.expected_draft_version,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.post("/candidates/{candidate_id}/reject")
+def candidates_reject(
+    candidate_id: UUID, session: Session = Depends(get_session)
+) -> dict[str, object]:
+    try:
+        return reject_candidate(session, candidate_id)
+    except Exception as error:
+        session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.get("/documents/{document_id}/intelligence-proposals")
+def intelligence_proposals_index(
+    document_id: UUID, session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    try:
+        return list_intelligence_proposals(session, document_id)
+    except Exception as error:
+        _raise_domain(error)
+        raise
+
+
+@router.post(
+    "/documents/{document_id}/intelligence-proposals",
+    status_code=status.HTTP_201_CREATED,
+)
+async def intelligence_proposals_create(
+    document_id: UUID,
+    request: ExtractIntelligenceRequest,
+    ctx=Depends(get_ctx),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    proposal: dict[str, Any] | None = None
+    try:
+        proposal = start_intelligence_proposal(
+            session, document_id, revision_id=request.revision_id
+        )
+        if proposal["state"] in {"ready", "partially_accepted", "accepted", "rejected"}:
+            return proposal
+        prompt = build_intelligence_prompt(session, UUID(str(proposal["id"])))
+        reply = await ctx.chat(
+            prompt,
+            skill="story-bible",
+            session_id=f"novel-intelligence:{proposal['id']}",
+        )
+        payload = _model_json(reply.text)
+        raw_items = payload.get("items", [])
+        if not isinstance(raw_items, list):
+            raise ValidationError("模型情报 JSON 的 items 必须是数组")
+        return complete_intelligence_proposal(
+            session,
+            UUID(str(proposal["id"])),
+            items=[item for item in raw_items if isinstance(item, dict)],
+            model_profile_fingerprint=f"qwenpaw-agent:{ctx.agent_id}",
+        )
+    except Exception as error:
+        session.rollback()
+        if proposal is not None and not isinstance(error, ProposalSupersededError):
+            try:
+                failed = fail_intelligence_proposal(
+                    session, UUID(str(proposal["id"])), str(error)
+                )
+            except Exception:
+                session.rollback()
+                failed = proposal
+            if not isinstance(
+                error,
+                (NotFoundError, ProposalSupersededError, ValidationError),
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={"type": "intelligence_failed", "proposal": failed},
+                ) from error
+        _raise_domain(error)
+        raise
+
+
+@router.patch("/intelligence-items/{item_id}")
+def intelligence_items_review(
+    item_id: UUID,
+    request: ReviewIntelligenceItemRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return review_intelligence_item(
+            session, item_id, review_state=request.review_state
+        )
+    except Exception as error:
+        session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.post("/intelligence-proposals/{proposal_id}/commit")
+def intelligence_proposals_commit(
+    proposal_id: UUID,
+    request: CommitIntelligenceRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return commit_intelligence_items(
+            session,
+            proposal_id,
+            accepted_item_ids=request.accepted_item_ids,
+            item_overrides=request.item_overrides,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/story-facts")
+def story_facts_index(
+    novel_id: UUID, session: Session = Depends(get_session)
+) -> list[dict[str, object]]:
+    try:
+        return list_story_facts(session, novel_id)
+    except Exception as error:
         _raise_domain(error)
         raise
 

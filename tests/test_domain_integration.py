@@ -9,14 +9,23 @@ from sqlalchemy.orm import Session
 
 from backend.models import Document, Novel
 from backend.services import (
+    CandidateConflictError,
+    adopt_candidate,
+    commit_intelligence_items,
+    complete_chapter_generation,
+    complete_intelligence_proposal,
     DraftConflictError,
     create_checkpoint,
     create_novel,
     get_document,
     get_novel_context,
+    list_story_facts,
     restore_revision,
+    save_chapter_brief,
     save_draft,
     search_novel,
+    start_chapter_generation,
+    start_intelligence_proposal,
 )
 
 
@@ -46,7 +55,9 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
                 "SELECT tablename FROM pg_tables "
                 "WHERE schemaname='public' AND tablename IN "
                 "('novels','documents','document_working_copies','document_revisions',"
-                "'story_facts','novel_chunks','media_assets')"
+                "'story_facts','novel_chunks','media_assets','chapter_briefs',"
+                "'chapter_generation_jobs','candidate_revisions','intelligence_proposals',"
+                "'intelligence_proposal_items')"
             )
         )
     }
@@ -60,6 +71,11 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
         "story_facts",
         "novel_chunks",
         "media_assets",
+        "chapter_briefs",
+        "chapter_generation_jobs",
+        "candidate_revisions",
+        "intelligence_proposals",
+        "intelligence_proposal_items",
     }
 
 
@@ -126,3 +142,119 @@ def test_create_novel_is_ready_to_write(session: Session) -> None:
     assert document["revisions"][0]["revision_number"] == 1
     assert session.scalar(select(Novel).where(Novel.id == UUID(novel["id"]))) is not None
     assert session.scalar(select(Document).where(Document.id == document_id)) is not None
+
+
+def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-候选闭环")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+
+    brief = save_chapter_brief(
+        session,
+        document_id,
+        expected_version=0,
+        target_word_count=1800,
+        expectation_text="推进雨夜来信的来源",
+        outline_text="江述核对邮戳，发现寄出日期来自明天。",
+        forbidden_text="不要揭示寄信人",
+        role_constraints={"required": ["江述"], "forbidden": ["寄信人"]},
+    )
+    job = start_chapter_generation(
+        session, document_id, expected_brief_version=brief["version"]
+    )
+    completed = complete_chapter_generation(
+        session,
+        UUID(job["id"]),
+        content_markdown="雨水敲着窗。江述翻过信封，邮戳日期写着明天。",
+        model_profile_fingerprint="pytest-model",
+    )
+    candidate = completed["candidate"]
+
+    assert candidate["state"] == "ready"
+    assert get_document(session, document_id)["content_markdown"] == ""
+
+    adopted = adopt_candidate(
+        session, UUID(candidate["id"]), expected_draft_version=1
+    )
+    assert adopted["document"]["content_markdown"].startswith("雨水敲着窗")
+    assert adopted["revision"]["source"] == "ai_candidate_adopt"
+
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(adopted["revision"]["id"]),
+    )
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                "item_type": "fact",
+                "subject": "信封邮戳",
+                "predicate": "日期",
+                "object": "明天",
+                "source_text": "邮戳日期写着明天",
+                "reasoning_summary": "明确的新时间异常",
+                "confidence": 98,
+            },
+            {
+                "item_type": "foreshadow_new",
+                "subject": "寄信人",
+                "predicate": "身份",
+                "object": "尚未揭示",
+                "source_text": "江述翻过信封",
+                "reasoning_summary": "可以继续追查",
+                "confidence": 61,
+            },
+        ],
+    )
+    assert list_story_facts(session, novel_id) == []
+
+    committed = commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=[UUID(proposal["items"][0]["id"])],
+    )
+    assert committed["state"] == "partially_accepted"
+    facts = list_story_facts(session, novel_id)
+    assert len(facts) == 1
+    assert facts[0]["subject"] == "信封邮戳"
+    assert facts[0]["source_revision_id"] == adopted["revision"]["id"]
+
+
+def test_candidate_adoption_rejects_a_changed_working_copy(session: Session) -> None:
+    novel = create_novel(session, "pytest-候选冲突")
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    brief = save_chapter_brief(
+        session,
+        document_id,
+        expected_version=0,
+        target_word_count=1200,
+        expectation_text="测试冲突",
+        outline_text="候选必须绑定生成基线。",
+        forbidden_text="",
+        role_constraints={},
+    )
+    job = start_chapter_generation(
+        session, document_id, expected_brief_version=brief["version"]
+    )
+    completed = complete_chapter_generation(
+        session, UUID(job["id"]), content_markdown="这是一份旧基线候选。"
+    )
+    save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="作者在模型运行时继续修改了正文。",
+    )
+
+    with pytest.raises(CandidateConflictError):
+        adopt_candidate(
+            session,
+            UUID(completed["candidate"]["id"]),
+            expected_draft_version=2,
+        )
+    session.rollback()
+    assert get_document(session, document_id)["content_markdown"].startswith("作者在模型运行时")

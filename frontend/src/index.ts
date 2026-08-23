@@ -4,11 +4,16 @@ import {
   APP_ROUTE_ID,
   CORE_CHAT_ROUTE_ID,
 } from "./contracts";
-import { NovelLibraryPage, NovelWorkbench } from "./workbench";
+import { NovelLibraryPage, NovelWorkbench } from "./workbench-v2";
 import { activeWorkbenchRoute } from "./workbench-route";
+import { ensureNovelStyles } from "./styles";
 
 
 const React = window.QwenPaw.host.React;
+const { CloseOutlined, RobotOutlined } = window.QwenPaw.host.antdIcons;
+
+
+ensureNovelStyles();
 
 
 function isNovelWorkbenchChat(): boolean {
@@ -18,6 +23,7 @@ function isNovelWorkbenchChat(): boolean {
 
 function wrapNativeChat(Inner: any) {
   return function NativeChatWithNovelWorkbench() {
+    const [chatOpen, setChatOpen] = React.useState(false);
     if (!isNovelWorkbenchChat()) {
       return React.createElement(Inner);
     }
@@ -26,32 +32,31 @@ function wrapNativeChat(Inner: any) {
       "div",
       {
         "data-ai-novel-workbench": "active",
-        style: {
-          display: "grid",
-          gridTemplateColumns: "minmax(620px, 62%) minmax(420px, 38%)",
-          height: "100%",
-          minHeight: 0,
-          overflow: "hidden",
-          background: "var(--ant-color-bg-container, transparent)",
-        },
+        className: `anw-workbench-frame ${chatOpen ? "has-chat" : ""}`,
       },
       React.createElement(
         "section",
-        { style: { minWidth: 0, minHeight: 0, overflow: "hidden" } },
+        { className: "anw-workbench-main" },
         React.createElement(NovelWorkbench),
       ),
+      chatOpen
+        ? React.createElement(
+            "section",
+            { "aria-label": "QwenPaw 原生 AI 助手", className: "anw-native-chat" },
+            React.createElement(Inner),
+          )
+        : null,
       React.createElement(
-        "section",
+        "button",
         {
-          "aria-label": "QwenPaw 原生 AI 助手",
-          style: {
-            minWidth: 0,
-            minHeight: 0,
-            overflow: "hidden",
-            borderLeft: "1px solid var(--ant-color-border-secondary, #303030)",
-          },
+          type: "button",
+          className: "anw-chat-toggle",
+          onClick: () => setChatOpen((value: boolean) => !value),
+          "aria-label": chatOpen ? "关闭 AI 助手" : "打开 AI 助手",
         },
-        React.createElement(Inner),
+        React.createElement(chatOpen ? CloseOutlined : RobotOutlined),
+        " ",
+        chatOpen ? "关闭助手" : "AI 助手",
       ),
     );
   };

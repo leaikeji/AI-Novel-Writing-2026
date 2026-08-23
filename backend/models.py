@@ -141,6 +141,96 @@ class DocumentWorkingCopy(Base):
     document: Mapped[Document] = relationship(back_populates="working_copy")
 
 
+class ChapterBrief(Base):
+    """Author-owned control plane for one chapter generation run."""
+
+    __tablename__ = "chapter_briefs"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    target_word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    expectation_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    outline_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    forbidden_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    role_constraints: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ChapterGenerationJob(Base):
+    """Immutable generation input snapshot plus the model run state."""
+
+    __tablename__ = "chapter_generation_jobs"
+    __table_args__ = (
+        UniqueConstraint("document_id", "kind", "input_hash", name="uq_chapter_generation_input"),
+        Index("ix_chapter_generation_document_created", "document_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="body")
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="running")
+    brief_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_revision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
+    )
+    base_draft_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    base_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    generation_context_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    model_profile_fingerprint: Mapped[str] = mapped_column(
+        String(160), nullable=False, default="qwenpaw-active-agent"
+    )
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CandidateRevision(Base):
+    """A model result that is inspectable but not yet authoritative."""
+
+    __tablename__ = "candidate_revisions"
+    __table_args__ = (Index("ix_candidate_document_state", "document_id", "state"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    generation_job_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("chapter_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    base_revision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
+    )
+    base_draft_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    base_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    base_content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    content_text: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="ready")
+    adopted_revision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class StoryFact(Base):
     __tablename__ = "story_facts"
     __table_args__ = (Index("ix_story_facts_novel_type", "novel_id", "fact_type"),)
@@ -158,6 +248,64 @@ class StoryFact(Base):
         PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
     )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IntelligenceProposal(Base):
+    """AI-extracted story-ledger changes awaiting explicit author review."""
+
+    __tablename__ = "intelligence_proposals"
+    __table_args__ = (
+        UniqueConstraint(
+            "chapter_revision_id", "input_hash", name="uq_intelligence_revision_input"
+        ),
+        Index("ix_intelligence_document_created", "document_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    chapter_revision_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("document_revisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="running")
+    model_profile_fingerprint: Mapped[str] = mapped_column(
+        String(160), nullable=False, default="qwenpaw-active-agent"
+    )
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IntelligenceProposalItem(Base):
+    __tablename__ = "intelligence_proposal_items"
+    __table_args__ = (
+        UniqueConstraint("proposal_id", "position", name="uq_intelligence_item_position"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    proposal_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("intelligence_proposals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    suggested_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reasoning_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    review_state: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    committed_story_fact_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("story_facts.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

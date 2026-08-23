@@ -1,4 +1,5 @@
 import { ApiError, apiRequest } from "./api";
+import { ChapterWorkflowPanel } from "./chapter-workflow";
 import { APP_PATH } from "./contracts";
 import {
   clearRecoveryDraft,
@@ -415,6 +416,17 @@ export function NovelWorkbench() {
     void saveNow(recoveredMarkdown);
   };
 
+  const applyWorkflowDocument = (updated: DocumentRecord, status: string) => {
+    documentRef.current = updated;
+    contentRef.current = updated.content_markdown;
+    setDocument(updated);
+    setContent(updated.content_markdown);
+    setConflict(null);
+    setRecovery(null);
+    setSaveState(status);
+    void clearRecoveryDraft(updated.id);
+  };
+
   return React.createElement(
     Spin,
     { spinning: busy },
@@ -497,6 +509,15 @@ export function NovelWorkbench() {
           React.createElement(
             "div",
             { style: { display: "flex", flex: "1 0 100%", flexWrap: "wrap", justifyContent: "flex-end", gap: 8 } },
+            novel && document
+              ? React.createElement(ChapterWorkflowPanel, {
+                  novel,
+                  document,
+                  onDocumentChanged: applyWorkflowDocument,
+                  onError: setError,
+                  onStatus: setSaveState,
+                })
+              : null,
             React.createElement(Button, { onClick: copyContext, disabled: !document }, "复制 AI 上下文"),
             React.createElement(Button, { onClick: () => setHistoryOpen(true), disabled: !document }, "历史"),
             React.createElement(Button, { type: "primary", onClick: checkpoint, disabled: !document }, "建立检查点"),

@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 
 APP_ID = "ai-novel-world-2026"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 NOVEL_AGENT_ID = "ai-novel-writer"
 NOVEL_SKILLS = {
     "novel-direction",
@@ -54,7 +54,8 @@ def verify() -> dict[str, object]:
     health = get_json(f"/api/{APP_ID}/health")
     assert isinstance(health, dict)
     assert health.get("app_id") == APP_ID
-    assert health.get("ai_write_enabled") is False
+    assert health.get("ai_candidate_generation_enabled") is True
+    assert health.get("ai_authoritative_write_enabled") is False
 
     agent_payload = get_json("/api/agents")
     assert isinstance(agent_payload, dict)
