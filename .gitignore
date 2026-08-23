@@ -19,7 +19,13 @@ working.secret
 # Generated dependencies and build output
 node_modules/
 .venv/
+*.egg-info/
 __pycache__/
 dist/
 build/
 coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+playwright-report/
+test-results/

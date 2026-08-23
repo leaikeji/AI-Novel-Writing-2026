@@ -2,7 +2,7 @@
 
 验证日期：2026-08-23（Asia/Shanghai）。
 
-状态：**已部署并通过基础运行、回环监听和重启持久性验证**。这只是 QwenPaw 上游验证环境，不代表已经执行 AI小说世界2026 的 Git 初始化、PawApp 初始化、数据库部署或模型配置。
+状态：**已部署并通过基础运行、回环监听、重启持久性、PawApp 0.2.0、PostgreSQL/pgvector 与阶段 3–6 闭环验证**。用户已在 QwenPaw 原生模型页激活 MiniMax M3，并完成小说讨论、Skill 与只读工具调用。
 
 ## 1. 当前可用入口
 
@@ -37,6 +37,7 @@
 | `ai-novel-2026-qwenpaw-data` | `/app/working` | QwenPaw 配置、workspace、日志和 Skills 等工作数据 |
 | `ai-novel-2026-qwenpaw-secrets` | `/app/working.secret` | Provider 等服务端密钥目录 |
 | `ai-novel-2026-qwenpaw-backups` | `/app/working.backups` | QwenPaw 备份目录 |
+| `ai-novel-2026-postgres-data` | `/var/lib/postgresql` | PostgreSQL 18.6 权威小说账本与 pgvector 扩展 |
 
 三个卷带有 `ai.novel.world.project=AI小说世界2026` 和各自用途标签。停止或重启容器不会删除这些卷。
 
@@ -56,8 +57,10 @@
 
 - QwenPaw 2.1.0 Docker 控制台本身没有登录认证。本验证环境只允许本机可信单用户使用，禁止把端口发布到 `0.0.0.0` 或局域网。
 - 当前未录入任何模型 API Key，未替用户选择或配置聊天 Provider。
-- 当前未安装小说 PawApp，未创建 PostgreSQL、pgvector、Portkey、Ollama、TEI、TTS 或图片服务。
-- 当前未创建 Git 仓库、工程骨架、Compose 文件或依赖锁；“执行新项目初始化”仍是独立的后续授权闸门。
+- 当前已安装小说 PawApp 0.2.0，并创建独立“AI小说作家” Agent；六个小说 Skills 和三个只读小说工具只在该 Agent 中启用，Default 与 QA 中保持关闭。
+- “AI小说作家”额外启用项目管理的 `AI_NOVEL_WORLD.md` 系统提示文件，用于自主 Skill 路由；QwenPaw 原生 `AGENTS.md`、`SOUL.md`、`PROFILE.md` 保留。默认首次引导文件已改名归档，避免继续污染小说对话。
+- 本机 Docker Desktop 偶发在 QwenPaw 停止后立即复用命名卷时卡住。安装脚本现使用 30 秒优雅停止、确认容器完全退出并等待卷释放，再启动临时安装容器；修改后重复安装已正常完成。
+- PostgreSQL 18.6 + pgvector 0.8.6 已启动并健康；Portkey、Ollama、TEI、TTS 和图片服务均未启动。
 - 后续录入 Provider 密钥时，必须验证浏览器存储、API 响应和日志不回显密钥；密钥目录继续与普通工作卷隔离。
 
 ## 6. 日常管理
@@ -79,6 +82,4 @@ docker restart ai-novel-2026-qwenpaw-lab
 
 ## 7. 下一步验证
 
-只读 UI 盘点已经完成，结果见[QwenPaw 原生 UI 盘点与小说工作台 UI 基线](./12-QwenPaw原生UI盘点与小说工作台UI基线.md)。已确认原生聊天、应用、模型、Skills、MCP、插件和设置入口的共存边界；最终视觉稿仍需三套低保真方向比较，不要求一次性冻结所有 UI，也不依赖妙笔神书研究全部结束。
-
-只有用户明确说“执行新项目初始化”后，才进入最小 PawApp/Compose 工程创建和插件装卸兼容尖峰。
+项目初始化和阶段二尖峰见[新项目初始化与兼容性验证](./13-新项目初始化与兼容性验证.md)；当前阶段 3–6 实证见[阶段 3–6 实现与验收记录](./14-阶段3至6实现与验收.md)。下一步只需由用户在 QwenPaw 原生模型页选择聊天模型并进行真实讨论测试，不自动启动 Portkey、向量、TTS 或图片服务。

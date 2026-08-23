@@ -1,0 +1,24 @@
+{
+  "name": "ai-novel-world-2026",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vitest": "4.1.11"
+  },
+  "dependencies": {
+    "idb": "8.0.3",
+    "zustand": "5.0.15"
+  }
+}

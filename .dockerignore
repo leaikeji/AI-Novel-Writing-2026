@@ -1,0 +1,5 @@
+*
+!requirements.txt
+!docker/
+!docker/qwenpaw/
+!docker/qwenpaw/Dockerfile

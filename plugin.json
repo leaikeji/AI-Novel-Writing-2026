@@ -1,0 +1,34 @@
+{
+  "id": "ai-novel-world-2026",
+  "name": "AI小说世界2026",
+  "version": "0.2.0",
+  "type": "app",
+  "description": "基于 QwenPaw 原生助手和小说 Skills 的个人小说写作工作台",
+  "description_i18n": {
+    "zh-CN": "基于 QwenPaw 原生助手和小说 Skills 的个人小说写作工作台",
+    "en-US": "A personal novel-writing workbench powered by QwenPaw's native assistant and novel Skills"
+  },
+  "author": "AI小说世界2026",
+  "entry": {
+    "backend": "plugin.py",
+    "frontend": "frontend/dist/index.js"
+  },
+  "dependencies": [],
+  "qwenpaw_version": {
+    "min": "2.1.0",
+    "max": "2.2.0"
+  },
+  "meta": {
+    "tools": [
+      { "name": "novel_get_context" },
+      { "name": "novel_get_document" },
+      { "name": "novel_search" }
+    ],
+    "pawapp": {
+      "category": "productivity",
+      "icon": "📖",
+      "entry_page": "/apps/ai-novel-world-2026",
+      "launch_scope": "page"
+    }
+  }
+}
