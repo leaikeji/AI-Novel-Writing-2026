@@ -25,6 +25,7 @@ from .models import (
     IntelligenceProposal,
     IntelligenceProposalItem,
     Novel,
+    NovelCharacter,
     AssetPreset,
     AssetPresetItem,
     PrivateAsset,
@@ -1424,10 +1425,18 @@ def build_intelligence_prompt(session: Session, proposal_id: UUID) -> str:
         f"- {fact.fact_type}｜{fact.subject}｜{fact.predicate}｜{fact.object_text}"
         for fact in existing_facts
     )
+    character_names = session.scalars(
+        select(NovelCharacter.name)
+        .where(
+            NovelCharacter.novel_id == proposal.novel_id,
+            NovelCharacter.lifecycle_state == "active",
+        )
+        .order_by(NovelCharacter.position)
+    ).all()
     return f"""请从下面这章正式正文中提取“候选情报”。只返回严格 JSON，不要代码围栏或解释。
 
 JSON 结构：
-{{"items":[{{"item_type":"fact|character_state|relationship|storyline_event|foreshadow_progress|foreshadow_new|next_chapter_required_role","subject":"主体","predicate":"变化或关系","object":"客体或内容","source_text":"正文中的短证据","reasoning_summary":"为何值得进入故事账本","confidence":0到100}}]}}
+{{"items":[{{"item_type":"fact|character_state|relationship|storyline_event|foreshadow_progress|foreshadow_new|next_chapter_required_role","subject":"主体","predicate":"变化或关系","object":"客体或内容","source_text":"正文中的短证据","reasoning_summary":"为何值得进入故事账本","confidence":0到100,"relationship_details":{{"source_name":"关系起点角色","target_name":"关系终点角色","directionality":"directed|undirected","relation_kind":"family|colleague|mentor|ally|enemy|romance|other","label":"简短关系名","description":"当前关系说明"}}}}]}}
 
 规则：
 1. 只提取正文明确发生或明确揭示的内容，不把猜测写成事实。
@@ -1441,8 +1450,10 @@ JSON 结构：
 9. 只有当本章结尾明确决定、约定或迫使某个已知角色在下一章继续出场时，才增加 next_chapter_required_role；subject 必须只写角色姓名，predicate 固定写「下一章必现」，object 简述正文依据。没有明确依据时不要输出此类型。
 10. foreshadow_new 只用于本章新出现、尚未解决且会影响后续章节的悬念；subject 必须写成可直接展示的简短伏笔名称（如「码头老板的阴谋线」），不得只写角色名或普通物件名。foreshadow_progress 只能推进现有故事账本中同名伏笔，不得凭角色名新建伏笔。
 11. storyline_event 只用于推进可跨越多个章节的稳定故事线；subject 应写故事线名称或稳定主题，不得把一次动作、普通物件、地点切换或一句对白各自拆成新故事线。
+12. item_type=relationship 时必须填写 relationship_details；source_name 与 target_name 只能逐字使用下面“已知角色”中的姓名。亲属、恋爱、盟友、敌对等稳定双向关系用 undirected；师徒、影响、控制等有明确施受方的关系用 directed。label 使用2到12个中文字符。其他 item_type 必须省略 relationship_details。
 
 章节：{document.title}
+已知角色：{', '.join(character_names) or '暂无'}
 现有故事账本：
 {ledger or '- 暂无'}
 
@@ -1518,6 +1529,12 @@ def complete_intelligence_proposal(
                     "subject": subject,
                     "predicate": predicate,
                     "object": object_text,
+                    **(
+                        {"relationship_details": raw["relationship_details"]}
+                        if item_type == "relationship"
+                        and isinstance(raw.get("relationship_details"), dict)
+                        else {}
+                    ),
                 },
                 confidence=max(0, min(confidence, 100)),
                 source_text=source_text,
@@ -1719,6 +1736,12 @@ def commit_intelligence_items(
             "subject": subject,
             "predicate": predicate,
             "object": object_text,
+            **(
+                {"relationship_details": payload["relationship_details"]}
+                if item.item_type == "relationship"
+                and isinstance(payload.get("relationship_details"), dict)
+                else {}
+            ),
         }
         item.committed_story_fact_id = fact.id
     pending = sum(1 for item in items if item.review_state == "pending")

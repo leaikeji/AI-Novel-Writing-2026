@@ -17,17 +17,22 @@ from .models import (
     ChapterBrief,
     ChapterCreationDraft,
     CharacterRelationship,
+    CharacterRelationshipRevision,
     CreativeGenerationJob,
     Document,
     DocumentRevision,
     DocumentWorkingCopy,
     Foreshadow,
+    IntelligenceProposal,
+    IntelligenceProposalItem,
     Novel,
     NovelCharacter,
     NovelCreationDraft,
     NovelExport,
     OutlineDraft,
     PrivateAsset,
+    RelationshipGraphPosition,
+    RelationshipGraphView,
     StoryFact,
     Storyline,
     Volume,
@@ -53,6 +58,17 @@ from .services import (
 MINIMAX_M3_MODEL_ID = "MiniMax-M3"
 PRIVATE_ASSET_TYPES = {"plot", "writing_style", "vocabulary", "idea"}
 ROLE_TYPES = {"main", "supporting"}
+RELATIONSHIP_DIRECTIONALITIES = {"directed", "undirected"}
+RELATIONSHIP_KINDS = {
+    "family",
+    "colleague",
+    "mentor",
+    "ally",
+    "enemy",
+    "romance",
+    "other",
+}
+RELATIONSHIP_STATUSES = {"active", "resolved", "archived"}
 STORYLINE_TYPES = {"main", "support", "romance", "faction"}
 STORYLINE_STATUSES = {"active", "paused", "completed", "archived"}
 FORESHADOW_STATUSES = {"planned", "active", "resolved", "dropped"}
@@ -66,6 +82,7 @@ CREATIVE_GENERATION_KINDS = {
     "outline_highlight",
     "chapter_storyline_recommendation",
     "chapter_outline",
+    "relationship_graph",
     "review",
 }
 
@@ -540,6 +557,8 @@ def _character_payload(
         "name": character.name,
         "description": character.description,
         "details": character.details,
+        "lifecycle_state": character.lifecycle_state,
+        "archived_at": _iso(character.archived_at),
         "required_next_chapter": required_next_chapter,
         "position": character.position,
         "version": character.version,
@@ -594,6 +613,8 @@ def complete_outline_draft(
         else:
             character.version += 1
             character.position = index * 1000
+        character.lifecycle_state = "active"
+        character.archived_at = None
         character.role_type = str(item.get("role_type", "supporting"))
         character.description = str(item.get("description", ""))
         character.details = dict(item.get("details") or {})
@@ -639,7 +660,10 @@ def list_novel_characters(session: Session, novel_id: UUID) -> list[dict[str, An
     _require_novel(session, novel_id)
     characters = session.scalars(
         select(NovelCharacter)
-        .where(NovelCharacter.novel_id == novel_id)
+        .where(
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.lifecycle_state == "active",
+        )
         .order_by(NovelCharacter.position)
     ).all()
     latest_source_revision_id = session.scalar(
@@ -739,6 +763,7 @@ def create_novel_character(
         name=clean_name,
         description=description.strip(),
         details=details,
+        lifecycle_state="active",
         position=_next_position(session, NovelCharacter, novel_id),
     )
     session.add(character)
@@ -766,6 +791,8 @@ def update_novel_character(
         raise NotFoundError(f"character {character_id} not found")
     if character.version != expected_version:
         raise EntityConflictError(_character_payload(character))
+    if character.lifecycle_state != "active":
+        raise ValidationError("已归档角色不能直接编辑")
     if role_type not in ROLE_TYPES:
         raise ValidationError("角色类型无效")
     clean_name = _clean_title(name, "角色姓名")
@@ -799,8 +826,91 @@ def delete_novel_character(
         raise NotFoundError(f"character {character_id} not found")
     if character.version != expected_version:
         raise EntityConflictError(_character_payload(character))
-    session.delete(character)
+    if character.lifecycle_state == "archived":
+        return
+    relations = session.scalars(
+        select(CharacterRelationship)
+        .where(
+            CharacterRelationship.novel_id == novel_id,
+            CharacterRelationship.archived_at.is_(None),
+            (
+                (CharacterRelationship.source_character_id == character_id)
+                | (CharacterRelationship.target_character_id == character_id)
+            ),
+        )
+        .with_for_update()
+    ).all()
+    for relation in relations:
+        _archive_relationship_entity(session, relation)
+    character.lifecycle_state = "archived"
+    character.archived_at = datetime.now(timezone.utc)
+    character.version += 1
     session.commit()
+
+
+def _normalize_relationship_label(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip()).casefold()
+
+
+def _relationship_pair_key(source_character_id: UUID, target_character_id: UUID) -> str:
+    left, right = sorted((str(source_character_id), str(target_character_id)))
+    return f"{left}:{right}"
+
+
+def _canonical_relationship_endpoints(
+    source_character_id: UUID,
+    target_character_id: UUID,
+    directionality: str,
+) -> tuple[UUID, UUID]:
+    if source_character_id == target_character_id:
+        raise ValidationError("角色不能与自己建立关系")
+    if directionality not in RELATIONSHIP_DIRECTIONALITIES:
+        raise ValidationError("关系方向无效")
+    if directionality == "undirected" and str(source_character_id) > str(target_character_id):
+        return target_character_id, source_character_id
+    return source_character_id, target_character_id
+
+
+def _require_relationship_characters(
+    session: Session,
+    novel_id: UUID,
+    source_character_id: UUID,
+    target_character_id: UUID,
+) -> None:
+    characters = session.scalars(
+        select(NovelCharacter).where(
+            NovelCharacter.id.in_((source_character_id, target_character_id)),
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.lifecycle_state == "active",
+        )
+    ).all()
+    if len(characters) != 2:
+        raise ValidationError("关系两端角色必须属于当前小说且未归档")
+
+
+def _relationship_duplicate(
+    session: Session,
+    *,
+    novel_id: UUID,
+    source_character_id: UUID,
+    target_character_id: UUID,
+    directionality: str,
+    relation_kind: str,
+    normalized_label: str,
+    excluding_id: UUID | None = None,
+) -> CharacterRelationship | None:
+    query = select(CharacterRelationship).where(
+        CharacterRelationship.novel_id == novel_id,
+        CharacterRelationship.source_character_id == source_character_id,
+        CharacterRelationship.target_character_id == target_character_id,
+        CharacterRelationship.directionality == directionality,
+        CharacterRelationship.relation_kind == relation_kind,
+        CharacterRelationship.normalized_label == normalized_label,
+        CharacterRelationship.archived_at.is_(None),
+    )
+    if excluding_id is not None:
+        query = query.where(CharacterRelationship.id != excluding_id)
+    return session.scalar(query)
 
 
 def _relationship_payload(relation: CharacterRelationship) -> dict[str, Any]:
@@ -809,22 +919,1093 @@ def _relationship_payload(relation: CharacterRelationship) -> dict[str, Any]:
         "novel_id": str(relation.novel_id),
         "source_character_id": str(relation.source_character_id),
         "target_character_id": str(relation.target_character_id),
-        "relation_type": relation.relation_type,
+        "directionality": relation.directionality,
+        "relation_kind": relation.relation_kind,
+        "label": relation.label,
+        "relation_type": relation.label,
         "description": relation.description,
+        "status": relation.status,
+        "created_by": relation.created_by,
+        "manual_override": relation.manual_override,
+        "confidence": relation.confidence,
+        "evidence": list(relation.evidence_json or []),
+        "source_generation_job_id": (
+            str(relation.source_generation_job_id)
+            if relation.source_generation_job_id
+            else None
+        ),
+        "relation_pair_key": relation.relation_pair_key,
+        "source_chapter_revision_id": (
+            str(relation.source_chapter_revision_id)
+            if relation.source_chapter_revision_id
+            else None
+        ),
+        "proposal_item_id": str(relation.proposal_item_id) if relation.proposal_item_id else None,
+        "current_revision_id": (
+            str(relation.current_revision_id) if relation.current_revision_id else None
+        ),
+        "archived_at": _iso(relation.archived_at),
         "version": relation.version,
         "created_at": _iso(relation.created_at),
         "updated_at": _iso(relation.updated_at),
     }
 
 
-def list_character_relationships(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
+def _relationship_revision_payload(
+    revision: CharacterRelationshipRevision,
+) -> dict[str, Any]:
+    return {
+        "id": str(revision.id),
+        "relationship_id": str(revision.relationship_id),
+        "revision_number": revision.revision_number,
+        "source_character_id": str(revision.source_character_id),
+        "target_character_id": str(revision.target_character_id),
+        "directionality": revision.directionality,
+        "relation_kind": revision.relation_kind,
+        "label": revision.label,
+        "description": revision.description,
+        "status": revision.status,
+        "change_reason": revision.change_reason,
+        "changed_by": revision.changed_by,
+        "manual_override": revision.manual_override,
+        "confidence": revision.confidence,
+        "evidence": list(revision.evidence_json or []),
+        "source_generation_job_id": (
+            str(revision.source_generation_job_id)
+            if revision.source_generation_job_id
+            else None
+        ),
+        "source_chapter_revision_id": (
+            str(revision.source_chapter_revision_id)
+            if revision.source_chapter_revision_id
+            else None
+        ),
+        "proposal_item_id": str(revision.proposal_item_id) if revision.proposal_item_id else None,
+        "created_at": _iso(revision.created_at),
+    }
+
+
+def _record_relationship_revision(
+    session: Session,
+    relation: CharacterRelationship,
+    *,
+    change_reason: str = "editorial",
+    changed_by: str | None = None,
+) -> CharacterRelationshipRevision:
+    current_number = session.scalar(
+        select(func.max(CharacterRelationshipRevision.revision_number)).where(
+            CharacterRelationshipRevision.relationship_id == relation.id
+        )
+    )
+    revision = CharacterRelationshipRevision(
+        id=uuid4(),
+        relationship_id=relation.id,
+        revision_number=int(current_number or 0) + 1,
+        source_character_id=relation.source_character_id,
+        target_character_id=relation.target_character_id,
+        directionality=relation.directionality,
+        relation_kind=relation.relation_kind,
+        label=relation.label,
+        description=relation.description,
+        status=relation.status,
+        change_reason=change_reason,
+        changed_by=changed_by or relation.created_by,
+        manual_override=relation.manual_override,
+        confidence=relation.confidence,
+        evidence_json=list(relation.evidence_json or []),
+        source_generation_job_id=relation.source_generation_job_id,
+        source_chapter_revision_id=relation.source_chapter_revision_id,
+        proposal_item_id=relation.proposal_item_id,
+    )
+    session.add(revision)
+    session.flush()
+    relation.current_revision_id = revision.id
+    return revision
+
+
+def _create_relationship_entity(
+    session: Session,
+    novel_id: UUID,
+    *,
+    source_character_id: UUID,
+    target_character_id: UUID,
+    label: str,
+    directionality: str,
+    relation_kind: str,
+    description: str,
+    created_by: str = "manual",
+    manual_override: bool | None = None,
+    confidence: int | None = None,
+    evidence: list[str] | None = None,
+    source_generation_job_id: UUID | None = None,
+    source_chapter_revision_id: UUID | None = None,
+    proposal_item_id: UUID | None = None,
+) -> CharacterRelationship:
+    if relation_kind not in RELATIONSHIP_KINDS:
+        raise ValidationError("关系分类无效")
+    source_character_id, target_character_id = _canonical_relationship_endpoints(
+        source_character_id,
+        target_character_id,
+        directionality,
+    )
+    _require_relationship_characters(
+        session,
+        novel_id,
+        source_character_id,
+        target_character_id,
+    )
+    clean_label = _clean_title(label, "关系名称")
+    if len(clean_label) > 80:
+        raise ValidationError("关系名称不能超过80个字符")
+    normalized_label = _normalize_relationship_label(clean_label)
+    duplicate = _relationship_duplicate(
+        session,
+        novel_id=novel_id,
+        source_character_id=source_character_id,
+        target_character_id=target_character_id,
+        directionality=directionality,
+        relation_kind=relation_kind,
+        normalized_label=normalized_label,
+    )
+    if duplicate is not None:
+        raise ValidationError("相同方向、分类和名称的关系已经存在")
+    relation = CharacterRelationship(
+        id=uuid4(),
+        novel_id=novel_id,
+        source_character_id=source_character_id,
+        target_character_id=target_character_id,
+        directionality=directionality,
+        relation_kind=relation_kind,
+        label=clean_label,
+        normalized_label=normalized_label,
+        relation_pair_key=_relationship_pair_key(source_character_id, target_character_id),
+        relation_type=clean_label,
+        description=description.strip(),
+        status="active",
+        created_by=created_by,
+        manual_override=(created_by not in {"ai_auto"} if manual_override is None else manual_override),
+        confidence=confidence,
+        evidence_json=list(evidence or []),
+        source_generation_job_id=source_generation_job_id,
+        source_chapter_revision_id=source_chapter_revision_id,
+        proposal_item_id=proposal_item_id,
+    )
+    session.add(relation)
+    session.flush()
+    _record_relationship_revision(session, relation, changed_by=created_by)
+    return relation
+
+
+def _update_relationship_entity(
+    session: Session,
+    relation: CharacterRelationship,
+    *,
+    expected_version: int,
+    source_character_id: UUID | None = None,
+    target_character_id: UUID | None = None,
+    label: str | None = None,
+    directionality: str | None = None,
+    relation_kind: str | None = None,
+    description: str | None = None,
+    status: str | None = None,
+    changed_by: str = "manual",
+    change_reason: str = "editorial",
+    promote_to_manual: bool = True,
+    confidence: int | None = None,
+    evidence: list[str] | None = None,
+    source_generation_job_id: UUID | None = None,
+    source_chapter_revision_id: UUID | None = None,
+    proposal_item_id: UUID | None = None,
+) -> CharacterRelationship:
+    if relation.version != expected_version:
+        raise EntityConflictError(_relationship_payload(relation))
+    next_directionality = directionality or relation.directionality
+    if next_directionality not in RELATIONSHIP_DIRECTIONALITIES:
+        raise ValidationError("请先明确选择有向或无向关系")
+    next_kind = relation_kind or relation.relation_kind
+    if next_kind not in RELATIONSHIP_KINDS:
+        raise ValidationError("关系分类无效")
+    next_status = status or ("active" if relation.status == "archived" else relation.status)
+    if next_status not in {"active", "resolved"}:
+        raise ValidationError("关系状态无效")
+    next_source, next_target = _canonical_relationship_endpoints(
+        source_character_id or relation.source_character_id,
+        target_character_id or relation.target_character_id,
+        next_directionality,
+    )
+    _require_relationship_characters(
+        session,
+        relation.novel_id,
+        next_source,
+        next_target,
+    )
+    clean_label = _clean_title(label if label is not None else relation.label, "关系名称")
+    if len(clean_label) > 80:
+        raise ValidationError("关系名称不能超过80个字符")
+    normalized_label = _normalize_relationship_label(clean_label)
+    duplicate = _relationship_duplicate(
+        session,
+        novel_id=relation.novel_id,
+        source_character_id=next_source,
+        target_character_id=next_target,
+        directionality=next_directionality,
+        relation_kind=next_kind,
+        normalized_label=normalized_label,
+        excluding_id=relation.id,
+    )
+    if duplicate is not None:
+        raise ValidationError("相同方向、分类和名称的关系已经存在")
+    relation.source_character_id = next_source
+    relation.target_character_id = next_target
+    relation.directionality = next_directionality
+    relation.relation_kind = next_kind
+    relation.label = clean_label
+    relation.normalized_label = normalized_label
+    relation.relation_pair_key = _relationship_pair_key(next_source, next_target)
+    relation.relation_type = clean_label
+    if description is not None:
+        relation.description = description.strip()
+    relation.status = next_status
+    relation.archived_at = None
+    if promote_to_manual:
+        relation.created_by = "manual"
+        relation.manual_override = True
+    if confidence is not None:
+        relation.confidence = confidence
+    if evidence is not None:
+        relation.evidence_json = list(evidence)
+    if source_generation_job_id is not None:
+        relation.source_generation_job_id = source_generation_job_id
+    if source_chapter_revision_id is not None:
+        relation.source_chapter_revision_id = source_chapter_revision_id
+    if proposal_item_id is not None:
+        relation.proposal_item_id = proposal_item_id
+    relation.version += 1
+    _record_relationship_revision(
+        session,
+        relation,
+        change_reason=change_reason,
+        changed_by=changed_by,
+    )
+    return relation
+
+
+def _archive_relationship_entity(
+    session: Session,
+    relation: CharacterRelationship,
+    *,
+    expected_version: int | None = None,
+    changed_by: str = "manual",
+    change_reason: str = "editorial",
+    promote_to_manual: bool = True,
+    source_generation_job_id: UUID | None = None,
+) -> CharacterRelationship:
+    if expected_version is not None and relation.version != expected_version:
+        raise EntityConflictError(_relationship_payload(relation))
+    if relation.archived_at is not None:
+        return relation
+    relation.status = "archived"
+    relation.archived_at = datetime.now(timezone.utc)
+    if promote_to_manual:
+        relation.created_by = "manual"
+        relation.manual_override = True
+    if source_generation_job_id is not None:
+        relation.source_generation_job_id = source_generation_job_id
+    relation.version += 1
+    _record_relationship_revision(
+        session,
+        relation,
+        change_reason=change_reason,
+        changed_by=changed_by,
+    )
+    return relation
+
+
+def _restore_relationship_entity(
+    session: Session,
+    relation: CharacterRelationship,
+    *,
+    expected_version: int,
+    changed_by: str = "manual",
+    change_reason: str = "editorial",
+    promote_to_manual: bool = True,
+    confidence: int | None = None,
+    evidence: list[str] | None = None,
+    source_generation_job_id: UUID | None = None,
+) -> CharacterRelationship:
+    if relation.version != expected_version:
+        raise EntityConflictError(_relationship_payload(relation))
+    if relation.archived_at is None:
+        return relation
+    if relation.directionality not in RELATIONSHIP_DIRECTIONALITIES:
+        raise ValidationError("旧关系恢复前必须先确认有向或无向")
+    duplicate = _relationship_duplicate(
+        session,
+        novel_id=relation.novel_id,
+        source_character_id=relation.source_character_id,
+        target_character_id=relation.target_character_id,
+        directionality=relation.directionality,
+        relation_kind=relation.relation_kind,
+        normalized_label=relation.normalized_label,
+        excluding_id=relation.id,
+    )
+    if duplicate is not None:
+        raise ValidationError("已有相同关系，不能恢复重复项")
+    _require_relationship_characters(
+        session,
+        relation.novel_id,
+        relation.source_character_id,
+        relation.target_character_id,
+    )
+    relation.status = "active"
+    relation.archived_at = None
+    if promote_to_manual:
+        relation.created_by = "manual"
+        relation.manual_override = True
+    if confidence is not None:
+        relation.confidence = confidence
+    if evidence is not None:
+        relation.evidence_json = list(evidence)
+    if source_generation_job_id is not None:
+        relation.source_generation_job_id = source_generation_job_id
+    relation.version += 1
+    _record_relationship_revision(
+        session,
+        relation,
+        change_reason=change_reason,
+        changed_by=changed_by,
+    )
+    return relation
+
+
+def list_character_relationships(
+    session: Session,
+    novel_id: UUID,
+    *,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
     _require_novel(session, novel_id)
+    query = select(CharacterRelationship).where(CharacterRelationship.novel_id == novel_id)
+    if not include_archived:
+        query = query.where(CharacterRelationship.archived_at.is_(None))
     relations = session.scalars(
-        select(CharacterRelationship)
-        .where(CharacterRelationship.novel_id == novel_id)
-        .order_by(CharacterRelationship.created_at, CharacterRelationship.id)
+        query.order_by(CharacterRelationship.created_at, CharacterRelationship.id)
     ).all()
     return [_relationship_payload(relation) for relation in relations]
+
+
+def list_character_relationship_history(
+    session: Session,
+    novel_id: UUID,
+    relationship_id: UUID,
+) -> list[dict[str, Any]]:
+    relation = session.get(CharacterRelationship, relationship_id)
+    if relation is None or relation.novel_id != novel_id:
+        raise NotFoundError(f"relationship {relationship_id} not found")
+    revisions = session.scalars(
+        select(CharacterRelationshipRevision)
+        .where(CharacterRelationshipRevision.relationship_id == relationship_id)
+        .order_by(CharacterRelationshipRevision.revision_number.desc())
+    ).all()
+    return [_relationship_revision_payload(revision) for revision in revisions]
+
+
+def _relationship_name_key(value: str) -> str:
+    return re.sub(r"\s+", "", value).casefold()
+
+
+def _relationship_known_character_mentions(
+    text_value: str,
+    character_names: Iterable[str],
+) -> list[str]:
+    """Return stable, de-duplicated known names mentioned by one source."""
+
+    found: list[str] = []
+    seen: set[str] = set()
+    for name in character_names:
+        clean_name = str(name or "").strip()
+        key = _relationship_name_key(clean_name)
+        if not clean_name or key in seen or clean_name not in text_value:
+            continue
+        seen.add(key)
+        found.append(clean_name)
+    return found
+
+
+def _relationship_evidence_mentions_pair(
+    evidence: Iterable[str],
+    source_name: str,
+    target_name: str,
+) -> bool:
+    return any(
+        source_name in str(source_text) and target_name in str(source_text)
+        for source_text in evidence
+    )
+
+
+def _relationship_snapshot_text(value: Any, limit: int) -> str:
+    text_value = str(value or "").strip()
+    if len(text_value) <= limit:
+        return text_value
+    return text_value[:limit].rstrip() + "…"
+
+
+def build_relationship_graph_snapshot(
+    session: Session,
+    novel_id: UUID,
+) -> dict[str, Any]:
+    """Build the bounded, deterministic source of truth for graph generation.
+
+    Automated relationship rows are deliberately excluded. Otherwise applying a
+    generation would change its own input hash and cause an endless regeneration
+    loop. Author-owned rows (including archived tombstones) stay in the snapshot
+    so a manual correction is always stronger than later model output.
+    """
+
+    novel = _require_novel(session, novel_id)
+    characters = session.scalars(
+        select(NovelCharacter)
+        .where(
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.lifecycle_state == "active",
+        )
+        .order_by(NovelCharacter.position, NovelCharacter.id)
+        .limit(80)
+    ).all()
+    character_by_id = {character.id: character for character in characters}
+    character_names = [character.name for character in characters]
+
+    document_rows = session.execute(
+        select(Document, DocumentWorkingCopy)
+        .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
+        .where(Document.novel_id == novel_id, Document.kind == "chapter")
+        .order_by(Document.position, Document.id)
+    ).all()
+    current_revision_ids = {
+        working.base_revision_id
+        for _, working in document_rows
+        if working.base_revision_id is not None
+    }
+
+    manual_rows = session.scalars(
+        select(CharacterRelationship)
+        .where(
+            CharacterRelationship.novel_id == novel_id,
+            CharacterRelationship.manual_override.is_(True),
+        )
+        .order_by(CharacterRelationship.created_at, CharacterRelationship.id)
+    ).all()
+    author_overrides: list[dict[str, Any]] = []
+    for relation in manual_rows:
+        source = character_by_id.get(relation.source_character_id)
+        target = character_by_id.get(relation.target_character_id)
+        if source is None or target is None:
+            continue
+        author_overrides.append(
+            {
+                "source_name": source.name,
+                "target_name": target.name,
+                "directionality": relation.directionality,
+                "relation_kind": relation.relation_kind,
+                "label": relation.label,
+                "description": _relationship_snapshot_text(relation.description, 1000),
+                "active": relation.archived_at is None,
+            }
+        )
+
+    facts = session.scalars(
+        select(StoryFact)
+        .where(
+            StoryFact.novel_id == novel_id,
+            StoryFact.fact_type == "relationship",
+            StoryFact.status.in_(("active", "source_restored")),
+            StoryFact.source_revision_id.in_(current_revision_ids),
+        )
+        .order_by(StoryFact.created_at.desc(), StoryFact.id.desc())
+        .limit(300)
+    ).all()
+    accepted_facts: list[dict[str, Any]] = []
+    for fact in facts:
+        details = fact.details if isinstance(fact.details, dict) else {}
+        searchable = " ".join(
+            (
+                fact.subject,
+                fact.predicate,
+                fact.object_text,
+                str(details.get("source_text") or ""),
+            )
+        )
+        mentioned = _relationship_known_character_mentions(searchable, character_names)
+        if len(set(mentioned)) < 2:
+            continue
+        accepted_facts.append(
+            {
+                "subject": fact.subject,
+                "predicate": fact.predicate,
+                "object": _relationship_snapshot_text(fact.object_text, 900),
+                "evidence": _relationship_snapshot_text(details.get("source_text"), 500),
+                "status": fact.status,
+            }
+        )
+
+    relevant_chapters: list[tuple[Document, DocumentWorkingCopy, str]] = []
+    excluded_chapter_count = 0
+    for document, working in document_rows[:1000]:
+        text_value = markdown_to_text(working.content_markdown).strip()
+        mentioned = _relationship_known_character_mentions(text_value, character_names)
+        if len(mentioned) < 2:
+            excluded_chapter_count += 1
+            continue
+        relevant_chapters.append((document, working, text_value))
+    chapter_index = [
+        {
+            "id": str(document.id),
+            "title": document.title,
+            "position": document.position,
+            "content_hash": working.content_hash,
+        }
+        for document, working, _ in relevant_chapters
+    ]
+    recent_excerpts: list[dict[str, Any]] = []
+    for document, _, text_value in relevant_chapters[-12:]:
+        if len(text_value) > 2600:
+            text_value = text_value[:800].rstrip() + "\n…\n" + text_value[-1600:].lstrip()
+        recent_excerpts.append(
+            {
+                "title": document.title,
+                "position": document.position,
+                "excerpt": text_value,
+            }
+        )
+
+    return {
+        "schema_version": 1,
+        "novel": {
+            "title": novel.title,
+            "genre": novel.genre,
+            "subgenre": novel.subgenre,
+            "idea": _relationship_snapshot_text(novel.idea, 6000),
+            "description": _relationship_snapshot_text(novel.description, 4000),
+            "background": _relationship_snapshot_text(novel.background, 8000),
+            "main_plot": _relationship_snapshot_text(novel.main_plot, 16_000),
+            "highlight": _relationship_snapshot_text(novel.highlight, 2000),
+        },
+        "characters": [
+            {
+                "name": character.name,
+                "role_type": character.role_type,
+                "description": _relationship_snapshot_text(character.description, 1800),
+                "details": _relationship_snapshot_text(
+                    json.dumps(character.details or {}, ensure_ascii=False, sort_keys=True),
+                    1800,
+                ),
+            }
+            for character in characters
+        ],
+        "author_relationship_overrides": author_overrides,
+        "accepted_relationship_facts": accepted_facts,
+        "chapter_index": chapter_index,
+        "excluded_chapter_count": excluded_chapter_count,
+        "recent_chapter_excerpts": recent_excerpts,
+    }
+
+
+def _relationship_snapshot_hash(snapshot: dict[str, Any]) -> str:
+    serialized = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return content_hash(serialized)
+
+
+def get_relationship_auto_sync_status(
+    session: Session,
+    novel_id: UUID,
+) -> dict[str, Any]:
+    snapshot = build_relationship_graph_snapshot(session, novel_id)
+    input_digest = _relationship_snapshot_hash(snapshot)
+    current_job = session.scalar(
+        select(CreativeGenerationJob)
+        .where(
+            CreativeGenerationJob.scope_type == "novel",
+            CreativeGenerationJob.scope_id == novel_id,
+            CreativeGenerationJob.kind == "relationship_graph",
+            CreativeGenerationJob.input_hash == input_digest,
+        )
+        .order_by(CreativeGenerationJob.attempt.desc())
+    )
+    latest_ready = session.scalar(
+        select(CreativeGenerationJob)
+        .where(
+            CreativeGenerationJob.scope_type == "novel",
+            CreativeGenerationJob.scope_id == novel_id,
+            CreativeGenerationJob.kind == "relationship_graph",
+            CreativeGenerationJob.state == "ready",
+        )
+        .order_by(CreativeGenerationJob.completed_at.desc(), CreativeGenerationJob.created_at.desc())
+    )
+    active_rows = session.scalars(
+        select(CharacterRelationship).where(
+            CharacterRelationship.novel_id == novel_id,
+            CharacterRelationship.archived_at.is_(None),
+        )
+    ).all()
+    eligible = len(snapshot["characters"]) >= 2
+    return {
+        "eligible": eligible,
+        "stale": eligible and (current_job is None or current_job.state != "ready"),
+        "state": current_job.state if current_job is not None else "never",
+        "input_hash": input_digest,
+        "last_synced_at": _iso(latest_ready.completed_at) if latest_ready else None,
+        "ai_relationship_count": sum(
+            1 for relation in active_rows if not relation.manual_override
+        ),
+        "manual_relationship_count": sum(
+            1 for relation in active_rows if relation.manual_override
+        ),
+        "source_summary": {
+            "characters": len(snapshot["characters"]),
+            "relationship_facts": len(snapshot["accepted_relationship_facts"]),
+            "chapters": len(snapshot["chapter_index"]),
+            "excluded_chapters": int(snapshot.get("excluded_chapter_count") or 0),
+        },
+        "job": _creative_job_payload(current_job) if current_job is not None else None,
+    }
+
+
+def _manual_relationship_blocks(
+    manual_rows: list[CharacterRelationship],
+    *,
+    pair_key: str,
+    relation_kind: str,
+) -> bool:
+    return any(
+        relation.relation_pair_key == pair_key
+        and (
+            relation.directionality == "legacy_unspecified"
+            or relation.relation_kind == "other"
+            or relation.relation_kind == relation_kind
+        )
+        for relation in manual_rows
+    )
+
+
+def apply_relationship_graph_generation(
+    session: Session,
+    novel_id: UUID,
+    job_id: UUID,
+) -> dict[str, Any]:
+    """Reconcile a complete model snapshot without touching author overrides."""
+
+    job = session.scalar(
+        select(CreativeGenerationJob)
+        .where(
+            CreativeGenerationJob.id == job_id,
+            CreativeGenerationJob.novel_id == novel_id,
+            CreativeGenerationJob.kind == "relationship_graph",
+        )
+        .with_for_update()
+    )
+    if job is None:
+        raise NotFoundError(f"creative generation job {job_id} not found")
+    if job.state != "ready":
+        raise ValidationError("关系网自动分析尚未完成")
+
+    characters = session.scalars(
+        select(NovelCharacter).where(
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.lifecycle_state == "active",
+        )
+    ).all()
+    character_by_name = {
+        _relationship_name_key(character.name): character for character in characters
+    }
+    all_rows = session.scalars(
+        select(CharacterRelationship)
+        .where(CharacterRelationship.novel_id == novel_id)
+        .order_by(CharacterRelationship.archived_at.is_(None).desc(), CharacterRelationship.created_at)
+        .with_for_update()
+    ).all()
+    manual_rows = [relation for relation in all_rows if relation.manual_override]
+    ai_rows = [relation for relation in all_rows if not relation.manual_override]
+
+    raw_relationships = job.output_json.get("relationships")
+    if not isinstance(raw_relationships, list):
+        raise ValidationError("关系网自动分析结果结构不完整")
+    candidates = sorted(
+        (item for item in raw_relationships if isinstance(item, dict)),
+        key=lambda item: int(item.get("confidence") or 0),
+        reverse=True,
+    )
+    matched_ids: set[UUID] = set()
+    desired_slots: set[tuple[UUID, UUID, str, str]] = set()
+    changes = {"created": 0, "updated": 0, "archived": 0, "skipped": 0}
+
+    for item in candidates[:200]:
+        source = character_by_name.get(_relationship_name_key(str(item.get("source_name") or "")))
+        target = character_by_name.get(_relationship_name_key(str(item.get("target_name") or "")))
+        directionality = str(item.get("directionality") or "")
+        relation_kind = str(item.get("relation_kind") or "")
+        label = str(item.get("label") or "").strip()
+        description = str(item.get("description") or "").strip()
+        try:
+            confidence = max(0, min(int(item.get("confidence") or 0), 100))
+        except (TypeError, ValueError):
+            confidence = 0
+        evidence = [
+            str(value).strip()[:500]
+            for value in item.get("evidence") or []
+            if str(value).strip()
+        ][:5]
+        if (
+            source is None
+            or target is None
+            or source.id == target.id
+            or directionality not in RELATIONSHIP_DIRECTIONALITIES
+            or relation_kind not in RELATIONSHIP_KINDS
+            or not label
+            or confidence < 80
+            or not _relationship_evidence_mentions_pair(
+                evidence,
+                source.name,
+                target.name,
+            )
+        ):
+            changes["skipped"] += 1
+            continue
+        source_id, target_id = _canonical_relationship_endpoints(
+            source.id,
+            target.id,
+            directionality,
+        )
+        pair_key = _relationship_pair_key(source_id, target_id)
+        slot = (source_id, target_id, directionality, relation_kind)
+        if slot in desired_slots or _manual_relationship_blocks(
+            manual_rows,
+            pair_key=pair_key,
+            relation_kind=relation_kind,
+        ):
+            changes["skipped"] += 1
+            continue
+        desired_slots.add(slot)
+
+        matching = [
+            relation
+            for relation in ai_rows
+            if relation.source_character_id == source_id
+            and relation.target_character_id == target_id
+            and relation.directionality == directionality
+            and relation.relation_kind == relation_kind
+            and relation.id not in matched_ids
+        ]
+        relation = matching[0] if matching else None
+        if relation is None:
+            relation = _create_relationship_entity(
+                session,
+                novel_id,
+                source_character_id=source_id,
+                target_character_id=target_id,
+                label=label,
+                directionality=directionality,
+                relation_kind=relation_kind,
+                description=description,
+                created_by="ai_auto",
+                manual_override=False,
+                confidence=confidence,
+                evidence=evidence,
+                source_generation_job_id=job.id,
+            )
+            ai_rows.append(relation)
+            changes["created"] += 1
+        else:
+            semantic_changed = any(
+                (
+                    relation.label != label,
+                    relation.description != description,
+                    relation.status != "active",
+                    relation.archived_at is not None,
+                    relation.confidence != confidence,
+                    list(relation.evidence_json or []) != evidence,
+                )
+            )
+            if semantic_changed:
+                _update_relationship_entity(
+                    session,
+                    relation,
+                    expected_version=relation.version,
+                    source_character_id=source_id,
+                    target_character_id=target_id,
+                    label=label,
+                    directionality=directionality,
+                    relation_kind=relation_kind,
+                    description=description,
+                    status="active",
+                    changed_by="ai_auto",
+                    change_reason="auto_sync",
+                    promote_to_manual=False,
+                    confidence=confidence,
+                    evidence=evidence,
+                    source_generation_job_id=job.id,
+                )
+                changes["updated"] += 1
+            else:
+                relation.source_generation_job_id = job.id
+        matched_ids.add(relation.id)
+
+    complete_snapshot = job.output_json.get("complete_snapshot") is True
+    if complete_snapshot and desired_slots:
+        for relation in ai_rows:
+            if relation.archived_at is not None or relation.id in matched_ids:
+                continue
+            _archive_relationship_entity(
+                session,
+                relation,
+                changed_by="ai_auto",
+                change_reason="auto_sync",
+                promote_to_manual=False,
+                source_generation_job_id=job.id,
+            )
+            changes["archived"] += 1
+
+    session.commit()
+    return {
+        "job": _creative_job_payload(job),
+        "changes": changes,
+        "relationships": list_character_relationships(session, novel_id),
+        "status": get_relationship_auto_sync_status(session, novel_id),
+    }
+
+
+def _inferred_relationship_kind(value: str) -> str:
+    lowered = value.casefold()
+    keyword_groups = (
+        ("family", ("父", "母", "兄", "弟", "姐", "妹", "夫妻", "亲属", "家人")),
+        ("romance", ("恋", "爱人", "情侣", "暧昧", "婚约", "心动")),
+        ("mentor", ("师父", "师徒", "导师", "教导", "传授", "引路人")),
+        ("enemy", ("敌", "仇", "对手", "冲突", "背叛", "追杀")),
+        ("ally", ("盟友", "同盟", "合作", "并肩", "共同调查", "互助")),
+        ("colleague", ("同事", "同学", "战友", "队友", "搭档")),
+    )
+    for relation_kind, keywords in keyword_groups:
+        if any(keyword in lowered for keyword in keywords):
+            return relation_kind
+    return "other"
+
+
+def _inferred_relationship_label(
+    relation_kind: str,
+    searchable: str,
+    predicate: str,
+) -> str:
+    if relation_kind == "ally":
+        return "调查同盟" if "调查" in searchable or "档案" in searchable else "同盟"
+    defaults = {
+        "family": "亲属",
+        "romance": "情感关系",
+        "mentor": "师徒",
+        "enemy": "敌对",
+        "colleague": "同事",
+    }
+    if relation_kind in defaults:
+        return defaults[relation_kind]
+    cleaned = re.sub(r'["“”「」『』]', "", predicate).strip()
+    return cleaned[:12] or "关联"
+
+
+def sync_relationships_from_intelligence_proposal(
+    session: Session,
+    proposal_id: UUID,
+) -> dict[str, Any]:
+    """Incrementally materialize accepted chapter relationship intelligence.
+
+    This is the normal day-to-day path: the same “同步进展” operation that writes
+    the story ledger also adds or updates graph edges. It never archives missing
+    edges because a single chapter is only an incremental observation.
+    """
+
+    proposal = session.get(IntelligenceProposal, proposal_id)
+    if proposal is None:
+        raise NotFoundError(f"intelligence proposal {proposal_id} not found")
+    characters = session.scalars(
+        select(NovelCharacter)
+        .where(
+            NovelCharacter.novel_id == proposal.novel_id,
+            NovelCharacter.lifecycle_state == "active",
+        )
+        .order_by(NovelCharacter.position)
+    ).all()
+    character_by_name = {
+        _relationship_name_key(character.name): character for character in characters
+    }
+    accepted_items = session.scalars(
+        select(IntelligenceProposalItem)
+        .where(
+            IntelligenceProposalItem.proposal_id == proposal_id,
+            IntelligenceProposalItem.item_type == "relationship",
+            IntelligenceProposalItem.review_state == "accepted",
+            IntelligenceProposalItem.committed_story_fact_id.is_not(None),
+        )
+        .order_by(IntelligenceProposalItem.position)
+    ).all()
+    all_rows = session.scalars(
+        select(CharacterRelationship)
+        .where(CharacterRelationship.novel_id == proposal.novel_id)
+        .order_by(
+            CharacterRelationship.archived_at.is_(None).desc(),
+            CharacterRelationship.created_at,
+        )
+        .with_for_update()
+    ).all()
+    manual_rows = [relation for relation in all_rows if relation.manual_override]
+    ai_rows = [relation for relation in all_rows if not relation.manual_override]
+    changes = {"created": 0, "updated": 0, "skipped": 0}
+
+    for item in accepted_items:
+        payload = dict(item.suggested_payload or {})
+        details = payload.get("relationship_details")
+        source: NovelCharacter | None = None
+        target: NovelCharacter | None = None
+        directionality = "undirected"
+        relation_kind = "other"
+        label = str(payload.get("predicate") or "").strip()[:80]
+        description = ""
+        if isinstance(details, dict):
+            source = character_by_name.get(
+                _relationship_name_key(str(details.get("source_name") or ""))
+            )
+            target = character_by_name.get(
+                _relationship_name_key(str(details.get("target_name") or ""))
+            )
+            directionality = str(details.get("directionality") or "")
+            relation_kind = str(details.get("relation_kind") or "")
+            label = str(details.get("label") or "").strip()[:80]
+            description = str(details.get("description") or "").strip()[:2000]
+
+        if source is None or target is None:
+            searchable = " ".join(
+                (
+                    str(payload.get("subject") or ""),
+                    str(payload.get("predicate") or ""),
+                    str(payload.get("object") or ""),
+                    item.source_text,
+                )
+            )
+            mentioned = [
+                character
+                for character in characters
+                if character.name and character.name in searchable
+            ]
+            if len(mentioned) == 2:
+                source, target = mentioned
+                relation_kind = _inferred_relationship_kind(searchable)
+                directionality = "undirected"
+                label = _inferred_relationship_label(
+                    relation_kind,
+                    searchable,
+                    str(payload.get("predicate") or relation_kind),
+                )
+
+        if (
+            source is None
+            or target is None
+            or source.id == target.id
+            or directionality not in RELATIONSHIP_DIRECTIONALITIES
+            or relation_kind not in RELATIONSHIP_KINDS
+            or not label
+            # Legacy intelligence proposals used 50 as the verified default.
+            # Once an item is explicitly typed as a relationship and resolves to
+            # two known characters, keep it eligible for incremental backfill.
+            or item.confidence < 50
+        ):
+            changes["skipped"] += 1
+            continue
+        source_id, target_id = _canonical_relationship_endpoints(
+            source.id,
+            target.id,
+            directionality,
+        )
+        pair_key = _relationship_pair_key(source_id, target_id)
+        if _manual_relationship_blocks(
+            manual_rows,
+            pair_key=pair_key,
+            relation_kind=relation_kind,
+        ):
+            changes["skipped"] += 1
+            continue
+        if not description:
+            description = (
+                f"{payload.get('predicate', '')}：{payload.get('object', '')}"
+            ).strip("： ")[:2000]
+        matching = [
+            relation
+            for relation in ai_rows
+            if relation.source_character_id == source_id
+            and relation.target_character_id == target_id
+            and relation.directionality == directionality
+            and relation.relation_kind == relation_kind
+        ]
+        relation = matching[0] if matching else None
+        next_evidence = list(relation.evidence_json or []) if relation is not None else []
+        if item.source_text and item.source_text not in next_evidence:
+            next_evidence.append(item.source_text[:500])
+        next_evidence = next_evidence[-5:]
+        if relation is None:
+            relation = _create_relationship_entity(
+                session,
+                proposal.novel_id,
+                source_character_id=source_id,
+                target_character_id=target_id,
+                label=label,
+                directionality=directionality,
+                relation_kind=relation_kind,
+                description=description,
+                created_by="ai_auto",
+                manual_override=False,
+                confidence=item.confidence,
+                evidence=next_evidence,
+                source_chapter_revision_id=proposal.chapter_revision_id,
+                proposal_item_id=item.id,
+            )
+            ai_rows.append(relation)
+            changes["created"] += 1
+            continue
+        changed = any(
+            (
+                relation.label != label,
+                relation.description != description,
+                relation.status != "active",
+                relation.archived_at is not None,
+                relation.confidence != item.confidence,
+                list(relation.evidence_json or []) != next_evidence,
+                relation.source_chapter_revision_id != proposal.chapter_revision_id,
+                relation.proposal_item_id != item.id,
+            )
+        )
+        if not changed:
+            continue
+        _update_relationship_entity(
+            session,
+            relation,
+            expected_version=relation.version,
+            source_character_id=source_id,
+            target_character_id=target_id,
+            label=label,
+            directionality=directionality,
+            relation_kind=relation_kind,
+            description=description,
+            status="active",
+            changed_by="ai_sync",
+            change_reason="chapter_sync",
+            promote_to_manual=False,
+            confidence=item.confidence,
+            evidence=next_evidence,
+            source_chapter_revision_id=proposal.chapter_revision_id,
+            proposal_item_id=item.id,
+        )
+        changes["updated"] += 1
+
+    session.commit()
+    return {
+        "changes": changes,
+        "relationships": list_character_relationships(session, proposal.novel_id),
+    }
 
 
 def create_character_relationship(
@@ -833,24 +2014,22 @@ def create_character_relationship(
     *,
     source_character_id: UUID,
     target_character_id: UUID,
-    relation_type: str,
-    description: str,
+    label: str,
+    directionality: str = "undirected",
+    relation_kind: str = "other",
+    description: str = "",
 ) -> dict[str, Any]:
-    if source_character_id == target_character_id:
-        raise ValidationError("角色不能与自己建立关系")
-    source = session.get(NovelCharacter, source_character_id)
-    target = session.get(NovelCharacter, target_character_id)
-    if source is None or target is None or source.novel_id != novel_id or target.novel_id != novel_id:
-        raise ValidationError("关系两端角色必须属于当前小说")
-    relation = CharacterRelationship(
-        id=uuid4(),
-        novel_id=novel_id,
+    _require_novel(session, novel_id)
+    relation = _create_relationship_entity(
+        session,
+        novel_id,
         source_character_id=source_character_id,
         target_character_id=target_character_id,
-        relation_type=_clean_title(relation_type, "关系类型"),
-        description=description.strip(),
+        label=label,
+        directionality=directionality,
+        relation_kind=relation_kind,
+        description=description,
     )
-    session.add(relation)
     session.commit()
     return _relationship_payload(relation)
 
@@ -861,8 +2040,13 @@ def update_character_relationship(
     relationship_id: UUID,
     *,
     expected_version: int,
-    relation_type: str,
-    description: str,
+    source_character_id: UUID | None = None,
+    target_character_id: UUID | None = None,
+    label: str | None = None,
+    directionality: str | None = None,
+    relation_kind: str | None = None,
+    description: str | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
     relation = session.scalar(
         select(CharacterRelationship)
@@ -874,11 +2058,18 @@ def update_character_relationship(
     )
     if relation is None:
         raise NotFoundError(f"relationship {relationship_id} not found")
-    if relation.version != expected_version:
-        raise EntityConflictError(_relationship_payload(relation))
-    relation.relation_type = _clean_title(relation_type, "关系类型")
-    relation.description = description.strip()
-    relation.version += 1
+    _update_relationship_entity(
+        session,
+        relation,
+        expected_version=expected_version,
+        source_character_id=source_character_id,
+        target_character_id=target_character_id,
+        label=label,
+        directionality=directionality,
+        relation_kind=relation_kind,
+        description=description,
+        status=status,
+    )
     session.commit()
     return _relationship_payload(relation)
 
@@ -896,10 +2087,271 @@ def delete_character_relationship(
     )
     if relation is None:
         raise NotFoundError(f"relationship {relationship_id} not found")
-    if relation.version != expected_version:
-        raise EntityConflictError(_relationship_payload(relation))
-    session.delete(relation)
+    _archive_relationship_entity(session, relation, expected_version=expected_version)
     session.commit()
+
+
+def restore_character_relationship(
+    session: Session,
+    novel_id: UUID,
+    relationship_id: UUID,
+    *,
+    expected_version: int,
+) -> dict[str, Any]:
+    relation = session.scalar(
+        select(CharacterRelationship)
+        .where(
+            CharacterRelationship.id == relationship_id,
+            CharacterRelationship.novel_id == novel_id,
+        )
+        .with_for_update()
+    )
+    if relation is None:
+        raise NotFoundError(f"relationship {relationship_id} not found")
+    _restore_relationship_entity(session, relation, expected_version=expected_version)
+    session.commit()
+    return _relationship_payload(relation)
+
+
+def batch_character_relationships(
+    session: Session,
+    novel_id: UUID,
+    *,
+    operations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    _require_novel(session, novel_id)
+    results: list[dict[str, Any]] = []
+    for operation in operations:
+        action = str(operation.get("action", ""))
+        relationship_id = operation.get("relationship_id")
+        relation: CharacterRelationship | None = None
+        if action != "create":
+            if relationship_id is None:
+                raise ValidationError("关系批量操作缺少 relationship_id")
+            relation = session.scalar(
+                select(CharacterRelationship)
+                .where(
+                    CharacterRelationship.id == relationship_id,
+                    CharacterRelationship.novel_id == novel_id,
+                )
+                .with_for_update()
+            )
+            if relation is None:
+                raise NotFoundError(f"relationship {relationship_id} not found")
+        if action == "create":
+            source_character_id = operation.get("source_character_id")
+            target_character_id = operation.get("target_character_id")
+            label = operation.get("label") or operation.get("relation_type")
+            if source_character_id is None or target_character_id is None or not label:
+                raise ValidationError("新增关系缺少角色或关系名称")
+            relation = _create_relationship_entity(
+                session,
+                novel_id,
+                source_character_id=source_character_id,
+                target_character_id=target_character_id,
+                label=str(label),
+                directionality=str(operation.get("directionality") or "undirected"),
+                relation_kind=str(operation.get("relation_kind") or "other"),
+                description=str(operation.get("description") or ""),
+            )
+        elif action == "update" and relation is not None:
+            expected_version = operation.get("expected_version")
+            if expected_version is None:
+                raise ValidationError("编辑关系缺少 expected_version")
+            relation = _update_relationship_entity(
+                session,
+                relation,
+                expected_version=int(expected_version),
+                source_character_id=operation.get("source_character_id"),
+                target_character_id=operation.get("target_character_id"),
+                label=operation.get("label") or operation.get("relation_type"),
+                directionality=operation.get("directionality"),
+                relation_kind=operation.get("relation_kind"),
+                description=operation.get("description"),
+                status=operation.get("status"),
+            )
+        elif action == "archive" and relation is not None:
+            expected_version = operation.get("expected_version")
+            if expected_version is None:
+                raise ValidationError("归档关系缺少 expected_version")
+            relation = _archive_relationship_entity(
+                session,
+                relation,
+                expected_version=int(expected_version),
+            )
+        elif action == "restore" and relation is not None:
+            expected_version = operation.get("expected_version")
+            if expected_version is None:
+                raise ValidationError("恢复关系缺少 expected_version")
+            relation = _restore_relationship_entity(
+                session,
+                relation,
+                expected_version=int(expected_version),
+            )
+        else:
+            raise ValidationError("不支持的关系批量操作")
+        results.append(
+            {
+                "client_id": operation.get("client_id"),
+                "relationship": _relationship_payload(relation),
+            }
+        )
+    session.commit()
+    return {
+        "operations": results,
+        "relationships": list_character_relationships(session, novel_id),
+    }
+
+
+def _relationship_graph_view_payload(
+    session: Session,
+    view: RelationshipGraphView | None,
+    *,
+    novel_id: UUID,
+) -> dict[str, Any]:
+    if view is None:
+        return {
+            "id": None,
+            "novel_id": str(novel_id),
+            "name": "默认视图",
+            "layout_algorithm": "force_atlas_2",
+            "random_seed": f"relationship-{novel_id}",
+            "zoom": 1.0,
+            "pan_x": 0.0,
+            "pan_y": 0.0,
+            "version": 0,
+            "positions": [],
+            "updated_at": None,
+        }
+    positions = session.scalars(
+        select(RelationshipGraphPosition)
+        .where(RelationshipGraphPosition.view_id == view.id)
+        .order_by(RelationshipGraphPosition.character_id)
+    ).all()
+    return {
+        "id": str(view.id),
+        "novel_id": str(view.novel_id),
+        "name": view.name,
+        "layout_algorithm": view.layout_algorithm,
+        "random_seed": view.random_seed,
+        "zoom": view.zoom,
+        "pan_x": view.pan_x,
+        "pan_y": view.pan_y,
+        "version": view.version,
+        "positions": [
+            {
+                "character_id": str(position.character_id),
+                "x": position.x,
+                "y": position.y,
+                "pinned": position.pinned,
+            }
+            for position in positions
+        ],
+        "updated_at": _iso(view.updated_at),
+    }
+
+
+def get_relationship_graph_view(
+    session: Session,
+    novel_id: UUID,
+    *,
+    name: str = "默认视图",
+) -> dict[str, Any]:
+    _require_novel(session, novel_id)
+    view = session.scalar(
+        select(RelationshipGraphView).where(
+            RelationshipGraphView.novel_id == novel_id,
+            RelationshipGraphView.name == name,
+        )
+    )
+    return _relationship_graph_view_payload(session, view, novel_id=novel_id)
+
+
+def save_relationship_graph_view(
+    session: Session,
+    novel_id: UUID,
+    *,
+    expected_version: int,
+    name: str,
+    layout_algorithm: str,
+    random_seed: str,
+    zoom: float,
+    pan_x: float,
+    pan_y: float,
+    positions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    _require_novel(session, novel_id)
+    view = session.scalar(
+        select(RelationshipGraphView)
+        .where(
+            RelationshipGraphView.novel_id == novel_id,
+            RelationshipGraphView.name == name,
+        )
+        .with_for_update()
+    )
+    if view is None:
+        if expected_version != 0:
+            raise EntityConflictError(
+                _relationship_graph_view_payload(session, None, novel_id=novel_id)
+            )
+        view = RelationshipGraphView(
+            id=uuid4(),
+            novel_id=novel_id,
+            name=_clean_title(name, "视图名称"),
+            layout_algorithm=layout_algorithm,
+            random_seed=random_seed,
+            zoom=zoom,
+            pan_x=pan_x,
+            pan_y=pan_y,
+        )
+        session.add(view)
+        session.flush()
+    else:
+        if view.version != expected_version:
+            raise EntityConflictError(
+                _relationship_graph_view_payload(session, view, novel_id=novel_id)
+            )
+        view.layout_algorithm = layout_algorithm
+        view.random_seed = random_seed
+        view.zoom = zoom
+        view.pan_x = pan_x
+        view.pan_y = pan_y
+        view.version += 1
+        existing_positions = session.scalars(
+            select(RelationshipGraphPosition).where(
+                RelationshipGraphPosition.view_id == view.id
+            )
+        ).all()
+        for position in existing_positions:
+            session.delete(position)
+        session.flush()
+    character_ids = [position["character_id"] for position in positions]
+    if len(character_ids) != len(set(character_ids)):
+        raise ValidationError("布局中存在重复角色坐标")
+    if character_ids:
+        known_ids = set(
+            session.scalars(
+                select(NovelCharacter.id).where(
+                    NovelCharacter.novel_id == novel_id,
+                    NovelCharacter.id.in_(character_ids),
+                    NovelCharacter.lifecycle_state == "active",
+                )
+            ).all()
+        )
+        if known_ids != set(character_ids):
+            raise ValidationError("布局包含不属于当前小说的角色")
+    for position in positions:
+        session.add(
+            RelationshipGraphPosition(
+                view_id=view.id,
+                character_id=position["character_id"],
+                x=float(position["x"]),
+                y=float(position["y"]),
+                pinned=bool(position.get("pinned", False)),
+            )
+        )
+    session.commit()
+    return _relationship_graph_view_payload(session, view, novel_id=novel_id)
 
 
 def _storyline_payload(item: Storyline) -> dict[str, Any]:
@@ -1697,6 +3149,10 @@ def _validate_creative_generation_scope(
     novel_id: UUID | None,
     document_id: UUID | None,
 ) -> None:
+    if kind == "relationship_graph":
+        if novel_id is None or scope_type != "novel" or scope_id != novel_id:
+            raise ValidationError("关系网自动生成必须绑定当前小说")
+        return
     if kind in {"novel_template", "novel_naming", "novel_cover"}:
         draft = session.get(NovelCreationDraft, scope_id)
         if scope_type != "novel_creation" or draft is None:
@@ -1786,6 +3242,23 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "只规划当前章，禁止预演后续章节、禁止引用第几章、禁止写8个或更多场景。"
             "章纲须包含场景顺序、核心冲突、人物行动、信息揭示、伏笔推进和结尾钩子。"
             "返回 {\"title\":\"...\",\"outline_text\":\"...\"}。"
+        ),
+        "relationship_graph": (
+            "根据角色设定、小说大纲、作者关系覆盖项、已确认章节情报和最近正文，"
+            "生成当前小说完整且克制的人物关系网。source_name与target_name只能逐字使用"
+            "输入characters中的真实姓名；不得创造人物，不得把临时同场或一次性动作当成稳定关系。"
+            "作者关系覆盖项是最高优先级真相：active=true不得重复或冲突，active=false代表作者已删除，"
+            "绝对不得复活。每对人物同一relation_kind最多一条。directionality只能是directed或"
+            "undirected；师徒、影响、命令等有明确施受方的关系用directed，其余稳定双向关系用"
+            "undirected。relation_kind只能从family、colleague、mentor、ally、enemy、romance、"
+            "other中选择；label使用2到12个中文字符；description用一句话说明关系现状；confidence"
+            "为0到100，只输出置信度不低于65的关系；evidence返回1到3条简短来源依据。"
+            "relationships必须代表本次快照中的完整AI关系集合，并返回"
+            " {\"complete_snapshot\":true,\"relationships\":[{\"source_name\":\"...\","
+            "\"target_name\":\"...\",\"directionality\":\"directed|undirected\","
+            "\"relation_kind\":\"family|colleague|mentor|ally|enemy|romance|other\","
+            "\"label\":\"...\",\"description\":\"...\",\"confidence\":85,"
+            "\"evidence\":[\"角色设定：...\"]}]}。没有可靠关系时也必须返回空relationships数组。"
         ),
         "review": (
             "审阅正文的连续性、人物一致性、时间地点、因果、伏笔、重复段落和系统文本污染。"

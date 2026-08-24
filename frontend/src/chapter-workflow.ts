@@ -24,7 +24,6 @@ const {
   Checkbox,
   Empty,
   Input,
-  InputNumber,
   Modal,
   Spin,
   Tag,
@@ -37,7 +36,6 @@ const {
   BookOutlined,
   BulbOutlined,
   EditOutlined,
-  FileTextOutlined,
   HistoryOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -58,6 +56,7 @@ interface ChapterWorkflowProps {
   onNextChapter?: () => void;
   previousChapterTitle?: string;
   nextChapterTitle?: string;
+  chapterNumber?: number;
   generateActionRef?: { current: (() => void) | null };
   onBodyGenerationStateChange?: (active: boolean, stage: string) => void;
 }
@@ -221,6 +220,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     onNextChapter,
     previousChapterTitle,
     nextChapterTitle,
+    chapterNumber,
     generateActionRef,
     onBodyGenerationStateChange,
   } = props;
@@ -287,7 +287,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       method: "PUT",
       body: JSON.stringify({
         expected_version: currentBrief.version,
-        target_word_count: Math.max(2000, form.targetWordCount),
+        target_word_count: Math.min(10000, Math.max(500, form.targetWordCount)),
         expectation_text: form.expectationText,
         outline_text: form.outlineText,
         forbidden_text: form.forbiddenText,
@@ -297,6 +297,14 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   );
 
   const saveBrief = async () => {
+    if (!briefForm.outlineText.trim()) {
+      onError("请先填写章节大纲");
+      return;
+    }
+    if (briefForm.targetWordCount < 500 || briefForm.targetWordCount > 10000) {
+      onError("目标字数需在 500-10000 字之间");
+      return;
+    }
     setBusyAction("brief-save");
     try {
       const currentBrief = brief ?? await loadBrief();
@@ -349,7 +357,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
 
   const ensureBrief = async (): Promise<ChapterBriefRecord> => {
     const currentBrief = brief ?? await loadBrief();
-    if (currentBrief.version > 0 && currentBrief.target_word_count >= 2000) return currentBrief;
+    if (currentBrief.version > 0 && currentBrief.target_word_count >= 500) return currentBrief;
     const form = briefToForm(currentBrief);
     const saved = await persistBrief(currentBrief, { ...form, targetWordCount: Math.max(2500, form.targetWordCount) });
     setBrief(saved);
@@ -562,16 +570,26 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         { method: "POST", body: JSON.stringify({ revision_id: source.base_revision_id }) },
       );
       if (proposal.actual_model_id !== FIXED_MODEL_ID) throw new Error("实际模型不是 MiniMax-M3，情报结果已作废");
-      const pendingIds = proposal.items.filter((item) => item.review_state === "pending").map((item) => item.id);
-      if (pendingIds.length > 0) {
-        proposal = await apiRequest<IntelligenceProposalRecord>(`/intelligence-proposals/${proposal.id}/commit`, {
+      const syncableIds = proposal.items
+        .filter((item) => item.review_state === "pending" || item.review_state === "accepted")
+        .map((item) => item.id);
+      let relationshipChanges = { created: 0, updated: 0, skipped: 0 };
+      if (syncableIds.length > 0) {
+        const committed = await apiRequest<IntelligenceProposalRecord & {
+          relationship_sync?: { created: number; updated: number; skipped: number };
+        }>(`/intelligence-proposals/${proposal.id}/commit`, {
           method: "POST",
-          body: JSON.stringify({ accepted_item_ids: pendingIds, item_overrides: {} }),
+          body: JSON.stringify({ accepted_item_ids: syncableIds, item_overrides: {} }),
         });
+        proposal = committed;
+        relationshipChanges = committed.relationship_sync || relationshipChanges;
       }
       setSelectedProposal(proposal);
       setIntelligenceOpen(true);
-      onStatus(`同步进展完成 · ${proposal.items.length} 条本章情报`);
+      const relationshipTotal = relationshipChanges.created + relationshipChanges.updated;
+      onStatus(
+        `同步进展完成 · ${proposal.items.length} 条本章情报 · ${relationshipTotal ? `关系网新增/更新 ${relationshipTotal} 条` : "关系网已同步"}`,
+      );
     } catch (reason) {
       onError(errorMessage(reason, "同步进展失败"));
       onStatus("同步进展失败");
@@ -653,6 +671,10 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const currentAssetLabel = ASSET_TABS.find((item) => item.key === assetTab)?.label || "私有库配置";
   const intelligenceGroups = groupedIntelligence(selectedProposal?.items ?? []);
   const reviewIssues = Array.isArray(reviewJob?.output_json?.issues) ? reviewJob?.output_json.issues as ReviewIssue[] : [];
+  const outlineChapterNumber = chapterNumber ?? Math.max(1, Math.round(document.position / 1000));
+  const briefSaveDisabled = !briefForm.outlineText.trim()
+    || briefForm.targetWordCount < 500
+    || briefForm.targetWordCount > 10000;
 
   return h(
     React.Fragment,
@@ -674,14 +696,42 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     h(Modal, {
       open: briefOpen,
       className: "anw-modal anw-outline-edit-modal",
-      title: h("div", { className: "anw-outline-edit-title" }, h(FileTextOutlined), h("strong", null, "修改章纲"), h("span", null, document.title)),
-      width: 720,
+      title: h("div", { className: "anw-outline-edit-title" },
+        h("span", { className: "anw-outline-edit-icon", "aria-hidden": "true" }, h(EditOutlined)),
+        h("span", { className: "anw-outline-edit-heading" },
+          h("strong", null, "编辑章纲"),
+          h("small", null, `第${outlineChapterNumber}章`),
+        ),
+      ),
+      width: 610,
       centered: true,
       onCancel: () => setBriefOpen(false),
-      footer: [h(Button, { key: "cancel", onClick: () => setBriefOpen(false) }, "取消"), h(Button, { key: "save", type: "primary", loading: busyAction === "brief-save", onClick: saveBrief }, "保存章纲")],
+      footer: [
+        h("button", { key: "cancel", type: "button", className: "anw-outline-edit-cancel", onClick: () => setBriefOpen(false) }, "取消"),
+        h(Button, { key: "save", className: "anw-outline-edit-save", type: "primary", loading: busyAction === "brief-save", disabled: briefSaveDisabled, onClick: saveBrief }, "保存章纲"),
+      ],
     }, h("div", { className: "anw-outline-edit-body" },
-      field("章节大纲", h(TextArea, { rows: 12, showCount: true, maxLength: 30000, "aria-label": "章节大纲", value: briefForm.outlineText, onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, outlineText: event.target.value })), placeholder: "请输入章节大纲..." })),
-      field("目标字数", h(InputNumber, { min: 2000, max: 5000, step: 100, "aria-label": "目标字数", value: briefForm.targetWordCount, onChange: (value: number | null) => setBriefForm((current: BriefFormState) => ({ ...current, targetWordCount: value ?? 2500 })) }), "章纲目标保留 2000-5000 字；本次验收正文严格控制在 1000-1500 字。"),
+      h("label", { className: "anw-outline-edit-field" },
+        h("strong", null, "章节大纲"),
+        h(TextArea, { maxLength: 30000, "aria-label": "章节大纲", value: briefForm.outlineText, onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, outlineText: event.target.value })), placeholder: "请输入章节大纲..." }),
+      ),
+      h("label", { className: "anw-outline-edit-field anw-outline-edit-target" },
+        h("strong", null, "目标字数"),
+        h(Input, {
+          type: "number",
+          min: 500,
+          max: 10000,
+          step: 100,
+          inputMode: "numeric",
+          "aria-label": "目标字数",
+          value: briefForm.targetWordCount,
+          onChange: (event: any) => {
+            const value = Number(event.target.value);
+            if (Number.isFinite(value)) setBriefForm((current: BriefFormState) => ({ ...current, targetWordCount: value }));
+          },
+        }),
+        h("small", null, "建议范围：500-10000字"),
+      ),
     )),
     h(Modal, {
       open: assetPickerOpen,

@@ -58,6 +58,20 @@ export function revisionSourceLabel(value: string): string {
 }
 
 
+export function chapterTitleName(title: string): string {
+  return title
+    .trim()
+    .replace(/^第\s*(?:\d+|[零〇一二三四五六七八九十百千两]+)\s*章(?:[\s:：·—-]+)?/, "")
+    .trim();
+}
+
+
+export function chapterDisplayTitle(chapterNumber: number, title: string): string {
+  const cleanTitle = chapterTitleName(title);
+  return `第${chapterNumber}章${cleanTitle ? ` ${cleanTitle}` : ""}`;
+}
+
+
 export function isClueFactType(value: string): boolean {
   return value === "clue"
     || value === "fact"

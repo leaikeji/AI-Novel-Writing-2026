@@ -1392,7 +1392,7 @@ export function NovelLibraryPage() {
                   "button",
                   { key: novel.id, type: "button", className: novel.id === activeNovel.id ? "is-active" : "", onClick: () => setActiveNovelId(novel.id), title: novel.title },
                   h("img", { src: coverSource(novel), alt: `${novel.title}封面` }),
-                  novel.id === activeNovel.id ? h(CheckOutlined) : null,
+                  novel.id === activeNovel.id ? h(CheckOutlined, { className: "mb-novel-switch-check" }) : null,
                 )),
                 h("button", { type: "button", className: "mb-new-novel-tile", onClick: () => setWizardOpen(true) }, h(PlusOutlined), h("span", null, "新建")),
               ),

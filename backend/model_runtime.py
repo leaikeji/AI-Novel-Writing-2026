@@ -428,6 +428,101 @@ def normalize_creative_generation_json(
             raise ModelVerificationError("MiniMax M3 角色结果结构不完整，请重新生成")
         return {"characters": characters}
 
+    if kind == "relationship_graph":
+        raw_relationships = payload.get("relationships")
+        explicit_relationship_array = isinstance(raw_relationships, list)
+        candidates: list[dict[str, Any]] = [
+            item for item in raw_relationships or [] if isinstance(item, dict)
+        ] if explicit_relationship_array else []
+        if payload.get("source_name") and payload.get("target_name"):
+            candidates.append(payload)
+
+        # If prose quotes damaged only the outer JSON envelope, independently
+        # valid relationship objects can still be recovered without accepting
+        # any unstructured text as graph data.
+        decoder = json.JSONDecoder()
+        for index, character in enumerate(output_text):
+            if character != "{":
+                continue
+            try:
+                recovered, _ = decoder.raw_decode(output_text[index:])
+            except json.JSONDecodeError:
+                continue
+            if (
+                isinstance(recovered, dict)
+                and recovered.get("source_name")
+                and recovered.get("target_name")
+            ):
+                candidates.append(recovered)
+
+        normalized_by_slot: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for candidate in candidates:
+            source_name = str(candidate.get("source_name") or "").strip()
+            target_name = str(candidate.get("target_name") or "").strip()
+            directionality = str(candidate.get("directionality") or "").strip()
+            relation_kind = str(candidate.get("relation_kind") or "").strip()
+            label = str(candidate.get("label") or "").strip()
+            if (
+                not source_name
+                or not target_name
+                or source_name == target_name
+                or directionality not in {"directed", "undirected"}
+                or relation_kind
+                not in {"family", "colleague", "mentor", "ally", "enemy", "romance", "other"}
+                or not label
+                or len(label) > 80
+            ):
+                continue
+            try:
+                confidence = int(candidate.get("confidence", 50))
+            except (TypeError, ValueError):
+                confidence = 50
+            raw_evidence = candidate.get("evidence")
+            if isinstance(raw_evidence, str):
+                raw_evidence = [raw_evidence]
+            evidence = [
+                str(item).strip()[:500]
+                for item in raw_evidence or []
+                if str(item).strip()
+            ][:5] if isinstance(raw_evidence, list) else []
+            left, right = source_name, target_name
+            if directionality == "undirected" and left.casefold() > right.casefold():
+                left, right = right, left
+            slot = (left.casefold(), right.casefold(), directionality, relation_kind)
+            normalized = {
+                "source_name": source_name,
+                "target_name": target_name,
+                "directionality": directionality,
+                "relation_kind": relation_kind,
+                "label": label,
+                "description": str(candidate.get("description") or "").strip()[:2000],
+                "confidence": max(0, min(confidence, 100)),
+                "evidence": evidence,
+            }
+            previous = normalized_by_slot.get(slot)
+            if previous is None or normalized["confidence"] > previous["confidence"]:
+                normalized_by_slot[slot] = normalized
+
+        if candidates and not normalized_by_slot:
+            raise ModelVerificationError("MiniMax M3 关系网结果没有可用关系，请重新生成")
+        if not explicit_relationship_array and not candidates:
+            raise ModelVerificationError("MiniMax M3 关系网结果结构不完整，请重新生成")
+        complete_snapshot = payload.get("complete_snapshot") is True or bool(
+            re.search(r'"complete_snapshot"\s*:\s*true', output_text, re.IGNORECASE)
+        )
+        return {
+            "complete_snapshot": complete_snapshot,
+            "relationships": sorted(
+                normalized_by_slot.values(),
+                key=lambda item: (
+                    -int(item["confidence"]),
+                    str(item["source_name"]),
+                    str(item["target_name"]),
+                    str(item["relation_kind"]),
+                ),
+            ),
+        }
+
     if kind == "chapter_storyline_recommendation":
         raw_ids = payload.get("storyline_ids")
         if not isinstance(raw_ids, list):
@@ -618,7 +713,7 @@ def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:
         confidence = int(value.get("confidence", 50))
     except (TypeError, ValueError):
         confidence = 50
-    return {
+    normalized = {
         "item_type": item_type,
         "subject": subject,
         "predicate": predicate,
@@ -627,6 +722,32 @@ def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:
         "reasoning_summary": str(value.get("reasoning_summary") or "").strip(),
         "confidence": max(0, min(confidence, 100)),
     }
+    relationship_details = value.get("relationship_details")
+    if item_type == "relationship" and isinstance(relationship_details, dict):
+        source_name = str(relationship_details.get("source_name") or "").strip()
+        target_name = str(relationship_details.get("target_name") or "").strip()
+        directionality = str(relationship_details.get("directionality") or "").strip()
+        relation_kind = str(relationship_details.get("relation_kind") or "").strip()
+        label = str(relationship_details.get("label") or "").strip()
+        if (
+            source_name
+            and target_name
+            and source_name != target_name
+            and directionality in {"directed", "undirected"}
+            and relation_kind
+            in {"family", "colleague", "mentor", "ally", "enemy", "romance", "other"}
+            and label
+            and len(label) <= 80
+        ):
+            normalized["relationship_details"] = {
+                "source_name": source_name,
+                "target_name": target_name,
+                "directionality": directionality,
+                "relation_kind": relation_kind,
+                "label": label,
+                "description": str(relationship_details.get("description") or "").strip()[:2000],
+            }
+    return normalized
 
 
 def _intelligence_items_from_embedded_objects(

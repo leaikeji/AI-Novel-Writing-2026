@@ -10,7 +10,9 @@ from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -18,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -579,6 +582,8 @@ class NovelCharacter(Base):
     name: Mapped[str] = mapped_column(String(240), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    lifecycle_state: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -590,11 +595,23 @@ class NovelCharacter(Base):
 class CharacterRelationship(Base):
     __tablename__ = "character_relationships"
     __table_args__ = (
-        UniqueConstraint(
-            "novel_id", "source_character_id", "target_character_id", "relation_type",
-            name="uq_character_relationship_edge",
+        CheckConstraint(
+            "source_character_id <> target_character_id",
+            name="ck_character_relationship_distinct_endpoints",
         ),
-        Index("ix_character_relationships_novel", "novel_id"),
+        Index(
+            "uq_character_relationship_active_semantics",
+            "novel_id",
+            "source_character_id",
+            "target_character_id",
+            "directionality",
+            "relation_kind",
+            "normalized_label",
+            unique=True,
+            postgresql_where=text("archived_at IS NULL"),
+        ),
+        Index("ix_character_relationships_novel", "novel_id", "archived_at"),
+        Index("ix_character_relationships_pair", "novel_id", "relation_pair_key"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -607,13 +624,139 @@ class CharacterRelationship(Base):
     target_character_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("novel_characters.id", ondelete="CASCADE"), nullable=False
     )
+    directionality: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="undirected"
+    )
+    relation_kind: Mapped[str] = mapped_column(String(30), nullable=False, default="other")
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    normalized_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    relation_pair_key: Mapped[str] = mapped_column(String(73), nullable=False)
+    # Kept as a compatibility alias while older clients migrate to `label`.
     relation_type: Mapped[str] = mapped_column(String(80), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
+    created_by: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")
+    # Author edits are durable overrides. Automated reconciliation may only
+    # mutate rows where this flag is false.
+    manual_override: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    confidence: Mapped[int | None] = mapped_column(Integer)
+    evidence_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    source_generation_job_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("creative_generation_jobs.id", ondelete="SET NULL")
+    )
+    source_chapter_revision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
+    )
+    proposal_item_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("intelligence_proposal_items.id", ondelete="SET NULL")
+    )
+    current_revision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(
+            "character_relationship_revisions.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_character_relationship_current_revision",
+        ),
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class CharacterRelationshipRevision(Base):
+    __tablename__ = "character_relationship_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "relationship_id",
+            "revision_number",
+            name="uq_character_relationship_revision_number",
+        ),
+        Index(
+            "ix_character_relationship_revision_source",
+            "source_chapter_revision_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    relationship_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("character_relationships.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    target_character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    directionality: Mapped[str] = mapped_column(String(24), nullable=False)
+    relation_kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    change_reason: Mapped[str] = mapped_column(String(30), nullable=False, default="editorial")
+    changed_by: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")
+    manual_override: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    confidence: Mapped[int | None] = mapped_column(Integer)
+    evidence_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    source_generation_job_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("creative_generation_jobs.id", ondelete="SET NULL")
+    )
+    source_chapter_revision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
+    )
+    proposal_item_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("intelligence_proposal_items.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RelationshipGraphView(Base):
+    __tablename__ = "relationship_graph_views"
+    __table_args__ = (
+        UniqueConstraint("novel_id", "name", name="uq_relationship_graph_view_name"),
+        Index("ix_relationship_graph_views_novel", "novel_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False, default="默认视图")
+    layout_algorithm: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="force_atlas_2"
+    )
+    random_seed: Mapped[str] = mapped_column(String(64), nullable=False, default="relationship-v1")
+    zoom: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    pan_x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    pan_y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RelationshipGraphPosition(Base):
+    __tablename__ = "relationship_graph_positions"
+    __table_args__ = (
+        Index("ix_relationship_graph_positions_character", "character_id"),
+    )
+
+    view_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("relationship_graph_views.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    character_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("novel_characters.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    y: Mapped[float] = mapped_column(Float, nullable=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class Storyline(Base):

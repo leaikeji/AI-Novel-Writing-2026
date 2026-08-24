@@ -1,5 +1,6 @@
 import { ApiError, apiRequest } from "./api";
 import { ChapterWorkflowPanel } from "./chapter-workflow";
+import { buildChapterTreeVolumes, ChapterTreeChapter, ChapterTreeVolume } from "./chapter-tree";
 import { APP_PATH } from "./contracts";
 import {
   clearRecoveryDraft,
@@ -8,6 +9,8 @@ import {
   saveRecoveryDraft,
 } from "./recovery";
 import {
+  chapterDisplayTitle as formatChapterDisplayTitle,
+  chapterTitleName,
   factStatusLabel,
   factTypeLabel,
   isClueFactType,
@@ -47,13 +50,18 @@ const {
   ArrowLeftOutlined,
   BookOutlined,
   BulbOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined,
   ClockCircleOutlined,
   CopyOutlined,
   DatabaseOutlined,
+  DoubleLeftOutlined,
+  DoubleRightOutlined,
   EditOutlined,
   FileTextOutlined,
   PlusOutlined,
   SaveOutlined,
+  SearchOutlined,
   SettingOutlined,
   TeamOutlined,
   UnorderedListOutlined,
@@ -67,6 +75,9 @@ type ProjectSection = WorkbenchSection;
 function currentQuery(): URLSearchParams {
   const query = new URLSearchParams(window.location.search);
   const stored = activeWorkbenchRoute();
+  if (stored?.roleView && !query.get("role_view")) {
+    query.set("role_view", stored.roleView);
+  }
   if (stored && !query.get("novel_id")) {
     query.set("novel_workbench", "1");
     query.set("novel_id", stored.novelId);
@@ -354,12 +365,19 @@ export function NovelWorkbench() {
   const [recovery, setRecovery] = React.useState(null as RecoveryDraft | null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [saveVolumeOpen, setSaveVolumeOpen] = React.useState(false);
+  const [titleEditOpen, setTitleEditOpen] = React.useState(false);
+  const [titleDraft, setTitleDraft] = React.useState("");
+  const [titleSaving, setTitleSaving] = React.useState(false);
   const [manualEditorOpen, setManualEditorOpen] = React.useState(false);
   const [bodyGenerationState, setBodyGenerationState] = React.useState({ active: false, stage: "" });
   const [openChapterWizardSignal, setOpenChapterWizardSignal] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [projectFacts, setProjectFacts] = React.useState([] as StoryFactRecord[]);
   const [projectFactsLoading, setProjectFactsLoading] = React.useState(false);
+  const [chapterTreeCollapsed, setChapterTreeCollapsed] = React.useState(false);
+  const [chapterTreeSearchOpen, setChapterTreeSearchOpen] = React.useState(false);
+  const [chapterTreeQuery, setChapterTreeQuery] = React.useState("");
+  const [expandedChapterVolumeIds, setExpandedChapterVolumeIds] = React.useState(null as string[] | null);
   const timerRef = React.useRef(null as ReturnType<typeof setTimeout> | null);
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
@@ -375,6 +393,7 @@ export function NovelWorkbench() {
       setDocument(loaded);
       setContent(loaded.content_markdown);
       setManualEditorOpen(false);
+      setTitleEditOpen(false);
       setBodyGenerationState({ active: false, stage: "" });
       setError("");
       setConflict(null);
@@ -419,6 +438,16 @@ export function NovelWorkbench() {
   }, [loadDocument, queryDocumentId]);
 
   React.useEffect(() => { if (queryNovelId) void loadNovel(queryNovelId); }, [loadNovel, queryNovelId]);
+
+  React.useEffect(() => {
+    const volumeId = document?.volume_id ?? null;
+    if (!novel || !volumeId) return;
+    const allVolumeIds = buildChapterTreeVolumes(novel).map((item: ChapterTreeVolume) => item.key);
+    setExpandedChapterVolumeIds((current: string[] | null) => {
+      if (current === null || current.includes(volumeId)) return current;
+      return [...current.filter((key: string) => allVolumeIds.includes(key)), volumeId];
+    });
+  }, [document?.id, document?.volume_id, novel?.id]);
 
   React.useLayoutEffect(() => {
     const textarea = editorTextareaRef.current;
@@ -510,6 +539,11 @@ export function NovelWorkbench() {
 
   const navigateToChapter = async (documentId: string) => {
     const active = documentRef.current;
+    if (active?.id === documentId) return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     if (active && contentRef.current !== active.content_markdown) {
       const saved = await saveNow(contentRef.current);
       if (!saved) return;
@@ -775,6 +809,60 @@ export function NovelWorkbench() {
     void clearRecoveryDraft(updated.id);
   };
 
+  const openTitleEditor = () => {
+    const active = documentRef.current;
+    if (!active) return;
+    setTitleDraft(active.kind === "chapter" ? chapterTitleName(active.title) : active.title.trim());
+    setTitleEditOpen(true);
+  };
+
+  const renameDocument = async () => {
+    const active = documentRef.current;
+    const nextTitle = titleDraft.trim();
+    if (!novel || !active || !nextTitle) return;
+    setTitleSaving(true);
+    setError("");
+    try {
+      let current = active;
+      if (contentRef.current !== active.content_markdown) {
+        const saved = await saveNow(contentRef.current);
+        if (!saved) return;
+        current = saved;
+      }
+      const updated = await apiRequest<DocumentRecord>(`/novels/${novel.id}/documents/${current.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ expected_version: current.version, title: nextTitle }),
+      });
+      const merged = {
+        ...updated,
+        revisions: updated.revisions ?? current.revisions ?? [],
+      };
+      documentRef.current = merged;
+      setDocument(merged);
+      setTitleEditOpen(false);
+      setSaveState(active.kind === "chapter" ? "章节名称已修改" : "文档名称已修改");
+      try {
+        await refreshNovel();
+      } catch {
+        setError("名称已经保存，但作品列表暂未刷新；重新进入页面即可看到最新名称。");
+      }
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 409) {
+        const current = (reason.detail as ConflictDetail)?.current;
+        if (current) {
+          documentRef.current = current;
+          setDocument(current);
+          setTitleDraft(current.kind === "chapter" ? chapterTitleName(current.title) : current.title);
+        }
+        setError("章节名称已在其他位置更新，请确认最新名称后重新保存。");
+      } else {
+        setError(reason instanceof Error ? reason.message : "修改章节名称失败");
+      }
+    } finally {
+      setTitleSaving(false);
+    }
+  };
+
   const switchSection = async (next: ProjectSection) => {
     if (!novel) return;
     setSection(next);
@@ -843,15 +931,151 @@ export function NovelWorkbench() {
     const previousChapter = currentChapterIndex > 0 ? orderedChapters[currentChapterIndex - 1] : null;
     const nextChapter = currentChapterIndex >= 0 && currentChapterIndex < orderedChapters.length - 1 ? orderedChapters[currentChapterIndex + 1] : null;
     const chapterDisplayTitle = document.kind === "chapter" && currentChapterIndex >= 0
-      ? `第${currentChapterIndex + 1}章 ${document.title.replace(/^第\d+章\s*/, "")}`
+      ? formatChapterDisplayTitle(currentChapterIndex + 1, document.title)
       : document.title;
     const showEditor = Boolean(content.trim()) || manualEditorOpen;
+    const isChapterEditor = document.kind === "chapter" && Boolean(novel);
+    const allChapterTreeVolumes = novel ? buildChapterTreeVolumes(novel) : [];
+    const chapterTreeVolumes = novel ? buildChapterTreeVolumes(novel, chapterTreeQuery) : [];
+    const expandedVolumeKeys = expandedChapterVolumeIds
+      ?? allChapterTreeVolumes.map((item: ChapterTreeVolume) => item.key);
+    const toggleChapterVolume = (volumeKey: string) => {
+      setExpandedChapterVolumeIds((current: string[] | null) => {
+        const openKeys = current ?? allChapterTreeVolumes.map((item: ChapterTreeVolume) => item.key);
+        return openKeys.includes(volumeKey)
+          ? openKeys.filter((key: string) => key !== volumeKey)
+          : [...openKeys, volumeKey];
+      });
+    };
+    const chapterTree = !isChapterEditor
+      ? null
+      : chapterTreeCollapsed
+        ? h(
+            "aside",
+            { className: "anw-chapter-tree is-collapsed", "aria-label": "章节目录，已折叠" },
+            h(Button, {
+              type: "text",
+              className: "anw-chapter-tree-restore",
+              icon: h(DoubleRightOutlined),
+              onClick: () => setChapterTreeCollapsed(false),
+              title: "展开章节目录",
+              "aria-label": "展开章节目录",
+            }),
+          )
+        : h(
+            "aside",
+            { className: "anw-chapter-tree", "aria-label": "章节目录" },
+            h(
+              "header",
+              { className: "anw-chapter-tree-header" },
+              h("h2", null, "章节目录"),
+              h(
+                "div",
+                { className: "anw-chapter-tree-controls" },
+                h(Button, {
+                  type: "text",
+                  className: `anw-chapter-tree-icon-button ${chapterTreeSearchOpen ? "is-active" : ""}`,
+                  icon: h(SearchOutlined),
+                  onClick: () => {
+                    setChapterTreeSearchOpen((current: boolean) => !current);
+                    if (chapterTreeSearchOpen) setChapterTreeQuery("");
+                  },
+                  title: "搜索章节",
+                  "aria-label": "搜索章节",
+                  "aria-expanded": chapterTreeSearchOpen,
+                }),
+                h(Button, {
+                  type: "text",
+                  className: "anw-chapter-tree-icon-button",
+                  icon: h(DoubleLeftOutlined),
+                  onClick: () => setChapterTreeCollapsed(true),
+                  title: "折叠章节目录",
+                  "aria-label": "折叠章节目录",
+                }),
+              ),
+            ),
+            chapterTreeSearchOpen
+              ? h(
+                  "div",
+                  { className: "anw-chapter-tree-search" },
+                  h(Input, {
+                    autoFocus: true,
+                    allowClear: true,
+                    value: chapterTreeQuery,
+                    prefix: h(SearchOutlined),
+                    placeholder: "搜索卷或章节",
+                    "aria-label": "搜索卷或章节",
+                    onChange: (event: any) => setChapterTreeQuery(event.target.value),
+                  }),
+                )
+              : null,
+            h("div", { className: "anw-chapter-tree-book-title", title: novel?.title }, novel?.title),
+            h(
+              "nav",
+              { className: "anw-chapter-tree-nav", "aria-label": "全书卷章导航" },
+              chapterTreeVolumes.length
+                ? chapterTreeVolumes.map((item: ChapterTreeVolume) => {
+                    const expanded = Boolean(chapterTreeQuery.trim()) || expandedVolumeKeys.includes(item.key);
+                    const volumeLabel = item.volume.id ? item.volume.title : "未分卷";
+                    const treeId = `anw-chapter-tree-volume-${item.key}`;
+                    return h(
+                      "section",
+                      { key: item.key, className: `anw-chapter-tree-volume ${expanded ? "is-expanded" : ""}` },
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "anw-chapter-tree-volume-toggle",
+                          onClick: () => toggleChapterVolume(item.key),
+                          "aria-expanded": expanded,
+                          "aria-controls": treeId,
+                        },
+                        h(expanded ? CaretDownOutlined : CaretRightOutlined),
+                        h("strong", { title: volumeLabel }, volumeLabel),
+                        h("span", null, `${item.chapters.length}章`),
+                      ),
+                      expanded
+                        ? h(
+                            "div",
+                            { id: treeId, className: "anw-chapter-tree-chapters" },
+                            ...item.chapters.map((chapter: ChapterTreeChapter) => {
+                              const active = chapter.document.id === document.id;
+                              return h(
+                                "button",
+                                {
+                                  key: chapter.document.id,
+                                  type: "button",
+                                  className: `anw-chapter-tree-chapter ${active ? "is-active" : ""}`,
+                                  "aria-current": active ? "page" : undefined,
+                                  "data-document-id": chapter.document.id,
+                                  onClick: () => { void navigateToChapter(chapter.document.id); },
+                                  title: chapter.displayTitle,
+                                },
+                                h("span", null, chapter.displayTitle),
+                                h("small", null, `${chapter.document.visible_character_count}字`),
+                              );
+                            }),
+                          )
+                        : null,
+                    );
+                  })
+                : h(
+                    "div",
+                    { className: "anw-chapter-tree-empty" },
+                    chapterTreeQuery.trim() ? "没有找到匹配的卷或章节" : "暂无章节",
+                  ),
+            ),
+          );
     return h(
       Spin,
       { spinning: busy },
       h(
         "main",
-        { className: "anw-app anw-editor" },
+        { className: `anw-app anw-editor ${isChapterEditor ? "has-chapter-tree" : ""} ${chapterTreeCollapsed ? "is-chapter-tree-collapsed" : ""}` },
+        chapterTree,
+        h(
+          "div",
+          { className: "anw-editor-content" },
         h(
           "header",
           { className: "anw-editor-topbar" },
@@ -885,7 +1109,14 @@ export function NovelWorkbench() {
                 h("h1", { className: "anw-editor-title" }, chapterDisplayTitle),
                 h("div", { className: "anw-editor-count" }, "本章字数 ", h("strong", null, document.visible_character_count), " 字"),
               ),
-              h(EditOutlined, { style: { color: "#8a909d", fontSize: 17 } }),
+              h(Button, {
+                type: "text",
+                className: "anw-title-edit-button",
+                icon: h(EditOutlined),
+                onClick: openTitleEditor,
+                title: document.kind === "chapter" ? "修改章节名称" : "修改文档名称",
+                "aria-label": document.kind === "chapter" ? "修改章节名称" : "修改文档名称",
+              }),
             ),
             bodyGenerationState.active
               ? h(
@@ -942,11 +1173,58 @@ export function NovelWorkbench() {
                       onNextChapter: nextChapter ? () => { void navigateToChapter(nextChapter.id); } : undefined,
                       previousChapterTitle: previousChapter?.title,
                       nextChapterTitle: nextChapter?.title,
+                      chapterNumber: currentChapterIndex + 1,
                       generateActionRef: chapterGenerateActionRef,
                       onBodyGenerationStateChange: (active: boolean, stage: string) => setBodyGenerationState({ active, stage }),
                     })
                   : null,
               ),
+            ),
+          ),
+        ),
+        ),
+        h(
+          Modal,
+          {
+            open: titleEditOpen,
+            className: "anw-modal anw-title-edit-modal",
+            title: document.kind === "chapter" ? "编辑章节标题" : "编辑文档标题",
+            width: 520,
+            centered: true,
+            closable: false,
+            footer: null,
+            maskClosable: !titleSaving,
+            onCancel: () => { if (!titleSaving) setTitleEditOpen(false); },
+          },
+          h(
+            "div",
+            { className: "anw-title-edit-form" },
+            h("label", { htmlFor: "anw-document-title-input" }, document.kind === "chapter" ? "章节标题" : "文档标题"),
+            h(Input, {
+              id: "anw-document-title-input",
+              autoFocus: true,
+              size: "large",
+              value: titleDraft,
+              maxLength: 20,
+              placeholder: document.kind === "chapter" ? "请输入章节标题" : "请输入文档标题",
+              onChange: (event: any) => setTitleDraft((event.target.value as string).slice(0, 20)),
+              onPressEnter: () => { if (titleDraft.trim() && !titleSaving) void renameDocument(); },
+            }),
+            h("p", { className: "anw-title-edit-count" }, `最多20字，当前：${titleDraft.length}/20`),
+            h(
+              "div",
+              { className: "anw-title-edit-actions" },
+              h(Button, {
+                className: "anw-title-edit-cancel",
+                disabled: titleSaving,
+                onClick: () => setTitleEditOpen(false),
+              }, "取消"),
+              h(Button, {
+                className: "anw-primary-button anw-title-edit-save",
+                loading: titleSaving,
+                disabled: !titleDraft.trim(),
+                onClick: () => void renameDocument(),
+              }, "保存"),
             ),
           ),
         ),

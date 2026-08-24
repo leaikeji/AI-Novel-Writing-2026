@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  chapterDisplayTitle,
+  chapterTitleName,
   factStatusLabel,
   factTypeLabel,
   isClueFactType,
@@ -68,5 +70,12 @@ describe("story fact presenters", () => {
     expect(revisionSourceLabel("pre_restore_checkpoint")).toBe("恢复前保护版本");
     expect(isClueFactType("foreshadow_new")).toBe(true);
     expect(isClueFactType("relationship")).toBe(false);
+  });
+
+  it("按全书顺序补齐章节序号，并替换标题中已有的旧序号", () => {
+    expect(chapterDisplayTitle(4, "退回的旧木盒")).toBe("第4章 退回的旧木盒");
+    expect(chapterDisplayTitle(5, "第五章：雾里来的人")).toBe("第5章 雾里来的人");
+    expect(chapterDisplayTitle(6, "第6章")).toBe("第6章");
+    expect(chapterTitleName("第十二章 · 潮声来信")).toBe("潮声来信");
   });
 });

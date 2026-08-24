@@ -1,0 +1,408 @@
+import { ApiError, apiRequest } from "./api";
+import {
+  RelationshipGraph,
+  RelationshipGraphController,
+} from "./relationship-graph";
+import {
+  CharacterRelationshipRecord,
+  NovelCharacterRecord,
+  RelationshipAutoSyncResponseRecord,
+  RelationshipAutoSyncStatusRecord,
+  RelationshipDirectionality,
+  RelationshipGraphViewRecord,
+  RelationshipKind,
+} from "./types";
+
+
+const host = window.QwenPaw.host;
+const React = host.React;
+const h = React.createElement;
+const { Alert, Button, Empty, Select, Spin } = host.antd;
+const {
+  ExclamationCircleOutlined,
+  ExpandOutlined,
+  LinkOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  RobotOutlined,
+  SaveOutlined,
+  SearchOutlined,
+} = host.antdIcons;
+
+
+interface RelationshipWorkspaceProps {
+  novelId: string;
+  characters: NovelCharacterRecord[];
+  relationships: CharacterRelationshipRecord[];
+  onEditCharacter: (characterId: string) => void;
+  onEditRelationship: (relationshipId: string) => void;
+  onAddRelationship: () => void;
+  onRelationshipsChanged: (relationships: CharacterRelationshipRecord[]) => void;
+}
+
+
+const EMPTY_VIEW = (novelId: string): RelationshipGraphViewRecord => ({
+  id: null,
+  novel_id: novelId,
+  name: "默认视图",
+  layout_algorithm: "force_atlas_2",
+  random_seed: `relationship-${novelId}`,
+  zoom: 1,
+  pan_x: 0,
+  pan_y: 0,
+  version: 0,
+  positions: [],
+  updated_at: null,
+});
+
+
+const KIND_OPTIONS: Array<{ label: string; value: "all" | RelationshipKind }> = [
+  { label: "全部分类", value: "all" },
+  { label: "亲属", value: "family" },
+  { label: "同事", value: "colleague" },
+  { label: "师徒", value: "mentor" },
+  { label: "盟友", value: "ally" },
+  { label: "敌对", value: "enemy" },
+  { label: "情感", value: "romance" },
+  { label: "其他", value: "other" },
+];
+
+
+const DIRECTION_OPTIONS: Array<{
+  label: string;
+  value: "all" | RelationshipDirectionality;
+}> = [
+  { label: "全部方向", value: "all" },
+  { label: "无向关系", value: "undirected" },
+  { label: "有向关系", value: "directed" },
+  { label: "方向待确认", value: "legacy_unspecified" },
+];
+
+
+function readError(reason: unknown): string {
+  if (reason instanceof ApiError && typeof reason.detail === "string") return reason.detail;
+  return reason instanceof Error ? reason.message : "关系图操作失败";
+}
+
+
+export function RelationshipWorkspace({
+  novelId,
+  characters,
+  relationships,
+  onEditCharacter,
+  onEditRelationship,
+  onAddRelationship,
+  onRelationshipsChanged,
+}: RelationshipWorkspaceProps) {
+  const [view, setView] = React.useState(EMPTY_VIEW(novelId) as RelationshipGraphViewRecord);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [autoSyncError, setAutoSyncError] = React.useState("");
+  const [autoSyncStatus, setAutoSyncStatus] = React.useState(
+    null as RelationshipAutoSyncStatusRecord | null,
+  );
+  const [checkingAutoSync, setCheckingAutoSync] = React.useState(true);
+  const [syncingRelationships, setSyncingRelationships] = React.useState(false);
+  const [scale, setScale] = React.useState(1);
+  const [dirty, setDirty] = React.useState(false);
+  const [focusCharacterId, setFocusCharacterId] = React.useState("");
+  const [kindFilter, setKindFilter] = React.useState("all" as "all" | RelationshipKind);
+  const [directionFilter, setDirectionFilter] = React.useState(
+    "all" as "all" | RelationshipDirectionality,
+  );
+  const controllerRef = React.useRef(null as RelationshipGraphController | null);
+  const syncInFlightRef = React.useRef(false);
+
+  const syncRelationships = React.useCallback(async (forceNew: boolean) => {
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
+    setSyncingRelationships(true);
+    setAutoSyncError("");
+    try {
+      const result = await apiRequest<RelationshipAutoSyncResponseRecord>(
+        `/novels/${novelId}/relationships/auto-sync`,
+        {
+          method: "POST",
+          body: JSON.stringify({ force_new: forceNew }),
+        },
+      );
+      setAutoSyncStatus(result.status);
+      onRelationshipsChanged(result.relationships);
+    } catch (reason) {
+      setAutoSyncError(readError(reason));
+    } finally {
+      syncInFlightRef.current = false;
+      setSyncingRelationships(false);
+    }
+  }, [novelId, onRelationshipsChanged]);
+
+  React.useEffect(() => {
+    let active = true;
+    setCheckingAutoSync(true);
+    setAutoSyncError("");
+    void apiRequest<RelationshipAutoSyncStatusRecord>(
+      `/novels/${novelId}/relationships/auto-sync/status`,
+    ).then((status) => {
+      if (!active) return;
+      setAutoSyncStatus(status);
+      setCheckingAutoSync(false);
+    }).catch((reason) => {
+      if (!active) return;
+      setCheckingAutoSync(false);
+      setAutoSyncError(readError(reason));
+    });
+    return () => { active = false; };
+  }, [novelId]);
+
+  const loadView = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const next = await apiRequest<RelationshipGraphViewRecord>(
+        `/novels/${novelId}/relationship-graph-view`,
+      );
+      setView(next);
+      setScale(next.zoom);
+      setDirty(false);
+      setError("");
+    } catch (reason) {
+      setView(EMPTY_VIEW(novelId));
+      setError(readError(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, [novelId]);
+
+  React.useEffect(() => { void loadView(); }, [loadView]);
+
+  const visibleRelationships = React.useMemo(
+    () => relationships.filter((relationship) => (
+      (kindFilter === "all" || relationship.relation_kind === kindFilter)
+      && (directionFilter === "all" || relationship.directionality === directionFilter)
+    )),
+    [relationships, kindFilter, directionFilter],
+  );
+  const legacyCount = relationships.filter(
+    (relationship) => relationship.directionality === "legacy_unspecified",
+  ).length;
+  const autoSyncBusy = checkingAutoSync || syncingRelationships;
+  const autoSyncTitle = autoSyncBusy
+    ? "正在读取关系同步状态"
+    : autoSyncError
+      ? "关系同步状态暂时不可用"
+      : autoSyncStatus?.eligible === false
+        ? "新增第二个角色后即可同步关系"
+        : `随章节同步进展自动更新 · ${autoSyncStatus?.ai_relationship_count || 0} 条 AI 关系`;
+  const autoSyncDescription = autoSyncBusy
+    ? "正在统计章节情报与人物关系。"
+    : autoSyncError
+      ? `${autoSyncError}；现有关系和人工修改均已保留。`
+      : autoSyncStatus
+        ? `写完章节点击“同步进展”即可增量生成；已有 ${autoSyncStatus.source_summary.relationship_facts} 条关系情报${autoSyncStatus.source_summary.excluded_chapters ? `，已隔离 ${autoSyncStatus.source_summary.excluded_chapters} 章未匹配当前角色的内容` : ""}，人工修改不会被 AI 覆盖。`
+        : "写完章节点击“同步进展”即可增量生成；人工修改不会被 AI 覆盖。";
+
+  const saveLayout = async () => {
+    const snapshot = controllerRef.current?.snapshot();
+    if (!snapshot || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await apiRequest<RelationshipGraphViewRecord>(
+        `/novels/${novelId}/relationship-graph-view`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            expected_version: view.version,
+            name: view.name,
+            layout_algorithm: view.layout_algorithm,
+            random_seed: view.random_seed,
+            ...snapshot,
+          }),
+        },
+      );
+      setView(saved);
+      setScale(saved.zoom);
+      setDirty(false);
+    } catch (reason) {
+      setError(readError(reason));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const relationLabel = (relationship: CharacterRelationshipRecord): string => {
+    const source = characters.find(
+      (character) => character.id === relationship.source_character_id,
+    )?.name || "未知角色";
+    const target = characters.find(
+      (character) => character.id === relationship.target_character_id,
+    )?.name || "未知角色";
+    const mark = relationship.directionality === "directed"
+      ? "→"
+      : relationship.directionality === "undirected"
+        ? "—"
+        : "?";
+    return `${source} ${mark} ${target}`;
+  };
+
+  if (loading) {
+    return h("div", { className: "mb-relation-loading" }, h(Spin), "正在加载关系网…");
+  }
+
+  return h(
+    "div",
+    { className: "mb-relationship-workspace" },
+    h(
+      "div",
+      { className: "mb-relation-heading" },
+      h("h3", null, "角色关系网"),
+      h("p", null, "章节同步进展时自动生成；点击角色或连线可人工修正"),
+      h(
+        "div",
+        {
+          className: `mb-relation-ai-status${autoSyncBusy ? " is-syncing" : ""}${autoSyncError ? " is-error" : ""}`,
+          role: "status",
+          "aria-live": "polite",
+        },
+        h("span", { className: "mb-relation-ai-icon" }, autoSyncBusy ? h(Spin, { size: "small" }) : h(RobotOutlined)),
+        h("span", { className: "mb-relation-ai-copy" }, h("strong", null, autoSyncTitle), h("small", null, autoSyncDescription)),
+        h(Button, {
+          type: "text",
+          size: "small",
+          icon: h(ReloadOutlined),
+          disabled: autoSyncBusy || autoSyncStatus?.eligible === false,
+          onClick: () => void syncRelationships(true),
+        }, autoSyncError ? "重试" : "补全历史关系"),
+      ),
+    ),
+    h(
+      "div",
+      { className: "mb-relation-overlay-stack" },
+      error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
+      h(
+        "div",
+        { className: "mb-relation-toolbar", role: "toolbar", "aria-label": "关系图工具栏" },
+        h(
+          "div",
+          { className: "mb-relation-filter-tools", role: "group", "aria-label": "关系筛选" },
+          h(Select, {
+            className: "mb-relation-character-search",
+            popupClassName: "mb-relation-filter-dropdown",
+            allowClear: true,
+            showSearch: true,
+            value: focusCharacterId || undefined,
+            placeholder: "搜索并聚焦角色",
+            suffixIcon: h(SearchOutlined),
+            optionFilterProp: "label",
+            options: characters.map((character) => ({ label: character.name, value: character.id })),
+            onChange: (value: string | undefined) => {
+              setFocusCharacterId(value || "");
+              if (value) controllerRef.current?.focusNode(value);
+            },
+          }),
+          h(Select, {
+            popupClassName: "mb-relation-filter-dropdown",
+            value: kindFilter,
+            options: KIND_OPTIONS,
+            onChange: (value: "all" | RelationshipKind) => setKindFilter(value),
+            "aria-label": "按关系分类筛选",
+          }),
+          h(Select, {
+            popupClassName: "mb-relation-filter-dropdown",
+            value: directionFilter,
+            options: DIRECTION_OPTIONS,
+            onChange: (value: "all" | RelationshipDirectionality) => setDirectionFilter(value),
+            "aria-label": "按关系方向筛选",
+          }),
+        ),
+        h(
+          "div",
+          { className: "mb-relation-edit-tools" },
+          legacyCount
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: `mb-relation-legacy-chip${directionFilter === "legacy_unspecified" ? " is-active" : ""}`,
+                  title: "只查看方向待确认的旧关系",
+                  onClick: () => setDirectionFilter("legacy_unspecified"),
+                },
+                h(ExclamationCircleOutlined),
+                `${legacyCount} 条方向待确认`,
+              )
+            : h("span", { className: "mb-relation-toolbar-spacer" }),
+          h(
+            "div",
+            { className: "mb-relation-view-tools", role: "group", "aria-label": "画布视图控制" },
+            h(Button, { size: "small", icon: h(MinusOutlined), title: "缩小", "aria-label": "缩小关系图", onClick: () => controllerRef.current?.zoomOut() }),
+            h("span", { className: "mb-relation-scale", "aria-live": "polite" }, `${Math.round(scale * 100)}%`),
+            h(Button, { size: "small", icon: h(PlusOutlined), title: "放大", "aria-label": "放大关系图", onClick: () => controllerRef.current?.zoomIn() }),
+            h(Button, { size: "small", icon: h(ExpandOutlined), title: "适应画布", "aria-label": "适应画布", onClick: () => controllerRef.current?.fit() }),
+            h(Button, { size: "small", icon: h(ReloadOutlined), title: "自动排布", "aria-label": "自动排布", onClick: () => controllerRef.current?.autoLayout() }),
+          ),
+          h(Button, { icon: h(LinkOutlined), className: "anw-primary-button mb-relation-add", disabled: characters.length < 2, onClick: onAddRelationship }, "新增关系"),
+        ),
+      ),
+    ),
+    h(
+      "div",
+      { className: "mb-relation-stage" },
+      h(RelationshipGraph, {
+        characters,
+        relationships: visibleRelationships,
+        view,
+        controllerRef,
+        focusCharacterId,
+        onCharacterClick: (character: NovelCharacterRecord) => onEditCharacter(character.id),
+        onRelationshipClick: (relationship: CharacterRelationshipRecord) => onEditRelationship(relationship.id),
+        onViewStateChange: (nextScale: number, nextDirty: boolean) => {
+          setScale(nextScale);
+          if (nextDirty) setDirty(true);
+        },
+      }),
+      dirty
+        ? h(
+            "div",
+            { className: "mb-relation-layout-actions", role: "status" },
+            h("span", null, "布局有改动"),
+            h(Button, { size: "small", onClick: () => void loadView() }, "撤销"),
+            h(Button, { size: "small", icon: h(SaveOutlined), className: "anw-primary-button", loading: saving, onClick: () => void saveLayout() }, "保存"),
+          )
+        : null,
+      visibleRelationships.length === 0 && relationships.length > 0
+        ? h("div", { className: "mb-relation-filter-empty" }, "当前筛选条件下没有关系")
+        : null,
+    ),
+    h(
+      "section",
+      { className: "mb-relation-accessible-list", "aria-labelledby": "mb-relation-list-title" },
+      h(
+        "header",
+        null,
+        h("div", null, h("h4", { id: "mb-relation-list-title" }, "关系列表"), h("span", null, `${visibleRelationships.length} 条`)),
+        h("small", null, "无需操作画布，也可以在这里完整查看和编辑关系。"),
+      ),
+      visibleRelationships.length
+        ? h(
+            "ul",
+            null,
+            ...visibleRelationships.map((relationship: CharacterRelationshipRecord) => h(
+              "li",
+              { key: relationship.id },
+              h(
+                "button",
+                { type: "button", onClick: () => onEditRelationship(relationship.id) },
+                h("span", { className: `mb-relation-direction is-${relationship.directionality}` }, relationLabel(relationship)),
+                h("span", { className: "mb-relation-list-title" },
+                  h("strong", null, relationship.label || relationship.relation_type),
+                  h("em", { className: relationship.manual_override ? "is-manual" : "is-ai" }, relationship.manual_override ? "人工确认" : `AI生成${relationship.confidence ? ` ${relationship.confidence}%` : ""}`),
+                ),
+                h("small", null, relationship.description || "未填写关系说明"),
+              ),
+            )),
+          )
+        : h(Empty, { description: relationships.length ? "当前筛选条件下没有关系" : "还没有角色关系" }),
+    ),
+  );
+}

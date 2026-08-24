@@ -9,6 +9,7 @@ from qwenpaw.pawapp import get_ctx
 from sqlalchemy.orm import Session
 
 from .creative_schemas import (
+    BatchRelationshipsRequest,
     CompleteVersionedRequest,
     CreateAssetPresetRequest,
     CreateChapterDraftRequest,
@@ -22,7 +23,9 @@ from .creative_schemas import (
     DeleteVolumeRequest,
     ReorderChaptersRequest,
     ReorderVolumesRequest,
+    SaveRelationshipGraphViewRequest,
     StartCreativeGenerationRequest,
+    SyncRelationshipsRequest,
     UpdateAssetPresetRequest,
     UpdateChapterDraftRequest,
     UpdateCharacterRequest,
@@ -40,8 +43,11 @@ from .creative_services import (
     EntityConflictError,
     archive_asset_preset,
     archive_private_asset,
+    apply_relationship_graph_generation,
+    build_relationship_graph_snapshot,
     build_creative_generation_prompt,
     build_novel_export,
+    batch_character_relationships,
     complete_chapter_creation_draft,
     complete_creative_generation,
     complete_novel_creation_draft,
@@ -60,11 +66,14 @@ from .creative_services import (
     delete_volume,
     fail_creative_generation,
     get_novel_creation_draft,
+    get_relationship_graph_view,
     get_or_create_chapter_creation_draft,
     get_or_create_novel_creation_draft,
     get_or_create_outline_draft,
+    get_relationship_auto_sync_status,
     list_asset_presets,
     list_character_relationships,
+    list_character_relationship_history,
     list_creative_generations,
     list_foreshadows,
     list_novel_characters,
@@ -72,6 +81,8 @@ from .creative_services import (
     list_storylines,
     reorder_chapters,
     reorder_volumes,
+    restore_character_relationship,
+    save_relationship_graph_view,
     start_creative_generation,
     update_asset_preset,
     update_chapter_creation_draft,
@@ -438,9 +449,113 @@ def characters_delete(
 
 @router.get("/novels/{novel_id}/relationships")
 def relationships_index(
-    novel_id: UUID, session: Session = Depends(get_session)
+    novel_id: UUID,
+    include_archived: bool = Query(default=False),
+    session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
-    return list_character_relationships(session, novel_id)
+    return list_character_relationships(
+        session,
+        novel_id,
+        include_archived=include_archived,
+    )
+
+
+@router.get("/novels/{novel_id}/relationships/auto-sync/status")
+def relationships_auto_sync_status(
+    novel_id: UUID,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return get_relationship_auto_sync_status(session, novel_id)
+    except Exception as error:
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/relationships/auto-sync")
+async def relationships_auto_sync(
+    novel_id: UUID,
+    request: SyncRelationshipsRequest,
+    ctx=Depends(get_ctx),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    job: dict[str, object] | None = None
+    try:
+        snapshot = build_relationship_graph_snapshot(session, novel_id)
+        job = start_creative_generation(
+            session,
+            scope_type="novel",
+            scope_id=novel_id,
+            kind="relationship_graph",
+            input_snapshot=snapshot,
+            novel_id=novel_id,
+            requested_model_id="MiniMax-M3",
+            force_new=request.force_new,
+        )
+        if job["state"] == "failed" and not request.force_new:
+            job = start_creative_generation(
+                session,
+                scope_type="novel",
+                scope_id=novel_id,
+                kind="relationship_graph",
+                input_snapshot=snapshot,
+                novel_id=novel_id,
+                requested_model_id="MiniMax-M3",
+                force_new=True,
+            )
+        if job["state"] == "running":
+            configured_model = configured_model_audit(ctx.agent_id)
+            generation_session_id = f"novel-relationship-auto-sync:{job['id']}"
+            reply = await ctx.chat(
+                build_creative_generation_prompt(job),
+                skill="story-bible",
+                session_id=generation_session_id,
+            )
+            actual_model = reply_model_audit(
+                reply,
+                session_id=generation_session_id,
+            ).ensure_matches(configured_model)
+            try:
+                parsed_output = parse_model_json(reply.text)
+            except ModelVerificationError:
+                parsed_output = {}
+            output_json = normalize_creative_generation_json(
+                "relationship_graph",
+                parsed_output,
+                reply.text,
+            )
+            job = complete_creative_generation(
+                session,
+                UUID(str(job["id"])),
+                actual_model_id=actual_model.model_id,
+                provider_profile=actual_model.provider_id,
+                output_text=reply.text,
+                output_json=output_json,
+            )
+        return apply_relationship_graph_generation(
+            session,
+            novel_id,
+            UUID(str(job["id"])),
+        )
+    except Exception as error:
+        session.rollback()
+        if job is not None and job.get("id") and job.get("state") == "running":
+            try:
+                failed = fail_creative_generation(
+                    session,
+                    UUID(str(job["id"])),
+                    failure_message=str(error),
+                )
+            except Exception:
+                session.rollback()
+                failed = job
+            if isinstance(error, ModelVerificationError):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={"type": "model_verification_failed", "job": failed},
+                ) from error
+        _raise(error)
+        raise
 
 
 @router.post("/novels/{novel_id}/relationships", status_code=status.HTTP_201_CREATED)
@@ -455,8 +570,28 @@ def relationships_create(
             novel_id,
             source_character_id=request.source_character_id,
             target_character_id=request.target_character_id,
-            relation_type=request.relation_type,
+            label=request.label or request.relation_type or "",
+            directionality=request.directionality,
+            relation_kind=request.relation_kind,
             description=request.description,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/relationships/batch")
+def relationships_batch(
+    novel_id: UUID,
+    request: BatchRelationshipsRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return batch_character_relationships(
+            session,
+            novel_id,
+            operations=[operation.model_dump() for operation in request.operations],
         )
     except Exception as error:
         session.rollback()
@@ -477,8 +612,76 @@ def relationships_update(
             novel_id,
             relationship_id,
             expected_version=request.expected_version,
-            relation_type=request.relation_type,
+            source_character_id=request.source_character_id,
+            target_character_id=request.target_character_id,
+            label=request.label or request.relation_type,
+            directionality=request.directionality,
+            relation_kind=request.relation_kind,
             description=request.description,
+            status=request.status,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/relationships/{relationship_id}/restore")
+def relationships_restore(
+    novel_id: UUID,
+    relationship_id: UUID,
+    request: CompleteVersionedRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return restore_character_relationship(
+            session,
+            novel_id,
+            relationship_id,
+            expected_version=request.expected_version,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/relationships/{relationship_id}/history")
+def relationships_history(
+    novel_id: UUID,
+    relationship_id: UUID,
+    session: Session = Depends(get_session),
+) -> list[dict[str, object]]:
+    return list_character_relationship_history(session, novel_id, relationship_id)
+
+
+@router.get("/novels/{novel_id}/relationship-graph-view")
+def relationship_graph_view_show(
+    novel_id: UUID,
+    name: str = Query(default="默认视图", min_length=1, max_length=120),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return get_relationship_graph_view(session, novel_id, name=name)
+
+
+@router.put("/novels/{novel_id}/relationship-graph-view")
+def relationship_graph_view_save(
+    novel_id: UUID,
+    request: SaveRelationshipGraphViewRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return save_relationship_graph_view(
+            session,
+            novel_id,
+            expected_version=request.expected_version,
+            name=request.name,
+            layout_algorithm=request.layout_algorithm,
+            random_seed=request.random_seed,
+            zoom=request.zoom,
+            pan_x=request.pan_x,
+            pan_y=request.pan_y,
+            positions=[position.model_dump() for position in request.positions],
         )
     except Exception as error:
         session.rollback()

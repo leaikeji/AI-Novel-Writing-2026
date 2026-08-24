@@ -291,6 +291,69 @@ def test_intelligence_payload_rejects_empty_success() -> None:
         normalize_intelligence_generation_json({"items": []}, '{"items":[]}')
 
 
+def test_intelligence_relationship_preserves_graph_details() -> None:
+    payload = {
+        "items": [
+            {
+                "item_type": "relationship",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "结成同盟",
+                "object": "共同调查旧电台档案",
+                "source_text": "我们一起把这件事查到底",
+                "reasoning_summary": "形成稳定协作关系",
+                "confidence": 92,
+                "relationship_details": {
+                    "source_name": "苏晚",
+                    "target_name": "陆沉舟",
+                    "directionality": "undirected",
+                    "relation_kind": "ally",
+                    "label": "调查同盟",
+                    "description": "两人共同调查旧电台档案。",
+                },
+            }
+        ]
+    }
+
+    items = normalize_intelligence_generation_json(payload, "")
+
+    assert items[0]["relationship_details"]["relation_kind"] == "ally"
+    assert items[0]["relationship_details"]["source_name"] == "苏晚"
+
+
+def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slot() -> None:
+    payload = {
+        "complete_snapshot": True,
+        "relationships": [
+            {
+                "source_name": "苏晚",
+                "target_name": "陆沉舟",
+                "directionality": "undirected",
+                "relation_kind": "ally",
+                "label": "临时合作",
+                "description": "较弱判断",
+                "confidence": 70,
+                "evidence": ["共同查档案"],
+            },
+            {
+                "source_name": "陆沉舟",
+                "target_name": "苏晚",
+                "directionality": "undirected",
+                "relation_kind": "ally",
+                "label": "调查同盟",
+                "description": "多章稳定合作",
+                "confidence": 94,
+                "evidence": ["共同查档案", "共同修复电台"],
+            },
+        ],
+    }
+
+    result = normalize_creative_generation_json("relationship_graph", payload, "")
+
+    assert result["complete_snapshot"] is True
+    assert len(result["relationships"]) == 1
+    assert result["relationships"][0]["label"] == "调查同盟"
+
+
 def test_review_payload_recovers_envelope_and_valid_embedded_issues() -> None:
     malformed = (
         '{"passed":false,"summary":"发现两处连续性问题","issues":['

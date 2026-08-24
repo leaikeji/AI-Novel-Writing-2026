@@ -10,5 +10,11 @@ export default defineConfig({
     outDir: "frontend/dist",
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: {
+      // QwenPaw evaluates PawApp frontends from a Blob URL. Relative chunk
+      // specifiers cannot be resolved from that origin, so every dynamic
+      // import must be inlined into the single distributable module.
+      output: { inlineDynamicImports: true },
+    },
   },
 });

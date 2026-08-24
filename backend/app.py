@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
+from .creative_services import sync_relationships_from_intelligence_proposal
 from .database import database_status, get_session
 from .model_runtime import (
     ModelVerificationError,
@@ -549,12 +550,18 @@ def intelligence_proposals_commit(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     try:
-        return commit_intelligence_items(
+        result = commit_intelligence_items(
             session,
             proposal_id,
             accepted_item_ids=request.accepted_item_ids,
             item_overrides=request.item_overrides,
         )
+        relationship_sync = sync_relationships_from_intelligence_proposal(
+            session,
+            proposal_id,
+        )
+        result["relationship_sync"] = relationship_sync["changes"]
+        return result
     except Exception as error:
         session.rollback()
         _raise_domain(error)

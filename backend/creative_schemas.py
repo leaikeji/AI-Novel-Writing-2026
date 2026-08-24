@@ -68,14 +68,78 @@ class UpdateCharacterRequest(CreateCharacterRequest):
 class CreateRelationshipRequest(BaseModel):
     source_character_id: UUID
     target_character_id: UUID
-    relation_type: str = Field(min_length=1, max_length=80)
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+    relation_type: str | None = Field(default=None, min_length=1, max_length=80)
+    directionality: str = Field(default="undirected", pattern="^(directed|undirected)$")
+    relation_kind: str = Field(
+        default="other",
+        pattern="^(family|colleague|mentor|ally|enemy|romance|other)$",
+    )
     description: str = Field(default="", max_length=10_000)
 
 
 class UpdateRelationshipRequest(BaseModel):
     expected_version: int = Field(ge=1)
-    relation_type: str = Field(min_length=1, max_length=80)
-    description: str = Field(default="", max_length=10_000)
+    source_character_id: UUID | None = None
+    target_character_id: UUID | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+    relation_type: str | None = Field(default=None, min_length=1, max_length=80)
+    directionality: str | None = Field(default=None, pattern="^(directed|undirected)$")
+    relation_kind: str | None = Field(
+        default=None,
+        pattern="^(family|colleague|mentor|ally|enemy|romance|other)$",
+    )
+    description: str | None = Field(default=None, max_length=10_000)
+    status: str | None = Field(default=None, pattern="^(active|resolved)$")
+
+
+class RelationshipBatchOperation(BaseModel):
+    action: str = Field(pattern="^(create|update|archive|restore)$")
+    client_id: str | None = Field(default=None, max_length=120)
+    relationship_id: UUID | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+    source_character_id: UUID | None = None
+    target_character_id: UUID | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+    relation_type: str | None = Field(default=None, min_length=1, max_length=80)
+    directionality: str | None = Field(
+        default=None, pattern="^(directed|undirected)$"
+    )
+    relation_kind: str | None = Field(
+        default=None,
+        pattern="^(family|colleague|mentor|ally|enemy|romance|other)$",
+    )
+    description: str | None = Field(default=None, max_length=10_000)
+    status: str | None = Field(default=None, pattern="^(active|resolved)$")
+
+
+class BatchRelationshipsRequest(BaseModel):
+    operations: list[RelationshipBatchOperation] = Field(min_length=1, max_length=200)
+
+
+class SyncRelationshipsRequest(BaseModel):
+    force_new: bool = False
+
+
+class RelationshipGraphPositionRequest(BaseModel):
+    character_id: UUID
+    x: float = Field(ge=-1_000_000, le=1_000_000)
+    y: float = Field(ge=-1_000_000, le=1_000_000)
+    pinned: bool = False
+
+
+class SaveRelationshipGraphViewRequest(BaseModel):
+    expected_version: int = Field(ge=0)
+    name: str = Field(default="默认视图", min_length=1, max_length=120)
+    layout_algorithm: str = Field(default="force_atlas_2", max_length=40)
+    random_seed: str = Field(default="relationship-v1", min_length=1, max_length=64)
+    zoom: float = Field(gt=0, le=10)
+    pan_x: float = Field(ge=-1_000_000, le=1_000_000)
+    pan_y: float = Field(ge=-1_000_000, le=1_000_000)
+    positions: list[RelationshipGraphPositionRequest] = Field(
+        default_factory=list,
+        max_length=2000,
+    )
 
 
 class CreateStorylineRequest(BaseModel):

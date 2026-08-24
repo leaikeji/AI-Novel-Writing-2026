@@ -17,6 +17,10 @@ import {
   VolumeRecord,
 } from "./types";
 import { compressCover } from "./cover-utils";
+import { chapterDisplayTitle } from "./presenters";
+import { RelationshipEditor } from "./relationship-editor";
+import { RelationshipWorkspace } from "./relationship-workspace";
+import { rememberWorkbenchRoleView } from "./workbench-route";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -49,7 +53,6 @@ const {
   DownloadOutlined,
   EditOutlined,
   FileTextOutlined,
-  LinkOutlined,
   PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -129,175 +132,6 @@ function downloadExport(record: NovelExportRecord, title: string): void {
   link.download = `${title}.${extension}`;
   link.click();
   URL.revokeObjectURL(url);
-}
-
-
-interface RelationshipCanvasProps {
-  characters: NovelCharacterRecord[];
-  relationships: CharacterRelationshipRecord[];
-  onCharacterClick?: (character: NovelCharacterRecord) => void;
-  onRelationshipClick?: (relationship: CharacterRelationshipRecord) => void;
-}
-
-
-function RelationshipCanvas({ characters, relationships, onCharacterClick, onRelationshipClick }: RelationshipCanvasProps) {
-  const canvasRef = React.useRef(null as HTMLCanvasElement | null);
-  const graphRef = React.useRef({
-    points: new Map<string, { x: number; y: number; radius: number }>(),
-    lines: [] as Array<{ relationship: CharacterRelationshipRecord; start: { x: number; y: number }; end: { x: number; y: number } }>,
-  });
-
-  React.useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || characters.length === 0) return;
-    const draw = () => {
-      const rect = canvas.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
-      const context = canvas.getContext("2d");
-      if (!context) return;
-      context.scale(ratio, ratio);
-      context.clearRect(0, 0, rect.width, rect.height);
-      const centerX = rect.width / 2;
-      const centerY = rect.height / 2;
-      const radiusX = Math.max(145, Math.min(245, rect.width * 0.18));
-      const radiusY = Math.max(105, Math.min(165, rect.height * 0.24));
-      const points = new Map<string, { x: number; y: number; radius: number }>();
-      characters.forEach((character, index) => {
-        const angle = -Math.PI / 2 + (Math.PI * 2 * index) / characters.length;
-        points.set(character.id, {
-          x: centerX + Math.cos(angle) * radiusX,
-          y: centerY + Math.sin(angle) * radiusY,
-          radius: character.role_type === "main" ? 42 : 38,
-        });
-      });
-      const lines: Array<{ relationship: CharacterRelationshipRecord; start: { x: number; y: number }; end: { x: number; y: number } }> = [];
-      context.lineWidth = 1.5;
-      context.font = "13px -apple-system, BlinkMacSystemFont, sans-serif";
-      relationships.forEach((relation) => {
-        const source = points.get(relation.source_character_id);
-        const target = points.get(relation.target_character_id);
-        if (!source || !target) return;
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-        const ux = dx / distance;
-        const uy = dy / distance;
-        const startRadius = 42;
-        const endRadius = 42;
-        const startX = source.x + ux * startRadius;
-        const startY = source.y + uy * startRadius;
-        const endX = target.x - ux * endRadius;
-        const endY = target.y - uy * endRadius;
-        lines.push({ relationship: relation, start: { x: startX, y: startY }, end: { x: endX, y: endY } });
-        context.strokeStyle = "#a8adb6";
-        context.beginPath();
-        context.moveTo(startX, startY);
-        context.lineTo(endX, endY);
-        context.stroke();
-        context.fillStyle = "#a8adb6";
-        context.beginPath();
-        context.moveTo(endX, endY);
-        context.lineTo(endX - ux * 10 - uy * 5, endY - uy * 10 + ux * 5);
-        context.lineTo(endX - ux * 10 + uy * 5, endY - uy * 10 - ux * 5);
-        context.closePath();
-        context.fill();
-        const textX = (startX + endX) / 2;
-        const textY = (startY + endY) / 2 - 8;
-        const width = context.measureText(relation.relation_type).width + 14;
-        context.fillStyle = "rgba(255,255,255,.94)";
-        context.fillRect(textX - width / 2, textY - 12, width, 20);
-        context.fillStyle = "#717783";
-        context.textAlign = "center";
-        context.fillText(relation.relation_type, textX, textY + 3);
-      });
-      characters.forEach((character) => {
-        const point = points.get(character.id);
-        if (!point) return;
-        const main = character.role_type === "main";
-        const nodeRadius = point.radius;
-        context.fillStyle = main ? "#ff7548" : "#6a7ce7";
-        context.shadowColor = main ? "rgba(255,117,72,.22)" : "rgba(106,124,231,.2)";
-        context.shadowBlur = 14;
-        context.beginPath();
-        context.arc(point.x, point.y, nodeRadius, 0, Math.PI * 2);
-        context.fill();
-        context.shadowBlur = 0;
-        context.fillStyle = "#fff";
-        context.font = "600 15px -apple-system, BlinkMacSystemFont, sans-serif";
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.fillText(character.name, point.x, point.y);
-      });
-      graphRef.current = { points, lines };
-    };
-    draw();
-    window.addEventListener("resize", draw);
-    return () => window.removeEventListener("resize", draw);
-  }, [characters, relationships]);
-
-  const handleClick = (event: any) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const character = characters.find((item) => {
-      const point = graphRef.current.points.get(item.id);
-      return Boolean(point && Math.hypot(x - point.x, y - point.y) <= point.radius + 4);
-    });
-    if (character) {
-      onCharacterClick?.(character);
-      return;
-    }
-    const relationship = graphRef.current.lines.find((item: { relationship: CharacterRelationshipRecord; start: { x: number; y: number }; end: { x: number; y: number } }) => {
-      const dx = item.end.x - item.start.x;
-      const dy = item.end.y - item.start.y;
-      const lengthSquared = dx * dx + dy * dy;
-      const t = lengthSquared ? Math.max(0, Math.min(1, ((x - item.start.x) * dx + (y - item.start.y) * dy) / lengthSquared)) : 0;
-      const nearestX = item.start.x + t * dx;
-      const nearestY = item.start.y + t * dy;
-      return Math.hypot(x - nearestX, y - nearestY) <= 10;
-    })?.relationship;
-    if (relationship) onRelationshipClick?.(relationship);
-  };
-
-  const hitPosition = (index: number) => {
-    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / Math.max(1, characters.length);
-    return { x: 50 + Math.cos(angle) * 18, y: 50 + Math.sin(angle) * 24 };
-  };
-
-  return h(
-    "div",
-    { className: "mb-relation-stage" },
-    h("canvas", { ref: canvasRef, className: "mb-relation-canvas", "aria-label": "角色关系图", onClick: handleClick }),
-    h(
-      "div",
-      { className: "mb-relation-hit-layer" },
-      ...characters.map((character, index) => {
-        const point = hitPosition(index);
-        return h("button", { key: character.id, type: "button", className: "mb-relation-node-hit", style: { left: `${point.x}%`, top: `${point.y}%` }, onClick: () => onCharacterClick?.(character), "aria-label": `编辑角色${character.name}` });
-      }),
-      ...relationships.map((relationship) => {
-        const sourceIndex = characters.findIndex((item) => item.id === relationship.source_character_id);
-        const targetIndex = characters.findIndex((item) => item.id === relationship.target_character_id);
-        if (sourceIndex < 0 || targetIndex < 0) return null;
-        const source = hitPosition(sourceIndex);
-        const target = hitPosition(targetIndex);
-        return h("button", { key: relationship.id, type: "button", className: "mb-relation-line-hit", style: { left: `${(source.x + target.x) / 2}%`, top: `${(source.y + target.y) / 2}%` }, onClick: () => onRelationshipClick?.(relationship), "aria-label": `编辑关系${relationship.relation_type}` });
-      }),
-    ),
-    h(
-      "ul",
-      { className: "mb-relation-a11y" },
-      ...relationships.map((relation) => {
-        const source = characters.find((item) => item.id === relation.source_character_id)?.name ?? "未知角色";
-        const target = characters.find((item) => item.id === relation.target_character_id)?.name ?? "未知角色";
-        return h("li", { key: relation.id }, `${source} ${relation.relation_type} ${target}`);
-      }),
-    ),
-  );
 }
 
 
@@ -1401,7 +1235,9 @@ export function StudioProjectView({
   const [relationships, setRelationships] = React.useState([] as CharacterRelationshipRecord[]);
   const [storylines, setStorylines] = React.useState([] as StorylineRecord[]);
   const [foreshadows, setForeshadows] = React.useState([] as ForeshadowRecord[]);
-  const [roleTab, setRoleTab] = React.useState("list" as "list" | "graph");
+  const [roleTab, setRoleTab] = React.useState(
+    (new URLSearchParams(window.location.search).get("role_view") === "graph" ? "graph" : "list") as "list" | "graph",
+  );
   const [clueTab, setClueTab] = React.useState("main" as StorylineType);
   const [settingsTab, setSettingsTab] = React.useState("template" as "template" | "foreshadow");
   const [expandedVolumes, setExpandedVolumes] = React.useState([] as string[]);
@@ -1416,8 +1252,9 @@ export function StudioProjectView({
   const [characterEditing, setCharacterEditing] = React.useState(null as NovelCharacterRecord | null);
   const [characterForm, setCharacterForm] = React.useState({ role_type: "main" as "main" | "supporting", name: "", gender: "", age: "", identity: "", personality: "", description: "" });
   const [relationshipOpen, setRelationshipOpen] = React.useState(false);
-  const [relationshipEditing, setRelationshipEditing] = React.useState(null as CharacterRelationshipRecord | null);
-  const [relationshipForm, setRelationshipForm] = React.useState({ source_character_id: "", target_character_id: "", relation_type: "", description: "" });
+  const [relationshipFocusCharacterId, setRelationshipFocusCharacterId] = React.useState(null as string | null);
+  const [relationshipFocusId, setRelationshipFocusId] = React.useState(null as string | null);
+  const [relationshipStartWithNew, setRelationshipStartWithNew] = React.useState(false);
   const [storylineOpen, setStorylineOpen] = React.useState(false);
   const [storylineEditing, setStorylineEditing] = React.useState(null as StorylineRecord | null);
   const [storylineForm, setStorylineForm] = React.useState({ storyline_type: "main" as StorylineType, title: "", description: "", status: "active", progress: 0 });
@@ -1438,6 +1275,20 @@ export function StudioProjectView({
   const orderedVolumes = volumeDescending ? [...volumes].reverse() : volumes;
   const ungrouped = novel.tree.find((item: VolumeRecord) => item.id === null);
   const chapterDocuments = novel.tree.flatMap((volume: VolumeRecord) => volume.documents).filter((item: DocumentRecord) => item.kind === "chapter");
+  const chapterNumberById = new Map(
+    [...chapterDocuments]
+      .sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position)
+      .map((document: DocumentRecord, index: number) => [document.id, index + 1]),
+  );
+
+  const setRoleSubview = (next: "list" | "graph") => {
+    setRoleTab(next);
+    rememberWorkbenchRoleView(novel.id, next);
+    const url = new URL(window.location.href);
+    if (next === "graph") url.searchParams.set("role_view", "graph");
+    else url.searchParams.delete("role_view");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  };
 
   const loadDomains = React.useCallback(async () => {
     const failures: string[] = [];
@@ -1683,40 +1534,34 @@ export function StudioProjectView({
   }, "保存角色失败");
 
   const deleteCharacter = (item: NovelCharacterRecord) => Modal.confirm({
-    className: "anw-modal", title: `删除角色“${item.name}”？`, content: "相关角色关系也会一并删除。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true },
+    className: "anw-modal", title: `归档角色“${item.name}”？`, content: "角色和相关关系会归档并保留历史记录。", okText: "归档", cancelText: "取消", okButtonProps: { danger: true },
     onOk: () => perform(async () => {
       await apiRequest(`/novels/${novel.id}/characters/${item.id}?expected_version=${item.version}`, { method: "DELETE" });
       await loadDomains();
-    }, "删除角色失败"),
+    }, "归档角色失败"),
   });
 
-  const openRelationshipForm = (item: CharacterRelationshipRecord | null = null) => {
-    setRelationshipEditing(item);
-    setRelationshipForm({
-      source_character_id: item?.source_character_id ?? characters[0]?.id ?? "",
-      target_character_id: item?.target_character_id ?? characters[1]?.id ?? "",
-      relation_type: item?.relation_type ?? "",
-      description: item?.description ?? "",
-    });
+  const openRelationshipsForCharacter = (characterId: string) => {
+    setRelationshipFocusCharacterId(characterId);
+    setRelationshipFocusId(null);
+    setRelationshipStartWithNew(false);
     setRelationshipOpen(true);
   };
 
-  const saveRelationship = () => perform(async () => {
-    const base = { relation_type: relationshipForm.relation_type.trim(), description: relationshipForm.description.trim() };
-    const payload = relationshipEditing
-      ? { ...base, expected_version: relationshipEditing.version }
-      : { ...base, source_character_id: relationshipForm.source_character_id, target_character_id: relationshipForm.target_character_id };
-    await apiRequest(`/novels/${novel.id}/relationships${relationshipEditing ? `/${relationshipEditing.id}` : ""}`, {
-      method: relationshipEditing ? "PUT" : "POST", body: JSON.stringify(payload),
-    });
-    setRelationshipOpen(false);
-    await loadDomains();
-  }, "保存角色关系失败");
+  const openRelationshipById = (relationshipId: string) => {
+    const relationship = relationships.find((item: CharacterRelationshipRecord) => item.id === relationshipId);
+    setRelationshipFocusCharacterId(relationship?.source_character_id ?? null);
+    setRelationshipFocusId(relationshipId);
+    setRelationshipStartWithNew(false);
+    setRelationshipOpen(true);
+  };
 
-  const deleteRelationship = (item: CharacterRelationshipRecord) => perform(async () => {
-    await apiRequest(`/novels/${novel.id}/relationships/${item.id}?expected_version=${item.version}`, { method: "DELETE" });
-    await loadDomains();
-  }, "删除角色关系失败");
+  const openNewRelationship = () => {
+    setRelationshipFocusCharacterId(null);
+    setRelationshipFocusId(null);
+    setRelationshipStartWithNew(true);
+    setRelationshipOpen(true);
+  };
 
   const openStorylineForm = (type: StorylineType, item: StorylineRecord | null = null) => {
     setStorylineEditing(item);
@@ -1782,7 +1627,7 @@ export function StudioProjectView({
     "article",
     { key: document.id, className: "mb-chapter-card" },
     h("button", { type: "button", className: "mb-chapter-open", onClick: () => onSelectDocument(document.id) },
-      h("strong", null, document.title),
+      h("strong", null, chapterDisplayTitle(chapterNumberById.get(document.id) ?? 1, document.title)),
       h("span", null, `${document.visible_character_count} 字`),
     ),
     h(
@@ -1910,8 +1755,17 @@ export function StudioProjectView({
     : h(
         "div",
         { className: "mb-relationship-panel" },
-        h("div", { className: "mb-relation-heading" }, h("h3", null, "角色关系网"), h("p", null, "点击角色/连线可编辑关系 | 双指缩放 | 拖动调整位置"), relationships.length === 0 && characters.length >= 2 ? h(Button, { className: "anw-primary-button", icon: h(LinkOutlined), onClick: () => openRelationshipForm() }, "新增关系") : null),
-        characters.length ? h(RelationshipCanvas, { characters, relationships, onCharacterClick: (item: NovelCharacterRecord) => openCharacterForm(item.role_type, item), onRelationshipClick: (item: CharacterRelationshipRecord) => openRelationshipForm(item) }) : h(Empty, { description: "请先新增至少两个角色" }),
+        characters.length
+          ? h(RelationshipWorkspace, {
+              novelId: novel.id,
+              characters,
+              relationships,
+              onEditCharacter: openRelationshipsForCharacter,
+              onEditRelationship: openRelationshipById,
+              onAddRelationship: openNewRelationship,
+              onRelationshipsChanged: setRelationships,
+            })
+          : h(Empty, { description: "请先新增至少两个角色" }),
       );
 
   const storylineLabels: Record<StorylineType, string> = { main: "主线", support: "支线", romance: "感情线", faction: "势力线" };
@@ -1970,7 +1824,7 @@ export function StudioProjectView({
     : section === "outline"
       ? h(Button, { className: "anw-primary-button", icon: h(ReloadOutlined), onClick: () => openOutline(hasOutline ? 1 : 0) }, hasOutline ? "重新生成" : "生成大纲")
       : section === "roles"
-        ? h("div", { className: "mb-top-tabs" }, h("button", { type: "button", className: roleTab === "list" ? "is-active" : "", onClick: () => setRoleTab("list") }, "角色列表"), h("button", { type: "button", className: roleTab === "graph" ? "is-active" : "", onClick: () => setRoleTab("graph") }, "关系网"))
+        ? h("div", { className: "mb-top-tabs" }, h("button", { type: "button", className: roleTab === "list" ? "is-active" : "", onClick: () => setRoleSubview("list") }, "角色列表"), h("button", { type: "button", className: roleTab === "graph" ? "is-active" : "", onClick: () => setRoleSubview("graph") }, "关系网"))
         : section === "clues"
           ? h("div", { className: "mb-top-tabs is-four" }, ...(Object.keys(storylineLabels) as StorylineType[]).map((type) => h("button", { key: type, type: "button", className: clueTab === type ? "is-active" : "", onClick: () => setClueTab(type) }, storylineLabels[type])))
           : h("div", { className: "mb-top-tabs is-settings" }, h("button", { type: "button", className: settingsTab === "template" ? "is-active" : "", onClick: () => setSettingsTab("template") }, "模板设定"), h("button", { type: "button", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => setSettingsTab("foreshadow") }, "伏笔管理"));
@@ -2001,7 +1855,7 @@ export function StudioProjectView({
               return h("button", { key: item, type: "button", className: section === item ? "is-active" : "", onClick: () => onSectionChange(item) }, h(Icon), h("span", null, sectionLabel(item)));
             }),
           ),
-          h(Button, { className: "mb-back-center", onClick: onBack }, "返回创作中心"),
+          h("div", { className: "mb-back-center-wrap" }, h(Button, { className: "mb-back-center", onClick: onBack }, "返回创作中心")),
         ),
         h(
           "section",
@@ -2096,27 +1950,27 @@ export function StudioProjectView({
       h("div", { className: "mb-form-stack" },
         field("角色类型", h(Select, { value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => setCharacterForm({ ...characterForm, role_type: value }) })),
         field("角色姓名", h(Input, { value: characterForm.name, onChange: (event: any) => setCharacterForm({ ...characterForm, name: event.target.value }) })),
-        h("div", { className: "mb-form-grid mb-form-grid-three" },
+        h("div", { className: "mb-form-grid mb-character-demographics" },
           field("性别", h(Select, { allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }], onChange: (value: string) => setCharacterForm({ ...characterForm, gender: value || "" }) })),
           field("年龄", h(Input, { value: characterForm.age, onChange: (event: any) => setCharacterForm({ ...characterForm, age: event.target.value }) })),
-          field("身份", h(Input, { value: characterForm.identity, onChange: (event: any) => setCharacterForm({ ...characterForm, identity: event.target.value }) })),
         ),
+        field("身份", h(Input.TextArea, { className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => setCharacterForm({ ...characterForm, identity: event.target.value }) })),
         field("性格", h(Input.TextArea, { rows: 3, value: characterForm.personality, onChange: (event: any) => setCharacterForm({ ...characterForm, personality: event.target.value }) })),
         field("人物小传", h(Input.TextArea, { rows: 5, value: characterForm.description, onChange: (event: any) => setCharacterForm({ ...characterForm, description: event.target.value }) })),
         h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "保存"),
       ),
     ),
-    h(Modal, { open: relationshipOpen, className: "anw-modal mb-entity-modal", width: 620, title: relationshipEditing ? "编辑角色关系" : "新增角色关系", footer: null, onCancel: () => setRelationshipOpen(false) },
-      h("div", { className: "mb-form-stack" },
-        h("div", { className: "mb-form-grid" },
-          field("起点角色", h(Select, { disabled: Boolean(relationshipEditing), value: relationshipForm.source_character_id || undefined, options: characters.map((item: NovelCharacterRecord) => ({ label: item.name, value: item.id })), onChange: (value: string) => setRelationshipForm({ ...relationshipForm, source_character_id: value }) })),
-          field("终点角色", h(Select, { disabled: Boolean(relationshipEditing), value: relationshipForm.target_character_id || undefined, options: characters.map((item: NovelCharacterRecord) => ({ label: item.name, value: item.id })), onChange: (value: string) => setRelationshipForm({ ...relationshipForm, target_character_id: value }) })),
-        ),
-        field("关系名称", h(Input, { value: relationshipForm.relation_type, placeholder: "例如：师生、旧友、竞争对手", onChange: (event: any) => setRelationshipForm({ ...relationshipForm, relation_type: event.target.value }) })),
-        field("关系说明", h(Input.TextArea, { rows: 4, value: relationshipForm.description, onChange: (event: any) => setRelationshipForm({ ...relationshipForm, description: event.target.value }) })),
-        h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !relationshipForm.source_character_id || !relationshipForm.target_character_id || relationshipForm.source_character_id === relationshipForm.target_character_id || !relationshipForm.relation_type.trim(), onClick: () => void saveRelationship() }, "保存"),
-      ),
-    ),
+    h(RelationshipEditor, {
+      novelId: novel.id,
+      open: relationshipOpen,
+      characters,
+      relationships,
+      focusCharacterId: relationshipFocusCharacterId,
+      focusRelationshipId: relationshipFocusId,
+      startWithNew: relationshipStartWithNew,
+      onClose: () => setRelationshipOpen(false),
+      onSaved: loadDomains,
+    }),
     h(Modal, { open: storylineOpen, className: "anw-modal mb-entity-modal", width: 680, title: storylineEditing ? "编辑故事线" : `新增${storylineLabels[storylineForm.storyline_type as StorylineType]}`, footer: null, onCancel: () => setStorylineOpen(false) },
       h("div", { className: "mb-form-stack" },
         field("故事线类型", h(Select, { value: storylineForm.storyline_type, options: (Object.keys(storylineLabels) as StorylineType[]).map((type) => ({ label: storylineLabels[type], value: type })), onChange: (value: StorylineType) => setStorylineForm({ ...storylineForm, storyline_type: value }) })),

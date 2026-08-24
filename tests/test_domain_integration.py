@@ -10,34 +10,44 @@ from sqlalchemy.orm import Session
 from backend.creative_services import (
     EntityConflictError,
     archive_private_asset,
+    batch_character_relationships,
     build_novel_export,
     complete_chapter_creation_draft,
     complete_creative_generation,
     complete_novel_creation_draft,
     complete_outline_draft,
     create_asset_preset,
+    create_character_relationship,
     create_foreshadow,
     create_novel_character,
     create_private_asset,
     create_storyline,
+    delete_character_relationship,
     delete_volume,
+    get_relationship_graph_view,
     get_or_create_chapter_creation_draft,
     get_or_create_novel_creation_draft,
     get_or_create_outline_draft,
     list_creative_generations,
+    list_character_relationship_history,
+    list_character_relationships,
     list_foreshadows,
     list_novel_characters,
     list_storylines,
     reorder_chapters,
     reorder_volumes,
+    restore_character_relationship,
+    save_relationship_graph_view,
     snapshot_private_assets,
     start_creative_generation,
+    sync_relationships_from_intelligence_proposal,
     update_chapter_creation_draft,
     update_foreshadow,
     update_novel_settings,
     update_novel_creation_draft,
     update_outline_draft,
     update_private_asset,
+    update_character_relationship,
 )
 from backend.models import (
     CandidateRevision,
@@ -175,6 +185,8 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
                 "'derived_source_bindings','novel_creation_drafts','private_assets',"
                 "'asset_presets','asset_preset_items','outline_drafts',"
                 "'novel_characters','character_relationships','storylines',"
+                "'character_relationship_revisions','relationship_graph_views',"
+                "'relationship_graph_positions',"
                 "'foreshadows','chapter_creation_drafts','creative_generation_jobs',"
                 "'novel_exports')"
             )
@@ -204,6 +216,9 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
         "outline_drafts",
         "novel_characters",
         "character_relationships",
+        "character_relationship_revisions",
+        "relationship_graph_views",
+        "relationship_graph_positions",
         "storylines",
         "foreshadows",
         "chapter_creation_drafts",
@@ -230,6 +245,277 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
         "validation_state",
         "attempt",
     } <= generation_columns
+
+    relationship_columns = {
+        row[0]
+        for row in session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema='public' AND table_name='character_relationships'"
+            )
+        )
+    }
+    assert {
+        "directionality",
+        "relation_kind",
+        "label",
+        "normalized_label",
+        "relation_pair_key",
+        "current_revision_id",
+        "archived_at",
+        "manual_override",
+        "confidence",
+        "evidence_json",
+        "source_generation_job_id",
+    } <= relationship_columns
+
+
+def test_sync_progress_incrementally_materializes_relationships_and_respects_manual_override(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-同步进展关系网")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    source = create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="旧电台修复师",
+        details={},
+    )
+    target = create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="陆沉舟",
+        description="灯塔维护工程师",
+        details={},
+    )
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="苏晚与陆沉舟约定共同调查旧电台档案。陆沉舟说：『我们一起查到底。』",
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                "item_type": "relationship",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "结成同盟",
+                "object": "共同调查旧电台档案",
+                "source_text": "我们一起查到底",
+                "reasoning_summary": "形成稳定协作关系",
+                "confidence": 93,
+                "relationship_details": {
+                    "source_name": "苏晚",
+                    "target_name": "陆沉舟",
+                    "directionality": "undirected",
+                    "relation_kind": "ally",
+                    "label": "调查同盟",
+                    "description": "两人共同调查旧电台档案。",
+                },
+            }
+        ],
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
+    )
+    commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=[UUID(item["id"]) for item in proposal["items"]],
+    )
+
+    first_sync = sync_relationships_from_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+    )
+    assert first_sync["changes"] == {"created": 1, "updated": 0, "skipped": 0}
+    generated = first_sync["relationships"][0]
+    assert generated["created_by"] == "ai_auto"
+    assert generated["manual_override"] is False
+    assert generated["proposal_item_id"] == proposal["items"][0]["id"]
+
+    edited = update_character_relationship(
+        session,
+        novel_id,
+        UUID(generated["id"]),
+        expected_version=generated["version"],
+        source_character_id=UUID(source["id"]),
+        target_character_id=UUID(target["id"]),
+        directionality="undirected",
+        relation_kind="ally",
+        label="作者确认的同盟",
+        description="作者手动修正后的关系。",
+    )
+    assert edited["manual_override"] is True
+
+    second_sync = sync_relationships_from_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+    )
+    assert second_sync["changes"]["skipped"] == 1
+    assert second_sync["relationships"][0]["label"] == "作者确认的同盟"
+
+
+def test_relationship_graph_is_versioned_atomic_and_layout_persistent(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-关系网闭环")
+    novel_id = UUID(novel["id"])
+    characters = [
+        create_novel_character(
+            session,
+            novel_id,
+            role_type="main" if index == 0 else "supporting",
+            name=name,
+            description="",
+            details={},
+        )
+        for index, name in enumerate(("苏晚", "陆沉舟", "周柚"))
+    ]
+    character_ids = [UUID(character["id"]) for character in characters]
+
+    family = create_character_relationship(
+        session,
+        novel_id,
+        source_character_id=character_ids[1],
+        target_character_id=character_ids[0],
+        directionality="undirected",
+        relation_kind="family",
+        label="姐弟",
+    )
+    assert family["source_character_id"] == min(
+        (str(character_ids[0]), str(character_ids[1]))
+    )
+    assert family["current_revision_id"] is not None
+
+    with pytest.raises(ValidationError, match="已经存在"):
+        create_character_relationship(
+            session,
+            novel_id,
+            source_character_id=character_ids[0],
+            target_character_id=character_ids[1],
+            directionality="undirected",
+            relation_kind="family",
+            label="  姐弟  ",
+        )
+    session.rollback()
+
+    mentor = create_character_relationship(
+        session,
+        novel_id,
+        source_character_id=character_ids[0],
+        target_character_id=character_ids[1],
+        directionality="directed",
+        relation_kind="mentor",
+        label="指导",
+    )
+    result = batch_character_relationships(
+        session,
+        novel_id,
+        operations=[
+            {
+                "action": "update",
+                "relationship_id": UUID(family["id"]),
+                "expected_version": family["version"],
+                "source_character_id": character_ids[0],
+                "target_character_id": character_ids[1],
+                "directionality": "undirected",
+                "relation_kind": "family",
+                "label": "姐弟",
+                "description": "共同守护旧电台。",
+            },
+            {
+                "action": "create",
+                "client_id": "new-ally",
+                "source_character_id": character_ids[1],
+                "target_character_id": character_ids[2],
+                "directionality": "undirected",
+                "relation_kind": "ally",
+                "label": "盟友",
+                "description": "",
+            },
+        ],
+    )
+    assert len(result["relationships"]) == 3
+    assert len(
+        list_character_relationship_history(session, novel_id, UUID(family["id"]))
+    ) == 2
+
+    delete_character_relationship(
+        session,
+        novel_id,
+        UUID(mentor["id"]),
+        expected_version=mentor["version"],
+    )
+    assert len(list_character_relationships(session, novel_id)) == 2
+    archived = next(
+        relationship
+        for relationship in list_character_relationships(
+            session, novel_id, include_archived=True
+        )
+        if relationship["id"] == mentor["id"]
+    )
+    restored = restore_character_relationship(
+        session,
+        novel_id,
+        UUID(mentor["id"]),
+        expected_version=archived["version"],
+    )
+    assert restored["archived_at"] is None
+
+    empty_view = get_relationship_graph_view(session, novel_id)
+    assert empty_view["version"] == 0
+    saved_view = save_relationship_graph_view(
+        session,
+        novel_id,
+        expected_version=0,
+        name="默认视图",
+        layout_algorithm="force_atlas_2",
+        random_seed="pytest-relationship-layout",
+        zoom=0.9,
+        pan_x=12,
+        pan_y=-8,
+        positions=[
+            {
+                "character_id": character_id,
+                "x": index * 120.0,
+                "y": index * -40.0,
+                "pinned": False,
+            }
+            for index, character_id in enumerate(character_ids)
+        ],
+    )
+    assert saved_view["version"] == 1
+    assert len(saved_view["positions"]) == 3
+    with pytest.raises(EntityConflictError):
+        save_relationship_graph_view(
+            session,
+            novel_id,
+            expected_version=0,
+            name="默认视图",
+            layout_algorithm="force_atlas_2",
+            random_seed="stale-client",
+            zoom=1,
+            pan_x=0,
+            pan_y=0,
+            positions=[],
+        )
+    session.rollback()
 
 
 def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:

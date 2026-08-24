@@ -1,7 +1,16 @@
 import pytest
 from uuid import uuid4
 
-from backend.creative_services import _storyline_topic_from_fact
+from backend.creative_services import (
+    _canonical_relationship_endpoints,
+    _inferred_relationship_kind,
+    _inferred_relationship_label,
+    _normalize_relationship_label,
+    _relationship_evidence_mentions_pair,
+    _relationship_known_character_mentions,
+    _relationship_pair_key,
+    _storyline_topic_from_fact,
+)
 from backend.models import StoryFact
 from backend.services import (
     ValidationError,
@@ -51,6 +60,63 @@ def test_storyline_topics_group_events_and_ignore_one_off_relationships() -> Non
     assert _storyline_topic_from_fact(
         _fact("storyline_event", "苏晚", "推开", "阁楼木门"), characters
     ) is None
+
+
+def test_undirected_relationships_have_canonical_endpoints_and_pair_keys() -> None:
+    left = uuid4()
+    right = uuid4()
+    first, second = _canonical_relationship_endpoints(left, right, "undirected")
+
+    assert str(first) < str(second)
+    assert _relationship_pair_key(left, right) == _relationship_pair_key(right, left)
+    assert _relationship_pair_key(first, second) == f"{first}:{second}"
+
+
+def test_directed_relationships_preserve_direction_and_reject_self_edges() -> None:
+    source = uuid4()
+    target = uuid4()
+
+    assert _canonical_relationship_endpoints(source, target, "directed") == (
+        source,
+        target,
+    )
+    with pytest.raises(ValidationError, match="自己建立关系"):
+        _canonical_relationship_endpoints(source, source, "directed")
+
+
+def test_relationship_labels_normalize_whitespace_and_case() -> None:
+    assert _normalize_relationship_label("  Old   FRIEND  ") == "old friend"
+
+
+def test_legacy_synced_relationship_gets_a_concise_graph_label() -> None:
+    source = "陈岁安与林知禾确立第一次真正意义上的同盟，共同调查档案篡改"
+    relation_kind = _inferred_relationship_kind(source)
+
+    assert relation_kind == "ally"
+    assert _inferred_relationship_label(relation_kind, source, "确立同盟") == "调查同盟"
+
+
+def test_relationship_sources_require_two_known_characters_and_pair_evidence() -> None:
+    known = ["陈岁安", "林知禾", "陈卫国"]
+
+    assert _relationship_known_character_mentions(
+        "陈岁安与林知禾在图书馆建立同盟。",
+        known,
+    ) == ["陈岁安", "林知禾"]
+    assert _relationship_known_character_mentions(
+        "林知夏与顾明川约定一起高考。",
+        known,
+    ) == []
+    assert _relationship_evidence_mentions_pair(
+        ["小说大纲：陈岁安与林知禾共同调查档案篡改"],
+        "陈岁安",
+        "林知禾",
+    )
+    assert not _relationship_evidence_mentions_pair(
+        ["小说大纲：林知禾开始调查档案"],
+        "陈岁安",
+        "林知禾",
+    )
 
 
 def test_clean_model_candidate_removes_only_final_agent_status_capsule() -> None:

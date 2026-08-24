@@ -355,6 +355,8 @@ export interface NovelCharacterRecord {
   name: string;
   description: string;
   details: Record<string, unknown>;
+  lifecycle_state: "active" | "archived";
+  archived_at: string | null;
   required_next_chapter: boolean;
   position: number;
   version: number;
@@ -362,15 +364,90 @@ export interface NovelCharacterRecord {
   updated_at: string | null;
 }
 
+export type RelationshipDirectionality = "directed" | "undirected" | "legacy_unspecified";
+
+export type RelationshipKind =
+  | "family"
+  | "colleague"
+  | "mentor"
+  | "ally"
+  | "enemy"
+  | "romance"
+  | "other";
+
 export interface CharacterRelationshipRecord {
   id: string;
   novel_id: string;
   source_character_id: string;
   target_character_id: string;
+  directionality: RelationshipDirectionality;
+  relation_kind: RelationshipKind;
+  label: string;
   relation_type: string;
   description: string;
+  status: "active" | "resolved" | "archived";
+  created_by: "manual" | "ai_accepted" | "ai_auto" | "import";
+  manual_override: boolean;
+  confidence: number | null;
+  evidence: string[];
+  source_generation_job_id: string | null;
+  relation_pair_key: string;
+  source_chapter_revision_id: string | null;
+  proposal_item_id: string | null;
+  current_revision_id: string | null;
+  archived_at: string | null;
   version: number;
   created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface RelationshipAutoSyncStatusRecord {
+  eligible: boolean;
+  stale: boolean;
+  state: "never" | "running" | "ready" | "failed";
+  input_hash: string;
+  last_synced_at: string | null;
+  ai_relationship_count: number;
+  manual_relationship_count: number;
+  source_summary: {
+    characters: number;
+    relationship_facts: number;
+    chapters: number;
+    excluded_chapters: number;
+  };
+  job: CreativeGenerationRecord | null;
+}
+
+export interface RelationshipAutoSyncResponseRecord {
+  job: CreativeGenerationRecord;
+  status: RelationshipAutoSyncStatusRecord;
+  changes: {
+    created: number;
+    updated: number;
+    archived: number;
+    skipped: number;
+  };
+  relationships: CharacterRelationshipRecord[];
+}
+
+export interface RelationshipGraphPositionRecord {
+  character_id: string;
+  x: number;
+  y: number;
+  pinned: boolean;
+}
+
+export interface RelationshipGraphViewRecord {
+  id: string | null;
+  novel_id: string;
+  name: string;
+  layout_algorithm: string;
+  random_seed: string;
+  zoom: number;
+  pan_x: number;
+  pan_y: number;
+  version: number;
+  positions: RelationshipGraphPositionRecord[];
   updated_at: string | null;
 }
 
