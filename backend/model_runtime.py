@@ -15,9 +15,81 @@ from typing import Any, Iterable
 
 MINIMAX_M3_MODEL_ID = "MiniMax-M3"
 
+INTELLIGENCE_ITEM_TYPES = {
+    "fact",
+    "character_state",
+    "relationship",
+    "storyline_event",
+    "foreshadow_progress",
+    "foreshadow_new",
+}
+
 
 class ModelVerificationError(RuntimeError):
     """Raised when a generation cannot be proven to have used MiniMax M3."""
+
+
+def _repair_character_array_boundaries(candidate: str) -> str:
+    """Close an item when a long ``characters`` array drops a boundary brace.
+
+    MiniMax occasionally emits ``...details:{...},{\"name\":...`` instead of
+    ``...details:{...}},{\"name\":...`` in an otherwise complete response.
+    We only repair structural boundaries inside the named array and never
+    touch quoted text.
+    """
+
+    match = re.search(r'"characters"\s*:\s*\[', candidate)
+    if match is None:
+        return candidate
+    start = match.end()
+    output = [candidate[:start]]
+    index = start
+    in_string = False
+    escaped = False
+    object_depth = 0
+    array_depth = 1
+    while index < len(candidate):
+        character = candidate[index]
+        if in_string:
+            output.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+        if character == '"':
+            in_string = True
+            output.append(character)
+            index += 1
+            continue
+        if character == "[":
+            array_depth += 1
+        elif character == "]":
+            if array_depth == 1 and object_depth > 0:
+                output.append("}" * object_depth)
+                object_depth = 0
+            array_depth -= 1
+            output.append(character)
+            index += 1
+            if array_depth == 0:
+                output.append(candidate[index:])
+                return "".join(output)
+            continue
+        elif character == "{":
+            object_depth += 1
+        elif character == "}":
+            object_depth = max(0, object_depth - 1)
+        elif character == "," and array_depth == 1 and object_depth > 0:
+            remainder = candidate[index + 1 :]
+            if re.match(r'\s*\{\s*"name"\s*:', remainder):
+                output.append("}" * object_depth)
+                object_depth = 0
+        output.append(character)
+        index += 1
+    return candidate
 
 
 def _normalized_model_id(value: str | None) -> str:
@@ -213,6 +285,14 @@ def parse_model_json(text: str) -> dict[str, Any]:
             return payload
     except json.JSONDecodeError:
         pass
+    repaired = _repair_character_array_boundaries(candidate)
+    if repaired != candidate:
+        try:
+            payload = json.loads(repaired)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
     decoder = json.JSONDecoder()
     for index, character in enumerate(candidate):
         if character not in "[{":
@@ -226,3 +306,323 @@ def parse_model_json(text: str) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     raise ModelVerificationError("MiniMax M3 没有返回可解析的 JSON 对象")
+
+
+def normalize_creative_generation_json(
+    kind: str,
+    payload: dict[str, Any],
+    output_text: str,
+) -> dict[str, Any]:
+    """Validate and recover the structured payload required by one helper kind.
+
+    A malformed top-level review object can still contain individually valid issue
+    objects.  The generic parser deliberately accepts embedded JSON, so without a
+    kind-aware check it may mistake the first issue for the entire review report.
+    Recover the report envelope and every independently valid issue, while refusing
+    to mark an incomplete negative review as successful.
+    """
+
+    text_field_by_kind = {
+        "outline_background": "background_text",
+        "outline_plot": "plot_text",
+        "outline_highlight": "highlight_text",
+    }
+    if kind in text_field_by_kind:
+        field = text_field_by_kind[kind]
+        value = str(payload.get(field) or "").strip()
+        if not value:
+            value = _extract_json_string_field(output_text, field)
+        if not value:
+            value = _plain_model_text(output_text, expected_field=field)
+        if not value:
+            raise ModelVerificationError(
+                f"MiniMax M3 {kind} 结果结构不完整，请重新生成"
+            )
+        return {field: value}
+
+    if kind == "novel_naming":
+        raw_titles = payload.get("titles")
+        if not isinstance(raw_titles, list):
+            raw_titles = payload.get("items")
+        titles = [str(item).strip() for item in raw_titles or [] if str(item).strip()]
+        if not titles:
+            raise ModelVerificationError("MiniMax M3 书名结果结构不完整，请重新生成")
+        return {"titles": titles}
+
+    if kind == "novel_cover":
+        cover_prompt = str(payload.get("cover_prompt") or "").strip()
+        if not cover_prompt:
+            cover_prompt = _extract_json_string_field(output_text, "cover_prompt")
+        if not cover_prompt:
+            cover_prompt = _plain_model_text(output_text, expected_field="cover_prompt")
+        if not cover_prompt:
+            raise ModelVerificationError("MiniMax M3 封面结果结构不完整，请重新生成")
+        keywords = payload.get("keywords")
+        return {
+            "cover_prompt": cover_prompt,
+            "subtitle": str(payload.get("subtitle") or "").strip(),
+            "keywords": [
+                str(item).strip()
+                for item in keywords or []
+                if str(item).strip()
+            ] if isinstance(keywords, list) else [],
+        }
+
+    if kind == "outline_characters":
+        raw_characters = payload.get("characters")
+        if not isinstance(raw_characters, list):
+            raw_characters = payload.get("items")
+        if not isinstance(raw_characters, list) and payload.get("name"):
+            raw_characters = [payload]
+        characters = [
+            item for item in raw_characters or []
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        ]
+        if not characters:
+            raise ModelVerificationError("MiniMax M3 角色结果结构不完整，请重新生成")
+        return {"characters": characters}
+
+    if kind == "chapter_storyline_recommendation":
+        raw_ids = payload.get("storyline_ids")
+        if not isinstance(raw_ids, list):
+            raise ModelVerificationError("MiniMax M3 故事线推荐结构不完整，请重新生成")
+        return {
+            "storyline_ids": [str(item).strip() for item in raw_ids if str(item).strip()],
+            "reason": str(payload.get("reason") or "").strip(),
+        }
+
+    if kind == "chapter_outline":
+        title = str(payload.get("title") or "").strip()
+        outline_text = str(payload.get("outline_text") or "").strip()
+        if not title:
+            title = _extract_json_string_field(output_text, "title")
+        if not outline_text:
+            outline_text = _extract_json_string_field(output_text, "outline_text")
+        if not title or not outline_text:
+            raise ModelVerificationError("MiniMax M3 章纲结果结构不完整，请重新生成")
+        return {"title": title, "outline_text": outline_text}
+
+    if kind != "review":
+        raise ModelVerificationError("MiniMax M3 返回了未知的创作生成结果")
+
+    passed = payload.get("passed") if isinstance(payload.get("passed"), bool) else None
+    summary = payload.get("summary") if isinstance(payload.get("summary"), str) else ""
+    summary = summary.strip()
+    issues = _normalized_review_issues(payload.get("issues"))
+
+    if passed is None:
+        match = re.search(r'"passed"\s*:\s*(true|false)', output_text, re.IGNORECASE)
+        if match is not None:
+            passed = match.group(1).lower() == "true"
+    if not summary:
+        summary = _extract_json_string_field(output_text, "summary")
+
+    recovered_issues = _review_issues_from_embedded_objects(output_text)
+    if not issues:
+        issues = recovered_issues
+    elif recovered_issues:
+        issues = _deduplicate_review_issues([*issues, *recovered_issues])
+
+    # ``parse_model_json`` may have returned one embedded issue object directly.
+    direct_issue = _normalized_review_issue(payload)
+    if direct_issue is not None:
+        issues = _deduplicate_review_issues([direct_issue, *issues])
+
+    if passed is None:
+        passed = False if issues else None
+    if issues:
+        passed = False
+    if passed is None or not summary or (passed is False and not issues):
+        raise ModelVerificationError(
+            "MiniMax M3 审稿结果结构不完整，请重新审稿"
+        )
+    return {"passed": passed, "summary": summary, "issues": issues}
+
+
+def normalize_intelligence_generation_json(
+    payload: dict[str, Any],
+    output_text: str,
+) -> list[dict[str, Any]]:
+    """Recover and validate story-ledger items from a MiniMax response.
+
+    Long Chinese evidence strings occasionally contain unescaped ASCII quotes.
+    That can invalidate the outer JSON envelope while leaving many individual
+    item objects intact.  ``parse_model_json`` intentionally returns the first
+    independently valid object in that situation, so this kind-aware layer also
+    scans every embedded object and deduplicates the valid intelligence items.
+    An empty result is never accepted as a successful synchronization.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    raw_items = payload.get("items")
+    if isinstance(raw_items, list):
+        candidates.extend(item for item in raw_items if isinstance(item, dict))
+    if payload.get("item_type"):
+        candidates.append(payload)
+    candidates.extend(_intelligence_items_from_embedded_objects(output_text))
+
+    output: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for candidate in candidates:
+        item = _normalized_intelligence_item(candidate)
+        if item is None:
+            continue
+        marker = (
+            item["item_type"],
+            item["subject"],
+            item["predicate"],
+            item["object"],
+            item["source_text"],
+        )
+        if marker in seen:
+            continue
+        seen.add(marker)
+        output.append(item)
+        if len(output) >= 200:
+            break
+    if not output:
+        raise ModelVerificationError(
+            "MiniMax M3 未返回可用的章节情报，请重新同步"
+        )
+    return output
+
+
+def _plain_model_text(output_text: str, *, expected_field: str) -> str:
+    """Recover useful prose when MiniMax returns text instead of a JSON envelope.
+
+    This fallback is intentionally limited to helpers whose entire result is one
+    text field.  If the expected JSON key is present but malformed, fail closed so
+    a partial JSON fragment is never saved as story content.
+    """
+
+    candidate = output_text.strip()
+    fenced = re.fullmatch(r"```(?:json|text)?\s*(.*?)\s*```", candidate, re.DOTALL)
+    if fenced:
+        candidate = fenced.group(1).strip()
+    if not candidate or f'"{expected_field}"' in candidate:
+        return ""
+    if candidate.startswith(("{", "[")):
+        return ""
+    return candidate
+
+
+def _extract_json_string_field(text: str, field: str) -> str:
+    match = re.search(rf'"{re.escape(field)}"\s*:\s*', text)
+    if match is None:
+        return ""
+    try:
+        value, _ = json.JSONDecoder().raw_decode(text[match.end() :])
+    except json.JSONDecodeError:
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    item_type = str(value.get("item_type") or "").strip()
+    subject = str(value.get("subject") or "").strip()
+    predicate = str(value.get("predicate") or "").strip()
+    object_text = str(value.get("object") or "").strip()
+    source_text = str(value.get("source_text") or "").strip()
+    if item_type not in INTELLIGENCE_ITEM_TYPES:
+        return None
+    if not subject or not predicate or not object_text or not source_text:
+        return None
+    try:
+        confidence = int(value.get("confidence", 50))
+    except (TypeError, ValueError):
+        confidence = 50
+    return {
+        "item_type": item_type,
+        "subject": subject,
+        "predicate": predicate,
+        "object": object_text,
+        "source_text": source_text,
+        "reasoning_summary": str(value.get("reasoning_summary") or "").strip(),
+        "confidence": max(0, min(confidence, 100)),
+    }
+
+
+def _intelligence_items_from_embedded_objects(
+    text: str,
+) -> list[dict[str, Any]]:
+    decoder = json.JSONDecoder()
+    output: list[dict[str, Any]] = []
+    for index, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        item = _normalized_intelligence_item(candidate)
+        if item is not None:
+            output.append(item)
+    return output
+
+
+def _normalized_review_issue(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    severity = str(value.get("severity") or "").strip().upper()
+    issue_type = str(value.get("type") or "").strip()
+    evidence = str(value.get("evidence") or "").strip()
+    suggestion = str(value.get("suggestion") or "").strip()
+    if severity not in {"P0", "P1", "P2", "P3"}:
+        return None
+    if not issue_type or not evidence or not suggestion:
+        return None
+    return {
+        "severity": severity,
+        "type": issue_type[:160],
+        "evidence": evidence[:4000],
+        "suggestion": suggestion[:4000],
+    }
+
+
+def _normalized_review_issues(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    return _deduplicate_review_issues(
+        issue
+        for item in value
+        if (issue := _normalized_review_issue(item)) is not None
+    )
+
+
+def _review_issues_from_embedded_objects(text: str) -> list[dict[str, str]]:
+    decoder = json.JSONDecoder()
+    issues: list[dict[str, str]] = []
+    for index, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        issue = _normalized_review_issue(candidate)
+        if issue is not None:
+            issues.append(issue)
+    return _deduplicate_review_issues(issues)
+
+
+def _deduplicate_review_issues(
+    values: Iterable[dict[str, str]],
+) -> list[dict[str, str]]:
+    output: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for value in values:
+        marker = (
+            value["severity"],
+            value["type"],
+            value["evidence"],
+            value["suggestion"],
+        )
+        if marker in seen:
+            continue
+        seen.add(marker)
+        output.append(value)
+        if len(output) >= 100:
+            break
+    return output

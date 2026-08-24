@@ -62,6 +62,7 @@ CREATIVE_GENERATION_KINDS = {
     "outline_characters",
     "outline_plot",
     "outline_highlight",
+    "chapter_storyline_recommendation",
     "chapter_outline",
     "review",
 }
@@ -203,12 +204,18 @@ def complete_novel_creation_draft(
     if not template_key and not template_name:
         raise ValidationError("请选择创作模板")
     title = _clean_title(str(data.get("title", "")), "小说名称")
+    author_name = str(data.get("author_name", "")).strip()
+    if not author_name:
+        raise ValidationError("请填写作者名称")
+    if len(author_name) > 120:
+        raise ValidationError("作者名称不能超过120个字符")
     cover_mode = str(data.get("cover_mode", "system"))
     if cover_mode not in {"ai", "system", "upload"}:
         raise ValidationError("请选择有效封面方式")
     novel = Novel(
         id=uuid4(),
         title=title,
+        author_name=author_name,
         description=str(data.get("description", "")).strip(),
         writing_type="long",
         audience=audience,
@@ -219,6 +226,7 @@ def complete_novel_creation_draft(
         template_name=template_name,
         template_data=dict(data.get("template_data") or {}),
         cover_mode=cover_mode,
+        cover_image_data=str(data.get("cover_image_data", "")),
     )
     volume = Volume(id=uuid4(), novel_id=novel.id, title="第一卷", position=1000)
     session.add_all((novel, volume))
@@ -483,8 +491,8 @@ def update_outline_draft(
     if not 1 <= step <= 5:
         raise ValidationError("大纲步骤必须在1到5之间")
     if target_chapter_count is not None:
-        if not 1 <= target_chapter_count <= 1000:
-            raise ValidationError("目标章节数必须在1到1000之间")
+        if not 10 <= target_chapter_count <= 10_000:
+            raise ValidationError("目标章节数必须在10到10000之间")
         draft.target_chapter_count = target_chapter_count
     if background_text is not None:
         draft.background_text = background_text.strip()
@@ -926,6 +934,7 @@ def _foreshadow_payload(item: Foreshadow) -> dict[str, Any]:
         "novel_id": str(item.novel_id),
         "title": item.title,
         "content": item.content,
+        "latest_progress": item.latest_progress,
         "status": item.status,
         "progress": item.progress,
         "position": item.position,
@@ -944,7 +953,7 @@ def list_foreshadows(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
 
 
 def create_foreshadow(
-    session: Session, novel_id: UUID, *, title: str, content: str
+    session: Session, novel_id: UUID, *, title: str, content: str, latest_progress: str
 ) -> dict[str, Any]:
     _require_novel(session, novel_id)
     item = Foreshadow(
@@ -952,6 +961,7 @@ def create_foreshadow(
         novel_id=novel_id,
         title=_clean_title(title, "伏笔名称"),
         content=content.strip(),
+        latest_progress=latest_progress.strip(),
         position=_next_position(session, Foreshadow, novel_id),
     )
     session.add(item)
@@ -967,6 +977,7 @@ def update_foreshadow(
     expected_version: int,
     title: str,
     content: str,
+    latest_progress: str,
     status: str,
     progress: int,
 ) -> dict[str, Any]:
@@ -983,6 +994,7 @@ def update_foreshadow(
         raise ValidationError("伏笔状态或进度无效")
     item.title = _clean_title(title, "伏笔名称")
     item.content = content.strip()
+    item.latest_progress = latest_progress.strip()
     item.status = status
     item.progress = progress
     item.version += 1
@@ -1326,12 +1338,12 @@ def _validate_creative_generation_scope(
         if novel_id is None or draft.novel_id != novel_id:
             raise ValidationError("大纲生成不属于当前小说")
         return
-    if kind == "chapter_outline":
+    if kind in {"chapter_storyline_recommendation", "chapter_outline"}:
         draft = session.get(ChapterCreationDraft, scope_id)
         if scope_type != "chapter_creation" or draft is None:
-            raise ValidationError("章纲生成必须绑定当前章节创建草稿")
+            raise ValidationError("章节辅助生成必须绑定当前章节创建草稿")
         if novel_id is None or draft.novel_id != novel_id:
-            raise ValidationError("章纲生成不属于当前小说")
+            raise ValidationError("章节辅助生成不属于当前小说")
         return
     if kind == "review":
         if document_id is not None:
@@ -1362,8 +1374,10 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "返回 {\"background_text\":\"...\"}。"
         ),
         "outline_characters": (
-            "生成主要角色和配角，人物动机、缺陷、秘密和成长方向必须彼此咬合。"
-            "返回 {\"characters\":[{\"name\":\"...\",\"role_type\":\"main|supporting\","
+            "生成4到8个主要角色和配角，至少包含1个main主角和2个supporting配角，"
+            "人物动机、缺陷、秘密和成长方向必须彼此咬合。顶层只能有characters数组，"
+            "即使只有一个人物也不得把人物对象直接放在顶层。返回"
+            " {\"characters\":[{\"name\":\"...\",\"role_type\":\"main|supporting\","
             "\"description\":\"...\",\"details\":{}}]}。"
         ),
         "outline_plot": (
@@ -1374,9 +1388,14 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "提炼作品亮点和不超过200个中文可见字符的简介。"
             "返回 {\"highlight_text\":\"...\"}。"
         ),
+        "chapter_storyline_recommendation": (
+            "根据小说总纲、所有候选故事线、上一章结尾和当前章节序号，选择本章最应推进的1到3条故事线。"
+            "只能返回输入中真实存在的故事线ID。返回 {\"storyline_ids\":[\"...\"],\"reason\":\"...\"}。"
+        ),
         "chapter_outline": (
-            "结合故事线、角色、伏笔、期望情节和前文，为本章生成可直接写作的详细章纲。"
-            "返回 {\"outline_text\":\"...\"}。"
+            "结合故事线、角色、伏笔、期望情节和前文，为本章生成可直接写作的详细章纲和简洁章节标题。"
+            "标题不带章节序号，章纲必须包含场景顺序、核心冲突、人物行动、信息揭示、伏笔推进和结尾钩子。"
+            "返回 {\"title\":\"...\",\"outline_text\":\"...\"}。"
         ),
         "review": (
             "审阅正文的连续性、人物一致性、时间地点、因果、伏笔、重复段落和系统文本污染。"
@@ -1487,6 +1506,38 @@ def update_volume(
     session.commit()
     current.update({"title": volume.title, "version": volume.version})
     return current
+
+
+def update_novel_settings(
+    session: Session,
+    novel_id: UUID,
+    *,
+    expected_version: int,
+    genre: str,
+    subgenre: str,
+    idea: str,
+    template_name: str,
+    template_data: dict[str, Any],
+    cover_image_data: str | None = None,
+) -> dict[str, Any]:
+    novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
+    if novel is None:
+        raise NotFoundError(f"novel {novel_id} not found")
+    if novel.version != expected_version:
+        raise EntityConflictError(get_novel(session, novel_id))
+    serialized = json.dumps(template_data, ensure_ascii=False, separators=(",", ":"))
+    if len(serialized) > 100_000:
+        raise ValidationError("模板设定不能超过100000个字符")
+    novel.genre = genre.strip()
+    novel.subgenre = subgenre.strip()
+    novel.idea = idea.strip()
+    novel.template_name = template_name.strip()
+    novel.template_data = template_data
+    if cover_image_data is not None:
+        novel.cover_image_data = cover_image_data
+    novel.version += 1
+    session.commit()
+    return get_novel(session, novel_id)
 
 
 def delete_volume(
@@ -1601,7 +1652,7 @@ def reorder_chapters(
     novel_id: UUID,
     *,
     ordered_document_ids: list[UUID],
-    volume_by_document: dict[str, UUID],
+    volume_by_document: dict[str, UUID | None],
 ) -> list[dict[str, Any]]:
     chapters = session.scalars(
         select(Document)
@@ -1615,7 +1666,7 @@ def reorder_chapters(
         session.scalars(select(Volume.id).where(Volume.novel_id == novel_id)).all()
     )
     for raw_id in volume_by_document.values():
-        if raw_id not in valid_volume_ids:
+        if raw_id is not None and raw_id not in valid_volume_ids:
             raise ValidationError("章节移动目标分卷不属于当前小说")
     for index, document_id in enumerate(ordered_document_ids, start=1):
         by_id[document_id].position = -(index * 1000)
@@ -1623,9 +1674,9 @@ def reorder_chapters(
     for index, document_id in enumerate(ordered_document_ids, start=1):
         document = by_id[document_id]
         document.position = index * 1000
-        mapped = volume_by_document.get(str(document_id))
-        if mapped is not None:
-            document.volume_id = mapped
+        raw_key = str(document_id)
+        if raw_key in volume_by_document:
+            document.volume_id = volume_by_document[raw_key]
         document.version += 1
     session.commit()
     return [get_document(session, item_id) for item_id in ordered_document_ids]

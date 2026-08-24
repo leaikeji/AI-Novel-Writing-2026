@@ -25,6 +25,7 @@ from backend.creative_services import (
     get_or_create_novel_creation_draft,
     get_or_create_outline_draft,
     list_creative_generations,
+    list_foreshadows,
     list_novel_characters,
     list_storylines,
     reorder_chapters,
@@ -32,6 +33,8 @@ from backend.creative_services import (
     snapshot_private_assets,
     start_creative_generation,
     update_chapter_creation_draft,
+    update_foreshadow,
+    update_novel_settings,
     update_novel_creation_draft,
     update_outline_draft,
     update_private_asset,
@@ -56,6 +59,7 @@ from backend.services import (
     create_document,
     create_novel,
     create_volume,
+    delete_novel,
     get_chapter_brief,
     get_document,
     get_novel,
@@ -114,7 +118,9 @@ def _create_long_novel_via_wizard(
             "template_name": "成长型长篇",
             "template_data": {"structure": "起承转合"},
             "title": title,
+            "author_name": "pytest-作者",
             "cover_mode": "system",
+            "cover_image_data": "data:image/jpeg;base64,AA==",
         },
     )
     return complete_novel_creation_draft(
@@ -642,6 +648,8 @@ def test_six_step_creation_is_persisted_validated_and_idempotent(
     assert completed["draft"]["state"] == "completed"
     assert novel["audience"] == "female"
     assert novel["genre"] == "年代言情"
+    assert novel["author_name"] == "pytest-作者"
+    assert novel["cover_image_data"] == "data:image/jpeg;base64,AA=="
     assert len(novel["tree"]) == 1
     assert novel["tree"][0]["documents"] == []
 
@@ -661,6 +669,26 @@ def test_six_step_creation_is_persisted_validated_and_idempotent(
             data_patch={"title": "不应覆盖"},
         )
     session.rollback()
+
+
+def test_novel_delete_requires_current_version_and_removes_the_exact_novel(
+    session: Session,
+) -> None:
+    completed = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-删除小说",
+        title="pytest-待删除小说",
+    )
+    novel = completed["novel"]
+    novel_id = UUID(novel["id"])
+
+    with pytest.raises(ValidationError, match="其他位置更新"):
+        delete_novel(session, novel_id, expected_version=novel["version"] + 1)
+    session.rollback()
+    assert session.get(Novel, novel_id) is not None
+
+    delete_novel(session, novel_id, expected_version=novel["version"])
+    assert session.get(Novel, novel_id) is None
 
 
 def test_private_library_presets_produce_immutable_generation_snapshots(
@@ -841,6 +869,7 @@ def test_six_step_chapter_creation_rejects_cross_book_references(
         first_id,
         title="被改动的档案",
         content="报名表上的联系人被人替换。",
+        latest_progress="第一章确认联系人栏被改动。",
     )
 
     draft = get_or_create_chapter_creation_draft(
@@ -920,7 +949,7 @@ def test_generation_requires_verified_minimax_and_three_thousand_characters(
         session,
         document_id,
         expected_version=0,
-        target_word_count=2500,
+        target_word_count=5000,
         expectation_text="建立冲突",
         outline_text="人物发现关键证据。",
         forbidden_text="",
@@ -977,6 +1006,47 @@ def test_generation_requires_verified_minimax_and_three_thousand_characters(
     assert completed["validation_state"] == "meets_target"
     assert completed["output_visible_character_count"] >= 3000
     assert completed["actual_model_id"] == MINIMAX_MODEL_ID
+
+
+def test_cover_settings_and_narrative_foreshadow_progress_persist(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-封面与伏笔进展")
+    novel_id = UUID(novel["id"])
+    updated = update_novel_settings(
+        session,
+        novel_id,
+        expected_version=novel["version"],
+        genre="悬疑",
+        subgenre="悬疑脑洞",
+        idea="档案馆里的未来录音带。",
+        template_name="悬疑探案",
+        template_data={"lead_name": "林默"},
+        cover_image_data="data:image/jpeg;base64,ZmFrZQ==",
+    )
+    assert updated["cover_image_data"] == "data:image/jpeg;base64,ZmFrZQ=="
+
+    created = create_foreshadow(
+        session,
+        novel_id,
+        title="无源录音",
+        content="未接电源的磁带机自行启动。",
+        latest_progress="第一章确认录音来自明日。",
+    )
+    assert created["latest_progress"] == "第一章确认录音来自明日。"
+    changed = update_foreshadow(
+        session,
+        novel_id,
+        UUID(created["id"]),
+        expected_version=created["version"],
+        title=created["title"],
+        content=created["content"],
+        latest_progress="第五章确认录音与旧案重合。",
+        status="active",
+        progress=30,
+    )
+    assert changed["latest_progress"] == "第五章确认录音与旧案重合。"
+    assert list_foreshadows(session, novel_id)[0]["latest_progress"] == changed["latest_progress"]
 
 
 def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(

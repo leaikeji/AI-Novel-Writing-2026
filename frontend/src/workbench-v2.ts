@@ -28,6 +28,8 @@ import {
   clearWorkbenchRoute,
   rememberWorkbenchRoute,
 } from "./workbench-route";
+import { StudioProjectView, WorkbenchSection } from "./workbench-studio";
+import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
 const host = window.QwenPaw.host;
@@ -42,14 +44,14 @@ const {
   Spin,
 } = host.antd;
 const {
+  ArrowLeftOutlined,
   BookOutlined,
   BulbOutlined,
   ClockCircleOutlined,
+  CopyOutlined,
   DatabaseOutlined,
   EditOutlined,
   FileTextOutlined,
-  HistoryOutlined,
-  HomeOutlined,
   PlusOutlined,
   SaveOutlined,
   SettingOutlined,
@@ -59,7 +61,7 @@ const {
 } = host.antdIcons;
 
 
-type ProjectSection = "chapters" | "outline" | "roles" | "clues" | "settings";
+type ProjectSection = WorkbenchSection;
 
 
 function currentQuery(): URLSearchParams {
@@ -95,16 +97,11 @@ function firstDocument(novel: NovelRecord): DocumentRecord | undefined {
 
 
 function novelCover(title: string, className = "anw-cover"): unknown {
-  return h(
-    "div",
-    {
-      className: className === "anw-cover" ? "anw-cover-fallback" : "anw-book-cover-empty",
-      role: "img",
-      "aria-label": `${title}尚未设置封面`,
-    },
-    h("span", { className: "anw-cover-monogram", "aria-hidden": "true" }, title.slice(0, 1) || "书"),
-    h("span", { className: "anw-cover-empty-label" }, "未设置封面"),
-  );
+  return h("img", {
+    className,
+    src: defaultNovelCover,
+    alt: `${title}封面`,
+  });
 }
 
 
@@ -356,12 +353,15 @@ export function NovelWorkbench() {
   const [conflict, setConflict] = React.useState(null as DocumentRecord | null);
   const [recovery, setRecovery] = React.useState(null as RecoveryDraft | null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [saveVolumeOpen, setSaveVolumeOpen] = React.useState(false);
+  const [openChapterWizardSignal, setOpenChapterWizardSignal] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [projectFacts, setProjectFacts] = React.useState([] as StoryFactRecord[]);
   const [projectFactsLoading, setProjectFactsLoading] = React.useState(false);
   const timerRef = React.useRef(null as ReturnType<typeof setTimeout> | null);
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
+  const editorTextareaRef = React.useRef(null as HTMLTextAreaElement | null);
 
   const loadDocument = React.useCallback(async (documentId: string) => {
     setBusy(true);
@@ -371,6 +371,7 @@ export function NovelWorkbench() {
       contentRef.current = loaded.content_markdown;
       setDocument(loaded);
       setContent(loaded.content_markdown);
+      setError("");
       setConflict(null);
       setEditorOpen(true);
       setSaveState("已保存");
@@ -413,6 +414,13 @@ export function NovelWorkbench() {
   }, [loadDocument, queryDocumentId]);
 
   React.useEffect(() => { if (queryNovelId) void loadNovel(queryNovelId); }, [loadNovel, queryNovelId]);
+
+  React.useLayoutEffect(() => {
+    const textarea = editorTextareaRef.current;
+    if (!textarea || !editorOpen) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.max(560, textarea.scrollHeight)}px`;
+  }, [content, document?.id, editorOpen]);
 
   React.useEffect(() => {
     if (!novel || (section !== "roles" && section !== "clues")) return;
@@ -482,16 +490,26 @@ export function NovelWorkbench() {
     timerRef.current = setTimeout(() => void saveNow(markdown), 600);
   };
 
-  const refreshNovel = async () => {
-    if (!novel) return;
+  const refreshNovel = async (): Promise<NovelRecord | null> => {
+    if (!novel) return null;
     const loaded = await apiRequest<NovelRecord>(`/novels/${novel.id}`);
     setNovel(loaded);
+    return loaded;
   };
 
   const selectDocument = (documentId: string) => {
     const active = documentRef.current;
     if (active && contentRef.current !== active.content_markdown) void saveNow(contentRef.current);
     void loadDocument(documentId);
+  };
+
+  const navigateToChapter = async (documentId: string) => {
+    const active = documentRef.current;
+    if (active && contentRef.current !== active.content_markdown) {
+      const saved = await saveNow(contentRef.current);
+      if (!saved) return;
+    }
+    await loadDocument(documentId);
   };
 
   const createChapter = async () => {
@@ -543,6 +561,46 @@ export function NovelWorkbench() {
       documentRef.current = result.document;
       setDocument(result.document);
       setSaveState("正式版本已建立");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveChapterToVolume = async (volumeId: string | null, continueWriting = false) => {
+    if (!novel || !document) return;
+    const saved = await saveNow(contentRef.current);
+    if (!saved) return;
+    setBusy(true);
+    try {
+      const chapterIds = novel.tree
+        .flatMap((volume: VolumeRecord) => volume.documents)
+        .filter((item: DocumentRecord) => item.kind === "chapter")
+        .map((item: DocumentRecord) => item.id);
+      await apiRequest(`/novels/${novel.id}/chapters/reorder`, {
+        method: "POST",
+        body: JSON.stringify({
+          ordered_document_ids: chapterIds,
+          volume_by_document: { [saved.id]: volumeId },
+        }),
+      });
+      const result = await apiRequest<{ document: DocumentRecord }>(`/documents/${saved.id}/checkpoints`, {
+        method: "POST",
+        body: JSON.stringify({ expected_draft_version: saved.draft_version }),
+      });
+      documentRef.current = result.document;
+      setDocument(result.document);
+      setSaveVolumeOpen(false);
+      setSaveState("已保存");
+      await refreshNovel();
+      if (continueWriting) {
+        setEditorOpen(false);
+        setSection("chapters");
+        setOpenChapterWizardSignal((current: number) => current + 1);
+        rememberWorkbenchRoute(novel.id);
+        window.history.replaceState(null, "", workbenchUrl(novel.id));
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "保存章节失败");
     } finally {
       setBusy(false);
     }
@@ -683,6 +741,7 @@ export function NovelWorkbench() {
     contentRef.current = updated.content_markdown;
     setDocument(updated);
     setContent(updated.content_markdown);
+    setError("");
     setConflict(null);
     setRecovery(null);
     setSaveState(status);
@@ -710,6 +769,33 @@ export function NovelWorkbench() {
     window.history.replaceState(null, "", workbenchUrl(novel.id, undefined, nextSection));
   };
 
+  const confirmDeleteDocument = () => {
+    if (!novel || !document) return;
+    Modal.confirm({
+      className: "anw-modal anw-delete-document-confirm",
+      title: "删除章节",
+      content: `确认删除《${document.title}》吗？删除后将返回章节列表。`,
+      okText: "删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy(true);
+        try {
+          await apiRequest(`/novels/${novel.id}/documents/${document.id}?expected_version=${document.version}`, {
+            method: "DELETE",
+          });
+          await refreshNovel();
+          backToProject();
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : "删除章节失败");
+          throw reason;
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
+
   if (!queryNovelId) {
     return h(
       "section",
@@ -720,6 +806,15 @@ export function NovelWorkbench() {
   }
 
   if (editorOpen && document) {
+    const orderedChapters = novel
+      ? [...novel.tree]
+          .sort((left: VolumeRecord, right: VolumeRecord) => left.position - right.position)
+          .flatMap((volume: VolumeRecord) => [...volume.documents].sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position))
+          .filter((item: DocumentRecord) => item.kind === "chapter")
+      : [];
+    const currentChapterIndex = orderedChapters.findIndex((item: DocumentRecord) => item.id === document.id);
+    const previousChapter = currentChapterIndex > 0 ? orderedChapters[currentChapterIndex - 1] : null;
+    const nextChapter = currentChapterIndex >= 0 && currentChapterIndex < orderedChapters.length - 1 ? orderedChapters[currentChapterIndex + 1] : null;
     return h(
       Spin,
       { spinning: busy },
@@ -729,7 +824,7 @@ export function NovelWorkbench() {
         h(
           "header",
           { className: "anw-editor-topbar" },
-          h(Button, { type: "text", icon: h(HomeOutlined), onClick: backToProject }, "返回作品"),
+          h(Button, { type: "text", icon: h(ArrowLeftOutlined), onClick: backToProject }, "返回列表"),
           h(
             "div",
             { className: "anw-editor-crumb" },
@@ -737,13 +832,9 @@ export function NovelWorkbench() {
             " / ",
             h("strong", null, document.title),
           ),
-          h(
-            "span",
-            { className: `anw-save-state ${saveState.includes("失败") || saveState.includes("冲突") ? "is-error" : ""}` },
-            saveState,
-          ),
-          h(Button, { icon: h(DatabaseOutlined), onClick: copyContext }, "复制上下文"),
-          h(Button, { icon: h(SaveOutlined), className: "anw-primary-button", onClick: checkpoint }, "保存版本"),
+          h(Button, { className: "anw-delete-button", onClick: confirmDeleteDocument }, "删除"),
+          h(Button, { icon: h(CopyOutlined), onClick: copyContext, title: "复制 AI 写作上下文" }, "复制"),
+          h(Button, { icon: h(SaveOutlined), className: "anw-primary-button", onClick: document.kind === "chapter" ? () => setSaveVolumeOpen(true) : checkpoint, title: saveState }, "保存"),
         ),
         error ? h(Alert, { type: "error", closable: true, message: error, onClose: () => setError(""), style: { margin: "10px 16px 0" } }) : null,
         recovery ? h(Alert, { type: "warning", showIcon: true, message: "发现未同步的崩溃恢复草稿", action: h(Button, { size: "small", onClick: recoverLocal }, "恢复本地稿"), style: { margin: "10px 16px 0" } }) : null,
@@ -766,6 +857,7 @@ export function NovelWorkbench() {
               h(EditOutlined, { style: { color: "#8a909d", fontSize: 17 } }),
             ),
             h("textarea", {
+              ref: editorTextareaRef,
               className: "anw-editor-textarea",
               value: content,
               onChange: onContentChange,
@@ -773,25 +865,62 @@ export function NovelWorkbench() {
               "aria-label": `${document.title}正文编辑器`,
               placeholder: "开始写作……Markdown 源文本会自动保存。",
             }),
+            h(
+              "div",
+              { className: "anw-editor-footer" },
+              h(
+                "div",
+                { className: "anw-workflow-buttons" },
+                document.kind === "chapter" && novel
+                  ? h(ChapterWorkflowPanel, {
+                      novel,
+                      document,
+                      onPrepareGeneration: () => saveNow(contentRef.current),
+                      onDocumentChanged: applyWorkflowDocument,
+                      onError: setError,
+                      onStatus: setSaveState,
+                      onPreviousChapter: previousChapter ? () => { void navigateToChapter(previousChapter.id); } : undefined,
+                      onNextChapter: nextChapter ? () => { void navigateToChapter(nextChapter.id); } : undefined,
+                      previousChapterTitle: previousChapter?.title,
+                      nextChapterTitle: nextChapter?.title,
+                    })
+                  : null,
+              ),
+            ),
           ),
         ),
         h(
-          "div",
-          { className: "anw-editor-footer" },
+          Modal,
+          {
+            open: saveVolumeOpen,
+            className: "anw-modal anw-save-volume-modal",
+            title: "选择分卷",
+            width: 520,
+            centered: true,
+            footer: null,
+            onCancel: () => setSaveVolumeOpen(false),
+          },
           h(
             "div",
-            { className: "anw-workflow-buttons" },
-            document.kind === "chapter" && novel
-              ? h(ChapterWorkflowPanel, {
-                  novel,
-                  document,
-                  onPrepareGeneration: () => saveNow(contentRef.current),
-                  onDocumentChanged: applyWorkflowDocument,
-                  onError: setError,
-                  onStatus: setSaveState,
-                })
-              : null,
-            h(Button, { icon: h(HistoryOutlined), onClick: () => setHistoryOpen(true) }, "历史"),
+            { className: "anw-save-volume-body" },
+            h("p", null, "请选择将章节保存到哪个分卷，不选择则跳过分卷保存。"),
+            h(
+              "div",
+              { className: "anw-save-volume-list" },
+              ...novel.tree.filter((volume: VolumeRecord) => volume.id).map((volume: VolumeRecord, index: number) => h(
+                "button",
+                {
+                  key: volume.id,
+                  type: "button",
+                  disabled: busy,
+                  onClick: () => void saveChapterToVolume(volume.id),
+                },
+                h("strong", null, /^第[^卷]*卷$/.test(volume.title.trim()) ? volume.title.trim() : `第${index + 1}卷 ${volume.title.replace(/^第[^卷]*卷\s*/, "").trim()}`),
+                h("span", null, `${volume.documents.filter((item: DocumentRecord) => item.kind === "chapter").length} 章`),
+              )),
+              h(Button, { block: true, disabled: busy, onClick: () => void saveChapterToVolume(null) }, "不选分卷"),
+              h(Button, { block: true, className: "anw-save-and-next-button", disabled: busy, onClick: () => void saveChapterToVolume(document.volume_id, true) }, "保存并新建下一章"),
+            ),
           ),
         ),
         h(
@@ -822,6 +951,22 @@ export function NovelWorkbench() {
       ),
     );
   }
+
+  if (!novel) {
+    return h("main", { className: "anw-app anw-empty-state" }, h(Spin), h("strong", null, "正在载入作品…"));
+  }
+
+  return h(StudioProjectView, {
+    novel,
+    section,
+    onSectionChange: (next: WorkbenchSection) => { void switchSection(next); },
+    onSelectDocument: selectDocument,
+    onNovelChanged: (updated: NovelRecord) => setNovel(updated),
+    onReload: refreshNovel,
+    openChapterWizardSignal,
+    onBack: () => { clearWorkbenchRoute(); window.location.assign(APP_PATH); },
+    onError: setError,
+  });
 
   const chapterDocuments = (novel?.tree ?? []).flatMap((volume: VolumeRecord) => volume.documents)
     .filter((item: DocumentRecord) => item.kind === "chapter");

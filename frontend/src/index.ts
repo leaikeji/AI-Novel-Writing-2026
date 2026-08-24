@@ -4,7 +4,8 @@ import {
   APP_ROUTE_ID,
   CORE_CHAT_ROUTE_ID,
 } from "./contracts";
-import { NovelLibraryPage, NovelWorkbench } from "./workbench-v2";
+import { NovelLibraryPage } from "./creative-center";
+import { NovelWorkbench } from "./workbench-v2";
 import { activeWorkbenchRoute } from "./workbench-route";
 import { ensureNovelStyles } from "./styles";
 

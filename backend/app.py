@@ -13,7 +13,9 @@ from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
 from .database import database_status, get_session
 from .model_runtime import (
+    ModelVerificationError,
     configured_model_audit,
+    normalize_intelligence_generation_json,
     parse_model_json,
     reply_model_audit,
 )
@@ -489,14 +491,15 @@ async def intelligence_proposals_create(
             reply,
             session_id=intelligence_session_id,
         ).ensure_matches(configured_model)
-        payload = parse_model_json(reply.text)
-        raw_items = payload.get("items", [])
-        if not isinstance(raw_items, list):
-            raise ValidationError("模型情报 JSON 的 items 必须是数组")
+        try:
+            payload = parse_model_json(reply.text)
+        except ModelVerificationError:
+            payload = {}
+        raw_items = normalize_intelligence_generation_json(payload, reply.text)
         return complete_intelligence_proposal(
             session,
             UUID(str(proposal["id"])),
-            items=[item for item in raw_items if isinstance(item, dict)],
+            items=raw_items,
             model_profile_fingerprint=actual_model.fingerprint,
             actual_model_id=actual_model.model_id,
             provider_profile=actual_model.provider_id,

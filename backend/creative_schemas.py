@@ -47,7 +47,7 @@ class UpdateAssetPresetRequest(CreateAssetPresetRequest):
 class UpdateOutlineDraftRequest(BaseModel):
     expected_version: int = Field(ge=1)
     step: int = Field(ge=1, le=5)
-    target_chapter_count: int | None = Field(default=None, ge=1, le=1000)
+    target_chapter_count: int | None = Field(default=None, ge=10, le=10_000)
     background_text: str | None = Field(default=None, max_length=30_000)
     characters: list[dict[str, Any]] | None = Field(default=None, max_length=200)
     plot_text: str | None = Field(default=None, max_length=50_000)
@@ -91,8 +91,9 @@ class UpdateStorylineRequest(CreateStorylineRequest):
 
 
 class CreateForeshadowRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=240)
-    content: str = Field(default="", max_length=30_000)
+    title: str = Field(min_length=1, max_length=50)
+    content: str = Field(default="", max_length=200)
+    latest_progress: str = Field(default="", max_length=200)
 
 
 class UpdateForeshadowRequest(CreateForeshadowRequest):
@@ -120,7 +121,7 @@ class StartCreativeGenerationRequest(BaseModel):
     scope_type: str = Field(min_length=1, max_length=40)
     scope_id: UUID
     kind: str = Field(
-        pattern="^(novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_outline|review)$"
+        pattern="^(novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_storyline_recommendation|chapter_outline|review)$"
     )
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     novel_id: UUID | None = None
@@ -133,6 +134,16 @@ class StartCreativeGenerationRequest(BaseModel):
 class UpdateVolumeRequest(BaseModel):
     expected_version: int = Field(ge=1)
     title: str = Field(min_length=1, max_length=240)
+
+
+class UpdateNovelSettingsRequest(BaseModel):
+    expected_version: int = Field(ge=1)
+    genre: str = Field(default="", max_length=80)
+    subgenre: str = Field(default="", max_length=80)
+    idea: str = Field(default="", max_length=30_000)
+    template_name: str = Field(default="", max_length=160)
+    template_data: dict[str, Any] = Field(default_factory=dict)
+    cover_image_data: str | None = Field(default=None, max_length=250_000)
 
 
 class DeleteVolumeRequest(BaseModel):
@@ -151,7 +162,7 @@ class UpdateDocumentMetadataRequest(BaseModel):
 
 class ReorderChaptersRequest(BaseModel):
     ordered_document_ids: list[UUID] = Field(default_factory=list, max_length=5000)
-    volume_by_document: dict[str, UUID] = Field(default_factory=dict)
+    volume_by_document: dict[str, UUID | None] = Field(default_factory=dict)
 
 
 class CreateExportRequest(BaseModel):

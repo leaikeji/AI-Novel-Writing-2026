@@ -120,6 +120,7 @@ def install() -> None:
     run(sys.executable, "-m", "pytest")
     run(sys.executable, str(ROOT / "scripts" / "package_plugin.py"))
     offline_plugin_command("install", "--force", "/plugin", mount_plugin=True)
+    migrate_installed_plugin()
     run(sys.executable, str(ROOT / "scripts" / "configure_qwenpaw_novel_agent.py"))
     run(
         "docker",
@@ -132,6 +133,21 @@ def install() -> None:
         "/app/working/workspaces/ai-novel-writer/BOOTSTRAP.md.completed; fi",
     )
     verify()
+
+
+def migrate_installed_plugin() -> None:
+    """Bring the installed plugin schema to the packaged Alembic head."""
+
+    installed_dir = f"/app/working/plugins/{PLUGIN_ID}"
+    run(
+        "docker",
+        "exec",
+        CONTAINER,
+        "sh",
+        "-lc",
+        f"cd {installed_dir} && "
+        "/app/venv/bin/python -m alembic -c alembic.ini upgrade head",
+    )
 
 
 def verify() -> None:

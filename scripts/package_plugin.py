@@ -33,6 +33,7 @@ def main() -> None:
     copy_file("plugin.json")
     copy_file("plugin.py")
     copy_file("requirements.txt")
+    copy_file("alembic.ini")
     copy_tree("backend")
     copy_tree("skills")
     copy_tree("frontend/dist")

@@ -1,44 +1,50 @@
 import { ApiError, apiRequest } from "./api";
-import { factStatusLabel, factTypeLabel } from "./presenters";
 import {
   CandidateRecord,
   ChapterBriefRecord,
+  CreativeGenerationRecord,
   DocumentRecord,
   GenerationJobRecord,
+  IntelligenceItemRecord,
   IntelligenceProposalRecord,
   NovelRecord,
+  PrivateAssetRecord,
+  PrivateAssetType,
   RoleConstraints,
-  StoryFactRecord,
 } from "./types";
 
 
 const host = window.QwenPaw.host;
 const React = host.React;
+const h = React.createElement;
 const {
   Alert,
   Button,
   Card,
   Checkbox,
-  Divider,
   Empty,
   Input,
   InputNumber,
-  List,
   Modal,
-  Space,
   Spin,
   Tag,
   Tabs,
-  Typography,
 } = host.antd;
 const {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  AuditOutlined,
   BookOutlined,
   BulbOutlined,
-  DatabaseOutlined,
+  EditOutlined,
   FileTextOutlined,
   HistoryOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  SyncOutlined,
 } = host.antdIcons;
 const TextArea = Input.TextArea;
+const FIXED_MODEL_ID = "MiniMax-M3";
 
 
 interface ChapterWorkflowProps {
@@ -48,6 +54,10 @@ interface ChapterWorkflowProps {
   onDocumentChanged: (document: DocumentRecord, status: string) => void;
   onError: (message: string) => void;
   onStatus: (message: string) => void;
+  onPreviousChapter?: () => void;
+  onNextChapter?: () => void;
+  previousChapterTitle?: string;
+  nextChapterTitle?: string;
 }
 
 
@@ -63,8 +73,16 @@ interface BriefFormState {
 }
 
 
+interface ReviewIssue {
+  severity?: string;
+  type?: string;
+  evidence?: string;
+  suggestion?: string;
+}
+
+
 const EMPTY_BRIEF_FORM: BriefFormState = {
-  targetWordCount: 2000,
+  targetWordCount: 3500,
   expectationText: "",
   outlineText: "",
   forbiddenText: "",
@@ -73,6 +91,23 @@ const EMPTY_BRIEF_FORM: BriefFormState = {
   contextOnlyRoles: "",
   forbiddenRoles: "",
 };
+
+
+const ASSET_TABS: Array<{ key: PrivateAssetType; label: string; empty: string }> = [
+  { key: "plot", label: "桥段配置", empty: "桥段配置" },
+  { key: "writing_style", label: "写作风格", empty: "写作风格" },
+  { key: "vocabulary", label: "特色词汇", empty: "特色词汇" },
+  { key: "idea", label: "热梗奇思", empty: "热梗奇思" },
+];
+
+
+const INTELLIGENCE_GROUPS: Array<{ key: string; label: string; types: string[] }> = [
+  { key: "character", label: "角色状态更新", types: ["character_state"] },
+  { key: "relationship", label: "角色关系变化", types: ["relationship"] },
+  { key: "storyline", label: "故事线进展", types: ["storyline_event"] },
+  { key: "foreshadow", label: "伏笔进展", types: ["foreshadow_progress", "foreshadow_new"] },
+  { key: "other", label: "其他情报", types: ["fact"] },
+];
 
 
 function splitNames(value: string): string[] {
@@ -84,7 +119,7 @@ function splitNames(value: string): string[] {
 
 function briefToForm(brief: ChapterBriefRecord): BriefFormState {
   return {
-    targetWordCount: brief.target_word_count,
+    targetWordCount: Math.max(3000, brief.target_word_count || 3500),
     expectationText: brief.expectation_text,
     outlineText: brief.outline_text,
     forbiddenText: brief.forbidden_text,
@@ -110,8 +145,10 @@ function errorMessage(reason: unknown, fallback: string): string {
   if (reason instanceof ApiError) {
     if (typeof reason.detail === "string") return reason.detail;
     if (reason.detail && typeof reason.detail === "object") {
-      const detail = reason.detail as Record<string, unknown>;
+      const detail = reason.detail as Record<string, any>;
       if (typeof detail.message === "string") return detail.message;
+      if (typeof detail.job?.failure_message === "string") return detail.job.failure_message;
+      if (typeof detail.proposal?.failure_message === "string") return detail.proposal.failure_message;
       if (typeof detail.type === "string") return `${fallback}：${detail.type}`;
     }
   }
@@ -122,87 +159,107 @@ function errorMessage(reason: unknown, fallback: string): string {
 function stateLabel(state: string): string {
   return {
     running: "生成中",
-    ready: "待复核",
+    ready: "生成成功",
     accepted: "已采用",
-    rejected: "已拒绝",
-    partially_accepted: "部分采用",
-    superseded: "来源已过期",
-    failed: "失败",
+    rejected: "已放弃",
+    failed: "生成失败",
   }[state] ?? state;
 }
 
 
 function stateColor(state: string): string {
-  if (state === "accepted") return "success";
-  if (state === "ready" || state === "partially_accepted") return "processing";
-  if (state === "failed" || state === "superseded") return "error";
+  if (state === "accepted" || state === "ready") return "success";
+  if (state === "failed") return "error";
   if (state === "rejected") return "default";
-  return "warning";
+  return "processing";
 }
 
 
-function field(
-  label: string,
-  control: unknown,
-  help?: string,
-): unknown {
-  return React.createElement(
-    "div",
-    { style: { width: "100%" } },
-    React.createElement(Typography.Text, { strong: true }, label),
-    help
-      ? React.createElement(
-          Typography.Text,
-          { type: "secondary", style: { display: "block", marginBlock: 3 } },
-          help,
-        )
-      : null,
+function formatDate(value: string | null): string {
+  if (!value) return "刚刚";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+
+function field(label: string, control: unknown, help?: string): unknown {
+  return h(
+    "label",
+    { className: "anw-chapter-field" },
+    h("strong", null, label),
+    help ? h("span", null, help) : null,
     control,
   );
 }
 
 
+function groupedIntelligence(items: IntelligenceItemRecord[]) {
+  return INTELLIGENCE_GROUPS.map((group) => ({
+    ...group,
+    items: items.filter((item) => group.types.includes(item.item_type)),
+  })).filter((group) => group.items.length > 0);
+}
+
+
 export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
-  const { novel, document, onPrepareGeneration, onDocumentChanged, onError, onStatus } = props;
+  const {
+    novel,
+    document,
+    onPrepareGeneration,
+    onDocumentChanged,
+    onError,
+    onStatus,
+    onPreviousChapter,
+    onNextChapter,
+    previousChapterTitle,
+    nextChapterTitle,
+  } = props;
   const [brief, setBrief] = React.useState(null as ChapterBriefRecord | null);
   const [briefForm, setBriefForm] = React.useState(EMPTY_BRIEF_FORM);
   const [briefOpen, setBriefOpen] = React.useState(false);
   const [assetPickerOpen, setAssetPickerOpen] = React.useState(false);
-  const [assetTab, setAssetTab] = React.useState("plot");
+  const [assets, setAssets] = React.useState([] as PrivateAssetRecord[]);
+  const [assetTab, setAssetTab] = React.useState("plot" as PrivateAssetType);
+  const [assetSearch, setAssetSearch] = React.useState("");
+  const [selectedAssetIds, setSelectedAssetIds] = React.useState([] as string[]);
+  const [quickAssetOpen, setQuickAssetOpen] = React.useState(false);
+  const [quickAssetTitle, setQuickAssetTitle] = React.useState("");
+  const [quickAssetContent, setQuickAssetContent] = React.useState("");
   const [generatingOpen, setGeneratingOpen] = React.useState(false);
+  const [generationStage, setGenerationStage] = React.useState("正在分析前文、章纲和章节情节");
   const [jobsOpen, setJobsOpen] = React.useState(false);
-  const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
-  const [ledgerOpen, setLedgerOpen] = React.useState(false);
   const [jobs, setJobs] = React.useState([] as GenerationJobRecord[]);
-  const [selectedCandidate, setSelectedCandidate] = React.useState(null as CandidateRecord | null);
-  const [proposals, setProposals] = React.useState([] as IntelligenceProposalRecord[]);
+  const [featuredCandidateId, setFeaturedCandidateId] = React.useState("");
+  const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
   const [selectedProposal, setSelectedProposal] = React.useState(null as IntelligenceProposalRecord | null);
-  const [selectedItemIds, setSelectedItemIds] = React.useState([] as string[]);
-  const [facts, setFacts] = React.useState([] as StoryFactRecord[]);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [reviewJob, setReviewJob] = React.useState(null as CreativeGenerationRecord | null);
   const [busyAction, setBusyAction] = React.useState("");
-  const [workflowError, setWorkflowError] = React.useState("");
 
   React.useEffect(() => {
     setBrief(null);
-    setJobs([]);
-    setSelectedCandidate(null);
-    setProposals([]);
-    setSelectedProposal(null);
-    setSelectedItemIds([]);
     setBriefOpen(false);
     setAssetPickerOpen(false);
-    setAssetTab("plot");
+    setAssetSearch("");
+    setSelectedAssetIds([]);
     setGeneratingOpen(false);
     setJobsOpen(false);
+    setJobs([]);
+    setFeaturedCandidateId("");
     setIntelligenceOpen(false);
-    setLedgerOpen(false);
-    setWorkflowError("");
+    setSelectedProposal(null);
+    setReviewOpen(false);
+    setReviewJob(null);
   }, [document.id]);
 
   const loadBrief = async (): Promise<ChapterBriefRecord> => {
-    const loaded = await apiRequest<ChapterBriefRecord>(
-      `/documents/${document.id}/chapter-brief`,
-    );
+    const loaded = await apiRequest<ChapterBriefRecord>(`/documents/${document.id}/chapter-brief`);
     setBrief(loaded);
     setBriefForm(briefToForm(loaded));
     return loaded;
@@ -220,16 +277,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  const persistBrief = async (
-    currentBrief: ChapterBriefRecord,
-    form: BriefFormState,
-  ): Promise<ChapterBriefRecord> => apiRequest<ChapterBriefRecord>(
+  const persistBrief = async (currentBrief: ChapterBriefRecord, form: BriefFormState): Promise<ChapterBriefRecord> => apiRequest<ChapterBriefRecord>(
     `/documents/${document.id}/chapter-brief`,
     {
       method: "PUT",
       body: JSON.stringify({
         expected_version: currentBrief.version,
-        target_word_count: form.targetWordCount,
+        target_word_count: Math.max(3000, form.targetWordCount),
         expectation_text: form.expectationText,
         outline_text: form.outlineText,
         forbidden_text: form.forbiddenText,
@@ -254,55 +308,52 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  const loadJobs = async (): Promise<GenerationJobRecord[]> => {
-    const loaded = await apiRequest<GenerationJobRecord[]>(
-      `/documents/${document.id}/generation-jobs`,
-    );
-    setJobs(loaded);
-    const firstCandidate = loaded.find((job) => job.candidate)?.candidate ?? null;
-    setSelectedCandidate(firstCandidate);
+  const loadAssets = async () => {
+    const loaded = await apiRequest<PrivateAssetRecord[]>("/private-assets");
+    setAssets(loaded.filter((item) => !item.archived));
     return loaded;
   };
 
-  const openJobs = async () => {
-    setBusyAction("jobs-load");
+  const openAssetPicker = async () => {
+    setBusyAction("assets-load");
     try {
-      await loadJobs();
-      setJobsOpen(true);
+      await loadAssets();
+      setAssetPickerOpen(true);
     } catch (reason) {
-      onError(errorMessage(reason, "加载候选历史失败"));
+      onError(errorMessage(reason, "加载私有库配置失败"));
     } finally {
       setBusyAction("");
     }
   };
 
   const openGenerationOptions = () => {
-    const open = () => setAssetPickerOpen(true);
     if (document.visible_character_count === 0) {
-      open();
+      void openAssetPicker();
       return;
     }
     Modal.confirm({
-      className: "anw-modal",
-      title: "确认重新生成",
-      content: "重新生成将替换当前正文，确定要继续吗？",
+      className: "anw-modal anw-simple-confirm",
+      title: "确认",
+      content: "重新生成将放弃当前内容，确定要重新生成吗？",
       okText: "确定",
       cancelText: "取消",
-      onOk: open,
+      onOk: openAssetPicker,
     });
   };
 
   const ensureBrief = async (): Promise<ChapterBriefRecord> => {
     const currentBrief = brief ?? await loadBrief();
-    if (currentBrief.version > 0) return currentBrief;
-    const saved = await persistBrief(currentBrief, briefToForm(currentBrief));
+    if (currentBrief.version > 0 && currentBrief.target_word_count >= 3000) return currentBrief;
+    const form = briefToForm(currentBrief);
+    const saved = await persistBrief(currentBrief, { ...form, targetWordCount: Math.max(3500, form.targetWordCount) });
     setBrief(saved);
     setBriefForm(briefToForm(saved));
     return saved;
   };
 
-  const generateBody = async () => {
+  const generateBody = async (assetIds: string[] = selectedAssetIds) => {
     setAssetPickerOpen(false);
+    setGenerationStage("正在分析前文、章纲和章节情节");
     setGeneratingOpen(true);
     setBusyAction("generate");
     try {
@@ -311,7 +362,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       }
       const currentBrief = await ensureBrief();
-      onStatus("AI 正在创作章节内容…");
+      onStatus(`${FIXED_MODEL_ID} 正在创作章节正文…`);
       const job = await apiRequest<GenerationJobRecord>(
         `/documents/${document.id}/generation-jobs/body?agent_id=ai-novel-writer`,
         {
@@ -319,10 +370,14 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           body: JSON.stringify({
             expected_brief_version: currentBrief.version,
             force_new: true,
+            asset_ids: assetIds,
+            requested_model_id: FIXED_MODEL_ID,
           }),
         },
       );
       if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
+      if (job.actual_model_id !== FIXED_MODEL_ID) throw new Error("实际模型不是 MiniMax-M3，结果已作废");
+      setGenerationStage("正文已生成，正在写入编辑器");
       const result = await apiRequest<{ document: DocumentRecord; candidate: CandidateRecord }>(
         `/candidates/${job.candidate.id}/adopt`,
         {
@@ -330,594 +385,338 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           body: JSON.stringify({ expected_draft_version: job.candidate.base_draft_version }),
         },
       );
-      setSelectedCandidate(result.candidate);
-      onDocumentChanged(result.document, "正文生成完成");
+      setFeaturedCandidateId(result.candidate.id);
+      setSelectedAssetIds([]);
+      onDocumentChanged(result.document, `${FIXED_MODEL_ID} 正文生成完成 · ${result.candidate.visible_character_count} 字`);
     } catch (reason) {
-      onError(errorMessage(reason, "生成正文失败"));
-      onStatus("正文生成失败");
+      const message = errorMessage(reason, "生成正文失败");
+      onError(message);
+      onStatus(message.includes("低于") ? "本次不足 3000 字，必须整章重写" : "正文生成失败");
     } finally {
       setGeneratingOpen(false);
       setBusyAction("");
     }
   };
 
-  const adopt = async (candidate: CandidateRecord) => {
-    setBusyAction(`adopt:${candidate.id}`);
+  const saveQuickAsset = async () => {
+    if (!quickAssetTitle.trim() || !quickAssetContent.trim()) return;
+    setBusyAction("asset-create");
     try {
-      const result = await apiRequest<{ document: DocumentRecord; candidate: CandidateRecord }>(
-        `/candidates/${candidate.id}/adopt`,
-        {
+      const created = await apiRequest<PrivateAssetRecord>("/private-assets", {
+        method: "POST",
+        body: JSON.stringify({ asset_type: assetTab, title: quickAssetTitle.trim(), content: quickAssetContent.trim() }),
+      });
+      await loadAssets();
+      setSelectedAssetIds((current: string[]) => Array.from(new Set([...current, created.id])));
+      setQuickAssetTitle("");
+      setQuickAssetContent("");
+      setQuickAssetOpen(false);
+    } catch (reason) {
+      onError(errorMessage(reason, "添加私有库配置失败"));
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const loadJobs = async () => {
+    const loaded = await apiRequest<GenerationJobRecord[]>(`/documents/${document.id}/generation-jobs`);
+    setJobs(loaded);
+    return loaded;
+  };
+
+  const openJobs = async () => {
+    setBusyAction("jobs-load");
+    try {
+      const loaded = await loadJobs();
+      const best = loaded
+        .filter((job) => job.candidate)
+        .sort((left, right) => right.output_visible_character_count - left.output_visible_character_count)[0];
+      setFeaturedCandidateId(best?.candidate?.id || "");
+      setJobsOpen(true);
+    } catch (reason) {
+      onError(errorMessage(reason, "加载生成历史失败"));
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const restoreCandidate = async (job: GenerationJobRecord) => {
+    const candidate = job.candidate;
+    if (!candidate) return;
+    setBusyAction(`restore:${candidate.id}`);
+    try {
+      let updated: DocumentRecord;
+      if (candidate.state === "ready") {
+        const result = await apiRequest<{ document: DocumentRecord }>(`/candidates/${candidate.id}/adopt`, {
           method: "POST",
           body: JSON.stringify({ expected_draft_version: document.draft_version }),
-        },
-      );
-      onDocumentChanged(result.document, "候选稿已采用并建立正式版本");
-      await loadJobs();
+        });
+        updated = result.document;
+      } else if (candidate.adopted_revision_id) {
+        const result = await apiRequest<{ document: DocumentRecord }>(
+          `/documents/${document.id}/revisions/${candidate.adopted_revision_id}/restore`,
+          { method: "POST", body: JSON.stringify({ expected_draft_version: document.draft_version }) },
+        );
+        updated = result.document;
+      } else {
+        throw new Error("这次生成没有可恢复的正文版本");
+      }
+      setJobsOpen(false);
+      onDocumentChanged(updated, `已恢复第 ${job.attempt} 次生成正文`);
     } catch (reason) {
-      onError(errorMessage(reason, "采用候选稿失败"));
+      onError(errorMessage(reason, "恢复生成版本失败"));
     } finally {
       setBusyAction("");
     }
   };
 
-  const reject = async (candidate: CandidateRecord) => {
-    setBusyAction(`reject:${candidate.id}`);
-    try {
-      await apiRequest(`/candidates/${candidate.id}/reject`, { method: "POST" });
-      await loadJobs();
-      onStatus("候选稿已拒绝，正文未变化");
-    } catch (reason) {
-      onError(errorMessage(reason, "拒绝候选稿失败"));
-    } finally {
-      setBusyAction("");
-    }
-  };
-
-  const loadProposals = async (): Promise<IntelligenceProposalRecord[]> => {
-    const loaded = await apiRequest<IntelligenceProposalRecord[]>(
-      `/documents/${document.id}/intelligence-proposals`,
-    );
-    setProposals(loaded);
-    const selected = loaded[0] ?? null;
-    setSelectedProposal(selected);
-    setSelectedItemIds([]);
-    return loaded;
+  const loadLatestIntelligence = async () => {
+    const loaded = await apiRequest<IntelligenceProposalRecord[]>(`/documents/${document.id}/intelligence-proposals`);
+    const current = loaded.find((proposal) => proposal.source_current) ?? loaded[0] ?? null;
+    setSelectedProposal(current);
+    return current;
   };
 
   const openIntelligence = async () => {
     setBusyAction("intelligence-load");
     try {
-      await loadProposals();
+      await loadLatestIntelligence();
       setIntelligenceOpen(true);
     } catch (reason) {
-      onError(errorMessage(reason, "加载章节情报失败"));
+      onError(errorMessage(reason, "加载本章情报失败"));
     } finally {
       setBusyAction("");
     }
   };
 
-  const extractIntelligence = async () => {
-    if (!document.base_revision_id) {
-      const message = "当前章节还没有正式版本，请先建立检查点";
-      setWorkflowError(message);
-      onError(message);
-      return;
-    }
-    setBusyAction("intelligence-extract");
-    setWorkflowError("");
+  const runSyncProgress = async () => {
+    setBusyAction("sync");
+    setGenerationStage("正在从本章正文提取角色、关系、故事线与伏笔进展");
+    setGeneratingOpen(true);
     try {
-      onStatus("AI 正在提取候选情报；故事账本不会自动变化");
-      const proposal = await apiRequest<IntelligenceProposalRecord>(
-        `/documents/${document.id}/intelligence-proposals?agent_id=ai-novel-writer`,
-        {
-          method: "POST",
-          body: JSON.stringify({ revision_id: document.base_revision_id }),
-        },
+      const prepared = onPrepareGeneration ? await onPrepareGeneration() : document;
+      if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
+      const checkpoint = await apiRequest<{ document: DocumentRecord }>(`/documents/${prepared.id}/checkpoints`, {
+        method: "POST",
+        body: JSON.stringify({ expected_draft_version: prepared.draft_version }),
+      });
+      const source = checkpoint.document;
+      if (!source.base_revision_id) throw new Error("本章正文尚未形成可同步版本");
+      onDocumentChanged(source, `${FIXED_MODEL_ID} 正在同步进展…`);
+      let proposal = await apiRequest<IntelligenceProposalRecord>(
+        `/documents/${source.id}/intelligence-proposals?agent_id=ai-novel-writer`,
+        { method: "POST", body: JSON.stringify({ revision_id: source.base_revision_id }) },
       );
-      await loadProposals();
+      if (proposal.actual_model_id !== FIXED_MODEL_ID) throw new Error("实际模型不是 MiniMax-M3，情报结果已作废");
+      const pendingIds = proposal.items.filter((item) => item.review_state === "pending").map((item) => item.id);
+      if (pendingIds.length > 0) {
+        proposal = await apiRequest<IntelligenceProposalRecord>(`/intelligence-proposals/${proposal.id}/commit`, {
+          method: "POST",
+          body: JSON.stringify({ accepted_item_ids: pendingIds, item_overrides: {} }),
+        });
+      }
       setSelectedProposal(proposal);
-      setSelectedItemIds([]);
       setIntelligenceOpen(true);
-      onStatus("候选情报已生成，等待逐条确认");
+      onStatus(`同步进展完成 · ${proposal.items.length} 条本章情报`);
     } catch (reason) {
-      const message = errorMessage(reason, "提取章节情报失败");
-      setWorkflowError(message);
-      onError(message);
-      onStatus("情报提取失败，故事账本未变化");
+      onError(errorMessage(reason, "同步进展失败"));
+      onStatus("同步进展失败");
     } finally {
+      setGeneratingOpen(false);
       setBusyAction("");
     }
   };
 
-  const selectProposal = (proposal: IntelligenceProposalRecord) => {
-    setSelectedProposal(proposal);
-    setSelectedItemIds([]);
+  const confirmSyncProgress = () => {
+    Modal.confirm({
+      className: "anw-modal anw-sync-confirm",
+      title: "确认",
+      width: 520,
+      content: h("div", { className: "anw-sync-copy" },
+        h("p", null, `本次同步进展将分析 ${document.visible_character_count} 字正文。`),
+        h("p", null, "AI 将根据当前章节内容提取情报信息（角色、伏笔、剧情线等），并更新到作品创作资料中。"),
+        h("strong", null, "确认同步并继续吗？"),
+      ),
+      okText: "确定",
+      cancelText: "取消",
+      onOk: () => { void runSyncProgress(); },
+    });
   };
 
-  const toggleItem = (itemId: string, checked: boolean) => {
-    setSelectedItemIds((current: string[]) =>
-      checked ? Array.from(new Set([...current, itemId])) : current.filter((id) => id !== itemId),
-    );
-  };
-
-  const rejectIntelligenceItem = async (itemId: string) => {
-    setBusyAction(`item-reject:${itemId}`);
+  const runReview = async () => {
+    setBusyAction("review");
+    setGenerationStage("正在从文字流畅、描写生动、人物一致性等维度审阅正文");
+    setGeneratingOpen(true);
     try {
-      const updated = await apiRequest<IntelligenceProposalRecord>(
-        `/intelligence-items/${itemId}`,
-        { method: "PATCH", body: JSON.stringify({ review_state: "rejected" }) },
-      );
-      setSelectedProposal(updated);
-      setSelectedItemIds((current: string[]) => current.filter((id) => id !== itemId));
-      await loadProposals();
+      const prepared = onPrepareGeneration ? await onPrepareGeneration() : document;
+      if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
+      const currentBrief = await ensureBrief();
+      const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+        method: "POST",
+        body: JSON.stringify({
+          scope_type: "document",
+          scope_id: prepared.id,
+          novel_id: novel.id,
+          document_id: prepared.id,
+          kind: "review",
+          input_snapshot: {
+            novel_title: novel.title,
+            chapter_title: prepared.title,
+            visible_character_count: prepared.visible_character_count,
+            outline_text: currentBrief.outline_text,
+            expectation_text: currentBrief.expectation_text,
+            content_markdown: prepared.content_markdown,
+          },
+          requested_model_id: FIXED_MODEL_ID,
+          force_new: true,
+        }),
+      });
+      if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) throw new Error(job.failure_message || "MiniMax-M3 审稿失败");
+      setReviewJob(job);
+      setReviewOpen(true);
+      onStatus("AI 审稿完成");
     } catch (reason) {
-      onError(errorMessage(reason, "拒绝情报项失败"));
+      onError(errorMessage(reason, "AI 审稿失败"));
     } finally {
+      setGeneratingOpen(false);
       setBusyAction("");
     }
   };
 
-  const commitSelectedItems = async () => {
-    if (!selectedProposal || selectedItemIds.length === 0) return;
-    setBusyAction("intelligence-commit");
-    try {
-      const updated = await apiRequest<IntelligenceProposalRecord>(
-        `/intelligence-proposals/${selectedProposal.id}/commit`,
-        {
-          method: "POST",
-          body: JSON.stringify({ accepted_item_ids: selectedItemIds, item_overrides: {} }),
-        },
-      );
-      setSelectedProposal(updated);
-      setSelectedItemIds([]);
-      await loadProposals();
-      onStatus("所选情报已写入故事账本");
-    } catch (reason) {
-      onError(errorMessage(reason, "采用情报失败"));
-    } finally {
-      setBusyAction("");
-    }
+  const confirmReview = () => {
+    Modal.confirm({
+      className: "anw-modal anw-review-confirm",
+      title: "确认",
+      width: 520,
+      content: "审稿将使用 MiniMax-M3 从文字流畅、描写生动、人物一致性、时空因果、伏笔与重复内容等维度分析正文并给出修改建议。是否开始审稿？",
+      okText: "确定",
+      cancelText: "取消",
+      onOk: () => { void runReview(); },
+    });
   };
 
-  const openLedger = async () => {
-    setBusyAction("ledger-load");
-    try {
-      setFacts(await apiRequest<StoryFactRecord[]>(`/novels/${novel.id}/story-facts`));
-      setLedgerOpen(true);
-    } catch (reason) {
-      onError(errorMessage(reason, "加载故事账本失败"));
-    } finally {
-      setBusyAction("");
-    }
-  };
+  const filteredAssets = assets.filter((item: PrivateAssetRecord) => item.asset_type === assetTab && (!assetSearch.trim() || `${item.title}\n${item.content}`.includes(assetSearch.trim())));
+  const currentAssetLabel = ASSET_TABS.find((item) => item.key === assetTab)?.label || "私有库配置";
+  const intelligenceGroups = groupedIntelligence(selectedProposal?.items ?? []);
+  const reviewIssues = Array.isArray(reviewJob?.output_json?.issues) ? reviewJob?.output_json.issues as ReviewIssue[] : [];
 
-  const selectedProposalItems = selectedProposal?.items ?? [];
-
-  return React.createElement(
+  return h(
     React.Fragment,
     null,
-    React.createElement(
-      Space,
-      { size: 8, wrap: true, className: "anw-workflow-panel" },
-      React.createElement(
-        Button,
-        { className: "anw-generate-button", icon: React.createElement(BookOutlined), onClick: openGenerationOptions, loading: busyAction === "generate" },
-        document.visible_character_count > 0 ? "重新生成" : "生成正文",
-      ),
-      React.createElement(
-        Button,
-        { icon: React.createElement(FileTextOutlined), onClick: openBrief, loading: busyAction === "brief-load" },
-        "修改章纲",
-      ),
-      React.createElement(
-        Button,
-        { className: "anw-intel-button", icon: React.createElement(BulbOutlined), onClick: openIntelligence, loading: busyAction === "intelligence-load" },
-        "情报",
-      ),
-      React.createElement(
-        Button,
-        { icon: React.createElement(DatabaseOutlined), onClick: openLedger, loading: busyAction === "ledger-load" },
-        "故事账本",
-      ),
+    h("div", { className: "anw-workflow-panel" },
+      h(Button, { className: "anw-generate-button", icon: h(BookOutlined), onClick: openGenerationOptions, loading: busyAction === "generate" || busyAction === "assets-load" }, document.visible_character_count > 0 ? "重新生成" : "生成正文"),
+      h(Button, { className: "anw-outline-button", icon: h(EditOutlined), onClick: openBrief, loading: busyAction === "brief-load" }, "修改章纲"),
+      h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: confirmSyncProgress, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
     ),
-    React.createElement(
-      Modal,
-      {
-        open: briefOpen,
-        className: "anw-modal",
-        title: "编辑章纲",
-        width: 680,
-        style: { top: 24 },
-        styles: { body: { maxHeight: "calc(100vh - 190px)", overflowY: "auto" } },
-        onCancel: () => setBriefOpen(false),
-        footer: [
-          React.createElement(Button, { key: "cancel", onClick: () => setBriefOpen(false) }, "取消"),
-          React.createElement(
-            Button,
-            { key: "save", type: "primary", loading: busyAction === "brief-save", onClick: saveBrief },
-            "保存章纲",
-          ),
-        ],
-      },
-      React.createElement(
-        Space,
-        { direction: "vertical", size: 18, style: { width: "100%" } },
-        React.createElement(
-          Typography.Text,
-          { className: "anw-outline-chapter-label" },
-          document.title,
-        ),
-        field(
-          "章节大纲",
-          React.createElement(TextArea, {
-            rows: 11,
-            "aria-label": "章节大纲",
-            value: briefForm.outlineText,
-            onChange: (event: any) => setBriefForm((current: BriefFormState) => ({
-              ...current,
-              outlineText: event.target.value,
-            })),
-            placeholder: "请输入章节大纲...",
-          }),
-        ),
-        field(
-          "目标字数",
-          React.createElement(InputNumber, {
-            min: 500,
-            max: 10000,
-            step: 100,
-            "aria-label": "目标字数",
-            value: briefForm.targetWordCount,
-            onChange: (value: number | null) => setBriefForm((current: BriefFormState) => ({
-              ...current,
-              targetWordCount: value ?? 2000,
-            })),
-            style: { width: 180 },
-          }),
-          "建议范围：500-10000字",
-        ),
-      ),
+    h("aside", { className: "anw-editor-side-tools", "aria-label": "章节工具" },
+      h(Button, { className: "is-orange", shape: "circle", icon: h(AuditOutlined), onClick: confirmReview, disabled: document.visible_character_count === 0, title: "审稿" }, h("span", null, "审稿")),
+      h(Button, { className: "is-orange", shape: "circle", icon: h(BulbOutlined), onClick: openIntelligence, loading: busyAction === "intelligence-load", title: "情报" }, h("span", null, "情报")),
+      h(Button, { shape: "circle", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load", title: "历史" }, h("span", null, "历史")),
+      h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowUpOutlined), onClick: onPreviousChapter, disabled: !onPreviousChapter, title: previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章", "aria-label": previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章" }),
+      h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowDownOutlined), onClick: onNextChapter, disabled: !onNextChapter, title: nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章", "aria-label": nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章" }),
     ),
-    React.createElement(
-      Modal,
-      {
-        open: assetPickerOpen,
-        className: "anw-modal anw-asset-modal",
-        title: "选择私有库配置",
-        width: 760,
-        style: { top: 36 },
-        onCancel: () => setAssetPickerOpen(false),
-        footer: [
-          React.createElement(Button, { key: "skip", onClick: generateBody }, "跳过"),
-          React.createElement(Button, { key: "generate", type: "primary", onClick: generateBody }, "确认生成"),
-        ],
-      },
-      React.createElement(
-        "section",
-        { className: "anw-asset-picker" },
-        React.createElement(
-          Typography.Paragraph,
-          { type: "secondary", className: "anw-asset-picker-copy" },
-          "可为本次正文选择桥段、写作风格、特色词汇或热梗奇思；也可以直接跳过。",
-        ),
-        React.createElement(Tabs, {
-          activeKey: assetTab,
-          onChange: setAssetTab,
-          items: [
-            ["plot", "桥段"],
-            ["style", "写作风格"],
-            ["vocabulary", "特色词汇"],
-            ["idea", "热梗奇思"],
-          ].map(([key, label]) => ({
-            key,
-            label,
-            children: React.createElement(
-              "div",
-              { className: "anw-asset-empty" },
-              React.createElement(Empty, { description: `暂无可选${label}` }),
-            ),
-          })),
-        }),
-      ),
-    ),
-    React.createElement(
-      Modal,
-      {
-        open: generatingOpen,
-        className: "anw-modal anw-generating-modal",
-        width: 520,
-        centered: true,
-        closable: false,
-        maskClosable: false,
-        keyboard: false,
-        footer: null,
-      },
-      React.createElement(
-        "section",
-        { className: "anw-generation-progress" },
-        React.createElement(Spin, { size: "large" }),
-        React.createElement("h2", null, "AI 正在创作章节内容"),
-        React.createElement("p", null, "正在分析前文、章纲和章节情节，请稍候…"),
-        React.createElement("span", null, "生成完成后将自动显示在正文编辑器中"),
-      ),
-    ),
-    React.createElement(
-      Modal,
-      {
-        open: jobsOpen,
-        className: "anw-modal",
-        title: "AI 候选历史与 Diff",
-        width: 1120,
-        style: { top: 24 },
-        styles: { body: { maxHeight: "calc(100vh - 150px)", overflowY: "auto" } },
-        footer: null,
-        onCancel: () => setJobsOpen(false),
-      },
-      jobs.length === 0
-        ? React.createElement(Empty, { description: "还没有候选任务" })
-        : React.createElement(
-            "div",
-            { style: { display: "grid", gridTemplateColumns: "260px minmax(0, 1fr)", gap: 16, minHeight: 520 } },
-            React.createElement(
-              "div",
-              { style: { maxHeight: 560, overflow: "auto" } },
-              ...jobs.map((job: GenerationJobRecord) =>
-                React.createElement(
-                  Card,
-                  {
-                    key: job.id,
-                    size: "small",
-                    hoverable: Boolean(job.candidate),
-                    onClick: () => job.candidate && setSelectedCandidate(job.candidate),
-                    style: {
-                      marginBottom: 8,
-                      borderColor: selectedCandidate?.generation_job_id === job.id ? "var(--ant-color-primary)" : undefined,
-                    },
-                  },
-                  React.createElement(
-                    Space,
-                    { direction: "vertical", size: 4 },
-                    React.createElement(
-                      Tag,
-                      { color: stateColor(job.candidate?.state ?? job.state) },
-                      stateLabel(job.candidate?.state ?? job.state),
-                    ),
-                    job.candidate
-                      ? React.createElement(Typography.Text, null, `${job.candidate.visible_character_count} 字`)
-                      : null,
-                    job.failure_message
-                      ? React.createElement(Typography.Text, { type: "danger", ellipsis: true }, job.failure_message)
-                      : null,
-                  ),
-                ),
-              ),
-            ),
-            selectedCandidate
-              ? React.createElement(
-                  "section",
-                  { style: { minWidth: 0 } },
-                  React.createElement(
-                    Space,
-                    { style: { width: "100%", justifyContent: "space-between", marginBottom: 10 }, wrap: true },
-                    React.createElement(
-                      Space,
-                      null,
-                      React.createElement(Tag, { color: stateColor(selectedCandidate.state) }, stateLabel(selectedCandidate.state)),
-                      React.createElement(Typography.Text, null, `${selectedCandidate.visible_character_count} 字`),
-                    ),
-                    selectedCandidate.state === "ready"
-                      ? React.createElement(
-                          Space,
-                          null,
-                          React.createElement(
-                            Button,
-                            { danger: true, loading: busyAction === `reject:${selectedCandidate.id}`, onClick: () => reject(selectedCandidate) },
-                            "拒绝",
-                          ),
-                          React.createElement(
-                            Button,
-                            { type: "primary", loading: busyAction === `adopt:${selectedCandidate.id}`, onClick: () => adopt(selectedCandidate) },
-                            "采用整稿并建立版本",
-                          ),
-                        )
-                      : null,
-                  ),
-                  React.createElement(Alert, {
-                    type: "warning",
-                    showIcon: true,
-                    message: "采用前只预览 Diff；若正文基线已经变化，服务端会拒绝覆盖。",
-                    style: { marginBottom: 10 },
-                  }),
-                  React.createElement(
-                    "pre",
-                    {
-                      style: {
-                        maxHeight: 470,
-                        overflow: "auto",
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        padding: 14,
-                        borderRadius: 8,
-                        background: "var(--ant-color-fill-quaternary, rgba(255,255,255,.04))",
-                        font: "13px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace",
-                      },
-                    },
-                    selectedCandidate.unified_diff || "候选与生成基线没有文本差异。",
-                  ),
-                )
-              : React.createElement(Empty, { description: "选择一份候选查看 Diff" }),
-          ),
-    ),
-    React.createElement(
+    h(Modal, {
+      open: briefOpen,
+      className: "anw-modal anw-outline-edit-modal",
+      title: h("div", { className: "anw-outline-edit-title" }, h(FileTextOutlined), h("strong", null, "修改章纲"), h("span", null, document.title)),
+      width: 720,
+      centered: true,
+      onCancel: () => setBriefOpen(false),
+      footer: [h(Button, { key: "cancel", onClick: () => setBriefOpen(false) }, "取消"), h(Button, { key: "save", type: "primary", loading: busyAction === "brief-save", onClick: saveBrief }, "保存章纲")],
+    }, h("div", { className: "anw-outline-edit-body" },
+      field("章节大纲", h(TextArea, { rows: 12, showCount: true, maxLength: 30000, "aria-label": "章节大纲", value: briefForm.outlineText, onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, outlineText: event.target.value })), placeholder: "请输入章节大纲..." })),
+      field("目标字数", h(InputNumber, { min: 3000, max: 5000, step: 100, "aria-label": "目标字数", value: briefForm.targetWordCount, onChange: (value: number | null) => setBriefForm((current: BriefFormState) => ({ ...current, targetWordCount: value ?? 3500 })) }), "每章 3000-5000 字；低于 3000 字的生成结果不能采用。"),
+    )),
+    h(Modal, {
+      open: assetPickerOpen,
+      className: "anw-modal anw-asset-modal",
+      title: "选择私有库配置",
+      width: 860,
+      centered: true,
+      onCancel: () => setAssetPickerOpen(false),
+      footer: [h(Button, { key: "skip", onClick: () => void generateBody([]) }, "跳过"), h(Button, { key: "generate", type: "primary", onClick: () => void generateBody(selectedAssetIds) }, `确定选择${selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ""}`)],
+    }, h("section", { className: "anw-asset-picker" },
+      h("p", { className: "anw-asset-picker-copy" }, "AI 将重点展示选中的内容到生成结果中"),
+      h("div", { className: "anw-asset-search-row" }, h(Input, { value: assetSearch, prefix: h(SearchOutlined), placeholder: "搜索私有库配置", onChange: (event: any) => setAssetSearch(event.target.value) }), h(Button, { type: "link", icon: h(PlusOutlined), onClick: () => setQuickAssetOpen(true) }, "快速添加")),
+      h(Tabs, { activeKey: assetTab, onChange: (key: string) => setAssetTab(key as PrivateAssetType), items: ASSET_TABS.map((tab) => ({
+        key: tab.key,
+        label: tab.label,
+        children: filteredAssets.length ? h("div", { className: "anw-asset-grid" }, ...filteredAssets.map((asset: PrivateAssetRecord) => {
+          const selected = selectedAssetIds.includes(asset.id);
+          return h("button", { type: "button", key: asset.id, className: `anw-asset-card${selected ? " is-selected" : ""}`, onClick: () => setSelectedAssetIds((current: string[]) => selected ? current.filter((id) => id !== asset.id) : [...current, asset.id]) }, h(Checkbox, { checked: selected, tabIndex: -1 }), h("span", null, h("strong", null, asset.title), h("small", null, asset.content)));
+        })) : h("div", { className: "anw-asset-empty" }, h(Empty, { description: `暂无可选${tab.empty}` })),
+      })) }),
+    )),
+    h(Modal, {
+      open: quickAssetOpen,
+      className: "anw-modal anw-quick-asset-modal",
+      title: `快速添加${currentAssetLabel}`,
+      width: 520,
+      centered: true,
+      onCancel: () => setQuickAssetOpen(false),
+      footer: [h(Button, { key: "cancel", onClick: () => setQuickAssetOpen(false) }, "取消"), h(Button, { key: "save", type: "primary", loading: busyAction === "asset-create", disabled: !quickAssetTitle.trim() || !quickAssetContent.trim(), onClick: saveQuickAsset }, "添加并选中")],
+    }, h("div", { className: "anw-quick-asset-body" }, field("名称", h(Input, { value: quickAssetTitle, maxLength: 160, onChange: (event: any) => setQuickAssetTitle(event.target.value), placeholder: `给这条${currentAssetLabel}起个名字` })), field("内容", h(TextArea, { rows: 7, value: quickAssetContent, maxLength: 12000, showCount: true, onChange: (event: any) => setQuickAssetContent(event.target.value), placeholder: "输入希望本次正文重点采用的内容" })))),
+    h(Modal, { open: generatingOpen, className: "anw-modal anw-generating-modal", width: 520, centered: true, closable: false, maskClosable: false, keyboard: false, footer: null }, h("section", { className: "anw-generation-progress" }, h(Spin, { size: "large" }), h("h2", null, `${FIXED_MODEL_ID} 正在工作`), h("p", null, generationStage), h("span", null, "完成后将自动返回当前章节"))),
+    h(Modal, {
+      open: jobsOpen,
+      className: "anw-modal anw-generation-history-modal",
+      title: h("div", { className: "anw-history-title" }, h("strong", null, `生成历史（共 ${jobs.length} 次）`), h(Tag, { color: "processing" }, FIXED_MODEL_ID)),
+      width: 760,
+      centered: true,
+      footer: null,
+      onCancel: () => setJobsOpen(false),
+    }, jobs.length === 0 ? h(Empty, { description: "还没有正文生成记录" }) : h("div", { className: "anw-generation-history-list" }, ...jobs.map((job: GenerationJobRecord) => {
+      const candidate = job.candidate;
+      const state = candidate?.state ?? job.state;
+      return h("article", { key: job.id, className: `anw-history-card${candidate?.id === featuredCandidateId ? " is-featured" : ""}` },
+        h("header", null, h("div", null, h("strong", null, `第 ${job.attempt || 1} 次生成`), h("span", null, formatDate(job.completed_at || job.created_at))), h(Tag, { color: stateColor(state) }, stateLabel(state))),
+        h("div", { className: "anw-history-meta" }, h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`), h("span", null, `目标 ${job.target_visible_character_count || 3000} 字`), h("span", null, job.actual_model_id || job.requested_model_id || FIXED_MODEL_ID)),
+        candidate ? h("p", null, candidate.content_text.slice(0, 230) || "本次生成正文为空") : h("p", { className: "is-error" }, job.failure_message || "本次生成没有可用正文"),
+        h("footer", null, job.asset_snapshot?.length ? h("small", null, `采用私有库：${job.asset_snapshot.map((item: GenerationJobRecord["asset_snapshot"][number]) => item.title).join("、")}`) : h("small", null, "未选择私有库配置"), h(Button, { disabled: !candidate || candidate.state === "rejected", loading: busyAction === `restore:${candidate?.id}`, onClick: () => void restoreCandidate(job) }, candidate ? "恢复此版本" : "需要整章重写")),
+      );
+    }))),
+    h(
       Modal,
       {
         open: intelligenceOpen,
-        className: "anw-modal",
-        title: "章节情报提案",
-        width: 1080,
-        style: { top: 24 },
-        styles: { body: { maxHeight: "calc(100vh - 190px)", overflowY: "auto" } },
-        footer: [
-          React.createElement(
-            Button,
-            { key: "extract", loading: busyAction === "intelligence-extract", onClick: extractIntelligence },
-            "提取当前正式版本",
-          ),
-          React.createElement(
-            Button,
-            {
-              key: "commit",
-              type: "primary",
-              disabled: !selectedProposal?.source_current || selectedItemIds.length === 0,
-              loading: busyAction === "intelligence-commit",
-              onClick: commitSelectedItems,
-            },
-            `采用所选（${selectedItemIds.length}）`,
-          ),
-        ],
+        className: "anw-modal anw-intelligence-modal",
+        title: h("div", { className: "anw-intelligence-title" }, h("strong", null, "本章章节情报"), h("span", null, "（本内容由AI生成）")),
+        width: 800,
+        centered: true,
         onCancel: () => setIntelligenceOpen(false),
+        footer: [h(Button, { key: "close", type: "primary", onClick: () => setIntelligenceOpen(false) }, "关闭")],
       },
-      React.createElement(
-        Spin,
-        { spinning: busyAction === "intelligence-extract" },
-        workflowError
-          ? React.createElement(Alert, {
-              type: "error",
-              showIcon: true,
-              closable: true,
-              message: workflowError,
-              onClose: () => setWorkflowError(""),
-              style: { marginBottom: 12 },
-            })
-          : null,
-        proposals.length === 0
-          ? React.createElement(Empty, { description: "还没有情报提案；先为当前正式版本提取" })
-          : React.createElement(
-              "div",
-              { style: { display: "grid", gridTemplateColumns: "230px minmax(0, 1fr)", gap: 16, minHeight: 460 } },
-              React.createElement(
-                "div",
-                null,
-                ...proposals.map((proposal: IntelligenceProposalRecord) =>
-                  React.createElement(
-                    Button,
-                    {
-                      key: proposal.id,
-                      block: true,
-                      type: selectedProposal?.id === proposal.id ? "primary" : "text",
-                      onClick: () => selectProposal(proposal),
-                      style: { height: "auto", minHeight: 44, marginBottom: 6, textAlign: "left" },
-                    },
-                    `${stateLabel(proposal.state)} · ${proposal.items.length} 项`,
-                  ),
+      !selectedProposal || intelligenceGroups.length === 0
+        ? h(Empty, { description: "本章还没有情报；完成正文后点击“同步进展”生成" })
+        : h(
+            "div",
+            { className: "anw-intelligence-groups" },
+            ...intelligenceGroups.map((group) => h(
+              "section",
+              { key: group.key },
+              h("h3", null, `${group.label}（${group.items.length}）`),
+              ...group.items.map((item) => h(
+                "article",
+                { key: item.id },
+                h("strong", null, item.suggested_payload.subject),
+                h(
+                  "div",
+                  null,
+                  h("span", null, h("small", null, "变化类型："), item.suggested_payload.predicate),
+                  h("span", null, h("small", null, "最新进展："), item.suggested_payload.object),
                 ),
-              ),
-              React.createElement(
-                "section",
-                { style: { minWidth: 0, maxHeight: 520, overflow: "auto" } },
-                React.createElement(Alert, {
-                  type: "info",
-                  showIcon: true,
-                  message: "候选默认不选中；请逐条确认后再写入故事账本。",
-                  style: { marginBottom: 10 },
-                }),
-                selectedProposal && !selectedProposal.source_current
-                  ? React.createElement(Alert, {
-                      type: "error",
-                      showIcon: true,
-                      message: "这份提案基于旧正文，只能审计，不能采用。请重新建立检查点并提取。",
-                      style: { marginBottom: 10 },
-                    })
-                  : null,
-                selectedProposalItems.length === 0
-                  ? React.createElement(Empty, { description: "模型没有提出可复核情报" })
-                  : React.createElement(List, {
-                      dataSource: selectedProposalItems,
-                      renderItem: (item: any) => React.createElement(
-                        List.Item,
-                        { key: item.id },
-                        React.createElement(
-                          Card,
-                          { size: "small", style: { width: "100%" } },
-                          React.createElement(
-                            Space,
-                            { align: "start", style: { width: "100%" } },
-                            React.createElement(Checkbox, {
-                              checked: item.review_state === "accepted" || selectedItemIds.includes(item.id),
-                              disabled: item.review_state !== "pending" || !selectedProposal?.source_current,
-                              "aria-label": `选择情报：${item.suggested_payload.subject}，${item.suggested_payload.predicate}，${item.suggested_payload.object}`,
-                              onChange: (event: any) => toggleItem(item.id, event.target.checked),
-                            }),
-                            React.createElement(
-                              "div",
-                              { style: { flex: 1, minWidth: 0 } },
-                              React.createElement(
-                                Space,
-                                { wrap: true },
-                                React.createElement(Tag, null, factTypeLabel(item.item_type)),
-                                React.createElement(Tag, { color: stateColor(item.review_state) }, stateLabel(item.review_state)),
-                                React.createElement(Typography.Text, { type: "secondary" }, `置信度 ${item.confidence}`),
-                              ),
-                              React.createElement(
-                                Typography.Paragraph,
-                                { style: { marginBlock: 8 } },
-                                `${item.suggested_payload.subject} · ${item.suggested_payload.predicate} · ${item.suggested_payload.object}`,
-                              ),
-                              React.createElement(Typography.Text, { type: "secondary" }, `证据：${item.source_text}`),
-                              item.reasoning_summary
-                                ? React.createElement(Typography.Paragraph, { type: "secondary", style: { marginTop: 6, marginBottom: 0 } }, item.reasoning_summary)
-                                : null,
-                            ),
-                            item.review_state === "pending"
-                              ? React.createElement(
-                                  Button,
-                                  { size: "small", danger: true, loading: busyAction === `item-reject:${item.id}`, onClick: () => rejectIntelligenceItem(item.id) },
-                                  "拒绝",
-                                )
-                              : null,
-                          ),
-                        ),
-                      ),
-                    }),
-              ),
-            ),
-      ),
+              )),
+            )),
+          ),
     ),
-    React.createElement(
-      Modal,
-      {
-        open: ledgerOpen,
-        className: "anw-modal",
-        title: `故事账本 · ${novel.title}`,
-        width: 880,
-        style: { top: 24 },
-        styles: { body: { maxHeight: "calc(100vh - 150px)", overflowY: "auto" } },
-        footer: null,
-        onCancel: () => setLedgerOpen(false),
-      },
-      facts.length === 0
-        ? React.createElement(Empty, { description: "故事账本还是空的" })
-        : React.createElement(List, {
-            dataSource: facts,
-            renderItem: (fact: StoryFactRecord) => React.createElement(
-              List.Item,
-              { key: fact.id },
-              React.createElement(List.Item.Meta, {
-                title: React.createElement(
-                  Space,
-                  { wrap: true },
-                  React.createElement(Tag, null, factTypeLabel(fact.fact_type)),
-                  React.createElement(
-                    Tag,
-                    { color: fact.status === "active" || fact.status === "source_restored" ? "success" : "warning" },
-                    factStatusLabel(fact.status),
-                  ),
-                  React.createElement(Typography.Text, { strong: true }, `${fact.subject} · ${fact.predicate}`),
-                ),
-                description: fact.object_text,
-              }),
-            ),
-          }),
-    ),
+    h(Modal, {
+      open: reviewOpen,
+      className: "anw-modal anw-review-result-modal",
+      title: h("div", { className: "anw-review-title" }, h(AuditOutlined), h("strong", null, "AI审稿报告"), h(Tag, { color: "processing" }, FIXED_MODEL_ID)),
+      width: 820,
+      centered: true,
+      footer: [h(Button, { key: "close", type: "primary", onClick: () => setReviewOpen(false) }, "关闭")],
+      onCancel: () => setReviewOpen(false),
+    }, reviewJob ? h("div", { className: "anw-review-result" }, h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "MiniMax-M3 已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
   );
 }

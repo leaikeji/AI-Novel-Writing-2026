@@ -29,6 +29,7 @@ from .creative_schemas import (
     UpdateDocumentMetadataRequest,
     UpdateForeshadowRequest,
     UpdateNovelDraftRequest,
+    UpdateNovelSettingsRequest,
     UpdateOutlineDraftRequest,
     UpdatePrivateAssetRequest,
     UpdateRelationshipRequest,
@@ -79,6 +80,7 @@ from .creative_services import (
     update_foreshadow,
     update_novel_character,
     update_novel_creation_draft,
+    update_novel_settings,
     update_outline_draft,
     update_private_asset,
     update_storyline,
@@ -88,10 +90,11 @@ from .database import get_session
 from .model_runtime import (
     ModelVerificationError,
     configured_model_audit,
+    normalize_creative_generation_json,
     parse_model_json,
     reply_model_audit,
 )
-from .services import NotFoundError, ValidationError
+from .services import NotFoundError, ValidationError, delete_novel
 
 
 router = APIRouter()
@@ -110,6 +113,21 @@ def _raise(error: Exception) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
         ) from error
     raise error
+
+
+@router.delete("/novels/{novel_id}")
+def novels_delete(
+    novel_id: UUID,
+    expected_version: int = Query(ge=1),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    try:
+        delete_novel(session, novel_id, expected_version=expected_version)
+        return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
 
 
 @router.post("/creation-drafts", status_code=status.HTTP_201_CREATED)
@@ -569,7 +587,11 @@ def foreshadows_create(
 ) -> dict[str, object]:
     try:
         return create_foreshadow(
-            session, novel_id, title=request.title, content=request.content
+            session,
+            novel_id,
+            title=request.title,
+            content=request.content,
+            latest_progress=request.latest_progress,
         )
     except Exception as error:
         session.rollback()
@@ -592,6 +614,7 @@ def foreshadows_update(
             expected_version=request.expected_version,
             title=request.title,
             content=request.content,
+            latest_progress=request.latest_progress,
             status=request.status,
             progress=request.progress,
         )
@@ -709,13 +732,25 @@ async def creative_generations_create(
             reply,
             session_id=generation_session_id,
         ).ensure_matches(configured_model)
+        try:
+            parsed_output = parse_model_json(reply.text)
+        except ModelVerificationError:
+            # Single-text helpers can safely recover useful prose even when the
+            # model omitted its JSON envelope. Kind-aware normalization below
+            # still rejects every incomplete structured result.
+            parsed_output = {}
+        output_json = normalize_creative_generation_json(
+            str(job["kind"]),
+            parsed_output,
+            reply.text,
+        )
         return complete_creative_generation(
             session,
             UUID(str(job["id"])),
             actual_model_id=actual_model.model_id,
             provider_profile=actual_model.provider_id,
             output_text=reply.text,
-            output_json=parse_model_json(reply.text),
+            output_json=output_json,
         )
     except Exception as error:
         session.rollback()
@@ -761,6 +796,30 @@ def volumes_update(
             volume_id,
             expected_version=request.expected_version,
             title=request.title,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.put("/novels/{novel_id}/settings")
+def novels_update_settings(
+    novel_id: UUID,
+    request: UpdateNovelSettingsRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return update_novel_settings(
+            session,
+            novel_id,
+            expected_version=request.expected_version,
+            genre=request.genre,
+            subgenre=request.subgenre,
+            idea=request.idea,
+            template_name=request.template_name,
+            template_data=request.template_data,
+            cover_image_data=request.cover_image_data,
         )
     except Exception as error:
         session.rollback()

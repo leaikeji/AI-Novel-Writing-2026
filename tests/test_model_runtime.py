@@ -10,9 +10,12 @@ from backend.model_runtime import (
     ModelAudit,
     ModelVerificationError,
     is_minimax_m3,
+    normalize_creative_generation_json,
+    normalize_intelligence_generation_json,
     parse_model_json,
     reply_model_audit,
 )
+from backend.services import build_chapter_generation_prompt
 
 
 def _reply_with_usage(provider_id: str, model_name: str) -> SimpleNamespace:
@@ -40,6 +43,42 @@ def test_minimax_m3_matching_is_exact() -> None:
     assert not is_minimax_m3("MiniMax-M2.7")
     assert not is_minimax_m3("MiniMax-M30")
     assert not is_minimax_m3("qwen3.7-plus")
+
+
+def test_chapter_prompt_separates_creative_target_from_acceptance_floor() -> None:
+    prompt = build_chapter_generation_prompt(
+        {
+            "novel": {"title": "长篇小说"},
+            "chapter": {"title": "第四章", "base_content_markdown": ""},
+            "brief": {
+                "target_word_count": 5000,
+                "expectation_text": "推进防汛主线",
+                "outline_text": "人物核对值班表。",
+                "forbidden_text": "",
+                "role_constraints": {
+                    "required": [],
+                    "allowed": [],
+                    "context_only": [],
+                    "forbidden": [],
+                },
+            },
+            "acceptance": {
+                "minimum_visible_character_count": 3000,
+                "target_visible_character_count": 3000,
+                "requested_visible_character_count": 5000,
+            },
+            "previous_context": [],
+            "story_facts": [],
+            "private_assets": [],
+        }
+    )
+
+    assert "创作目标：约 5000 个中文可见字符" in prompt
+    assert "验收下限：至少 3000 个中文可见字符" in prompt
+    assert "至少 5000 个中文可见字符；不得少于该值" not in prompt
+    assert "不得输出“我需要先加载”等内部工作语句" in prompt
+    assert "内容禁区、角色限制和验收规则只用于约束创作，不是正文素材" in prompt
+    assert "不得用“没有……”“不出现……”“不靠……”等作者说明" in prompt
 
 
 def test_reply_audit_reads_actual_provider_usage_metadata() -> None:
@@ -122,3 +161,100 @@ def test_model_json_parser_accepts_fenced_or_embedded_objects() -> None:
     }
     with pytest.raises(ModelVerificationError, match="可解析的 JSON"):
         parse_model_json("没有结构化结果")
+
+
+def test_model_json_parser_repairs_missing_character_item_boundary() -> None:
+    malformed = (
+        '{"characters":['
+        '{"name":"甲","role_type":"main","details":{"age":"17"},'
+        '{"name":"乙","role_type":"supporting","details":{"age":"18"}}]}'
+    )
+    payload = parse_model_json(malformed)
+    assert [item["name"] for item in payload["characters"]] == ["甲", "乙"]
+
+
+def test_single_text_generation_recovers_plain_minimax_prose() -> None:
+    recovered = normalize_creative_generation_json(
+        "outline_plot",
+        {},
+        "第一章重返旧车站，第二章发现被调包的档案，最终在洪水前公开证据。",
+    )
+    assert recovered == {
+        "plot_text": "第一章重返旧车站，第二章发现被调包的档案，最终在洪水前公开证据。"
+    }
+
+
+def test_structured_generation_rejects_missing_required_fields() -> None:
+    with pytest.raises(ModelVerificationError, match="章纲结果结构不完整"):
+        normalize_creative_generation_json(
+            "chapter_outline",
+            {"title": "旧车站来信"},
+            '{"title":"旧车站来信"}',
+        )
+
+    with pytest.raises(ModelVerificationError, match="角色结果结构不完整"):
+        normalize_creative_generation_json(
+            "outline_characters",
+            {"characters": []},
+            '{"characters":[]}',
+        )
+
+
+def test_intelligence_payload_recovers_valid_items_from_malformed_envelope() -> None:
+    malformed = (
+        '{"items":['
+        '{"item_type":"fact","subject":"沈青禾","predicate":"重生",'
+        '"object":"回到1992年","source_text":"她睁开眼",'
+        '"reasoning_summary":"时间锚点","confidence":96},'
+        '{"item_type":"fact","subject":"沈佑平","predicate":"被处分",'
+        '"object":"处分事由"扣留单据"","source_text":"处分公告",'
+        '"reasoning_summary":"未转义引号使这一项无效"},'
+        '{"item_type":"storyline_event","subject":"沈青禾",'
+        '"predicate":"启动调查","object":"列下三项计划",'
+        '"source_text":"她写下三条线",'
+        '"reasoning_summary":"主线启动","confidence":88}]}'
+    )
+    parsed = parse_model_json(malformed)
+    assert parsed["subject"] == "沈青禾"
+
+    items = normalize_intelligence_generation_json(parsed, malformed)
+
+    assert [item["subject"] for item in items] == ["沈青禾", "沈青禾"]
+    assert items[1]["item_type"] == "storyline_event"
+
+
+def test_intelligence_payload_rejects_empty_success() -> None:
+    with pytest.raises(ModelVerificationError, match="未返回可用"):
+        normalize_intelligence_generation_json({"items": []}, '{"items":[]}')
+
+
+def test_review_payload_recovers_envelope_and_valid_embedded_issues() -> None:
+    malformed = (
+        '{"passed":false,"summary":"发现两处连续性问题","issues":['
+        '{"severity":"P0","type":"时间矛盾","evidence":"周三锁门",'
+        '"suggestion":"改为周五"},'
+        '{"severity":"P1","type":"坏对象","evidence":"缺少结尾",'
+        "'suggestion':'补齐'},"
+        '{"severity":"P2","type":"重复描写","evidence":"连续两次愣住",'
+        '"suggestion":"删去一次"}]}'
+    )
+    parsed = parse_model_json(malformed)
+    assert parsed["type"] == "时间矛盾"
+
+    recovered = normalize_creative_generation_json("review", parsed, malformed)
+
+    assert recovered["passed"] is False
+    assert recovered["summary"] == "发现两处连续性问题"
+    assert [issue["type"] for issue in recovered["issues"]] == [
+        "时间矛盾",
+        "重复描写",
+    ]
+
+
+def test_review_payload_rejects_incomplete_negative_report() -> None:
+    with pytest.raises(ModelVerificationError, match="结构不完整"):
+        normalize_creative_generation_json(
+            "review",
+            {"passed": False, "summary": "发现问题", "issues": []},
+            '{"passed":false,"summary":"发现问题","issues":[]}',
+        )

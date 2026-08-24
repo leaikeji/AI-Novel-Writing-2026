@@ -42,3 +42,29 @@ def test_uninstall_requires_the_exact_plugin_id() -> None:
 
     with pytest.raises(RuntimeError, match="requires --confirm"):
         lab.uninstall("wrong-plugin")
+
+
+def test_installed_plugin_migration_uses_packaged_alembic_head(monkeypatch) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(lab, "run", lambda *args, **kwargs: calls.append(args) or "")
+    lab.migrate_installed_plugin()
+
+    assert calls == [
+        (
+            "docker",
+            "exec",
+            lab.CONTAINER,
+            "sh",
+            "-lc",
+            "cd /app/working/plugins/ai-novel-world-2026 && "
+            "/app/venv/bin/python -m alembic -c alembic.ini upgrade head",
+        )
+    ]
+
+
+def test_packager_includes_alembic_configuration() -> None:
+    source = (ROOT / "scripts" / "package_plugin.py").read_text(encoding="utf-8")
+
+    assert 'copy_file("alembic.ini")' in source

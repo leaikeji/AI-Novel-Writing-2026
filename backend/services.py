@@ -454,12 +454,14 @@ def list_novels(session: Session) -> list[dict[str, Any]]:
             {
                 "id": str(novel.id),
                 "title": novel.title,
+                "author_name": novel.author_name,
                 "description": novel.description,
                 "writing_type": novel.writing_type,
                 "audience": novel.audience,
                 "genre": novel.genre,
                 "subgenre": novel.subgenre,
                 "cover_mode": novel.cover_mode,
+                "cover_image_data": novel.cover_image_data,
                 "cover_asset_id": str(novel.cover_asset_id) if novel.cover_asset_id else None,
                 "version": novel.version,
                 "chapter_count": len(documents),
@@ -471,11 +473,29 @@ def list_novels(session: Session) -> list[dict[str, Any]]:
     return result
 
 
+def delete_novel(
+    session: Session,
+    novel_id: UUID,
+    *,
+    expected_version: int,
+) -> None:
+    novel = session.scalar(
+        select(Novel).where(Novel.id == novel_id).with_for_update()
+    )
+    if novel is None:
+        raise NotFoundError(f"novel {novel_id} not found")
+    if novel.version != expected_version:
+        raise ValidationError("小说已在其他位置更新，请刷新后重试")
+    session.delete(novel)
+    session.commit()
+
+
 def get_novel(session: Session, novel_id: UUID) -> dict[str, Any]:
     novel = _require_novel(session, novel_id)
     return {
         "id": str(novel.id),
         "title": novel.title,
+        "author_name": novel.author_name,
         "description": novel.description,
         "writing_type": novel.writing_type,
         "audience": novel.audience,
@@ -486,6 +506,7 @@ def get_novel(session: Session, novel_id: UUID) -> dict[str, Any]:
         "template_name": novel.template_name,
         "template_data": novel.template_data,
         "cover_mode": novel.cover_mode,
+        "cover_image_data": novel.cover_image_data,
         "cover_asset_id": str(novel.cover_asset_id) if novel.cover_asset_id else None,
         "outline_target_chapters": novel.outline_target_chapters,
         "highlight": novel.highlight,
@@ -757,13 +778,17 @@ def start_chapter_generation(
         session, asset_ids=asset_ids, preset_id=preset_id
     )
     snapshot = _generation_snapshot(session, document, working, brief, asset_snapshot)
-    acceptance_target = max(
-        MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
-        brief.target_word_count,
-    )
+    # ``target_word_count`` is a creative length target, not a hard rejection
+    # threshold.  The product requirement is explicit: only chapters below
+    # 3000 visible Chinese characters must be discarded and rewritten.
+    acceptance_target = MINIMUM_COMPLETED_CHAPTER_CHARACTERS
     snapshot["acceptance"] = {
         "minimum_visible_character_count": MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
         "target_visible_character_count": acceptance_target,
+        "requested_visible_character_count": max(
+            MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
+            brief.target_word_count,
+        ),
     }
     attempt = 1
     if force_new:
@@ -817,10 +842,17 @@ def start_chapter_generation(
 def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
     brief = snapshot["brief"]
     acceptance = snapshot.get("acceptance") or {}
-    target_visible_character_count = max(
+    minimum_visible_character_count = max(
         MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
         int(
             acceptance.get("target_visible_character_count")
+            or MINIMUM_COMPLETED_CHAPTER_CHARACTERS
+        ),
+    )
+    requested_visible_character_count = max(
+        minimum_visible_character_count,
+        int(
+            acceptance.get("requested_visible_character_count")
             or brief["target_word_count"]
         ),
     )
@@ -840,10 +872,15 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
     return f"""你正在为作者生成一份可审阅的章节正文候选。请遵循 prose-writing Skill。
 
 只输出小说正文，不要解释、不要写标题、不要使用 Markdown 代码围栏，也不要声称已经保存。
+正文结束后立即停止；禁止追加“完成”“下一步”“等待作者反馈”“进入下一章”“修订本稿”等工作状态或流程提示。
+绝对不要叙述你将加载、读取或遵循任何 Skill；不得输出“我需要先加载”等内部工作语句。
+本章期望、章节大纲、内容禁区、角色限制和验收规则只用于约束创作，不是正文素材。不得在正文中复述、解释、否定或评论这些规则，也不得用“没有……”“不出现……”“不靠……”等作者说明来证明自己遵守了规则；请让合规结果自然发生在场景里。
+输出的第一个字必须已经属于小说场景。
 
 作品：{snapshot['novel']['title']}
 章节：{snapshot['chapter']['title']}
-目标字数：至少 {target_visible_character_count} 个中文可见字符；不得少于该值
+创作目标：约 {requested_visible_character_count} 个中文可见字符；优先达到目标
+验收下限：至少 {minimum_visible_character_count} 个中文可见字符；低于该值必须整章重写
 本章期望：{brief['expectation_text'] or '按章纲推进，不额外扩张设定'}
 章节大纲：
 {brief['outline_text'] or '无固定章纲，保持前文连续并形成完整章节推进'}
@@ -870,12 +907,31 @@ def _clean_model_candidate(text: str) -> str:
     fenced = re.fullmatch(r"```(?:markdown|md|text)?\s*(.*?)\s*```", candidate, re.DOTALL)
     if fenced:
         candidate = fenced.group(1).strip()
+    # Some host-agent replies leak a one-sentence orchestration preamble and
+    # concatenate it directly with the first prose sentence. Remove only an
+    # anchored instruction about the explicitly named prose-writing Skill;
+    # broader first-person prose must remain untouched.
+    orchestration_prefix = (
+        r"^(?:(?:我(?:需要|将|会|先)?|需要|将|先)\s*(?:先\s*)?"
+        r"(?:加载|读取|查看|调用|使用|遵循)[^\n。！？!?]{0,240}"
+        r"prose[- ]writing[^\n。！？!?]{0,240}[。！？!?]\s*)+"
+    )
+    candidate = re.sub(orchestration_prefix, "", candidate, flags=re.IGNORECASE).lstrip()
+    embedded_orchestration = (
+        r"(?:我(?:需要|将|会|先)?|需要|将|先)\s*(?:先\s*)?"
+        r"(?:加载|读取|查看|调用|使用|遵循)[^\n。！？!?]{0,240}"
+        r"prose[- ]writing"
+    )
+    if re.search(embedded_orchestration, candidate, flags=re.IGNORECASE):
+        raise ValidationError("模型正文中混入了 Skill 工作语句，请重新生成候选")
     # The host agent can occasionally append its own status capsule after the prose.
     # Strip only final standalone capsules with known orchestration wording so an
     # author's legitimate in-story brackets are never touched. Older host builds
     # occasionally emitted the wrong opening glyph, so both variants are accepted.
     capsule_pattern = (
-        r"[⟦⟧][^\n⟧]*(?:正文候选|续写候选|待作者审阅|状态：|禁区检查|锚点：)[^\n⟧]*⟧"
+        r"[⟦⟧][^\n⟧]*(?:正文候选|续写候选|待作者审阅|状态：|禁区检查|"
+        r"锚点：|完成：|下一步：|等作者反馈|等待作者反馈|进入下一章|修订本稿)"
+        r"[^\n⟧]*⟧"
     )
     candidate = re.sub(
         rf"(?:\n*\s*{capsule_pattern}\s*)+$",
@@ -1275,7 +1331,7 @@ def start_intelligence_proposal(
         raise NotFoundError(f"working copy for document {document_id} not found")
     if working.base_revision_id != revision_id or working.content_hash != revision.content_hash:
         raise ValidationError("请先建立当前正文检查点，再提取情报")
-    extractor_profile = "story-ledger-extractor-v1"
+    extractor_profile = "story-ledger-extractor-v3"
     input_hash = content_hash(f"{revision.content_hash}:{extractor_profile}")
     existing = session.scalar(
         select(IntelligenceProposal).where(
@@ -1351,6 +1407,10 @@ JSON 结构：
 2. 调查、协作、敌对和线索交换不能误分成恋爱关系。
 3. 已有相同事实不要重复；不确定时省略。
 4. 每项必须有可在正文中找到的 source_text。
+5. 所有字符串内禁止使用未转义的英文双引号；引用原文时统一改用中文引号「」。
+6. 正文不为空时至少返回 1 条情报，不得返回空 items。
+7. 小说时间线与现实系统日期无关。严禁用当前现实年份补全「今年」「去年」「本月」等相对日期；必须以正文最近的明确场景日期为锚点推断。无法可靠推断时保留正文原有相对表述，不得擅自补全年份。
+8. source_text 与 object 中的日期必须彼此一致；正文写明发生在 1992 年的场景，不得改写成 2026 年或其他现实年份。
 
 章节：{document.title}
 现有故事账本：

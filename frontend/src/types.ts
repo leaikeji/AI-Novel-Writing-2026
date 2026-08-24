@@ -17,6 +17,7 @@ export interface DocumentRecord {
   kind: "chapter" | "outline" | "setting";
   title: string;
   position: number;
+  version: number;
   draft_version: number;
   base_revision_id: string | null;
   content_markdown: string;
@@ -24,6 +25,14 @@ export interface DocumentRecord {
   visible_character_count: number;
   updated_at: string | null;
   revisions: RevisionSummary[];
+}
+
+export interface NovelSearchResultRecord {
+  document_id: string;
+  title: string;
+  kind: "chapter" | "outline" | "setting";
+  base_revision_id: string | null;
+  snippet: string;
 }
 
 export interface VolumeRecord {
@@ -37,7 +46,15 @@ export interface VolumeRecord {
 export interface NovelSummary {
   id: string;
   title: string;
+  author_name: string;
   description: string;
+  writing_type: string;
+  audience: string;
+  genre: string;
+  subgenre: string;
+  cover_mode: "ai" | "system" | "upload";
+  cover_image_data: string;
+  cover_asset_id: string | null;
   version: number;
   chapter_count: number;
   visible_character_count: number;
@@ -48,11 +65,87 @@ export interface NovelSummary {
 export interface NovelRecord {
   id: string;
   title: string;
+  author_name: string;
   description: string;
+  writing_type: string;
+  audience: string;
+  genre: string;
+  subgenre: string;
+  idea: string;
+  template_key: string | null;
+  template_name: string;
+  template_data: Record<string, unknown>;
+  cover_mode: "ai" | "system" | "upload";
+  cover_image_data: string;
+  cover_asset_id: string | null;
+  outline_target_chapters: number;
+  highlight: string;
+  background: string;
+  main_plot: string;
+  story_ledger_version: number;
   version: number;
   created_at: string | null;
   updated_at: string | null;
   tree: VolumeRecord[];
+}
+
+export type PrivateAssetType = "plot" | "writing_style" | "vocabulary" | "idea";
+
+export interface NovelCreationDraftRecord {
+  id: string;
+  draft_key: string;
+  step: number;
+  state: "draft" | "completed";
+  version: number;
+  data: Record<string, any>;
+  completed_novel_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PrivateAssetRecord {
+  id: string;
+  asset_type: PrivateAssetType;
+  title: string;
+  content: string;
+  version: number;
+  archived: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AssetPresetRecord {
+  id: string;
+  title: string;
+  description: string;
+  version: number;
+  archived: boolean;
+  assets: PrivateAssetRecord[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CreativeGenerationRecord {
+  id: string;
+  scope_type: string;
+  scope_id: string;
+  novel_id: string | null;
+  document_id: string | null;
+  kind: string;
+  state: "running" | "ready" | "failed";
+  input_hash: string;
+  input_snapshot: Record<string, unknown>;
+  requested_model_id: string;
+  actual_model_id: string | null;
+  provider_profile: string | null;
+  output_json: Record<string, any>;
+  output_text: string;
+  target_character_count: number | null;
+  output_visible_character_count: number;
+  attempt: number;
+  failure_message: string | null;
+  created_at: string | null;
+  completed_at: string | null;
 }
 
 export interface RoleConstraints {
@@ -73,6 +166,29 @@ export interface ChapterBriefRecord {
   role_constraints: RoleConstraints;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface ChapterCreationDraftRecord {
+  id: string;
+  draft_key: string;
+  novel_id: string;
+  volume_id: string | null;
+  step: number;
+  state: "draft" | "completed";
+  version: number;
+  title: string;
+  target_character_count: number;
+  expectation_text: string;
+  outline_text: string;
+  data: Record<string, any>;
+  completed_document_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ChapterCreationCompleteRecord {
+  draft: ChapterCreationDraftRecord;
+  document: DocumentRecord;
 }
 
 export interface CandidateRecord {
@@ -105,6 +221,20 @@ export interface GenerationJobRecord {
   base_draft_version: number;
   base_content_hash: string;
   model_profile_fingerprint: string;
+  asset_snapshot: Array<{
+    id: string;
+    asset_type: PrivateAssetType;
+    title: string;
+    content: string;
+    version: number;
+  }>;
+  requested_model_id: string;
+  actual_model_id: string | null;
+  provider_profile: string | null;
+  target_visible_character_count: number;
+  output_visible_character_count: number;
+  validation_state: string;
+  attempt: number;
   failure_message: string | null;
   candidate: CandidateRecord | null;
   created_at: string | null;
@@ -144,6 +274,9 @@ export interface IntelligenceProposalRecord {
     | "superseded"
     | "failed";
   source_current: boolean;
+  requested_model_id: string;
+  actual_model_id: string | null;
+  provider_profile: string | null;
   model_profile_fingerprint: string;
   failure_message: string | null;
   items: IntelligenceItemRecord[];
@@ -191,4 +324,99 @@ export interface RestorePreviewRecord {
     state: string;
     accepted_item_ids: string[];
   }>;
+}
+
+export interface OutlineCharacterDraft {
+  name: string;
+  role_type: "main" | "supporting";
+  description: string;
+  details: Record<string, unknown>;
+}
+
+export interface OutlineDraftRecord {
+  id: string;
+  novel_id: string;
+  step: number;
+  state: "draft" | "completed";
+  version: number;
+  target_chapter_count: number;
+  background_text: string;
+  characters: OutlineCharacterDraft[];
+  plot_text: string;
+  highlight_text: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface NovelCharacterRecord {
+  id: string;
+  novel_id: string;
+  role_type: "main" | "supporting";
+  name: string;
+  description: string;
+  details: Record<string, unknown>;
+  position: number;
+  version: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CharacterRelationshipRecord {
+  id: string;
+  novel_id: string;
+  source_character_id: string;
+  target_character_id: string;
+  relation_type: string;
+  description: string;
+  version: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export type StorylineType = "main" | "support" | "romance" | "faction";
+
+export interface StorylineRecord {
+  id: string;
+  novel_id: string;
+  storyline_type: StorylineType;
+  title: string;
+  description: string;
+  status: "active" | "paused" | "completed" | "archived";
+  progress: number;
+  position: number;
+  version: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ForeshadowRecord {
+  id: string;
+  novel_id: string;
+  title: string;
+  content: string;
+  latest_progress: string;
+  status: "planned" | "active" | "resolved" | "dropped";
+  progress: number;
+  position: number;
+  version: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface NovelExportRecord {
+  id: string;
+  novel_id: string;
+  export_format: "markdown" | "text";
+  state: "ready";
+  content_hash: string;
+  content: string;
+  metadata: {
+    novel_title: string;
+    volume_count: number;
+    ungrouped_chapter_count: number;
+    chapter_count: number;
+    visible_character_count: number;
+  };
+  created_at: string | null;
+  completed_at: string | null;
 }

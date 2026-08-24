@@ -32,6 +32,7 @@ class Novel(Base):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
+    author_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     writing_type: Mapped[str] = mapped_column(String(20), nullable=False, default="long")
     audience: Mapped[str] = mapped_column(String(20), nullable=False, default="")
@@ -42,6 +43,7 @@ class Novel(Base):
     template_name: Mapped[str] = mapped_column(String(160), nullable=False, default="")
     template_data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     cover_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="system")
+    cover_image_data: Mapped[str] = mapped_column(Text, nullable=False, default="")
     cover_asset_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="SET NULL")
     )
@@ -651,6 +653,7 @@ class Foreshadow(Base):
     )
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    latest_progress: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="planned")
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
