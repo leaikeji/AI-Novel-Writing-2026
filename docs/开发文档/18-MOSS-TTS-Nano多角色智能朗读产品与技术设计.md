@@ -6,7 +6,7 @@
 
 最近修订：2026-08-25（Asia/Shanghai）
 
-修订结论：采用“本地优先、规则优先、脚本与朗读版本分离、独立显示句段合成、Manifest 分段播放、统一持久任务底座”。运行拓扑由阶段 0 基准决定，不预先锁死为进程内、受管子进程或本机 Sidecar。
+修订结论：采用“本地优先、规则优先、脚本与朗读版本分离、独立显示句段合成、Manifest 分段播放、章节同页校听、统一持久任务底座”。运行拓扑由阶段 0 基准决定，不预先锁死为进程内、受管子进程或本机 Sidecar；编辑器实现由阶段 0 的兼容性尖峰冻结，不能用原生 `textarea` 的视觉叠层冒充可编辑句段映射。
 
 目标环境：QwenPaw 2.1.0 内的 `AI小说世界2026` PawApp；Apple Silicon M4、16 GB 内存；个人、本地优先使用。
 
@@ -37,7 +37,7 @@ MOSS-VoiceGenerator       = 文字描述音色设计器
 播放器与句段时间轴          = 阅读体验
 ```
 
-**项目决策**：目标是实现与番茄小说公开能力同类的功能架构，不复制其私有算法、声音资产、品牌、界面文案或未公开接口，也不在首版承诺达到其多年生产数据积累形成的主观音质。
+**项目决策**：目标是实现与番茄小说公开能力同类的功能架构，不复制其私有算法、声音资产、品牌、界面文案或未公开接口，也不在首版承诺达到其多年生产数据积累形成的主观音质。作品级声音配置留在书本“朗读”页面；章节播放、段落跳播和校听修改进入同一个章节工作台，两者不能被误合并成一个拥挤页面。
 
 ## 2. 研究结论和能力边界
 
@@ -101,6 +101,8 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 
 番茄未公开完整实现源码和客户端同步协议。本项目只采用由官方公开产品能力支持的架构模式。
 
+[公开可复核的番茄操作记录](https://jingyan.baidu.com/article/bea41d43dfc919f5c41be60b.html)还显示，至少部分版本在“边听边读”中提供“长按段落 -> 从本段听”。具体手势可能随客户端版本变化，本项目只学习“正文位置可成为播放起点”的产品原则：只读朗读视图可直接点击句段，写作编辑器必须保留普通单击放置光标，改用段落边栏播放按钮、上下文菜单和键盘命令触发跳播。
+
 ## 3. 范围
 
 ### 3.1 纳入
@@ -118,6 +120,9 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 - 按章合成、增量重生成、缓存和失败恢复；
 - 同一朗读脚本的多朗读版本与历史回溯；
 - 句段级正文高亮和自动滚动；
+- 章节工作台内的段落跳播、固定播放器和边听边改；
+- 音频未全部完成时，对用户明确选择位置建立连续就绪播放窗口；
+- 工作稿与当前朗读快照不一致时的旧稿提示、显式更新与版本切换；
 - 播放进度保存；
 - 后续全书批量生成和导出。
 
@@ -131,7 +136,10 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 - 模型自动新增正式人物或直接修改小说正文；
 - 默认把整章正文发送给云端模型；
 - 首版跨句 rolling prompt、跨显示句段合成和逐字强制对齐；
-- 第一版自动生成复杂情绪变体并静默替换已锁定音色。
+- 第一版自动生成复杂情绪变体并静默替换已锁定音色；
+- 每次按键、每次自动保存都触发说话人分析或 TTS；
+- 播放过程中无提示地把旧 Edition 切换成新正文 Edition；
+- 在可编辑正文中劫持普通单击作为播放手势。
 
 ## 4. 当前项目基础与必须保持的边界
 
@@ -142,7 +150,7 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 - [`DocumentWorkingCopy`](../../backend/models.py) 已提供草稿版本和内容哈希。
 - [`MediaAsset`](../../backend/models.py) 已预留小说媒体元数据、来源 revision、存储路径和内容哈希，但尚缺 MIME、字节数、资产类别、生命周期、保留策略和存储后端字段，实施时必须扩展，不能把现状误写为已满足朗读资产治理。
 - 当前作品工作台导航为章节、大纲、角色、线索、设定，见 [`workbench-studio.ts`](../../frontend/src/workbench-studio.ts)。
-- 当前正文控件实际仍是原生 `textarea`，见 [`workbench-v2.ts`](../../frontend/src/workbench-v2.ts)；规划中的 Monaco 尚未落地。
+- 当前正文控件实际仍是原生 `textarea`，见 [`workbench-v2.ts`](../../frontend/src/workbench-v2.ts)；它只能提供整块文本选择和光标偏移，不能原生渲染句段 decoration、段落 gutter 或被编辑事务安全映射的播放范围。
 - 现有架构已经预留 `TTSAdapter`、`LocalMountedMediaStorage` 和 TTS 失败不影响正文的边界。
 
 **项目决策**：
@@ -152,6 +160,9 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 - 浏览器只访问 PawApp API；浏览器不能直接访问模型 Runtime、模型目录或文件系统路径。
 - 逻辑上保留 `TTSAdapter` 和 `VoiceDesignAdapter`；Nano 的物理运行方式由阶段 0 决定。即使采用本机 Sidecar，它也只是受控模型依赖，不是第二套业务 API、Agent Runtime 或权威任务系统。
 - 现有 `ChapterGenerationJob`、`CreativeGenerationJob` 不作为 TTS 新建第三套调度器的理由。朗读使用共享持久任务领取、租约、重试和审计协议，领域表只保存朗读状态。
+- 章节播放和写作必须同页，但播放权威始终是不可变 `NarrationEdition`，编辑权威始终是 `DocumentWorkingCopy`。两者可以同时存在，不能共享一个会随按键变化的内容哈希。
+- 阶段 0 增加编辑器兼容性尖峰。默认候选为 CodeMirror 6，因为其 transaction、decoration、gutter 和位置映射更贴合 Markdown 长文；若其在 QwenPaw Blob bundle、中文输入法或现有自动保存中不达标，再评估 Monaco 公共 API。最终选择写入 ADR，业务层只依赖 `NarrationEditorBridge`，不得访问编辑器内部实现。
+- 原生 `textarea` 只允许作为安全降级：音频可继续播放，编辑仍可进行，但正文变更后当前句只显示在播放器字幕或不可变旧稿抽屉中，不承诺可编辑正文内的精确高亮和段落边栏跳播。
 
 ## 5. 产品信息架构
 
@@ -260,22 +271,78 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 
 ### 5.4 章节编辑器
 
-增加：
+章节写作与校听使用同一个章节工作台；书本“朗读”页面继续负责旁白、人物、通用声音、选角和作品级规则，不把这些制作设置复制进章节正文。
 
-- `智能朗读`；
-- 当前版本朗读状态；
-- 朗读脚本复核面板；
-- 固定或浮动播放器；
-- 播放、暂停、倍速、上一句、下一句和拖动；
-- 当前说话人和音色；
-- 当前句段高亮和自动滚动；
-- 点击句段跳转；
-- 单句试听和重新生成；
-- 正文版本过期提示。
+```text
+┌────────章节树────────┬────────────章节正文────────────┬──脚本/角色抽屉──┐
+│ 第一章               │  ▶ 第一段正文……               │ 当前说话人      │
+│ 第二章               │    “第一句对白……”             │ 选角证据        │
+│ 第三章               │  ▶ 第二段正文……               │ 单句试听/修正   │
+└──────────────────────┴────────────────────────────────┴────────────────┘
+┌────────────────────────────固定播放器─────────────────────────────┐
+│ 当前稿/旧稿  角色与音色  上一句  播放  下一句  倍速  更新朗读     │
+└───────────────────────────────────────────────────────────────────┘
+```
 
-播放器必须支持键盘操作、焦点可见、ARIA 标签和高对比度高亮。用户手动滚动后自动跟随暂停，并显示“返回当前朗读位置”；不得与用户争夺滚动位置。
+章节工作台增加：
 
-正文 `content_hash` 与朗读版本不一致时，允许继续听旧版本，但只能在不可变朗读快照中高亮；不得把旧偏移映射到当前编辑稿。
+- `智能朗读` 和当前朗读 Edition 状态；
+- 朗读脚本复核抽屉，不强制离开章节；
+- 不遮挡正文的固定底部播放器；
+- 播放、暂停、倍速、上一句、下一句和完整 Edition 的全章进度拖动；
+- 当前说话人、音色、源正文版本和“当前稿/旧稿”状态；
+- 当前句段高亮、自动滚动和“返回当前朗读位置”；
+- 段落边栏 `▶`、上下文菜单“从本段朗读”和键盘命令；
+- 单句试听、重新生成和“更新朗读”；
+- 正文修改后的待更新范围与旧版本提示。
+
+#### 写作手势与跳播
+
+- 普通单击、拖选、双击和中文输入法行为完全归编辑器所有，不能触发播放；
+- 可编辑模式以段落边栏 `▶` 为主入口；上下文菜单和可配置键盘命令为辅助入口；
+- 只读朗读快照允许直接点击句段；若点击的是段落空白，解析为该段第一个可朗读 `segment_id`；
+- 段落含多个句段时，边栏按钮从第一句开始，句段点击或上下文菜单可从具体句开始；
+- 标题、分隔符或不朗读内容没有可播放 segment 时禁用入口并说明原因；
+- 工作稿段落已经修改、新增或无法唯一映射到当前 Edition 时，不得把该段强行指向相似旧句；入口改为“更新后朗读”，只有进入不可变旧稿视图后才能明确跳播旧内容；
+- 目标起点已有满足缓冲策略的连续 ready window 时立即 `seekToSegment`；目标句虽 ready 但后续缓冲不足时，仍创建或提升从该句开始的播放窗口并显示准备状态，不静默回退到章首；
+- 连续点击不同段落只保留最后一次用户意图为最高交互优先级，已完成 render 和正在安全执行的模型调用不被破坏。
+
+播放器和所有跳播入口必须支持键盘操作、焦点可见、ARIA 标签和高对比度高亮。段落边栏按钮使用“从第 N 段朗读”等可读标签，不能只依赖 hover 或颜色。
+
+#### 自动跟随与编辑优先
+
+- 未发生人工操作时，当前 `segment_id` 驱动句段级高亮和滚动；
+- 用户手动滚动、移动光标、选择文字或开始输入后，立即暂停自动跟随，播放器继续播放；
+- 暂停跟随后显示“返回当前朗读位置”，只有用户明确点击才恢复；
+- 自动滚动不能改变 selection、输入法 composition、撤销栈或编辑器焦点；
+- 当前播放句段被修改时，旧音频可以继续，但该句在工作稿中的高亮失效，播放器字幕显示 Edition 中的旧文本并明确标记“旧稿朗读”。
+
+### 5.5 同页边听边改的版本契约
+
+“边听边改”表示播放与编辑可以同时进行，不表示每次按键都实时重新合成：
+
+```text
+不可变正文快照 A ──► Script A ──► Edition A ──► 正在播放
+                                           │
+作者继续编辑 ─────────► WorkingCopy B       │ 音频仍锁定 A
+                                           ▼
+                                  显示“旧稿朗读/待更新”
+                                           │ 用户点击更新朗读
+                                           ▼
+不可变正文快照 B ──► Script B ──► Edition B ──► 用户明确切换
+```
+
+必须满足：
+
+1. 播放会话固定 `edition_id`，不因 working copy 自动保存而切换 Edition；
+2. 同一 Edition 可在句段边界刷新到更新的 Manifest revision，以接收新完成的 render，但不得改变来源 `revision_id/content_hash`；
+3. 作者输入只更新 working copy；不得在每次按键或每次自动保存后创建分析/TTS 任务；
+4. 活跃编辑会话可通过编辑器 transaction 映射未被触碰且局部文本哈希/锚点仍一致的句段范围；任何与变更相交的句段立即标为本地失效，段落拆分/合并或边界标点变化还要保守失效相邻块；
+5. 页面重载、编辑器映射链丢失或无法唯一验证锚点时，禁止把旧偏移映射到当前正文，只在播放器字幕或不可变旧稿视图高亮；
+6. “更新朗读”先完成保存屏障，再幂等创建/复用新快照和脚本；说话人分析至少覆盖变化句段及其必要场景上下文；
+7. 新脚本经所需复核和审批后创建新 Edition；相同 `spoken_text`、音色和模型输入继续复用 render；
+8. 新 Edition 准备好后由用户选择“立即从对应位置切换”或“下次播放使用新版本”；前者必须带可播放起点，后者必须已有章首或已保存的合法起点，不能无提示热切换；
+9. 旧 Edition、旧进度和旧快照保持可回放，删除和回收继续服从媒体保留策略。
 
 ## 6. 声音体系
 
@@ -498,10 +565,13 @@ novel_id
 
 - Markdown 源位置；
 - 前端使用的 UTF-16 起止偏移；
+- 脚本版本内的段落序号、`source_block_key` 和段内句段序号；
 - 原文；
 - 实际朗读文本 `spoken_text`；
 - 局部内容哈希；
 - 前后必要上下文。
+
+`source_block_key` 只标识同一不可变脚本版本中的来源块，由版本化解析器基于块类型、段落序号、局部哈希和锚点生成；它不能被当作跨 revision 永久 ID。前端从段落边栏触发跳播时，先定位当前可验证的来源块，再选择该块第一个可朗读 segment；从句段视图触发时直接使用命中的 `segment_id`。
 
 章节标题、自动插入停顿等没有直接正文字符范围的合成项必须使用独立 `segment_kind`，其源偏移允许为空；不得伪造正文范围。
 
@@ -655,18 +725,18 @@ canonical_spoken_text_hash
 5. 计算句段 render fingerprint；
 6. 复用命中缓存，并立即把已命中句段写入 Edition Manifest；
 7. 缺失句段进入共享持久任务队列；
-8. 按“交互试听 > 当前章节开头 > 当前章节剩余 > 批量 > 导出”排序；
+8. 按“用户明确选择的播放窗口 > 交互试听 > 当前章节开头 > 当前章节剩余 > 批量 > 导出”排序；同一资源类别仍应用公平老化，避免连续跳播永久饿死后台任务；
 9. M4 初始默认单并发运行 Nano；
 10. 校验输出可解码、非空、非异常长度；
 11. 检查严重静音、削波、峰值、响度和时长异常；
 12. 保存无损/可重建 master 和浏览器播放资产；
 13. 写入真实句段时长、停顿和 render 状态；
-14. 每完成一个可连续播放的前缀就更新 Manifest revision；
-15. 前缀达到最小播放门槛时将 Edition 标记 `partial_ready`；
+14. 每完成一个可连续播放的章首前缀或用户请求窗口就更新 Manifest revision；
+15. 任一合法播放起点的连续窗口达到最小播放门槛时将 Edition 标记 `partial_ready`；默认从章首播放仍要求章首前缀达到门槛；
 16. 所有必需句段完成并校验后标记 Edition `ready`；
 17. 仅在用户导出时生成章节或全书连续文件。
 
-最小播放门槛的初始候选为“连续至少 3 个句段且累计至少 8 秒，或短章节已经全部完成”；最终值由阶段 0 接缝和生成速度基准冻结，并作为 `initial_buffer_policy_version` 写入 Edition/Manifest，不能由前端临时猜测。
+最小播放门槛的初始候选为“从本次合法播放起点起连续至少 3 个句段且累计至少 8 秒，或到章末的剩余内容已经全部完成”；最终值由阶段 0 接缝和生成速度基准冻结，并作为 `initial_buffer_policy_version` 写入 Edition/Manifest，不能由前端临时猜测。用户没有明确选择中间起点时，合法起点只能是章首或已保存进度；系统不得为了更快出声自动跳过前面的 pending/failed 句段。
 
 ### 10.4 长篇一致性
 
@@ -678,17 +748,28 @@ canonical_spoken_text_hash
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "edition_id": "edition-123",
   "revision_id": "revision-123",
   "content_hash": "sha256...",
   "status": "partial_ready",
   "ready_prefix_count": 3,
+  "default_start_ready": true,
+  "ready_ranges": [
+    {
+      "start_ordinal": 1,
+      "end_ordinal": 3,
+      "duration_ms": 8980,
+      "last_playable_start_ordinal": 1
+    }
+  ],
   "duration_ms": null,
   "segments": [
     {
       "segment_id": "segment-1",
       "ordinal": 1,
+      "paragraph_ordinal": 1,
+      "source_block_key": "block-1",
       "source_start_utf16": 0,
       "source_end_utf16": 9,
       "render_status": "ready",
@@ -701,6 +782,8 @@ canonical_spoken_text_hash
     {
       "segment_id": "segment-2",
       "ordinal": 2,
+      "paragraph_ordinal": 2,
+      "source_block_key": "block-2",
       "source_start_utf16": 9,
       "source_end_utf16": 20,
       "render_status": "ready",
@@ -713,6 +796,8 @@ canonical_spoken_text_hash
     {
       "segment_id": "segment-3",
       "ordinal": 3,
+      "paragraph_ordinal": 2,
+      "source_block_key": "block-2",
       "source_start_utf16": 20,
       "source_end_utf16": 31,
       "render_status": "ready",
@@ -721,30 +806,65 @@ canonical_spoken_text_hash
       "gap_after_ms": 0,
       "speaker_kind": "character",
       "character_id": "character-2"
+    },
+    {
+      "segment_id": "segment-4",
+      "ordinal": 4,
+      "paragraph_ordinal": 3,
+      "source_block_key": "block-3",
+      "source_start_utf16": 31,
+      "source_end_utf16": 45,
+      "render_status": "pending",
+      "asset_url": null,
+      "duration_ms": null,
+      "gap_after_ms": 180,
+      "speaker_kind": "narrator",
+      "character_id": null
     }
   ]
 }
 ```
 
-Manifest 是分段播放清单，不要求先存在整章音频。只允许从第一个句段开始形成连续 `ready` 前缀；中间缺失的句段不能被播放器静默跳过。
+Manifest 是分段播放清单，不要求先存在整章音频。它列出全部 Edition segment 的有序状态，并分别保存：
 
-前端播放器通过统一 `SegmentPlaybackQueue` 预取后续 3–5 个句段。优先验证 Web Audio 调度以减少分段间隙；若宿主环境不兼容，则回退双 `<audio>` 预加载，但必须记录可听间隙并进入阶段 0/5 验收。当前播放会话保持同一 Manifest revision，不在播放中途无感切换到另一整章文件。
+- 从章首形成的 `ready_prefix_count` 和服务端判定的 `default_start_ready`，用于默认开始播放；
+- 从 segment 状态推导、且至少一个起点达到门槛的最大连续 `ready_ranges`，以及按服务端缓冲策略计算的 `last_playable_start_ordinal`；
+- pending/failed 句段和空缺位置，前端不能把它们隐藏成连续时间轴。
+
+`ready_ranges.duration_ms` 包含窗口内音频时长和句间 gap。某个起点只有在不晚于该 range 的 `last_playable_start_ordinal` 时才可立即开始；更靠后的起点仍需 `prepare-range` 补足后续缓冲。尚未达到门槛的零散 ready segment 只通过 segment 状态暴露，前端不能自行拼出绕过策略的窗口。Edition 完整 `ready` 后，任一可朗读 segment 都是合法起点。
+
+用户显式从第 N 段开始时，N 之前的缺失不构成跳过；播放器只能消费从 N 开始的连续 ready window，并在遇到下一个 pending/failed 句段时停下或等待。系统绝不能在同一次播放中静默越过窗口内部缺口。目标窗口未 ready 时，`prepare-range` 幂等提升 N 及其后续缓冲句段的任务优先级，不新建重复 render。
+
+前端播放器通过统一 `SegmentPlaybackQueue` 预取后续 3–5 个句段。优先验证 Web Audio 调度以减少分段间隙；若宿主环境不兼容，则回退双 `<audio>` 预加载，但必须记录可听间隙并进入阶段 0/4 验收。播放会话固定同一 `edition_id`；它可在句段边界通过 ETag/CAS 获取同一 Edition 的较新 Manifest revision，以延长 ready window，但不能在播放中途无提示切换到另一 Edition、另一正文哈希或另一整章文件。已经排入本地播放队列的旧 Manifest revision 资产在消费完成前保持可读。
 
 ### 10.6 编辑器跟随
 
 播放器以当前 `segment_id` 为句段级同步权威；完整 Edition 准备后可根据累计时长支持全章拖动。播放倍速由播放层应用，不能修改原始句段时间数据。
 
-当前 `textarea` 首版采用同一编辑区域内的只读朗读覆盖层：每个句段渲染为可点击 span，播放时高亮；返回编辑前暂停或退出朗读视图。Monaco 落地后改用公共 decorations/range API，不访问内部实现。
+前端通过稳定的 `NarrationEditorBridge` 对接实际编辑器，最少提供：
+
+- 按 `segment_id/source_block_key/source range` 安装和移除 decoration；
+- 从段落或 UTF-16 光标位置解析合法播放起点；
+- 通过 gutter、上下文菜单和键盘命令触发 `seekToSegment`；
+- 接收编辑 transaction，映射未相交范围并使相交句段失效；
+- 高亮当前句段、滚动到句段和暂停/恢复自动跟随；
+- 正确处理中文输入法 composition、emoji、组合字符、撤销/重做和大文本虚拟化。
+
+默认候选 CodeMirror 6 与备用 Monaco 都只能使用公开 transaction/decoration/range API，不访问内部节点。原生 `textarea` 降级模式不做透明可编辑叠层：正文 hash 一致时可切换只读句段层完成高亮和点击跳播；用户返回编辑时音频不暂停，但高亮退到播放器字幕/旧稿抽屉，使用“从光标所在段朗读”代替段落 gutter，直到恢复内容一致或启用合格编辑器。
+
+活跃的可装饰编辑器允许把未相交的 decoration 随 transaction 移动，但移动后还必须复核局部文本哈希和锚点；这一映射只是当前前端会话的临时派生状态。任一变化与句段范围相交时，该句段立即失效；段落拆分/合并、引号或边界标点变化还要保守失效相邻来源块，不能仅因最终偏移仍落在相似文字上就继续高亮。
 
 ### 10.7 正文变化
 
 正文 `content_hash` 与 manifest 不一致时：
 
-- 立即停止把旧时间轴映射到新正文；
-- 将对应脚本标为 `stale`，旧 Edition 保持不可变历史状态；
-- 允许在不可变旧版本朗读视图中继续播放；
-- 提供按当前正文重新分析；
-- 相同文本、音色和模型的句段仍可命中缓存。
+- 计算派生兼容状态 `working_copy_diverged`，不得因每次按键改写 Edition 或创建持久任务；
+- 活跃编辑会话中，只允许继续显示经 transaction 映射且未与变更相交的句段；相交句段改在播放器字幕中显示 Edition 旧文本；
+- 页面重载、映射链丢失或锚点无法唯一验证后，立即停止把旧时间轴映射到当前正文，只在不可变旧版本朗读视图中高亮；
+- 旧 Edition 保持不可变历史状态并可继续播放；当新 revision/脚本被创建并选为当前版本时，再把旧脚本标为 `stale`，Edition 是否当前则只由 `document_narration_state` 指针表达；
+- “更新朗读”必须完成第 8.1 节保存屏障，并对变化句段及必要上下文重新分析；不能在工作稿尚未稳定时按键级触发；
+- 新脚本审批后创建新 Edition；相同文本、音色和模型输入的句段仍可命中缓存；
+- 新 Edition 切换必须由用户明确确认，并从可唯一对应的句段或章首开始；不能把旧 Edition 的句内毫秒偏移直接迁移到新 Edition。
 
 ## 11. 数据模型
 
@@ -859,11 +979,12 @@ Nano 不支持的标记语法不得直接送入模型；阶段 0 先验证中文
 
 `narration_scripts` 是 document/revision 下的稳定分析身份，绑定精确 `revision_id` 和 `content_hash`。
 
-`narration_script_versions` 保存分析器、规则、分析/选角设置 fingerprint、提示模板、requested/actual model fingerprint、状态、统计、审批信息、父版本和唯一幂等键。草稿通过 CAS 修改；一旦审批即不可变。正文变化只把旧脚本标为 `stale`，不改写旧版本。
+`narration_script_versions` 保存分析器、规则、分析/选角设置 fingerprint、提示模板、requested/actual model fingerprint、状态、统计、审批信息、父版本和唯一幂等键。草稿通过 CAS 修改；一旦审批即不可变。working copy 按键级变化只产生派生的 `working_copy_diverged`，不持续写脚本状态；当新正文快照/脚本被建立并选为当前版本时，旧脚本才标为 `stale`，且永不改写旧版本。
 
 ### 11.11 `narration_segments`
 
 - 脚本版本、场景、稳定序号和 `segment_kind`；
+- 脚本版本内的 `paragraph_ordinal`、`source_block_key`、段内序号；
 - 可空 Markdown/UTF-16 起止位置；
 - 原文、最终 `spoken_text`、局部哈希和前后锚点；
 - `speaker_kind`、character/anonymous ID；
@@ -897,9 +1018,11 @@ Render 不属于某一个脚本；满足相同隐私 scope 和完整 fingerprint
 
 ### 11.14 `narration_manifests` 与播放进度
 
-Manifest 绑定 Edition，保存 schema version、Manifest revision、连续 ready 前缀、有序 segment/render 哈希、总时长、状态和结构化 JSON。更新使用 CAS；旧 Manifest revision 在正在播放的会话结束前保持可读取。
+Manifest 绑定 Edition，保存 schema version、Manifest revision、连续 ready 前缀、连续 ready ranges、有序 segment/render 哈希、每段 render 状态、总时长、状态和结构化 JSON。更新使用 CAS；旧 Manifest revision 在正在播放的会话结束前保持可读取。`ready_ranges` 是 render 状态的可校验派生索引，不另建会与 segment 真相漂移的第二套状态表。
 
-`narration_playback_progress` 保存本地 owner/profile、Edition、Manifest revision、最后 segment、句内偏移、倍速和更新时间。正文或 Edition 更新后保留历史进度，但不自动迁移到不同内容哈希。
+`document_narration_state` 按本地 owner 与 document 唯一保存当前 Edition 指针、CAS 版本和切换时间。working copy 是否匹配由查询时比较内容哈希得出，不把每次编辑写进该表；只有用户明确选择新 Edition 时才更新指针。Edition 的生成状态与“是否当前”正交，切换指针不改写旧 Edition 状态；个人播放进度仍可按 profile 分开保存。
+
+`narration_playback_progress` 保存本地 owner/profile、Edition、Manifest revision、最后 segment、句内偏移、最近一次合法起点、倍速和更新时间。刷新同一 Edition 的 Manifest revision 可以继续使用 segment 进度；正文或 Edition 更新后保留历史进度，但不自动迁移到不同内容哈希。
 
 ### 11.15 `background_jobs` 与 `model_run_records`
 
@@ -907,7 +1030,7 @@ Manifest 绑定 Edition，保存 schema version、Manifest revision、连续 rea
 
 - `job_kind`: `narration.analyze | narration.voice_preview | narration.segment_render | narration.export` 等命名空间；
 - 本地 `owner_id`、可选 `novel_id`、`scope_kind`、`scope_id`、可选 `source_revision_id`；
-- 输入哈希、唯一幂等键、优先级和资源类别；
+- 输入哈希、唯一幂等键、基础优先级、可过期交互优先级提升和资源类别；
 - `queued | running | succeeded | failed | cancelled | dead_letter`；
 - `locked_by`、`lease_until`、attempts、`next_retry_at`；
 - 进度、错误分类、取消请求和时间戳。
@@ -917,6 +1040,8 @@ Manifest 绑定 Edition，保存 schema version、Manifest revision、连续 rea
 领取必须使用 PostgreSQL 原子锁/租约；前端 PawTask/SSE 只展示进度，不是持久权威。共享执行器可被后续 Embedding、情报派生和媒体任务复用；现有专用生成 job 的迁移另行评审，不在朗读阶段偷偷重写。
 
 优先级调度必须带等待时间老化和资源类别配额，避免持续单句试听永久饿死全书任务。Nano、VoiceGenerator、CPU 转码分别声明资源类别；同一模型重任务默认单并发，轻量校验/转码可在阶段 0 基准后独立限流。
+
+`prepare-range` 不创建第二份 render job；它按 render fingerprint 幂等复用现有任务，只更新尚未运行任务的短期交互优先级。用户连续选择多个位置时，最后一次请求获得最高优先级，旧请求自然降级；若底层 Nano 不支持安全抢占，当前正在合成的单句完成后再调度新窗口，不能粗暴终止并留下半写资产。
 
 取消是协作式请求：执行器在调用前、分段间和写入前检查 `cancel_requested_at`。若底层模型不能立即中断，允许本次计算结束，但取消后的结果不得发布到 Edition；只有通过完整 fingerprint 校验且仍有其他有效引用时才可作为缓存保留。
 
@@ -941,12 +1066,25 @@ analyzing
   -> review_required
   -> approved
 
-正文更新 -> stale
+新正文快照/脚本被设为当前 -> stale
 分析失败 -> failed
 approved 后修改 -> 新建 script version -> review_required
 ```
 
 脚本状态只表达分析与审批，不表达音频合成。
+
+working copy 与当前 Edition 的关系是查询时派生的兼容状态，不进入脚本状态机：
+
+```text
+content_match
+  -> working_copy_diverged
+  -> update_requested
+  -> new_edition_available
+
+new_edition_available -> user_switched
+```
+
+`working_copy_diverged` 不写入不可变 Edition，也不按键创建后台任务；它由 working copy `content_hash` 与 Edition 来源哈希比较得出。
 
 ### 12.3 朗读版本 Edition
 
@@ -957,10 +1095,9 @@ queued
   -> ready
 
 rendering/partial_ready -> failed -> rendering（重试）
-ready -> superseded（新 Edition 被设为当前）
 ```
 
-旧 Edition 不因正文或音色更新被改写；它只是不再是当前版本。
+旧 Edition 不因正文、音色或当前指针更新被改写；working copy 修改也不会改变其 `partial_ready/ready` 状态。当前 Edition 由 `document_narration_state` 表达，历史 Edition 始终可以按权限和保留策略回放。
 
 ### 12.4 后台任务
 
@@ -1033,8 +1170,11 @@ POST  /narration-script-versions/{version_id}/reanalyze-segments
 
 ```text
 POST /narration-script-versions/{version_id}/editions
+GET  /documents/{document_id}/narration-playback-context
+PUT  /documents/{document_id}/current-narration-edition
 GET  /narration-editions/{edition_id}
 GET  /narration-editions/{edition_id}/manifest
+POST /narration-editions/{edition_id}/prepare-range
 POST /narration-editions/{edition_id}/retry-failed-segments
 POST /narration-editions/{edition_id}/export
 GET  /background-jobs/{job_id}
@@ -1044,6 +1184,10 @@ POST /background-jobs/{job_id}/cancel
 GET  /media-assets/{asset_id}/content
 PUT  /narration-editions/{edition_id}/playback-progress
 ```
+
+`narration-playback-context` 返回 working copy 哈希、当前 Edition/来源哈希、派生兼容状态、可用新 Edition 和最后进度。`current-narration-edition` 使用 `expected_version`，请求体包含目标 Edition、`switch_mode = immediate | next_playback` 和可选 `start_segment_id`：立即切换必须验证该起点已有合法 ready window，并原子写入新 Edition 进度；下次使用必须已有章首或历史合法起点。接口只接受同一 document 的可播放 Edition，并代表用户明确切换。
+
+`prepare-range` 请求体至少包含 `start_segment_id` 和 `reason = user_seek | resume`；服务端验证 segment 属于该 Edition，按服务端缓冲策略幂等提升该句及后续句段任务，并返回当前 Manifest revision、窗口状态和可选 job ID。前端不能指定任意高优先级或绕过资源配额。
 
 云端授权接口不得与普通设置 PUT 混在一起静默开启。媒体读取支持 Range、ETag 和内容类型校验；API 返回受控媒体 URL，不返回服务器文件路径或供应商临时 URL。Manifest 使用 `ETag`/revision 支持增量轮询；SSE 只用于加快状态更新，不能成为恢复权威。
 
@@ -1171,19 +1315,45 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 15. 作者审批并冻结脚本版本；
 16. 冻结设置/发音/模型/音色并创建 Edition；
 17. 计算所有句段 render fingerprint；
-18. 复用命中 render 并发布初始 Manifest；
+18. 复用命中 render 并发布包含全部句段状态、ready prefix 和 ready ranges 的初始 Manifest；
 19. 对缺失句段建立共享持久任务；
 20. 优先合成章节连续开头；
 21. 校验、标准化并保存 master/播放资产；
-22. 每个句段完成后更新 Manifest；
-23. 达到连续前缀门槛后标记 `partial_ready`；
+22. 每个句段完成后重新计算连续窗口并 CAS 更新 Manifest；
+23. 章首连续前缀达到门槛后标记 `partial_ready` 并允许默认播放；
 24. 前端按 Segment Manifest 预加载和播放；
-25. 校验当前正文 hash 后按 segment ID 高亮；
+25. 校验当前正文 hash 后通过 `NarrationEditorBridge` 按 segment ID 高亮；
 26. 保存播放进度；
 27. 失败句段可单独重试；
 28. 所有句段完成后 Edition 标记 `ready`。
 
-### 16.3 修改和失效
+### 16.3 从任意段落开始朗读
+
+1. 用户点击段落边栏 `▶`、句段上下文命令，或在只读快照点击句段；
+2. 前端把当前来源块/位置解析成 Edition 内的 `segment_id`，普通正文单击仍只放置光标；
+3. 读取播放上下文并确认目标 segment 属于当前 Edition，且工作稿来源块仍有可验证映射；若该段已修改、新增或映射不唯一，则提示先更新朗读或进入旧稿视图，不猜测跳转；
+4. 若 Manifest 已有覆盖目标起点且该起点满足 `last_playable_start_ordinal` 的连续 ready range，立即停止当前队列并从目标 segment 预取播放；
+5. 若目标未 ready 或后续缓冲不足，调用幂等 `prepare-range`，显示“正在准备本段”，不回退章首、不跳到其他已完成段；
+6. 后端提升目标句及后续缓冲句的短期优先级，保留 render fingerprint 幂等和公平老化；
+7. 目标窗口达到服务端门槛后发布新的 Manifest revision；
+8. 前端只在句段边界刷新同一 Edition 的 Manifest，随后从目标 segment 播放；
+9. 跳播更新最后合法起点和播放进度；
+10. 正文一致时恢复高亮，正文已修改时使用安全映射或旧稿字幕，不错误套用偏移。
+
+### 16.4 同页修改、更新和失效
+
+1. Edition A 播放期间，作者可以继续修改 working copy B；输入、选择和撤销优先于自动跟随，音频默认不暂停；
+2. 页面派生 `working_copy_diverged`，显示“旧稿朗读”和待更新范围，不创建按键级任务；
+3. 合格编辑器只继续映射未与 transaction 相交的句段；相交句段的高亮失效并在播放器显示 Edition A 旧文本；
+4. 作者点击“更新朗读”后，前端等待自动保存并执行保存屏障；
+5. 后端幂等复用或创建正文快照 B，对变化范围及必要场景上下文重新分析；
+6. 可唯一匹配且证据仍成立的人工覆盖允许迁移，其他变化进入复核；
+7. 新脚本审批后创建 Edition B，相同 render fingerprint 直接复用，只合成必要句段；
+8. Edition B 达到目标起点的播放门槛后提示“新朗读已就绪”；
+9. 用户明确选择立即切换或下次使用；立即切换只在当前句段边界进行，并从可唯一匹配且已 ready 的 segment 或章首开始；下次使用必须保存新 Edition 的合法起点；
+10. 更新 `document_narration_state` 后 Edition A 不再是当前版本，但其生成状态、音频、进度和快照不被改写，继续按保留策略可回放。
+
+其他失效规则：
 
 - 修改正文：新 revision 的脚本重新分析；满足唯一锚点条件的人工覆盖可迁移，相同句段仍可复用 render；旧脚本标记 `stale`，旧 Edition 保留。
 - 修改某一句说话人或 `spoken_text`：创建新脚本版本，审批后创建新 Edition；只缺失必要 render。
@@ -1205,10 +1375,12 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 | 实际聊天模型不匹配 | 本次分析结果作废 | 旧脚本不变 | 修复 Provider 后重试 |
 | 单句合成失败 | 章节部分完成 | 已成功句段保留 | 单句重试 |
 | 任务进程崩溃 | 进度暂时停止 | 持久 job/render 保留 | 租约过期后恢复 |
-| 正文已修改 | 旧版本提示 | 旧音频和 revision 保留 | 旧版播放或新建脚本 |
+| 正文已修改 | 播放器显示“旧稿朗读”，修改段待更新 | 旧音频、Edition 和 revision 保留 | 继续旧版校听或点击“更新朗读” |
+| 跳播目标未生成或后续缓冲不足 | 显示“正在准备本段” | Edition、已有 render 和任务保留 | 幂等提升目标连续窗口优先级，满足门槛后从目标播放 |
+| 编辑器映射链丢失 | 当前工作稿不显示旧高亮 | Edition 与不可变旧稿保留 | 播放器字幕/旧稿视图继续高亮，禁止猜测映射 |
 | 磁盘不足 | 暂停生成并提示 | 不删除重要资产 | 清缓存/扩容后重试 |
 | 音频转码失败 | 目标句段未 ready | 已校验 master 可恢复 | 重试播放副本转码，不重合成 |
-| Manifest 中间句缺失 | 只能播放连续 ready 前缀 | 已完成 render 保留 | 优先重试缺失句，不静默跳过 |
+| 当前播放窗口中间句缺失 | 播放到缺口后等待或停止 | 已完成 render 和 ready ranges 保留 | 优先重试缺失句，不静默越过缺口 |
 | 浏览器断线 | 进度暂停显示 | 后台任务继续 | 按 job ID 恢复 |
 
 ## 18. 实施阶段
@@ -1224,9 +1396,11 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - 测试首包、RTF、取消、崩溃恢复和连续 30 分钟稳定性；
 - 测试 VoiceGenerator MPS/可用本地路径以及 Nano 二次克隆保持度；
 - 生成并人工锁定 24 槽位基础音色包，或确定具有授权的替代包；
+- 补充编辑器 ADR，使用真实长章节对 CodeMirror 6、Monaco 和 `textarea` 安全降级验证中文输入法、自动保存、undo/redo、decoration、gutter、UTF-16 映射和 Blob bundle；
+- 用 pending gap、章首前缀和中段用户请求窗口验证 Manifest schema v2、任务优先级、公平老化和同 Edition revision 刷新；
 - 冻结基准语料、参数、能力矩阵和 go/no-go 报告。
 
-退出条件：四项均明确——Nano 物理部署、24 音色来源、浏览器分段播放方案、VoiceGenerator 可见/隐藏结论。未退出阶段 0 时只允许原型代码，不建正式迁移和产品 UI。
+退出条件：六项均明确——Nano 物理部署、24 音色来源、浏览器分段播放方案、VoiceGenerator 可见/隐藏结论、正式编辑器与安全降级方案、随机跳播 ready-window 协议。未退出阶段 0 时只允许原型代码，不建正式迁移和产品 UI。
 
 ### 阶段 1：共享基础设施与数据
 
@@ -1235,7 +1409,7 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - 扩展 `media_assets` 与引用/保留/清理策略；
 - `background_jobs`、租约、幂等、重试、死信和 `model_run_records`；
 - 幂等隐藏 `tts_snapshot`，不推进 working copy 基线；
-- 音色、设置快照、脚本版本、Edition、render、Manifest 迁移；
+- 音色、设置快照、脚本版本、`source_block_key`、Edition、`document_narration_state`、render、Manifest v2 和播放进度迁移；
 - `moss-models`、`novel-media`、Range/ETag；
 - fake adapter、崩溃恢复、迁移升级/回退和 GC 集成测试。
 
@@ -1253,7 +1427,7 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 
 ### 阶段 3：脚本、场景和选角
 
-- Markdown/UTF-16 映射和 `segment_kind`；
+- Markdown/UTF-16 映射、段落 `source_block_key` 和 `segment_kind`；
 - `character_aliases`、别名冲突和场景切分；
 - 本地规则解析；
 - 授权后的最小化云端补充归因；
@@ -1269,11 +1443,14 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - 版本化 render fingerprint 与 owner/workspace 缓存；
 - 持久句段任务、优先级和单并发资源锁；
 - master/播放副本校验和后处理；
-- 渐进 Segment Manifest 与连续 ready 前缀；
+- 渐进 Segment Manifest v2、连续 ready 前缀和用户请求 ready ranges；
 - Web Audio 队列及双 audio 回退验证；
-- `textarea` 只读朗读覆盖层；
-- 句段高亮、滚动暂停/恢复、跳转、倍速和进度；
-- 局部重生成、旧版本视图和正文 hash 屏障。
+- `NarrationEditorBridge` 与阶段 0 选定的可装饰编辑器；
+- 段落 gutter、上下文命令、只读句段点击和 `prepare-range`；
+- 句段高亮、编辑优先、滚动暂停/恢复、跳转、倍速和进度；
+- 同页边听边改、播放器旧稿字幕和 `textarea` 安全降级；
+- `working_copy_diverged`、显式“更新朗读”、Edition 切换和正文 hash 屏障；
+- 局部重生成、旧版本视图、快速连续跳播和后台公平性。
 
 完成阶段 4 才达到核心“番茄式多角色朗读”可用范围。
 
@@ -1293,7 +1470,7 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - 章节/全书显式导出；
 - 发音批量校对和可选 ASR 回查；
 - 音频质量报告、可达性 GC 和配额治理；
-- Monaco decorations（若 Monaco 已单独落地并验收）。
+- 经用户单独开启的空闲后自动准备新 Edition；即使启用，也只能在明确确认后切换，不能退化为按键级 TTS。
 
 ## 19. 测试与验收
 
@@ -1311,8 +1488,11 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - 同一匿名人物跨章、相同泛称但实际不同人物；
 - Markdown、emoji、嵌套引号和特殊标点；
 - 多音字、人名、年代和中英混合；
-- 正文中途修改和音色换版。
-- 用户手动滚动、键盘播放和正文 hash 不一致；
+- 正文中途修改和音色换版；
+- 段前、段内和段后编辑，段落拆分/合并、引号/边界标点变化，以及编辑当前/下一播放句段；
+- 章首 pending、中段 ready、窗口内部 failed 和快速连续选择不同段落；
+- 用户手动滚动、移动光标、中文输入法、键盘播放和正文 hash 不一致；
+- 页面重载导致临时编辑映射链丢失；
 - 云端未授权、已授权、撤销授权和实际模型不匹配。
 
 ### 19.2 自动化门槛
@@ -1326,11 +1506,20 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - 相同正文重复点击朗读不重复创建可见 checkpoint，也不推进 working copy 基线；
 - 单句修改只失效必要 render；
 - 已审批脚本不可原地修改，同一脚本可创建多个独立 Edition；
-- 正文修改后旧 manifest 不映射新正文；
+- 普通正文单击只移动光标，只有 gutter/命令/只读句段点击触发跳播；
+- 目标起点已有合法 ready window 时从正确 `segment_id` 开始；目标未 ready 或缓冲不足时幂等准备窗口且不回退章首；
+- 已修改、新增或映射不唯一的工作稿段落不能误跳旧 Edition 的相似句，只能更新朗读或在旧稿视图明确跳播；
+- 未显式选择中段时，默认播放仍只使用章首连续 ready 前缀；显式选择中段时允许使用该起点的连续 ready range；
+- 播放窗口内部 pending/failed 句段绝不被静默跳过；
+- 同一 Edition 可在句段边界刷新 Manifest revision，但不会无提示切换 Edition；
+- 活跃编辑 transaction 只映射未相交且哈希/锚点仍一致的句段；相交、段落拆并和边界标点变化按规则失效相邻块；页面重载后旧 manifest 不猜测映射新正文；
+- 编辑时播放器不被强制暂停，光标、selection、composition 和 undo/redo 不被自动跟随破坏；
+- 按键和自动保存不创建 narration job；明确“更新朗读”才进入保存、分析和新 Edition 流程；
+- 新 Edition 不自动替换旧 Edition，CAS 显式切换只更新当前指针，不改写旧 Edition 的生成状态；
 - `local_rules_only` 网络捕获中正文外发数量为 0；
 - `cloud_assisted` 未授权调用数量为 0，授权后 payload 只包含不确定窗口和允许候选；
 - 实际聊天模型与请求配置不匹配时分析结果作废；
-- `partial_ready` 只播放从首句开始的连续 ready 前缀，不跳过中间失败句；
+- `partial_ready` 的默认起点和显式 ready ranges 均服从服务端缓冲策略；
 - 任务崩溃恢复不重复合成已 ready 句段；
 - 音色归档、角色归档和缓存清理不破坏历史引用；
 - 普通清缓存不删除上传原件、标准化参考音频或锁定音色；
@@ -1344,7 +1533,7 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - Nano 预热后标准中文实时因子 `RTF <= 1.0`，否则必须证明渐进生成仍满足产品体验；
 - 单任务峰值内存不导致 16 GB M4 明显换页或拖垮 QwenPaw；
 - 已缓存句段可立即播放；
-- 连续 ready 前缀达到阶段 0 冻结门槛后可开始播放；
+- 章首前缀或用户明确请求的连续 ready window 达到阶段 0 冻结门槛后可从对应合法起点播放；
 - 局部重生成不触发整章 TTS；
 - VoiceGenerator 与 Nano 默认不同时常驻。
 
@@ -1372,13 +1561,16 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 4. Nano 执行后端不影响 QwenPaw 原生聊天、模型、Skills、MCP 和插件管理；
 5. `local_rules_only` 和 `cloud_assisted` 授权边界均通过网络/契约测试；
 6. 一章真实多角色正文完成脚本复核、多 Edition、局部重生成和句段跟随；
-7. `partial_ready` 连续前缀可播放，中间失败不会被跳过；
+7. `partial_ready` 章首前缀和用户请求 ready window 都可从各自合法起点播放，窗口内部失败不会被跳过；
 8. 关闭重开后任务、音色、Edition、Manifest 和进度可恢复；
-9. 修改正文后旧高亮不误用；
+9. 修改正文后音频可继续，播放器明确显示旧稿，旧高亮只在安全映射或不可变快照中出现；
 10. 清缓存不会删除参考录音或锁定音色；
 11. 至少完成旁白、正式人物、匿名人物和通用音色四类真实验收；
 12. 所有 P0/P1 数据安全、声音授权和版本一致性问题清零；
-13. 关联 ADR、总体架构、迁移、API、测试和回退说明同步更新。
+13. 普通编辑点击不触发播放，段落 gutter、上下文命令和键盘跳播通过可达性验收；
+14. 工作稿自动保存不产生 TTS 任务，“更新朗读”和 Edition 切换均为显式操作；
+15. 可装饰编辑器和原生 `textarea` 安全降级都通过中文输入法、撤销、长章节和页面重载测试；
+16. 关联 ADR、总体架构、迁移、API、测试和回退说明同步更新。
 
 ## 21. 仍待验证
 
@@ -1393,8 +1585,10 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 - Web Audio 分段队列与双 `<audio>` 回退的接缝差异；
 - segment master 和浏览器播放副本的最终编码；
 - QwenPaw 固定版本的 PawApp 模型设置 schema 是否足以承载模型路径、缓存目录和高级参数；
-- `textarea` 只读覆盖层的精确视觉方案；
-- Monaco 在宿主 Blob bundle 环境完成兼容验证后的切换时机。
+- CodeMirror 6 与 Monaco 在 QwenPaw Blob bundle、长章节、中文输入法、自动保存和 decorations 下的最终选择；
+- `NarrationEditorBridge` 的最小公共契约、段落 gutter 视觉和 `textarea` 字幕/旧稿抽屉降级细节；
+- ready window 的最终句段数/时长门槛、快速连续跳播的优先级过期时间和不可抢占 Nano 的交互反馈；
+- 从旧 Edition 切换到新 Edition 时，唯一句段匹配失败后的默认回退位置。
 
 这些验证项必须有显式回退：核心技术链可使用“上传/已授权锁定音色 + Nano ONNX + 本地规则/人工复核 + 独立句段同步”；但缺少完整基础音色包时只能发布有限音色预览，不能把完整通用选角标为完成。VoiceGenerator 产品 UI、复杂情绪、rolling prompt 和群体混音不阻塞核心链路。
 
@@ -1415,10 +1609,13 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
   -> 审批不可变脚本版本
   -> 冻结设置/发音/音色并创建 Edition
   -> Nano 独立句段合成并复用缓存
-  -> 连续 ready 前缀形成渐进 Segment Manifest
-  -> 播放到哪一段，编辑器高亮到哪一段
-  -> 修改一句只重生成必要内容
-  -> 旧 Edition 可回放，新 Edition 精确生成
+  -> 章首前缀和用户请求窗口形成渐进 Segment Manifest
+  -> 在章节工作台点击段落 gutter，从对应句段开始朗读
+  -> 播放到哪一段，正文一致时编辑器高亮到哪一段
+  -> 作者边听边改，自动跟随让位于光标和输入
+  -> 播放器明确显示旧稿，按键和自动保存不触发 TTS
+  -> 作者点击“更新朗读”，只分析/生成必要内容
+  -> 用户明确切换新 Edition，旧 Edition 仍可回放
   -> 关闭重开后恢复任务、Manifest 和播放进度
 ```
 
