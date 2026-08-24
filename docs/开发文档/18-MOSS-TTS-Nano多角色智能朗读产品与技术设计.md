@@ -16,7 +16,6 @@
 - [总体架构与核心流程](./06-总体架构与核心流程.md)
 - [创作工作台内容模型与关系图产品规格](./09-创作工作台内容模型与关系图产品规格.md)
 - [阶段实施矩阵](./08-阶段实施矩阵.md)
-- [Codex 多子代理并行施工矩阵](./21-Codex多子代理并行施工矩阵.md)
 
 ## 0. Codex 多子代理并行施工授权
 
@@ -38,7 +37,7 @@
 
 并行施工必须维持单一集成责任：每个子代理获得明确的领域/文件所有权和验收条件；数据库迁移顺序、共享 API/schema、依赖锁、状态机和最终 Git 提交由主 Codex 统一协调。子代理完成只表示候选结果就绪，只有主 Codex 完成复核、集成测试和阶段退出检查后才算交付。
 
-正式开发直接使用[并行施工矩阵第 9 节](./21-Codex多子代理并行施工矩阵.md)的 T0–T6 工作包编号；该矩阵已经覆盖每一阶段的全部任务、前置、M4 资源互斥、验收产物和汇合门禁。
+正式开发直接使用本文第 18.0 节定义的 T0–T6 本地工作包编号。它们只用于完成本 MOSS-TTS-Nano 专项，不授权当前聊天任务顺带开发模型切换、助手或其他专项。
 
 ## 1. 结论与产品定位
 
@@ -1408,7 +1407,7 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 
 ## 18. 实施阶段
 
-### 18.0 并行派发总表
+### 18.0 本文内部的子代理并行派发总表
 
 | 阶段 | 可并行工作包 | 主要串行/互斥点 | 汇合门禁 |
 | --- | --- | --- | --- |
@@ -1421,6 +1420,109 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 | 6 | T6-A…H：情绪变体、群体声、批量、导出、ASR、质量/GC、空闲准备和回归 | 媒体清理、调度、导出路径和最终发布 | T6-GATE |
 
 标注不等于提前批准：当前 ready set 只有 T0-A…I 的 ADR、研究、原型和验证；T0-GATE 通过并得到后续范围批准前，T1–T6 只保留为已规划 backlog。
+
+工作包标记：`PAR` 表示前置满足后可独立并行，`PAR-C` 表示先冻结契约再并行，`SER` 表示串行或单一所有者，`MUTEX` 表示共享 M4/模型资源互斥，`GATE` 表示阶段闸门，`INT` 表示主代理集成。以下编号全部是本 TTS 文档的本地编号。
+
+#### 18.0.1 阶段 T0：ADR、模型、音色包和质量尖峰
+
+| ID | 标记 | 本文工作包 | 独立产物 |
+| --- | --- | --- | --- |
+| T0-A | PAR | Nano、Tokenizer、ONNX、VoiceGenerator、转码器 revision/hash、许可证和下载清单 | 可复现依赖清单 |
+| T0-B | PAR/MUTEX | 进程内 ONNX、受管本机进程、Sidecar、浏览器试听同基准 | 拓扑性能/故障矩阵 |
+| T0-C | PAR/MUTEX | 数字、标点、多音字、中英混读、长句、3/5/8/12 秒参考和独立句段听感 | 音质与参考音频报告 |
+| T0-D | PAR/MUTEX | VoiceGenerator MPS/CPU、峰值内存、候选生成和 Nano 二次克隆 | 可见/隐藏结论 |
+| T0-E | PAR | 24 槽位音色来源、授权台账、去重、样本和人工锁定 | 音色包或替代来源 |
+| T0-F | PAR | CodeMirror 6、Monaco、textarea 降级的 IME、自动保存、undo、decoration、gutter、UTF-16 和 Blob bundle | 编辑器 ADR 输入 |
+| T0-G | PAR | Manifest v2、章首前缀、中段 ready window、pending gap、快速跳播和播放接缝原型 | Manifest/队列原型 |
+| T0-H | PAR | 任务、媒体、脚本、Edition、render、授权与隐私 schema 审查 | 数据/API 草案复核 |
+| T0-I | PAR | 固定语料、假适配器、自动化、性能、崩溃恢复和人工听感记录模板 | 可复用验收工具 |
+| T0-GATE | GATE | 冻结 Nano 拓扑、24 音色、播放器、VoiceGenerator、编辑器和 ready-window 六项 go/no-go | ADR、能力矩阵、阶段 0 报告 |
+
+T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano 与 VoiceGenerator 的 MPS/大内存运行不得同时压测；每次测试必须记录环境、进程、模型 hash、参数、峰值内存和结果。
+
+#### 18.0.2 阶段 T1：共享基础设施与数据
+
+| ID | 标记 | 本文工作包 | 前置/汇合 |
+| --- | --- | --- | --- |
+| T1-A | PAR-C | `MossNanoTTSAdapter`、`VoiceDesignAdapter`、能力/健康/指纹 | T0-GATE |
+| T1-B | PAR-C | 模型下载、校验、预热和受管生命周期 | T0-GATE 拓扑 |
+| T1-C | PAR-C | background job、租约、幂等、重试、死信和资源锁 | 共享任务契约冻结 |
+| T1-D | SER | TTS schema、Alembic 迁移编号、升级/回退 | T0-H、迁移锁 |
+| T1-E | PAR-C | media assets、moss-models、novel-media、Range/ETag、引用/GC | T0-GATE |
+| T1-F | PAR-C | tts_snapshot、voice/settings/script/source key/Edition/render/Manifest/进度领域服务 | T1-D schema |
+| T1-G | PAR-C | fake adapter、崩溃恢复、GC、迁移和缓存集成测试 | T1-A–T1-F 契约 |
+| T1-GATE | INT/GATE | 本阶段共享基础设施集成 | T1-A–T1-G |
+
+#### 18.0.3 阶段 T2：声音和朗读设置
+
+| ID | 标记 | 本文工作包 | 前置/汇合 |
+| --- | --- | --- | --- |
+| T2-A | SER | 设置、音色、绑定和试听 API/DTO 冻结 | T1-GATE |
+| T2-B | PAR-C | 书本 reading 路由、总览、导航和旁白/范围覆盖 UI | T2-A |
+| T2-C | PAR-C | 人物卡“声音”页签、专属/继承与历史影响预览 | T2-A |
+| T2-D | PAR-C | 预设、上传、标准化、授权、试听和不可变锁定版本 | T2-A |
+| T2-E | PAR-C | 24 槽位导入、通用音色池、覆盖率和缺失提示 | T2-A |
+| T2-F | PAR-C | 发音、停顿、音频和缓存设置 | T2-A |
+| T2-G | PAR-C | 本地规则/云端授权、撤销、磁盘和模型缺失状态 | T2-A |
+| T2-H | PAR-C | API、UI、键盘、授权和历史引用测试 | T2-A |
+| T2-GATE | INT/GATE | 本阶段声音设置闭环集成 | T2-B–T2-H |
+
+#### 18.0.4 阶段 T3：脚本、场景和选角
+
+| ID | 标记 | 本文工作包 | 前置/汇合 |
+| --- | --- | --- | --- |
+| T3-A | SER | narration script/segment、范围和 ID 契约冻结 | T1-GATE |
+| T3-B | PAR-C | Markdown、纯文本、UTF-16、source_block_key 和 segment_kind | T3-A |
+| T3-C | PAR-C | 别名冲突、场景切分和本地说话人规则 | T3-A |
+| T3-D | PAR-C | 最小云端不确定窗口、requested/actual 和严格 schema 校验 | T3-A、已完成的模型契约 |
+| T3-E | PAR-C | 匿名人物稳定键、合并、拆分和升级 | T3-A |
+| T3-F | PAR-C | 通用选角、scope 优先级和稳定分配 | T2-GATE、T3-A |
+| T3-G | PAR-C | 情绪/表达、置信等级和人工覆盖继承 | T3-A |
+| T3-H | PAR-C | 脚本复核 UI、审批、版本和 unknown 处理 | T3-A |
+| T3-I | PAR-C | 归因准确率、非法 ID、隐私和重复分析测试 | T3-A |
+| T3-GATE | INT/GATE | 本阶段可审批朗读脚本集成 | T3-B–T3-I |
+
+#### 18.0.5 阶段 T4：独立句段合成和同步播放
+
+| ID | 标记 | 本文工作包 | 前置/汇合 |
+| --- | --- | --- | --- |
+| T4-A | PAR-C | Edition、不变设置快照、render fingerprint 和缓存作用域 | T1-GATE、T3-GATE |
+| T4-B | PAR-C/MUTEX | 持久句段 Worker、优先级、公平老化、取消和单并发资源锁 | T1-GATE |
+| T4-C | PAR-C | master/播放副本校验、转码、响度和接缝处理 | T0-GATE |
+| T4-D | PAR-C | Manifest v2、连续前缀/range、ETag/CAS 和 prepare-range API | T0-G、T1-GATE |
+| T4-E | PAR-C | Web Audio 队列、3–5 段预取和双 audio 回退 | T4-D mock |
+| T4-F | PAR-C | `NarrationEditorBridge` 与正式编辑器适配器 | T0-F ADR |
+| T4-G | PAR-C | gutter、上下文命令、键盘跳播、高亮和滚动暂停/恢复 | T4-D、T4-E、T4-F 契约 |
+| T4-H | PAR-C | working_copy_diverged、旧稿字幕、显式更新和 Edition 切换 | T4-A、T4-F |
+| T4-I | PAR-C | 局部失效/重生成、旧版本视图、进度保存和快速连续跳播 | T4-A、T4-D |
+| T4-J | PAR-C | Manifest、编辑映射、缓存、隐私、恢复和不触发按键级 TTS 自动化 | T4 契约 |
+| T4-K | PAR/MUTEX | 一章真实多角色、接缝、30 分钟、RTF、跳播和人工听感 | T4-A–T4-I 集成 |
+| T4-GATE | INT/GATE | 核心多角色朗读闭环集成 | T4-A–T4-K |
+
+#### 18.0.6 阶段 T5：文字描述生成音色
+
+| ID | 标记 | 本文工作包 | 前置/汇合 |
+| --- | --- | --- | --- |
+| T5-A | PAR-C/MUTEX | VoiceGenerator 受管后端、生命周期和资源锁 | T0-D go |
+| T5-B | PAR-C | 人物卡资料到可编辑音色描述 | T2-GATE |
+| T5-C | PAR-C | 多候选、试听、来源、不可变版本和私人音色库 UI | T2-A、T5 契约 |
+| T5-D | PAR/MUTEX | VoiceGenerator 样音到 Nano 克隆保持度与质量测试 | T5-A |
+| T5-E | PAR-C | M4 不达标时隐藏入口和既有路径非回归 | T5-A–T5-D |
+| T5-GATE | INT/GATE | 本阶段文字生音色产品化裁决 | T5-A–T5-E |
+
+#### 18.0.7 阶段 T6：高级生产
+
+| ID | 标记 | 本文工作包 | 前置/汇合 |
+| --- | --- | --- | --- |
+| T6-A | PAR-C | 人工确认的情绪音色变体 | T4-GATE |
+| T6-B | PAR-C/MUTEX | 群体声音混合与听感 | T4-GATE |
+| T6-C | PAR-C | 全书批量生成、恢复、优先级和公平性 | T4-GATE |
+| T6-D | PAR-C | 章节/全书导出与 manifest | T4-GATE |
+| T6-E | PAR-C | 发音批量校对和可选 ASR 告警 | T4-GATE |
+| T6-F | PAR-C | 音质报告、可达性 GC、配额和磁盘治理 | T4-GATE |
+| T6-G | PAR-C | 明确开启的空闲预生成和显式 Edition 切换 | T4-GATE |
+| T6-H | PAR | 批量、恢复、导出、音质、配额和隐私回归 | T6 契约 |
+| T6-GATE | INT/GATE | 本阶段高级生产最终集成 | T6-A–T6-H |
 
 ### 阶段 0：ADR、模型、音色包和质量尖峰
 
