@@ -354,6 +354,8 @@ export function NovelWorkbench() {
   const [recovery, setRecovery] = React.useState(null as RecoveryDraft | null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [saveVolumeOpen, setSaveVolumeOpen] = React.useState(false);
+  const [manualEditorOpen, setManualEditorOpen] = React.useState(false);
+  const [bodyGenerationState, setBodyGenerationState] = React.useState({ active: false, stage: "" });
   const [openChapterWizardSignal, setOpenChapterWizardSignal] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [projectFacts, setProjectFacts] = React.useState([] as StoryFactRecord[]);
@@ -362,6 +364,7 @@ export function NovelWorkbench() {
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
   const editorTextareaRef = React.useRef(null as HTMLTextAreaElement | null);
+  const chapterGenerateActionRef = React.useRef(null as (() => void) | null);
 
   const loadDocument = React.useCallback(async (documentId: string) => {
     setBusy(true);
@@ -371,6 +374,8 @@ export function NovelWorkbench() {
       contentRef.current = loaded.content_markdown;
       setDocument(loaded);
       setContent(loaded.content_markdown);
+      setManualEditorOpen(false);
+      setBodyGenerationState({ active: false, stage: "" });
       setError("");
       setConflict(null);
       setEditorOpen(true);
@@ -598,12 +603,34 @@ export function NovelWorkbench() {
         setOpenChapterWizardSignal((current: number) => current + 1);
         rememberWorkbenchRoute(novel.id);
         window.history.replaceState(null, "", workbenchUrl(novel.id));
+      } else {
+        Modal.success({ title: "提示", content: "保存成功", okText: "确定" });
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存章节失败");
     } finally {
       setBusy(false);
     }
+  };
+
+  const confirmSaveChapterToVolume = (volumeId: string | null, continueWriting = false) => {
+    setSaveVolumeOpen(false);
+    Modal.confirm({
+      className: "anw-modal anw-save-confirm",
+      title: "确认",
+      width: 520,
+      centered: true,
+      content: h("div", { className: "anw-save-confirm-copy" },
+        h("strong", null, "💡 保存提示："),
+        h("p", null, "1. 角色记忆将同步更新到角色表"),
+        h("p", null, "2. 退场的角色将自动删除其记忆"),
+        h("p", null, "3. 保存后将同步最新进展，请确认内容无误。"),
+        h("b", null, "确定要保存章节内容吗？"),
+      ),
+      okText: "确定",
+      cancelText: "取消",
+      onOk: () => saveChapterToVolume(volumeId, continueWriting),
+    });
   };
 
   const restore = async (revisionId: string, preview: RestorePreviewRecord) => {
@@ -815,6 +842,10 @@ export function NovelWorkbench() {
     const currentChapterIndex = orderedChapters.findIndex((item: DocumentRecord) => item.id === document.id);
     const previousChapter = currentChapterIndex > 0 ? orderedChapters[currentChapterIndex - 1] : null;
     const nextChapter = currentChapterIndex >= 0 && currentChapterIndex < orderedChapters.length - 1 ? orderedChapters[currentChapterIndex + 1] : null;
+    const chapterDisplayTitle = document.kind === "chapter" && currentChapterIndex >= 0
+      ? `第${currentChapterIndex + 1}章 ${document.title.replace(/^第\d+章\s*/, "")}`
+      : document.title;
+    const showEditor = Boolean(content.trim()) || manualEditorOpen;
     return h(
       Spin,
       { spinning: busy },
@@ -830,7 +861,7 @@ export function NovelWorkbench() {
             { className: "anw-editor-crumb" },
             novel?.title,
             " / ",
-            h("strong", null, document.title),
+            h("strong", null, chapterDisplayTitle),
           ),
           h(Button, { className: "anw-delete-button", onClick: confirmDeleteDocument }, "删除"),
           h(Button, { icon: h(CopyOutlined), onClick: copyContext, title: "复制 AI 写作上下文" }, "复制"),
@@ -851,20 +882,48 @@ export function NovelWorkbench() {
               h(
                 "div",
                 null,
-                h("h1", { className: "anw-editor-title" }, document.title),
+                h("h1", { className: "anw-editor-title" }, chapterDisplayTitle),
                 h("div", { className: "anw-editor-count" }, "本章字数 ", h("strong", null, document.visible_character_count), " 字"),
               ),
               h(EditOutlined, { style: { color: "#8a909d", fontSize: 17 } }),
             ),
-            h("textarea", {
-              ref: editorTextareaRef,
-              className: "anw-editor-textarea",
-              value: content,
-              onChange: onContentChange,
-              spellCheck: false,
-              "aria-label": `${document.title}正文编辑器`,
-              placeholder: "开始写作……Markdown 源文本会自动保存。",
-            }),
+            bodyGenerationState.active
+              ? h(
+                  "section",
+                  { className: "anw-editor-generating", "aria-label": "AI 正在创作章节内容" },
+                  h(Spin, { size: "large" }),
+                  h("strong", null, "AI 正在创作章节内容..."),
+                  h("p", null, bodyGenerationState.stage || "正在分析角色关系、伏笔推进和章节情节"),
+                  h("span", null, "请稍候，精彩内容即将呈现"),
+                  h("small", null, "预计需要 30-60 秒"),
+                )
+              : showEditor
+              ? h("textarea", {
+                  ref: editorTextareaRef,
+                  className: "anw-editor-textarea",
+                  value: content,
+                  onChange: onContentChange,
+                  spellCheck: false,
+                  "aria-label": `${chapterDisplayTitle}正文编辑器`,
+                  placeholder: "开始写作……Markdown 源文本会自动保存。",
+                })
+              : h(
+                  "section",
+                  { className: "anw-editor-empty", "aria-label": "章节正文空状态" },
+                  h("span", { className: "anw-editor-empty-icon" }, h(FileTextOutlined)),
+                  h("strong", null, "暂无章节内容"),
+                  h("p", null, "点击下方按钮开始生成"),
+                  h(Button, {
+                    className: "anw-primary-button anw-editor-empty-generate",
+                    icon: h(BookOutlined),
+                    onClick: () => chapterGenerateActionRef.current?.(),
+                  }, "生成章节内容"),
+                  h("button", {
+                    type: "button",
+                    className: "anw-editor-direct-link",
+                    onClick: () => setManualEditorOpen(true),
+                  }, "我已有正文，点击直接填写"),
+                ),
             h(
               "div",
               { className: "anw-editor-footer" },
@@ -883,6 +942,8 @@ export function NovelWorkbench() {
                       onNextChapter: nextChapter ? () => { void navigateToChapter(nextChapter.id); } : undefined,
                       previousChapterTitle: previousChapter?.title,
                       nextChapterTitle: nextChapter?.title,
+                      generateActionRef: chapterGenerateActionRef,
+                      onBodyGenerationStateChange: (active: boolean, stage: string) => setBodyGenerationState({ active, stage }),
                     })
                   : null,
               ),
@@ -913,13 +974,13 @@ export function NovelWorkbench() {
                   key: volume.id,
                   type: "button",
                   disabled: busy,
-                  onClick: () => void saveChapterToVolume(volume.id),
+                  onClick: () => confirmSaveChapterToVolume(volume.id),
                 },
-                h("strong", null, /^第[^卷]*卷$/.test(volume.title.trim()) ? volume.title.trim() : `第${index + 1}卷 ${volume.title.replace(/^第[^卷]*卷\s*/, "").trim()}`),
+                h("strong", null, /^第[^卷]*卷(?:\s|$)/.test(volume.title.trim()) ? volume.title.trim() : `第${index + 1}卷 ${volume.title.replace(/^第[^卷]*卷\s*/, "").trim()}`),
                 h("span", null, `${volume.documents.filter((item: DocumentRecord) => item.kind === "chapter").length} 章`),
               )),
-              h(Button, { block: true, disabled: busy, onClick: () => void saveChapterToVolume(null) }, "不选分卷"),
-              h(Button, { block: true, className: "anw-save-and-next-button", disabled: busy, onClick: () => void saveChapterToVolume(document.volume_id, true) }, "保存并新建下一章"),
+              h(Button, { block: true, disabled: busy, onClick: () => confirmSaveChapterToVolume(null) }, "不选分卷"),
+              h(Button, { block: true, className: "anw-save-and-next-button", disabled: busy, onClick: () => confirmSaveChapterToVolume(document.volume_id, true) }, "保存并新建下一章"),
             ),
           ),
         ),

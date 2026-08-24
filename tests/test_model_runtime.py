@@ -45,7 +45,7 @@ def test_minimax_m3_matching_is_exact() -> None:
     assert not is_minimax_m3("qwen3.7-plus")
 
 
-def test_chapter_prompt_separates_creative_target_from_acceptance_floor() -> None:
+def test_chapter_prompt_enforces_current_acceptance_window() -> None:
     prompt = build_chapter_generation_prompt(
         {
             "novel": {"title": "长篇小说"},
@@ -63,9 +63,10 @@ def test_chapter_prompt_separates_creative_target_from_acceptance_floor() -> Non
                 },
             },
             "acceptance": {
-                "minimum_visible_character_count": 3000,
-                "target_visible_character_count": 3000,
-                "requested_visible_character_count": 5000,
+                "minimum_visible_character_count": 1000,
+                "maximum_visible_character_count": 1500,
+                "target_visible_character_count": 1000,
+                "requested_visible_character_count": 1250,
             },
             "previous_context": [],
             "story_facts": [],
@@ -73,9 +74,9 @@ def test_chapter_prompt_separates_creative_target_from_acceptance_floor() -> Non
         }
     )
 
-    assert "创作目标：约 5000 个中文可见字符" in prompt
-    assert "验收下限：至少 3000 个中文可见字符" in prompt
-    assert "至少 5000 个中文可见字符；不得少于该值" not in prompt
+    assert "创作目标：约 1250 个中文可见字符" in prompt
+    assert "验收范围：1000—1500 个中文可见字符" in prompt
+    assert "固定输出 6 个自然段" in prompt
     assert "不得输出“我需要先加载”等内部工作语句" in prompt
     assert "内容禁区、角色限制和验收规则只用于约束创作，不是正文素材" in prompt
     assert "不得用“没有……”“不出现……”“不靠……”等作者说明" in prompt
@@ -175,13 +176,46 @@ def test_model_json_parser_repairs_missing_character_item_boundary() -> None:
 
 def test_single_text_generation_recovers_plain_minimax_prose() -> None:
     recovered = normalize_creative_generation_json(
-        "outline_plot",
+        "outline_highlight",
         {},
-        "第一章重返旧车站，第二章发现被调包的档案，最终在洪水前公开证据。",
+        "旧电台连接两代人的秘密，久别重逢的恋人在台风夜重新听见彼此。",
     )
     assert recovered == {
-        "plot_text": "第一章重返旧车站，第二章发现被调包的档案，最终在洪水前公开证据。"
+        "highlight_text": "旧电台连接两代人的秘密，久别重逢的恋人在台风夜重新听见彼此。"
     }
+
+
+def test_outline_plot_recovers_complete_prose_after_unescaped_quote() -> None:
+    body = (
+        "第一章，苏晚回到澄屿，在阁楼发现未寄出的录音。"
+        "她听见外婆说“别让潮声替你沉默”，决定留下修复电台。"
+        + "陆沉舟协助她查清旧录音、共同面对台风与当年的误会。" * 45
+    )
+    recovered = normalize_creative_generation_json(
+        "outline_plot",
+        {"plot_text": "第一章，苏晚回到澄屿，在阁楼发现未寄出的录音。她听见外婆说"},
+        f'{{"plot_text":"{body}"}}\n\n⟦ 状态：完成；下一步：逐章创作 ⟧',
+    )
+    assert recovered == {"plot_text": body}
+
+
+def test_outline_plot_rejects_silently_truncated_fragment() -> None:
+    with pytest.raises(ModelVerificationError, match="故事情节结果过短"):
+        normalize_creative_generation_json(
+            "outline_plot",
+            {"plot_text": "第一章刚刚开始，模型输出便被错误截断。"},
+            '{"plot_text":"第一章刚刚开始，模型输出便被错误截断。"}',
+        )
+
+
+def test_outline_background_is_kept_at_source_like_length() -> None:
+    recovered = normalize_creative_generation_json(
+        "outline_background",
+        {"background_text": "澄屿临海。" + "海风吹过旧电台与灯塔，未寄出的录音等待被听见。" * 20},
+        "",
+    )
+    assert 80 <= len(recovered["background_text"]) <= 220
+    assert recovered["background_text"].endswith("。")
 
 
 def test_structured_generation_rejects_missing_required_fields() -> None:
@@ -198,6 +232,35 @@ def test_structured_generation_rejects_missing_required_fields() -> None:
             {"characters": []},
             '{"characters":[]}',
         )
+
+
+def test_novel_template_generation_normalizes_editable_fields() -> None:
+    recovered = normalize_creative_generation_json(
+        "novel_template",
+        {
+            "genre": "现实",
+            "template_key": "real-life",
+            "template_name": "现实生活",
+            "template_fields": ["模型返回的字段顺序会被规范化"],
+            "template_data": {
+                "protagonist_identity": "电台修复师与灯塔工程师",
+                "background_setting": "东南沿海小城澄屿",
+                "core_conflict": "隐藏录音与当年误会",
+                "emotional_mainline": "双向暗恋久别重逢",
+                "style_features": "克制细腻、治愈圆满",
+            },
+        },
+        "",
+    )
+
+    assert recovered["template_fields"] == [
+        "protagonist_identity",
+        "background_setting",
+        "core_conflict",
+        "emotional_mainline",
+        "style_features",
+    ]
+    assert recovered["template_data"]["core_conflict"] == "隐藏录音与当年误会"
 
 
 def test_intelligence_payload_recovers_valid_items_from_malformed_envelope() -> None:

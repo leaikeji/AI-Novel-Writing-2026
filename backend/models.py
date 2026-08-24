@@ -682,7 +682,7 @@ class ChapterCreationDraft(Base):
     state: Mapped[str] = mapped_column(String(30), nullable=False, default="draft")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     title: Mapped[str] = mapped_column(String(240), nullable=False, default="")
-    target_character_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3000)
+    target_character_count: Mapped[int] = mapped_column(Integer, nullable=False, default=2500)
     expectation_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     outline_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     data_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

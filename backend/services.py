@@ -78,7 +78,9 @@ class RestorationPlanConflictError(DomainError):
 
 CURRENT_FACT_STATUSES = ("active", "source_restored")
 MINIMAX_M3_MODEL_ID = "MiniMax-M3"
-MINIMUM_COMPLETED_CHAPTER_CHARACTERS = 3000
+MINIMUM_COMPLETED_CHAPTER_CHARACTERS = 1000
+TARGET_COMPLETED_CHAPTER_CHARACTERS = 1250
+MAXIMUM_COMPLETED_CHAPTER_CHARACTERS = 1500
 
 
 def content_hash(markdown: str) -> str:
@@ -150,6 +152,7 @@ INTELLIGENCE_ITEM_TYPES = {
     "storyline_event",
     "foreshadow_progress",
     "foreshadow_new",
+    "next_chapter_required_role",
 }
 
 
@@ -778,17 +781,16 @@ def start_chapter_generation(
         session, asset_ids=asset_ids, preset_id=preset_id
     )
     snapshot = _generation_snapshot(session, document, working, brief, asset_snapshot)
-    # ``target_word_count`` is a creative length target, not a hard rejection
-    # threshold.  The product requirement is explicit: only chapters below
-    # 3000 visible Chinese characters must be discarded and rewritten.
+    # The current paired-flow acceptance run requires every generated chapter
+    # to land inside a strict 1000—1500 visible-character window.  The chapter
+    # brief keeps the source product's planning target, while generation uses
+    # a centered target to avoid repeatedly overshooting the upper boundary.
     acceptance_target = MINIMUM_COMPLETED_CHAPTER_CHARACTERS
     snapshot["acceptance"] = {
         "minimum_visible_character_count": MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
+        "maximum_visible_character_count": MAXIMUM_COMPLETED_CHAPTER_CHARACTERS,
         "target_visible_character_count": acceptance_target,
-        "requested_visible_character_count": max(
-            MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
-            brief.target_word_count,
-        ),
+        "requested_visible_character_count": TARGET_COMPLETED_CHAPTER_CHARACTERS,
     }
     attempt = 1
     if force_new:
@@ -856,6 +858,17 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
             or brief["target_word_count"]
         ),
     )
+    maximum_visible_character_count = max(
+        minimum_visible_character_count,
+        int(
+            acceptance.get("maximum_visible_character_count")
+            or MAXIMUM_COMPLETED_CHAPTER_CHARACTERS
+        ),
+    )
+    requested_visible_character_count = min(
+        requested_visible_character_count,
+        maximum_visible_character_count,
+    )
     roles = brief["role_constraints"]
     previous_context = snapshot.get("previous_context", [])
     context_text = "\n\n".join(
@@ -873,14 +886,16 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
 
 只输出小说正文，不要解释、不要写标题、不要使用 Markdown 代码围栏，也不要声称已经保存。
 正文结束后立即停止；禁止追加“完成”“下一步”“等待作者反馈”“进入下一章”“修订本稿”等工作状态或流程提示。
+禁止在结尾追加方括号摘要、生成段数、情节清单、验收说明或任何形如「⟦……⟧」的状态胶囊。
 绝对不要叙述你将加载、读取或遵循任何 Skill；不得输出“我需要先加载”等内部工作语句。
 本章期望、章节大纲、内容禁区、角色限制和验收规则只用于约束创作，不是正文素材。不得在正文中复述、解释、否定或评论这些规则，也不得用“没有……”“不出现……”“不靠……”等作者说明来证明自己遵守了规则；请让合规结果自然发生在场景里。
 输出的第一个字必须已经属于小说场景。
 
 作品：{snapshot['novel']['title']}
 章节：{snapshot['chapter']['title']}
-创作目标：约 {requested_visible_character_count} 个中文可见字符；优先达到目标
-验收下限：至少 {minimum_visible_character_count} 个中文可见字符；低于该值必须整章重写
+创作目标：约 {requested_visible_character_count} 个中文可见字符
+验收范围：{minimum_visible_character_count}—{maximum_visible_character_count} 个中文可见字符；低于下限或超过上限都必须整章重写
+固定输出 6 个自然段，每段约 180—220 个中文可见字符，全部正文控制在 1100—1400 个可见字符；不得拆成第 7 段，也不得用短句单独成段。
 本章期望：{brief['expectation_text'] or '按章纲推进，不额外扩张设定'}
 章节大纲：
 {brief['outline_text'] or '无固定章纲，保持前文连续并形成完整章节推进'}
@@ -928,17 +943,15 @@ def _clean_model_candidate(text: str) -> str:
     # Strip only final standalone capsules with known orchestration wording so an
     # author's legitimate in-story brackets are never touched. Older host builds
     # occasionally emitted the wrong opening glyph, so both variants are accepted.
-    capsule_pattern = (
-        r"[⟦⟧][^\n⟧]*(?:正文候选|续写候选|待作者审阅|状态：|禁区检查|"
-        r"锚点：|完成：|下一步：|等作者反馈|等待作者反馈|进入下一章|修订本稿)"
-        r"[^\n⟧]*⟧"
-    )
+    capsule_pattern = r"[⟦⟧][^\n⟧]{0,800}⟧"
     candidate = re.sub(
-        rf"(?:\n*\s*{capsule_pattern}\s*)+$",
+        rf"(?:\n+\s*{capsule_pattern}\s*)+$",
         "",
         candidate,
     ).strip()
-    if re.search(capsule_pattern, candidate):
+    if re.fullmatch(rf"\s*{capsule_pattern}\s*", candidate):
+        candidate = ""
+    if re.search(rf"(?:^|\n)\s*{capsule_pattern}\s*(?:$|\n)", candidate):
         raise ValidationError("模型正文中混入了系统状态说明，请重新生成候选")
     if not candidate:
         raise ValidationError("模型没有返回可用正文")
@@ -987,6 +1000,20 @@ def complete_chapter_generation(
         job.failure_message = (
             f"正文仅有{output_visible_character_count}个可见字符，"
             f"低于{job.target_visible_character_count}字门槛，必须整章重写"
+        )
+        job.completed_at = datetime.now(timezone.utc)
+        session.commit()
+        raise ValidationError(job.failure_message)
+    if output_visible_character_count > MAXIMUM_COMPLETED_CHAPTER_CHARACTERS:
+        job.state = "failed"
+        job.model_profile_fingerprint = model_profile_fingerprint
+        job.actual_model_id = actual_model_id
+        job.provider_profile = provider_profile
+        job.output_visible_character_count = output_visible_character_count
+        job.validation_state = "above_target"
+        job.failure_message = (
+            f"正文共有{output_visible_character_count}个可见字符，"
+            f"超过{MAXIMUM_COMPLETED_CHAPTER_CHARACTERS}字范围，必须整章重写"
         )
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
@@ -1060,7 +1087,7 @@ def adopt_candidate(
         or generation_job.output_visible_character_count
         < generation_job.target_visible_character_count
     ):
-        raise ValidationError("正文候选未达到3000字验收门槛，不能采用")
+        raise ValidationError("正文候选未通过1000—1500字验收范围，不能采用")
     document = _require_document(session, candidate.document_id)
     working = session.scalar(
         select(DocumentWorkingCopy)
@@ -1400,7 +1427,7 @@ def build_intelligence_prompt(session: Session, proposal_id: UUID) -> str:
     return f"""请从下面这章正式正文中提取“候选情报”。只返回严格 JSON，不要代码围栏或解释。
 
 JSON 结构：
-{{"items":[{{"item_type":"fact|character_state|relationship|storyline_event|foreshadow_progress|foreshadow_new","subject":"主体","predicate":"变化或关系","object":"客体或内容","source_text":"正文中的短证据","reasoning_summary":"为何值得进入故事账本","confidence":0到100}}]}}
+{{"items":[{{"item_type":"fact|character_state|relationship|storyline_event|foreshadow_progress|foreshadow_new|next_chapter_required_role","subject":"主体","predicate":"变化或关系","object":"客体或内容","source_text":"正文中的短证据","reasoning_summary":"为何值得进入故事账本","confidence":0到100}}]}}
 
 规则：
 1. 只提取正文明确发生或明确揭示的内容，不把猜测写成事实。
@@ -1411,6 +1438,9 @@ JSON 结构：
 6. 正文不为空时至少返回 1 条情报，不得返回空 items。
 7. 小说时间线与现实系统日期无关。严禁用当前现实年份补全「今年」「去年」「本月」等相对日期；必须以正文最近的明确场景日期为锚点推断。无法可靠推断时保留正文原有相对表述，不得擅自补全年份。
 8. source_text 与 object 中的日期必须彼此一致；正文写明发生在 1992 年的场景，不得改写成 2026 年或其他现实年份。
+9. 只有当本章结尾明确决定、约定或迫使某个已知角色在下一章继续出场时，才增加 next_chapter_required_role；subject 必须只写角色姓名，predicate 固定写「下一章必现」，object 简述正文依据。没有明确依据时不要输出此类型。
+10. foreshadow_new 只用于本章新出现、尚未解决且会影响后续章节的悬念；subject 必须写成可直接展示的简短伏笔名称（如「码头老板的阴谋线」），不得只写角色名或普通物件名。foreshadow_progress 只能推进现有故事账本中同名伏笔，不得凭角色名新建伏笔。
+11. storyline_event 只用于推进可跨越多个章节的稳定故事线；subject 应写故事线名称或稳定主题，不得把一次动作、普通物件、地点切换或一句对白各自拆成新故事线。
 
 章节：{document.title}
 现有故事账本：

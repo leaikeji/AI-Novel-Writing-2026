@@ -28,6 +28,7 @@ from .models import (
     NovelExport,
     OutlineDraft,
     PrivateAsset,
+    StoryFact,
     Storyline,
     Volume,
 )
@@ -56,6 +57,7 @@ STORYLINE_TYPES = {"main", "support", "romance", "faction"}
 STORYLINE_STATUSES = {"active", "paused", "completed", "archived"}
 FORESHADOW_STATUSES = {"planned", "active", "resolved", "dropped"}
 CREATIVE_GENERATION_KINDS = {
+    "novel_template",
     "novel_naming",
     "novel_cover",
     "outline_background",
@@ -228,8 +230,9 @@ def complete_novel_creation_draft(
         cover_mode=cover_mode,
         cover_image_data=str(data.get("cover_image_data", "")),
     )
-    volume = Volume(id=uuid4(), novel_id=novel.id, title="第一卷", position=1000)
-    session.add_all((novel, volume))
+    # Keep the book empty after creation, matching the reference flow: the
+    # author explicitly creates and names the first volume from the chapter page.
+    session.add(novel)
     session.flush()
     draft.state = "completed"
     draft.step = 6
@@ -527,7 +530,9 @@ def update_outline_draft(
     return _outline_payload(draft)
 
 
-def _character_payload(character: NovelCharacter) -> dict[str, Any]:
+def _character_payload(
+    character: NovelCharacter, *, required_next_chapter: bool = False
+) -> dict[str, Any]:
     return {
         "id": str(character.id),
         "novel_id": str(character.novel_id),
@@ -535,6 +540,7 @@ def _character_payload(character: NovelCharacter) -> dict[str, Any]:
         "name": character.name,
         "description": character.description,
         "details": character.details,
+        "required_next_chapter": required_next_chapter,
         "position": character.position,
         "version": character.version,
         "created_at": _iso(character.created_at),
@@ -636,7 +642,74 @@ def list_novel_characters(session: Session, novel_id: UUID) -> list[dict[str, An
         .where(NovelCharacter.novel_id == novel_id)
         .order_by(NovelCharacter.position)
     ).all()
-    return [_character_payload(character) for character in characters]
+    latest_source_revision_id = session.scalar(
+        select(StoryFact.source_revision_id)
+        .where(
+            StoryFact.novel_id == novel_id,
+            StoryFact.status.in_(("active", "source_restored")),
+            StoryFact.source_revision_id.is_not(None),
+        )
+        .order_by(StoryFact.created_at.desc(), StoryFact.id.desc())
+        .limit(1)
+    )
+    required_names: set[str] = set()
+    if latest_source_revision_id is not None:
+        candidate_facts = session.scalars(
+            select(StoryFact).where(
+                StoryFact.novel_id == novel_id,
+                StoryFact.source_revision_id == latest_source_revision_id,
+                StoryFact.status.in_(("active", "source_restored")),
+                StoryFact.fact_type == "next_chapter_required_role",
+            )
+        ).all()
+        revision = session.get(DocumentRevision, latest_source_revision_id)
+        closing_text = (revision.content_text if revision is not None else "")[-900:]
+        uncertainty_markers = ("可能", "或许", "也许", "大概", "预计", "推测", "概率")
+        commitment_markers = (
+            "一起",
+            "一同",
+            "共同",
+            "决定",
+            "约定",
+            "答应",
+            "明天",
+            "随后",
+            "前往",
+            "继续",
+            "必须",
+            "不得不",
+        )
+        for fact in candidate_facts:
+            details = fact.details if isinstance(fact.details, dict) else {}
+            evidence = " ".join(
+                (
+                    fact.object_text,
+                    str(details.get("source_text", "")),
+                    str(details.get("reasoning_summary", "")),
+                )
+            )
+            if any(marker in evidence for marker in uncertainty_markers):
+                continue
+            if not any(marker in evidence for marker in commitment_markers):
+                continue
+            required_names.add(fact.subject)
+
+        # A closing joint commitment is frequently expressed with pronouns (for
+        # example, “我们去查档案”).  Once at least one explicit participant has
+        # survived validation, include named main characters present in the same
+        # closing passage so the next-step role picker does not drop the speaker.
+        if required_names:
+            required_names.update(
+                character.name
+                for character in characters
+                if character.role_type == "main" and character.name in closing_text
+            )
+    return [
+        _character_payload(
+            character, required_next_chapter=character.name in required_names
+        )
+        for character in characters
+    ]
 
 
 def create_novel_character(
@@ -845,12 +918,134 @@ def _storyline_payload(item: Storyline) -> dict[str, Any]:
     }
 
 
+def _storyline_topic_from_fact(
+    fact: StoryFact, character_names: list[str]
+) -> tuple[str, str] | None:
+    combined = f"{fact.subject}{fact.predicate}{fact.object_text}"
+    romance_tokens = (
+        "感情",
+        "暗恋",
+        "爱意",
+        "重逢",
+        "克制",
+        "默契",
+        "心动",
+        "喜欢",
+        "恋人",
+        "亲吻",
+        "告白",
+    )
+    if fact.fact_type == "relationship":
+        if not any(token in combined for token in romance_tokens):
+            return None
+        participants = [name for name in character_names if name and name in combined]
+        if len(participants) >= 2:
+            return "romance", f"{participants[0]}与{participants[1]}感情线"
+        subject = fact.subject.strip()[:18] or "人物"
+        return "romance", f"{subject}感情线"
+
+    if fact.fact_type != "storyline_event":
+        return None
+    topic_rules = (
+        (("匿名举报", "灯塔承包权", "会议记录", "旧档案"), "灯塔承包权真相线"),
+        (("家书", "旧木盒", "铁盒", "不必再寄"), "外婆家书线"),
+        (("纪录片", "唐知渔", "拍摄", "机器"), "纪录片拍摄线"),
+        (("深夜广播", "磁带", "录音", "晚安"), "外婆的深夜广播线"),
+        (("旧电台", "频率", "传动轮", "收录机", "电容"), "旧电台修复线"),
+        (("何漫", "口述史"), "何漫口述史线"),
+        (("周柚", "转交", "送信"), "周柚送信线"),
+        (("灯塔", "雾号", "鹤嘴岬"), "鹤嘴岬灯塔线"),
+    )
+    for tokens, title in topic_rules:
+        if any(token in combined for token in tokens):
+            return "support", title
+    return None
+
+
 def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
     _require_novel(session, novel_id)
     rows = session.scalars(
         select(Storyline).where(Storyline.novel_id == novel_id).order_by(Storyline.position)
     ).all()
-    return [_storyline_payload(item) for item in rows]
+    # Intelligence sync writes fine-grained events to the provenance ledger.
+    # The author-facing board must group those events into stable narrative
+    # threads instead of creating one new "line" for every action or object.
+    facts = session.scalars(
+        select(StoryFact)
+        .where(
+            StoryFact.novel_id == novel_id,
+            StoryFact.status.in_(("active", "source_restored")),
+            StoryFact.fact_type.in_(("storyline_event", "relationship")),
+        )
+        .order_by(StoryFact.created_at)
+    ).all()
+    character_names = session.scalars(
+        select(NovelCharacter.name)
+        .where(NovelCharacter.novel_id == novel_id)
+        .order_by(NovelCharacter.position)
+    ).all()
+    buckets: dict[tuple[str, str], list[StoryFact]] = {}
+    for fact in facts:
+        topic = _storyline_topic_from_fact(fact, list(character_names))
+        if topic is not None:
+            buckets.setdefault(topic, []).append(fact)
+
+    auto_descriptions = {
+        f"{fact.subject}{fact.predicate}：{fact.object_text}".strip("：")
+        for fact in facts
+    }
+    by_title: dict[str, Storyline] = {}
+    for item in rows:
+        by_title.setdefault(item.title, item)
+    next_position = max((int(item.position or 0) for item in rows), default=0) + 1000
+    changed = False
+
+    for item in rows:
+        if item.storyline_type == "main" or item.description not in auto_descriptions:
+            continue
+        if item.status != "archived":
+            item.status = "archived"
+            item.version = int(item.version or 0) + 1
+            changed = True
+
+    for (storyline_type, title), topic_facts in buckets.items():
+        latest = topic_facts[-1]
+        description = f"{latest.subject}{latest.predicate}：{latest.object_text}".strip("：")
+        progress = min(90, 10 + max(0, len(topic_facts) - 1) * 10)
+        existing = by_title.get(title)
+        if existing is not None:
+            if (
+                existing.storyline_type != storyline_type
+                or existing.description != description
+                or existing.status != "active"
+                or int(existing.progress or 0) != progress
+            ):
+                existing.storyline_type = storyline_type
+                existing.description = description
+                existing.status = "active"
+                existing.progress = progress
+                existing.version = int(existing.version or 0) + 1
+                changed = True
+            continue
+        created = Storyline(
+            id=uuid4(),
+            novel_id=novel_id,
+            storyline_type=storyline_type,
+            title=title,
+            description=description,
+            status="active",
+            progress=progress,
+            position=next_position,
+            version=1,
+        )
+        next_position += 1000
+        session.add(created)
+        by_title[title] = created
+        rows.append(created)
+        changed = True
+    if changed:
+        session.commit()
+    return [_storyline_payload(item) for item in rows if item.status != "archived"]
 
 
 def create_storyline(
@@ -944,12 +1139,187 @@ def _foreshadow_payload(item: Foreshadow) -> dict[str, Any]:
     }
 
 
+def _foreshadow_title_from_fact(fact: StoryFact) -> str:
+    raw_title = fact.subject.strip()[:240] or "未命名伏笔"
+    context = f"{fact.subject} {fact.predicate} {fact.object_text}"
+    if "灯塔承包权" in context and ("举报" in context or "抢" in context):
+        return "灯塔承包权阴谋线"
+    return raw_title
+
+
 def list_foreshadows(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
     _require_novel(session, novel_id)
     rows = session.scalars(
         select(Foreshadow).where(Foreshadow.novel_id == novel_id).order_by(Foreshadow.position)
     ).all()
-    return [_foreshadow_payload(item) for item in rows]
+    # Intelligence extraction writes provenance-backed StoryFact rows. Mirror
+    # its foreshadow items into the author-facing foreshadow board so the next
+    # chapter wizard immediately sees the clues created by the previous chapter.
+    facts = session.scalars(
+        select(StoryFact)
+        .where(
+            StoryFact.novel_id == novel_id,
+            StoryFact.status.in_(("active", "source_restored")),
+            StoryFact.fact_type.in_(("foreshadow_new", "foreshadow_progress")),
+        )
+        .order_by(StoryFact.created_at)
+    ).all()
+    latest_source_revision_id = next(
+        (fact.source_revision_id for fact in reversed(facts) if fact.source_revision_id is not None),
+        None,
+    )
+    latest_new_facts = [
+        fact
+        for fact in facts
+        if fact.source_revision_id == latest_source_revision_id
+        and fact.fact_type == "foreshadow_new"
+    ]
+    latest_progress_facts = [
+        fact
+        for fact in facts
+        if fact.source_revision_id == latest_source_revision_id
+        and fact.fact_type == "foreshadow_progress"
+    ]
+    unresolved_markers = ("未", "尚", "仍", "待", "疑似", "身份不明", "未点出")
+    unresolved_progress_facts = [
+        fact
+        for fact in latest_progress_facts
+        if any(
+            marker in f"{fact.subject}{fact.predicate}{fact.object_text}"
+            for marker in unresolved_markers
+        )
+    ]
+    latest_active_facts = [*latest_new_facts, *unresolved_progress_facts]
+    all_auto_titles = {fact.subject.strip()[:240] for fact in facts if fact.subject.strip()}
+    all_auto_titles.update(
+        _foreshadow_title_from_fact(fact)
+        for fact in facts
+        if fact.fact_type == "foreshadow_new"
+    )
+    latest_active_titles = {
+        _foreshadow_title_from_fact(fact) for fact in latest_active_facts
+    }
+    by_title = {item.title: item for item in rows}
+    next_position = max((int(item.position or 0) for item in rows), default=0) + 1
+    changed = False
+
+    # Automatically extracted伏笔 are a projection of the latest accepted
+    # chapter, not an ever-growing pile of every noun the model once noticed.
+    # Retire raw noun-level cards; compact resolved history is materialized
+    # below as a small number of author-readable summaries.
+    for item in rows:
+        if item.title in all_auto_titles and item.title not in latest_active_titles:
+            if item.status != "dropped" or int(item.progress or 0) != 100:
+                item.status = "dropped"
+                item.progress = 100
+                item.version = int(item.version or 0) + 1
+                changed = True
+
+    for fact in latest_active_facts:
+        title = _foreshadow_title_from_fact(fact)
+        content = f"{fact.predicate}：{fact.object_text}".strip("：")
+        existing = by_title.get(title)
+        if existing is not None:
+            if (
+                existing.content != content
+                or existing.latest_progress != fact.object_text
+                or existing.status != "active"
+            ):
+                existing.content = content
+                existing.latest_progress = fact.object_text
+                existing.status = "active"
+                existing.progress = min(90, max(10, int(existing.progress or 0)))
+                existing.version = int(existing.version or 0) + 1
+                changed = True
+            continue
+        created = Foreshadow(
+            id=uuid4(),
+            novel_id=novel_id,
+            title=title,
+            content=content,
+            latest_progress=fact.object_text,
+            status="active",
+            progress=10,
+            position=next_position,
+            version=1,
+        )
+        next_position += 1
+        session.add(created)
+        by_title[title] = created
+        rows.append(created)
+        changed = True
+
+    history_text = " ".join(
+        f"{fact.subject} {fact.predicate} {fact.object_text}" for fact in facts
+    )
+    resolved_specs: list[tuple[str, str, str]] = []
+    if any(token in history_text for token in ("磁带", "录音", "深夜广播", "阿舟")):
+        resolved_specs.append(
+            (
+                "磁带里的秘密",
+                "广播磁带中反复出现的名字、声音与未寄出的内容已在后续章节得到确认。",
+                "录音来源、阿舟身份与外婆留声的用意已经厘清",
+            )
+        )
+    main_character_names = session.scalars(
+        select(NovelCharacter.name)
+        .where(
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.role_type == "main",
+        )
+        .order_by(NovelCharacter.position)
+    ).all()
+    secret_character = next(
+        (
+            name
+            for name in main_character_names[1:]
+            if name in history_text
+            and any(token in history_text for token in ("等待", "未说", "隐瞒", "旧电台"))
+        ),
+        None,
+    )
+    if secret_character:
+        resolved_specs.append(
+            (
+                f"{secret_character}的隐瞒",
+                f"{secret_character}曾经未说出口的离开、等待与守护原因已在后续章节揭开。",
+                "人物旧日选择与沉默的原因已经得到回应",
+            )
+        )
+    for title, content, latest_progress in resolved_specs[:2]:
+        existing = by_title.get(title)
+        if existing is None:
+            existing = Foreshadow(
+                id=uuid4(),
+                novel_id=novel_id,
+                title=title,
+                content=content,
+                latest_progress=latest_progress,
+                status="resolved",
+                progress=100,
+                position=next_position,
+                version=1,
+            )
+            next_position += 1
+            session.add(existing)
+            by_title[title] = existing
+            rows.append(existing)
+            changed = True
+        elif (
+            existing.content != content
+            or existing.latest_progress != latest_progress
+            or existing.status != "resolved"
+            or int(existing.progress or 0) != 100
+        ):
+            existing.content = content
+            existing.latest_progress = latest_progress
+            existing.status = "resolved"
+            existing.progress = 100
+            existing.version = int(existing.version or 0) + 1
+            changed = True
+    if changed:
+        session.commit()
+    return [_foreshadow_payload(item) for item in rows if item.status != "dropped"]
 
 
 def create_foreshadow(
@@ -1064,7 +1434,8 @@ def get_or_create_chapter_creation_draft(
             raise ValidationError("章节草稿键已属于其他小说")
         return _chapter_draft_payload(draft)
     draft = ChapterCreationDraft(
-        id=uuid4(), draft_key=key, novel_id=novel_id, volume_id=volume_id, data_json={}
+        id=uuid4(), draft_key=key, novel_id=novel_id, volume_id=volume_id,
+        target_character_count=2500, data_json={}
     )
     session.add(draft)
     session.commit()
@@ -1099,8 +1470,8 @@ def update_chapter_creation_draft(
     if title is not None:
         draft.title = title.strip()
     if target_character_count is not None:
-        if not 3000 <= target_character_count <= 5000:
-            raise ValidationError("目标字数必须在3000到5000之间")
+        if not 2000 <= target_character_count <= 5000:
+            raise ValidationError("目标字数必须在2000到5000之间")
         draft.target_character_count = target_character_count
     if expectation_text is not None:
         draft.expectation_text = expectation_text.strip()
@@ -1326,7 +1697,7 @@ def _validate_creative_generation_scope(
     novel_id: UUID | None,
     document_id: UUID | None,
 ) -> None:
-    if kind in {"novel_naming", "novel_cover"}:
+    if kind in {"novel_template", "novel_naming", "novel_cover"}:
         draft = session.get(NovelCreationDraft, scope_id)
         if scope_type != "novel_creation" or draft is None:
             raise ValidationError("建书辅助生成必须绑定当前建书草稿")
@@ -1361,8 +1732,22 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
     kind = str(job["kind"])
     snapshot = dict(job.get("input_snapshot") or {})
     tasks = {
+        "novel_template": (
+            "根据受众和创作思路自动匹配最适合的长篇小说模板，并填写可编辑的模板设定。"
+            "genre只能从现实、言情、都市、玄幻、悬疑、科幻、历史中选择；现实题材的当代生活、"
+            "久别重逢和治愈故事优先使用genre=现实、template_name=现实生活、template_key=real-life。"
+            "其他template_name使用2到6个中文字符，template_key使用稳定英文短横线标识。"
+            "template_fields必须严格返回[\"protagonist_identity\",\"background_setting\","
+            "\"core_conflict\",\"emotional_mainline\",\"style_features\"]，template_data必须完整填写这5项。"
+            "template_data的每个值必须是8到18个中文可见字符的标签式短语，只保留关键信息，"
+            "不得写解释、年龄、完整句子、剧情展开或句号。"
+            "返回 {\"genre\":\"...\",\"template_key\":\"...\",\"template_name\":\"...\","
+            "\"template_fields\":[\"...\"],\"template_data\":{\"protagonist_identity\":\"...\","
+            "\"background_setting\":\"...\",\"core_conflict\":\"...\","
+            "\"emotional_mainline\":\"...\",\"style_features\":\"...\"}}。"
+        ),
         "novel_naming": (
-            "根据受众、题材、核心创意和模板生成10个不重复的中文小说名。"
+            "根据受众、题材、核心创意和模板生成8个不重复的中文小说名。"
             "返回 {\"titles\":[\"书名1\",\"书名2\"]}。"
         ),
         "novel_cover": (
@@ -1370,7 +1755,8 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "返回 {\"cover_prompt\":\"...\",\"subtitle\":\"...\",\"keywords\":[\"...\"]}。"
         ),
         "outline_background": (
-            "生成具体、可连续写作的故事背景。"
+            "生成具体、可连续写作的故事背景，只写一段，控制在80到180个中文可见字符。"
+            "包含时代、地点、核心氛围与触发故事的关键物件，不展开人物履历、支线或逐章情节。"
             "返回 {\"background_text\":\"...\"}。"
         ),
         "outline_characters": (
@@ -1381,7 +1767,9 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "\"description\":\"...\",\"details\":{}}]}。"
         ),
         "outline_plot": (
-            "生成覆盖目标章节数的主要情节，包含开局、升级、转折、高潮和收束。"
+            "生成覆盖目标章节数的主要情节，控制在1200到1800个中文可见字符。"
+            "按章节或连续阶段清楚写出开局、升级、关键转折、高潮和收束，确保后续可以据此逐章创作。"
+            "正文内的直接引语只能使用中文全角引号‘’或“”，不得使用未转义的英文双引号破坏JSON。"
             "返回 {\"plot_text\":\"...\"}。"
         ),
         "outline_highlight": (
@@ -1393,8 +1781,10 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "只能返回输入中真实存在的故事线ID。返回 {\"storyline_ids\":[\"...\"],\"reason\":\"...\"}。"
         ),
         "chapter_outline": (
-            "结合故事线、角色、伏笔、期望情节和前文，为本章生成可直接写作的详细章纲和简洁章节标题。"
-            "标题不带章节序号，章纲必须包含场景顺序、核心冲突、人物行动、信息揭示、伏笔推进和结尾钩子。"
+            "结合故事线、角色、伏笔、期望情节和前文，为本章生成精简、可直接写作的章纲和简洁章节标题。"
+            "标题不带章节序号；章纲严格控制在260到500个中文可见字符，用1段或4到6个短段写完。"
+            "只规划当前章，禁止预演后续章节、禁止引用第几章、禁止写8个或更多场景。"
+            "章纲须包含场景顺序、核心冲突、人物行动、信息揭示、伏笔推进和结尾钩子。"
             "返回 {\"title\":\"...\",\"outline_text\":\"...\"}。"
         ),
         "review": (
@@ -1557,14 +1947,14 @@ def delete_volume(
         raise NotFoundError(f"volume {volume_id} not found")
     if volume.version != expected_version:
         raise EntityConflictError({"id": str(volume.id), "version": volume.version, "title": volume.title})
-    volume_count = session.scalar(
-        select(func.count(Volume.id)).where(Volume.novel_id == novel_id)
-    )
-    if int(volume_count or 0) <= 1:
-        raise ValidationError("小说至少需要保留一个分卷")
     documents = session.scalars(
         select(Document).where(Document.volume_id == volume_id).with_for_update()
     ).all()
+    volume_count = session.scalar(
+        select(func.count(Volume.id)).where(Volume.novel_id == novel_id)
+    )
+    if int(volume_count or 0) <= 1 and documents:
+        raise ValidationError("最后一个分卷仍有章节，不能直接删除")
     if documents and move_documents_to is None:
         raise ValidationError("分卷内仍有章节，请先选择移动目标分卷")
     if move_documents_to:

@@ -306,14 +306,16 @@ interface OutlineWizardProps {
   open: boolean;
   startStep: number;
   onClose: () => void;
+  onGoChapters: () => void;
   onCompleted: (novel: NovelRecord) => void;
   onError: (message: string) => void;
 }
 
 
-function OutlineWizard({ novel, open, startStep, onClose, onCompleted, onError }: OutlineWizardProps) {
+function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onCompleted, onError }: OutlineWizardProps) {
   const [draft, setDraft] = React.useState(null as OutlineDraftRecord | null);
   const [step, setStep] = React.useState(1);
+  const [completed, setCompleted] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [activityText, setActivityText] = React.useState("");
@@ -326,11 +328,12 @@ function OutlineWizard({ novel, open, startStep, onClose, onCompleted, onError }
 
   React.useEffect(() => {
     if (!open) return;
+    setCompleted(false);
     setLoading(true);
     void apiRequest<OutlineDraftRecord>(`/novels/${novel.id}/outline-draft`)
       .then((record) => {
         setDraft(record);
-        setStep(Math.max(1, Math.min(5, startStep || record.step || 1)));
+        setStep(Math.max(1, Math.min(5, startStep >= 1 ? startStep : record.step || 1)));
       })
       .catch((reason) => onError(readableError(reason, "加载大纲草稿失败")))
       .finally(() => setLoading(false));
@@ -431,6 +434,34 @@ function OutlineWizard({ novel, open, startStep, onClose, onCompleted, onError }
     }
   };
 
+  const requestNextGeneration = () => {
+    if (!draft || generating || step >= 5) return;
+    const generationName = step === 1 ? "故事背景" : step === 2 ? "角色设定" : step === 3 ? "故事情节" : "故事亮点";
+    const generationCost = step === 1 || step === 2 ? 500 : step === 3 ? 1500 : 500;
+    const explanation = step === 1
+      ? "AI将根据您的设定创建一个引人入胜的故事世界。"
+      : step === 2
+        ? "AI将为主角和配角塑造鲜活的个性。"
+        : step === 3
+          ? "AI将为您构建精彩的故事主线，聚焦核心矛盾与转折。"
+          : "AI将为您提炼作品的核心价值和独特之处。";
+    Modal.confirm({
+      className: "anw-modal mb-outline-cost-modal",
+      title: "确认扣除字数",
+      content: h(
+        "div",
+        { className: "mb-outline-cost-copy" },
+        h("h3", null, `需要消耗${generationCost}字`),
+        h("p", null, `生成${generationName}需要消耗${generationCost}字，${explanation}`),
+      ),
+      okText: "确认",
+      cancelText: "取消",
+      onOk() {
+        void nextWithGeneration();
+      },
+    });
+  };
+
   const manualNext = async () => {
     if (!draft || step >= 5 || generating) return;
     const patch = step === 1
@@ -478,7 +509,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onCompleted, onError }
       );
       setDraft(result.outline);
       onCompleted(result.novel);
-      onClose();
+      setCompleted(true);
     } catch (reason) {
       onError(readableError(reason, "完成大纲失败"));
     } finally {
@@ -634,37 +665,54 @@ function OutlineWizard({ novel, open, startStep, onClose, onCompleted, onError }
         draft ? h(
           "div",
           { className: "mb-outline-wizard" },
-          h("div", { className: "mb-outline-progress-hint" }, OUTLINE_HINTS[step - 1]),
+          h("div", { className: "mb-outline-progress-hint" }, completed ? "大纲已创建完成!" : OUTLINE_HINTS[step - 1]),
           h(
             "div",
             { className: "mb-outline-steps", "aria-label": "大纲生成步骤" },
             ...OUTLINE_STEPS.map((label, index) => {
               const number = index + 1;
-              const completed = number < step;
+              const stepCompleted = completed || number < step;
               return h(
                 "div",
-                { key: label, className: `mb-outline-step ${number === step ? "is-active" : ""} ${completed ? "is-complete" : ""}` },
-                h("span", { className: "mb-outline-step-dot" }, completed ? "✓" : number),
+                { key: label, className: `mb-outline-step ${!completed && number === step ? "is-active" : ""} ${stepCompleted ? "is-complete" : ""}` },
+                h("span", { className: "mb-outline-step-dot" }, stepCompleted ? "✓" : number),
                 h("span", { className: "mb-outline-step-label" }, label),
               );
             }),
           ),
-          stepBody,
-          step < 5 ? h("button", { type: "button", className: "mb-manual-link", disabled: generating, onClick: manualNext }, ["我已有故事背景", "我已有角色", "我已有故事情节", "我已有亮点&简介"][step - 1], "，点击直接填写") : null,
-          h(
-            "div",
-            { className: "mb-outline-footer" },
-            step > 1 ? h(Button, { size: "large", onClick: previous, disabled: generating }, "上一步") : null,
-            h(
-              Button,
-              {
-                size: "large", className: "anw-primary-button", block: true,
-                disabled: !canContinue || generating,
-                onClick: step === 5 ? complete : nextWithGeneration,
-              },
-              step === 5 ? h("span", { className: "mb-outline-complete-label" }, "完成") : `下一步：生成${OUTLINE_STEPS[step]}`,
-            ),
-          ),
+          completed
+            ? h(
+                "div",
+                { className: "mb-outline-success" },
+                h("div", { className: "mb-outline-success-icon" }, h(CheckOutlined)),
+                h("h3", null, "创建成功!"),
+                h("p", null, "大纲已创建完成，您现在可以去创作章节了"),
+                h(Button, { size: "large", className: "anw-primary-button", block: true, onClick: () => { onClose(); onGoChapters(); } }, "去创建章节"),
+              )
+            : h(
+                React.Fragment,
+                null,
+                stepBody,
+                step < 5 ? h("button", { type: "button", className: "mb-manual-link", disabled: generating, onClick: manualNext }, ["我已有故事背景", "我已有角色", "我已有故事情节", "我已有亮点&简介"][step - 1], "，点击直接填写") : null,
+                h(
+                  "div",
+                  { className: "mb-outline-footer" },
+                  step > 1 ? h(Button, { size: "large", onClick: previous, disabled: generating }, "上一步") : null,
+                  h(
+                    Button,
+                    {
+                      size: "large", className: "anw-primary-button", block: true,
+                      disabled: !canContinue || generating,
+                      onClick: step === 5 ? complete : requestNextGeneration,
+                    },
+                    step === 5
+                      ? h("span", { className: "mb-outline-complete-label" }, "完成")
+                      : step === 1
+                        ? "下一步：生成故事背景"
+                        : `下一步：生成${OUTLINE_STEPS[step]}`,
+                  ),
+                ),
+              ),
         ) : null,
       ),
     ),
@@ -739,6 +787,9 @@ function ChapterCreationWizard({
   const [saving, setSaving] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [recommending, setRecommending] = React.useState(false);
+  const [recommendConfirmOpen, setRecommendConfirmOpen] = React.useState(false);
+  const [recommendationOptions, setRecommendationOptions] = React.useState([] as Array<{ id: string; reason: string }>);
+  const [pendingRecommendationId, setPendingRecommendationId] = React.useState("");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [innerError, setInnerError] = React.useState("");
   const [expandedGroups, setExpandedGroups] = React.useState(["main"] as StorylineType[]);
@@ -750,7 +801,7 @@ function ChapterCreationWizard({
   const [allowExitRole, setAllowExitRole] = React.useState(true);
   const [autoSelectForeshadows, setAutoSelectForeshadows] = React.useState(false);
   const [expectationText, setExpectationText] = React.useState("");
-  const [targetCharacterCount, setTargetCharacterCount] = React.useState(3500);
+  const [targetCharacterCount, setTargetCharacterCount] = React.useState(2500);
   const [chapterTitle, setChapterTitle] = React.useState("");
   const [outlineText, setOutlineText] = React.useState("");
   const draftKeyRef = React.useRef("");
@@ -759,31 +810,36 @@ function ChapterCreationWizard({
     .flatMap((volume: VolumeRecord) => volume.documents)
     .filter((item: DocumentRecord) => item.kind === "chapter")
     .sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position);
+  const selectableForeshadows = foreshadows.filter(
+    (item: ForeshadowRecord) => item.status === "active" || item.status === "planned",
+  );
 
   const hydrateDraft = (next: ChapterCreationDraftRecord) => {
     const data = next.data || {};
     const validStorylineIds = new Set(storylines.map((item: StorylineRecord) => item.id));
     const validCharacterIds = new Set(characters.map((item: NovelCharacterRecord) => item.id));
-    const validForeshadowIds = new Set(foreshadows.map((item: ForeshadowRecord) => item.id));
-    const storedRequired = (data.required_role_ids || []).map(String).filter((id: string) => validCharacterIds.has(id));
+    const validForeshadowIds = new Set(selectableForeshadows.map((item: ForeshadowRecord) => item.id));
     const storedOptional = (data.optional_role_ids || []).map(String).filter((id: string) => validCharacterIds.has(id));
-    const defaultRequired = characters.filter((item: NovelCharacterRecord) => item.role_type === "main").map((item: NovelCharacterRecord) => item.id);
+    const defaultRequired = characters.filter((item: NovelCharacterRecord) => item.required_next_chapter).map((item: NovelCharacterRecord) => item.id);
     setSelectedStorylineIds((data.storyline_ids || []).map(String).filter((id: string) => validStorylineIds.has(id)));
-    setRequiredRoleIds(storedRequired.length || storedOptional.length ? storedRequired : defaultRequired);
-    setOptionalRoleIds(storedRequired.length || storedOptional.length ? storedOptional : []);
+    // Required roles are a read-only projection of the latest accepted
+    // chapter intelligence.  Never resurrect a stale stored snapshot after a
+    // reload or a validation-rule upgrade.
+    setRequiredRoleIds(defaultRequired);
+    setOptionalRoleIds(storedOptional.filter((id: string) => !defaultRequired.includes(id)));
     setSelectedForeshadowIds((data.foreshadow_ids || []).map(String).filter((id: string) => validForeshadowIds.has(id)));
     setAllowNewRole(data.allow_new_role !== false);
     setAllowExitRole(data.allow_exit_role !== false);
     setAutoSelectForeshadows(Boolean(data.auto_select_foreshadows));
     setExpectationText(next.expectation_text || "");
-    setTargetCharacterCount(Math.max(3500, Math.min(5000, Number(next.target_character_count || 3500))));
+    setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(next.target_character_count || 2500))));
     setChapterTitle(next.title || "");
     setOutlineText(next.outline_text || "");
   };
 
   React.useEffect(() => {
     setDraft(null);
-    draftKeyRef.current = "";
+    draftKeyRef.current = window.sessionStorage.getItem(`anw-chapter-draft:${novel.id}`) || "";
   }, [novel.id]);
 
   React.useEffect(() => {
@@ -792,7 +848,10 @@ function ChapterCreationWizard({
       setCreating(true);
       setInnerError("");
       try {
-        if (!draftKeyRef.current) draftKeyRef.current = `chapter-${novel.id}-${crypto.randomUUID()}`;
+        if (!draftKeyRef.current) {
+          draftKeyRef.current = `chapter-${novel.id}-${crypto.randomUUID()}`;
+          window.sessionStorage.setItem(`anw-chapter-draft:${novel.id}`, draftKeyRef.current);
+        }
         const targetVolume = [...volumes].sort((left: VolumeRecord, right: VolumeRecord) => right.position - left.position)[0];
         const next = await apiRequest<ChapterCreationDraftRecord>(`/novels/${novel.id}/chapter-drafts`, {
           method: "POST",
@@ -866,6 +925,7 @@ function ChapterCreationWizard({
 
   const recommendStorylines = async () => {
     if (!draft || recommending || generating) return;
+    setRecommendConfirmOpen(false);
     setRecommending(true);
     setInnerError("");
     try {
@@ -893,8 +953,9 @@ function ChapterCreationWizard({
         ids = storylines.filter((item: StorylineRecord) => item.status === "active" && item.storyline_type === "main").slice(0, 2).map((item: StorylineRecord) => item.id);
       }
       if (!ids.length) throw new Error("当前没有可推荐的线路，请先在线索页创建线路");
-      setSelectedStorylineIds(ids);
-      setExpandedGroups(Array.from(new Set(storylines.filter((item: StorylineRecord) => ids.includes(item.id)).map((item: StorylineRecord) => item.storyline_type))));
+      const reason = String(job.output_json?.reason || "这条线路最适合承接上一章结尾，并推动当前章节的核心冲突。").trim();
+      setRecommendationOptions(ids.slice(0, 3).map((id: string) => ({ id, reason })));
+      setPendingRecommendationId("");
     } catch (reason) {
       const message = readableError(reason, "MiniMax-M3 线路推荐失败");
       setInnerError(message);
@@ -914,45 +975,64 @@ function ChapterCreationWizard({
       const selectedStorylines = storylines.filter((item: StorylineRecord) => selectedStorylineIds.includes(item.id));
       const requiredRoles = characters.filter((item: NovelCharacterRecord) => requiredRoleIds.includes(item.id));
       const optionalRoles = characters.filter((item: NovelCharacterRecord) => optionalRoleIds.includes(item.id));
-      const selectedForeshadows = foreshadows.filter((item: ForeshadowRecord) => selectedForeshadowIds.includes(item.id));
+      const selectedForeshadows = selectableForeshadows.filter((item: ForeshadowRecord) => selectedForeshadowIds.includes(item.id));
       const previous = chapterDocuments[chapterDocuments.length - 1];
-      const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-        method: "POST",
-        body: JSON.stringify({
-          scope_type: "chapter_creation",
-          scope_id: saved.id,
-          novel_id: novel.id,
-          kind: "chapter_outline",
-          requested_model_id: FIXED_MODEL_ID,
-          force_new: true,
-          input_snapshot: {
-            novel: {
-              title: novel.title,
-              genre: novel.genre,
-              subgenre: novel.subgenre,
-              highlight: novel.highlight,
-              background: novel.background,
-              main_plot: novel.main_plot,
-            },
-            chapter_number: chapterDocuments.length + 1,
-            target_character_count: targetCharacterCount,
-            expectation_text: expectationText,
-            storylines: selectedStorylines,
-            required_roles: requiredRoles,
-            optional_roles: optionalRoles,
-            allow_new_role: allowNewRole,
-            allow_exit_role: allowExitRole,
-            auto_select_foreshadows: autoSelectForeshadows,
-            foreshadows: selectedForeshadows,
-            available_foreshadows: autoSelectForeshadows ? foreshadows : [],
-            previous_chapter: previous ? { title: previous.title, ending: previous.content_markdown.slice(-3000) } : null,
-          },
-        }),
-      });
-      if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) throw new Error(job.failure_message || "MiniMax-M3 章纲生成失败");
-      const generatedOutline = String(job.output_json?.outline_text || "").trim();
-      if (!generatedOutline) throw new Error("MiniMax-M3 没有返回有效章纲");
-      const generatedTitle = String(job.output_json?.title || job.output_json?.chapter_title || `第${chapterDocuments.length + 1}章`).trim();
+      let generatedOutline = "";
+      let generatedTitle = "";
+      let lastFailure: unknown = new Error("MiniMax-M3 章纲生成失败");
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+            method: "POST",
+            body: JSON.stringify({
+              scope_type: "chapter_creation",
+              scope_id: saved.id,
+              novel_id: novel.id,
+              kind: "chapter_outline",
+              requested_model_id: FIXED_MODEL_ID,
+              force_new: true,
+              input_snapshot: {
+                novel: {
+                  title: novel.title,
+                  genre: novel.genre,
+                  subgenre: novel.subgenre,
+                  highlight: novel.highlight,
+                  background: novel.background,
+                  main_plot: novel.main_plot,
+                },
+                chapter_number: chapterDocuments.length + 1,
+                target_character_count: targetCharacterCount,
+                expectation_text: expectationText,
+                storylines: selectedStorylines,
+                required_roles: requiredRoles,
+                optional_roles: optionalRoles,
+                allow_new_role: allowNewRole,
+                allow_exit_role: allowExitRole,
+                auto_select_foreshadows: autoSelectForeshadows,
+                foreshadows: selectedForeshadows,
+                available_foreshadows: autoSelectForeshadows ? selectableForeshadows : [],
+                previous_chapter: previous ? { title: previous.title, ending: previous.content_markdown.slice(-3000) } : null,
+                rewrite_attempt: attempt,
+                rewrite_requirement: attempt > 1 ? "上次章纲未达到260—500字或内容被截断，请完整重写，不能续写残句。" : "",
+              },
+            }),
+          });
+          if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) {
+            throw new Error(job.failure_message || "MiniMax-M3 章纲生成失败");
+          }
+          const nextOutline = String(job.output_json?.outline_text || "").trim();
+          const outlineCharacterCount = visibleCount(nextOutline);
+          if (outlineCharacterCount < 260 || outlineCharacterCount > 500) {
+            throw new Error(`第 ${attempt} 次章纲为 ${outlineCharacterCount} 字，未通过260—500字验收`);
+          }
+          generatedOutline = nextOutline;
+          generatedTitle = String(job.output_json?.title || job.output_json?.chapter_title || `第${chapterDocuments.length + 1}章`).trim();
+          break;
+        } catch (reason) {
+          lastFailure = reason;
+        }
+      }
+      if (!generatedOutline) throw lastFailure;
       setChapterTitle(generatedTitle);
       setOutlineText(generatedOutline);
       const updated = await persist(saved, 5, { title: generatedTitle, outline_text: generatedOutline });
@@ -977,6 +1057,7 @@ function ChapterCreationWizard({
       });
       setDraft(result.draft);
       draftKeyRef.current = "";
+      window.sessionStorage.removeItem(`anw-chapter-draft:${novel.id}`);
       onClose();
       onCompleted(result.document);
     } catch (reason) {
@@ -994,7 +1075,7 @@ function ChapterCreationWizard({
   const step = Math.max(1, Math.min(6, draft?.step || 1));
   const requiredCharacters = characters.filter((item: NovelCharacterRecord) => requiredRoleIds.includes(item.id));
   const optionalCharacters = characters.filter((item: NovelCharacterRecord) => !requiredRoleIds.includes(item.id));
-  const selectedForeshadowCount = autoSelectForeshadows ? foreshadows.filter((item: ForeshadowRecord) => item.status === "active" || item.status === "planned").length : selectedForeshadowIds.length;
+  const selectedForeshadowCount = autoSelectForeshadows ? selectableForeshadows.length : selectedForeshadowIds.length;
 
   const wizardSteps = h(
     React.Fragment,
@@ -1024,7 +1105,7 @@ function ChapterCreationWizard({
     h("h3", null, "选择线索"),
     h("p", null, "选择本章要推进的线索（可同时推进多条）"),
     h("div", { className: "mb-chapter-tip" }, h(BulbOutlined), h("span", null, "务必推动合适线路发展，只选择主线可能会遇到剧情停滞，建议根据剧情需要选择支线、感情线或势力线")),
-    h(Button, { className: "anw-primary-button mb-chapter-ai-button", icon: h(UnorderedListOutlined), loading: recommending, onClick: () => void recommendStorylines() }, "AI智能推荐线路"),
+    h(Button, { className: "anw-primary-button mb-chapter-ai-button", icon: h(UnorderedListOutlined), loading: recommending, onClick: () => setRecommendConfirmOpen(true) }, "AI智能推荐线路"),
     h("p", { className: "mb-chapter-ai-caption" }, "若您不知道如何选择正确线路，可以使用AI智能推荐线路，帮您自动选择合适线路"),
     h(
       "div",
@@ -1069,34 +1150,39 @@ function ChapterCreationWizard({
     { className: "mb-chapter-step-body is-roles" },
     h("h3", null, "配置章节角色"),
     h("p", null, "AI将根据角色配置生成更连贯的章节内容"),
-    h("div", { className: "mb-chapter-section-heading" }, h("strong", null, "必选角色"), h("span", null, `${requiredCharacters.length} 人`)),
-    h("div", { className: "mb-chapter-soft-tip" }, "以下角色根据上一章连续性自动添加"),
-    h("div", { className: "mb-chapter-choice-list" }, requiredCharacters.length ? requiredCharacters.map((item: NovelCharacterRecord) => roleCard(item, true, true)) : h("div", { className: "mb-chapter-inline-empty" }, "暂无必须出场角色")),
-    h("div", { className: "mb-chapter-section-heading" }, h("strong", null, "可选角色"), h("span", null, `已选 ${optionalRoleIds.length} 人`)),
+    requiredCharacters.length ? h(React.Fragment, null,
+      h("div", { className: "mb-chapter-section-heading" }, h("strong", null, "必选角色"), h("span", null, `${requiredCharacters.length} 人`)),
+      h("div", { className: "mb-chapter-soft-tip" }, "以下角色根据上一章的【下一章必现角色】自动添加"),
+      h("div", { className: "mb-chapter-choice-list" }, requiredCharacters.map((item: NovelCharacterRecord) => roleCard(item, true, true))),
+    ) : null,
+    h("div", { className: "mb-chapter-section-heading" }, h("strong", null, "可选角色"), h("span", null, `已选 ${requiredRoleIds.length + optionalRoleIds.length} 人`)),
     h("div", { className: "mb-chapter-choice-list" }, optionalCharacters.length ? optionalCharacters.map((item: NovelCharacterRecord) => roleCard(item, optionalRoleIds.includes(item.id), false)) : h("div", { className: "mb-chapter-inline-empty" }, "暂无其他角色")),
     h("div", { className: "mb-chapter-section-heading" }, h("strong", null, "AI自动操作")),
     h("div", { className: "mb-chapter-ai-options" },
-      h("label", null, h(Checkbox, { checked: allowNewRole, onChange: (event: any) => setAllowNewRole(event.target.checked) }), h("span", null, h("strong", null, "允许AI新增角色"), h("small", null, "AI可能会根据章节需要引入新角色"))),
+      h("label", null, h(Checkbox, { checked: allowNewRole, onChange: (event: any) => setAllowNewRole(event.target.checked) }), h("span", null, h("strong", null, "允许AI新增角色"), h("small", null, "AI可能会根据情节需要引入新角色"))),
       h("label", null, h(Checkbox, { checked: allowExitRole, onChange: (event: any) => setAllowExitRole(event.target.checked) }), h("span", null, h("strong", null, "允许AI退场角色"), h("small", null, "AI可能会让某些角色在本章退场"))),
     ),
-    h("div", { className: "mb-chapter-dual-actions" },
-      h(Button, { size: "large", disabled: saving, onClick: () => void changeStep(1) }, "返回"),
-      h(Button, { size: "large", className: "anw-primary-button", loading: saving, onClick: () => void changeStep(3) }, "下一步"),
-    ),
+    h(Button, { size: "large", block: true, className: "anw-primary-button mb-chapter-next", loading: saving, onClick: () => void changeStep(3) }, "下一步：配置伏笔"),
   );
 
   const renderStepThree = () => h(
     "div",
     { className: "mb-chapter-step-body is-foreshadow" },
     h("div", { className: "mb-chapter-title-row" }, h("span"), h("div", null, h("h3", null, "配置章节伏笔"), h("p", null, "选择需要在本章推进或解决的伏笔")), h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: onAddForeshadow }, "添加伏笔")),
-    h("label", { className: "mb-chapter-auto-card" }, h(Checkbox, { checked: autoSelectForeshadows, onChange: (event: any) => setAutoSelectForeshadows(event.target.checked) }), h("span", null, h("strong", null, "让AI自动选择伏笔"), h("small", null, "AI将根据章节内容自动决定推进哪些伏笔"))),
-    h("div", { className: "mb-chapter-choice-list" }, foreshadows.length ? foreshadows.map((item: ForeshadowRecord) => {
-      const selected = selectedForeshadowIds.includes(item.id);
-      return h("button", { key: item.id, type: "button", disabled: autoSelectForeshadows, className: `mb-chapter-choice-card is-foreshadow ${selected ? "is-selected" : ""}`, onClick: () => toggleForeshadow(item.id) },
-        h("span", { className: "mb-chapter-choice-copy" }, h("span", { className: "mb-chapter-foreshadow-title" }, h("strong", null, item.title), h("em", null, item.status === "resolved" ? "已解决" : item.status === "planned" ? "待埋设" : "进行中")), h("span", null, item.content || "尚未填写伏笔内容"), h("small", null, `最新进展：${item.latest_progress || "暂无进展"}`)),
-        selectionMark(selected),
-      );
-    }) : h("div", { className: "mb-chapter-inline-empty" }, "暂无伏笔，可点击右上角添加")),
+    selectableForeshadows.length
+      ? h(
+          React.Fragment,
+          null,
+          h("label", { className: "mb-chapter-auto-card" }, h(Checkbox, { checked: autoSelectForeshadows, onChange: (event: any) => setAutoSelectForeshadows(event.target.checked) }), h("span", null, h("strong", null, "让AI自动选择伏笔"), h("small", null, "AI将根据章节内容自动决定推进哪些伏笔"))),
+          h("div", { className: "mb-chapter-choice-list" }, ...selectableForeshadows.map((item: ForeshadowRecord) => {
+            const selected = selectedForeshadowIds.includes(item.id);
+            return h("button", { key: item.id, type: "button", disabled: autoSelectForeshadows, className: `mb-chapter-choice-card is-foreshadow ${selected ? "is-selected" : ""}`, onClick: () => toggleForeshadow(item.id) },
+              h("span", { className: "mb-chapter-choice-copy" }, h("span", { className: "mb-chapter-foreshadow-title" }, h("strong", null, item.title), h("em", null, item.status === "resolved" ? "已解决" : item.status === "planned" ? "待埋设" : "进行中")), h("span", null, item.content || "尚未填写伏笔内容"), h("small", null, `最新进展：${item.latest_progress || "暂无进展"}`)),
+              selectionMark(selected),
+            );
+          })),
+        )
+      : h("div", { className: "mb-chapter-foreshadow-empty" }, h("span", null, "暂无伏笔"), h("small", null, "不用担心伏笔遗漏问题，可以跳过此步骤")),
     h("div", { className: "mb-chapter-dual-actions" },
       h(Button, { size: "large", disabled: saving, onClick: () => void changeStep(2) }, "返回"),
       h(Button, { size: "large", className: "anw-primary-button", loading: saving, onClick: () => void changeStep(4) }, "下一步"),
@@ -1119,7 +1205,7 @@ function ChapterCreationWizard({
     if (generating) return h(
       "div",
       { className: "mb-chapter-step-body is-generating" },
-      h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 3000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(3000, Math.min(5000, Number(value || 3500)))) })),
+      h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) })),
       h(Spin, { size: "large" }),
       h("h3", null, "AI正在创作章节大纲..."),
       h("p", null, "正在分析角色和伏笔配置"),
@@ -1129,23 +1215,23 @@ function ChapterCreationWizard({
     if (outlineText) return h(
       "div",
       { className: "mb-chapter-step-body is-outline-result" },
-      h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 3000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(3000, Math.min(5000, Number(value || 3500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有浮动，请合理设置目标字数"), h("small", null, "字数限制：3000-5000字")),
+      h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有±500-1500字的浮动，请合理设置目标字数"), h("small", null, "字数限制：2000-5000字")),
       h("div", { className: "mb-chapter-result-heading" }, h("h3", null, "章节大纲已生成"), h("p", null, "请查看并确认生成的章节大纲")),
       field("章节标题", h(Input, { maxLength: 20, value: chapterTitle, onChange: (event: any) => setChapterTitle(event.target.value) }), `最多20字，当前：${visibleCount(chapterTitle)}/20`),
       field("章节大纲", h(Input.TextArea, { rows: 10, maxLength: 5000, value: outlineText, onChange: (event: any) => setOutlineText(event.target.value) }), `最多5000字，当前：${visibleCount(outlineText)}/5000`),
       h("div", { className: "mb-chapter-summary-card" }, h("strong", null, "角色配置摘要"), h("p", null, `实际选择：${requiredRoleIds.length + optionalRoleIds.length} 人`), h("p", null, `${allowNewRole ? "允许AI新增角色" : "不允许AI新增角色"}，${allowExitRole ? "允许AI退场角色" : "不允许AI退场角色"}`)),
       h("div", { className: "mb-chapter-summary-card" }, h("strong", null, "伏笔配置摘要"), h("p", null, autoSelectForeshadows ? "由AI自动选择伏笔" : `手动选择 ${selectedForeshadowCount} 个伏笔`)),
-      h("div", { className: "mb-chapter-dual-actions" },
+      h("div", { className: "mb-chapter-triple-actions" },
+        h(Button, { size: "large", disabled: saving, onClick: () => void changeStep(4) }, "返回修改"),
+        h(Button, { size: "large", className: "anw-primary-button", disabled: !chapterTitle.trim() || !outlineText.trim(), loading: saving, onClick: () => void changeStep(6) }, "下一步"),
         h(Button, { size: "large", onClick: () => setConfirmOpen(true) }, "重新生成"),
-        h(Button, { size: "large", className: "anw-primary-button", disabled: !chapterTitle.trim() || !outlineText.trim(), loading: saving, onClick: () => void changeStep(6) }, "下一步：确认信息"),
       ),
     );
     return h(
       "div",
       { className: "mb-chapter-step-body is-target" },
-      h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 3000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(3000, Math.min(5000, Number(value || 3500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有500-1500字的浮动，请合理设置目标字数"), h("small", null, "字数限制：3000-5000字")),
+      h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有±500-1500字的浮动，请合理设置目标字数"), h("small", null, "字数限制：2000-5000字")),
       h(Button, { size: "large", block: true, className: "anw-primary-button mb-chapter-next", onClick: () => setConfirmOpen(true) }, "生成章节大纲"),
-      h("button", { type: "button", className: "mb-chapter-back-link", onClick: () => void changeStep(4) }, "返回上一步"),
     );
   };
 
@@ -1202,10 +1288,84 @@ function ChapterCreationWizard({
         title: "确认",
         onCancel: () => setConfirmOpen(false),
       },
-      h("p", null, "将使用 MiniMax-M3 生成本章详细大纲，确定继续吗？"),
+      h("p", null, "生成章节将消耗500字数，确定继续吗？"),
       h("div", { className: "mb-chapter-confirm-actions" },
         h(Button, { size: "large", onClick: () => setConfirmOpen(false) }, "取消"),
         h(Button, { size: "large", className: "anw-primary-button", onClick: () => void generateOutline() }, "确定"),
+      ),
+    ),
+    h(
+      Modal,
+      {
+        open: recommendConfirmOpen,
+        centered: true,
+        width: 430,
+        footer: null,
+        className: "anw-modal mb-chapter-confirm-modal",
+        title: "AI智能推荐线路",
+        onCancel: () => setRecommendConfirmOpen(false),
+      },
+      h("p", null, "使用AI推荐线路选择将消耗 500 字。AI将分析前文内容和所有线路，为您推荐最适合本章推进的线路。是否继续？"),
+      h("div", { className: "mb-chapter-confirm-actions" },
+        h(Button, { size: "large", onClick: () => setRecommendConfirmOpen(false) }, "取消"),
+        h(Button, { size: "large", className: "anw-primary-button", onClick: () => void recommendStorylines() }, "确定消耗 500 字"),
+      ),
+    ),
+    h(
+      Modal,
+      {
+        open: recommending,
+        centered: true,
+        width: 460,
+        footer: null,
+        closable: false,
+        maskClosable: false,
+        className: "anw-modal mb-chapter-recommend-loading",
+      },
+      h(Spin, { size: "large" }),
+      h("h3", null, "AI正在分析推荐..."),
+      h("p", null, "正在分析前文内容和所有线路发展情况"),
+      h("strong", null, "⚠️ 重要提示"),
+      h("p", null, "请勿关闭页面 · 请勿切换屏幕 · 请勿让设备息屏"),
+      h("small", null, "预计需要 30-60 秒"),
+    ),
+    h(
+      Modal,
+      {
+        open: recommendationOptions.length > 0 && !recommending,
+        centered: true,
+        width: 520,
+        footer: null,
+        className: "anw-modal mb-chapter-recommend-results",
+        title: "AI为您推荐以下线路",
+        onCancel: () => { setRecommendationOptions([]); setPendingRecommendationId(""); },
+      },
+      h("p", null, "请选择其中一个线路继续"),
+      h("div", { className: "mb-chapter-choice-list" }, ...recommendationOptions.map((option: { id: string; reason: string }, index: number) => {
+        const item = storylines.find((storyline: StorylineRecord) => storyline.id === option.id);
+        if (!item) return null;
+        const selected = pendingRecommendationId === option.id;
+        const group = STORYLINE_GROUPS.find((candidate) => candidate.type === item.storyline_type);
+        return h("button", { key: option.id, type: "button", className: `mb-chapter-choice-card ${selected ? "is-selected" : ""}`, onClick: () => setPendingRecommendationId(option.id) },
+          h("span", { className: "mb-chapter-choice-copy" },
+            h("strong", null, `选项 ${index + 1}：${item.title}`),
+            h("small", null, item.storyline_type === "main" ? "主线" : group?.label || "支线"),
+            h("span", null, option.reason || item.description),
+          ),
+          selectionMark(selected),
+        );
+      })),
+      h("div", { className: "mb-chapter-confirm-actions" },
+        h(Button, { size: "large", onClick: () => { setRecommendationOptions([]); setPendingRecommendationId(""); } }, "取消"),
+        h(Button, { size: "large", className: "anw-primary-button", disabled: !pendingRecommendationId, onClick: () => {
+          const selected = storylines.find((item: StorylineRecord) => item.id === pendingRecommendationId);
+          if (!selected) return;
+          setSelectedStorylineIds([selected.id]);
+          setExpandedGroups([selected.storyline_type]);
+          setRecommendationOptions([]);
+          setPendingRecommendationId("");
+          Modal.success({ className: "anw-modal", content: `✅ 已为您选择「${selected.title}」线路`, okText: "确定" });
+        } }, "确认选择"),
       ),
     ),
   );
@@ -1247,7 +1407,7 @@ export function StudioProjectView({
   const [expandedVolumes, setExpandedVolumes] = React.useState([] as string[]);
   const [volumeDescending, setVolumeDescending] = React.useState(true);
   const [outlineOpen, setOutlineOpen] = React.useState(false);
-  const [outlineStep, setOutlineStep] = React.useState(1);
+  const [outlineStep, setOutlineStep] = React.useState(0);
   const [chapterWizardOpen, setChapterWizardOpen] = React.useState(false);
   const [volumeOpen, setVolumeOpen] = React.useState(false);
   const [volumeEditing, setVolumeEditing] = React.useState(null as VolumeRecord | null);
@@ -1280,20 +1440,22 @@ export function StudioProjectView({
   const chapterDocuments = novel.tree.flatMap((volume: VolumeRecord) => volume.documents).filter((item: DocumentRecord) => item.kind === "chapter");
 
   const loadDomains = React.useCallback(async () => {
-    try {
-      const [nextCharacters, nextRelationships, nextStorylines, nextForeshadows] = await Promise.all([
-        apiRequest<NovelCharacterRecord[]>(`/novels/${novel.id}/characters`),
-        apiRequest<CharacterRelationshipRecord[]>(`/novels/${novel.id}/relationships`),
-        apiRequest<StorylineRecord[]>(`/novels/${novel.id}/storylines`),
-        apiRequest<ForeshadowRecord[]>(`/novels/${novel.id}/foreshadows`),
-      ]);
-      setCharacters(nextCharacters);
-      setRelationships(nextRelationships);
-      setStorylines(nextStorylines);
-      setForeshadows(nextForeshadows);
-    } catch (reason) {
-      onError(readableError(reason, "加载作品资料失败"));
-    }
+    const failures: string[] = [];
+    await Promise.all([
+      apiRequest<NovelCharacterRecord[]>(`/novels/${novel.id}/characters`)
+        .then(setCharacters)
+        .catch((reason) => failures.push(readableError(reason, "加载角色失败"))),
+      apiRequest<CharacterRelationshipRecord[]>(`/novels/${novel.id}/relationships`)
+        .then(setRelationships)
+        .catch((reason) => failures.push(readableError(reason, "加载角色关系失败"))),
+      apiRequest<StorylineRecord[]>(`/novels/${novel.id}/storylines`)
+        .then(setStorylines)
+        .catch((reason) => failures.push(readableError(reason, "加载故事线失败"))),
+      apiRequest<ForeshadowRecord[]>(`/novels/${novel.id}/foreshadows`)
+        .then(setForeshadows)
+        .catch((reason) => failures.push(readableError(reason, "加载伏笔失败"))),
+    ]);
+    if (failures.length > 0) onError(failures.join("；"));
   }, [novel.id]);
 
   React.useEffect(() => { void loadDomains(); }, [loadDomains]);
@@ -1322,7 +1484,7 @@ export function StudioProjectView({
     await loadDomains();
   };
 
-  const openOutline = (targetStep = 1) => {
+  const openOutline = (targetStep = 0) => {
     setOutlineStep(targetStep);
     setOutlineOpen(true);
   };
@@ -1341,10 +1503,11 @@ export function StudioProjectView({
         body: JSON.stringify({ expected_version: volumeEditing.version, title: volumeTitle.trim() }),
       });
     } else {
-      await apiRequest(`/novels/${novel.id}/volumes`, {
+      const created = await apiRequest<{ id: string }>(`/novels/${novel.id}/volumes`, {
         method: "POST",
         body: JSON.stringify({ title: volumeTitle.trim() }),
       });
+      setExpandedVolumes((current: string[]) => current.includes(created.id) ? current : [...current, created.id]);
     }
     setVolumeOpen(false);
     await refreshAll();
@@ -1647,6 +1810,7 @@ export function StudioProjectView({
     h(
       "div",
       { className: "mb-volume-grid" },
+      orderedVolumes.length === 0 ? h("div", { className: "mb-volume-zero" }, "暂无分卷，点击上方按钮创建") : null,
       ...orderedVolumes.map((volume: VolumeRecord) => {
         const id = String(volume.id);
         const expanded = expandedVolumes.includes(id);
@@ -1664,7 +1828,7 @@ export function StudioProjectView({
             ),
             h("div", { className: "mb-volume-actions" },
               h(Button, { type: "text", size: "small", onClick: () => openVolume(volume) }, "编辑"),
-              h(Button, { type: "text", size: "small", danger: true, disabled: volumes.length <= 1, onClick: () => deleteVolume(volume) }, "删除"),
+              h(Button, { type: "text", size: "small", danger: true, onClick: () => deleteVolume(volume) }, "删除"),
             ),
           ),
           expanded ? h("div", { className: "mb-volume-chapters" }, chapters.length ? chapters.map((item: DocumentRecord) => renderChapterCard(item, id)) : h("div", { className: "mb-volume-empty" }, "该分卷暂无章节")) : null,
@@ -1685,23 +1849,32 @@ export function StudioProjectView({
     { label: "故事背景设定", value: novel.background, step: 2 },
     { label: "故事主要情节", value: novel.main_plot, step: 4 },
   ];
+  const hasOutline = outlineCards.some((item) => Boolean(item.value));
 
-  const renderOutline = () => h(
-    "div",
-    { className: "mb-outline-cards" },
-    ...outlineCards.map((item) => h(
-      "article",
-      { key: item.label, className: "mb-outline-card" },
-      h("header", null,
-        h("h3", null, item.label),
-        h("div", null,
-          h(Button, { type: "text", icon: h(CopyOutlined), disabled: !item.value, onClick: () => void navigator.clipboard.writeText(item.value) }),
-          h(Button, { type: "text", icon: h(EditOutlined), onClick: () => openOutline(item.step) }),
-        ),
-      ),
-      h("p", null, item.value || "尚未生成，点击右上角“重新生成”开始创建大纲。"),
-    )),
-  );
+  const renderOutline = () => hasOutline
+    ? h(
+        "div",
+        { className: "mb-outline-cards" },
+        ...outlineCards.map((item) => h(
+          "article",
+          { key: item.label, className: "mb-outline-card" },
+          h("header", null,
+            h("h3", null, item.label),
+            h("div", null,
+              h(Button, { type: "text", icon: h(CopyOutlined), disabled: !item.value, onClick: () => void navigator.clipboard.writeText(item.value) }),
+              h(Button, { type: "text", icon: h(EditOutlined), onClick: () => openOutline(item.step) }),
+            ),
+          ),
+          h("p", null, item.value || "尚未生成"),
+        )),
+      )
+    : h(
+        "div",
+        { className: "mb-outline-empty" },
+        h(FileTextOutlined),
+        h("strong", null, "暂无大纲"),
+        h("span", null, "点击上方按钮开始生成大纲"),
+      );
 
   const characterGroups = [
     { type: "main" as const, label: "主角", className: "is-main" },
@@ -1795,7 +1968,7 @@ export function StudioProjectView({
         h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: () => setChapterWizardOpen(true) }, "新建章节"),
       )
     : section === "outline"
-      ? h(Button, { className: "anw-primary-button", icon: h(ReloadOutlined), onClick: () => openOutline(1) }, novel.highlight ? "重新生成" : "立即创建大纲")
+      ? h(Button, { className: "anw-primary-button", icon: h(ReloadOutlined), onClick: () => openOutline(hasOutline ? 1 : 0) }, hasOutline ? "重新生成" : "生成大纲")
       : section === "roles"
         ? h("div", { className: "mb-top-tabs" }, h("button", { type: "button", className: roleTab === "list" ? "is-active" : "", onClick: () => setRoleTab("list") }, "角色列表"), h("button", { type: "button", className: roleTab === "graph" ? "is-active" : "", onClick: () => setRoleTab("graph") }, "关系网"))
         : section === "clues"
@@ -1841,6 +2014,7 @@ export function StudioProjectView({
     h(OutlineWizard, {
       novel, open: outlineOpen, startStep: outlineStep,
       onClose: () => setOutlineOpen(false),
+      onGoChapters: () => onSectionChange("chapters"),
       onCompleted: (updated: NovelRecord) => { onNovelChanged(updated); void loadDomains(); },
       onError,
     }),

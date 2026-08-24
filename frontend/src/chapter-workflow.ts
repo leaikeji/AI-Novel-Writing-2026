@@ -58,6 +58,8 @@ interface ChapterWorkflowProps {
   onNextChapter?: () => void;
   previousChapterTitle?: string;
   nextChapterTitle?: string;
+  generateActionRef?: { current: (() => void) | null };
+  onBodyGenerationStateChange?: (active: boolean, stage: string) => void;
 }
 
 
@@ -82,7 +84,7 @@ interface ReviewIssue {
 
 
 const EMPTY_BRIEF_FORM: BriefFormState = {
-  targetWordCount: 3500,
+  targetWordCount: 2500,
   expectationText: "",
   outlineText: "",
   forbiddenText: "",
@@ -119,7 +121,7 @@ function splitNames(value: string): string[] {
 
 function briefToForm(brief: ChapterBriefRecord): BriefFormState {
   return {
-    targetWordCount: Math.max(3000, brief.target_word_count || 3500),
+    targetWordCount: brief.target_word_count || 2500,
     expectationText: brief.expectation_text,
     outlineText: brief.outline_text,
     forbiddenText: brief.forbidden_text,
@@ -219,6 +221,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     onNextChapter,
     previousChapterTitle,
     nextChapterTitle,
+    generateActionRef,
+    onBodyGenerationStateChange,
   } = props;
   const [brief, setBrief] = React.useState(null as ChapterBriefRecord | null);
   const [briefForm, setBriefForm] = React.useState(EMPTY_BRIEF_FORM);
@@ -283,7 +287,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       method: "PUT",
       body: JSON.stringify({
         expected_version: currentBrief.version,
-        target_word_count: Math.max(3000, form.targetWordCount),
+        target_word_count: Math.max(2000, form.targetWordCount),
         expectation_text: form.expectationText,
         outline_text: form.outlineText,
         forbidden_text: form.forbiddenText,
@@ -341,11 +345,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     });
   };
 
+  if (generateActionRef) generateActionRef.current = openGenerationOptions;
+
   const ensureBrief = async (): Promise<ChapterBriefRecord> => {
     const currentBrief = brief ?? await loadBrief();
-    if (currentBrief.version > 0 && currentBrief.target_word_count >= 3000) return currentBrief;
+    if (currentBrief.version > 0 && currentBrief.target_word_count >= 2000) return currentBrief;
     const form = briefToForm(currentBrief);
-    const saved = await persistBrief(currentBrief, { ...form, targetWordCount: Math.max(3500, form.targetWordCount) });
+    const saved = await persistBrief(currentBrief, { ...form, targetWordCount: Math.max(2500, form.targetWordCount) });
     setBrief(saved);
     setBriefForm(briefToForm(saved));
     return saved;
@@ -353,8 +359,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
 
   const generateBody = async (assetIds: string[] = selectedAssetIds) => {
     setAssetPickerOpen(false);
-    setGenerationStage("正在分析前文、章纲和章节情节");
-    setGeneratingOpen(true);
+    const bodyStage = "正在分析角色关系、伏笔推进和章节情节";
+    setGenerationStage(bodyStage);
+    onBodyGenerationStateChange?.(true, bodyStage);
     setBusyAction("generate");
     try {
       if (onPrepareGeneration) {
@@ -362,40 +369,87 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       }
       const currentBrief = await ensureBrief();
-      onStatus(`${FIXED_MODEL_ID} 正在创作章节正文…`);
-      const job = await apiRequest<GenerationJobRecord>(
-        `/documents/${document.id}/generation-jobs/body?agent_id=ai-novel-writer`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            expected_brief_version: currentBrief.version,
-            force_new: true,
-            asset_ids: assetIds,
-            requested_model_id: FIXED_MODEL_ID,
-          }),
-        },
-      );
-      if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
-      if (job.actual_model_id !== FIXED_MODEL_ID) throw new Error("实际模型不是 MiniMax-M3，结果已作废");
+      let acceptedJob: GenerationJobRecord | null = null;
+      let lastFailure: unknown = null;
+      const maximumAttempts = 3;
+
+      for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+        const attemptStage = attempt === 1
+          ? "正在分析角色关系、伏笔推进和章节情节"
+          : `第 ${attempt} 次整章重写：正在校准 1000—1500 字范围`;
+        setGenerationStage(attemptStage);
+        onBodyGenerationStateChange?.(true, attemptStage);
+        onStatus(attempt === 1
+          ? `${FIXED_MODEL_ID} 正在创作章节正文…`
+          : `第 ${attempt} 次整章重写中，上次正文未达 1000—1500 字范围…`);
+
+        try {
+          const job = await apiRequest<GenerationJobRecord>(
+            `/documents/${document.id}/generation-jobs/body?agent_id=ai-novel-writer`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                expected_brief_version: currentBrief.version,
+                force_new: true,
+                asset_ids: assetIds,
+                requested_model_id: FIXED_MODEL_ID,
+              }),
+            },
+          );
+          if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
+          if (job.actual_model_id !== FIXED_MODEL_ID) throw new Error("实际模型不是 MiniMax-M3，结果已作废");
+          acceptedJob = job;
+          break;
+        } catch (reason) {
+          lastFailure = reason;
+          const message = errorMessage(reason, "生成正文失败");
+          const isLengthFailure = message.includes("字范围") || message.includes("低于") || message.includes("超过");
+          if (!isLengthFailure || attempt === maximumAttempts) throw reason;
+        }
+      }
+
+      if (!acceptedJob?.candidate) throw lastFailure || new Error("模型没有返回正文");
       setGenerationStage("正文已生成，正在写入编辑器");
       const result = await apiRequest<{ document: DocumentRecord; candidate: CandidateRecord }>(
-        `/candidates/${job.candidate.id}/adopt`,
+        `/candidates/${acceptedJob.candidate.id}/adopt`,
         {
           method: "POST",
-          body: JSON.stringify({ expected_draft_version: job.candidate.base_draft_version }),
+          body: JSON.stringify({ expected_draft_version: acceptedJob.candidate.base_draft_version }),
         },
       );
       setFeaturedCandidateId(result.candidate.id);
       setSelectedAssetIds([]);
       onDocumentChanged(result.document, `${FIXED_MODEL_ID} 正文生成完成 · ${result.candidate.visible_character_count} 字`);
+      await runSyncProgress(result.document, true);
     } catch (reason) {
       const message = errorMessage(reason, "生成正文失败");
       onError(message);
-      onStatus(message.includes("低于") ? "本次不足 3000 字，必须整章重写" : "正文生成失败");
+      onStatus(message.includes("字范围") || message.includes("低于") || message.includes("超过") ? "本次未达 1000—1500 字范围，必须整章重写" : "正文生成失败");
     } finally {
       setGeneratingOpen(false);
+      onBodyGenerationStateChange?.(false, "");
       setBusyAction("");
     }
+  };
+
+  const confirmGenerateBody = (assetIds: string[]) => {
+    setAssetPickerOpen(false);
+    Modal.confirm({
+      className: "anw-modal anw-generation-confirm",
+      title: "确认",
+      width: 520,
+      centered: true,
+      content: h("div", { className: "anw-generation-confirm-copy" },
+        h("strong", null, "⚠️ 请确保网络畅通，并保持该页面始终显示在最上方"),
+        h("p", null, "若屏幕关闭 / 切换应用 / 网络波动，易导致生成失败。"),
+        h("p", null, "生成一旦开始，已产生的模型消耗不可撤回。"),
+        h("p", null, "若多次出现生成失败，请检查 MiniMax-M3 模型连接。"),
+        h("b", null, "确定继续生成吗？"),
+      ),
+      okText: "确定",
+      cancelText: "取消",
+      onOk: () => { void generateBody(assetIds); },
+    });
   };
 
   const saveQuickAsset = async () => {
@@ -489,12 +543,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  const runSyncProgress = async () => {
+  async function runSyncProgress(preparedOverride?: DocumentRecord, silent = false) {
     setBusyAction("sync");
     setGenerationStage("正在从本章正文提取角色、关系、故事线与伏笔进展");
-    setGeneratingOpen(true);
+    if (!silent) setGeneratingOpen(true);
     try {
-      const prepared = onPrepareGeneration ? await onPrepareGeneration() : document;
+      const prepared = preparedOverride ?? (onPrepareGeneration ? await onPrepareGeneration() : document);
       if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       const checkpoint = await apiRequest<{ document: DocumentRecord }>(`/documents/${prepared.id}/checkpoints`, {
         method: "POST",
@@ -522,10 +576,10 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       onError(errorMessage(reason, "同步进展失败"));
       onStatus("同步进展失败");
     } finally {
-      setGeneratingOpen(false);
+      if (!silent) setGeneratingOpen(false);
       setBusyAction("");
     }
-  };
+  }
 
   const confirmSyncProgress = () => {
     Modal.confirm({
@@ -607,14 +661,16 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       h(Button, { className: "anw-generate-button", icon: h(BookOutlined), onClick: openGenerationOptions, loading: busyAction === "generate" || busyAction === "assets-load" }, document.visible_character_count > 0 ? "重新生成" : "生成正文"),
       h(Button, { className: "anw-outline-button", icon: h(EditOutlined), onClick: openBrief, loading: busyAction === "brief-load" }, "修改章纲"),
       h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: confirmSyncProgress, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
+      h(Button, { className: "anw-history-button", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load" }, "历史"),
     ),
-    h("aside", { className: "anw-editor-side-tools", "aria-label": "章节工具" },
-      h(Button, { className: "is-orange", shape: "circle", icon: h(AuditOutlined), onClick: confirmReview, disabled: document.visible_character_count === 0, title: "审稿" }, h("span", null, "审稿")),
-      h(Button, { className: "is-orange", shape: "circle", icon: h(BulbOutlined), onClick: openIntelligence, loading: busyAction === "intelligence-load", title: "情报" }, h("span", null, "情报")),
-      h(Button, { shape: "circle", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load", title: "历史" }, h("span", null, "历史")),
-      h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowUpOutlined), onClick: onPreviousChapter, disabled: !onPreviousChapter, title: previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章", "aria-label": previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章" }),
-      h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowDownOutlined), onClick: onNextChapter, disabled: !onNextChapter, title: nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章", "aria-label": nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章" }),
-    ),
+    document.visible_character_count > 0
+      ? h("aside", { className: "anw-editor-side-tools", "aria-label": "章节工具" },
+          h(Button, { className: "is-orange", shape: "circle", icon: h(AuditOutlined), onClick: confirmReview, title: "审稿" }, h("span", null, "审稿")),
+          h(Button, { className: "is-orange", shape: "circle", icon: h(BulbOutlined), onClick: openIntelligence, loading: busyAction === "intelligence-load", title: "情报" }, h("span", null, "情报")),
+          h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowUpOutlined), onClick: onPreviousChapter, disabled: !onPreviousChapter, title: previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章", "aria-label": previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章" }),
+          h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowDownOutlined), onClick: onNextChapter, disabled: !onNextChapter, title: nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章", "aria-label": nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章" }),
+        )
+      : null,
     h(Modal, {
       open: briefOpen,
       className: "anw-modal anw-outline-edit-modal",
@@ -625,19 +681,19 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       footer: [h(Button, { key: "cancel", onClick: () => setBriefOpen(false) }, "取消"), h(Button, { key: "save", type: "primary", loading: busyAction === "brief-save", onClick: saveBrief }, "保存章纲")],
     }, h("div", { className: "anw-outline-edit-body" },
       field("章节大纲", h(TextArea, { rows: 12, showCount: true, maxLength: 30000, "aria-label": "章节大纲", value: briefForm.outlineText, onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, outlineText: event.target.value })), placeholder: "请输入章节大纲..." })),
-      field("目标字数", h(InputNumber, { min: 3000, max: 5000, step: 100, "aria-label": "目标字数", value: briefForm.targetWordCount, onChange: (value: number | null) => setBriefForm((current: BriefFormState) => ({ ...current, targetWordCount: value ?? 3500 })) }), "每章 3000-5000 字；低于 3000 字的生成结果不能采用。"),
+      field("目标字数", h(InputNumber, { min: 2000, max: 5000, step: 100, "aria-label": "目标字数", value: briefForm.targetWordCount, onChange: (value: number | null) => setBriefForm((current: BriefFormState) => ({ ...current, targetWordCount: value ?? 2500 })) }), "章纲目标保留 2000-5000 字；本次验收正文严格控制在 1000-1500 字。"),
     )),
     h(Modal, {
       open: assetPickerOpen,
       className: "anw-modal anw-asset-modal",
       title: "选择私有库配置",
-      width: 860,
+      width: 700,
       centered: true,
       onCancel: () => setAssetPickerOpen(false),
-      footer: [h(Button, { key: "skip", onClick: () => void generateBody([]) }, "跳过"), h(Button, { key: "generate", type: "primary", onClick: () => void generateBody(selectedAssetIds) }, `确定选择${selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ""}`)],
+      footer: [h(Button, { key: "skip", onClick: () => confirmGenerateBody([]) }, "跳过"), h(Button, { key: "generate", type: "primary", onClick: () => confirmGenerateBody(selectedAssetIds) }, `确定选择${selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ""}`)],
     }, h("section", { className: "anw-asset-picker" },
       h("p", { className: "anw-asset-picker-copy" }, "AI 将重点展示选中的内容到生成结果中"),
-      h("div", { className: "anw-asset-search-row" }, h(Input, { value: assetSearch, prefix: h(SearchOutlined), placeholder: "搜索私有库配置", onChange: (event: any) => setAssetSearch(event.target.value) }), h(Button, { type: "link", icon: h(PlusOutlined), onClick: () => setQuickAssetOpen(true) }, "快速添加")),
+      h("div", { className: "anw-asset-search-row" }, h(Input, { value: assetSearch, prefix: h(SearchOutlined), placeholder: "搜索公有库配置", onChange: (event: any) => setAssetSearch(event.target.value) }), h(Button, { type: "link", icon: h(PlusOutlined), onClick: () => setQuickAssetOpen(true) }, "快速添加公有库到配置")),
       h(Tabs, { activeKey: assetTab, onChange: (key: string) => setAssetTab(key as PrivateAssetType), items: ASSET_TABS.map((tab) => ({
         key: tab.key,
         label: tab.label,
@@ -670,7 +726,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       const state = candidate?.state ?? job.state;
       return h("article", { key: job.id, className: `anw-history-card${candidate?.id === featuredCandidateId ? " is-featured" : ""}` },
         h("header", null, h("div", null, h("strong", null, `第 ${job.attempt || 1} 次生成`), h("span", null, formatDate(job.completed_at || job.created_at))), h(Tag, { color: stateColor(state) }, stateLabel(state))),
-        h("div", { className: "anw-history-meta" }, h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`), h("span", null, `目标 ${job.target_visible_character_count || 3000} 字`), h("span", null, job.actual_model_id || job.requested_model_id || FIXED_MODEL_ID)),
+        h("div", { className: "anw-history-meta" }, h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`), h("span", null, `验收 ${job.target_visible_character_count || 1000}-1500 字`), h("span", null, job.actual_model_id || job.requested_model_id || FIXED_MODEL_ID)),
         candidate ? h("p", null, candidate.content_text.slice(0, 230) || "本次生成正文为空") : h("p", { className: "is-error" }, job.failure_message || "本次生成没有可用正文"),
         h("footer", null, job.asset_snapshot?.length ? h("small", null, `采用私有库：${job.asset_snapshot.map((item: GenerationJobRecord["asset_snapshot"][number]) => item.title).join("、")}`) : h("small", null, "未选择私有库配置"), h(Button, { disabled: !candidate || candidate.state === "rejected", loading: busyAction === `restore:${candidate?.id}`, onClick: () => void restoreCandidate(job) }, candidate ? "恢复此版本" : "需要整章重写")),
       );

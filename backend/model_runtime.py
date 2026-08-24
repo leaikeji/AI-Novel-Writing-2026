@@ -22,6 +22,7 @@ INTELLIGENCE_ITEM_TYPES = {
     "storyline_event",
     "foreshadow_progress",
     "foreshadow_new",
+    "next_chapter_required_role",
 }
 
 
@@ -329,15 +330,28 @@ def normalize_creative_generation_json(
     }
     if kind in text_field_by_kind:
         field = text_field_by_kind[kind]
-        value = str(payload.get(field) or "").strip()
-        if not value:
-            value = _extract_json_string_field(output_text, field)
-        if not value:
-            value = _plain_model_text(output_text, expected_field=field)
+        candidates = [
+            str(payload.get(field) or "").strip(),
+            _extract_json_string_field(output_text, field),
+            _extract_relaxed_json_string_field(output_text, field),
+            _plain_model_text(output_text, expected_field=field),
+        ]
+        # MiniMax occasionally emits an otherwise complete JSON string with
+        # unescaped quotation marks inside prose.  The generic repair parser can
+        # then return only the prefix before the first quotation mark.  Prefer the
+        # longest recoverable single-field value so a short fragment can never
+        # silently replace the complete model response.
+        value = max((item for item in candidates if item), key=len, default="")
         if not value:
             raise ModelVerificationError(
                 f"MiniMax M3 {kind} 结果结构不完整，请重新生成"
             )
+        if kind == "outline_plot" and len(value) < 800:
+            raise ModelVerificationError("MiniMax M3 故事情节结果过短，请重新生成")
+        if kind == "outline_background" and len(value) > 220:
+            shortened = value[:220]
+            punctuation = max(shortened.rfind("。"), shortened.rfind("！"), shortened.rfind("？"))
+            value = shortened[: punctuation + 1] if punctuation >= 80 else shortened.rstrip("，、；： ") + "。"
         return {field: value}
 
     if kind == "novel_naming":
@@ -348,6 +362,38 @@ def normalize_creative_generation_json(
         if not titles:
             raise ModelVerificationError("MiniMax M3 书名结果结构不完整，请重新生成")
         return {"titles": titles}
+
+    if kind == "novel_template":
+        required_fields = [
+            "protagonist_identity",
+            "background_setting",
+            "core_conflict",
+            "emotional_mainline",
+            "style_features",
+        ]
+        genre = str(payload.get("genre") or "").strip()
+        template_name = str(payload.get("template_name") or "").strip()
+        template_key = str(payload.get("template_key") or "").strip()
+        template_data = payload.get("template_data")
+        if not isinstance(template_data, dict):
+            template_data = {}
+        normalized_data = {
+            field: str(template_data.get(field) or "").strip()
+            for field in required_fields
+        }
+        if not genre or not template_name or not template_key or any(
+            not value for value in normalized_data.values()
+        ):
+            raise ModelVerificationError("MiniMax M3 模板结果结构不完整，请重新生成")
+        if any(len(value) > 24 for value in normalized_data.values()):
+            raise ModelVerificationError("MiniMax M3 模板字段过长，请重新生成")
+        return {
+            "genre": genre,
+            "template_key": template_key,
+            "template_name": template_name,
+            "template_fields": required_fields,
+            "template_data": normalized_data,
+        }
 
     if kind == "novel_cover":
         cover_prompt = str(payload.get("cover_prompt") or "").strip()
@@ -515,6 +561,45 @@ def _extract_json_string_field(text: str, field: str) -> str:
     except json.JSONDecodeError:
         return ""
     return value.strip() if isinstance(value, str) else ""
+
+
+def _extract_relaxed_json_string_field(text: str, field: str) -> str:
+    """Recover a single JSON text field containing unescaped prose quotes.
+
+    This deliberately requires the field to occupy the complete top-level JSON
+    envelope.  It is therefore safe only for the single-text helper kinds that
+    call it above, and cannot accidentally consume a neighbouring JSON field.
+    """
+
+    start = re.search(rf'"{re.escape(field)}"\s*:\s*"', text)
+    if start is None:
+        return ""
+    remainder = text[start.end() :]
+    # Some MiniMax replies append a status capsule after the JSON despite the
+    # prompt.  Use the final string-and-object terminator rather than requiring
+    # the JSON object itself to be the final bytes of the reply.
+    endings = list(re.finditer(r'"\s*}', remainder))
+    if not endings:
+        return ""
+    end = endings[-1]
+    raw_value = remainder[: end.start()]
+
+    def replace_escape(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if token.startswith("u"):
+            return chr(int(token[1:], 16))
+        return {
+            '"': '"',
+            "\\": "\\",
+            "/": "/",
+            "b": "\b",
+            "f": "\f",
+            "n": "\n",
+            "r": "\r",
+            "t": "\t",
+        }[token]
+
+    return re.sub(r'\\(u[0-9a-fA-F]{4}|["\\/bfnrt])', replace_escape, raw_value).strip()
 
 
 def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:

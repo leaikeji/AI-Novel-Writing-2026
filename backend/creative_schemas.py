@@ -111,7 +111,7 @@ class UpdateChapterDraftRequest(BaseModel):
     expected_version: int = Field(ge=1)
     step: int = Field(ge=1, le=6)
     title: str | None = Field(default=None, max_length=240)
-    target_character_count: int | None = Field(default=None, ge=3000, le=5000)
+    target_character_count: int | None = Field(default=None, ge=2000, le=5000)
     expectation_text: str | None = Field(default=None, max_length=12_000)
     outline_text: str | None = Field(default=None, max_length=30_000)
     data_patch: dict[str, Any] = Field(default_factory=dict)
@@ -121,7 +121,7 @@ class StartCreativeGenerationRequest(BaseModel):
     scope_type: str = Field(min_length=1, max_length=40)
     scope_id: UUID
     kind: str = Field(
-        pattern="^(novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_storyline_recommendation|chapter_outline|review)$"
+        pattern="^(novel_template|novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_storyline_recommendation|chapter_outline|review)$"
     )
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     novel_id: UUID | None = None

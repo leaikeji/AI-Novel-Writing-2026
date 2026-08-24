@@ -650,8 +650,7 @@ def test_six_step_creation_is_persisted_validated_and_idempotent(
     assert novel["genre"] == "年代言情"
     assert novel["author_name"] == "pytest-作者"
     assert novel["cover_image_data"] == "data:image/jpeg;base64,AA=="
-    assert len(novel["tree"]) == 1
-    assert novel["tree"][0]["documents"] == []
+    assert novel["tree"] == []
 
     replayed = complete_novel_creation_draft(
         session,
@@ -819,6 +818,91 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
     assert main_line["description"] == second["novel"]["main_plot"]
 
 
+def test_next_chapter_required_roles_reject_uncertain_supporting_inference(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-下一章必现角色")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="电台修复师",
+        details={},
+    )
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="陆沉舟",
+        description="灯塔维护工程师",
+        details={},
+    )
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="周柚",
+        description="咖啡馆老板",
+        details={},
+    )
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown=(
+            "周柚把信放下，说自己先回咖啡馆。"
+            "苏晚摊开记录说：『明天我们一起去文化馆查档案。』"
+            "陆沉舟点头：『我和你一起去。』两人收好档案，等雨停后离开。"
+        ),
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session, document_id, revision_id=UUID(revision["id"])
+    )
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                "item_type": "next_chapter_required_role",
+                "subject": "陆沉舟",
+                "predicate": "下一章必现",
+                "object": "已明确答应与苏晚一起去文化馆查档案",
+                "source_text": "我和你一起去",
+                "reasoning_summary": "结尾形成明确的共同计划",
+                "confidence": 99,
+            },
+            {
+                "item_type": "next_chapter_required_role",
+                "subject": "周柚",
+                "predicate": "下一章必现",
+                "object": "送来了关键记录",
+                "source_text": "周柚把信放下",
+                "reasoning_summary": "作为送件人，下一章极可能继续出现",
+                "confidence": 70,
+            },
+        ],
+        actual_model_id=MINIMAX_MODEL_ID,
+        provider_profile=MINIMAX_PROVIDER_ID,
+    )
+    commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=[UUID(item["id"]) for item in proposal["items"]],
+    )
+
+    characters = list_novel_characters(session, novel_id)
+    required = {item["name"] for item in characters if item["required_next_chapter"]}
+    assert required == {"苏晚", "陆沉舟"}
+
+
 def test_six_step_chapter_creation_rejects_cross_book_references(
     session: Session,
 ) -> None:
@@ -940,7 +1024,7 @@ def test_six_step_chapter_creation_rejects_cross_book_references(
     assert second_role["novel_id"] == str(second_id)
 
 
-def test_generation_requires_verified_minimax_and_three_thousand_characters(
+def test_generation_requires_verified_minimax_and_acceptance_window(
     session: Session,
 ) -> None:
     novel = create_novel(session, "pytest-MiniMax门槛")
@@ -969,7 +1053,7 @@ def test_generation_requires_verified_minimax_and_three_thousand_characters(
         document_id,
         expected_brief_version=brief["version"],
     )
-    assert first_job["target_visible_character_count"] == 3000
+    assert first_job["target_visible_character_count"] == 1000
     with pytest.raises(ValidationError, match="必须整章重写"):
         complete_chapter_generation(
             session,
@@ -996,7 +1080,7 @@ def test_generation_requires_verified_minimax_and_three_thousand_characters(
     completed = complete_chapter_generation(
         session,
         UUID(second_job["id"]),
-        content_markdown=_long_chapter("人物终于找到能够推进调查的关键证据。"),
+        content_markdown=_long_chapter("人物终于找到能够推进调查的关键证据。", paragraphs=22),
         model_profile_fingerprint="qwenpaw:provider-usage:minimax-cn:MiniMax-M3",
         actual_model_id=MINIMAX_MODEL_ID,
         provider_profile=MINIMAX_PROVIDER_ID,
@@ -1004,7 +1088,7 @@ def test_generation_requires_verified_minimax_and_three_thousand_characters(
     assert completed["attempt"] == 2
     assert completed["state"] == "ready"
     assert completed["validation_state"] == "meets_target"
-    assert completed["output_visible_character_count"] >= 3000
+    assert 1000 <= completed["output_visible_character_count"] <= 1500
     assert completed["actual_model_id"] == MINIMAX_MODEL_ID
 
 

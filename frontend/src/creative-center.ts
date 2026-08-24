@@ -10,7 +10,7 @@ import {
   PrivateAssetType,
 } from "./types";
 import { rememberWorkbenchRoute } from "./workbench-route";
-import { compressCover } from "./cover-utils";
+import { compressCover, generateSystemCover } from "./cover-utils";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -47,6 +47,7 @@ const {
   SearchOutlined,
   StarOutlined,
   TeamOutlined,
+  ThunderboltOutlined,
   UploadOutlined,
   WomanOutlined,
 } = host.antdIcons;
@@ -70,16 +71,19 @@ const ASSET_META: Record<PrivateAssetType, { label: string; singular: string; pl
 
 const WIZARD_LABELS = ["受众", "思路", "模板", "命名", "封面", "完成"];
 const WIZARD_HINTS = [
-  "还差5步了哦，你的故事即将诞生!",
-  "还差4步了哦，你的故事正在快马加鞭赶来!",
-  "还差3步了哦，马上就要大功告成啦!",
-  "还差2步了哦，给作品取个响亮的名字吧!",
-  "最后一步啦，为作品选择封面!",
-  "万事俱备，完成创建!",
+  "还差5步了哦，你的故事即将诞生！",
+  "还差4步了哦，你的故事正在快马加鞭赶来！",
+  "还差3步了哦，马上就要大功告成啦！",
+  "还差2步了哦，给作品取个响亮的名字吧！",
+  "最后一步啦，为作品选择封面！",
+  "万事俱备，完成创建！",
 ];
 
 
 const SYSTEM_TEMPLATES: Record<string, Array<{ key: string; name: string; fields: string[] }>> = {
+  现实: [
+    { key: "real-life", name: "现实生活", fields: ["protagonist_identity", "background_setting", "core_conflict", "emotional_mainline", "style_features"] },
+  ],
   言情: [
     { key: "republic-romance", name: "民国言情", fields: ["male_name", "female_name", "core_hook", "male_identity", "female_identity", "romance_line"] },
     { key: "ancient-romance", name: "古言脑洞", fields: ["male_name", "female_name", "core_hook", "male_identity", "female_identity", "romance_line"] },
@@ -107,6 +111,11 @@ const SYSTEM_TEMPLATES: Record<string, Array<{ key: string; name: string; fields
 
 
 const TEMPLATE_FIELD_META: Record<string, { label: string; placeholder: string }> = {
+  protagonist_identity: { label: "主角身份", placeholder: "请输入主角身份" },
+  background_setting: { label: "背景设定", placeholder: "请输入背景设定" },
+  core_conflict: { label: "核心冲突", placeholder: "请输入核心冲突" },
+  emotional_mainline: { label: "情感主线", placeholder: "请输入情感主线" },
+  style_features: { label: "风格特点", placeholder: "请输入风格特点" },
   male_name: { label: "男主名字", placeholder: "请输入男主名字" },
   female_name: { label: "女主名字", placeholder: "请输入女主名字" },
   lead_name: { label: "主角名字", placeholder: "请输入主角名字" },
@@ -623,29 +632,35 @@ function WizardProgress(props: { step: number }) {
 }
 
 
-function ChoiceCard(props: { selected: boolean; icon: any; title: string; copy: string; onClick: () => void }) {
+function ChoiceCard(props: { selected: boolean; icon: any; title: string; copy: string; badge?: string; onClick: () => void }) {
   return h(
     "button",
     { type: "button", className: `mb-choice-card${props.selected ? " is-selected" : ""}`, onClick: props.onClick },
     h("span", { className: "mb-choice-icon" }, h(props.icon)),
-    h("strong", null, props.title),
+    h("strong", null, props.title, props.badge && props.selected ? h("span", { className: "mb-choice-badge" }, props.badge) : null),
     h("small", null, props.copy),
     props.selected ? h(CheckOutlined, { className: "mb-choice-check" }) : null,
   );
 }
 
 
-function CreateNovelWizard(props: { open: boolean; onClose: () => void; onCompleted: (novel: NovelRecord) => void }) {
+function CreateNovelWizard(props: { open: boolean; onClose: () => void; onCompleted: (novel: NovelRecord, next?: "outline") => Promise<void> }) {
   const [draft, setDraft] = React.useState(null as NovelCreationDraftRecord | null);
+  const [completedNovel, setCompletedNovel] = React.useState(null as NovelRecord | null);
   const [step, setStep] = React.useState(0);
-  const [data, setData] = React.useState({ writing_type: "long", cover_mode: "ai", template_data: {} } as Record<string, any>);
+  const [data, setData] = React.useState({ writing_type: "", audience: "male", cover_mode: "ai", template_data: {} } as Record<string, any>);
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [templateModalOpen, setTemplateModalOpen] = React.useState(false);
+  const [templateGenerating, setTemplateGenerating] = React.useState(false);
   const [templateTab, setTemplateTab] = React.useState("system" as TemplateTab);
   const [templateCategory, setTemplateCategory] = React.useState("");
   const [templateCandidate, setTemplateCandidate] = React.useState(null as { key: string; name: string; fields: string[] } | null);
+
+  React.useEffect(() => {
+    setBusy(false);
+  }, [step]);
 
   const startDraft = React.useCallback(async () => {
     setLoading(true);
@@ -667,7 +682,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           body: JSON.stringify({ draft_key: draftKey }),
         });
       }
-      const nextData = { writing_type: "long", cover_mode: "ai", template_data: {}, ...(next.data || {}) };
+      const nextData = { writing_type: "", audience: "male", cover_mode: "ai", template_data: {}, ...(next.data || {}) };
       setDraft(next);
       setData(nextData);
       setStep(next.step || 0);
@@ -697,12 +712,18 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
       body: JSON.stringify({ expected_version: draft.version, step: nextStep, data_patch: merged }),
     });
     setDraft(next);
-    setData({ writing_type: "long", cover_mode: "ai", template_data: {}, ...(next.data || {}) });
+    setData({ writing_type: "", audience: "male", cover_mode: "ai", template_data: {}, ...(next.data || {}) });
     setStep(nextStep);
     return next;
   };
 
   const closeWizard = async () => {
+    if (completedNovel) {
+      const novel = completedNovel;
+      setCompletedNovel(null);
+      await props.onCompleted(novel);
+      return;
+    }
     if (!draft || busy) {
       props.onClose();
       return;
@@ -731,6 +752,85 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     }
   };
 
+  const goDirectToTemplate = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await persist(3, data);
+      setError("");
+    } catch (reason) {
+      setError(readableError(reason, "进入模板填写失败"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateTemplate = async () => {
+    if (!draft || busy) return;
+    setBusy(true);
+    setTemplateGenerating(true);
+    setStep(3);
+    try {
+      const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+        method: "POST",
+        body: JSON.stringify({
+          scope_type: "novel_creation",
+          scope_id: draft.id,
+          kind: "novel_template",
+          input_snapshot: {
+            audience: data.audience,
+            idea: data.idea,
+          },
+          requested_model_id: FIXED_MODEL_ID,
+          force_new: true,
+        }),
+      });
+      const output = job.output_json || {};
+      const fields = Array.isArray(output.template_fields) ? output.template_fields.map(String) : [];
+      const templateData = output.template_data && typeof output.template_data === "object" ? output.template_data : {};
+      if (
+        job.state !== "ready"
+        || job.actual_model_id !== FIXED_MODEL_ID
+        || !String(output.genre || "").trim()
+        || !String(output.template_key || "").trim()
+        || !String(output.template_name || "").trim()
+        || fields.length === 0
+        || fields.some((field: string) => !String(templateData[field] || "").trim())
+      ) {
+        throw new Error(job.failure_message || "MiniMax-M3 模板生成失败");
+      }
+      await persist(3, {
+        genre: String(output.genre),
+        subgenre: String(output.template_name),
+        template_key: String(output.template_key),
+        template_name: String(output.template_name),
+        template_fields: fields,
+        template_data: templateData,
+        template_generation_job_id: job.id,
+      });
+      setError("");
+    } catch (reason) {
+      setError(readableError(reason, "AI模板生成失败"));
+    } finally {
+      setTemplateGenerating(false);
+      setBusy(false);
+    }
+  };
+
+  const requestTemplateGeneration = () => {
+    if (!draft || busy || !String(data.idea || "").trim()) return;
+    Modal.confirm({
+      className: "anw-modal mb-confirm-modal",
+      title: "确认",
+      content: "创建小说将消耗500字符，用于AI智能生成模板设定，确定继续吗？",
+      okText: "确定",
+      cancelText: "取消",
+      onOk() {
+        void generateTemplate();
+      },
+    });
+  };
+
   const templateFields = (data.template_fields || []) as string[];
   const templateReady = Boolean(data.template_key && data.template_name && templateFields.every((field) => String(data.template_data?.[field] || "").trim()));
 
@@ -748,7 +848,14 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     if (nextDisabled() || busy) return;
     setBusy(true);
     try {
-      if (step === 5 && data.cover_mode === "ai" && !data.cover_prompt) {
+      if (step === 5 && data.cover_mode === "system") {
+        const patch = {
+          cover_image_data: generateSystemCover(String(data.title || ""), String(data.author_name || ""), String(data.audience || "female")),
+          cover_file_name: "system-cover.jpg",
+        };
+        updateData(patch);
+        await persist(6, patch);
+      } else if (step === 5 && data.cover_mode === "ai" && !data.cover_prompt) {
         if (!draft) throw new Error("建书草稿尚未就绪");
         const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
           method: "POST",
@@ -809,41 +916,46 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
       title: "确认",
-      content: `将使用 ${FIXED_MODEL_ID} 根据当前创作信息生成小说名称，确定继续吗？`,
+      content: "生成小说名称将消耗20字包，确定继续吗？",
       okText: "确定",
       cancelText: "取消",
-      async onOk() {
+      onOk() {
         setBusy(true);
-        try {
-          const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-            method: "POST",
-            body: JSON.stringify({
-              scope_type: "novel_creation",
-              scope_id: draft.id,
-              kind: "novel_naming",
-              input_snapshot: {
-                audience: data.audience,
-                genre: data.genre,
-                subgenre: data.subgenre,
-                idea: data.idea,
-                template_name: data.template_name,
-                template_data: data.template_data,
-              },
-              requested_model_id: FIXED_MODEL_ID,
-              force_new: true,
-            }),
-          });
-          const titles = Array.isArray(job.output_json?.titles) ? job.output_json.titles : [];
-          if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID || !titles.length) {
-            throw new Error(job.failure_message || "MiniMax-M3 没有返回有效书名");
+        void (async () => {
+          try {
+            const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+              method: "POST",
+              body: JSON.stringify({
+                scope_type: "novel_creation",
+                scope_id: draft.id,
+                kind: "novel_naming",
+                input_snapshot: {
+                  audience: data.audience,
+                  genre: data.genre,
+                  subgenre: data.subgenre,
+                  idea: data.idea,
+                  template_name: data.template_name,
+                  template_data: data.template_data,
+                },
+                requested_model_id: FIXED_MODEL_ID,
+                force_new: true,
+              }),
+            });
+            const titles = Array.isArray(job.output_json?.titles) ? job.output_json.titles.slice(0, 8) : [];
+            if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID || !titles.length) {
+              throw new Error(job.failure_message || "MiniMax-M3 没有返回有效书名");
+            }
+            updateData({
+              title: titles.map((title: unknown, index: number) => `${index + 1}. ${String(title).trim()}`).join(" "),
+              naming_generation_job_id: job.id,
+            });
+            setError("");
+          } catch (reason) {
+            setError(readableError(reason, "AI 取名失败"));
+          } finally {
+            setBusy(false);
           }
-          updateData({ title: String(titles[0]), naming_generation_job_id: job.id });
-          setError("");
-        } catch (reason) {
-          setError(readableError(reason, "AI 取名失败"));
-        } finally {
-          setBusy(false);
-        }
+        })();
       },
     });
   };
@@ -872,7 +984,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         body: JSON.stringify({ expected_version: draft.version }),
       });
       window.localStorage.removeItem(CREATION_DRAFT_KEY);
-      props.onCompleted(result.novel);
+      setCompletedNovel(result.novel);
       setError("");
     } catch (reason) {
       setError(readableError(reason, "创建作品失败"));
@@ -887,8 +999,13 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     h(
       "div",
       { className: "mb-template-current" },
-      h("div", null, h("strong", null, "当前选择"), h("span", null, `${data.genre} · ${data.template_name}`)),
-      h(Button, { onClick: () => setTemplateModalOpen(true) }, "选择模板"),
+      h("div", null, h("strong", null, "当前选择"), h("span", null, `${data.genre}·${data.template_name}`)),
+      h(
+        "div",
+        { className: "mb-template-actions" },
+        h(Button, { onClick: requestTemplateGeneration }, "重新生成"),
+        h(Button, { className: "mb-orange-button", onClick: () => setTemplateModalOpen(true) }, "修改模板"),
+      ),
     ),
     h("div", { className: "mb-template-heading" }, h("strong", null, "模板设定"), h("span", null, "可修改")),
     ...templateFields.map((field) => {
@@ -908,12 +1025,12 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         "div",
         { className: "mb-type-step" },
         h("h2", null, "选择创作类型"),
-        h("p", null, "选择适合您的创作模式"),
+        h("p", null, "请选择您要创作的作品类型"),
         h(
           "div",
           { className: "mb-type-cards" },
-          h(ChoiceCard, { selected: data.writing_type === "long", icon: BookOutlined, title: "长篇小说", copy: "完整世界观、多卷多章持续创作", onClick: () => updateData({ writing_type: "long" }) }),
-          h(ChoiceCard, { selected: false, icon: FileTextOutlined, title: "短篇小说", copy: "当前创作闭环暂不包含短篇", onClick: () => setError("本阶段只建设长篇小说完整创作流程") }),
+          h(ChoiceCard, { selected: data.writing_type === "long", icon: BookOutlined, title: "长篇小说", copy: "多章节 · 大纲 · 角色", onClick: () => updateData({ writing_type: "long" }) }),
+          h(ChoiceCard, { selected: false, icon: FileTextOutlined, title: "短篇小说", copy: "短篇 · 直接生成", onClick: () => setError("当前流程验收使用长篇小说") }),
         ),
       );
     }
@@ -922,12 +1039,12 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         "div",
         { className: "mb-wizard-body" },
         h("h2", null, "选择小说受众"),
-        h("p", null, "选择作品面向的主要读者"),
+        h("p", null, "请选择您的小说主要面向的读者群体"),
         h(
           "div",
           { className: "mb-audience-cards" },
-          h(ChoiceCard, { selected: data.audience === "male", icon: ManOutlined, title: "男频", copy: "热血、成长、冒险与事业线", onClick: () => updateData({ audience: "male" }) }),
-          h(ChoiceCard, { selected: data.audience === "female", icon: WomanOutlined, title: "女频", copy: "情感、成长、关系与人生选择", onClick: () => updateData({ audience: "female" }) }),
+          h(ChoiceCard, { selected: data.audience === "male", icon: ManOutlined, title: "男频", copy: "玄幻 · 都市 · 历史", onClick: () => updateData({ audience: "male" }) }),
+          h(ChoiceCard, { selected: data.audience === "female", icon: WomanOutlined, title: "女频", copy: "言情 · 穿越 · 种田", onClick: () => updateData({ audience: "female" }) }),
         ),
       );
     }
@@ -941,26 +1058,39 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           "div",
           { className: "mb-idea-label" },
           h("strong", null, "描述您的创作想法"),
-          h("span", null, "已有作品点击直接填写模板"),
+          h("button", { type: "button", className: "mb-direct-template", onClick: goDirectToTemplate }, "已有作品点击直接填写模板"),
         ),
         h(Input.TextArea, {
           className: "mb-idea-input",
           rows: 7,
           maxLength: 2000,
           value: data.idea || "",
-          placeholder: "例如：一个现代都市青年穿越到古代，成为了一名书生，凭借现代知识在古代混得风生水起……",
+          placeholder: "例如：一个现代都市青年穿越到古代，成为了一名书生，凭借现代知识在古代混得风生水起...",
           onChange: (event: any) => updateData({ idea: event.target.value }),
         }),
-        h("div", { className: "mb-char-count" }, `${String(data.idea || "").length}/2000`),
+        h(
+          "div",
+          { className: "mb-idea-meta" },
+          h("span", { className: "mb-idea-tip" }, h(BulbOutlined), "提示：描述越详细，AI生成的模板越精准"),
+          h("span", { className: "mb-char-count" }, `${String(data.idea || "").length}/2000`),
+        ),
       );
     }
     if (step === 3) {
       return h(
         "div",
         { className: "mb-wizard-body" },
-        h("h2", null, "选择模板"),
-        h("p", null, "请选择适合的模板"),
-        data.template_key
+        h("h2", null, templateGenerating || data.template_key ? "智能模板生成" : "选择模板"),
+        h("p", null, templateGenerating || data.template_key ? "AI根据您的创作思路自动选择最佳模板" : "请选择适合的模板"),
+        templateGenerating
+          ? h(
+              "div",
+              { className: "mb-template-generating" },
+              h(Spin, { size: "large" }),
+              h("strong", null, "AI正在分析您的创作思路"),
+              h("span", null, "正在为您匹配最合适的模板设定"),
+            )
+          : data.template_key
           ? renderTemplateForm()
           : h(
               "div",
@@ -974,20 +1104,28 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     if (step === 4) {
       return h(
         "div",
-        { className: "mb-wizard-body" },
+        { className: "mb-wizard-body mb-info-step" },
         h("h2", null, "作品信息"),
         h("p", null, "填写作者名称和小说名称"),
         h("label", { className: "mb-wizard-field" }, h("span", null, "作者名称 *"), h(Input, { value: data.author_name || "", maxLength: 120, placeholder: "请输入您的笔名", onChange: (event: any) => updateData({ author_name: event.target.value }) })),
         h("label", { className: "mb-wizard-field" }, h("span", null, "小说名称 *"), h(Input, { value: data.title || "", maxLength: 240, placeholder: "请输入小说名称", onChange: (event: any) => updateData({ title: event.target.value }) })),
-        h(Button, { block: true, className: "mb-orange-button mb-ai-name", icon: data.title ? h(ReloadOutlined) : h(RobotOutlined), loading: busy, onClick: generateName }, data.title ? "重新生成名称" : "AI帮我取名"),
-        h("small", { className: "mb-model-note" }, `取名模型固定为 ${FIXED_MODEL_ID}`),
+        h(Button, {
+          block: true,
+          className: "mb-orange-button mb-ai-name",
+          icon: busy ? null : data.title ? h(ReloadOutlined) : h(RobotOutlined),
+          disabled: busy,
+          onClick: generateName,
+        }, busy ? "AI生成中..." : data.title ? "重新生成名称" : "AI帮我取名"),
+        busy || data.naming_generation_job_id
+          ? h("small", { className: "mb-name-cost" }, h(ThunderboltOutlined), "每次消耗20字包")
+          : null,
       );
     }
     if (step === 5) {
       const coverModes = [
-        { key: "ai", icon: RobotOutlined, title: "AI智能生成", copy: "根据故事风格生成封面方案", button: "开始生成精美封面" },
-        { key: "system", icon: BookOutlined, title: "系统封面", copy: "使用系统提供的正式封面", button: "生成系统封面" },
-        { key: "upload", icon: PictureOutlined, title: "上传图片", copy: "上传自己的图片，自动裁剪为3:4", button: "确认使用此封面" },
+        { key: "ai", icon: RobotOutlined, title: "AI智能生成", badge: "推荐", copy: "消耗10000字包，AI根据您的故事风格精心绘制独一无二的精美封面", button: "开始生成精美封面" },
+        { key: "system", icon: BookOutlined, title: "系统封面", copy: "根据小说分类自动生成，包含书名和作者", button: "生成系统封面" },
+        { key: "upload", icon: PictureOutlined, title: "上传图片", copy: "上传您自己的图片，自动裁剪为3:4", button: "确认使用此封面" },
       ];
       return h(
         "div",
@@ -1003,6 +1141,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
             selected: data.cover_mode === mode.key,
             icon: mode.icon,
             title: mode.title,
+            badge: mode.badge,
             copy: mode.copy,
             onClick: () => updateData({ cover_mode: mode.key, ...(mode.key !== "upload" ? { cover_image_data: "" } : {}) }),
           })),
@@ -1029,7 +1168,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     );
   };
 
-  const footerLabel = step === 0 ? "确认并开始创作" : step === 2 ? "确认并生成模板" : step === 3 ? "确认模板" : step === 5
+  const footerLabel = step === 0 ? "下一步" : step === 2 ? "确认并生成模板" : step === 3 ? "确认模板" : step === 5
     ? ({ ai: "开始生成精美封面", system: "生成系统封面", upload: "确认使用此封面" }[data.cover_mode as "ai" | "system" | "upload"] || "下一步")
     : "下一步";
 
@@ -1038,7 +1177,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     {
       open: props.open,
       className: "anw-modal mb-create-modal",
-      width: step === 0 ? 570 : 600,
+      width: 600,
       title: "创建新小说",
       footer: null,
       maskClosable: false,
@@ -1046,7 +1185,34 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
       onCancel: closeWizard,
       destroyOnClose: false,
     },
-    loading
+    completedNovel
+      ? h(
+          "div",
+          { className: "mb-create-success" },
+          h(CheckOutlined, { className: "mb-create-success-icon" }),
+          h("h2", null, "创建成功！"),
+          h("p", null, `您的作品《${completedNovel.title}》已创建完成`),
+          h(
+            "div",
+            { className: "mb-create-success-actions" },
+            h(Button, {
+              className: "mb-orange-button",
+              onClick: async () => {
+                const novel = completedNovel;
+                setCompletedNovel(null);
+                await props.onCompleted(novel, "outline");
+              },
+            }, "立即创建大纲"),
+            h(Button, {
+              onClick: async () => {
+                const novel = completedNovel;
+                setCompletedNovel(null);
+                await props.onCompleted(novel);
+              },
+            }, "返回作品列表"),
+          ),
+        )
+      : loading
       ? h("div", { className: "mb-wizard-loading" }, h(Spin), "正在读取建书草稿…")
       : h(
           React.Fragment,
@@ -1054,16 +1220,16 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
           step > 0 ? h(WizardProgress, { step }) : null,
           renderStep(),
-          h(
+          templateGenerating ? null : h(
             "div",
             { className: "mb-wizard-footer" },
-            step > 0 ? h(Button, { onClick: goBack, disabled: busy }, step === 6 ? "返回修改" : "上一步") : null,
+            step > 1 ? h(Button, { onClick: goBack, disabled: busy }, step === 6 ? "返回修改" : "上一步") : null,
             h(Button, {
               block: step === 0,
               className: "mb-orange-button",
-              loading: busy,
-              disabled: nextDisabled(),
-              onClick: step === 6 ? complete : goNext,
+              loading: busy && step !== 4,
+              disabled: nextDisabled() || busy,
+              onClick: step === 6 ? complete : step === 2 ? requestTemplateGeneration : goNext,
             }, step === 6 ? "完成创建" : footerLabel),
           ),
         ),
@@ -1243,10 +1409,11 @@ export function NovelLibraryPage() {
     h(CreateNovelWizard, {
       open: wizardOpen,
       onClose: () => setWizardOpen(false),
-      onCompleted: async (novel: NovelRecord) => {
+      onCompleted: async (novel: NovelRecord, next?: "outline") => {
         setWizardOpen(false);
         await reload();
         setActiveNovelId(novel.id);
+        if (next === "outline") openNovel(novel.id, "outline");
       },
     }),
   );

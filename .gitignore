@@ -32,3 +32,12 @@ test-results/
 
 # Local database safety snapshots
 audit/db-backups/
+
+# Local browser-audit captures (keep the report, manifest, and selected evidence)
+docs/开发文档/证据/妙笔双站全流程-2026-08-24/raw/
+docs/开发文档/证据/妙笔双站全流程-2026-08-24/compare/*-triplet.png
+docs/开发文档/证据/妙笔双站全流程-2026-08-24/compare/all-pairs/*.png
+!docs/开发文档/证据/妙笔双站全流程-2026-08-24/compare/all-pairs/532-both-ch6-outline-results-0.png
+!docs/开发文档/证据/妙笔双站全流程-2026-08-24/compare/all-pairs/570-local-clues-support-fixed-0.png
+!docs/开发文档/证据/妙笔双站全流程-2026-08-24/compare/all-pairs/576-local-foreshadows-fixed-0.png
+!docs/开发文档/证据/妙笔双站全流程-2026-08-24/compare/all-pairs/578-local-return-chapters-final-0.png

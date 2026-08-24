@@ -355,6 +355,7 @@ export interface NovelCharacterRecord {
   name: string;
   description: string;
   details: Record<string, unknown>;
+  required_next_chapter: boolean;
   position: number;
   version: number;
   created_at: string | null;
