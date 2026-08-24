@@ -1,19 +1,22 @@
 """Runtime model verification for every AI-assisted writing operation.
 
 QwenPaw's PawApp context currently exposes a placeholder ``ctx.config`` value,
-so model identity must be resolved from the agent profile before a call and from
-the provider usage metadata attached to the completed reply after a call.
+so model identity is resolved from QwenPaw's public effective-model API before
+a call and from provider usage metadata after the call.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+import httpx
 
-MINIMAX_M3_MODEL_ID = "MiniMax-M3"
+NOVEL_AGENT_ID = "ai-novel-writer"
+GENERATION_CONTRACT_VERSION = "follow-agent-effective-v1"
 
 INTELLIGENCE_ITEM_TYPES = {
     "fact",
@@ -27,13 +30,40 @@ INTELLIGENCE_ITEM_TYPES = {
 
 
 class ModelVerificationError(RuntimeError):
-    """Raised when a generation cannot be proven to have used MiniMax M3."""
+    """Raised when a generation's requested/actual model cannot be proven."""
+
+
+def ensure_prompt_within_effective_limit(
+    prompt: str,
+    configured: "ModelAudit",
+) -> None:
+    """Fail before generation when a prompt clearly exceeds the active window.
+
+    QwenPaw exposes the effective context length but not a tokenizer through the
+    PawApp API.  This conservative estimate counts CJK characters roughly one
+    token each and other non-space characters at four characters per token.
+    A 20% margin avoids rejecting prompts close to a tokenizer boundary.
+    """
+
+    limit = configured.effective_max_input_length
+    if limit is None or limit <= 0:
+        return
+    cjk_count = len(re.findall(r"[\u3400-\u9fff\uf900-\ufaff]", prompt))
+    other_count = len(
+        re.sub(r"[\s\u3400-\u9fff\uf900-\ufaff]", "", prompt)
+    )
+    estimated_tokens = cjk_count + math.ceil(other_count / 4)
+    if estimated_tokens > math.floor(limit * 1.2):
+        raise ModelVerificationError(
+            "本次生成输入明显超过当前有效模型的上下文窗口："
+            f"估算 {estimated_tokens} tokens，窗口 {limit} tokens"
+        )
 
 
 def _repair_character_array_boundaries(candidate: str) -> str:
     """Close an item when a long ``characters`` array drops a boundary brace.
 
-    MiniMax occasionally emits ``...details:{...},{\"name\":...`` instead of
+    A model may emit ``...details:{...},{\"name\":...`` instead of
     ``...details:{...}},{\"name\":...`` in an otherwise complete response.
     We only repair structural boundaries inside the named array and never
     touch quoted text.
@@ -93,16 +123,6 @@ def _repair_character_array_boundaries(candidate: str) -> str:
     return candidate
 
 
-def _normalized_model_id(value: str | None) -> str:
-    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
-
-
-def is_minimax_m3(value: str | None) -> bool:
-    """Return true only for the exact MiniMax M3 model family identifier."""
-
-    return _normalized_model_id(value) == "minimaxm3"
-
-
 @dataclass(frozen=True)
 class ModelAudit:
     provider_id: str
@@ -111,22 +131,15 @@ class ModelAudit:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
-
-    def ensure_minimax_m3(self) -> "ModelAudit":
-        if not is_minimax_m3(self.model_id):
-            raise ModelVerificationError(
-                "当前实际模型不是 MiniMax M3，生成结果已作废："
-                f"{self.provider_id or 'unknown'}/{self.model_id or 'unknown'}"
-            )
-        return self
+    agent_id: str | None = None
+    effective_max_input_length: int | None = None
 
     def ensure_matches(self, configured: "ModelAudit") -> "ModelAudit":
         """Reject a reply if the provider/model changed after preflight."""
 
         if (
             self.provider_id != configured.provider_id
-            or _normalized_model_id(self.model_id)
-            != _normalized_model_id(configured.model_id)
+            or self.model_id != configured.model_id
         ):
             raise ModelVerificationError(
                 "本次回复模型与调用前活动模型不一致，生成结果已作废："
@@ -135,71 +148,79 @@ class ModelAudit:
             )
         return self
 
-    @property
-    def fingerprint(self) -> str:
-        parts = [
-            "qwenpaw",
-            self.source,
-            self.provider_id or "unknown",
-            self.model_id or "unknown",
-        ]
-        if self.prompt_tokens is not None:
-            parts.append(f"in={self.prompt_tokens}")
-        if self.completion_tokens is not None:
-            parts.append(f"out={self.completion_tokens}")
-        return ":".join(parts)[:160]
 
+async def effective_model_audit(
+    asgi_app: Any,
+    *,
+    agent_id: str = NOVEL_AGENT_ID,
+) -> ModelAudit:
+    """Resolve one Agent's model through QwenPaw's public HTTP contract.
 
-def configured_model_audit(agent_id: str) -> ModelAudit:
-    """Read the authoritative QwenPaw agent-scoped model configuration."""
+    ``ASGITransport`` keeps the request inside the running QwenPaw process while
+    still exercising ``GET /api/models/active``.  This avoids private config
+    imports and avoids a loopback HTTP deadlock in the host event loop.
+    """
 
     try:
-        # Imported lazily because the standalone test environment intentionally
-        # contains only this PawApp's dependencies, while QwenPaw injects its
-        # package in the production runtime.
-        from qwenpaw.config.config import load_agent_config
-
-        config = load_agent_config(agent_id)
-        slot = getattr(config, "active_model", None)
-        provider_id = str(getattr(slot, "provider_id", "") or "").strip()
-        model_id = str(getattr(slot, "model", "") or "").strip()
+        transport = httpx.ASGITransport(app=asgi_app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://qwenpaw.internal",
+            timeout=10.0,
+        ) as client:
+            response = await client.get(
+                "/api/models/active",
+                params={"scope": "effective", "agent_id": agent_id},
+            )
+            response.raise_for_status()
+            payload = response.json()
     except Exception as error:  # pragma: no cover - production runtime boundary
         raise ModelVerificationError(
-            f"无法读取 AI 小说作家活动模型：{type(error).__name__}: {error}"
+            f"无法通过 QwenPaw 公开接口读取 AI 小说作家有效模型："
+            f"{type(error).__name__}: {error}"
         ) from error
+
+    active_llm = payload.get("active_llm") if isinstance(payload, dict) else None
+    provider_id = str(
+        active_llm.get("provider_id") if isinstance(active_llm, dict) else ""
+    ).strip()
+    model_id = str(
+        active_llm.get("model") if isinstance(active_llm, dict) else ""
+    ).strip()
     if not provider_id or not model_id:
-        raise ModelVerificationError("AI 小说作家尚未配置活动模型")
+        raise ModelVerificationError("AI 小说作家当前没有可用的有效模型")
+    effective_max_input_length = _optional_int(
+        payload.get("effective_max_input_length")
+        if isinstance(payload, dict)
+        else None
+    )
     return ModelAudit(
         provider_id=provider_id,
         model_id=model_id,
-        source="agent-config",
-    ).ensure_minimax_m3()
+        source="effective-model-api",
+        agent_id=agent_id,
+        effective_max_input_length=effective_max_input_length,
+    )
 
 
-def _iter_metadata_dicts(value: Any) -> Iterable[dict[str, Any]]:
-    """Yield nested metadata dictionaries without traversing arbitrary objects."""
+def _iter_qwenpaw_turn_usages(value: Any) -> Iterable[dict[str, Any]]:
+    """Read only closing-message metadata, never tool/content payloads."""
 
-    stack: list[tuple[Any, int]] = [(value, 0)]
-    seen: set[int] = set()
-    while stack:
-        current, depth = stack.pop()
-        if current is None or depth > 8:
+    chunks = value if isinstance(value, (list, tuple)) else ()
+    for chunk in reversed(chunks):
+        output = getattr(chunk, "output", None)
+        if not isinstance(output, (list, tuple)) or not output:
             continue
-        marker = id(current)
-        if marker in seen:
+        closing_message = output[-1]
+        metadata = getattr(closing_message, "metadata", None)
+        if not isinstance(metadata, dict):
             continue
-        seen.add(marker)
-        if isinstance(current, dict):
-            yield current
-            stack.extend((item, depth + 1) for item in current.values())
+        envelope = metadata.get("qwenpaw_turn_usage")
+        if not isinstance(envelope, dict):
             continue
-        if isinstance(current, (list, tuple)):
-            stack.extend((item, depth + 1) for item in current)
-            continue
-        for attribute in ("metadata", "output", "content"):
-            nested = getattr(current, attribute, None)
-            if nested is not None:
-                stack.append((nested, depth + 1))
+        usage = envelope.get("usage")
+        if isinstance(usage, dict):
+            yield usage
 
 
 def reply_model_audit(reply: Any, *, session_id: str | None = None) -> ModelAudit:
@@ -212,10 +233,10 @@ def reply_model_audit(reply: Any, *, session_id: str | None = None) -> ModelAudi
     """
 
     chunks = getattr(reply, "chunks", None)
-    for metadata in _iter_metadata_dicts(chunks):
-        audit = _audit_from_usage(metadata, source="provider-usage")
+    for usage in _iter_qwenpaw_turn_usages(chunks):
+        audit = _audit_from_usage(usage, source="provider-usage")
         if audit is not None:
-            return audit.ensure_minimax_m3()
+            return audit
     if session_id:
         try:
             from qwenpaw.token_usage.model_wrapper import TokenRecordingModelWrapper
@@ -230,9 +251,10 @@ def reply_model_audit(reply: Any, *, session_id: str | None = None) -> ModelAudi
             source="provider-usage-buffer",
         )
         if audit is not None:
-            return audit.ensure_minimax_m3()
+            return audit
     raise ModelVerificationError(
-        "QwenPaw 回复缺少实际 provider/model 用量元数据，生成结果已作废"
+        "模型身份未核验：QwenPaw 回复缺少实际 provider/model 用量元数据，"
+        "生成结果已作废"
     )
 
 
@@ -306,7 +328,7 @@ def parse_model_json(text: str) -> dict[str, Any]:
             return {"items": payload}
         if isinstance(payload, dict):
             return payload
-    raise ModelVerificationError("MiniMax M3 没有返回可解析的 JSON 对象")
+    raise ModelVerificationError("模型没有返回可解析的 JSON 对象")
 
 
 def normalize_creative_generation_json(
@@ -336,7 +358,7 @@ def normalize_creative_generation_json(
             _extract_relaxed_json_string_field(output_text, field),
             _plain_model_text(output_text, expected_field=field),
         ]
-        # MiniMax occasionally emits an otherwise complete JSON string with
+        # A model may emit an otherwise complete JSON string with
         # unescaped quotation marks inside prose.  The generic repair parser can
         # then return only the prefix before the first quotation mark.  Prefer the
         # longest recoverable single-field value so a short fragment can never
@@ -344,10 +366,10 @@ def normalize_creative_generation_json(
         value = max((item for item in candidates if item), key=len, default="")
         if not value:
             raise ModelVerificationError(
-                f"MiniMax M3 {kind} 结果结构不完整，请重新生成"
+                f"模型 {kind} 结果结构不完整，请重新生成"
             )
         if kind == "outline_plot" and len(value) < 800:
-            raise ModelVerificationError("MiniMax M3 故事情节结果过短，请重新生成")
+            raise ModelVerificationError("模型故事情节结果过短，请重新生成")
         if kind == "outline_background" and len(value) > 220:
             shortened = value[:220]
             punctuation = max(shortened.rfind("。"), shortened.rfind("！"), shortened.rfind("？"))
@@ -360,7 +382,7 @@ def normalize_creative_generation_json(
             raw_titles = payload.get("items")
         titles = [str(item).strip() for item in raw_titles or [] if str(item).strip()]
         if not titles:
-            raise ModelVerificationError("MiniMax M3 书名结果结构不完整，请重新生成")
+            raise ModelVerificationError("模型书名结果结构不完整，请重新生成")
         return {"titles": titles}
 
     if kind == "novel_template":
@@ -384,9 +406,9 @@ def normalize_creative_generation_json(
         if not genre or not template_name or not template_key or any(
             not value for value in normalized_data.values()
         ):
-            raise ModelVerificationError("MiniMax M3 模板结果结构不完整，请重新生成")
+            raise ModelVerificationError("模型模板结果结构不完整，请重新生成")
         if any(len(value) > 24 for value in normalized_data.values()):
-            raise ModelVerificationError("MiniMax M3 模板字段过长，请重新生成")
+            raise ModelVerificationError("模型模板字段过长，请重新生成")
         return {
             "genre": genre,
             "template_key": template_key,
@@ -402,7 +424,7 @@ def normalize_creative_generation_json(
         if not cover_prompt:
             cover_prompt = _plain_model_text(output_text, expected_field="cover_prompt")
         if not cover_prompt:
-            raise ModelVerificationError("MiniMax M3 封面结果结构不完整，请重新生成")
+            raise ModelVerificationError("模型封面结果结构不完整，请重新生成")
         keywords = payload.get("keywords")
         return {
             "cover_prompt": cover_prompt,
@@ -425,7 +447,7 @@ def normalize_creative_generation_json(
             if isinstance(item, dict) and str(item.get("name") or "").strip()
         ]
         if not characters:
-            raise ModelVerificationError("MiniMax M3 角色结果结构不完整，请重新生成")
+            raise ModelVerificationError("模型角色结果结构不完整，请重新生成")
         return {"characters": characters}
 
     if kind == "relationship_graph":
@@ -504,9 +526,9 @@ def normalize_creative_generation_json(
                 normalized_by_slot[slot] = normalized
 
         if candidates and not normalized_by_slot:
-            raise ModelVerificationError("MiniMax M3 关系网结果没有可用关系，请重新生成")
+            raise ModelVerificationError("模型关系网结果没有可用关系，请重新生成")
         if not explicit_relationship_array and not candidates:
-            raise ModelVerificationError("MiniMax M3 关系网结果结构不完整，请重新生成")
+            raise ModelVerificationError("模型关系网结果结构不完整，请重新生成")
         complete_snapshot = payload.get("complete_snapshot") is True or bool(
             re.search(r'"complete_snapshot"\s*:\s*true', output_text, re.IGNORECASE)
         )
@@ -526,7 +548,7 @@ def normalize_creative_generation_json(
     if kind == "chapter_storyline_recommendation":
         raw_ids = payload.get("storyline_ids")
         if not isinstance(raw_ids, list):
-            raise ModelVerificationError("MiniMax M3 故事线推荐结构不完整，请重新生成")
+            raise ModelVerificationError("模型故事线推荐结构不完整，请重新生成")
         return {
             "storyline_ids": [str(item).strip() for item in raw_ids if str(item).strip()],
             "reason": str(payload.get("reason") or "").strip(),
@@ -540,11 +562,11 @@ def normalize_creative_generation_json(
         if not outline_text:
             outline_text = _extract_json_string_field(output_text, "outline_text")
         if not title or not outline_text:
-            raise ModelVerificationError("MiniMax M3 章纲结果结构不完整，请重新生成")
+            raise ModelVerificationError("模型章纲结果结构不完整，请重新生成")
         return {"title": title, "outline_text": outline_text}
 
     if kind != "review":
-        raise ModelVerificationError("MiniMax M3 返回了未知的创作生成结果")
+        raise ModelVerificationError("模型返回了未知的创作生成结果")
 
     passed = payload.get("passed") if isinstance(payload.get("passed"), bool) else None
     summary = payload.get("summary") if isinstance(payload.get("summary"), str) else ""
@@ -575,7 +597,7 @@ def normalize_creative_generation_json(
         passed = False
     if passed is None or not summary or (passed is False and not issues):
         raise ModelVerificationError(
-            "MiniMax M3 审稿结果结构不完整，请重新审稿"
+            "模型审稿结果结构不完整，请重新审稿"
         )
     return {"passed": passed, "summary": summary, "issues": issues}
 
@@ -584,7 +606,7 @@ def normalize_intelligence_generation_json(
     payload: dict[str, Any],
     output_text: str,
 ) -> list[dict[str, Any]]:
-    """Recover and validate story-ledger items from a MiniMax response.
+    """Recover and validate story-ledger items from a model response.
 
     Long Chinese evidence strings occasionally contain unescaped ASCII quotes.
     That can invalidate the outer JSON envelope while leaving many individual
@@ -623,13 +645,13 @@ def normalize_intelligence_generation_json(
             break
     if not output:
         raise ModelVerificationError(
-            "MiniMax M3 未返回可用的章节情报，请重新同步"
+            "模型未返回可用的章节情报，请重新同步"
         )
     return output
 
 
 def _plain_model_text(output_text: str, *, expected_field: str) -> str:
-    """Recover useful prose when MiniMax returns text instead of a JSON envelope.
+    """Recover useful prose when a model returns text instead of a JSON envelope.
 
     This fallback is intentionally limited to helpers whose entire result is one
     text field.  If the expected JSON key is present but malformed, fail closed so
@@ -670,7 +692,7 @@ def _extract_relaxed_json_string_field(text: str, field: str) -> str:
     if start is None:
         return ""
     remainder = text[start.end() :]
-    # Some MiniMax replies append a status capsule after the JSON despite the
+    # Some model replies append a status capsule after the JSON despite the
     # prompt.  Use the final string-and-object terminator rather than requiring
     # the JSON object itself to be the final bytes of the reply.
     endings = list(re.finditer(r'"\s*}', remainder))

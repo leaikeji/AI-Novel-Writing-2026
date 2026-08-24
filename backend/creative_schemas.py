@@ -191,7 +191,6 @@ class StartCreativeGenerationRequest(BaseModel):
     novel_id: UUID | None = None
     document_id: UUID | None = None
     target_character_count: int | None = Field(default=None, ge=1, le=50_000)
-    requested_model_id: str = Field(default="MiniMax-M3", min_length=1, max_length=120)
     force_new: bool = False
 
 

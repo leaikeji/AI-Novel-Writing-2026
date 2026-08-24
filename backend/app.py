@@ -5,17 +5,25 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from qwenpaw.pawapp import PawApp, get_ctx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from qwenpaw.pawapp import PawApp
 from sqlalchemy.orm import Session
 
 from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
 from .creative_services import sync_relationships_from_intelligence_proposal
 from .database import database_status, get_session
+from .generation_dependencies import (
+    get_novel_effective_model,
+    get_novel_generation_ctx,
+)
 from .model_runtime import (
+    GENERATION_CONTRACT_VERSION,
+    NOVEL_AGENT_ID,
+    ModelAudit,
     ModelVerificationError,
-    configured_model_audit,
+    effective_model_audit,
+    ensure_prompt_within_effective_limit,
     normalize_intelligence_generation_json,
     parse_model_json,
     reply_model_audit,
@@ -128,9 +136,31 @@ def health() -> dict[str, object]:
         "database": database,
         "ai_candidate_generation_enabled": True,
         "ai_authoritative_write_enabled": False,
-        "required_generation_model": "MiniMax-M3",
-        "model_verification_mode": "agent-config+provider-usage",
+        "generation_agent_id": NOVEL_AGENT_ID,
+        "generation_model_policy": "follow-agent-effective",
+        "model_verification_mode": "preflight-effective+provider-usage",
         "vector_retrieval_enabled": False,
+    }
+
+
+@router.get("/generation-model")
+async def generation_model_status(request: Request) -> dict[str, object]:
+    try:
+        configured = await effective_model_audit(
+            request.app,
+            agent_id=NOVEL_AGENT_ID,
+        )
+    except ModelVerificationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"type": "generation_model_unavailable", "message": str(error)},
+        ) from error
+    return {
+        "agent_id": NOVEL_AGENT_ID,
+        "provider_id": configured.provider_id,
+        "model_id": configured.model_id,
+        "effective_max_input_length": configured.effective_max_input_length,
+        "policy": "follow-agent-effective",
     }
 
 
@@ -349,24 +379,31 @@ def generation_jobs_index(
 async def generation_jobs_create_body(
     document_id: UUID,
     request: GenerateChapterRequest,
-    ctx=Depends(get_ctx),
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     job: dict[str, Any] | None = None
+    actual_model: ModelAudit | None = None
     try:
         job = start_chapter_generation(
             session,
             document_id,
             expected_brief_version=request.expected_brief_version,
+            execution_agent_id=NOVEL_AGENT_ID,
+            requested_provider_id=configured_model.provider_id,
+            requested_model_id=configured_model.model_id,
+            generation_contract_version=GENERATION_CONTRACT_VERSION,
             force_new=request.force_new,
             asset_ids=request.asset_ids,
             preset_id=request.preset_id,
-            requested_model_id=request.requested_model_id,
         )
         if job["state"] == "ready" and job.get("candidate"):
             return job
-        configured_model = configured_model_audit(ctx.agent_id)
+        if not job.get("should_execute", True):
+            return job
         prompt = build_chapter_generation_prompt(job["generation_context_snapshot"])
+        ensure_prompt_within_effective_limit(prompt, configured_model)
         generation_session_id = f"novel-generation:{job['id']}"
         reply = await ctx.chat(
             prompt,
@@ -376,20 +413,28 @@ async def generation_jobs_create_body(
         actual_model = reply_model_audit(
             reply,
             session_id=generation_session_id,
-        ).ensure_matches(configured_model)
+        )
+        actual_model.ensure_matches(configured_model)
         return complete_chapter_generation(
             session,
             UUID(str(job["id"])),
             content_markdown=reply.text,
-            model_profile_fingerprint=actual_model.fingerprint,
+            actual_provider_id=actual_model.provider_id,
             actual_model_id=actual_model.model_id,
-            provider_profile=actual_model.provider_id,
         )
     except Exception as error:
         session.rollback()
         if job is not None:
             try:
-                failed = fail_chapter_generation(session, UUID(str(job["id"])), str(error))
+                failed = fail_chapter_generation(
+                    session,
+                    UUID(str(job["id"])),
+                    str(error),
+                    actual_provider_id=(
+                        actual_model.provider_id if actual_model else None
+                    ),
+                    actual_model_id=(actual_model.model_id if actual_model else None),
+                )
             except Exception:
                 session.rollback()
                 failed = job
@@ -470,18 +515,26 @@ def intelligence_proposals_index(
 async def intelligence_proposals_create(
     document_id: UUID,
     request: ExtractIntelligenceRequest,
-    ctx=Depends(get_ctx),
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     proposal: dict[str, Any] | None = None
+    actual_model: ModelAudit | None = None
     try:
         proposal = start_intelligence_proposal(
-            session, document_id, revision_id=request.revision_id
+            session,
+            document_id,
+            revision_id=request.revision_id,
+            execution_agent_id=NOVEL_AGENT_ID,
+            requested_provider_id=configured_model.provider_id,
+            requested_model_id=configured_model.model_id,
+            generation_contract_version=GENERATION_CONTRACT_VERSION,
         )
-        if proposal["state"] in {"ready", "partially_accepted", "accepted", "rejected"}:
+        if not proposal.get("should_execute", True):
             return proposal
         prompt = build_intelligence_prompt(session, UUID(str(proposal["id"])))
-        configured_model = configured_model_audit(ctx.agent_id)
+        ensure_prompt_within_effective_limit(prompt, configured_model)
         intelligence_session_id = f"novel-intelligence:{proposal['id']}"
         reply = await ctx.chat(
             prompt,
@@ -491,7 +544,8 @@ async def intelligence_proposals_create(
         actual_model = reply_model_audit(
             reply,
             session_id=intelligence_session_id,
-        ).ensure_matches(configured_model)
+        )
+        actual_model.ensure_matches(configured_model)
         try:
             payload = parse_model_json(reply.text)
         except ModelVerificationError:
@@ -501,16 +555,21 @@ async def intelligence_proposals_create(
             session,
             UUID(str(proposal["id"])),
             items=raw_items,
-            model_profile_fingerprint=actual_model.fingerprint,
+            actual_provider_id=actual_model.provider_id,
             actual_model_id=actual_model.model_id,
-            provider_profile=actual_model.provider_id,
         )
     except Exception as error:
         session.rollback()
         if proposal is not None and not isinstance(error, ProposalSupersededError):
             try:
                 failed = fail_intelligence_proposal(
-                    session, UUID(str(proposal["id"])), str(error)
+                    session,
+                    UUID(str(proposal["id"])),
+                    str(error),
+                    actual_provider_id=(
+                        actual_model.provider_id if actual_model else None
+                    ),
+                    actual_model_id=(actual_model.model_id if actual_model else None),
                 )
             except Exception:
                 session.rollback()

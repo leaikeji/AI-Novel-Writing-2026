@@ -42,6 +42,7 @@ from .services import (
     NotFoundError,
     ValidationError,
     _document_payload,
+    _lock_generation_attempt,
     _new_document,
     _normalize_role_constraints,
     _require_document,
@@ -55,7 +56,6 @@ from .services import (
 )
 
 
-MINIMAX_M3_MODEL_ID = "MiniMax-M3"
 PRIVATE_ASSET_TYPES = {"plot", "writing_style", "vocabulary", "idea"}
 ROLE_TYPES = {"main", "supporting"}
 RELATIONSHIP_DIRECTIONALITIES = {"directed", "undirected"}
@@ -104,11 +104,6 @@ def _clean_title(value: str, label: str = "标题") -> str:
     if len(title) > 240:
         raise ValidationError(f"{label}不能超过240个字符")
     return title
-
-
-def _model_matches_minimax_m3(value: str | None) -> bool:
-    normalized = re.sub(r"[^a-z0-9]", "", (value or "").lower())
-    return normalized == "minimaxm3"
 
 
 def _next_position(session: Session, model: Any, novel_id: UUID) -> int:
@@ -3057,9 +3052,13 @@ def _creative_job_payload(job: CreativeGenerationJob) -> dict[str, Any]:
         "state": job.state,
         "input_hash": job.input_hash,
         "input_snapshot": job.input_snapshot,
+        "execution_agent_id": job.execution_agent_id,
+        "requested_provider_id": job.requested_provider_id,
         "requested_model_id": job.requested_model_id,
+        "generation_contract_version": job.generation_contract_version,
+        "actual_provider_id": job.actual_provider_id,
         "actual_model_id": job.actual_model_id,
-        "provider_profile": job.provider_profile,
+        "provider_profile": job.actual_provider_id or job.provider_profile,
         "output_json": job.output_json,
         "output_text": job.output_text,
         "target_character_count": job.target_character_count,
@@ -3078,16 +3077,27 @@ def start_creative_generation(
     scope_id: UUID,
     kind: str,
     input_snapshot: dict[str, Any],
+    execution_agent_id: str,
+    requested_provider_id: str,
+    requested_model_id: str,
+    generation_contract_version: str,
     novel_id: UUID | None = None,
     document_id: UUID | None = None,
     target_character_count: int | None = None,
-    requested_model_id: str = MINIMAX_M3_MODEL_ID,
     force_new: bool = False,
 ) -> dict[str, Any]:
     if kind not in CREATIVE_GENERATION_KINDS:
         raise ValidationError("创作生成类型无效")
-    if not _model_matches_minimax_m3(requested_model_id):
-        raise ValidationError("本项目的创作生成模型固定为 MiniMax M3")
+    if not all(
+        value.strip()
+        for value in (
+            execution_agent_id,
+            requested_provider_id,
+            requested_model_id,
+            generation_contract_version,
+        )
+    ):
+        raise ValidationError("创作生成缺少可核验的 Agent 或 requested 模型证据")
     if novel_id:
         _require_novel(session, novel_id)
     if document_id:
@@ -3102,11 +3112,28 @@ def start_creative_generation(
         novel_id=novel_id,
         document_id=document_id,
     )
-    serialized = json.dumps(input_snapshot, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    serialized = json.dumps(
+        {
+            "input_snapshot": input_snapshot,
+            "execution_agent_id": execution_agent_id,
+            "requested_provider_id": requested_provider_id,
+            "requested_model_id": requested_model_id,
+            "generation_contract_version": generation_contract_version,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
     if len(serialized) > 500_000:
         raise ValidationError("生成输入快照不能超过500000个字符")
     input_digest = content_hash(serialized)
     attempt = 1
+    _lock_generation_attempt(
+        session,
+        namespace=f"creative:{scope_type}:{kind}",
+        scope_key=str(scope_id),
+        input_hash=input_digest,
+    )
     existing = session.scalar(
         select(CreativeGenerationJob)
         .where(
@@ -3117,8 +3144,10 @@ def start_creative_generation(
         )
         .order_by(CreativeGenerationJob.attempt.desc())
     )
-    if existing and not force_new:
-        return _creative_job_payload(existing)
+    if existing and not force_new and existing.state in {"running", "ready"}:
+        payload = _creative_job_payload(existing)
+        payload["should_execute"] = False
+        return payload
     if existing:
         attempt = existing.attempt + 1
     job = CreativeGenerationJob(
@@ -3131,13 +3160,18 @@ def start_creative_generation(
         state="running",
         input_hash=input_digest,
         input_snapshot=input_snapshot,
-        requested_model_id=MINIMAX_M3_MODEL_ID,
+        execution_agent_id=execution_agent_id,
+        requested_provider_id=requested_provider_id,
+        requested_model_id=requested_model_id,
+        generation_contract_version=generation_contract_version,
         target_character_count=target_character_count,
         attempt=attempt,
     )
     session.add(job)
     session.commit()
-    return _creative_job_payload(job)
+    payload = _creative_job_payload(job)
+    payload["should_execute"] = True
+    return payload
 
 
 def _validate_creative_generation_scope(
@@ -3270,7 +3304,7 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
     if instruction is None:
         raise ValidationError("创作生成类型无效")
     return (
-        "你是长篇小说创作流程中的结构化助手。本次固定使用 MiniMax M3。\n"
+        "你是长篇小说创作流程中的结构化助手。\n"
         "只返回一个严格 JSON 对象，不要 Markdown 代码围栏、解释、状态胶囊或保存声明。\n"
         f"任务：{instruction}\n"
         "输入快照：\n"
@@ -3282,8 +3316,8 @@ def complete_creative_generation(
     session: Session,
     job_id: UUID,
     *,
+    actual_provider_id: str,
     actual_model_id: str,
-    provider_profile: str,
     output_text: str = "",
     output_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -3294,19 +3328,24 @@ def complete_creative_generation(
     )
     if job is None:
         raise NotFoundError(f"creative generation job {job_id} not found")
-    if job.state == "ready":
+    if job.state != "running":
         return _creative_job_payload(job)
-    if not _model_matches_minimax_m3(actual_model_id):
+    job.actual_provider_id = actual_provider_id
+    job.actual_model_id = actual_model_id
+    if (
+        actual_provider_id != job.requested_provider_id
+        or actual_model_id != job.requested_model_id
+    ):
         job.state = "failed"
-        job.actual_model_id = actual_model_id
-        job.provider_profile = provider_profile
-        job.failure_message = "实际模型不是 MiniMax M3，结果已作废"
+        job.failure_message = (
+            "创作回复模型与任务启动模型不一致，结果已作废："
+            f"requested={job.requested_provider_id}/{job.requested_model_id}, "
+            f"actual={actual_provider_id}/{actual_model_id}"
+        )
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
         raise ValidationError(job.failure_message)
     job.state = "ready"
-    job.actual_model_id = actual_model_id
-    job.provider_profile = provider_profile
     job.output_text = output_text.strip()
     job.output_json = output_json or {}
     job.output_visible_character_count = visible_character_count(job.output_text)
@@ -3317,11 +3356,25 @@ def complete_creative_generation(
 
 
 def fail_creative_generation(
-    session: Session, job_id: UUID, *, failure_message: str
+    session: Session,
+    job_id: UUID,
+    *,
+    failure_message: str,
+    actual_provider_id: str | None = None,
+    actual_model_id: str | None = None,
 ) -> dict[str, Any]:
-    job = session.get(CreativeGenerationJob, job_id)
+    job = session.scalar(
+        select(CreativeGenerationJob)
+        .where(CreativeGenerationJob.id == job_id)
+        .with_for_update()
+    )
     if job is None:
         raise NotFoundError(f"creative generation job {job_id} not found")
+    if job.state != "running":
+        return _creative_job_payload(job)
+    if actual_provider_id and actual_model_id:
+        job.actual_provider_id = actual_provider_id
+        job.actual_model_id = actual_model_id
     job.state = "failed"
     job.failure_message = failure_message[:4000]
     job.completed_at = datetime.now(timezone.utc)

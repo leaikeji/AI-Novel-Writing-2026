@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from qwenpaw.pawapp import get_ctx
 from sqlalchemy.orm import Session
 
 from .creative_schemas import (
@@ -98,9 +97,16 @@ from .creative_services import (
     update_volume,
 )
 from .database import get_session
+from .generation_dependencies import (
+    get_novel_effective_model,
+    get_novel_generation_ctx,
+)
 from .model_runtime import (
+    GENERATION_CONTRACT_VERSION,
+    NOVEL_AGENT_ID,
+    ModelAudit,
     ModelVerificationError,
-    configured_model_audit,
+    ensure_prompt_within_effective_limit,
     normalize_creative_generation_json,
     parse_model_json,
     reply_model_audit,
@@ -476,10 +482,13 @@ def relationships_auto_sync_status(
 async def relationships_auto_sync(
     novel_id: UUID,
     request: SyncRelationshipsRequest,
-    ctx=Depends(get_ctx),
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     job: dict[str, object] | None = None
+    owns_execution = False
+    actual_model: ModelAudit | None = None
     try:
         snapshot = build_relationship_graph_snapshot(session, novel_id)
         job = start_creative_generation(
@@ -488,33 +497,36 @@ async def relationships_auto_sync(
             scope_id=novel_id,
             kind="relationship_graph",
             input_snapshot=snapshot,
+            execution_agent_id=NOVEL_AGENT_ID,
+            requested_provider_id=configured_model.provider_id,
+            requested_model_id=configured_model.model_id,
+            generation_contract_version=GENERATION_CONTRACT_VERSION,
             novel_id=novel_id,
-            requested_model_id="MiniMax-M3",
             force_new=request.force_new,
         )
-        if job["state"] == "failed" and not request.force_new:
-            job = start_creative_generation(
-                session,
-                scope_type="novel",
-                scope_id=novel_id,
-                kind="relationship_graph",
-                input_snapshot=snapshot,
-                novel_id=novel_id,
-                requested_model_id="MiniMax-M3",
-                force_new=True,
+        owns_execution = bool(job.get("should_execute", True))
+        if job["state"] == "running" and not owns_execution:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "type": "relationship_generation_in_progress",
+                    "job": job,
+                },
             )
-        if job["state"] == "running":
-            configured_model = configured_model_audit(ctx.agent_id)
+        if job["state"] == "running" and job.get("should_execute", True):
             generation_session_id = f"novel-relationship-auto-sync:{job['id']}"
+            prompt = build_creative_generation_prompt(job)
+            ensure_prompt_within_effective_limit(prompt, configured_model)
             reply = await ctx.chat(
-                build_creative_generation_prompt(job),
+                prompt,
                 skill="story-bible",
                 session_id=generation_session_id,
             )
             actual_model = reply_model_audit(
                 reply,
                 session_id=generation_session_id,
-            ).ensure_matches(configured_model)
+            )
+            actual_model.ensure_matches(configured_model)
             try:
                 parsed_output = parse_model_json(reply.text)
             except ModelVerificationError:
@@ -527,8 +539,8 @@ async def relationships_auto_sync(
             job = complete_creative_generation(
                 session,
                 UUID(str(job["id"])),
+                actual_provider_id=actual_model.provider_id,
                 actual_model_id=actual_model.model_id,
-                provider_profile=actual_model.provider_id,
                 output_text=reply.text,
                 output_json=output_json,
             )
@@ -539,12 +551,16 @@ async def relationships_auto_sync(
         )
     except Exception as error:
         session.rollback()
-        if job is not None and job.get("id") and job.get("state") == "running":
+        if owns_execution and job is not None and job.get("id"):
             try:
                 failed = fail_creative_generation(
                     session,
                     UUID(str(job["id"])),
                     failure_message=str(error),
+                    actual_provider_id=(
+                        actual_model.provider_id if actual_model else None
+                    ),
+                    actual_model_id=(actual_model.model_id if actual_model else None),
                 )
             except Exception:
                 session.rollback()
@@ -905,10 +921,12 @@ def chapter_drafts_complete(
 @router.post("/creative-generations", status_code=status.HTTP_201_CREATED)
 async def creative_generations_create(
     request: StartCreativeGenerationRequest,
-    ctx=Depends(get_ctx),
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     job: dict[str, object] | None = None
+    actual_model: ModelAudit | None = None
     try:
         job = start_creative_generation(
             session,
@@ -916,25 +934,30 @@ async def creative_generations_create(
             scope_id=request.scope_id,
             kind=request.kind,
             input_snapshot=request.input_snapshot,
+            execution_agent_id=NOVEL_AGENT_ID,
+            requested_provider_id=configured_model.provider_id,
+            requested_model_id=configured_model.model_id,
+            generation_contract_version=GENERATION_CONTRACT_VERSION,
             novel_id=request.novel_id,
             document_id=request.document_id,
             target_character_count=request.target_character_count,
-            requested_model_id=request.requested_model_id,
             force_new=request.force_new,
         )
-        if job["state"] != "running":
+        if job["state"] != "running" or not job.get("should_execute", True):
             return job
-        configured_model = configured_model_audit(ctx.agent_id)
         generation_session_id = f"novel-creative-generation:{job['id']}"
+        prompt = build_creative_generation_prompt(job)
+        ensure_prompt_within_effective_limit(prompt, configured_model)
         reply = await ctx.chat(
-            build_creative_generation_prompt(job),
+            prompt,
             skill="story-bible",
             session_id=generation_session_id,
         )
         actual_model = reply_model_audit(
             reply,
             session_id=generation_session_id,
-        ).ensure_matches(configured_model)
+        )
+        actual_model.ensure_matches(configured_model)
         try:
             parsed_output = parse_model_json(reply.text)
         except ModelVerificationError:
@@ -950,8 +973,8 @@ async def creative_generations_create(
         return complete_creative_generation(
             session,
             UUID(str(job["id"])),
+            actual_provider_id=actual_model.provider_id,
             actual_model_id=actual_model.model_id,
-            provider_profile=actual_model.provider_id,
             output_text=reply.text,
             output_json=output_json,
         )
@@ -963,6 +986,10 @@ async def creative_generations_create(
                     session,
                     UUID(str(job["id"])),
                     failure_message=str(error),
+                    actual_provider_id=(
+                        actual_model.provider_id if actual_model else None
+                    ),
+                    actual_model_id=(actual_model.model_id if actual_model else None),
                 )
             except Exception:
                 session.rollback()

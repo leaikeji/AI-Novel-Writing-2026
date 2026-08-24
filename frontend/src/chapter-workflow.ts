@@ -1,10 +1,20 @@
-import { ApiError, apiRequest } from "./api";
+import {
+  actualGenerationModelLabel,
+  ApiError,
+  apiRequest,
+  completedGenerationModelLabel,
+  generationModelLabel,
+  generationModelAuditLabel,
+  getGenerationModelStatus,
+  requestedGenerationModelLabel,
+} from "./api";
 import {
   CandidateRecord,
   ChapterBriefRecord,
   CreativeGenerationRecord,
   DocumentRecord,
   GenerationJobRecord,
+  GenerationModelStatus,
   IntelligenceItemRecord,
   IntelligenceProposalRecord,
   NovelRecord,
@@ -42,7 +52,6 @@ const {
   SyncOutlined,
 } = host.antdIcons;
 const TextArea = Input.TextArea;
-const FIXED_MODEL_ID = "MiniMax-M3";
 
 
 interface ChapterWorkflowProps {
@@ -244,7 +253,14 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [selectedProposal, setSelectedProposal] = React.useState(null as IntelligenceProposalRecord | null);
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [reviewJob, setReviewJob] = React.useState(null as CreativeGenerationRecord | null);
+  const [activeGenerationModel, setActiveGenerationModel] = React.useState(null as GenerationModelStatus | null);
   const [busyAction, setBusyAction] = React.useState("");
+
+  const loadGenerationModel = async (): Promise<GenerationModelStatus> => {
+    const current = await getGenerationModelStatus();
+    setActiveGenerationModel(current);
+    return current;
+  };
 
   React.useEffect(() => {
     setBrief(null);
@@ -372,6 +388,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     onBodyGenerationStateChange?.(true, bodyStage);
     setBusyAction("generate");
     try {
+      const currentModel = await loadGenerationModel();
+      const currentModelLabel = generationModelLabel(currentModel);
       if (onPrepareGeneration) {
         const prepared = await onPrepareGeneration();
         if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
@@ -388,24 +406,22 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         setGenerationStage(attemptStage);
         onBodyGenerationStateChange?.(true, attemptStage);
         onStatus(attempt === 1
-          ? `${FIXED_MODEL_ID} 正在创作章节正文…`
+          ? `${currentModelLabel} 正在创作章节正文…`
           : `第 ${attempt} 次整章重写中，上次正文未达 1000—1500 字范围…`);
 
         try {
           const job = await apiRequest<GenerationJobRecord>(
-            `/documents/${document.id}/generation-jobs/body?agent_id=ai-novel-writer`,
+            `/documents/${document.id}/generation-jobs/body`,
             {
               method: "POST",
               body: JSON.stringify({
                 expected_brief_version: currentBrief.version,
                 force_new: true,
                 asset_ids: assetIds,
-                requested_model_id: FIXED_MODEL_ID,
               }),
             },
           );
           if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
-          if (job.actual_model_id !== FIXED_MODEL_ID) throw new Error("实际模型不是 MiniMax-M3，结果已作废");
           acceptedJob = job;
           break;
         } catch (reason) {
@@ -427,7 +443,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       );
       setFeaturedCandidateId(result.candidate.id);
       setSelectedAssetIds([]);
-      onDocumentChanged(result.document, `${FIXED_MODEL_ID} 正文生成完成 · ${result.candidate.visible_character_count} 字`);
+      const completedModel = completedGenerationModelLabel(acceptedJob);
+      onDocumentChanged(result.document, `${completedModel} 正文生成完成 · ${result.candidate.visible_character_count} 字`);
       await runSyncProgress(result.document, true);
     } catch (reason) {
       const message = errorMessage(reason, "生成正文失败");
@@ -440,8 +457,15 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  const confirmGenerateBody = (assetIds: string[]) => {
+  const confirmGenerateBody = async (assetIds: string[]) => {
     setAssetPickerOpen(false);
+    let currentModel: GenerationModelStatus;
+    try {
+      currentModel = await loadGenerationModel();
+    } catch (reason) {
+      onError(errorMessage(reason, "读取当前有效模型失败"));
+      return;
+    }
     Modal.confirm({
       className: "anw-modal anw-generation-confirm",
       title: "确认",
@@ -451,7 +475,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         h("strong", null, "⚠️ 请确保网络畅通，并保持该页面始终显示在最上方"),
         h("p", null, "若屏幕关闭 / 切换应用 / 网络波动，易导致生成失败。"),
         h("p", null, "生成一旦开始，已产生的模型消耗不可撤回。"),
-        h("p", null, "若多次出现生成失败，请检查 MiniMax-M3 模型连接。"),
+        h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
+        h("p", null, "若多次出现生成失败，请检查当前有效模型连接。"),
         h("b", null, "确定继续生成吗？"),
       ),
       okText: "确定",
@@ -556,6 +581,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setGenerationStage("正在从本章正文提取角色、关系、故事线与伏笔进展");
     if (!silent) setGeneratingOpen(true);
     try {
+      const currentModel = await loadGenerationModel();
       const prepared = preparedOverride ?? (onPrepareGeneration ? await onPrepareGeneration() : document);
       if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       const checkpoint = await apiRequest<{ document: DocumentRecord }>(`/documents/${prepared.id}/checkpoints`, {
@@ -564,12 +590,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       });
       const source = checkpoint.document;
       if (!source.base_revision_id) throw new Error("本章正文尚未形成可同步版本");
-      onDocumentChanged(source, `${FIXED_MODEL_ID} 正在同步进展…`);
+      onDocumentChanged(source, `${generationModelLabel(currentModel)} 正在同步进展…`);
       let proposal = await apiRequest<IntelligenceProposalRecord>(
-        `/documents/${source.id}/intelligence-proposals?agent_id=ai-novel-writer`,
+        `/documents/${source.id}/intelligence-proposals`,
         { method: "POST", body: JSON.stringify({ revision_id: source.base_revision_id }) },
       );
-      if (proposal.actual_model_id !== FIXED_MODEL_ID) throw new Error("实际模型不是 MiniMax-M3，情报结果已作废");
       const syncableIds = proposal.items
         .filter((item) => item.review_state === "pending" || item.review_state === "accepted")
         .map((item) => item.id);
@@ -588,7 +613,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       setIntelligenceOpen(true);
       const relationshipTotal = relationshipChanges.created + relationshipChanges.updated;
       onStatus(
-        `同步进展完成 · ${proposal.items.length} 条本章情报 · ${relationshipTotal ? `关系网新增/更新 ${relationshipTotal} 条` : "关系网已同步"}`,
+        `${completedGenerationModelLabel(proposal)} 同步进展完成 · ${proposal.items.length} 条本章情报 · ${relationshipTotal ? `关系网新增/更新 ${relationshipTotal} 条` : "关系网已同步"}`,
       );
     } catch (reason) {
       onError(errorMessage(reason, "同步进展失败"));
@@ -599,13 +624,21 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   }
 
-  const confirmSyncProgress = () => {
+  const confirmSyncProgress = async () => {
+    let currentModel: GenerationModelStatus;
+    try {
+      currentModel = await loadGenerationModel();
+    } catch (reason) {
+      onError(errorMessage(reason, "读取当前有效模型失败"));
+      return;
+    }
     Modal.confirm({
       className: "anw-modal anw-sync-confirm",
       title: "确认",
       width: 520,
       content: h("div", { className: "anw-sync-copy" },
         h("p", null, `本次同步进展将分析 ${document.visible_character_count} 字正文。`),
+        h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
         h("p", null, "AI 将根据当前章节内容提取情报信息（角色、伏笔、剧情线等），并更新到作品创作资料中。"),
         h("strong", null, "确认同步并继续吗？"),
       ),
@@ -620,6 +653,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setGenerationStage("正在从文字流畅、描写生动、人物一致性等维度审阅正文");
     setGeneratingOpen(true);
     try {
+      await loadGenerationModel();
       const prepared = onPrepareGeneration ? await onPrepareGeneration() : document;
       if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       const currentBrief = await ensureBrief();
@@ -639,14 +673,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
             expectation_text: currentBrief.expectation_text,
             content_markdown: prepared.content_markdown,
           },
-          requested_model_id: FIXED_MODEL_ID,
           force_new: true,
         }),
       });
-      if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) throw new Error(job.failure_message || "MiniMax-M3 审稿失败");
+      if (job.state !== "ready") throw new Error(job.failure_message || "模型审稿失败");
       setReviewJob(job);
       setReviewOpen(true);
-      onStatus("AI 审稿完成");
+      onStatus(`${completedGenerationModelLabel(job)} AI 审稿完成`);
     } catch (reason) {
       onError(errorMessage(reason, "AI 审稿失败"));
     } finally {
@@ -655,12 +688,19 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  const confirmReview = () => {
+  const confirmReview = async () => {
+    let currentModel: GenerationModelStatus;
+    try {
+      currentModel = await loadGenerationModel();
+    } catch (reason) {
+      onError(errorMessage(reason, "读取当前有效模型失败"));
+      return;
+    }
     Modal.confirm({
       className: "anw-modal anw-review-confirm",
       title: "确认",
       width: 520,
-      content: "审稿将使用 MiniMax-M3 从文字流畅、描写生动、人物一致性、时空因果、伏笔与重复内容等维度分析正文并给出修改建议。是否开始审稿？",
+      content: `审稿将使用 ${generationModelLabel(currentModel)}，从文字流畅、描写生动、人物一致性、时空因果、伏笔与重复内容等维度分析正文并给出修改建议。是否开始审稿？`,
       okText: "确定",
       cancelText: "取消",
       onOk: () => { void runReview(); },
@@ -762,11 +802,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       onCancel: () => setQuickAssetOpen(false),
       footer: [h(Button, { key: "cancel", onClick: () => setQuickAssetOpen(false) }, "取消"), h(Button, { key: "save", type: "primary", loading: busyAction === "asset-create", disabled: !quickAssetTitle.trim() || !quickAssetContent.trim(), onClick: saveQuickAsset }, "添加并选中")],
     }, h("div", { className: "anw-quick-asset-body" }, field("名称", h(Input, { value: quickAssetTitle, maxLength: 160, onChange: (event: any) => setQuickAssetTitle(event.target.value), placeholder: `给这条${currentAssetLabel}起个名字` })), field("内容", h(TextArea, { rows: 7, value: quickAssetContent, maxLength: 12000, showCount: true, onChange: (event: any) => setQuickAssetContent(event.target.value), placeholder: "输入希望本次正文重点采用的内容" })))),
-    h(Modal, { open: generatingOpen, className: "anw-modal anw-generating-modal", width: 520, centered: true, closable: false, maskClosable: false, keyboard: false, footer: null }, h("section", { className: "anw-generation-progress" }, h(Spin, { size: "large" }), h("h2", null, `${FIXED_MODEL_ID} 正在工作`), h("p", null, generationStage), h("span", null, "完成后将自动返回当前章节"))),
+    h(Modal, { open: generatingOpen, className: "anw-modal anw-generating-modal", width: 520, centered: true, closable: false, maskClosable: false, keyboard: false, footer: null }, h("section", { className: "anw-generation-progress" }, h(Spin, { size: "large" }), h("h2", null, `${activeGenerationModel ? generationModelLabel(activeGenerationModel) : "当前有效模型"} 正在工作`), h("p", null, generationStage), h("span", null, "完成后将自动返回当前章节"))),
     h(Modal, {
       open: jobsOpen,
       className: "anw-modal anw-generation-history-modal",
-      title: h("div", { className: "anw-history-title" }, h("strong", null, `生成历史（共 ${jobs.length} 次）`), h(Tag, { color: "processing" }, FIXED_MODEL_ID)),
+      title: h("div", { className: "anw-history-title" }, h("strong", null, `生成历史（共 ${jobs.length} 次）`), h(Tag, { color: "processing" }, "按任务记录模型")),
       width: 760,
       centered: true,
       footer: null,
@@ -774,9 +814,17 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }, jobs.length === 0 ? h(Empty, { description: "还没有正文生成记录" }) : h("div", { className: "anw-generation-history-list" }, ...jobs.map((job: GenerationJobRecord) => {
       const candidate = job.candidate;
       const state = candidate?.state ?? job.state;
+      const requestedModel = requestedGenerationModelLabel(job);
+      const actualModel = actualGenerationModelLabel(job);
       return h("article", { key: job.id, className: `anw-history-card${candidate?.id === featuredCandidateId ? " is-featured" : ""}` },
         h("header", null, h("div", null, h("strong", null, `第 ${job.attempt || 1} 次生成`), h("span", null, formatDate(job.completed_at || job.created_at))), h(Tag, { color: stateColor(state) }, stateLabel(state))),
-        h("div", { className: "anw-history-meta" }, h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`), h("span", null, `验收 ${job.target_visible_character_count || 1000}-1500 字`), h("span", null, job.actual_model_id || job.requested_model_id || FIXED_MODEL_ID)),
+        h("div", { className: "anw-history-meta" },
+          h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`),
+          h("span", null, `验收 ${job.target_visible_character_count || 1000}-1500 字`),
+          state === "failed"
+            ? h("span", null, actualModel ? `请求 ${requestedModel} · 实际 ${actualModel}` : `请求 ${requestedModel} · 实际未核验`)
+            : h("span", null, `实际 ${completedGenerationModelLabel(job)}`),
+        ),
         candidate ? h("p", null, candidate.content_text.slice(0, 230) || "本次生成正文为空") : h("p", { className: "is-error" }, job.failure_message || "本次生成没有可用正文"),
         h("footer", null, job.asset_snapshot?.length ? h("small", null, `采用私有库：${job.asset_snapshot.map((item: GenerationJobRecord["asset_snapshot"][number]) => item.title).join("、")}`) : h("small", null, "未选择私有库配置"), h(Button, { disabled: !candidate || candidate.state === "rejected", loading: busyAction === `restore:${candidate?.id}`, onClick: () => void restoreCandidate(job) }, candidate ? "恢复此版本" : "需要整章重写")),
       );
@@ -786,7 +834,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       {
         open: intelligenceOpen,
         className: "anw-modal anw-intelligence-modal",
-        title: h("div", { className: "anw-intelligence-title" }, h("strong", null, "本章章节情报"), h("span", null, "（本内容由AI生成）")),
+        title: h("div", { className: "anw-intelligence-title" }, h("strong", null, "本章章节情报"), h("span", null, selectedProposal ? `（${selectedProposal.state === "failed" ? generationModelAuditLabel(selectedProposal) : `实际 ${completedGenerationModelLabel(selectedProposal)}`}）` : "（本内容由AI生成）")),
         width: 800,
         centered: true,
         onCancel: () => setIntelligenceOpen(false),
@@ -818,11 +866,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     h(Modal, {
       open: reviewOpen,
       className: "anw-modal anw-review-result-modal",
-      title: h("div", { className: "anw-review-title" }, h(AuditOutlined), h("strong", null, "AI审稿报告"), h(Tag, { color: "processing" }, FIXED_MODEL_ID)),
+      title: h("div", { className: "anw-review-title" }, h(AuditOutlined), h("strong", null, "AI审稿报告"), h(Tag, { color: "processing" }, reviewJob ? `实际 ${completedGenerationModelLabel(reviewJob)}` : "当前任务模型")),
       width: 820,
       centered: true,
       footer: [h(Button, { key: "close", type: "primary", onClick: () => setReviewOpen(false) }, "关闭")],
       onCancel: () => setReviewOpen(false),
-    }, reviewJob ? h("div", { className: "anw-review-result" }, h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "MiniMax-M3 已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
+    }, reviewJob ? h("div", { className: "anw-review-result" }, h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "模型已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
   );
 }

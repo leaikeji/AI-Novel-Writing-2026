@@ -12,7 +12,6 @@ from urllib.request import Request, urlopen
 APP_ID = "ai-novel-world-2026"
 APP_VERSION = "0.3.0"
 NOVEL_AGENT_ID = "ai-novel-writer"
-NOVEL_MODEL = {"provider_id": "minimax-cn", "model": "MiniMax-M3"}
 NOVEL_SKILLS = {
     "novel-direction",
     "story-bible",
@@ -57,8 +56,9 @@ def verify() -> dict[str, object]:
     assert health.get("app_id") == APP_ID
     assert health.get("ai_candidate_generation_enabled") is True
     assert health.get("ai_authoritative_write_enabled") is False
-    assert health.get("required_generation_model") == "MiniMax-M3"
-    assert health.get("model_verification_mode") == "agent-config+provider-usage"
+    assert health.get("generation_agent_id") == NOVEL_AGENT_ID
+    assert health.get("generation_model_policy") == "follow-agent-effective"
+    assert health.get("model_verification_mode") == "preflight-effective+provider-usage"
 
     agent_payload = get_json("/api/agents")
     assert isinstance(agent_payload, dict)
@@ -66,7 +66,20 @@ def verify() -> dict[str, object]:
     agent_ids = set(agents)
     assert NOVEL_AGENT_ID in agent_ids
     assert {"default", "QwenPaw_QA_Agent_0.2"}.issubset(agent_ids)
-    assert agents[NOVEL_AGENT_ID].get("active_model") == NOVEL_MODEL
+    effective_model = get_json(
+        f"/api/models/active?scope=effective&agent_id={NOVEL_AGENT_ID}"
+    )
+    assert isinstance(effective_model, dict)
+    active_llm = effective_model.get("active_llm")
+    assert isinstance(active_llm, dict)
+    assert str(active_llm.get("provider_id") or "").strip()
+    assert str(active_llm.get("model") or "").strip()
+    runtime_model = get_json(f"/api/{APP_ID}/generation-model")
+    assert isinstance(runtime_model, dict)
+    assert runtime_model.get("agent_id") == NOVEL_AGENT_ID
+    assert runtime_model.get("policy") == "follow-agent-effective"
+    assert runtime_model.get("provider_id") == active_llm.get("provider_id")
+    assert runtime_model.get("model_id") == active_llm.get("model")
 
     enabled_scope: dict[str, list[str]] = {}
     for agent_id in ("default", "QwenPaw_QA_Agent_0.2", NOVEL_AGENT_ID):
@@ -125,7 +138,7 @@ def verify() -> dict[str, object]:
         "pawapp": f"{APP_ID}@{APP_VERSION}",
         "health": health.get("status"),
         "agents": sorted(agent_ids),
-        "novel_model": NOVEL_MODEL,
+        "novel_model": active_llm,
         "enabled_novel_skills": enabled_scope,
         "enabled_novel_tools": enabled_tools,
         "system_prompt_files": system_prompt_files,

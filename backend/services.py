@@ -10,7 +10,7 @@ from difflib import unified_diff
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -78,7 +78,6 @@ class RestorationPlanConflictError(DomainError):
 
 
 CURRENT_FACT_STATUSES = ("active", "source_restored")
-MINIMAX_M3_MODEL_ID = "MiniMax-M3"
 MINIMUM_COMPLETED_CHAPTER_CHARACTERS = 1000
 TARGET_COMPLETED_CHAPTER_CHARACTERS = 1250
 MAXIMUM_COMPLETED_CHAPTER_CHARACTERS = 1500
@@ -86,6 +85,25 @@ MAXIMUM_COMPLETED_CHAPTER_CHARACTERS = 1500
 
 def content_hash(markdown: str) -> str:
     return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+
+
+def _lock_generation_attempt(
+    session: Session,
+    *,
+    namespace: str,
+    scope_key: str,
+    input_hash: str,
+) -> None:
+    """Serialize attempt allocation for one PostgreSQL generation key."""
+
+    bind = session.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    lock_key = f"ai-novel-generation:{namespace}:{scope_key}:{input_hash}"
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+        {"lock_key": lock_key},
+    )
 
 
 def markdown_to_text(markdown: str) -> str:
@@ -255,11 +273,15 @@ def _generation_job_payload(
         "base_revision_id": str(job.base_revision_id) if job.base_revision_id else None,
         "base_draft_version": job.base_draft_version,
         "base_content_hash": job.base_content_hash,
+        "execution_agent_id": job.execution_agent_id,
+        "requested_provider_id": job.requested_provider_id,
         "model_profile_fingerprint": job.model_profile_fingerprint,
         "asset_snapshot": job.asset_snapshot,
         "requested_model_id": job.requested_model_id,
+        "generation_contract_version": job.generation_contract_version,
+        "actual_provider_id": job.actual_provider_id,
         "actual_model_id": job.actual_model_id,
-        "provider_profile": job.provider_profile,
+        "provider_profile": job.actual_provider_id or job.provider_profile,
         "target_visible_character_count": job.target_visible_character_count,
         "output_visible_character_count": job.output_visible_character_count,
         "validation_state": job.validation_state,
@@ -320,10 +342,15 @@ def _intelligence_proposal_payload(
         "input_hash": proposal.input_hash,
         "state": proposal.state,
         "source_current": source_current,
+        "execution_agent_id": proposal.execution_agent_id,
+        "requested_provider_id": proposal.requested_provider_id,
         "requested_model_id": proposal.requested_model_id,
+        "generation_contract_version": proposal.generation_contract_version,
+        "actual_provider_id": proposal.actual_provider_id,
         "actual_model_id": proposal.actual_model_id,
-        "provider_profile": proposal.provider_profile,
+        "provider_profile": proposal.actual_provider_id or proposal.provider_profile,
         "model_profile_fingerprint": proposal.model_profile_fingerprint,
+        "attempt": proposal.attempt,
         "failure_message": proposal.failure_message,
         "items": [_intelligence_item_payload(item) for item in items],
         "created_at": proposal.created_at.isoformat() if proposal.created_at else None,
@@ -759,10 +786,13 @@ def start_chapter_generation(
     document_id: UUID,
     *,
     expected_brief_version: int,
+    execution_agent_id: str,
+    requested_provider_id: str,
+    requested_model_id: str,
+    generation_contract_version: str,
     force_new: bool = False,
     asset_ids: list[UUID] | None = None,
     preset_id: UUID | None = None,
-    requested_model_id: str = MINIMAX_M3_MODEL_ID,
 ) -> dict[str, Any]:
     document = _require_document(session, document_id)
     if document.kind != "chapter":
@@ -772,9 +802,16 @@ def start_chapter_generation(
         raise ValidationError("请先保存章节任务书")
     if brief.version != expected_brief_version:
         raise BriefConflictError(_brief_payload(brief, document_id))
-    normalized_model = re.sub(r"[^a-z0-9]", "", requested_model_id.lower())
-    if normalized_model != "minimaxm3":
-        raise ValidationError("本项目的正文生成模型固定为 MiniMax M3")
+    if not all(
+        value.strip()
+        for value in (
+            execution_agent_id,
+            requested_provider_id,
+            requested_model_id,
+            generation_contract_version,
+        )
+    ):
+        raise ValidationError("正文生成缺少可核验的 Agent 或 requested 模型证据")
     working = session.get(DocumentWorkingCopy, document_id)
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
@@ -793,34 +830,38 @@ def start_chapter_generation(
         "target_visible_character_count": acceptance_target,
         "requested_visible_character_count": TARGET_COMPLETED_CHAPTER_CHARACTERS,
     }
-    attempt = 1
-    if force_new:
-        previous_attempts = session.scalar(
-            select(func.count(ChapterGenerationJob.id)).where(
-                ChapterGenerationJob.document_id == document_id,
-                ChapterGenerationJob.kind == "body",
-                ChapterGenerationJob.brief_version == brief.version,
-                ChapterGenerationJob.base_content_hash == working.content_hash,
-            )
-        )
-        attempt = int(previous_attempts or 0) + 1
-        snapshot["generation_attempt"] = attempt
-    serialized = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    hash_material = {
+        "input_snapshot": snapshot,
+        "execution_agent_id": execution_agent_id,
+        "requested_provider_id": requested_provider_id,
+        "requested_model_id": requested_model_id,
+        "generation_contract_version": generation_contract_version,
+    }
+    serialized = json.dumps(
+        hash_material,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     input_hash = content_hash(serialized)
+    _lock_generation_attempt(
+        session,
+        namespace="chapter-body",
+        scope_key=str(document_id),
+        input_hash=input_hash,
+    )
     existing = session.scalar(
         select(ChapterGenerationJob).where(
             ChapterGenerationJob.document_id == document_id,
             ChapterGenerationJob.kind == "body",
             ChapterGenerationJob.input_hash == input_hash,
-        )
+        ).order_by(ChapterGenerationJob.attempt.desc())
     )
-    if existing is not None:
-        if existing.state == "failed":
-            existing.state = "running"
-            existing.failure_message = None
-            existing.completed_at = None
-            session.commit()
-        return _generation_job_payload(session, existing, include_snapshot=True)
+    if existing is not None and not force_new and existing.state in {"running", "ready"}:
+        payload = _generation_job_payload(session, existing, include_snapshot=True)
+        payload["should_execute"] = False
+        return payload
+    attempt = (existing.attempt + 1) if existing is not None else 1
     job = ChapterGenerationJob(
         id=uuid4(),
         document_id=document_id,
@@ -833,13 +874,18 @@ def start_chapter_generation(
         base_content_hash=working.content_hash,
         generation_context_snapshot=snapshot,
         asset_snapshot=asset_snapshot,
-        requested_model_id=MINIMAX_M3_MODEL_ID,
+        execution_agent_id=execution_agent_id,
+        requested_provider_id=requested_provider_id,
+        requested_model_id=requested_model_id,
+        generation_contract_version=generation_contract_version,
         target_visible_character_count=acceptance_target,
         attempt=attempt,
     )
     session.add(job)
     session.commit()
-    return _generation_job_payload(session, job, include_snapshot=True)
+    payload = _generation_job_payload(session, job, include_snapshot=True)
+    payload["should_execute"] = True
+    return payload
 
 
 def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
@@ -964,9 +1010,8 @@ def complete_chapter_generation(
     job_id: UUID,
     *,
     content_markdown: str,
-    model_profile_fingerprint: str = "qwenpaw-active-agent",
+    actual_provider_id: str,
     actual_model_id: str,
-    provider_profile: str,
 ) -> dict[str, Any]:
     job = session.scalar(
         select(ChapterGenerationJob)
@@ -980,22 +1025,27 @@ def complete_chapter_generation(
     )
     if existing is not None:
         return _generation_job_payload(session, job)
-    candidate_text = _clean_model_candidate(content_markdown)
-    normalized_model = re.sub(r"[^a-z0-9]", "", actual_model_id.lower())
-    if normalized_model != "minimaxm3":
+    if job.state != "running":
+        return _generation_job_payload(session, job)
+    job.actual_provider_id = actual_provider_id
+    job.actual_model_id = actual_model_id
+    if (
+        actual_provider_id != job.requested_provider_id
+        or actual_model_id != job.requested_model_id
+    ):
         job.state = "failed"
-        job.actual_model_id = actual_model_id
-        job.provider_profile = provider_profile
-        job.failure_message = "实际模型不是 MiniMax M3，正文结果已作废"
+        job.failure_message = (
+            "正文回复模型与任务启动模型不一致，结果已作废："
+            f"requested={job.requested_provider_id}/{job.requested_model_id}, "
+            f"actual={actual_provider_id}/{actual_model_id}"
+        )
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
         raise ValidationError(job.failure_message)
+    candidate_text = _clean_model_candidate(content_markdown)
     output_visible_character_count = visible_character_count(candidate_text)
     if output_visible_character_count < job.target_visible_character_count:
         job.state = "failed"
-        job.model_profile_fingerprint = model_profile_fingerprint
-        job.actual_model_id = actual_model_id
-        job.provider_profile = provider_profile
         job.output_visible_character_count = output_visible_character_count
         job.validation_state = "below_target"
         job.failure_message = (
@@ -1007,9 +1057,6 @@ def complete_chapter_generation(
         raise ValidationError(job.failure_message)
     if output_visible_character_count > MAXIMUM_COMPLETED_CHAPTER_CHARACTERS:
         job.state = "failed"
-        job.model_profile_fingerprint = model_profile_fingerprint
-        job.actual_model_id = actual_model_id
-        job.provider_profile = provider_profile
         job.output_visible_character_count = output_visible_character_count
         job.validation_state = "above_target"
         job.failure_message = (
@@ -1034,9 +1081,6 @@ def complete_chapter_generation(
         state="ready",
     )
     job.state = "ready"
-    job.model_profile_fingerprint = model_profile_fingerprint
-    job.actual_model_id = actual_model_id
-    job.provider_profile = provider_profile
     job.output_visible_character_count = output_visible_character_count
     job.validation_state = "meets_target"
     job.completed_at = datetime.now(timezone.utc)
@@ -1045,10 +1089,26 @@ def complete_chapter_generation(
     return _generation_job_payload(session, job)
 
 
-def fail_chapter_generation(session: Session, job_id: UUID, message: str) -> dict[str, Any]:
-    job = session.get(ChapterGenerationJob, job_id)
+def fail_chapter_generation(
+    session: Session,
+    job_id: UUID,
+    message: str,
+    *,
+    actual_provider_id: str | None = None,
+    actual_model_id: str | None = None,
+) -> dict[str, Any]:
+    job = session.scalar(
+        select(ChapterGenerationJob)
+        .where(ChapterGenerationJob.id == job_id)
+        .with_for_update()
+    )
     if job is None:
         raise NotFoundError(f"generation job {job_id} not found")
+    if job.state != "running":
+        return _generation_job_payload(session, job)
+    if actual_provider_id and actual_model_id:
+        job.actual_provider_id = actual_provider_id
+        job.actual_model_id = actual_model_id
     job.state = "failed"
     job.failure_message = message[:4000]
     job.completed_at = datetime.now(timezone.utc)
@@ -1348,7 +1408,14 @@ def _supersede_intelligence_for_document(
 
 
 def start_intelligence_proposal(
-    session: Session, document_id: UUID, *, revision_id: UUID
+    session: Session,
+    document_id: UUID,
+    *,
+    revision_id: UUID,
+    execution_agent_id: str,
+    requested_provider_id: str,
+    requested_model_id: str,
+    generation_contract_version: str,
 ) -> dict[str, Any]:
     document = _require_document(session, document_id)
     working = session.get(DocumentWorkingCopy, document_id)
@@ -1359,37 +1426,49 @@ def start_intelligence_proposal(
         raise NotFoundError(f"working copy for document {document_id} not found")
     if working.base_revision_id != revision_id or working.content_hash != revision.content_hash:
         raise ValidationError("请先建立当前正文检查点，再提取情报")
-    extractor_profile = "story-ledger-extractor-v3"
-    input_hash = content_hash(f"{revision.content_hash}:{extractor_profile}")
+    if not all(
+        value.strip()
+        for value in (
+            execution_agent_id,
+            requested_provider_id,
+            requested_model_id,
+            generation_contract_version,
+        )
+    ):
+        raise ValidationError("章节情报生成缺少可核验的 Agent 或 requested 模型证据")
+    extractor_contract = "story-ledger-extractor-v3"
+    input_hash = content_hash(
+        json.dumps(
+            {
+                "revision_content_hash": revision.content_hash,
+                "extractor_contract": extractor_contract,
+                "execution_agent_id": execution_agent_id,
+                "requested_provider_id": requested_provider_id,
+                "requested_model_id": requested_model_id,
+                "generation_contract_version": generation_contract_version,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    _lock_generation_attempt(
+        session,
+        namespace="intelligence",
+        scope_key=str(revision_id),
+        input_hash=input_hash,
+    )
     existing = session.scalar(
         select(IntelligenceProposal).where(
             IntelligenceProposal.document_id == document_id,
             IntelligenceProposal.input_hash == input_hash,
-        ).order_by(IntelligenceProposal.created_at)
+        ).order_by(IntelligenceProposal.attempt.desc())
     )
-    if existing is not None:
-        existing_items = session.scalars(
-            select(IntelligenceProposalItem).where(
-                IntelligenceProposalItem.proposal_id == existing.id
-            )
-        ).all()
-        if existing.state == "failed" and not existing_items:
-            existing.state = "running"
-            existing.failure_message = None
-            session.commit()
-        elif existing.state == "superseded":
-            pending = sum(1 for item in existing_items if item.review_state == "pending")
-            accepted = sum(1 for item in existing_items if item.review_state == "accepted")
-            if pending:
-                existing.state = "partially_accepted" if accepted else "ready"
-            elif accepted:
-                existing.state = "accepted"
-            elif existing_items:
-                existing.state = "rejected"
-            else:
-                existing.state = "running"
-            session.commit()
-        return _intelligence_proposal_payload(session, existing)
+    if existing is not None and existing.state not in {"failed", "superseded"}:
+        payload = _intelligence_proposal_payload(session, existing)
+        payload["should_execute"] = False
+        return payload
+    attempt = (existing.attempt + 1) if existing is not None else 1
     proposal = IntelligenceProposal(
         id=uuid4(),
         novel_id=document.novel_id,
@@ -1397,11 +1476,17 @@ def start_intelligence_proposal(
         chapter_revision_id=revision_id,
         input_hash=input_hash,
         state="running",
-        model_profile_fingerprint="qwenpaw-active-agent",
+        execution_agent_id=execution_agent_id,
+        requested_provider_id=requested_provider_id,
+        requested_model_id=requested_model_id,
+        generation_contract_version=generation_contract_version,
+        attempt=attempt,
     )
     session.add(proposal)
     session.commit()
-    return _intelligence_proposal_payload(session, proposal)
+    payload = _intelligence_proposal_payload(session, proposal)
+    payload["should_execute"] = True
+    return payload
 
 
 def build_intelligence_prompt(session: Session, proposal_id: UUID) -> str:
@@ -1467,9 +1552,8 @@ def complete_intelligence_proposal(
     proposal_id: UUID,
     *,
     items: list[dict[str, Any]],
-    model_profile_fingerprint: str = "qwenpaw-active-agent",
+    actual_provider_id: str,
     actual_model_id: str,
-    provider_profile: str,
 ) -> dict[str, Any]:
     proposal = session.scalar(
         select(IntelligenceProposal)
@@ -1478,6 +1562,22 @@ def complete_intelligence_proposal(
     )
     if proposal is None:
         raise NotFoundError(f"intelligence proposal {proposal_id} not found")
+    if proposal.state != "running":
+        return _intelligence_proposal_payload(session, proposal)
+    proposal.actual_provider_id = actual_provider_id
+    proposal.actual_model_id = actual_model_id
+    if (
+        actual_provider_id != proposal.requested_provider_id
+        or actual_model_id != proposal.requested_model_id
+    ):
+        proposal.state = "failed"
+        proposal.failure_message = (
+            "章节情报回复模型与任务启动模型不一致，结果已作废："
+            f"requested={proposal.requested_provider_id}/{proposal.requested_model_id}, "
+            f"actual={actual_provider_id}/{actual_model_id}"
+        )
+        session.commit()
+        raise ValidationError(proposal.failure_message)
     working = session.get(DocumentWorkingCopy, proposal.document_id)
     revision = session.get(DocumentRevision, proposal.chapter_revision_id)
     if (
@@ -1496,14 +1596,6 @@ def complete_intelligence_proposal(
     )
     if existing:
         return _intelligence_proposal_payload(session, proposal)
-    normalized_model = re.sub(r"[^a-z0-9]", "", actual_model_id.lower())
-    if normalized_model != "minimaxm3":
-        proposal.state = "failed"
-        proposal.actual_model_id = actual_model_id
-        proposal.provider_profile = provider_profile
-        proposal.failure_message = "实际模型不是 MiniMax M3，情报结果已作废"
-        session.commit()
-        raise ValidationError(proposal.failure_message)
     normalized: list[IntelligenceProposalItem] = []
     for position, raw in enumerate(items[:200], start=1):
         item_type = str(raw.get("item_type", "fact")).strip()
@@ -1544,21 +1636,31 @@ def complete_intelligence_proposal(
         )
     session.add_all(normalized)
     proposal.state = "ready"
-    proposal.requested_model_id = MINIMAX_M3_MODEL_ID
-    proposal.actual_model_id = actual_model_id
-    proposal.provider_profile = provider_profile
-    proposal.model_profile_fingerprint = model_profile_fingerprint
     proposal.failure_message = None
     session.commit()
     return _intelligence_proposal_payload(session, proposal)
 
 
 def fail_intelligence_proposal(
-    session: Session, proposal_id: UUID, message: str
+    session: Session,
+    proposal_id: UUID,
+    message: str,
+    *,
+    actual_provider_id: str | None = None,
+    actual_model_id: str | None = None,
 ) -> dict[str, Any]:
-    proposal = session.get(IntelligenceProposal, proposal_id)
+    proposal = session.scalar(
+        select(IntelligenceProposal)
+        .where(IntelligenceProposal.id == proposal_id)
+        .with_for_update()
+    )
     if proposal is None:
         raise NotFoundError(f"intelligence proposal {proposal_id} not found")
+    if proposal.state != "running":
+        return _intelligence_proposal_payload(session, proposal)
+    if actual_provider_id and actual_model_id:
+        proposal.actual_provider_id = actual_provider_id
+        proposal.actual_model_id = actual_model_id
     proposal.state = "failed"
     proposal.failure_message = message[:4000]
     session.commit()

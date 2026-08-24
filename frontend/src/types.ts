@@ -135,7 +135,11 @@ export interface CreativeGenerationRecord {
   state: "running" | "ready" | "failed";
   input_hash: string;
   input_snapshot: Record<string, unknown>;
+  execution_agent_id: string | null;
+  requested_provider_id: string | null;
   requested_model_id: string;
+  generation_contract_version: string | null;
+  actual_provider_id: string | null;
   actual_model_id: string | null;
   provider_profile: string | null;
   output_json: Record<string, any>;
@@ -220,7 +224,9 @@ export interface GenerationJobRecord {
   base_revision_id: string | null;
   base_draft_version: number;
   base_content_hash: string;
-  model_profile_fingerprint: string;
+  execution_agent_id: string | null;
+  requested_provider_id: string | null;
+  model_profile_fingerprint: string | null;
   asset_snapshot: Array<{
     id: string;
     asset_type: PrivateAssetType;
@@ -229,6 +235,8 @@ export interface GenerationJobRecord {
     version: number;
   }>;
   requested_model_id: string;
+  generation_contract_version: string | null;
+  actual_provider_id: string | null;
   actual_model_id: string | null;
   provider_profile: string | null;
   target_visible_character_count: number;
@@ -274,14 +282,27 @@ export interface IntelligenceProposalRecord {
     | "superseded"
     | "failed";
   source_current: boolean;
+  execution_agent_id: string | null;
+  requested_provider_id: string | null;
   requested_model_id: string;
+  generation_contract_version: string | null;
+  actual_provider_id: string | null;
   actual_model_id: string | null;
   provider_profile: string | null;
-  model_profile_fingerprint: string;
+  model_profile_fingerprint: string | null;
+  attempt: number;
   failure_message: string | null;
   items: IntelligenceItemRecord[];
   created_at: string | null;
   reviewed_at: string | null;
+}
+
+export interface GenerationModelStatus {
+  agent_id: "ai-novel-writer";
+  provider_id: string;
+  model_id: string;
+  effective_max_input_length: number | null;
+  policy: "follow-agent-effective";
 }
 
 export interface StoryFactRecord {

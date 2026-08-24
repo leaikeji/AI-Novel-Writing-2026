@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import os
+from threading import Barrier
 from uuid import UUID
 
 import pytest
@@ -13,7 +15,7 @@ from backend.creative_services import (
     batch_character_relationships,
     build_novel_export,
     complete_chapter_creation_draft,
-    complete_creative_generation,
+    complete_creative_generation as _complete_creative_generation,
     complete_novel_creation_draft,
     complete_outline_draft,
     create_asset_preset,
@@ -24,6 +26,7 @@ from backend.creative_services import (
     create_storyline,
     delete_character_relationship,
     delete_volume,
+    fail_creative_generation,
     get_relationship_graph_view,
     get_or_create_chapter_creation_draft,
     get_or_create_novel_creation_draft,
@@ -39,7 +42,7 @@ from backend.creative_services import (
     restore_character_relationship,
     save_relationship_graph_view,
     snapshot_private_assets,
-    start_creative_generation,
+    start_creative_generation as _start_creative_generation,
     sync_relationships_from_intelligence_proposal,
     update_chapter_creation_draft,
     update_foreshadow,
@@ -61,9 +64,10 @@ from backend.services import (
     ValidationError,
     adopt_candidate,
     commit_intelligence_items,
-    complete_chapter_generation,
-    complete_intelligence_proposal,
+    complete_chapter_generation as _complete_chapter_generation,
+    complete_intelligence_proposal as _complete_intelligence_proposal,
     DraftConflictError,
+    fail_chapter_generation,
     RestorationPlanConflictError,
     create_checkpoint,
     create_document,
@@ -81,18 +85,71 @@ from backend.services import (
     save_chapter_brief,
     save_draft,
     search_novel,
-    start_chapter_generation,
-    start_intelligence_proposal,
+    start_chapter_generation as _start_chapter_generation,
+    start_intelligence_proposal as _start_intelligence_proposal,
 )
 
 
 TEST_DATABASE_URL = os.environ.get("AI_NOVEL_TEST_DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(not TEST_DATABASE_URL, reason="integration database not configured")
-MINIMAX_MODEL_ID = "MiniMax-M3"
-MINIMAX_PROVIDER_ID = "minimax-cn"
+TEST_AGENT_ID = "ai-novel-writer"
+TEST_MODEL_ID = "model-test-v1"
+TEST_PROVIDER_ID = "provider-test"
+TEST_CONTRACT_VERSION = "follow-agent-effective-test-v1"
 
 
-def _long_chapter(opening: str, *, paragraphs: int = 90) -> str:
+def _requested_model_kwargs() -> dict[str, str]:
+    return {
+        "execution_agent_id": TEST_AGENT_ID,
+        "requested_provider_id": TEST_PROVIDER_ID,
+        "requested_model_id": TEST_MODEL_ID,
+        "generation_contract_version": TEST_CONTRACT_VERSION,
+    }
+
+
+def start_chapter_generation(*args, **kwargs):
+    for key, value in _requested_model_kwargs().items():
+        kwargs.setdefault(key, value)
+    return _start_chapter_generation(*args, **kwargs)
+
+
+def start_intelligence_proposal(*args, **kwargs):
+    for key, value in _requested_model_kwargs().items():
+        kwargs.setdefault(key, value)
+    return _start_intelligence_proposal(*args, **kwargs)
+
+
+def start_creative_generation(*args, **kwargs):
+    for key, value in _requested_model_kwargs().items():
+        kwargs.setdefault(key, value)
+    return _start_creative_generation(*args, **kwargs)
+
+
+def _actual_model_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
+    normalized = dict(kwargs)
+    normalized.pop("model_profile_fingerprint", None)
+    legacy_provider = normalized.pop("provider_profile", None)
+    normalized.setdefault(
+        "actual_provider_id",
+        legacy_provider if legacy_provider is not None else TEST_PROVIDER_ID,
+    )
+    normalized.setdefault("actual_model_id", TEST_MODEL_ID)
+    return normalized
+
+
+def complete_chapter_generation(*args, **kwargs):
+    return _complete_chapter_generation(*args, **_actual_model_kwargs(kwargs))
+
+
+def complete_intelligence_proposal(*args, **kwargs):
+    return _complete_intelligence_proposal(*args, **_actual_model_kwargs(kwargs))
+
+
+def complete_creative_generation(*args, **kwargs):
+    return _complete_creative_generation(*args, **_actual_model_kwargs(kwargs))
+
+
+def _long_chapter(opening: str, *, paragraphs: int = 22) -> str:
     body = [opening]
     body.extend(
         (
@@ -237,7 +294,11 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
     }
     assert {
         "asset_snapshot",
+        "execution_agent_id",
+        "requested_provider_id",
         "requested_model_id",
+        "generation_contract_version",
+        "actual_provider_id",
         "actual_model_id",
         "provider_profile",
         "target_visible_character_count",
@@ -330,8 +391,8 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
                 },
             }
         ],
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     commit_intelligence_items(
         session,
@@ -660,8 +721,8 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
             "雨水敲着窗。江述翻过信封，邮戳日期写着明天。"
         ),
         model_profile_fingerprint="pytest-model",
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     candidate = completed["candidate"]
 
@@ -702,8 +763,8 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
                 "confidence": 61,
             },
         ],
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     assert list_story_facts(session, novel_id) == []
 
@@ -752,8 +813,8 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
                 "confidence": 99,
             }
         ],
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     selected_a = [UUID(proposal_a["items"][0]["id"])]
     committed_a = commit_intelligence_items(
@@ -799,8 +860,8 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
                 "confidence": 99,
             }
         ],
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     commit_intelligence_items(
         session,
@@ -886,8 +947,8 @@ def test_candidate_adoption_rejects_a_changed_working_copy(session: Session) -> 
         session,
         UUID(job["id"]),
         content_markdown=_long_chapter("这是一份旧基线候选。"),
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     save_draft(
         session,
@@ -1175,8 +1236,8 @@ def test_next_chapter_required_roles_reject_uncertain_supporting_inference(
                 "confidence": 70,
             },
         ],
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     commit_intelligence_items(
         session,
@@ -1204,6 +1265,8 @@ def test_six_step_chapter_creation_rejects_cross_book_references(
     )
     first_id = UUID(first["novel"]["id"])
     second_id = UUID(second["novel"]["id"])
+    create_volume(session, first_id, "第一卷")
+    create_volume(session, second_id, "第一卷")
     first_role = create_novel_character(
         session,
         first_id,
@@ -1310,10 +1373,10 @@ def test_six_step_chapter_creation_rejects_cross_book_references(
     assert second_role["novel_id"] == str(second_id)
 
 
-def test_generation_requires_verified_minimax_and_acceptance_window(
+def test_generation_requires_matching_model_evidence_and_acceptance_window(
     session: Session,
 ) -> None:
-    novel = create_novel(session, "pytest-MiniMax门槛")
+    novel = create_novel(session, "pytest-通用模型门槛")
     document_id = UUID(novel["tree"][0]["documents"][0]["id"])
     brief = save_chapter_brief(
         session,
@@ -1325,15 +1388,6 @@ def test_generation_requires_verified_minimax_and_acceptance_window(
         forbidden_text="",
         role_constraints={},
     )
-    with pytest.raises(ValidationError, match="固定为 MiniMax M3"):
-        start_chapter_generation(
-            session,
-            document_id,
-            expected_brief_version=brief["version"],
-            requested_model_id="MiniMax-M30",
-        )
-    session.rollback()
-
     first_job = start_chapter_generation(
         session,
         document_id,
@@ -1345,8 +1399,8 @@ def test_generation_requires_verified_minimax_and_acceptance_window(
             session,
             UUID(first_job["id"]),
             content_markdown="这一章太短。",
-            actual_model_id=MINIMAX_MODEL_ID,
-            provider_profile=MINIMAX_PROVIDER_ID,
+            actual_model_id=TEST_MODEL_ID,
+            provider_profile=TEST_PROVIDER_ID,
         )
     failed = list_chapter_generation_jobs(session, document_id)[0]
     assert failed["state"] == "failed"
@@ -1356,6 +1410,15 @@ def test_generation_requires_verified_minimax_and_acceptance_window(
             CandidateRevision.generation_job_id == UUID(first_job["id"])
         )
     ) == 0
+    still_failed = complete_chapter_generation(
+        session,
+        UUID(first_job["id"]),
+        content_markdown=_long_chapter("终态不应被重新完成。"),
+        actual_provider_id=TEST_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+    )
+    assert still_failed["state"] == "failed"
+    assert still_failed["failure_message"] == failed["failure_message"]
 
     second_job = start_chapter_generation(
         session,
@@ -1367,15 +1430,93 @@ def test_generation_requires_verified_minimax_and_acceptance_window(
         session,
         UUID(second_job["id"]),
         content_markdown=_long_chapter("人物终于找到能够推进调查的关键证据。", paragraphs=22),
-        model_profile_fingerprint="qwenpaw:provider-usage:minimax-cn:MiniMax-M3",
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
     )
     assert completed["attempt"] == 2
     assert completed["state"] == "ready"
     assert completed["validation_state"] == "meets_target"
     assert 1000 <= completed["output_visible_character_count"] <= 1500
-    assert completed["actual_model_id"] == MINIMAX_MODEL_ID
+    assert completed["actual_model_id"] == TEST_MODEL_ID
+    still_ready = fail_chapter_generation(
+        session,
+        UUID(second_job["id"]),
+        "迟到的失败回调",
+    )
+    assert still_ready["state"] == "ready"
+    assert still_ready["failure_message"] is None
+
+
+def test_fail_path_preserves_known_actual_model_and_terminal_state(
+    session: Session,
+) -> None:
+    draft = get_or_create_novel_creation_draft(session, "pytest-解析失败模型审计")
+    job = start_creative_generation(
+        session,
+        scope_type="novel_creation",
+        scope_id=UUID(draft["id"]),
+        kind="novel_template",
+        input_snapshot={"idea": "海岛旧电台"},
+    )
+
+    failed = fail_creative_generation(
+        session,
+        UUID(job["id"]),
+        failure_message="模型身份已核验，但返回内容无法解析",
+        actual_provider_id=TEST_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+    )
+    assert failed["state"] == "failed"
+    assert failed["actual_provider_id"] == TEST_PROVIDER_ID
+    assert failed["actual_model_id"] == TEST_MODEL_ID
+
+    replayed = complete_creative_generation(
+        session,
+        UUID(job["id"]),
+        actual_provider_id=TEST_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        output_json={"template": "迟到的解析结果"},
+    )
+    assert replayed["state"] == "failed"
+    assert replayed["failure_message"] == failed["failure_message"]
+
+
+def test_concurrent_forced_generation_allocates_unique_attempts(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-并发生成尝试")
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    brief = save_chapter_brief(
+        session,
+        document_id,
+        expected_version=0,
+        target_word_count=3000,
+        expectation_text="并发生成",
+        outline_text="两个请求同时到达。",
+        forbidden_text="",
+        role_constraints={},
+    )
+    barrier = Barrier(2)
+    worker_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+
+    def create_attempt() -> dict[str, object]:
+        with Session(worker_engine, expire_on_commit=False) as worker_session:
+            barrier.wait(timeout=5)
+            return start_chapter_generation(
+                worker_session,
+                document_id,
+                expected_brief_version=brief["version"],
+                force_new=True,
+            )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            jobs = list(executor.map(lambda _: create_attempt(), range(2)))
+    finally:
+        worker_engine.dispose()
+
+    assert sorted(int(job["attempt"]) for job in jobs) == [1, 2]
+    assert len({str(job["id"]) for job in jobs}) == 2
 
 
 def test_cover_settings_and_narrative_foreshadow_progress_persist(
@@ -1428,17 +1569,6 @@ def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
         "genre": "年代言情",
         "idea": "重回一九八八年的高三。",
     }
-    with pytest.raises(ValidationError, match="固定为 MiniMax M3"):
-        start_creative_generation(
-            session,
-            scope_type="novel_creation",
-            scope_id=UUID(draft["id"]),
-            kind="novel_naming",
-            input_snapshot=snapshot,
-            requested_model_id="qwen3.7-plus",
-        )
-    session.rollback()
-
     first = start_creative_generation(
         session,
         scope_type="novel_creation",
@@ -1446,7 +1576,7 @@ def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
         kind="novel_naming",
         input_snapshot=snapshot,
     )
-    with pytest.raises(ValidationError, match="实际模型不是 MiniMax M3"):
+    with pytest.raises(ValidationError, match="模型与任务启动模型不一致"):
         complete_creative_generation(
             session,
             UUID(first["id"]),
@@ -1466,10 +1596,28 @@ def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
     second = complete_creative_generation(
         session,
         UUID(second["id"]),
-        actual_model_id=MINIMAX_MODEL_ID,
-        provider_profile=MINIMAX_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
         output_text='{"titles":["风从一九八八的操场吹来"]}',
         output_json={"titles": ["风从一九八八的操场吹来"]},
+    )
+    switched = start_creative_generation(
+        session,
+        scope_type="novel_creation",
+        scope_id=UUID(draft["id"]),
+        kind="novel_naming",
+        input_snapshot=snapshot,
+        requested_provider_id="bailian",
+        requested_model_id="qwen-next",
+        force_new=False,
+    )
+    switched = complete_creative_generation(
+        session,
+        UUID(switched["id"]),
+        actual_provider_id="bailian",
+        actual_model_id="qwen-next",
+        output_text='{"titles":["另一模型的书名"]}',
+        output_json={"titles": ["另一模型的书名"]},
     )
     history = list_creative_generations(
         session,
@@ -1477,8 +1625,13 @@ def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
         scope_id=UUID(draft["id"]),
     )
     assert {item["state"] for item in history} == {"failed", "ready"}
+    assert len(history) == 3
     assert second["attempt"] == 2
-    assert second["actual_model_id"] == MINIMAX_MODEL_ID
+    assert switched["attempt"] == 1
+    assert switched["input_hash"] != second["input_hash"]
+    assert second["actual_model_id"] == TEST_MODEL_ID
+    assert second["actual_provider_id"] == TEST_PROVIDER_ID
+    assert second["requested_provider_id"] == TEST_PROVIDER_ID
     assert second["input_snapshot"] == snapshot
 
 
@@ -1550,7 +1703,7 @@ def test_volume_chapter_reorder_delete_guard_and_export_structure(
         move_documents_to=first_volume_id,
     )
     remaining = get_novel(session, novel_id)["tree"][0]
-    with pytest.raises(ValidationError, match="至少需要保留一个分卷"):
+    with pytest.raises(ValidationError, match="最后一个分卷仍有章节"):
         delete_volume(
             session,
             novel_id,

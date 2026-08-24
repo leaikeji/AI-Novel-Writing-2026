@@ -1,5 +1,7 @@
+import ast
 import importlib.util
 from pathlib import Path
+import re
 
 import pytest
 
@@ -35,6 +37,48 @@ def test_agent_configuration_and_verifier_use_the_same_skill_set() -> None:
     assert configure.AGENT_ID == verifier.NOVEL_AGENT_ID
     assert set(configure.SKILLS) == verifier.NOVEL_SKILLS
     assert set(configure.TOOLS) == verifier.NOVEL_TOOLS
+
+
+def test_agent_configuration_never_writes_a_model_setting() -> None:
+    source = (ROOT / "scripts" / "configure_qwenpaw_novel_agent.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+
+    assert re.search(r"QWENPAW_[A-Z0-9_]*MODEL", source) is None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        if node.func.id != "request_json" or not node.args:
+            continue
+        path = ast.get_source_segment(source, node.args[0]) or ""
+        if "/api/models" not in path:
+            continue
+        method = next(
+            (
+                keyword.value.value
+                for keyword in node.keywords
+                if keyword.arg == "method"
+                and isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, str)
+            ),
+            "GET",
+        )
+        assert method == "GET"
+
+
+def test_verifier_compares_runtime_model_with_agent_effective_model() -> None:
+    source = (ROOT / "scripts" / "verify_qwenpaw_lab.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "MiniMax" not in source
+    assert 'get_json(f"/api/{APP_ID}/generation-model")' in source
+    assert (
+        'runtime_model.get("provider_id") == active_llm.get("provider_id")'
+        in source
+    )
+    assert 'runtime_model.get("model_id") == active_llm.get("model")' in source
 
 
 def test_uninstall_requires_the_exact_plugin_id() -> None:

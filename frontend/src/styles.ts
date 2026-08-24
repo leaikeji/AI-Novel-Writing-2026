@@ -497,6 +497,9 @@ export function ensureNovelStyles(): void {
     .anw-save-state { border-radius:999px; padding:5px 9px; color:#407464; background:#eaf8f2; font-size:12px; white-space:nowrap; }
     .anw-save-state.is-error { color:#b43c2a; background:#fff0ec; }
     .anw-editor-topbar .anw-delete-button { color:#ee774c!important; border-color:#ffebd8!important; background:#fff5e8!important; }
+    .anw-current-model-inline { display:flex; min-width:150px; flex-direction:column; gap:1px; color:#777c85; line-height:1.2; }
+    .anw-current-model-inline small { max-width:190px; overflow:hidden; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+    .anw-current-model-inline strong { max-width:190px; overflow:hidden; color:#30343a; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
 
     .anw-editor-scroll { flex:0 0 auto; min-height:auto; overflow:visible; padding:30px 24px 36px 70px; }
     .anw-editor-paper { display:flex; width:min(1000px,100%); min-height:calc(100vh - 220px); flex-direction:column; margin:0 auto; border:1px solid var(--anw-line); border-radius:18px; padding:36px 40px 38px; background:#fff; box-shadow:var(--anw-shadow); }
@@ -1002,6 +1005,10 @@ export function ensureNovelStyles(): void {
     .mb-book-rail > h1 { margin:0 0 8px; font-size:23px; line-height:1.35; }
     .mb-book-rail > p { display:-webkit-box; min-height:42px; margin:0 0 12px; overflow:hidden; color:#777c85; font-size:13px; line-height:1.7; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
     .mb-book-stats { display:flex; gap:18px; margin-bottom:16px; color:#5c616a; font-size:13px; }
+    .anw-current-model-card { display:flex; margin:0 0 16px; border:1px solid #eceef1; border-radius:10px; padding:10px 11px; flex-direction:column; gap:4px; background:#fafbfc; }
+    .anw-current-model-card > strong { color:#555b65; font-size:11px; }
+    .anw-current-model-card > span { overflow:hidden; color:#252a31; font-size:13px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+    .anw-current-model-card > small { color:#858a93; font-size:10px; line-height:1.5; }
     .mb-book-nav { display:grid; gap:8px; border-top:1px solid #eff0f2; padding-top:16px; }
     .mb-book-nav > button { display:flex; align-items:center; gap:11px; min-height:44px; border:0; border-radius:8px; padding:0 15px; color:#30343a; background:#f7f7f8; cursor:pointer; font-size:15px; font-weight:650; text-align:left; }
     .mb-book-nav > button:hover { color:#ef6d42; background:#fff5f0; }
@@ -1078,7 +1085,7 @@ export function ensureNovelStyles(): void {
     .mb-search-empty { display:grid; min-height:240px; place-content:center; justify-items:center; gap:12px; color:#9a9ea5; }
     .mb-search-empty > .qwenpawicon { font-size:28px; }
 
-    /* Miaobi chapter creation flow: six persisted steps, MiniMax-M3 outline generation, atomic chapter creation. */
+    /* Miaobi chapter creation flow: six persisted steps, Agent outline generation, atomic chapter creation. */
     html .qwenpaw-modal-root .qwenpaw-modal.mb-chapter-wizard-modal .qwenpaw-modal-content { overflow:hidden!important; border:0!important; border-radius:12px!important; padding:0!important; color:#30343a!important; background:#fff!important; box-shadow:0 20px 60px rgba(23,28,36,.24)!important; }
     html .qwenpaw-modal-root .qwenpaw-modal.mb-chapter-wizard-modal .qwenpaw-modal-header { margin:0!important; border-bottom:1px solid #eceef1!important; padding:18px 20px!important; background:#fff!important; }
     html .qwenpaw-modal-root .qwenpaw-modal.mb-chapter-wizard-modal .qwenpaw-modal-title { color:#24272d!important; font-size:20px!important; font-weight:750!important; }

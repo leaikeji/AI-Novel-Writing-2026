@@ -199,7 +199,10 @@ class ChapterGenerationJob(Base):
 
     __tablename__ = "chapter_generation_jobs"
     __table_args__ = (
-        UniqueConstraint("document_id", "kind", "input_hash", name="uq_chapter_generation_input"),
+        UniqueConstraint(
+            "document_id", "kind", "input_hash", "attempt",
+            name="uq_chapter_generation_attempt",
+        ),
         Index("ix_chapter_generation_document_created", "document_id", "created_at"),
     )
 
@@ -220,10 +223,13 @@ class ChapterGenerationJob(Base):
         JSONB, nullable=False, default=dict
     )
     asset_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    requested_model_id: Mapped[str] = mapped_column(
-        String(120), nullable=False, default="MiniMax-M3"
-    )
+    execution_agent_id: Mapped[str | None] = mapped_column(String(120))
+    requested_provider_id: Mapped[str | None] = mapped_column(String(160))
+    requested_model_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    generation_contract_version: Mapped[str | None] = mapped_column(String(120))
+    actual_provider_id: Mapped[str | None] = mapped_column(String(160))
     actual_model_id: Mapped[str | None] = mapped_column(String(160))
+    # Legacy read-only columns. New generation code never writes them.
     provider_profile: Mapped[str | None] = mapped_column(String(160))
     target_visible_character_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=3000
@@ -235,9 +241,7 @@ class ChapterGenerationJob(Base):
         String(30), nullable=False, default="pending"
     )
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    model_profile_fingerprint: Mapped[str] = mapped_column(
-        String(160), nullable=False, default="qwenpaw-active-agent"
-    )
+    model_profile_fingerprint: Mapped[str | None] = mapped_column(String(160))
     failure_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -302,7 +306,8 @@ class IntelligenceProposal(Base):
     __tablename__ = "intelligence_proposals"
     __table_args__ = (
         UniqueConstraint(
-            "chapter_revision_id", "input_hash", name="uq_intelligence_revision_input"
+            "chapter_revision_id", "input_hash", "attempt",
+            name="uq_intelligence_revision_attempt",
         ),
         Index("ix_intelligence_document_created", "document_id", "created_at"),
     )
@@ -321,14 +326,16 @@ class IntelligenceProposal(Base):
     )
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(30), nullable=False, default="running")
-    requested_model_id: Mapped[str] = mapped_column(
-        String(120), nullable=False, default="MiniMax-M3"
-    )
+    execution_agent_id: Mapped[str | None] = mapped_column(String(120))
+    requested_provider_id: Mapped[str | None] = mapped_column(String(160))
+    requested_model_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    generation_contract_version: Mapped[str | None] = mapped_column(String(120))
+    actual_provider_id: Mapped[str | None] = mapped_column(String(160))
     actual_model_id: Mapped[str | None] = mapped_column(String(160))
+    # Legacy read-only columns. New generation code never writes them.
     provider_profile: Mapped[str | None] = mapped_column(String(160))
-    model_profile_fingerprint: Mapped[str] = mapped_column(
-        String(160), nullable=False, default="qwenpaw-active-agent"
-    )
+    model_profile_fingerprint: Mapped[str | None] = mapped_column(String(160))
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failure_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -839,7 +846,7 @@ class ChapterCreationDraft(Base):
 
 
 class CreativeGenerationJob(Base):
-    """Auditable MiniMax generation for naming, outline steps and chapter outlines."""
+    """Auditable Agent generation for naming, outlines, review and relations."""
 
     __tablename__ = "creative_generation_jobs"
     __table_args__ = (
@@ -863,8 +870,13 @@ class CreativeGenerationJob(Base):
     state: Mapped[str] = mapped_column(String(30), nullable=False, default="running")
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     input_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    requested_model_id: Mapped[str] = mapped_column(String(120), nullable=False, default="MiniMax-M3")
+    execution_agent_id: Mapped[str | None] = mapped_column(String(120))
+    requested_provider_id: Mapped[str | None] = mapped_column(String(160))
+    requested_model_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    generation_contract_version: Mapped[str | None] = mapped_column(String(120))
+    actual_provider_id: Mapped[str | None] = mapped_column(String(160))
     actual_model_id: Mapped[str | None] = mapped_column(String(160))
+    # Legacy read-only column. New generation code never writes it.
     provider_profile: Mapped[str | None] = mapped_column(String(160))
     output_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     output_text: Mapped[str] = mapped_column(Text, nullable=False, default="")

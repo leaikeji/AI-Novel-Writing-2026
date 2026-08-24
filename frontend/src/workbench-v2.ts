@@ -1,4 +1,4 @@
-import { ApiError, apiRequest } from "./api";
+import { ApiError, apiRequest, generationModelLabel, getGenerationModelStatus } from "./api";
 import { ChapterWorkflowPanel } from "./chapter-workflow";
 import { buildChapterTreeVolumes, ChapterTreeChapter, ChapterTreeVolume } from "./chapter-tree";
 import { APP_PATH } from "./contracts";
@@ -20,6 +20,7 @@ import {
 import { workbenchStore } from "./store";
 import {
   DocumentRecord,
+  GenerationModelStatus,
   NovelRecord,
   NovelSummary,
   RestorePreviewRecord,
@@ -360,6 +361,8 @@ export function NovelWorkbench() {
   const [section, setSection] = React.useState(initialSection as ProjectSection);
   const [editorOpen, setEditorOpen] = React.useState(Boolean(queryDocumentId));
   const [saveState, setSaveState] = React.useState("正在加载…");
+  const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
+  const [generationModelStatusError, setGenerationModelStatusError] = React.useState(false);
   const [error, setError] = React.useState("");
   const [conflict, setConflict] = React.useState(null as DocumentRecord | null);
   const [recovery, setRecovery] = React.useState(null as RecoveryDraft | null);
@@ -438,6 +441,29 @@ export function NovelWorkbench() {
   }, [loadDocument, queryDocumentId]);
 
   React.useEffect(() => { if (queryNovelId) void loadNovel(queryNovelId); }, [loadNovel, queryNovelId]);
+  React.useEffect(() => {
+    if (!queryNovelId) return;
+    let active = true;
+    const load = () => {
+      setGenerationModelStatusError(false);
+      void getGenerationModelStatus()
+        .then((status) => {
+          if (active) setGenerationModelStatus(status);
+        })
+        .catch(() => {
+          if (active) {
+            setGenerationModelStatus(null);
+            setGenerationModelStatusError(true);
+          }
+        });
+    };
+    load();
+    window.addEventListener("focus", load);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", load);
+    };
+  }, [queryNovelId]);
 
   React.useEffect(() => {
     const volumeId = document?.volume_id ?? null;
@@ -1087,6 +1113,11 @@ export function NovelWorkbench() {
             " / ",
             h("strong", null, chapterDisplayTitle),
           ),
+          h("div", {
+            className: "anw-current-model-inline",
+            title: "跟随 AI 小说作家 Agent；专属模型优先，未设置则继承 QwenPaw 全局模型。",
+            "aria-label": "当前有效模型",
+          }, h("small", null, "AI 小说作家 Agent · 专属优先/全局继承"), h("strong", null, generationModelStatus ? generationModelLabel(generationModelStatus) : generationModelStatusError ? "无法读取" : "读取中…")),
           h(Button, { className: "anw-delete-button", onClick: confirmDeleteDocument }, "删除"),
           h(Button, { icon: h(CopyOutlined), onClick: copyContext, title: "复制 AI 写作上下文" }, "复制"),
           h(Button, { icon: h(SaveOutlined), className: "anw-primary-button", onClick: document.kind === "chapter" ? () => setSaveVolumeOpen(true) : checkpoint, title: saveState }, "保存"),

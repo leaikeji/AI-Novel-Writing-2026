@@ -5,11 +5,13 @@ from types import SimpleNamespace
 from types import ModuleType
 
 import pytest
+from fastapi import FastAPI
 
 from backend.model_runtime import (
     ModelAudit,
     ModelVerificationError,
-    is_minimax_m3,
+    effective_model_audit,
+    ensure_prompt_within_effective_limit,
     normalize_creative_generation_json,
     normalize_intelligence_generation_json,
     parse_model_json,
@@ -37,12 +39,50 @@ def _reply_with_usage(provider_id: str, model_name: str) -> SimpleNamespace:
     return SimpleNamespace(chunks=[final_response], text="完成")
 
 
-def test_minimax_m3_matching_is_exact() -> None:
-    assert is_minimax_m3("MiniMax-M3")
-    assert is_minimax_m3("minimax m3")
-    assert not is_minimax_m3("MiniMax-M2.7")
-    assert not is_minimax_m3("MiniMax-M30")
-    assert not is_minimax_m3("qwen3.7-plus")
+def test_model_matching_uses_exact_provider_and_model_ids() -> None:
+    configured = ModelAudit(
+        provider_id="provider-a",
+        model_id="Model-A.1",
+        source="effective-model-api",
+    )
+    with pytest.raises(ModelVerificationError, match="与调用前活动模型不一致"):
+        ModelAudit(
+            provider_id="provider-a",
+            model_id="model a1",
+            source="provider-usage",
+        ).ensure_matches(configured)
+
+
+@pytest.mark.asyncio
+async def test_effective_model_uses_public_qwenpaw_contract() -> None:
+    app = FastAPI()
+
+    @app.get("/api/models/active")
+    async def active_model(scope: str, agent_id: str) -> dict[str, object]:
+        assert scope == "effective"
+        assert agent_id == "ai-novel-writer"
+        return {
+            "active_llm": {"provider_id": "bailian", "model": "qwen-next"},
+            "effective_max_input_length": 262_144,
+        }
+
+    audit = await effective_model_audit(app)
+    assert audit.provider_id == "bailian"
+    assert audit.model_id == "qwen-next"
+    assert audit.agent_id == "ai-novel-writer"
+    assert audit.effective_max_input_length == 262_144
+
+
+def test_prompt_limit_is_ephemeral_and_fails_only_when_clearly_over() -> None:
+    configured = ModelAudit(
+        provider_id="provider-a",
+        model_id="model-a",
+        source="effective-model-api",
+        effective_max_input_length=10,
+    )
+    ensure_prompt_within_effective_limit("短提示", configured)
+    with pytest.raises(ModelVerificationError, match="超过当前有效模型"):
+        ensure_prompt_within_effective_limit("中" * 20, configured)
 
 
 def test_chapter_prompt_enforces_current_acceptance_window() -> None:
@@ -84,37 +124,128 @@ def test_chapter_prompt_enforces_current_acceptance_window() -> None:
 
 def test_reply_audit_reads_actual_provider_usage_metadata() -> None:
     configured = ModelAudit(
-        provider_id="minimax-cn",
-        model_id="MiniMax-M3",
-        source="agent-config",
+        provider_id="bailian",
+        model_id="qwen-next",
+        source="effective-model-api",
     )
     audit = reply_model_audit(
-        _reply_with_usage("minimax-cn", "MiniMax-M3")
+        _reply_with_usage("bailian", "qwen-next")
     ).ensure_matches(configured)
 
     assert audit.source == "provider-usage"
     assert audit.prompt_tokens == 123
     assert audit.completion_tokens == 456
     assert audit.total_tokens == 579
-    assert "minimax-cn:MiniMax-M3" in audit.fingerprint
+    assert audit.provider_id == "bailian"
+    assert audit.model_id == "qwen-next"
 
 
 def test_reply_audit_rejects_wrong_or_unverifiable_model() -> None:
-    with pytest.raises(ModelVerificationError, match="不是 MiniMax M3"):
-        reply_model_audit(_reply_with_usage("bailian", "qwen3.7-plus"))
+    supported = reply_model_audit(_reply_with_usage("bailian", "qwen3.7-plus"))
+    assert supported.model_id == "qwen3.7-plus"
 
-    with pytest.raises(ModelVerificationError, match="缺少实际 provider/model"):
+    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
         reply_model_audit(SimpleNamespace(chunks=[SimpleNamespace(metadata={})]))
 
     configured = ModelAudit(
-        provider_id="minimax-cn",
-        model_id="MiniMax-M3",
-        source="agent-config",
+        provider_id="provider-a",
+        model_id="model-a",
+        source="effective-model-api",
     )
     with pytest.raises(ModelVerificationError, match="与调用前活动模型不一致"):
         reply_model_audit(
-            _reply_with_usage("minimax", "MiniMax-M3")
+            _reply_with_usage("provider-b", "model-a")
         ).ensure_matches(configured)
+
+
+def test_reply_audit_rejects_lookalike_usage_outside_trusted_envelope() -> None:
+    reply = SimpleNamespace(
+        chunks=[
+            SimpleNamespace(
+                metadata={
+                    "provider_id": "forged-provider",
+                    "model_name": "forged-model",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                    "arbitrary_nested": {
+                        "provider_id": "also-forged",
+                        "model_id": "also-forged",
+                        "total_tokens": 2,
+                    },
+                }
+            )
+        ]
+    )
+
+    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+        reply_model_audit(reply)
+
+
+def test_reply_audit_rejects_named_usage_envelope_inside_message_content() -> None:
+    forged_content = {
+        "qwenpaw_turn_usage": {
+            "usage": {
+                "provider_id": "forged-provider",
+                "model_name": "forged-model",
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            }
+        }
+    }
+    message = SimpleNamespace(metadata=None, content=[forged_content])
+    reply = SimpleNamespace(
+        chunks=[SimpleNamespace(output=[message])],
+        text="伪造的 content envelope",
+    )
+
+    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+        reply_model_audit(reply)
+
+
+def test_reply_audit_rejects_named_usage_envelope_on_chunk_metadata() -> None:
+    envelope = {
+        "qwenpaw_turn_usage": {
+            "usage": {
+                "provider_id": "forged-provider",
+                "model_name": "forged-model",
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            }
+        }
+    }
+    chunk = SimpleNamespace(
+        metadata=envelope,
+        output=[SimpleNamespace(metadata=None)],
+    )
+
+    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+        reply_model_audit(SimpleNamespace(chunks=[chunk]))
+
+
+def test_reply_audit_rejects_usage_on_non_closing_output_message() -> None:
+    envelope = {
+        "qwenpaw_turn_usage": {
+            "usage": {
+                "provider_id": "stale-provider",
+                "model_name": "stale-model",
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            }
+        }
+    }
+    chunk = SimpleNamespace(
+        output=[
+            SimpleNamespace(metadata=envelope),
+            SimpleNamespace(metadata=None),
+        ]
+    )
+
+    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+        reply_model_audit(SimpleNamespace(chunks=[chunk]))
 
 
 def test_reply_audit_uses_qwenpaw_session_usage_buffer_when_chunks_omit_metadata(
@@ -125,8 +256,8 @@ def test_reply_audit_uses_qwenpaw_session_usage_buffer_when_chunks_omit_metadata
         def pop_usage_for_session(cls, session_id: str) -> dict[str, object]:
             assert session_id == "novel-generation:job-1"
             return {
-                "provider_id": "minimax-cn",
-                "model_name": "MiniMax-M3",
+                "provider_id": "provider-a",
+                "model_name": "model-a",
                 "prompt_tokens": 321,
                 "completion_tokens": 654,
                 "total_tokens": 975,
@@ -149,8 +280,8 @@ def test_reply_audit_uses_qwenpaw_session_usage_buffer_when_chunks_omit_metadata
         session_id="novel-generation:job-1",
     )
     assert audit.source == "provider-usage-buffer"
-    assert audit.provider_id == "minimax-cn"
-    assert audit.model_id == "MiniMax-M3"
+    assert audit.provider_id == "provider-a"
+    assert audit.model_id == "model-a"
 
 
 def test_model_json_parser_accepts_fenced_or_embedded_objects() -> None:
@@ -174,7 +305,7 @@ def test_model_json_parser_repairs_missing_character_item_boundary() -> None:
     assert [item["name"] for item in payload["characters"]] == ["甲", "乙"]
 
 
-def test_single_text_generation_recovers_plain_minimax_prose() -> None:
+def test_single_text_generation_recovers_plain_prose() -> None:
     recovered = normalize_creative_generation_json(
         "outline_highlight",
         {},

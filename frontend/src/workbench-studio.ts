@@ -1,4 +1,10 @@
-import { apiRequest } from "./api";
+import {
+  apiRequest,
+  completedGenerationModelLabel,
+  generationModelLabel,
+  generationModelAuditLabel,
+  getGenerationModelStatus,
+} from "./api";
 import {
   ChapterCreationCompleteRecord,
   ChapterCreationDraftRecord,
@@ -6,6 +12,7 @@ import {
   CreativeGenerationRecord,
   DocumentRecord,
   ForeshadowRecord,
+  GenerationModelStatus,
   NovelCharacterRecord,
   NovelExportRecord,
   NovelRecord,
@@ -68,7 +75,6 @@ const {
 export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings";
 
 
-const FIXED_MODEL_ID = "MiniMax-M3";
 const OUTLINE_STEPS = ["章节", "背景", "角色", "情节", "亮点"];
 const OUTLINE_HINTS = [
   "还差4步了哦，故事即将诞生!",
@@ -153,6 +159,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [activityText, setActivityText] = React.useState("");
+  const [lastGeneratedModelLabel, setLastGeneratedModelLabel] = React.useState("");
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterIndex, setCharacterIndex] = React.useState(-1);
   const [characterForm, setCharacterForm] = React.useState({
@@ -163,6 +170,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
   React.useEffect(() => {
     if (!open) return;
     setCompleted(false);
+    setLastGeneratedModelLabel("");
     setLoading(true);
     void apiRequest<OutlineDraftRecord>(`/novels/${novel.id}/outline-draft`)
       .then((record) => {
@@ -202,7 +210,6 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         scope_id: base.id,
         novel_id: novel.id,
         kind,
-        requested_model_id: FIXED_MODEL_ID,
         force_new: true,
         input_snapshot: {
           novel_title: novel.title,
@@ -220,18 +227,17 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         },
       }),
     });
-    if (job.state !== "ready") throw new Error(job.failure_message || `${FIXED_MODEL_ID} 生成失败`);
-    if (job.actual_model_id !== FIXED_MODEL_ID || job.provider_profile !== "minimax-cn") {
-      throw new Error("模型审计未通过：本次结果不是 minimax-cn / MiniMax-M3");
-    }
+    if (job.state !== "ready") throw new Error(job.failure_message || "模型生成失败");
+    setLastGeneratedModelLabel(completedGenerationModelLabel(job));
     return job;
   };
 
   const nextWithGeneration = async () => {
     if (!draft || generating) return;
-    setActivityText(`${FIXED_MODEL_ID} 正在生成...`);
     setGenerating(true);
     try {
+      const currentModel = await getGenerationModelStatus();
+      setActivityText(`${generationModelLabel(currentModel)} 正在生成...`);
       if (step === 1) {
         const saved = await saveDraft(draft, 1, { target_chapter_count: draft.target_chapter_count });
         const job = await generate(saved, "outline_background");
@@ -268,7 +274,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
     }
   };
 
-  const requestNextGeneration = () => {
+  const requestNextGeneration = async () => {
     if (!draft || generating || step >= 5) return;
     const generationName = step === 1 ? "故事背景" : step === 2 ? "角色设定" : step === 3 ? "故事情节" : "故事亮点";
     const generationCost = step === 1 || step === 2 ? 500 : step === 3 ? 1500 : 500;
@@ -279,6 +285,13 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         : step === 3
           ? "AI将为您构建精彩的故事主线，聚焦核心矛盾与转折。"
           : "AI将为您提炼作品的核心价值和独特之处。";
+    let modelLabel: string;
+    try {
+      modelLabel = generationModelLabel(await getGenerationModelStatus());
+    } catch (reason) {
+      onError(readableError(reason, "读取当前有效模型失败"));
+      return;
+    }
     Modal.confirm({
       className: "anw-modal mb-outline-cost-modal",
       title: "确认扣除字数",
@@ -287,6 +300,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         { className: "mb-outline-cost-copy" },
         h("h3", null, `需要消耗${generationCost}字`),
         h("p", null, `生成${generationName}需要消耗${generationCost}字，${explanation}`),
+        h("p", null, `本次将使用 ${modelLabel}。`),
       ),
       okText: "确认",
       cancelText: "取消",
@@ -488,7 +502,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         centered: true,
         className: "anw-modal mb-outline-modal",
         width: 600,
-        title: h("div", { className: "mb-outline-modal-title" }, h("strong", null, "生成大纲"), h("span", null, "(本内容由AI生成)")),
+        title: h("div", { className: "mb-outline-modal-title" }, h("strong", null, "生成大纲"), h("span", null, lastGeneratedModelLabel ? `(上一步实际模型：${lastGeneratedModelLabel})` : "(本内容由AI生成)")),
         footer: null,
         destroyOnClose: true,
         onCancel: generating ? undefined : onClose,
@@ -625,6 +639,8 @@ function ChapterCreationWizard({
   const [recommendationOptions, setRecommendationOptions] = React.useState([] as Array<{ id: string; reason: string }>);
   const [pendingRecommendationId, setPendingRecommendationId] = React.useState("");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [outlineTaskModelLabel, setOutlineTaskModelLabel] = React.useState("");
+  const [recommendationTaskModelLabel, setRecommendationTaskModelLabel] = React.useState("");
   const [innerError, setInnerError] = React.useState("");
   const [expandedGroups, setExpandedGroups] = React.useState(["main"] as StorylineType[]);
   const [selectedStorylineIds, setSelectedStorylineIds] = React.useState([] as string[]);
@@ -763,6 +779,8 @@ function ChapterCreationWizard({
     setRecommending(true);
     setInnerError("");
     try {
+      const currentModel = await getGenerationModelStatus();
+      setRecommendationTaskModelLabel(generationModelLabel(currentModel));
       const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
         method: "POST",
         body: JSON.stringify({
@@ -770,7 +788,6 @@ function ChapterCreationWizard({
           scope_id: draft.id,
           novel_id: novel.id,
           kind: "chapter_storyline_recommendation",
-          requested_model_id: FIXED_MODEL_ID,
           force_new: true,
           input_snapshot: {
             novel: { title: novel.title, genre: novel.genre, subgenre: novel.subgenre, main_plot: novel.main_plot },
@@ -780,7 +797,8 @@ function ChapterCreationWizard({
           },
         }),
       });
-      if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) throw new Error(job.failure_message || "MiniMax-M3 线路推荐失败");
+      setRecommendationTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
+      if (job.state !== "ready") throw new Error(job.failure_message || "模型线路推荐失败");
       const allowed = new Set(storylines.map((item: StorylineRecord) => item.id));
       let ids = (job.output_json?.storyline_ids || []).map(String).filter((id: string) => allowed.has(id));
       if (!ids.length) {
@@ -791,7 +809,7 @@ function ChapterCreationWizard({
       setRecommendationOptions(ids.slice(0, 3).map((id: string) => ({ id, reason })));
       setPendingRecommendationId("");
     } catch (reason) {
-      const message = readableError(reason, "MiniMax-M3 线路推荐失败");
+      const message = readableError(reason, "模型线路推荐失败");
       setInnerError(message);
       onError(message);
     } finally {
@@ -813,7 +831,9 @@ function ChapterCreationWizard({
       const previous = chapterDocuments[chapterDocuments.length - 1];
       let generatedOutline = "";
       let generatedTitle = "";
-      let lastFailure: unknown = new Error("MiniMax-M3 章纲生成失败");
+      let lastFailure: unknown = new Error("模型章纲生成失败");
+      const currentModel = await getGenerationModelStatus();
+      setOutlineTaskModelLabel(generationModelLabel(currentModel));
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
           const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
@@ -823,7 +843,6 @@ function ChapterCreationWizard({
               scope_id: saved.id,
               novel_id: novel.id,
               kind: "chapter_outline",
-              requested_model_id: FIXED_MODEL_ID,
               force_new: true,
               input_snapshot: {
                 novel: {
@@ -851,8 +870,9 @@ function ChapterCreationWizard({
               },
             }),
           });
-          if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) {
-            throw new Error(job.failure_message || "MiniMax-M3 章纲生成失败");
+          setOutlineTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
+          if (job.state !== "ready") {
+            throw new Error(job.failure_message || "模型章纲生成失败");
           }
           const nextOutline = String(job.output_json?.outline_text || "").trim();
           const outlineCharacterCount = visibleCount(nextOutline);
@@ -872,7 +892,7 @@ function ChapterCreationWizard({
       const updated = await persist(saved, 5, { title: generatedTitle, outline_text: generatedOutline });
       setDraft(updated);
     } catch (reason) {
-      const message = readableError(reason, "MiniMax-M3 章纲生成失败");
+      const message = readableError(reason, "模型章纲生成失败");
       setInnerError(message);
       onError(message);
     } finally {
@@ -906,6 +926,30 @@ function ChapterCreationWizard({
   const toggleStoryline = (id: string) => setSelectedStorylineIds((current: string[]) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const toggleOptionalRole = (id: string) => setOptionalRoleIds((current: string[]) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const toggleForeshadow = (id: string) => setSelectedForeshadowIds((current: string[]) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+
+  const openOutlineGenerationConfirm = async () => {
+    try {
+      const current = await getGenerationModelStatus();
+      setOutlineTaskModelLabel(generationModelLabel(current));
+      setConfirmOpen(true);
+    } catch (reason) {
+      const message = readableError(reason, "读取当前有效模型失败");
+      setInnerError(message);
+      onError(message);
+    }
+  };
+
+  const openRecommendationConfirm = async () => {
+    try {
+      const current = await getGenerationModelStatus();
+      setRecommendationTaskModelLabel(generationModelLabel(current));
+      setRecommendConfirmOpen(true);
+    } catch (reason) {
+      const message = readableError(reason, "读取当前有效模型失败");
+      setInnerError(message);
+      onError(message);
+    }
+  };
   const step = Math.max(1, Math.min(6, draft?.step || 1));
   const requiredCharacters = characters.filter((item: NovelCharacterRecord) => requiredRoleIds.includes(item.id));
   const optionalCharacters = characters.filter((item: NovelCharacterRecord) => !requiredRoleIds.includes(item.id));
@@ -939,7 +983,7 @@ function ChapterCreationWizard({
     h("h3", null, "选择线索"),
     h("p", null, "选择本章要推进的线索（可同时推进多条）"),
     h("div", { className: "mb-chapter-tip" }, h(BulbOutlined), h("span", null, "务必推动合适线路发展，只选择主线可能会遇到剧情停滞，建议根据剧情需要选择支线、感情线或势力线")),
-    h(Button, { className: "anw-primary-button mb-chapter-ai-button", icon: h(UnorderedListOutlined), loading: recommending, onClick: () => setRecommendConfirmOpen(true) }, "AI智能推荐线路"),
+    h(Button, { className: "anw-primary-button mb-chapter-ai-button", icon: h(UnorderedListOutlined), loading: recommending, onClick: () => void openRecommendationConfirm() }, "AI智能推荐线路"),
     h("p", { className: "mb-chapter-ai-caption" }, "若您不知道如何选择正确线路，可以使用AI智能推荐线路，帮您自动选择合适线路"),
     h(
       "div",
@@ -1041,7 +1085,7 @@ function ChapterCreationWizard({
       { className: "mb-chapter-step-body is-generating" },
       h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) })),
       h(Spin, { size: "large" }),
-      h("h3", null, "AI正在创作章节大纲..."),
+      h("h3", null, `${outlineTaskModelLabel || "当前任务模型"} 正在创作章节大纲...`),
       h("p", null, "正在分析角色和伏笔配置"),
       h(Progress, { percent: 42, showInfo: false, strokeColor: "#ff7548", trailColor: "#fde8df" }),
       h("small", null, "预计需要 8-15 秒"),
@@ -1050,7 +1094,7 @@ function ChapterCreationWizard({
       "div",
       { className: "mb-chapter-step-body is-outline-result" },
       h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有±500-1500字的浮动，请合理设置目标字数"), h("small", null, "字数限制：2000-5000字")),
-      h("div", { className: "mb-chapter-result-heading" }, h("h3", null, "章节大纲已生成"), h("p", null, "请查看并确认生成的章节大纲")),
+      h("div", { className: "mb-chapter-result-heading" }, h("h3", null, "章节大纲已生成"), h("p", null, outlineTaskModelLabel ? `任务模型：${outlineTaskModelLabel}` : "请查看并确认生成的章节大纲")),
       field("章节标题", h(Input, { maxLength: 20, value: chapterTitle, onChange: (event: any) => setChapterTitle(event.target.value) }), `最多20字，当前：${visibleCount(chapterTitle)}/20`),
       field("章节大纲", h(Input.TextArea, { rows: 10, maxLength: 5000, value: outlineText, onChange: (event: any) => setOutlineText(event.target.value) }), `最多5000字，当前：${visibleCount(outlineText)}/5000`),
       h("div", { className: "mb-chapter-summary-card" }, h("strong", null, "角色配置摘要"), h("p", null, `实际选择：${requiredRoleIds.length + optionalRoleIds.length} 人`), h("p", null, `${allowNewRole ? "允许AI新增角色" : "不允许AI新增角色"}，${allowExitRole ? "允许AI退场角色" : "不允许AI退场角色"}`)),
@@ -1058,14 +1102,14 @@ function ChapterCreationWizard({
       h("div", { className: "mb-chapter-triple-actions" },
         h(Button, { size: "large", disabled: saving, onClick: () => void changeStep(4) }, "返回修改"),
         h(Button, { size: "large", className: "anw-primary-button", disabled: !chapterTitle.trim() || !outlineText.trim(), loading: saving, onClick: () => void changeStep(6) }, "下一步"),
-        h(Button, { size: "large", onClick: () => setConfirmOpen(true) }, "重新生成"),
+        h(Button, { size: "large", onClick: () => void openOutlineGenerationConfirm() }, "重新生成"),
       ),
     );
     return h(
       "div",
       { className: "mb-chapter-step-body is-target" },
       h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有±500-1500字的浮动，请合理设置目标字数"), h("small", null, "字数限制：2000-5000字")),
-      h(Button, { size: "large", block: true, className: "anw-primary-button mb-chapter-next", onClick: () => setConfirmOpen(true) }, "生成章节大纲"),
+      h(Button, { size: "large", block: true, className: "anw-primary-button mb-chapter-next", onClick: () => void openOutlineGenerationConfirm() }, "生成章节大纲"),
     );
   };
 
@@ -1122,7 +1166,7 @@ function ChapterCreationWizard({
         title: "确认",
         onCancel: () => setConfirmOpen(false),
       },
-      h("p", null, "生成章节将消耗500字数，确定继续吗？"),
+      h("p", null, `生成章节将使用 ${outlineTaskModelLabel || "当前有效模型"} 并消耗500字数，确定继续吗？`),
       h("div", { className: "mb-chapter-confirm-actions" },
         h(Button, { size: "large", onClick: () => setConfirmOpen(false) }, "取消"),
         h(Button, { size: "large", className: "anw-primary-button", onClick: () => void generateOutline() }, "确定"),
@@ -1139,7 +1183,7 @@ function ChapterCreationWizard({
         title: "AI智能推荐线路",
         onCancel: () => setRecommendConfirmOpen(false),
       },
-      h("p", null, "使用AI推荐线路选择将消耗 500 字。AI将分析前文内容和所有线路，为您推荐最适合本章推进的线路。是否继续？"),
+      h("p", null, `使用 ${recommendationTaskModelLabel || "当前有效模型"} 推荐线路将消耗 500 字。AI将分析前文内容和所有线路，为您推荐最适合本章推进的线路。是否继续？`),
       h("div", { className: "mb-chapter-confirm-actions" },
         h(Button, { size: "large", onClick: () => setRecommendConfirmOpen(false) }, "取消"),
         h(Button, { size: "large", className: "anw-primary-button", onClick: () => void recommendStorylines() }, "确定消耗 500 字"),
@@ -1157,7 +1201,7 @@ function ChapterCreationWizard({
         className: "anw-modal mb-chapter-recommend-loading",
       },
       h(Spin, { size: "large" }),
-      h("h3", null, "AI正在分析推荐..."),
+      h("h3", null, `${recommendationTaskModelLabel || "当前任务模型"} 正在分析推荐...`),
       h("p", null, "正在分析前文内容和所有线路发展情况"),
       h("strong", null, "⚠️ 重要提示"),
       h("p", null, "请勿关闭页面 · 请勿切换屏幕 · 请勿让设备息屏"),
@@ -1174,7 +1218,7 @@ function ChapterCreationWizard({
         title: "AI为您推荐以下线路",
         onCancel: () => { setRecommendationOptions([]); setPendingRecommendationId(""); },
       },
-      h("p", null, "请选择其中一个线路继续"),
+      h("p", null, recommendationTaskModelLabel ? `任务模型：${recommendationTaskModelLabel}` : "请选择其中一个线路继续"),
       h("div", { className: "mb-chapter-choice-list" }, ...recommendationOptions.map((option: { id: string; reason: string }, index: number) => {
         const item = storylines.find((storyline: StorylineRecord) => storyline.id === option.id);
         if (!item) return null;
@@ -1231,6 +1275,8 @@ export function StudioProjectView({
   openChapterWizardSignal = 0,
 }: StudioProps) {
   const [busy, setBusy] = React.useState(false);
+  const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
+  const [generationModelStatusError, setGenerationModelStatusError] = React.useState(false);
   const [characters, setCharacters] = React.useState([] as NovelCharacterRecord[]);
   const [relationships, setRelationships] = React.useState([] as CharacterRelationshipRecord[]);
   const [storylines, setStorylines] = React.useState([] as StorylineRecord[]);
@@ -1270,6 +1316,29 @@ export function StudioProjectView({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState([] as NovelSearchResultRecord[]);
   const [searching, setSearching] = React.useState(false);
+
+  React.useEffect(() => {
+    let active = true;
+    const load = () => {
+      setGenerationModelStatusError(false);
+      void getGenerationModelStatus()
+        .then((status) => {
+          if (active) setGenerationModelStatus(status);
+        })
+        .catch(() => {
+          if (active) {
+            setGenerationModelStatus(null);
+            setGenerationModelStatusError(true);
+          }
+        });
+    };
+    load();
+    window.addEventListener("focus", load);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", load);
+    };
+  }, [novel.id]);
 
   const volumes = novel.tree.filter((item: VolumeRecord) => item.id !== null);
   const orderedVolumes = volumeDescending ? [...volumes].reverse() : volumes;
@@ -1468,6 +1537,7 @@ export function StudioProjectView({
     let nextCover = coverImageData;
     const templateData = { ...(novel.template_data || {}) } as Record<string, unknown>;
     if (coverMode === "ai") {
+      await getGenerationModelStatus();
       const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
         method: "POST",
         body: JSON.stringify({
@@ -1476,11 +1546,10 @@ export function StudioProjectView({
           novel_id: novel.id,
           kind: "novel_cover",
           input_snapshot: { title: novel.title, genre: novel.genre, subgenre: novel.subgenre, idea: novel.idea, highlight: novel.highlight },
-          requested_model_id: FIXED_MODEL_ID,
           force_new: true,
         }),
       });
-      if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) throw new Error(job.failure_message || "MiniMax-M3 封面方案生成失败");
+      if (job.state !== "ready") throw new Error(job.failure_message || "模型封面方案生成失败");
       templateData.cover_prompt = String(job.output_json?.cover_prompt || "");
       templateData.cover_generation_job_id = job.id;
       nextCover = novel.cover_image_data || defaultNovelCover;
@@ -1847,6 +1916,11 @@ export function StudioProjectView({
           h("h1", null, novel.title),
           h("p", null, [novel.genre, novel.subgenre].filter(Boolean).join(" / ") || "长篇小说"),
           h("div", { className: "mb-book-stats" }, h("span", null, `${chapterDocuments.reduce((sum: number, item: DocumentRecord) => sum + item.visible_character_count, 0)} 字`), h("span", null, `${chapterDocuments.length} 章节`)),
+          h("section", { className: "anw-current-model-card", "aria-label": "当前有效模型" },
+            h("strong", null, "当前有效模型"),
+            h("span", null, generationModelStatus ? generationModelLabel(generationModelStatus) : generationModelStatusError ? "暂时无法读取" : "正在读取…"),
+            h("small", null, "跟随 AI 小说作家 Agent；专属模型优先，未设置则继承 QwenPaw 全局模型。"),
+          ),
           h(
             "nav",
             { className: "mb-book-nav", "aria-label": "作品创作流程" },
@@ -2003,6 +2077,7 @@ export function StudioProjectView({
         ),
         coverMode === "upload" ? h("label", { className: `mb-cover-edit-preview is-upload${coverImageData ? " has-image" : ""}` }, coverImageData ? h("img", { src: coverImageData, alt: "上传封面预览" }) : h("span", null, h(UploadOutlined), "点击上传图片"), h("input", { type: "file", accept: "image/*", onChange: uploadCover }))
           : h("div", { className: `mb-cover-edit-preview${coverMode === "system" ? " has-image" : ""}` }, coverMode === "system" ? h("img", { src: defaultNovelCover, alt: "系统封面预览" }) : h("span", null, h(PictureOutlined), "点击下方按钮生成封面")),
+        coverMode === "ai" ? h("small", { className: "mb-name-cost" }, `当前有效模型：${generationModelStatus ? generationModelLabel(generationModelStatus) : generationModelStatusError ? "无法读取" : "读取中…"}`) : null,
         h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: coverMode === "upload" && !coverImageData, onClick: () => void applyCover() }, coverMode === "ai" ? "开始生成" : "确认使用"),
         h(Button, { size: "large", block: true, onClick: () => setCoverOpen(false) }, "取消"),
       ),

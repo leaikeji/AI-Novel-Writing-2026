@@ -1,4 +1,11 @@
-import { ApiError, apiRequest } from "./api";
+import {
+  ApiError,
+  apiRequest,
+  completedGenerationModelLabel,
+  generationModelLabel,
+  generationModelAuditLabel,
+  getGenerationModelStatus,
+} from "./api";
 import { APP_PATH } from "./contracts";
 import {
   AssetPresetRecord,
@@ -54,9 +61,6 @@ const {
 
 
 const CREATION_DRAFT_KEY = "ai-novel-world-2026:creation-draft-key";
-const FIXED_MODEL_ID = "MiniMax-M3";
-
-
 type LibraryView = "center" | "private-library";
 type TemplateTab = "system" | "custom";
 
@@ -657,6 +661,9 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
   const [templateTab, setTemplateTab] = React.useState("system" as TemplateTab);
   const [templateCategory, setTemplateCategory] = React.useState("");
   const [templateCandidate, setTemplateCandidate] = React.useState(null as { key: string; name: string; fields: string[] } | null);
+  const [templateTaskModelLabel, setTemplateTaskModelLabel] = React.useState("");
+  const [namingTaskModelLabel, setNamingTaskModelLabel] = React.useState("");
+  const [coverTaskModelLabel, setCoverTaskModelLabel] = React.useState("");
 
   React.useEffect(() => {
     setBusy(false);
@@ -771,6 +778,8 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     setTemplateGenerating(true);
     setStep(3);
     try {
+      const currentModel = await getGenerationModelStatus();
+      setTemplateTaskModelLabel(generationModelLabel(currentModel));
       const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
         method: "POST",
         body: JSON.stringify({
@@ -781,23 +790,22 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
             audience: data.audience,
             idea: data.idea,
           },
-          requested_model_id: FIXED_MODEL_ID,
           force_new: true,
         }),
       });
+      setTemplateTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
       const output = job.output_json || {};
       const fields = Array.isArray(output.template_fields) ? output.template_fields.map(String) : [];
       const templateData = output.template_data && typeof output.template_data === "object" ? output.template_data : {};
       if (
         job.state !== "ready"
-        || job.actual_model_id !== FIXED_MODEL_ID
         || !String(output.genre || "").trim()
         || !String(output.template_key || "").trim()
         || !String(output.template_name || "").trim()
         || fields.length === 0
         || fields.some((field: string) => !String(templateData[field] || "").trim())
       ) {
-        throw new Error(job.failure_message || "MiniMax-M3 模板生成失败");
+        throw new Error(job.failure_message || "模型模板生成失败");
       }
       await persist(3, {
         genre: String(output.genre),
@@ -817,12 +825,19 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     }
   };
 
-  const requestTemplateGeneration = () => {
+  const requestTemplateGeneration = async () => {
     if (!draft || busy || !String(data.idea || "").trim()) return;
+    let modelLabel: string;
+    try {
+      modelLabel = generationModelLabel(await getGenerationModelStatus());
+    } catch (reason) {
+      setError(readableError(reason, "读取当前有效模型失败"));
+      return;
+    }
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
       title: "确认",
-      content: "创建小说将消耗500字符，用于AI智能生成模板设定，确定继续吗？",
+      content: `创建小说将使用 ${modelLabel} 并消耗500字符，用于AI智能生成模板设定，确定继续吗？`,
       okText: "确定",
       cancelText: "取消",
       onOk() {
@@ -857,6 +872,8 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         await persist(6, patch);
       } else if (step === 5 && data.cover_mode === "ai" && !data.cover_prompt) {
         if (!draft) throw new Error("建书草稿尚未就绪");
+        const currentModel = await getGenerationModelStatus();
+        setCoverTaskModelLabel(generationModelLabel(currentModel));
         const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
           method: "POST",
           body: JSON.stringify({
@@ -872,12 +889,12 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
               template_name: data.template_name,
               template_data: data.template_data,
             },
-            requested_model_id: FIXED_MODEL_ID,
             force_new: true,
           }),
         });
-        if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID) {
-          throw new Error(job.failure_message || "MiniMax-M3 封面方案生成失败");
+        setCoverTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
+        if (job.state !== "ready") {
+          throw new Error(job.failure_message || "模型封面方案生成失败");
         }
         const patch = {
           cover_prompt: String(job.output_json?.cover_prompt || ""),
@@ -897,6 +914,29 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     }
   };
 
+  const requestGoNext = async () => {
+    if (step !== 5 || data.cover_mode !== "ai" || data.cover_prompt) {
+      await goNext();
+      return;
+    }
+    let modelLabel: string;
+    try {
+      modelLabel = generationModelLabel(await getGenerationModelStatus());
+      setCoverTaskModelLabel(modelLabel);
+    } catch (reason) {
+      setError(readableError(reason, "读取当前有效模型失败"));
+      return;
+    }
+    Modal.confirm({
+      className: "anw-modal mb-confirm-modal",
+      title: "确认",
+      content: `生成封面将使用 ${modelLabel} 并消耗10000字包，确定继续吗？`,
+      okText: "确定",
+      cancelText: "取消",
+      onOk: () => { void goNext(); },
+    });
+  };
+
   const chooseTemplate = (categoryOverride?: string) => {
     if (!templateCandidate) return;
     const category = categoryOverride || templateCategory || "自定义";
@@ -911,12 +951,20 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     setTemplateModalOpen(false);
   };
 
-  const generateName = () => {
+  const generateName = async () => {
     if (!draft || busy) return;
+    let modelLabel: string;
+    try {
+      modelLabel = generationModelLabel(await getGenerationModelStatus());
+      setNamingTaskModelLabel(modelLabel);
+    } catch (reason) {
+      setError(readableError(reason, "读取当前有效模型失败"));
+      return;
+    }
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
       title: "确认",
-      content: "生成小说名称将消耗20字包，确定继续吗？",
+      content: `生成小说名称将使用 ${modelLabel} 并消耗20字包，确定继续吗？`,
       okText: "确定",
       cancelText: "取消",
       onOk() {
@@ -937,13 +985,13 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
                   template_name: data.template_name,
                   template_data: data.template_data,
                 },
-                requested_model_id: FIXED_MODEL_ID,
                 force_new: true,
               }),
             });
+            setNamingTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
             const titles = Array.isArray(job.output_json?.titles) ? job.output_json.titles.slice(0, 8) : [];
-            if (job.state !== "ready" || job.actual_model_id !== FIXED_MODEL_ID || !titles.length) {
-              throw new Error(job.failure_message || "MiniMax-M3 没有返回有效书名");
+            if (job.state !== "ready" || !titles.length) {
+              throw new Error(job.failure_message || "模型没有返回有效书名");
             }
             updateData({
               title: titles.map((title: unknown, index: number) => `${index + 1}. ${String(title).trim()}`).join(" "),
@@ -1088,7 +1136,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
               { className: "mb-template-generating" },
               h(Spin, { size: "large" }),
               h("strong", null, "AI正在分析您的创作思路"),
-              h("span", null, "正在为您匹配最合适的模板设定"),
+              h("span", null, templateTaskModelLabel ? `任务模型：${templateTaskModelLabel}` : "正在为您匹配最合适的模板设定"),
             )
           : data.template_key
           ? renderTemplateForm()
@@ -1117,7 +1165,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           onClick: generateName,
         }, busy ? "AI生成中..." : data.title ? "重新生成名称" : "AI帮我取名"),
         busy || data.naming_generation_job_id
-          ? h("small", { className: "mb-name-cost" }, h(ThunderboltOutlined), "每次消耗20字包")
+          ? h("small", { className: "mb-name-cost" }, h(ThunderboltOutlined), namingTaskModelLabel ? `每次消耗20字包 · ${namingTaskModelLabel}` : "每次消耗20字包")
           : null,
       );
     }
@@ -1133,6 +1181,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         h("h2", null, "选择封面"),
         h("p", null, "为您的作品选择一个精美的封面"),
         h("strong", { className: "mb-cover-label" }, "选择生成方式"),
+        data.cover_mode === "ai" && coverTaskModelLabel ? h("small", { className: "mb-name-cost" }, `封面任务模型：${coverTaskModelLabel}`) : null,
         h(
           "div",
           { className: "mb-cover-mode-list" },
@@ -1229,7 +1278,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
               className: "mb-orange-button",
               loading: busy && step !== 4,
               disabled: nextDisabled() || busy,
-              onClick: step === 6 ? complete : step === 2 ? requestTemplateGeneration : goNext,
+              onClick: step === 6 ? complete : step === 2 ? requestTemplateGeneration : requestGoNext,
             }, step === 6 ? "完成创建" : footerLabel),
           ),
         ),

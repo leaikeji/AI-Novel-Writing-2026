@@ -20,8 +20,13 @@ def test_expected_skill_set_is_present() -> None:
     assert actual == EXPECTED_SKILLS
 
 
-def test_skills_are_manual_adoption_only() -> None:
+def test_skills_allow_controlled_candidates_but_not_authoritative_model_writes() -> None:
     for skill_path in SKILLS_ROOT.glob("*/SKILL.md"):
         text = skill_path.read_text(encoding="utf-8")
-        assert "不得声称已经保存或修改正文" in text
+        assert "PawApp" in text
+        assert any(
+            marker in text
+            for marker in ("不得声称", "不得自行声称", "不把建议或候选冒充")
+        )
+        assert "权威" in text or "正式故事事实" in text
         assert "novel_get_context" in text

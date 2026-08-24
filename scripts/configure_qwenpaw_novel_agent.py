@@ -11,8 +11,6 @@ from urllib.request import Request, urlopen
 
 
 AGENT_ID = "ai-novel-writer"
-MODEL_PROVIDER_ID = os.environ.get("AI_NOVEL_MODEL_PROVIDER", "minimax-cn")
-MODEL_ID = os.environ.get("AI_NOVEL_MODEL_ID", "MiniMax-M3")
 SKILLS = [
     "novel-direction",
     "story-bible",
@@ -136,35 +134,28 @@ def configure() -> dict[str, object]:
         )
         assert isinstance(system_prompt_files, list)
 
-    model_check = request_json(
-        f"/api/models/{MODEL_PROVIDER_ID}/models/test",
-        method="POST",
-        body={"model_id": MODEL_ID},
-    )
-    if not isinstance(model_check, dict) or model_check.get("success") is not True:
-        raise RuntimeError(
-            f"required model connection failed: {MODEL_PROVIDER_ID}/{MODEL_ID}"
-        )
     active_model = request_json(
-        "/api/models/active",
-        method="PUT",
-        body={
-            "provider_id": MODEL_PROVIDER_ID,
-            "model": MODEL_ID,
-            "scope": "agent",
-            "agent_id": AGENT_ID,
-        },
+        f"/api/models/active?scope=effective&agent_id={AGENT_ID}",
     )
-    if not isinstance(active_model, dict) or active_model.get("active_llm") != {
-        "provider_id": MODEL_PROVIDER_ID,
-        "model": MODEL_ID,
-    }:
-        raise RuntimeError("failed to lock novel agent to MiniMax M3")
+    active_llm = (
+        active_model.get("active_llm")
+        if isinstance(active_model, dict)
+        else None
+    )
+    if (
+        not isinstance(active_llm, dict)
+        or not str(active_llm.get("provider_id") or "").strip()
+        or not str(active_llm.get("model") or "").strip()
+    ):
+        raise RuntimeError(
+            "AI 小说作家没有可用的有效模型；请先在 QwenPaw 设置 Agent "
+            "专属模型或全局默认模型"
+        )
 
     return {
         "agent_id": AGENT_ID,
         "created": created,
-        "active_model": active_model["active_llm"],
+        "effective_model": active_llm,
         "enabled_skills": SKILLS,
         "enabled_tools": TOOLS,
         "system_prompt_files": system_prompt_files,
