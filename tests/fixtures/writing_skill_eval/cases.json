@@ -1,0 +1,270 @@
+{
+  "schema_version": "1.0",
+  "suite_id": "writing-skill-eval-0.4.0",
+  "rights_basis": "project-synthetic",
+  "comparison_protocol": {
+    "candidate_versions": ["0.3.0", "0.4.0"],
+    "same_model": true,
+    "attempts_per_version": 2,
+    "blind_order": true,
+    "model_and_parameters_must_be_recorded": true
+  },
+  "rubric_dimensions": [
+    "吸引力",
+    "人物可信度",
+    "场景推进",
+    "语言自然度",
+    "类型满足度",
+    "可继续修改性"
+  ],
+  "hard_gate_dimensions": [
+    "事实边界",
+    "人物知识边界",
+    "视角",
+    "篇幅",
+    "必要状态变化",
+    "纯净输出"
+  ],
+  "cases": [
+    {
+      "id": "CF-01",
+      "category": "closed-fact-continuation",
+      "genre": "近未来悬疑",
+      "primary_skills": ["prose-writing", "continuity-check"],
+      "title": "九分钟后的档案室",
+      "source_text": "雨城的地下档案站已于十年前封闭。林岑只有一枚铜钥匙、一张受潮纸图和剩九格电的手电；站内无网络。周野在唯一入口守门，两人约定十二点十分前离开。林岑要找的是纸质值班簿，因为电子备份已被删除。当前时间为十二点零一分。",
+      "request": "从林岑进入档案室写起，续写一个完整场景。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（林岑）",
+        "target_chars": {"min": 500, "max": 800},
+        "required_anchors": ["铜钥匙", "受潮纸图", "九格电", "十二点十分"],
+        "forbidden_additions": ["新人物", "新设备", "秘密通道", "联网求援", "超自然能力"],
+        "knowledge_boundaries": ["林岑不知道值班簿的确切位置", "周野看不见档案室内部"],
+        "required_state_changes": ["林岑靠纸图和环境线索缩小值班簿位置", "限时压力明显升级"],
+        "speaker_ids": ["林岑", "周野"]
+      },
+      "blind_review_focus": ["吸引力", "场景推进", "语言自然度"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "CF-02",
+      "category": "closed-fact-continuation",
+      "genre": "东方玄幻",
+      "primary_skills": ["prose-writing", "continuity-check"],
+      "title": "破镜谷的最后一符",
+      "source_text": "沈砥与师妹秦音被困在破镜谷。沈砥左肩受伤，只剩一张火符；秦音抱着不能打开的木匣。影兽畏光，但火符只能燃三息。谷口被落石堵住，两人既不会飞，也没有其他法器。木匣必须原样带回宗门。",
+      "request": "写两人用已有条件挡住影兽并找到下一步的场景，不要完全脱险。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（沈砥）",
+        "target_chars": {"min": 500, "max": 800},
+        "required_anchors": ["左肩伤", "一张火符", "三息", "木匣不能打开"],
+        "forbidden_additions": ["新功法", "新法器", "外援", "开启木匣", "突然觉醒"],
+        "knowledge_boundaries": ["沈砥和秦音都不知道木匣内容", "两人只知道影兽畏光"],
+        "required_state_changes": ["火符被消耗", "两人从被动防守转为有代价的临时计划"],
+        "speaker_ids": ["沈砥", "秦音"]
+      },
+      "blind_review_focus": ["人物可信度", "场景推进", "类型满足度"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "SP-01",
+      "category": "scene-progression",
+      "genre": "年代/重生情感",
+      "primary_skills": ["scene-craft", "prose-writing"],
+      "title": "粮站签字",
+      "source_text": "1984 年七月，何雨带着大学录取通知书来公社粮站，必须在下午四点前让会计陈湘在粮食关系转出单上签字。陈湘发现何家去年交粮账差五十斤，拒绝签字。何雨知道父亲保留了收条，但收条在十里外家中；她若现在走路来回，必然赶不上四点。站内只有何雨、陈湘和一本原始过磅簿。",
+      "request": "写完整的办事场景。何雨必须换策略，但不得靠求情或巧合获得签字。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（何雨）",
+        "target_chars": {"min": 550, "max": 850},
+        "required_anchors": ["下午四点", "五十斤", "原始过磅簿", "十里"],
+        "forbidden_additions": ["第三人帮忙", "突然找到收条", "陈湘无条件心软", "现代电子设备"],
+        "knowledge_boundaries": ["何雨不知道过磅簿中的具体数字", "陈湘不能确认收条是否存在"],
+        "required_state_changes": ["何雨从要求通融转为核对原始记录", "陈湘从拒绝转为接受可核验的处理方案"],
+        "speaker_ids": ["何雨", "陈湘"]
+      },
+      "blind_review_focus": ["人物可信度", "场景推进", "可继续修改性"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "SP-02",
+      "category": "scene-progression",
+      "genre": "近未来悬疑",
+      "primary_skills": ["scene-craft", "prose-writing"],
+      "title": "氧气校准值",
+      "source_text": "环城防污站的无人机在七号区失联。维修员饶真要进去取回存储芯片，因为其中有污染源的唯一光谱记录。值班主管路宁根据仪表读数拒绝开门：防护服只够十八分钟，往返标准时间是二十二分钟。饶真今早更换过氧传感器，但尚未做手动复核。控制室内只有两人。",
+      "request": "写一个以策略变化而非大声争吵推进的场景，结尾作出可执行但有代价的决定。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（饶真）",
+        "target_chars": {"min": 500, "max": 800},
+        "required_anchors": ["十八分钟", "二十二分钟", "氧传感器", "手动复核"],
+        "forbidden_additions": ["备用防护服", "第三名工作人员", "远程取回芯片", "无代价破例"],
+        "knowledge_boundaries": ["饶真不知道手动复核结果", "路宁只能依据当前记录承担开门责任"],
+        "required_state_changes": ["饶真从要求开门转为先证明读数是否可信", "两人形成带停止条件的行动决定"],
+        "speaker_ids": ["饶真", "路宁"]
+      },
+      "blind_review_focus": ["场景推进", "人物可信度", "吸引力"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "CV-01",
+      "category": "character-voice",
+      "genre": "东方玄幻",
+      "primary_skills": ["character-craft", "dialogue-craft"],
+      "title": "三人争一张残图",
+      "source_text": "剑修长老闻九衡做事讲秩序与责任，句子短，从不夸大把握。杂役出身的弟子阿鹊先算风险和退路，爱用市井比方，紧张时反而开玩笑。典籍官迟雁引说话精确，习惯纠正名称，遇到未证实的事会明说不知道。三人得到一张只标出南北方位的残图，必须决定今夜是否进入雾岭。",
+      "request": "写一段三人讨论并做决定的对话场景。不要用方言、口头禅或大段背景介绍区分人物。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（阿鹊）",
+        "target_chars": {"min": 450, "max": 700},
+        "required_anchors": ["残图只有南北方位", "今夜是否进雾岭", "三人都发言"],
+        "forbidden_additions": ["残图突然显示新信息", "方言标签", "重复口头禅", "新队员"],
+        "knowledge_boundaries": ["三人都不知道雾岭内的具体道路", "迟雁引不能把推测说成史实"],
+        "required_state_changes": ["三人从互不接受的立场形成有退出条件的共同决定"],
+        "speaker_ids": ["闻九衡", "阿鹊", "迟雁引"]
+      },
+      "blind_review_focus": ["人物可信度", "语言自然度", "可继续修改性"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "CV-02",
+      "category": "character-voice",
+      "genre": "年代/重生情感",
+      "primary_skills": ["character-craft", "dialogue-craft"],
+      "title": "缝纫机该不该卖",
+      "source_text": "1991 年，许家准备为小女儿的手术筹钱。外婆罗秋珍觉得家传缝纫机不能卖，她说话总从实际用处和旧账入手，很少直说难过。长女许方从外地赶回，习惯先给方案再谈感受，对家人的指责会用问句挡回去。十六岁的许川想卖掉自己的自行车，但怕被当成小孩，说话直，越急越少字。",
+      "request": "写三人围绕缝纫机和手术费的家庭场景。去掉人名后也应尽量能辨认说话者。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（许方）",
+        "target_chars": {"min": 450, "max": 700},
+        "required_anchors": ["小女儿手术", "家传缝纫机", "许川的自行车", "三人都发言"],
+        "forbidden_additions": ["医院突然免费", "陌生人捐款", "宝藏或意外遗产", "用方言符号化人物"],
+        "knowledge_boundaries": ["三人都不知道物品确切售价", "许方不知道许川已想卖车"],
+        "required_state_changes": ["许川第一次主动把卖车计划说出来", "家人从争论卖不卖转为核算缺口与选择的具体会议"],
+        "speaker_ids": ["罗秋珍", "许方", "许川"]
+      },
+      "blind_review_focus": ["人物可信度", "语言自然度", "吸引力"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "DS-01",
+      "category": "dialogue-subtext",
+      "genre": "近未来悬疑",
+      "primary_skills": ["dialogue-craft", "scene-craft"],
+      "title": "被删除的十一分钟",
+      "source_text": "安全审查员程珂发现医疗站能源日志缺失十一分钟，怀疑技术员郝文删除了记录。郝文确实做了删除，因为他私自把备用电转给了儿童病区；一旦直说，他和值班医生都会被停职。程珂必须在二十分钟内上交报告，但她不知道备用电去向。两人在空的设备间谈话。",
+      "request": "写这场谈话。郝文不能直说真相，程珂不能凭空猜中；让双方通过试探、拒绝和条件交换改变权力位置。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（程珂）",
+        "target_chars": {"min": 450, "max": 700},
+        "required_anchors": ["缺失十一分钟", "二十分钟报告时限", "备用电", "停职风险"],
+        "forbidden_additions": ["郝文直接说出儿童病区", "程珂突然掌握新证据", "第三人打断", "长篇制度说明"],
+        "knowledge_boundaries": ["程珂只知道日志缺失和郝文有权限", "郝文知道真相但不能明说去向"],
+        "required_state_changes": ["程珂从要求认罪转为提出可验证的有限条件", "郝文交出一个不泄露去向但能推进调查的线索"],
+        "speaker_ids": ["程珂", "郝文"]
+      },
+      "blind_review_focus": ["人物可信度", "语言自然度", "场景推进"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "DS-02",
+      "category": "dialogue-subtext",
+      "genre": "年代/重生情感",
+      "primary_skills": ["dialogue-craft", "prose-writing"],
+      "title": "最后一场电影",
+      "source_text": "1992 年冬，县城电影院将在今夜散场后关门。售票员苏芩明早要乘火车去南方工作，车票已买。放映员陆诚想留她，却不愿用承诺逼她放弃工作；苏芩希望他开口，但不愿再替他作决定。陆诚手里有苏芩自行车的备用钥匙。两人在售票窗前核对最后一场的票根。",
+      "request": "写两人只围绕票根、放映时间和自行车钥匙说话，但让去留愿望和关系权力变化可被读者感知。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（苏芩）",
+        "target_chars": {"min": 400, "max": 650},
+        "required_anchors": ["最后一场票根", "明早火车", "备用钥匙", "电影院关门"],
+        "forbidden_additions": ["直接说我爱你", "直接说留下别走", "火车取消", "第三人促成"],
+        "knowledge_boundaries": ["苏芩不知道陆诚最终会不会开口", "陆诚不能把未做出的承诺当成事实"],
+        "required_state_changes": ["备用钥匙的归属发生明确变化", "苏芩从等陆诚决定转为自己设定关系边界"],
+        "speaker_ids": ["苏芩", "陆诚"]
+      },
+      "blind_review_focus": ["吸引力", "人物可信度", "语言自然度"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "CC-01",
+      "category": "cross-chapter-continuity",
+      "genre": "东方玄幻",
+      "primary_skills": ["continuity-check", "prose-writing"],
+      "title": "红印之后",
+      "source_text": "上章结束时：罗潜拿走了青玉令，说要去验证令上的红印；主角姜策左臂骨裂，已用布带吊在胸前；两人在城北药铺分开，时间是子夜。姜策只知道红印与师门旧案有关，不知道谁是叛徒。他的钱袋里只剩十二枚铜钱。本章开头，姜策在药铺后门听见两声急促敲门。",
+      "request": "续写本章开头场景，让敲门促使姜策作出一个与红印有关但不越过知识边界的决定。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（姜策）",
+        "target_chars": {"min": 450, "max": 700},
+        "required_anchors": ["青玉令不在姜策手中", "左臂骨裂", "十二枚铜钱", "子夜"],
+        "forbidden_additions": ["姜策使用左臂打斗", "青玉令突然回到姜策手中", "姜策知道叛徒身份", "天亮"],
+        "knowledge_boundaries": ["姜策只知道红印与旧案有关", "姜策不知道罗潜此刻的位置和验证结果"],
+        "required_state_changes": ["姜策根据有限线索决定是否开门及如何防备", "敲门者提供的信息只缩小疑问而不直接公布答案"],
+        "speaker_ids": ["姜策", "敲门者"]
+      },
+      "blind_review_focus": ["场景推进", "人物可信度", "类型满足度"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "CC-02",
+      "category": "cross-chapter-continuity",
+      "genre": "年代/重生情感",
+      "primary_skills": ["continuity-check", "prose-writing"],
+      "title": "慢车上的车票",
+      "source_text": "1977 年十一月，梁枝在上章追火车时扭伤右脚踝，已经肿起；她和姑妈上了去市里的慢车。两张车票和介绍信都在姑妈的蓝布包里。梁枝只知道市里工厂可能招工，不知道名额已经定下。姑妈在上章说过“到站前不许打开包”。本章开头，列车员正从前一节车厢查票过来，姑妈却不在座位上。",
+      "request": "续写查票场景，保持上章的伤势、物件所有权、人物知识和时代条件。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（梁枝）",
+        "target_chars": {"min": 450, "max": 700},
+        "required_anchors": ["右脚踝肿伤", "蓝布包属于姑妈", "车票在包里", "不许打开包"],
+        "forbidden_additions": ["手机或电子车票", "梁枝无伤奔跑", "梁枝事先拿到车票", "梁枝知道招工名额结果"],
+        "knowledge_boundaries": ["梁枝不知道姑妈去向", "梁枝不知道包内除车票和介绍信以外是否还有东西"],
+        "required_state_changes": ["梁枝在不擅自打开包的前提下先应对查票", "姑妈的去向或隐瞒成为下一步的具体问题"],
+        "speaker_ids": ["梁枝", "列车员", "姑妈"]
+      },
+      "blind_review_focus": ["人物可信度", "场景推进", "可继续修改性"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "GP-01",
+      "category": "genre-promise",
+      "genre": "东方玄幻",
+      "primary_skills": ["novel-direction", "character-craft", "prose-writing"],
+      "title": "盐灶边的第一次听潮",
+      "source_text": "海盐学徒陈沐能在触摸盐晶时听见极微弱的震颤，但他不知道这是什么，也无法借此增强力量。盐灶每次点火要消耗一日柴薪，失败的一锅会扣他三日工钱。师傅只教过看颜色和闻气味判断火候。今天的卤水比平日浑，师傅要他独自守完这一锅。",
+      "request": "写陈沐第一次把“听见震颤”转化为可验证练习的场景。要有公平成长的快感，但不能一次成功或无代价升级。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（陈沐）",
+        "target_chars": {"min": 550, "max": 850},
+        "required_anchors": ["盐晶震颤", "颜色和气味", "一日柴薪", "三日工钱"],
+        "forbidden_additions": ["系统面板", "神秘高人", "瞬间掌握功法", "无代价成功", "新法器"],
+        "knowledge_boundaries": ["陈沐不知道震颤的正式名称和原理", "陈沐只能通过反复对照验证假设"],
+        "required_state_changes": ["陈沐建立一个可重复验证的火候对照方法", "本锅出现损失或明确风险，但陈沐获得有边界的进步"],
+        "speaker_ids": ["陈沐", "师傅"]
+      },
+      "blind_review_focus": ["类型满足度", "场景推进", "吸引力"],
+      "rights_basis": "project-synthetic"
+    },
+    {
+      "id": "GP-02",
+      "category": "genre-promise",
+      "genre": "近未来悬疑",
+      "primary_skills": ["novel-direction", "scene-craft", "prose-writing"],
+      "title": "隔离舱里的第二道水痕",
+      "source_text": "轨道居住站发生一起隔离舱死亡事件。舱门记录显示从二十一点到尸体被发现都没有开启；地面有两道水痕，一道从洗手台流向排水口，另一道却停在墙边。氧循环系统每十五分钟自检一次，最后两次自检均显示正常。调查员季乔刚到现场，尚不知道死因，也没有嫌疑人名单。",
+      "request": "写季乔的首轮现场勘查。让线索产生一个可验证的暂时假设，但不揭示凶手或死因。只输出正文。",
+      "hard_constraints": {
+        "pov": "第三人称限知（季乔）",
+        "target_chars": {"min": 500, "max": 800},
+        "required_anchors": ["舱门未开启", "两道水痕", "十五分钟自检", "两次正常记录"],
+        "forbidden_additions": ["直接确定死因", "凭空指认凶手", "未提及的隐藏门", "无条件修改舱门日志", "超自然解释"],
+        "knowledge_boundaries": ["季乔只能观察现场和已给记录", "自检正常只能排除对应检测项，不能证明整个系统绝对正常"],
+        "required_state_changes": ["季乔把第二道水痕与自检时间建立一个有限假设", "下一步验证动作明确且不依赖未知证据"],
+        "speaker_ids": ["季乔"]
+      },
+      "blind_review_focus": ["类型满足度", "吸引力", "可继续修改性"],
+      "rights_basis": "project-synthetic"
+    }
+  ]
+}

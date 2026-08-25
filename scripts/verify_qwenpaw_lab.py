@@ -10,12 +10,15 @@ from urllib.request import Request, urlopen
 
 
 APP_ID = "ai-novel-world-2026"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 NOVEL_AGENT_ID = "ai-novel-writer"
 NOVEL_SKILLS = {
     "novel-direction",
-    "story-bible",
+    "story-foundation",
+    "character-craft",
     "chapter-outline",
+    "scene-craft",
+    "dialogue-craft",
     "prose-writing",
     "continuity-check",
     "style-review",

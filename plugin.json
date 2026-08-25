@@ -1,7 +1,7 @@
 {
   "id": "ai-novel-world-2026",
   "name": "AI小说世界2026",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "app",
   "description": "基于 QwenPaw 原生助手和小说 Skills 的个人小说写作工作台",
   "description_i18n": {

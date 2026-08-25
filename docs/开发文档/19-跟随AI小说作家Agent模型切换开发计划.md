@@ -377,7 +377,7 @@ requested_provider_id == actual_provider_id
 ### 7.2 需要修订的旧边界
 
 - `prose-writing`：允许 PawApp 把干净正文保存为“可审阅候选”，仍禁止模型声称已经采用或覆盖正式正文。
-- `story-bible`：允许受控任务返回结构化草稿或情报候选，正式事实仍以业务采用/同步规则为准。
+- `story-foundation`：允许受控任务返回结构化草稿或情报候选，正式事实仍以业务采用/同步规则为准。
 - `chapter-outline`：允许章纲生成任务写入章纲草稿，最终创建章节仍由业务事务完成。
 - `style-review`、`continuity-check`：允许生成结构化审稿结果，但不得直接修改正文。
 - `AI_NOVEL_WORLD.md`：删除“当前只能在对话中”的过期阶段说明，改成“模型只输出建议或候选，权威写入由 PawApp 事务完成”。

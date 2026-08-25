@@ -519,7 +519,7 @@ async def relationships_auto_sync(
             ensure_prompt_within_effective_limit(prompt, configured_model)
             reply = await ctx.chat(
                 prompt,
-                skill="story-bible",
+                skill="story-foundation",
                 session_id=generation_session_id,
             )
             actual_model = reply_model_audit(
@@ -950,7 +950,7 @@ async def creative_generations_create(
         ensure_prompt_within_effective_limit(prompt, configured_model)
         reply = await ctx.chat(
             prompt,
-            skill="story-bible",
+            skill="story-foundation",
             session_id=generation_session_id,
         )
         actual_model = reply_model_audit(

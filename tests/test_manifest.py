@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_VERSION = "0.4.0"
 
 
 def load_manifest() -> dict:
@@ -13,11 +14,21 @@ def test_manifest_is_a_version_bounded_pawapp() -> None:
     manifest = load_manifest()
 
     assert manifest["id"] == "ai-novel-world-2026"
+    assert manifest["version"] == EXPECTED_VERSION
     assert manifest["type"] == "app"
     assert manifest["qwenpaw_version"] == {"min": "2.1.0", "max": "2.2.0"}
     assert manifest["meta"]["pawapp"]["entry_page"] == (
         "/apps/ai-novel-world-2026"
     )
+    assert f'version = "{EXPECTED_VERSION}"' in (
+        ROOT / "pyproject.toml"
+    ).read_text(encoding="utf-8")
+    assert json.loads((ROOT / "package.json").read_text(encoding="utf-8"))[
+        "version"
+    ] == EXPECTED_VERSION
+    assert f'APP_VERSION = "{EXPECTED_VERSION}"' in (
+        ROOT / "backend" / "contracts.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_manifest_entries_exist() -> None:

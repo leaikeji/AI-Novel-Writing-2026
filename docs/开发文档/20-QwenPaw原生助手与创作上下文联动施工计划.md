@@ -924,7 +924,7 @@ input/textarea 使用 selectionStart、selectionEnd 和 selectionDirection。
 | backend/tools.py | A4-B → A6-A，同一工具 Owner 串行 | workspace context 与 selection proposal；两个工具不得由不同代理并写 |
 | backend/services.py、backend/creative_services.py | 默认只读；必要窄 helper 仅 A4-G 集成 Owner | 先复用既有服务；若确需修改，按函数登记唯一 Owner |
 | qwenpaw-agent/AI_NOVEL_WORLD.md | A4-D0 → A6-E0，同一文档 Owner | 页面语义、草稿边界、工具选择和提案路由；其他 Skill 代理只读 |
-| skills/chapter-outline、continuity-check、novel-direction、prose-writing、story-bible、style-review | A4-D1…D6 → A6-E1…E6 | 六个目录可以分别派发；各目录只能有一个 Owner，统一规则由主 Codex 汇合 |
+| skills/chapter-outline、continuity-check、novel-direction、prose-writing、story-foundation、style-review | A4-D1…D6 → A6-E1…E6 | 六个目录可以分别派发；各目录只能有一个 Owner，统一规则由主 Codex 汇合 |
 | scripts/configure_qwenpaw_novel_agent.py | A4-C → A6-E7，安装 Owner | 工具作用域、幂等升级和不覆盖用户模型选择 |
 | scripts/verify_qwenpaw_lab.py | A0B-8 → A4-C → A6-E7，同一验证 Owner | Hook、工具、Agent 作用域、重复注册和卸载残留 |
 

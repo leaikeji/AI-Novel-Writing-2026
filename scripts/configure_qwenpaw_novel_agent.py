@@ -13,8 +13,11 @@ from urllib.request import Request, urlopen
 AGENT_ID = "ai-novel-writer"
 SKILLS = [
     "novel-direction",
-    "story-bible",
+    "story-foundation",
+    "character-craft",
     "chapter-outline",
+    "scene-craft",
+    "dialogue-craft",
     "prose-writing",
     "continuity-check",
     "style-review",

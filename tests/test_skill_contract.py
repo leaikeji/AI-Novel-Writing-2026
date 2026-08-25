@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -6,12 +7,17 @@ SKILLS_ROOT = ROOT / "skills"
 NOVEL_AGENT_PROMPT = ROOT / "qwenpaw-agent" / "AI_NOVEL_WORLD.md"
 EXPECTED_SKILLS = {
     "novel-direction",
-    "story-bible",
+    "story-foundation",
+    "character-craft",
     "chapter-outline",
+    "scene-craft",
+    "dialogue-craft",
     "prose-writing",
     "continuity-check",
     "style-review",
 }
+EXPECTED_SKILL_VERSION = "0.4.0"
+REFERENCE_LINK = re.compile(r"\[[^\]]+\]\((references/[^)]+\.md)\)")
 
 
 def test_expected_skill_set_is_present() -> None:
@@ -19,6 +25,18 @@ def test_expected_skill_set_is_present() -> None:
         path.parent.name for path in SKILLS_ROOT.glob("*/SKILL.md")
     }
     assert actual == EXPECTED_SKILLS
+
+
+def test_skills_are_versioned_and_reference_only_existing_local_craft_guides() -> None:
+    for skill_path in SKILLS_ROOT.glob("*/SKILL.md"):
+        text = skill_path.read_text(encoding="utf-8")
+        assert f'plugin_skill_version: "{EXPECTED_SKILL_VERSION}"' in text
+        references = REFERENCE_LINK.findall(text)
+        assert references, f"{skill_path.parent.name} has no progressive craft reference"
+        for reference in references:
+            target = skill_path.parent / reference
+            assert target.is_file(), f"missing reference from {skill_path}: {reference}"
+            assert target.read_text(encoding="utf-8").strip()
 
 
 def test_skills_allow_controlled_candidates_but_not_authoritative_model_writes() -> None:
@@ -83,3 +101,68 @@ def test_chapter_title_proposals_require_chapter_evidence_and_book_wide_dedup() 
         assert 'include=["chapter_naming"]' in text
         assert "chapter_titles_in_book_order" in text
         assert "书名" in text and "不能" in text
+
+
+def test_craft_skills_freeze_observable_story_capabilities() -> None:
+    required_markers = {
+        "character-craft": (
+            "外部欲望",
+            "内部需求",
+            "恐惧与误判",
+            "能动性与关系",
+            "声音与弧线",
+        ),
+        "scene-craft": (
+            "场景目标应能失败",
+            "阻力应对人物行动作出回应",
+            "策略调整",
+            "转折不是任意反转",
+            "场景出口",
+        ),
+        "dialogue-craft": (
+            "每句话都是动作",
+            "潜台词",
+            "权力会移动",
+            "信息说明应被当前利益打断",
+            "去掉姓名后",
+        ),
+        "prose-writing": (
+            "人物先行动",
+            "状态要变化",
+            "因果不断链",
+            "视角过滤",
+            "保护作者声音",
+            "references/genre-promises.md",
+        ),
+        "chapter-outline": (
+            "入口状态",
+            "出口状态",
+            "每场明确视角",
+            "因为/所以/但是",
+        ),
+        "style-review": (
+            "发展性审稿",
+            "场景/视角审稿",
+            "行文审稿",
+            "校对",
+            "先保护文本中最有辨识度的部分",
+        ),
+    }
+
+    for skill_name, markers in required_markers.items():
+        text = (SKILLS_ROOT / skill_name / "SKILL.md").read_text(encoding="utf-8")
+        for marker in markers:
+            assert marker in text, f"{skill_name} missing craft marker: {marker}"
+
+
+def test_story_foundation_uses_neutral_terms_and_is_not_an_outline_alias() -> None:
+    text = (SKILLS_ROOT / "story-foundation" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    agent_text = NOVEL_AGENT_PROMPT.read_text(encoding="utf-8")
+
+    assert "# 故事设定总表与总体架构" in text
+    assert "故事设定总表、总纲、人物或世界规则" in agent_text
+    for layer in ("已采用事实", "当前状态", "计划承诺", "创作候选", "未知或冲突"):
+        assert layer in text
+    assert "总体大纲用“选择 → 后果 → 新压力”" in text

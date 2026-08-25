@@ -540,7 +540,7 @@ async def intelligence_proposals_create(
         intelligence_session_id = f"novel-intelligence:{proposal['id']}"
         reply = await ctx.chat(
             prompt,
-            skill="story-bible",
+            skill="story-foundation",
             session_id=intelligence_session_id,
         )
         actual_model = reply_model_audit(

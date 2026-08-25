@@ -8,7 +8,7 @@ AI小说世界2026 是运行在 QwenPaw 2.1.0 中的个人小说写作 PawApp。
 - PostgreSQL 18.6 + pgvector 0.8.6、Alembic 和最小小说账本。
 - 作品库、卷章、Markdown 源文本、CAS 自动保存、不可变检查点、历史恢复和 IndexedDB 崩溃恢复。
 - 一个通过官方 `route.wrap` 与 QwenPaw 原生聊天共存的三栏工作台；普通 `/chat` 不变。
-- 专用“AI小说作家” Agent，以及只在该 Agent 中启用、可持续优化的六个小说 Skills。
+- 专用“AI小说作家” Agent，以及只在该 Agent 中启用、可持续优化的九个小说 Skills；`0.4.0` 新增人物塑造、场景构建和对白技法，并强化正文与审稿方法。
 - 三个只读小说工具；HTTP UI 与工具共用同一领域服务。
 - Docker Compose、迁移、前后端测试、安装和运行验证脚本。
 
