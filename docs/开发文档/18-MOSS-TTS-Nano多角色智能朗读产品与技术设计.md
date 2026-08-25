@@ -1600,15 +1600,15 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 | ID | 标记 | 本文工作包 | 前置/汇合 |
 | --- | --- | --- | --- |
 | T4-DEP | SER | 按 T0-F ADR 接入唯一正式编辑器依赖和根 lock | T3-GATE；依赖锁 |
-| T4-A | PAR-C | narration-request 编排、Edition、不变设置快照、render fingerprint 和缓存作用域 | T1-GATE、T3-GATE |
-| T4-B | PAR-C/MUTEX | 持久句段 Worker、优先级、公平老化、取消和单并发资源锁 | T1-GATE |
-| T4-C | PAR-C | master/播放副本校验、转码、响度和接缝处理 | T0-GATE |
-| T4-D | PAR-C | Manifest v2、连续前缀/range、ETag/CAS 和 prepare-range API | T0-G、T1-GATE |
+| T4-A | PAR-C | narration-request 编排、Edition、不变设置快照、render fingerprint 和缓存作用域 | T1-F/T1-GATE、T3-GATE |
+| T4-B | PAR-C/MUTEX | 持久句段 Worker、优先级、公平老化、取消和单并发资源锁 | T1-C/T1-GATE |
+| T4-C | PAR-C | master/播放副本校验、转码、响度和接缝处理 | T0-GATE、T1-E/T1-GATE |
+| T4-D | PAR-C | Manifest v2、连续前缀/range、ETag/CAS 和 prepare-range API | T0-G、T1-F/T1-GATE |
 | T4-E | PAR-C | Web Audio 队列、3–5 段预取和双 audio 回退 | T4-D mock |
 | T4-F | PAR-C | `NarrationEditorBridge` 与正式编辑器适配器 | T0-F ADR、T4-DEP |
 | T4-G | PAR-C | gutter、上下文命令、键盘跳播、高亮和滚动暂停/恢复 | T4-D、T4-E、T4-F 契约 |
-| T4-H | PAR-C | working_copy_diverged、来源快照提示、复核面板/播放器共存、旧稿字幕、显式更新和 Edition 切换 | T4-A、T4-F |
-| T4-I | PAR-C | 局部失效/重生成、旧版本视图、进度保存和快速连续跳播 | T4-A、T4-D |
+| T4-H | PAR-C | working_copy_diverged、来源快照提示、复核面板/播放器共存、旧稿字幕、显式更新和 Edition 切换 | T3-H、T4-A、T4-F |
+| T4-I | PAR-C | 局部失效/重生成、旧版本视图、进度保存和快速连续跳播 | T1-F、T4-A、T4-D |
 | T4-J | PAR-C | 零阻塞自动生成、阻塞暂停、Manifest、编辑映射、缓存、隐私、恢复和不触发按键级 TTS 自动化 | T4 契约 |
 | T4-K | PAR/MUTEX | 一章真实多角色、接缝、30 分钟、RTF、跳播和人工听感 | T4-A–T4-I 集成 |
 | T4-GATE | INT/GATE | 核心多角色朗读闭环集成 | T4-DEP、T4-A–T4-K |
@@ -1617,9 +1617,9 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 
 | ID | 标记 | 本文工作包 | 前置/汇合 |
 | --- | --- | --- | --- |
-| T5-A | PAR-C/MUTEX | VoiceGenerator 受管后端、生命周期和资源锁 | T0-D go |
+| T5-A | PAR-C/MUTEX | VoiceGenerator 受管后端、生命周期和资源锁 | T0-D go、T1-B/T1-GATE |
 | T5-B | PAR-C | 人物卡资料到可编辑音色描述 | T2-GATE |
-| T5-C | PAR-C | 多候选、试听、来源、不可变版本和私人音色库 UI | T2-A、T5 契约 |
+| T5-C | PAR-C | 多候选、试听、来源、不可变版本和私人音色库 UI | T2-A、T5-A API 契约 |
 | T5-D | PAR/MUTEX | VoiceGenerator 样音到 Nano 克隆保持度与质量测试 | T5-A |
 | T5-E | PAR-C | M4 不达标时隐藏入口和既有路径非回归 | T5-A–T5-D |
 | T5-GATE | INT/GATE | 本阶段文字生音色产品化裁决 | T5-A–T5-E |
