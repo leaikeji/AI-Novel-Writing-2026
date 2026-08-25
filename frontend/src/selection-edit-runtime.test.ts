@@ -5,14 +5,17 @@ import { AssistantSelectionRegistry } from "./assistant-selection-registry";
 import { AIEditTransactionManager } from "./assistant-transactions";
 import type { EditableFieldAdapter, SelectionSnapshot } from "./assistant-fields";
 import {
+  createSelectionEditReviewHost,
   SelectionEditRuntime,
   type SelectionEditGenerationClient,
 } from "./selection-edit-runtime";
+import type { QwenPawReactRuntime } from "./assistant-pane";
 import type { CreativeGenerationRecord } from "./types";
 
 
 const SELECTION_ID = "00000000-0000-4000-8000-000000000021";
 const JOB_ID = "00000000-0000-4000-8000-000000000022";
+const RETRY_JOB_ID = "00000000-0000-4000-8000-000000000025";
 const REVIEW_ID = "00000000-0000-4000-8000-000000000023";
 const TRANSACTION_ID = "00000000-0000-4000-8000-000000000024";
 
@@ -184,6 +187,57 @@ async function harness(client?: SelectionEditGenerationClient) {
 
 
 describe("SelectionEditRuntime", () => {
+  it("keeps the controlled source field mounted while the local review surface is active", () => {
+    const state = {
+      phase: "applied",
+      identity: {
+        reviewSessionId: REVIEW_ID,
+        selectionId: SELECTION_ID,
+        operation: "polish",
+        baseText: "旧句",
+        target: {
+          fieldId: "settings.idea",
+          fieldLabel: "创作思路",
+          mode: "multiline",
+        },
+      },
+      focusRequest: {
+        sequence: 1,
+        target: { kind: "source-field", fieldId: "settings.idea" },
+        reason: "apply-succeeded",
+      },
+      message: "AI 修改已应用。",
+      canUndo: true,
+      undoPending: false,
+    } as const;
+    const createElement = vi.fn((type: unknown, props: unknown, ...children: unknown[]) => ({
+      type,
+      props,
+      children,
+    }));
+    const React = {
+      createElement,
+      useState: (initial: () => unknown) => [initial(), vi.fn()],
+      useEffect: vi.fn(),
+    } as unknown as QwenPawReactRuntime;
+    const runtime = {
+      getState: () => state,
+      subscribe: vi.fn(() => vi.fn()),
+      handleSurfaceAction: vi.fn(),
+      focusSource: vi.fn(),
+    } as unknown as SelectionEditRuntime;
+    const Host = createSelectionEditReviewHost(React, runtime);
+
+    const rendered = Host({ fieldIds: "settings.idea", children: "SOURCE_FIELD" }) as {
+      children: unknown[];
+    };
+
+    expect(rendered.children[0]).toBe("SOURCE_FIELD");
+    expect(rendered.children[1]).toMatchObject({
+      props: expect.objectContaining({ state }),
+    });
+  });
+
   it("creates one audited editor job, opens V2 review, applies once and supports one-step undo", async () => {
     const values = await harness();
 
@@ -281,5 +335,44 @@ describe("SelectionEditRuntime", () => {
     values.runtime.handleSurfaceAction({ type: "send-to-assistant" });
     expect(values.fallback).toHaveBeenCalledWith(SELECTION_ID, "polish");
     expect(values.applyValue).not.toHaveBeenCalled();
+  });
+
+  it("creates a new audited attempt only after an explicit retry", async () => {
+    let callCount = 0;
+    const client: SelectionEditGenerationClient = {
+      start: vi.fn(async (payload) => {
+        callCount += 1;
+        return readyJob(payload.input_snapshot, callCount === 1
+          ? {
+            state: "failed",
+            failure_message: "模型暂时不可用",
+            output_json: {},
+            output_text: "",
+            completed_at: null,
+          }
+          : { id: RETRY_JOB_ID, attempt: 2 });
+      }),
+    };
+    const values = await harness(client);
+    await values.runtime.start({
+      record: values.record,
+      fieldLabel: "创作思路",
+      operation: "polish",
+    });
+    expect(values.runtime.getState()).toMatchObject({ phase: "failed", retryable: true });
+    expect(values.registry.get(SELECTION_ID)?.jobId).toBe(JOB_ID);
+
+    values.runtime.handleSurfaceAction({ type: "retry" });
+    await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("reviewing"));
+
+    expect(client.start).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ force_new: true }),
+      expect.any(AbortSignal),
+    );
+    expect(values.registry.get(SELECTION_ID)?.delivery).toEqual({
+      kind: "editor-task",
+      jobId: RETRY_JOB_ID,
+    });
   });
 });

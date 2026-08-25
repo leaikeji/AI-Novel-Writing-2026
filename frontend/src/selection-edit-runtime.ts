@@ -87,6 +87,11 @@ export interface SelectionEditReviewHostProps {
 }
 
 
+export type SelectionEditReviewHostComponent = (
+  props: SelectionEditReviewHostProps,
+) => unknown;
+
+
 function defaultUuid(): string {
   return globalThis.crypto.randomUUID();
 }
@@ -211,15 +216,16 @@ export class SelectionEditRuntime {
       throw new Error("当前审阅尚未结束，请先处理现有候选");
     }
     const context = this.contextRuntime.getEditableFieldContext(request.record.fieldId);
+    if (!context) throw new Error("选区上下文已经变化，请重新框选");
     const active: ActiveSelectionEdit = {
       record: request.record,
-      scopeId: context?.scopeId ?? "",
-      adapter: context?.adapter ?? request.record as never,
+      scopeId: context.scopeId,
+      adapter: context.adapter,
       operation: request.operation,
       customInstruction: request.customInstruction,
       generation: 0,
     };
-    if (!context || !sameContext(context, active)) {
+    if (!sameContext(context, active)) {
       throw new Error("选区上下文已经变化，请重新框选");
     }
     this.active?.abort?.abort();
@@ -325,6 +331,10 @@ export class SelectionEditRuntime {
       if (active) void this.retry(active);
       return;
     }
+    if (action.type === "dismiss-applied" && result.ok) {
+      this.active = undefined;
+      return;
+    }
     if (result.effect) void this.runEffect(result.effect);
   }
 
@@ -355,7 +365,7 @@ export class SelectionEditRuntime {
       const job = await this.generationClient.start(payload, abort.signal);
       if (!this.isCurrent(active, generation)) return job.id ? { jobId: job.id } : undefined;
       active.jobId = job.id;
-      const bound = this.registry.bindToEditorTask({
+      const bindingInput = {
         selectionId: active.record.selectionId,
         jobId: job.id,
         agentId: active.record.agentId,
@@ -363,7 +373,14 @@ export class SelectionEditRuntime {
         documentId: active.record.documentId,
         fieldId: active.record.fieldId,
         contextRevision: active.record.contextRevision,
-      });
+      };
+      const priorDelivery = active.record.delivery;
+      const bound = forceNew && priorDelivery.kind === "editor-task"
+        ? this.registry.rebindEditorTaskForRetry({
+          ...bindingInput,
+          previousJobId: priorDelivery.jobId,
+        })
+        : this.registry.bindToEditorTask(bindingInput);
       if (!bound.ok) {
         this.coordinator.dispatch({ type: "conflict", message: "编辑任务与选区绑定已经失效。" });
         return { jobId: job.id };
@@ -562,10 +579,10 @@ export class SelectionEditRuntime {
   }
 
   private async retry(active: ActiveSelectionEdit): Promise<void> {
-    if (active.record.delivery.kind === "editor-task") {
+    if (active.record.delivery.kind === "chat-session") {
       this.coordinator.dispatch({
         type: "generation-failed",
-        message: "当前候选已形成独立审计任务；请重新框选后再次生成。",
+        message: "聊天候选不能切换为编辑任务；请退出后重新框选。",
         retryable: false,
       });
       return;
@@ -586,7 +603,7 @@ export class SelectionEditRuntime {
 export function createSelectionEditReviewHost(
   React: QwenPawReactRuntime,
   runtime: SelectionEditRuntime,
-): (props: SelectionEditReviewHostProps) => unknown {
+): SelectionEditReviewHostComponent {
   const h = React.createElement;
   const Surface = createSelectionEditReviewSurface(React);
   return function SelectionEditReviewHost(props: SelectionEditReviewHostProps): unknown {
@@ -606,13 +623,19 @@ export function createSelectionEditReviewHost(
         ].filter(Boolean).join(" "),
         "data-selection-edit-host": fieldIds.join(" "),
       },
+      // Keep the controlled source field mounted while the review surface is
+      // visible.  Applying a candidate can move the session into `applied`
+      // before the author chooses Undo; unmounting the field here would also
+      // unregister its adapter and make the recorded AI transaction
+      // impossible to reverse safely.
+      props.children,
       active
         ? h(Surface, {
           state,
           onAction: (action: SelectionEditReviewSurfaceAction) => runtime.handleSurfaceAction(action),
           onReturnFocus: (target: { fieldId: string }) => runtime.focusSource(target.fieldId),
         })
-        : props.children,
+        : null,
     );
   };
 }

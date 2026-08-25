@@ -44,6 +44,7 @@ import {
   type AssistantTextControl,
 } from "./chapter-workflow";
 import type { SelectionRange, SelectionSnapshot } from "./assistant-fields";
+import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import { compressCover } from "./cover-utils";
 import { chapterDisplayTitle } from "./presenters";
 import { RelationshipEditor } from "./relationship-editor";
@@ -128,6 +129,53 @@ export const STUDIO_ASSISTANT_FIELD_IDS = {
   settingsGenre: "settings.genre",
   settingsSubgenre: "settings.subgenre",
   settingsIdea: "settings.idea",
+} as const;
+
+
+export const STUDIO_SELECTION_REVIEW_FIELD_GROUPS = {
+  outline: [
+    STUDIO_ASSISTANT_FIELD_IDS.outlineTargetChapterCount,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineBackground,
+    STUDIO_ASSISTANT_FIELD_IDS.outlinePlot,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineHighlight,
+  ],
+  outlineCharacter: [
+    STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterRoleType,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity,
+    STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription,
+  ],
+  character: [
+    STUDIO_ASSISTANT_FIELD_IDS.characterRoleType,
+    STUDIO_ASSISTANT_FIELD_IDS.characterName,
+    STUDIO_ASSISTANT_FIELD_IDS.characterGender,
+    STUDIO_ASSISTANT_FIELD_IDS.characterAge,
+    STUDIO_ASSISTANT_FIELD_IDS.characterIdentity,
+    STUDIO_ASSISTANT_FIELD_IDS.characterPersonality,
+    STUDIO_ASSISTANT_FIELD_IDS.characterDescription,
+  ],
+  storyline: [
+    STUDIO_ASSISTANT_FIELD_IDS.storylineType,
+    STUDIO_ASSISTANT_FIELD_IDS.storylineTitle,
+    STUDIO_ASSISTANT_FIELD_IDS.storylineDescription,
+    STUDIO_ASSISTANT_FIELD_IDS.storylineStatus,
+    STUDIO_ASSISTANT_FIELD_IDS.storylineProgress,
+  ],
+  foreshadow: [
+    STUDIO_ASSISTANT_FIELD_IDS.foreshadowTitle,
+    STUDIO_ASSISTANT_FIELD_IDS.foreshadowContent,
+    STUDIO_ASSISTANT_FIELD_IDS.foreshadowLatestProgress,
+    STUDIO_ASSISTANT_FIELD_IDS.foreshadowStatus,
+  ],
+  settings: [
+    STUDIO_ASSISTANT_FIELD_IDS.settingsTemplateName,
+    STUDIO_ASSISTANT_FIELD_IDS.settingsGenre,
+    STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre,
+    STUDIO_ASSISTANT_FIELD_IDS.settingsIdea,
+  ],
 } as const;
 
 
@@ -438,10 +486,20 @@ interface OutlineWizardProps {
   onGoChapters: () => void;
   onCompleted: (novel: NovelRecord) => void;
   onError: (message: string) => void;
+  selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
 
 
-function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onCompleted, onError }: OutlineWizardProps) {
+function OutlineWizard({
+  novel,
+  open,
+  startStep,
+  onClose,
+  onGoChapters,
+  onCompleted,
+  onError,
+  selectionEditReviewHost: SelectionEditReviewHost,
+}: OutlineWizardProps) {
   const [draft, setDraft] = React.useState(null as OutlineDraftRecord | null);
   const [step, setStep] = React.useState(1);
   const [completed, setCompleted] = React.useState(false);
@@ -464,6 +522,14 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
   const outlineControlRefs = React.useRef(new Map<string, StudioFocusableControl>()) as StudioMutableRef<Map<string, StudioFocusableControl>>;
   draftRef.current = draft;
   characterFormRef.current = characterForm;
+
+  const wrapSelectionReview = (
+    fieldIds: readonly string[],
+    className: string,
+    child: unknown,
+  ): unknown => SelectionEditReviewHost
+    ? h(SelectionEditReviewHost, { fieldIds, className }, child)
+    : child;
 
   const replaceDraft = (next: OutlineDraftRecord | null): void => {
     draftRef.current = next;
@@ -1065,7 +1131,10 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
       h(
         Spin,
         { spinning: loading || generating, tip: generating ? activityText || "正在处理..." : "正在载入..." },
-        draft ? h(
+        wrapSelectionReview(
+          STUDIO_SELECTION_REVIEW_FIELD_GROUPS.outline,
+          "mb-outline-selection-review-host",
+          draft ? h(
           "div",
           { className: "mb-outline-wizard" },
           h("div", { className: "mb-outline-progress-hint" }, completed ? "大纲已创建完成!" : OUTLINE_HINTS[step - 1]),
@@ -1116,7 +1185,8 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
                   ),
                 ),
               ),
-        ) : null,
+          ) : null,
+        ),
       ),
     ),
     h(
@@ -1131,20 +1201,24 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         footer: null,
         onCancel: () => setCharacterOpen(false),
       },
-      h(
-        "div",
-        { className: "mb-form-stack" },
+      wrapSelectionReview(
+        STUDIO_SELECTION_REVIEW_FIELD_GROUPS.outlineCharacter,
+        "mb-outline-character-selection-review-host",
         h(
           "div",
-          { className: "mb-form-grid mb-form-grid-three" },
-          field("姓名", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName), maxLength: 10, value: characterForm.name, onChange: (event: any) => changeOutlineCharacterField("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName) })),
-          field("性别", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender), maxLength: 2, value: characterForm.gender, onChange: (event: any) => changeOutlineCharacterField("gender", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender) })),
-          field("年龄", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge), maxLength: 5, placeholder: "如：18岁", value: characterForm.age, onChange: (event: any) => changeOutlineCharacterField("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge) })),
+          { className: "mb-form-stack" },
+          h(
+            "div",
+            { className: "mb-form-grid mb-form-grid-three" },
+            field("姓名", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName), maxLength: 10, value: characterForm.name, onChange: (event: any) => changeOutlineCharacterField("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName) })),
+            field("性别", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender), maxLength: 2, value: characterForm.gender, onChange: (event: any) => changeOutlineCharacterField("gender", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender) })),
+            field("年龄", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge), maxLength: 5, placeholder: "如：18岁", value: characterForm.age, onChange: (event: any) => changeOutlineCharacterField("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge) })),
+          ),
+          field("性格", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality), maxLength: 20, value: characterForm.personality, onChange: (event: any) => changeOutlineCharacterField("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality) })),
+          field("身份", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity), maxLength: 20, value: characterForm.identity, onChange: (event: any) => changeOutlineCharacterField("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity) })),
+          field("人物小传", h(Input.TextArea, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription), rows: 4, maxLength: 100, value: characterForm.description, onChange: (event: any) => changeOutlineCharacterField("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription) })),
+          h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: saveCharacter }, "保存修改"),
         ),
-        field("性格", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality), maxLength: 20, value: characterForm.personality, onChange: (event: any) => changeOutlineCharacterField("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality) })),
-        field("身份", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity), maxLength: 20, value: characterForm.identity, onChange: (event: any) => changeOutlineCharacterField("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity) })),
-        field("人物小传", h(Input.TextArea, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription), rows: 4, maxLength: 100, value: characterForm.description, onChange: (event: any) => changeOutlineCharacterField("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription) })),
-        h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: saveCharacter }, "保存修改"),
       ),
     ),
   );
@@ -1834,6 +1908,7 @@ interface StudioProps {
   onError: (message: string) => void;
   openChapterWizardSignal?: number;
   assistantWorkspaceLayout?: AssistantWorkspaceLayout;
+  selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
 
 
@@ -1848,6 +1923,7 @@ export function StudioProjectView({
   onError,
   openChapterWizardSignal = 0,
   assistantWorkspaceLayout,
+  selectionEditReviewHost: SelectionEditReviewHost,
 }: StudioProps) {
   const [busy, setBusy] = React.useState(false);
   const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
@@ -1910,6 +1986,14 @@ export function StudioProjectView({
   const foreshadowAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
   const settingsAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
   const assistantControlRefs = React.useRef(new Map<string, StudioFocusableControl>()) as StudioMutableRef<Map<string, StudioFocusableControl>>;
+
+  const wrapSelectionReview = (
+    fieldIds: readonly string[],
+    className: string,
+    child: unknown,
+  ): unknown => SelectionEditReviewHost
+    ? h(SelectionEditReviewHost, { fieldIds, className }, child)
+    : child;
 
   const focusAssistantControl = (fieldId: string): void => {
     assistantControlRefs.current.get(fieldId)?.focus?.();
@@ -3042,6 +3126,7 @@ export function StudioProjectView({
       onGoChapters: () => onSectionChange("chapters"),
       onCompleted: (updated: NovelRecord) => { onNovelChanged(updated); void loadDomains(); },
       onError,
+      selectionEditReviewHost: SelectionEditReviewHost,
     }),
     h(ChapterCreationWizard, {
       novel,
@@ -3118,17 +3203,21 @@ export function StudioProjectView({
       ),
     ),
     h(Modal, { open: characterOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 720, title: characterEditing ? "编辑角色" : "新增角色", footer: null, onCancel: () => setCharacterOpen(false) },
-      h("div", { className: "mb-form-stack" },
-        field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
-        field("角色姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
-        h("div", { className: "mb-form-grid mb-character-demographics" },
-          field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
-          field("年龄", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterAge), value: characterForm.age, onChange: (event: any) => changeCharacterFieldValue("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterAge) })),
+      wrapSelectionReview(
+        STUDIO_SELECTION_REVIEW_FIELD_GROUPS.character,
+        "mb-character-selection-review-host",
+        h("div", { className: "mb-form-stack" },
+          field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
+          field("角色姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
+          h("div", { className: "mb-form-grid mb-character-demographics" },
+            field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
+            field("年龄", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterAge), value: characterForm.age, onChange: (event: any) => changeCharacterFieldValue("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterAge) })),
+          ),
+          field("身份", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity), className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => changeCharacterFieldValue("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity) })),
+          field("性格", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality), rows: 3, value: characterForm.personality, onChange: (event: any) => changeCharacterFieldValue("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality) })),
+          field("人物小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),
+          h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "保存"),
         ),
-        field("身份", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity), className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => changeCharacterFieldValue("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity) })),
-        field("性格", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality), rows: 3, value: characterForm.personality, onChange: (event: any) => changeCharacterFieldValue("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality) })),
-        field("人物小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),
-        h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "保存"),
       ),
     ),
     h(RelationshipEditor, {
@@ -3142,26 +3231,35 @@ export function StudioProjectView({
       startWithNew: relationshipStartWithNew,
       onClose: () => setRelationshipOpen(false),
       onSaved: loadDomains,
+      selectionEditReviewHost: SelectionEditReviewHost,
     }),
     h(Modal, { open: storylineOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 680, title: storylineEditing ? "编辑故事线" : `新增${storylineLabels[storylineForm.storyline_type as StorylineType]}`, footer: null, onCancel: () => setStorylineOpen(false) },
-      h("div", { className: "mb-form-stack" },
-        field("故事线类型", h(Select, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineType), value: storylineForm.storyline_type, options: (Object.keys(storylineLabels) as StorylineType[]).map((type) => ({ label: storylineLabels[type], value: type })), onChange: (value: StorylineType) => changeStorylineFieldValue("storyline_type", value, STUDIO_ASSISTANT_FIELD_IDS.storylineType) })),
-        field("故事线名称", h(Input, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineTitle), value: storylineForm.title, onChange: (event: any) => changeStorylineFieldValue("title", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.storylineTitle) })),
-        field("情节说明", h(Input.TextArea, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineDescription), rows: 6, value: storylineForm.description, onChange: (event: any) => changeStorylineFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.storylineDescription) })),
-        storylineEditing ? h("div", { className: "mb-form-grid" },
-          field("状态", h(Select, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineStatus), value: storylineForm.status, options: [{ label: "进行中", value: "active" }, { label: "暂停", value: "paused" }, { label: "已完成", value: "completed" }, { label: "已归档", value: "archived" }], onChange: (value: string) => changeStorylineFieldValue("status", value, STUDIO_ASSISTANT_FIELD_IDS.storylineStatus) })),
-          field("进度", h(InputNumber, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineProgress), min: 0, max: 100, value: storylineForm.progress, formatter: (value: number) => `${value}%`, parser: (value: string) => Number(String(value).replace("%", "")), onChange: (value: number | null) => changeStorylineFieldValue("progress", Number(value || 0), STUDIO_ASSISTANT_FIELD_IDS.storylineProgress) })),
-        ) : null,
-        h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !storylineForm.title.trim(), onClick: () => void saveStoryline() }, "保存"),
+      wrapSelectionReview(
+        STUDIO_SELECTION_REVIEW_FIELD_GROUPS.storyline,
+        "mb-storyline-selection-review-host",
+        h("div", { className: "mb-form-stack" },
+          field("故事线类型", h(Select, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineType), value: storylineForm.storyline_type, options: (Object.keys(storylineLabels) as StorylineType[]).map((type) => ({ label: storylineLabels[type], value: type })), onChange: (value: StorylineType) => changeStorylineFieldValue("storyline_type", value, STUDIO_ASSISTANT_FIELD_IDS.storylineType) })),
+          field("故事线名称", h(Input, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineTitle), value: storylineForm.title, onChange: (event: any) => changeStorylineFieldValue("title", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.storylineTitle) })),
+          field("情节说明", h(Input.TextArea, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineDescription), rows: 6, value: storylineForm.description, onChange: (event: any) => changeStorylineFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.storylineDescription) })),
+          storylineEditing ? h("div", { className: "mb-form-grid" },
+            field("状态", h(Select, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineStatus), value: storylineForm.status, options: [{ label: "进行中", value: "active" }, { label: "暂停", value: "paused" }, { label: "已完成", value: "completed" }, { label: "已归档", value: "archived" }], onChange: (value: string) => changeStorylineFieldValue("status", value, STUDIO_ASSISTANT_FIELD_IDS.storylineStatus) })),
+            field("进度", h(InputNumber, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineProgress), min: 0, max: 100, value: storylineForm.progress, formatter: (value: number) => `${value}%`, parser: (value: string) => Number(String(value).replace("%", "")), onChange: (value: number | null) => changeStorylineFieldValue("progress", Number(value || 0), STUDIO_ASSISTANT_FIELD_IDS.storylineProgress) })),
+          ) : null,
+          h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !storylineForm.title.trim(), onClick: () => void saveStoryline() }, "保存"),
+        ),
       ),
     ),
     h(Modal, { open: foreshadowOpen, centered: true, closable: false, className: "anw-modal mb-entity-modal mb-foreshadow-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 480, title: foreshadowEditing ? "编辑伏笔" : "新增伏笔", footer: null, onCancel: () => setForeshadowOpen(false) },
-      h("div", { className: "mb-form-stack" },
-        field("伏笔名称", h(Input, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowTitle), maxLength: 50, showCount: true, placeholder: "如：神秘的黑衣人、丢失的玉佩...", value: foreshadowForm.title, onChange: (event: any) => changeForeshadowFieldValue("title", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowTitle) })),
-        field("伏笔内容", h(Input.TextArea, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowContent), rows: 4, maxLength: 200, showCount: true, placeholder: "详细描述伏笔的内容，如：第一章在城门口遇到一个黑衣人...", value: foreshadowForm.content, onChange: (event: any) => changeForeshadowFieldValue("content", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowContent) })),
-        field("伏笔进展（可选）", h(Input.TextArea, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowLatestProgress), rows: 3, maxLength: 200, showCount: true, placeholder: "记录伏笔的最新进展，如：第十章黑衣人再次出现...", value: foreshadowForm.latest_progress, onChange: (event: any) => changeForeshadowFieldValue("latest_progress", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowLatestProgress) })),
-        foreshadowEditing ? field("状态", h(Select, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowStatus), value: foreshadowForm.status === "resolved" ? "resolved" : "active", options: [{ label: "进行中", value: "active" }, { label: "已解决", value: "resolved" }], onChange: (value: string) => changeForeshadowFieldValue("status", value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowStatus) })) : null,
-        h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !foreshadowForm.title.trim(), onClick: () => void saveForeshadow() }, "保存"),
+      wrapSelectionReview(
+        STUDIO_SELECTION_REVIEW_FIELD_GROUPS.foreshadow,
+        "mb-foreshadow-selection-review-host",
+        h("div", { className: "mb-form-stack" },
+          field("伏笔名称", h(Input, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowTitle), maxLength: 50, showCount: true, placeholder: "如：神秘的黑衣人、丢失的玉佩...", value: foreshadowForm.title, onChange: (event: any) => changeForeshadowFieldValue("title", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowTitle) })),
+          field("伏笔内容", h(Input.TextArea, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowContent), rows: 4, maxLength: 200, showCount: true, placeholder: "详细描述伏笔的内容，如：第一章在城门口遇到一个黑衣人...", value: foreshadowForm.content, onChange: (event: any) => changeForeshadowFieldValue("content", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowContent) })),
+          field("伏笔进展（可选）", h(Input.TextArea, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowLatestProgress), rows: 3, maxLength: 200, showCount: true, placeholder: "记录伏笔的最新进展，如：第十章黑衣人再次出现...", value: foreshadowForm.latest_progress, onChange: (event: any) => changeForeshadowFieldValue("latest_progress", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowLatestProgress) })),
+          foreshadowEditing ? field("状态", h(Select, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowStatus), value: foreshadowForm.status === "resolved" ? "resolved" : "active", options: [{ label: "进行中", value: "active" }, { label: "已解决", value: "resolved" }], onChange: (value: string) => changeForeshadowFieldValue("status", value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowStatus) })) : null,
+          h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !foreshadowForm.title.trim(), onClick: () => void saveForeshadow() }, "保存"),
+        ),
       ),
     ),
     h(Modal, { open: coverOpen, centered: true, closable: false, className: "anw-modal mb-cover-edit-modal", width: 500, title: "修改封面", footer: null, onCancel: () => setCoverOpen(false) },
@@ -3181,15 +3279,22 @@ export function StudioProjectView({
       ),
     ),
     h(Modal, { open: settingsOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 760, title: "编辑模板设定", footer: null, onCancel: () => setSettingsOpen(false) },
-      h("div", { className: "mb-form-stack" },
-        h("div", { className: "mb-form-grid" },
-          field("模板名称", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsTemplateName), value: settingsForm.template_name, onChange: (event: any) => changeSettingsFieldValue("template_name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsTemplateName) })),
-          field("分类", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsGenre), value: settingsForm.genre, onChange: (event: any) => changeSettingsFieldValue("genre", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsGenre) })),
+      wrapSelectionReview(
+        [
+          ...STUDIO_SELECTION_REVIEW_FIELD_GROUPS.settings,
+          ...Object.keys(settingsForm.template_data).map(settingsTemplateFieldId),
+        ],
+        "mb-settings-selection-review-host",
+        h("div", { className: "mb-form-stack" },
+          h("div", { className: "mb-form-grid" },
+            field("模板名称", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsTemplateName), value: settingsForm.template_name, onChange: (event: any) => changeSettingsFieldValue("template_name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsTemplateName) })),
+            field("分类", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsGenre), value: settingsForm.genre, onChange: (event: any) => changeSettingsFieldValue("genre", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsGenre) })),
+          ),
+          field("细分类", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre), value: settingsForm.subgenre, onChange: (event: any) => changeSettingsFieldValue("subgenre", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre) })),
+          field("创作思路", h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea), rows: 5, value: settingsForm.idea, onChange: (event: any) => changeSettingsFieldValue("idea", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea) })),
+          ...Object.entries(settingsForm.template_data).map(([key, value]) => field(key, h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, settingsTemplateFieldId(key)), key, rows: 2, value, onChange: (event: any) => changeSettingsTemplateValue(key, event.target.value) }))),
+          h(Button, { size: "large", block: true, className: "anw-primary-button", onClick: () => void saveSettings() }, "保存"),
         ),
-        field("细分类", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre), value: settingsForm.subgenre, onChange: (event: any) => changeSettingsFieldValue("subgenre", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre) })),
-        field("创作思路", h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea), rows: 5, value: settingsForm.idea, onChange: (event: any) => changeSettingsFieldValue("idea", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea) })),
-        ...Object.entries(settingsForm.template_data).map(([key, value]) => field(key, h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, settingsTemplateFieldId(key)), key, rows: 2, value, onChange: (event: any) => changeSettingsTemplateValue(key, event.target.value) }))),
-        h(Button, { size: "large", block: true, className: "anw-primary-button", onClick: () => void saveSettings() }, "保存"),
       ),
     ),
   );

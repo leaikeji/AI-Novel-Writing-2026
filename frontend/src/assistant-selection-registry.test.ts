@@ -230,7 +230,7 @@ describe("AssistantSelectionRegistry", () => {
     });
   });
 
-  it("atomically binds the editor task and never crosses into chat delivery", async () => {
+  it("atomically binds the editor task, only rebinds on explicit retry, and never crosses into chat delivery", async () => {
     const registry = new AssistantSelectionRegistry({
       idProvider: sequentialIds(),
     });
@@ -253,15 +253,25 @@ describe("AssistantSelectionRegistry", () => {
       ok: false,
       reason: "job-mismatch",
     });
+    expect(registry.rebindEditorTaskForRetry({
+      ...request,
+      previousJobId: "stale-job",
+      jobId: "job-2",
+    })).toEqual({ ok: false, reason: "job-mismatch" });
+    expect(registry.rebindEditorTaskForRetry({
+      ...request,
+      previousJobId: "job-1",
+      jobId: "job-2",
+    })).toMatchObject({ ok: true, status: "rebound" });
     expect(registry.bindToSession({
       ...BASE_SCOPE,
       selectionId: record.selectionId,
       sessionId: "session-1",
     })).toEqual({ ok: false, reason: "delivery-mismatch" });
     expect(registry.get(record.selectionId)).toMatchObject({
-      jobId: "job-1",
+      jobId: "job-2",
       sessionId: undefined,
-      delivery: { kind: "editor-task", jobId: "job-1" },
+      delivery: { kind: "editor-task", jobId: "job-2" },
     });
   });
 

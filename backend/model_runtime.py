@@ -374,21 +374,50 @@ def normalize_creative_generation_json(
         def reject_nonstandard_constant(value: str) -> None:
             raise ValueError(f"non-standard JSON constant: {value}")
 
-        try:
-            strict_payload = json.loads(
-                output_text.strip(),
-                object_pairs_hook=reject_duplicate_keys,
-                parse_constant=reject_nonstandard_constant,
-            )
-        except (json.JSONDecodeError, TypeError, AttributeError, ValueError) as error:
-            raise ModelVerificationError(
-                "模型选区编辑结果必须是单一严格 JSON 对象"
-            ) from error
-        if not isinstance(strict_payload, dict) or strict_payload != payload:
-            raise ModelVerificationError(
-                "模型选区编辑结果必须是单一严格 JSON 对象"
-            )
+        # Public providers may wrap the result in a JSON fence or emit
+        # non-authoritative reasoning containing other JSON objects. Select
+        # exactly one object with the frozen two-field candidate shape; two
+        # candidate-shaped objects, duplicate keys and non-standard JSON remain
+        # invalid. Ignored wrapper/reasoning text is never persisted or
+        # surfaced as candidate text.
+        strict_candidate = output_text.strip()
+        fenced = re.fullmatch(
+            r"```(?:json)?\s*(.*?)\s*```",
+            strict_candidate,
+            re.DOTALL,
+        )
+        if fenced:
+            strict_candidate = fenced.group(1).strip()
         allowed_fields = {"replacement_text", "short_summary"}
+        decoder = json.JSONDecoder(
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_nonstandard_constant,
+        )
+        embedded_objects: list[dict[str, Any]] = []
+        for index, character in enumerate(strict_candidate):
+            if character != "{":
+                continue
+            try:
+                embedded, _ = decoder.raw_decode(strict_candidate[index:])
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(embedded, dict):
+                embedded_objects.append(embedded)
+        candidate_objects = [
+            item for item in embedded_objects if set(item) == allowed_fields
+        ]
+        if len(candidate_objects) > 1:
+            raise ModelVerificationError(
+                "模型选区编辑结果包含多个候选 JSON 对象"
+            )
+        if len(candidate_objects) == 1:
+            strict_payload = candidate_objects[0]
+        elif len(embedded_objects) == 1:
+            strict_payload = embedded_objects[0]
+        else:
+            raise ModelVerificationError(
+                "模型选区编辑结果必须包含唯一严格 JSON 候选对象"
+            )
         if set(strict_payload) != allowed_fields:
             raise ModelVerificationError(
                 "模型选区编辑结果必须且只能包含 replacement_text 与 short_summary"

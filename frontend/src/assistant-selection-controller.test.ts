@@ -29,8 +29,8 @@ class FakeEvents implements AssistantSelectionEventTarget {
     this.listeners.get(type)?.delete(listener);
   }
 
-  emit(type: string, target: unknown): void {
-    const event = { type, target } as Event;
+  emit(type: string, target: unknown, extra: Record<string, unknown> = {}): void {
+    const event = { type, target, ...extra } as Event;
     for (const listener of this.listeners.get(type) ?? []) {
       if (typeof listener === "function") listener(event);
       else listener.handleEvent(event);
@@ -303,6 +303,56 @@ describe("assistant selection controller", () => {
     expect(harness.registry.get(SELECTION_ID)).toBeUndefined();
     expect(harness.suggestions.registry.registeredIds()).toEqual([]);
     expect(harness.runtime.getStatus().selectionCharacters).toBe(0);
+    stop();
+  });
+
+  it("reads a pointer-collapsed range after the capture-phase event finishes", async () => {
+    const events = new FakeEvents();
+    const harness = setup({ sessionId: "session-1", documentTarget: events });
+    const stop = harness.controller.start();
+    await harness.controller.capture(harness.anchor);
+
+    // A real textarea applies the pointer's collapsed caret after capture-phase
+    // listeners return.  Model that ordering so stale ranges cannot leave the
+    // toolbar visible after the author cancels a selection with a click.
+    events.emit("mouseup", harness.anchor);
+    harness.setSelection(null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(harness.controller.getState()).toMatchObject({
+      phase: "idle",
+      visible: false,
+      selectedCharacters: 0,
+    });
+    expect(harness.registry.get(SELECTION_ID)).toBeUndefined();
+    expect(harness.runtime.getStatus().selectionCharacters).toBe(0);
+    stop();
+  });
+
+  it("keeps a keyboard selection while focus traverses the same editor host", async () => {
+    const events = new FakeEvents();
+    const harness = setup({ sessionId: "session-1", documentTarget: events });
+    const stop = harness.controller.start();
+    const host = {};
+    const hostedAnchor: AssistantSelectionAnchor = {
+      ...harness.anchor,
+      closest: (selector: string) => selector === "[data-selection-edit-host]" ? host : null,
+    };
+    await harness.controller.capture(hostedAnchor);
+
+    events.emit("keyup", {
+      closest: (selector: string) => selector === "[data-selection-edit-host]" ? host : null,
+    }, { key: "Tab" });
+    events.emit("focusin", {
+      closest: (selector: string) => selector === "[data-selection-edit-host]" ? host : null,
+    });
+
+    expect(harness.controller.getState()).toMatchObject({
+      phase: "ready",
+      visible: true,
+      selectedCharacters: 2,
+    });
+    expect(harness.registry.get(SELECTION_ID)).toBeDefined();
     stop();
   });
 

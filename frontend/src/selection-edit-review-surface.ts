@@ -32,7 +32,8 @@ export type SelectionEditReviewSurfaceAction =
   | { readonly type: "retry" }
   | { readonly type: "copy-candidate"; readonly candidateText: string }
   | { readonly type: "send-to-assistant" }
-  | { readonly type: "undo" };
+  | { readonly type: "undo" }
+  | { readonly type: "dismiss-applied" };
 
 
 export interface SelectionEditReviewSurfaceProps {
@@ -75,6 +76,8 @@ export function selectionEditReviewEventForSurfaceAction(
       return { type: "retry" };
     case "undo":
       return { type: "request-undo" };
+    case "dismiss-applied":
+      return { type: "reset" };
     case "copy-candidate":
     case "send-to-assistant":
       return null;
@@ -477,17 +480,30 @@ export function createSelectionEditReviewSurface(
         heading("AI 修改已应用"),
         liveStatus,
         h("p", null, state.message),
-        state.canUndo
-          ? h(
+        h(
+          "div",
+          { className: "anw-selection-edit-review-status-actions", role: "group", "aria-label": "应用完成操作" },
+          state.canUndo
+            ? h(
+              "button",
+              {
+                type: "button",
+                disabled: state.undoPending,
+                onClick: () => emit({ type: "undo" }),
+              },
+              state.undoPending ? "正在撤销" : "撤销 AI 修改",
+            )
+            : null,
+          h(
             "button",
             {
               type: "button",
               disabled: state.undoPending,
-              onClick: () => emit({ type: "undo" }),
+              onClick: () => emit({ type: "dismiss-applied" }),
             },
-            state.undoPending ? "正在撤销" : "撤销 AI 修改",
-          )
-          : null,
+            "继续编辑",
+          ),
+        ),
       );
     }
 

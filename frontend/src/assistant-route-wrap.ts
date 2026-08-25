@@ -24,6 +24,7 @@ import {
 import type { AssistantContextRefCoordinator } from "./assistant-context-ref";
 import type { AssistantSelectionController } from "./assistant-selection-controller";
 import { createAssistantSelectionToolbar } from "./assistant-selection-toolbar";
+import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 
 
 export type AssistantRouteReactRuntime = QwenPawReactRuntime;
@@ -95,7 +96,7 @@ export interface AssistantRouteWrapOptions {
   getCurrentSessionId?: () => string | null;
   contextRefCoordinator?: AssistantContextRefCoordinator;
   selectionController?: AssistantSelectionController;
-  selectionEditReviewHost?: unknown;
+  selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
 
 
@@ -269,9 +270,21 @@ export function createAssistantRouteWrap(
         options.selectionController,
         createPortal ? {
           createPortal,
-          getContainer: () => (
-            typeof document !== "undefined" ? document.body : null
-          ),
+          getContainer: () => {
+            if (typeof document === "undefined") return null;
+            const active = document.activeElement;
+            const activeHost = typeof Element !== "undefined" && active instanceof Element
+              ? active.closest("[data-selection-edit-host]")
+              : null;
+            // A toolbar created from a project-owned modal field must stay
+            // inside that same focus scope; otherwise Ant Design's modal focus
+            // trap makes the visually present actions unreachable by Tab.
+            // Page fields still portal to body so editor overflow cannot clip
+            // the floating toolbar.
+            return activeHost?.closest(".anw-assistant-aware-modal-wrap")
+              ? activeHost
+              : document.body;
+          },
         } : undefined,
       )
     : null;
@@ -450,13 +463,7 @@ export function createAssistantRouteWrap(
           preferredWidth: assistantPreference.preferredWidth,
           statusBar: h(AssistantContextStatusBar),
         }),
-        AssistantSelectionToolbar
-          ? h(AssistantSelectionToolbar, {
-              onEnsureAssistantOpen: () => setAssistantPreference(
-                (current) => ({ ...current, collapsed: false }),
-              ),
-            })
-          : null,
+        AssistantSelectionToolbar ? h(AssistantSelectionToolbar) : null,
       );
     };
   };

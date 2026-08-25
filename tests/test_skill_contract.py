@@ -113,6 +113,7 @@ def test_direct_selection_edit_skills_separate_chat_and_strict_json_modes() -> N
         assert "两种模式互斥" in text
         assert "任务模式不" in text
         assert "不调用 `novel_prepare_selection_edit`" in text
+        assert "回复首字符必须是 `{`、末字符必须是 `}`" in text
         assert "严格 JSON 对象只含 `replacement_text` 和 `short_summary` 两个字段" in text
         assert "不得生成项目负责的 Diff、哈希、字符数" in text
         assert "不得返回 `diff_segments`、`segment_id`" in text

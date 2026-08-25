@@ -31,6 +31,15 @@ NOVEL_TOOLS = {
     "novel_prepare_selection_edit",
 }
 NOVEL_PROMPT_FILE = "AI_NOVEL_WORLD.md"
+SELECTION_EDIT_OPERATIONS = [
+    "polish",
+    "rewrite",
+    "expand",
+    "shorten",
+    "dialogue",
+    "review",
+    "custom",
+]
 BASE_URL = os.environ.get("QWENPAW_BASE_URL", "http://127.0.0.1:18088").rstrip("/")
 
 
@@ -68,6 +77,8 @@ def verify() -> dict[str, object]:
     assert health.get("generation_agent_id") == NOVEL_AGENT_ID
     assert health.get("generation_model_policy") == "follow-agent-effective"
     assert health.get("model_verification_mode") == "preflight-effective+provider-usage"
+    assert health.get("selection_edit_enabled") is True
+    assert health.get("selection_edit_operations") == SELECTION_EDIT_OPERATIONS
 
     agent_payload = get_json("/api/agents")
     assert isinstance(agent_payload, dict)

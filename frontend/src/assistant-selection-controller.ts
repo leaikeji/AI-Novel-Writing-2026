@@ -181,6 +181,7 @@ interface ActiveSelection {
 const TOOLBAR_DEFAULT_SIZE = Object.freeze({ width: 636, height: 52 });
 const TOOLBAR_SELECTOR = "[data-assistant-selection-toolbar]";
 const ASSISTANT_PANE_SELECTOR = ".anw-assistant-pane";
+const SELECTION_EDIT_HOST_SELECTOR = "[data-selection-edit-host]";
 
 
 function defaultViewportRect(): GeometryRect {
@@ -244,6 +245,16 @@ function isAssistantPaneEventTarget(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Pick<AssistantSelectionAnchor, "closest">;
   return Boolean(candidate.closest?.(ASSISTANT_PANE_SELECTOR));
+}
+
+
+function sharesSelectionEditHost(left: unknown, right: unknown): boolean {
+  if (!left || typeof left !== "object" || !right || typeof right !== "object") return false;
+  const leftHost = (left as Pick<AssistantSelectionAnchor, "closest">)
+    .closest?.(SELECTION_EDIT_HOST_SELECTOR);
+  const rightHost = (right as Pick<AssistantSelectionAnchor, "closest">)
+    .closest?.(SELECTION_EDIT_HOST_SELECTOR);
+  return Boolean(leftHost && leftHost === rightHost);
 }
 
 
@@ -724,6 +735,11 @@ export class AssistantSelectionController {
 
   private readonly onSelectionEvent = (event: Event) => {
     if (this.composing) return;
+    // Tab moves focus before keyup is delivered in browsers.  Treating that
+    // keyup as a fresh text-selection event would discard the frozen range
+    // before keyboard users can reach the toolbar.  The subsequent focusin
+    // event still cancels when focus actually leaves the editor host.
+    if (event.type === "keyup" && (event as KeyboardEvent).key === "Tab") return;
     if (isToolbarEventTarget(event.target)) return;
     if (isAssistantPaneEventTarget(event.target)) {
       this.hideToolbar();
@@ -747,12 +763,29 @@ export class AssistantSelectionController {
       this.cancelActiveSelection();
       return;
     }
+    // The document listeners run in capture phase.  For pointer selections the
+    // browser updates selectionStart/selectionEnd as the event's default action,
+    // after capture listeners have already run.  Reading the range immediately
+    // therefore keeps a stale selection alive when the author simply clicks to
+    // collapse it.  Mouseup needs the next task (not merely a microtask) because
+    // the default action may run after the event-dispatch microtask checkpoint.
+    if (event.type === "mouseup") {
+      setTimeout(() => {
+        if (this.started) void this.capture(anchor);
+      }, 0);
+      return;
+    }
     void this.capture(anchor);
   };
 
   private readonly onFocusIn = (event: Event) => {
     if (isToolbarEventTarget(event.target)) return;
     if (this.active?.anchor && (event.target as unknown) === this.active.anchor) return;
+    // Keep a keyboard-created selection available while Tab traverses sibling
+    // controls inside the same editor host (for example title Cancel/Save)
+    // before focus reaches the selection toolbar.  Pointer clicks still run
+    // through onSelectionEvent and cancel a collapsed range immediately.
+    if (this.active?.anchor && sharesSelectionEditHost(event.target, this.active.anchor)) return;
     if (isAssistantPaneEventTarget(event.target)) {
       this.hideToolbar();
       return;

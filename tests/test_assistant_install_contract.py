@@ -156,6 +156,10 @@ class VerifyApi:
                 "generation_agent_id": self.verifier.NOVEL_AGENT_ID,
                 "generation_model_policy": "follow-agent-effective",
                 "model_verification_mode": "preflight-effective+provider-usage",
+                "selection_edit_enabled": True,
+                "selection_edit_operations": list(
+                    self.verifier.SELECTION_EDIT_OPERATIONS
+                ),
             }
         if path == "/api/agents":
             return {
@@ -276,6 +280,29 @@ def test_verifier_reads_all_agent_tool_scopes_and_accepts_target_only(
     }
     assert queried_tool_agents == api.agent_ids
     assert result["novel_model"] == api.model
+
+
+def test_verifier_requires_the_complete_selection_edit_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier = load_script("verify_qwenpaw_lab")
+    api = VerifyApi(verifier)
+    original_get_json = api.get_json
+
+    def get_json(path: str, *, agent_id: str | None = None) -> object:
+        payload = original_get_json(path, agent_id=agent_id)
+        if path == f"/api/{verifier.APP_ID}/health":
+            assert isinstance(payload, dict)
+            return {
+                **payload,
+                "selection_edit_operations": verifier.SELECTION_EDIT_OPERATIONS[:-1],
+            }
+        return payload
+
+    monkeypatch.setattr(verifier, "get_json", get_json)
+
+    with pytest.raises(AssertionError):
+        verifier.verify()
 
 
 @pytest.mark.parametrize("failure", ["missing-target", "enabled-non-target"])

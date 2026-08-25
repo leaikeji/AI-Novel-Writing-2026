@@ -18,16 +18,30 @@ describe("resolveAssistantWorkspaceLayout", () => {
     });
   });
 
-  it("clamps the assistant before stealing the chapter editor minimum width", () => {
+  it("clamps a persisted wide assistant before stealing the chapter editor and tree width", () => {
+    expect(resolveAssistantWorkspaceLayout({
+      containerWidth: 1_280,
+      preferredAssistantWidth: 520,
+      pageKind: "chapter-editor",
+    })).toMatchObject({
+      assistantWidth: 400,
+      mainWidth: 880,
+      density: "constrained",
+      assistantOverlay: false,
+    });
+  });
+
+  it("moves the assistant to an overlay when its minimum cannot coexist with the chapter tree", () => {
     expect(resolveAssistantWorkspaceLayout({
       containerWidth: 1_180,
       preferredAssistantWidth: 520,
       pageKind: "chapter-editor",
     })).toMatchObject({
-      assistantWidth: 420,
-      mainWidth: 760,
+      assistantWidth: 520,
+      mainWidth: 1_180,
+      mainMinWidth: 640,
       density: "constrained",
-      assistantOverlay: false,
+      assistantOverlay: true,
     });
   });
 

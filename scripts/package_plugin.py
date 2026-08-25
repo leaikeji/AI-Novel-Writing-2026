@@ -6,6 +6,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "build" / "ai-novel-world-2026"
+PLUGIN_COPY_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
 
 
 def copy_file(relative_path: str) -> None:
@@ -22,7 +23,7 @@ def copy_tree(relative_path: str) -> None:
     target = OUTPUT / relative_path
     if not source.is_dir():
         raise FileNotFoundError(f"Required plugin directory is missing: {source}")
-    shutil.copytree(source, target)
+    shutil.copytree(source, target, ignore=PLUGIN_COPY_IGNORE)
 
 
 def main() -> None:

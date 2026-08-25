@@ -153,3 +153,16 @@ final result: passed
 - 详细报告：`docs/开发文档/证据/关系网页面优化-2026-08-25/design-qa.md`。
 
 final result: passed
+
+## 增量验收：选区 AI 中央统一 Diff 审阅
+
+- 获选视觉基线：`docs/开发文档/设计稿/21-选区AI中央统一Diff审阅-2026-08-25/README.md`；最终同视口比较：`docs/开发文档/证据/选区AI中央统一Diff审阅-2026-08-25/UD3-E2E/reference-vs-implementation-final.jpg`。
+- 最终实现图：`docs/开发文档/证据/选区AI中央统一Diff审阅-2026-08-25/UD3-E2E/1525x1031-body-central-diff-final-v2.png`、`1920-central-diff-partial.jpg`、`2560-central-diff-ready.jpg`。
+- 已实现一次点击启动润色、改写、扩写、缩写、增强对白、检查问题和自定义任务；候选只在当前字段所属中央工作面审阅，右侧保持 QwenPaw 原生对话，不再出现嵌套完整候选卡片。
+- 第一轮同视口发现 [P1]：右侧助手固定 520px 时把中央 Diff 压缩到不可用宽度；已改为章节主工作面最小 880px，并按 `comfortable / compact / constrained` 密度把章节树收敛到 286/240/220px。1525×1031 最终实测为助手约 395px、主工作面 880px、树 220px、中央审阅区约 660px。
+- 交互修复 [P1]：审阅态曾卸载源字段，导致事务撤销找不到 Adapter；现保持 Host 挂载并仅视觉隐藏源字段。弹窗字段的工具条和中央审阅面均留在弹窗焦点作用域，取消选区自动关闭，Tab 不误清选区，Escape 与焦点返回有自动化覆盖。
+- 1920×1080、2560×1440、200% 等效缩放、章节树展开/折叠、助手展开/折叠、非颜色差异语义和三题材七操作均已复核；完整卸载后普通 QwenPaw 聊天恢复，重装后工作台与正式正文哈希保持。
+- 自动化无障碍契约与浏览器焦点路径通过；受当前浏览器自动化能力限制，人工中文 IME 候选窗和人工读屏顺序保留为非阻断发布前建议，未冒充已人工执行。
+- 本专项最终无剩余 P0/P1。详细报告：`docs/开发文档/证据/选区AI中央统一Diff审阅-2026-08-25/UD3-E2E/README.md`、`UD3-A11Y-QA/README.md`。
+
+final result: passed

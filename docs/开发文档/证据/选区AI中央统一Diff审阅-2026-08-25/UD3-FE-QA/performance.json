@@ -1,0 +1,15 @@
+{
+  "probe": "selection-edit 12k bidirectional reconstruction",
+  "runtime": "node v24.19.0",
+  "samples": 500,
+  "segments": 4000,
+  "base_characters": 12000,
+  "candidate_characters": 12000,
+  "reconstructed_base": true,
+  "reconstructed_candidate": true,
+  "p50_ms": 0.0267,
+  "p95_ms": 0.0806,
+  "max_ms": 1.0187,
+  "gate_ms": 100,
+  "passed": true
+}

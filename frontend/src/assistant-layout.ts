@@ -10,7 +10,10 @@ export type AssistantWorkspacePageKind = "chapter-editor" | "studio";
 export type AssistantWorkspaceDensity = "comfortable" | "compact" | "constrained";
 
 
-export const ASSISTANT_CHAPTER_MAIN_MIN_WIDTH = 760;
+// The chapter workspace contains its own volume/chapter navigation rail. Keep
+// enough inline room for both that rail and the central editor before allowing
+// a persisted wide assistant preference to consume the remaining width.
+export const ASSISTANT_CHAPTER_MAIN_MIN_WIDTH = 880;
 export const ASSISTANT_STUDIO_MAIN_MIN_WIDTH = 720;
 export const ASSISTANT_CONSTRAINED_MAIN_MIN_WIDTH = 640;
 

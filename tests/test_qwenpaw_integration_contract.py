@@ -208,3 +208,10 @@ def test_packager_includes_alembic_configuration() -> None:
     source = (ROOT / "scripts" / "package_plugin.py").read_text(encoding="utf-8")
 
     assert 'copy_file("alembic.ini")' in source
+
+
+def test_packager_excludes_python_cache_artifacts() -> None:
+    source = (ROOT / "scripts" / "package_plugin.py").read_text(encoding="utf-8")
+
+    assert 'shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")' in source
+    assert "ignore=PLUGIN_COPY_IGNORE" in source

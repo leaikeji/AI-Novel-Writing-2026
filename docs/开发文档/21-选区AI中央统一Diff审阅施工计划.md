@@ -1,8 +1,8 @@
 # 选区 AI 中央统一 Diff 审阅施工计划
 
-状态：**🚧 施工中。2026-08-25 已获用户“开始施工”及本轮 Git 提交/推送授权；W1 后端、前端审阅内核、Skill 规则和聊天桥候选已完成专项测试，正由唯一集成责任人串行执行 W2。尚未完成真实安装态尖峰、全部能力接线和 W3 验收。**
+状态：**✅ 2026-08-25 已完成 W1–W3 施工并通过 `UD3-G`。一键选区任务、全部既有字段 Host、中央统一 Diff、一次应用/撤销、真实 MiniMax-M2.7 三题材七操作、双桌面分辨率、隔离数据库、完整卸载/重装和原生聊天非回归均已验证。用户已明确授权 `UD4-GIT`，由本次精确提交与推送完成发布。**
 
-计划版本：V1.0
+计划版本：V1.1（施工验收回写）
 
 制定与复查日期：2026-08-25（Asia/Shanghai）
 
@@ -29,7 +29,7 @@
 
 用户已选择并确认方案 1；设计方向不再开放重选。本计划完成后已经具备施工所需的产品、协议、文件所有权、回退和验收边界。后续收到明确“开始施工”指令后，从 W0 门禁复核进入 W1，不再重复做 UI 方向讨论。
 
-### 0.2 当前实现事实
+### 0.2 施工入口事实（历史基线）
 
 - QwenPaw 原生助手 V2 已随提交 `6790eb7` 发布；本计划进入施工时 HEAD 与 `AI-Novel-Writing-2026/main` 均为 `1c9448d`。
 - 当前前端仍由 `assistant-selection-controller.ts` 复制 slash 命令，并由 `assistant-tool-card.ts` 把完整候选渲染在右侧聊天消息流中。
@@ -37,6 +37,8 @@
 - 后端已经通过公开 PawApp `ctx.chat`、`get_novel_generation_ctx` 和 `get_novel_effective_model` 执行受控生成；`CreativeGenerationJob` 已记录 requested/actual Provider、模型、输入哈希、attempt、输出和失败证据。
 - 现有 `creative_generation_jobs` 足以承载 `selection_edit`；首选方案不新增表、不改 Alembic。若真实尖峰证明无法满足幂等、恢复或数据边界，必须暂停并单独裁决迁移，不能临时塞入其他表。
 - 规划前相关前端基线专项为 4 个测试文件、39 项通过；这只证明当前候选/事务基础未坏，不代表本计划已经实现。
+
+以上只记录开工时的事实，不再代表当前源码状态；完成后的实现与真实验收结果以第 10 节门禁和[验收证据](./证据/选区AI中央统一Diff审阅-2026-08-25/UD3-E2E/README.md)为准。
 
 ### 0.3 当前工作区边界
 
@@ -206,6 +208,7 @@ Skill 只是公开 PawApp 生成调用的创作规则来源，不成为第二套
 - 输出只按纯文本渲染，不执行 HTML、Markdown、URL、脚本或模型给出的操作指令。
 - replacement 为空、超限、结构错误、混入状态胶囊或请求/实际模型不一致时，任务失败并保留原文。
 - 候选与原文完全一致时显示“未发现需要修改的差异”，不建立伪变更块。
+- Skill 与 prompt 继续要求模型直接返回裸严格 JSON。为兼容当前 Provider 的真实传输行为，后端只允许从单个响应中提取**唯一一个**严格形状的 `{replacement_text, short_summary}` 对象并丢弃对象外 reasoning/围栏；多个候选对象、重复 key、非法常量、额外字段、候选内状态胶囊或工作语句仍 fail closed。被丢弃的外围壳不持久化、不显示、不进入 Diff 或作者字段；这是 Provider 传输规范化，不放宽 V1/V2 领域契约。
 
 ### 3.4 Selection Registry 新绑定
 
@@ -346,21 +349,21 @@ unbound
 | --- | --- | --- | --- | --- | --- |
 | W0 | `UD0-SER` | `DONE/SER` | 归档设计、冻结计划与 ADR | 本计划、ADR-0004、设计稿 README/PNG、索引 | 本轮已完成；不含代码 |
 | W0 | `UD0-G` | `DONE/GATE` | 施工前复核工作区、契约和测试基线 | 只读；本节记录门禁事实 | ✅ 无未解释规划级 P0；相关 39 项测试绿 |
-| W1 | `UD1-BE` | `PAR-C` | selection_edit job、模型规范化、Diff 和恢复查询 | `backend/creative_schemas.py`、`backend/creative_services.py`、`backend/model_runtime.py`、`backend/creative_api.py`、新建 `backend/selection_edit_diff.py`、对应新测试及既有相关测试 | 不新增迁移；API/结果契约测试通过 |
-| W1 | `UD1-FE-CORE` | `PAR-C` | review session 状态机、决定合成与纯组件 | 新建 `frontend/src/selection-edit-review.ts`、`selection-edit-review.test.ts`、`selection-edit-review-surface.ts`、`selection-edit-review-surface.test.ts` | 不改共享入口/样式；状态机测试通过 |
-| W1 | `UD1-SKILL` | `PAR-C` | 受控选择编辑的 Skill 输出规则 | `skills/prose-writing/SKILL.md`、`skills/style-review/SKILL.md`、`tests/test_skill_contract.py` | 不改 Agent/模型选择；契约测试通过 |
-| W1 | `UD1-BRIDGE` | `PAR-C` | 将聊天候选 renderer 收缩为中央审阅桥 | `frontend/src/assistant-tool-card.ts`、`frontend/src/assistant-tool-card.test.ts` | 不接线 `index.ts`；历史结果安全降级 |
-| W1 | `UD1-G` | `GATE/INT` | 冻结实际 DTO、状态机和 mount 接口 | 主 Codex只读复核各工作包；必要修订由原 Owner 完成 | 无 DTO 漂移、无同文件冲突 |
-| W2 | `UD2-SELECTION` | `SER/MUTEX` | editor-task delivery、取消选区和兼容路径 | `frontend/src/assistant-selection-controller.ts`、其测试、`assistant-selection-registry.ts`、其测试；独占 `LOCK-SELECTION` | 保留现有未提交修复；不默认写剪贴板 |
-| W2 | `UD2-INT` | `SER/INT/MUTEX` | API/types、页面 Host、中央 UI、样式和入口接线 | `frontend/src/api.ts`、`types.ts`、`assistant-fields.ts`、`assistant-body-field.ts`、`assistant-form-field.ts`、`assistant-context-runtime.ts`、新建 `selection-edit-runtime.ts` 与专项测试、`index.ts`、`styles.ts`、`workbench-v2.ts`、`chapter-workflow.ts`、`workbench-studio.ts`、`relationship-editor.ts` 及页面集成测试；独占 `LOCK-FE-SHARED/LOCK-SELECTION` | 所有已注册字段接线；无嵌套候选卡 |
-| W2 | `UD2-CAPABILITY` | `SER/MUTEX` | 健康能力、打包与安装验证接线 | `backend/app.py`、`scripts/verify_qwenpaw_lab.py`、安装/契约测试；独占安装脚本相关文件 | 禁用/卸载无残留；不改上游 |
-| W2 | `UD2-G` | `GATE/INT` | 功能集成门禁 | 主 Codex | 一键任务→中央审阅→应用/撤销闭环通过 |
-| W3 | `UD3-FE-QA` | `PAR` | 前端全量、类型、构建、性能探针 | 只读实现；证据目录独占子目录 | 命令全部通过 |
-| W3 | `UD3-BE-QA` | `PAR/MUTEX` | 后端单元、隔离 DB、幂等、权限、失败恢复 | 只读实现；明确测试数据库 | 0 skipped 的适用门禁通过 |
-| W3 | `UD3-A11Y-QA` | `PAR/MUTEX` | 键盘、ARIA、IME、200% | 独占浏览器时段；证据目录独占子目录 | 无 P0/P1 |
-| W3 | `UD3-E2E` | `SER/MUTEX` | 三题材真实模型、双分辨率和宿主非回归 | 独占 `LOCK-QWENPAW/DB/BROWSER` | 全矩阵完成、正文影响可复核 |
-| W3 | `UD3-G` | `GATE/INT` | 最终产品与技术裁决 | 主 Codex | 无未解释 P0/P1；恢复路径可执行 |
-| W4 | `UD4-GIT` | `SER` | 精确暂存、提交、推送 | Git index；仅在用户明确授权后 | diff 仅含本计划范围 |
+| W1 | `UD1-BE` | `DONE/PAR-C` | selection_edit job、模型规范化、Diff 和恢复查询 | `backend/creative_schemas.py`、`backend/creative_services.py`、`backend/model_runtime.py`、`backend/creative_api.py`、新建 `backend/selection_edit_diff.py`、对应新测试及既有相关测试 | ✅ 不新增迁移；API/结果契约测试通过 |
+| W1 | `UD1-FE-CORE` | `DONE/PAR-C` | review session 状态机、决定合成与纯组件 | 新建 `frontend/src/selection-edit-review.ts`、`selection-edit-review.test.ts`、`selection-edit-review-surface.ts`、`selection-edit-review-surface.test.ts` | ✅ 状态机测试通过 |
+| W1 | `UD1-SKILL` | `DONE/PAR-C` | 受控选择编辑的 Skill 输出规则 | `skills/prose-writing/SKILL.md`、`skills/style-review/SKILL.md`、`tests/test_skill_contract.py` | ✅ 契约测试通过 |
+| W1 | `UD1-BRIDGE` | `DONE/PAR-C` | 将聊天候选 renderer 收缩为中央审阅桥 | `frontend/src/assistant-tool-card.ts`、`frontend/src/assistant-tool-card.test.ts` | ✅ 历史结果安全降级 |
+| W1 | `UD1-G` | `DONE/GATE/INT` | 冻结实际 DTO、状态机和 mount 接口 | 主 Codex只读复核各工作包；必要修订由原 Owner 完成 | ✅ 无 DTO 漂移、无同文件冲突 |
+| W2 | `UD2-SELECTION` | `DONE/SER/MUTEX` | editor-task delivery、取消选区和兼容路径 | `frontend/src/assistant-selection-controller.ts`、其测试、`assistant-selection-registry.ts`、其测试；独占 `LOCK-SELECTION` | ✅ 一键任务；不默认写剪贴板 |
+| W2 | `UD2-INT` | `DONE/SER/INT/MUTEX` | API/types、页面 Host、中央 UI、样式和入口接线 | `frontend/src/api.ts`、`types.ts`、`assistant-fields.ts`、`assistant-body-field.ts`、`assistant-form-field.ts`、`assistant-context-runtime.ts`、新建 `selection-edit-runtime.ts` 与专项测试、`index.ts`、`styles.ts`、`workbench-v2.ts`、`chapter-workflow.ts`、`workbench-studio.ts`、`relationship-editor.ts` 及页面集成测试；独占 `LOCK-FE-SHARED/LOCK-SELECTION` | ✅ 全部注册字段接线；无新嵌套候选卡 |
+| W2 | `UD2-CAPABILITY` | `DONE/SER/MUTEX` | 健康能力、打包与安装验证接线 | `backend/app.py`、`scripts/verify_qwenpaw_lab.py`、安装/契约测试；独占安装脚本相关文件 | ✅ 卸载无残留；不改上游 |
+| W2 | `UD2-G` | `DONE/GATE/INT` | 功能集成门禁 | 主 Codex | ✅ 一键任务→中央审阅→应用/撤销闭环通过 |
+| W3 | `UD3-FE-QA` | `DONE/PAR` | 前端全量、类型、构建、性能探针 | 只读实现；证据目录独占子目录 | ✅ 命令全部通过 |
+| W3 | `UD3-BE-QA` | `DONE/PAR/MUTEX` | 后端单元、隔离 DB、幂等、权限、失败恢复 | 只读实现；明确测试数据库 | ✅ 251 passed、0 skipped |
+| W3 | `UD3-A11Y-QA` | `DONE/PAR/MUTEX` | 键盘、ARIA、IME、200% | 独占浏览器时段；证据目录独占子目录 | ✅ 无 P0/P1；保留人工 IME 建议 |
+| W3 | `UD3-E2E` | `DONE/SER/MUTEX` | 三题材真实模型、双分辨率和宿主非回归 | 独占 `LOCK-QWENPAW/DB/BROWSER` | ✅ 全矩阵完成、正文影响可复核 |
+| W3 | `UD3-G` | `DONE/GATE/INT` | 最终产品与技术裁决 | 主 Codex | ✅ 无未解释 P0/P1；恢复路径可执行 |
+| W4 | `UD4-GIT` | `DONE/SER` | 精确暂存、提交、推送 | Git index；仅在用户明确授权后 | ✅ 用户已明确授权；排除朗读专项与既有备份 |
 
 #### W1 可并行写包的完整派发契约
 
@@ -461,6 +464,8 @@ pnpm build
 
 数据库测试必须指向明确隔离测试库；条件测试的 skipped 不得写成通过。打包、健康、安装或公共契约发生变化时继续执行现有 `verify_qwenpaw_lab.py`、安装幂等、完整卸载和重装验证。
 
+最终实际结果：前端 `38` 文件、`303 passed`，typecheck/build 通过；后端明确隔离 PostgreSQL 全量 `251 passed, 0 skipped, 1 warning`；12k 后端 Diff p95 约 `1.403ms`，前端重建 p95 `0.0806ms`；打包产物 0 个 `__pycache__/pyc/pyo`；完整卸载后 PawApp/Skills/novel tools 均为 0，原生聊天恢复，重装 verifier 通过。
+
 ### 9.2 功能矩阵
 
 | 场景 | 必须验证 |
@@ -512,6 +517,8 @@ pnpm build
 
 ### `UD1-G`：协议冻结
 
+状态：**✅ 2026-08-25 已通过。**
+
 - W1 源码协议与专项测试已冻结：后端 67 项、前端审阅内核 42 项、聊天桥 22 项通过；12k Diff p95 远低于 100ms。
 - 当前真实安装态仍返回旧的 `kind` 枚举，证明运行中的 PawApp 尚未安装本轮候选，而不是源码 DTO 失败。真实 `/creative-generations` 的 `selection_edit` 受控尖峰并入 `UD2-CAPABILITY` 的打包/安装后第一项门禁；在该尖峰通过前 `UD2-G` 仍不得判定通过。
 - requested/actual 模型、Agent、Skill、幂等、失败和 input snapshot 边界可复核。
@@ -520,20 +527,28 @@ pnpm build
 
 ### `UD2-G`：功能闭环
 
+状态：**✅ 2026-08-25 已通过。**
+
 - 七操作不再默认走 Clipboard。
 - 章节正文和全部既有字段在本字段所属工作面审阅。
 - 逐处决定、一次应用、保存、撤销和冲突通过。
 - 右侧不存在完整候选审阅卡；聊天功能非回归。
 
+补充事实：静态测试覆盖 47 个注册字段唯一 Host；真实标题、正文和章纲/弹窗 focus scope 已打开统一 Surface。默认项目任务不向原生聊天写命令或候选卡，工作台内“新建对话”保持同页。
+
 ### `UD3-G`：最终验收
+
+状态：**✅ 2026-08-25 已通过。**
 
 - 前后端全量、构建、打包、隔离 DB、安装/卸载、性能、无障碍和三题材真实模型通过。
 - 没有未解释 P0/P1；任何跳过项、未运行项和环境限制单独列出。
 - 证据、恢复方式和数据影响可复核。
 
+实际裁决：三题材七操作均记录 MiniMax-M2.7 requested/actual 一致；1920×1080、2560×1440、200% 等效缩放和参考稿 1525×1031 同图已复核；正文拒绝/退出零写入，显式应用/撤销后原哈希恢复；隔离数据库、打包、完整卸载、原生聊天、重装和四章哈希保持均通过。人工中文 IME 候选窗和人工读屏顺序作为非阻断发布前复核建议透明保留，不表述为已人工执行。
+
 ### `UD4-GIT`：发布
 
-- 只有用户再次明确要求提交/推送后才能执行。
+- 2026-08-25 用户已明确要求提交并推送，发布门禁获准执行。
 - 精确暂存本计划文件，排除朗读、关系网备份、旧验收备份和用户其他修改。
 
 ## 11. 施工前自查与已解除门槛
@@ -541,7 +556,7 @@ pnpm build
 | 审核角度 | 结论 | 依据/处理 |
 | --- | --- | --- |
 | 产品方向 | ✅ 已冻结 | 用户选择方案 1；不再比较方案 2/3 |
-| 当前/目标事实 | ✅ 已分离 | V2 保留为历史完成；本计划明确标为施工中，W3 前不写成最终验收完成 |
+| 当前/目标事实 | ✅ 已分离 | V2 保留为历史完成；本计划按阶段保存历史入口事实，并在 `UD3-G` 后才回写为最终验收完成 |
 | QwenPaw 边界 | ✅ 可施工 | 使用公开 PawApp `ctx.chat` 与现有 route/renderer；不碰私有 DOM/store |
 | 模型权威 | ✅ 可施工 | 继续 follow-agent-effective；requested/actual 强校验 |
 | 数据与审计 | ✅ 可施工 | 复用 CreativeGenerationJob；显式有界选区留存已在 ADR 披露 |
@@ -555,4 +570,4 @@ pnpm build
 | 并行施工 | ✅ 已分包 | W1 独立文件可并行；共享前端、安装、浏览器与 Git 串行 |
 | 工作区保护 | ✅ 已标注 | 相关 dirty 文件由主 Codex独占，其他改动只读 |
 
-自查结论：没有剩余的规划级 P0，当前已完成 `UD0-G → W1` 并进入 W2 串行集成；任何真实尖峰发现必须改 QwenPaw 核心、必须引入第二套模型运行时或必须新增未规划迁移时，立即停止并重新裁决，不能自行扩大范围。
+自查结论：没有剩余 P0/P1；`UD0-G → UD3-G` 已全部完成，未修改 QwenPaw 核心、未引入第二套模型运行时、未新增迁移。用户已明确授权 `UD4-GIT`；本次只提交本计划范围，排除朗读专项、关系网备份、旧验收备份和其他用户修改。

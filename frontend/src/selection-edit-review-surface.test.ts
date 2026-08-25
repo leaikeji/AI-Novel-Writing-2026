@@ -182,6 +182,8 @@ describe("SelectionEditReviewSurface reviewing state", () => {
     });
     expect(selectionEditReviewEventForSurfaceAction({ type: "next-change" }))
       .toEqual({ type: "navigate", direction: "next" });
+    expect(selectionEditReviewEventForSurfaceAction({ type: "dismiss-applied" }))
+      .toEqual({ type: "reset" });
     expect(selectionEditReviewEventForSurfaceAction({ type: "send-to-assistant" }))
       .toBeNull();
   });
@@ -360,7 +362,11 @@ describe("SelectionEditReviewSurface non-review states", () => {
       fieldId: "chapter.body",
     });
     (findButton(tree, "撤销 AI 修改").props.onClick as () => void)();
-    expect(onAction).toHaveBeenCalledWith({ type: "undo" });
+    (findButton(tree, "继续编辑").props.onClick as () => void)();
+    expect(onAction.mock.calls.map(([action]) => action)).toEqual([
+      { type: "undo" },
+      { type: "dismiss-applied" },
+    ]);
   });
 
   it("returns no review UI after discard but still returns source focus", () => {

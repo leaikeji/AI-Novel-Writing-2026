@@ -363,10 +363,11 @@ describe("assistant route wrap", () => {
     observerCallback?.([{ target: container, contentRect: { width: 1_180 } }]);
     const resized = React.render(Component);
     const [, pane] = elementChildren(resized);
-    expect(resized.props["data-assistant-width"]).toBe("420");
-    expect(elementChildren(resized)[0].props["data-main-width"]).toBe("760");
+    expect(resized.props["data-assistant-width"]).toBe("520");
+    expect(resized.props["data-assistant-overlay"]).toBe("true");
+    expect(elementChildren(resized)[0].props["data-main-width"]).toBe("1180");
     expect(pane.props.availableWidth).toBe(1_180);
-    expect(pane.props.mainMinWidth).toBe(760);
+    expect(pane.props.mainMinWidth).toBe(640);
 
     React.unmount();
     expect(disconnect).toHaveBeenCalledOnce();

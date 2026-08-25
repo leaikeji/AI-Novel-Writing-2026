@@ -314,14 +314,32 @@ def test_model_normalizer_accepts_only_two_model_owned_fields() -> None:
             ),
         )
 
-    with pytest.raises(ModelVerificationError, match="单一严格 JSON"):
+    assert normalize_creative_generation_json(
+        "selection_edit",
+        normalized,
+        f"```json\n{raw}\n```",
+    ) == normalized
+
+    assert normalize_creative_generation_json(
+        "selection_edit",
+        normalized,
+        f"以下是内部推理，不属于候选：\n{raw}",
+    ) == normalized
+
+    assert normalize_creative_generation_json(
+        "selection_edit",
+        normalized,
+        f"内部推理\n{raw}\n非候选状态说明",
+    ) == normalized
+
+    with pytest.raises(ModelVerificationError, match="多个候选 JSON"):
         normalize_creative_generation_json(
             "selection_edit",
             normalized,
-            f"```json\n{raw}\n```",
+            f"{raw}\n{raw}",
         )
 
-    with pytest.raises(ModelVerificationError, match="单一严格 JSON"):
+    with pytest.raises(ModelVerificationError, match="唯一严格 JSON"):
         normalize_creative_generation_json(
             "selection_edit",
             normalized,
@@ -363,6 +381,8 @@ def test_operation_skill_mapping_and_prompt_contract(
     assert "只能包含 replacement_text 与 short_summary" in prompt
     assert "before 与 after 只用于保持衔接" in prompt
     assert "diff_segments" in prompt
+    assert "第一个字符必须是{" in prompt
+    assert "最后一个字符必须是}" in prompt
 
 
 def test_service_reuses_ready_job_and_force_new_increments_attempt() -> None:

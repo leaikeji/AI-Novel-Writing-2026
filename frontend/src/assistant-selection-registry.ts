@@ -101,6 +101,12 @@ export interface SelectionEditorTaskApplyValidationInput
 }
 
 
+export interface SelectionEditorTaskRetryBindingInput
+  extends SelectionEditorTaskBindingInput {
+  previousJobId: string;
+}
+
+
 export interface SelectionFieldIdentity {
   novelId: string;
   documentId: string;
@@ -148,6 +154,18 @@ export type SelectionEditorTaskBindingResult =
   | {
     ok: true;
     status: "bound" | "already-bound";
+    record: SelectionRegistryRecord;
+  }
+  | {
+    ok: false;
+    reason: Exclude<SelectionInvalidReason, "job-unbound" | "source-value-changed">;
+  };
+
+
+export type SelectionEditorTaskRetryBindingResult =
+  | {
+    ok: true;
+    status: "rebound";
     record: SelectionRegistryRecord;
   }
   | {
@@ -441,6 +459,50 @@ export class AssistantSelectionRegistry {
       record: boundRecord,
     });
     return { ok: true, status: "bound", record: boundRecord };
+  }
+
+  /**
+   * Replace an editor-task job only after an explicit author retry.  The
+   * delivery kind remains immutable, and the caller must prove the job that
+   * was visible when retry started so a late response cannot steal the
+   * selection from a newer attempt.
+   */
+  rebindEditorTaskForRetry(
+    input: SelectionEditorTaskRetryBindingInput,
+  ): SelectionEditorTaskRetryBindingResult {
+    this.assertActive();
+    requireNonEmpty(input.previousJobId, "previousJobId");
+    requireNonEmpty(input.jobId, "jobId");
+    const lookup = this.lookupForOperation(input.selectionId);
+    if (!lookup.ok) return lookup;
+
+    const mismatch = scopeMismatch(lookup.stored.record, input);
+    if (mismatch) return { ok: false, reason: mismatch };
+    const delivery = lookup.stored.record.delivery;
+    if (delivery.kind !== "editor-task") {
+      return { ok: false, reason: "delivery-mismatch" };
+    }
+    if (delivery.jobId !== input.previousJobId) {
+      return { ok: false, reason: "job-mismatch" };
+    }
+    if (delivery.jobId === input.jobId) {
+      return { ok: false, reason: "job-mismatch" };
+    }
+
+    const reboundRecord = freezeRecord({
+      ...lookup.stored.record,
+      delivery: Object.freeze({
+        kind: "editor-task" as const,
+        jobId: input.jobId,
+      }),
+      sessionId: undefined,
+      jobId: input.jobId,
+    });
+    this.entries.set(input.selectionId, {
+      ...lookup.stored,
+      record: reboundRecord,
+    });
+    return { ok: true, status: "rebound", record: reboundRecord };
   }
 
   /**

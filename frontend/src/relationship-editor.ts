@@ -19,6 +19,7 @@ import {
   restoreAssistantTextSelection,
   type AssistantTextControl,
 } from "./chapter-workflow";
+import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import {
   CharacterRelationshipRecord,
   NovelCharacterRecord,
@@ -35,6 +36,11 @@ export const RELATIONSHIP_ASSISTANT_FIELD_IDS = {
   label: "relationship.label",
   description: "relationship.description",
 } as const;
+
+
+export const RELATIONSHIP_SELECTION_REVIEW_FIELD_IDS = Object.freeze(
+  Object.values(RELATIONSHIP_ASSISTANT_FIELD_IDS),
+);
 
 
 const host = window.QwenPaw.host;
@@ -70,6 +76,7 @@ export interface RelationshipEditorProps {
   startWithNew?: boolean;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
+  selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
 
 
@@ -407,6 +414,7 @@ export function RelationshipEditor({
   startWithNew = false,
   onClose,
   onSaved,
+  selectionEditReviewHost: SelectionEditReviewHost,
 }: RelationshipEditorProps) {
   const [drafts, setDrafts] = React.useState([] as RelationshipDraft[]);
   const [archived, setArchived] = React.useState([] as RelationshipDraft[]);
@@ -708,6 +716,12 @@ export function RelationshipEditor({
   };
 
   const options = characters.map((character) => ({ label: character.name, value: character.id }));
+  const wrapSelectionReview = (child: unknown): unknown => SelectionEditReviewHost
+    ? h(SelectionEditReviewHost, {
+      fieldIds: RELATIONSHIP_SELECTION_REVIEW_FIELD_IDS,
+      className: "mb-relationship-selection-review-host",
+    }, child)
+    : child;
   return h(
     Modal,
     {
@@ -742,7 +756,7 @@ export function RelationshipEditor({
         ),
       ),
     },
-    h(
+    wrapSelectionReview(h(
       "div",
       { className: "mb-relationship-editor-body" },
       error ? h(Alert, { type: "error", showIcon: true, message: error }) : null,
@@ -915,6 +929,6 @@ export function RelationshipEditor({
               );
             }),
           ),
-    ),
+    )),
   );
 }

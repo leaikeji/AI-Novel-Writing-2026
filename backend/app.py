@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .assistant_api import router as assistant_router
 from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
+from .creative_schemas import SELECTION_EDIT_OPERATIONS
 from .creative_services import sync_relationships_from_intelligence_proposal
 from .database import database_status, get_session
 from .generation_dependencies import (
@@ -141,6 +142,8 @@ def health() -> dict[str, object]:
         "generation_agent_id": NOVEL_AGENT_ID,
         "generation_model_policy": "follow-agent-effective",
         "model_verification_mode": "preflight-effective+provider-usage",
+        "selection_edit_enabled": True,
+        "selection_edit_operations": list(SELECTION_EDIT_OPERATIONS),
         "vector_retrieval_enabled": False,
     }
 

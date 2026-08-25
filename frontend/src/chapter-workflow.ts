@@ -48,6 +48,7 @@ import type {
   SelectionRange,
   SelectionSnapshot,
 } from "./assistant-fields";
+import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 const host = window.QwenPaw.host;
 const React = host.React;
 const ReactDOM = host.ReactDOM;
@@ -89,7 +90,7 @@ interface ChapterWorkflowProps {
   generateActionRef?: { current: (() => void) | null };
   onBodyGenerationStateChange?: (active: boolean, stage: string) => void;
   onAssistantModalStateChange?: (open: boolean) => void;
-  selectionEditReviewHost?: unknown;
+  selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
 
 
@@ -1271,6 +1272,71 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const mountedTitleTools = titleTools && titleToolsTarget && typeof ReactDOM?.createPortal === "function"
     ? ReactDOM.createPortal(titleTools, titleToolsTarget)
     : titleTools;
+  const briefEditorBody = h(
+    "div",
+    { className: "anw-outline-edit-body" },
+    h(
+      "label",
+      { className: "anw-outline-edit-field" },
+      h("strong", null, "章节大纲"),
+      h(TextArea, {
+        ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.outlineText),
+        maxLength: 30000,
+        "aria-label": "章节大纲",
+        value: briefForm.outlineText,
+        onChange: (event: any) => updateBriefField(
+          CHAPTER_OUTLINE_FIELD_IDS.outlineText,
+          "outlineText",
+          event.target.value,
+        ),
+        placeholder: "请输入章节大纲...",
+      }),
+    ),
+    h(
+      "label",
+      { className: "anw-outline-edit-field anw-outline-edit-target" },
+      h("strong", null, "目标字数"),
+      h(Input, {
+        ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.targetCharacters),
+        type: "number",
+        min: 500,
+        max: 10000,
+        step: 100,
+        inputMode: "numeric",
+        "aria-label": "目标字数",
+        value: briefForm.targetWordCount,
+        onChange: (event: any) => {
+          const value = Number(event.target.value);
+          if (Number.isFinite(value)) updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
+            "targetWordCount",
+            value,
+          );
+        },
+      }),
+      h("small", null, "建议范围：500-10000字"),
+    ),
+    ...OUTLINE_FIELD_SPECS.filter((spec) => !new Set<string>([
+      CHAPTER_OUTLINE_FIELD_IDS.outlineText,
+      CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
+    ]).has(spec.id)).map((spec) => h(
+      "label",
+      { key: spec.id, className: "anw-outline-edit-field" },
+      h("strong", null, spec.label),
+      h(TextArea, {
+        ...assistantBriefControlProps(spec.id),
+        rows: spec.id === CHAPTER_OUTLINE_FIELD_IDS.expectation
+          || spec.id === CHAPTER_OUTLINE_FIELD_IDS.forbidden ? 3 : 2,
+        "aria-label": spec.label,
+        value: spec.serialize(briefForm[spec.key]),
+        onChange: (event: any) => updateBriefField(
+          spec.id,
+          spec.key,
+          spec.parse(event.target.value) as never,
+        ),
+      }),
+    )),
+  );
 
   return h(
     React.Fragment,
@@ -1310,197 +1376,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           fieldIds: Object.values(CHAPTER_OUTLINE_FIELD_IDS),
           className: "anw-outline-selection-review-host",
         },
-        h("div", { className: "anw-outline-edit-body" },
-          h("label", { className: "anw-outline-edit-field" },
-            h("strong", null, "章节大纲"),
-            h(TextArea, {
-              ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.outlineText),
-              maxLength: 30000,
-              "aria-label": "章节大纲",
-              value: briefForm.outlineText,
-              onChange: (event: any) => updateBriefField(
-                CHAPTER_OUTLINE_FIELD_IDS.outlineText,
-                "outlineText",
-                event.target.value,
-              ),
-              placeholder: "请输入章节大纲...",
-            }),
-          ),
-          h("label", { className: "anw-outline-edit-field anw-outline-edit-target" },
-            h("strong", null, "目标字数"),
-            h(Input, {
-              ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.targetCharacters),
-              type: "number",
-              min: 500,
-              max: 10000,
-              step: 100,
-              inputMode: "numeric",
-              "aria-label": "目标字数",
-              value: briefForm.targetWordCount,
-              onChange: (event: any) => {
-                const value = Number(event.target.value);
-                if (Number.isFinite(value)) updateBriefField(
-                  CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
-                  "targetWordCount",
-                  value,
-                );
-              },
-            }),
-            h("small", null, "建议范围：500-10000字"),
-          ),
-          ...OUTLINE_FIELD_SPECS.filter((spec) => !new Set<string>([
-            CHAPTER_OUTLINE_FIELD_IDS.outlineText,
-            CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
-          ]).has(spec.id)).map((spec) => h(
-            "label",
-            { key: spec.id, className: "anw-outline-edit-field" },
-            h("strong", null, spec.label),
-            h(TextArea, {
-              ...assistantBriefControlProps(spec.id),
-              rows: spec.id === CHAPTER_OUTLINE_FIELD_IDS.expectation
-                || spec.id === CHAPTER_OUTLINE_FIELD_IDS.forbidden ? 3 : 2,
-              "aria-label": spec.label,
-              value: spec.serialize(briefForm[spec.key]),
-              onChange: (event: any) => updateBriefField(
-                spec.id,
-                spec.key,
-                spec.parse(event.target.value) as never,
-              ),
-            }),
-          )),
-        ),
+        briefEditorBody,
       )
-      : h("div", { className: "anw-outline-edit-body" },
-      h("label", { className: "anw-outline-edit-field" },
-        h("strong", null, "章节大纲"),
-        h(TextArea, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.outlineText),
-          maxLength: 30000,
-          "aria-label": "章节大纲",
-          value: briefForm.outlineText,
-          onChange: (event: any) => updateBriefField(
-            CHAPTER_OUTLINE_FIELD_IDS.outlineText,
-            "outlineText",
-            event.target.value,
-          ),
-          placeholder: "请输入章节大纲...",
-        }),
-      ),
-      h("label", { className: "anw-outline-edit-field anw-outline-edit-target" },
-        h("strong", null, "目标字数"),
-        h(Input, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.targetCharacters),
-          type: "number",
-          min: 500,
-          max: 10000,
-          step: 100,
-          inputMode: "numeric",
-          "aria-label": "目标字数",
-          value: briefForm.targetWordCount,
-          onChange: (event: any) => {
-            const value = Number(event.target.value);
-            if (Number.isFinite(value)) updateBriefField(
-              CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
-              "targetWordCount",
-              value,
-            );
-          },
-        }),
-        h("small", null, "建议范围：500-10000字"),
-      ),
-      h("label", { className: "anw-outline-edit-field" },
-        h("strong", null, "本章期待"),
-        h(TextArea, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.expectation),
-          rows: 3,
-          maxLength: 12000,
-          "aria-label": "本章期待",
-          value: briefForm.expectationText,
-          onChange: (event: any) => updateBriefField(
-            CHAPTER_OUTLINE_FIELD_IDS.expectation,
-            "expectationText",
-            event.target.value,
-          ),
-          placeholder: "请输入本章希望达成的情节、情绪或信息目标",
-        }),
-      ),
-      h("label", { className: "anw-outline-edit-field" },
-        h("strong", null, "禁止事项"),
-        h(TextArea, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.forbidden),
-          rows: 3,
-          maxLength: 12000,
-          "aria-label": "禁止事项",
-          value: briefForm.forbiddenText,
-          onChange: (event: any) => updateBriefField(
-            CHAPTER_OUTLINE_FIELD_IDS.forbidden,
-            "forbiddenText",
-            event.target.value,
-          ),
-          placeholder: "请输入本章不得发生或不得写入的内容",
-        }),
-      ),
-      h("label", { className: "anw-outline-edit-field" },
-        h("strong", null, "必须出场角色"),
-        h(TextArea, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.requiredRoles),
-          rows: 2,
-          "aria-label": "必须出场角色",
-          value: briefForm.requiredRoles,
-          onChange: (event: any) => updateBriefField(
-            CHAPTER_OUTLINE_FIELD_IDS.requiredRoles,
-            "requiredRoles",
-            event.target.value,
-          ),
-          placeholder: "多个角色可用逗号或换行分隔",
-        }),
-      ),
-      h("label", { className: "anw-outline-edit-field" },
-        h("strong", null, "允许出场角色"),
-        h(TextArea, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.allowedRoles),
-          rows: 2,
-          "aria-label": "允许出场角色",
-          value: briefForm.allowedRoles,
-          onChange: (event: any) => updateBriefField(
-            CHAPTER_OUTLINE_FIELD_IDS.allowedRoles,
-            "allowedRoles",
-            event.target.value,
-          ),
-          placeholder: "多个角色可用逗号或换行分隔",
-        }),
-      ),
-      h("label", { className: "anw-outline-edit-field" },
-        h("strong", null, "仅上下文角色"),
-        h(TextArea, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.contextOnlyRoles),
-          rows: 2,
-          "aria-label": "仅上下文角色",
-          value: briefForm.contextOnlyRoles,
-          onChange: (event: any) => updateBriefField(
-            CHAPTER_OUTLINE_FIELD_IDS.contextOnlyRoles,
-            "contextOnlyRoles",
-            event.target.value,
-          ),
-          placeholder: "仅可作为背景提及，不安排实际出场",
-        }),
-      ),
-      h("label", { className: "anw-outline-edit-field" },
-        h("strong", null, "禁止出场角色"),
-        h(TextArea, {
-          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.forbiddenRoles),
-          rows: 2,
-          "aria-label": "禁止出场角色",
-          value: briefForm.forbiddenRoles,
-          onChange: (event: any) => updateBriefField(
-            CHAPTER_OUTLINE_FIELD_IDS.forbiddenRoles,
-            "forbiddenRoles",
-            event.target.value,
-          ),
-          placeholder: "多个角色可用逗号或换行分隔",
-        }),
-      ),
-    )),
+      : briefEditorBody),
     h(Modal, {
       open: assetPickerOpen,
       className: "anw-modal anw-asset-modal",

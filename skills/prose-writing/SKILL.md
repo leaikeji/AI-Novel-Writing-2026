@@ -28,11 +28,7 @@ metadata:
 - 本 Skill 的任务 operation 只处理 `polish`、`rewrite`、`expand`、`shorten`、`dialogue` 和 `custom`：`polish` 保持事实、视角和语气并改善表达；`rewrite` 保留核心事实并明显重组表达；`expand` 只扩展选区；`shorten` 保留关键信息并显著压缩；`dialogue` 只使用选区和已核实正式资料中的人物与关系；`custom` 只执行作者本次明确要求。
 - `selection_text` 是唯一可替换范围；`before`、`after` 只是只读连续性上下文。不得改写、复述或续写未选中内容，也不得把未选中上下文写进 `replacement_text`。
 - 保留选区中的核心事实、信息归属、人物关系、叙事视角、时态和叙述声音。自定义要求不得越过选区边界，也不得把未经正式资料核实的剧情、人物、地点、物件或规则写成既有事实。
-- 只返回一个可解析的严格 JSON 对象，不得输出 Markdown 围栏、HTML、解释、诊断列表、状态胶囊、工具调用或对象前后的自然语言。严格 JSON 对象只含 `replacement_text` 和 `short_summary` 两个字段：
-
-  ```json
-  {"replacement_text":"纯文本候选","short_summary":"不超过240字符的实际修改摘要"}
-  ```
+- 只返回一个可解析的严格 JSON 对象，不得输出 Markdown 围栏、HTML、解释、诊断列表、状态胶囊、工具调用或对象前后的自然语言。回复首字符必须是 `{`、末字符必须是 `}`；严格 JSON 对象只含 `replacement_text` 和 `short_summary` 两个字段，例如 `{"replacement_text":"纯文本候选","short_summary":"不超过240字符的实际修改摘要"}`。
 
 - `replacement_text` 必须是非空纯文本候选；`short_summary` 只描述实际完成的变化，不声称已经采用、保存或达到未经项目校验的精确比例。不得生成项目负责的 Diff、哈希、字符数，不得返回 `diff_segments`、`segment_id` 或任何写回指令。
 - 若不能在事实、视角和选区边界内安全完成操作，不用编造内容掩盖缺口；返回保守候选并在摘要中如实说明限制，最终结构、长度、模型一致性和 Diff 校验由 PawApp 后端裁决。
