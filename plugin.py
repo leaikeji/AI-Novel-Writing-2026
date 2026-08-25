@@ -3,8 +3,15 @@
 from pathlib import Path
 from typing import Any
 
+from .backend.assistant_context import create_ai_novel_page_context_middleware
 from .backend.app import pawapp
-from .backend.tools import novel_get_context, novel_get_document, novel_search
+from .backend.tools import (
+    novel_get_context,
+    novel_get_document,
+    novel_get_workspace_context,
+    novel_prepare_selection_edit,
+    novel_search,
+)
 
 PLUGIN_ROOT = Path(__file__).resolve().parent
 
@@ -14,6 +21,10 @@ class AINovelWorldPlugin:
 
     def register(self, api: Any) -> None:
         pawapp.register(api)
+        api.register_middleware(
+            create_ai_novel_page_context_middleware,
+            priority=80,
+        )
         api.register_skill_provider(
             PLUGIN_ROOT / "skills",
             enabled_by_default=False,
@@ -40,6 +51,25 @@ class AINovelWorldPlugin:
             tool_func=novel_search,
             description="在指定小说当前正文中进行关键词检索（只读）",
             icon="🔎",
+            enabled=False,
+            tool_type="internal",
+        )
+        api.register_tool(
+            tool_name="novel_get_workspace_context",
+            tool_func=novel_get_workspace_context,
+            description="读取当前写作工作台范围内的大纲、人物、关系、线索与设定等正式资料（只读）",
+            icon="🗂️",
+            enabled=False,
+            tool_type="internal",
+        )
+        api.register_tool(
+            tool_name="novel_prepare_selection_edit",
+            tool_func=novel_prepare_selection_edit,
+            description=(
+                "为当前工作台选区返回结构化纯文本候选；只生成提案，"
+                "不写数据库或正文"
+            ),
+            icon="✏️",
             enabled=False,
             tool_type="internal",
         )

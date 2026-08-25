@@ -6,7 +6,7 @@ import type {
   IntelligenceProposalRecord,
 } from "./types";
 
-type GenerationTaskModelEvidence = Pick<
+export type GenerationTaskModelEvidence = Pick<
   CreativeGenerationRecord | GenerationJobRecord | IntelligenceProposalRecord,
   | "requested_provider_id"
   | "requested_model_id"
@@ -26,6 +26,54 @@ export class ApiError extends Error {
   }
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object"
+    ? value as Record<string, unknown>
+    : null;
+}
+
+export function generationTaskFromApiError(
+  reason: unknown,
+): GenerationTaskModelEvidence | null {
+  if (!(reason instanceof ApiError)) return null;
+  const detail = objectRecord(reason.detail);
+  if (!detail) return null;
+  for (const key of ["job", "proposal"] as const) {
+    const task = objectRecord(detail[key]);
+    if (task && typeof task.requested_model_id === "string") {
+      return task as unknown as GenerationTaskModelEvidence;
+    }
+  }
+  return null;
+}
+
+export function apiErrorMessage(reason: unknown, fallback: string): string {
+  if (!(reason instanceof ApiError)) {
+    return reason instanceof Error ? reason.message : fallback;
+  }
+  const detail = objectRecord(reason.detail);
+  let message = typeof reason.detail === "string" ? reason.detail.trim() : "";
+  if (!message && detail && typeof detail.message === "string") {
+    message = detail.message.trim();
+  }
+  if (!message && detail) {
+    for (const key of ["job", "proposal"] as const) {
+      const task = objectRecord(detail[key]);
+      if (task && typeof task.failure_message === "string" && task.failure_message.trim()) {
+        message = task.failure_message.trim();
+        break;
+      }
+    }
+  }
+  if (!message && detail && typeof detail.type === "string") {
+    message = `${fallback}：${detail.type}`;
+  }
+  const task = generationTaskFromApiError(reason);
+  const audit = task ? generationModelAuditLabel(task) : "";
+  const base = message || reason.message || fallback;
+  return audit && !base.includes(audit) ? `${base}（${audit}）` : base;
+}
+
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await window.QwenPaw.host.fetch(`/${APP_ID}${path}`, {
     ...init,
@@ -37,7 +85,13 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new ApiError(response.status, `HTTP ${response.status}`, payload?.detail ?? payload);
+    const detail = payload?.detail ?? payload;
+    const provisional = new ApiError(response.status, `HTTP ${response.status}`, detail);
+    throw new ApiError(
+      response.status,
+      apiErrorMessage(provisional, `HTTP ${response.status}`),
+      detail,
+    );
   }
   return payload as T;
 }
@@ -80,4 +134,9 @@ export function generationModelAuditLabel(value: GenerationTaskModelEvidence): s
   const requested = requestedGenerationModelLabel(value);
   const actual = actualGenerationModelLabel(value);
   return actual ? `请求 ${requested} · 实际 ${actual}` : `请求 ${requested} · 实际未核验`;
+}
+
+export function verifiedGenerationModelLabel(value: GenerationTaskModelEvidence): string {
+  const actual = actualGenerationModelLabel(value);
+  return actual ? `实际 ${actual}` : generationModelAuditLabel(value);
 }

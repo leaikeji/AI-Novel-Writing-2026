@@ -2409,6 +2409,27 @@ def _storyline_topic_from_fact(
     return None
 
 
+def _should_archive_legacy_auto_storyline(
+    item: Storyline,
+    *,
+    auto_descriptions: set[str],
+    canonical_titles: set[str],
+) -> bool:
+    """Identify only obsolete fine-grained rows, never canonical buckets.
+
+    Canonical aggregate rows deliberately reuse the latest source fact as
+    their description.  Archiving by description alone therefore toggled each
+    canonical row inactive and active again on every GET, incrementing its
+    version despite no author or source change.
+    """
+
+    return (
+        item.storyline_type != "main"
+        and item.title not in canonical_titles
+        and item.description in auto_descriptions
+    )
+
+
 def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
     _require_novel(session, novel_id)
     rows = session.scalars(
@@ -2441,6 +2462,7 @@ def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
         f"{fact.subject}{fact.predicate}：{fact.object_text}".strip("：")
         for fact in facts
     }
+    canonical_titles = {title for _storyline_type, title in buckets}
     by_title: dict[str, Storyline] = {}
     for item in rows:
         by_title.setdefault(item.title, item)
@@ -2448,7 +2470,11 @@ def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
     changed = False
 
     for item in rows:
-        if item.storyline_type == "main" or item.description not in auto_descriptions:
+        if not _should_archive_legacy_auto_storyline(
+            item,
+            auto_descriptions=auto_descriptions,
+            canonical_titles=canonical_titles,
+        ):
             continue
         if item.status != "archived":
             item.status = "archived"
@@ -3119,6 +3145,7 @@ def start_creative_generation(
             "requested_provider_id": requested_provider_id,
             "requested_model_id": requested_model_id,
             "generation_contract_version": generation_contract_version,
+            "target_character_count": target_character_count,
         },
         ensure_ascii=False,
         separators=(",", ":"),

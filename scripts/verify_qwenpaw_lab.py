@@ -20,7 +20,13 @@ NOVEL_SKILLS = {
     "continuity-check",
     "style-review",
 }
-NOVEL_TOOLS = {"novel_get_context", "novel_get_document", "novel_search"}
+NOVEL_TOOLS = {
+    "novel_get_context",
+    "novel_get_document",
+    "novel_search",
+    "novel_get_workspace_context",
+    "novel_prepare_selection_edit",
+}
 NOVEL_PROMPT_FILE = "AI_NOVEL_WORLD.md"
 BASE_URL = os.environ.get("QWENPAW_BASE_URL", "http://127.0.0.1:18088").rstrip("/")
 
@@ -94,7 +100,7 @@ def verify() -> dict[str, object]:
     assert set(enabled_scope[NOVEL_AGENT_ID]) == NOVEL_SKILLS
 
     enabled_tools: dict[str, list[str]] = {}
-    for agent_id in ("default", "QwenPaw_QA_Agent_0.2", NOVEL_AGENT_ID):
+    for agent_id in sorted(agent_ids):
         tools = get_json("/api/tools", agent_id=agent_id)
         assert isinstance(tools, list)
         novel_tools = {
@@ -108,8 +114,9 @@ def verify() -> dict[str, object]:
         enabled_tools[agent_id] = sorted(
             name for name, item in novel_tools.items() if item.get("enabled") is True
         )
-    assert enabled_tools["default"] == []
-    assert enabled_tools["QwenPaw_QA_Agent_0.2"] == []
+    for agent_id, tool_names in enabled_tools.items():
+        if agent_id != NOVEL_AGENT_ID:
+            assert tool_names == [], f"novel tools enabled for {agent_id}"
     assert set(enabled_tools[NOVEL_AGENT_ID]) == NOVEL_TOOLS
 
     system_prompt_files = get_json(
@@ -126,6 +133,11 @@ def verify() -> dict[str, object]:
     assert "正文生成或重写必须调用 `prose-writing`" in str(
         prompt_payload.get("content", "")
     )
+    prompt_content = str(prompt_payload.get("content", ""))
+    assert "每条命令最多一次成功调用 `novel_prepare_selection_edit`" in prompt_content
+    assert "insufficient-shortening" in prompt_content
+    assert "insufficient-expansion" in prompt_content
+    assert "review-size-mismatch" in prompt_content
     workspace_files = get_json("/api/workspace/files", agent_id=NOVEL_AGENT_ID)
     assert isinstance(workspace_files, list)
     workspace_names = {

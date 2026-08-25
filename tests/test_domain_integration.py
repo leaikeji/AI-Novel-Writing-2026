@@ -283,7 +283,34 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
         "novel_exports",
     }
 
-    generation_columns = {
+    model_evidence_columns = {
+        "execution_agent_id",
+        "requested_provider_id",
+        "requested_model_id",
+        "generation_contract_version",
+        "actual_provider_id",
+        "actual_model_id",
+        "provider_profile",
+        "attempt",
+    }
+    for table_name in (
+        "chapter_generation_jobs",
+        "intelligence_proposals",
+        "creative_generation_jobs",
+    ):
+        generation_columns = {
+            row[0]
+            for row in session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema='public' AND table_name=:table_name"
+                ),
+                {"table_name": table_name},
+            )
+        }
+        assert model_evidence_columns <= generation_columns
+
+    chapter_generation_columns = {
         row[0]
         for row in session.execute(
             text(
@@ -294,18 +321,41 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
     }
     assert {
         "asset_snapshot",
-        "execution_agent_id",
-        "requested_provider_id",
-        "requested_model_id",
-        "generation_contract_version",
-        "actual_provider_id",
-        "actual_model_id",
-        "provider_profile",
         "target_visible_character_count",
         "output_visible_character_count",
         "validation_state",
-        "attempt",
-    } <= generation_columns
+    } <= chapter_generation_columns
+
+    requested_model_defaults = dict(
+        session.execute(
+            text(
+                "SELECT table_name, column_default FROM information_schema.columns "
+                "WHERE table_schema='public' AND column_name='requested_model_id' "
+                "AND table_name IN ('chapter_generation_jobs', "
+                "'intelligence_proposals', 'creative_generation_jobs')"
+            )
+        ).all()
+    )
+    assert requested_model_defaults == {
+        "chapter_generation_jobs": None,
+        "intelligence_proposals": None,
+        "creative_generation_jobs": None,
+    }
+    generation_constraints = {
+        row[0]
+        for row in session.execute(
+            text(
+                "SELECT conname FROM pg_constraint WHERE conname IN "
+                "('uq_chapter_generation_attempt', 'uq_intelligence_revision_attempt', "
+                "'uq_creative_generation_attempt')"
+            )
+        )
+    }
+    assert generation_constraints == {
+        "uq_chapter_generation_attempt",
+        "uq_intelligence_revision_attempt",
+        "uq_creative_generation_attempt",
+    }
 
     relationship_columns = {
         row[0]
@@ -1633,6 +1683,25 @@ def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
     assert second["actual_provider_id"] == TEST_PROVIDER_ID
     assert second["requested_provider_id"] == TEST_PROVIDER_ID
     assert second["input_snapshot"] == snapshot
+
+    short_target = start_creative_generation(
+        session,
+        scope_type="novel_creation",
+        scope_id=UUID(draft["id"]),
+        kind="novel_cover",
+        input_snapshot=snapshot,
+        target_character_count=2_000,
+    )
+    long_target = start_creative_generation(
+        session,
+        scope_type="novel_creation",
+        scope_id=UUID(draft["id"]),
+        kind="novel_cover",
+        input_snapshot=snapshot,
+        target_character_count=5_000,
+    )
+    assert short_target["id"] != long_target["id"]
+    assert short_target["input_hash"] != long_target["input_hash"]
 
 
 def test_volume_chapter_reorder_delete_guard_and_export_structure(

@@ -1,5 +1,18 @@
 import { ApiError, apiRequest, generationModelLabel, getGenerationModelStatus } from "./api";
-import { ChapterWorkflowPanel } from "./chapter-workflow";
+import {
+  CHAPTER_BODY_FIELD_ID,
+  CHAPTER_TITLE_FIELD_ID,
+  ChapterWorkflowPanel,
+  mountChapterBodyAssistantScope,
+  mountChapterTitleAssistantScope,
+  readAssistantTextSelection,
+  restoreAssistantTextSelection,
+  type AssistantTextControl,
+  type ChapterBodyAssistantBinding,
+  type ChapterFormAssistantBinding,
+} from "./chapter-workflow";
+import type { AssistantFormFieldAdapter } from "./assistant-form-field";
+import { assistantContextRuntime } from "./assistant-context-runtime";
 import { buildChapterTreeVolumes, ChapterTreeChapter, ChapterTreeVolume } from "./chapter-tree";
 import { APP_PATH } from "./contracts";
 import {
@@ -33,6 +46,7 @@ import {
   rememberWorkbenchRoute,
 } from "./workbench-route";
 import { StudioProjectView, WorkbenchSection } from "./workbench-studio";
+import type { AssistantWorkspaceLayout } from "./assistant-layout";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -105,6 +119,16 @@ function firstDocument(novel: NovelRecord): DocumentRecord | undefined {
   return novel.tree.flatMap((volume) => volume.documents)
     .find((document) => document.kind === "chapter")
     ?? novel.tree.flatMap((volume) => volume.documents)[0];
+}
+
+
+function chapterNumberFor(novel: NovelRecord, documentId: string): number | undefined {
+  const index = [...novel.tree]
+    .sort((left, right) => left.position - right.position)
+    .flatMap((volume) => [...volume.documents].sort((left, right) => left.position - right.position))
+    .filter((document) => document.kind === "chapter")
+    .findIndex((document) => document.id === documentId);
+  return index >= 0 ? index + 1 : undefined;
 }
 
 
@@ -327,6 +351,12 @@ export function NovelLibraryPage() {
 interface ConflictDetail { current: DocumentRecord; }
 
 
+interface AssistantTitleInputRef {
+  focus?: () => void;
+  input?: AssistantTextControl | null;
+}
+
+
 function sectionLabel(section: ProjectSection): string {
   return {
     chapters: "章节",
@@ -349,7 +379,12 @@ function sectionIcon(section: ProjectSection): any {
 }
 
 
-export function NovelWorkbench() {
+interface NovelWorkbenchProps {
+  assistantWorkspaceLayout?: AssistantWorkspaceLayout;
+}
+
+
+export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const query = currentQuery();
   const queryNovelId = query.get("novel_id");
   const queryDocumentId = query.get("document_id");
@@ -371,6 +406,8 @@ export function NovelWorkbench() {
   const [titleEditOpen, setTitleEditOpen] = React.useState(false);
   const [titleDraft, setTitleDraft] = React.useState("");
   const [titleSaving, setTitleSaving] = React.useState(false);
+  const [chapterOutlineAssistantOpen, setChapterOutlineAssistantOpen] = React.useState(false);
+  const [assistantPageScopeVersion, setAssistantPageScopeVersion] = React.useState(0);
   const [manualEditorOpen, setManualEditorOpen] = React.useState(false);
   const [bodyGenerationState, setBodyGenerationState] = React.useState({ active: false, stage: "" });
   const [openChapterWizardSignal, setOpenChapterWizardSignal] = React.useState(0);
@@ -385,7 +422,35 @@ export function NovelWorkbench() {
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
   const editorTextareaRef = React.useRef(null as HTMLTextAreaElement | null);
+  const titleDraftRef = React.useRef("");
+  const titleBaselineRef = React.useRef("");
+  const titleInputRef = React.useRef(null as AssistantTitleInputRef | null);
+  const titleInputNativeRef = React.useRef(null as AssistantTextControl | null);
+  const assistantBodyBindingRef = React.useRef(null as ChapterBodyAssistantBinding | null);
+  const assistantTitleBindingRef = React.useRef(
+    null as ChapterFormAssistantBinding<AssistantFormFieldAdapter> | null,
+  );
+  const assistantPageLocationFingerprintRef = React.useRef("");
   const chapterGenerateActionRef = React.useRef(null as (() => void) | null);
+
+  const assistantChapterNumber = novel && document?.kind === "chapter"
+    && novel.id === document.novel_id
+    ? chapterNumberFor(novel, document.id)
+    : undefined;
+  const assistantPageLocationFingerprint = novel && document?.kind === "chapter"
+    && novel.id === document.novel_id && assistantChapterNumber !== undefined
+    ? JSON.stringify([
+        novel.id,
+        novel.title,
+        document.id,
+        document.volume_id,
+        document.title,
+        document.draft_version,
+        document.content_hash,
+        content !== document.content_markdown,
+        assistantChapterNumber,
+      ])
+    : "";
 
   const loadDocument = React.useCallback(async (documentId: string) => {
     setBusy(true);
@@ -397,6 +462,10 @@ export function NovelWorkbench() {
       setContent(loaded.content_markdown);
       setManualEditorOpen(false);
       setTitleEditOpen(false);
+      setChapterOutlineAssistantOpen(false);
+      titleDraftRef.current = "";
+      titleBaselineRef.current = "";
+      titleInputNativeRef.current = null;
       setBodyGenerationState({ active: false, stage: "" });
       setError("");
       setConflict(null);
@@ -441,6 +510,19 @@ export function NovelWorkbench() {
   }, [loadDocument, queryDocumentId]);
 
   React.useEffect(() => { if (queryNovelId) void loadNovel(queryNovelId); }, [loadNovel, queryNovelId]);
+
+  React.useLayoutEffect(() => {
+    // Section and chapter routes share the workbench's own scroll container.
+    // Returning from a long chapter must not carry that scroll offset into the
+    // next page, otherwise its left rail and main panel start off-screen.
+    (window.document.querySelector(".mb-workbench") as HTMLElement | null)?.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "auto",
+    });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [document?.id, editorOpen, section]);
+
   React.useEffect(() => {
     if (!queryNovelId) return;
     let active = true;
@@ -538,6 +620,7 @@ export function NovelWorkbench() {
     const active = documentRef.current;
     setContent(markdown);
     contentRef.current = markdown;
+    assistantBodyBindingRef.current?.notifyFieldChanged();
     setSaveState("本地草稿");
     if (!active) return;
     void saveRecoveryDraft({
@@ -838,13 +921,24 @@ export function NovelWorkbench() {
   const openTitleEditor = () => {
     const active = documentRef.current;
     if (!active) return;
-    setTitleDraft(active.kind === "chapter" ? chapterTitleName(active.title) : active.title.trim());
+    const currentTitle = active.kind === "chapter" ? chapterTitleName(active.title) : active.title.trim();
+    titleDraftRef.current = currentTitle;
+    titleBaselineRef.current = currentTitle;
+    titleInputNativeRef.current = null;
+    setTitleDraft(currentTitle);
     setTitleEditOpen(true);
+  };
+
+  const updateTitleDraft = (value: string) => {
+    const nextTitle = value.slice(0, 20);
+    titleDraftRef.current = nextTitle;
+    setTitleDraft(nextTitle);
+    assistantTitleBindingRef.current?.notifyFieldChanged(CHAPTER_TITLE_FIELD_ID);
   };
 
   const renameDocument = async () => {
     const active = documentRef.current;
-    const nextTitle = titleDraft.trim();
+    const nextTitle = titleDraftRef.current.trim();
     if (!novel || !active || !nextTitle) return;
     setTitleSaving(true);
     setError("");
@@ -876,9 +970,13 @@ export function NovelWorkbench() {
       if (reason instanceof ApiError && reason.status === 409) {
         const current = (reason.detail as ConflictDetail)?.current;
         if (current) {
+          const currentTitle = current.kind === "chapter" ? chapterTitleName(current.title) : current.title;
           documentRef.current = current;
           setDocument(current);
-          setTitleDraft(current.kind === "chapter" ? chapterTitleName(current.title) : current.title);
+          titleDraftRef.current = currentTitle;
+          titleBaselineRef.current = currentTitle;
+          setTitleDraft(currentTitle);
+          assistantTitleBindingRef.current?.notifyFieldChanged(CHAPTER_TITLE_FIELD_ID);
         }
         setError("章节名称已在其他位置更新，请确认最新名称后重新保存。");
       } else {
@@ -888,6 +986,111 @@ export function NovelWorkbench() {
       setTitleSaving(false);
     }
   };
+
+  React.useEffect(() => {
+    if (!editorOpen || !novel || !document || document.kind !== "chapter") {
+      assistantPageLocationFingerprintRef.current = "";
+      return;
+    }
+    if (novel.id !== document.novel_id || assistantChapterNumber === undefined) {
+      assistantPageLocationFingerprintRef.current = "";
+      return;
+    }
+    const binding = mountChapterBodyAssistantScope({
+      location: {
+        novel,
+        document,
+        chapterNumber: assistantChapterNumber,
+        dirty: contentRef.current !== document.content_markdown,
+      },
+      getValue: () => contentRef.current,
+      getDirty: () => {
+        const active = documentRef.current;
+        return Boolean(active && contentRef.current !== active.content_markdown);
+      },
+      getSelection: () => readAssistantTextSelection(
+        editorTextareaRef.current,
+        contentRef.current,
+      ),
+      applyEditorContent: (nextValue) => {
+        const active = documentRef.current;
+        if (!active || active.id !== document.id) {
+          throw new Error("章节已切换，不能应用到旧正文");
+        }
+        contentRef.current = nextValue;
+        setContent(nextValue);
+        setSaveState("已应用，正在自动保存");
+        void saveRecoveryDraft({
+          documentId: active.id,
+          draftVersion: active.draft_version,
+          contentMarkdown: nextValue,
+          updatedAt: Date.now(),
+        });
+      },
+      scheduleAutosave: (nextValue) => {
+        const active = documentRef.current;
+        if (!active || active.id !== document.id) return;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setSaveState("已应用，正在自动保存");
+        timerRef.current = setTimeout(() => void saveNow(nextValue), 600);
+      },
+      restoreSelection: (range) => restoreAssistantTextSelection(
+        editorTextareaRef.current,
+        range,
+      ),
+      focus: () => editorTextareaRef.current?.focus(),
+    });
+    assistantPageLocationFingerprintRef.current = assistantPageLocationFingerprint;
+    assistantBodyBindingRef.current = binding;
+    return () => {
+      if (assistantBodyBindingRef.current === binding) {
+        assistantBodyBindingRef.current = null;
+      }
+      binding.dispose();
+    };
+  }, [assistantChapterNumber, assistantPageScopeVersion, document?.id, editorOpen, novel?.id, saveNow]);
+
+  React.useEffect(() => {
+    if (!titleEditOpen || !novel || !document || document.kind !== "chapter") return;
+    if (novel.id !== document.novel_id || assistantChapterNumber === undefined) return;
+    const currentControl = () => titleInputNativeRef.current ?? titleInputRef.current?.input ?? null;
+    const binding = mountChapterTitleAssistantScope({
+      location: {
+        novel,
+        document,
+        chapterNumber: assistantChapterNumber,
+        dirty: titleDraftRef.current !== titleBaselineRef.current,
+      },
+      getValue: () => titleDraftRef.current,
+      getDirty: () => titleDraftRef.current !== titleBaselineRef.current,
+      getSelection: () => readAssistantTextSelection(currentControl(), titleDraftRef.current),
+      applyDraftValue: (nextValue) => {
+        if (nextValue.length > 20) throw new Error("章节标题不能超过 20 字");
+        titleDraftRef.current = nextValue;
+        setTitleDraft(nextValue);
+      },
+      restoreSelection: (_fieldId, range) => restoreAssistantTextSelection(currentControl(), range),
+      focus: () => {
+        if (titleInputRef.current?.focus) titleInputRef.current.focus();
+        else currentControl()?.focus();
+      },
+      markDirty: () => setSaveState("已应用到标题草稿，尚未保存"),
+    });
+    assistantTitleBindingRef.current = binding;
+    return () => {
+      if (assistantTitleBindingRef.current === binding) {
+        assistantTitleBindingRef.current = null;
+      }
+      binding.dispose();
+    };
+  }, [assistantChapterNumber, document?.id, novel?.id, titleEditOpen]);
+
+  React.useEffect(() => {
+    if (!assistantPageLocationFingerprint || titleEditOpen || chapterOutlineAssistantOpen) return;
+    if (assistantContextRuntime.getStatus().scopeKind === "modal") return;
+    if (assistantPageLocationFingerprintRef.current === assistantPageLocationFingerprint) return;
+    setAssistantPageScopeVersion((current: number) => current + 1);
+  }, [assistantPageLocationFingerprint, chapterOutlineAssistantOpen, titleEditOpen]);
 
   const switchSection = async (next: ProjectSection) => {
     if (!novel) return;
@@ -954,13 +1157,12 @@ export function NovelWorkbench() {
           .filter((item: DocumentRecord) => item.kind === "chapter")
       : [];
     const currentChapterIndex = orderedChapters.findIndex((item: DocumentRecord) => item.id === document.id);
-    const previousChapter = currentChapterIndex > 0 ? orderedChapters[currentChapterIndex - 1] : null;
-    const nextChapter = currentChapterIndex >= 0 && currentChapterIndex < orderedChapters.length - 1 ? orderedChapters[currentChapterIndex + 1] : null;
     const chapterDisplayTitle = document.kind === "chapter" && currentChapterIndex >= 0
       ? formatChapterDisplayTitle(currentChapterIndex + 1, document.title)
       : document.title;
     const showEditor = Boolean(content.trim()) || manualEditorOpen;
     const isChapterEditor = document.kind === "chapter" && Boolean(novel);
+    const chapterTitleToolsTargetId = `anw-chapter-title-tools-${document.id}`;
     const allChapterTreeVolumes = novel ? buildChapterTreeVolumes(novel) : [];
     const chapterTreeVolumes = novel ? buildChapterTreeVolumes(novel, chapterTreeQuery) : [];
     const expandedVolumeKeys = expandedChapterVolumeIds
@@ -1140,14 +1342,22 @@ export function NovelWorkbench() {
                 h("h1", { className: "anw-editor-title" }, chapterDisplayTitle),
                 h("div", { className: "anw-editor-count" }, "本章字数 ", h("strong", null, document.visible_character_count), " 字"),
               ),
-              h(Button, {
-                type: "text",
-                className: "anw-title-edit-button",
-                icon: h(EditOutlined),
-                onClick: openTitleEditor,
-                title: document.kind === "chapter" ? "修改章节名称" : "修改文档名称",
-                "aria-label": document.kind === "chapter" ? "修改章节名称" : "修改文档名称",
-              }),
+              h("div", { className: "anw-editor-title-actions" },
+                isChapterEditor
+                  ? h("div", {
+                      id: chapterTitleToolsTargetId,
+                      className: "anw-chapter-title-tools",
+                    })
+                  : null,
+                h(Button, {
+                  type: "text",
+                  className: "anw-title-edit-button",
+                  icon: h(EditOutlined),
+                  onClick: openTitleEditor,
+                  title: document.kind === "chapter" ? "修改章节名称" : "修改文档名称",
+                  "aria-label": document.kind === "chapter" ? "修改章节名称" : "修改文档名称",
+                }),
+              ),
             ),
             bodyGenerationState.active
               ? h(
@@ -1165,6 +1375,8 @@ export function NovelWorkbench() {
                   className: "anw-editor-textarea",
                   value: content,
                   onChange: onContentChange,
+                  onFocus: () => assistantBodyBindingRef.current?.setFocusedField(true),
+                  onBlur: () => assistantBodyBindingRef.current?.setFocusedField(false),
                   spellCheck: false,
                   "aria-label": `${chapterDisplayTitle}正文编辑器`,
                   placeholder: "开始写作……Markdown 源文本会自动保存。",
@@ -1200,13 +1412,11 @@ export function NovelWorkbench() {
                       onDocumentChanged: applyWorkflowDocument,
                       onError: setError,
                       onStatus: setSaveState,
-                      onPreviousChapter: previousChapter ? () => { void navigateToChapter(previousChapter.id); } : undefined,
-                      onNextChapter: nextChapter ? () => { void navigateToChapter(nextChapter.id); } : undefined,
-                      previousChapterTitle: previousChapter?.title,
-                      nextChapterTitle: nextChapter?.title,
                       chapterNumber: currentChapterIndex + 1,
+                      titleToolsTargetId: chapterTitleToolsTargetId,
                       generateActionRef: chapterGenerateActionRef,
                       onBodyGenerationStateChange: (active: boolean, stage: string) => setBodyGenerationState({ active, stage }),
+                      onAssistantModalStateChange: setChapterOutlineAssistantOpen,
                     })
                   : null,
               ),
@@ -1219,6 +1429,8 @@ export function NovelWorkbench() {
           {
             open: titleEditOpen,
             className: "anw-modal anw-title-edit-modal",
+            wrapClassName: "anw-assistant-aware-modal-wrap",
+            mask: false,
             title: document.kind === "chapter" ? "编辑章节标题" : "编辑文档标题",
             width: 520,
             centered: true,
@@ -1232,14 +1444,26 @@ export function NovelWorkbench() {
             { className: "anw-title-edit-form" },
             h("label", { htmlFor: "anw-document-title-input" }, document.kind === "chapter" ? "章节标题" : "文档标题"),
             h(Input, {
+              ref: (node: AssistantTitleInputRef | null) => {
+                titleInputRef.current = node;
+                titleInputNativeRef.current = node?.input ?? null;
+              },
               id: "anw-document-title-input",
               autoFocus: true,
               size: "large",
               value: titleDraft,
               maxLength: 20,
               placeholder: document.kind === "chapter" ? "请输入章节标题" : "请输入文档标题",
-              onChange: (event: any) => setTitleDraft((event.target.value as string).slice(0, 20)),
-              onPressEnter: () => { if (titleDraft.trim() && !titleSaving) void renameDocument(); },
+              onChange: (event: any) => updateTitleDraft(event.target.value as string),
+              onFocus: (event: { currentTarget: AssistantTextControl }) => {
+                titleInputNativeRef.current = event.currentTarget;
+                assistantTitleBindingRef.current?.setFocusedField(CHAPTER_TITLE_FIELD_ID);
+              },
+              onSelect: (event: { currentTarget: AssistantTextControl }) => {
+                titleInputNativeRef.current = event.currentTarget;
+              },
+              onBlur: () => assistantTitleBindingRef.current?.setFocusedField(undefined),
+              onPressEnter: () => { if (titleDraftRef.current.trim() && !titleSaving) void renameDocument(); },
             }),
             h("p", { className: "anw-title-edit-count" }, `最多20字，当前：${titleDraft.length}/20`),
             h(
@@ -1336,6 +1560,7 @@ export function NovelWorkbench() {
     openChapterWizardSignal,
     onBack: () => { clearWorkbenchRoute(); window.location.assign(APP_PATH); },
     onError: setError,
+    assistantWorkspaceLayout: props.assistantWorkspaceLayout,
   });
 
   const chapterDocuments = (novel?.tree ?? []).flatMap((volume: VolumeRecord) => volume.documents)

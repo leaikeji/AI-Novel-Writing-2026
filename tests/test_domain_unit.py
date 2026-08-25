@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from uuid import uuid4
 
 from backend.creative_services import (
@@ -9,6 +10,7 @@ from backend.creative_services import (
     _relationship_evidence_mentions_pair,
     _relationship_known_character_mentions,
     _relationship_pair_key,
+    _should_archive_legacy_auto_storyline,
     _storyline_topic_from_fact,
 )
 from backend.models import StoryFact
@@ -60,6 +62,32 @@ def test_storyline_topics_group_events_and_ignore_one_off_relationships() -> Non
     assert _storyline_topic_from_fact(
         _fact("storyline_event", "苏晚", "推开", "阁楼木门"), characters
     ) is None
+
+
+def test_storyline_list_does_not_rearchive_canonical_aggregate_rows() -> None:
+    canonical = SimpleNamespace(
+        storyline_type="support",
+        title="外婆家书线",
+        description="苏晚拆开：外婆退回的旧家书",
+    )
+    legacy = SimpleNamespace(
+        storyline_type="support",
+        title="苏晚拆开外婆退回的旧家书线",
+        description="苏晚拆开：外婆退回的旧家书",
+    )
+    descriptions = {"苏晚拆开：外婆退回的旧家书"}
+    canonical_titles = {"外婆家书线"}
+
+    assert not _should_archive_legacy_auto_storyline(
+        canonical,  # type: ignore[arg-type]
+        auto_descriptions=descriptions,
+        canonical_titles=canonical_titles,
+    )
+    assert _should_archive_legacy_auto_storyline(
+        legacy,  # type: ignore[arg-type]
+        auto_descriptions=descriptions,
+        canonical_titles=canonical_titles,
+    )
 
 
 def test_undirected_relationships_have_canonical_endpoints_and_pair_keys() -> None:

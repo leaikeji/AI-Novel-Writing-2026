@@ -35,10 +35,12 @@ def test_runtime_dependencies_are_declared_in_requirements_file() -> None:
     assert "pgvector==0.5.0" in requirements
 
 
-def test_read_only_tools_are_declared_for_clean_uninstall() -> None:
+def test_project_tools_are_declared_for_clean_uninstall() -> None:
     manifest = load_manifest()
     assert {tool["name"] for tool in manifest["meta"]["tools"]} == {
         "novel_get_context",
         "novel_get_document",
+        "novel_get_workspace_context",
+        "novel_prepare_selection_edit",
         "novel_search",
     }

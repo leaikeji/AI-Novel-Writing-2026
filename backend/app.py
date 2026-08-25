@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from qwenpaw.pawapp import PawApp
 from sqlalchemy.orm import Session
 
+from .assistant_api import router as assistant_router
 from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
 from .creative_services import sync_relationships_from_intelligence_proposal
@@ -86,6 +87,7 @@ from .services import (
 
 pawapp = PawApp(name="AI小说世界2026", app_id=APP_ID)
 router = APIRouter()
+router.include_router(assistant_router)
 router.include_router(creative_router)
 
 

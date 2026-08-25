@@ -1,4 +1,12 @@
-import { ApiError, apiRequest } from "./api";
+import {
+  apiErrorMessage,
+  apiRequest,
+  completedGenerationModelLabel,
+  generationModelAuditLabel,
+  generationModelLabel,
+  generationTaskFromApiError,
+  getGenerationModelStatus,
+} from "./api";
 import {
   RelationshipGraph,
   RelationshipGraphController,
@@ -17,7 +25,7 @@ import {
 const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
-const { Alert, Button, Empty, Select, Spin } = host.antd;
+const { Alert, Button, Empty, Modal, Select, Spin } = host.antd;
 const {
   ExclamationCircleOutlined,
   ExpandOutlined,
@@ -81,8 +89,7 @@ const DIRECTION_OPTIONS: Array<{
 
 
 function readError(reason: unknown): string {
-  if (reason instanceof ApiError && typeof reason.detail === "string") return reason.detail;
-  return reason instanceof Error ? reason.message : "关系图操作失败";
+  return apiErrorMessage(reason, "关系图操作失败");
 }
 
 
@@ -104,7 +111,10 @@ export function RelationshipWorkspace({
     null as RelationshipAutoSyncStatusRecord | null,
   );
   const [checkingAutoSync, setCheckingAutoSync] = React.useState(true);
+  const [preparingAutoSync, setPreparingAutoSync] = React.useState(false);
+  const [confirmingAutoSync, setConfirmingAutoSync] = React.useState(false);
   const [syncingRelationships, setSyncingRelationships] = React.useState(false);
+  const [autoSyncModelLabel, setAutoSyncModelLabel] = React.useState("");
   const [scale, setScale] = React.useState(1);
   const [dirty, setDirty] = React.useState(false);
   const [focusCharacterId, setFocusCharacterId] = React.useState("");
@@ -129,14 +139,49 @@ export function RelationshipWorkspace({
         },
       );
       setAutoSyncStatus(result.status);
+      setAutoSyncModelLabel(
+        result.job.state === "ready"
+          ? `实际 ${completedGenerationModelLabel(result.job)}`
+          : generationModelAuditLabel(result.job),
+      );
       onRelationshipsChanged(result.relationships);
     } catch (reason) {
+      const failedTask = generationTaskFromApiError(reason);
+      if (failedTask) setAutoSyncModelLabel(generationModelAuditLabel(failedTask));
       setAutoSyncError(readError(reason));
     } finally {
       syncInFlightRef.current = false;
       setSyncingRelationships(false);
     }
   }, [novelId, onRelationshipsChanged]);
+
+  const requestRelationshipSync = React.useCallback(async () => {
+    if (preparingAutoSync || confirmingAutoSync || syncInFlightRef.current) return;
+    setPreparingAutoSync(true);
+    setAutoSyncError("");
+    try {
+      const currentModel = await getGenerationModelStatus();
+      const modelLabel = generationModelLabel(currentModel);
+      setPreparingAutoSync(false);
+      setConfirmingAutoSync(true);
+      Modal.confirm({
+        title: "确认补全历史关系",
+        content: `本次关系网生成将使用 ${modelLabel}。生成结果会保留任务 requested/actual 模型证据，人工修改不会被覆盖。`,
+        okText: "开始生成",
+        cancelText: "取消",
+        onOk: async () => {
+          setConfirmingAutoSync(false);
+          setAutoSyncModelLabel(`请求 ${modelLabel} · 实际未核验`);
+          await syncRelationships(true);
+        },
+        onCancel: () => setConfirmingAutoSync(false),
+      });
+    } catch (reason) {
+      setAutoSyncError(readError(reason));
+      setPreparingAutoSync(false);
+      setConfirmingAutoSync(false);
+    }
+  }, [confirmingAutoSync, preparingAutoSync, syncRelationships]);
 
   React.useEffect(() => {
     let active = true;
@@ -147,6 +192,13 @@ export function RelationshipWorkspace({
     ).then((status) => {
       if (!active) return;
       setAutoSyncStatus(status);
+      setAutoSyncModelLabel(
+        status.job
+          ? status.job.state === "ready"
+            ? `实际 ${completedGenerationModelLabel(status.job)}`
+            : generationModelAuditLabel(status.job)
+          : "",
+      );
       setCheckingAutoSync(false);
     }).catch((reason) => {
       if (!active) return;
@@ -186,7 +238,8 @@ export function RelationshipWorkspace({
   const legacyCount = relationships.filter(
     (relationship) => relationship.directionality === "legacy_unspecified",
   ).length;
-  const autoSyncBusy = checkingAutoSync || syncingRelationships;
+  const autoSyncBusy = checkingAutoSync || preparingAutoSync || syncingRelationships;
+  const autoSyncActionBusy = autoSyncBusy || confirmingAutoSync;
   const autoSyncTitle = autoSyncBusy
     ? "正在读取关系同步状态"
     : autoSyncError
@@ -199,7 +252,7 @@ export function RelationshipWorkspace({
     : autoSyncError
       ? `${autoSyncError}；现有关系和人工修改均已保留。`
       : autoSyncStatus
-        ? `写完章节点击“同步进展”即可增量生成；已有 ${autoSyncStatus.source_summary.relationship_facts} 条关系情报${autoSyncStatus.source_summary.excluded_chapters ? `，已隔离 ${autoSyncStatus.source_summary.excluded_chapters} 章未匹配当前角色的内容` : ""}，人工修改不会被 AI 覆盖。`
+        ? `写完章节点击“同步进展”即可增量生成；已有 ${autoSyncStatus.source_summary.relationship_facts} 条关系情报${autoSyncStatus.source_summary.excluded_chapters ? `，已隔离 ${autoSyncStatus.source_summary.excluded_chapters} 章未匹配当前角色的内容` : ""}，人工修改不会被 AI 覆盖。${autoSyncModelLabel ? ` 任务模型：${autoSyncModelLabel}。` : ""}`
         : "写完章节点击“同步进展”即可增量生成；人工修改不会被 AI 覆盖。";
 
   const saveLayout = async () => {
@@ -271,8 +324,8 @@ export function RelationshipWorkspace({
           type: "text",
           size: "small",
           icon: h(ReloadOutlined),
-          disabled: autoSyncBusy || autoSyncStatus?.eligible === false,
-          onClick: () => void syncRelationships(true),
+          disabled: autoSyncActionBusy || autoSyncStatus?.eligible === false,
+          onClick: () => void requestRelationshipSync(),
         }, autoSyncError ? "重试" : "补全历史关系"),
       ),
     ),

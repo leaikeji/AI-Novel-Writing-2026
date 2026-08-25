@@ -22,7 +22,9 @@
     "tools": [
       { "name": "novel_get_context" },
       { "name": "novel_get_document" },
-      { "name": "novel_search" }
+      { "name": "novel_search" },
+      { "name": "novel_get_workspace_context" },
+      { "name": "novel_prepare_selection_edit" }
     ],
     "pawapp": {
       "category": "productivity",

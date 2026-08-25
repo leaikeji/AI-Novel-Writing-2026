@@ -59,8 +59,10 @@ async def test_effective_model_uses_public_qwenpaw_contract() -> None:
 
     @app.get("/api/models/active")
     async def active_model(scope: str, agent_id: str) -> dict[str, object]:
-        assert scope == "effective"
         assert agent_id == "ai-novel-writer"
+        if scope == "agent":
+            return {"active_llm": None}
+        assert scope == "effective"
         return {
             "active_llm": {"provider_id": "bailian", "model": "qwen-next"},
             "effective_max_input_length": 262_144,
@@ -71,6 +73,50 @@ async def test_effective_model_uses_public_qwenpaw_contract() -> None:
     assert audit.model_id == "qwen-next"
     assert audit.agent_id == "ai-novel-writer"
     assert audit.effective_max_input_length == 262_144
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "active_llm",
+    [
+        None,
+        {},
+        {"provider_id": None, "model": None},
+        {"provider_id": [], "model": {}},
+        {"provider_id": "bailian", "model": None},
+    ],
+)
+async def test_effective_model_rejects_missing_or_non_string_identity(
+    active_llm: object,
+) -> None:
+    app = FastAPI()
+
+    @app.get("/api/models/active")
+    async def active_model(scope: str, agent_id: str) -> dict[str, object]:
+        assert agent_id == "ai-novel-writer"
+        if scope == "agent":
+            return {"active_llm": None}
+        return {"active_llm": active_llm}
+
+    with pytest.raises(ModelVerificationError, match="没有可用的有效模型"):
+        await effective_model_audit(app)
+
+
+@pytest.mark.asyncio
+async def test_effective_model_rejects_missing_agent_before_global_fallback() -> None:
+    app = FastAPI()
+
+    @app.get("/api/models/active")
+    async def active_model(scope: str, agent_id: str):
+        assert agent_id == "ai-novel-writer"
+        if scope == "agent":
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"detail": "agent not found"}, status_code=404)
+        return {"active_llm": {"provider_id": "global", "model": "fallback"}}
+
+    with pytest.raises(ModelVerificationError, match="公开接口读取"):
+        await effective_model_audit(app)
 
 
 def test_prompt_limit_is_ephemeral_and_fails_only_when_clearly_over() -> None:
@@ -156,6 +202,13 @@ def test_reply_audit_rejects_wrong_or_unverifiable_model() -> None:
         reply_model_audit(
             _reply_with_usage("provider-b", "model-a")
         ).ensure_matches(configured)
+
+    malformed = _reply_with_usage("provider-a", "model-a")
+    malformed.chunks[0].output[-1].metadata["qwenpaw_turn_usage"]["usage"][
+        "provider_id"
+    ] = {"forged": "provider-a"}
+    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+        reply_model_audit(malformed)
 
 
 def test_reply_audit_rejects_lookalike_usage_outside_trusted_envelope() -> None:

@@ -1,12 +1,13 @@
 import {
   actualGenerationModelLabel,
-  ApiError,
+  apiErrorMessage,
   apiRequest,
   completedGenerationModelLabel,
   generationModelLabel,
   generationModelAuditLabel,
   getGenerationModelStatus,
   requestedGenerationModelLabel,
+  verifiedGenerationModelLabel,
 } from "./api";
 import {
   CandidateRecord,
@@ -22,10 +23,34 @@ import {
   PrivateAssetType,
   RoleConstraints,
 } from "./types";
-
-
+import { restoreDialogTriggerFocus } from "./assistant-focus";
+import {
+  createAssistantBodyFieldAdapter,
+  type AssistantBodyFieldAdapter,
+} from "./assistant-body-field";
+import {
+  assistantContextRuntime,
+  NOVEL_ASSISTANT_TARGET_AGENT_ID,
+  type AssistantContextScopeHandle,
+  type NovelAssistantContextRuntime,
+} from "./assistant-context-runtime";
+import {
+  NOVEL_ASSISTANT_SELECTION_CONTEXT_CHARACTERS,
+  type NovelPageView,
+} from "./assistant-context-schema";
+import {
+  createAssistantFormFieldAdapter,
+  type AssistantFormFieldAdapter,
+} from "./assistant-form-field";
+import type {
+  AIApplyMeta,
+  EditableFieldRegistration,
+  SelectionRange,
+  SelectionSnapshot,
+} from "./assistant-fields";
 const host = window.QwenPaw.host;
 const React = host.React;
+const ReactDOM = host.ReactDOM;
 const h = React.createElement;
 const {
   Alert,
@@ -40,8 +65,6 @@ const {
   Tabs,
 } = host.antd;
 const {
-  ArrowDownOutlined,
-  ArrowUpOutlined,
   AuditOutlined,
   BookOutlined,
   BulbOutlined,
@@ -61,17 +84,15 @@ interface ChapterWorkflowProps {
   onDocumentChanged: (document: DocumentRecord, status: string) => void;
   onError: (message: string) => void;
   onStatus: (message: string) => void;
-  onPreviousChapter?: () => void;
-  onNextChapter?: () => void;
-  previousChapterTitle?: string;
-  nextChapterTitle?: string;
   chapterNumber?: number;
+  titleToolsTargetId?: string;
   generateActionRef?: { current: (() => void) | null };
   onBodyGenerationStateChange?: (active: boolean, stage: string) => void;
+  onAssistantModalStateChange?: (open: boolean) => void;
 }
 
 
-interface BriefFormState {
+export interface BriefFormState {
   targetWordCount: number;
   expectationText: string;
   outlineText: string;
@@ -101,6 +122,387 @@ const EMPTY_BRIEF_FORM: BriefFormState = {
   contextOnlyRoles: "",
   forbiddenRoles: "",
 };
+
+
+export const CHAPTER_BODY_FIELD_ID = "chapter.body";
+export const CHAPTER_TITLE_FIELD_ID = "chapter.title";
+export const CHAPTER_OUTLINE_FIELD_IDS = {
+  outlineText: "chapter.outline",
+  targetCharacters: "chapter.outline.targetCharacters",
+  expectation: "chapter.outline.expectation",
+  forbidden: "chapter.outline.forbidden",
+  requiredRoles: "chapter.outline.roles.required",
+  allowedRoles: "chapter.outline.roles.allowed",
+  contextOnlyRoles: "chapter.outline.roles.contextOnly",
+  forbiddenRoles: "chapter.outline.roles.forbidden",
+} as const;
+
+
+export type ChapterOutlineFieldId = typeof CHAPTER_OUTLINE_FIELD_IDS[keyof typeof CHAPTER_OUTLINE_FIELD_IDS];
+
+
+export interface AssistantTextControl {
+  selectionStart: number | null;
+  selectionEnd: number | null;
+  selectionDirection: string | null;
+  focus(): void;
+  setSelectionRange(start: number, end: number, direction?: "forward" | "backward" | "none"): void;
+}
+
+
+export interface ChapterAssistantLocation {
+  novel: Pick<NovelRecord, "id" | "title">;
+  document: Pick<DocumentRecord, "id" | "volume_id" | "kind" | "title" | "draft_version" | "content_hash">;
+  chapterNumber?: number;
+  dirty: boolean;
+}
+
+
+type AssistantRuntimeMount = Pick<NovelAssistantContextRuntime, "mountScope">;
+
+
+export interface ChapterBodyAssistantBindingOptions {
+  runtime?: AssistantRuntimeMount;
+  location: ChapterAssistantLocation;
+  getValue: () => string;
+  getDirty: () => boolean;
+  getSelection: () => SelectionSnapshot | null;
+  applyEditorContent: (nextValue: string, meta: Readonly<AIApplyMeta>) => void | Promise<void>;
+  scheduleAutosave: (nextValue: string, meta: Readonly<AIApplyMeta>) => void | Promise<void>;
+  restoreSelection: (range: SelectionRange) => void;
+  focus: () => void;
+}
+
+
+export interface ChapterFormAssistantBindingOptions {
+  runtime?: AssistantRuntimeMount;
+  location: ChapterAssistantLocation;
+  getSelection: (fieldId: string) => SelectionSnapshot | null;
+  restoreSelection: (fieldId: string, range: SelectionRange) => void;
+  focus: (fieldId: string) => void;
+  markDirty: (fieldId: string, meta: Readonly<AIApplyMeta>) => void | Promise<void>;
+}
+
+
+export interface ChapterBodyAssistantBinding {
+  readonly scope: AssistantContextScopeHandle;
+  readonly adapter: AssistantBodyFieldAdapter;
+  setFocusedField(focused: boolean): void;
+  notifyFieldChanged(): void;
+  dispose(): void;
+}
+
+
+export interface ChapterFormAssistantBinding<TAdapters> {
+  readonly scope: AssistantContextScopeHandle;
+  readonly adapters: TAdapters;
+  setFocusedField(fieldId: string | undefined): void;
+  notifyFieldChanged(fieldId: string): void;
+  dispose(): void;
+}
+
+
+export interface ChapterTitleAssistantBindingOptions extends ChapterFormAssistantBindingOptions {
+  getValue: () => string;
+  getDirty: () => boolean;
+  applyDraftValue: (nextValue: string, meta: Readonly<AIApplyMeta>) => void | Promise<void>;
+}
+
+
+export interface ChapterOutlineAssistantBindingOptions extends ChapterFormAssistantBindingOptions {
+  getForm: () => BriefFormState;
+  getBaseline: () => BriefFormState;
+  applyField: <K extends keyof BriefFormState>(
+    field: K,
+    value: BriefFormState[K],
+    meta: Readonly<AIApplyMeta>,
+  ) => void | Promise<void>;
+}
+
+
+export type ChapterOutlineAssistantAdapters = Record<ChapterOutlineFieldId, AssistantFormFieldAdapter>;
+
+
+export async function hashAssistantFieldValue(value: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("Web Crypto SHA-256 is required for assistant field adapters");
+  }
+  const bytes = new TextEncoder().encode(value);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+
+export function readAssistantTextSelection(
+  control: AssistantTextControl | null,
+  value: string,
+): SelectionSnapshot | null {
+  if (!control) return null;
+  const start = Math.max(0, Math.min(value.length, control.selectionStart ?? 0));
+  const end = Math.max(start, Math.min(value.length, control.selectionEnd ?? start));
+  if (start === end) return null;
+  const rawDirection = control.selectionDirection;
+  const direction = rawDirection === "forward" || rawDirection === "backward"
+    ? rawDirection
+    : "none";
+  return {
+    startUtf16: start,
+    endUtf16: end,
+    direction,
+    text: value.slice(start, end),
+    before: value.slice(
+      Math.max(0, start - NOVEL_ASSISTANT_SELECTION_CONTEXT_CHARACTERS),
+      start,
+    ),
+    after: value.slice(
+      end,
+      end + NOVEL_ASSISTANT_SELECTION_CONTEXT_CHARACTERS,
+    ),
+  };
+}
+
+
+export function restoreAssistantTextSelection(
+  control: AssistantTextControl | null,
+  range: SelectionRange,
+): void {
+  if (!control) return;
+  control.focus();
+  control.setSelectionRange(range.startUtf16, range.endUtf16, range.direction);
+}
+
+
+function chapterAssistantEnvelope(
+  location: ChapterAssistantLocation,
+  modal?: Extract<NovelPageView, "title-editor" | "chapter-outline-editor">,
+) {
+  return {
+    agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
+    novel: { id: location.novel.id, title: location.novel.title },
+    page: {
+      section: "chapters" as const,
+      view: "chapter-editor" as const,
+      ...(modal ? { modal } : {}),
+    },
+    entity: {
+      type: "document" as const,
+      id: location.document.id,
+      title: location.document.title,
+    },
+    document: {
+      id: location.document.id,
+      ...(location.document.volume_id ? { volumeId: location.document.volume_id } : {}),
+      kind: location.document.kind,
+      ...(location.chapterNumber === undefined ? {} : { chapterNumber: location.chapterNumber }),
+      title: location.document.title,
+      draftVersion: location.document.draft_version,
+      savedContentHash: location.document.content_hash,
+      dirty: location.dirty,
+    },
+  };
+}
+
+
+function disposeAssistantScope(
+  scope: AssistantContextScopeHandle,
+  registrations: EditableFieldRegistration[],
+): () => void {
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    for (const registration of [...registrations].reverse()) registration.dispose();
+    scope.dispose();
+  };
+}
+
+
+export function mountChapterBodyAssistantScope(
+  options: ChapterBodyAssistantBindingOptions,
+): ChapterBodyAssistantBinding {
+  const runtime = options.runtime ?? assistantContextRuntime;
+  const scope = runtime.mountScope({
+    id: `page:chapter:${options.location.document.id}`,
+    kind: "page",
+    envelope: chapterAssistantEnvelope(options.location),
+  });
+  const adapter = createAssistantBodyFieldAdapter({
+    id: CHAPTER_BODY_FIELD_ID,
+    label: "正文",
+    getValue: options.getValue,
+    getDirty: options.getDirty,
+    getSelection: options.getSelection,
+    hashValue: hashAssistantFieldValue,
+    applyEditorContent: async (nextValue, meta) => {
+      await options.applyEditorContent(nextValue, meta);
+      scope.notifyFieldChanged(CHAPTER_BODY_FIELD_ID);
+    },
+    scheduleAutosave: options.scheduleAutosave,
+    restoreSelection: options.restoreSelection,
+    focus: options.focus,
+  });
+  const registrations = [scope.registerField(adapter)];
+  const dispose = disposeAssistantScope(scope, registrations);
+  return {
+    scope,
+    adapter,
+    setFocusedField: (focused) => scope.setFocusedField(focused ? CHAPTER_BODY_FIELD_ID : undefined),
+    notifyFieldChanged: () => scope.notifyFieldChanged(CHAPTER_BODY_FIELD_ID),
+    dispose,
+  };
+}
+
+
+export function mountChapterTitleAssistantScope(
+  options: ChapterTitleAssistantBindingOptions,
+): ChapterFormAssistantBinding<AssistantFormFieldAdapter> {
+  const runtime = options.runtime ?? assistantContextRuntime;
+  const scope = runtime.mountScope({
+    id: `modal:chapter-title:${options.location.document.id}`,
+    kind: "modal",
+    envelope: chapterAssistantEnvelope(options.location, "title-editor"),
+  });
+  const adapter = createAssistantFormFieldAdapter({
+    id: CHAPTER_TITLE_FIELD_ID,
+    label: "章节标题",
+    getValue: options.getValue,
+    getDirty: options.getDirty,
+    getSelection: () => options.getSelection(CHAPTER_TITLE_FIELD_ID),
+    hashValue: hashAssistantFieldValue,
+    applyDraftValue: async (nextValue, meta) => {
+      await options.applyDraftValue(nextValue, meta);
+      scope.notifyFieldChanged(CHAPTER_TITLE_FIELD_ID);
+    },
+    markDirty: (meta) => options.markDirty(CHAPTER_TITLE_FIELD_ID, meta),
+    restoreSelection: (range) => options.restoreSelection(CHAPTER_TITLE_FIELD_ID, range),
+    focus: () => options.focus(CHAPTER_TITLE_FIELD_ID),
+  });
+  const registrations = [scope.registerField(adapter)];
+  const dispose = disposeAssistantScope(scope, registrations);
+  return {
+    scope,
+    adapters: adapter,
+    setFocusedField: (fieldId) => scope.setFocusedField(fieldId),
+    notifyFieldChanged: (fieldId) => scope.notifyFieldChanged(fieldId),
+    dispose,
+  };
+}
+
+
+interface OutlineFieldSpec<K extends keyof BriefFormState = keyof BriefFormState> {
+  id: ChapterOutlineFieldId;
+  label: string;
+  key: K;
+  serialize: (value: BriefFormState[K]) => string;
+  parse: (value: string) => BriefFormState[K];
+}
+
+
+const OUTLINE_FIELD_SPECS: OutlineFieldSpec[] = [
+  { id: CHAPTER_OUTLINE_FIELD_IDS.outlineText, label: "章节大纲", key: "outlineText", serialize: String, parse: String },
+  {
+    id: CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
+    label: "目标字数",
+    key: "targetWordCount",
+    serialize: String,
+    parse: (value) => {
+      if (!/^(0|[1-9]\d*)$/.test(value)) throw new Error("目标字数必须是非负整数");
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed)) throw new Error("目标字数超出安全整数范围");
+      return parsed;
+    },
+  },
+  { id: CHAPTER_OUTLINE_FIELD_IDS.expectation, label: "本章期待", key: "expectationText", serialize: String, parse: String },
+  { id: CHAPTER_OUTLINE_FIELD_IDS.forbidden, label: "禁止事项", key: "forbiddenText", serialize: String, parse: String },
+  { id: CHAPTER_OUTLINE_FIELD_IDS.requiredRoles, label: "必须出场角色", key: "requiredRoles", serialize: String, parse: String },
+  { id: CHAPTER_OUTLINE_FIELD_IDS.allowedRoles, label: "允许出场角色", key: "allowedRoles", serialize: String, parse: String },
+  { id: CHAPTER_OUTLINE_FIELD_IDS.contextOnlyRoles, label: "仅上下文角色", key: "contextOnlyRoles", serialize: String, parse: String },
+  { id: CHAPTER_OUTLINE_FIELD_IDS.forbiddenRoles, label: "禁止出场角色", key: "forbiddenRoles", serialize: String, parse: String },
+];
+
+
+function assistantBriefFormIsDirty(
+  form: BriefFormState,
+  baseline: BriefFormState,
+): boolean {
+  return OUTLINE_FIELD_SPECS.some((spec) => (
+    spec.serialize(form[spec.key]) !== spec.serialize(baseline[spec.key])
+  ));
+}
+
+
+export function mountChapterOutlineAssistantScope(
+  options: ChapterOutlineAssistantBindingOptions,
+): ChapterFormAssistantBinding<ChapterOutlineAssistantAdapters> {
+  const runtime = options.runtime ?? assistantContextRuntime;
+  const scope = runtime.mountScope({
+    id: `modal:chapter-outline:${options.location.document.id}`,
+    kind: "modal",
+    envelope: chapterAssistantEnvelope(options.location, "chapter-outline-editor"),
+  });
+  const adapters = {} as ChapterOutlineAssistantAdapters;
+  const registrations: EditableFieldRegistration[] = [];
+  for (const spec of OUTLINE_FIELD_SPECS) {
+    const adapter = createAssistantFormFieldAdapter({
+      id: spec.id,
+      label: spec.label,
+      getValue: () => spec.serialize(options.getForm()[spec.key]),
+      getDirty: () => spec.serialize(options.getForm()[spec.key])
+        !== spec.serialize(options.getBaseline()[spec.key]),
+      getSelection: () => options.getSelection(spec.id),
+      hashValue: hashAssistantFieldValue,
+      applyDraftValue: async (nextValue, meta) => {
+        await options.applyField(spec.key, spec.parse(nextValue), meta);
+        scope.notifyFieldChanged(spec.id);
+      },
+      markDirty: (meta) => options.markDirty(spec.id, meta),
+      restoreSelection: (range) => options.restoreSelection(spec.id, range),
+      focus: () => options.focus(spec.id),
+    });
+    adapters[spec.id] = adapter;
+    registrations.push(scope.registerField(adapter));
+  }
+  const dispose = disposeAssistantScope(scope, registrations);
+  return {
+    scope,
+    adapters,
+    setFocusedField: (fieldId) => scope.setFocusedField(fieldId),
+    notifyFieldChanged: (fieldId) => scope.notifyFieldChanged(fieldId),
+    dispose,
+  };
+}
+
+
+interface AssistantComponentControlRef {
+  focus?: () => void;
+  input?: AssistantTextControl | null;
+  resizableTextArea?: { textArea?: AssistantTextControl | null } | null;
+}
+
+
+interface AssistantControlRefs {
+  component: AssistantComponentControlRef | null;
+  native: AssistantTextControl | null;
+}
+
+
+function assistantNativeControl(refs: AssistantControlRefs): AssistantTextControl | null {
+  return refs.native
+    ?? refs.component?.input
+    ?? refs.component?.resizableTextArea?.textArea
+    ?? null;
+}
+
+
+function focusAssistantControl(refs: AssistantControlRefs): void {
+  if (refs.component?.focus) {
+    refs.component.focus();
+    return;
+  }
+  assistantNativeControl(refs)?.focus();
+}
 
 
 const ASSET_TABS: Array<{ key: PrivateAssetType; label: string; empty: string }> = [
@@ -152,17 +554,7 @@ function formRoleConstraints(form: BriefFormState): RoleConstraints {
 
 
 function errorMessage(reason: unknown, fallback: string): string {
-  if (reason instanceof ApiError) {
-    if (typeof reason.detail === "string") return reason.detail;
-    if (reason.detail && typeof reason.detail === "object") {
-      const detail = reason.detail as Record<string, any>;
-      if (typeof detail.message === "string") return detail.message;
-      if (typeof detail.job?.failure_message === "string") return detail.job.failure_message;
-      if (typeof detail.proposal?.failure_message === "string") return detail.proposal.failure_message;
-      if (typeof detail.type === "string") return `${fallback}：${detail.type}`;
-    }
-  }
-  return reason instanceof Error ? reason.message : fallback;
+  return apiErrorMessage(reason, fallback);
 }
 
 
@@ -225,17 +617,24 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     onDocumentChanged,
     onError,
     onStatus,
-    onPreviousChapter,
-    onNextChapter,
-    previousChapterTitle,
-    nextChapterTitle,
     chapterNumber,
+    titleToolsTargetId,
     generateActionRef,
     onBodyGenerationStateChange,
+    onAssistantModalStateChange,
   } = props;
   const [brief, setBrief] = React.useState(null as ChapterBriefRecord | null);
   const [briefForm, setBriefForm] = React.useState(EMPTY_BRIEF_FORM);
   const [briefOpen, setBriefOpen] = React.useState(false);
+  const briefTriggerRef = React.useRef(null as HTMLButtonElement | null);
+  const briefFormRef = React.useRef({ ...EMPTY_BRIEF_FORM } as BriefFormState);
+  const briefBaselineRef = React.useRef({ ...EMPTY_BRIEF_FORM } as BriefFormState);
+  const assistantBriefBindingRef = React.useRef(
+    null as ChapterFormAssistantBinding<ChapterOutlineAssistantAdapters> | null,
+  );
+  const assistantBriefControlRefs = React.useRef(
+    {} as Record<ChapterOutlineFieldId, AssistantControlRefs>,
+  );
   const [assetPickerOpen, setAssetPickerOpen] = React.useState(false);
   const [assets, setAssets] = React.useState([] as PrivateAssetRecord[]);
   const [assetTab, setAssetTab] = React.useState("plot" as PrivateAssetType);
@@ -252,6 +651,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
   const [selectedProposal, setSelectedProposal] = React.useState(null as IntelligenceProposalRecord | null);
   const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [titleToolsTarget, setTitleToolsTarget] = React.useState(null as HTMLElement | null);
   const [reviewJob, setReviewJob] = React.useState(null as CreativeGenerationRecord | null);
   const [activeGenerationModel, setActiveGenerationModel] = React.useState(null as GenerationModelStatus | null);
   const [busyAction, setBusyAction] = React.useState("");
@@ -263,7 +663,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   };
 
   React.useEffect(() => {
+    const emptyForm = { ...EMPTY_BRIEF_FORM };
+    briefFormRef.current = emptyForm;
+    briefBaselineRef.current = { ...emptyForm };
+    assistantBriefControlRefs.current = {} as Record<ChapterOutlineFieldId, AssistantControlRefs>;
     setBrief(null);
+    setBriefForm(emptyForm);
     setBriefOpen(false);
     setAssetPickerOpen(false);
     setAssetSearch("");
@@ -278,11 +683,111 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setReviewJob(null);
   }, [document.id]);
 
+  React.useEffect(() => {
+    onAssistantModalStateChange?.(briefOpen);
+    return () => {
+      if (briefOpen) onAssistantModalStateChange?.(false);
+    };
+  }, [briefOpen, document.id, onAssistantModalStateChange]);
+
+  React.useEffect(() => {
+    if (!titleToolsTargetId) {
+      setTitleToolsTarget(null);
+      return;
+    }
+    setTitleToolsTarget(window.document.getElementById(titleToolsTargetId));
+  }, [titleToolsTargetId, document.id]);
+
   const loadBrief = async (): Promise<ChapterBriefRecord> => {
     const loaded = await apiRequest<ChapterBriefRecord>(`/documents/${document.id}/chapter-brief`);
+    const loadedForm = briefToForm(loaded);
     setBrief(loaded);
-    setBriefForm(briefToForm(loaded));
+    briefFormRef.current = loadedForm;
+    briefBaselineRef.current = { ...loadedForm };
+    setBriefForm(loadedForm);
     return loaded;
+  };
+
+  React.useEffect(() => {
+    if (!briefOpen) return;
+    const binding = mountChapterOutlineAssistantScope({
+      location: {
+        novel,
+        document,
+        chapterNumber,
+        dirty: assistantBriefFormIsDirty(briefFormRef.current, briefBaselineRef.current),
+      },
+      getForm: () => briefFormRef.current,
+      getBaseline: () => briefBaselineRef.current,
+      getSelection: (fieldId) => {
+        const refs = assistantBriefControlRefs.current[fieldId as ChapterOutlineFieldId];
+        const field = OUTLINE_FIELD_SPECS.find((item) => item.id === fieldId);
+        if (!refs || !field) return null;
+        return readAssistantTextSelection(
+          assistantNativeControl(refs),
+          field.serialize(briefFormRef.current[field.key]),
+        );
+      },
+      applyField: (field, value) => {
+        const next = { ...briefFormRef.current, [field]: value };
+        briefFormRef.current = next;
+        setBriefForm(next);
+      },
+      restoreSelection: (fieldId, range) => {
+        const refs = assistantBriefControlRefs.current[fieldId as ChapterOutlineFieldId];
+        if (!refs) return;
+        restoreAssistantTextSelection(assistantNativeControl(refs), range);
+      },
+      focus: (fieldId) => {
+        const refs = assistantBriefControlRefs.current[fieldId as ChapterOutlineFieldId];
+        if (refs) focusAssistantControl(refs);
+      },
+      markDirty: () => onStatus("已应用到章纲草稿，尚未保存"),
+    });
+    assistantBriefBindingRef.current = binding;
+    return () => {
+      if (assistantBriefBindingRef.current === binding) {
+        assistantBriefBindingRef.current = null;
+      }
+      binding.dispose();
+    };
+  }, [briefOpen, chapterNumber, document.id, novel.id, onStatus]);
+
+  const getAssistantBriefControl = (fieldId: ChapterOutlineFieldId): AssistantControlRefs => {
+    const current = assistantBriefControlRefs.current[fieldId];
+    if (current) return current;
+    const created: AssistantControlRefs = { component: null, native: null };
+    assistantBriefControlRefs.current[fieldId] = created;
+    return created;
+  };
+
+  const assistantBriefControlProps = (fieldId: ChapterOutlineFieldId) => {
+    const refs = getAssistantBriefControl(fieldId);
+    return {
+      ref: (node: AssistantComponentControlRef | null) => {
+        refs.component = node;
+        refs.native = node?.input ?? node?.resizableTextArea?.textArea ?? null;
+      },
+      onFocus: (event: { currentTarget: AssistantTextControl }) => {
+        refs.native = event.currentTarget;
+        assistantBriefBindingRef.current?.setFocusedField(fieldId);
+      },
+      onSelect: (event: { currentTarget: AssistantTextControl }) => {
+        refs.native = event.currentTarget;
+      },
+      onBlur: () => assistantBriefBindingRef.current?.setFocusedField(undefined),
+    };
+  };
+
+  const updateBriefField = <K extends keyof BriefFormState>(
+    fieldId: ChapterOutlineFieldId,
+    key: K,
+    value: BriefFormState[K],
+  ) => {
+    const next = { ...briefFormRef.current, [key]: value };
+    briefFormRef.current = next;
+    setBriefForm(next);
+    assistantBriefBindingRef.current?.notifyFieldChanged(fieldId);
   };
 
   const openBrief = async () => {
@@ -325,8 +830,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     try {
       const currentBrief = brief ?? await loadBrief();
       const saved = await persistBrief(currentBrief, briefForm);
+      const savedForm = briefToForm(saved);
       setBrief(saved);
-      setBriefForm(briefToForm(saved));
+      briefFormRef.current = savedForm;
+      briefBaselineRef.current = { ...savedForm };
+      setBriefForm(savedForm);
       setBriefOpen(false);
       onStatus("章纲已保存");
     } catch (reason) {
@@ -376,8 +884,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     if (currentBrief.version > 0 && currentBrief.target_word_count >= 500) return currentBrief;
     const form = briefToForm(currentBrief);
     const saved = await persistBrief(currentBrief, { ...form, targetWordCount: Math.max(2500, form.targetWordCount) });
+    const savedForm = briefToForm(saved);
     setBrief(saved);
-    setBriefForm(briefToForm(saved));
+    briefFormRef.current = savedForm;
+    briefBaselineRef.current = { ...savedForm };
+    setBriefForm(savedForm);
     return saved;
   };
 
@@ -445,7 +956,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       setSelectedAssetIds([]);
       const completedModel = completedGenerationModelLabel(acceptedJob);
       onDocumentChanged(result.document, `${completedModel} 正文生成完成 · ${result.candidate.visible_character_count} 字`);
-      await runSyncProgress(result.document, true);
+      setGeneratingOpen(false);
+      await confirmSyncProgress(result.document);
     } catch (reason) {
       const message = errorMessage(reason, "生成正文失败");
       onError(message);
@@ -576,10 +1088,10 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  async function runSyncProgress(preparedOverride?: DocumentRecord, silent = false) {
+  async function runSyncProgress(preparedOverride?: DocumentRecord) {
     setBusyAction("sync");
     setGenerationStage("正在从本章正文提取角色、关系、故事线与伏笔进展");
-    if (!silent) setGeneratingOpen(true);
+    setGeneratingOpen(true);
     try {
       const currentModel = await loadGenerationModel();
       const prepared = preparedOverride ?? (onPrepareGeneration ? await onPrepareGeneration() : document);
@@ -619,12 +1131,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       onError(errorMessage(reason, "同步进展失败"));
       onStatus("同步进展失败");
     } finally {
-      if (!silent) setGeneratingOpen(false);
+      setGeneratingOpen(false);
       setBusyAction("");
     }
   }
 
-  const confirmSyncProgress = async () => {
+  const confirmSyncProgress = async (preparedOverride?: DocumentRecord) => {
+    const source = preparedOverride ?? document;
     let currentModel: GenerationModelStatus;
     try {
       currentModel = await loadGenerationModel();
@@ -637,14 +1150,14 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       title: "确认",
       width: 520,
       content: h("div", { className: "anw-sync-copy" },
-        h("p", null, `本次同步进展将分析 ${document.visible_character_count} 字正文。`),
+        h("p", null, `本次同步进展将分析 ${source.visible_character_count} 字正文。`),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
         h("p", null, "AI 将根据当前章节内容提取情报信息（角色、伏笔、剧情线等），并更新到作品创作资料中。"),
         h("strong", null, "确认同步并继续吗？"),
       ),
       okText: "确定",
       cancelText: "取消",
-      onOk: () => { void runSyncProgress(); },
+      onOk: () => { void runSyncProgress(preparedOverride); },
     });
   };
 
@@ -715,27 +1228,44 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const briefSaveDisabled = !briefForm.outlineText.trim()
     || briefForm.targetWordCount < 500
     || briefForm.targetWordCount > 10000;
+  const titleTools = document.visible_character_count > 0
+    ? h("div", { className: "anw-chapter-title-tool-buttons", role: "toolbar", "aria-label": "章节工具" },
+        h(Button, {
+          className: "anw-chapter-title-tool",
+          icon: h(AuditOutlined),
+          onClick: confirmReview,
+          title: "AI 审稿",
+          "aria-label": "AI 审稿",
+        }, "审稿"),
+        h(Button, {
+          className: "anw-chapter-title-tool",
+          icon: h(BulbOutlined),
+          onClick: openIntelligence,
+          loading: busyAction === "intelligence-load",
+          title: "查看章节情报",
+          "aria-label": "查看章节情报",
+        }, "情报"),
+      )
+    : null;
+  const mountedTitleTools = titleTools && titleToolsTarget && typeof ReactDOM?.createPortal === "function"
+    ? ReactDOM.createPortal(titleTools, titleToolsTarget)
+    : titleTools;
 
   return h(
     React.Fragment,
     null,
     h("div", { className: "anw-workflow-panel" },
       h(Button, { className: "anw-generate-button", icon: h(BookOutlined), onClick: openGenerationOptions, loading: busyAction === "generate" || busyAction === "assets-load" }, document.visible_character_count > 0 ? "重新生成" : "生成正文"),
-      h(Button, { className: "anw-outline-button", icon: h(EditOutlined), onClick: openBrief, loading: busyAction === "brief-load" }, "修改章纲"),
+      h(Button, { ref: briefTriggerRef, className: "anw-outline-button", icon: h(EditOutlined), onClick: openBrief, loading: busyAction === "brief-load" }, "修改章纲"),
       h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: confirmSyncProgress, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
       h(Button, { className: "anw-history-button", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load" }, "历史"),
     ),
-    document.visible_character_count > 0
-      ? h("aside", { className: "anw-editor-side-tools", "aria-label": "章节工具" },
-          h(Button, { className: "is-orange", shape: "circle", icon: h(AuditOutlined), onClick: confirmReview, title: "审稿" }, h("span", null, "审稿")),
-          h(Button, { className: "is-orange", shape: "circle", icon: h(BulbOutlined), onClick: openIntelligence, loading: busyAction === "intelligence-load", title: "情报" }, h("span", null, "情报")),
-          h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowUpOutlined), onClick: onPreviousChapter, disabled: !onPreviousChapter, title: previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章", "aria-label": previousChapterTitle ? `上一章：${previousChapterTitle}` : "已经是第一章" }),
-          h(Button, { className: "is-orange is-chapter-nav", shape: "circle", icon: h(ArrowDownOutlined), onClick: onNextChapter, disabled: !onNextChapter, title: nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章", "aria-label": nextChapterTitle ? `下一章：${nextChapterTitle}` : "已经是最后一章" }),
-        )
-      : null,
+    mountedTitleTools,
     h(Modal, {
       open: briefOpen,
       className: "anw-modal anw-outline-edit-modal",
+      wrapClassName: "anw-assistant-aware-modal-wrap",
+      mask: false,
       title: h("div", { className: "anw-outline-edit-title" },
         h("span", { className: "anw-outline-edit-icon", "aria-hidden": "true" }, h(EditOutlined)),
         h("span", { className: "anw-outline-edit-heading" },
@@ -745,6 +1275,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       ),
       width: 610,
       centered: true,
+      focusTriggerAfterClose: false,
+      afterClose: () => restoreDialogTriggerFocus(briefTriggerRef.current),
       onCancel: () => setBriefOpen(false),
       footer: [
         h("button", { key: "cancel", type: "button", className: "anw-outline-edit-cancel", onClick: () => setBriefOpen(false) }, "取消"),
@@ -753,11 +1285,23 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }, h("div", { className: "anw-outline-edit-body" },
       h("label", { className: "anw-outline-edit-field" },
         h("strong", null, "章节大纲"),
-        h(TextArea, { maxLength: 30000, "aria-label": "章节大纲", value: briefForm.outlineText, onChange: (event: any) => setBriefForm((current: BriefFormState) => ({ ...current, outlineText: event.target.value })), placeholder: "请输入章节大纲..." }),
+        h(TextArea, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.outlineText),
+          maxLength: 30000,
+          "aria-label": "章节大纲",
+          value: briefForm.outlineText,
+          onChange: (event: any) => updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.outlineText,
+            "outlineText",
+            event.target.value,
+          ),
+          placeholder: "请输入章节大纲...",
+        }),
       ),
       h("label", { className: "anw-outline-edit-field anw-outline-edit-target" },
         h("strong", null, "目标字数"),
         h(Input, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.targetCharacters),
           type: "number",
           min: 500,
           max: 10000,
@@ -767,10 +1311,106 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           value: briefForm.targetWordCount,
           onChange: (event: any) => {
             const value = Number(event.target.value);
-            if (Number.isFinite(value)) setBriefForm((current: BriefFormState) => ({ ...current, targetWordCount: value }));
+            if (Number.isFinite(value)) updateBriefField(
+              CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
+              "targetWordCount",
+              value,
+            );
           },
         }),
         h("small", null, "建议范围：500-10000字"),
+      ),
+      h("label", { className: "anw-outline-edit-field" },
+        h("strong", null, "本章期待"),
+        h(TextArea, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.expectation),
+          rows: 3,
+          maxLength: 12000,
+          "aria-label": "本章期待",
+          value: briefForm.expectationText,
+          onChange: (event: any) => updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.expectation,
+            "expectationText",
+            event.target.value,
+          ),
+          placeholder: "请输入本章希望达成的情节、情绪或信息目标",
+        }),
+      ),
+      h("label", { className: "anw-outline-edit-field" },
+        h("strong", null, "禁止事项"),
+        h(TextArea, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.forbidden),
+          rows: 3,
+          maxLength: 12000,
+          "aria-label": "禁止事项",
+          value: briefForm.forbiddenText,
+          onChange: (event: any) => updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.forbidden,
+            "forbiddenText",
+            event.target.value,
+          ),
+          placeholder: "请输入本章不得发生或不得写入的内容",
+        }),
+      ),
+      h("label", { className: "anw-outline-edit-field" },
+        h("strong", null, "必须出场角色"),
+        h(TextArea, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.requiredRoles),
+          rows: 2,
+          "aria-label": "必须出场角色",
+          value: briefForm.requiredRoles,
+          onChange: (event: any) => updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.requiredRoles,
+            "requiredRoles",
+            event.target.value,
+          ),
+          placeholder: "多个角色可用逗号或换行分隔",
+        }),
+      ),
+      h("label", { className: "anw-outline-edit-field" },
+        h("strong", null, "允许出场角色"),
+        h(TextArea, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.allowedRoles),
+          rows: 2,
+          "aria-label": "允许出场角色",
+          value: briefForm.allowedRoles,
+          onChange: (event: any) => updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.allowedRoles,
+            "allowedRoles",
+            event.target.value,
+          ),
+          placeholder: "多个角色可用逗号或换行分隔",
+        }),
+      ),
+      h("label", { className: "anw-outline-edit-field" },
+        h("strong", null, "仅上下文角色"),
+        h(TextArea, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.contextOnlyRoles),
+          rows: 2,
+          "aria-label": "仅上下文角色",
+          value: briefForm.contextOnlyRoles,
+          onChange: (event: any) => updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.contextOnlyRoles,
+            "contextOnlyRoles",
+            event.target.value,
+          ),
+          placeholder: "仅可作为背景提及，不安排实际出场",
+        }),
+      ),
+      h("label", { className: "anw-outline-edit-field" },
+        h("strong", null, "禁止出场角色"),
+        h(TextArea, {
+          ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.forbiddenRoles),
+          rows: 2,
+          "aria-label": "禁止出场角色",
+          value: briefForm.forbiddenRoles,
+          onChange: (event: any) => updateBriefField(
+            CHAPTER_OUTLINE_FIELD_IDS.forbiddenRoles,
+            "forbiddenRoles",
+            event.target.value,
+          ),
+          placeholder: "多个角色可用逗号或换行分隔",
+        }),
       ),
     )),
     h(Modal, {
@@ -823,7 +1463,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           h("span", null, `验收 ${job.target_visible_character_count || 1000}-1500 字`),
           state === "failed"
             ? h("span", null, actualModel ? `请求 ${requestedModel} · 实际 ${actualModel}` : `请求 ${requestedModel} · 实际未核验`)
-            : h("span", null, `实际 ${completedGenerationModelLabel(job)}`),
+            : h("span", null, verifiedGenerationModelLabel(job)),
         ),
         candidate ? h("p", null, candidate.content_text.slice(0, 230) || "本次生成正文为空") : h("p", { className: "is-error" }, job.failure_message || "本次生成没有可用正文"),
         h("footer", null, job.asset_snapshot?.length ? h("small", null, `采用私有库：${job.asset_snapshot.map((item: GenerationJobRecord["asset_snapshot"][number]) => item.title).join("、")}`) : h("small", null, "未选择私有库配置"), h(Button, { disabled: !candidate || candidate.state === "rejected", loading: busyAction === `restore:${candidate?.id}`, onClick: () => void restoreCandidate(job) }, candidate ? "恢复此版本" : "需要整章重写")),
@@ -834,7 +1474,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       {
         open: intelligenceOpen,
         className: "anw-modal anw-intelligence-modal",
-        title: h("div", { className: "anw-intelligence-title" }, h("strong", null, "本章章节情报"), h("span", null, selectedProposal ? `（${selectedProposal.state === "failed" ? generationModelAuditLabel(selectedProposal) : `实际 ${completedGenerationModelLabel(selectedProposal)}`}）` : "（本内容由AI生成）")),
+        title: h("div", { className: "anw-intelligence-title" }, h("strong", null, "本章章节情报"), h("span", null, selectedProposal ? `（${selectedProposal.state === "failed" ? generationModelAuditLabel(selectedProposal) : verifiedGenerationModelLabel(selectedProposal)}）` : "（本内容由AI生成）")),
         width: 800,
         centered: true,
         onCancel: () => setIntelligenceOpen(false),

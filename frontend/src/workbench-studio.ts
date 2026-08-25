@@ -1,9 +1,11 @@
 import {
+  apiErrorMessage,
   apiRequest,
   completedGenerationModelLabel,
   generationModelLabel,
   generationModelAuditLabel,
   getGenerationModelStatus,
+  verifiedGenerationModelLabel,
 } from "./api";
 import {
   ChapterCreationCompleteRecord,
@@ -23,6 +25,25 @@ import {
   StorylineType,
   VolumeRecord,
 } from "./types";
+import type { AssistantWorkspaceLayout } from "./assistant-layout";
+import type { NovelAssistantContextEnvelope } from "./assistant-context-schema";
+import {
+  assistantContextRuntime,
+  NOVEL_ASSISTANT_TARGET_AGENT_ID,
+  type AssistantContextScopeHandle,
+  type AssistantContextScopeInput,
+  type NovelAssistantContextRuntime,
+} from "./assistant-context-runtime";
+import {
+  createAssistantFormFieldAdapter,
+  type AssistantFormFieldAdapter,
+} from "./assistant-form-field";
+import {
+  readAssistantTextSelection,
+  restoreAssistantTextSelection,
+  type AssistantTextControl,
+} from "./chapter-workflow";
+import type { SelectionRange, SelectionSnapshot } from "./assistant-fields";
 import { compressCover } from "./cover-utils";
 import { chapterDisplayTitle } from "./presenters";
 import { RelationshipEditor } from "./relationship-editor";
@@ -75,6 +96,268 @@ const {
 export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings";
 
 
+export const STUDIO_ASSISTANT_FIELD_IDS = {
+  outlineTargetChapterCount: "outline.targetChapterCount",
+  outlineBackground: "outline.background",
+  outlinePlot: "outline.plot",
+  outlineHighlight: "outline.highlight",
+  outlineCharacterRoleType: "outline.character.roleType",
+  outlineCharacterName: "outline.character.name",
+  outlineCharacterGender: "outline.character.gender",
+  outlineCharacterAge: "outline.character.age",
+  outlineCharacterPersonality: "outline.character.personality",
+  outlineCharacterIdentity: "outline.character.identity",
+  outlineCharacterDescription: "outline.character.description",
+  characterRoleType: "character.roleType",
+  characterName: "character.name",
+  characterGender: "character.gender",
+  characterAge: "character.age",
+  characterIdentity: "character.identity",
+  characterPersonality: "character.personality",
+  characterDescription: "character.description",
+  storylineType: "storyline.storylineType",
+  storylineTitle: "storyline.title",
+  storylineDescription: "storyline.description",
+  storylineStatus: "storyline.status",
+  storylineProgress: "storyline.progress",
+  foreshadowTitle: "foreshadow.title",
+  foreshadowContent: "foreshadow.content",
+  foreshadowLatestProgress: "foreshadow.latestProgress",
+  foreshadowStatus: "foreshadow.status",
+  settingsTemplateName: "settings.templateName",
+  settingsGenre: "settings.genre",
+  settingsSubgenre: "settings.subgenre",
+  settingsIdea: "settings.idea",
+} as const;
+
+
+function settingsTemplateFieldId(key: string): string {
+  return `settings.templateData.${encodeURIComponent(key)}`;
+}
+
+
+export interface StudioAssistantFieldBinding {
+  id: string;
+  label: string;
+  getValue: () => string;
+  getDirty: () => boolean;
+  applyDraftValue: (nextValue: string) => void | Promise<void>;
+  markDirty: () => void | Promise<void>;
+  getSelection?: () => SelectionSnapshot | null;
+  restoreSelection?: (range: SelectionRange) => void;
+  focus: () => void;
+  dispose?: () => void;
+}
+
+
+export interface StudioAssistantScopeMount {
+  readonly handle: AssistantContextScopeHandle;
+  readonly adapters: ReadonlyMap<string, AssistantFormFieldAdapter>;
+  dispose(): void;
+}
+
+
+export async function hashStudioAssistantField(value: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("Web Crypto SHA-256 is required for assistant form fields");
+  }
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+
+/** Mount one page/modal scope and bind only controlled React draft fields. */
+export function mountStudioAssistantScope(
+  runtime: NovelAssistantContextRuntime,
+  input: AssistantContextScopeInput,
+  bindings: readonly StudioAssistantFieldBinding[] = [],
+  hashValue: (value: string) => string | Promise<string> = hashStudioAssistantField,
+): StudioAssistantScopeMount {
+  const handle = runtime.mountScope(input);
+  const adapters = new Map<string, AssistantFormFieldAdapter>();
+  try {
+    for (const binding of bindings) {
+      if (adapters.has(binding.id)) {
+        throw new Error(`duplicate studio assistant field: ${binding.id}`);
+      }
+      const adapter = createAssistantFormFieldAdapter({
+        id: binding.id,
+        label: binding.label,
+        getValue: binding.getValue,
+        getDirty: binding.getDirty,
+        getSelection: binding.getSelection ?? (() => null),
+        hashValue,
+        applyDraftValue: (nextValue) => binding.applyDraftValue(nextValue),
+        markDirty: async () => {
+          await binding.markDirty();
+          handle.notifyFieldChanged(binding.id);
+        },
+        restoreSelection: binding.restoreSelection ?? (() => undefined),
+        focus: binding.focus,
+        dispose: binding.dispose,
+      });
+      try {
+        handle.registerField(adapter);
+      } catch (reason) {
+        adapter.dispose();
+        throw reason;
+      }
+      adapters.set(binding.id, adapter);
+    }
+  } catch (reason) {
+    handle.dispose();
+    throw reason;
+  }
+  return {
+    handle,
+    adapters,
+    dispose: () => handle.dispose(),
+  };
+}
+
+
+export function studioAssistantPageEnvelope(
+  novel: Pick<NovelRecord, "id" | "title">,
+  section: WorkbenchSection,
+  roleView: "list" | "graph" = "list",
+): NovelAssistantContextEnvelope | null {
+  const base = {
+    agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
+    novel: { id: novel.id, title: novel.title },
+  };
+  if (section === "outline") {
+    return {
+      ...base,
+      page: { section: "outline", view: "novel-outline" },
+      entity: { type: "outline", id: novel.id, title: novel.title },
+    };
+  }
+  if (section === "roles" && roleView === "list") {
+    return {
+      ...base,
+      page: { section: "roles", view: "character-list" },
+      entity: { type: "novel", id: novel.id, title: novel.title },
+    };
+  }
+  if (section === "clues") {
+    return {
+      ...base,
+      page: { section: "clues", view: "clue-list" },
+      entity: { type: "novel", id: novel.id, title: novel.title },
+    };
+  }
+  if (section === "settings") {
+    return {
+      ...base,
+      page: { section: "settings", view: "novel-settings" },
+      entity: { type: "setting", id: novel.id, title: novel.title },
+    };
+  }
+  return null;
+}
+
+
+interface StudioMutableRef<T> {
+  current: T;
+}
+
+
+interface StudioFocusableControl {
+  focus?: () => void;
+  input?: AssistantTextControl | null;
+  resizableTextArea?: { textArea?: AssistantTextControl | null } | null;
+  selectionStart?: number | null;
+  selectionEnd?: number | null;
+  selectionDirection?: string | null;
+  setSelectionRange?: AssistantTextControl["setSelectionRange"];
+}
+
+
+function studioTextControl(
+  control: StudioFocusableControl | undefined,
+): AssistantTextControl | null {
+  const candidate = control?.input
+    ?? control?.resizableTextArea?.textArea
+    ?? control;
+  if (!candidate
+    || typeof candidate.focus !== "function"
+    || typeof candidate.setSelectionRange !== "function"
+    || !("selectionStart" in candidate)
+    || !("selectionEnd" in candidate)) {
+    return null;
+  }
+  return candidate as AssistantTextControl;
+}
+
+
+function replaceStudioControlledState<T>(
+  stateRef: StudioMutableRef<T>,
+  setState: (next: T) => void,
+  next: T,
+): void {
+  stateRef.current = next;
+  setState(next);
+}
+
+
+function setStudioControlledField<T, Key extends keyof T>(
+  stateRef: StudioMutableRef<T>,
+  setState: (next: T) => void,
+  key: Key,
+  value: T[Key],
+): void {
+  replaceStudioControlledState(
+    stateRef,
+    setState,
+    { ...stateRef.current, [key]: value },
+  );
+}
+
+
+function requireStudioChoice<const Choice extends string>(
+  value: string,
+  choices: readonly Choice[],
+  label: string,
+): Choice {
+  if (!choices.includes(value as Choice)) {
+    throw new Error(`${label}值无效`);
+  }
+  return value as Choice;
+}
+
+
+function requireStudioPercentage(value: string): number {
+  const parsed = Number(value);
+  if (
+    value.trim() !== value
+    || !Number.isFinite(parsed)
+    || parsed < 0
+    || parsed > 100
+    || String(parsed) !== value
+  ) {
+    throw new Error("故事线进度必须是 0 到 100 的数字");
+  }
+  return parsed;
+}
+
+
+function requireStudioMaxLength(
+  value: string,
+  maximum: number,
+  label: string,
+): string {
+  if (value.length > maximum) {
+    throw new Error(`${label}不能超过 ${maximum} 个 UTF-16 字符`);
+  }
+  return value;
+}
+
+
 const OUTLINE_STEPS = ["章节", "背景", "角色", "情节", "亮点"];
 const OUTLINE_HINTS = [
   "还差4步了哦，故事即将诞生!",
@@ -86,8 +369,14 @@ const OUTLINE_HINTS = [
 
 
 function readableError(reason: unknown, fallback: string): string {
-  if (reason instanceof Error) return reason.message;
-  return fallback;
+  return apiErrorMessage(reason, fallback);
+}
+
+
+function creativeTaskModelLabel(job: CreativeGenerationRecord): string {
+  return job.state === "ready"
+    ? verifiedGenerationModelLabel(job)
+    : generationModelAuditLabel(job);
 }
 
 
@@ -166,6 +455,67 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
     name: "", role_type: "main" as "main" | "supporting", gender: "", age: "",
     personality: "", identity: "", description: "",
   });
+  const draftRef = React.useRef(draft) as StudioMutableRef<OutlineDraftRecord | null>;
+  const characterFormRef = React.useRef(characterForm) as StudioMutableRef<typeof characterForm>;
+  const outlineDirtyFieldsRef = React.useRef(new Set<string>()) as StudioMutableRef<Set<string>>;
+  const outlineCharacterDirtyFieldsRef = React.useRef(new Set<string>()) as StudioMutableRef<Set<string>>;
+  const outlineAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
+  const outlineCharacterAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
+  const outlineControlRefs = React.useRef(new Map<string, StudioFocusableControl>()) as StudioMutableRef<Map<string, StudioFocusableControl>>;
+  draftRef.current = draft;
+  characterFormRef.current = characterForm;
+
+  const replaceDraft = (next: OutlineDraftRecord | null): void => {
+    draftRef.current = next;
+    setDraft(next);
+  };
+  const replaceCharacterForm = (next: typeof characterForm): void => {
+    characterFormRef.current = next;
+    setCharacterForm(next);
+  };
+  const outlineControlProps = (
+    scopeRef: StudioMutableRef<AssistantContextScopeHandle | null>,
+    fieldId: string,
+  ) => ({
+    ref: (control: StudioFocusableControl | null) => {
+      if (control) outlineControlRefs.current.set(fieldId, control);
+      else outlineControlRefs.current.delete(fieldId);
+    },
+    onFocus: () => scopeRef.current?.setFocusedField(fieldId),
+    onBlur: () => scopeRef.current?.setFocusedField(undefined),
+  });
+  const outlineFieldBinding = (
+    scopeRef: StudioMutableRef<AssistantContextScopeHandle | null>,
+    dirtyRef: StudioMutableRef<Set<string>>,
+    id: string,
+    label: string,
+    getValue: () => string,
+    applyDraftValue: (value: string) => void,
+  ): StudioAssistantFieldBinding => ({
+    id,
+    label,
+    getValue,
+    getDirty: () => dirtyRef.current.has(id),
+    applyDraftValue,
+    markDirty: () => { dirtyRef.current.add(id); },
+    getSelection: () => readAssistantTextSelection(
+      studioTextControl(outlineControlRefs.current.get(id)),
+      getValue(),
+    ),
+    restoreSelection: (range) => restoreAssistantTextSelection(
+      studioTextControl(outlineControlRefs.current.get(id)),
+      range,
+    ),
+    focus: () => outlineControlRefs.current.get(id)?.focus?.(),
+  });
+  const markOutlineChanged = (
+    scopeRef: StudioMutableRef<AssistantContextScopeHandle | null>,
+    dirtyRef: StudioMutableRef<Set<string>>,
+    fieldId: string,
+  ): void => {
+    dirtyRef.current.add(fieldId);
+    scopeRef.current?.notifyFieldChanged(fieldId);
+  };
 
   React.useEffect(() => {
     if (!open) return;
@@ -174,15 +524,23 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
     setLoading(true);
     void apiRequest<OutlineDraftRecord>(`/novels/${novel.id}/outline-draft`)
       .then((record) => {
-        setDraft(record);
+        replaceDraft(record);
+        outlineDirtyFieldsRef.current.clear();
         setStep(Math.max(1, Math.min(5, startStep >= 1 ? startStep : record.step || 1)));
+        void apiRequest<CreativeGenerationRecord[]>(
+          `/creative-generations?scope_type=outline&scope_id=${encodeURIComponent(record.id)}`,
+        ).then((jobs) => {
+          const latest = jobs.find((job) => job.kind.startsWith("outline_"));
+          setLastGeneratedModelLabel(latest ? creativeTaskModelLabel(latest) : "");
+        }).catch(() => setLastGeneratedModelLabel(""));
       })
       .catch((reason) => onError(readableError(reason, "加载大纲草稿失败")))
       .finally(() => setLoading(false));
   }, [open, novel.id, startStep]);
 
   const updateLocal = (patch: Partial<OutlineDraftRecord>) => {
-    setDraft((current: OutlineDraftRecord | null) => current ? { ...current, ...patch } : current);
+    const current = draftRef.current;
+    replaceDraft(current ? { ...current, ...patch } : current);
   };
 
   const saveDraft = async (
@@ -194,7 +552,8 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
       method: "PATCH",
       body: JSON.stringify({ expected_version: base.version, step: nextStep, ...patch }),
     });
-    setDraft(updated);
+    replaceDraft(updated);
+    outlineDirtyFieldsRef.current.clear();
     setStep(nextStep);
     return updated;
   };
@@ -228,7 +587,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
       }),
     });
     if (job.state !== "ready") throw new Error(job.failure_message || "模型生成失败");
-    setLastGeneratedModelLabel(completedGenerationModelLabel(job));
+    setLastGeneratedModelLabel(creativeTaskModelLabel(job));
     return job;
   };
 
@@ -355,7 +714,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         `/novels/${novel.id}/outline-draft/complete`,
         { method: "POST", body: JSON.stringify({ expected_version: saved.version }) },
       );
-      setDraft(result.outline);
+      replaceDraft(result.outline);
       onCompleted(result.novel);
       setCompleted(true);
     } catch (reason) {
@@ -369,7 +728,8 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
   const openCharacter = (roleType: "main" | "supporting", index = -1) => {
     const current = index >= 0 ? draft?.characters[index] : null;
     setCharacterIndex(index);
-    setCharacterForm({
+    outlineCharacterDirtyFieldsRef.current.clear();
+    replaceCharacterForm({
       name: current?.name ?? "",
       role_type: current?.role_type ?? roleType,
       gender: String(current?.details?.gender ?? ""),
@@ -382,19 +742,20 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
   };
 
   const saveCharacter = () => {
-    if (!draft || !characterForm.name.trim()) return;
+    if (!draftRef.current || !characterFormRef.current.name.trim()) return;
+    const currentForm = characterFormRef.current;
     const next: OutlineCharacterDraft = {
-      name: characterForm.name.trim(),
-      role_type: characterForm.role_type,
-      description: characterForm.description.trim(),
+      name: currentForm.name.trim(),
+      role_type: currentForm.role_type,
+      description: currentForm.description.trim(),
       details: {
-        gender: characterForm.gender.trim(),
-        age: characterForm.age.trim(),
-        personality: characterForm.personality.trim(),
-        identity: characterForm.identity.trim(),
+        gender: currentForm.gender.trim(),
+        age: currentForm.age.trim(),
+        personality: currentForm.personality.trim(),
+        identity: currentForm.identity.trim(),
       },
     };
-    const rows = [...draft.characters];
+    const rows = [...draftRef.current.characters];
     if (characterIndex >= 0) rows[characterIndex] = next;
     else rows.push(next);
     updateLocal({ characters: rows });
@@ -405,6 +766,180 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
     if (!draft) return;
     updateLocal({ characters: draft.characters.filter((_: OutlineCharacterDraft, rowIndex: number) => rowIndex !== index) });
   };
+
+  const changeOutlineField = (
+    patch: Partial<OutlineDraftRecord>,
+    fieldId: string,
+  ): void => {
+    updateLocal(patch);
+    markOutlineChanged(
+      outlineAssistantScopeRef,
+      outlineDirtyFieldsRef,
+      fieldId,
+    );
+  };
+  const setOutlineCharacterField = <Key extends keyof typeof characterForm>(
+    key: Key,
+    value: (typeof characterForm)[Key],
+  ): void => replaceCharacterForm({
+    ...characterFormRef.current,
+    [key]: value,
+  });
+  const changeOutlineCharacterField = <Key extends keyof typeof characterForm>(
+    key: Key,
+    value: (typeof characterForm)[Key],
+    fieldId: string,
+  ): void => {
+    setOutlineCharacterField(key, value);
+    markOutlineChanged(
+      outlineCharacterAssistantScopeRef,
+      outlineCharacterDirtyFieldsRef,
+      fieldId,
+    );
+  };
+
+  React.useEffect(() => {
+    if (!open || !draft || completed) return;
+    const ids = STUDIO_ASSISTANT_FIELD_IDS;
+    const binding = step === 1
+      ? outlineFieldBinding(
+          outlineAssistantScopeRef,
+          outlineDirtyFieldsRef,
+          ids.outlineTargetChapterCount,
+          "目标章节数",
+          () => String(draftRef.current?.target_chapter_count ?? 10),
+          (value) => {
+            const parsed = Number(value);
+            if (!Number.isSafeInteger(parsed) || parsed < 10 || parsed > 10_000) {
+              throw new Error("目标章节数必须是 10-10000 的整数");
+            }
+            updateLocal({ target_chapter_count: parsed });
+          },
+        )
+      : step === 2
+        ? outlineFieldBinding(
+            outlineAssistantScopeRef,
+            outlineDirtyFieldsRef,
+            ids.outlineBackground,
+            "故事背景设定",
+            () => draftRef.current?.background_text ?? "",
+            (value) => updateLocal({ background_text: requireStudioMaxLength(value, 2000, "故事背景设定") }),
+          )
+        : step === 4
+          ? outlineFieldBinding(
+              outlineAssistantScopeRef,
+              outlineDirtyFieldsRef,
+              ids.outlinePlot,
+              "故事主要情节",
+              () => draftRef.current?.plot_text ?? "",
+              (value) => updateLocal({ plot_text: requireStudioMaxLength(value, 5000, "故事主要情节") }),
+            )
+          : step === 5
+            ? outlineFieldBinding(
+                outlineAssistantScopeRef,
+                outlineDirtyFieldsRef,
+                ids.outlineHighlight,
+                "亮点与简介",
+                () => draftRef.current?.highlight_text ?? "",
+                (value) => updateLocal({ highlight_text: requireStudioMaxLength(value, 200, "亮点与简介") }),
+              )
+            : null;
+    const mounted = mountStudioAssistantScope(
+      assistantContextRuntime,
+      {
+        id: `studio:modal:outline:${novel.id}:${draft.id}:step-${step}`,
+        kind: "modal",
+        envelope: {
+          agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
+          novel: { id: novel.id, title: novel.title },
+          page: {
+            section: "outline",
+            view: "novel-outline",
+            modal: "novel-outline",
+          },
+          entity: { type: "outline", id: draft.id, title: `${novel.title}总体大纲` },
+        },
+      },
+      binding ? [binding] : [],
+    );
+    outlineAssistantScopeRef.current = mounted.handle;
+    return () => {
+      if (outlineAssistantScopeRef.current === mounted.handle) {
+        outlineAssistantScopeRef.current = null;
+      }
+      mounted.dispose();
+    };
+  }, [completed, draft?.id, novel.id, novel.title, open, step]);
+
+  React.useEffect(() => {
+    if (!open || !characterOpen || !draft) return;
+    const ids = STUDIO_ASSISTANT_FIELD_IDS;
+    const fields: Array<[
+      string,
+      string,
+      keyof typeof characterForm,
+      number,
+    ]> = [
+      [ids.outlineCharacterName, "姓名", "name", 10],
+      [ids.outlineCharacterGender, "性别", "gender", 2],
+      [ids.outlineCharacterAge, "年龄", "age", 5],
+      [ids.outlineCharacterPersonality, "性格", "personality", 20],
+      [ids.outlineCharacterIdentity, "身份", "identity", 20],
+      [ids.outlineCharacterDescription, "人物小传", "description", 100],
+    ];
+    const bindings: StudioAssistantFieldBinding[] = [
+      outlineFieldBinding(
+        outlineCharacterAssistantScopeRef,
+        outlineCharacterDirtyFieldsRef,
+        ids.outlineCharacterRoleType,
+        "角色类型",
+        () => characterFormRef.current.role_type,
+        (value) => setOutlineCharacterField(
+          "role_type",
+          requireStudioChoice(value, ["main", "supporting"] as const, "角色类型"),
+        ),
+      ),
+      ...fields.map(([id, label, key, maximum]) => outlineFieldBinding(
+        outlineCharacterAssistantScopeRef,
+        outlineCharacterDirtyFieldsRef,
+        id,
+        label,
+        () => String(characterFormRef.current[key]),
+        (value) => setOutlineCharacterField(
+          key,
+          requireStudioMaxLength(value, maximum, label) as never,
+        ),
+      )),
+    ];
+    const mounted = mountStudioAssistantScope(
+      assistantContextRuntime,
+      {
+        id: `studio:modal:outline-character:${novel.id}:${draft.id}:${characterIndex}`,
+        kind: "modal",
+        envelope: {
+          agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
+          novel: { id: novel.id, title: novel.title },
+          page: {
+            section: "outline",
+            view: "novel-outline",
+            modal: "character-editor",
+          },
+          entity: {
+            type: "character",
+            title: characterFormRef.current.name || "大纲角色草稿",
+          },
+        },
+      },
+      bindings,
+    );
+    outlineCharacterAssistantScopeRef.current = mounted.handle;
+    return () => {
+      if (outlineCharacterAssistantScopeRef.current === mounted.handle) {
+        outlineCharacterAssistantScopeRef.current = null;
+      }
+      mounted.dispose();
+    };
+  }, [characterIndex, characterOpen, draft?.id, novel.id, novel.title, open]);
 
   const canContinue = draft && (
     (step === 1 && draft.target_chapter_count >= 10 && draft.target_chapter_count <= 10000)
@@ -421,9 +956,13 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         h("h3", null, "设置章节数"),
         h("p", null, "请输入您希望本小说大概要写多少章节，这将帮助我们生成更符合预期的大纲"),
         h(InputNumber, {
+          ...outlineControlProps(outlineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineTargetChapterCount),
           min: 10, max: 10000, precision: 0, controls: false,
           value: draft.target_chapter_count,
-          onChange: (value: number | null) => updateLocal({ target_chapter_count: Number(value || 10) }),
+          onChange: (value: number | null) => changeOutlineField(
+            { target_chapter_count: Number(value || 10) },
+            STUDIO_ASSISTANT_FIELD_IDS.outlineTargetChapterCount,
+          ),
           "aria-label": "目标章节数",
         }),
       )
@@ -433,9 +972,13 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
           { className: "mb-outline-step-body" },
           h("div", { className: "mb-outline-heading-row" }, h("h3", null, "故事背景设定"), h("span", null, "AI已为您生成了故事背景设定，您可以查看并修改")),
           h(Input.TextArea, {
+            ...outlineControlProps(outlineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineBackground),
             rows: 7, maxLength: 2000, value: draft.background_text,
             placeholder: "故事背景设定将在这里显示...",
-            onChange: (event: any) => updateLocal({ background_text: event.target.value }),
+            onChange: (event: any) => changeOutlineField(
+              { background_text: event.target.value },
+              STUDIO_ASSISTANT_FIELD_IDS.outlineBackground,
+            ),
             "aria-label": "故事背景设定",
           }),
           h("div", { className: "mb-count-hint" }, `最多2000字，当前：${visibleCount(draft.background_text)}/2000`),
@@ -471,9 +1014,13 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
               { className: "mb-outline-step-body" },
               h("div", { className: "mb-outline-heading-row" }, h("h3", null, "故事主要情节"), h("span", null, "AI已为您生成了故事主要情节，您可以查看并修改")),
               h(Input.TextArea, {
+                ...outlineControlProps(outlineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlinePlot),
                 rows: 9, maxLength: 5000, value: draft.plot_text,
                 placeholder: "故事情节将在这里显示...",
-                onChange: (event: any) => updateLocal({ plot_text: event.target.value }),
+                onChange: (event: any) => changeOutlineField(
+                  { plot_text: event.target.value },
+                  STUDIO_ASSISTANT_FIELD_IDS.outlinePlot,
+                ),
                 "aria-label": "故事主要情节",
               }),
               h("div", { className: "mb-count-hint" }, `最多5000字，当前：${visibleCount(draft.plot_text)}/5000`),
@@ -484,9 +1031,13 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
               h("h3", null, "亮点&简介"),
               h("p", null, "AI已为您生成了亮点&简介，您可以查看并修改。确认无误后点击完成即可创建大纲"),
               h(Input.TextArea, {
+                ...outlineControlProps(outlineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineHighlight),
                 rows: 6, maxLength: 200, value: draft.highlight_text,
                 placeholder: "主题亮点将在这里显示...",
-                onChange: (event: any) => updateLocal({ highlight_text: event.target.value }),
+                onChange: (event: any) => changeOutlineField(
+                  { highlight_text: event.target.value },
+                  STUDIO_ASSISTANT_FIELD_IDS.outlineHighlight,
+                ),
                 "aria-label": "亮点与简介",
               }),
               h("div", { className: "mb-count-hint" }, `最多200字，当前：${visibleCount(draft.highlight_text)}/200`),
@@ -501,8 +1052,10 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         open,
         centered: true,
         className: "anw-modal mb-outline-modal",
+        wrapClassName: "anw-assistant-aware-modal-wrap",
+        mask: false,
         width: 600,
-        title: h("div", { className: "mb-outline-modal-title" }, h("strong", null, "生成大纲"), h("span", null, lastGeneratedModelLabel ? `(上一步实际模型：${lastGeneratedModelLabel})` : "(本内容由AI生成)")),
+        title: h("div", { className: "mb-outline-modal-title" }, h("strong", null, "生成大纲"), h("span", null, lastGeneratedModelLabel ? `(最近任务模型：${lastGeneratedModelLabel})` : "(本内容由AI生成)")),
         footer: null,
         destroyOnClose: true,
         onCancel: generating ? undefined : onClose,
@@ -569,6 +1122,8 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
       {
         open: characterOpen,
         className: "anw-modal mb-character-modal",
+        wrapClassName: "anw-assistant-aware-modal-wrap",
+        mask: false,
         width: 520,
         title: characterIndex >= 0 ? "修改角色" : "新增角色",
         footer: null,
@@ -580,13 +1135,13 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
         h(
           "div",
           { className: "mb-form-grid mb-form-grid-three" },
-          field("姓名", h(Input, { maxLength: 10, value: characterForm.name, onChange: (event: any) => setCharacterForm({ ...characterForm, name: event.target.value }) })),
-          field("性别", h(Input, { maxLength: 2, value: characterForm.gender, onChange: (event: any) => setCharacterForm({ ...characterForm, gender: event.target.value }) })),
-          field("年龄", h(Input, { maxLength: 5, placeholder: "如：18岁", value: characterForm.age, onChange: (event: any) => setCharacterForm({ ...characterForm, age: event.target.value }) })),
+          field("姓名", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName), maxLength: 10, value: characterForm.name, onChange: (event: any) => changeOutlineCharacterField("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName) })),
+          field("性别", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender), maxLength: 2, value: characterForm.gender, onChange: (event: any) => changeOutlineCharacterField("gender", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender) })),
+          field("年龄", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge), maxLength: 5, placeholder: "如：18岁", value: characterForm.age, onChange: (event: any) => changeOutlineCharacterField("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge) })),
         ),
-        field("性格", h(Input, { maxLength: 20, value: characterForm.personality, onChange: (event: any) => setCharacterForm({ ...characterForm, personality: event.target.value }) })),
-        field("身份", h(Input, { maxLength: 20, value: characterForm.identity, onChange: (event: any) => setCharacterForm({ ...characterForm, identity: event.target.value }) })),
-        field("人物小传", h(Input.TextArea, { rows: 4, maxLength: 100, value: characterForm.description, onChange: (event: any) => setCharacterForm({ ...characterForm, description: event.target.value }) })),
+        field("性格", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality), maxLength: 20, value: characterForm.personality, onChange: (event: any) => changeOutlineCharacterField("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality) })),
+        field("身份", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity), maxLength: 20, value: characterForm.identity, onChange: (event: any) => changeOutlineCharacterField("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity) })),
+        field("人物小传", h(Input.TextArea, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription), rows: 4, maxLength: 100, value: characterForm.description, onChange: (event: any) => changeOutlineCharacterField("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription) })),
         h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: saveCharacter }, "保存修改"),
       ),
     ),
@@ -709,6 +1264,22 @@ function ChapterCreationWizard({
         });
         setDraft(next);
         hydrateDraft(next);
+        try {
+          const jobs = await apiRequest<CreativeGenerationRecord[]>(
+            `/creative-generations?scope_type=chapter_creation&scope_id=${encodeURIComponent(next.id)}`,
+          );
+          const recommendation = jobs.find(
+            (job) => job.kind === "chapter_storyline_recommendation",
+          );
+          const outline = jobs.find((job) => job.kind === "chapter_outline");
+          setRecommendationTaskModelLabel(
+            recommendation ? creativeTaskModelLabel(recommendation) : "",
+          );
+          setOutlineTaskModelLabel(outline ? creativeTaskModelLabel(outline) : "");
+        } catch {
+          setRecommendationTaskModelLabel("");
+          setOutlineTaskModelLabel("");
+        }
       } catch (reason) {
         const message = readableError(reason, "创建章节草稿失败");
         setInnerError(message);
@@ -1260,6 +1831,7 @@ interface StudioProps {
   onBack: () => void;
   onError: (message: string) => void;
   openChapterWizardSignal?: number;
+  assistantWorkspaceLayout?: AssistantWorkspaceLayout;
 }
 
 
@@ -1273,6 +1845,7 @@ export function StudioProjectView({
   onBack,
   onError,
   openChapterWizardSignal = 0,
+  assistantWorkspaceLayout,
 }: StudioProps) {
   const [busy, setBusy] = React.useState(false);
   const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
@@ -1317,6 +1890,151 @@ export function StudioProjectView({
   const [searchResults, setSearchResults] = React.useState([] as NovelSearchResultRecord[]);
   const [searching, setSearching] = React.useState(false);
 
+  const characterFormRef = React.useRef(characterForm) as StudioMutableRef<typeof characterForm>;
+  const storylineFormRef = React.useRef(storylineForm) as StudioMutableRef<typeof storylineForm>;
+  const foreshadowFormRef = React.useRef(foreshadowForm) as StudioMutableRef<typeof foreshadowForm>;
+  const settingsFormRef = React.useRef(settingsForm) as StudioMutableRef<typeof settingsForm>;
+  characterFormRef.current = characterForm;
+  storylineFormRef.current = storylineForm;
+  foreshadowFormRef.current = foreshadowForm;
+  settingsFormRef.current = settingsForm;
+
+  const characterDirtyFieldsRef = React.useRef(new Set<string>()) as StudioMutableRef<Set<string>>;
+  const storylineDirtyFieldsRef = React.useRef(new Set<string>()) as StudioMutableRef<Set<string>>;
+  const foreshadowDirtyFieldsRef = React.useRef(new Set<string>()) as StudioMutableRef<Set<string>>;
+  const settingsDirtyFieldsRef = React.useRef(new Set<string>()) as StudioMutableRef<Set<string>>;
+  const characterAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
+  const storylineAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
+  const foreshadowAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
+  const settingsAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
+  const assistantControlRefs = React.useRef(new Map<string, StudioFocusableControl>()) as StudioMutableRef<Map<string, StudioFocusableControl>>;
+
+  const focusAssistantControl = (fieldId: string): void => {
+    assistantControlRefs.current.get(fieldId)?.focus?.();
+  };
+  const assistantControlProps = (
+    scopeRef: StudioMutableRef<AssistantContextScopeHandle | null>,
+    fieldId: string,
+  ) => ({
+    ref: (control: StudioFocusableControl | null) => {
+      if (control) assistantControlRefs.current.set(fieldId, control);
+      else assistantControlRefs.current.delete(fieldId);
+    },
+    onFocus: () => scopeRef.current?.setFocusedField(fieldId),
+    onBlur: () => scopeRef.current?.setFocusedField(undefined),
+  });
+  const markAssistantFieldDirty = (
+    dirtyFieldsRef: StudioMutableRef<Set<string>>,
+    scopeRef: StudioMutableRef<AssistantContextScopeHandle | null>,
+    fieldId: string,
+  ): void => {
+    dirtyFieldsRef.current.add(fieldId);
+    scopeRef.current?.notifyFieldChanged(fieldId);
+  };
+  const setCharacterFieldValue = <Key extends keyof typeof characterForm>(
+    key: Key,
+    value: (typeof characterForm)[Key],
+  ): void => setStudioControlledField(characterFormRef, setCharacterForm, key, value);
+  const changeCharacterFieldValue = <Key extends keyof typeof characterForm>(
+    key: Key,
+    value: (typeof characterForm)[Key],
+    fieldId: string,
+  ): void => {
+    setCharacterFieldValue(key, value);
+    markAssistantFieldDirty(
+      characterDirtyFieldsRef,
+      characterAssistantScopeRef,
+      fieldId,
+    );
+  };
+  const setStorylineFieldValue = <Key extends keyof typeof storylineForm>(
+    key: Key,
+    value: (typeof storylineForm)[Key],
+  ): void => setStudioControlledField(storylineFormRef, setStorylineForm, key, value);
+  const changeStorylineFieldValue = <Key extends keyof typeof storylineForm>(
+    key: Key,
+    value: (typeof storylineForm)[Key],
+    fieldId: string,
+  ): void => {
+    setStorylineFieldValue(key, value);
+    markAssistantFieldDirty(
+      storylineDirtyFieldsRef,
+      storylineAssistantScopeRef,
+      fieldId,
+    );
+  };
+  const setForeshadowFieldValue = <Key extends keyof typeof foreshadowForm>(
+    key: Key,
+    value: (typeof foreshadowForm)[Key],
+  ): void => setStudioControlledField(foreshadowFormRef, setForeshadowForm, key, value);
+  const changeForeshadowFieldValue = <Key extends keyof typeof foreshadowForm>(
+    key: Key,
+    value: (typeof foreshadowForm)[Key],
+    fieldId: string,
+  ): void => {
+    setForeshadowFieldValue(key, value);
+    markAssistantFieldDirty(
+      foreshadowDirtyFieldsRef,
+      foreshadowAssistantScopeRef,
+      fieldId,
+    );
+  };
+  const setSettingsFieldValue = <Key extends keyof typeof settingsForm>(
+    key: Key,
+    value: (typeof settingsForm)[Key],
+  ): void => setStudioControlledField(settingsFormRef, setSettingsForm, key, value);
+  const changeSettingsFieldValue = <Key extends Exclude<keyof typeof settingsForm, "template_data">>(
+    key: Key,
+    value: (typeof settingsForm)[Key],
+    fieldId: string,
+  ): void => {
+    setSettingsFieldValue(key, value);
+    markAssistantFieldDirty(
+      settingsDirtyFieldsRef,
+      settingsAssistantScopeRef,
+      fieldId,
+    );
+  };
+  const setSettingsTemplateValue = (key: string, value: string): void => {
+    setSettingsFieldValue("template_data", {
+      ...settingsFormRef.current.template_data,
+      [key]: value,
+    });
+  };
+  const changeSettingsTemplateValue = (key: string, value: string): void => {
+    const fieldId = settingsTemplateFieldId(key);
+    setSettingsTemplateValue(key, value);
+    markAssistantFieldDirty(
+      settingsDirtyFieldsRef,
+      settingsAssistantScopeRef,
+      fieldId,
+    );
+  };
+  const controlledAssistantBinding = (
+    scopeRef: StudioMutableRef<AssistantContextScopeHandle | null>,
+    dirtyFieldsRef: StudioMutableRef<Set<string>>,
+    id: string,
+    label: string,
+    getValue: () => string,
+    applyDraftValue: (nextValue: string) => void,
+  ): StudioAssistantFieldBinding => ({
+    id,
+    label,
+    getValue,
+    getDirty: () => dirtyFieldsRef.current.has(id),
+    applyDraftValue,
+    markDirty: () => { dirtyFieldsRef.current.add(id); },
+    getSelection: () => readAssistantTextSelection(
+      studioTextControl(assistantControlRefs.current.get(id)),
+      getValue(),
+    ),
+    restoreSelection: (range) => restoreAssistantTextSelection(
+      studioTextControl(assistantControlRefs.current.get(id)),
+      range,
+    ),
+    focus: () => focusAssistantControl(id),
+  });
+
   React.useEffect(() => {
     let active = true;
     const load = () => {
@@ -1339,6 +2057,362 @@ export function StudioProjectView({
       window.removeEventListener("focus", load);
     };
   }, [novel.id]);
+
+  React.useEffect(() => {
+    // No outline/settings editor modal view exists in the frozen V2 enum.
+    // While either unsupported editor is open, publish no misleading
+    // background-page draft context; closing it remounts the page scope.
+    if (outlineOpen || settingsOpen) return;
+    const envelope = studioAssistantPageEnvelope(novel, section, roleTab);
+    if (!envelope) return;
+    const mounted = mountStudioAssistantScope(
+      assistantContextRuntime,
+      {
+        id: `studio:page:${novel.id}:${envelope.page.view}`,
+        kind: "page",
+        envelope,
+      },
+    );
+    return () => mounted.dispose();
+  }, [novel.id, novel.title, outlineOpen, roleTab, section, settingsOpen]);
+
+  React.useEffect(() => {
+    if (!characterOpen || section !== "roles" || roleTab !== "list") return;
+    const background = studioAssistantPageEnvelope(novel, "roles", "list");
+    if (!background) return;
+    const ids = STUDIO_ASSISTANT_FIELD_IDS;
+    const bindings: StudioAssistantFieldBinding[] = [
+      controlledAssistantBinding(
+        characterAssistantScopeRef,
+        characterDirtyFieldsRef,
+        ids.characterRoleType,
+        "角色类型",
+        () => characterFormRef.current.role_type,
+        (value) => setCharacterFieldValue(
+          "role_type",
+          requireStudioChoice(value, ["main", "supporting"] as const, "角色类型"),
+        ),
+      ),
+      controlledAssistantBinding(
+        characterAssistantScopeRef,
+        characterDirtyFieldsRef,
+        ids.characterName,
+        "角色姓名",
+        () => characterFormRef.current.name,
+        (value) => setCharacterFieldValue("name", value),
+      ),
+      controlledAssistantBinding(
+        characterAssistantScopeRef,
+        characterDirtyFieldsRef,
+        ids.characterGender,
+        "性别",
+        () => characterFormRef.current.gender,
+        (value) => setCharacterFieldValue(
+          "gender",
+          requireStudioChoice(value, ["", "男", "女", "其他"] as const, "性别"),
+        ),
+      ),
+      controlledAssistantBinding(
+        characterAssistantScopeRef,
+        characterDirtyFieldsRef,
+        ids.characterAge,
+        "年龄",
+        () => characterFormRef.current.age,
+        (value) => setCharacterFieldValue("age", value),
+      ),
+      controlledAssistantBinding(
+        characterAssistantScopeRef,
+        characterDirtyFieldsRef,
+        ids.characterIdentity,
+        "身份",
+        () => characterFormRef.current.identity,
+        (value) => setCharacterFieldValue("identity", value),
+      ),
+      controlledAssistantBinding(
+        characterAssistantScopeRef,
+        characterDirtyFieldsRef,
+        ids.characterPersonality,
+        "性格",
+        () => characterFormRef.current.personality,
+        (value) => setCharacterFieldValue("personality", value),
+      ),
+      controlledAssistantBinding(
+        characterAssistantScopeRef,
+        characterDirtyFieldsRef,
+        ids.characterDescription,
+        "人物小传",
+        () => characterFormRef.current.description,
+        (value) => setCharacterFieldValue("description", value),
+      ),
+    ];
+    const mounted = mountStudioAssistantScope(
+      assistantContextRuntime,
+      {
+        id: `studio:modal:character:${novel.id}:${characterEditing?.id ?? "new"}`,
+        kind: "modal",
+        envelope: {
+          ...background,
+          page: { ...background.page, modal: "character-editor" },
+          entity: {
+            type: "character",
+            ...(characterEditing?.id ? { id: characterEditing.id } : {}),
+            title: characterEditing?.name || "新增角色",
+          },
+        },
+      },
+      bindings,
+    );
+    characterAssistantScopeRef.current = mounted.handle;
+    return () => {
+      if (characterAssistantScopeRef.current === mounted.handle) {
+        characterAssistantScopeRef.current = null;
+      }
+      mounted.dispose();
+    };
+  }, [characterEditing?.id, characterOpen, novel.id, novel.title, roleTab, section]);
+
+  React.useEffect(() => {
+    if (!storylineOpen || section !== "clues") return;
+    const background = studioAssistantPageEnvelope(novel, "clues");
+    if (!background) return;
+    const ids = STUDIO_ASSISTANT_FIELD_IDS;
+    const bindings: StudioAssistantFieldBinding[] = [
+      controlledAssistantBinding(
+        storylineAssistantScopeRef,
+        storylineDirtyFieldsRef,
+        ids.storylineType,
+        "故事线类型",
+        () => storylineFormRef.current.storyline_type,
+        (value) => setStorylineFieldValue(
+          "storyline_type",
+          requireStudioChoice(
+            value,
+            ["main", "support", "romance", "faction"] as const,
+            "故事线类型",
+          ),
+        ),
+      ),
+      controlledAssistantBinding(
+        storylineAssistantScopeRef,
+        storylineDirtyFieldsRef,
+        ids.storylineTitle,
+        "故事线名称",
+        () => storylineFormRef.current.title,
+        (value) => setStorylineFieldValue("title", value),
+      ),
+      controlledAssistantBinding(
+        storylineAssistantScopeRef,
+        storylineDirtyFieldsRef,
+        ids.storylineDescription,
+        "情节说明",
+        () => storylineFormRef.current.description,
+        (value) => setStorylineFieldValue("description", value),
+      ),
+    ];
+    if (storylineEditing) {
+      bindings.push(
+        controlledAssistantBinding(
+          storylineAssistantScopeRef,
+          storylineDirtyFieldsRef,
+          ids.storylineStatus,
+          "故事线状态",
+          () => storylineFormRef.current.status,
+          (value) => setStorylineFieldValue(
+            "status",
+            requireStudioChoice(
+              value,
+              ["active", "paused", "completed", "archived"] as const,
+              "故事线状态",
+            ),
+          ),
+        ),
+        controlledAssistantBinding(
+          storylineAssistantScopeRef,
+          storylineDirtyFieldsRef,
+          ids.storylineProgress,
+          "故事线进度",
+          () => String(storylineFormRef.current.progress),
+          (value) => setStorylineFieldValue("progress", requireStudioPercentage(value)),
+        ),
+      );
+    }
+    const mounted = mountStudioAssistantScope(
+      assistantContextRuntime,
+      {
+        id: `studio:modal:storyline:${novel.id}:${storylineEditing?.id ?? "new"}`,
+        kind: "modal",
+        envelope: {
+          ...background,
+          page: { ...background.page, modal: "storyline-editor" },
+          entity: {
+            type: "storyline",
+            ...(storylineEditing?.id ? { id: storylineEditing.id } : {}),
+            title: storylineEditing?.title || "新增故事线",
+          },
+        },
+      },
+      bindings,
+    );
+    storylineAssistantScopeRef.current = mounted.handle;
+    return () => {
+      if (storylineAssistantScopeRef.current === mounted.handle) {
+        storylineAssistantScopeRef.current = null;
+      }
+      mounted.dispose();
+    };
+  }, [novel.id, novel.title, section, storylineEditing?.id, storylineOpen]);
+
+  React.useEffect(() => {
+    if (!foreshadowOpen || section !== "settings" || settingsTab !== "foreshadow") return;
+    const background = studioAssistantPageEnvelope(novel, "settings");
+    if (!background) return;
+    const ids = STUDIO_ASSISTANT_FIELD_IDS;
+    const bindings: StudioAssistantFieldBinding[] = [
+      controlledAssistantBinding(
+        foreshadowAssistantScopeRef,
+        foreshadowDirtyFieldsRef,
+        ids.foreshadowTitle,
+        "伏笔名称",
+        () => foreshadowFormRef.current.title,
+        (value) => setForeshadowFieldValue(
+          "title",
+          requireStudioMaxLength(value, 50, "伏笔名称"),
+        ),
+      ),
+      controlledAssistantBinding(
+        foreshadowAssistantScopeRef,
+        foreshadowDirtyFieldsRef,
+        ids.foreshadowContent,
+        "伏笔内容",
+        () => foreshadowFormRef.current.content,
+        (value) => setForeshadowFieldValue(
+          "content",
+          requireStudioMaxLength(value, 200, "伏笔内容"),
+        ),
+      ),
+      controlledAssistantBinding(
+        foreshadowAssistantScopeRef,
+        foreshadowDirtyFieldsRef,
+        ids.foreshadowLatestProgress,
+        "伏笔进展",
+        () => foreshadowFormRef.current.latest_progress,
+        (value) => setForeshadowFieldValue(
+          "latest_progress",
+          requireStudioMaxLength(value, 200, "伏笔进展"),
+        ),
+      ),
+    ];
+    if (foreshadowEditing) {
+      bindings.push(
+        controlledAssistantBinding(
+          foreshadowAssistantScopeRef,
+          foreshadowDirtyFieldsRef,
+          ids.foreshadowStatus,
+          "伏笔状态",
+          () => foreshadowFormRef.current.status,
+          (value) => setForeshadowFieldValue(
+            "status",
+            requireStudioChoice(value, ["active", "resolved"] as const, "伏笔状态"),
+          ),
+        ),
+      );
+    }
+    const mounted = mountStudioAssistantScope(
+      assistantContextRuntime,
+      {
+        id: `studio:modal:foreshadow:${novel.id}:${foreshadowEditing?.id ?? "new"}`,
+        kind: "modal",
+        envelope: {
+          ...background,
+          page: { ...background.page, modal: "foreshadow-editor" },
+          entity: {
+            type: "foreshadow",
+            ...(foreshadowEditing?.id ? { id: foreshadowEditing.id } : {}),
+            title: foreshadowEditing?.title || "新增伏笔",
+          },
+        },
+      },
+      bindings,
+    );
+    foreshadowAssistantScopeRef.current = mounted.handle;
+    return () => {
+      if (foreshadowAssistantScopeRef.current === mounted.handle) {
+        foreshadowAssistantScopeRef.current = null;
+      }
+      mounted.dispose();
+    };
+  }, [foreshadowEditing?.id, foreshadowOpen, novel.id, novel.title, section, settingsTab]);
+
+  React.useEffect(() => {
+    if (!settingsOpen || section !== "settings" || settingsTab !== "template") return;
+    const background = studioAssistantPageEnvelope(novel, "settings");
+    if (!background) return;
+    const ids = STUDIO_ASSISTANT_FIELD_IDS;
+    const bindings: StudioAssistantFieldBinding[] = [
+      controlledAssistantBinding(
+        settingsAssistantScopeRef,
+        settingsDirtyFieldsRef,
+        ids.settingsTemplateName,
+        "模板名称",
+        () => settingsFormRef.current.template_name,
+        (value) => setSettingsFieldValue("template_name", value),
+      ),
+      controlledAssistantBinding(
+        settingsAssistantScopeRef,
+        settingsDirtyFieldsRef,
+        ids.settingsGenre,
+        "分类",
+        () => settingsFormRef.current.genre,
+        (value) => setSettingsFieldValue("genre", value),
+      ),
+      controlledAssistantBinding(
+        settingsAssistantScopeRef,
+        settingsDirtyFieldsRef,
+        ids.settingsSubgenre,
+        "细分类",
+        () => settingsFormRef.current.subgenre,
+        (value) => setSettingsFieldValue("subgenre", value),
+      ),
+      controlledAssistantBinding(
+        settingsAssistantScopeRef,
+        settingsDirtyFieldsRef,
+        ids.settingsIdea,
+        "创作思路",
+        () => settingsFormRef.current.idea,
+        (value) => setSettingsFieldValue("idea", value),
+      ),
+      ...Object.keys(settingsFormRef.current.template_data).map((key) => (
+        controlledAssistantBinding(
+          settingsAssistantScopeRef,
+          settingsDirtyFieldsRef,
+          settingsTemplateFieldId(key),
+          key,
+          () => settingsFormRef.current.template_data[key] ?? "",
+          (value) => setSettingsTemplateValue(key, value),
+        )
+      )),
+    ];
+    const mounted = mountStudioAssistantScope(
+      assistantContextRuntime,
+      {
+        id: `studio:modal:settings:${novel.id}`,
+        kind: "modal",
+        envelope: {
+          ...background,
+          page: { ...background.page, modal: "novel-settings" },
+          entity: { type: "setting", id: novel.id, title: novel.template_name || novel.title },
+        },
+      },
+      bindings,
+    );
+    settingsAssistantScopeRef.current = mounted.handle;
+    return () => {
+      if (settingsAssistantScopeRef.current === mounted.handle) {
+        settingsAssistantScopeRef.current = null;
+      }
+      mounted.dispose();
+    };
+  }, [novel.id, novel.title, section, settingsOpen, settingsTab]);
 
   const volumes = novel.tree.filter((item: VolumeRecord) => item.id !== null);
   const orderedVolumes = volumeDescending ? [...volumes].reverse() : volumes;
@@ -1575,7 +2649,8 @@ export function StudioProjectView({
 
   const openCharacterForm = (roleType: "main" | "supporting", item: NovelCharacterRecord | null = null) => {
     setCharacterEditing(item);
-    setCharacterForm({
+    characterDirtyFieldsRef.current.clear();
+    replaceStudioControlledState(characterFormRef, setCharacterForm, {
       role_type: item?.role_type ?? roleType,
       name: item?.name ?? "",
       gender: String(item?.details?.gender ?? ""),
@@ -1588,11 +2663,12 @@ export function StudioProjectView({
   };
 
   const saveCharacter = () => perform(async () => {
+    const current = characterFormRef.current;
     const payload = {
-      role_type: characterForm.role_type,
-      name: characterForm.name.trim(),
-      description: characterForm.description.trim(),
-      details: { gender: characterForm.gender.trim(), age: characterForm.age.trim(), identity: characterForm.identity.trim(), personality: characterForm.personality.trim() },
+      role_type: current.role_type,
+      name: current.name.trim(),
+      description: current.description.trim(),
+      details: { gender: current.gender.trim(), age: current.age.trim(), identity: current.identity.trim(), personality: current.personality.trim() },
     };
     await apiRequest(`/novels/${novel.id}/characters${characterEditing ? `/${characterEditing.id}` : ""}`, {
       method: characterEditing ? "PUT" : "POST",
@@ -1634,13 +2710,15 @@ export function StudioProjectView({
 
   const openStorylineForm = (type: StorylineType, item: StorylineRecord | null = null) => {
     setStorylineEditing(item);
-    setStorylineForm({ storyline_type: item?.storyline_type ?? type, title: item?.title ?? "", description: item?.description ?? "", status: item?.status ?? "active", progress: item?.progress ?? 0 });
+    storylineDirtyFieldsRef.current.clear();
+    replaceStudioControlledState(storylineFormRef, setStorylineForm, { storyline_type: item?.storyline_type ?? type, title: item?.title ?? "", description: item?.description ?? "", status: item?.status ?? "active", progress: item?.progress ?? 0 });
     setStorylineOpen(true);
   };
 
   const saveStoryline = () => perform(async () => {
-    const base = { storyline_type: storylineForm.storyline_type, title: storylineForm.title.trim(), description: storylineForm.description.trim() };
-    const payload = storylineEditing ? { ...base, expected_version: storylineEditing.version, status: storylineForm.status, progress: storylineForm.progress } : base;
+    const current = storylineFormRef.current;
+    const base = { storyline_type: current.storyline_type, title: current.title.trim(), description: current.description.trim() };
+    const payload = storylineEditing ? { ...base, expected_version: storylineEditing.version, status: current.status, progress: current.progress } : base;
     await apiRequest(`/novels/${novel.id}/storylines${storylineEditing ? `/${storylineEditing.id}` : ""}`, {
       method: storylineEditing ? "PUT" : "POST", body: JSON.stringify(payload),
     });
@@ -1655,13 +2733,15 @@ export function StudioProjectView({
 
   const openForeshadowForm = (item: ForeshadowRecord | null = null) => {
     setForeshadowEditing(item);
-    setForeshadowForm({ title: item?.title ?? "", content: item?.content ?? "", latest_progress: item?.latest_progress ?? "", status: item?.status ?? "active", progress: item?.progress ?? 0 });
+    foreshadowDirtyFieldsRef.current.clear();
+    replaceStudioControlledState(foreshadowFormRef, setForeshadowForm, { title: item?.title ?? "", content: item?.content ?? "", latest_progress: item?.latest_progress ?? "", status: item?.status ?? "active", progress: item?.progress ?? 0 });
     setForeshadowOpen(true);
   };
 
   const saveForeshadow = () => perform(async () => {
-    const base = { title: foreshadowForm.title.trim(), content: foreshadowForm.content.trim(), latest_progress: foreshadowForm.latest_progress.trim() };
-    const payload = foreshadowEditing ? { ...base, expected_version: foreshadowEditing.version, status: foreshadowForm.status, progress: foreshadowForm.status === "resolved" ? 100 : foreshadowForm.progress } : base;
+    const current = foreshadowFormRef.current;
+    const base = { title: current.title.trim(), content: current.content.trim(), latest_progress: current.latest_progress.trim() };
+    const payload = foreshadowEditing ? { ...base, expected_version: foreshadowEditing.version, status: current.status, progress: current.status === "resolved" ? 100 : current.progress } : base;
     await apiRequest(`/novels/${novel.id}/foreshadows${foreshadowEditing ? `/${foreshadowEditing.id}` : ""}`, {
       method: foreshadowEditing ? "PUT" : "POST", body: JSON.stringify(payload),
     });
@@ -1677,14 +2757,15 @@ export function StudioProjectView({
   const openSettings = () => {
     const data: Record<string, string> = {};
     Object.entries(novel.template_data || {}).forEach(([key, value]) => { data[key] = String(value ?? ""); });
-    setSettingsForm({ genre: novel.genre, subgenre: novel.subgenre, idea: novel.idea, template_name: novel.template_name, template_data: data });
+    settingsDirtyFieldsRef.current.clear();
+    replaceStudioControlledState(settingsFormRef, setSettingsForm, { genre: novel.genre, subgenre: novel.subgenre, idea: novel.idea, template_name: novel.template_name, template_data: data });
     setSettingsOpen(true);
   };
 
   const saveSettings = () => perform(async () => {
     const updated = await apiRequest<NovelRecord>(`/novels/${novel.id}/settings`, {
       method: "PUT",
-      body: JSON.stringify({ expected_version: novel.version, ...settingsForm }),
+      body: JSON.stringify({ expected_version: novel.version, ...settingsFormRef.current }),
     });
     onNovelChanged(updated);
     setSettingsOpen(false);
@@ -1908,7 +2989,11 @@ export function StudioProjectView({
       { spinning: busy },
       h(
         "main",
-        { className: "anw-app mb-workbench" },
+        {
+          className: "anw-app mb-workbench",
+          "data-assistant-density": assistantWorkspaceLayout?.density ?? "comfortable",
+          "data-assistant-overlay": String(assistantWorkspaceLayout?.assistantOverlay === true),
+        },
         h(
           "aside",
           { className: "mb-book-rail" },
@@ -2020,22 +3105,23 @@ export function StudioProjectView({
         ),
       ),
     ),
-    h(Modal, { open: characterOpen, className: "anw-modal mb-entity-modal", width: 720, title: characterEditing ? "编辑角色" : "新增角色", footer: null, onCancel: () => setCharacterOpen(false) },
+    h(Modal, { open: characterOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 720, title: characterEditing ? "编辑角色" : "新增角色", footer: null, onCancel: () => setCharacterOpen(false) },
       h("div", { className: "mb-form-stack" },
-        field("角色类型", h(Select, { value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => setCharacterForm({ ...characterForm, role_type: value }) })),
-        field("角色姓名", h(Input, { value: characterForm.name, onChange: (event: any) => setCharacterForm({ ...characterForm, name: event.target.value }) })),
+        field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
+        field("角色姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
         h("div", { className: "mb-form-grid mb-character-demographics" },
-          field("性别", h(Select, { allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }], onChange: (value: string) => setCharacterForm({ ...characterForm, gender: value || "" }) })),
-          field("年龄", h(Input, { value: characterForm.age, onChange: (event: any) => setCharacterForm({ ...characterForm, age: event.target.value }) })),
+          field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
+          field("年龄", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterAge), value: characterForm.age, onChange: (event: any) => changeCharacterFieldValue("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterAge) })),
         ),
-        field("身份", h(Input.TextArea, { className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => setCharacterForm({ ...characterForm, identity: event.target.value }) })),
-        field("性格", h(Input.TextArea, { rows: 3, value: characterForm.personality, onChange: (event: any) => setCharacterForm({ ...characterForm, personality: event.target.value }) })),
-        field("人物小传", h(Input.TextArea, { rows: 5, value: characterForm.description, onChange: (event: any) => setCharacterForm({ ...characterForm, description: event.target.value }) })),
+        field("身份", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity), className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => changeCharacterFieldValue("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity) })),
+        field("性格", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality), rows: 3, value: characterForm.personality, onChange: (event: any) => changeCharacterFieldValue("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality) })),
+        field("人物小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),
         h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "保存"),
       ),
     ),
     h(RelationshipEditor, {
       novelId: novel.id,
+      novelTitle: novel.title,
       open: relationshipOpen,
       characters,
       relationships,
@@ -2045,24 +3131,24 @@ export function StudioProjectView({
       onClose: () => setRelationshipOpen(false),
       onSaved: loadDomains,
     }),
-    h(Modal, { open: storylineOpen, className: "anw-modal mb-entity-modal", width: 680, title: storylineEditing ? "编辑故事线" : `新增${storylineLabels[storylineForm.storyline_type as StorylineType]}`, footer: null, onCancel: () => setStorylineOpen(false) },
+    h(Modal, { open: storylineOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 680, title: storylineEditing ? "编辑故事线" : `新增${storylineLabels[storylineForm.storyline_type as StorylineType]}`, footer: null, onCancel: () => setStorylineOpen(false) },
       h("div", { className: "mb-form-stack" },
-        field("故事线类型", h(Select, { value: storylineForm.storyline_type, options: (Object.keys(storylineLabels) as StorylineType[]).map((type) => ({ label: storylineLabels[type], value: type })), onChange: (value: StorylineType) => setStorylineForm({ ...storylineForm, storyline_type: value }) })),
-        field("故事线名称", h(Input, { value: storylineForm.title, onChange: (event: any) => setStorylineForm({ ...storylineForm, title: event.target.value }) })),
-        field("情节说明", h(Input.TextArea, { rows: 6, value: storylineForm.description, onChange: (event: any) => setStorylineForm({ ...storylineForm, description: event.target.value }) })),
+        field("故事线类型", h(Select, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineType), value: storylineForm.storyline_type, options: (Object.keys(storylineLabels) as StorylineType[]).map((type) => ({ label: storylineLabels[type], value: type })), onChange: (value: StorylineType) => changeStorylineFieldValue("storyline_type", value, STUDIO_ASSISTANT_FIELD_IDS.storylineType) })),
+        field("故事线名称", h(Input, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineTitle), value: storylineForm.title, onChange: (event: any) => changeStorylineFieldValue("title", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.storylineTitle) })),
+        field("情节说明", h(Input.TextArea, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineDescription), rows: 6, value: storylineForm.description, onChange: (event: any) => changeStorylineFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.storylineDescription) })),
         storylineEditing ? h("div", { className: "mb-form-grid" },
-          field("状态", h(Select, { value: storylineForm.status, options: [{ label: "进行中", value: "active" }, { label: "暂停", value: "paused" }, { label: "已完成", value: "completed" }, { label: "已归档", value: "archived" }], onChange: (value: string) => setStorylineForm({ ...storylineForm, status: value }) })),
-          field("进度", h(InputNumber, { min: 0, max: 100, value: storylineForm.progress, formatter: (value: number) => `${value}%`, parser: (value: string) => Number(String(value).replace("%", "")), onChange: (value: number | null) => setStorylineForm({ ...storylineForm, progress: Number(value || 0) }) })),
+          field("状态", h(Select, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineStatus), value: storylineForm.status, options: [{ label: "进行中", value: "active" }, { label: "暂停", value: "paused" }, { label: "已完成", value: "completed" }, { label: "已归档", value: "archived" }], onChange: (value: string) => changeStorylineFieldValue("status", value, STUDIO_ASSISTANT_FIELD_IDS.storylineStatus) })),
+          field("进度", h(InputNumber, { ...assistantControlProps(storylineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.storylineProgress), min: 0, max: 100, value: storylineForm.progress, formatter: (value: number) => `${value}%`, parser: (value: string) => Number(String(value).replace("%", "")), onChange: (value: number | null) => changeStorylineFieldValue("progress", Number(value || 0), STUDIO_ASSISTANT_FIELD_IDS.storylineProgress) })),
         ) : null,
         h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !storylineForm.title.trim(), onClick: () => void saveStoryline() }, "保存"),
       ),
     ),
-    h(Modal, { open: foreshadowOpen, centered: true, closable: false, className: "anw-modal mb-entity-modal mb-foreshadow-modal", width: 480, title: foreshadowEditing ? "编辑伏笔" : "新增伏笔", footer: null, onCancel: () => setForeshadowOpen(false) },
+    h(Modal, { open: foreshadowOpen, centered: true, closable: false, className: "anw-modal mb-entity-modal mb-foreshadow-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 480, title: foreshadowEditing ? "编辑伏笔" : "新增伏笔", footer: null, onCancel: () => setForeshadowOpen(false) },
       h("div", { className: "mb-form-stack" },
-        field("伏笔名称", h(Input, { maxLength: 50, showCount: true, placeholder: "如：神秘的黑衣人、丢失的玉佩...", value: foreshadowForm.title, onChange: (event: any) => setForeshadowForm({ ...foreshadowForm, title: event.target.value }) })),
-        field("伏笔内容", h(Input.TextArea, { rows: 4, maxLength: 200, showCount: true, placeholder: "详细描述伏笔的内容，如：第一章在城门口遇到一个黑衣人...", value: foreshadowForm.content, onChange: (event: any) => setForeshadowForm({ ...foreshadowForm, content: event.target.value }) })),
-        field("伏笔进展（可选）", h(Input.TextArea, { rows: 3, maxLength: 200, showCount: true, placeholder: "记录伏笔的最新进展，如：第十章黑衣人再次出现...", value: foreshadowForm.latest_progress, onChange: (event: any) => setForeshadowForm({ ...foreshadowForm, latest_progress: event.target.value }) })),
-        foreshadowEditing ? field("状态", h(Select, { value: foreshadowForm.status === "resolved" ? "resolved" : "active", options: [{ label: "进行中", value: "active" }, { label: "已解决", value: "resolved" }], onChange: (value: string) => setForeshadowForm({ ...foreshadowForm, status: value }) })) : null,
+        field("伏笔名称", h(Input, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowTitle), maxLength: 50, showCount: true, placeholder: "如：神秘的黑衣人、丢失的玉佩...", value: foreshadowForm.title, onChange: (event: any) => changeForeshadowFieldValue("title", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowTitle) })),
+        field("伏笔内容", h(Input.TextArea, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowContent), rows: 4, maxLength: 200, showCount: true, placeholder: "详细描述伏笔的内容，如：第一章在城门口遇到一个黑衣人...", value: foreshadowForm.content, onChange: (event: any) => changeForeshadowFieldValue("content", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowContent) })),
+        field("伏笔进展（可选）", h(Input.TextArea, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowLatestProgress), rows: 3, maxLength: 200, showCount: true, placeholder: "记录伏笔的最新进展，如：第十章黑衣人再次出现...", value: foreshadowForm.latest_progress, onChange: (event: any) => changeForeshadowFieldValue("latest_progress", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowLatestProgress) })),
+        foreshadowEditing ? field("状态", h(Select, { ...assistantControlProps(foreshadowAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.foreshadowStatus), value: foreshadowForm.status === "resolved" ? "resolved" : "active", options: [{ label: "进行中", value: "active" }, { label: "已解决", value: "resolved" }], onChange: (value: string) => changeForeshadowFieldValue("status", value, STUDIO_ASSISTANT_FIELD_IDS.foreshadowStatus) })) : null,
         h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !foreshadowForm.title.trim(), onClick: () => void saveForeshadow() }, "保存"),
       ),
     ),
@@ -2082,15 +3168,15 @@ export function StudioProjectView({
         h(Button, { size: "large", block: true, onClick: () => setCoverOpen(false) }, "取消"),
       ),
     ),
-    h(Modal, { open: settingsOpen, className: "anw-modal mb-entity-modal", width: 760, title: "编辑模板设定", footer: null, onCancel: () => setSettingsOpen(false) },
+    h(Modal, { open: settingsOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 760, title: "编辑模板设定", footer: null, onCancel: () => setSettingsOpen(false) },
       h("div", { className: "mb-form-stack" },
         h("div", { className: "mb-form-grid" },
-          field("模板名称", h(Input, { value: settingsForm.template_name, onChange: (event: any) => setSettingsForm({ ...settingsForm, template_name: event.target.value }) })),
-          field("分类", h(Input, { value: settingsForm.genre, onChange: (event: any) => setSettingsForm({ ...settingsForm, genre: event.target.value }) })),
+          field("模板名称", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsTemplateName), value: settingsForm.template_name, onChange: (event: any) => changeSettingsFieldValue("template_name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsTemplateName) })),
+          field("分类", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsGenre), value: settingsForm.genre, onChange: (event: any) => changeSettingsFieldValue("genre", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsGenre) })),
         ),
-        field("细分类", h(Input, { value: settingsForm.subgenre, onChange: (event: any) => setSettingsForm({ ...settingsForm, subgenre: event.target.value }) })),
-        field("创作思路", h(Input.TextArea, { rows: 5, value: settingsForm.idea, onChange: (event: any) => setSettingsForm({ ...settingsForm, idea: event.target.value }) })),
-        ...Object.entries(settingsForm.template_data).map(([key, value]) => field(key, h(Input.TextArea, { key, rows: 2, value, onChange: (event: any) => setSettingsForm({ ...settingsForm, template_data: { ...settingsForm.template_data, [key]: event.target.value } }) }))),
+        field("细分类", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre), value: settingsForm.subgenre, onChange: (event: any) => changeSettingsFieldValue("subgenre", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre) })),
+        field("创作思路", h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea), rows: 5, value: settingsForm.idea, onChange: (event: any) => changeSettingsFieldValue("idea", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea) })),
+        ...Object.entries(settingsForm.template_data).map(([key, value]) => field(key, h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, settingsTemplateFieldId(key)), key, rows: 2, value, onChange: (event: any) => changeSettingsTemplateValue(key, event.target.value) }))),
         h(Button, { size: "large", block: true, className: "anw-primary-button", onClick: () => void saveSettings() }, "保存"),
       ),
     ),

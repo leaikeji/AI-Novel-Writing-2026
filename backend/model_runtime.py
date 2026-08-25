@@ -168,6 +168,15 @@ async def effective_model_audit(
             base_url="http://qwenpaw.internal",
             timeout=10.0,
         ) as client:
+            # QwenPaw's ``effective`` scope intentionally falls back to the
+            # global model when an Agent lookup fails. Probe the explicit
+            # Agent scope first so a deleted/disabled novel Agent cannot be
+            # mistaken for a healthy generation runtime.
+            agent_response = await client.get(
+                "/api/models/active",
+                params={"scope": "agent", "agent_id": agent_id},
+            )
+            agent_response.raise_for_status()
             response = await client.get(
                 "/api/models/active",
                 params={"scope": "effective", "agent_id": agent_id},
@@ -181,12 +190,12 @@ async def effective_model_audit(
         ) from error
 
     active_llm = payload.get("active_llm") if isinstance(payload, dict) else None
-    provider_id = str(
-        active_llm.get("provider_id") if isinstance(active_llm, dict) else ""
-    ).strip()
-    model_id = str(
-        active_llm.get("model") if isinstance(active_llm, dict) else ""
-    ).strip()
+    provider_id = _nonempty_string(
+        active_llm.get("provider_id") if isinstance(active_llm, dict) else None
+    )
+    model_id = _nonempty_string(
+        active_llm.get("model") if isinstance(active_llm, dict) else None
+    )
     if not provider_id or not model_id:
         raise ModelVerificationError("AI 小说作家当前没有可用的有效模型")
     effective_max_input_length = _optional_int(
@@ -264,10 +273,10 @@ def _audit_from_usage(
     source: str,
 ) -> ModelAudit | None:
     if metadata:
-        provider_id = str(metadata.get("provider_id") or "").strip()
-        model_id = str(
-            metadata.get("model_name") or metadata.get("model_id") or ""
-        ).strip()
+        provider_id = _nonempty_string(metadata.get("provider_id"))
+        model_id = _nonempty_string(
+            metadata.get("model_name") or metadata.get("model_id")
+        )
         if not provider_id or not model_id:
             return None
         prompt_tokens = _optional_int(metadata.get("prompt_tokens"))
@@ -284,6 +293,12 @@ def _audit_from_usage(
             total_tokens=total_tokens,
         )
     return None
+
+
+def _nonempty_string(value: Any) -> str:
+    """Accept model identity only in the public contract's string form."""
+
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _optional_int(value: Any) -> int | None:

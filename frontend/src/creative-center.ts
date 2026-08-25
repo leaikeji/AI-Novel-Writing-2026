@@ -1,10 +1,11 @@
 import {
-  ApiError,
+  apiErrorMessage,
   apiRequest,
   completedGenerationModelLabel,
   generationModelLabel,
   generationModelAuditLabel,
   getGenerationModelStatus,
+  verifiedGenerationModelLabel,
 } from "./api";
 import { APP_PATH } from "./contracts";
 import {
@@ -135,15 +136,14 @@ const TEMPLATE_FIELD_META: Record<string, { label: string; placeholder: string }
 
 
 function readableError(reason: unknown, fallback: string): string {
-  if (reason instanceof ApiError) {
-    if (typeof reason.detail === "string") return reason.detail;
-    if (reason.detail && typeof reason.detail === "object") {
-      const detail = reason.detail as Record<string, any>;
-      if (typeof detail.message === "string") return detail.message;
-      if (detail.job?.failure_message) return String(detail.job.failure_message);
-    }
-  }
-  return reason instanceof Error ? reason.message : fallback;
+  return apiErrorMessage(reason, fallback);
+}
+
+
+function taskModelLabel(job: CreativeGenerationRecord): string {
+  return job.state === "ready"
+    ? verifiedGenerationModelLabel(job)
+    : generationModelAuditLabel(job);
 }
 
 
@@ -689,11 +689,34 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           body: JSON.stringify({ draft_key: draftKey }),
         });
       }
-      const nextData = { writing_type: "", audience: "male", cover_mode: "ai", template_data: {}, ...(next.data || {}) };
+      const nextData: Record<string, any> = {
+        writing_type: "",
+        audience: "male",
+        cover_mode: "ai",
+        template_data: {},
+        ...(next.data || {}),
+      };
       setDraft(next);
       setData(nextData);
       setStep(next.step || 0);
       setError("");
+      try {
+        const jobs = await apiRequest<CreativeGenerationRecord[]>(
+          `/creative-generations?scope_type=novel_creation&scope_id=${encodeURIComponent(next.id)}`,
+        );
+        const byId = new Map(jobs.map((job) => [job.id, job]));
+        const labelFor = (jobId: unknown) => {
+          const job = byId.get(String(jobId || ""));
+          return job ? taskModelLabel(job) : "";
+        };
+        setTemplateTaskModelLabel(labelFor(nextData.template_generation_job_id));
+        setNamingTaskModelLabel(labelFor(nextData.naming_generation_job_id));
+        setCoverTaskModelLabel(labelFor(nextData.cover_generation_job_id));
+      } catch {
+        setTemplateTaskModelLabel("");
+        setNamingTaskModelLabel("");
+        setCoverTaskModelLabel("");
+      }
     } catch (reason) {
       setError(readableError(reason, "加载建书草稿失败"));
     } finally {

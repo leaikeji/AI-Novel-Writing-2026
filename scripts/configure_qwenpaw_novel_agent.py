@@ -19,11 +19,29 @@ SKILLS = [
     "continuity-check",
     "style-review",
 ]
-TOOLS = ["novel_get_context", "novel_get_document", "novel_search"]
+TOOLS = [
+    "novel_get_context",
+    "novel_get_document",
+    "novel_search",
+    "novel_get_workspace_context",
+    "novel_prepare_selection_edit",
+]
 BASE_URL = os.environ.get("QWENPAW_BASE_URL", "http://127.0.0.1:18088").rstrip("/")
 ROOT = Path(__file__).resolve().parents[1]
 PROMPT_FILE = "AI_NOVEL_WORLD.md"
 PROMPT_SOURCE = ROOT / "qwenpaw-agent" / PROMPT_FILE
+
+
+def desired_agent_payload() -> dict[str, object]:
+    return {
+        "id": AGENT_ID,
+        "name": "AI小说作家",
+        "description": (
+            "AI小说世界2026 专用写作助手；使用项目版本化 Skills 与小说工作台，"
+            "不替代 QwenPaw 原生设置。"
+        ),
+        "language": "zh",
+    }
 
 
 def request_json(
@@ -59,16 +77,17 @@ def configure() -> dict[str, object]:
         request_json(
             "/api/agents",
             method="POST",
-            body={
-                "id": AGENT_ID,
-                "name": "AI小说作家",
-                "description": (
-                    "AI小说世界2026 专用写作助手；使用项目版本化 Skills 与小说工作台，"
-                    "不替代 QwenPaw 原生设置。"
-                ),
-                "language": "zh",
-                "skill_names": [],
-            },
+            body={**desired_agent_payload(), "skill_names": []},
+        )
+    else:
+        # Runtime uninstall removes plugin tools from each existing Agent's
+        # materialized tool registry.  A public no-op Agent update rebuilds
+        # that registry after reinstall without deleting the workspace,
+        # chats, model selection, channel settings, or system-prompt files.
+        request_json(
+            f"/api/agents/{AGENT_ID}",
+            method="PUT",
+            body=desired_agent_payload(),
         )
 
     available = request_json("/api/skills", agent_id=AGENT_ID)
@@ -112,6 +131,26 @@ def configure() -> dict[str, object]:
                 method="PATCH",
                 agent_id=AGENT_ID,
             )
+
+    # Project tools are intentionally scoped to the dedicated novel Agent.
+    # Toggle only an observed enabled state, keeping repeated configuration
+    # idempotent and leaving unrelated tools untouched.
+    for agent_id in sorted(agent_ids - {AGENT_ID}):
+        other_tools = request_json("/api/tools", agent_id=agent_id)
+        assert isinstance(other_tools, list)
+        other_tool_by_name = {
+            str(item["name"]): item
+            for item in other_tools
+            if isinstance(item, dict)
+        }
+        for tool_name in TOOLS:
+            tool = other_tool_by_name.get(tool_name)
+            if tool is not None and tool.get("enabled") is True:
+                request_json(
+                    f"/api/tools/{tool_name}/toggle",
+                    method="PATCH",
+                    agent_id=agent_id,
+                )
 
     request_json(
         f"/api/workspace/files/{PROMPT_FILE}",

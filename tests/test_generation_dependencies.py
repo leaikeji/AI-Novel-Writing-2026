@@ -46,7 +46,10 @@ async def test_novel_generation_context_forces_agent_without_mutating_source(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_mode", ["public-api-error", "no-effective-model"])
+@pytest.mark.parametrize(
+    "failure_mode",
+    ["public-api-error", "no-effective-model", "missing-agent"],
+)
 async def test_novel_effective_model_maps_unavailable_public_contract_to_503(
     monkeypatch,
     failure_mode: str,
@@ -56,8 +59,12 @@ async def test_novel_effective_model_maps_unavailable_public_contract_to_503(
 
     @app.get("/api/models/active")
     async def active_model(scope: str, agent_id: str):
-        assert scope == "effective"
         assert agent_id == "ai-novel-writer"
+        if scope == "agent":
+            if failure_mode == "missing-agent":
+                return JSONResponse({"detail": "not found"}, status_code=404)
+            return {"active_llm": None}
+        assert scope == "effective"
         if failure_mode == "public-api-error":
             return JSONResponse({"detail": "unavailable"}, status_code=503)
         return {"active_llm": None}

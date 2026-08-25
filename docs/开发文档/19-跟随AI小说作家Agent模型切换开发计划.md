@@ -698,5 +698,7 @@ model_verification_mode = preflight-effective+provider-usage
 - 三类任务已写入 Agent、requested/actual provider/model、契约版本和不可覆盖 attempt；并发 attempt 使用 PostgreSQL 事务级 advisory lock 分配。
 - 前端不再提交 Agent 或模型身份；当前 effective、任务 requested/actual 与历史模型分层展示。
 - 安装脚本不读写模型环境变量或设置；真实升级前后 `ai-novel-writer` 专属模型选择保持不变。
-- Python 完整测试 76 项通过；前端 20 项通过；TypeScript、Vite 生产构建、Compose 配置、插件打包和真实 QwenPaw 验证通过。
+- 施工后复查修复了 Agent 缺失被全局 effective 掩盖、非字符串模型身份被误接受、目标字数未进入幂等摘要、前端实际模型误标、结构化错误丢失、向导模型证据未恢复、关系补全缺少模型确认、正文采纳后静默同步情报和窄屏布局等遗漏。
+- Python 完整测试 83 项通过；前端 22 项通过；TypeScript、Vite 生产构建、Compose 配置、插件打包和真实 QwenPaw 验证通过。
+- 当前真实 `ai-novel-writer` effective 模型为 `minimax-cn / MiniMax-M3`；重新安装没有写入或覆盖 Agent 模型设置，工作台和关系补全确认框均与公开 API 一致。
 - 详细证据见 [模型切换施工验收记录](./证据/模型切换施工-2026-08-25/验收记录.md)。

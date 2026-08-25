@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = ROOT / "skills"
+NOVEL_AGENT_PROMPT = ROOT / "qwenpaw-agent" / "AI_NOVEL_WORLD.md"
 EXPECTED_SKILLS = {
     "novel-direction",
     "story-bible",
@@ -30,3 +31,55 @@ def test_skills_allow_controlled_candidates_but_not_authoritative_model_writes()
         )
         assert "权威" in text or "正式故事事实" in text
         assert "novel_get_context" in text
+        assert "novel_prepare_selection_edit" in text
+        assert "/polish-selection" in text
+        assert "selection.id" in text
+        assert "replacement_text" in text
+        assert "选区等于整字段也有效" in text
+        assert "不得二次确认" in text
+        assert "二者都不表示只读" in text
+        assert "立即调用提案工具" in text
+        assert "上一张未应用" in text
+
+
+def test_novel_agent_defines_distinct_and_measurable_selection_operations() -> None:
+    text = NOVEL_AGENT_PROMPT.read_text(encoding="utf-8")
+    for operation in ("polish", "rewrite", "expand", "shorten", "dialogue", "review", "custom"):
+        assert f"`{operation}`" in text
+    assert "至少减少 20%" in text
+    assert "55%–75%" in text
+    assert "130%–180%" in text
+    assert "原长度的 80%–120%" in text
+    assert "不得声称一个并未达到的精确字数或比例" in text
+    assert "不得以“去重”“简化”或“润色”为由删除" in text
+    assert "选区覆盖整个受控字段也仍然是有效、明确的选区" in text
+    assert "不得因为选区较长、等于整字段" in text
+    assert "`persistence=explicit-save` 表示候选应用后只进入尚未保存的表单草稿" in text
+    assert "`dirty=false` 只表示作者尚未改动当前表单" in text
+    assert "不能把“潮声”联想成未核实的“潮州”" in text
+    assert "不得先列 A/B/C 或多个标题让作者选择" in text
+    assert "未应用 proposal" in text
+    assert "不能只扩写叙述或用信件、广播、标语等引文冒充人物对白" in text
+    assert "不得在选区明示姓名后反称“没有该人物”" in text
+    assert "不得以“不是对话场景”为由跳过候选" in text
+    assert "`review-size-mismatch`" in text
+    for qualifier in ("逆序", "否定", "数量", "时间", "来源", "范围"):
+        assert qualifier in text
+
+
+def test_chapter_title_proposals_require_chapter_evidence_and_book_wide_dedup() -> None:
+    agent_text = NOVEL_AGENT_PROMPT.read_text(encoding="utf-8")
+    assert "`selection.fieldId` 为 `chapter.title`" in agent_text
+    assert 'include=["chapter_naming"]' in agent_text
+    assert "`current_chapter.content_markdown` 为主证据" in agent_text
+    assert "书名只能校验整体语气，不能提供标题词汇" in agent_text
+    assert "与 `chapter_titles_in_book_order` 中除当前章外的标题做全书去重" in agent_text
+    assert "不得完全重复" in agent_text
+    assert "优先 4–12 个中文字符" in agent_text
+
+    for skill_name in ("prose-writing", "novel-direction"):
+        text = (SKILLS_ROOT / skill_name / "SKILL.md").read_text(encoding="utf-8")
+        assert "selection.fieldId=chapter.title" in text
+        assert 'include=["chapter_naming"]' in text
+        assert "chapter_titles_in_book_order" in text
+        assert "书名" in text and "不能" in text
