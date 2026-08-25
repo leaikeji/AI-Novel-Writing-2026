@@ -47,6 +47,10 @@ import {
 } from "./workbench-route";
 import { StudioProjectView, WorkbenchSection } from "./workbench-studio";
 import type { AssistantWorkspaceLayout } from "./assistant-layout";
+import {
+  observeEditorTextareaAutoSize,
+  resizeEditorTextareaToContent,
+} from "./editor-textarea-auto-size";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -560,9 +564,14 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   React.useLayoutEffect(() => {
     const textarea = editorTextareaRef.current;
     if (!textarea || !editorOpen) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.max(560, textarea.scrollHeight)}px`;
+    resizeEditorTextareaToContent(textarea);
   }, [content, document?.id, editorOpen]);
+
+  React.useLayoutEffect(() => {
+    const textarea = editorTextareaRef.current;
+    if (!textarea || !editorOpen || bodyGenerationState.active) return;
+    return observeEditorTextareaAutoSize(textarea);
+  }, [bodyGenerationState.active, document?.id, editorOpen, manualEditorOpen]);
 
   React.useEffect(() => {
     if (!novel || (section !== "roles" && section !== "clues")) return;
@@ -1310,10 +1319,13 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           h(Button, { type: "text", icon: h(ArrowLeftOutlined), onClick: backToProject }, "返回列表"),
           h(
             "div",
-            { className: "anw-editor-crumb" },
-            novel?.title,
-            " / ",
-            h("strong", null, chapterDisplayTitle),
+            {
+              className: "anw-editor-crumb",
+              title: `${novel?.title ?? ""} / ${chapterDisplayTitle}`,
+            },
+            h("span", { className: "anw-editor-crumb-book" }, novel?.title),
+            h("span", { className: "anw-editor-crumb-separator", "aria-hidden": "true" }, " / "),
+            h("strong", { className: "anw-editor-crumb-chapter" }, chapterDisplayTitle),
           ),
           h("div", {
             className: "anw-current-model-inline",
