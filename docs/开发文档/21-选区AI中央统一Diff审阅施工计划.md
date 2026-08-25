@@ -31,7 +31,7 @@
 
 ### 0.2 当前实现事实
 
-- QwenPaw 原生助手 V2 已随提交 `6790eb7` 发布；本计划进入施工时 HEAD 与 `origin/main` 均为 `1c9448d`。
+- QwenPaw 原生助手 V2 已随提交 `6790eb7` 发布；本计划进入施工时 HEAD 与 `AI-Novel-Writing-2026/main` 均为 `1c9448d`。
 - 当前前端仍由 `assistant-selection-controller.ts` 复制 slash 命令，并由 `assistant-tool-card.ts` 把完整候选渲染在右侧聊天消息流中。
 - 现有 `EditableFieldAdapter`、Selection Registry、`AIEditTransactionManager`、完整字段 SHA-256、UTF-16 选区、正文 CAS/恢复草稿/自动保存均可复用。
 - 后端已经通过公开 PawApp `ctx.chat`、`get_novel_generation_ctx` 和 `get_novel_effective_model` 执行受控生成；`CreativeGenerationJob` 已记录 requested/actual Provider、模型、输入哈希、attempt、输出和失败证据。

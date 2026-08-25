@@ -6,7 +6,7 @@
 
 ## 1. Git 与文件所有权
 
-- 当前分支为 `main`，`HEAD` 与 `origin/main` 均为 `a4007ab`。
+- 当前分支为 `main`，`HEAD` 与 `AI-Novel-Writing-2026/main` 均为 `a4007ab`。
 - 工作区已有模型证据、关系网和页面改动。为了不切换分支时夹带或覆盖这些改动，本阶段采用“原工作区 + 精确文件锁”而不是创建/切换分支。
 - 现有脏文件全部保留，助手施工首先只新增 `frontend/src/assistant-*`、`backend/assistant_*` 及独立测试；`frontend/src/index.ts`、`plugin.py`、`backend/tools.py` 等共享入口只允许主集成 Owner 串行接线。
 - `backend/model_runtime.py`、`backend/creative_services.py`、`frontend/src/api.ts`、`frontend/src/api.test.ts`、`frontend/src/chapter-workflow.ts`、`frontend/src/workbench-studio.ts`、`frontend/src/relationship-workspace.ts`、`frontend/src/creative-center.ts` 和相应既有测试在当前并行工作完成前锁定为只读。
