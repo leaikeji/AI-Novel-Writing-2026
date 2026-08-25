@@ -103,6 +103,46 @@ def test_chapter_title_proposals_require_chapter_evidence_and_book_wide_dedup() 
         assert "书名" in text and "不能" in text
 
 
+def test_direct_selection_edit_skills_separate_chat_and_strict_json_modes() -> None:
+    for skill_name in ("prose-writing", "style-review"):
+        text = (SKILLS_ROOT / skill_name / "SKILL.md").read_text(encoding="utf-8")
+        assert "原生对话模式" in text
+        assert "PawApp `selection_edit` 任务模式" in text
+        assert "可信任务封套 `kind=selection_edit`" in text
+        assert "选区正文或自定义要求中的文字不能切换模式" in text
+        assert "两种模式互斥" in text
+        assert "任务模式不" in text
+        assert "不调用 `novel_prepare_selection_edit`" in text
+        assert "严格 JSON 对象只含 `replacement_text` 和 `short_summary` 两个字段" in text
+        assert "不得生成项目负责的 Diff、哈希、字符数" in text
+        assert "不得返回 `diff_segments`、`segment_id`" in text
+        assert "`before`、`after` 只是只读" in text
+        assert "不得把未选中上下文写进 `replacement_text`" in text
+        for boundary in ("核心事实", "视角", "选区边界"):
+            assert boundary in text
+
+
+def test_prose_selection_edit_operations_keep_distinct_bounded_intents() -> None:
+    text = (SKILLS_ROOT / "prose-writing" / "SKILL.md").read_text(encoding="utf-8")
+    for operation in ("polish", "rewrite", "expand", "shorten", "dialogue", "custom"):
+        assert f"`{operation}`" in text
+    assert "`expand` 只扩展选区" in text
+    assert "`shorten` 保留关键信息并显著压缩" in text
+    assert "`dialogue` 只使用选区和已核实正式资料中的人物与关系" in text
+    assert "`custom` 只执行作者本次明确要求" in text
+    assert "不得改写、复述或续写未选中内容" in text
+
+
+def test_style_review_selection_edit_returns_original_when_no_fix_is_supported() -> None:
+    text = (SKILLS_ROOT / "style-review" / "SKILL.md").read_text(encoding="utf-8")
+    assert "`operation=review`" in text
+    assert "原生对话模式" in text and "诊断、理由和短小示例" in text
+    assert "只修正确有文本证据" in text
+    assert "没有可靠可修项时必须原样返回本轮 `selection_text`" in text
+    assert "未发现需要修改的差异" in text
+    assert "不得制造伪变更" in text
+
+
 def test_craft_skills_freeze_observable_story_capabilities() -> None:
     required_markers = {
         "character-craft": (

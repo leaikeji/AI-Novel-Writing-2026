@@ -15,6 +15,8 @@ from typing import Any, Iterable
 
 import httpx
 
+from .selection_edit_diff import SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS
+
 NOVEL_AGENT_ID = "ai-novel-writer"
 GENERATION_CONTRACT_VERSION = "follow-agent-effective-v1"
 
@@ -359,6 +361,89 @@ def normalize_creative_generation_json(
     Recover the report envelope and every independently valid issue, while refusing
     to mark an incomplete negative review as successful.
     """
+
+    if kind == "selection_edit":
+        def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError(f"duplicate JSON key: {key}")
+                result[key] = value
+            return result
+
+        def reject_nonstandard_constant(value: str) -> None:
+            raise ValueError(f"non-standard JSON constant: {value}")
+
+        try:
+            strict_payload = json.loads(
+                output_text.strip(),
+                object_pairs_hook=reject_duplicate_keys,
+                parse_constant=reject_nonstandard_constant,
+            )
+        except (json.JSONDecodeError, TypeError, AttributeError, ValueError) as error:
+            raise ModelVerificationError(
+                "模型选区编辑结果必须是单一严格 JSON 对象"
+            ) from error
+        if not isinstance(strict_payload, dict) or strict_payload != payload:
+            raise ModelVerificationError(
+                "模型选区编辑结果必须是单一严格 JSON 对象"
+            )
+        allowed_fields = {"replacement_text", "short_summary"}
+        if set(strict_payload) != allowed_fields:
+            raise ModelVerificationError(
+                "模型选区编辑结果必须且只能包含 replacement_text 与 short_summary"
+            )
+        replacement_text = strict_payload.get("replacement_text")
+        short_summary = strict_payload.get("short_summary")
+        if not isinstance(replacement_text, str) or not replacement_text.strip():
+            raise ModelVerificationError("模型选区编辑结果缺少可用 replacement_text")
+        try:
+            replacement_text.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ModelVerificationError("模型选区编辑候选包含非法 Unicode 字符") from error
+        if len(replacement_text) > SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS:
+            raise ModelVerificationError(
+                "模型选区编辑候选超过"
+                f"{SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS}个字符"
+            )
+        if any(
+            ord(character) < 32 and character not in "\n\r\t"
+            for character in replacement_text
+        ):
+            raise ModelVerificationError("模型选区编辑候选包含非法控制字符")
+        if not isinstance(short_summary, str) or not short_summary.strip():
+            raise ModelVerificationError("模型选区编辑结果缺少 short_summary")
+        short_summary = short_summary.strip()
+        try:
+            short_summary.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ModelVerificationError("模型选区编辑摘要包含非法 Unicode 字符") from error
+        if any(
+            ord(character) < 32 and character not in "\n\r\t"
+            for character in short_summary
+        ):
+            raise ModelVerificationError("模型选区编辑摘要包含非法控制字符")
+        if len(short_summary) > 240:
+            raise ModelVerificationError("模型选区编辑摘要不能超过240个字符")
+        for model_text in (replacement_text, short_summary):
+            for capsule in re.findall(r"[⟦⟧][^\n⟧]{0,800}⟧", model_text):
+                if re.search(
+                    r"状态|完成|下一步|等待作者|候选|已生成|Skill",
+                    capsule,
+                    re.IGNORECASE,
+                ):
+                    raise ModelVerificationError("模型选区编辑结果混入系统状态胶囊")
+            if re.search(
+                r"(?:加载|读取|查看|调用|使用|遵循)[^\n。！？!?]{0,240}"
+                r"(?:prose[- ]writing|style[- ]review)",
+                model_text,
+                re.IGNORECASE,
+            ):
+                raise ModelVerificationError("模型选区编辑结果混入 Skill 工作语句")
+        return {
+            "replacement_text": replacement_text,
+            "short_summary": short_summary,
+        }
 
     text_field_by_kind = {
         "outline_background": "background_text",

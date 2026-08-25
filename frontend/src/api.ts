@@ -100,6 +100,45 @@ export async function getGenerationModelStatus(): Promise<GenerationModelStatus>
   return apiRequest<GenerationModelStatus>("/generation-model");
 }
 
+
+export interface StartCreativeGenerationPayload {
+  readonly scope_type: "document" | "novel";
+  readonly scope_id: string;
+  readonly kind: "selection_edit";
+  readonly input_snapshot: Record<string, unknown>;
+  readonly novel_id: string;
+  readonly document_id: string | null;
+  readonly target_character_count: null;
+  readonly force_new: boolean;
+}
+
+
+export function startCreativeGeneration(
+  payload: StartCreativeGenerationPayload,
+  signal?: AbortSignal,
+): Promise<CreativeGenerationRecord> {
+  return apiRequest<CreativeGenerationRecord>("/creative-generations", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+
+export function listSelectionEditGenerations(
+  scopeType: "document" | "novel",
+  scopeId: string,
+  selectionId?: string,
+): Promise<CreativeGenerationRecord[]> {
+  const query = new URLSearchParams({
+    scope_type: scopeType,
+    scope_id: scopeId,
+    kind: "selection_edit",
+  });
+  if (selectionId) query.set("selection_id", selectionId);
+  return apiRequest<CreativeGenerationRecord[]>(`/creative-generations?${query.toString()}`);
+}
+
 export function generationModelLabel(
   value: Pick<GenerationModelStatus, "provider_id" | "model_id">,
 ): string {

@@ -9,7 +9,6 @@ import type { QwenPawReactRuntime } from "./assistant-pane";
 
 
 export interface AssistantSelectionToolbarProps {
-  onEnsureAssistantOpen?: () => void;
 }
 
 
@@ -32,6 +31,7 @@ export function createAssistantSelectionToolbar(
     const [state, setState] = React.useState<AssistantSelectionToolbarState>(
       () => controller.getState(),
     );
+    const [customInstruction, setCustomInstruction] = React.useState("");
     const toolbarRef = React.useRef<HTMLElement | null>(null);
 
     React.useEffect(() => controller.subscribe(setState), []);
@@ -41,12 +41,14 @@ export function createAssistantSelectionToolbar(
       const rect = toolbar.getBoundingClientRect();
       controller.setToolbarSize(rect.width, rect.height);
     }, [state.visible, state.selectionId]);
+    React.useEffect(() => {
+      if (state.phase !== "customizing") setCustomInstruction("");
+    }, [state.phase, state.selectionId]);
 
     if (!state.visible || !state.placement) return null;
 
     const choose = (operation: AssistantSelectionOperation) => {
       if (!controller.selectOperation(operation)) return;
-      props.onEnsureAssistantOpen?.();
     };
     const onToolbarKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -65,7 +67,6 @@ export function createAssistantSelectionToolbar(
         "aria-label": `${state.fieldLabel ?? "当前字段"}选区助手`,
         "aria-describedby": "anw-assistant-selection-status",
         onKeyDown: onToolbarKeyDown,
-        onMouseDown: (event: MouseEvent) => event.preventDefault(),
         style: {
           left: `${Math.round(state.placement.x)}px`,
           top: `${Math.round(state.placement.y)}px`,
@@ -98,6 +99,45 @@ export function createAssistantSelectionToolbar(
           "×",
         ),
       ),
+      state.phase === "customizing"
+        ? h(
+          "form",
+          {
+            className: "anw-assistant-selection-custom",
+            onSubmit: (event: Event) => {
+              event.preventDefault();
+              controller.submitCustomInstruction(customInstruction);
+            },
+          },
+          h("label", { htmlFor: "anw-assistant-selection-custom-input" }, "自定义修改要求"),
+          h("textarea", {
+            id: "anw-assistant-selection-custom-input",
+            value: customInstruction,
+            maxLength: 2_000,
+            rows: 2,
+            autoFocus: true,
+            placeholder: "例如：保持事实不变，改成更克制的第一人称表达",
+            onChange: (event: { target: { value: string } }) => {
+              setCustomInstruction(event.target.value);
+            },
+          }),
+          h(
+            "div",
+            { className: "anw-assistant-selection-custom-actions" },
+            h("span", null, `${customInstruction.length}/2000`),
+            h(
+              "button",
+              { type: "button", onClick: () => controller.hideToolbar() },
+              "取消",
+            ),
+            h(
+              "button",
+              { type: "submit", disabled: !customInstruction.trim() },
+              "开始修改",
+            ),
+          ),
+        )
+        : null,
       h(
         "div",
         {

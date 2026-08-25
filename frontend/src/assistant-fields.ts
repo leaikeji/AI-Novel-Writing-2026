@@ -2,6 +2,12 @@ export type EditableFieldPersistence = "autosave" | "explicit-save";
 export type EditableFieldSelectionDirection = "forward" | "backward" | "none";
 
 
+export interface EditableFieldPersistenceBaseline {
+  readonly kind: "draft" | "entity" | "none";
+  readonly version: number | null;
+}
+
+
 export interface SelectionRange {
   startUtf16: number;
   endUtf16: number;

@@ -95,6 +95,7 @@ export interface AssistantRouteWrapOptions {
   getCurrentSessionId?: () => string | null;
   contextRefCoordinator?: AssistantContextRefCoordinator;
   selectionController?: AssistantSelectionController;
+  selectionEditReviewHost?: unknown;
 }
 
 
@@ -428,7 +429,10 @@ export function createAssistantRouteWrap(
               width: layout.assistantOverlay ? "100%" : `${layout.mainWidth}px`,
             },
           },
-          h(options.Workbench, { assistantWorkspaceLayout: layout }),
+          h(options.Workbench, {
+            assistantWorkspaceLayout: layout,
+            selectionEditReviewHost: options.selectionEditReviewHost,
+          }),
         ),
         h(AssistantPane, {
           preferenceKey: options.assistantPreferenceKey,

@@ -36,6 +36,9 @@ function mountEnvelope(contextRuntime: NovelAssistantContextRuntime, fieldId: st
   const scope = contextRuntime.mountScope({
     id: `page:${fieldId}`,
     kind: "page",
+    persistenceBaseline: fieldId === "chapter.body"
+      ? { kind: "draft", version: 4 }
+      : { kind: "entity", version: 4 },
     envelope: {
       agentId: "ai-novel-writer",
       novel: { id: "novel-1", title: "潮声替我说晚安" },

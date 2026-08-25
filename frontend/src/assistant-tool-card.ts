@@ -49,6 +49,9 @@ const INVALID_REASON_LABELS: Readonly<Record<SelectionInvalidReason, string>> = 
   "context-revision-mismatch": "页面内容版本已变化，只能复制候选",
   "session-unbound": "选区没有绑定本次会话，只能复制候选",
   "session-mismatch": "候选来自另一会话，只能复制候选",
+  "job-unbound": "选区没有绑定编辑任务，只能复制候选",
+  "job-mismatch": "候选来自另一编辑任务，只能复制候选",
+  "delivery-mismatch": "选区已经绑定另一交付路径，只能复制候选",
   "source-value-changed": "字段内容已变化，只能复制候选",
 };
 
@@ -75,6 +78,7 @@ interface AssistantToolReactRuntime {
 
 export interface AssistantToolCardModel {
   valid: boolean;
+  schemaVersion?: 1 | 2;
   selectionId?: string;
   operation?: AssistantSelectionOperation;
   operationLabel: string;
@@ -82,6 +86,8 @@ export interface AssistantToolCardModel {
   replacementText: string;
   replacementCharacterCount: number;
   warnings: string[];
+  /** V2 payload for the central coordinator's own strict validator. */
+  generationResult?: unknown;
   sessionId?: string;
   messageId?: string;
   error?: string;
@@ -91,6 +97,7 @@ export interface AssistantToolCardModel {
 export type AssistantProposalPhase =
   | "checking"
   | "ready"
+  | "expired"
   | "conflict"
   | "applied"
   | "undone"
@@ -118,10 +125,60 @@ export interface AssistantProposalCoordinatorOptions {
 }
 
 
+/**
+ * Minimal read/discard boundary consumed by the chat renderer.
+ *
+ * The historical coordinator still exposes apply/undo for compatibility, but
+ * the bridge intentionally cannot see those mutating methods through this
+ * interface.  Central review wiring is supplied separately through
+ * `openReview`.
+ */
+export interface AssistantProposalBridgeInspector {
+  currentSessionId(): string | undefined;
+  subscribe(listener: () => void): () => void;
+  inspect(model: AssistantToolCardModel): Promise<AssistantProposalCardState>;
+  discard(
+    model: AssistantToolCardModel,
+    current: AssistantProposalCardState,
+  ): AssistantProposalCardState;
+}
+
+
+export interface AssistantReviewBridgeCandidate {
+  readonly source: "assistant-tool";
+  readonly schemaVersion: 1 | 2;
+  readonly selectionId: string;
+  readonly operation: AssistantSelectionOperation;
+  readonly operationLabel: string;
+  readonly summary: string;
+  readonly replacementText: string;
+  readonly replacementCharacterCount: number;
+  readonly warnings: readonly string[];
+  /**
+   * Present for V2 only.  The integration layer may dispatch this value as a
+   * `generation-ready` event; the central coordinator remains responsible for
+   * strict diff/base reconstruction.  It is never rendered by this bridge.
+   */
+  readonly generationResult?: unknown;
+  readonly sessionId?: string;
+  readonly messageId?: string;
+  readonly fieldId?: string;
+  readonly fieldLabel?: string;
+  readonly originalCharacterCount?: number;
+  readonly persistence?: "autosave" | "explicit-save";
+}
+
+
+export type AssistantReviewBridgeOpen = (
+  candidate: AssistantReviewBridgeCandidate,
+) => void | Promise<void>;
+
+
 export interface AssistantToolRendererOptions {
   React: AssistantToolReactRuntime;
-  coordinator: AssistantProposalCoordinator;
+  coordinator: AssistantProposalBridgeInspector;
   copyText: (text: string) => void | Promise<void>;
+  openReview?: AssistantReviewBridgeOpen;
   getCurrentSessionId?: () => string | null | undefined;
   onCopyError?: (error: unknown) => void;
   onStateChange?: (state: AssistantProposalCardState) => void;
@@ -144,7 +201,7 @@ interface ResolvedProposal {
 
 type ProposalResolution =
   | { ok: true; value: ResolvedProposal }
-  | { ok: false; message: string };
+  | { ok: false; phase: "expired" | "conflict"; message: string };
 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -278,6 +335,23 @@ function conflictState(
 }
 
 
+function expiredState(
+  message: string,
+  current: Partial<AssistantProposalCardState> = {},
+): AssistantProposalCardState {
+  return {
+    phase: "expired",
+    applicable: false,
+    canUndo: false,
+    statusMessage: message,
+    fieldId: current.fieldId,
+    fieldLabel: current.fieldLabel,
+    originalCharacterCount: current.originalCharacterCount,
+    persistence: current.persistence,
+  };
+}
+
+
 function failedState(
   message: string,
   current: Partial<AssistantProposalCardState> = {},
@@ -333,16 +407,22 @@ export function createAssistantToolCardModel(
     };
   }
 
+  const schemaVersion = result.schema_version === 1 || result.schema_version === 2
+    ? result.schema_version
+    : undefined;
   const replacementText = boundedString(
     result.replacement_text,
     ASSISTANT_PROPOSAL_MAX_TEXT_CHARACTERS,
   ) ?? "";
   const selectionId = safeSelectionId(result.selection_id);
   const operation = supportedOperation(result.operation);
-  const summary = boundedString(
+  const rawSummary = boundedString(
     result.short_summary,
-    ASSISTANT_PROPOSAL_MAX_SUMMARY_CHARACTERS,
+    schemaVersion === 2 ? 240 : ASSISTANT_PROPOSAL_MAX_SUMMARY_CHARACTERS,
   ) ?? "AI 已生成一份候选文本。";
+  const summary = replacementText && rawSummary.includes(replacementText)
+    ? "AI 已生成一份候选文本。"
+    : rawSummary;
   const warnings = Array.isArray(result.warnings)
     ? result.warnings
       .slice(0, MAX_WARNING_COUNT)
@@ -351,13 +431,14 @@ export function createAssistantToolCardModel(
     : [];
 
   if (
-    result.schema_version !== 1
+    !schemaVersion
     || !selectionId
     || !operation
     || !replacementText
   ) {
     return {
       valid: false,
+      schemaVersion,
       selectionId,
       operation,
       operationLabel: operation ? OPERATION_LABELS[operation] : "未知操作",
@@ -373,6 +454,7 @@ export function createAssistantToolCardModel(
 
   return {
     valid: true,
+    schemaVersion,
     selectionId,
     operation,
     operationLabel: OPERATION_LABELS[operation],
@@ -380,6 +462,7 @@ export function createAssistantToolCardModel(
     replacementText,
     replacementCharacterCount: characterCount(replacementText),
     warnings,
+    generationResult: schemaVersion === 2 ? result : undefined,
     sessionId,
     messageId,
   };
@@ -415,7 +498,11 @@ export class AssistantProposalCoordinator {
     } catch {
       return failedState("候选校验失败，未修改页面内容；仍可复制候选");
     }
-    if (!resolution.ok) return conflictState(resolution.message);
+    if (!resolution.ok) {
+      return resolution.phase === "expired"
+        ? expiredState(resolution.message)
+        : conflictState(resolution.message);
+    }
     const { context, record } = resolution.value;
     const latest = this.transactions.latest(context.fieldId);
     return {
@@ -441,7 +528,11 @@ export class AssistantProposalCoordinator {
     } catch {
       return failedState("应用前校验失败，未修改页面内容；仍可复制候选");
     }
-    if (!resolution.ok) return conflictState(resolution.message);
+    if (!resolution.ok) {
+      return resolution.phase === "expired"
+        ? expiredState(resolution.message)
+        : conflictState(resolution.message);
+    }
     const { context, record } = resolution.value;
     const fieldValue = context.adapter.getValue();
     const next = applySelectionOperation(
@@ -563,7 +654,11 @@ export class AssistantProposalCoordinator {
 
   private async resolve(model: AssistantToolCardModel): Promise<ProposalResolution> {
     if (!model.selectionId || !model.sessionId) {
-      return { ok: false, message: "候选缺少选区或会话绑定，只能复制" };
+      return {
+        ok: false,
+        phase: "conflict",
+        message: "候选缺少选区或会话绑定，只能复制",
+      };
     }
     const runtimeStatus = this.runtime.getStatus();
     if (
@@ -571,15 +666,27 @@ export class AssistantProposalCoordinator {
       || runtimeStatus.selectedAgentId !== NOVEL_ASSISTANT_TARGET_AGENT_ID
       || runtimeStatus.sessionId !== model.sessionId
     ) {
-      return { ok: false, message: "当前 Agent 或会话已变化，只能复制候选" };
+      return {
+        ok: false,
+        phase: "conflict",
+        message: "当前 Agent 或会话已变化，只能复制候选",
+      };
     }
     const record = this.registry.get(model.selectionId);
     if (!record) {
-      return { ok: false, message: "选区不存在或已经过期，请重新框选" };
+      return {
+        ok: false,
+        phase: "expired",
+        message: "选区不存在或已经过期，请重新框选",
+      };
     }
     const context = this.runtime.getEditableFieldContext(record.fieldId);
     if (!context) {
-      return { ok: false, message: "目标字段已经离开页面，只能复制候选" };
+      return {
+        ok: false,
+        phase: "expired",
+        message: "目标字段已经离开页面，只能复制候选",
+      };
     }
     const validation = await this.registry.validateForApply({
       selectionId: record.selectionId,
@@ -592,7 +699,13 @@ export class AssistantProposalCoordinator {
       fieldValue: context.adapter.getValue(),
     });
     if (!validation.ok) {
-      return { ok: false, message: INVALID_REASON_LABELS[validation.reason] };
+      return {
+        ok: false,
+        phase: validation.reason === "expired" || validation.reason === "not-found"
+          ? "expired"
+          : "conflict",
+        message: INVALID_REASON_LABELS[validation.reason],
+      };
     }
     const value = context.adapter.getValue();
     if (
@@ -601,7 +714,11 @@ export class AssistantProposalCoordinator {
       || record.endUtf16 <= record.startUtf16
       || value.slice(record.startUtf16, record.endUtf16) !== record.text
     ) {
-      return { ok: false, message: "原选区范围已经变化，只能复制候选" };
+      return {
+        ok: false,
+        phase: "conflict",
+        message: "原选区范围已经变化，只能复制候选",
+      };
     }
     return { ok: true, value: { context, record } };
   }
@@ -617,6 +734,40 @@ function createInitialCardState(model: AssistantToolCardModel): AssistantProposa
       statusMessage: "正在校验选区与当前字段…",
     }
     : invalidState(model.summary);
+}
+
+
+function createReviewBridgeCandidate(
+  model: AssistantToolCardModel,
+  state: AssistantProposalCardState,
+): AssistantReviewBridgeCandidate | undefined {
+  if (
+    !model.valid
+    || !model.schemaVersion
+    || !model.selectionId
+    || !model.operation
+    || !model.replacementText
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    source: "assistant-tool",
+    schemaVersion: model.schemaVersion,
+    selectionId: model.selectionId,
+    operation: model.operation,
+    operationLabel: model.operationLabel,
+    summary: model.summary,
+    replacementText: model.replacementText,
+    replacementCharacterCount: model.replacementCharacterCount,
+    warnings: Object.freeze([...model.warnings]),
+    generationResult: model.generationResult,
+    sessionId: model.sessionId,
+    messageId: model.messageId,
+    fieldId: state.fieldId,
+    fieldLabel: state.fieldLabel,
+    originalCharacterCount: state.originalCharacterCount,
+    persistence: state.persistence,
+  });
 }
 
 
@@ -683,31 +834,55 @@ export function createAssistantToolRenderer(
         mounted = false;
         unsubscribe();
       };
-    }, [model.selectionId, model.sessionId, model.messageId]);
+    }, [
+      model.valid,
+      model.schemaVersion,
+      model.selectionId,
+      model.sessionId,
+      model.messageId,
+      model.replacementText,
+    ]);
 
-    const run = (action: () => Promise<AssistantProposalCardState>) => {
+    const handleOpenReview = () => {
+      const candidate = createReviewBridgeCandidate(model, state);
+      if (!candidate || !state.applicable || !options.openReview || busyRef.current) {
+        return;
+      }
       busyRef.current = true;
-      const checking: AssistantProposalCardState = {
+      const opening: AssistantProposalCardState = {
         ...state,
         phase: "checking",
         applicable: false,
         canUndo: false,
-        statusMessage: "正在重新校验并执行…",
+        statusMessage: "正在编辑器中打开中央审阅…",
       };
-      setState(checking);
-      void action().then((next) => {
-        busyRef.current = false;
-        setState(next);
-        options.onStateChange?.(next);
-      }).catch(() => {
-        busyRef.current = false;
-        const next = failedState(
-          "候选审阅器操作异常，未执行新的页面写入；仍可复制候选",
-          state,
-        );
-        setState(next);
-        options.onStateChange?.(next);
-      });
+      phaseRef.current = opening.phase;
+      setState(opening);
+      void Promise.resolve()
+        .then(() => options.openReview?.(candidate))
+        .then(() => {
+          busyRef.current = false;
+          const opened: AssistantProposalCardState = {
+            ...state,
+            phase: "ready",
+            applicable: true,
+            canUndo: false,
+            statusMessage: "候选已交给编辑器，请在中央工作区继续审阅",
+          };
+          phaseRef.current = opened.phase;
+          setState(opened);
+          options.onStateChange?.(opened);
+        })
+        .catch(() => {
+          busyRef.current = false;
+          const next = failedState(
+            "无法打开中央审阅，页面内容未修改；仍可复制候选",
+            state,
+          );
+          phaseRef.current = next.phase;
+          setState(next);
+          options.onStateChange?.(next);
+        });
     };
 
     const handleCopy = () => {
@@ -742,13 +917,13 @@ export function createAssistantToolRenderer(
       label,
     );
 
-    const copyOnly = !state.applicable;
+    const canOpenReview = state.phase === "ready" && state.applicable;
     return h(
       "article",
       {
-        className: `anw-assistant-review-editor is-${state.phase}${model.valid ? "" : " is-invalid"}`,
+        className: `anw-assistant-review-editor anw-assistant-review-bridge is-${state.phase}${model.valid ? "" : " is-invalid"}`,
         role: "region",
-        "aria-label": "AI 修改审阅器",
+        "aria-label": "AI 修改候选桥接",
         "data-session-id": model.sessionId,
         "data-message-id": model.messageId,
         "data-proposal-phase": state.phase,
@@ -757,7 +932,7 @@ export function createAssistantToolRenderer(
         "header",
         null,
         h("div", null,
-          h("strong", null, model.valid ? `${model.operationLabel} · ${state.fieldLabel ?? "选区"}` : "未生成可应用候选"),
+          h("strong", null, model.valid ? `${model.operationLabel}候选 · ${state.fieldLabel ?? "选区"}` : "未生成可用候选"),
           h("span", null, model.summary),
         ),
         h(
@@ -768,26 +943,6 @@ export function createAssistantToolRenderer(
             : `${state.originalCharacterCount} → ${model.replacementCharacterCount} 字`,
         ),
       ),
-      model.replacementText
-        ? h(
-          "pre",
-          {
-            className: "anw-assistant-review-text",
-            tabIndex: 0,
-            "aria-label": `AI 候选文本，${model.replacementCharacterCount} 字`,
-          },
-          model.replacementText,
-        )
-        : null,
-      model.warnings.length > 0
-        ? h(
-          "ul",
-          { className: "anw-assistant-review-warnings" },
-          ...model.warnings.map((warning, index) => (
-            h("li", { key: `${index}-${warning}` }, warning)
-          )),
-        )
-        : null,
       h(
         "p",
         {
@@ -800,30 +955,20 @@ export function createAssistantToolRenderer(
       h(
         "footer",
         null,
-        actionButton(
-          "替换选中文字",
-          "用 AI 候选替换选中文字",
-          () => run(() => options.coordinator.apply(model, "replace-selection")),
-          !state.applicable,
-          "is-primary",
-        ),
-        actionButton(
-          "插入到选区后",
-          "将 AI 候选插入到选区后",
-          () => run(() => options.coordinator.apply(model, "insert-after-selection")),
-          !state.applicable,
-        ),
+        canOpenReview
+          ? actionButton(
+            "在编辑器中打开审阅",
+            "在编辑器中打开 AI 候选审阅",
+            handleOpenReview,
+            !options.openReview || busyRef.current,
+            "is-primary",
+          )
+          : null,
         actionButton(
           "复制",
           "复制 AI 候选文本",
           handleCopy,
           !model.replacementText,
-        ),
-        actionButton(
-          "撤销 AI 修改",
-          "撤销当前字段最近一次 AI 修改",
-          () => run(() => options.coordinator.undo(model, state)),
-          !state.canUndo,
         ),
         actionButton(
           "放弃",
@@ -836,13 +981,6 @@ export function createAssistantToolRenderer(
           state.phase === "discarded" || state.phase === "checking",
           "is-quiet",
         ),
-      ),
-      h(
-        "small",
-        null,
-        copyOnly
-          ? "只读预览 · 冲突或过期时仍可复制"
-          : "未写入页面 · 点击应用按钮后才会修改当前字段",
       ),
     );
   }

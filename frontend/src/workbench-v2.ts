@@ -385,11 +385,13 @@ function sectionIcon(section: ProjectSection): any {
 
 interface NovelWorkbenchProps {
   assistantWorkspaceLayout?: AssistantWorkspaceLayout;
+  selectionEditReviewHost?: unknown;
 }
 
 
 export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const query = currentQuery();
+  const SelectionEditReviewHost = props.selectionEditReviewHost;
   const queryNovelId = query.get("novel_id");
   const queryDocumentId = query.get("document_id");
   const initialSection = (query.get("section") as ProjectSection | null) ?? "chapters";
@@ -1375,7 +1377,26 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                   h("small", null, "预计需要 30-60 秒"),
                 )
               : showEditor
-              ? h("textarea", {
+              ? (SelectionEditReviewHost
+                ? h(
+                  SelectionEditReviewHost,
+                  {
+                    fieldIds: CHAPTER_BODY_FIELD_ID,
+                    className: "anw-editor-selection-review-host",
+                  },
+                  h("textarea", {
+                    ref: editorTextareaRef,
+                    className: "anw-editor-textarea",
+                    value: content,
+                    onChange: onContentChange,
+                    onFocus: () => assistantBodyBindingRef.current?.setFocusedField(true),
+                    onBlur: () => assistantBodyBindingRef.current?.setFocusedField(false),
+                    spellCheck: false,
+                    "aria-label": `${chapterDisplayTitle}正文编辑器`,
+                    placeholder: "开始写作……Markdown 源文本会自动保存。",
+                  }),
+                )
+                : h("textarea", {
                   ref: editorTextareaRef,
                   className: "anw-editor-textarea",
                   value: content,
@@ -1385,7 +1406,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                   spellCheck: false,
                   "aria-label": `${chapterDisplayTitle}正文编辑器`,
                   placeholder: "开始写作……Markdown 源文本会自动保存。",
-                })
+                }))
               : h(
                   "section",
                   { className: "anw-editor-empty", "aria-label": "章节正文空状态" },
@@ -1422,6 +1443,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                       generateActionRef: chapterGenerateActionRef,
                       onBodyGenerationStateChange: (active: boolean, stage: string) => setBodyGenerationState({ active, stage }),
                       onAssistantModalStateChange: setChapterOutlineAssistantOpen,
+                      selectionEditReviewHost: SelectionEditReviewHost,
                     })
                   : null,
               ),
@@ -1444,9 +1466,57 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
             maskClosable: !titleSaving,
             onCancel: () => { if (!titleSaving) setTitleEditOpen(false); },
           },
-          h(
-            "div",
-            { className: "anw-title-edit-form" },
+          SelectionEditReviewHost
+            ? h(
+              SelectionEditReviewHost,
+              { fieldIds: CHAPTER_TITLE_FIELD_ID, className: "anw-title-selection-review-host" },
+              h(
+                "div",
+                { className: "anw-title-edit-form" },
+                h("label", { htmlFor: "anw-document-title-input" }, document.kind === "chapter" ? "章节标题" : "文档标题"),
+                h(Input, {
+                  ref: (node: AssistantTitleInputRef | null) => {
+                    titleInputRef.current = node;
+                    titleInputNativeRef.current = node?.input ?? null;
+                  },
+                  id: "anw-document-title-input",
+                  autoFocus: true,
+                  size: "large",
+                  value: titleDraft,
+                  maxLength: 20,
+                  placeholder: document.kind === "chapter" ? "请输入章节标题" : "请输入文档标题",
+                  onChange: (event: any) => updateTitleDraft(event.target.value as string),
+                  onFocus: (event: { currentTarget: AssistantTextControl }) => {
+                    titleInputNativeRef.current = event.currentTarget;
+                    assistantTitleBindingRef.current?.setFocusedField(CHAPTER_TITLE_FIELD_ID);
+                  },
+                  onSelect: (event: { currentTarget: AssistantTextControl }) => {
+                    titleInputNativeRef.current = event.currentTarget;
+                  },
+                  onBlur: () => assistantTitleBindingRef.current?.setFocusedField(undefined),
+                  onPressEnter: () => { if (titleDraftRef.current.trim() && !titleSaving) void renameDocument(); },
+                }),
+                h("p", { className: "anw-title-edit-count" }, `最多20字，当前：${titleDraft.length}/20`),
+                h(
+                  "div",
+                  { className: "anw-title-edit-actions" },
+                  h(Button, {
+                    className: "anw-title-edit-cancel",
+                    disabled: titleSaving,
+                    onClick: () => setTitleEditOpen(false),
+                  }, "取消"),
+                  h(Button, {
+                    className: "anw-primary-button anw-title-edit-save",
+                    loading: titleSaving,
+                    disabled: !titleDraft.trim(),
+                    onClick: () => void renameDocument(),
+                  }, "保存"),
+                ),
+              ),
+            )
+            : h(
+              "div",
+              { className: "anw-title-edit-form" },
             h("label", { htmlFor: "anw-document-title-input" }, document.kind === "chapter" ? "章节标题" : "文档标题"),
             h(Input, {
               ref: (node: AssistantTitleInputRef | null) => {
@@ -1566,6 +1636,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     onBack: () => { clearWorkbenchRoute(); window.location.assign(APP_PATH); },
     onError: setError,
     assistantWorkspaceLayout: props.assistantWorkspaceLayout,
+    selectionEditReviewHost: props.selectionEditReviewHost,
   });
 
   const chapterDocuments = (novel?.tree ?? []).flatMap((volume: VolumeRecord) => volume.documents)

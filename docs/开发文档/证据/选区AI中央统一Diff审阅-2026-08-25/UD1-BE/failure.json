@@ -1,0 +1,23 @@
+{
+  "model_reply_shape": {
+    "replacement_text": "她攥紧车票。",
+    "short_summary": "润色。",
+    "diff_segments": []
+  },
+  "failure": {
+    "http_status": 502,
+    "type": "model_verification_failed",
+    "job": {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "kind": "selection_edit",
+      "state": "failed",
+      "execution_agent_id": "ai-novel-writer",
+      "requested_provider_id": "provider-redacted",
+      "requested_model_id": "effective-model-redacted",
+      "actual_provider_id": "provider-redacted",
+      "actual_model_id": "effective-model-redacted",
+      "failure_message": "模型选区编辑结果必须且只能包含 replacement_text 与 short_summary"
+    }
+  },
+  "data_effect": "没有完成 output_json，没有字段 Adapter 或正式正文写入"
+}

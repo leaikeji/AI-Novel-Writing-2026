@@ -11,6 +11,7 @@ import {
 } from "./assistant-context-store";
 import type {
   EditableFieldAdapter,
+  EditableFieldPersistenceBaseline,
   EditableFieldRegistration,
 } from "./assistant-fields";
 import { resolveSelectionDocumentId } from "./assistant-selection-registry";
@@ -26,6 +27,10 @@ export interface AssistantContextScopeInput {
   id: string;
   kind: AssistantContextScopeKind;
   envelope: NovelAssistantContextEnvelope;
+  /** Current CAS/version evidence for selection_edit input snapshots. */
+  persistenceBaseline?:
+    | EditableFieldPersistenceBaseline
+    | (() => EditableFieldPersistenceBaseline);
 }
 
 
@@ -51,6 +56,8 @@ export interface AssistantEditableFieldContext {
   readonly documentId: string;
   readonly fieldId: string;
   readonly contextRevision: number;
+  readonly envelope: NovelAssistantContextEnvelope;
+  readonly persistenceBaseline: EditableFieldPersistenceBaseline;
 }
 
 
@@ -95,6 +102,7 @@ interface RuntimeScope {
   id: string;
   kind: AssistantContextScopeKind;
   envelope: NovelAssistantContextEnvelope;
+  persistenceBaseline?: AssistantContextScopeInput["persistenceBaseline"];
   store: NovelAssistantContextStore;
   unsubscribe: () => void;
   active: boolean;
@@ -116,6 +124,36 @@ function emptyStatus(): NovelAssistantContextStoreStatus {
     selectionCharacters: 0,
     disposed: false,
   };
+}
+
+
+function normalizePersistenceBaseline(
+  scope: RuntimeScope,
+  adapter: EditableFieldAdapter,
+): EditableFieldPersistenceBaseline {
+  const configured = typeof scope.persistenceBaseline === "function"
+    ? scope.persistenceBaseline()
+    : scope.persistenceBaseline;
+  if (configured) {
+    const validVersion = configured.version === null
+      || (Number.isSafeInteger(configured.version) && configured.version > 0);
+    if (!validVersion
+      || (configured.kind === "none") !== (configured.version === null)) {
+      throw new Error("assistant persistence baseline is invalid");
+    }
+    return Object.freeze({ ...configured });
+  }
+  if (adapter.persistence === "autosave") {
+    const draftVersion = scope.envelope.document?.draftVersion;
+    if (!Number.isSafeInteger(draftVersion) || Number(draftVersion) <= 0) {
+      throw new Error("assistant autosave field is missing a draft baseline");
+    }
+    return Object.freeze({ kind: "draft", version: Number(draftVersion) });
+  }
+  if (!scope.envelope.entity?.id) {
+    return Object.freeze({ kind: "none", version: null });
+  }
+  throw new Error("assistant persisted form is missing an entity baseline");
 }
 
 
@@ -172,6 +210,7 @@ export class NovelAssistantContextRuntime {
       id,
       kind: input.kind,
       envelope: input.envelope,
+      persistenceBaseline: input.persistenceBaseline,
       store,
       unsubscribe: () => undefined,
       active: true,
@@ -260,6 +299,8 @@ export class NovelAssistantContextRuntime {
       documentId: resolveSelectionDocumentId(scope.envelope),
       fieldId: resolvedFieldId,
       contextRevision: scope.store.getStatus().contextRevision,
+      envelope: scope.envelope,
+      persistenceBaseline: normalizePersistenceBaseline(scope, adapter),
     };
   }
 

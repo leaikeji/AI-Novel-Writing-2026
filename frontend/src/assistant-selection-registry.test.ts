@@ -93,7 +93,9 @@ describe("AssistantSelectionRegistry", () => {
     expect(record).toEqual({
       ...BASE_SCOPE,
       selectionId: UUIDS[0],
+      delivery: { kind: "unbound" },
       sessionId: undefined,
+      jobId: undefined,
       startUtf16: 1,
       endUtf16: 2,
       direction: "forward",
@@ -120,6 +122,25 @@ describe("AssistantSelectionRegistry", () => {
 
     expect(record.text).toBe("😀");
     expect(record.endUtf16 - record.startUtf16).toBe(2);
+  });
+
+  it("keeps explicitly supplied legacy chat sessions on the chat delivery path", async () => {
+    const registry = new AssistantSelectionRegistry({
+      idProvider: sequentialIds(),
+    });
+
+    const record = await registry.create(selectionInput({ sessionId: "session-legacy" }));
+
+    expect(record.sessionId).toBe("session-legacy");
+    expect(record.delivery).toEqual({
+      kind: "chat-session",
+      sessionId: "session-legacy",
+    });
+    expect(registry.bindToEditorTask({
+      ...BASE_SCOPE,
+      selectionId: record.selectionId,
+      jobId: "job-1",
+    })).toEqual({ ok: false, reason: "delivery-mismatch" });
   });
 
   it("rejects empty/out-of-range selections, weak ids and invalid registry bounds", async () => {
@@ -203,6 +224,45 @@ describe("AssistantSelectionRegistry", () => {
     expect(sameSession.ok && sameSession.status).toBe("already-bound");
     expect(otherSession).toEqual({ ok: false, reason: "session-mismatch" });
     expect(registry.get(record.selectionId)?.sessionId).toBe("session-1");
+    expect(registry.get(record.selectionId)?.delivery).toEqual({
+      kind: "chat-session",
+      sessionId: "session-1",
+    });
+  });
+
+  it("atomically binds the editor task and never crosses into chat delivery", async () => {
+    const registry = new AssistantSelectionRegistry({
+      idProvider: sequentialIds(),
+    });
+    const record = await registry.create(selectionInput());
+    const request = {
+      ...BASE_SCOPE,
+      selectionId: record.selectionId,
+      jobId: "job-1",
+    };
+
+    expect(registry.bindToEditorTask(request)).toMatchObject({
+      ok: true,
+      status: "bound",
+    });
+    expect(registry.bindToEditorTask(request)).toMatchObject({
+      ok: true,
+      status: "already-bound",
+    });
+    expect(registry.bindToEditorTask({ ...request, jobId: "job-2" })).toEqual({
+      ok: false,
+      reason: "job-mismatch",
+    });
+    expect(registry.bindToSession({
+      ...BASE_SCOPE,
+      selectionId: record.selectionId,
+      sessionId: "session-1",
+    })).toEqual({ ok: false, reason: "delivery-mismatch" });
+    expect(registry.get(record.selectionId)).toMatchObject({
+      jobId: "job-1",
+      sessionId: undefined,
+      delivery: { kind: "editor-task", jobId: "job-1" },
+    });
   });
 
   it("does not bind when Agent, work, document, field or revision changed", async () => {
@@ -259,6 +319,37 @@ describe("AssistantSelectionRegistry", () => {
       ...applyInput,
       sessionId: "session-2",
     })).resolves.toEqual({ ok: false, reason: "session-mismatch" });
+  });
+
+  it("requires the bound editor job and unchanged full field before apply", async () => {
+    const registry = new AssistantSelectionRegistry({
+      idProvider: sequentialIds(),
+    });
+    const record = await registry.create(selectionInput());
+    const applyInput = {
+      ...BASE_SCOPE,
+      selectionId: record.selectionId,
+      jobId: "job-1",
+      fieldValue: "abc",
+    };
+
+    await expect(registry.validateForEditorTaskApply(applyInput)).resolves.toEqual({
+      ok: false,
+      reason: "job-unbound",
+    });
+    registry.bindToEditorTask(applyInput);
+    await expect(registry.validateForEditorTaskApply(applyInput)).resolves.toMatchObject({
+      ok: true,
+      record: { selectionId: record.selectionId },
+    });
+    await expect(registry.validateForEditorTaskApply({
+      ...applyInput,
+      fieldValue: "abC",
+    })).resolves.toEqual({ ok: false, reason: "source-value-changed" });
+    await expect(registry.validateForEditorTaskApply({
+      ...applyInput,
+      jobId: "job-2",
+    })).resolves.toEqual({ ok: false, reason: "job-mismatch" });
   });
 
   it("cleans expired, previous-work and destroyed-field selections", async () => {

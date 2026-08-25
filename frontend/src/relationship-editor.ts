@@ -245,6 +245,15 @@ export function mountRelationshipAssistantScope(
   const scope = runtime.mountScope({
     id: `modal:relationship:${options.novelId}:${options.draftKey}`,
     kind: "modal",
+    persistenceBaseline: () => {
+      const draft = options.getDraft();
+      if (!draft || draft.key !== options.draftKey) {
+        throw new Error("relationship assistant draft is no longer available");
+      }
+      return draft.id && draft.expected_version
+        ? { kind: "entity" as const, version: draft.expected_version }
+        : { kind: "none" as const, version: null };
+    },
     envelope: {
       agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
       novel: { id: options.novelId, title: novelTitle },

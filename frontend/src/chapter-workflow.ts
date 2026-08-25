@@ -89,6 +89,7 @@ interface ChapterWorkflowProps {
   generateActionRef?: { current: (() => void) | null };
   onBodyGenerationStateChange?: (active: boolean, stage: string) => void;
   onAssistantModalStateChange?: (open: boolean) => void;
+  selectionEditReviewHost?: unknown;
 }
 
 
@@ -152,7 +153,7 @@ export interface AssistantTextControl {
 
 export interface ChapterAssistantLocation {
   novel: Pick<NovelRecord, "id" | "title">;
-  document: Pick<DocumentRecord, "id" | "volume_id" | "kind" | "title" | "draft_version" | "content_hash">;
+  document: Pick<DocumentRecord, "id" | "volume_id" | "kind" | "title" | "version" | "draft_version" | "content_hash">;
   chapterNumber?: number;
   dirty: boolean;
 }
@@ -210,6 +211,7 @@ export interface ChapterTitleAssistantBindingOptions extends ChapterFormAssistan
 
 
 export interface ChapterOutlineAssistantBindingOptions extends ChapterFormAssistantBindingOptions {
+  getPersistenceVersion: () => number;
   getForm: () => BriefFormState;
   getBaseline: () => BriefFormState;
   applyField: <K extends keyof BriefFormState>(
@@ -327,6 +329,10 @@ export function mountChapterBodyAssistantScope(
     id: `page:chapter:${options.location.document.id}`,
     kind: "page",
     envelope: chapterAssistantEnvelope(options.location),
+    persistenceBaseline: () => ({
+      kind: "draft",
+      version: options.location.document.draft_version,
+    }),
   });
   const adapter = createAssistantBodyFieldAdapter({
     id: CHAPTER_BODY_FIELD_ID,
@@ -363,6 +369,10 @@ export function mountChapterTitleAssistantScope(
     id: `modal:chapter-title:${options.location.document.id}`,
     kind: "modal",
     envelope: chapterAssistantEnvelope(options.location, "title-editor"),
+    persistenceBaseline: () => ({
+      kind: "entity",
+      version: options.location.document.version,
+    }),
   });
   const adapter = createAssistantFormFieldAdapter({
     id: CHAPTER_TITLE_FIELD_ID,
@@ -441,6 +451,10 @@ export function mountChapterOutlineAssistantScope(
     id: `modal:chapter-outline:${options.location.document.id}`,
     kind: "modal",
     envelope: chapterAssistantEnvelope(options.location, "chapter-outline-editor"),
+    persistenceBaseline: () => ({
+      kind: "entity",
+      version: options.getPersistenceVersion(),
+    }),
   });
   const adapters = {} as ChapterOutlineAssistantAdapters;
   const registrations: EditableFieldRegistration[] = [];
@@ -622,6 +636,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     generateActionRef,
     onBodyGenerationStateChange,
     onAssistantModalStateChange,
+    selectionEditReviewHost: SelectionEditReviewHost,
   } = props;
   const [brief, setBrief] = React.useState(null as ChapterBriefRecord | null);
   const [briefForm, setBriefForm] = React.useState(EMPTY_BRIEF_FORM);
@@ -717,6 +732,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         chapterNumber,
         dirty: assistantBriefFormIsDirty(briefFormRef.current, briefBaselineRef.current),
       },
+      getPersistenceVersion: () => {
+        if (!brief || brief.version < 1) {
+          throw new Error("章纲尚未建立可比较的保存版本");
+        }
+        return brief.version;
+      },
       getForm: () => briefFormRef.current,
       getBaseline: () => briefBaselineRef.current,
       getSelection: (fieldId) => {
@@ -751,7 +772,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       }
       binding.dispose();
     };
-  }, [briefOpen, chapterNumber, document.id, novel.id, onStatus]);
+  }, [brief?.version, briefOpen, chapterNumber, document.id, novel.id, onStatus]);
 
   const getAssistantBriefControl = (fieldId: ChapterOutlineFieldId): AssistantControlRefs => {
     const current = assistantBriefControlRefs.current[fieldId];
@@ -1282,7 +1303,74 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         h("button", { key: "cancel", type: "button", className: "anw-outline-edit-cancel", onClick: () => setBriefOpen(false) }, "取消"),
         h(Button, { key: "save", className: "anw-outline-edit-save", type: "primary", loading: busyAction === "brief-save", disabled: briefSaveDisabled, onClick: saveBrief }, "保存章纲"),
       ],
-    }, h("div", { className: "anw-outline-edit-body" },
+    }, SelectionEditReviewHost
+      ? h(
+        SelectionEditReviewHost,
+        {
+          fieldIds: Object.values(CHAPTER_OUTLINE_FIELD_IDS),
+          className: "anw-outline-selection-review-host",
+        },
+        h("div", { className: "anw-outline-edit-body" },
+          h("label", { className: "anw-outline-edit-field" },
+            h("strong", null, "章节大纲"),
+            h(TextArea, {
+              ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.outlineText),
+              maxLength: 30000,
+              "aria-label": "章节大纲",
+              value: briefForm.outlineText,
+              onChange: (event: any) => updateBriefField(
+                CHAPTER_OUTLINE_FIELD_IDS.outlineText,
+                "outlineText",
+                event.target.value,
+              ),
+              placeholder: "请输入章节大纲...",
+            }),
+          ),
+          h("label", { className: "anw-outline-edit-field anw-outline-edit-target" },
+            h("strong", null, "目标字数"),
+            h(Input, {
+              ...assistantBriefControlProps(CHAPTER_OUTLINE_FIELD_IDS.targetCharacters),
+              type: "number",
+              min: 500,
+              max: 10000,
+              step: 100,
+              inputMode: "numeric",
+              "aria-label": "目标字数",
+              value: briefForm.targetWordCount,
+              onChange: (event: any) => {
+                const value = Number(event.target.value);
+                if (Number.isFinite(value)) updateBriefField(
+                  CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
+                  "targetWordCount",
+                  value,
+                );
+              },
+            }),
+            h("small", null, "建议范围：500-10000字"),
+          ),
+          ...OUTLINE_FIELD_SPECS.filter((spec) => !new Set<string>([
+            CHAPTER_OUTLINE_FIELD_IDS.outlineText,
+            CHAPTER_OUTLINE_FIELD_IDS.targetCharacters,
+          ]).has(spec.id)).map((spec) => h(
+            "label",
+            { key: spec.id, className: "anw-outline-edit-field" },
+            h("strong", null, spec.label),
+            h(TextArea, {
+              ...assistantBriefControlProps(spec.id),
+              rows: spec.id === CHAPTER_OUTLINE_FIELD_IDS.expectation
+                || spec.id === CHAPTER_OUTLINE_FIELD_IDS.forbidden ? 3 : 2,
+              "aria-label": spec.label,
+              value: spec.serialize(briefForm[spec.key]),
+              onChange: (event: any) => updateBriefField(
+                spec.id,
+                spec.key,
+                spec.parse(event.target.value) as never,
+              ),
+            }),
+          )),
+        ),
+      )
+      : h("div", { className: "anw-outline-edit-body" },
       h("label", { className: "anw-outline-edit-field" },
         h("strong", null, "章节大纲"),
         h(TextArea, {

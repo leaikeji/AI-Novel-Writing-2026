@@ -1,0 +1,27 @@
+{
+  "same_canonical_input": {
+    "scope_type": "novel",
+    "scope_id": "00000000-0000-0000-0000-000000000010",
+    "kind": "selection_edit",
+    "input_hash": "sha256-redacted",
+    "requested_provider_id": "provider-redacted",
+    "requested_model_id": "effective-model-redacted"
+  },
+  "first_completed_request": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "state": "ready",
+    "attempt": 1
+  },
+  "repeated_force_new_false": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "state": "ready",
+    "attempt": 1,
+    "should_execute": false
+  },
+  "explicit_force_new_true": {
+    "id": "00000000-0000-0000-0000-000000000003",
+    "state": "running",
+    "attempt": 2,
+    "should_execute": true
+  }
+}

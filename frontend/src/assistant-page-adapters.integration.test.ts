@@ -19,6 +19,7 @@ function location(documentId = "document-1") {
       volume_id: "volume-1",
       kind: "chapter" as const,
       title: "退回的旧木盒",
+      version: 4,
       draft_version: 9,
       content_hash: "a".repeat(64),
     },
@@ -250,6 +251,7 @@ describe("real chapter page assistant adapters", () => {
     const modal = adapters.mountChapterOutlineAssistantScope({
       runtime: contextRuntime,
       location: location(),
+      getPersistenceVersion: () => 3,
       getForm: () => form,
       getBaseline: () => baseline,
       getSelection: () => null,

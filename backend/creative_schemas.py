@@ -2,10 +2,251 @@
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+SELECTION_EDIT_OPERATIONS = (
+    "polish",
+    "rewrite",
+    "expand",
+    "shorten",
+    "dialogue",
+    "review",
+    "custom",
+)
+SELECTION_EDIT_ENTITY_TYPES = (
+    "document",
+    "outline",
+    "character",
+    "relationship",
+    "storyline",
+    "foreshadow",
+    "setting",
+)
+SELECTION_EDIT_FIELD_IDS = frozenset(
+    {
+        "chapter.body",
+        "chapter.title",
+        "chapter.outline",
+        "chapter.outline.targetCharacters",
+        "chapter.outline.expectation",
+        "chapter.outline.forbidden",
+        "chapter.outline.roles.required",
+        "chapter.outline.roles.allowed",
+        "chapter.outline.roles.contextOnly",
+        "chapter.outline.roles.forbidden",
+        "outline.targetChapterCount",
+        "outline.background",
+        "outline.plot",
+        "outline.highlight",
+        "outline.character.roleType",
+        "outline.character.name",
+        "outline.character.gender",
+        "outline.character.age",
+        "outline.character.personality",
+        "outline.character.identity",
+        "outline.character.description",
+        "character.roleType",
+        "character.name",
+        "character.gender",
+        "character.age",
+        "character.identity",
+        "character.personality",
+        "character.description",
+        "relationship.sourceCharacterId",
+        "relationship.targetCharacterId",
+        "relationship.kind",
+        "relationship.directionality",
+        "relationship.label",
+        "relationship.description",
+        "storyline.storylineType",
+        "storyline.title",
+        "storyline.description",
+        "storyline.status",
+        "storyline.progress",
+        "foreshadow.title",
+        "foreshadow.content",
+        "foreshadow.latestProgress",
+        "foreshadow.status",
+        "settings.templateName",
+        "settings.genre",
+        "settings.subgenre",
+        "settings.idea",
+    }
+)
+_SELECTION_EDIT_TEMPLATE_FIELD_ID = re.compile(
+    r"^settings\.templateData\.[A-Za-z0-9_.!~*'()%\-]{1,160}$"
+)
+
+
+def is_selection_edit_field_id(value: str) -> bool:
+    """Return whether a field id belongs to the frozen workbench registry."""
+
+    return value in SELECTION_EDIT_FIELD_IDS or bool(
+        _SELECTION_EDIT_TEMPLATE_FIELD_ID.fullmatch(value)
+    )
+
+
+class _StrictSelectionEditModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SelectionEditTarget(_StrictSelectionEditModel):
+    novel_id: UUID
+    document_id: UUID | None = None
+    entity_type: Literal[
+        "document",
+        "outline",
+        "character",
+        "relationship",
+        "storyline",
+        "foreshadow",
+        "setting",
+    ]
+    entity_id: UUID | None = None
+    field_id: str = Field(min_length=1, max_length=200)
+    field_label: str = Field(min_length=1, max_length=200)
+    persistence: Literal["autosave", "explicit-save"]
+    context_revision: int = Field(
+        ge=0,
+        le=9_007_199_254_740_991,
+        strict=True,
+    )
+
+    @model_validator(mode="after")
+    def validate_field_identity(self) -> "SelectionEditTarget":
+        self.field_label = self.field_label.strip()
+        if not self.field_label:
+            raise ValueError("field_label 不能为空")
+        if not is_selection_edit_field_id(self.field_id):
+            raise ValueError("field_id 不属于受控选区字段")
+        expected_entity = (
+            "document"
+            if self.field_id.startswith("chapter.")
+            else "character"
+            if self.field_id.startswith(("character.", "outline.character."))
+            else "relationship"
+            if self.field_id.startswith("relationship.")
+            else "storyline"
+            if self.field_id.startswith("storyline.")
+            else "foreshadow"
+            if self.field_id.startswith("foreshadow.")
+            else "setting"
+            if self.field_id.startswith("settings.")
+            else "outline"
+        )
+        if self.entity_type != expected_entity:
+            raise ValueError("field_id 与 entity_type 不匹配")
+        expected_persistence = (
+            "autosave" if self.field_id == "chapter.body" else "explicit-save"
+        )
+        if self.persistence != expected_persistence:
+            raise ValueError("field_id 与 persistence 不匹配")
+        if self.entity_type == "document":
+            if self.document_id is None or self.entity_id != self.document_id:
+                raise ValueError("文档字段必须绑定同一 document_id/entity_id")
+        elif self.document_id is not None:
+            raise ValueError("非文档字段不得携带 document_id")
+        return self
+
+
+class SelectionEditBase(_StrictSelectionEditModel):
+    field_value_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    persistence_version_kind: Literal["draft", "entity", "none"]
+    persistence_version: int | None = Field(default=None, ge=1, strict=True)
+    start_utf16: int = Field(ge=0, le=50_000_000, strict=True)
+    end_utf16: int = Field(ge=1, le=50_000_000, strict=True)
+    selection_text: str = Field(min_length=1, max_length=12_000)
+    selection_text_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    before: str = Field(default="", max_length=1_500)
+    after: str = Field(default="", max_length=1_500)
+
+    @model_validator(mode="after")
+    def validate_selection_bounds(self) -> "SelectionEditBase":
+        self.field_value_sha256 = self.field_value_sha256.lower()
+        self.selection_text_sha256 = self.selection_text_sha256.lower()
+        if not self.selection_text.strip():
+            raise ValueError("selection_text 不能只包含空白")
+        if self.end_utf16 <= self.start_utf16:
+            raise ValueError("选区 UTF-16 范围无效")
+        utf16_length = len(self.selection_text.encode("utf-16-le")) // 2
+        if self.end_utf16 - self.start_utf16 != utf16_length:
+            raise ValueError("选区 UTF-16 范围与 selection_text 不一致")
+        if self.persistence_version_kind == "none":
+            if self.persistence_version is not None:
+                raise ValueError("none 版本不得携带 persistence_version")
+        elif self.persistence_version is None:
+            raise ValueError("draft/entity 版本必须携带 persistence_version")
+        return self
+
+
+class SelectionEditInputSnapshot(_StrictSelectionEditModel):
+    schema_version: Literal[1]
+    selection_id: UUID
+    operation: Literal[
+        "polish",
+        "rewrite",
+        "expand",
+        "shorten",
+        "dialogue",
+        "review",
+        "custom",
+    ]
+    custom_instruction: str | None = Field(default=None, max_length=2_000)
+    target: SelectionEditTarget
+    base: SelectionEditBase
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_schema_version_type(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or type(value.get("schema_version")) is not int:
+            raise ValueError("schema_version 必须是整数 1")
+        return value
+
+    @model_validator(mode="after")
+    def validate_operation_payload(self) -> "SelectionEditInputSnapshot":
+        instruction = (self.custom_instruction or "").strip()
+        if self.operation == "custom":
+            if not instruction:
+                raise ValueError("custom 操作必须提供 custom_instruction")
+            self.custom_instruction = instruction
+        elif self.custom_instruction is not None:
+            raise ValueError("仅 custom 操作可携带 custom_instruction")
+        if (
+            self.target.persistence == "autosave"
+            and self.base.persistence_version_kind != "draft"
+        ):
+            raise ValueError("autosave 字段必须使用 draft 版本")
+        if (
+            self.target.persistence == "explicit-save"
+            and self.base.persistence_version_kind == "draft"
+        ):
+            raise ValueError("explicit-save 字段不得使用 draft 版本")
+        if self.target.persistence == "explicit-save":
+            expected_version_kind = (
+                "entity" if self.target.entity_id is not None else "none"
+            )
+            if self.base.persistence_version_kind != expected_version_kind:
+                raise ValueError(
+                    "显式保存字段的 entity_id 与 persistence_version_kind 不一致"
+                )
+        try:
+            "".join(
+                (
+                    self.custom_instruction or "",
+                    self.target.field_label,
+                    self.base.selection_text,
+                    self.base.before,
+                    self.base.after,
+                )
+            ).encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ValueError("选区编辑输入包含非法 Unicode 字符") from error
+        return self
 
 
 class CreateNovelDraftRequest(BaseModel):
@@ -185,13 +426,33 @@ class StartCreativeGenerationRequest(BaseModel):
     scope_type: str = Field(min_length=1, max_length=40)
     scope_id: UUID
     kind: str = Field(
-        pattern="^(novel_template|novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_storyline_recommendation|chapter_outline|review)$"
+        pattern="^(novel_template|novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_storyline_recommendation|chapter_outline|review|selection_edit)$"
     )
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     novel_id: UUID | None = None
     document_id: UUID | None = None
     target_character_count: int | None = Field(default=None, ge=1, le=50_000)
     force_new: bool = False
+
+    @model_validator(mode="after")
+    def validate_selection_edit_request(self) -> "StartCreativeGenerationRequest":
+        if self.kind != "selection_edit":
+            return self
+        snapshot = SelectionEditInputSnapshot.model_validate(self.input_snapshot)
+        target = snapshot.target
+        if self.novel_id != target.novel_id:
+            raise ValueError("selection_edit novel_id 与 target 不匹配")
+        if self.document_id != target.document_id:
+            raise ValueError("selection_edit document_id 与 target 不匹配")
+        if target.entity_type == "document":
+            if self.scope_type != "document" or self.scope_id != target.document_id:
+                raise ValueError("文档选区任务必须使用 document scope")
+        elif self.scope_type != "novel" or self.scope_id != target.novel_id:
+            raise ValueError("非文档选区任务必须使用 novel scope")
+        if self.target_character_count is not None:
+            raise ValueError("selection_edit 不接受 target_character_count")
+        self.input_snapshot = snapshot.model_dump(mode="json")
+        return self
 
 
 class UpdateVolumeRequest(BaseModel):

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AssistantSelectionController,
   type AssistantSelectionAnchor,
+  type AssistantSelectionControllerOptions,
   type AssistantSelectionEventTarget,
 } from "./assistant-selection-controller";
 import { NovelAssistantContextRuntime } from "./assistant-context-runtime";
@@ -63,7 +64,7 @@ function setup(options: {
   sha256?: (value: string) => Promise<string>;
   now?: () => number;
   documentTarget?: FakeEvents;
-  copyCommand?: (command: string) => void | Promise<void>;
+  onStartEditorTask?: AssistantSelectionControllerOptions["onStartEditorTask"];
 } = {}) {
   let value = "潮声从旧木盒里传来。";
   let selection: SelectionSnapshot | null = {
@@ -115,11 +116,14 @@ function setup(options: {
     sha256: options.sha256 ?? (async () => SHA),
     now: options.now,
   });
+  const onStartEditorTask = options.onStartEditorTask ?? vi.fn(
+    async () => ({ jobId: "job-1" }),
+  );
   const controller = new AssistantSelectionController({
     runtime,
     registry,
     suggestions: suggestions.registry,
-    copyCommand: options.copyCommand,
+    onStartEditorTask,
     documentTarget: options.documentTarget ?? null,
     windowTarget: null,
     getViewportRect: () => ({ left: 0, top: 0, width: 1920, height: 1080 }),
@@ -144,6 +148,7 @@ function setup(options: {
     registry,
     controller,
     suggestions,
+    onStartEditorTask,
     anchor,
     setValue(next: string) { value = next; },
     setSelection(next: SelectionSnapshot | null) { selection = next; },
@@ -152,7 +157,7 @@ function setup(options: {
 
 
 describe("assistant selection controller", () => {
-  it("captures through the active adapter, publishes field-anchor UX and registers an explicit send suggestion", async () => {
+  it("captures through the active adapter and starts an editor task in one click", async () => {
     const harness = setup({ sessionId: "session-1" });
 
     await expect(harness.controller.capture(harness.anchor)).resolves.toBe(true);
@@ -169,70 +174,67 @@ describe("assistant selection controller", () => {
     expect(harness.runtime.getStatus().selectionCharacters).toBe(2);
 
     expect(harness.controller.selectOperation("polish")).toBe(true);
-    const [suggestionId] = harness.suggestions.registry.registeredIds();
-    const suggestion = harness.suggestions.definitions.get(suggestionId);
-    expect(suggestion?.items[0]).toMatchObject({
-      label: "/polish-selection · 润色选区",
-    });
-    expect(harness.controller.getState().message).toContain("输入框键入该命令");
-    expect(suggestion?.items[0].value).toBe("polish-selection");
+    await Promise.resolve();
+    await Promise.resolve();
 
-    const record = harness.registry.get(SELECTION_ID)!;
-    expect(harness.controller.bindSelectionForSend({
-      selectionId: record.selectionId,
-      sessionId: "session-1",
-      agentId: record.agentId,
-      novelId: record.novelId,
-      documentId: record.documentId,
-      fieldId: record.fieldId,
-      contextRevision: record.contextRevision,
-    })).toBe(true);
+    expect(harness.onStartEditorTask).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "polish",
+      record: expect.objectContaining({ selectionId: SELECTION_ID }),
+    }));
     expect(harness.controller.getState()).toMatchObject({ phase: "sent", visible: false });
     expect(harness.suggestions.registry.registeredIds()).toEqual([]);
+    expect(harness.registry.get(SELECTION_ID)?.delivery).toEqual({
+      kind: "editor-task",
+      jobId: "job-1",
+    });
   });
 
-  it("copies a fixed selection command and gives an exact native-sender handoff", async () => {
-    const copyCommand = vi.fn(async () => undefined);
-    const harness = setup({ sessionId: "session-1", copyCommand });
+  it("does not create a suggestion or touch a clipboard-style callback on the default path", async () => {
+    const start = vi.fn(async () => ({ jobId: "job-2" }));
+    const harness = setup({ sessionId: "session-1", onStartEditorTask: start });
     await harness.controller.capture(harness.anchor);
 
     expect(harness.controller.selectOperation("polish")).toBe(true);
     await Promise.resolve();
 
-    expect(copyCommand).toHaveBeenCalledWith("/polish-selection");
-    expect(harness.controller.getState()).toMatchObject({
-      phase: "suggested",
-      operation: "polish",
-    });
-    expect(harness.controller.getState().message).toContain("⌘V");
-    expect(harness.controller.getState().message).toContain("点击发送开始润色");
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(harness.suggestions.registry.registeredIds()).toEqual([]);
   });
 
-  it("copies a custom command with a trailing space for the author's request", async () => {
-    const copyCommand = vi.fn(async () => undefined);
-    const harness = setup({ copyCommand });
+  it("collects and validates a custom instruction before starting", async () => {
+    const start = vi.fn(async () => ({ jobId: "job-custom" }));
+    const harness = setup({ onStartEditorTask: start });
     await harness.controller.capture(harness.anchor);
 
     expect(harness.controller.selectOperation("custom")).toBe(true);
+    expect(harness.controller.getState()).toMatchObject({
+      phase: "customizing",
+      visible: true,
+    });
+    expect(start).not.toHaveBeenCalled();
+    expect(harness.controller.submitCustomInstruction("   ")).toBe(false);
+    expect(harness.controller.submitCustomInstruction("保留事实，改成克制语气")).toBe(true);
     await Promise.resolve();
-
-    expect(copyCommand).toHaveBeenCalledWith("/custom-selection ");
-    expect(harness.controller.getState().message).toContain("补充要求后点击发送");
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "custom",
+      customInstruction: "保留事实，改成克制语气",
+    }));
   });
 
-  it("keeps the public slash-suggestion fallback when clipboard copying fails", async () => {
-    const harness = setup({
-      copyCommand: async () => { throw new Error("denied"); },
-    });
+  it("keeps the public slash suggestion only as an explicit fallback", async () => {
+    const harness = setup();
     await harness.controller.capture(harness.anchor);
 
-    expect(harness.controller.selectOperation("rewrite")).toBe(true);
-    await Promise.resolve();
-    await Promise.resolve();
+    expect(harness.controller.prepareAssistantFallback(SELECTION_ID, "rewrite")).toBe(true);
+    const [suggestionId] = harness.suggestions.registry.registeredIds();
+    const suggestion = harness.suggestions.definitions.get(suggestionId);
 
-    expect(harness.controller.getState().message).toContain("复制失败");
-    expect(harness.controller.getState().message).toContain("/rewrite-selection");
+    expect(suggestion?.items[0]).toMatchObject({
+      label: "/rewrite-selection · 改写选区",
+      value: "rewrite-selection",
+    });
     expect(harness.suggestions.registry.registeredIds()).toHaveLength(1);
+    expect(harness.onStartEditorTask).not.toHaveBeenCalled();
   });
 
   it("does not lose the logical field on blur, but invalidates after an actual field mutation", async () => {
@@ -256,17 +258,18 @@ describe("assistant selection controller", () => {
     stop();
   });
 
-  it("keeps the registered suggestion when the native sender receives mouse/select events", async () => {
+  it("keeps an explicitly registered fallback when the native sender receives mouse/select events", async () => {
     const events = new FakeEvents();
     const harness = setup({ sessionId: "session-1", documentTarget: events });
     const stop = harness.controller.start();
     await harness.controller.capture(harness.anchor);
-    expect(harness.controller.selectOperation("polish")).toBe(true);
+    expect(harness.controller.prepareAssistantFallback(SELECTION_ID, "polish")).toBe(true);
     const registered = harness.suggestions.registry.registeredIds();
 
     const nativeSender: AssistantSelectionAnchor = {
       ...harness.anchor,
       getBoundingClientRect: () => ({ left: 1400, top: 900, width: 360, height: 96 }),
+      closest: (selector: string) => selector === ".anw-assistant-pane" ? {} : null,
     };
     events.emit("mouseup", nativeSender);
     events.emit("select", nativeSender);
@@ -275,7 +278,91 @@ describe("assistant selection controller", () => {
     expect(harness.suggestions.registry.registeredIds()).toEqual(registered);
     expect(harness.controller.getState()).toMatchObject({
       phase: "suggested",
+      visible: false,
       operation: "polish",
+    });
+    expect(harness.registry.get(SELECTION_ID)).toBeDefined();
+    expect(harness.runtime.getStatus().selectionCharacters).toBe(2);
+    stop();
+  });
+
+  it("clears the logical selection when the active field range collapses", async () => {
+    const events = new FakeEvents();
+    const harness = setup({ sessionId: "session-1", documentTarget: events });
+    const stop = harness.controller.start();
+    await harness.controller.capture(harness.anchor);
+    harness.setSelection(null);
+    events.emit("keyup", harness.anchor);
+    await Promise.resolve();
+
+    expect(harness.controller.getState()).toMatchObject({
+      phase: "idle",
+      visible: false,
+      selectedCharacters: 0,
+    });
+    expect(harness.registry.get(SELECTION_ID)).toBeUndefined();
+    expect(harness.suggestions.registry.registeredIds()).toEqual([]);
+    expect(harness.runtime.getStatus().selectionCharacters).toBe(0);
+    stop();
+  });
+
+  it("hides on assistant focus without breaking the native-sender handoff", async () => {
+    const events = new FakeEvents();
+    const harness = setup({ sessionId: "session-1", documentTarget: events });
+    const stop = harness.controller.start();
+    await harness.controller.capture(harness.anchor);
+    expect(harness.controller.prepareAssistantFallback(SELECTION_ID, "rewrite")).toBe(true);
+
+    events.emit("focusin", {
+      closest: (selector: string) => selector === ".anw-assistant-pane" ? {} : null,
+    });
+
+    expect(harness.controller.getState()).toMatchObject({
+      phase: "suggested",
+      visible: false,
+      operation: "rewrite",
+    });
+    expect(harness.registry.get(SELECTION_ID)).toBeDefined();
+    expect(harness.suggestions.registry.registeredIds()).toHaveLength(1);
+    expect(harness.runtime.getStatus().selectionCharacters).toBe(2);
+
+    stop();
+    expect(events.count("focusin")).toBe(0);
+  });
+
+  it("clears a stale selection when focus moves elsewhere in the workbench", async () => {
+    const events = new FakeEvents();
+    const harness = setup({ sessionId: "session-1", documentTarget: events });
+    const stop = harness.controller.start();
+    await harness.controller.capture(harness.anchor);
+    events.emit("focusin", { closest: () => null });
+
+    expect(harness.controller.getState()).toMatchObject({
+      phase: "idle",
+      visible: false,
+      selectedCharacters: 0,
+    });
+    expect(harness.registry.get(SELECTION_ID)).toBeUndefined();
+    expect(harness.suggestions.registry.registeredIds()).toEqual([]);
+    expect(harness.runtime.getStatus().selectionCharacters).toBe(0);
+    stop();
+  });
+
+  it("does not auto-close for pointer events inside the selection toolbar", async () => {
+    const events = new FakeEvents();
+    const harness = setup({ documentTarget: events });
+    const stop = harness.controller.start();
+    await harness.controller.capture(harness.anchor);
+
+    events.emit("mouseup", {
+      closest: (selector: string) => selector === "[data-assistant-selection-toolbar]"
+        ? {}
+        : null,
+    });
+
+    expect(harness.controller.getState()).toMatchObject({
+      phase: "ready",
+      visible: true,
     });
     stop();
   });
@@ -333,6 +420,7 @@ describe("assistant selection controller", () => {
     harness.controller.start();
     await harness.controller.capture(harness.anchor);
     const record = harness.registry.get(SELECTION_ID)!;
+    expect(harness.controller.prepareAssistantFallback(SELECTION_ID, "polish")).toBe(true);
     expect(harness.controller.bindSelectionForSend({
       selectionId: record.selectionId,
       sessionId: "session-1",

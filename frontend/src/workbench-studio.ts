@@ -849,6 +849,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
       {
         id: `studio:modal:outline:${novel.id}:${draft.id}:step-${step}`,
         kind: "modal",
+        persistenceBaseline: () => ({ kind: "entity", version: draftRef.current?.version ?? 0 }),
         envelope: {
           agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
           novel: { id: novel.id, title: novel.title },
@@ -916,6 +917,7 @@ function OutlineWizard({ novel, open, startStep, onClose, onGoChapters, onComple
       {
         id: `studio:modal:outline-character:${novel.id}:${draft.id}:${characterIndex}`,
         kind: "modal",
+        persistenceBaseline: { kind: "none", version: null },
         envelope: {
           agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
           novel: { id: novel.id, title: novel.title },
@@ -2150,6 +2152,9 @@ export function StudioProjectView({
       {
         id: `studio:modal:character:${novel.id}:${characterEditing?.id ?? "new"}`,
         kind: "modal",
+        persistenceBaseline: characterEditing
+          ? { kind: "entity", version: characterEditing.version }
+          : { kind: "none", version: null },
         envelope: {
           ...background,
           page: { ...background.page, modal: "character-editor" },
@@ -2241,6 +2246,9 @@ export function StudioProjectView({
       {
         id: `studio:modal:storyline:${novel.id}:${storylineEditing?.id ?? "new"}`,
         kind: "modal",
+        persistenceBaseline: storylineEditing
+          ? { kind: "entity", version: storylineEditing.version }
+          : { kind: "none", version: null },
         envelope: {
           ...background,
           page: { ...background.page, modal: "storyline-editor" },
@@ -2322,6 +2330,9 @@ export function StudioProjectView({
       {
         id: `studio:modal:foreshadow:${novel.id}:${foreshadowEditing?.id ?? "new"}`,
         kind: "modal",
+        persistenceBaseline: foreshadowEditing
+          ? { kind: "entity", version: foreshadowEditing.version }
+          : { kind: "none", version: null },
         envelope: {
           ...background,
           page: { ...background.page, modal: "foreshadow-editor" },
@@ -2397,6 +2408,7 @@ export function StudioProjectView({
       {
         id: `studio:modal:settings:${novel.id}`,
         kind: "modal",
+        persistenceBaseline: { kind: "entity", version: novel.version },
         envelope: {
           ...background,
           page: { ...background.page, modal: "novel-settings" },

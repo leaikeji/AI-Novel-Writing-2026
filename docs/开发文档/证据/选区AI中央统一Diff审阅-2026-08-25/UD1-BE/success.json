@@ -1,0 +1,72 @@
+{
+  "request": {
+    "scope_type": "novel",
+    "scope_id": "00000000-0000-0000-0000-000000000010",
+    "kind": "selection_edit",
+    "novel_id": "00000000-0000-0000-0000-000000000010",
+    "document_id": null,
+    "target_character_count": null,
+    "force_new": false,
+    "input_snapshot": {
+      "schema_version": 1,
+      "selection_id": "00000000-0000-0000-0000-000000000002",
+      "operation": "polish",
+      "custom_instruction": null,
+      "target": {
+        "novel_id": "00000000-0000-0000-0000-000000000010",
+        "document_id": null,
+        "entity_type": "setting",
+        "entity_id": "00000000-0000-0000-0000-000000000010",
+        "field_id": "settings.idea",
+        "field_label": "创作思路",
+        "persistence": "explicit-save",
+        "context_revision": 3
+      },
+      "base": {
+        "field_value_sha256": "161ce1c033be7fa6aed95e6e59805ab587f4764ef7b334b340a4bc5b13253e5f",
+        "persistence_version_kind": "entity",
+        "persistence_version": 1,
+        "start_utf16": 3,
+        "end_utf16": 15,
+        "selection_text": "她把湿透的车票攥在掌心。",
+        "selection_text_sha256": "c6dadeaff262c28c3b9638d95993b0c5281d0180d6b8544545cba9c5d66e4def",
+        "before": "前文。",
+        "after": "后文。"
+      }
+    }
+  },
+  "result": {
+    "state": "ready",
+    "execution_agent_id": "ai-novel-writer",
+    "requested_provider_id": "provider-redacted",
+    "requested_model_id": "effective-model-redacted",
+    "actual_provider_id": "provider-redacted",
+    "actual_model_id": "effective-model-redacted",
+    "output_json": {
+      "schema_version": 2,
+      "selection_id": "00000000-0000-0000-0000-000000000002",
+      "operation": "polish",
+      "replacement_text": "她把湿透的旧车票攥在掌心。",
+      "short_summary": "补充物件质感，保持原意。",
+      "replacement_character_count": 13,
+      "warnings": [],
+      "diff_segments": [
+        {
+          "segment_id": "seg-0000-2d94886c6404e272",
+          "kind": "equal",
+          "text": "她把湿透的"
+        },
+        {
+          "segment_id": "seg-0001-8412af49c354392a",
+          "kind": "insert",
+          "replacement_text": "旧"
+        },
+        {
+          "segment_id": "seg-0002-bbde4bd2d3f79e71",
+          "kind": "equal",
+          "text": "车票攥在掌心。"
+        }
+      ]
+    }
+  }
+}

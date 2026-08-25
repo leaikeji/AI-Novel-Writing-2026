@@ -57,6 +57,7 @@ from .creative_services import (
     create_novel_character,
     create_private_asset,
     create_storyline,
+    creative_generation_skill,
     delete_character_relationship,
     delete_document,
     delete_foreshadow,
@@ -112,6 +113,10 @@ from .model_runtime import (
     reply_model_audit,
 )
 from .services import NotFoundError, ValidationError, delete_novel
+from .selection_edit_diff import (
+    SelectionEditDiffError,
+    build_selection_edit_result,
+)
 
 
 router = APIRouter()
@@ -950,7 +955,7 @@ async def creative_generations_create(
         ensure_prompt_within_effective_limit(prompt, configured_model)
         reply = await ctx.chat(
             prompt,
-            skill="story-foundation",
+            skill=creative_generation_skill(job),
             session_id=generation_session_id,
         )
         actual_model = reply_model_audit(
@@ -961,6 +966,8 @@ async def creative_generations_create(
         try:
             parsed_output = parse_model_json(reply.text)
         except ModelVerificationError:
+            if str(job["kind"]) == "selection_edit":
+                raise
             # Single-text helpers can safely recover useful prose even when the
             # model omitted its JSON envelope. Kind-aware normalization below
             # still rejects every incomplete structured result.
@@ -970,12 +977,25 @@ async def creative_generations_create(
             parsed_output,
             reply.text,
         )
+        output_text = reply.text
+        if str(job["kind"]) == "selection_edit":
+            snapshot = dict(job.get("input_snapshot") or {})
+            base = dict(snapshot.get("base") or {})
+            output_json = build_selection_edit_result(
+                job_id=str(job["id"]),
+                selection_id=str(snapshot.get("selection_id") or ""),
+                operation=str(snapshot.get("operation") or ""),
+                original_text=str(base.get("selection_text") or ""),
+                replacement_text=str(output_json["replacement_text"]),
+                short_summary=str(output_json["short_summary"]),
+            )
+            output_text = str(output_json["replacement_text"])
         return complete_creative_generation(
             session,
             UUID(str(job["id"])),
             actual_provider_id=actual_model.provider_id,
             actual_model_id=actual_model.model_id,
-            output_text=reply.text,
+            output_text=output_text,
             output_json=output_json,
         )
     except Exception as error:
@@ -994,7 +1014,7 @@ async def creative_generations_create(
             except Exception:
                 session.rollback()
                 failed = job
-            if isinstance(error, ModelVerificationError):
+            if isinstance(error, (ModelVerificationError, SelectionEditDiffError)):
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={"type": "model_verification_failed", "job": failed},
@@ -1007,9 +1027,22 @@ async def creative_generations_create(
 def creative_generations_index(
     scope_type: str = Query(min_length=1, max_length=40),
     scope_id: UUID = Query(),
+    kind: str | None = Query(default=None, min_length=1, max_length=40),
+    selection_id: UUID | None = Query(default=None),
     session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
-    return list_creative_generations(session, scope_type=scope_type, scope_id=scope_id)
+    try:
+        return list_creative_generations(
+            session,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            kind=kind,
+            selection_id=selection_id,
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
 
 
 @router.put("/novels/{novel_id}/volumes/{volume_id}")

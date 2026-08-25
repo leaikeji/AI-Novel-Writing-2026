@@ -44,6 +44,12 @@ export interface SelectionRegistryScope {
 }
 
 
+export type SelectionDelivery =
+  | { readonly kind: "unbound" }
+  | { readonly kind: "editor-task"; readonly jobId: string }
+  | { readonly kind: "chat-session"; readonly sessionId: string };
+
+
 export interface CreateSelectionInput extends SelectionRegistryScope {
   sessionId?: string;
   fieldValue: string;
@@ -55,7 +61,11 @@ export interface CreateSelectionInput extends SelectionRegistryScope {
 
 export interface SelectionRegistryRecord extends SelectionRegistryScope {
   readonly selectionId: string;
+  readonly delivery: SelectionDelivery;
+  /** Compatibility projection for the historical chat proposal path. */
   readonly sessionId?: string;
+  /** Compatibility projection for the editor-task path. */
+  readonly jobId?: string;
   readonly startUtf16: number;
   readonly endUtf16: number;
   readonly direction: EditableFieldSelectionDirection;
@@ -79,6 +89,18 @@ export interface SelectionApplyValidationInput extends SelectionRegistryScope {
 }
 
 
+export interface SelectionEditorTaskBindingInput extends SelectionRegistryScope {
+  selectionId: string;
+  jobId: string;
+}
+
+
+export interface SelectionEditorTaskApplyValidationInput
+  extends SelectionEditorTaskBindingInput {
+  fieldValue: string;
+}
+
+
 export interface SelectionFieldIdentity {
   novelId: string;
   documentId: string;
@@ -96,6 +118,9 @@ export type SelectionInvalidReason =
   | "context-revision-mismatch"
   | "session-unbound"
   | "session-mismatch"
+  | "job-unbound"
+  | "job-mismatch"
+  | "delivery-mismatch"
   | "source-value-changed";
 
 
@@ -116,6 +141,18 @@ export type SelectionSessionBindingResult =
   | {
     ok: false;
     reason: Exclude<SelectionInvalidReason, "session-unbound" | "source-value-changed">;
+  };
+
+
+export type SelectionEditorTaskBindingResult =
+  | {
+    ok: true;
+    status: "bound" | "already-bound";
+    record: SelectionRegistryRecord;
+  }
+  | {
+    ok: false;
+    reason: Exclude<SelectionInvalidReason, "job-unbound" | "source-value-changed">;
   };
 
 
@@ -271,10 +308,15 @@ export class AssistantSelectionRegistry {
       throw new Error("selection expired before registration completed");
     }
 
+    const initialDelivery: SelectionDelivery = input.sessionId
+      ? Object.freeze({ kind: "chat-session" as const, sessionId: input.sessionId })
+      : Object.freeze({ kind: "unbound" as const });
     const record = freezeRecord({
       selectionId,
       agentId: input.agentId,
+      delivery: initialDelivery,
       sessionId: input.sessionId,
+      jobId: undefined,
       novelId: input.novelId,
       documentId: input.documentId,
       fieldId: input.fieldId,
@@ -327,9 +369,12 @@ export class AssistantSelectionRegistry {
     const mismatch = scopeMismatch(lookup.stored.record, input);
     if (mismatch) return { ok: false, reason: mismatch };
 
-    const currentSessionId = lookup.stored.record.sessionId;
-    if (currentSessionId !== undefined) {
-      if (currentSessionId !== input.sessionId) {
+    const delivery = lookup.stored.record.delivery;
+    if (delivery.kind === "editor-task") {
+      return { ok: false, reason: "delivery-mismatch" };
+    }
+    if (delivery.kind === "chat-session") {
+      if (delivery.sessionId !== input.sessionId) {
         return { ok: false, reason: "session-mismatch" };
       }
       return {
@@ -341,7 +386,55 @@ export class AssistantSelectionRegistry {
 
     const boundRecord = freezeRecord({
       ...lookup.stored.record,
+      delivery: Object.freeze({
+        kind: "chat-session" as const,
+        sessionId: input.sessionId,
+      }),
       sessionId: input.sessionId,
+      jobId: undefined,
+    });
+    this.entries.set(input.selectionId, {
+      ...lookup.stored,
+      record: boundRecord,
+    });
+    return { ok: true, status: "bound", record: boundRecord };
+  }
+
+  /** Bind the new default path without borrowing the visible chat session. */
+  bindToEditorTask(
+    input: SelectionEditorTaskBindingInput,
+  ): SelectionEditorTaskBindingResult {
+    this.assertActive();
+    requireNonEmpty(input.jobId, "jobId");
+    const lookup = this.lookupForOperation(input.selectionId);
+    if (!lookup.ok) return lookup;
+
+    const mismatch = scopeMismatch(lookup.stored.record, input);
+    if (mismatch) return { ok: false, reason: mismatch };
+
+    const delivery = lookup.stored.record.delivery;
+    if (delivery.kind === "chat-session") {
+      return { ok: false, reason: "delivery-mismatch" };
+    }
+    if (delivery.kind === "editor-task") {
+      if (delivery.jobId !== input.jobId) {
+        return { ok: false, reason: "job-mismatch" };
+      }
+      return {
+        ok: true,
+        status: "already-bound",
+        record: lookup.stored.record,
+      };
+    }
+
+    const boundRecord = freezeRecord({
+      ...lookup.stored.record,
+      delivery: Object.freeze({
+        kind: "editor-task" as const,
+        jobId: input.jobId,
+      }),
+      sessionId: undefined,
+      jobId: input.jobId,
     });
     this.entries.set(input.selectionId, {
       ...lookup.stored,
@@ -365,6 +458,24 @@ export class AssistantSelectionRegistry {
     const currentValueSha256 = normalizeSha256(await this.sha256(input.fieldValue));
     this.assertActive();
     const afterHash = this.validateBoundOperation(input);
+    if (!afterHash.ok) return afterHash;
+    if (afterHash.record.sourceValueSha256 !== currentValueSha256) {
+      return { ok: false, reason: "source-value-changed" };
+    }
+    return afterHash;
+  }
+
+  async validateForEditorTaskApply(
+    input: SelectionEditorTaskApplyValidationInput,
+  ): Promise<SelectionApplyValidationResult> {
+    this.assertActive();
+    requireNonEmpty(input.jobId, "jobId");
+    const beforeHash = this.validateEditorTaskOperation(input);
+    if (!beforeHash.ok) return beforeHash;
+
+    const currentValueSha256 = normalizeSha256(await this.sha256(input.fieldValue));
+    this.assertActive();
+    const afterHash = this.validateEditorTaskOperation(input);
     if (!afterHash.ok) return afterHash;
     if (afterHash.record.sourceValueSha256 !== currentValueSha256) {
       return { ok: false, reason: "source-value-changed" };
@@ -490,11 +601,33 @@ export class AssistantSelectionRegistry {
     if (!lookup.ok) return lookup;
     const mismatch = scopeMismatch(lookup.stored.record, input);
     if (mismatch) return { ok: false, reason: mismatch };
-    if (lookup.stored.record.sessionId === undefined) {
+    if (lookup.stored.record.delivery.kind === "unbound") {
       return { ok: false, reason: "session-unbound" };
     }
-    if (lookup.stored.record.sessionId !== input.sessionId) {
+    if (lookup.stored.record.delivery.kind !== "chat-session") {
+      return { ok: false, reason: "delivery-mismatch" };
+    }
+    if (lookup.stored.record.delivery.sessionId !== input.sessionId) {
       return { ok: false, reason: "session-mismatch" };
+    }
+    return { ok: true, record: lookup.stored.record };
+  }
+
+  private validateEditorTaskOperation(
+    input: SelectionEditorTaskApplyValidationInput,
+  ): SelectionApplyValidationResult {
+    const lookup = this.lookupForOperation(input.selectionId);
+    if (!lookup.ok) return lookup;
+    const mismatch = scopeMismatch(lookup.stored.record, input);
+    if (mismatch) return { ok: false, reason: mismatch };
+    if (lookup.stored.record.delivery.kind === "unbound") {
+      return { ok: false, reason: "job-unbound" };
+    }
+    if (lookup.stored.record.delivery.kind !== "editor-task") {
+      return { ok: false, reason: "delivery-mismatch" };
+    }
+    if (lookup.stored.record.delivery.jobId !== input.jobId) {
+      return { ok: false, reason: "job-mismatch" };
     }
     return { ok: true, record: lookup.stored.record };
   }

@@ -67,6 +67,8 @@ export type AssistantSelectionPhase =
   | "idle"
   | "capturing"
   | "ready"
+  | "customizing"
+  | "starting"
   | "suggested"
   | "sent"
   | "invalid"
@@ -128,13 +130,30 @@ export interface AssistantSelectionControllerOptions {
   runtime: NovelAssistantContextRuntime;
   registry: AssistantSelectionRegistry;
   suggestions: AssistantSuggestionRegistry;
-  copyCommand?: (command: string) => void | Promise<void>;
+  onStartEditorTask?: (
+    request: AssistantSelectionEditorTaskRequest,
+  ) => void | AssistantSelectionEditorTaskStartResult | Promise<
+    void | AssistantSelectionEditorTaskStartResult
+  >;
   documentTarget?: AssistantSelectionEventTarget | null;
   windowTarget?: AssistantSelectionEventTarget | null;
   getViewportRect?: () => GeometryRect;
   getVisualViewportScale?: () => number;
   getDevicePixelRatio?: () => number;
   now?: () => number;
+}
+
+
+export interface AssistantSelectionEditorTaskRequest {
+  readonly record: SelectionRegistryRecord;
+  readonly fieldLabel: string;
+  readonly operation: AssistantSelectionOperation;
+  readonly customInstruction?: string;
+}
+
+
+export interface AssistantSelectionEditorTaskStartResult {
+  readonly jobId: string;
 }
 
 
@@ -161,6 +180,7 @@ interface ActiveSelection {
 
 const TOOLBAR_DEFAULT_SIZE = Object.freeze({ width: 636, height: 52 });
 const TOOLBAR_SELECTOR = "[data-assistant-selection-toolbar]";
+const ASSISTANT_PANE_SELECTOR = ".anw-assistant-pane";
 
 
 function defaultViewportRect(): GeometryRect {
@@ -213,11 +233,25 @@ function selectionPreview(value: string): string {
 }
 
 
+function isToolbarEventTarget(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Pick<AssistantSelectionAnchor, "closest">;
+  return Boolean(candidate.closest?.(TOOLBAR_SELECTOR));
+}
+
+
+function isAssistantPaneEventTarget(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Pick<AssistantSelectionAnchor, "closest">;
+  return Boolean(candidate.closest?.(ASSISTANT_PANE_SELECTOR));
+}
+
+
 function isTextSelectionAnchor(value: unknown): value is AssistantSelectionAnchor {
   if (!value || typeof value !== "object") return false;
   const candidate = value as AssistantSelectionAnchor;
   if (typeof candidate.getBoundingClientRect !== "function") return false;
-  if (candidate.closest?.(TOOLBAR_SELECTOR)) return false;
+  if (isToolbarEventTarget(candidate)) return false;
   const tagName = candidate.tagName?.toUpperCase();
   return tagName === "INPUT"
     || tagName === "TEXTAREA"
@@ -278,7 +312,6 @@ function scopeMatches(
   record: SelectionRegistryRecord,
 ): boolean {
   return context.agentId === record.agentId
-    && context.sessionId === record.sessionId
     && context.novelId === record.novelId
     && context.documentId === record.documentId
     && context.fieldId === record.fieldId
@@ -287,18 +320,17 @@ function scopeMatches(
 
 
 /**
- * A5's tab-local coordinator.  It reads selections exclusively through the
- * active controlled-field adapter, stores no full field value, and never
- * writes to a field.  QwenPaw 2.1 exposes suggestions but no public imperative
- * send/prefill API, so the controller can copy the exact command during the
- * toolbar click and leaves the final paste/send action in the native sender.
+ * Tab-local selection coordinator. It freezes a controlled-field selection,
+ * starts the project-owned editor task in one click, and retains the public
+ * slash suggestion path only when the author explicitly chooses the fallback.
+ * It never writes a field and never writes to the Clipboard.
  */
 export class AssistantSelectionController {
   private readonly listeners = new Set<AssistantSelectionToolbarListener>();
   private readonly runtime: NovelAssistantContextRuntime;
   private readonly registry: AssistantSelectionRegistry;
   private readonly suggestions: AssistantSuggestionRegistry;
-  private readonly copyCommand?: (command: string) => void | Promise<void>;
+  private readonly onStartEditorTask?: AssistantSelectionControllerOptions["onStartEditorTask"];
   private readonly documentTarget: AssistantSelectionEventTarget | null;
   private readonly windowTarget: AssistantSelectionEventTarget | null;
   private readonly getViewportRect: () => GeometryRect;
@@ -318,7 +350,7 @@ export class AssistantSelectionController {
     this.runtime = options.runtime;
     this.registry = options.registry;
     this.suggestions = options.suggestions;
-    this.copyCommand = options.copyCommand;
+    this.onStartEditorTask = options.onStartEditorTask;
     this.documentTarget = options.documentTarget === undefined
       ? (typeof document !== "undefined" ? document : null)
       : options.documentTarget;
@@ -341,6 +373,7 @@ export class AssistantSelectionController {
     this.documentTarget?.addEventListener("mouseup", this.onSelectionEvent, true);
     this.documentTarget?.addEventListener("keyup", this.onSelectionEvent, true);
     this.documentTarget?.addEventListener("select", this.onSelectionEvent, true);
+    this.documentTarget?.addEventListener("focusin", this.onFocusIn, true);
     this.documentTarget?.addEventListener("compositionstart", this.onCompositionStart, true);
     this.documentTarget?.addEventListener("compositionend", this.onCompositionEnd, true);
     this.documentTarget?.addEventListener("scroll", this.onGeometryChange, true);
@@ -364,6 +397,7 @@ export class AssistantSelectionController {
     this.documentTarget?.removeEventListener("mouseup", this.onSelectionEvent, true);
     this.documentTarget?.removeEventListener("keyup", this.onSelectionEvent, true);
     this.documentTarget?.removeEventListener("select", this.onSelectionEvent, true);
+    this.documentTarget?.removeEventListener("focusin", this.onFocusIn, true);
     this.documentTarget?.removeEventListener("compositionstart", this.onCompositionStart, true);
     this.documentTarget?.removeEventListener("compositionend", this.onCompositionEnd, true);
     this.documentTarget?.removeEventListener("scroll", this.onGeometryChange, true);
@@ -396,6 +430,7 @@ export class AssistantSelectionController {
     if (!initial) return false;
     const selection = initial.adapter.getSelection();
     if (!selection || selection.endUtf16 <= selection.startUtf16 || !selection.text) {
+      this.cancelActiveSelection();
       return false;
     }
     if (selection.text.length > NOVEL_ASSISTANT_SELECTION_MAX_CHARACTERS) {
@@ -430,7 +465,6 @@ export class AssistantSelectionController {
     try {
       record = await this.registry.create({
         agentId: initial.agentId,
-        sessionId: initial.sessionId,
         novelId: initial.novelId,
         documentId: initial.documentId,
         fieldId: initial.fieldId,
@@ -499,62 +533,69 @@ export class AssistantSelectionController {
     if (!ASSISTANT_SELECTION_OPERATIONS.includes(operation)) return false;
     const active = this.validActive();
     if (!active) return false;
-    const suggestionId = this.suggestionId(active.record.selectionId);
-    this.suggestions.upsert({
-      id: suggestionId,
-      items: [buildSelectionSuggestion(active.record, active.fieldLabel, operation)],
-    });
     active.operation = operation;
-    const command = ASSISTANT_SELECTION_OPERATION_COMMANDS[operation];
-    const fallbackMessage = operation === "custom"
-      ? `已准备 ${command}：在右侧助手输入框键入该命令，补充要求后发送`
-      : `已准备 ${command}：在右侧助手输入框键入该命令并发送`;
-    this.publish(freezeState({
-      ...this.readyState(active, this.copyCommand
-        ? `正在复制 ${command}…`
-        : fallbackMessage),
-      phase: "suggested",
-      operation,
-    }));
-    if (this.copyCommand) {
-      const selectionId = active.record.selectionId;
-      const copyValue = operation === "custom" ? `${command} ` : command;
-      let copyResult: void | Promise<void>;
-      try {
-        copyResult = this.copyCommand(copyValue);
-      } catch {
-        copyResult = Promise.reject(new Error("copy failed"));
-      }
-      void Promise.resolve(copyResult).then(() => {
-        const latest = this.validActive(false);
-        if (!latest
-          || latest.record.selectionId !== selectionId
-          || latest.operation !== operation) return;
-        const copiedMessage = operation === "custom"
-          ? `已复制 ${command}；在右侧助手按 ⌘V，补充要求后点击发送`
-          : `已复制 ${command}；在右侧助手按 ⌘V，再点击发送开始${ASSISTANT_SELECTION_OPERATION_LABELS[operation]}`;
-        this.publish(freezeState({
-          ...this.readyState(latest, copiedMessage),
-          phase: "suggested",
-          operation,
-        }));
-      }).catch(() => {
-        const latest = this.validActive(false);
-        if (!latest
-          || latest.record.selectionId !== selectionId
-          || latest.operation !== operation) return;
-        this.publish(freezeState({
-          ...this.readyState(latest, `复制失败；${fallbackMessage}`),
-          phase: "suggested",
-          operation,
-        }));
-      });
+    if (operation === "custom") {
+      this.publish(freezeState({
+        ...this.readyState(active, "输入本次修改要求（最多 2000 字）"),
+        phase: "customizing",
+        operation,
+      }));
+      return true;
+    }
+    this.startEditorTask(active, operation);
+    return true;
+  }
+
+  submitCustomInstruction(instruction: string): boolean {
+    const active = this.validActive();
+    const normalized = instruction.trim();
+    if (!active || active.operation !== "custom") return false;
+    if (!normalized || normalized.length > 2_000) {
+      this.publish(freezeState({
+        ...this.readyState(active, normalized
+          ? "自定义要求不能超过 2000 字"
+          : "请输入本次修改要求"),
+        phase: "customizing",
+        operation: "custom",
+      }));
+      return false;
+    }
+    this.startEditorTask(active, "custom", normalized);
+    return true;
+  }
+
+  /** Explicit compatibility path. It registers a public suggestion only. */
+  prepareAssistantFallback(
+    selectionId: string,
+    operation: AssistantSelectionOperation,
+  ): boolean {
+    const record = this.registry.get(selectionId);
+    if (!record || record.delivery.kind === "editor-task") return false;
+    const active = this.active?.record.selectionId === selectionId
+      ? this.active
+      : undefined;
+    const fieldLabel = active?.fieldLabel ?? record.fieldId;
+    this.suggestions.upsert({
+      id: this.suggestionId(selectionId),
+      items: [buildSelectionSuggestion(record, fieldLabel, operation)],
+    });
+    if (active) {
+      active.operation = operation;
+      this.publish(freezeState({
+        ...this.readyState(active, `已准备 ${ASSISTANT_SELECTION_OPERATION_COMMANDS[operation]}，请在右侧助手中明确发送`),
+        phase: "suggested",
+        visible: false,
+        operation,
+      }));
     }
     return true;
   }
 
   hideToolbar(): void {
-    if (!this.active) return;
+    if (!this.state.visible) return;
+    // If the author dismisses the toolbar while hashing a fresh range, make
+    // that asynchronous capture stale so it cannot reopen the toolbar later.
+    if (this.state.phase === "capturing") this.captureGeneration += 1;
     this.publish(freezeState({ ...this.state, visible: false }));
   }
 
@@ -602,10 +643,97 @@ export class AssistantSelectionController {
     return true;
   }
 
+  private startEditorTask(
+    active: ActiveSelection,
+    operation: AssistantSelectionOperation,
+    customInstruction?: string,
+  ): void {
+    this.removeActiveSuggestion();
+    const selectionId = active.record.selectionId;
+    this.publish(freezeState({
+      ...this.readyState(active, `正在开始${ASSISTANT_SELECTION_OPERATION_LABELS[operation]}任务…`),
+      phase: "starting",
+      visible: false,
+      operation,
+    }));
+    if (!this.onStartEditorTask) {
+      this.publish(freezeState({
+        ...this.readyState(active, "当前安装未提供选区编辑任务能力"),
+        phase: "failed",
+        operation,
+      }));
+      return;
+    }
+    let result: ReturnType<NonNullable<typeof this.onStartEditorTask>>;
+    try {
+      result = this.onStartEditorTask({
+        record: active.record,
+        fieldLabel: active.fieldLabel,
+        operation,
+        customInstruction,
+      });
+    } catch (reason) {
+      this.publishStartFailure(selectionId, operation, reason);
+      return;
+    }
+    void Promise.resolve(result).then((started) => {
+      const current = this.active?.record.selectionId === selectionId
+        ? this.active
+        : undefined;
+      if (!current) return;
+      if (started?.jobId) {
+        const bound = this.registry.bindToEditorTask({
+          selectionId,
+          jobId: started.jobId,
+          agentId: current.record.agentId,
+          novelId: current.record.novelId,
+          documentId: current.record.documentId,
+          fieldId: current.record.fieldId,
+          contextRevision: current.record.contextRevision,
+        });
+        if (!bound.ok) {
+          this.publishStartFailure(selectionId, operation, new Error("编辑任务绑定已失效"));
+          return;
+        }
+        current.record = bound.record;
+      }
+      this.publish(freezeState({
+        ...this.state,
+        phase: "sent",
+        visible: false,
+        message: "候选已在当前编辑工作面打开",
+      }));
+    }).catch((reason) => this.publishStartFailure(selectionId, operation, reason));
+  }
+
+  private publishStartFailure(
+    selectionId: string,
+    operation: AssistantSelectionOperation,
+    reason: unknown,
+  ): void {
+    const active = this.active?.record.selectionId === selectionId
+      ? this.active
+      : undefined;
+    if (!active) return;
+    this.publish(freezeState({
+      ...this.readyState(active, reason instanceof Error ? reason.message : "选区编辑任务启动失败"),
+      phase: "failed",
+      operation,
+    }));
+  }
+
   private readonly onSelectionEvent = (event: Event) => {
     if (this.composing) return;
+    if (isToolbarEventTarget(event.target)) return;
+    if (isAssistantPaneEventTarget(event.target)) {
+      this.hideToolbar();
+      return;
+    }
     const anchor = isTextSelectionAnchor(event.target) ? event.target : undefined;
-    if (!anchor) return;
+    if (!anchor) {
+      this.cancelActiveSelection();
+      return;
+    }
     const context = this.runtime.getEditableFieldContext();
     // Blurring a controlled field to operate QwenPaw's native sender must not
     // recapture the still-retained textarea range and dispose its suggestion.
@@ -615,8 +743,21 @@ export class AssistantSelectionController {
       this.active
       && context?.adapter === this.active.adapter
       && anchor !== this.active.anchor
-    ) return;
+    ) {
+      this.cancelActiveSelection();
+      return;
+    }
     void this.capture(anchor);
+  };
+
+  private readonly onFocusIn = (event: Event) => {
+    if (isToolbarEventTarget(event.target)) return;
+    if (this.active?.anchor && (event.target as unknown) === this.active.anchor) return;
+    if (isAssistantPaneEventTarget(event.target)) {
+      this.hideToolbar();
+      return;
+    }
+    this.cancelActiveSelection();
   };
 
   private readonly onCompositionStart = () => {
@@ -630,6 +771,28 @@ export class AssistantSelectionController {
   };
 
   private readonly onGeometryChange = () => this.reposition();
+
+  private cancelActiveSelection(): void {
+    // Once a native request has been sent, its structure card still needs the
+    // registry record even if the author moves the caret.  The sent phase is
+    // already visually hidden, so leave that in-flight binding untouched.
+    if (this.state.phase === "starting" || this.state.phase === "sent") {
+      this.hideToolbar();
+      return;
+    }
+    this.captureGeneration += 1;
+    const active = this.active;
+    if (active) {
+      this.suggestions.remove(this.suggestionId(active.record.selectionId));
+      this.registry.delete(active.record.selectionId);
+    }
+    this.active = undefined;
+    if (this.runtime.getStatus().active
+      && this.runtime.getStatus().selectionCharacters > 0) {
+      this.runtime.setActiveSelection(undefined);
+    }
+    this.publish(idleState());
+  }
 
   private reconcile(status: AssistantContextRuntimeStatus): void {
     const previous = this.lastRuntimeStatus;

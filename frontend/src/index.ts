@@ -17,6 +17,10 @@ import { AssistantSelectionRegistry } from "./assistant-selection-registry";
 import { createAssistantSuggestionRegistry } from "./assistant-suggestions";
 import { AssistantSelectionController } from "./assistant-selection-controller";
 import { AIEditTransactionManager } from "./assistant-transactions";
+import {
+  SelectionEditRuntime,
+  createSelectionEditReviewHost,
+} from "./selection-edit-runtime";
 import { NovelLibraryPage } from "./creative-center";
 import { NovelWorkbench } from "./workbench-v2";
 import { activeWorkbenchRouteSession } from "./workbench-route";
@@ -36,19 +40,32 @@ const assistantSuggestionRegistry = createAssistantSuggestionRegistry(
   APP_ID,
   window.QwenPaw.chat.sender,
 );
-const assistantSelectionController = new AssistantSelectionController({
+const assistantEditTransactions = new AIEditTransactionManager();
+let assistantSelectionController: AssistantSelectionController;
+const selectionEditRuntime = new SelectionEditRuntime({
+  contextRuntime: assistantContextRuntime,
+  registry: assistantSelectionRegistry,
+  transactions: assistantEditTransactions,
+  copyText: (text) => navigator.clipboard.writeText(text),
+  confirmExit: (prompt) => window.confirm(prompt),
+  onAssistantFallback: (selectionId, operation) => {
+    if (!assistantSelectionController.prepareAssistantFallback(selectionId, operation)) {
+      message.error("选区已失效，请重新框选后再发送到助手");
+      return;
+    }
+    message.info("已准备助手命令，请在右侧输入框中明确发送");
+  },
+});
+assistantSelectionController = new AssistantSelectionController({
   runtime: assistantContextRuntime,
   registry: assistantSelectionRegistry,
   suggestions: assistantSuggestionRegistry,
-  copyCommand: async (command) => {
-    if (!navigator.clipboard?.writeText) {
-      throw new Error("clipboard unavailable");
-    }
-    await navigator.clipboard.writeText(command);
-    message.success("助手命令已复制，请在右侧输入框粘贴并发送");
-  },
+  onStartEditorTask: (request) => selectionEditRuntime.start(request),
 });
-const assistantEditTransactions = new AIEditTransactionManager();
+const SelectionEditReviewHost = createSelectionEditReviewHost(
+  React,
+  selectionEditRuntime,
+);
 const assistantProposalCoordinator = new AssistantProposalCoordinator({
   runtime: assistantContextRuntime,
   registry: assistantSelectionRegistry,
@@ -77,6 +94,7 @@ registerAssistantToolCard({
   copyText: (text) => navigator.clipboard.writeText(text),
   getCurrentSessionId: () => window.QwenPaw.host.getCurrentSessionId(),
   onCopyError: () => message.error("复制失败，请手动选择候选文本"),
+  openReview: (candidate) => selectionEditRuntime.openBridgeCandidate(candidate),
 });
 
 window.QwenPaw.route.add(APP_ID, {
@@ -93,4 +111,5 @@ registerAssistantRouteWrap({
   Workbench: NovelWorkbench,
   contextRefCoordinator: assistantContextRefCoordinator,
   selectionController: assistantSelectionController,
+  selectionEditReviewHost: SelectionEditReviewHost,
 });
