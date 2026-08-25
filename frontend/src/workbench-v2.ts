@@ -1,4 +1,4 @@
-import { ApiError, apiRequest, generationModelLabel, getGenerationModelStatus } from "./api";
+import { ApiError, apiRequest, getGenerationModelStatus } from "./api";
 import {
   CHAPTER_BODY_FIELD_ID,
   CHAPTER_TITLE_FIELD_ID,
@@ -1169,6 +1169,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     const chapterDisplayTitle = document.kind === "chapter" && currentChapterIndex >= 0
       ? formatChapterDisplayTitle(currentChapterIndex + 1, document.title)
       : document.title;
+    const generationModelName = generationModelStatus
+      ? generationModelStatus.model_id
+      : generationModelStatusError ? "无法读取" : "读取中…";
     const showEditor = Boolean(content.trim()) || manualEditorOpen;
     const isChapterEditor = document.kind === "chapter" && Boolean(novel);
     const chapterTitleToolsTargetId = `anw-chapter-title-tools-${document.id}`;
@@ -1317,21 +1320,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           "header",
           { className: "anw-editor-topbar" },
           h(Button, { type: "text", icon: h(ArrowLeftOutlined), onClick: backToProject }, "返回列表"),
-          h(
-            "div",
-            {
-              className: "anw-editor-crumb",
-              title: `${novel?.title ?? ""} / ${chapterDisplayTitle}`,
-            },
-            h("span", { className: "anw-editor-crumb-book" }, novel?.title),
-            h("span", { className: "anw-editor-crumb-separator", "aria-hidden": "true" }, " / "),
-            h("strong", { className: "anw-editor-crumb-chapter" }, chapterDisplayTitle),
-          ),
           h("div", {
             className: "anw-current-model-inline",
-            title: "跟随 AI 小说作家 Agent；专属模型优先，未设置则继承 QwenPaw 全局模型。",
-            "aria-label": "当前有效模型",
-          }, h("small", null, "AI 小说作家 Agent · 专属优先/全局继承"), h("strong", null, generationModelStatus ? generationModelLabel(generationModelStatus) : generationModelStatusError ? "无法读取" : "读取中…")),
+            title: generationModelName,
+            "aria-label": `当前模型：${generationModelName}`,
+          }, h("strong", null, generationModelName)),
           h(Button, { className: "anw-delete-button", onClick: confirmDeleteDocument }, "删除"),
           h(Button, { icon: h(CopyOutlined), onClick: copyContext, title: "复制 AI 写作上下文" }, "复制"),
           h(Button, { icon: h(SaveOutlined), className: "anw-primary-button", onClick: document.kind === "chapter" ? () => setSaveVolumeOpen(true) : checkpoint, title: saveState }, "保存"),
