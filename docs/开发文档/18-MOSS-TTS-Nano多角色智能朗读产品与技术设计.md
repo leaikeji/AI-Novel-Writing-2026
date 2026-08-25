@@ -6,7 +6,7 @@
 
 最近修订：2026-08-25（Asia/Shanghai）
 
-修订结论：采用“本地优先、规则优先、脚本与朗读版本分离、独立显示句段合成、Manifest 分段播放、章节同页校听、统一持久任务底座”。运行拓扑由阶段 0 基准决定，不预先锁死为进程内、受管子进程或本机 Sidecar；编辑器实现由阶段 0 的兼容性尖峰冻结，不能用原生 `textarea` 的视觉叠层冒充可编辑句段映射。
+修订结论：采用“本地优先、规则优先、可审计的自动人物识别与自动选角、默认仅异常复核、脚本与朗读版本分离、独立显示句段合成、Manifest 分段播放、章节同页校听、统一持久任务底座”。运行拓扑由阶段 0 基准决定，不预先锁死为进程内、受管子进程或本机 Sidecar；编辑器实现由阶段 0 的兼容性尖峰冻结，不能用原生 `textarea` 的视觉叠层冒充可编辑句段映射。T0–T6 已补充可直接派发的文件 Owner、共享资源锁、验收命令、证据目录与串行汇合规则；这些施工卡仍受阶段批准状态约束。
 
 目标环境：QwenPaw 2.1.0 内的 `AI小说世界2026` PawApp；Apple Silicon M4、16 GB 内存；个人、本地优先使用。
 
@@ -16,6 +16,7 @@
 - [总体架构与核心流程](./06-总体架构与核心流程.md)
 - [创作工作台内容模型与关系图产品规格](./09-创作工作台内容模型与关系图产品规格.md)
 - [阶段实施矩阵](./08-阶段实施矩阵.md)
+- [当前布局页面设计评审稿 V2](./设计稿/18-MOSS-TTS-Nano智能朗读-页面设计评审-V2-2026-08-25/README.md)：基于 2026-08-25 运行界面重新截图和重画，已完成用户初审与施工前专项终审；不代表已实施或已批准进入后续阶段。
 
 ## 0. Codex 多子代理并行施工授权
 
@@ -60,6 +61,56 @@ MOSS-VoiceGenerator       = 文字描述音色设计器
 ```
 
 **项目决策**：目标是实现与番茄小说公开能力同类的功能架构，不复制其私有算法、声音资产、品牌、界面文案或未公开接口，也不在首版承诺达到其多年生产数据积累形成的主观音质。作品级声音配置留在书本“朗读”页面；章节播放、段落跳播和校听修改进入同一个章节工作台，两者不能被误合并成一个拥挤页面。
+
+### 1.1 自动识别人物并自动配音的明确结论
+
+**当前实现事实**：截至 2026-08-25，本项目运行版本尚未实现 TTS、人物说话人识别、自动选角或多角色音频生成。V2 页面是已完成初审和专项终审的设计稿，本文件是尚未实施的专项设计；不能把目标能力表述成当前页面已经可用。
+
+**目标能力**：可以实现“系统自动识别旁白、正式人物、匿名人物和群体声音，并自动选择已配置音色完成多角色配音”。这不是 MOSS-TTS-Nano 单模型原生提供的能力，而是本项目把正文分析、人物卡、别名与场景、自动选角、脚本复核、Nano 合成和 Edition 播放组合后的产品能力。
+
+```text
+不可变正文 revision
+  -> 句段与场景切分
+  -> 自动判断 narrator / character / anonymous / group / unknown
+  -> 正式人物映射到人物卡，匿名人物建立稳定身份
+  -> 解析旁白、专属音色、继承音色或通用音色槽位
+  -> 计算 warnings 与 blockers
+  -> 默认策略且 0 blockers：系统自动冻结脚本并创建 Edition
+  -> 存在 blockers 或启用逐章复核：进入脚本复核底部面板
+  -> 作者集中处理后一次确认继续生成
+  -> MOSS-TTS-Nano 按句段和锁定音色版本自动合成
+  -> 形成可播放、可恢复、可回溯的 NarrationEdition
+```
+
+首版采用“可审计自动化”，而不是无条件猜测：
+
+| 识别结果 | 系统自动行为 | 是否需要逐句人工处理 |
+|---|---|---|
+| 旁白 | 自动使用当前章节/分卷/作品旁白 | 否 |
+| 高置信度正式人物 | 自动绑定人物卡及其专属或继承音色 | 否 |
+| 中置信度正式人物 | 自动给出人物和音色，明显标记证据 | 默认不阻塞，可集中检查 |
+| 已知匿名人物 | 在其合法作用域内复用稳定匿名身份和音色 | 否；发生冲突时才处理 |
+| 新匿名人物 | 自动建立候选稳定身份并从通用音色池确定性选角 | 低置信度或跨章疑似复现时处理 |
+| 低置信度、`unknown`、别名/匿名冲突或缺失音色 | 不进入正式 Edition，不静默猜人物或套用错误音色 | 是，必须处理 |
+
+用户不需要为每一句手动指定人物和声音。点击“智能朗读”“批量生成”或“更新朗读”后，系统完成识别、选角和所需生成；默认只有低置信度、`unknown`、别名冲突、匿名人物冲突和缺失音色成为待办。没有阻塞项时不再要求作者额外点击“审批”，但按键和普通自动保存仍不得触发说话人分析或 TTS。“扫描全书”只分析并报告覆盖率/阻塞项，不创建 Edition 或音频。
+
+音色解析遵循稳定优先级：人物卡专属音色 > 人物明确继承音色 > 已知匿名人物绑定 > 年龄/性别/用途通用音色 > 待人工确认。任一已生成 Edition 都冻结实际使用的 `character_id`/`anonymous_speaker_id`、音色版本、规则版本和正文 revision；以后修改人物卡、音色池或正文不会静默改写旧音频。
+
+V2 界面中的对应入口为：朗读总览显示自动识别覆盖率、提醒和阻塞项；人物配音页显示正式人物声音映射；选角规则页控制本地规则、复核策略、匿名人物和可选智能增强；章节脚本复核底部面板只在阻塞或逐章复核时出现；满足冻结条件后由音频与缓存页及后台任务自动生产音频。
+
+### 1.2 脚本复核策略：默认自动，异常暂停
+
+作品设置增加独立于正文隐私模式的 `script_review_policy`：
+
+| 策略 | 行为 | 适用场景 |
+|---|---|---|
+| `blockers_only`（默认） | 零阻塞时由确定性领域规则自动冻结脚本并继续创建 Edition；有阻塞时才暂停 | 日常写作与番茄式低摩擦朗读 |
+| `always_review` | 即使零阻塞也打开整章复核面板，作者确认后才创建 Edition | 重要章节、出版前校听或作者主动精细控制 |
+
+`blockers_only` 不是让聊天模型自行“批准”内容。只有用户已显式发起朗读/更新/批量生成、分析成功、`blocker_count = 0`、全部人物/匿名身份/音色/scope 可解析且模型身份校验通过时，领域服务才能执行自动冻结。中置信度结果作为 `warning` 可见但不阻塞；低置信度、`unknown`、别名冲突、匿名身份冲突、缺失音色、非法人物/scope 和硬性发音冲突属于 `blocker`。`analyze_only` 扫描结果不得触发自动冻结或生成；后续生成前必须重新校验正文与设置 fingerprint。
+
+每次冻结都记录 `approval_kind = auto_no_blockers | manual_after_review`、策略和阻断分类版本、warnings/blockers 计数、actor、时间、规则/模型 fingerprint 与输入哈希。自动或人工冻结后的脚本同样不可变；任何修改都创建新脚本版本。逐次请求只允许把默认策略临时收紧为 `always_review`，不能把作品已设为逐章复核的策略静默放宽。
 
 ## 2. 研究结论和能力边界
 
@@ -172,6 +223,7 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 - [`DocumentWorkingCopy`](../../backend/models.py) 已提供草稿版本和内容哈希。
 - [`MediaAsset`](../../backend/models.py) 已预留小说媒体元数据、来源 revision、存储路径和内容哈希，但尚缺 MIME、字节数、资产类别、生命周期、保留策略和存储后端字段，实施时必须扩展，不能把现状误写为已满足朗读资产治理。
 - 当前作品工作台导航为章节、大纲、角色、线索、设定，见 [`workbench-studio.ts`](../../frontend/src/workbench-studio.ts)。
+- 当前桌面工作台同时保留 QwenPaw 全局左侧导航、PawApp 作品/章节导航、中央业务区和右侧原生 AI 助手。TTS 页面、播放器和复核工具只能使用 PawApp 自有区域，不能占用、替换或覆盖原生助手列。
 - 当前正文控件实际仍是原生 `textarea`，见 [`workbench-v2.ts`](../../frontend/src/workbench-v2.ts)；它只能提供整块文本选择和光标偏移，不能原生渲染句段 decoration、段落 gutter 或被编辑事务安全映射的播放范围。
 - 现有架构已经预留 `TTSAdapter`、`LocalMountedMediaStorage` 和 TTS 失败不影响正文的边界。
 
@@ -201,6 +253,8 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 
 路由 section 新增稳定值 `reading`。新版工作台、兼容工作台、创作中心跳转、路由恢复、类型定义和测试必须同步扩展，不能只在一个导航数组里增加按钮。
 
+创作中心作品卡的四个主快捷入口调整为大纲、角色、线索和朗读；破坏性的删除进入作品卡更多菜单，不与高频创作入口并列。该调整属于 V2 设计候选，只有用户批准并进入对应实施阶段后才能修改代码。
+
 ### 5.2 “朗读”页面
 
 ```text
@@ -221,10 +275,11 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 - Nano Runtime 安装、健康和预热状态；
 - VoiceGenerator 可用状态；
 - 当前正文分析隐私模式及云端授权状态；
+- 当前脚本复核策略；
 - 当前旁白；
 - 正式人物音色覆盖率；
 - 通用音色池覆盖率；
-- 待复核脚本、已生成章节和失败任务；
+- 自动识别覆盖率、提醒/阻塞数量、待复核脚本、已生成章节和失败任务；
 - 模型、媒体和缓存磁盘占用；
 - 测试朗读、初始化基础音色包、扫描缺失配置、批量生成和清理缓存入口；
 - 不可删除源资产、可回收派生缓存和预计可释放空间分别统计。
@@ -262,6 +317,7 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 
 管理人物归因、匿名角色复用、同场景去重、备用声音、低置信度阈值、第一人称、内心独白、信件、电话、广播和群体声音规则，同时显示：
 
+- `仅异常复核`（默认）与 `每章都复核` 两种脚本复核策略；策略与正文是否允许云端分析分开设置；
 - `隐私优先`：本地规则无法确定时直接进入人工复核；
 - `智能增强`：仅把不确定句段和最小上下文发送给当前受控聊天模型；必须单独确认作品级授权；
 - 最近一次分析实际使用的供应商、模型和规则版本；
@@ -296,27 +352,44 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 章节写作与校听使用同一个章节工作台；书本“朗读”页面继续负责旁白、人物、通用声音、选角和作品级规则，不把这些制作设置复制进章节正文。
 
 ```text
-┌────────章节树────────┬────────────章节正文────────────┬──脚本/角色抽屉──┐
-│ 第一章               │  ▶ 第一段正文……               │ 当前说话人      │
-│ 第二章               │    “第一句对白……”             │ 选角证据        │
-│ 第三章               │  ▶ 第二段正文……               │ 单句试听/修正   │
-└──────────────────────┴────────────────────────────────┴────────────────┘
-┌────────────────────────────固定播放器─────────────────────────────┐
-│ 当前稿/旧稿  角色与音色  上一句  播放  下一句  倍速  更新朗读     │
-└───────────────────────────────────────────────────────────────────┘
+┌──QwenPaw──┬────章节树────┬────────────章节正文────────────┬──原生 AI 助手──┐
+│ 全局导航  │ 第一章       │  ▶ 第一段正文……               │ 会话与创作上下文│
+│           │ 第二章       │    “第一句对白……”             │ 不承载 TTS 表单 │
+│           │ 第三章       │  ▶ 第二段正文……               │                │
+└───────────┴──────────────┴────────────────────────────────┴────────────────┘
+                            ┌────脚本复核底部面板（按需）────┐
+                            │ 句段列表｜说话人/音色/证据/修正 │
+                            └────────────────────────────────┘
+                            ┌────────固定播放器──────────────┐
+                            │ 当前稿/旧稿｜播放｜进度｜更新朗读│
+                            └────────────────────────────────┘
 ```
 
 章节工作台增加：
 
 - `智能朗读` 和当前朗读 Edition 状态；
-- 朗读脚本复核抽屉，不强制离开章节；
-- 不遮挡正文的固定底部播放器；
+- 朗读脚本复核底部面板，不强制离开章节，也不与右侧原生 AI 助手争夺同一列；
+- 只位于 PawApp 编辑区内、在原生 AI 助手左侧结束的固定底部播放器；正文必须预留真实底部空间，不能被播放器覆盖；
 - 播放、暂停、倍速、上一句、下一句和完整 Edition 的全章进度拖动；
 - 当前说话人、音色、源正文版本和“当前稿/旧稿”状态；
 - 当前句段高亮、自动滚动和“返回当前朗读位置”；
 - 段落边栏 `▶`、上下文菜单“从本段朗读”和键盘命令；
 - 单句试听、重新生成和“更新朗读”；
 - 正文修改后的待更新范围与旧版本提示。
+
+#### 自动生成与复核状态
+
+- 点击“智能朗读”或“更新朗读”后，按钮进入“正在分析人物与选角”，并通过可读状态区报告进度；普通输入和自动保存不出现该状态；
+- 默认 `blockers_only` 且零阻塞时，页面显示“识别完成，已自动创建 Edition；0 个阻塞、N 个提醒”，直接进入渐进生成，不打开复核面板；
+- 发现阻塞时，页面显示阻塞总数并打开/提示打开复核底部面板；面板默认只列阻塞项，可切换查看全部 warnings；
+- 阻塞未清零时“处理完成并继续生成”禁用；清零后作者一次确认，脚本以 `manual_after_review` 冻结并继续；
+- `always_review` 即使零阻塞也打开面板，主要按钮文案为“确认脚本并生成”；
+- 分析器失败、模型身份不匹配或输出结构非法属于分析失败，不伪装成待复核，也不能自动冻结；云端授权撤销后不再外发，无法由本地规则确定的句段转为阻塞；Nano Runtime 不可用则脚本可保留，但 Edition 生成进入可恢复失败/待就绪状态；
+- 生成进度、成功、部分就绪和失败均与当前 `edition_id` 绑定；重新分析不会原地覆盖已冻结脚本或历史 Edition。
+
+复核面板打开后，键盘焦点进入面板标题或首个阻塞项；关闭后回到原触发控件。阻塞、提醒和已确认状态必须同时有文字/图标，不只依赖红黄绿；状态变化使用非打断式 live region。受限宽度下，句段列表与编辑表单上下堆叠，不能覆盖右侧原生 AI 助手，固定播放器也不能遮住面板主要操作。
+
+复核面板与播放器不得成为两个互相覆盖的 fixed layer：没有活跃播放时使用完整复核面板；旧 Edition 正在播放时音频默认继续，完整播放器收为面板内/上方的紧凑播放条，至少保留“旧稿”标记、说话人、播放/暂停、进度和关闭面板后的焦点恢复。关闭复核面板后恢复完整播放器。若分析期间 working copy 已继续修改，面板必须显示其绑定的来源 revision，并提供“继续生成该快照”与“使用最新正文重新分析”，不能把旧脚本修正套到新正文偏移。
 
 #### 写作手势与跳播
 
@@ -362,7 +435,7 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
 4. 活跃编辑会话可通过编辑器 transaction 映射未被触碰且局部文本哈希/锚点仍一致的句段范围；任何与变更相交的句段立即标为本地失效，段落拆分/合并或边界标点变化还要保守失效相邻块；
 5. 页面重载、编辑器映射链丢失或无法唯一验证锚点时，禁止把旧偏移映射到当前正文，只在播放器字幕或不可变旧稿视图高亮；
 6. “更新朗读”先完成保存屏障，再幂等创建/复用新快照和脚本；说话人分析至少覆盖变化句段及其必要场景上下文；
-7. 新脚本经所需复核和审批后创建新 Edition；相同 `spoken_text`、音色和模型输入继续复用 render；
+7. 新脚本按 `script_review_policy` 自动冻结或经人工复核后冻结，再创建新 Edition；相同 `spoken_text`、音色和模型输入继续复用 render；
 8. 新 Edition 准备好后由用户选择“立即从对应位置切换”或“下次播放使用新版本”；前者必须带可播放起点，后者必须已有章首或已保存的合法起点，不能无提示热切换；
 9. 旧 Edition、旧进度和旧快照保持可回放，删除和回收继续服从媒体保留策略。
 
@@ -510,7 +583,8 @@ VoiceGenerator 的公开模型卡证明了文字描述生成音色，不证明�
    │
    ├─ 众人齐声 -> 群体规则
    │
-   └─ 未知 -> 中性备用音色 + 待确认
+   └─ 未知 -> 待确认并阻止正式 Edition
+                └─ 仅作者显式选择临时试听时，才可使用中性备用音色；试听资产不得进入正式版本
 ```
 
 ### 7.3 稳定分配
@@ -524,7 +598,7 @@ novel_id
 + scene_scope（仅用于同场景排除）
 ```
 
-同一稳定键在同一通用池版本下得到相同 slot。音色池升级不能改变任何历史 Edition；从同一已审批脚本创建新 Edition 时，默认沿用原 settings snapshot/pool version，只有作者显式选择“使用新音色池重新选角”才解析新 pool，并在创建前展示受影响人物和句段。
+同一稳定键在同一通用池版本下得到相同 slot。音色池升级不能改变任何历史 Edition；从同一已冻结脚本创建新 Edition 时，默认沿用原 settings snapshot/pool version，只有作者显式选择“使用新音色池重新选角”才解析新 pool，并在创建前展示受影响人物和句段。
 
 `scene_scope` 不是自由字符串。分析器先根据章节结构、显式分隔符和段落边界生成 `narration_scenes`；无法确定场景时退回章节范围。匿名稳定键由标准化描述、作用域、首次出现局部锚点和显式别名共同生成，并保留生成算法版本。哈希碰撞、泛称冲突或跨章疑似复现必须进入人工合并/拆分流程，不能静默合并。
 
@@ -695,11 +769,18 @@ delivery: normal | whisper | shout | inner_monologue
 - 单句试听；
 - 只重分析当前句；
 - 批量修改同一匿名说话人；
-- 审批整章脚本。
+- 在逐章复核或阻塞处理路径中确认整章脚本。
 
-脚本未审批前不进入正式朗读版本合成。允许快速试听单句，但试听资产必须标为临时派生数据。
+脚本只有进入 `approved`（已冻结）状态后才能进入正式朗读版本合成。允许快速试听单句，但试听资产必须标为临时派生数据。
 
-审批会冻结一个不可变 `narration_script_version`。审批后的修改不能原地覆盖，必须创建新的脚本版本；旧朗读版本继续引用旧脚本版本。这样才能复现历史配音并准确计算失效范围。
+冻结存在两条合法路径：
+
+1. 默认 `blockers_only` 且 `blocker_count = 0` 时，领域服务记录 `auto_no_blockers` 并自动冻结；
+2. 存在阻塞或启用 `always_review` 时，作者处理/检查后记录 `manual_after_review` 并冻结。
+
+阻塞分类至少包含 `low_confidence_speaker`、`unknown_speaker`、`alias_conflict`、`anonymous_identity_conflict`、`missing_voice_binding`、`invalid_target_scope` 和 `hard_pronunciation_conflict`。`medium_confidence` 只作为 warning；普通“待校对”发音项不阻塞其他章节，只有当前句出现多个不可唯一解析的硬性朗读替换时才使用 `hard_pronunciation_conflict`。分析器失败、实际模型不匹配或输出 schema 非法直接使本次分析失败，不转成可自动通过的 warning。
+
+冻结后的 `narration_script_version` 不可变。任何修改都必须创建新的脚本版本；旧朗读版本继续引用旧脚本版本。这样才能复现历史配音并准确计算失效范围。
 
 ## 10. 音频生成、时间轴和播放
 
@@ -740,7 +821,7 @@ canonical_spoken_text_hash
 
 ### 10.3 生成顺序
 
-1. 审批并冻结脚本版本；
+1. 校验脚本已经按复核策略自动或人工冻结；
 2. 冻结朗读设置快照、发音表版本、模型 fingerprint 和所有音色版本；
 3. 创建幂等 `narration_edition`；
 4. 为每个句段解析最终音色版本并保存解析证据；
@@ -885,7 +966,7 @@ Manifest 是分段播放清单，不要求先存在整章音频。它列出全�
 - 页面重载、映射链丢失或锚点无法唯一验证后，立即停止把旧时间轴映射到当前正文，只在不可变旧版本朗读视图中高亮；
 - 旧 Edition 保持不可变历史状态并可继续播放；当新 revision/脚本被创建并选为当前版本时，再把旧脚本标为 `stale`，Edition 是否当前则只由 `document_narration_state` 指针表达；
 - “更新朗读”必须完成第 8.1 节保存屏障，并对变化句段及必要上下文重新分析；不能在工作稿尚未稳定时按键级触发；
-- 新脚本审批后创建新 Edition；相同文本、音色和模型输入的句段仍可命中缓存；
+- 新脚本按复核策略自动或人工冻结后创建新 Edition；相同文本、音色和模型输入的句段仍可命中缓存；
 - 新 Edition 切换必须由用户明确确认，并从可唯一对应的句段或章首开始；不能把旧 Edition 的句内毫秒偏移直接迁移到新 Edition。
 
 ## 11. 数据模型
@@ -909,7 +990,7 @@ NarrationScriptVersion
 BackgroundJob ──► ModelRunRecord
 ```
 
-权威层级：正文 revision 是文本权威；已审批脚本版本是说话人/朗读文本权威；Edition 是一次配音制作配置权威；render 和媒体均为可校验派生物。
+权威层级：正文 revision 是文本权威；已冻结的 `approved` 脚本版本是说话人/朗读文本权威；Edition 是一次配音制作配置权威；render 和媒体均为可校验派生物。
 
 ### 11.2 `media_assets` 扩展
 
@@ -960,9 +1041,9 @@ BackgroundJob ──► ModelRunRecord
 - 默认旁白 profile/version；
 - 标题、作者注、第一人称和内心独白规则；
 - 正文分析模式与云端授权引用；
-- 默认语言、停顿、播放格式和低置信度策略；
+- 默认语言、停顿、播放格式、低置信度策略和 `script_review_policy`；
 - 默认通用池、选角规则和发音表 fingerprint；
-- schema/version/fingerprint。
+- 阻断分类/策略版本与 schema/version/fingerprint。
 
 `narration_scope_overrides` 使用 `scope_kind = volume | chapter` 与 `scope_id`，保存旁白和有限规则覆盖。解析顺序固定为章节 > 分卷 > 作品，并用数据库约束保证 scope 属于同一小说。
 
@@ -1001,7 +1082,9 @@ Nano 不支持的标记语法不得直接送入模型；阶段 0 先验证中文
 
 `narration_scripts` 是 document/revision 下的稳定分析身份，绑定精确 `revision_id` 和 `content_hash`。
 
-`narration_script_versions` 保存分析器、规则、分析/选角设置 fingerprint、提示模板、requested/actual model fingerprint、状态、统计、审批信息、父版本和唯一幂等键。草稿通过 CAS 修改；一旦审批即不可变。working copy 按键级变化只产生派生的 `working_copy_diverged`，不持续写脚本状态；当新正文快照/脚本被建立并选为当前版本时，旧脚本才标为 `stale`，且永不改写旧版本。
+`narration_script_versions` 保存分析器、规则、分析/选角设置 fingerprint、提示模板、requested/actual model fingerprint、状态、warnings/blockers 分类统计、父版本和唯一幂等键。冻结审计至少保存 `approval_kind`、生效的 `script_review_policy`、阻断分类版本、actor type/ID 和时间。草稿通过 CAS 修改；一旦进入 `approved` 即不可变。working copy 按键级变化只产生派生的 `working_copy_diverged`，不持续写脚本状态；当新正文快照/脚本被建立并选为当前版本时，旧脚本才标为 `stale`，且永不改写旧版本。
+
+数据库/服务层约束必须保证 `auto_no_blockers` 只能在分析成功、`blocker_count = 0`、所有 casting target 与音色都可解析、生效策略为 `blockers_only` 且存在用户显式生成意图时写入；`manual_after_review` 必须有 owner actor 和复核时间。聊天模型输出本身不能写审批字段。
 
 ### 11.11 `narration_segments`
 
@@ -1019,7 +1102,7 @@ Nano 不支持的标记语法不得直接送入模型；阶段 0 先验证中文
 
 `narration_editions` 是一次可复现制作版本，绑定：
 
-- 已审批 script version；
+- 已冻结的 `approved` script version；
 - settings snapshot、pronunciation profile；
 - TTS/Tokenizer/Normalizer/postprocess fingerprints；
 - 上下文模式，首版固定 `independent_segment`；
@@ -1085,15 +1168,23 @@ generating -> failed -> generating
 
 ```text
 analyzing
-  -> review_required
-  -> approved
+  ├─ analyze_only -> analyzed（只报告，不冻结/不生成）
+  ├─ blockers_only + 0 blockers -> approved（auto_no_blockers）
+  ├─ blockers > 0 -> review_required
+  └─ always_review -> review_required
+
+analyzed + 显式生成意图 + 正文/设置 fingerprint 仍一致
+  -> 按当前策略进入 approved 或 review_required
+
+review_required + blockers 已清零 + 作者确认
+  -> approved（manual_after_review）
 
 新正文快照/脚本被设为当前 -> stale
 分析失败 -> failed
 approved 后修改 -> 新建 script version -> review_required
 ```
 
-脚本状态只表达分析与审批，不表达音频合成。
+脚本状态只表达分析、复核与冻结，不表达音频合成。`analyzed` 只是扫描候选，不能创建正式 Edition；`approved` 表示脚本满足进入正式合成的不可变门槛，不等同于每次都由作者逐句人工背书。任何自动转移都由确定性领域校验执行，不能由模型自由判断。
 
 working copy 与当前 Edition 的关系是查询时派生的兼容状态，不进入脚本状态机：
 
@@ -1180,6 +1271,7 @@ POST /novels/{novel_id}/anonymous-speakers/{speaker_id}/promote
 ### 13.4 脚本
 
 ```text
+POST  /documents/{document_id}/narration-requests
 POST  /documents/{document_id}/narration-scripts/analyze
 GET   /narration-scripts/{script_id}
 GET   /narration-script-versions/{version_id}
@@ -1187,6 +1279,10 @@ PATCH /narration-script-versions/{version_id}/segments/{segment_id}
 POST  /narration-script-versions/{version_id}/approve
 POST  /narration-script-versions/{version_id}/reanalyze-segments
 ```
+
+`narration-requests` 是“扫描全书”、章节“智能朗读”“更新朗读”和后续批量生成的单入口编排接口，不新建第二套任务账本。请求绑定已保存的 `source_revision_id/content_hash`、`intent = analyze_only | create | update | batch`、幂等键和可选 `force_review = true`；`force_review` 只能收紧为 `always_review`。服务复用既有脚本/Edition 或创建共享后台任务，并返回 `workflow_state = analyzing | analyzed | review_required | queued | partial_ready | ready | failed`、warnings/blockers 计数、script version、可选 Edition 和 job ID。`analyze_only` 永不创建 Edition/音频；以后转为生成时必须重新校验 source、settings、规则和音色 fingerprint。
+
+`analyze`、`approve` 与 `editions` 保留为领域级/恢复接口：默认零阻塞路径由 `narration-requests` 编排自动冻结并创建 Edition；人工路径只能在阻塞已清零或作品启用 `always_review` 时调用 `approve`。前端不得自行伪造 `auto_no_blockers`，也不得通过直接调用 `editions` 绕过脚本状态校验。
 
 ### 13.5 生成和播放
 
@@ -1333,21 +1429,25 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 11. 应用章节、分卷、作品、人物和通用音色优先级；
 12. 校验所有 character ID 和 scope 归属；
 13. 生成带证据和置信等级的脚本草稿；
-14. 作者复核低置信度、unknown、别名冲突和匿名人物；
-15. 作者审批并冻结脚本版本；
-16. 冻结设置/发音/模型/音色并创建 Edition；
-17. 计算所有句段 render fingerprint；
-18. 复用命中 render 并发布包含全部句段状态、ready prefix 和 ready ranges 的初始 Manifest；
-19. 对缺失句段建立共享持久任务；
-20. 优先合成章节连续开头；
-21. 校验、标准化并保存 master/播放资产；
-22. 每个句段完成后重新计算连续窗口并 CAS 更新 Manifest；
-23. 章首连续前缀达到门槛后标记 `partial_ready` 并允许默认播放；
-24. 前端按 Segment Manifest 预加载和播放；
-25. 校验当前正文 hash 后通过 `NarrationEditorBridge` 按 segment ID 高亮；
-26. 保存播放进度；
-27. 失败句段可单独重试；
-28. 所有句段完成后 Edition 标记 `ready`。
+14. 计算 warnings、blockers 和生效的 `script_review_policy`；
+15. 若为默认 `blockers_only` 且零阻塞，领域服务记录 `auto_no_blockers` 并自动冻结脚本；
+16. 若存在阻塞或启用 `always_review`，打开复核面板；作者集中处理低置信度、unknown、别名/匿名冲突、缺失音色等项目；
+17. 阻塞清零并经作者确认后记录 `manual_after_review` 并冻结脚本；
+18. 冻结设置/发音/模型/音色并创建 Edition；
+19. 计算所有句段 render fingerprint；
+20. 复用命中 render 并发布包含全部句段状态、ready prefix 和 ready ranges 的初始 Manifest；
+21. 对缺失句段建立共享持久任务；
+22. 优先合成章节连续开头；
+23. 校验、标准化并保存 master/播放资产；
+24. 每个句段完成后重新计算连续窗口并 CAS 更新 Manifest；
+25. 章首连续前缀达到门槛后标记 `partial_ready` 并允许默认播放；
+26. 前端按 Segment Manifest 预加载和播放；
+27. 校验当前正文 hash 后通过 `NarrationEditorBridge` 按 segment ID 高亮；
+28. 保存播放进度；
+29. 失败句段可单独重试；
+30. 所有句段完成后 Edition 标记 `ready`。
+
+第 15 步只发生在作者已显式发起本次生成之后；它不是后台按键级预生成，也不会自动替换正在播放的旧 Edition。首次生成且不存在当前 Edition 时，只有 working copy 仍与来源 hash 一致，才可在达到播放门槛后把它设为初始当前版本；分析期间正文已经继续修改时，新 Edition 标为“旧快照已就绪”并等待作者更新或明确选择。已有旧 Edition 时仍执行第 16.4 节的显式切换契约。
 
 ### 16.3 从任意段落开始朗读
 
@@ -1370,7 +1470,7 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 4. 作者点击“更新朗读”后，前端等待自动保存并执行保存屏障；
 5. 后端幂等复用或创建正文快照 B，对变化范围及必要场景上下文重新分析；
 6. 可唯一匹配且证据仍成立的人工覆盖允许迁移，其他变化进入复核；
-7. 新脚本审批后创建 Edition B，相同 render fingerprint 直接复用，只合成必要句段；
+7. 新脚本按复核策略自动或人工冻结后创建 Edition B，相同 render fingerprint 直接复用，只合成必要句段；
 8. Edition B 达到目标起点的播放门槛后提示“新朗读已就绪”；
 9. 用户明确选择立即切换或下次使用；立即切换只在当前句段边界进行，并从可唯一匹配且已 ready 的 segment 或章首开始；下次使用必须保存新 Edition 的合法起点；
 10. 更新 `document_narration_state` 后 Edition A 不再是当前版本，但其生成状态、音频、进度和快照不被改写，继续按保留策略可回放。
@@ -1378,11 +1478,23 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 其他失效规则：
 
 - 修改正文：新 revision 的脚本重新分析；满足唯一锚点条件的人工覆盖可迁移，相同句段仍可复用 render；旧脚本标记 `stale`，旧 Edition 保留。
-- 修改某一句说话人或 `spoken_text`：创建新脚本版本，审批后创建新 Edition；只缺失必要 render。
+- 修改某一句说话人或 `spoken_text`：创建新脚本版本，按复核策略重新冻结后创建新 Edition；只缺失必要 render。
 - 修改人物音色：创建新 voice version/binding；历史 Edition 不变，新 Edition 只生成受影响句段。
 - 修改停顿：创建新 settings snapshot/Edition，复用语音 render，只重建 Manifest 时间线和显式导出文件。
 - 升级模型、Tokenizer、Normalizer 或后处理：按 fingerprint 精确失效。
 - 归档人物：保留历史绑定，当前脚本重新分析时提示处理。
+
+### 16.5 全书扫描与批量生成
+
+“扫描全书”和“批量生成”必须是两个动作：
+
+1. “扫描全书”只创建/复用 `analyze_only` 请求，按章节显示覆盖率、warnings、blockers 和失效状态，不创建 Edition、render 或音频任务；
+2. “批量生成”在阶段 6 开放；开始前展示章节范围、预计时长/磁盘、当前复核策略和并发策略，并由作者显式确认；
+3. 每章使用独立幂等请求和脚本/Edition；某章有 blocker 或失败时只暂停该章，不阻塞其他零阻塞章节；
+4. `blockers_only` 下零阻塞章节自动进入生成，问题章节进入总览待办队列；不连续弹出多个复核面板；
+5. `always_review` 下每章停在待复核队列，由作者逐章确认；
+6. 总览显示“已完成/生成中/待复核/失败/取消”数量，可取消未开始任务并保留已完成的合法 render；
+7. 批量生成完成的新 Edition 不自动替换各章当前 Edition；作者在章节内或批量结果页显式选择更新范围。
 
 ## 17. 失败恢复
 
@@ -1412,10 +1524,10 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 | 阶段 | 可并行工作包 | 主要串行/互斥点 | 汇合门禁 |
 | --- | --- | --- | --- |
 | 0 | T0-A…I：依赖、拓扑、语音质量、VoiceGenerator、24 音色、编辑器、Manifest、数据审查、测试工具 | Nano/VoiceGenerator 重负载、ADR 编号和最终裁决 | T0-GATE |
-| 1 | T1-A…C、E…G：适配器、模型生命周期、任务、媒体、领域服务和测试 | T1-D schema/Alembic 与共享任务契约 | T1-GATE |
+| 1 | T1-A…C、E…G：适配器、模型生命周期、任务、媒体、领域服务和测试 | T1-DEP 运行依赖、T1-D schema/Alembic 与共享任务契约 | T1-GATE |
 | 2 | T2-B…H：朗读页、人物声音、上传标准化、音色池、发音缓存、错误/授权状态和测试 | T2-A API/DTO 与共享前端壳 | T2-GATE |
 | 3 | T3-B…I：切分映射、说话人、云端补充、匿名人物、选角、情绪、复核和测试 | T3-A segment/script 契约 | T3-GATE |
-| 4 | T4-A…K：Edition、Worker、后处理、Manifest、播放器、编辑器桥、高亮、旧稿、局部重生成和验收 | 真正 Nano 单并发、公共接口与最终章节 E2E | T4-GATE |
+| 4 | T4-A…K：Edition、Worker、后处理、Manifest、播放器、编辑器桥、高亮、旧稿、局部重生成和验收 | T4-DEP 正式编辑器依赖、真正 Nano 单并发、公共接口与最终章节 E2E | T4-GATE |
 | 5 | T5-A…E：VoiceGenerator 后端、人物描述、候选 UI、二次克隆和降级 | VoiceGenerator/Nano 共用重资源 | T5-GATE |
 | 6 | T6-A…H：情绪变体、群体声、批量、导出、ASR、质量/GC、空闲准备和回归 | 媒体清理、调度、导出路径和最终发布 | T6-GATE |
 
@@ -1434,9 +1546,9 @@ novel-media    参考录音、试听、句段 master、播放副本和导出音�
 | T0-E | PAR | 24 槽位音色来源、授权台账、去重、样本和人工锁定 | 音色包或替代来源 |
 | T0-F | PAR | CodeMirror 6、Monaco、textarea 降级的 IME、自动保存、undo、decoration、gutter、UTF-16 和 Blob bundle | 编辑器 ADR 输入 |
 | T0-G | PAR | Manifest v2、章首前缀、中段 ready window、pending gap、快速跳播和播放接缝原型 | Manifest/队列原型 |
-| T0-H | PAR | 任务、媒体、脚本、Edition、render、授权与隐私 schema 审查 | 数据/API 草案复核 |
+| T0-H | PAR | 任务、媒体、脚本、Edition、render、复核策略、阻断分类、授权与隐私 schema 审查 | 数据/API/状态机草案复核 |
 | T0-I | PAR | 固定语料、假适配器、自动化、性能、崩溃恢复和人工听感记录模板 | 可复用验收工具 |
-| T0-GATE | GATE | 冻结 Nano 拓扑、24 音色、播放器、VoiceGenerator、编辑器和 ready-window 六项 go/no-go | ADR、能力矩阵、阶段 0 报告 |
+| T0-GATE | GATE | 冻结 Nano 拓扑、24 音色、播放器、VoiceGenerator、编辑器、ready-window、复核策略/阻断分类七项 go/no-go | ADR、能力矩阵、阶段 0 报告 |
 
 T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano 与 VoiceGenerator 的 MPS/大内存运行不得同时压测；每次测试必须记录环境、进程、模型 hash、参数、峰值内存和结果。
 
@@ -1444,14 +1556,15 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 
 | ID | 标记 | 本文工作包 | 前置/汇合 |
 | --- | --- | --- | --- |
-| T1-A | PAR-C | `MossNanoTTSAdapter`、`VoiceDesignAdapter`、能力/健康/指纹 | T0-GATE |
-| T1-B | PAR-C | 模型下载、校验、预热和受管生命周期 | T0-GATE 拓扑 |
-| T1-C | PAR-C | background job、租约、幂等、重试、死信和资源锁 | 共享任务契约冻结 |
+| T1-DEP | SER | 将 T0-GATE 选定的正式 Python/转码/拓扑依赖接入项目锁与可重建运行层 | T0-GATE；依赖/Compose 锁 |
+| T1-A | PAR-C | `MossNanoTTSAdapter`、`VoiceDesignAdapter`、能力/健康/指纹 | T1-DEP |
+| T1-B | PAR-C | 模型下载、校验、预热和受管生命周期 | T0-GATE 拓扑、T1-A 接口 |
+| T1-C | PAR-C | background job、租约、幂等、重试、死信和资源锁 | T1-D 共享任务 schema |
 | T1-D | SER | TTS schema、Alembic 迁移编号、升级/回退 | T0-H、迁移锁 |
-| T1-E | PAR-C | media assets、moss-models、novel-media、Range/ETag、引用/GC | T0-GATE |
-| T1-F | PAR-C | tts_snapshot、voice/settings/script/source key/Edition/render/Manifest/进度领域服务 | T1-D schema |
+| T1-E | PAR-C | media assets、moss-models、novel-media、Range/ETag、引用/GC | T0-GATE、T1-D schema |
+| T1-F | PAR-C | tts_snapshot、voice/settings/script/source key/Edition/render/Manifest/进度领域服务 | T1-A 接口、T1-D schema |
 | T1-G | PAR-C | fake adapter、崩溃恢复、GC、迁移和缓存集成测试 | T1-A–T1-F 契约 |
-| T1-GATE | INT/GATE | 本阶段共享基础设施集成 | T1-A–T1-G |
+| T1-GATE | INT/GATE | 本阶段共享基础设施集成 | T1-DEP、T1-A–T1-G |
 
 #### 18.0.3 阶段 T2：声音和朗读设置
 
@@ -1463,8 +1576,8 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 | T2-D | PAR-C | 预设、上传、标准化、授权、试听和不可变锁定版本 | T2-A |
 | T2-E | PAR-C | 24 槽位导入、通用音色池、覆盖率和缺失提示 | T2-A |
 | T2-F | PAR-C | 发音、停顿、音频和缓存设置 | T2-A |
-| T2-G | PAR-C | 本地规则/云端授权、撤销、磁盘和模型缺失状态 | T2-A |
-| T2-H | PAR-C | API、UI、键盘、授权和历史引用测试 | T2-A |
+| T2-G | PAR-C | 本地规则/云端授权、脚本复核策略、撤销、磁盘和模型缺失状态 | T2-A |
+| T2-H | PAR-C | API、UI、键盘、授权、历史引用及舒适/紧凑/受限宽度测试 | T2-A 后可测试先行；最终运行依赖 T2-B–T2-G |
 | T2-GATE | INT/GATE | 本阶段声音设置闭环集成 | T2-B–T2-H |
 
 #### 18.0.4 阶段 T3：脚本、场景和选角
@@ -1478,26 +1591,27 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 | T3-E | PAR-C | 匿名人物稳定键、合并、拆分和升级 | T3-A |
 | T3-F | PAR-C | 通用选角、scope 优先级和稳定分配 | T2-GATE、T3-A |
 | T3-G | PAR-C | 情绪/表达、置信等级和人工覆盖继承 | T3-A |
-| T3-H | PAR-C | 脚本复核 UI、审批、版本和 unknown 处理 | T3-A |
-| T3-I | PAR-C | 归因准确率、非法 ID、隐私和重复分析测试 | T3-A |
-| T3-GATE | INT/GATE | 本阶段可审批朗读脚本集成 | T3-B–T3-I |
+| T3-H | PAR-C | 默认零阻塞自动冻结、逐章复核、阻塞复核 UI、版本和 unknown 处理 | T3-A、T0-H、T2-GATE |
+| T3-I | PAR-C | 归因准确率、非法 ID、两种复核策略、阻断拦截、隐私和重复分析测试 | T3-A 后可测试先行；最终运行依赖 T3-B–T3-H |
+| T3-GATE | INT/GATE | 本阶段可自动/人工冻结朗读脚本集成 | T3-B–T3-I |
 
 #### 18.0.5 阶段 T4：独立句段合成和同步播放
 
 | ID | 标记 | 本文工作包 | 前置/汇合 |
 | --- | --- | --- | --- |
-| T4-A | PAR-C | Edition、不变设置快照、render fingerprint 和缓存作用域 | T1-GATE、T3-GATE |
+| T4-DEP | SER | 按 T0-F ADR 接入唯一正式编辑器依赖和根 lock | T3-GATE；依赖锁 |
+| T4-A | PAR-C | narration-request 编排、Edition、不变设置快照、render fingerprint 和缓存作用域 | T1-GATE、T3-GATE |
 | T4-B | PAR-C/MUTEX | 持久句段 Worker、优先级、公平老化、取消和单并发资源锁 | T1-GATE |
 | T4-C | PAR-C | master/播放副本校验、转码、响度和接缝处理 | T0-GATE |
 | T4-D | PAR-C | Manifest v2、连续前缀/range、ETag/CAS 和 prepare-range API | T0-G、T1-GATE |
 | T4-E | PAR-C | Web Audio 队列、3–5 段预取和双 audio 回退 | T4-D mock |
-| T4-F | PAR-C | `NarrationEditorBridge` 与正式编辑器适配器 | T0-F ADR |
+| T4-F | PAR-C | `NarrationEditorBridge` 与正式编辑器适配器 | T0-F ADR、T4-DEP |
 | T4-G | PAR-C | gutter、上下文命令、键盘跳播、高亮和滚动暂停/恢复 | T4-D、T4-E、T4-F 契约 |
-| T4-H | PAR-C | working_copy_diverged、旧稿字幕、显式更新和 Edition 切换 | T4-A、T4-F |
+| T4-H | PAR-C | working_copy_diverged、来源快照提示、复核面板/播放器共存、旧稿字幕、显式更新和 Edition 切换 | T4-A、T4-F |
 | T4-I | PAR-C | 局部失效/重生成、旧版本视图、进度保存和快速连续跳播 | T4-A、T4-D |
-| T4-J | PAR-C | Manifest、编辑映射、缓存、隐私、恢复和不触发按键级 TTS 自动化 | T4 契约 |
+| T4-J | PAR-C | 零阻塞自动生成、阻塞暂停、Manifest、编辑映射、缓存、隐私、恢复和不触发按键级 TTS 自动化 | T4 契约 |
 | T4-K | PAR/MUTEX | 一章真实多角色、接缝、30 分钟、RTF、跳播和人工听感 | T4-A–T4-I 集成 |
-| T4-GATE | INT/GATE | 核心多角色朗读闭环集成 | T4-A–T4-K |
+| T4-GATE | INT/GATE | 核心多角色朗读闭环集成 | T4-DEP、T4-A–T4-K |
 
 #### 18.0.6 阶段 T5：文字描述生成音色
 
@@ -1516,13 +1630,338 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 | --- | --- | --- | --- |
 | T6-A | PAR-C | 人工确认的情绪音色变体 | T4-GATE |
 | T6-B | PAR-C/MUTEX | 群体声音混合与听感 | T4-GATE |
-| T6-C | PAR-C | 全书批量生成、恢复、优先级和公平性 | T4-GATE |
+| T6-C | PAR-C | 全书仅扫描/批量生成分离、逐章阻塞隔离、恢复、优先级和公平性 | T4-GATE |
 | T6-D | PAR-C | 章节/全书导出与 manifest | T4-GATE |
 | T6-E | PAR-C | 发音批量校对和可选 ASR 告警 | T4-GATE |
 | T6-F | PAR-C | 音质报告、可达性 GC、配额和磁盘治理 | T4-GATE |
 | T6-G | PAR-C | 明确开启的空闲预生成和显式 Edition 切换 | T4-GATE |
-| T6-H | PAR | 批量、恢复、导出、音质、配额和隐私回归 | T6 契约 |
+| T6-H | PAR | 批量、恢复、导出、音质、配额和隐私回归 | T6 契约后可测试先行；最终运行依赖 T6-A–T6-G |
 | T6-GATE | INT/GATE | 本阶段高级生产最终集成 | T6-A–T6-H |
+
+### 18.0.8 子代理直接派发协议
+
+本文的阶段表不是口头分工建议，而是正式施工的派发入口。主代理只能派发当前已获批准且前置满足的工作包；截至本次修订，只有 T0-A…T0-I 可进入 ready set。规划中的 T1–T6 文件名不代表已经创建文件、实施 schema 或批准后续阶段。
+
+每次派发必须完整填写以下施工卡；任一字段为空、允许写范围与其他活跃工作包重叠、或冻结输入尚未形成时，不得启动该子代理：
+
+```text
+工作包 ID：
+唯一目标：
+明确非目标：
+允许修改的精确文件/目录：
+只读文件/目录：
+禁止触碰的共享文件与当前用户改动：
+已冻结输入契约、fixture 与版本：
+需要取得的共享资源锁：
+必须运行的最小测试命令：
+必须写入的证据文件：
+交付给主代理的接线位置、风险、未完成项与回退说明：
+```
+
+派发和交付规则：
+
+1. 一个活跃工作包只有一个写 Owner；Owner 表示文件和接口责任域，不绑定固定代理。后续代理只有在前一 Owner 已交付、主代理确认工作树边界并重新派发后，才能按表中顺序继续修改同一文件。
+2. 子代理只改施工卡列出的路径。发现必须触碰共享入口、公共 DTO、迁移、依赖锁或另一工作包文件时立即停止写入，只向主代理返回所需变更和原因；不得自行扩大范围。
+3. 子代理不得执行 `git add`、`git commit`、`git push`，不得分配 Alembic revision，不得操作正式数据库、真实用户小说、唯一 QwenPaw 安装状态、媒体清理或模型全局安装。主代理负责串行接线、迁移、真实运行状态、最终测试和 Git。
+4. 每个实现 Owner 同时拥有本表指定的窄单元测试；专职 QA 工作包只写独立集成/回归测试文件，不与实现 Owner 并写同一测试。
+5. 子代理返回“完成”只表示候选 diff 和证据就绪。主代理必须核对越界文件、测试原始结果、风险和未完成项，再决定接收、返工或丢弃候选。
+6. 若开始施工时目标路径已有用户或其他专项未提交改动，主代理必须先登记冲突并暂停相应工作包；不得让代理靠事后大规模合并解决同文件竞争。
+7. `PAR-C` 的代理只能消费已冻结契约，不得修改契约语义。需要变更时退回对应 `SER/GATE`，更新文档和 fixture 后重新形成 ready set。
+
+每个工作包的唯一目标就是 18.0.1–18.0.7 对应行；同时继承第 3.2 节排除项和以下阶段非目标。派发卡可以继续收窄非目标，但不得放宽：
+
+| 阶段 | 统一非目标 |
+| --- | --- |
+| T0 | 不建正式迁移、生产 API、产品 UI 或正式媒体；不把模型实验依赖装进 PawApp 运行环境 |
+| T1 | 不做页面、说话人推断、真实章节合成或用户可见自动化；只建立共享底座 |
+| T2 | 不分析正文、不自动冻结脚本、不生成正式 Edition 或接入章节播放 |
+| T3 | 不合成音频、不修改权威正文、不让模型创建正式人物、不绕过 blocker |
+| T4 | 不产品化 VoiceGenerator、不默认开放全书批量/导出/ASR/群体混音 |
+| T5 | 不逐句调用 VoiceGenerator、不静默替换锁定音色、不因该能力不可用而破坏上传/预设路径 |
+| T6 | ASR 不写正文；GC 不删源资产/被引用资产；空闲准备默认关闭且不自动切换 Edition |
+
+### 18.0.9 专属目录、共享文件和禁止范围
+
+为避免把所有实现继续堆进现有大文件，T0-GATE 通过后采用以下专属目录。括号中的目录当前可不存在；只有其 Owner 工作包获批后才可创建。
+
+| 路径 | 用途与所有权规则 |
+| --- | --- |
+| `backend/narration/`（新） | TTS 领域、模型适配、任务、脚本、音频和 API 的唯一后端包；按 18.0.11 的精确文件分配 Owner，不允许把相同逻辑复制回 `backend/services.py` |
+| `frontend/src/narration/`（新） | 朗读设置、播放器、编辑器桥和专属样式；对外只通过 `index.ts` 导出冻结接口 |
+| `tests/narration/`（新） | 后端单元、集成、迁移、恢复和安全测试；测试数据库必须与正式数据库隔离 |
+| `tests/fixtures/narration/`（新） | 只保存有授权的短文本、schema fixture、参数和哈希清单；不提交用户小说、私人参考音频或模型权重 |
+| `scripts/tts/`（新） | 可复现下载校验、基准、音频检查和 E2E 工具；不得拥有业务权威状态 |
+| `prototypes/moss-tts-nano/`（新） | 仅阶段 0 原型；T0-GATE 必须列出保留、迁移或删除决定，生产代码不得运行时依赖该目录 |
+| `docs/开发文档/证据/MOSS-TTS-Nano施工/`（新） | 每个工作包和阶段门禁的可复核证据根目录；二进制模型与正式音频不进入 Git |
+| `moss-models/`、`novel-media/` | 未来受控挂载/运行数据，不是源码目录；模型、参考音频、缓存和导出文件只记录 hash、来源和恢复信息，不由子代理提交 |
+
+以下是共享热点文件的唯一写入顺序。除表中 Owner 外，所有子代理只读：
+
+| 精确文件 | 唯一 Owner / 顺序 | 允许内容 |
+| --- | --- | --- |
+| `backend/models.py` | 仅 T1-D | 一次性增加已冻结的朗读 ORM；其他工作包不得追加临时 JSON 字段替代正式表 |
+| `backend/migrations/versions/20260825_0010_narration_foundation.py` | 仅 T1-D；实施前先确认仍为下一合法 revision | 单一 TTS 基础迁移、升级和回退；若其他已批准迁移先落地，主代理先修订本文文件名和 `down_revision`，禁止产生第二个 head |
+| `backend/narration/__init__.py` | T1-A → T1-GATE → 后续相关 GATE，串行 | 初始包契约和已通过门禁的公开导出；实现代理不得越过门禁提前暴露模块 |
+| `backend/narration/manifest.py` | T1-F → T4-D | T1 只实现持久领域骨架，T4 按冻结 Manifest v2/ETag 契约补齐；两个 Owner 不得重叠 |
+| `backend/narration/progress.py` | T1-F → T4-I | T1 建立持久进度，T4 增加播放器/局部重生成语义；保持同一数据契约顺序演进 |
+| `backend/app.py` | T1-GATE → T2-GATE → T3-GATE → T4-GATE → T5-GATE → T6-GATE，均由主集成 Owner 串行 | 路由、健康和生命周期的最窄接线；领域逻辑不得写入该文件 |
+| `plugin.py`、`plugin.json` | 仅需要宿主生命周期/权限变化的 GATE 主 Owner | 只使用公开 PawApp/PluginApi 契约；不得改 QwenPaw 上游实现 |
+| `frontend/src/index.ts` | T2-GATE → T4-GATE → T5-GATE → T6-GATE，主集成 Owner 串行 | 注册专属模块和清理函数；子代理不得直接接线 |
+| `frontend/src/narration/index.ts`、`frontend/src/narration/styles.ts` | T2-GATE → T4-GATE → T5-GATE → T6-GATE，主集成 Owner 串行 | 汇出已通过门禁的模块并维护 TTS 局部样式；实现代理只返回新增导出和样式需求 |
+| `frontend/src/narration/script-review-panel.ts` | T3-H → T4-H | T3 完成脚本复核，T4 增加与播放器共存和旧稿状态；保持单一 Owner 顺序 |
+| `frontend/src/creative-center.ts` | 仅 T2-GATE | 创作中心“朗读”入口；必须保留现有作品卡和用户改动 |
+| `frontend/src/workbench.ts`、`frontend/src/workbench-v2.ts`、`frontend/src/workbench-studio.ts` | T2-GATE → T4-GATE，按页面由主集成 Owner 串行 | `reading` 路由、人物声音页签、章节播放器/复核面板接线；同一时刻禁止其他专项并写 |
+| `frontend/src/styles.ts` | 默认只读；确有宿主级共享样式时仅对应 GATE 主 Owner | TTS 局部样式优先写 `frontend/src/narration/styles.ts`，避免共享样式冲突 |
+| `frontend/src/types.ts`、`frontend/src/api.ts`、`backend/schemas.py`、`backend/contracts.py` | 默认只读；公共边界确需变化时仅 GATE 主 Owner | TTS DTO 优先留在专属模块，禁止复制出第二份漂移契约 |
+| `pyproject.toml`、`requirements.txt`、`requirements-dev.lock` | 仅 T1-DEP 的运行时依赖 Owner 串行 | 阶段 0 使用 `prototypes/moss-tts-nano/python-requirements.lock` 和隔离 `.venv`；只有 T0-GATE 选定且核实许可证/离线影响的依赖才能进入项目运行时 |
+| `package.json`、`pnpm-lock.yaml` | 仅 T4-DEP 的正式编辑器依赖 Owner 串行 | 阶段 0 使用 prototype 自己的 `package.json`/lock；只有编辑器 ADR 选中的依赖才进入根项目，继续使用 `pnpm` |
+| `compose.yaml`、`docker/qwenpaw/Dockerfile`、`.env.example` | 仅 T1-DEP 的拓扑 Owner 串行 | 只实现已选本地模型边界和受控挂载；不得覆盖 QwenPaw 核心目录或删除持久卷 |
+| `scripts/package_plugin.py`、`scripts/verify_qwenpaw_lab.py` | 各相关 GATE 的主验证 Owner | 打包、安装、升级、卸载和公开契约验证；子代理只返回所需验证点 |
+| 本文、TTS ADR 与所有 `T*-GATE.md` | 仅主代理 | 决策、状态、门禁、下一 ready set 和最终验收结论 |
+
+本文为 T0 预留 ADR-0005 和 ADR-0006。真正创建前主代理必须重新执行 `rg --files docs/开发文档/ADR`；若编号已被另一项已批准工作占用，先串行更新本文的两个精确路径和所有引用，再派发 T0-GATE，禁止覆盖既有 ADR 或产生同号文件。
+
+默认禁止触碰：`/Users/liujia/Documents/AI小说世界3/Data`；QwenPaw 上游核心、已安装包、私有路由/store/数据库；不属于本文的开发计划、ADR、Skills 和 Agent 配置；`frontend/dist/`、`build/`、`node_modules/`、`__pycache__/` 等生成目录；真实用户正文、revision、媒体、数据库 dump 和当前工作树中未分配的用户改动。
+
+### 18.0.10 共享资源锁与冻结接口
+
+| 锁 | 使用者 | 规则 |
+| --- | --- | --- |
+| `LOCK-NANO` | T0-B、T0-C、T4-B、T4-K、T5-D、T6-B | 同一时间只运行一个真实 Nano 重任务；代码和假适配器测试可并行 |
+| `LOCK-VOICEGEN` | T0-D、T5-A、T5-D | VoiceGenerator 加载、MPS/CPU 基准和候选生成串行；默认不与 Nano 同时常驻 |
+| `LOCK-MODEL-ASSETS` | T0-A、T0-E、T1-B、T5-A | 模型/音色下载、校验、版本切换和清单更新由单一 Owner 排队，禁止并发覆盖文件 |
+| `LOCK-DEPENDENCIES` | T1-DEP、T4-DEP | 根 Python/Node 依赖、lock 和本地依赖安装状态由主代理串行；子代理不得自行安装未冻结依赖 |
+| `LOCK-DB-MIGRATION` | T1-D、各迁移门禁 | 只允许专用测试库；备份、升级、回退和 schema 比对由主代理串行 |
+| `LOCK-QWENPAW` | 各安装/升级/卸载与真实宿主验证 | 唯一实验环境串行；测试结束必须恢复已登记状态 |
+| `LOCK-BROWSER` | T0-F、T0-G、T2-H、T4-K、T5/T6 UI 验收 | 同一浏览器会话和同一小说状态串行，截图任务可在不同隔离会话并行 |
+| `LOCK-MEDIA-GC` | T1-E、T6-F | GC/配额测试只能针对可重建测试媒体；删除前验证引用，禁止触碰用户媒体 |
+| `LOCK-SHARED-FILE` | 所有共享热点文件 | 主代理登记文件、函数/页面区域、Owner 和起止时间；锁释放后下一 Owner 才能接手 |
+| `LOCK-GIT` | 最终集成、提交、推送 | 仅主代理持有；阶段门禁不会自动授权提交或推送 |
+
+并行编码前必须依次冻结以下接口；冻结产物既是后续 `PAR-C` 的输入，也是发生变更时必须退回的串行门禁：
+
+| 冻结点 | 必须冻结的内容 | 权威产物 |
+| --- | --- | --- |
+| T0-GATE | `TTSAdapter`/`VoiceDesignAdapter` 能力契约、模型拓扑、音频规范、Manifest v2、ready-window、`NarrationEditorBridge`、复核策略和 blocker taxonomy | T0 报告、能力矩阵、`docs/开发文档/ADR/ADR-0005-MOSS-TTS本地运行拓扑与资源边界.md`、`docs/开发文档/ADR/ADR-0006-朗读编辑器与Manifest播放契约.md` |
+| T1-D | ORM 表、枚举、唯一约束、外键、保留语义、迁移 revision 和回退路径 | `backend/models.py`、唯一 Alembic revision、schema fixture |
+| T2-A | 设置/音色/绑定/试听 API、前后端 DTO、错误码、授权与能力状态 | `backend/narration/schemas.py`、`frontend/src/narration/contracts.ts`、契约测试 |
+| T3-A | script/segment/scene/speaker/anonymous ID、UTF-16 范围、warnings/blockers 和冻结状态机 | `backend/narration/script_contracts.py`、版本化 JSON fixture |
+| T4-A/T4-D | Edition/render fingerprint、任务幂等、Manifest revision、Range/ETag、播放和局部重生成契约 | 领域契约测试、Manifest fixture 和播放 mock |
+| T5-GATE/T6-GATE | VoiceGenerator 可见性、批量/导出/GC 等高级能力的最终 capability flag | 阶段门禁记录和前后端 capability 测试 |
+
+### 18.0.11 T0–T6 精确工作包绑定
+
+下表中的路径是对应工作包可写范围；未列出的路径一律只读。`（新）` 只表示获批施工时允许创建，不表示当前已经实现。每个工作包还只能写自己的证据目录 `docs/开发文档/证据/MOSS-TTS-Nano施工/<ID>/`。
+
+为压缩表格，同一分号分组中不含 `/` 的后续文件名继承该分组第一项的目录。例如 `` `backend/narration/adapters.py`、`fingerprints.py` `` 精确表示两个文件 `backend/narration/adapters.py` 与 `backend/narration/fingerprints.py`，不授权整个目录。
+
+“必须证据”列中 `<ID>/...` 和紧随其后的裸文件名都位于上述证据根目录的同一 `<ID>/` 下。七个阶段门禁文件固定为证据根目录下的 `T0-GATE.md` 至 `T6-GATE.md`；只有主代理可以创建或改写这些门禁文件。
+
+任何包含前端产品实现的工作包还可独占一个同名局部样式片段 `frontend/src/narration/styles/<小写工作包ID>.ts`，例如 T2-B 只能写 `frontend/src/narration/styles/t2-b.ts`。这是唯一允许从 ID 推导的附加路径；不得修改其他片段。各 GATE 仅在 `frontend/src/narration/styles.ts` 中按已通过工作包顺序组合片段。
+
+#### T0 文件、验证和证据
+
+| ID | 允许修改的精确文件/目录 | 最小验收 | 必须证据 |
+| --- | --- | --- | --- |
+| T0-A | `scripts/tts/collect_dependency_inventory.py`；`prototypes/moss-tts-nano/python-requirements.lock`、`model-sources.lock.json`、`package.json`、`pnpm-lock.yaml`、`dependencies/` | `DOC`、脚本 `--help`、隔离 Python/Node 依赖可重建、依赖 hash/许可证复核 | `T0-A/README.md`、`dependency-lock.json`、`licenses.md` |
+| T0-B | `scripts/tts/benchmark_nano_topologies.py`；`prototypes/moss-tts-nano/topology/` | `BENCH-NANO`；真实运行持有 `LOCK-NANO` | `T0-B/README.md`、`metrics.json`、`failures.md` |
+| T0-C | `scripts/tts/benchmark_nano_quality.py`；`prototypes/moss-tts-nano/quality/` | `BENCH-QUALITY`；固定样本人工听检 | `T0-C/README.md`、`metrics.json`、`listening.md` |
+| T0-D | `scripts/tts/benchmark_voice_generator.py`；`prototypes/moss-tts-nano/voice-generator/` | `BENCH-VOICEGEN`；持有 `LOCK-VOICEGEN` | `T0-D/README.md`、`metrics.json`、`clone-retention.md` |
+| T0-E | `tests/fixtures/narration/voice_pool_slots_v1.json`；本工作包证据目录 | `.venv/bin/python -m json.tool tests/fixtures/narration/voice_pool_slots_v1.json`、来源与授权逐槽复核、人工去重 | `T0-E/README.md`、`voice-pack-manifest.json`、`licenses.md`、`listening.md` |
+| T0-F | `prototypes/moss-tts-nano/editor/editor-spike.ts`、`editor-spike.test.ts`、`vitest.config.ts` | `pnpm --dir prototypes/moss-tts-nano exec vitest run --config editor/vitest.config.ts`、IME/undo/decoration/gutter/Blob 实测 | `T0-F/README.md`、`matrix.json`、目标分辨率截图 |
+| T0-G | `prototypes/moss-tts-nano/manifest-player/manifest-player.ts`、`manifest-player.test.ts`、`vitest.config.ts` | `pnpm --dir prototypes/moss-tts-nano exec vitest run --config manifest-player/vitest.config.ts`、pending gap/跳播/接缝浏览器实测 | `T0-G/README.md`、`manifest-v2.schema.json`、`queue-metrics.json`、截图 |
+| T0-H | 本工作包证据目录，源码只读 | schema/API/状态机/权限威胁审查清单 | `T0-H/README.md`、`contract-review.md`、`threat-model.md` |
+| T0-I | `scripts/tts/inspect_audio.py`；`scripts/tts/render_benchmark_report.py`；`tests/fixtures/narration/benchmark_manifest.json`、`authorized-texts.json` | 两个脚本 `--help`、fixture schema、假数据自测 | `T0-I/README.md`、`tooling-contract.md` |
+| T0-GATE | 本文；`docs/开发文档/ADR/ADR-0005-MOSS-TTS本地运行拓扑与资源边界.md`、`docs/开发文档/ADR/ADR-0006-朗读编辑器与Manifest播放契约.md`；证据根目录的 `T0-GATE.md` | 汇总 T0-A…I，执行 `DOC`，逐项作七个 go/no-go | `T0-GATE.md`、`capability-matrix.md`、下一 ready set |
+
+#### T1 文件、验证和证据
+
+| ID | 允许修改的精确文件/目录 | 最小验收 | 必须证据 |
+| --- | --- | --- | --- |
+| T1-DEP | `pyproject.toml`、`requirements.txt`、`requirements-dev.lock`、`compose.yaml`、`docker/qwenpaw/Dockerfile`、`.env.example` | `.venv/bin/python -m pip check`、`docker compose config --quiet`、`PKG`；持有 `LOCK-DEPENDENCIES` | `T1-DEP/README.md`、依赖/许可证/镜像与卸载回退清单 |
+| T1-A | `backend/narration/__init__.py`、`adapters.py`、`fingerprints.py`；`tests/narration/test_adapters.py` | `PY:test_adapters.py` | `T1-A/README.md`、fake/real capability 对照 |
+| T1-B | `backend/narration/runtime.py`、`model_assets.py`；`scripts/tts/install_models.py`；`tests/narration/test_runtime.py` | `PY:test_runtime.py`、下载校验 dry-run | `T1-B/README.md`、生命周期与恢复记录 |
+| T1-C | `backend/narration/jobs.py`、`resource_locks.py`；`tests/narration/test_jobs.py` | `PY:test_jobs.py` | `T1-C/README.md`、租约/重试/死信/公平性结果 |
+| T1-D | `backend/models.py`；唯一 TTS migration；`tests/narration/test_migrations.py` | `MIG`、`PY:test_migrations.py` | `T1-D/README.md`、升级/回退/schema diff |
+| T1-E | `backend/narration/media.py`、`storage.py`；`tests/narration/test_media.py` | `PY:test_media.py`；GC 用测试资产 | `T1-E/README.md`、Range/ETag/引用/GC 结果 |
+| T1-F | `backend/narration/snapshots.py`、`settings.py`、`script_versions.py`、`editions.py`、`renders.py`、`manifest.py`、`progress.py`、`services.py`；`tests/narration/test_domain_services.py` | `PY:test_domain_services.py` | `T1-F/README.md`、幂等与不可变性矩阵 |
+| T1-G | `tests/narration/test_foundation_integration.py`、`tests/narration/test_crash_recovery.py` | `PY:test_foundation_integration.py`、`PY:test_crash_recovery.py` | `T1-G/README.md`、崩溃恢复和缓存复用结果 |
+| T1-GATE | `backend/narration/__init__.py`；18.0.9 分配给 T1-GATE 的共享热点；`T1-GATE.md` | `PY-ALL`、`MIG`、`PKG`、相关宿主健康验证 | `T1-GATE.md`、已接收 diff、回退点、下一 ready set |
+
+#### T2 文件、验证和证据
+
+| ID | 允许修改的精确文件/目录 | 最小验收 | 必须证据 |
+| --- | --- | --- | --- |
+| T2-A | `backend/narration/schemas.py`、`settings_api.py`；`frontend/src/narration/contracts.ts`、`api.ts`；`tests/narration/test_settings_contract.py`；`frontend/src/narration/contracts.test.ts`、`api.test.ts` | `PY:test_settings_contract.py`、`FE:contracts.test.ts api.test.ts` | `T2-A/README.md`、字段/错误码/API 对照 |
+| T2-B | `frontend/src/narration/reading-page.ts`、`reading-overview.ts`、`reading-page.test.ts`、`reading-overview.test.ts` | `FE:reading-page.test.ts reading-overview.test.ts`、`FE-CHECK` | `T2-B/README.md`、空/加载/成功/失败截图 |
+| T2-C | `frontend/src/narration/character-voice-panel.ts`、`character-voice-panel.test.ts` | `FE:character-voice-panel.test.ts`、键盘测试 | `T2-C/README.md`、人物绑定与历史影响截图 |
+| T2-D | `backend/narration/voices.py`；`tests/narration/test_voices.py`；`frontend/src/narration/voice-source-panel.ts`、`voice-source-panel.test.ts` | `PY:test_voices.py`、`FE:voice-source-panel.test.ts`，上传格式/授权/试听测试 | `T2-D/README.md`、上传与锁定版本证据 |
+| T2-E | `backend/narration/voice_pool.py`、`backend/narration/resources/voice_pool_v1.json`；`tests/narration/test_voice_pool.py`；`frontend/src/narration/voice-pool-panel.ts`、`voice-pool-panel.test.ts` | `PY:test_voice_pool.py`、`FE:voice-pool-panel.test.ts`，24 槽位完整性校验 | `T2-E/README.md`、覆盖率和缺失降级截图 |
+| T2-F | `backend/narration/pronunciations.py`；`tests/narration/test_pronunciations.py`；`frontend/src/narration/pronunciation-panel.ts`、`pronunciation-panel.test.ts`、`cache-panel.ts`、`cache-panel.test.ts` | `PY:test_pronunciations.py`、`FE:pronunciation-panel.test.ts cache-panel.test.ts` | `T2-F/README.md`、发音/停顿/缓存状态证据 |
+| T2-G | `backend/narration/privacy.py`；`tests/narration/test_reading_privacy.py`；`frontend/src/narration/reading-rules-panel.ts`、`reading-rules-panel.test.ts`、`reading-status.ts`、`reading-status.test.ts` | `PY:test_reading_privacy.py`、`FE:reading-rules-panel.test.ts reading-status.test.ts`，授权撤销和磁盘不足测试 | `T2-G/README.md`、两种复核策略和失败态证据 |
+| T2-H | `tests/narration/test_settings_api.py`；`frontend/src/narration/reading-page.integration.test.ts`、`reading-accessibility.test.ts` | `PY:test_settings_api.py`、两个 `FE`、`UI` | `T2-H/README.md`、桌面/窄屏/键盘/状态矩阵 |
+| T2-GATE | `frontend/src/narration/index.ts`、`styles.ts`；18.0.9 分配给 T2-GATE 的共享热点；`T2-GATE.md` | `PY-ALL`、`FE-ALL`、`PKG`、`UI` | `T2-GATE.md`、入口/卸载非回归、下一 ready set |
+
+#### T3 文件、验证和证据
+
+| ID | 允许修改的精确文件/目录 | 最小验收 | 必须证据 |
+| --- | --- | --- | --- |
+| T3-A | `backend/narration/script_contracts.py`；`tests/fixtures/narration/script-contract-v1.json`；`tests/narration/test_script_contracts.py` | `PY:test_script_contracts.py` | `T3-A/README.md`、版本化 schema 和状态机 |
+| T3-B | `backend/narration/segmentation.py`、`source_mapping.py`；`tests/narration/test_segmentation.py` | `PY:test_segmentation.py` | `T3-B/README.md`、Markdown/UTF-16/边界用例 |
+| T3-C | `backend/narration/scenes.py`、`speaker_rules.py`、`aliases.py`；`tests/narration/test_speaker_rules.py` | `PY:test_speaker_rules.py` | `T3-C/README.md`、场景和别名冲突矩阵 |
+| T3-D | `backend/narration/cloud_analysis.py`、`speaker_model.py`；`tests/narration/test_cloud_analysis.py` | `PY:test_cloud_analysis.py`，假模型覆盖全部失败态 | `T3-D/README.md`、最小外发/模型身份/schema 证据 |
+| T3-E | `backend/narration/anonymous_speakers.py`；`tests/narration/test_anonymous_speakers.py` | `PY:test_anonymous_speakers.py` | `T3-E/README.md`、稳定键/合并/拆分/升级用例 |
+| T3-F | `backend/narration/casting.py`；`tests/narration/test_casting.py` | `PY:test_casting.py` | `T3-F/README.md`、scope 优先级和确定性结果 |
+| T3-G | `backend/narration/expression.py`、`confidence.py`；`tests/narration/test_confidence.py` | `PY:test_confidence.py` | `T3-G/README.md`、校准样本和阈值说明 |
+| T3-H | `backend/narration/script_review.py`、`script_api.py`；`tests/narration/test_script_review.py`、`test_script_api.py`；`frontend/src/narration/script-contracts.ts`、`script-api.ts`、`script-api.test.ts`、`script-review-panel.ts`、`script-review-panel.test.ts` | `PY:test_script_review.py test_script_api.py`、`FE:script-api.test.ts script-review-panel.test.ts`，两种冻结路径和 unknown 阻断 | `T3-H/README.md`、阻塞处理和焦点恢复证据 |
+| T3-I | `tests/narration/test_speaker_attribution.py`、`tests/narration/test_script_review_integration.py`；`frontend/src/narration/script-review.integration.test.ts` | `PY:test_speaker_attribution.py test_script_review_integration.py`、`FE:script-review.integration.test.ts` | `T3-I/README.md`、准确率、授权/非法 ID/重复分析和失败分类报告 |
+| T3-GATE | 18.0.9 分配给 T3-GATE 的共享热点；证据根目录的 `T3-GATE.md` | `PY-ALL`、`FE-ALL`、隐私回归 | `T3-GATE.md`、固定脚本样本、下一 ready set |
+
+#### T4 文件、验证和证据
+
+| ID | 允许修改的精确文件/目录 | 最小验收 | 必须证据 |
+| --- | --- | --- | --- |
+| T4-DEP | `package.json`、`pnpm-lock.yaml` | `pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm build`；持有 `LOCK-DEPENDENCIES` | `T4-DEP/README.md`、依赖/许可证/bundle 增量和回退清单 |
+| T4-A | `backend/narration/requests.py`、`edition_service.py`、`render_cache.py`、`narration_api.py`；`tests/narration/test_edition_service.py`、`test_narration_requests_api.py` | `PY:test_edition_service.py test_narration_requests_api.py`，幂等/快照/缓存作用域 | `T4-A/README.md`、fingerprint 和重放结果 |
+| T4-B | `backend/narration/worker.py`、`scheduler.py`；`tests/narration/test_narration_worker.py` | `PY:test_narration_worker.py`；真实运行持有 `LOCK-NANO` | `T4-B/README.md`、取消/公平/崩溃恢复指标 |
+| T4-C | `backend/narration/audio_pipeline.py`、`transcoding.py`；`tests/narration/test_audio_pipeline.py` | `PY:test_audio_pipeline.py`、音频校验和接缝听检 | `T4-C/README.md`、格式/响度/接缝报告 |
+| T4-D | `backend/narration/manifest.py`、`playback_api.py`；`tests/narration/test_manifest_v2.py`；`tests/fixtures/narration/manifest-v2.json`；`frontend/src/narration/playback-contracts.ts`、`playback-api.ts`、`playback-api.test.ts` | `PY:test_manifest_v2.py`、`FE:playback-api.test.ts`，Range/ETag/CAS/pending gap | `T4-D/README.md`、Manifest v2 样本 |
+| T4-E | `frontend/src/narration/segment-playback-queue.ts`、`segment-playback-queue.test.ts`、`narration-player.ts`、`narration-player.test.ts` | `FE:segment-playback-queue.test.ts narration-player.test.ts`，Web Audio 与双 audio 回退 | `T4-E/README.md`、预取/间隙/失败指标 |
+| T4-F | `frontend/src/narration/editor-bridge.ts`、`editor-bridge.test.ts`、`editor-codemirror.ts`、`editor-codemirror.test.ts`、`editor-textarea-fallback.ts`、`editor-textarea-fallback.test.ts` | `FE:editor-bridge.test.ts editor-codemirror.test.ts editor-textarea-fallback.test.ts`，IME/undo/映射/降级 | `T4-F/README.md`、编辑器兼容矩阵 |
+| T4-G | `frontend/src/narration/paragraph-gutter.ts`、`paragraph-gutter.test.ts`、`segment-follow.ts`、`segment-follow.test.ts`、`chapter-playback.ts`、`chapter-playback.test.ts` | `FE:paragraph-gutter.test.ts segment-follow.test.ts chapter-playback.test.ts`，键盘跳播/高亮/暂停跟随 | `T4-G/README.md`、桌面/窄屏/200% 证据 |
+| T4-H | `backend/narration/document_state.py`；`tests/narration/test_document_narration_state.py`；`frontend/src/narration/chapter-narration-state.ts`、`chapter-narration-state.test.ts`、`script-review-panel.ts`、`script-review-player.integration.test.ts` | `PY:test_document_narration_state.py`、`FE:chapter-narration-state.test.ts script-review-player.integration.test.ts` | `T4-H/README.md`、旧稿/新稿/面板播放器共存、版本分歧和焦点证据 |
+| T4-I | `backend/narration/regeneration.py`、`progress.py`；`tests/narration/test_regeneration.py`；`frontend/src/narration/edition-history.ts`、`edition-history.test.ts` | `PY:test_regeneration.py`、`FE:edition-history.test.ts`，局部失效/恢复/快速跳播 | `T4-I/README.md`、复用率和进度恢复结果 |
+| T4-J | `tests/narration/test_narration_e2e.py`、`tests/narration/test_playback_recovery.py`；`frontend/src/narration/chapter-narration.integration.test.ts` | `PY:test_narration_e2e.py test_playback_recovery.py`、`FE:chapter-narration.integration.test.ts`，正文不被按键级 TTS 触发 | `T4-J/README.md`、自动化矩阵 |
+| T4-K | `scripts/tts/validate_chapter_e2e.py`；本工作包证据目录 | `BENCH-CHAPTER`、`UI`；真实 Nano/浏览器按锁排队 | `T4-K/README.md`、30 分钟/RTF/接缝/跳播/听感报告 |
+| T4-GATE | 18.0.9 分配给 T4-GATE 的共享热点；证据根目录的 `T4-GATE.md` | `PY-ALL`、`FE-ALL`、`PKG`、真实一章 E2E、原生页面非回归 | `T4-GATE.md`、核心可用 go/no-go、下一 ready set |
+
+#### T5 文件、验证和证据
+
+| ID | 允许修改的精确文件/目录 | 最小验收 | 必须证据 |
+| --- | --- | --- | --- |
+| T5-A | `backend/narration/voice_generator.py`、`voice_generator_runtime.py`、`voice_generator_api.py`；`tests/narration/test_voice_generator_runtime.py`、`test_voice_generator_api.py` | `PY:test_voice_generator_runtime.py test_voice_generator_api.py`；真实运行持有 `LOCK-VOICEGEN` | `T5-A/README.md`、生命周期/峰值内存/失败恢复 |
+| T5-B | `backend/narration/voice_descriptions.py`；`tests/narration/test_voice_descriptions.py` | `PY:test_voice_descriptions.py`，最小人物字段和可编辑描述 | `T5-B/README.md`、隐私字段矩阵 |
+| T5-C | `frontend/src/narration/voice-generator-contracts.ts`、`voice-generator-api.ts`、`voice-generator-api.test.ts`、`voice-generator-panel.ts`、`voice-generator-panel.test.ts`、`private-voice-library.ts`、`private-voice-library.test.ts` | `FE:voice-generator-api.test.ts voice-generator-panel.test.ts private-voice-library.test.ts`，候选/试听/锁定/来源状态 | `T5-C/README.md`、完整交互截图 |
+| T5-D | `scripts/tts/validate_voice_generator_clone.py`；`tests/narration/test_voice_generator_quality.py` | `PY:test_voice_generator_quality.py`、真实 VoiceGenerator→Nano 听检，持有两个模型锁 | `T5-D/README.md`、保持度与漂移报告 |
+| T5-E | `backend/narration/capabilities.py`；`tests/narration/test_narration_capabilities.py`；`frontend/src/narration/voice-generator-capability.ts`、`voice-generator-capability.test.ts` | `PY:test_narration_capabilities.py`、`FE:voice-generator-capability.test.ts`，不可用时隐藏且既有路径非回归 | `T5-E/README.md`、go/hide 两套证据 |
+| T5-GATE | 18.0.9 分配给 T5-GATE 的共享热点；证据根目录的 `T5-GATE.md` | `PY-ALL`、`FE-ALL`、`PKG`、M4 真实裁决 | `T5-GATE.md`、可见/隐藏结论 |
+
+#### T6 文件、验证和证据
+
+| ID | 允许修改的精确文件/目录 | 最小验收 | 必须证据 |
+| --- | --- | --- | --- |
+| T6-A | `backend/narration/voice_variants.py`、`voice_variants_api.py`；`tests/narration/test_voice_variants.py`、`test_voice_variants_api.py`；`frontend/src/narration/voice-variants-api.ts`、`voice-variants-api.test.ts`、`voice-variants-panel.ts`、`voice-variants-panel.test.ts` | `PY:test_voice_variants.py test_voice_variants_api.py`、`FE:voice-variants-api.test.ts voice-variants-panel.test.ts`，仅人工确认后生效 | `T6-A/README.md`、版本影响和听感记录 |
+| T6-B | `backend/narration/group_mix.py`、`group_mix_api.py`；`tests/narration/test_group_mix.py`、`test_group_mix_api.py`；`frontend/src/narration/group-mix-api.ts`、`group-mix-api.test.ts`、`group-mix-setting.ts`、`group-mix-setting.test.ts` | `PY:test_group_mix.py test_group_mix_api.py`、`FE:group-mix-api.test.ts group-mix-setting.test.ts`、真实混音持有 `LOCK-NANO` | `T6-B/README.md`、响度/相位/听感报告 |
+| T6-C | `backend/narration/batch.py`、`batch_api.py`；`tests/narration/test_batch_narration.py`、`test_batch_api.py`；`frontend/src/narration/batch-api.ts`、`batch-api.test.ts`、`batch-generation-panel.ts`、`batch-generation-panel.test.ts` | `PY:test_batch_narration.py test_batch_api.py`、`FE:batch-api.test.ts batch-generation-panel.test.ts`，扫描/生成分离和逐章恢复 | `T6-C/README.md`、公平性与恢复记录 |
+| T6-D | `backend/narration/export.py`、`export_api.py`；`tests/narration/test_narration_export.py`、`test_export_api.py`；`frontend/src/narration/export-api.ts`、`export-api.test.ts`、`export-panel.ts`、`export-panel.test.ts` | `PY:test_narration_export.py test_export_api.py`、`FE:export-api.test.ts export-panel.test.ts`，章节/全书/Manifest 校验 | `T6-D/README.md`、导出清单和 hash |
+| T6-E | `backend/narration/pronunciation_audit.py`、`pronunciation_audit_api.py`；`tests/narration/test_pronunciation_audit.py`、`test_pronunciation_audit_api.py`；`frontend/src/narration/pronunciation-audit-api.ts`、`pronunciation-audit-api.test.ts`、`pronunciation-audit-panel.ts`、`pronunciation-audit-panel.test.ts` | `PY:test_pronunciation_audit.py test_pronunciation_audit_api.py`、`FE:pronunciation-audit-api.test.ts pronunciation-audit-panel.test.ts`，ASR 仅告警不改正文 | `T6-E/README.md`、误报/漏报样本 |
+| T6-F | `backend/narration/quality.py`、`gc.py`、`storage_governance_api.py`；`tests/narration/test_narration_gc.py`、`test_storage_governance_api.py`；`frontend/src/narration/storage-governance-api.ts`、`storage-governance-api.test.ts`、`storage-governance-panel.ts`、`storage-governance-panel.test.ts` | `PY:test_narration_gc.py test_storage_governance_api.py`、`FE:storage-governance-api.test.ts storage-governance-panel.test.ts`，持有 `LOCK-MEDIA-GC` | `T6-F/README.md`、引用可达性/配额/恢复报告 |
+| T6-G | `backend/narration/idle_prepare.py`、`idle_prepare_api.py`；`tests/narration/test_idle_prepare.py`、`test_idle_prepare_api.py`；`frontend/src/narration/idle-prepare-api.ts`、`idle-prepare-api.test.ts`、`idle-prepare-setting.ts`、`idle-prepare-setting.test.ts` | `PY:test_idle_prepare.py test_idle_prepare_api.py`、`FE:idle-prepare-api.test.ts idle-prepare-setting.test.ts`，默认关闭且不按键触发 | `T6-G/README.md`、启停与 Edition 显式切换证据 |
+| T6-H | `tests/narration/test_advanced_production.py`、`tests/narration/test_export_recovery.py`；`frontend/src/narration/advanced-production.integration.test.ts` | `PY:test_advanced_production.py test_export_recovery.py`、`FE:advanced-production.integration.test.ts`，批量/隐私/配额回归 | `T6-H/README.md`、高级生产自动化矩阵 |
+| T6-GATE | 18.0.9 分配给 T6-GATE 的共享热点；证据根目录的 `T6-GATE.md` | `FULL`、真实批量/导出/恢复、最终产品验收 | `T6-GATE.md`、发布/降级/回退裁决 |
+
+### 18.0.12 推荐施工波次与唯一汇合顺序
+
+| 波次 | 主代理串行工作 | 子代理 ready set | 汇合条件 |
+| --- | --- | --- | --- |
+| W0-1 | 登记基线、锁和 fixture 契约 | T0-A、T0-E、T0-H、T0-I | 依赖、音色槽位、数据边界和工具输入可复用 |
+| W0-2 | 安排真实模型/浏览器资源锁 | T0-B/T0-C 代码可并行但真实 Nano 排队；T0-F、T0-G 可并行 | 拓扑、音质、编辑器和播放器原型均有原始证据 |
+| W0-3 | 串行安排 T0-D VoiceGenerator；汇总未通过项 | T0-E 可根据听感结果完成候选锁定 | T0-GATE 七项 go/no-go |
+| W1-1 | 先串行完成 T1-DEP；主代理/唯一 Owner 冻结 T1-D，另一个工作槽可执行 T1-A | T1-A 与 T1-D 文件隔离；T1-D 冻结后开放 T1-C/T1-E，T1-A 完成后开放 T1-B | 正式依赖、adapter 和 schema 均可复用 |
+| W1-2 | 串行执行 T1-D 测试库迁移并登记回退 | T1-C、T1-E、T1-B 可继续；T1-F 等待 T1-A/T1-D 后进入；T1-G 可测试先行 | T1-GATE 共享底座通过 |
+| W2/3-1 | 依次冻结 T2-A、T3-A 两套不重叠契约 | T2-B…G 与 T3-B…E、T3-G 可滚动并行 | T2-H 后执行 T2-GATE |
+| W3-2 | 释放 T2 声音设置契约 | T3-F、T3-H、T3-I | T3-GATE 可冻结完整朗读脚本 |
+| W4-1 | 先串行完成 T4-DEP，再冻结 Edition/render 与 Manifest 接口 | T4-A、T4-B、T4-C、T4-D、T4-F | 正式编辑器依赖和 lock 可重建；后端生产和编辑器桥 mock 通过 |
+| W4-2 | 保持共享页面文件锁 | T4-E、T4-G、T4-H、T4-I、T4-J 滚动并行 | 主代理接线后执行 T4-K |
+| W4-3 | 独占 Nano、浏览器和一章测试数据 | 无共享写入；只允许独立复核代理读证 | T4-GATE，达到核心多角色朗读可用范围 |
+| W5/6-1 | 冻结 VoiceGenerator capability 与高级生产公共接口 | T5-A…C、T6-A、T6-C…G 可按文件并行；T5/T6 重模型任务排队 | 各自窄测试和证据完成 |
+| W5/6-2 | 串行运行 T5-D、T6-B 和 GC/批量真实负载 | T5-E、T6-H 可使用 fake adapter 并行回归 | 先 T5-GATE，再 T6-GATE |
+| W-FINAL | 主代理接线、全量测试、打包、真实浏览器和恢复验证 | 子代理只读复核不同证据维度，不再并写代码 | 发布门槛全部通过；Git 仍需用户明确授权 |
+
+任何阶段的唯一汇合顺序固定为：`契约/fixture → 独立实现与窄测试 → 主代理越界审查 → 共享入口接线 → 集成测试 → 真实资源验证 → GATE 记录 → 下一 ready set`。不得先把多个未冻结实现合并，再倒推公共接口。
+
+### 18.0.13 验收命令束与证据格式
+
+工作包表中的命令束含义如下；派发卡必须把 `test_files` 替换成表中一个或多个精确测试文件，不得只写“运行相关测试”。表中同时列出多个 basename 时，每个 basename 都分别补全为 `tests/narration/<name>` 或 `frontend/src/narration/<name>` 后作为独立命令参数，不能只给第一个参数补目录。
+
+`DOC`：
+
+```bash
+git status --short
+git diff --check
+```
+
+`PY:test_files`：
+
+```bash
+.venv/bin/python -m pytest -q -ra tests/narration/<test_files>
+```
+
+`PY-ALL`：
+
+```bash
+.venv/bin/python -m pytest -q -ra
+```
+
+`FE:test_files`：
+
+```bash
+pnpm exec vitest run frontend/src/narration/<test_files>
+pnpm typecheck
+```
+
+`FE-CHECK`：
+
+```bash
+pnpm typecheck
+pnpm build
+```
+
+`FE-ALL`：
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+`MIG` 只能在主代理已确认的专用测试数据库执行；数据库名固定为 `ai_novel_world_2026_tts_test`，`TTS_TEST_DATABASE_URL` 必须与正式数据库不同，并在证据中隐藏口令。执行 downgrade 前还必须完成该测试库的可恢复备份或确认它可由 fixture 全量重建：
+
+```bash
+test -n "${TTS_TEST_DATABASE_URL:-}"
+case "$TTS_TEST_DATABASE_URL" in */ai_novel_world_2026_tts_test) ;; *) exit 64 ;; esac
+AI_NOVEL_DATABASE_URL="$TTS_TEST_DATABASE_URL" .venv/bin/python scripts/migrate.py upgrade head
+AI_NOVEL_DATABASE_URL="$TTS_TEST_DATABASE_URL" .venv/bin/python scripts/migrate.py downgrade <T1-D记录的精确前一revision>
+AI_NOVEL_DATABASE_URL="$TTS_TEST_DATABASE_URL" .venv/bin/python scripts/migrate.py upgrade head
+```
+
+`PKG`：
+
+```bash
+docker compose config --quiet
+.venv/bin/python scripts/package_plugin.py
+.venv/bin/python -m pytest -q -ra tests/test_manifest.py tests/test_qwenpaw_integration_contract.py
+```
+
+`BENCH-NANO`、`BENCH-QUALITY`、`BENCH-VOICEGEN`、`BENCH-CHAPTER` 必须使用 T0-I 冻结的 fixture manifest 和统一 JSON 输出契约；正式命令由对应脚本 `--help` 固定并原样记录。阶段 0 的模型实验统一使用由 `prototypes/moss-tts-nano/python-requirements.lock` 重建的 `prototypes/moss-tts-nano/.venv/bin/python`，不得把尚未裁决的模型依赖装入项目 `.venv` 或正式 PawApp；T1-GATE 冻结正式运行依赖后才切换到项目解释器。所有运行至少记录：硬件/系统、Python、模型 revision/hash、执行后端、参数、输入 hash、首包、RTF、峰值内存、取消/失败状态和输出 hash。人工听检另外记录漏字、重复、音色漂移、停顿、接缝和主观结论，不能用时长/解码成功替代听感。
+
+`UI` 至少覆盖当前宿主真实布局下的 1920×1080、2560×1440、受限桌面宽度、移动窄屏、200% 缩放、键盘、中文 IME、焦点恢复、控制台和错误态。截图必须记录实际像素，不以文件名代替尺寸核验。
+
+`FULL`：
+
+```bash
+git diff --check
+.venv/bin/python -m pytest -q -ra
+pnpm test
+pnpm typecheck
+pnpm build
+docker compose config --quiet
+.venv/bin/python scripts/package_plugin.py
+```
+
+若阶段影响真实 QwenPaw 安装/升级/卸载，主代理还必须在隔离环境执行项目当时有效的 `scripts/verify_qwenpaw_lab.py`，并验证禁用/卸载后原生聊天、设置、Agent、Skills、工具和数据卷非回归。脚本尚未增加 TTS 检查项时不得把旧结果当作 TTS 通过。
+
+每个 `docs/开发文档/证据/MOSS-TTS-Nano施工/<ID>/README.md` 必须包含：基线 commit 与工作树状态、Owner、开始/结束时间、冻结输入、实际修改文件、命令及原始通过/失败/跳过数量、运行环境、产物 hash、人工验收、未验证项、风险、回退和主代理接线说明。每个 `T*-GATE.md` 还必须列出接收/拒绝的工作包、尚未解释的 P0/P1、降级决定、下一 ready set 和是否需要用户重新批准。没有证据文件、测试被无说明跳过或只收到口头总结时，门禁不得通过。
 
 ### 阶段 0：ADR、模型、音色包和质量尖峰
 
@@ -1537,9 +1976,9 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 - 生成并人工锁定 24 槽位基础音色包，或确定具有授权的替代包；
 - 补充编辑器 ADR，使用真实长章节对 CodeMirror 6、Monaco 和 `textarea` 安全降级验证中文输入法、自动保存、undo/redo、decoration、gutter、UTF-16 映射和 Blob bundle；
 - 用 pending gap、章首前缀和中段用户请求窗口验证 Manifest schema v2、任务优先级、公平老化和同 Edition revision 刷新；
-- 冻结基准语料、参数、能力矩阵和 go/no-go 报告。
+- 冻结 `script_review_policy`、warnings/blockers taxonomy、自动冻结约束、API/状态机契约、基准语料、参数、能力矩阵和 go/no-go 报告。
 
-退出条件：六项均明确——Nano 物理部署、24 音色来源、浏览器分段播放方案、VoiceGenerator 可见/隐藏结论、正式编辑器与安全降级方案、随机跳播 ready-window 协议。未退出阶段 0 时只允许原型代码，不建正式迁移和产品 UI。
+退出条件：七项均明确——Nano 物理部署、24 音色来源、浏览器分段播放方案、VoiceGenerator 可见/隐藏结论、正式编辑器与安全降级方案、随机跳播 ready-window 协议、复核策略与阻断分类契约。未退出阶段 0 时只允许原型代码，不建正式迁移和产品 UI。
 
 ### 阶段 1：共享基础设施与数据
 
@@ -1557,12 +1996,14 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 - `reading` 路由、总览和导航；
 - 旁白、章节/分卷范围覆盖；
 - 正文分析隐私模式和独立云端授权；
+- 默认“仅异常复核”与可选“每章都复核”；
 - 人物卡声音页签；
 - 预设、上传、标准化、授权、试听和锁定版本；
 - 24 槽位基础音色池导入、覆盖率和缺失提示；
 - 人物专属/继承绑定与历史影响预览；
 - 发音、停顿、音频和缓存管理；
-- 空、加载、失败、模型缺失、授权和磁盘不足状态。
+- 空、加载、分析中、零阻塞自动继续、阻塞待处理、失败、模型缺失、授权和磁盘不足状态；
+- 当前宿主舒适、紧凑、受限桌面宽度和移动窄屏回流验证。
 
 ### 阶段 3：脚本、场景和选角
 
@@ -1574,11 +2015,11 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 - 匿名人物稳定键、合并、拆分和升级；
 - 确定性通用选角与 scope 优先级；
 - 情绪/表达标签和校准置信等级；
-- 脚本版本、复核、审批和人工覆盖安全继承。
+- 脚本版本、warnings/blockers、默认自动冻结、逐章人工复核和人工覆盖安全继承。
 
 ### 阶段 4：独立句段合成和同步播放
 
-- Edition 创建和不可变设置快照；
+- `narration-requests` 一键编排、Edition 创建和不可变设置快照；
 - 版本化 render fingerprint 与 owner/workspace 缓存；
 - 持久句段任务、优先级和单并发资源锁；
 - master/播放副本校验和后处理；
@@ -1588,6 +2029,7 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 - 段落 gutter、上下文命令、只读句段点击和 `prepare-range`；
 - 句段高亮、编辑优先、滚动暂停/恢复、跳转、倍速和进度；
 - 同页边听边改、播放器旧稿字幕和 `textarea` 安全降级；
+- 分析/复核期间正文继续修改的来源快照提示，以及复核面板与紧凑播放器共存；
 - `working_copy_diverged`、显式“更新朗读”、Edition 切换和正文 hash 屏障；
 - 局部重生成、旧版本视图、快速连续跳播和后台公平性。
 
@@ -1605,7 +2047,7 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 
 - 人工确认的情绪音色变体；
 - 群体声音混合；
-- 全书批量生成和可恢复进度；
+- 全书仅扫描与批量生成分离、逐章阻塞隔离和可恢复进度；
 - 章节/全书显式导出；
 - 发音批量校对和可选 ASR 回查；
 - 音频质量报告、可达性 GC 和配额治理；
@@ -1628,23 +2070,37 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 - Markdown、emoji、嵌套引号和特殊标点；
 - 多音字、人名、年代和中英混合；
 - 正文中途修改和音色换版；
+- 分析/复核期间继续修改正文、旧来源快照提示、继续旧快照与重新分析两条路径；
 - 段前、段内和段后编辑，段落拆分/合并、引号/边界标点变化，以及编辑当前/下一播放句段；
 - 章首 pending、中段 ready、窗口内部 failed 和快速连续选择不同段落；
 - 用户手动滚动、移动光标、中文输入法、键盘播放和正文 hash 不一致；
 - 页面重载导致临时编辑映射链丢失；
 - 云端未授权、已授权、撤销授权和实际模型不匹配。
+- 默认零阻塞自动冻结、warning 不阻塞、每章都复核、每一种 blocker 和阻塞清零后继续；
+- 舒适、紧凑、受限桌面宽度与移动窄屏下的复核面板、播放器和右侧原生助手共存。
 
 ### 19.2 自动化门槛
 
 - 明确姓名+说话动词样本的说话人识别目标不低于 98%；
+- 每个自动识别结果都保存规则/模型来源、人物候选、证据和置信等级，缺少证据的结果不能标记为高置信度；
+- 同一 Edition 内，同一 `character_id` 或同一合法作用域的 `anonymous_speaker_id` 必须稳定解析到同一锁定音色版本，错误漂移数量为 0；
+- 已配置人物的高置信度对白必须自动解析人物卡音色，不要求作者逐句重复选角；
 - 非允许 character ID 数量为 0；
 - 所有 unknown 和低置信度句段均可见、可编辑；
+- 未处理的 unknown、别名冲突、匿名人物冲突和缺失音色进入正式 Edition 的数量为 0；
+- `blockers_only` 在分析成功且零阻塞时无需额外人工点击，脚本以 `auto_no_blockers` 冻结并幂等创建 Edition；
+- 中置信度 warning 不阻塞默认生成，但在总览和脚本详情中可追溯；
+- 任一 blocker 存在时自动冻结和正式 Edition 创建数量为 0；清零并确认后只能生成 `manual_after_review` 记录；
+- `always_review` 在零阻塞时仍停留 `review_required`，未经作者确认不得创建正式 Edition；
+- 分析失败、实际模型不匹配或非法 schema 不得被降级为 warning 或 `auto_no_blockers`；
+- 自动/人工冻结均记录策略、阻断分类版本、计数、actor、时间和输入/模型 fingerprint，已冻结脚本不可原地修改；
 - 未修改 revision 的句段高亮偏移错误为 0；
 - emoji/组合字符测试的前后端范围完全一致；
 - 同幂等键不重复创建 job、render 或媒体；
 - 相同正文重复点击朗读不重复创建可见 checkpoint，也不推进 working copy 基线；
+- `analyze_only` 扫描创建 Edition、render 或音频任务的数量为 0；扫描后正文/设置 fingerprint 改变时，生成请求必须重新分析或明确失效旧候选；
 - 单句修改只失效必要 render；
-- 已审批脚本不可原地修改，同一脚本可创建多个独立 Edition；
+- 已冻结脚本不可原地修改，同一脚本可创建多个独立 Edition；
 - 普通正文单击只移动光标，只有 gutter/命令/只读句段点击触发跳播；
 - 目标起点已有合法 ready window 时从正确 `segment_id` 开始；目标未 ready 或缓冲不足时幂等准备窗口且不回退章首；
 - 已修改、新增或映射不唯一的工作稿段落不能误跳旧 Edition 的相似句，只能更新朗读或在旧稿视图明确跳播；
@@ -1654,6 +2110,8 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 - 活跃编辑 transaction 只映射未相交且哈希/锚点仍一致的句段；相交、段落拆并和边界标点变化按规则失效相邻块；页面重载后旧 manifest 不猜测映射新正文；
 - 编辑时播放器不被强制暂停，光标、selection、composition 和 undo/redo 不被自动跟随破坏；
 - 按键和自动保存不创建 narration job；明确“更新朗读”才进入保存、分析和新 Edition 流程；
+- 复核面板支持键盘遍历、可见焦点、关闭后焦点恢复、非颜色状态提示和分析/生成 live region；受限宽度下主要操作不被固定播放器覆盖；
+- 旧 Edition 播放时打开复核面板不会中断音频或产生双层遮挡，紧凑播放条可操作；来源 revision 已落后时不能把旧句段修正映射到新正文；
 - 新 Edition 不自动替换旧 Edition，CAS 显式切换只更新当前指针，不改写旧 Edition 的生成状态；
 - `local_rules_only` 网络捕获中正文外发数量为 0；
 - `cloud_assisted` 未授权调用数量为 0，授权后 payload 只包含不确定窗口和允许候选；
@@ -1664,6 +2122,7 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 - 普通清缓存不删除上传原件、标准化参考音频或锁定音色；
 - 私人正文/音色 render 不跨 owner/workspace 复用；
 - TTS 失败不改变 working copy 和 revision。
+- 批量生成中单章 blocker/失败不会阻塞其他合格章节，取消未开始任务不删除已完成合法 render，任何新 Edition 都不会被批量流程静默设为当前版本。
 
 ### 19.3 本机性能门槛
 
@@ -1699,7 +2158,7 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 3. 数据迁移具有升级和回退测试；
 4. Nano 执行后端不影响 QwenPaw 原生聊天、模型、Skills、MCP 和插件管理；
 5. `local_rules_only` 和 `cloud_assisted` 授权边界均通过网络/契约测试；
-6. 一章真实多角色正文完成脚本复核、多 Edition、局部重生成和句段跟随；
+6. 一章真实多角色正文同时完成“零阻塞自动生成”和“阻塞暂停—处理—继续”两条链路，并通过多 Edition、局部重生成和句段跟随；
 7. `partial_ready` 章首前缀和用户请求 ready window 都可从各自合法起点播放，窗口内部失败不会被跳过；
 8. 关闭重开后任务、音色、Edition、Manifest 和进度可恢复；
 9. 修改正文后音频可继续，播放器明确显示旧稿，旧高亮只在安全映射或不可变快照中出现；
@@ -1709,7 +2168,9 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
 13. 普通编辑点击不触发播放，段落 gutter、上下文命令和键盘跳播通过可达性验收；
 14. 工作稿自动保存不产生 TTS 任务，“更新朗读”和 Edition 切换均为显式操作；
 15. 可装饰编辑器和原生 `textarea` 安全降级都通过中文输入法、撤销、长章节和页面重载测试；
-16. 关联 ADR、总体架构、迁移、API、测试和回退说明同步更新。
+16. `blockers_only`、`always_review`、阻断分类和冻结审计均通过契约与权限测试；
+17. 当前宿主舒适/紧凑/受限桌面宽度及移动窄屏均完成真实浏览器检查；复核面板、紧凑/完整播放器和原生 AI 助手互不遮挡，旧 Edition 播放时仍有可操作控件；
+18. 关联 ADR、总体架构、迁移、API、测试和回退说明同步更新。
 
 ## 21. 仍待验证
 
@@ -1744,8 +2205,8 @@ T0-B、T0-C、T0-D 的文档分析和脚本开发可以同时进行，但 Nano �
   -> 生成 revision 绑定的朗读脚本版本
   -> 自动识别旁白、正式人物和匿名人物
   -> 自动选角
-  -> 作者复核低置信度句段
-  -> 审批不可变脚本版本
+  -> 计算 warnings 与 blockers
+  -> 零阻塞时自动冻结脚本；否则作者集中处理后一次确认
   -> 冻结设置/发音/音色并创建 Edition
   -> Nano 独立句段合成并复用缓存
   -> 章首前缀和用户请求窗口形成渐进 Segment Manifest
