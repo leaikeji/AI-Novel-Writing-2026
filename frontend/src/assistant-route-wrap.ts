@@ -27,14 +27,15 @@ import type { AssistantContextRefCoordinator } from "./assistant-context-ref";
 import type { AssistantSelectionController } from "./assistant-selection-controller";
 import { createAssistantSelectionToolbar } from "./assistant-selection-toolbar";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
+import { NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
 
 
 export type AssistantRouteReactRuntime = QwenPawReactRuntime;
 
 
 export interface AssistantRouteEventTarget {
-  addEventListener(type: "popstate" | "resize", listener: () => void): void;
-  removeEventListener(type: "popstate" | "resize", listener: () => void): void;
+  addEventListener(type: "popstate" | "resize" | typeof NOVEL_SURFACE_NAVIGATION_EVENT, listener: () => void): void;
+  removeEventListener(type: "popstate" | "resize" | typeof NOVEL_SURFACE_NAVIGATION_EVENT, listener: () => void): void;
 }
 
 
@@ -369,12 +370,16 @@ export function createAssistantRouteWrap(
 
       React.useEffect(() => {
         if (!eventTarget) return undefined;
-        const handlePopState = () => {
+        const handleRouteChange = () => {
           routeRevisionRef.current += 1;
           setRouteRevision(routeRevisionRef.current);
         };
-        eventTarget.addEventListener("popstate", handlePopState);
-        return () => eventTarget.removeEventListener("popstate", handlePopState);
+        eventTarget.addEventListener("popstate", handleRouteChange);
+        eventTarget.addEventListener(NOVEL_SURFACE_NAVIGATION_EVENT, handleRouteChange);
+        return () => {
+          eventTarget.removeEventListener("popstate", handleRouteChange);
+          eventTarget.removeEventListener(NOVEL_SURFACE_NAVIGATION_EVENT, handleRouteChange);
+        };
       }, []);
 
       React.useEffect(() => {

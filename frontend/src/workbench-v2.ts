@@ -53,6 +53,7 @@ import {
   resizeEditorTextareaToContent,
 } from "./editor-textarea-auto-size";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
+import { navigateNovelSurface } from "./novel-surface-navigation";
 
 
 const host = window.QwenPaw.host;
@@ -195,7 +196,7 @@ export function NovelLibraryPage() {
         method: "POST",
         body: JSON.stringify({ title: title.trim(), description: "" }),
       });
-      window.location.assign(workbenchUrl(novel.id));
+      navigateNovelSurface(workbenchUrl(novel.id));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "创建作品失败");
     } finally {
@@ -204,7 +205,7 @@ export function NovelLibraryPage() {
   };
 
   const openNovel = (novelId: string, section: ProjectSection = "chapters") => {
-    window.location.assign(workbenchUrl(novelId, undefined, section));
+    navigateNovelSurface(workbenchUrl(novelId, undefined, section));
   };
 
   return h(
@@ -1157,7 +1158,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       "section",
       { className: "anw-app anw-empty-state" },
       h("strong", null, "请先选择一本小说"),
-      h(Button, { onClick: () => { clearWorkbenchRoute(); window.location.assign(CREATIVE_CENTER_CHAT_PATH); } }, "打开创作中心"),
+      h(Button, { onClick: () => { clearWorkbenchRoute(); navigateNovelSurface(CREATIVE_CENTER_CHAT_PATH); } }, "打开创作中心"),
     );
   }
 
@@ -1584,7 +1585,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     onNovelChanged: (updated: NovelRecord) => setNovel(updated),
     onReload: refreshNovel,
     openChapterWizardSignal,
-    onBack: () => { clearWorkbenchRoute(); window.location.assign(CREATIVE_CENTER_CHAT_PATH); },
+    onBack: () => { clearWorkbenchRoute(); navigateNovelSurface(CREATIVE_CENTER_CHAT_PATH); },
     onError: setError,
     assistantWorkspaceLayout: props.assistantWorkspaceLayout,
     selectionEditReviewHost: props.selectionEditReviewHost,
@@ -1842,7 +1843,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           h(
             "div",
             { className: "anw-panel-actions" },
-            h(Button, { onClick: () => { clearWorkbenchRoute(); window.location.assign(CREATIVE_CENTER_CHAT_PATH); } }, "返回创作中心"),
+            h(Button, { onClick: () => { clearWorkbenchRoute(); navigateNovelSurface(CREATIVE_CENTER_CHAT_PATH); } }, "返回创作中心"),
             section === "chapters" ? h(Button, { onClick: createVolume }, "+ 新增分卷") : null,
             section === "chapters" ? h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: createChapter }, "新建章节") : null,
           ),

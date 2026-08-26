@@ -12,6 +12,7 @@ import {
   RouteSessionSnapshot,
   RouteSessionStateMachine,
 } from "./workbench-route";
+import { NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
 import {
   NOVEL_ASSISTANT_TARGET_AGENT_ID,
   NovelAssistantContextRuntime,
@@ -134,21 +135,21 @@ class HookTestReact implements AssistantRouteReactRuntime {
 class TestEventTarget implements AssistantRouteEventTarget {
   private readonly listeners = new Map<string, Set<() => void>>();
 
-  addEventListener(type: "popstate" | "resize", listener: () => void): void {
+  addEventListener(type: "popstate" | "resize" | typeof NOVEL_SURFACE_NAVIGATION_EVENT, listener: () => void): void {
     const registered = this.listeners.get(type) ?? new Set<() => void>();
     registered.add(listener);
     this.listeners.set(type, registered);
   }
 
-  removeEventListener(type: "popstate" | "resize", listener: () => void): void {
+  removeEventListener(type: "popstate" | "resize" | typeof NOVEL_SURFACE_NAVIGATION_EVENT, listener: () => void): void {
     this.listeners.get(type)?.delete(listener);
   }
 
-  emit(type: "popstate" | "resize"): void {
+  emit(type: "popstate" | "resize" | typeof NOVEL_SURFACE_NAVIGATION_EVENT): void {
     for (const listener of this.listeners.get(type) ?? []) listener();
   }
 
-  count(type: "popstate" | "resize"): number {
+  count(type: "popstate" | "resize" | typeof NOVEL_SURFACE_NAVIGATION_EVENT): number {
     return this.listeners.get(type)?.size ?? 0;
   }
 }
@@ -250,10 +251,11 @@ describe("assistant route wrap", () => {
     expect(ordinary.type).toBe(Inner);
     expect(ordinary.props).toEqual({});
     expect(events.count("popstate")).toBe(1);
+    expect(events.count(NOVEL_SURFACE_NAVIGATION_EVENT)).toBe(1);
 
     route = workbenchRoute();
     location = { pathname: "/chat/session-1", search: "" };
-    events.emit("popstate");
+    events.emit(NOVEL_SURFACE_NAVIGATION_EVENT);
     const workbench = React.render(Component);
     const [main, pane] = elementChildren(workbench);
 
@@ -437,6 +439,7 @@ describe("assistant route wrap", () => {
     React.unmount();
     expect(disconnect).toHaveBeenCalledOnce();
     expect(events.count("popstate")).toBe(0);
+    expect(events.count(NOVEL_SURFACE_NAVIGATION_EVENT)).toBe(0);
   });
 
   it("falls back to real element measurement when ResizeObserver is unavailable", () => {
@@ -473,6 +476,7 @@ describe("assistant route wrap", () => {
     React.unmount();
     expect(events.count("resize")).toBe(0);
     expect(events.count("popstate")).toBe(0);
+    expect(events.count(NOVEL_SURFACE_NAVIGATION_EVENT)).toBe(0);
   });
 
   it("derives both frozen workspace page types from public route data", () => {

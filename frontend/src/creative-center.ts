@@ -19,6 +19,7 @@ import {
 } from "./types";
 import { rememberWorkbenchRoute } from "./workbench-route";
 import { compressCover, generateSystemCover } from "./cover-utils";
+import { navigateNovelSurface } from "./novel-surface-navigation";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -1415,7 +1416,7 @@ export function NovelLibraryPage() {
   const activeNovel = novels.find((novel) => novel.id === activeNovelId) || novels[0];
 
   const openNovel = (novelId: string, section?: "chapters" | "outline" | "roles" | "clues") => {
-    window.location.assign(workbenchUrl(novelId, section));
+    navigateNovelSurface(workbenchUrl(novelId, section));
   };
 
   const deleteNovel = (novel: NovelSummary) => {
