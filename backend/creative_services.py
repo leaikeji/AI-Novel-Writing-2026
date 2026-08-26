@@ -626,11 +626,18 @@ def complete_outline_draft(
         else:
             character.version += 1
             character.position = index * 1000
+        incoming_details = dict(item.get("details") or {})
+        existing_gender = str((character.details or {}).get("gender") or "").strip()
+        if existing_gender:
+            # Completing or regenerating an outline must not silently replace a
+            # gender already saved on the formal character card. The author can
+            # still change that field explicitly in the character editor.
+            incoming_details["gender"] = existing_gender
         character.lifecycle_state = "active"
         character.archived_at = None
         character.role_type = str(item.get("role_type", "supporting"))
         character.description = str(item.get("description", ""))
-        character.details = dict(item.get("details") or {})
+        character.details = incoming_details
     remaining = [item for item in existing_rows if item.name not in outlined_names]
     for offset, character in enumerate(remaining, start=len(draft.characters_json) + 1):
         character.position = offset * 1000
@@ -1540,9 +1547,9 @@ def get_relationship_auto_sync_status(
             CreativeGenerationJob.scope_type == "novel",
             CreativeGenerationJob.scope_id == novel_id,
             CreativeGenerationJob.kind == "relationship_graph",
-            CreativeGenerationJob.input_hash == input_digest,
+            CreativeGenerationJob.input_snapshot == snapshot,
         )
-        .order_by(CreativeGenerationJob.attempt.desc())
+        .order_by(CreativeGenerationJob.created_at.desc(), CreativeGenerationJob.attempt.desc())
     )
     latest_ready = session.scalar(
         select(CreativeGenerationJob)
@@ -1649,6 +1656,7 @@ def apply_relationship_graph_generation(
     )
     matched_ids: set[UUID] = set()
     desired_slots: set[tuple[UUID, UUID, str, str]] = set()
+    validated_candidate_count = 0
     changes = {"created": 0, "updated": 0, "archived": 0, "skipped": 0}
 
     for item in candidates[:200]:
@@ -1683,6 +1691,7 @@ def apply_relationship_graph_generation(
         ):
             changes["skipped"] += 1
             continue
+        validated_candidate_count += 1
         source_id, target_id = _canonical_relationship_endpoints(
             source.id,
             target.id,
@@ -1761,6 +1770,9 @@ def apply_relationship_graph_generation(
             else:
                 relation.source_generation_job_id = job.id
         matched_ids.add(relation.id)
+
+    if candidates and validated_candidate_count == 0:
+        raise ValidationError("关系网分析结果没有通过角色、置信度或双人证据校验")
 
     complete_snapshot = job.output_json.get("complete_snapshot") is True
     if complete_snapshot and desired_slots:
@@ -3272,6 +3284,27 @@ def start_creative_generation(
         raise ValidationError("生成输入快照不能超过500000个字符")
     input_digest = content_hash(serialized)
     attempt = 1
+    if kind == "relationship_graph":
+        _lock_generation_attempt(
+            session,
+            namespace=f"creative:{scope_type}:{kind}",
+            scope_key=str(scope_id),
+            input_hash="single-flight",
+        )
+        running = session.scalar(
+            select(CreativeGenerationJob)
+            .where(
+                CreativeGenerationJob.scope_type == scope_type,
+                CreativeGenerationJob.scope_id == scope_id,
+                CreativeGenerationJob.kind == kind,
+                CreativeGenerationJob.state == "running",
+            )
+            .order_by(CreativeGenerationJob.created_at.desc(), CreativeGenerationJob.id.desc())
+        )
+        if running is not None:
+            payload = _creative_job_payload(running)
+            payload["should_execute"] = False
+            return payload
     _lock_generation_attempt(
         session,
         namespace=f"creative:{scope_type}:{kind}",
@@ -3443,9 +3476,11 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
         "outline_characters": (
             "生成4到8个主要角色和配角，至少包含1个main主角和2个supporting配角，"
             "人物动机、缺陷、秘密和成长方向必须彼此咬合。顶层只能有characters数组，"
-            "即使只有一个人物也不得把人物对象直接放在顶层。返回"
+            "即使只有一个人物也不得把人物对象直接放在顶层。每个角色的details必须包含"
+            "gender字段，值只能是男、女、其他、未知；只有创作材料确实没有设定时才使用未知，"
+            "不得根据姓名猜测性别。返回"
             " {\"characters\":[{\"name\":\"...\",\"role_type\":\"main|supporting\","
-            "\"description\":\"...\",\"details\":{}}]}。"
+            "\"description\":\"...\",\"details\":{\"gender\":\"男|女|其他|未知\"}}]}。"
         ),
         "outline_plot": (
             "生成覆盖目标章节数的主要情节，控制在1200到1800个中文可见字符。"
@@ -3477,7 +3512,8 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "undirected；师徒、影响、命令等有明确施受方的关系用directed，其余稳定双向关系用"
             "undirected。relation_kind只能从family、colleague、mentor、ally、enemy、romance、"
             "other中选择；label使用2到12个中文字符；description用一句话说明关系现状；confidence"
-            "为0到100，只输出置信度不低于65的关系；evidence返回1到3条简短来源依据。"
+            "为0到100，只输出置信度不低于80的关系；evidence返回1到3条简短来源依据，"
+            "其中至少一条必须逐字同时包含source_name与target_name。"
             "relationships必须代表本次快照中的完整AI关系集合，并返回"
             " {\"complete_snapshot\":true,\"relationships\":[{\"source_name\":\"...\","
             "\"target_name\":\"...\",\"directionality\":\"directed|undirected\","

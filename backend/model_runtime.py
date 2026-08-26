@@ -18,7 +18,43 @@ import httpx
 from .selection_edit_diff import SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS
 
 NOVEL_AGENT_ID = "ai-novel-writer"
-GENERATION_CONTRACT_VERSION = "follow-agent-effective-v1"
+GENERATION_CONTRACT_VERSION = "follow-agent-effective-v3"
+
+
+_CHARACTER_GENDER_ALIASES = {
+    "男": "男",
+    "男性": "男",
+    "male": "男",
+    "man": "男",
+    "boy": "男",
+    "女": "女",
+    "女性": "女",
+    "female": "女",
+    "woman": "女",
+    "girl": "女",
+    "其他": "其他",
+    "其它": "其他",
+    "非二元": "其他",
+    "non-binary": "其他",
+    "nonbinary": "其他",
+    "unknown": "未知",
+    "unspecified": "未知",
+    "未知": "未知",
+    "未设定": "未知",
+    "不明": "未知",
+}
+
+
+def _normalize_generated_character_gender(value: Any) -> str:
+    """Return an explicit model-generated gender state without name guessing."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ModelVerificationError("模型角色性别字段缺失，请重新生成")
+    clean_value = value.strip()
+    normalized = _CHARACTER_GENDER_ALIASES.get(clean_value.casefold())
+    if normalized is None:
+        raise ModelVerificationError("模型角色性别字段无效，请重新生成")
+    return normalized
 
 INTELLIGENCE_ITEM_TYPES = {
     "fact",
@@ -571,10 +607,31 @@ def normalize_creative_generation_json(
             raw_characters = payload.get("items")
         if not isinstance(raw_characters, list) and payload.get("name"):
             raw_characters = [payload]
-        characters = [
-            item for item in raw_characters or []
-            if isinstance(item, dict) and str(item.get("name") or "").strip()
-        ]
+        characters: list[dict[str, Any]] = []
+        for item in raw_characters or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            details = dict(item.get("details") or {}) if isinstance(item.get("details"), dict) else {}
+            top_level_gender = item.get("gender")
+            nested_gender = details.get("gender")
+            if (
+                top_level_gender is not None
+                and nested_gender is not None
+                and _normalize_generated_character_gender(top_level_gender)
+                != _normalize_generated_character_gender(nested_gender)
+            ):
+                raise ModelVerificationError("模型角色性别字段互相冲突，请重新生成")
+            details["gender"] = _normalize_generated_character_gender(
+                nested_gender if nested_gender is not None else top_level_gender
+            )
+            normalized = dict(item)
+            normalized["name"] = name
+            normalized["details"] = details
+            normalized.pop("gender", None)
+            characters.append(normalized)
         if not characters:
             raise ModelVerificationError("模型角色结果结构不完整，请重新生成")
         return {"characters": characters}
@@ -636,6 +693,11 @@ def normalize_creative_generation_json(
                 for item in raw_evidence or []
                 if str(item).strip()
             ][:5] if isinstance(raw_evidence, list) else []
+            if confidence < 80 or not any(
+                source_name in evidence_item and target_name in evidence_item
+                for evidence_item in evidence
+            ):
+                continue
             left, right = source_name, target_name
             if directionality == "undirected" and left.casefold() > right.casefold():
                 left, right = right, left

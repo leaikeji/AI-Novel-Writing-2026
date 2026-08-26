@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 
 from backend.model_runtime import (
+    GENERATION_CONTRACT_VERSION,
     ModelAudit,
     ModelVerificationError,
     effective_model_audit,
@@ -40,6 +41,7 @@ def _reply_with_usage(provider_id: str, model_name: str) -> SimpleNamespace:
 
 
 def test_model_matching_uses_exact_provider_and_model_ids() -> None:
+    assert GENERATION_CONTRACT_VERSION == "follow-agent-effective-v3"
     configured = ModelAudit(
         provider_id="provider-a",
         model_id="Model-A.1",
@@ -418,6 +420,76 @@ def test_structured_generation_rejects_missing_required_fields() -> None:
         )
 
 
+def test_outline_character_generation_normalizes_gender_without_name_guessing() -> None:
+    recovered = normalize_creative_generation_json(
+        "outline_characters",
+        {
+            "characters": [
+                {
+                    "name": "江述",
+                    "role_type": "main",
+                    "gender": "male",
+                    "description": "刑侦科长。",
+                    "details": {"age": 37},
+                },
+                {
+                    "name": "林青瓷",
+                    "role_type": "supporting",
+                    "description": "省报记者。",
+                    "details": {"gender": "女性"},
+                },
+                {
+                    "name": "未定角色",
+                    "role_type": "supporting",
+                    "description": "身份尚未确定。",
+                    "details": {"gender": "unknown"},
+                },
+            ]
+        },
+        "",
+    )
+
+    assert [item["details"]["gender"] for item in recovered["characters"]] == [
+        "男",
+        "女",
+        "未知",
+    ]
+    assert "gender" not in recovered["characters"][0]
+
+    for invalid_gender in (None, "", "稍后再想想", 1):
+        with pytest.raises(ModelVerificationError, match="性别字段"):
+            normalize_creative_generation_json(
+                "outline_characters",
+                {
+                    "characters": [
+                        {
+                            "name": "无有效性别",
+                            "role_type": "main",
+                            "description": "不能根据姓名猜测。",
+                            "details": {"gender": invalid_gender},
+                        }
+                    ]
+                },
+                "",
+            )
+
+    with pytest.raises(ModelVerificationError, match="互相冲突"):
+        normalize_creative_generation_json(
+            "outline_characters",
+            {
+                "characters": [
+                    {
+                        "name": "冲突角色",
+                        "role_type": "main",
+                        "gender": "男",
+                        "details": {"gender": "女"},
+                    }
+                ]
+            },
+            "",
+        )
+
+
 def test_novel_template_generation_normalizes_editable_fields() -> None:
     recovered = normalize_creative_generation_json(
         "novel_template",
@@ -516,7 +588,7 @@ def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slo
                 "label": "临时合作",
                 "description": "较弱判断",
                 "confidence": 70,
-                "evidence": ["共同查档案"],
+                "evidence": ["苏晚与陆沉舟共同查档案"],
             },
             {
                 "source_name": "陆沉舟",
@@ -526,7 +598,7 @@ def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slo
                 "label": "调查同盟",
                 "description": "多章稳定合作",
                 "confidence": 94,
-                "evidence": ["共同查档案", "共同修复电台"],
+                "evidence": ["陆沉舟与苏晚共同查档案", "两人共同修复电台"],
             },
         ],
     }
@@ -536,6 +608,28 @@ def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slo
     assert result["complete_snapshot"] is True
     assert len(result["relationships"]) == 1
     assert result["relationships"][0]["label"] == "调查同盟"
+
+
+def test_relationship_graph_generation_rejects_nonempty_candidates_without_pair_evidence() -> None:
+    with pytest.raises(ModelVerificationError, match="没有可用关系"):
+        normalize_creative_generation_json(
+            "relationship_graph",
+            {
+                "complete_snapshot": True,
+                "relationships": [
+                    {
+                        "source_name": "苏晚",
+                        "target_name": "陆沉舟",
+                        "directionality": "undirected",
+                        "relation_kind": "ally",
+                        "label": "调查同盟",
+                        "confidence": 94,
+                        "evidence": ["两人共同调查旧电台档案"],
+                    }
+                ],
+            },
+            "",
+        )
 
 
 def test_review_payload_recovers_envelope_and_valid_embedded_issues() -> None:

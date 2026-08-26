@@ -1211,7 +1211,7 @@ function OutlineWizard({
             "div",
             { className: "mb-form-grid mb-form-grid-three" },
             field("姓名", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName), maxLength: 10, value: characterForm.name, onChange: (event: any) => changeOutlineCharacterField("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterName) })),
-            field("性别", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender), maxLength: 2, value: characterForm.gender, onChange: (event: any) => changeOutlineCharacterField("gender", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender) })),
+            field("性别", h(Select, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }, { label: "未知", value: "未知" }], onChange: (value: string) => changeOutlineCharacterField("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterGender) })),
             field("年龄", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge), maxLength: 5, placeholder: "如：18岁", value: characterForm.age, onChange: (event: any) => changeOutlineCharacterField("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterAge) })),
           ),
           field("性格", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality), maxLength: 20, value: characterForm.personality, onChange: (event: any) => changeOutlineCharacterField("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality) })),
@@ -2195,7 +2195,7 @@ export function StudioProjectView({
         () => characterFormRef.current.gender,
         (value) => setCharacterFieldValue(
           "gender",
-          requireStudioChoice(value, ["", "男", "女", "其他"] as const, "性别"),
+          requireStudioChoice(value, ["", "男", "女", "其他", "未知"] as const, "性别"),
         ),
       ),
       controlledAssistantBinding(
@@ -3210,7 +3210,7 @@ export function StudioProjectView({
           field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
           field("角色姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
           h("div", { className: "mb-form-grid mb-character-demographics" },
-            field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
+            field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }, { label: "未知", value: "未知" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
             field("年龄", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterAge), value: characterForm.age, onChange: (event: any) => changeCharacterFieldValue("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterAge) })),
           ),
           field("身份", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity), className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => changeCharacterFieldValue("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity) })),

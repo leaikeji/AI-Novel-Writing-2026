@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from backend.creative_services import (
     EntityConflictError,
     archive_private_asset,
+    apply_relationship_graph_generation,
     batch_character_relationships,
+    build_relationship_graph_snapshot,
     build_novel_export,
     complete_chapter_creation_draft,
     complete_creative_generation as _complete_creative_generation,
@@ -28,6 +30,7 @@ from backend.creative_services import (
     delete_volume,
     fail_creative_generation,
     get_relationship_graph_view,
+    get_relationship_auto_sync_status,
     get_or_create_chapter_creation_draft,
     get_or_create_novel_creation_draft,
     get_or_create_outline_draft,
@@ -49,6 +52,7 @@ from backend.creative_services import (
     update_novel_settings,
     update_novel_creation_draft,
     update_outline_draft,
+    update_novel_character,
     update_private_asset,
     update_character_relationship,
 )
@@ -480,6 +484,99 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
     )
     assert second_sync["changes"]["skipped"] == 1
     assert second_sync["relationships"][0]["label"] == "作者确认的同盟"
+
+
+def test_relationship_graph_status_matches_snapshot_and_prevents_parallel_force_new(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-关系网状态契约")
+    novel_id = UUID(novel["id"])
+    source = create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="与陆沉舟长期共同调查旧电台档案。",
+        details={"gender": "女"},
+    )
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="陆沉舟",
+        description="与苏晚长期共同调查旧电台档案。",
+        details={"gender": "男"},
+    )
+    snapshot = build_relationship_graph_snapshot(session, novel_id)
+    first = start_creative_generation(
+        session,
+        scope_type="novel",
+        scope_id=novel_id,
+        kind="relationship_graph",
+        input_snapshot=snapshot,
+        novel_id=novel_id,
+    )
+    duplicate = start_creative_generation(
+        session,
+        scope_type="novel",
+        scope_id=novel_id,
+        kind="relationship_graph",
+        input_snapshot=snapshot,
+        novel_id=novel_id,
+        force_new=True,
+    )
+    running_status = get_relationship_auto_sync_status(session, novel_id)
+
+    assert duplicate["id"] == first["id"]
+    assert duplicate["should_execute"] is False
+    assert running_status["state"] == "running"
+    assert running_status["job"]["id"] == first["id"]
+
+    completed = complete_creative_generation(
+        session,
+        UUID(first["id"]),
+        output_json={
+            "complete_snapshot": True,
+            "relationships": [
+                {
+                    "source_name": "苏晚",
+                    "target_name": "陆沉舟",
+                    "directionality": "undirected",
+                    "relation_kind": "ally",
+                    "label": "调查同盟",
+                    "description": "两人长期共同调查旧电台档案。",
+                    "confidence": 94,
+                    "evidence": ["角色设定：苏晚与陆沉舟长期共同调查旧电台档案。"],
+                }
+            ],
+        },
+    )
+    applied = apply_relationship_graph_generation(
+        session,
+        novel_id,
+        UUID(completed["id"]),
+    )
+
+    assert applied["status"]["state"] == "ready"
+    assert applied["status"]["stale"] is False
+    assert applied["status"]["job"]["id"] == first["id"]
+    assert len(applied["relationships"]) == 1
+
+    updated = update_novel_character(
+        session,
+        novel_id,
+        UUID(source["id"]),
+        expected_version=source["version"],
+        role_type="main",
+        name="苏晚",
+        description="与陆沉舟共同调查旧电台档案，并开始互相隐瞒线索。",
+        details={"gender": "女"},
+    )
+    assert updated["version"] == source["version"] + 1
+    stale_status = get_relationship_auto_sync_status(session, novel_id)
+    assert stale_status["state"] == "never"
+    assert stale_status["stale"] is True
+    assert stale_status["last_synced_at"] is not None
 
 
 def test_relationship_graph_is_versioned_atomic_and_layout_persistent(
@@ -1162,7 +1259,12 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         target_chapter_count=10,
         background_text="一九八八年的县城高中，升学与家庭变迁交织。",
         characters=[
-            {"name": "林知夏", "role_type": "main", "description": "重返高三"},
+            {
+                "name": "林知夏",
+                "role_type": "main",
+                "description": "重返高三",
+                "details": {"gender": "女"},
+            },
             {"name": "顾明川", "role_type": "main", "description": "理科尖子生"},
         ],
         plot_text="两人从互相试探到共同改变家庭命运。",
@@ -1175,6 +1277,18 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
     )
     assert first["novel"]["outline_target_chapters"] == 10
     assert [item["name"] for item in first["characters"]] == ["林知夏", "顾明川"]
+
+    formal_lead = first["characters"][0]
+    update_novel_character(
+        session,
+        novel_id,
+        UUID(formal_lead["id"]),
+        expected_version=formal_lead["version"],
+        role_type="main",
+        name="林知夏",
+        description="重返高三",
+        details={"gender": "其他", "identity": "学生"},
+    )
 
     create_novel_character(
         session,
@@ -1191,7 +1305,12 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         step=5,
         characters=[
             {"name": "顾明川", "role_type": "main", "description": "承担家庭压力"},
-            {"name": "林知夏", "role_type": "main", "description": "主动修正遗憾"},
+            {
+                "name": "林知夏",
+                "role_type": "main",
+                "description": "主动修正遗憾",
+                "details": {"gender": "女"},
+            },
             {"name": "沈青", "role_type": "supporting", "description": "同桌"},
         ],
         plot_text="两人先修正报名档案，再面对家庭与高考的双重抉择。",
@@ -1209,6 +1328,7 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         "顾老师",
     ]
     assert len({item["position"] for item in characters}) == 4
+    assert next(item for item in characters if item["name"] == "林知夏")["details"]["gender"] == "其他"
     main_line = next(
         item for item in list_storylines(session, novel_id) if item["storyline_type"] == "main"
     )

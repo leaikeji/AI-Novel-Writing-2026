@@ -11,6 +11,7 @@ import {
   RelationshipGraph,
   RelationshipGraphController,
 } from "./relationship-graph";
+import { relationshipSyncPresentation } from "./relationship-sync-presentation";
 import {
   CharacterRelationshipRecord,
   NovelCharacterRecord,
@@ -155,7 +156,7 @@ export function RelationshipWorkspace({
     }
   }, [novelId, onRelationshipsChanged]);
 
-  const requestRelationshipSync = React.useCallback(async () => {
+  const requestRelationshipSync = React.useCallback(async (forceNew: boolean) => {
     if (preparingAutoSync || confirmingAutoSync || syncInFlightRef.current) return;
     setPreparingAutoSync(true);
     setAutoSyncError("");
@@ -165,14 +166,14 @@ export function RelationshipWorkspace({
       setPreparingAutoSync(false);
       setConfirmingAutoSync(true);
       Modal.confirm({
-        title: "确认补全历史关系",
-        content: `本次关系网生成将使用 ${modelLabel}。生成结果会保留任务 requested/actual 模型证据，人工修改不会被覆盖。`,
-        okText: "开始生成",
+        title: forceNew ? "确认重新分析关系网" : "确认生成关系网",
+        content: `本次将使用 ${modelLabel} 分析当前角色设定、大纲和章节正文；成功后会写入 AI 关系，并可能归档已不符合当前资料的旧 AI 关系。人工关系和正文不会被覆盖，任务会保留 requested/actual 模型证据。`,
+        okText: forceNew ? "重新分析" : "开始生成",
         cancelText: "取消",
         onOk: async () => {
           setConfirmingAutoSync(false);
           setAutoSyncModelLabel(`请求 ${modelLabel} · 实际未核验`);
-          await syncRelationships(true);
+          await syncRelationships(forceNew);
         },
         onCancel: () => setConfirmingAutoSync(false),
       });
@@ -183,14 +184,13 @@ export function RelationshipWorkspace({
     }
   }, [confirmingAutoSync, preparingAutoSync, syncRelationships]);
 
-  React.useEffect(() => {
-    let active = true;
-    setCheckingAutoSync(true);
+  const loadAutoSyncStatus = React.useCallback(async (silent = false) => {
+    if (!silent) setCheckingAutoSync(true);
     setAutoSyncError("");
-    void apiRequest<RelationshipAutoSyncStatusRecord>(
-      `/novels/${novelId}/relationships/auto-sync/status`,
-    ).then((status) => {
-      if (!active) return;
+    try {
+      const status = await apiRequest<RelationshipAutoSyncStatusRecord>(
+        `/novels/${novelId}/relationships/auto-sync/status`,
+      );
       setAutoSyncStatus(status);
       setAutoSyncModelLabel(
         status.job
@@ -199,14 +199,24 @@ export function RelationshipWorkspace({
             : generationModelAuditLabel(status.job)
           : "",
       );
-      setCheckingAutoSync(false);
-    }).catch((reason) => {
-      if (!active) return;
-      setCheckingAutoSync(false);
+    } catch (reason) {
       setAutoSyncError(readError(reason));
-    });
-    return () => { active = false; };
+    } finally {
+      if (!silent) setCheckingAutoSync(false);
+    }
   }, [novelId]);
+
+  React.useEffect(() => {
+    void loadAutoSyncStatus();
+  }, [loadAutoSyncStatus]);
+
+  React.useEffect(() => {
+    if (autoSyncStatus?.state !== "running" || syncingRelationships) return undefined;
+    const timer = window.setInterval(() => {
+      void loadAutoSyncStatus(true);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [autoSyncStatus?.state, loadAutoSyncStatus, syncingRelationships]);
 
   const loadView = React.useCallback(async () => {
     setLoading(true);
@@ -238,22 +248,20 @@ export function RelationshipWorkspace({
   const legacyCount = relationships.filter(
     (relationship) => relationship.directionality === "legacy_unspecified",
   ).length;
-  const autoSyncBusy = checkingAutoSync || preparingAutoSync || syncingRelationships;
-  const autoSyncActionBusy = autoSyncBusy || confirmingAutoSync;
-  const autoSyncTitle = autoSyncBusy
-    ? "正在读取关系同步状态"
-    : autoSyncError
-      ? "关系同步状态暂时不可用"
-      : autoSyncStatus?.eligible === false
-        ? "新增第二个角色后即可同步关系"
-        : `随章节同步进展自动更新 · ${autoSyncStatus?.ai_relationship_count || 0} 条 AI 关系`;
-  const autoSyncDescription = autoSyncBusy
-    ? "正在统计章节情报与人物关系。"
-    : autoSyncError
-      ? `${autoSyncError}；现有关系和人工修改均已保留。`
-      : autoSyncStatus
-        ? `写完章节点击“同步进展”即可增量生成；已有 ${autoSyncStatus.source_summary.relationship_facts} 条关系情报${autoSyncStatus.source_summary.excluded_chapters ? `，已隔离 ${autoSyncStatus.source_summary.excluded_chapters} 章未匹配当前角色的内容` : ""}，人工修改不会被 AI 覆盖。${autoSyncModelLabel ? ` 任务模型：${autoSyncModelLabel}。` : ""}`
-        : "写完章节点击“同步进展”即可增量生成；人工修改不会被 AI 覆盖。";
+  const autoSyncPhase = syncingRelationships
+    ? "syncing"
+    : preparingAutoSync
+      ? "preparing"
+      : checkingAutoSync
+        ? "checking"
+        : "idle";
+  const autoSyncPresentation = relationshipSyncPresentation(autoSyncStatus, {
+    phase: autoSyncPhase,
+    error: autoSyncError,
+    modelLabel: autoSyncModelLabel,
+    confirming: confirmingAutoSync,
+  });
+  const autoSyncBusy = autoSyncPhase !== "idle" || autoSyncStatus?.state === "running";
 
   const saveLayout = async () => {
     const snapshot = controllerRef.current?.snapshot();
@@ -310,7 +318,7 @@ export function RelationshipWorkspace({
       "div",
       { className: "mb-relation-heading" },
       h("h3", null, "角色关系网"),
-      h("p", null, "章节同步进展时自动生成；点击角色或连线可人工修正"),
+      h("p", null, "已确认的关系情报会随章节同步写入；完整关系网由作者显式生成，角色和连线可人工修正"),
       h(
         "div",
         {
@@ -319,14 +327,20 @@ export function RelationshipWorkspace({
           "aria-live": "polite",
         },
         h("span", { className: "mb-relation-ai-icon" }, autoSyncBusy ? h(Spin, { size: "small" }) : h(RobotOutlined)),
-        h("span", { className: "mb-relation-ai-copy" }, h("strong", null, autoSyncTitle), h("small", null, autoSyncDescription)),
+        h("span", { className: "mb-relation-ai-copy" }, h("strong", null, autoSyncPresentation.title), h("small", null, autoSyncPresentation.description)),
         h(Button, {
           type: "text",
           size: "small",
           icon: h(ReloadOutlined),
-          disabled: autoSyncActionBusy || autoSyncStatus?.eligible === false,
-          onClick: () => void requestRelationshipSync(),
-        }, autoSyncError ? "重试" : "补全历史关系"),
+          disabled: autoSyncPresentation.actionDisabled,
+          onClick: () => {
+            if (autoSyncPresentation.action === "reload-status") {
+              void loadAutoSyncStatus();
+              return;
+            }
+            void requestRelationshipSync(autoSyncPresentation.forceNew);
+          },
+        }, autoSyncPresentation.actionLabel),
       ),
     ),
     h(
