@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isCreativeCenterRouteSession,
+  isNovelWorkbenchRouteSession,
   RouteSessionLocation,
   RouteSessionStateMachine,
   RouteSessionStorage,
@@ -59,6 +61,33 @@ function createHarness(initialPath = "/apps/ai-novel-world-2026") {
 
 
 describe("RouteSessionStateMachine", () => {
+  it("keeps the creative center shell when native chat normalizes to a session path", () => {
+    const harness = createHarness("/chat?novel_center=1");
+
+    const entered = harness.machine.resolve();
+    harness.navigate("/chat/session-center");
+    const normalized = harness.machine.resolve();
+
+    expect(isCreativeCenterRouteSession(entered)).toBe(true);
+    expect(isNovelWorkbenchRouteSession(entered)).toBe(false);
+    expect(normalized.state).toBe("workbench-session");
+    expect(normalized.ownerToken).toBe(OWNER_ONE);
+    expect(isCreativeCenterRouteSession(normalized)).toBe(true);
+    expect(isNovelWorkbenchRouteSession(normalized)).toBe(false);
+  });
+
+  it("prefers an explicit novel workbench when both surface flags are present", () => {
+    const harness = createHarness(
+      "/chat?novel_center=1&novel_workbench=1&novel_id=novel-1",
+    );
+
+    const resolved = harness.machine.resolve();
+
+    expect(isCreativeCenterRouteSession(resolved)).toBe(false);
+    expect(isNovelWorkbenchRouteSession(resolved)).toBe(true);
+    expect(resolved.route?.novelId).toBe("novel-1");
+  });
+
   it("creates a tab owner when a novel is opened from the creative center", () => {
     const harness = createHarness();
 

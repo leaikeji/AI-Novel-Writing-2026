@@ -12,6 +12,8 @@ import {
 } from "./assistant-layout";
 import {
   activeWorkbenchRouteSession,
+  isCreativeCenterRouteSession,
+  isNovelWorkbenchRouteSession,
   OwnedWorkbenchRouteState,
   RouteSessionLocation,
   RouteSessionSnapshot,
@@ -76,6 +78,7 @@ export interface AssistantRouteApi {
 export interface AssistantRouteWrapOptions {
   React: AssistantRouteReactRuntime;
   Workbench: unknown;
+  CreativeCenter?: unknown;
   getRouteSession?: () => RouteSessionSnapshot;
   getLocation?: () => RouteSessionLocation;
   eventTarget?: AssistantRouteEventTarget | null;
@@ -204,13 +207,6 @@ export function resolveAssistantRoutePageKind(
 }
 
 
-function isWorkbenchRoute(snapshot: RouteSessionSnapshot): boolean {
-  return snapshot.route !== null
-    && (snapshot.state === "workbench-no-session"
-      || snapshot.state === "workbench-session");
-}
-
-
 const SECTION_LABELS = {
   chapters: "章节",
   outline: "大纲",
@@ -320,6 +316,25 @@ export function createAssistantRouteWrap(
     );
   }
 
+  function CreativeCenterAssistantStatusBar() {
+    return h(
+      "section",
+      {
+        className: "anw-assistant-context-status is-supported",
+        "aria-label": "QwenPaw 助手页面感知状态",
+        "aria-live": "polite",
+      },
+      h("div", { className: "anw-assistant-context-status-main" },
+        h("strong", null, "创作中心"),
+        h("span", null, "未发送作品页面内容"),
+      ),
+      h("div", { className: "anw-assistant-context-status-meta" },
+        h("span", null, "未进入具体作品"),
+      ),
+      h("small", null, "进入作品工作台后才会准备小说页面上下文"),
+    );
+  }
+
   return function wrapNativeChat(Inner: unknown) {
     const AssistantPane = createAssistantPane(React, Inner);
 
@@ -347,7 +362,10 @@ export function createAssistantRouteWrap(
       });
       const containerRef = React.useRef<AssistantRouteContainerElement | null>(null);
       const routeSession = getRouteSession();
-      const workbenchActive = isWorkbenchRoute(routeSession);
+      const creativeCenterActive = options.CreativeCenter !== undefined
+        && isCreativeCenterRouteSession(routeSession);
+      const workbenchActive = isNovelWorkbenchRouteSession(routeSession);
+      const shellActive = creativeCenterActive || workbenchActive;
 
       React.useEffect(() => {
         if (!eventTarget) return undefined;
@@ -361,14 +379,14 @@ export function createAssistantRouteWrap(
 
       React.useEffect(() => {
         const container = containerRef.current;
-        if (!workbenchActive || !container) return undefined;
+        if (!shellActive || !container) return undefined;
         return observeAssistantRouteContainer({
           container,
           onWidth: setContainerWidth,
           createResizeObserver,
           fallbackEventTarget: eventTarget,
         });
-      }, [workbenchActive]);
+      }, [shellActive]);
 
       React.useEffect(() => {
         contextRuntime.setHostBinding(selectedAgentId, currentSessionId);
@@ -393,14 +411,13 @@ export function createAssistantRouteWrap(
         return () => options.selectionController?.suspend();
       }, [workbenchActive]);
 
-      if (!workbenchActive || !routeSession.route) {
+      if (!shellActive || !routeSession.route) {
         return h(Inner);
       }
 
-      const pageKind = resolveAssistantRoutePageKind(
-        getLocation(),
-        routeSession.route,
-      );
+      const pageKind: AssistantWorkspacePageKind = creativeCenterActive
+        ? "creative-center"
+        : resolveAssistantRoutePageKind(getLocation(), routeSession.route);
       const layout = resolveAssistantWorkspaceLayout({
         containerWidth,
         preferredAssistantWidth: assistantPreference.preferredWidth,
@@ -413,6 +430,7 @@ export function createAssistantRouteWrap(
         {
           ref: containerRef,
           "data-ai-novel-workbench": "active",
+          "data-ai-novel-surface": creativeCenterActive ? "creative-center" : "workbench",
           "data-assistant-density": layout.density,
           "data-assistant-overlay": String(layout.assistantOverlay),
           "data-assistant-page-kind": pageKind,
@@ -442,10 +460,12 @@ export function createAssistantRouteWrap(
               width: layout.assistantOverlay ? "100%" : `${layout.mainWidth}px`,
             },
           },
-          h(options.Workbench, {
-            assistantWorkspaceLayout: layout,
-            selectionEditReviewHost: options.selectionEditReviewHost,
-          }),
+          creativeCenterActive
+            ? h(options.CreativeCenter)
+            : h(options.Workbench, {
+                assistantWorkspaceLayout: layout,
+                selectionEditReviewHost: options.selectionEditReviewHost,
+              }),
         ),
         h(AssistantPane, {
           preferenceKey: options.assistantPreferenceKey,
@@ -461,9 +481,11 @@ export function createAssistantRouteWrap(
             (current) => ({ ...current, preferredWidth }),
           ),
           preferredWidth: assistantPreference.preferredWidth,
-          statusBar: h(AssistantContextStatusBar),
+          statusBar: creativeCenterActive
+            ? h(CreativeCenterAssistantStatusBar)
+            : h(AssistantContextStatusBar),
         }),
-        AssistantSelectionToolbar ? h(AssistantSelectionToolbar) : null,
+        workbenchActive && AssistantSelectionToolbar ? h(AssistantSelectionToolbar) : null,
       );
     };
   };

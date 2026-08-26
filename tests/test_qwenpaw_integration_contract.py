@@ -18,7 +18,7 @@ def load_script(name: str):
     return module
 
 
-def test_chat_wrapper_is_workbench_gated_and_uses_public_route_api() -> None:
+def test_chat_wrapper_is_surface_gated_and_uses_public_route_api() -> None:
     source = (ROOT / "frontend" / "src" / "index.ts").read_text(encoding="utf-8")
     wrapper = (ROOT / "frontend" / "src" / "assistant-route-wrap.ts").read_text(
         encoding="utf-8"
@@ -28,9 +28,12 @@ def test_chat_wrapper_is_workbench_gated_and_uses_public_route_api() -> None:
     assert "registerAssistantRouteWrap" in source
     assert "options.route.wrap(" in wrapper
     assert "CORE_CHAT_ROUTE_ID" in source
-    assert "isWorkbenchRoute(routeSession)" in wrapper
+    assert "isNovelWorkbenchRouteSession(routeSession)" in wrapper
+    assert "isCreativeCenterRouteSession(routeSession)" in wrapper
+    assert "CreativeCenter: NovelLibraryPage" in source
     assert "class RouteSessionStateMachine" in route_state
-    assert 'query.get("novel_workbench") !== "1"' in route_state
+    assert 'query.get("novel_workbench") === "1"' in route_state
+    assert 'query.get("novel_center") === "1"' in route_state
     assert 'query.get("novel_id")' not in route_state
     assert 'nonEmptyQueryValue(query, "novel_id")' in route_state
     assert "window.sessionStorage" in route_state

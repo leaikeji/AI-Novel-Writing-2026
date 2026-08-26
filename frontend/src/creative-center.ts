@@ -7,7 +7,7 @@ import {
   getGenerationModelStatus,
   verifiedGenerationModelLabel,
 } from "./api";
-import { APP_PATH } from "./contracts";
+import { CHAT_PATH, CREATIVE_CENTER_CHAT_PATH } from "./contracts";
 import {
   AssetPresetRecord,
   CreativeGenerationRecord,
@@ -163,11 +163,19 @@ function initialLibraryView(): LibraryView {
 
 
 function setLibraryUrl(view: LibraryView): void {
-  const query = new URLSearchParams(window.location.search);
+  const target = new URL(CREATIVE_CENTER_CHAT_PATH, window.location.origin);
+  const currentPath = window.location.pathname;
+  if (currentPath === CHAT_PATH || currentPath.startsWith(`${CHAT_PATH}/`)) {
+    target.pathname = currentPath;
+  }
+  const query = target.searchParams;
   if (view === "private-library") query.set("view", view);
   else query.delete("view");
-  const suffix = query.toString() ? `?${query.toString()}` : "";
-  window.history.replaceState(null, "", `${APP_PATH}${suffix}`);
+  window.history.replaceState(
+    null,
+    "",
+    `${target.pathname}?${query.toString()}`,
+  );
 }
 
 

@@ -6,7 +6,7 @@ import {
 } from "./assistant-pane";
 
 
-export type AssistantWorkspacePageKind = "chapter-editor" | "studio";
+export type AssistantWorkspacePageKind = "chapter-editor" | "creative-center" | "studio";
 export type AssistantWorkspaceDensity = "comfortable" | "compact" | "constrained";
 
 

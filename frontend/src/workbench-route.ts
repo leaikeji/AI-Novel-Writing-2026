@@ -1,6 +1,7 @@
 const WORKBENCH_ROUTE_KEY = "ai-novel-world-2026.workbench-route";
 const WORKBENCH_ROUTE_STORAGE_VERSION = 1;
 const CHAT_ROOT_PATH = "/chat";
+const CREATIVE_CENTER_ROUTE_SCOPE_ID = "ai-novel-world-2026:creative-center";
 
 
 export type RouteSessionState =
@@ -108,16 +109,19 @@ function explicitWorkbenchRoute(
 
   const query = new URLSearchParams(location.search);
   const novelId = nonEmptyQueryValue(query, "novel_id");
-  if (query.get("novel_workbench") !== "1" || !novelId) return null;
-
-  const queryRoleView = query.get("role_view");
-  return {
-    novelId,
-    documentId: nonEmptyQueryValue(query, "document_id"),
-    roleView: queryRoleView === "list" || queryRoleView === "graph"
-      ? queryRoleView
-      : undefined,
-  };
+  if (query.get("novel_workbench") === "1" && novelId) {
+    const queryRoleView = query.get("role_view");
+    return {
+      novelId,
+      documentId: nonEmptyQueryValue(query, "document_id"),
+      roleView: queryRoleView === "list" || queryRoleView === "graph"
+        ? queryRoleView
+        : undefined,
+    };
+  }
+  return query.get("novel_center") === "1"
+    ? { novelId: CREATIVE_CENTER_ROUTE_SCOPE_ID }
+    : null;
 }
 
 
@@ -421,6 +425,11 @@ export function rememberWorkbenchRoute(novelId: string, documentId?: string): vo
 }
 
 
+export function rememberCreativeCenterRoute(): void {
+  browserStateMachine().enterWorkbench(CREATIVE_CENTER_ROUTE_SCOPE_ID);
+}
+
+
 export function rememberWorkbenchRoleView(
   novelId: string,
   roleView: "list" | "graph",
@@ -435,10 +444,30 @@ export function activeWorkbenchRouteSession(): RouteSessionSnapshot {
 
 
 export function activeWorkbenchRoute(): WorkbenchRouteState | null {
-  return activeWorkbenchRouteSession().route;
+  const snapshot = activeWorkbenchRouteSession();
+  return isCreativeCenterRouteSession(snapshot) ? null : snapshot.route;
 }
 
 
 export function clearWorkbenchRoute(): void {
   browserStateMachine().leaveWorkbench();
+}
+
+
+export function isCreativeCenterRouteSession(
+  snapshot: RouteSessionSnapshot,
+): boolean {
+  return snapshot.route?.novelId === CREATIVE_CENTER_ROUTE_SCOPE_ID
+    && (snapshot.state === "workbench-no-session"
+      || snapshot.state === "workbench-session");
+}
+
+
+export function isNovelWorkbenchRouteSession(
+  snapshot: RouteSessionSnapshot,
+): boolean {
+  return snapshot.route !== null
+    && snapshot.route.novelId !== CREATIVE_CENTER_ROUTE_SCOPE_ID
+    && (snapshot.state === "workbench-no-session"
+      || snapshot.state === "workbench-session");
 }

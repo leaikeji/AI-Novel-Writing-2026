@@ -8,7 +8,10 @@ import {
   registerAssistantRouteWrap,
   resolveAssistantRoutePageKind,
 } from "./assistant-route-wrap";
-import { RouteSessionSnapshot } from "./workbench-route";
+import {
+  RouteSessionSnapshot,
+  RouteSessionStateMachine,
+} from "./workbench-route";
 import {
   NOVEL_ASSISTANT_TARGET_AGENT_ID,
   NovelAssistantContextRuntime,
@@ -172,6 +175,21 @@ function workbenchRoute(documentId?: string): RouteSessionSnapshot {
 }
 
 
+function creativeCenterRoute(): RouteSessionSnapshot {
+  const values = new Map<string, string>();
+  const machine = new RouteSessionStateMachine({
+    getLocation: () => ({ pathname: "/chat", search: "?novel_center=1" }),
+    storage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => { values.set(key, value); },
+      removeItem: (key) => { values.delete(key); },
+    },
+    createOwnerToken: () => "owner_token_0000000000000099",
+  });
+  return machine.resolve();
+}
+
+
 function elementChildren(element: TestElement): TestElement[] {
   return element.children.filter(
     (child): child is TestElement => Boolean(
@@ -249,6 +267,53 @@ describe("assistant route wrap", () => {
     location = { pathname: "/chat", search: "" };
     events.emit("popstate");
     expect(React.render(Component).type).toBe(Inner);
+  });
+
+  it("renders the creative center in the existing assistant shell without workspace context", () => {
+    const React = new HookTestReact();
+    const contextRuntime = new NovelAssistantContextRuntime();
+    const Workbench = () => "workbench";
+    const CreativeCenter = () => "creative-center";
+    const AssistantPane = () => "assistant";
+    const startContextRef = vi.fn(() => vi.fn());
+    const wrap = createAssistantRouteWrap({
+      React,
+      Workbench,
+      CreativeCenter,
+      getRouteSession: () => creativeCenterRoute(),
+      getLocation: () => ({ pathname: "/chat/session-center", search: "" }),
+      eventTarget: null,
+      createResizeObserver: () => null,
+      createAssistantPane: () => AssistantPane,
+      contextRuntime,
+      contextRefCoordinator: {
+        start: startContextRef,
+        refresh: vi.fn(),
+        requestPatch: vi.fn(() => null),
+        getReadyRef: vi.fn(() => null),
+        getTabInstance: vi.fn(() => "tab-instance"),
+        dispose: vi.fn(),
+      },
+    });
+    const Component = wrap(() => "native-chat") as () => unknown;
+
+    const rendered = React.render(Component);
+    React.flushEffects();
+    const [main, pane] = elementChildren(rendered);
+
+    expect(rendered.props).toMatchObject({
+      "data-ai-novel-workbench": "active",
+      "data-ai-novel-surface": "creative-center",
+      "data-assistant-page-kind": "creative-center",
+    });
+    expect(elementChildren(main)[0].type).toBe(CreativeCenter);
+    expect(pane.type).toBe(AssistantPane);
+    expect(startContextRef).not.toHaveBeenCalled();
+    expect(contextRuntime.getStatus()).toMatchObject({
+      active: false,
+      fieldCount: 0,
+      selectionCharacters: 0,
+    });
   });
 
   it("starts context preparation only inside workbench and stops it on exit", () => {

@@ -21,6 +21,7 @@ import {
   SelectionEditRuntime,
   createSelectionEditReviewHost,
 } from "./selection-edit-runtime";
+import { CreativeCenterEntry } from "./creative-center-entry";
 import { NovelLibraryPage } from "./creative-center";
 import { NovelWorkbench } from "./workbench-v2";
 import { activeWorkbenchRouteSession } from "./workbench-route";
@@ -100,7 +101,7 @@ registerAssistantToolCard({
 window.QwenPaw.route.add(APP_ID, {
   id: APP_ROUTE_ID,
   path: APP_PATH,
-  component: NovelLibraryPage,
+  component: CreativeCenterEntry,
 });
 
 registerAssistantRouteWrap({
@@ -109,6 +110,7 @@ registerAssistantRouteWrap({
   route: window.QwenPaw.route,
   React,
   Workbench: NovelWorkbench,
+  CreativeCenter: NovelLibraryPage,
   contextRefCoordinator: assistantContextRefCoordinator,
   selectionController: assistantSelectionController,
   selectionEditReviewHost: SelectionEditReviewHost,

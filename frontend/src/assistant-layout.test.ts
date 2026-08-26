@@ -18,6 +18,19 @@ describe("resolveAssistantWorkspaceLayout", () => {
     });
   });
 
+  it("uses the studio width policy for the creative center", () => {
+    expect(resolveAssistantWorkspaceLayout({
+      containerWidth: 1_500,
+      preferredAssistantWidth: 480,
+      pageKind: "creative-center",
+    })).toMatchObject({
+      assistantWidth: 480,
+      mainWidth: 1_020,
+      mainMinWidth: 720,
+      assistantOverlay: false,
+    });
+  });
+
   it("clamps a persisted wide assistant before stealing the chapter editor and tree width", () => {
     expect(resolveAssistantWorkspaceLayout({
       containerWidth: 1_280,

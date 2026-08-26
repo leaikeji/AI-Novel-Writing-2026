@@ -14,7 +14,7 @@ import {
 import type { AssistantFormFieldAdapter } from "./assistant-form-field";
 import { assistantContextRuntime } from "./assistant-context-runtime";
 import { buildChapterTreeVolumes, ChapterTreeChapter, ChapterTreeVolume } from "./chapter-tree";
-import { APP_PATH } from "./contracts";
+import { CREATIVE_CENTER_CHAT_PATH } from "./contracts";
 import {
   clearRecoveryDraft,
   loadRecoveryDraft,
@@ -1157,7 +1157,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       "section",
       { className: "anw-app anw-empty-state" },
       h("strong", null, "请先选择一本小说"),
-      h(Button, { onClick: () => { clearWorkbenchRoute(); window.location.assign(APP_PATH); } }, "打开创作中心"),
+      h(Button, { onClick: () => { clearWorkbenchRoute(); window.location.assign(CREATIVE_CENTER_CHAT_PATH); } }, "打开创作中心"),
     );
   }
 
@@ -1584,7 +1584,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     onNovelChanged: (updated: NovelRecord) => setNovel(updated),
     onReload: refreshNovel,
     openChapterWizardSignal,
-    onBack: () => { clearWorkbenchRoute(); window.location.assign(APP_PATH); },
+    onBack: () => { clearWorkbenchRoute(); window.location.assign(CREATIVE_CENTER_CHAT_PATH); },
     onError: setError,
     assistantWorkspaceLayout: props.assistantWorkspaceLayout,
     selectionEditReviewHost: props.selectionEditReviewHost,
@@ -1842,7 +1842,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           h(
             "div",
             { className: "anw-panel-actions" },
-            h(Button, { onClick: () => { clearWorkbenchRoute(); window.location.assign(APP_PATH); } }, "返回创作中心"),
+            h(Button, { onClick: () => { clearWorkbenchRoute(); window.location.assign(CREATIVE_CENTER_CHAT_PATH); } }, "返回创作中心"),
             section === "chapters" ? h(Button, { onClick: createVolume }, "+ 新增分卷") : null,
             section === "chapters" ? h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: createChapter }, "新建章节") : null,
           ),
