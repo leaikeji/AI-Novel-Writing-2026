@@ -257,3 +257,11 @@ X01 在 308.590 秒后完整结束响应流，没有命中600秒硬上限。流�
 运行后研究路由恢复404，QwenPaw 根页面、PawApp 注册表与项目健康接口均为200，TTS Sidecar healthy，四个既有 TTS 验证字段逐项等值恢复。核心表中出现的43条新增 `model_run_records` 全部属于并行 `narration.segment_render`，两条新增 `document_revisions` 均为 `tts_snapshot`；其他评测关注表不变，活动后台任务和活动朗读请求为0。不能把共享环境的 TTS 写入表述为评测零写入，但现有行级类型证据没有显示 X01 写入小说权威数据。
 
 阶段门禁继续保持关闭：不得启动其余15个样本。后续只有两条合规路径：等待 QwenPaw 在公开 PawApp 契约中提供 actual provider/model 与 usage，或由用户另行裁决降低评测审计要求；不得使用私有接口、内部 usage buffer 或未经证明的 requested=actual 假设绕过门禁。
+
+### 8.8 公开模型前后核对与 usage 可选合同（2026-08-28）
+
+用户已明确选择第二条路径：写作质量评测不再因公开 usage 缺失而丢弃正文，但不得把调用前 effective 模型冒充 actual 模型。本轮使用 `RR-PUBLIC-EVIDENCE`（`SER/MUTEX/GATE`）单一工作包；合同、API、CLI和测试共享同一响应结构，不并行修改。允许文件限定为 `backend/writing_eval_api.py`、`backend/writing_eval_contract.py`、`scripts/run_writing_eval.py`、三份 `tests/test_writing_eval_*.py` 和本专项文档/证据；不触碰正式 Skills、小说正文、数据库 schema、QwenPaw 上游或私有 usage buffer。
+
+结果 schema 升为 `1.1`，模型证据合同为 `writing-eval-effective-model-pre-post-v1`。服务端在生成前通过公开 effective-model API 获取 `requested_model`，流完整结束并提取 final-only 正文后再次通过同一公开接口获取 `postflight_model`；provider/model 不一致时正文仍作废。公开 closing message 含合法 usage 时继续严格核验 actual 模型；不含时固定 `actual_model=null`、`usage=null`、`actual_model_status=not_exposed`，并记录 `private_usage_buffer_used=false`。这只能证明运行窗口前后模型配置没有变化，不能证明 Provider 实际执行身份。
+
+CLI 同时验证 schema、前后非空模型身份、模型证据状态、usage 结构、流完整性、正文与哈希；任何字段矛盾都失败。源码候选定向测试 `58 passed`、相关回归 `202 passed`、项目全量 `2445 passed, 116 skipped`；合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。两条全量警告均为既有 Starlette 弃用警告。真实 X01 v3 之前仍需备份与恢复门禁；其余15个样本继续停止。

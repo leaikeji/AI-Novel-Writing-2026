@@ -83,3 +83,9 @@ QwenPaw 当前公开 `PawAppContext.chat/chat_stream` 参数不包含逐请求�
 恢复后研究路由为404，QwenPaw 根页面、PawApp 注册表、项目健康接口为200，TTS Sidecar healthy，四个既有 TTS 验证字段与运行前逐项等值。运行窗口附近新增43条 `model_run_records`，全部关联 `narration.segment_render` 与 MOSS-TTS-Nano；新增两条 `document_revisions` 的 `source` 均为 `tts_snapshot`。这些是共享环境中的并行朗读写入，不是 X01 的写作评测记录；因此本轮不能使用“总表计数完全一致”措辞，只能说明未发现 X01 写入小说权威表的行级证据。
 
 当前阻断已经从“看不见超时阶段”收敛为“公开 PawApp 返回不满足 actual/usage 审计合同”。在 QwenPaw 提供公开证据或用户另行裁决降低审计要求前，批量评测保持停止。
+
+## 2026-08-28 用户裁决后的合同调整
+
+用户同意不再因 QwenPaw 未公开 usage 而丢弃已完整生成的正文。调整后的证据边界是：生成前后各通过一次公开 effective-model API，provider/model 必须一致；公开 usage 存在时严格核验 actual，不存在时只能标记 `actual_model=not_exposed`、`usage=not_exposed`，不能把 effective 模型冒充 actual，也不能读取内部 usage buffer。
+
+schema `1.1` 与 CLI 候选已完成，定向测试 `58 passed`、相关回归 `202 passed`、项目全量 `2445 passed, 116 skipped`，合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。此处仍只是源码候选；第三次 X01 尚未派发，研究路由保持404，其余15个样本保持停止。

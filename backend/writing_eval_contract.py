@@ -13,7 +13,7 @@ from .model_runtime import GENERATION_CONTRACT_VERSION
 
 
 EXPERIMENT_ID = "mystery-ab-20260827-v1"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 RIGHTS_BASIS = "project-synthetic"
 SOURCE_SUITE_SHA256 = (
     "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf"
@@ -25,6 +25,8 @@ MANIFEST_SHA256 = "19d5bb361b74c93f51f1580dea8d8977a7c21fa7f9a0a80dec781aee449d6
 RUBRIC_SHA256 = "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6"
 PROMPT_CONTRACT_VERSION = "writing-eval-prompt-v1"
 STREAM_DIAGNOSTIC_CONTRACT_VERSION = "writing-eval-stream-diagnostics-v1"
+MODEL_EVIDENCE_CONTRACT_VERSION = "writing-eval-effective-model-pre-post-v1"
+ACTUAL_MODEL_POLICY = "provider_usage_optional_not_exposed_allowed"
 SKILL_SELECTION_ENFORCEMENT = "requested_via_pawapp_context_parameter"
 TOOL_POLICY_ENFORCEMENT = "prompt_only"
 
@@ -330,6 +332,8 @@ def experiment_contract(experiment_id: str) -> dict[str, Any]:
         "generation_contract": GENERATION_CONTRACT_VERSION,
         "prompt_contract": PROMPT_CONTRACT_VERSION,
         "stream_diagnostic_contract": STREAM_DIAGNOSTIC_CONTRACT_VERSION,
+        "model_evidence_contract": MODEL_EVIDENCE_CONTRACT_VERSION,
+        "actual_model_policy": ACTUAL_MODEL_POLICY,
         "skill_selection_enforcement": SKILL_SELECTION_ENFORCEMENT,
         "tool_policy_enforcement": TOOL_POLICY_ENFORCEMENT,
         "sample_ids": list(_ASSIGNMENTS),

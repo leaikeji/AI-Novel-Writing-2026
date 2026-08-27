@@ -221,6 +221,7 @@ def test_generation_endpoint_accepts_no_body_and_has_no_persistence_calls() -> N
         "response",
         "ctx",
         "configured_model",
+        "postflight_model_probe",
     ]
 
     chat_stream_calls = [

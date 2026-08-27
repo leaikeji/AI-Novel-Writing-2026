@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
 import hashlib
 import hmac
@@ -14,7 +14,15 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 
 from .generation_dependencies import (
     get_novel_effective_model,
@@ -24,14 +32,17 @@ from .model_runtime import (
     NOVEL_AGENT_ID,
     ModelAudit,
     ModelVerificationError,
+    effective_model_audit,
     ensure_prompt_within_effective_limit,
     reply_final_text,
     reply_model_audit,
 )
 from .writing_eval_contract import (
+    ACTUAL_MODEL_POLICY,
     CANDIDATE_OVERLAY_SHA256,
     EXPERIMENT_ID,
     MANIFEST_SHA256,
+    MODEL_EVIDENCE_CONTRACT_VERSION,
     PROMPT_CONTRACT_VERSION,
     RIGHTS_BASIS,
     RUBRIC_SHA256,
@@ -236,8 +247,10 @@ async def _await_reply(awaitable: Any) -> Any:
         raise
 
 
-def _strict_public_usage(reply: Any) -> dict[str, Any]:
-    """Return strict usage from a closing assistant message in raw reply chunks."""
+def _public_usage(
+    reply: Any, *, required: bool
+) -> dict[str, Any] | None:
+    """Return validated public usage, or ``None`` when it is not exposed."""
 
     chunks = getattr(reply, "chunks", None)
     if not isinstance(chunks, (list, tuple)) or not chunks:
@@ -255,10 +268,14 @@ def _strict_public_usage(reply: Any) -> dict[str, Any]:
         metadata = getattr(closing, "metadata", None)
         if not isinstance(metadata, dict):
             continue
-        envelope = metadata.get("qwenpaw_turn_usage")
-        usage = envelope.get("usage") if isinstance(envelope, dict) else None
-        if not isinstance(usage, dict):
+        if "qwenpaw_turn_usage" not in metadata:
             continue
+        envelope = metadata["qwenpaw_turn_usage"]
+        if not isinstance(envelope, dict):
+            raise ModelVerificationError("模型用量元数据无效：qwenpaw_turn_usage")
+        usage = envelope.get("usage")
+        if not isinstance(usage, dict):
+            raise ModelVerificationError("模型用量元数据无效：usage")
         provider_id = usage.get("provider_id")
         model_id = usage.get("model_name") or usage.get("model_id")
         if not isinstance(provider_id, str) or not provider_id.strip():
@@ -275,9 +292,25 @@ def _strict_public_usage(reply: Any) -> dict[str, Any]:
         if all(value is None for value in token_values.values()):
             raise ModelVerificationError("模型身份未核验：回复没有可用 token 用量")
         return usage
-    raise ModelVerificationError(
-        "模型身份未核验：closing assistant message 缺少 provider usage"
-    )
+    if required:
+        raise ModelVerificationError(
+            "模型身份未核验：closing assistant message 缺少 provider usage"
+        )
+    return None
+
+
+def _strict_public_usage(reply: Any) -> dict[str, Any]:
+    """Return strict usage from a closing assistant message in raw reply chunks."""
+
+    usage = _public_usage(reply, required=True)
+    assert usage is not None
+    return usage
+
+
+def _optional_public_usage(reply: Any) -> dict[str, Any] | None:
+    """Keep missing public usage explicit without consulting private buffers."""
+
+    return _public_usage(reply, required=False)
 
 
 def _skill_sha256() -> str:
@@ -318,6 +351,17 @@ def _execution_diagnostics(
     }
 
 
+def _postflight_model_probe(
+    request: Request,
+) -> Callable[[], Awaitable[ModelAudit]]:
+    """Create a public effective-model probe that runs after the response stream."""
+
+    async def probe() -> ModelAudit:
+        return await effective_model_audit(request.app, agent_id=NOVEL_AGENT_ID)
+
+    return probe
+
+
 @router.get("/{experiment_id}", dependencies=[Depends(require_writing_eval_enabled)])
 def writing_evaluation_contract_get(
     experiment_id: str, response: Response
@@ -339,6 +383,9 @@ async def writing_evaluation_generate(
     response: Response,
     ctx=Depends(get_novel_generation_ctx),
     configured_model: ModelAudit = Depends(get_novel_effective_model),
+    postflight_model_probe: Callable[[], Awaitable[ModelAudit]] = Depends(
+        _postflight_model_probe
+    ),
 ) -> dict[str, Any]:
     """Generate one registered sample without touching novel persistence."""
 
@@ -360,6 +407,7 @@ async def writing_evaluation_generate(
     started_monotonic = time.monotonic()
     stream_diagnostics = _StreamDiagnostics(started_monotonic=started_monotonic)
     actual_model: ModelAudit | None = None
+    postflight_model: ModelAudit | None = None
     try:
         async with _RUN_LOCK:
             ensure_prompt_within_effective_limit(sample.prompt, configured_model)
@@ -373,12 +421,15 @@ async def writing_evaluation_generate(
                     stream_diagnostics,
                 )
             )
-            _strict_public_usage(reply)
-            # Deliberately omit session_id: research evidence may only use the
-            # raw public PawApp reply, never QwenPaw's internal usage buffer.
-            actual_model = reply_model_audit(reply)
-            actual_model.ensure_matches(configured_model)
             final_text = reply_final_text(reply)
+            postflight_model = await postflight_model_probe()
+            postflight_model.ensure_matches(configured_model)
+            public_usage = _optional_public_usage(reply)
+            if public_usage is not None:
+                # Deliberately omit session_id: research evidence may only use
+                # public reply metadata, never QwenPaw's internal usage buffer.
+                actual_model = reply_model_audit(reply)
+                actual_model.ensure_matches(configured_model)
     except WritingEvalTimeoutError as error:
         diagnostics = _execution_diagnostics(
             session_id=session_id,
@@ -413,6 +464,8 @@ async def writing_evaluation_generate(
                 "completion_tokens": actual_model.completion_tokens,
                 "total_tokens": actual_model.total_tokens,
             }
+        if postflight_model is not None:
+            detail["postflight_model"] = _model_payload(postflight_model)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=detail,
@@ -437,7 +490,11 @@ async def writing_evaluation_generate(
 
     finished_at = _utc_now()
     duration_ms = max(0, round((time.monotonic() - started_monotonic) * 1000))
-    assert actual_model is not None
+    assert postflight_model is not None
+    actual_model_status = (
+        "verified_from_provider_usage" if actual_model is not None else "not_exposed"
+    )
+    usage_status = "exposed" if actual_model is not None else "not_exposed"
     return {
         "schema_version": SCHEMA_VERSION,
         "state": "generated",
@@ -458,11 +515,26 @@ async def writing_evaluation_generate(
         "base_prompt_sha256": sha256_text(sample.base_prompt),
         "prompt_sha256": sha256_text(sample.prompt),
         "requested_model": _model_payload(configured_model),
-        "actual_model": _model_payload(actual_model),
-        "usage": {
-            "prompt_tokens": actual_model.prompt_tokens,
-            "completion_tokens": actual_model.completion_tokens,
-            "total_tokens": actual_model.total_tokens,
+        "postflight_model": _model_payload(postflight_model),
+        "actual_model": (
+            _model_payload(actual_model) if actual_model is not None else None
+        ),
+        "usage": (
+            {
+                "prompt_tokens": actual_model.prompt_tokens,
+                "completion_tokens": actual_model.completion_tokens,
+                "total_tokens": actual_model.total_tokens,
+            }
+            if actual_model is not None
+            else None
+        ),
+        "model_evidence": {
+            "contract": MODEL_EVIDENCE_CONTRACT_VERSION,
+            "actual_model_policy": ACTUAL_MODEL_POLICY,
+            "effective_model_pre_post_match": True,
+            "actual_model_status": actual_model_status,
+            "usage_status": usage_status,
+            "private_usage_buffer_used": False,
         },
         "sampling_parameters": "not_exposed",
         "session_id": session_id,

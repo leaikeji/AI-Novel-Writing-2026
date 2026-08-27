@@ -94,6 +94,18 @@ def _streaming_ctx(
     return SimpleNamespace(chat_stream=chat_stream)
 
 
+def _model_probe(
+    model: ModelAudit | None = None,
+    calls: list[str] | None = None,
+):
+    async def probe() -> ModelAudit:
+        if calls is not None:
+            calls.append("postflight")
+        return model or _configured_model()
+
+    return probe
+
+
 def test_contract_endpoint_exposes_only_frozen_samples(api) -> None:
     response = Response()
 
@@ -103,6 +115,12 @@ def test_contract_endpoint_exposes_only_frozen_samples(api) -> None:
     assert payload["case_ids"] == ["CF-01", "SP-02", "DS-01", "GP-02"]
     assert payload["arbitrary_prompt_allowed"] is False
     assert payload["server_persistence"] == "none"
+    assert payload["model_evidence_contract"] == (
+        "writing-eval-effective-model-pre-post-v1"
+    )
+    assert payload["actual_model_policy"] == (
+        "provider_usage_optional_not_exposed_allowed"
+    )
     assert response.headers["Cache-Control"] == "no-store"
 
     with pytest.raises(HTTPException) as captured:
@@ -218,6 +236,7 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
         response,
         ctx=_streaming_ctx(_reply(text=final_text), chat_calls),
         configured_model=_configured_model(),
+        postflight_model_probe=_model_probe(),
     )
 
     assert len(chat_calls) == 1
@@ -233,6 +252,7 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
     assert result["attempt"] == 1
     assert result["execution_agent_id"] == "ai-novel-writer"
     assert result["requested_model"]["model_id"] == "model-a"
+    assert result["postflight_model"]["model_id"] == "model-a"
     assert result["actual_model"]["model_id"] == "model-a"
     assert result["usage"] == {
         "prompt_tokens": 101,
@@ -240,6 +260,14 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
         "total_tokens": 303,
     }
     assert result["output_text"] == final_text
+    assert result["model_evidence"] == {
+        "contract": "writing-eval-effective-model-pre-post-v1",
+        "actual_model_policy": "provider_usage_optional_not_exposed_allowed",
+        "effective_model_pre_post_match": True,
+        "actual_model_status": "verified_from_provider_usage",
+        "usage_status": "exposed",
+        "private_usage_buffer_used": False,
+    }
     assert result["final_text_source"] == "structured_reply_chunks"
     assert result["skill_selection_enforcement"] == (
         "requested_via_pawapp_context_parameter"
@@ -278,6 +306,7 @@ async def test_generate_extracts_structured_final_without_reasoning(
         Response(),
         ctx=_streaming_ctx(_reply(text=final_text, include_reasoning=True)),
         configured_model=_configured_model(),
+        postflight_model_probe=_model_probe(),
     )
 
     assert result["output_text"] == final_text
@@ -297,6 +326,7 @@ async def test_generate_model_mismatch_returns_actual_and_usage_evidence(
             Response(),
             ctx=_streaming_ctx(_reply(provider_id="provider-a", model_id="model-b")),
             configured_model=_configured_model(),
+            postflight_model_probe=_model_probe(),
         )
 
     assert captured.value.status_code == 502
@@ -317,12 +347,11 @@ async def test_generate_model_mismatch_returns_actual_and_usage_evidence(
 @pytest.mark.parametrize(
     "reply",
     [
-        _reply(include_usage=False),
         _reply(provider_id=[]),
         _reply(usage_overrides={"total_tokens": "303"}),
     ],
 )
-async def test_generate_rejects_missing_or_illegal_raw_actual(
+async def test_generate_rejects_illegal_exposed_actual(
     api, monkeypatch: pytest.MonkeyPatch, reply: SimpleNamespace
 ) -> None:
     monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
@@ -334,6 +363,7 @@ async def test_generate_rejects_missing_or_illegal_raw_actual(
             Response(),
             ctx=_streaming_ctx(reply),
             configured_model=_configured_model(),
+            postflight_model_probe=_model_probe(),
         )
 
     assert captured.value.status_code == 502
@@ -341,6 +371,57 @@ async def test_generate_rejects_missing_or_illegal_raw_actual(
         "writing_evaluation_model_verification_failed"
     )
     assert "actual_model" not in captured.value.detail
+
+
+@pytest.mark.asyncio
+async def test_generate_keeps_text_when_public_usage_is_not_exposed(
+    api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
+    final_text = "雨停之后，走廊里只剩下钟表的回声。"
+    probe_calls: list[str] = []
+
+    result = await api.writing_evaluation_generate(
+        api.EXPERIMENT_ID,
+        "X03",
+        Response(),
+        ctx=_streaming_ctx(_reply(text=final_text, include_usage=False)),
+        configured_model=_configured_model(),
+        postflight_model_probe=_model_probe(calls=probe_calls),
+    )
+
+    assert probe_calls == ["postflight"]
+    assert result["output_text"] == final_text
+    assert result["actual_model"] is None
+    assert result["usage"] is None
+    assert result["model_evidence"]["actual_model_status"] == "not_exposed"
+    assert result["model_evidence"]["usage_status"] == "not_exposed"
+    assert result["model_evidence"]["private_usage_buffer_used"] is False
+
+
+@pytest.mark.asyncio
+async def test_generate_rejects_effective_model_drift_after_stream(
+    api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
+
+    with pytest.raises(HTTPException) as captured:
+        await api.writing_evaluation_generate(
+            api.EXPERIMENT_ID,
+            "X04",
+            Response(),
+            ctx=_streaming_ctx(_reply(include_usage=False)),
+            configured_model=_configured_model(),
+            postflight_model_probe=_model_probe(
+                _configured_model(model_id="model-b")
+            ),
+        )
+
+    assert captured.value.status_code == 502
+    detail = captured.value.detail
+    assert detail["type"] == "writing_evaluation_model_verification_failed"
+    assert detail["requested_model"]["model_id"] == "model-a"
+    assert detail["postflight_model"]["model_id"] == "model-b"
 
 
 @pytest.mark.asyncio
@@ -364,6 +445,7 @@ async def test_generate_rejects_concurrent_run_before_provider_call(
                 Response(),
                 ctx=SimpleNamespace(chat_stream=chat_stream),
                 configured_model=_configured_model(),
+                postflight_model_probe=_model_probe(),
             )
     finally:
         lock.release()
@@ -407,6 +489,7 @@ async def test_generate_timeout_is_504_and_cancels_provider_task(
             Response(),
             ctx=SimpleNamespace(chat_stream=chat_stream),
             configured_model=_configured_model(),
+            postflight_model_probe=_model_probe(),
         )
 
     await asyncio.sleep(0)

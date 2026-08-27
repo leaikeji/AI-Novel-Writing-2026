@@ -23,11 +23,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.writing_eval_contract import (  # noqa: E402
+    ACTUAL_MODEL_POLICY,
     CANDIDATE_OVERLAY_SHA256,
     EXPERIMENT_ID,
     MANIFEST_SHA256,
+    MODEL_EVIDENCE_CONTRACT_VERSION,
     PROMPT_CONTRACT_VERSION,
     RUBRIC_SHA256,
+    SCHEMA_VERSION,
     SKILL_SELECTION_ENFORCEMENT,
     SOURCE_SUITE_SHA256,
     STREAM_DIAGNOSTIC_CONTRACT_VERSION,
@@ -210,6 +213,8 @@ def _validate_server_contract(server: dict[str, Any], local: dict[str, Any]) -> 
         "generation_contract",
         "prompt_contract",
         "stream_diagnostic_contract",
+        "model_evidence_contract",
+        "actual_model_policy",
         "skill_selection_enforcement",
         "tool_policy_enforcement",
         "sample_ids",
@@ -230,6 +235,7 @@ def _validate_server_contract(server: dict[str, Any], local: dict[str, Any]) -> 
 def _validate_result(result: dict[str, Any], sample_id: str) -> None:
     sample = build_sample(EXPERIMENT_ID, sample_id)
     expected = {
+        "schema_version": SCHEMA_VERSION,
         "experiment_id": EXPERIMENT_ID,
         "sample_id": sample.sample_id,
         "case_id": sample.case_id,
@@ -253,14 +259,64 @@ def _validate_result(result: dict[str, Any], sample_id: str) -> None:
     if result.get("output_sha256") != sha256_text(output_text):
         raise RunnerError("RESULT_OUTPUT_HASH_MISMATCH")
     requested = result.get("requested_model")
+    postflight = result.get("postflight_model")
     actual = result.get("actual_model")
-    if not isinstance(requested, dict) or not isinstance(actual, dict):
+
+    def model_identity(value: Any) -> tuple[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        provider_id = value.get("provider_id")
+        model_id = value.get("model_id")
+        if (
+            not isinstance(provider_id, str)
+            or not provider_id.strip()
+            or not isinstance(model_id, str)
+            or not model_id.strip()
+        ):
+            return None
+        return provider_id, model_id
+
+    requested_identity = model_identity(requested)
+    postflight_identity = model_identity(postflight)
+    if requested_identity is None or postflight_identity is None:
         raise RunnerError("RESULT_MODEL_EVIDENCE_MISSING")
-    if (
-        requested.get("provider_id") != actual.get("provider_id")
-        or requested.get("model_id") != actual.get("model_id")
-    ):
+    if requested_identity != postflight_identity:
         raise RunnerError("RESULT_MODEL_MISMATCH")
+    model_evidence = result.get("model_evidence")
+    if (
+        not isinstance(model_evidence, dict)
+        or model_evidence.get("contract") != MODEL_EVIDENCE_CONTRACT_VERSION
+        or model_evidence.get("actual_model_policy") != ACTUAL_MODEL_POLICY
+        or model_evidence.get("effective_model_pre_post_match") is not True
+        or model_evidence.get("private_usage_buffer_used") is not False
+    ):
+        raise RunnerError("RESULT_MODEL_EVIDENCE_INVALID")
+    actual_status = model_evidence.get("actual_model_status")
+    usage_status = model_evidence.get("usage_status")
+    if actual_status == "not_exposed" and usage_status == "not_exposed":
+        if actual is not None or result.get("usage") is not None:
+            raise RunnerError("RESULT_MODEL_EVIDENCE_INVALID")
+    elif (
+        actual_status == "verified_from_provider_usage"
+        and usage_status == "exposed"
+    ):
+        usage = result.get("usage")
+        actual_identity = model_identity(actual)
+        if actual_identity is None or not isinstance(usage, dict):
+            raise RunnerError("RESULT_MODEL_EVIDENCE_MISSING")
+        if requested_identity != actual_identity:
+            raise RunnerError("RESULT_MODEL_MISMATCH")
+        token_values = [
+            usage.get(name)
+            for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+        ]
+        if any(
+            value is not None and (type(value) is not int or value < 0)
+            for value in token_values
+        ) or all(value is None for value in token_values):
+            raise RunnerError("RESULT_MODEL_EVIDENCE_INVALID")
+    else:
+        raise RunnerError("RESULT_MODEL_EVIDENCE_INVALID")
     diagnostics = result.get("stream_diagnostics")
     if (
         not isinstance(diagnostics, dict)

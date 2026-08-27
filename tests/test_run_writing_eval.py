@@ -22,7 +22,9 @@ class _Response:
         return copy.deepcopy(self._payload)
 
 
-def _valid_result(sample_id: str) -> dict[str, object]:
+def _valid_result(
+    sample_id: str, *, actual_exposed: bool = True
+) -> dict[str, object]:
     sample = runner.build_sample(runner.EXPERIMENT_ID, sample_id)
     output_text = f"{sample.case_id} 的冻结测试输出。"
     model = {
@@ -33,7 +35,7 @@ def _valid_result(sample_id: str) -> dict[str, object]:
         "effective_max_input_length": 131_072,
     }
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "state": "generated",
         "experiment_id": runner.EXPERIMENT_ID,
         "sample_id": sample.sample_id,
@@ -48,11 +50,26 @@ def _valid_result(sample_id: str) -> dict[str, object]:
         "base_prompt_sha256": runner.sha256_text(sample.base_prompt),
         "prompt_sha256": runner.sha256_text(sample.prompt),
         "requested_model": dict(model, source="effective-model-api"),
-        "actual_model": model,
-        "usage": {
-            "prompt_tokens": 100,
-            "completion_tokens": 20,
-            "total_tokens": 120,
+        "postflight_model": dict(model, source="effective-model-api"),
+        "actual_model": model if actual_exposed else None,
+        "usage": (
+            {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+            }
+            if actual_exposed
+            else None
+        ),
+        "model_evidence": {
+            "contract": "writing-eval-effective-model-pre-post-v1",
+            "actual_model_policy": "provider_usage_optional_not_exposed_allowed",
+            "effective_model_pre_post_match": True,
+            "actual_model_status": (
+                "verified_from_provider_usage" if actual_exposed else "not_exposed"
+            ),
+            "usage_status": "exposed" if actual_exposed else "not_exposed",
+            "private_usage_buffer_used": False,
         },
         "session_id": f"eval-session:{sample_id}",
         "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
@@ -343,6 +360,7 @@ def test_http_failure_hashes_but_does_not_store_oversized_body(
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
+        ("schema", "RESULT_IDENTITY_MISMATCH"),
         ("identity", "RESULT_IDENTITY_MISMATCH"),
         ("model", "RESULT_MODEL_MISMATCH"),
         ("output_hash", "RESULT_OUTPUT_HASH_MISMATCH"),
@@ -353,7 +371,9 @@ def test_result_identity_model_and_output_hash_are_verified(
     message: str,
 ) -> None:
     result = _valid_result("X01")
-    if mutation == "identity":
+    if mutation == "schema":
+        result["schema_version"] = "1.0"
+    elif mutation == "identity":
         result["case_id"] = "CF-01"
     elif mutation == "model":
         actual = result["actual_model"]
@@ -363,6 +383,20 @@ def test_result_identity_model_and_output_hash_are_verified(
         result["output_sha256"] = "f" * 64
 
     with pytest.raises(runner.RunnerError, match=message):
+        runner._validate_result(result, "X01")
+
+
+def test_result_without_public_actual_or_usage_is_valid_when_pre_post_match() -> None:
+    runner._validate_result(_valid_result("X01", actual_exposed=False), "X01")
+
+
+def test_result_rejects_effective_model_drift() -> None:
+    result = _valid_result("X01", actual_exposed=False)
+    postflight = result["postflight_model"]
+    assert isinstance(postflight, dict)
+    postflight["model_id"] = "model-b"
+
+    with pytest.raises(runner.RunnerError, match="RESULT_MODEL_MISMATCH"):
         runner._validate_result(result, "X01")
 
 

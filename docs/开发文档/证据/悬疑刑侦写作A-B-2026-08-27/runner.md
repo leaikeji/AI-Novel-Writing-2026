@@ -1,6 +1,6 @@
 # 写作研究运行器
 
-状态：源码候选；默认关闭；两次真实 X01 哨兵均未通过，当前阻断为公开 PawApp 流不提供可核验的 actual provider/model 与 usage。
+状态：源码候选；默认关闭；两次真实 X01 哨兵均未通过；用户已批准 transparent `not_exposed` 合同，第三次 X01 尚未执行。
 
 2026-08-27 源码门禁：冻结合同/API/CLI 新增测试 `52 passed`，相关定向回归 `166 passed`，项目全量回归 `2376 passed, 116 skipped`；合同自检、Compose override 配置解析和 PawApp 打包通过。以上只证明运行器候选可进入真实哨兵，不证明模型侧链路或写作质量已经通过。
 
@@ -81,3 +81,9 @@ docker compose -f compose.yaml up -d --force-recreate qwenpaw
 该结果证明流式观测已能区分“流没有结束”与“流结束后证据不足”，但也证明当前冻结成功条件无法通过公开 PawApp 合同满足。不得改用私有 usage buffer，也不得把调用前 effective 模型当作 actual 模型。其余15个样本继续停止。
 
 运行窗口结束后研究路由恢复404，QwenPaw/PawApp/项目健康接口正常，TTS Sidecar healthy，原有 TTS 验证字段等值恢复。共享环境同时产生43条 TTS segment render 模型记录和两条 `tts_snapshot` 正文版本；行级类型表明它们来自并行朗读流程，不能写成评测运行前后总表计数完全一致。
+
+## 公开模型前后核对合同
+
+用户已批准在 QwenPaw 不公开 usage 时保留完整正文。新 schema `1.1` 要求生成前后的公开 effective 模型 provider/model 完全一致；如公开 reply 含 usage，仍严格核验 actual，若不含则保存 `actual_model=null`、`usage=null` 并标记 `not_exposed`。任何情况下都记录 `private_usage_buffer_used=false`，不读取内部 usage buffer。
+
+该合同降低的是模型用量证据门槛，不降低正文质量门槛，也不把 effective 模型表述成 actual 模型。源码定向测试 `58 passed`、相关回归 `202 passed`、项目全量 `2445 passed, 116 skipped`；合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。第三次 X01 只有在备份和恢复门禁通过后执行，其余15个样本不启动。
