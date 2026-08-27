@@ -490,6 +490,17 @@ interface OutlineWizardProps {
 }
 
 
+type OutlineGenerationKind = "outline_background" | "outline_characters" | "outline_plot" | "outline_highlight";
+type OutlineGenerationIntent = "fresh" | "refine";
+type OutlineExplorationDirection = "change_setting_focus" | "change_relationship_structure" | "change_conflict_structure" | "change_positioning_focus";
+
+interface OutlineGenerationCandidate {
+  job: CreativeGenerationRecord;
+  sourceVersion: number;
+  generationName: string;
+}
+
+
 function OutlineWizard({
   novel,
   open,
@@ -506,7 +517,8 @@ function OutlineWizard({
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [activityText, setActivityText] = React.useState("");
-  const [lastGeneratedModelLabel, setLastGeneratedModelLabel] = React.useState("");
+  const [candidate, setCandidate] = React.useState(null as OutlineGenerationCandidate | null);
+  const [applyingCandidate, setApplyingCandidate] = React.useState(false);
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterIndex, setCharacterIndex] = React.useState(-1);
   const [characterForm, setCharacterForm] = React.useState({
@@ -586,19 +598,13 @@ function OutlineWizard({
   React.useEffect(() => {
     if (!open) return;
     setCompleted(false);
-    setLastGeneratedModelLabel("");
+    setCandidate(null);
     setLoading(true);
     void apiRequest<OutlineDraftRecord>(`/novels/${novel.id}/outline-draft`)
       .then((record) => {
         replaceDraft(record);
         outlineDirtyFieldsRef.current.clear();
         setStep(Math.max(1, Math.min(5, startStep >= 1 ? startStep : record.step || 1)));
-        void apiRequest<CreativeGenerationRecord[]>(
-          `/creative-generations?scope_type=outline&scope_id=${encodeURIComponent(record.id)}`,
-        ).then((jobs) => {
-          const latest = jobs.find((job) => job.kind.startsWith("outline_"));
-          setLastGeneratedModelLabel(latest ? creativeTaskModelLabel(latest) : "");
-        }).catch(() => setLastGeneratedModelLabel(""));
       })
       .catch((reason) => onError(readableError(reason, "加载大纲草稿失败")))
       .finally(() => setLoading(false));
@@ -626,7 +632,9 @@ function OutlineWizard({
 
   const generate = async (
     base: OutlineDraftRecord,
-    kind: "outline_background" | "outline_characters" | "outline_plot" | "outline_highlight",
+    kind: OutlineGenerationKind,
+    intent: OutlineGenerationIntent,
+    explorationDirection?: OutlineExplorationDirection,
   ): Promise<CreativeGenerationRecord> => {
     const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
       method: "POST",
@@ -637,60 +645,72 @@ function OutlineWizard({
         kind,
         force_new: true,
         input_snapshot: {
-          novel_title: novel.title,
-          audience: novel.audience,
-          genre: novel.genre,
-          subgenre: novel.subgenre,
-          idea: novel.idea,
-          template_name: novel.template_name,
-          template_data: novel.template_data,
-          target_chapter_count: base.target_chapter_count,
-          background_text: base.background_text,
-          characters: base.characters,
-          plot_text: base.plot_text,
-          highlight_text: base.highlight_text,
+          schema_version: "outline-generation-request-v1",
+          intent,
+          expected_outline_version: base.version,
+          ...(explorationDirection ? { exploration_direction: explorationDirection } : {}),
         },
       }),
     });
     if (job.state !== "ready") throw new Error(job.failure_message || "模型生成失败");
-    setLastGeneratedModelLabel(creativeTaskModelLabel(job));
     return job;
   };
 
-  const nextWithGeneration = async () => {
+  const targetKind = (): OutlineGenerationKind => step === 1
+    ? "outline_background"
+    : step === 2
+      ? "outline_characters"
+      : step === 3
+        ? "outline_plot"
+        : "outline_highlight";
+
+  const targetGenerationName = (): string => step === 1
+    ? "故事背景"
+    : step === 2
+      ? "角色设定"
+      : step === 3
+        ? "故事情节"
+        : "故事亮点";
+
+  const hasCurrentTarget = (current: OutlineDraftRecord): boolean => step === 1
+    ? Boolean(current.background_text.trim())
+    : step === 2
+      ? current.characters.length > 0
+      : step === 3
+        ? Boolean(current.plot_text.trim())
+        : Boolean(current.highlight_text.trim());
+
+  const explorationDirection = (): OutlineExplorationDirection => step === 1
+    ? "change_setting_focus"
+    : step === 2
+      ? "change_relationship_structure"
+      : step === 3
+        ? "change_conflict_structure"
+        : "change_positioning_focus";
+
+  const saveGenerationSource = async (current: OutlineDraftRecord): Promise<OutlineDraftRecord> => {
+    if (step === 1) return saveDraft(current, 1, { target_chapter_count: current.target_chapter_count });
+    if (step === 2) return saveDraft(current, 2, { background_text: current.background_text });
+    if (step === 3) return saveDraft(current, 3, { characters: current.characters });
+    return saveDraft(current, 4, { plot_text: current.plot_text });
+  };
+
+  const nextWithGeneration = async (intent: OutlineGenerationIntent) => {
     if (!draft || generating) return;
     setGenerating(true);
     try {
-      const currentModel = await getGenerationModelStatus();
-      setActivityText(`${generationModelLabel(currentModel)} 正在生成...`);
-      if (step === 1) {
-        const saved = await saveDraft(draft, 1, { target_chapter_count: draft.target_chapter_count });
-        const job = await generate(saved, "outline_background");
-        await saveDraft(saved, 2, { background_text: String(job.output_json.background_text || "").slice(0, 2000) });
-      } else if (step === 2) {
-        const saved = await saveDraft(draft, 2, { background_text: draft.background_text });
-        const job = await generate(saved, "outline_characters");
-        const rows = Array.isArray(job.output_json.characters)
-          ? job.output_json.characters
-          : job.output_json.name
-            ? [job.output_json]
-            : [];
-        const characters: OutlineCharacterDraft[] = rows.map((item: any): OutlineCharacterDraft => ({
-          name: String(item.name || "").trim(),
-          role_type: item.role_type === "main" ? "main" : "supporting",
-          description: String(item.description || ""),
-          details: item.details && typeof item.details === "object" ? item.details : {},
-        })).filter((item: OutlineCharacterDraft) => Boolean(item.name));
-        await saveDraft(saved, 3, { characters });
-      } else if (step === 3) {
-        const saved = await saveDraft(draft, 3, { characters: draft.characters });
-        const job = await generate(saved, "outline_plot");
-        await saveDraft(saved, 4, { plot_text: String(job.output_json.plot_text || "").slice(0, 5000) });
-      } else if (step === 4) {
-        const saved = await saveDraft(draft, 4, { plot_text: draft.plot_text });
-        const job = await generate(saved, "outline_highlight");
-        await saveDraft(saved, 5, { highlight_text: String(job.output_json.highlight_text || "").slice(0, 200) });
-      }
+      const generationName = targetGenerationName();
+      setActivityText(`正在生成${generationName}`);
+      await getGenerationModelStatus();
+      const hadTarget = hasCurrentTarget(draft);
+      const saved = await saveGenerationSource(draft);
+      const job = await generate(
+        saved,
+        targetKind(),
+        intent,
+        intent === "fresh" && hadTarget ? explorationDirection() : undefined,
+      );
+      setCandidate({ job, sourceVersion: saved.version, generationName });
     } catch (reason) {
       onError(readableError(reason, "生成大纲失败"));
     } finally {
@@ -699,9 +719,9 @@ function OutlineWizard({
     }
   };
 
-  const requestNextGeneration = async () => {
+  const requestNextGeneration = async (intent: OutlineGenerationIntent = "fresh") => {
     if (!draft || generating || step >= 5) return;
-    const generationName = step === 1 ? "故事背景" : step === 2 ? "角色设定" : step === 3 ? "故事情节" : "故事亮点";
+    const generationName = targetGenerationName();
     const explanation = step === 1
       ? "AI将根据您的设定创建一个引人入胜的故事世界。"
       : step === 2
@@ -718,20 +738,45 @@ function OutlineWizard({
     }
     Modal.confirm({
       className: "anw-modal mb-outline-cost-modal",
-      title: `确认生成${generationName}`,
+      title: intent === "refine" ? `确认优化${generationName}` : `确认生成${generationName}`,
       content: h(
         "div",
         { className: "mb-outline-cost-copy" },
-        h("h3", null, `生成${generationName}`),
+        h("h3", null, intent === "refine" ? `优化当前${generationName}` : `生成${generationName}`),
         h("p", null, explanation),
+        h("p", null, intent === "refine"
+          ? "当前内容会作为优化材料发送给模型，结果只进入候选区。"
+          : "当前同类内容不会发送给模型，结果只进入候选区。"),
         h("p", null, `本次将使用 ${modelLabel}。`),
       ),
       okText: "确认",
       cancelText: "取消",
       onOk() {
-        void nextWithGeneration();
+        void nextWithGeneration(intent);
       },
     });
+  };
+
+  const applyCandidate = async () => {
+    if (!candidate || applyingCandidate) return;
+    setApplyingCandidate(true);
+    try {
+      const updated = await apiRequest<OutlineDraftRecord>(
+        `/creative-generations/${candidate.job.id}/apply-outline`,
+        {
+          method: "POST",
+          body: JSON.stringify({ expected_version: candidate.sourceVersion }),
+        },
+      );
+      replaceDraft(updated);
+      outlineDirtyFieldsRef.current.clear();
+      setStep(updated.step);
+      setCandidate(null);
+    } catch (reason) {
+      onError(readableError(reason, "采用大纲候选失败"));
+    } finally {
+      setApplyingCandidate(false);
+    }
   };
 
   const manualNext = async () => {
@@ -1015,6 +1060,50 @@ function OutlineWizard({
     || (step === 4 && Boolean(draft.plot_text.trim()))
     || (step === 5 && Boolean(draft.highlight_text.trim()))
   );
+  const targetAlreadyExists = Boolean(draft && hasCurrentTarget(draft));
+  const candidateReview = candidate
+    ? (candidate.job.output_json.candidate_review || {}) as Record<string, unknown>
+    : {};
+  const candidateExactDuplicate = candidateReview.exact_duplicate === true;
+
+  const candidatePreview = !candidate
+    ? null
+    : candidate.job.kind === "outline_characters"
+      ? h(
+          "div",
+          { className: "mb-outline-candidate-characters" },
+          ...(Array.isArray(candidate.job.output_json.characters)
+            ? candidate.job.output_json.characters
+            : []).map((item: any, index: number) => h(
+              "article",
+              { key: `${String(item.name || "角色")}-${index}`, className: "mb-outline-candidate-character" },
+              h("strong", null, String(item.name || "未命名角色")),
+              h("span", null, item.role_type === "main" ? "主角" : "配角"),
+              h("p", null, String(item.description || "")),
+            )),
+        )
+      : h(
+          "div",
+          { className: "mb-outline-candidate-text" },
+          String(
+            candidate.job.output_json.background_text
+            || candidate.job.output_json.plot_text
+            || candidate.job.output_json.highlight_text
+            || "",
+          ),
+        );
+
+  const generationDetail = !generating
+    ? "正在准备可编辑的大纲草稿"
+    : activityText === "正在保存..."
+      ? "正在保存当前修改，请稍候"
+      : step === 1
+        ? "AI 正在整理世界观与时代背景，请稍候"
+        : step === 2
+          ? "AI 正在梳理核心角色及其关系，请稍候"
+          : step === 3
+            ? "AI 正在构建主要情节与关键转折，请稍候"
+            : "AI 正在提炼作品亮点与简介，请稍候";
 
   const stepBody = !draft ? null : step === 1
     ? h(
@@ -1121,16 +1210,36 @@ function OutlineWizard({
         className: "anw-modal mb-outline-modal",
         wrapClassName: "anw-assistant-aware-modal-wrap",
         mask: false,
-        width: 600,
-        title: h("div", { className: "mb-outline-modal-title" }, h("strong", null, "生成大纲"), h("span", null, lastGeneratedModelLabel ? `(最近任务模型：${lastGeneratedModelLabel})` : "(本内容由AI生成)")),
+        width: 680,
+        title: h(
+          "div",
+          { className: "mb-outline-modal-title" },
+          h("span", { className: "mb-outline-modal-title-icon", "aria-hidden": "true" }, h(FileTextOutlined)),
+          h(
+            "span",
+            { className: "mb-outline-modal-title-copy" },
+            h("strong", null, "生成大纲"),
+            h("small", null, "AI 辅助生成，可逐步检查和修改"),
+          ),
+        ),
         footer: null,
         destroyOnClose: true,
         onCancel: generating ? undefined : onClose,
       },
-      h(
-        Spin,
-        { spinning: loading || generating, tip: generating ? activityText || "正在处理..." : "正在载入..." },
-        wrapSelectionReview(
+      loading || generating
+        ? h(
+            "div",
+            { className: "mb-outline-generation-panel", role: "status", "aria-live": "polite" },
+            h(Spin, { size: "large" }),
+            h(
+              "span",
+              { className: "mb-outline-generation-status" },
+              h("strong", null, generating ? activityText || "正在生成大纲内容..." : "正在载入大纲..."),
+              h("span", null, generationDetail),
+              generating ? h("small", null, "请保持当前页面打开，完成后会进入候选预览") : null,
+            ),
+          )
+        : wrapSelectionReview(
           STUDIO_SELECTION_REVIEW_FIELD_GROUPS.outline,
           "mb-outline-selection-review-host",
           draft ? h(
@@ -1164,28 +1273,76 @@ function OutlineWizard({
                 React.Fragment,
                 null,
                 stepBody,
-                step < 5 ? h("button", { type: "button", className: "mb-manual-link", disabled: generating, onClick: manualNext }, ["我已有故事背景", "我已有角色", "我已有故事情节", "我已有亮点&简介"][step - 1], "，点击直接填写") : null,
+                step < 5 ? h(
+                  "button",
+                  { type: "button", className: "mb-manual-link", disabled: generating, onClick: manualNext },
+                  targetAlreadyExists
+                    ? `编辑现有${targetGenerationName()}`
+                    : `自己填写${targetGenerationName()}`,
+                ) : null,
                 h(
                   "div",
                   { className: "mb-outline-footer" },
                   step > 1 ? h(Button, { size: "large", onClick: previous, disabled: generating }, "上一步") : null,
+                  step < 5 && targetAlreadyExists ? h(
+                    Button,
+                    {
+                      size: "large",
+                      disabled: generating,
+                      onClick: () => void requestNextGeneration("refine"),
+                    },
+                    `AI 优化当前${targetGenerationName()}`,
+                  ) : null,
                   h(
                     Button,
                     {
                       size: "large", className: "anw-primary-button", block: true,
                       disabled: !canContinue || generating,
-                      onClick: step === 5 ? complete : requestNextGeneration,
+                      onClick: step === 5 ? complete : () => void requestNextGeneration("fresh"),
                     },
                     step === 5
                       ? h("span", { className: "mb-outline-complete-label" }, "完成")
                       : step === 1
-                        ? "下一步：生成故事背景"
-                        : `下一步：生成${OUTLINE_STEPS[step]}`,
+                        ? targetAlreadyExists ? "换一版故事背景" : "下一步：生成故事背景"
+                        : targetAlreadyExists ? `换一版${OUTLINE_STEPS[step]}` : `下一步：生成${OUTLINE_STEPS[step]}`,
                   ),
                 ),
               ),
           ) : null,
         ),
+    ),
+    h(
+      Modal,
+      {
+        open: Boolean(candidate),
+        className: "anw-modal mb-outline-candidate-modal",
+        wrapClassName: "anw-assistant-aware-modal-wrap",
+        mask: false,
+        width: 700,
+        title: candidate ? `${candidate.generationName}候选` : "大纲候选",
+        okText: candidateExactDuplicate ? "内容完全相同" : "采用并进入下一步",
+        cancelText: "放弃候选",
+        okButtonProps: { disabled: candidateExactDuplicate, loading: applyingCandidate },
+        cancelButtonProps: { disabled: applyingCandidate },
+        onOk: () => void applyCandidate(),
+        onCancel: () => { if (!applyingCandidate) setCandidate(null); },
+        closable: !applyingCandidate,
+      },
+      h(
+        "div",
+        { className: "mb-outline-candidate-body" },
+        candidateReview.message
+          ? h(Alert, {
+              type: candidateExactDuplicate ? "error" : "warning",
+              showIcon: true,
+              message: String(candidateReview.message),
+            })
+          : h(Alert, {
+              type: "info",
+              showIcon: true,
+              message: "以下内容尚未写入大纲，请检查后决定是否采用。",
+            }),
+        candidatePreview,
       ),
     ),
     h(

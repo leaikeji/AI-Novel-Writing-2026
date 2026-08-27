@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from .creative_schemas import (
+    ApplyOutlineGenerationRequest,
     BatchRelationshipsRequest,
     CompleteVersionedRequest,
     CreateAssetPresetRequest,
@@ -43,6 +44,7 @@ from .creative_services import (
     archive_asset_preset,
     archive_private_asset,
     apply_relationship_graph_generation,
+    apply_outline_generation_candidate,
     build_relationship_graph_snapshot,
     build_creative_generation_prompt,
     build_novel_export,
@@ -79,6 +81,7 @@ from .creative_services import (
     list_novel_characters,
     list_private_assets,
     list_storylines,
+    outline_candidate_review,
     reorder_chapters,
     reorder_volumes,
     restore_character_relationship,
@@ -990,6 +993,13 @@ async def creative_generations_create(
                 short_summary=str(output_json["short_summary"]),
             )
             output_text = str(output_json["replacement_text"])
+        elif str(job["kind"]).startswith("outline_"):
+            outline_kind = str(job["kind"])
+            output_json["candidate_review"] = outline_candidate_review(
+                outline_kind,
+                dict(job.get("input_snapshot") or {}),
+                output_json,
+            )
         return complete_creative_generation(
             session,
             UUID(str(job["id"])),
@@ -1019,6 +1029,24 @@ async def creative_generations_create(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={"type": "model_verification_failed", "job": failed},
                 ) from error
+        _raise(error)
+        raise
+
+
+@router.post("/creative-generations/{job_id}/apply-outline")
+def creative_generations_apply_outline(
+    job_id: UUID,
+    request: ApplyOutlineGenerationRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return apply_outline_generation_candidate(
+            session,
+            job_id,
+            expected_version=request.expected_version,
+        )
+    except Exception as error:
+        session.rollback()
         _raise(error)
         raise
 

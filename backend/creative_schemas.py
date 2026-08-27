@@ -436,6 +436,10 @@ class StartCreativeGenerationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_selection_edit_request(self) -> "StartCreativeGenerationRequest":
+        if self.kind.startswith("outline_"):
+            snapshot = OutlineGenerationRequestSnapshot.model_validate(self.input_snapshot)
+            self.input_snapshot = snapshot.model_dump(mode="json")
+            return self
         if self.kind != "selection_edit":
             return self
         snapshot = SelectionEditInputSnapshot.model_validate(self.input_snapshot)
@@ -453,6 +457,26 @@ class StartCreativeGenerationRequest(BaseModel):
             raise ValueError("selection_edit 不接受 target_character_count")
         self.input_snapshot = snapshot.model_dump(mode="json")
         return self
+
+
+class OutlineGenerationRequestSnapshot(BaseModel):
+    """Small client contract; the server constructs every model-visible field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["outline-generation-request-v1"]
+    intent: Literal["fresh", "refine"]
+    expected_outline_version: int = Field(ge=1)
+    exploration_direction: Literal[
+        "change_setting_focus",
+        "change_relationship_structure",
+        "change_conflict_structure",
+        "change_positioning_focus",
+    ] | None = None
+
+
+class ApplyOutlineGenerationRequest(BaseModel):
+    expected_version: int = Field(ge=1)
 
 
 class UpdateVolumeRequest(BaseModel):
