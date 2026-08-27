@@ -1,0 +1,20 @@
+{
+  "empty": false,
+  "length_pass": false,
+  "non_whitespace_chars": 802,
+  "output_purity_pass": false,
+  "required_anchor_hits": {
+    "二十二分钟": true,
+    "十八分钟": true,
+    "手动复核": true,
+    "氧传感器": true
+  },
+  "semantic_review_required": true,
+  "wrapper_flags": {
+    "agent_status_capsule": true,
+    "analysis_prefix": false,
+    "json_or_xml_wrapper": false,
+    "markdown_fence": false,
+    "markdown_heading": false
+  }
+}

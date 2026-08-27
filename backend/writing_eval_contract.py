@@ -13,7 +13,7 @@ from .model_runtime import GENERATION_CONTRACT_VERSION
 
 
 EXPERIMENT_ID = "mystery-ab-20260827-v1"
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 RIGHTS_BASIS = "project-synthetic"
 SOURCE_SUITE_SHA256 = (
     "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf"
@@ -26,6 +26,7 @@ RUBRIC_SHA256 = "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e
 PROMPT_CONTRACT_VERSION = "writing-eval-prompt-v1"
 STREAM_DIAGNOSTIC_CONTRACT_VERSION = "writing-eval-stream-diagnostics-v1"
 MODEL_EVIDENCE_CONTRACT_VERSION = "writing-eval-effective-model-pre-post-v1"
+OUTPUT_PURITY_CONTRACT_VERSION = "writing-eval-output-purity-v1"
 ACTUAL_MODEL_POLICY = "provider_usage_optional_not_exposed_allowed"
 SKILL_SELECTION_ENFORCEMENT = "requested_via_pawapp_context_parameter"
 TOOL_POLICY_ENFORCEMENT = "prompt_only"
@@ -333,6 +334,7 @@ def experiment_contract(experiment_id: str) -> dict[str, Any]:
         "prompt_contract": PROMPT_CONTRACT_VERSION,
         "stream_diagnostic_contract": STREAM_DIAGNOSTIC_CONTRACT_VERSION,
         "model_evidence_contract": MODEL_EVIDENCE_CONTRACT_VERSION,
+        "output_purity_contract": OUTPUT_PURITY_CONTRACT_VERSION,
         "actual_model_policy": ACTUAL_MODEL_POLICY,
         "skill_selection_enforcement": SKILL_SELECTION_ENFORCEMENT,
         "tool_policy_enforcement": TOOL_POLICY_ENFORCEMENT,
@@ -353,6 +355,9 @@ _WRAPPER_PATTERNS = {
         r"^\s*(?:\{.*\}|\[.*\]|<[^>]+>.*</[^>]+>)\s*$", re.DOTALL
     ),
     "analysis_prefix": re.compile(r"^\s*(?:分析|说明|评分|提纲|创作思路)\s*[:：]"),
+    "agent_status_capsule": re.compile(
+        r"(?m)(?:^|\n)[ \t]*[⟦⟧][^\n⟧]{0,800}⟧[ \t]*\Z"
+    ),
 }
 
 
@@ -363,6 +368,10 @@ def deterministic_output_checks(case_id: str, output_text: str) -> dict[str, Any
     normalized = unicodedata.normalize("NFC", output_text)
     non_whitespace_chars = sum(1 for character in normalized if not character.isspace())
     target = case["target_chars"]
+    wrapper_flags = {
+        name: bool(pattern.search(normalized))
+        for name, pattern in _WRAPPER_PATTERNS.items()
+    }
     return {
         "empty": not bool(normalized.strip()),
         "non_whitespace_chars": non_whitespace_chars,
@@ -370,9 +379,7 @@ def deterministic_output_checks(case_id: str, output_text: str) -> dict[str, Any
         "required_anchor_hits": {
             anchor: anchor in normalized for anchor in case["required_anchors"]
         },
-        "wrapper_flags": {
-            name: bool(pattern.search(normalized))
-            for name, pattern in _WRAPPER_PATTERNS.items()
-        },
+        "wrapper_flags": wrapper_flags,
+        "output_purity_pass": not any(wrapper_flags.values()),
         "semantic_review_required": True,
     }

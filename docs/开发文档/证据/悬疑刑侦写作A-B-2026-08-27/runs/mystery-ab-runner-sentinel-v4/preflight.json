@@ -1,0 +1,50 @@
+{
+  "evidence_schema_version": "1.0",
+  "run_id": "mystery-ab-runner-sentinel-v4",
+  "sample_id": "X01",
+  "run_started_at": "2026-08-27T17:38:06.592259Z",
+  "scope": {
+    "requested_sample_count": 1,
+    "automatic_retry": false,
+    "remaining_samples_authorized": false
+  },
+  "installed_source": {
+    "writing_eval_api_sha256": "183c0ba906dd81beace4d52e0663dd52e50e43e43f9f61a24b045a1d072c1b74",
+    "writing_eval_contract_sha256": "c9f7f85a1339c5d11c7458384669441d032387e9dbce8658204984cd3e72fc04",
+    "schema_version": "1.2",
+    "output_purity_contract": "writing-eval-output-purity-v1"
+  },
+  "recovery_backup": {
+    "location": "/app/working.backups/writing-eval-sentinel-v4-20260828-pre",
+    "plugin_archive_sha256": "84bf5ec753b2d4c6b8a7b63df14e615addcae315e82bf38477f4ae4bd4f38d37",
+    "postgres_dump_sha256": "bc316b263b5fd5225723907f5ce027913501637b7dddb5003848f5d24e3b36c0"
+  },
+  "database_baseline": {
+    "migration_head": "20260827_0023",
+    "novels": 9,
+    "documents": 25,
+    "document_revisions": 138,
+    "document_working_copies": 25,
+    "chapter_generation_jobs": 51,
+    "candidate_revisions": 26,
+    "story_facts": 510,
+    "intelligence_proposals": 29,
+    "creative_generation_jobs": 167,
+    "model_run_records": 108,
+    "active_narration_requests": 0
+  },
+  "stale_state_review": {
+    "chapter_rows_marked_running": 1,
+    "creative_rows_marked_running": 4,
+    "active_in_current_qwenpaw_process": false,
+    "basis": "五条记录均早于当前 QwenPaw 进程启动；最新章节记录也在容器启动前创建，当前进程中没有对应工作进程。本次未修改其状态或内容。"
+  },
+  "runtime_preconditions": {
+    "qwenpaw_healthy": true,
+    "postgres_healthy": true,
+    "tts_sidecar_healthy": true,
+    "authorized_research_contract_http_status": 200,
+    "unauthorized_research_contract_http_status": 403,
+    "tts_validation_fields_forwarded_without_recording_values": true
+  }
+}

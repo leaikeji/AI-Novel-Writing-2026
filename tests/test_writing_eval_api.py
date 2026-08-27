@@ -118,6 +118,7 @@ def test_contract_endpoint_exposes_only_frozen_samples(api) -> None:
     assert payload["model_evidence_contract"] == (
         "writing-eval-effective-model-pre-post-v1"
     )
+    assert payload["output_purity_contract"] == "writing-eval-output-purity-v1"
     assert payload["actual_model_policy"] == (
         "provider_usage_optional_not_exposed_allowed"
     )
@@ -311,6 +312,33 @@ async def test_generate_extracts_structured_final_without_reasoning(
 
     assert result["output_text"] == final_text
     assert "内部推理" not in result["output_text"]
+
+
+@pytest.mark.asyncio
+async def test_generate_marks_final_agent_status_capsule_as_impure(
+    api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
+    final_text = (
+        "门内传来一声轻响。\n\n"
+        "⟦ 合成写作评测｜已完成：锚点齐全；无下一步 ⟧"
+    )
+
+    result = await api.writing_evaluation_generate(
+        api.EXPERIMENT_ID,
+        "X01",
+        Response(),
+        ctx=_streaming_ctx(_reply(text=final_text)),
+        configured_model=_configured_model(),
+        postflight_model_probe=_model_probe(),
+    )
+
+    assert result["output_text"] == final_text
+    assert result["output_purity_contract"] == "writing-eval-output-purity-v1"
+    assert result["deterministic_checks"]["output_purity_pass"] is False
+    assert result["deterministic_checks"]["wrapper_flags"][
+        "agent_status_capsule"
+    ] is True
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,101 @@
+{
+  "actual_model": null,
+  "attempt": 1,
+  "base_prompt_sha256": "e39878aa716aed4d967f24640caccfac275757f9ee4ecdbb4e6be9c554bf11c1",
+  "candidate_overlay_sha256": "8fd672fcefcc657f8d3998f0b896d89a3326f5e0e0e6ce5ecf232beea0a3863d",
+  "case_id": "SP-02",
+  "deterministic_checks": {
+    "empty": false,
+    "length_pass": false,
+    "non_whitespace_chars": 802,
+    "output_purity_pass": false,
+    "required_anchor_hits": {
+      "二十二分钟": true,
+      "十八分钟": true,
+      "手动复核": true,
+      "氧传感器": true
+    },
+    "semantic_review_required": true,
+    "wrapper_flags": {
+      "agent_status_capsule": true,
+      "analysis_prefix": false,
+      "json_or_xml_wrapper": false,
+      "markdown_fence": false,
+      "markdown_heading": false
+    }
+  },
+  "duration_ms": 326836,
+  "execution_agent_id": "ai-novel-writer",
+  "experiment_id": "mystery-ab-20260827-v1",
+  "final_text_source": "structured_reply_chunks",
+  "finished_at": "2026-08-27T17:43:33.434415Z",
+  "manifest_sha256": "19d5bb361b74c93f51f1580dea8d8977a7c21fa7f9a0a80dec781aee449d640f",
+  "model_evidence": {
+    "actual_model_policy": "provider_usage_optional_not_exposed_allowed",
+    "actual_model_status": "not_exposed",
+    "contract": "writing-eval-effective-model-pre-post-v1",
+    "effective_model_pre_post_match": true,
+    "private_usage_buffer_used": false,
+    "usage_status": "not_exposed"
+  },
+  "output_purity_contract": "writing-eval-output-purity-v1",
+  "output_sha256": "a491e7f2e068627d22c3f46f91cf708575de8109ca902fa2f0e646b5de25a804",
+  "output_text": "饶真的手掌在门禁玻璃上按了第三次。“光谱记录只有一份，无人机在里头多泡一分钟，芯片就多毁一分。开门。”\n\n路宁没动，指节敲了敲仪表盘：“防护服十八分钟，标准往返二十二分钟。差四分钟，门不开。”\n\n“仪表是你写的，门也是你关的？”\n\n“记录在我这里，责任也在这里。”他的声音不高，倒像在念规程。\n\n饶真把吼声咽了回去。吼完，门还是那扇门。她盯着屏幕上那行倒计时，忽然停住——十八分钟，是今早那支新氧传感器报出来的数。探头是她亲手换的，换完就被叫来七号区，手动复核一直没排上。新探头出厂漂移多半偏保守，偏半格，就是两三分钟。\n\n她转身走向检测台，拔掉参比气瓶的封帽。\n\n“你做什么？”\n\n“手动复核。拿参比气样，对你今早那支氧传感器，把十八分钟重新校一遍。”她把传感器接上校验口，手很稳，“读数可信，我转身就走，芯片的账记在我头上；读数偏低，误差盖过账面缺口，你按核实过的记录开门——责任落在纸面上，不落在你心软上。”\n\n路宁沉默了几秒，调出校验规程，在授权栏敲进自己的工号。“六分钟，校不完就按失联处理。”他顿了顿，“参比气瓶烧掉的那一格，今晚补不回来。”\n\n“行。”饶真按下启动键，倒计时换成了校验进度条。她在心里把账重算了一遍：改走检修短廊，往返十九分钟，账面缺口从四分钟缩到一分钟——传感器那两三分钟的偏差，只要复核证实，就够把它填平。\n\n“进短廊可以。”路宁站到门边，“防护服剩四分钟，人必须在内门；剩两分钟，必须在外门。差一条，我按扩散预案封闸——芯片归档，不补第二次。”\n\n“到点没出来，照封。”饶真盯着进度条。第一格亮起来时，她发现自己的指甲掐进了掌心。\n\n⟦ mystery-ab-20260827-v1章节生成｜已完成：饶真限知防污站场景约640字已输出，四锚点（十八分钟/二十二分钟/氧传感器/手动复核）齐备无禁项，策略转向复核+封闸停止条件决定；封套tools=forbidden、persistence=none已遵守，无后续步骤 ⟧",
+  "postflight_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "prompt_contract": "writing-eval-prompt-v1",
+  "prompt_sha256": "e39878aa716aed4d967f24640caccfac275757f9ee4ecdbb4e6be9c554bf11c1",
+  "requested_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "rights_basis": "project-synthetic",
+  "rubric_sha256": "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6",
+  "sample_id": "X01",
+  "sampling_parameters": "not_exposed",
+  "schema_version": "1.2",
+  "server_persistence": "none",
+  "session_id": "novel-writing-eval:mystery-ab-20260827-v1:X01:9f40776c-e0f6-4e2f-97f0-4649f05f0bfd",
+  "skill_id": "prose-writing",
+  "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
+  "skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+  "source_suite_sha256": "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf",
+  "started_at": "2026-08-27T17:38:06.599559Z",
+  "state": "generated",
+  "stream_diagnostics": {
+    "content_part_type_counts": {
+      "text": 4
+    },
+    "content_recorded": false,
+    "contract": "writing-eval-stream-diagnostics-v1",
+    "event_count": 15687,
+    "event_type_counts": {
+      "agentresponse": 3,
+      "message": 2,
+      "reasoning": 2,
+      "text": 15680
+    },
+    "first_event_elapsed_ms": 101,
+    "last_event_elapsed_ms": 326808,
+    "message_role_counts": {
+      "assistant": 6
+    },
+    "message_type_counts": {
+      "message": 3,
+      "reasoning": 3,
+      "text": 15680
+    },
+    "stream_completed": true
+  },
+  "tool_policy_enforcement": "prompt_only",
+  "usage": null,
+  "variant": "A"
+}

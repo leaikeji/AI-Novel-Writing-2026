@@ -295,11 +295,30 @@ def test_length_count_uses_nfc_and_ignores_unicode_whitespace() -> None:
         ('["正文"]', "json_or_xml_wrapper"),
         ("<正文>内容</正文>", "json_or_xml_wrapper"),
         ("分析：先说明写法，再给正文。", "analysis_prefix"),
+        (
+            "门内传来一声轻响。\n\n"
+            "⟦ 合成写作评测｜已完成：锚点齐全；无下一步 ⟧",
+            "agent_status_capsule",
+        ),
+        (
+            "门内传来一声轻响。\n"
+            "⟧ 第一章正文候选｜完成；等待作者反馈 ⟧   ",
+            "agent_status_capsule",
+        ),
     ),
 )
 def test_explicit_non_prose_wrappers_are_detected(output: str, flag: str) -> None:
     checks = contract.deterministic_output_checks("CF-01", output)
     assert checks["wrapper_flags"][flag] is True
+    assert checks["output_purity_pass"] is False
+
+
+def test_in_story_brackets_do_not_trigger_agent_status_capsule() -> None:
+    output = "他在纸上写下⟧不要回头⟧，随后把纸折进衣袋。"
+    checks = contract.deterministic_output_checks("CF-01", output)
+
+    assert checks["wrapper_flags"]["agent_status_capsule"] is False
+    assert checks["output_purity_pass"] is True
 
 
 def test_anchor_hits_remain_candidates_and_never_claim_semantic_pass() -> None:

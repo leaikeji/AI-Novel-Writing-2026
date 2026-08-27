@@ -28,6 +28,7 @@ from backend.writing_eval_contract import (  # noqa: E402
     EXPERIMENT_ID,
     MANIFEST_SHA256,
     MODEL_EVIDENCE_CONTRACT_VERSION,
+    OUTPUT_PURITY_CONTRACT_VERSION,
     PROMPT_CONTRACT_VERSION,
     RUBRIC_SHA256,
     SCHEMA_VERSION,
@@ -36,6 +37,7 @@ from backend.writing_eval_contract import (  # noqa: E402
     STREAM_DIAGNOSTIC_CONTRACT_VERSION,
     TOOL_POLICY_ENFORCEMENT,
     build_sample,
+    deterministic_output_checks,
     experiment_contract,
     sha256_text,
 )
@@ -214,6 +216,7 @@ def _validate_server_contract(server: dict[str, Any], local: dict[str, Any]) -> 
         "prompt_contract",
         "stream_diagnostic_contract",
         "model_evidence_contract",
+        "output_purity_contract",
         "actual_model_policy",
         "skill_selection_enforcement",
         "tool_policy_enforcement",
@@ -246,6 +249,7 @@ def _validate_result(result: dict[str, Any], sample_id: str) -> None:
         "manifest_sha256": MANIFEST_SHA256,
         "rubric_sha256": RUBRIC_SHA256,
         "prompt_contract": PROMPT_CONTRACT_VERSION,
+        "output_purity_contract": OUTPUT_PURITY_CONTRACT_VERSION,
         "base_prompt_sha256": sha256_text(sample.base_prompt),
         "prompt_sha256": sha256_text(sample.prompt),
         "server_persistence": "none",
@@ -258,6 +262,9 @@ def _validate_result(result: dict[str, Any], sample_id: str) -> None:
         raise RunnerError("RESULT_OUTPUT_MISSING")
     if result.get("output_sha256") != sha256_text(output_text):
         raise RunnerError("RESULT_OUTPUT_HASH_MISMATCH")
+    expected_checks = deterministic_output_checks(sample.case_id, output_text)
+    if result.get("deterministic_checks") != expected_checks:
+        raise RunnerError("RESULT_DETERMINISTIC_CHECKS_MISMATCH")
     requested = result.get("requested_model")
     postflight = result.get("postflight_model")
     actual = result.get("actual_model")
@@ -344,7 +351,7 @@ def _terminal_result_valid(sample_dir: Path, sample_id: str) -> bool:
         raise RunnerError(f"PROMPT_HASH_MISMATCH: {sample_id}")
     if output_path.read_text(encoding="utf-8") != result["output_text"]:
         raise RunnerError(f"RESULT_OUTPUT_HASH_MISMATCH: {sample_id}")
-    return True
+    return bool(result["deterministic_checks"]["output_purity_pass"])
 
 
 def _blind_markdown(result: dict[str, Any]) -> str:
@@ -377,10 +384,14 @@ def _save_result(
     )
     _write_json(sample_dir / "hard-gates.json", result["deterministic_checks"])
     _write_json(sample_dir / "result.json", result)
-    _atomic_write(
-        run_dir / "blind-samples" / f"{sample_id}.md",
-        _blind_markdown(result).encode("utf-8"),
+    output_purity_pass = bool(
+        result["deterministic_checks"]["output_purity_pass"]
     )
+    if output_purity_pass:
+        _atomic_write(
+            run_dir / "blind-samples" / f"{sample_id}.md",
+            _blind_markdown(result).encode("utf-8"),
+        )
     dispatch: dict[str, Any] = {
         "state": "received",
         "sample_id": sample_id,
@@ -542,6 +553,35 @@ def command_run(args: argparse.Namespace) -> int:
                             ),
                         ),
                     )
+                    checks = result["deterministic_checks"]
+                    if not checks["output_purity_pass"]:
+                        failed += 1
+                        _write_json(
+                            failure_path,
+                            {
+                                "state": "failed",
+                                "sample_id": sample_id,
+                                "error_class": "DeterministicHardGateFailure",
+                                "message": "RESULT_OUTPUT_PURITY_FAILED",
+                                "failure_code": "output_purity_failed",
+                                "output_sha256": result["output_sha256"],
+                                "wrapper_flags": checks["wrapper_flags"],
+                                "dispatch_started_at": dispatch_started_at,
+                                "failed_at": _utc_now_iso(),
+                                "client_duration_ms": max(
+                                    0,
+                                    round(
+                                        (
+                                            time.monotonic()
+                                            - dispatch_started_monotonic
+                                        )
+                                        * 1000
+                                    ),
+                                ),
+                                "automatic_retry": False,
+                            },
+                        )
+                        break
                     completed += 1
                 except Exception as error:
                     failed += 1

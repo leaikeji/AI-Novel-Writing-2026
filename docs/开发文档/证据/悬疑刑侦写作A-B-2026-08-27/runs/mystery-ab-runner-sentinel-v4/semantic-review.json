@@ -1,0 +1,39 @@
+{
+  "evidence_schema_version": "1.0",
+  "run_id": "mystery-ab-runner-sentinel-v4",
+  "sample_id": "X01",
+  "review_type": "manual-semantic-and-output-purity-review",
+  "source_output_sha256": "a491e7f2e068627d22c3f46f91cf708575de8109ca902fa2f0e646b5de25a804",
+  "source_output_modified": false,
+  "technical_generation_completed": true,
+  "writing_quality_sample_eligible": false,
+  "blind_sample_eligible": false,
+  "hard_gate_result": "failed",
+  "failure_code": "agent_status_capsule_appended",
+  "capsule_evidence": {
+    "matched_line_count": 1,
+    "character_count_including_trailing_newline": 143,
+    "line_sha256_including_trailing_newline": "627237ea75a276b6b505ec76cc80b2f3947098dfab868fe46a27627056595e28",
+    "automatic_detector_flagged_it": true,
+    "runner_rejected_before_blind_sample": true
+  },
+  "prose_prefix_read_only_derivation": {
+    "derived_by_omitting_only_the_final_capsule_for_analysis": true,
+    "saved_as_replacement_output": false,
+    "non_whitespace_character_count": 661,
+    "sha256_including_trailing_newline": "c6e9d2d087ed2b9a5745fd4c276148e4e13d8dd27df8f21a89aad24c252db93e"
+  },
+  "manual_findings": {
+    "third_person_limited_viewpoint": "pass",
+    "required_anchors": "pass",
+    "character_strategy_changes": "pass",
+    "decision_mechanism_and_cost": "pass",
+    "verification_result_remains_unknown": "pass",
+    "prose_body_length": "pass",
+    "prose_only_output": "fail",
+    "seeded_resource_discipline": "needs_improvement"
+  },
+  "writing_observation": "正文通过校准动作、授权责任和封闸停止条件推进，人物能动性和场景压力明确；但临时引入检修短廊、十九分钟和传感器偏差幅度来缩小风险，存在用未铺垫资源便利化解核心冲突的倾向。",
+  "interpretation": "v3 与 v4 连续出现同类状态说明，证明输出纪律问题可复现；v4 同时提供场景推进的正向信号与资源约束的改进方向。它仍是失去盲态的单个 A 样本，不能证明 Skill 胜率。",
+  "batch_allowed": false
+}

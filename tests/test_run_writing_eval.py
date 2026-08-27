@@ -35,7 +35,7 @@ def _valid_result(
         "effective_max_input_length": 131_072,
     }
     return {
-        "schema_version": "1.1",
+        "schema_version": runner.SCHEMA_VERSION,
         "state": "generated",
         "experiment_id": runner.EXPERIMENT_ID,
         "sample_id": sample.sample_id,
@@ -47,6 +47,7 @@ def _valid_result(
         "manifest_sha256": runner.MANIFEST_SHA256,
         "rubric_sha256": runner.RUBRIC_SHA256,
         "prompt_contract": runner.PROMPT_CONTRACT_VERSION,
+        "output_purity_contract": runner.OUTPUT_PURITY_CONTRACT_VERSION,
         "base_prompt_sha256": runner.sha256_text(sample.base_prompt),
         "prompt_sha256": runner.sha256_text(sample.prompt),
         "requested_model": dict(model, source="effective-model-api"),
@@ -88,14 +89,9 @@ def _valid_result(
         },
         "output_text": output_text,
         "output_sha256": runner.sha256_text(output_text),
-        "deterministic_checks": {
-            "empty": False,
-            "non_whitespace_chars": len(output_text),
-            "length_pass": False,
-            "required_anchor_hits": {},
-            "wrapper_flags": {},
-            "semantic_review_required": True,
-        },
+        "deterministic_checks": runner.deterministic_output_checks(
+            sample.case_id, output_text
+        ),
         "server_persistence": "none",
     }
 
@@ -398,6 +394,57 @@ def test_result_rejects_effective_model_drift() -> None:
 
     with pytest.raises(runner.RunnerError, match="RESULT_MODEL_MISMATCH"):
         runner._validate_result(result, "X01")
+
+
+def test_result_rejects_forged_deterministic_checks() -> None:
+    result = _valid_result("X01")
+    checks = result["deterministic_checks"]
+    assert isinstance(checks, dict)
+    checks["output_purity_pass"] = False
+
+    with pytest.raises(
+        runner.RunnerError, match="RESULT_DETERMINISTIC_CHECKS_MISMATCH"
+    ):
+        runner._validate_result(result, "X01")
+
+
+def test_impure_output_is_preserved_but_rejected_before_blind_sample(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _valid_result("X01", actual_exposed=False)
+    output_text = (
+        "门内传来一声轻响。\n\n"
+        "⟦ 合成写作评测｜已完成：锚点齐全；无下一步 ⟧"
+    )
+    result["output_text"] = output_text
+    result["output_sha256"] = runner.sha256_text(output_text)
+    result["deterministic_checks"] = runner.deterministic_output_checks(
+        "SP-02", output_text
+    )
+    evidence_root = tmp_path / "evidence"
+    _install_httpx_client(monkeypatch, result=result)
+
+    assert runner.command_run(_args(evidence_root, sample=["X01"])) == 2
+
+    run_dir = evidence_root / "rr-test"
+    sample_dir = run_dir / "samples" / "X01"
+    assert (sample_dir / "output.txt").read_text(encoding="utf-8") == output_text
+    assert runner._read_json(sample_dir / "result.json")[
+        "output_sha256"
+    ] == runner.sha256_text(output_text)
+    failure = runner._read_json(sample_dir / "failure.json")
+    assert failure["failure_code"] == "output_purity_failed"
+    assert failure["wrapper_flags"]["agent_status_capsule"] is True
+    assert not (run_dir / "blind-samples" / "X01.md").exists()
+    assert runner._read_json(run_dir / "summary.json") == {
+        "complete": False,
+        "completed": 0,
+        "experiment_id": runner.EXPERIMENT_ID,
+        "failed": 1,
+        "requested_sample_count": 1,
+        "run_id": "rr-test",
+    }
 
 
 def test_status_and_verify_report_complete_run(

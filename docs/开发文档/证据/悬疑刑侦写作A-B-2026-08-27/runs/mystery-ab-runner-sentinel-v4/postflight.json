@@ -1,0 +1,63 @@
+{
+  "evidence_schema_version": "1.0",
+  "run_id": "mystery-ab-runner-sentinel-v4",
+  "sample_id": "X01",
+  "run_finished_at": "2026-08-27T17:43:33.451151Z",
+  "technical_result": {
+    "request_completed": true,
+    "completed_samples": 0,
+    "failed_samples": 1,
+    "failure_code": "output_purity_failed",
+    "duration_ms": 326836,
+    "stream_completed": true,
+    "event_count": 15687,
+    "output_sha256": "a491e7f2e068627d22c3f46f91cf708575de8109ca902fa2f0e646b5de25a804",
+    "non_whitespace_chars": 802,
+    "effective_model_pre_post_match": true,
+    "requested_provider_model": "bigmodel/glm-5.3-flash",
+    "postflight_provider_model": "bigmodel/glm-5.3-flash",
+    "actual_model_status": "not_exposed",
+    "usage_status": "not_exposed",
+    "private_usage_buffer_used": false
+  },
+  "gate_behavior": {
+    "agent_status_capsule_detected": true,
+    "raw_output_preserved": true,
+    "blind_sample_created": false,
+    "automatic_retry": false,
+    "remaining_samples_started": false
+  },
+  "database_postflight": {
+    "migration_head": "20260827_0023",
+    "novels": 9,
+    "documents": 25,
+    "document_revisions": 138,
+    "document_working_copies": 25,
+    "chapter_generation_jobs": 51,
+    "candidate_revisions": 26,
+    "story_facts": 510,
+    "intelligence_proposals": 29,
+    "creative_generation_jobs": 167,
+    "model_run_records": 108,
+    "active_narration_requests": 0,
+    "all_recorded_counts_equal_to_preflight": true
+  },
+  "runtime_restoration": {
+    "research_environment_variable_present": false,
+    "research_route_http_status": 404,
+    "qwenpaw_root_http_status": 200,
+    "pawapps_http_status": 200,
+    "project_health_http_status": 200,
+    "qwenpaw_healthy": true,
+    "tts_sidecar_healthy": true,
+    "tts_validation_fields_forwarded_without_recording_values": true,
+    "temporary_files_removed": true
+  },
+  "recovery_backup_reverified": {
+    "location": "/app/working.backups/writing-eval-sentinel-v4-20260828-pre",
+    "plugin_archive_sha256": "84bf5ec753b2d4c6b8a7b63df14e615addcae315e82bf38477f4ae4bd4f38d37",
+    "postgres_dump_sha256": "bc316b263b5fd5225723907f5ce027913501637b7dddb5003848f5d24e3b36c0"
+  },
+  "batch_allowed": false,
+  "batch_blocker": "连续第二次真实 X01 追加状态说明；新门禁已正确拒绝，但正式 Skill 与评测提示尚未完成下一轮候选优化。"
+}
