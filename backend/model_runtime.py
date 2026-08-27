@@ -305,6 +305,91 @@ def reply_model_audit(reply: Any, *, session_id: str | None = None) -> ModelAudi
     )
 
 
+_FINAL_TEXT_PART_TYPES = {"text", "output_text"}
+_NON_FINAL_TEXT_PART_TYPES = {
+    "analysis",
+    "reasoning",
+    "reasoning_content",
+    "thinking",
+    "tool_call",
+    "tool_result",
+}
+
+
+def reply_final_text(reply: Any) -> str:
+    """Return only the final assistant answer, excluding reasoning and tool traces.
+
+    ``PawAppReply.text`` aggregates an Agent run. Thinking-capable models can
+    place reasoning or text from several tool turns in that aggregation, so it
+    is not a safe business result. Extract final text blocks from the last
+    assistant message instead. A plain-text fallback is used only when the host
+    reply exposes no structured chunks at all.
+    """
+
+    chunks = getattr(reply, "chunks", None)
+    if isinstance(chunks, (list, tuple)) and chunks:
+        for chunk in reversed(chunks):
+            output = _field(chunk, "output")
+            if not isinstance(output, (list, tuple)) or not output:
+                continue
+            for message in reversed(output):
+                text = _message_final_text(message)
+                if text:
+                    return text
+            break
+        raise ModelVerificationError(
+            "模型完成了思考或工具过程，但没有返回独立的最终回答；"
+            "生成结果已安全作废"
+        )
+
+    fallback = _field(reply, "text")
+    if isinstance(fallback, str) and fallback.strip():
+        return fallback.strip()
+    raise ModelVerificationError("模型没有返回可用的最终回答")
+
+
+def _message_final_text(message: Any) -> str:
+    message_type = _normalized_discriminator(_field(message, "type"))
+    if message_type and message_type != "message":
+        return ""
+    role = _field(message, "role")
+    if isinstance(role, str) and role.lower() not in {"assistant", "model"}:
+        return ""
+    content = _field(message, "content")
+    parts = content if isinstance(content, (list, tuple)) else [content]
+    final_parts: list[str] = []
+    for part in parts:
+        if isinstance(part, str):
+            if part.strip():
+                final_parts.append(part)
+            continue
+        part_type = _field(part, "type")
+        normalized_type = _normalized_discriminator(part_type)
+        if normalized_type in _NON_FINAL_TEXT_PART_TYPES:
+            continue
+        if bool(_field(part, "is_delta")) or bool(_field(part, "delta")):
+            continue
+        text = _field(part, "text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        if normalized_type and normalized_type not in _FINAL_TEXT_PART_TYPES:
+            continue
+        final_parts.append(text)
+    return "".join(final_parts).strip()
+
+
+def _field(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _normalized_discriminator(value: Any) -> str:
+    if not isinstance(value, str):
+        value = getattr(value, "value", "")
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
 def _audit_from_usage(
     metadata: dict[str, Any] | None,
     *,

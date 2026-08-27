@@ -185,3 +185,50 @@ S3 至少保存：九 Skill 清单、quick validator 结果、契约测试、打
 - S3：已完成。Skill Creator `quick_validate.py` 对九个 Skill 全部返回 `Skill is valid!`；本次隔离暂存快照的九 Skill/评测集/版本/安装契约定向回归 `29 passed`，全量 Python 回归 `202 passed, 21 skipped`；`scripts/package_plugin.py` 打包成功，产物含九个 Skill、十个技法参考文件且清单版本为 `0.4.0`。本次未改项目运行依赖；快速校验器所需 PyYAML 仅安装在 `/tmp` 临时目录。
 - S4：待执行。必须使用冻结的十二个合成任务，在同一真实模型和参数下对 `0.3.0`/`0.4.0` 各独立生成两次并匿名盲评；未执行前不宣称文笔或写作质量已提升。
 - S5：只有 S4 通过才允许把“写作能力提升”写成验收结论；Git 提交和推送仍需用户另行授权。
+
+## 8. S4-R：探索性写作研究运行器
+
+状态：**用户于 2026-08-27 批准开发最小内部研究运行器；仅服务本轮项目合成题 A/B，不批准正式 Skill 修改、产品页面、数据库表或任意提示执行接口。**
+
+### 8.1 冻结目标与非目标
+
+运行器用于替代不可审计、易拥塞的聊天页面手工跑样本：由后端使用公开 PawApp 上下文固定调用 `ai-novel-writer`，每次生成前读取 effective 模型，完成后从原始 reply metadata 核验 actual provider/model 和 token usage，再把纯正文与证据返回给项目脚本。它不写小说数据库、不建立第二套 Agent Runtime、不切换模型、不自动修改 Skill、不执行授权小说正文，也不把一次探索性结果升级为 S4 正式结论。
+
+HTTP 只接受冻结 experiment/sample id；题面、A/B 分配、候选覆盖层和 `prose-writing` Skill 均由服务端固定，拒绝调用者提交任意 prompt、模型、Skill、小说 ID 或正文。A/B 同题同轮只允许候选覆盖层不同。生成使用新的独立 session id、单路互斥、600 秒上限；该上限依据首个 UI 样本约 270 秒的观察设置，不代表性能目标。超时、模型身份缺失或 requested/actual 不一致时丢弃正文并返回可审计失败。
+
+### 8.2 冻结接口与文件协议
+
+- `GET /api/ai-novel-world-2026/research/writing-evaluations/{experiment_id}`：返回固定合同、样本编号和哈希，不返回小说数据。
+- `POST /api/ai-novel-world-2026/research/writing-evaluations/{experiment_id}/samples/{sample_id}/generate`：无请求正文；只运行已登记样本。
+- 成功结果包含 `prompt_sha256`、`output_sha256`、非空白字符数、requested/actual provider/model、token usage、Skill 哈希、session id 和耗时；不持久化服务端结果。
+- 主机脚本按样本原子写入专项证据目录；已有完整且哈希一致的样本默认跳过，失败单独保存，不静默重试或覆盖。
+- 本轮冻结 experiment 为 `mystery-ab-20260827-v1`，题面权利基础固定为 `project-synthetic`。
+
+### 8.3 子代理并行施工设计
+
+| 波次 | 工作包 | 标记 | 目标 | 文件所有权 | 前置与门禁 |
+| --- | --- | --- | --- | --- | --- |
+| R0 | `RR-AUDIT-API`、`RR-AUDIT-HARNESS`、`RR-AUDIT-CONTRACT` | `PAR` | 只读审计公开调用、运行证据、CLI恢复和安全边界 | 不修改文件 | 本节范围获批 |
+| R1 | `RR-CONTRACT` | `SER/GATE` | 主代理冻结 experiment、case、assignment、prompt 和响应 DTO | 本文、`backend/writing_eval_contract.py` | R0 汇合；接口冻结 |
+| R2 | `RR-API` | `SER/MUTEX` | 实现无持久化、固定样本、单路生成 API | `backend/writing_eval_api.py`、`backend/app.py` 的唯一接线行 | R1；锁定 `backend/app.py` |
+| R3 | `RR-CLI` | `SER` | 实现串行、断点续跑、原子证据保存 | `scripts/run_writing_eval.py` | R1、R2 DTO 冻结 |
+| R4 | `RR-TEST` | `PAR-C` | 契约/API/CLI 定向测试和失败注入 | 新建 `tests/test_writing_eval_*.py` | R1 接口冻结；不得修改实现文件 |
+| R5 | `RR-INT` | `INT/SER/GATE` | 主代理复核 diff、定向/全量测试、打包和真实单样本验证 | 专项证据目录；必要索引行 | R2–R4 完成 |
+
+R0 可并行，写代码阶段保持单一所有者：本运行器规模小，API、合同与 CLI 紧密共享哈希和响应字段，且 `backend/app.py` 已存在其他未提交施工，串行能避免覆盖用户改动。若 R4 派发，只允许新增独立测试文件，不得修改实现、共享 fixture、现有测试或证据。共享运行环境、真实模型调用、最终集成、Git 暂存/提交/推送始终由主代理串行负责。
+
+每个工作包都不得触碰旧项目及其 `Data`、正式数据库、小说正文、Skills、迁移、QwenPaw 上游、Provider 设置、密钥、现有用户改动和无关专项。唯一集成责任人为主代理。
+
+### 8.4 验收与回退
+
+最低验收：固定合同/哈希测试、未登记 experiment/sample 拒绝、无任意 prompt 字段、A/B 唯一变量测试、并发拒绝、超时、缺 actual metadata、模型不一致、final-only 提取、CLI 已完成跳过/失败保留/原子写入，以及 `.venv/bin/python -m pytest`、`scripts/package_plugin.py`、`git diff --check`。真实运行只做一个合成样本哨兵，确认数据库写入数不变和 actual/usage 可保存后，才允许继续16样本。
+
+回退只需移除新路由接线、研究模块、主机脚本和专项证据；没有 schema、用户正文或数据卷恢复动作。禁用/卸载 PawApp 后仍遵循既有完整清理与 QwenPaw 原生非回归规则。
+
+### 8.5 当前实现与阶段门禁（2026-08-27）
+
+- `RR-CONTRACT`、`RR-API`、`RR-CLI`、`RR-TEST` 的源码候选已完成；普通 Compose 默认不启用研究开关，未写入数据库、迁移、正式 Skills 或小说正文。
+- 冻结合同、API、CLI 三组新增测试共 `52 passed`；相关 QwenPaw/Skill/模型编排定向回归 `166 passed`；项目全量回归 `2376 passed, 116 skipped`。
+- `scripts/run_writing_eval.py verify-contract`、Compose override 配置解析和 `scripts/package_plugin.py` 已通过；打包产物为本地生成物，不作为人工源文件编辑。
+- `RR-INT` 只完成源码与静态/自动化集成门禁。真实单样本哨兵尚未执行，也未切换唯一共享 QwenPaw 运行环境；执行前仍需用户明确确认模型调用成本，并核对其他专项没有占用共享运行环境。
+- 在真实哨兵证明 actual/usage 可保存且数据库写入数不变之前，不得继续16样本，不得把运行器源码通过写成写作能力提升。

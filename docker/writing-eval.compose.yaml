@@ -1,0 +1,6 @@
+# Temporary local-only override for the fixed, project-synthetic writing study.
+# Stop the research window by recreating qwenpaw with compose.yaml alone.
+services:
+  qwenpaw:
+    environment:
+      AI_NOVEL_WRITING_EVAL_ENABLED: "true"

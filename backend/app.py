@@ -30,6 +30,7 @@ from .model_runtime import (
     parse_model_json,
     reply_model_audit,
 )
+from .writing_eval_api import router as writing_eval_router
 from .schemas import (
     AdoptCandidateRequest,
     CheckpointRequest,
@@ -90,6 +91,7 @@ pawapp = PawApp(name="AI小说世界2026", app_id=APP_ID)
 router = APIRouter()
 router.include_router(assistant_router)
 router.include_router(creative_router)
+router.include_router(writing_eval_router)
 
 
 def _raise_domain(error: Exception) -> None:
