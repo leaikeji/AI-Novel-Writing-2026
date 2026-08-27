@@ -1,0 +1,59 @@
+{
+  "automatic_retry": false,
+  "client_duration_ms": 308638,
+  "dispatch_started_at": "2026-08-27T16:42:27.965850Z",
+  "error_class": "HTTPStatusError",
+  "failed_at": "2026-08-27T16:47:36.582400Z",
+  "http_status": 502,
+  "message": "Server error '502 Bad Gateway' for url 'http://127.0.0.1:18088/api/ai-novel-world-2026/research/writing-evaluations/mystery-ab-20260827-v1/samples/X01/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/502",
+  "response_body_bytes": 1057,
+  "response_body_sha256": "9354dc40f49f38fa18f9438c231d3d44bc3c4af6bb2ce4f46f9f8307e239ff8b",
+  "response_content_type": "application/json",
+  "response_json": {
+    "detail": {
+      "message": "模型身份未核验：closing assistant message 缺少 provider usage",
+      "requested_model": {
+        "agent_id": "ai-novel-writer",
+        "effective_max_input_length": 131072,
+        "model_id": "glm-5.3-flash",
+        "provider_id": "bigmodel",
+        "source": "effective-model-api"
+      },
+      "sample_id": "X01",
+      "session_id": "novel-writing-eval:mystery-ab-20260827-v1:X01:17e387fc-1296-4fce-b128-fd9fa126ca0b",
+      "skill_id": "prose-writing",
+      "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
+      "started_at": "2026-08-27T16:42:27.981475Z",
+      "stream_diagnostics": {
+        "content_part_type_counts": {
+          "text": 4
+        },
+        "content_recorded": false,
+        "contract": "writing-eval-stream-diagnostics-v1",
+        "event_count": 14492,
+        "event_type_counts": {
+          "agentresponse": 3,
+          "message": 2,
+          "reasoning": 2,
+          "text": 14485
+        },
+        "first_event_elapsed_ms": 320,
+        "last_event_elapsed_ms": 308590,
+        "message_role_counts": {
+          "assistant": 6
+        },
+        "message_type_counts": {
+          "message": 3,
+          "reasoning": 3,
+          "text": 14485
+        },
+        "stream_completed": true
+      },
+      "timeout_seconds": 600.0,
+      "tool_policy_enforcement": "prompt_only",
+      "type": "writing_evaluation_model_verification_failed"
+    }
+  },
+  "sample_id": "X01",
+  "state": "failed"
+}

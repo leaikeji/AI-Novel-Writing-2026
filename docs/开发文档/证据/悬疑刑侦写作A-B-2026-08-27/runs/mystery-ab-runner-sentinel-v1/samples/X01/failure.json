@@ -1,0 +1,7 @@
+{
+  "automatic_retry": false,
+  "error_class": "HTTPStatusError",
+  "message": "Server error '504 Gateway Timeout' for url 'http://127.0.0.1:18088/api/ai-novel-world-2026/research/writing-evaluations/mystery-ab-20260827-v1/samples/X01/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504",
+  "sample_id": "X01",
+  "state": "failed"
+}

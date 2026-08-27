@@ -1,6 +1,6 @@
 # 运行观察
 
-状态：首个样本完成；批量生成尚未完成。
+状态：聊天页探索样本完成1份；研究运行器有效样本0份，批量生成保持停止。
 
 ## 已完成样本
 
@@ -63,3 +63,23 @@
 QwenPaw 当前公开 `PawAppContext.chat/chat_stream` 参数不包含逐请求工具策略，而 `AI小说作家` 当前有9个启用 Skill 和29个启用工具。因此旧运行器把 `tools=forbidden` 写入提示，只能表达意图，不能证明运行时隔离。当前模型 `bigmodel/glm-5.3-flash` 的公开元数据为 `relay_reasoning=true`，thinking budget 未暴露；这些是解释候选，不是已证明根因。
 
 诊断源码候选现改用 `ctx.chat_stream()`：只保存流式事件结构计数和耗时，不保存内容；失败响应返回 session、开始时间、请求模型和提示级工具策略，CLI 保存有界 JSON 错误正文与本地时间链。纯模拟定向测试 `54 passed`，项目全量回归 `2436 passed, 116 skipped`，合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。整个验证过程未启用研究入口、未安装到共享容器、未调用模型。真实根因分类仍须未来获得新的明确授权后，用新 run id 执行一次带观测的哨兵；在此之前保持停止。
+
+## 第二次真实运行器哨兵
+
+### `mystery-ab-runner-sentinel-v2` / X01
+
+- 派发：新 session、新 run id，只请求一次，没有自动重试。
+- 请求模型：`bigmodel / glm-5.3-flash`，来源为调用前公开 effective-model API。
+- 流式结果：首事件320毫秒，末事件308.590秒，`stream_completed=true`。
+- 结构计数：14,492个事件，其中 `text=14,485`、`agentresponse=3`、`message=2`、`reasoning=2`；未观察到 `tool_call` 或 `tool_result`。
+- 最终状态：HTTP 502，`writing_evaluation_model_verification_failed`。
+- 失败原因：closing assistant message 缺少 `qwenpaw_turn_usage`，不能核验 actual provider/model 或 token usage。
+- 数据处理：没有保存正文，没有生成匿名评测样本，没有计入 A/B，也没有继续其余15个样本。
+
+该请求完整结束且未触发600秒上限，因此本次不是 Provider 永久等待或可见工具循环；约5分9秒的长响应表明模型推理/生成时间本身足以显著影响墙钟时间，但不能仅凭第二次运行倒推首次600秒的唯一深层原因。
+
+本机已安装 QwenPaw 的公开 `PawAppContext.chat_stream()` 只承诺返回异步事件流，`chat()` 只是把同一流聚合为 `ChatReply`。真实事件的 closing message 没有本项目原先假设的 `qwenpaw_turn_usage`。项目现有 `model_runtime.py` 虽有内部 usage buffer 兼容分支，但研究运行器按边界明确没有传入 session id；继续保持这一限制，不能依赖 QwenPaw 私有内部状态完成评测。
+
+恢复后研究路由为404，QwenPaw 根页面、PawApp 注册表、项目健康接口为200，TTS Sidecar healthy，四个既有 TTS 验证字段与运行前逐项等值。运行窗口附近新增43条 `model_run_records`，全部关联 `narration.segment_render` 与 MOSS-TTS-Nano；新增两条 `document_revisions` 的 `source` 均为 `tts_snapshot`。这些是共享环境中的并行朗读写入，不是 X01 的写作评测记录；因此本轮不能使用“总表计数完全一致”措辞，只能说明未发现 X01 写入小说权威表的行级证据。
+
+当前阻断已经从“看不见超时阶段”收敛为“公开 PawApp 返回不满足 actual/usage 审计合同”。在 QwenPaw 提供公开证据或用户另行裁决降低审计要求前，批量评测保持停止。

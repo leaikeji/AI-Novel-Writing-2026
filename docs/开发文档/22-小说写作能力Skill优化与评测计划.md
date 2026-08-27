@@ -245,3 +245,15 @@ R0 可并行，写代码阶段保持单一所有者：本运行器规模小，AP
 `RR-DIAG` 采用公开 `ctx.chat_stream()` 收集事件，只保存事件、消息角色和内容块类型的有界计数及首末事件耗时，明确 `content_recorded=false`，不保存 reasoning、正文片段或工具参数。超时/Provider/模型核验失败响应携带 session id、开始时间、请求模型、Skill请求方式、`tool_policy_enforcement=prompt_only` 和流式摘要；CLI 保存至多64 KiB的 JSON 错误正文、HTTP状态、正文哈希、派发/失败时间和客户端耗时。任何旧失败 run 保持不可覆盖；本轮不启用研究开关、不安装插件、不执行 X01。
 
 `RR-DIAG` 源码候选验证结果：新增定向测试 `54 passed`，项目全量回归 `2436 passed, 116 skipped`；合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包均通过。两条全量警告均为既有 Starlette 弃用警告。本验证没有启用研究入口、安装插件或发起模型调用，不能据此宣称更深层超时原因已经确定。
+
+### 8.7 第二次 X01 流式哨兵与新阻断（2026-08-28）
+
+用户明确授权后，主代理以新 run id `mystery-ab-runner-sentinel-v2` 只派发 X01 一次，没有自动重试。派发前确认已安装 `writing_eval_api.py`、`writing_eval_contract.py` 与提交 `2f8849b` 的工作区哈希一致，数据库迁移为 `20260827_0023 (head)`；同时在 `qwenpaw-backups` 卷建立插件与 PostgreSQL 恢复备份。由于共享容器保留了与当前 `.env` 不同的四个 TTS 验证字段，本次通过权限 `0600` 的临时覆盖文件继承原值，只增加研究开关，恢复后删除临时文件且未记录字段值。
+
+X01 在 308.590 秒后完整结束响应流，没有命中600秒硬上限。流式诊断记录 `stream_completed=true`、14,492个事件，事件类型为 `text=14,485`、`agentresponse=3`、`message=2`、`reasoning=2`；没有观察到 `tool_call` 或 `tool_result` 类型。该证据足以排除本次请求的工具循环和 Provider 永久等待，但不能反推首次600秒请求一定经历相同路径。
+
+本次最终返回 HTTP 502，失败类型为 `writing_evaluation_model_verification_failed`：公开 closing assistant message 没有 `qwenpaw_turn_usage`，因此 actual provider/model 与 token usage 均无法核验，正文按冻结合同作废且没有保存。已核实公开 `PawAppContext.chat_stream()` 只承诺流式事件，`chat()` 也只是聚合同一公开流为 `ChatReply`；当前公开 PawApp 合同不保证 closing message 携带用量元数据。项目不得读取私有 usage buffer，也不得把调用前 effective 模型冒充 actual 模型。
+
+运行后研究路由恢复404，QwenPaw 根页面、PawApp 注册表与项目健康接口均为200，TTS Sidecar healthy，四个既有 TTS 验证字段逐项等值恢复。核心表中出现的43条新增 `model_run_records` 全部属于并行 `narration.segment_render`，两条新增 `document_revisions` 均为 `tts_snapshot`；其他评测关注表不变，活动后台任务和活动朗读请求为0。不能把共享环境的 TTS 写入表述为评测零写入，但现有行级类型证据没有显示 X01 写入小说权威数据。
+
+阶段门禁继续保持关闭：不得启动其余15个样本。后续只有两条合规路径：等待 QwenPaw 在公开 PawApp 契约中提供 actual provider/model 与 usage，或由用户另行裁决降低评测审计要求；不得使用私有接口、内部 usage buffer 或未经证明的 requested=actual 假设绕过门禁。

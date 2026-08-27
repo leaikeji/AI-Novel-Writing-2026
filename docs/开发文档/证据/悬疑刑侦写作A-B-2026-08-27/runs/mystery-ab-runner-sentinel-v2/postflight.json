@@ -1,0 +1,47 @@
+{
+  "schema_version": "writing-eval-environment-evidence-v1",
+  "run_id": "mystery-ab-runner-sentinel-v2",
+  "phase": "after_restore",
+  "captured_at": "2026-08-27T16:50:26Z",
+  "health": {
+    "qwenpaw": "healthy",
+    "qwenpaw_root_http_status": 200,
+    "pawapps_http_status": 200,
+    "project_health_http_status": 200,
+    "research_route_http_status": 404,
+    "tts_sidecar": "healthy"
+  },
+  "authoritative_counts": {
+    "novels": 9,
+    "documents": 25,
+    "document_revisions": 128,
+    "document_working_copies": 25,
+    "chapter_generation_jobs": 50,
+    "candidate_revisions": 26,
+    "story_facts": 510,
+    "intelligence_proposals": 29,
+    "creative_generation_jobs": 162,
+    "model_run_records": 96,
+    "active_background_jobs": 0,
+    "active_narration_requests": 0,
+    "alembic_version": "20260827_0023"
+  },
+  "observed_deltas": {
+    "document_revisions": 2,
+    "model_run_records": 43,
+    "other_counted_tables": 0,
+    "document_revision_sources": {
+      "tts_snapshot": 2
+    },
+    "model_run_job_kinds": {
+      "narration.segment_render": 43
+    },
+    "model_run_requested_model": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX"
+  },
+  "restoration": {
+    "writing_eval_environment_variable": "absent",
+    "tts_validation_fields_restored_by_exact_equality": 4,
+    "temporary_sensitive_files_removed": true,
+    "backup_retained": true
+  }
+}

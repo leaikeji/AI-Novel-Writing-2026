@@ -1,6 +1,6 @@
 # 写作研究运行器
 
-状态：源码候选；默认关闭；2026-08-27 首次真实 X01 哨兵因 HTTP 504 未通过。
+状态：源码候选；默认关闭；两次真实 X01 哨兵均未通过，当前阻断为公开 PawApp 流不提供可核验的 actual provider/model 与 usage。
 
 2026-08-27 源码门禁：冻结合同/API/CLI 新增测试 `52 passed`，相关定向回归 `166 passed`，项目全量回归 `2376 passed, 116 skipped`；合同自检、Compose override 配置解析和 PawApp 打包通过。以上只证明运行器候选可进入真实哨兵，不证明模型侧链路或写作质量已经通过。
 
@@ -73,3 +73,11 @@ docker compose -f compose.yaml up -d --force-recreate qwenpaw
 每次结果或失败都必须如实记录：Skill 只是通过 `PawAppContext` 参数请求，工具限制只是 `prompt_only`，不能写成宿主已经强制禁用工具。失败响应携带 session id、开始时间和流式结构摘要；CLI 保存受64 KiB上限保护的 JSON 错误正文、HTTP状态、正文哈希和客户端耗时。该修复只补观测能力，不批准真实重跑。
 
 本次诊断修复的模拟定向测试为 `54 passed`，项目全量回归为 `2436 passed, 116 skipped`；合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。验证过程没有启用研究入口、安装插件或发起模型调用。
+
+## 第二次流式哨兵
+
+`mystery-ab-runner-sentinel-v2` 只派发 X01 一次。响应流于308.590秒完整结束，共14,492个结构事件；没有观察到工具调用类型，也没有触发600秒超时。随后模型身份核验失败并返回 HTTP 502，因为 closing assistant message 缺少 `qwenpaw_turn_usage`。运行器按合同没有保存正文、actual 模型或 token usage，也没有重试。
+
+该结果证明流式观测已能区分“流没有结束”与“流结束后证据不足”，但也证明当前冻结成功条件无法通过公开 PawApp 合同满足。不得改用私有 usage buffer，也不得把调用前 effective 模型当作 actual 模型。其余15个样本继续停止。
+
+运行窗口结束后研究路由恢复404，QwenPaw/PawApp/项目健康接口正常，TTS Sidecar healthy，原有 TTS 验证字段等值恢复。共享环境同时产生43条 TTS segment render 模型记录和两条 `tts_snapshot` 正文版本；行级类型表明它们来自并行朗读流程，不能写成评测运行前后总表计数完全一致。

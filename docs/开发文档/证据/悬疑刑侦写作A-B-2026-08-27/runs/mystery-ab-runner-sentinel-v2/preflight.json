@@ -1,0 +1,43 @@
+{
+  "schema_version": "writing-eval-environment-evidence-v1",
+  "run_id": "mystery-ab-runner-sentinel-v2",
+  "phase": "before_dispatch",
+  "installed_contract": {
+    "alembic_version": "20260827_0023",
+    "writing_eval_api_sha256": "e22fc8edcb7b31a1eb3d5aed79b5c64931112e6b5cb5f411e614f045ebe2941b",
+    "writing_eval_contract_sha256": "2c93077a639a8e0d8dc6fdcb25d18bca8725a979d8649fb4b17124319c24f6ef"
+  },
+  "health": {
+    "qwenpaw": "healthy",
+    "qwenpaw_root_http_status": 200,
+    "pawapps_http_status": 200,
+    "project_health_http_status": 200,
+    "research_route_before_enable_http_status": 404,
+    "research_route_after_enable_http_status": 200,
+    "tts_sidecar": "healthy"
+  },
+  "authoritative_counts": {
+    "novels": 9,
+    "documents": 25,
+    "document_revisions": 126,
+    "document_working_copies": 25,
+    "chapter_generation_jobs": 50,
+    "candidate_revisions": 26,
+    "story_facts": 510,
+    "intelligence_proposals": 29,
+    "creative_generation_jobs": 162,
+    "model_run_records": 53,
+    "active_background_jobs": 0,
+    "active_narration_requests": 0
+  },
+  "backup": {
+    "root": "/app/working.backups/writing-eval-sentinel-v2-20260828-pre",
+    "plugin_archive_sha256": "fe8b988f5ed0fdcd22b726fa55b939dcaf242c6ba167bd43dbbffa3bda936930",
+    "postgres_dump_sha256": "e0d0fb9a27d6d6bf99914e44f90dab41b5c983c8f6cb4e4ac6a2aa35cf9f5d5c"
+  },
+  "shared_runtime_preservation": {
+    "tts_validation_fields_preserved_by_exact_equality": 4,
+    "values_recorded": false,
+    "temporary_override_mode": "0600"
+  }
+}
