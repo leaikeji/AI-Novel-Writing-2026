@@ -897,11 +897,11 @@ export function ensureNovelStyles(): void {
     .mb-center-action:hover .mb-center-action-icon { transform:translateY(-1px); }
     .mb-center-loading { display:flex; min-height:520px; flex-direction:column; align-items:center; justify-content:center; gap:13px; color:#8a8b90; font-size:13px; }
 
-    .mb-novel-card { width:600px; margin:150px auto 0; overflow:hidden; border-radius:12px; background:#fff; box-shadow:0 9px 25px rgba(21,34,50,.09); }
-    .mb-novel-card-hero { display:grid; grid-template-columns:112px minmax(0,1fr); gap:22px; min-height:202px; padding:22px 24px; background:linear-gradient(110deg,#edf9ff 0%,#eaf2f9 52%,#e6eef5 100%); }
-    .mb-novel-cover { width:112px; height:150px; align-self:center; border-radius:7px; object-fit:cover; box-shadow:0 10px 19px rgba(19,43,67,.24); }
+    .mb-novel-card { box-sizing:border-box; width:min(760px,100%); margin:108px auto 0; overflow:hidden; border-radius:14px; background:#fff; box-shadow:0 12px 30px rgba(21,34,50,.1); }
+    .mb-novel-card-hero { display:grid; grid-template-columns:136px minmax(0,1fr); gap:28px; min-height:236px; padding:28px 30px; background:linear-gradient(110deg,#edf9ff 0%,#eaf2f9 52%,#e6eef5 100%); }
+    .mb-novel-cover { width:136px; height:181px; align-self:center; border-radius:8px; object-fit:cover; box-shadow:0 12px 22px rgba(19,43,67,.24); }
     .mb-novel-card-meta { display:flex; min-width:0; flex-direction:column; justify-content:center; }
-    .mb-novel-card-meta h2 { margin:0 0 13px; overflow:hidden; font-size:20px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+    .mb-novel-card-meta h2 { margin:0 0 14px; overflow:hidden; font-size:23px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
     .mb-novel-counts { display:flex; gap:18px; color:#777b83; font-size:12px; }
     .mb-novel-counts span { display:inline-flex; align-items:center; gap:5px; }
     .mb-novel-tags { display:flex; flex-wrap:wrap; gap:8px; margin-top:36px; }
@@ -914,8 +914,8 @@ export function ensureNovelStyles(): void {
     .mb-novel-tool-row button:hover { color:#f36a3d; }
     .mb-novel-start { padding:8px 20px 18px; }
     .mb-novel-start .qwenpaw-btn { height:44px; }
-    .mb-novel-switcher { display:flex; width:600px; align-items:flex-start; justify-content:center; gap:12px; margin:14px auto 0; }
-    .mb-novel-switcher > button { position:relative; display:flex; width:72px; height:96px; align-items:center; justify-content:center; overflow:hidden; border:1px solid transparent; border-radius:5px; padding:0; background:#fff; cursor:pointer; }
+    .mb-novel-switcher { display:grid; box-sizing:border-box; width:min(760px,100%); grid-template-columns:repeat(auto-fit,88px); align-items:start; justify-content:center; gap:16px; margin:18px auto 0; }
+    .mb-novel-switcher > button { position:relative; display:flex; width:88px; height:117px; align-items:center; justify-content:center; overflow:hidden; border:1px solid transparent; border-radius:6px; padding:0; background:#fff; cursor:pointer; }
     .mb-novel-switcher > button.is-active { border:2px solid #ff7848; box-shadow:0 5px 13px rgba(255,112,67,.2); }
     .mb-novel-switcher > button > img { width:100%; height:100%; object-fit:cover; }
     .mb-novel-switcher > button > .mb-novel-switch-check { position:absolute; right:2px; top:2px; z-index:1; border-radius:50%; padding:2px; color:#fff; background:#ff7848; font-size:9px; }
