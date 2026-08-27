@@ -412,13 +412,6 @@ function requireStudioMaxLength(
 
 
 const OUTLINE_STEPS = ["章节", "背景", "角色", "情节", "亮点"];
-const OUTLINE_HINTS = [
-  "第 1 步，共 5 步 · 确定作品体量",
-  "第 2 步，共 5 步 · 完善故事背景",
-  "第 3 步，共 5 步 · 梳理核心角色",
-  "第 4 步，共 5 步 · 构建主要情节",
-  "第 5 步，共 5 步 · 提炼作品亮点",
-];
 
 
 function readableError(reason: unknown, fallback: string): string {
@@ -506,7 +499,6 @@ function OutlineWizard({
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [activityText, setActivityText] = React.useState("");
-  const [generationNotice, setGenerationNotice] = React.useState("");
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterIndex, setCharacterIndex] = React.useState(-1);
   const [characterForm, setCharacterForm] = React.useState({
@@ -585,7 +577,6 @@ function OutlineWizard({
 
   React.useEffect(() => {
     setLoading(true);
-    setGenerationNotice("");
     void apiRequest<OutlineDraftRecord>(`/novels/${novel.id}/outline-draft`)
       .then((record) => {
         replaceDraft(record);
@@ -684,7 +675,6 @@ function OutlineWizard({
     if (!draft || generating || targetStep < 2 || targetStep > 5) return;
     const generationName = outlineGenerationTarget(targetStep).name;
     setGenerating(true);
-    setGenerationNotice("");
     setActivityText(`正在生成${generationName}`);
     try {
       const saved = await saveDraft(draft, step, patchForStep(draft, step));
@@ -692,7 +682,6 @@ function OutlineWizard({
       replaceDraft(updated);
       outlineDirtyFieldsRef.current.clear();
       setStep(updated.step);
-      setGenerationNotice(`${generationName}已生成，可直接修改；失败或重复生成都不会清空原内容。`);
     } catch (reason) {
       onError(readableError(reason, `生成${generationName}失败，原内容已保留`));
     } finally {
@@ -705,7 +694,6 @@ function OutlineWizard({
     if (!draft || step >= 5 || generating) return;
     setActivityText("正在保存...");
     setGenerating(true);
-    setGenerationNotice("");
     try {
       await saveDraft(draft, step + 1, patchForStep(draft, step));
     } catch (reason) {
@@ -720,7 +708,6 @@ function OutlineWizard({
     if (!draft || step <= 1 || generating) return;
     setActivityText("正在保存...");
     setGenerating(true);
-    setGenerationNotice("");
     try {
       await saveDraft(draft, step - 1, {});
     } catch (reason) {
@@ -785,14 +772,12 @@ function OutlineWizard({
     if (characterIndex >= 0) rows[characterIndex] = next;
     else rows.push(next);
     updateLocal({ characters: rows });
-    setGenerationNotice("");
     setCharacterOpen(false);
   };
 
   const removeCharacter = (index: number) => {
     if (!draft) return;
     updateLocal({ characters: draft.characters.filter((_: OutlineCharacterDraft, rowIndex: number) => rowIndex !== index) });
-    setGenerationNotice("");
   };
 
   const changeOutlineField = (
@@ -800,7 +785,6 @@ function OutlineWizard({
     fieldId: string,
   ): void => {
     updateLocal(patch);
-    setGenerationNotice("");
     markOutlineChanged(
       outlineAssistantScopeRef,
       outlineDirtyFieldsRef,
@@ -1007,7 +991,7 @@ function OutlineWizard({
           h(
             "div",
             { className: "mb-outline-heading-row" },
-            h("div", null, h("h3", null, "故事背景设定"), h("span", null, "生成结果直接显示在这里，也可以手动修改")),
+            h("div", null, h("h3", null, "故事背景设定")),
             h(Button, {
               icon: h(ReloadOutlined),
               disabled: generating,
@@ -1066,7 +1050,7 @@ function OutlineWizard({
               h(
                 "div",
                 { className: "mb-outline-heading-row" },
-                h("div", null, h("h3", null, "故事主要情节"), h("span", null, "生成结果直接显示在这里，也可以手动修改")),
+                h("div", null, h("h3", null, "故事主要情节")),
                 h(Button, {
                   icon: h(ReloadOutlined),
                   disabled: generating,
@@ -1149,8 +1133,6 @@ function OutlineWizard({
                 );
               }),
             ),
-            h("div", { className: "mb-outline-progress-hint" }, OUTLINE_HINTS[step - 1]),
-            generationNotice ? h(Alert, { type: "success", showIcon: true, message: generationNotice }) : null,
             h(
               "div",
               { className: "mb-outline-step-stage" },

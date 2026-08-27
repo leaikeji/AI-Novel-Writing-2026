@@ -1641,7 +1641,6 @@ export function ensureNovelStyles(): void {
     .mb-outline-modal-title-copy strong { color:#202329; font-size:19px; line-height:1.25; }
     .mb-outline-modal-title-copy small { overflow:hidden; color:#999da4; font-size:11px; font-weight:500; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
     .mb-outline-wizard { display:grid; min-height:0; gap:16px; transform:none; }
-    .mb-outline-progress-hint { width:max-content; max-width:100%; justify-self:center; margin:0; border:1px solid #ffd8c9; border-radius:999px; padding:5px 12px; color:#dc623b; background:#fff4ee; font-size:11px; font-weight:700; line-height:1.35; text-align:center; }
     .mb-outline-steps { position:relative; display:flex; box-sizing:border-box; width:100%; justify-content:space-between; margin:0 0 2px; padding:0 8px; }
     .mb-outline-steps::before { position:absolute; z-index:0; top:15px; right:15px; left:15px; height:3px; background:#e6e7e9; content:""; }
     .mb-outline-steps::after { position:absolute; z-index:0; top:15px; left:10%; width:calc((var(--mb-step-progress,0))*20%); height:3px; background:#ff7548; content:""; }
