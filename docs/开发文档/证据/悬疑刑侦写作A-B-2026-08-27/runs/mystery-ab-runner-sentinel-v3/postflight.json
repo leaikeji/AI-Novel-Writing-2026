@@ -1,0 +1,60 @@
+{
+  "evidence_schema_version": "1.0",
+  "run_id": "mystery-ab-runner-sentinel-v3",
+  "sample_id": "X01",
+  "run_finished_at": "2026-08-27T17:19:31.906292Z",
+  "technical_result": {
+    "request_completed": true,
+    "completed_samples": 1,
+    "failed_samples": 0,
+    "duration_ms": 283697,
+    "stream_completed": true,
+    "event_count": 14560,
+    "output_sha256": "ec77f129fc177382140d727fb611e8e1e4552c151228d8b694439a95cb75019f",
+    "non_whitespace_chars": 711,
+    "effective_model_pre_post_match": true,
+    "requested_provider_model": "bigmodel/glm-5.3-flash",
+    "postflight_provider_model": "bigmodel/glm-5.3-flash",
+    "actual_model_status": "not_exposed",
+    "usage_status": "not_exposed",
+    "private_usage_buffer_used": false
+  },
+  "database_postflight": {
+    "novels": 9,
+    "documents": 25,
+    "document_revisions": 138,
+    "document_working_copies": 25,
+    "chapter_generation_jobs": 51,
+    "chapter_candidates": 26,
+    "story_facts": 510,
+    "intelligence_proposals": 29,
+    "creative_generation_jobs": 167,
+    "model_run_records": 108,
+    "active_background_jobs": 0,
+    "active_narration_requests": 0
+  },
+  "database_delta_review": {
+    "chapter_generation_jobs": 1,
+    "creative_generation_jobs": 1,
+    "attributed_to_writing_evaluation": false,
+    "basis": "研究路由不依赖数据库；行级元数据识别到一条并行正式章节任务和一条 outline_highlight 任务，本次未读取或修改其内容。"
+  },
+  "runtime_restoration": {
+    "research_environment_variable_present": false,
+    "research_route_http_status": 404,
+    "qwenpaw_root_http_status": 200,
+    "pawapps_http_status": 200,
+    "project_health_http_status": 200,
+    "qwenpaw_healthy": true,
+    "tts_sidecar_healthy": true,
+    "tts_validation_fields_equal_to_pre_run_values": true,
+    "temporary_files_removed": true
+  },
+  "recovery_backup_reverified": {
+    "location": "/app/working.backups/writing-eval-sentinel-v3-20260828-pre",
+    "plugin_archive_sha256": "2163e092f973ada491e2f3c25311dd9dfb4d359ec09d44b27d81f57e3e88ffe1",
+    "postgres_dump_sha256": "096eda2029eebb89e3eb91c5f335248ae72e7164010cddcab0ea4e800c8cce4e"
+  },
+  "batch_allowed": false,
+  "batch_blocker": "X01 正文后附加 Agent 状态胶囊，人工输出纯净度门槛失败。"
+}

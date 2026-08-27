@@ -192,9 +192,9 @@ S3 至少保存：九 Skill 清单、quick validator 结果、契约测试、打
 
 ### 8.1 冻结目标与非目标
 
-运行器用于替代不可审计、易拥塞的聊天页面手工跑样本：由后端使用公开 PawApp 上下文固定调用 `ai-novel-writer`，每次生成前读取 effective 模型，完成后从原始 reply metadata 核验 actual provider/model 和 token usage，再把纯正文与证据返回给项目脚本。它不写小说数据库、不建立第二套 Agent Runtime、不切换模型、不自动修改 Skill、不执行授权小说正文，也不把一次探索性结果升级为 S4 正式结论。
+运行器用于替代不可审计、易拥塞的聊天页面手工跑样本：由后端使用公开 PawApp 上下文固定调用 `ai-novel-writer`，每次生成前后读取 effective 模型；公开 reply 暴露 usage 时核验 actual provider/model 和 token usage，未暴露时透明记录 `not_exposed`，再把完整原始输出与证据返回给项目脚本。它不写小说数据库、不建立第二套 Agent Runtime、不切换模型、不自动修改 Skill、不执行授权小说正文，也不把一次探索性结果升级为 S4 正式结论。
 
-HTTP 只接受冻结 experiment/sample id；题面、A/B 分配、候选覆盖层和 `prose-writing` Skill 均由服务端固定，拒绝调用者提交任意 prompt、模型、Skill、小说 ID 或正文。A/B 同题同轮只允许候选覆盖层不同。生成使用新的独立 session id、单路互斥、600 秒上限；该上限依据首个 UI 样本约 270 秒的观察设置，不代表性能目标。超时、模型身份缺失或 requested/actual 不一致时丢弃正文并返回可审计失败。
+HTTP 只接受冻结 experiment/sample id；题面、A/B 分配、候选覆盖层和 `prose-writing` Skill 均由服务端固定，拒绝调用者提交任意 prompt、模型、Skill、小说 ID 或正文。A/B 同题同轮只允许候选覆盖层不同。生成使用新的独立 session id、单路互斥、600 秒上限；该上限依据首个 UI 样本约 270 秒的观察设置，不代表性能目标。超时、公开 effective 模型缺失或前后不一致、公开 usage 与 actual 模型矛盾时丢弃正文并返回可审计失败。
 
 ### 8.2 冻结接口与文件协议
 
@@ -221,7 +221,7 @@ R0 可并行，写代码阶段保持单一所有者：本运行器规模小，AP
 
 ### 8.4 验收与回退
 
-最低验收：固定合同/哈希测试、未登记 experiment/sample 拒绝、无任意 prompt 字段、A/B 唯一变量测试、并发拒绝、超时、缺 actual metadata、模型不一致、final-only 提取、CLI 已完成跳过/失败保留/原子写入，以及 `.venv/bin/python -m pytest`、`scripts/package_plugin.py`、`git diff --check`。真实运行只做一个合成样本哨兵，确认数据库写入数不变和 actual/usage 可保存后，才允许继续16样本。
+最低验收：固定合同/哈希测试、未登记 experiment/sample 拒绝、无任意 prompt 字段、A/B 唯一变量测试、并发拒绝、超时、公开模型前后不一致、usage 状态矛盾、final-only 提取、正文输出纯净度、CLI 已完成跳过/失败保留/原子写入，以及 `.venv/bin/python -m pytest`、`scripts/package_plugin.py`、`git diff --check`。真实运行只做一个合成样本哨兵，确认无评测数据库写入、模型证据透明且正文质量硬门槛通过后，才允许继续16样本。
 
 回退只需移除新路由接线、研究模块、主机脚本和专项证据；没有 schema、用户正文或数据卷恢复动作。禁用/卸载 PawApp 后仍遵循既有完整清理与 QwenPaw 原生非回归规则。
 
@@ -265,3 +265,15 @@ X01 在 308.590 秒后完整结束响应流，没有命中600秒硬上限。流�
 结果 schema 升为 `1.1`，模型证据合同为 `writing-eval-effective-model-pre-post-v1`。服务端在生成前通过公开 effective-model API 获取 `requested_model`，流完整结束并提取 final-only 正文后再次通过同一公开接口获取 `postflight_model`；provider/model 不一致时正文仍作废。公开 closing message 含合法 usage 时继续严格核验 actual 模型；不含时固定 `actual_model=null`、`usage=null`、`actual_model_status=not_exposed`，并记录 `private_usage_buffer_used=false`。这只能证明运行窗口前后模型配置没有变化，不能证明 Provider 实际执行身份。
 
 CLI 同时验证 schema、前后非空模型身份、模型证据状态、usage 结构、流完整性、正文与哈希；任何字段矛盾都失败。源码候选定向测试 `58 passed`、相关回归 `202 passed`、项目全量 `2445 passed, 116 skipped`；合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。两条全量警告均为既有 Starlette 弃用警告。真实 X01 v3 之前仍需备份与恢复门禁；其余15个样本继续停止。
+
+### 8.9 第三次 X01 哨兵：调用链成功、样本纯净度失败（2026-08-28）
+
+用户同意后，以新 run id `mystery-ab-runner-sentinel-v3` 只派发 X01 一次，没有重试或继续其他样本。请求在 283.697 秒后完整结束，14,560 个流式事件全部收口；生成前后公开 effective 模型均为 `bigmodel/glm-5.3-flash`。QwenPaw 没有公开 actual/usage，结果按 schema `1.1` 如实保存 `actual_model=null`、`usage=null` 和两项 `not_exposed`，且 `private_usage_buffer_used=false`。输出哈希为 `ec77f129fc177382140d727fb611e8e1e4552c151228d8b694439a95cb75019f`，非空白字符数 711，四个固定锚点和篇幅候选门槛均通过。
+
+人工纯净度复核发现，正文后附加一行 `⟦…⟧` Agent 状态胶囊，内容概括题目约束并自行宣称完成。现有自动包装检测器没有识别这种格式，导致 `hard-gates.json` 中四个 wrapper flag 均为 false；这是检测缺口，不是样本通过。原始 `output.txt`、`result.json`、`hard-gates.json` 与匿名样本均保持原样，没有事后裁剪或改写；另以 `semantic-review.json` 记录质量硬门槛失败。因此本次只能证明公开模型前后核对、完整正文保存和恢复链路可用，X01 不具备匿名盲评资格，也不能证明 `0.4.0` 写作能力提升。
+
+正文主体的只读人工观察为：第三人称限知成立，人物从要求开门转为验证读数，联名责任和十五分钟停止条件形成可识别代价，验证结果保持未知。这些是正向实现信号，但不能抵消“只输出正文”硬门槛失败，也不能用单个 A 样本外推 Skill 胜率。
+
+运行后研究开关已移除，研究路由恢复404，QwenPaw 根页面、PawApp 注册表和项目健康接口均为200，TTS Sidecar healthy，四个既有 TTS 验证字段逐项等值。备份保留于 `/app/working.backups/writing-eval-sentinel-v3-20260828-pre`，插件包与 PostgreSQL dump 哈希已复核；主机、容器与 Compose 临时副本已清理。前后表计数仅新增一条正式章节生成任务和一条 `outline_highlight` 创作任务；研究路由不连接数据库，行级元数据表明它们属于共享环境中的并行正式流程，本次未读取其内容或干预其状态。
+
+阶段门禁保持关闭：其余15个样本不得启动。下一次模型请求前必须先补充末尾状态胶囊的显式检测与拒绝回归；本次失败证据不得覆盖、修剪或转记为有效样本。

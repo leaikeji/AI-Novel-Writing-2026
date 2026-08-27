@@ -1,6 +1,6 @@
 # 运行观察
 
-状态：聊天页探索样本完成1份；研究运行器有效样本0份，批量生成保持停止。
+状态：聊天页探索样本完成1份；研究运行器完成1次技术生成，但有效盲评样本仍为0份，批量生成保持停止。
 
 ## 已完成样本
 
@@ -89,3 +89,19 @@ QwenPaw 当前公开 `PawAppContext.chat/chat_stream` 参数不包含逐请求�
 用户同意不再因 QwenPaw 未公开 usage 而丢弃已完整生成的正文。调整后的证据边界是：生成前后各通过一次公开 effective-model API，provider/model 必须一致；公开 usage 存在时严格核验 actual，不存在时只能标记 `actual_model=not_exposed`、`usage=not_exposed`，不能把 effective 模型冒充 actual，也不能读取内部 usage buffer。
 
 schema `1.1` 与 CLI 候选已完成，定向测试 `58 passed`、相关回归 `202 passed`、项目全量 `2445 passed, 116 skipped`，合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。此处仍只是源码候选；第三次 X01 尚未派发，研究路由保持404，其余15个样本保持停止。
+
+## 第三次真实运行器哨兵
+
+### `mystery-ab-runner-sentinel-v3` / X01
+
+- 派发：新 session、新 run id，只请求一次，没有自动重试。
+- 技术结果：283.697秒后成功，`1 completed / 0 failed`；流完整结束，共14,560个事件。
+- 公开模型证据：生成前后均为 `bigmodel / glm-5.3-flash`；actual provider/model 与 usage 没有公开，按合同保存为 `null + not_exposed`，没有读取私有 usage buffer。
+- 输出证据：原始输出 SHA-256 为 `ec77f129fc177382140d727fb611e8e1e4552c151228d8b694439a95cb75019f`，非空白字符711，篇幅和四个固定锚点候选检查通过。
+- 人工正文观察：第三人称限知稳定；饶真从索要开门转为先验证读数；联名责任和十五分钟停止条件构成代价；验证结果保持未知。
+- 质量硬门槛：失败。正文末尾附加独立 `⟦…⟧` Agent 状态胶囊，概括评测约束和完成判断，违反“只输出正文”并破坏匿名盲评；现有自动包装检测器漏报。
+- 处理：保留原始 `output.txt`、`result.json`、`hard-gates.json` 和匿名文件，不裁剪、不覆盖；新增 `semantic-review.json` 将样本标为盲评不可用。
+
+研究窗口关闭后，研究开关已移除且路由为404；QwenPaw 根页面、PawApp 注册表和项目健康接口均为200，TTS Sidecar healthy，四个原有 TTS 验证字段逐项等值。恢复卷中的插件包与 PostgreSQL dump 哈希复核通过，临时副本已清理。运行窗口内新增的一条正式章节任务和一条 `outline_highlight` 任务来自共享环境的并行流程；研究路由不连接数据库，本次未读取其内容或干预状态。
+
+结论：运行器已证明可以在公开 usage 不暴露时保存完整原始结果，但尚未证明能稳定产出纯正文评测样本。其余15个样本继续停止；下一次模型请求前先补状态胶囊检测和拒绝回归。

@@ -1,0 +1,48 @@
+{
+  "evidence_schema_version": "1.0",
+  "run_id": "mystery-ab-runner-sentinel-v3",
+  "sample_id": "X01",
+  "run_started_at": "2026-08-27T17:14:48.215174Z",
+  "scope": {
+    "requested_sample_count": 1,
+    "automatic_retry": false,
+    "remaining_samples_authorized": false
+  },
+  "installed_source": {
+    "writing_eval_api_sha256": "5c31f827ed8d18d46ac46a625d82162fb13e80604502189f0b891494412da787",
+    "writing_eval_contract_sha256": "de86bb23c28476332cb31bb4f25725b7f50c998ecdd099d3292bc59160497074"
+  },
+  "recovery_backup": {
+    "location": "/app/working.backups/writing-eval-sentinel-v3-20260828-pre",
+    "plugin_archive": {
+      "filename": "plugin.tar.gz",
+      "sha256": "2163e092f973ada491e2f3c25311dd9dfb4d359ec09d44b27d81f57e3e88ffe1"
+    },
+    "postgres_dump": {
+      "filename": "postgres.dump",
+      "sha256": "096eda2029eebb89e3eb91c5f335248ae72e7164010cddcab0ea4e800c8cce4e"
+    }
+  },
+  "database_baseline": {
+    "migration_head": "20260827_0023",
+    "novels": 9,
+    "documents": 25,
+    "document_revisions": 138,
+    "document_working_copies": 25,
+    "chapter_generation_jobs": 50,
+    "chapter_candidates": 26,
+    "story_facts": 510,
+    "intelligence_proposals": 29,
+    "creative_generation_jobs": 166,
+    "model_run_records": 108,
+    "active_background_jobs": 0,
+    "active_narration_requests": 0
+  },
+  "runtime_preconditions": {
+    "qwenpaw_healthy": true,
+    "postgres_healthy": true,
+    "tts_sidecar_healthy": true,
+    "research_route_enabled_for_window": true,
+    "tts_validation_fields_preserved_without_recording_values": true
+  }
+}

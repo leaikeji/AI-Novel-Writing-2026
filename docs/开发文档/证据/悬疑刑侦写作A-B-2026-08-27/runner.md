@@ -1,6 +1,6 @@
 # 写作研究运行器
 
-状态：源码候选；默认关闭；两次真实 X01 哨兵均未通过；用户已批准 transparent `not_exposed` 合同，第三次 X01 尚未执行。
+状态：源码候选；默认关闭；第三次 X01 已完成技术调用，但因末尾 Agent 状态胶囊违反“只输出正文”而不具备盲评资格；其余15个样本保持停止。
 
 2026-08-27 源码门禁：冻结合同/API/CLI 新增测试 `52 passed`，相关定向回归 `166 passed`，项目全量回归 `2376 passed, 116 skipped`；合同自检、Compose override 配置解析和 PawApp 打包通过。以上只证明运行器候选可进入真实哨兵，不证明模型侧链路或写作质量已经通过。
 
@@ -10,7 +10,7 @@
 
 运行器只执行 `mystery-ab-20260827-v1` 已登记的16个项目合成样本。HTTP 不接受 prompt、题面、小说正文、文件路径、Agent、Skill、Provider、模型或采样参数；服务端不连接小说数据库，也不创建候选、revision 或故事事实。
 
-后端固定使用 `ai-novel-writer` 与 `prose-writing`，在可信 `chapter_generation` 任务模式下禁止工具和持久化。调用前保存 effective 模型，调用后只从结构化 PawApp closing reply 的公开 usage metadata 获取 actual 模型与 token；缺失、不合法或 requested/actual 不一致时样本作废。运行器不使用 QwenPaw 内部 usage buffer。
+后端固定使用 `ai-novel-writer` 与 `prose-writing`，在可信 `chapter_generation` 任务模式下以提示约束禁止工具和持久化。调用前后保存公开 effective 模型；公开 closing reply 含合法 usage 时核验 actual 模型与 token，未暴露时透明保存 `actual_model=null`、`usage=null` 与 `not_exposed`，前后模型不一致或证据状态矛盾时样本作废。运行器不使用 QwenPaw 内部 usage buffer。
 
 ## 默认关闭
 
@@ -87,3 +87,11 @@ docker compose -f compose.yaml up -d --force-recreate qwenpaw
 用户已批准在 QwenPaw 不公开 usage 时保留完整正文。新 schema `1.1` 要求生成前后的公开 effective 模型 provider/model 完全一致；如公开 reply 含 usage，仍严格核验 actual，若不含则保存 `actual_model=null`、`usage=null` 并标记 `not_exposed`。任何情况下都记录 `private_usage_buffer_used=false`，不读取内部 usage buffer。
 
 该合同降低的是模型用量证据门槛，不降低正文质量门槛，也不把 effective 模型表述成 actual 模型。源码定向测试 `58 passed`、相关回归 `202 passed`、项目全量 `2445 passed, 116 skipped`；合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包通过。第三次 X01 只有在备份和恢复门禁通过后执行，其余15个样本不启动。
+
+## 第三次哨兵与纯净度阻断
+
+`mystery-ab-runner-sentinel-v3` 只派发 X01 一次，在 283.697 秒后成功保存完整原始输出。流完整结束，共14,560个事件；生成前后公开 effective 模型均为 `bigmodel/glm-5.3-flash`。公开 actual/usage 未暴露，结果按 schema `1.1` 保存为 `null + not_exposed`，没有读取私有 usage buffer。
+
+技术成功不等于评测样本有效。人工复核发现正文末尾附有独立 `⟦…⟧` 状态胶囊，概括了题目锚点、状态变化和完成判断，违反“只输出正文”并泄漏评测信息。现有自动 wrapper 检测漏报；原始结果未裁剪，另以 `semantic-review.json` 将该样本标记为硬门槛失败和盲评不可用。正文主体虽呈现稳定视角、策略变化、代价和未决结果，也不能抵消纯净度失败或证明 Skill 已提升。
+
+研究路由已恢复404，健康检查和原有 TTS 验证配置均已恢复，恢复备份保留，临时副本已清理。下一次模型请求前必须先让运行器显式检测并拒绝末尾状态胶囊；其余15个样本继续停止。

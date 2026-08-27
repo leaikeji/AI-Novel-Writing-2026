@@ -1,0 +1,37 @@
+{
+  "evidence_schema_version": "1.0",
+  "run_id": "mystery-ab-runner-sentinel-v3",
+  "sample_id": "X01",
+  "review_type": "manual-semantic-and-output-purity-review",
+  "source_output_sha256": "ec77f129fc177382140d727fb611e8e1e4552c151228d8b694439a95cb75019f",
+  "source_output_modified": false,
+  "technical_generation_valid": true,
+  "writing_quality_sample_eligible": false,
+  "blind_sample_eligible": false,
+  "hard_gate_result": "failed",
+  "failure_code": "agent_status_capsule_appended",
+  "failure_detail": "正文后出现由 U+27E6/U+27E7 包围的独立状态胶囊，概括评测要求并自行宣称完成；这违反只输出正文合同，并把评测元数据泄漏进候选。",
+  "capsule_evidence": {
+    "matched_line_count": 1,
+    "line_sha256_including_trailing_newline": "efed4e04ed691691347da9099bb48ab01fbb44be19d5fa857ce592ee5f3f5891",
+    "existing_automatic_wrapper_detector_flagged_it": false,
+    "detector_gap_confirmed": true
+  },
+  "prose_prefix_read_only_derivation": {
+    "derived_by_removing_only_the_final_capsule_for_analysis": true,
+    "saved_as_replacement_output": false,
+    "character_count_including_whitespace": 630,
+    "sha256": "ac32306d010299f5116f6ea58cd62c2df3fe5d448ad4c7758cbc4a8fa20be297"
+  },
+  "manual_findings": {
+    "third_person_limited_viewpoint": "pass",
+    "required_anchors": "pass",
+    "character_strategy_changes": "pass",
+    "decision_mechanism_and_cost": "pass",
+    "verification_result_remains_unknown": "pass",
+    "prose_only_output": "fail"
+  },
+  "interpretation": "正文主体提供了正向实现信号，但一个失去盲态的 A 样本不能证明 Skill 提升。输出纯净度属于确定性硬门槛，主观优点不能抵消该失败。",
+  "batch_allowed": false,
+  "required_before_next_model_run": "增加末尾 Agent 状态胶囊的显式检测与拒绝，并补回归测试；不得修改本次保留证据。"
+}

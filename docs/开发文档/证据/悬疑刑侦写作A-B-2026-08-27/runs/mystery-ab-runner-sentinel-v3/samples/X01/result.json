@@ -1,0 +1,98 @@
+{
+  "actual_model": null,
+  "attempt": 1,
+  "base_prompt_sha256": "e39878aa716aed4d967f24640caccfac275757f9ee4ecdbb4e6be9c554bf11c1",
+  "candidate_overlay_sha256": "8fd672fcefcc657f8d3998f0b896d89a3326f5e0e0e6ce5ecf232beea0a3863d",
+  "case_id": "SP-02",
+  "deterministic_checks": {
+    "empty": false,
+    "length_pass": true,
+    "non_whitespace_chars": 711,
+    "required_anchor_hits": {
+      "二十二分钟": true,
+      "十八分钟": true,
+      "手动复核": true,
+      "氧传感器": true
+    },
+    "semantic_review_required": true,
+    "wrapper_flags": {
+      "analysis_prefix": false,
+      "json_or_xml_wrapper": false,
+      "markdown_fence": false,
+      "markdown_heading": false
+    }
+  },
+  "duration_ms": 283697,
+  "execution_agent_id": "ai-novel-writer",
+  "experiment_id": "mystery-ab-20260827-v1",
+  "final_text_source": "structured_reply_chunks",
+  "finished_at": "2026-08-27T17:19:31.906292Z",
+  "manifest_sha256": "19d5bb361b74c93f51f1580dea8d8977a7c21fa7f9a0a80dec781aee449d640f",
+  "model_evidence": {
+    "actual_model_policy": "provider_usage_optional_not_exposed_allowed",
+    "actual_model_status": "not_exposed",
+    "contract": "writing-eval-effective-model-pre-post-v1",
+    "effective_model_pre_post_match": true,
+    "private_usage_buffer_used": false,
+    "usage_status": "not_exposed"
+  },
+  "output_sha256": "ec77f129fc177382140d727fb611e8e1e4552c151228d8b694439a95cb75019f",
+  "output_text": "饶真的手掌拍在门禁玻璃上，声音比自己预想的响：“路宁，开门。光谱记录只有那一份，无人机撑不过今晚。”\n\n路宁没有抬头，指尖点着屏幕：“防护服十八分钟，往返标准二十二分钟，差四分钟。这扇门我一开，责任就全在我身上。”\n\n控制室里只剩仪表的低鸣，七号区的红色光斑在图上一闪一闪。\n\n一句“你就是怕担责”冲到喉咙口。饶真把它咽了回去。吵赢路宁没有用，这扇门不认嗓门，只认数字。他盯着屏幕上那行“十八分钟”，忽然想起来：今早六点四十，新的氧传感器是他亲手拧上去的，无人机警报跟着就响，手动复核被他划掉了，校验台的防尘布到现在都没掀。\n\n“先不开门。”他听见自己说，“先验证你这个十八分钟。”\n\n路宁这才抬起头，目光越过他，落在墙角的校验台上。\n\n“传感器是新的，没做手动复核，读数是多少就是多少——这个漏洞是我留的。”饶真说，“接上标准压力计，折算够二十二分钟，你按新记录开门，违规记录我跟你联名。不够，我闭嘴，芯片按报损上报。”\n\n路宁看了他三秒，起身掀开校验台的护罩，又调出门禁日志页，添了一行，把笔搁在页脚：“再加一条。你进七号区，第十五分钟必须站回闸口，芯片在不在手上都算数。超一分钟，我落锁，按失联上报。”\n\n“成交。”饶真清楚那条规则的分量：到点取不出芯片，他也得空着手往回跑。\n\n他抱起标准压力计走向闸口。表盘冰凉，指针伏在零位。接下来决定那扇门的，不是他们俩谁更急，而是这根细得几乎看不见的指针。\n\n管路接好，气流声轻轻响起来，像有人在门的另一侧呼吸。\n\n⟦ 合成写作评测·七号区开门场景｜已完成：输出约610字第三人称限知正文，饶真由索要开门转向先验证读数，以联名违规记录加第十五分钟停止条件成交，四锚点齐全且无禁用项；验证结果按知识边界保持未知；无下一步 ⟧",
+  "postflight_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "prompt_contract": "writing-eval-prompt-v1",
+  "prompt_sha256": "e39878aa716aed4d967f24640caccfac275757f9ee4ecdbb4e6be9c554bf11c1",
+  "requested_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "rights_basis": "project-synthetic",
+  "rubric_sha256": "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6",
+  "sample_id": "X01",
+  "sampling_parameters": "not_exposed",
+  "schema_version": "1.1",
+  "server_persistence": "none",
+  "session_id": "novel-writing-eval:mystery-ab-20260827-v1:X01:8552c878-bba7-4aa5-a856-55086e3759da",
+  "skill_id": "prose-writing",
+  "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
+  "skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+  "source_suite_sha256": "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf",
+  "started_at": "2026-08-27T17:14:48.215174Z",
+  "state": "generated",
+  "stream_diagnostics": {
+    "content_part_type_counts": {
+      "text": 4
+    },
+    "content_recorded": false,
+    "contract": "writing-eval-stream-diagnostics-v1",
+    "event_count": 14560,
+    "event_type_counts": {
+      "agentresponse": 3,
+      "message": 2,
+      "reasoning": 2,
+      "text": 14553
+    },
+    "first_event_elapsed_ms": 87,
+    "last_event_elapsed_ms": 283672,
+    "message_role_counts": {
+      "assistant": 6
+    },
+    "message_type_counts": {
+      "message": 3,
+      "reasoning": 3,
+      "text": 14553
+    },
+    "stream_completed": true
+  },
+  "tool_policy_enforcement": "prompt_only",
+  "usage": null,
+  "variant": "A"
+}

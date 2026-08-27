@@ -1,0 +1,8 @@
+{
+  "client_duration_ms": 283715,
+  "dispatch_started_at": "2026-08-27T17:14:48.208952Z",
+  "output_sha256": "ec77f129fc177382140d727fb611e8e1e4552c151228d8b694439a95cb75019f",
+  "sample_id": "X01",
+  "session_id": "novel-writing-eval:mystery-ab-20260827-v1:X01:8552c878-bba7-4aa5-a856-55086e3759da",
+  "state": "received"
+}
