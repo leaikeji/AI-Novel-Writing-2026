@@ -56,7 +56,6 @@ const {
   SearchOutlined,
   StarOutlined,
   TeamOutlined,
-  ThunderboltOutlined,
   UploadOutlined,
   WomanOutlined,
 } = host.antdIcons;
@@ -869,7 +868,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
       title: "确认",
-      content: `创建小说将使用 ${modelLabel} 并消耗500字符，用于AI智能生成模板设定，确定继续吗？`,
+      content: `生成模板设定将使用 ${modelLabel}，确定继续吗？`,
       okText: "确定",
       cancelText: "取消",
       onOk() {
@@ -962,7 +961,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
       title: "确认",
-      content: `生成封面将使用 ${modelLabel} 并消耗10000字包，确定继续吗？`,
+      content: `生成封面方案将使用 ${modelLabel}，确定继续吗？`,
       okText: "确定",
       cancelText: "取消",
       onOk: () => { void goNext(); },
@@ -996,7 +995,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
       title: "确认",
-      content: `生成小说名称将使用 ${modelLabel} 并消耗20字包，确定继续吗？`,
+      content: `生成小说名称将使用 ${modelLabel}，确定继续吗？`,
       okText: "确定",
       cancelText: "取消",
       onOk() {
@@ -1197,13 +1196,13 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           onClick: generateName,
         }, busy ? "AI生成中..." : data.title ? "重新生成名称" : "AI帮我取名"),
         busy || data.naming_generation_job_id
-          ? h("small", { className: "mb-name-cost" }, h(ThunderboltOutlined), namingTaskModelLabel ? `每次消耗20字包 · ${namingTaskModelLabel}` : "每次消耗20字包")
+          ? h("small", { className: "mb-name-cost" }, `取名模型：${namingTaskModelLabel}`)
           : null,
       );
     }
     if (step === 5) {
       const coverModes = [
-        { key: "ai", icon: RobotOutlined, title: "AI智能生成", badge: "推荐", copy: "消耗10000字包，AI根据您的故事风格精心绘制独一无二的精美封面", button: "开始生成精美封面" },
+        { key: "ai", icon: RobotOutlined, title: "AI智能生成", badge: "推荐", copy: "AI根据您的故事风格生成独一无二的封面方案", button: "开始生成精美封面" },
         { key: "system", icon: BookOutlined, title: "系统封面", copy: "根据小说分类自动生成，包含书名和作者", button: "生成系统封面" },
         { key: "upload", icon: PictureOutlined, title: "上传图片", copy: "上传您自己的图片，自动裁剪为3:4", button: "确认使用此封面" },
       ];

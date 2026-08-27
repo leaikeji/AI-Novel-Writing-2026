@@ -702,7 +702,6 @@ function OutlineWizard({
   const requestNextGeneration = async () => {
     if (!draft || generating || step >= 5) return;
     const generationName = step === 1 ? "故事背景" : step === 2 ? "角色设定" : step === 3 ? "故事情节" : "故事亮点";
-    const generationCost = step === 1 || step === 2 ? 500 : step === 3 ? 1500 : 500;
     const explanation = step === 1
       ? "AI将根据您的设定创建一个引人入胜的故事世界。"
       : step === 2
@@ -719,12 +718,12 @@ function OutlineWizard({
     }
     Modal.confirm({
       className: "anw-modal mb-outline-cost-modal",
-      title: "确认扣除字数",
+      title: `确认生成${generationName}`,
       content: h(
         "div",
         { className: "mb-outline-cost-copy" },
-        h("h3", null, `需要消耗${generationCost}字`),
-        h("p", null, `生成${generationName}需要消耗${generationCost}字，${explanation}`),
+        h("h3", null, `生成${generationName}`),
+        h("p", null, explanation),
         h("p", null, `本次将使用 ${modelLabel}。`),
       ),
       okText: "确认",
@@ -1813,7 +1812,7 @@ function ChapterCreationWizard({
         title: "确认",
         onCancel: () => setConfirmOpen(false),
       },
-      h("p", null, `生成章节将使用 ${outlineTaskModelLabel || "当前有效模型"} 并消耗500字数，确定继续吗？`),
+      h("p", null, `生成章节将使用 ${outlineTaskModelLabel || "当前有效模型"}，确定继续吗？`),
       h("div", { className: "mb-chapter-confirm-actions" },
         h(Button, { size: "large", onClick: () => setConfirmOpen(false) }, "取消"),
         h(Button, { size: "large", className: "anw-primary-button", onClick: () => void generateOutline() }, "确定"),
@@ -1830,10 +1829,10 @@ function ChapterCreationWizard({
         title: "AI智能推荐线路",
         onCancel: () => setRecommendConfirmOpen(false),
       },
-      h("p", null, `使用 ${recommendationTaskModelLabel || "当前有效模型"} 推荐线路将消耗 500 字。AI将分析前文内容和所有线路，为您推荐最适合本章推进的线路。是否继续？`),
+      h("p", null, `将使用 ${recommendationTaskModelLabel || "当前有效模型"} 分析前文内容和所有线路，为您推荐最适合本章推进的线路。是否继续？`),
       h("div", { className: "mb-chapter-confirm-actions" },
         h(Button, { size: "large", onClick: () => setRecommendConfirmOpen(false) }, "取消"),
-        h(Button, { size: "large", className: "anw-primary-button", onClick: () => void recommendStorylines() }, "确定消耗 500 字"),
+        h(Button, { size: "large", className: "anw-primary-button", onClick: () => void recommendStorylines() }, "确定推荐"),
       ),
     ),
     h(

@@ -1008,7 +1008,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       content: h("div", { className: "anw-generation-confirm-copy" },
         h("strong", null, "⚠️ 请确保网络畅通，并保持该页面始终显示在最上方"),
         h("p", null, "若屏幕关闭 / 切换应用 / 网络波动，易导致生成失败。"),
-        h("p", null, "生成一旦开始，已产生的模型消耗不可撤回。"),
+        h("p", null, "生成开始后请勿重复发起；失败时系统会保留正式正文不变。"),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
         h("p", null, "若多次出现生成失败，请检查当前有效模型连接。"),
         h("b", null, "确定继续生成吗？"),
