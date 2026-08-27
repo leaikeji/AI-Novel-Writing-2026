@@ -46,6 +46,11 @@ import {
 import type { SelectionRange, SelectionSnapshot } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import { compressCover } from "./cover-utils";
+import {
+  nextOutlineGenerationTarget,
+  outlineGenerationTarget,
+  type OutlineGenerationKind,
+} from "./outline-workflow";
 import { chapterDisplayTitle } from "./presenters";
 import { RelationshipEditor } from "./relationship-editor";
 import { RelationshipWorkspace } from "./relationship-workspace";
@@ -480,45 +485,28 @@ function downloadExport(record: NovelExportRecord, title: string): void {
 
 interface OutlineWizardProps {
   novel: NovelRecord;
-  open: boolean;
   startStep: number;
-  onClose: () => void;
-  onGoChapters: () => void;
   onCompleted: (novel: NovelRecord) => void;
   onError: (message: string) => void;
   selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
 
 
-type OutlineGenerationKind = "outline_background" | "outline_characters" | "outline_plot" | "outline_highlight";
 type OutlineGenerationIntent = "fresh" | "refine";
-type OutlineExplorationDirection = "change_setting_focus" | "change_relationship_structure" | "change_conflict_structure" | "change_positioning_focus";
-
-interface OutlineGenerationCandidate {
-  job: CreativeGenerationRecord;
-  sourceVersion: number;
-  generationName: string;
-}
-
 
 function OutlineWizard({
   novel,
-  open,
   startStep,
-  onClose,
-  onGoChapters,
   onCompleted,
   onError,
   selectionEditReviewHost: SelectionEditReviewHost,
 }: OutlineWizardProps) {
   const [draft, setDraft] = React.useState(null as OutlineDraftRecord | null);
   const [step, setStep] = React.useState(1);
-  const [completed, setCompleted] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [activityText, setActivityText] = React.useState("");
-  const [candidate, setCandidate] = React.useState(null as OutlineGenerationCandidate | null);
-  const [applyingCandidate, setApplyingCandidate] = React.useState(false);
+  const [generationNotice, setGenerationNotice] = React.useState("");
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterIndex, setCharacterIndex] = React.useState(-1);
   const [characterForm, setCharacterForm] = React.useState({
@@ -596,10 +584,8 @@ function OutlineWizard({
   };
 
   React.useEffect(() => {
-    if (!open) return;
-    setCompleted(false);
-    setCandidate(null);
     setLoading(true);
+    setGenerationNotice("");
     void apiRequest<OutlineDraftRecord>(`/novels/${novel.id}/outline-draft`)
       .then((record) => {
         replaceDraft(record);
@@ -608,7 +594,7 @@ function OutlineWizard({
       })
       .catch((reason) => onError(readableError(reason, "加载大纲草稿失败")))
       .finally(() => setLoading(false));
-  }, [open, novel.id, startStep]);
+  }, [novel.id, startStep]);
 
   const updateLocal = (patch: Partial<OutlineDraftRecord>) => {
     const current = draftRef.current;
@@ -634,7 +620,7 @@ function OutlineWizard({
     base: OutlineDraftRecord,
     kind: OutlineGenerationKind,
     intent: OutlineGenerationIntent,
-    explorationDirection?: OutlineExplorationDirection,
+    explorationDirection?: ReturnType<typeof outlineGenerationTarget>["explorationDirection"],
   ): Promise<CreativeGenerationRecord> => {
     const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
       method: "POST",
@@ -656,142 +642,72 @@ function OutlineWizard({
     return job;
   };
 
-  const targetKind = (): OutlineGenerationKind => step === 1
-    ? "outline_background"
-    : step === 2
-      ? "outline_characters"
-      : step === 3
-        ? "outline_plot"
-        : "outline_highlight";
+  const hasContentForStep = (current: OutlineDraftRecord, targetStep: number): boolean => targetStep === 1
+    ? current.target_chapter_count >= 10 && current.target_chapter_count <= 10_000
+    : targetStep === 2
+      ? Boolean(current.background_text.trim())
+      : targetStep === 3
+        ? current.characters.length > 0
+        : targetStep === 4
+          ? Boolean(current.plot_text.trim())
+          : Boolean(current.highlight_text.trim());
 
-  const targetGenerationName = (): string => step === 1
-    ? "故事背景"
-    : step === 2
-      ? "角色设定"
-      : step === 3
-        ? "故事情节"
-        : "故事亮点";
+  const patchForStep = (current: OutlineDraftRecord, targetStep: number): Record<string, unknown> => targetStep === 1
+    ? { target_chapter_count: current.target_chapter_count }
+    : targetStep === 2
+      ? { background_text: current.background_text }
+      : targetStep === 3
+        ? { characters: current.characters }
+        : targetStep === 4
+          ? { plot_text: current.plot_text }
+          : { highlight_text: current.highlight_text };
 
-  const hasCurrentTarget = (current: OutlineDraftRecord): boolean => step === 1
-    ? Boolean(current.background_text.trim())
-    : step === 2
-      ? current.characters.length > 0
-      : step === 3
-        ? Boolean(current.plot_text.trim())
-        : Boolean(current.highlight_text.trim());
-
-  const explorationDirection = (): OutlineExplorationDirection => step === 1
-    ? "change_setting_focus"
-    : step === 2
-      ? "change_relationship_structure"
-      : step === 3
-        ? "change_conflict_structure"
-        : "change_positioning_focus";
-
-  const saveGenerationSource = async (current: OutlineDraftRecord): Promise<OutlineDraftRecord> => {
-    if (step === 1) return saveDraft(current, 1, { target_chapter_count: current.target_chapter_count });
-    if (step === 2) return saveDraft(current, 2, { background_text: current.background_text });
-    if (step === 3) return saveDraft(current, 3, { characters: current.characters });
-    return saveDraft(current, 4, { plot_text: current.plot_text });
+  const generateAndApply = async (targetStep: number, source: OutlineDraftRecord): Promise<OutlineDraftRecord> => {
+    const target = outlineGenerationTarget(targetStep);
+    const hasExistingContent = hasContentForStep(source, targetStep);
+    const job = await generate(
+      source,
+      target.kind,
+      "fresh",
+      hasExistingContent ? target.explorationDirection : undefined,
+    );
+    return apiRequest<OutlineDraftRecord>(
+      `/creative-generations/${job.id}/apply-outline`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expected_version: source.version }),
+      },
+    );
   };
 
-  const nextWithGeneration = async (intent: OutlineGenerationIntent) => {
-    if (!draft || generating) return;
+  const requestGeneration = async (targetStep: number) => {
+    if (!draft || generating || targetStep < 2 || targetStep > 5) return;
+    const generationName = outlineGenerationTarget(targetStep).name;
     setGenerating(true);
+    setGenerationNotice("");
+    setActivityText(`正在生成${generationName}`);
     try {
-      const generationName = targetGenerationName();
-      setActivityText(`正在生成${generationName}`);
-      await getGenerationModelStatus();
-      const hadTarget = hasCurrentTarget(draft);
-      const saved = await saveGenerationSource(draft);
-      const job = await generate(
-        saved,
-        targetKind(),
-        intent,
-        intent === "fresh" && hadTarget ? explorationDirection() : undefined,
-      );
-      setCandidate({ job, sourceVersion: saved.version, generationName });
+      const saved = await saveDraft(draft, step, patchForStep(draft, step));
+      const updated = await generateAndApply(targetStep, saved);
+      replaceDraft(updated);
+      outlineDirtyFieldsRef.current.clear();
+      setStep(updated.step);
+      setGenerationNotice(`${generationName}已生成，可直接修改；失败或重复生成都不会清空原内容。`);
     } catch (reason) {
-      onError(readableError(reason, "生成大纲失败"));
+      onError(readableError(reason, `生成${generationName}失败，原内容已保留`));
     } finally {
       setGenerating(false);
       setActivityText("");
     }
   };
 
-  const requestNextGeneration = async (intent: OutlineGenerationIntent = "fresh") => {
-    if (!draft || generating || step >= 5) return;
-    const generationName = targetGenerationName();
-    const explanation = step === 1
-      ? "AI将根据您的设定创建一个引人入胜的故事世界。"
-      : step === 2
-        ? "AI将为主角和配角塑造鲜活的个性。"
-        : step === 3
-          ? "AI将为您构建精彩的故事主线，聚焦核心矛盾与转折。"
-          : "AI将为您提炼作品的核心价值和独特之处。";
-    let modelLabel: string;
-    try {
-      modelLabel = generationModelLabel(await getGenerationModelStatus());
-    } catch (reason) {
-      onError(readableError(reason, "读取当前有效模型失败"));
-      return;
-    }
-    Modal.confirm({
-      className: "anw-modal mb-outline-cost-modal",
-      title: intent === "refine" ? `确认优化${generationName}` : `确认生成${generationName}`,
-      content: h(
-        "div",
-        { className: "mb-outline-cost-copy" },
-        h("h3", null, intent === "refine" ? `优化当前${generationName}` : `生成${generationName}`),
-        h("p", null, explanation),
-        h("p", null, intent === "refine"
-          ? "当前内容会作为优化材料发送给模型，结果只进入候选区。"
-          : "当前同类内容不会发送给模型，结果只进入候选区。"),
-        h("p", null, `本次将使用 ${modelLabel}。`),
-      ),
-      okText: "确认",
-      cancelText: "取消",
-      onOk() {
-        void nextWithGeneration(intent);
-      },
-    });
-  };
-
-  const applyCandidate = async () => {
-    if (!candidate || applyingCandidate) return;
-    setApplyingCandidate(true);
-    try {
-      const updated = await apiRequest<OutlineDraftRecord>(
-        `/creative-generations/${candidate.job.id}/apply-outline`,
-        {
-          method: "POST",
-          body: JSON.stringify({ expected_version: candidate.sourceVersion }),
-        },
-      );
-      replaceDraft(updated);
-      outlineDirtyFieldsRef.current.clear();
-      setStep(updated.step);
-      setCandidate(null);
-    } catch (reason) {
-      onError(readableError(reason, "采用大纲候选失败"));
-    } finally {
-      setApplyingCandidate(false);
-    }
-  };
-
   const manualNext = async () => {
     if (!draft || step >= 5 || generating) return;
-    const patch = step === 1
-      ? { target_chapter_count: draft.target_chapter_count }
-      : step === 2
-        ? { background_text: draft.background_text }
-        : step === 3
-          ? { characters: draft.characters }
-          : { plot_text: draft.plot_text };
     setActivityText("正在保存...");
     setGenerating(true);
+    setGenerationNotice("");
     try {
-      await saveDraft(draft, step + 1, patch);
+      await saveDraft(draft, step + 1, patchForStep(draft, step));
     } catch (reason) {
       onError(readableError(reason, "保存大纲草稿失败"));
     } finally {
@@ -804,6 +720,7 @@ function OutlineWizard({
     if (!draft || step <= 1 || generating) return;
     setActivityText("正在保存...");
     setGenerating(true);
+    setGenerationNotice("");
     try {
       await saveDraft(draft, step - 1, {});
     } catch (reason) {
@@ -826,7 +743,6 @@ function OutlineWizard({
       );
       replaceDraft(result.outline);
       onCompleted(result.novel);
-      setCompleted(true);
     } catch (reason) {
       onError(readableError(reason, "完成大纲失败"));
     } finally {
@@ -869,12 +785,14 @@ function OutlineWizard({
     if (characterIndex >= 0) rows[characterIndex] = next;
     else rows.push(next);
     updateLocal({ characters: rows });
+    setGenerationNotice("");
     setCharacterOpen(false);
   };
 
   const removeCharacter = (index: number) => {
     if (!draft) return;
     updateLocal({ characters: draft.characters.filter((_: OutlineCharacterDraft, rowIndex: number) => rowIndex !== index) });
+    setGenerationNotice("");
   };
 
   const changeOutlineField = (
@@ -882,6 +800,7 @@ function OutlineWizard({
     fieldId: string,
   ): void => {
     updateLocal(patch);
+    setGenerationNotice("");
     markOutlineChanged(
       outlineAssistantScopeRef,
       outlineDirtyFieldsRef,
@@ -909,7 +828,7 @@ function OutlineWizard({
   };
 
   React.useEffect(() => {
-    if (!open || !draft || completed) return;
+    if (!draft) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
     const binding = step === 1
       ? outlineFieldBinding(
@@ -957,8 +876,8 @@ function OutlineWizard({
     const mounted = mountStudioAssistantScope(
       assistantContextRuntime,
       {
-        id: `studio:modal:outline:${novel.id}:${draft.id}:step-${step}`,
-        kind: "modal",
+        id: `studio:page:outline:${novel.id}:${draft.id}:step-${step}`,
+        kind: "page",
         persistenceBaseline: () => ({ kind: "entity", version: draftRef.current?.version ?? 0 }),
         envelope: {
           agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
@@ -966,7 +885,6 @@ function OutlineWizard({
           page: {
             section: "outline",
             view: "novel-outline",
-            modal: "novel-outline",
           },
           entity: { type: "outline", id: draft.id, title: `${novel.title}总体大纲` },
         },
@@ -980,10 +898,10 @@ function OutlineWizard({
       }
       mounted.dispose();
     };
-  }, [completed, draft?.id, novel.id, novel.title, open, step]);
+  }, [draft?.id, novel.id, novel.title, step]);
 
   React.useEffect(() => {
-    if (!open || !characterOpen || !draft) return;
+    if (!characterOpen || !draft) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
     const fields: Array<[
       string,
@@ -1051,7 +969,7 @@ function OutlineWizard({
       }
       mounted.dispose();
     };
-  }, [characterIndex, characterOpen, draft?.id, novel.id, novel.title, open]);
+  }, [characterIndex, characterOpen, draft?.id, novel.id, novel.title]);
 
   const canContinue = draft && (
     (step === 1 && draft.target_chapter_count >= 10 && draft.target_chapter_count <= 10000)
@@ -1060,50 +978,10 @@ function OutlineWizard({
     || (step === 4 && Boolean(draft.plot_text.trim()))
     || (step === 5 && Boolean(draft.highlight_text.trim()))
   );
-  const targetAlreadyExists = Boolean(draft && hasCurrentTarget(draft));
-  const candidateReview = candidate
-    ? (candidate.job.output_json.candidate_review || {}) as Record<string, unknown>
-    : {};
-  const candidateExactDuplicate = candidateReview.exact_duplicate === true;
-
-  const candidatePreview = !candidate
-    ? null
-    : candidate.job.kind === "outline_characters"
-      ? h(
-          "div",
-          { className: "mb-outline-candidate-characters" },
-          ...(Array.isArray(candidate.job.output_json.characters)
-            ? candidate.job.output_json.characters
-            : []).map((item: any, index: number) => h(
-              "article",
-              { key: `${String(item.name || "角色")}-${index}`, className: "mb-outline-candidate-character" },
-              h("strong", null, String(item.name || "未命名角色")),
-              h("span", null, item.role_type === "main" ? "主角" : "配角"),
-              h("p", null, String(item.description || "")),
-            )),
-        )
-      : h(
-          "div",
-          { className: "mb-outline-candidate-text" },
-          String(
-            candidate.job.output_json.background_text
-            || candidate.job.output_json.plot_text
-            || candidate.job.output_json.highlight_text
-            || "",
-          ),
-        );
-
-  const generationDetail = !generating
-    ? "正在准备可编辑的大纲草稿"
-    : activityText === "正在保存..."
-      ? "正在保存当前修改，请稍候"
-      : step === 1
-        ? "AI 正在整理世界观与时代背景，请稍候"
-        : step === 2
-          ? "AI 正在梳理核心角色及其关系，请稍候"
-          : step === 3
-            ? "AI 正在构建主要情节与关键转折，请稍候"
-            : "AI 正在提炼作品亮点与简介，请稍候";
+  const currentStepHasContent = Boolean(draft && hasContentForStep(draft, step));
+  const generationDetail = activityText === "正在保存..."
+    ? "正在保存当前修改，请稍候"
+    : "当前内容会保持可见；生成成功后自动写入草稿，失败则保留原内容。";
 
   const stepBody = !draft ? null : step === 1
     ? h(
@@ -1126,7 +1004,16 @@ function OutlineWizard({
       ? h(
           "div",
           { className: "mb-outline-step-body" },
-          h("div", { className: "mb-outline-heading-row" }, h("h3", null, "故事背景设定"), h("span", null, "AI已为您生成了故事背景设定，您可以查看并修改")),
+          h(
+            "div",
+            { className: "mb-outline-heading-row" },
+            h("div", null, h("h3", null, "故事背景设定"), h("span", null, "生成结果直接显示在这里，也可以手动修改")),
+            h(Button, {
+              icon: h(ReloadOutlined),
+              disabled: generating,
+              onClick: () => void requestGeneration(2),
+            }, currentStepHasContent ? "重新生成" : "生成故事背景"),
+          ),
           h(Input.TextArea, {
             ...outlineControlProps(outlineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineBackground),
             rows: 7, maxLength: 2000, value: draft.background_text,
@@ -1143,8 +1030,16 @@ function OutlineWizard({
         ? h(
             "div",
             { className: "mb-outline-step-body is-roles" },
-            h("h3", null, "角色设定"),
-            h("p", null, "AI已为您生成了主角和配角，点击角色标签可以查看和修改详细信息"),
+            h(
+              "div",
+              { className: "mb-outline-heading-row" },
+              h("div", null, h("h3", null, "角色设定"), h("span", null, "点击角色标签可查看和修改详细信息")),
+              h(Button, {
+                icon: h(ReloadOutlined),
+                disabled: generating,
+                onClick: () => void requestGeneration(3),
+              }, currentStepHasContent ? "重新生成" : "生成角色"),
+            ),
             ...(["main", "supporting"] as const).map((roleType) => h(
               "section",
               { key: roleType, className: "mb-outline-role-group" },
@@ -1168,7 +1063,16 @@ function OutlineWizard({
           ? h(
               "div",
               { className: "mb-outline-step-body" },
-              h("div", { className: "mb-outline-heading-row" }, h("h3", null, "故事主要情节"), h("span", null, "AI已为您生成了故事主要情节，您可以查看并修改")),
+              h(
+                "div",
+                { className: "mb-outline-heading-row" },
+                h("div", null, h("h3", null, "故事主要情节"), h("span", null, "生成结果直接显示在这里，也可以手动修改")),
+                h(Button, {
+                  icon: h(ReloadOutlined),
+                  disabled: generating,
+                  onClick: () => void requestGeneration(4),
+                }, currentStepHasContent ? "重新生成" : "生成故事情节"),
+              ),
               h(Input.TextArea, {
                 ...outlineControlProps(outlineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlinePlot),
                 rows: 9, maxLength: 5000, value: draft.plot_text,
@@ -1184,8 +1088,16 @@ function OutlineWizard({
           : h(
               "div",
               { className: "mb-outline-step-body is-highlight" },
-              h("h3", null, "亮点&简介"),
-              h("p", null, "AI已为您生成了亮点&简介，您可以查看并修改。确认无误后点击完成即可创建大纲"),
+              h(
+                "div",
+                { className: "mb-outline-heading-row" },
+                h("div", null, h("h3", null, "亮点&简介"), h("span", null, "确认无误后即可完成大纲")),
+                h(Button, {
+                  icon: h(ReloadOutlined),
+                  disabled: generating,
+                  onClick: () => void requestGeneration(5),
+                }, currentStepHasContent ? "重新生成" : "生成亮点"),
+              ),
               h(Input.TextArea, {
                 ...outlineControlProps(outlineAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineHighlight),
                 rows: 6, maxLength: 200, value: draft.highlight_text,
@@ -1203,30 +1115,9 @@ function OutlineWizard({
     React.Fragment,
     null,
     h(
-      Modal,
-      {
-        open,
-        centered: true,
-        className: "anw-modal mb-outline-modal",
-        wrapClassName: "anw-assistant-aware-modal-wrap",
-        mask: false,
-        width: 680,
-        title: h(
-          "div",
-          { className: "mb-outline-modal-title" },
-          h("span", { className: "mb-outline-modal-title-icon", "aria-hidden": "true" }, h(FileTextOutlined)),
-          h(
-            "span",
-            { className: "mb-outline-modal-title-copy" },
-            h("strong", null, "生成大纲"),
-            h("small", null, "AI 辅助生成，可逐步检查和修改"),
-          ),
-        ),
-        footer: null,
-        destroyOnClose: true,
-        onCancel: generating ? undefined : onClose,
-      },
-      loading || generating
+      "section",
+      { className: "mb-outline-workspace", "aria-busy": loading || generating },
+      loading
         ? h(
             "div",
             { className: "mb-outline-generation-panel", role: "status", "aria-live": "polite" },
@@ -1234,116 +1125,65 @@ function OutlineWizard({
             h(
               "span",
               { className: "mb-outline-generation-status" },
-              h("strong", null, generating ? activityText || "正在生成大纲内容..." : "正在载入大纲..."),
-              h("span", null, generationDetail),
-              generating ? h("small", null, "请保持当前页面打开，完成后会进入候选预览") : null,
+              h("strong", null, "正在载入大纲草稿..."),
+              h("span", null, "正在恢复上次编辑位置和已保存内容"),
             ),
           )
         : wrapSelectionReview(
           STUDIO_SELECTION_REVIEW_FIELD_GROUPS.outline,
           "mb-outline-selection-review-host",
           draft ? h(
-          "div",
-          { className: "mb-outline-wizard" },
-          h("div", { className: "mb-outline-progress-hint" }, completed ? "大纲已创建完成!" : OUTLINE_HINTS[step - 1]),
-          h(
             "div",
-            { className: "mb-outline-steps", "aria-label": "大纲生成步骤" },
-            ...OUTLINE_STEPS.map((label, index) => {
-              const number = index + 1;
-              const stepCompleted = completed || number < step;
-              return h(
-                "div",
-                { key: label, className: `mb-outline-step ${!completed && number === step ? "is-active" : ""} ${stepCompleted ? "is-complete" : ""}` },
-                h("span", { className: "mb-outline-step-dot" }, stepCompleted ? "✓" : number),
-                h("span", { className: "mb-outline-step-label" }, label),
-              );
-            }),
-          ),
-          completed
-            ? h(
-                "div",
-                { className: "mb-outline-success" },
-                h("div", { className: "mb-outline-success-icon" }, h(CheckOutlined)),
-                h("h3", null, "创建成功!"),
-                h("p", null, "大纲已创建完成，您现在可以去创作章节了"),
-                h(Button, { size: "large", className: "anw-primary-button", block: true, onClick: () => { onClose(); onGoChapters(); } }, "去创建章节"),
-              )
-            : h(
-                React.Fragment,
-                null,
-                stepBody,
-                step < 5 ? h(
-                  "button",
-                  { type: "button", className: "mb-manual-link", disabled: generating, onClick: manualNext },
-                  targetAlreadyExists
-                    ? `编辑现有${targetGenerationName()}`
-                    : `自己填写${targetGenerationName()}`,
-                ) : null,
-                h(
+            { className: "mb-outline-wizard" },
+            h(
+              "div",
+              { className: "mb-outline-steps", "aria-label": "大纲生成步骤" },
+              ...OUTLINE_STEPS.map((label, index) => {
+                const number = index + 1;
+                const stepCompleted = number < step;
+                return h(
                   "div",
-                  { className: "mb-outline-footer" },
-                  step > 1 ? h(Button, { size: "large", onClick: previous, disabled: generating }, "上一步") : null,
-                  step < 5 && targetAlreadyExists ? h(
-                    Button,
-                    {
-                      size: "large",
-                      disabled: generating,
-                      onClick: () => void requestNextGeneration("refine"),
-                    },
-                    `AI 优化当前${targetGenerationName()}`,
-                  ) : null,
-                  h(
-                    Button,
-                    {
-                      size: "large", className: "anw-primary-button", block: true,
-                      disabled: !canContinue || generating,
-                      onClick: step === 5 ? complete : () => void requestNextGeneration("fresh"),
-                    },
-                    step === 5
-                      ? h("span", { className: "mb-outline-complete-label" }, "完成")
-                      : step === 1
-                        ? targetAlreadyExists ? "换一版故事背景" : "下一步：生成故事背景"
-                        : targetAlreadyExists ? `换一版${OUTLINE_STEPS[step]}` : `下一步：生成${OUTLINE_STEPS[step]}`,
-                  ),
-                ),
+                  { key: label, className: `mb-outline-step ${number === step ? "is-active" : ""} ${stepCompleted ? "is-complete" : ""}` },
+                  h("span", { className: "mb-outline-step-dot" }, stepCompleted ? "✓" : number),
+                  h("span", { className: "mb-outline-step-label" }, label),
+                );
+              }),
+            ),
+            h("div", { className: "mb-outline-progress-hint" }, OUTLINE_HINTS[step - 1]),
+            generationNotice ? h(Alert, { type: "success", showIcon: true, message: generationNotice }) : null,
+            h(
+              "div",
+              { className: "mb-outline-step-stage" },
+              stepBody,
+              generating ? h(
+                "div",
+                { className: "mb-outline-inline-progress", role: "status", "aria-live": "polite" },
+                h(Spin, { size: "large" }),
+                h("strong", null, activityText || "正在处理大纲..."),
+                h("span", null, generationDetail),
+              ) : null,
+            ),
+            step < 5 ? h(
+              "button",
+              { type: "button", className: "mb-manual-link", disabled: generating, onClick: manualNext },
+              `跳过 AI，直接填写${OUTLINE_STEPS[step]}`,
+            ) : null,
+            h(
+              "div",
+              { className: "mb-outline-footer mb-outline-workspace-footer" },
+              step > 1 ? h(Button, { size: "large", onClick: previous, disabled: generating }, "上一步") : null,
+              h(
+                Button,
+                {
+                  size: "large", className: "anw-primary-button", block: true,
+                  disabled: !canContinue || generating,
+                  onClick: step === 5 ? complete : () => void requestGeneration(nextOutlineGenerationTarget(step).step),
+                },
+                step === 5 ? "完成大纲" : `下一步：生成${OUTLINE_STEPS[step]}`,
               ),
+            ),
           ) : null,
         ),
-    ),
-    h(
-      Modal,
-      {
-        open: Boolean(candidate),
-        className: "anw-modal mb-outline-candidate-modal",
-        wrapClassName: "anw-assistant-aware-modal-wrap",
-        mask: false,
-        width: 700,
-        title: candidate ? `${candidate.generationName}候选` : "大纲候选",
-        okText: candidateExactDuplicate ? "内容完全相同" : "采用并进入下一步",
-        cancelText: "放弃候选",
-        okButtonProps: { disabled: candidateExactDuplicate, loading: applyingCandidate },
-        cancelButtonProps: { disabled: applyingCandidate },
-        onOk: () => void applyCandidate(),
-        onCancel: () => { if (!applyingCandidate) setCandidate(null); },
-        closable: !applyingCandidate,
-      },
-      h(
-        "div",
-        { className: "mb-outline-candidate-body" },
-        candidateReview.message
-          ? h(Alert, {
-              type: candidateExactDuplicate ? "error" : "warning",
-              showIcon: true,
-              message: String(candidateReview.message),
-            })
-          : h(Alert, {
-              type: "info",
-              showIcon: true,
-              message: "以下内容尚未写入大纲，请检查后决定是否采用。",
-            }),
-        candidatePreview,
-      ),
     ),
     h(
       Modal,
@@ -2095,7 +1935,7 @@ export function StudioProjectView({
   const [settingsTab, setSettingsTab] = React.useState("template" as "template" | "foreshadow");
   const [expandedVolumes, setExpandedVolumes] = React.useState([] as string[]);
   const [volumeDescending, setVolumeDescending] = React.useState(true);
-  const [outlineOpen, setOutlineOpen] = React.useState(false);
+  const [outlineEditing, setOutlineEditing] = React.useState(false);
   const [outlineStep, setOutlineStep] = React.useState(0);
   const [chapterWizardOpen, setChapterWizardOpen] = React.useState(false);
   const [volumeOpen, setVolumeOpen] = React.useState(false);
@@ -2301,10 +2141,8 @@ export function StudioProjectView({
   }, [novel.id]);
 
   React.useEffect(() => {
-    // No outline/settings editor modal view exists in the frozen V2 enum.
-    // While either unsupported editor is open, publish no misleading
-    // background-page draft context; closing it remounts the page scope.
-    if (outlineOpen || settingsOpen) return;
+    // Settings still uses a modal without a frozen V2 page contract.
+    if (settingsOpen) return;
     const envelope = studioAssistantPageEnvelope(novel, section, roleTab);
     if (!envelope) return;
     const mounted = mountStudioAssistantScope(
@@ -2316,7 +2154,7 @@ export function StudioProjectView({
       },
     );
     return () => mounted.dispose();
-  }, [novel.id, novel.title, outlineOpen, roleTab, section, settingsOpen]);
+  }, [novel.id, novel.title, roleTab, section, settingsOpen]);
 
   React.useEffect(() => {
     if (!characterOpen || section !== "roles" || roleTab !== "list") return;
@@ -2732,7 +2570,7 @@ export function StudioProjectView({
 
   const openOutline = (targetStep = 0) => {
     setOutlineStep(targetStep);
-    setOutlineOpen(true);
+    setOutlineEditing(true);
   };
 
   const openVolume = (volume: VolumeRecord | null = null) => {
@@ -3098,8 +2936,19 @@ export function StudioProjectView({
   ];
   const hasOutline = outlineCards.some((item) => Boolean(item.value));
 
-  const renderOutline = () => hasOutline
-    ? h(
+  const renderOutline = () => !hasOutline || outlineEditing
+    ? h(OutlineWizard, {
+        novel,
+        startStep: outlineStep,
+        onCompleted: (updated: NovelRecord) => {
+          onNovelChanged(updated);
+          setOutlineEditing(false);
+          void loadDomains();
+        },
+        onError,
+        selectionEditReviewHost: SelectionEditReviewHost,
+      })
+    : h(
         "div",
         { className: "mb-outline-cards" },
         ...outlineCards.map((item) => h(
@@ -3114,13 +2963,6 @@ export function StudioProjectView({
           ),
           h("p", null, item.value || "尚未生成"),
         )),
-      )
-    : h(
-        "div",
-        { className: "mb-outline-empty" },
-        h(FileTextOutlined),
-        h("strong", null, "暂无大纲"),
-        h("span", null, "点击上方按钮开始生成大纲"),
       );
 
   const characterGroups = [
@@ -3224,7 +3066,9 @@ export function StudioProjectView({
         h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: () => setChapterWizardOpen(true) }, "新建章节"),
       )
     : section === "outline"
-      ? h(Button, { className: "anw-primary-button", icon: h(ReloadOutlined), onClick: () => openOutline(hasOutline ? 1 : 0) }, hasOutline ? "重新生成" : "生成大纲")
+      ? hasOutline && !outlineEditing
+        ? h(Button, { className: "anw-primary-button", icon: h(EditOutlined), onClick: () => openOutline(1) }, "编辑大纲")
+        : null
       : section === "roles"
         ? h("div", { className: "mb-top-tabs" }, h("button", { type: "button", className: roleTab === "list" ? "is-active" : "", onClick: () => setRoleSubview("list") }, "角色列表"), h("button", { type: "button", className: roleTab === "graph" ? "is-active" : "", onClick: () => setRoleSubview("graph") }, "关系网"))
         : section === "clues"
@@ -3276,14 +3120,6 @@ export function StudioProjectView({
         ),
       ),
     ),
-    h(OutlineWizard, {
-      novel, open: outlineOpen, startStep: outlineStep,
-      onClose: () => setOutlineOpen(false),
-      onGoChapters: () => onSectionChange("chapters"),
-      onCompleted: (updated: NovelRecord) => { onNovelChanged(updated); void loadDomains(); },
-      onError,
-      selectionEditReviewHost: SelectionEditReviewHost,
-    }),
     h(ChapterCreationWizard, {
       novel,
       open: chapterWizardOpen,
