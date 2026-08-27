@@ -223,16 +223,16 @@ def test_generation_endpoint_accepts_no_body_and_has_no_persistence_calls() -> N
         "configured_model",
     ]
 
-    chat_calls = [
+    chat_stream_calls = [
         node
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "chat"
+        and node.func.attr == "chat_stream"
     ]
-    assert len(chat_calls) == 1
+    assert len(chat_stream_calls) == 1
     assert {
-        keyword.arg for keyword in chat_calls[0].keywords
+        keyword.arg for keyword in chat_stream_calls[0].keywords
     } == {"skill", "session_id"}
 
     forbidden_calls = {

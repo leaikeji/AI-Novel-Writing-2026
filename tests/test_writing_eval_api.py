@@ -81,6 +81,19 @@ def _reply(
     )
 
 
+def _streaming_ctx(
+    reply: SimpleNamespace,
+    calls: list[dict[str, object]] | None = None,
+) -> SimpleNamespace:
+    async def chat_stream(prompt: str, **kwargs):
+        if calls is not None:
+            calls.append({"prompt": prompt, **kwargs})
+        for chunk in reply.chunks:
+            yield chunk
+
+    return SimpleNamespace(chat_stream=chat_stream)
+
+
 def test_contract_endpoint_exposes_only_frozen_samples(api) -> None:
     response = Response()
 
@@ -197,17 +210,13 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
     chat_calls: list[dict[str, object]] = []
     final_text = "雨水沿着门缝渗入档案室。铜钥匙压在受潮纸图的一角。"
 
-    async def chat(prompt: str, **kwargs):
-        chat_calls.append({"prompt": prompt, **kwargs})
-        return _reply(text=final_text)
-
     sample = api.build_sample(api.EXPERIMENT_ID, "X07")
     response = Response()
     result = await api.writing_evaluation_generate(
         api.EXPERIMENT_ID,
         "X07",
         response,
-        ctx=SimpleNamespace(chat=chat),
+        ctx=_streaming_ctx(_reply(text=final_text), chat_calls),
         configured_model=_configured_model(),
     )
 
@@ -232,6 +241,26 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
     }
     assert result["output_text"] == final_text
     assert result["final_text_source"] == "structured_reply_chunks"
+    assert result["skill_selection_enforcement"] == (
+        "requested_via_pawapp_context_parameter"
+    )
+    assert result["tool_policy_enforcement"] == "prompt_only"
+    assert result["stream_diagnostics"] == {
+        "contract": "writing-eval-stream-diagnostics-v1",
+        "content_recorded": False,
+        "stream_completed": True,
+        "event_count": 1,
+        "first_event_elapsed_ms": result["stream_diagnostics"][
+            "first_event_elapsed_ms"
+        ],
+        "last_event_elapsed_ms": result["stream_diagnostics"][
+            "last_event_elapsed_ms"
+        ],
+        "event_type_counts": {"simplenamespace": 1},
+        "message_role_counts": {"assistant": 1},
+        "message_type_counts": {"message": 1},
+        "content_part_type_counts": {"output_text": 1},
+    }
     assert result["server_persistence"] == "none"
     assert response.headers["Cache-Control"] == "no-store"
 
@@ -243,14 +272,11 @@ async def test_generate_extracts_structured_final_without_reasoning(
     monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
     final_text = "只有这一段属于最终正文。"
 
-    async def chat(*_args, **_kwargs):
-        return _reply(text=final_text, include_reasoning=True)
-
     result = await api.writing_evaluation_generate(
         api.EXPERIMENT_ID,
         "X01",
         Response(),
-        ctx=SimpleNamespace(chat=chat),
+        ctx=_streaming_ctx(_reply(text=final_text, include_reasoning=True)),
         configured_model=_configured_model(),
     )
 
@@ -264,15 +290,12 @@ async def test_generate_model_mismatch_returns_actual_and_usage_evidence(
 ) -> None:
     monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
 
-    async def chat(*_args, **_kwargs):
-        return _reply(provider_id="provider-a", model_id="model-b")
-
     with pytest.raises(HTTPException) as captured:
         await api.writing_evaluation_generate(
             api.EXPERIMENT_ID,
             "X02",
             Response(),
-            ctx=SimpleNamespace(chat=chat),
+            ctx=_streaming_ctx(_reply(provider_id="provider-a", model_id="model-b")),
             configured_model=_configured_model(),
         )
 
@@ -287,6 +310,7 @@ async def test_generate_model_mismatch_returns_actual_and_usage_evidence(
         "completion_tokens": 202,
         "total_tokens": 303,
     }
+    assert detail["stream_diagnostics"]["stream_completed"] is True
 
 
 @pytest.mark.asyncio
@@ -303,15 +327,12 @@ async def test_generate_rejects_missing_or_illegal_raw_actual(
 ) -> None:
     monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
 
-    async def chat(*_args, **_kwargs):
-        return reply
-
     with pytest.raises(HTTPException) as captured:
         await api.writing_evaluation_generate(
             api.EXPERIMENT_ID,
             "X03",
             Response(),
-            ctx=SimpleNamespace(chat=chat),
+            ctx=_streaming_ctx(reply),
             configured_model=_configured_model(),
         )
 
@@ -331,9 +352,9 @@ async def test_generate_rejects_concurrent_run_before_provider_call(
     monkeypatch.setattr(api, "_RUN_LOCK", lock)
     chat_calls: list[object] = []
 
-    async def chat(*args, **kwargs):
+    async def chat_stream(*args, **kwargs):
         chat_calls.append((args, kwargs))
-        return _reply()
+        yield _reply().chunks[0]
 
     try:
         with pytest.raises(HTTPException) as captured:
@@ -341,7 +362,7 @@ async def test_generate_rejects_concurrent_run_before_provider_call(
                 api.EXPERIMENT_ID,
                 "X04",
                 Response(),
-                ctx=SimpleNamespace(chat=chat),
+                ctx=SimpleNamespace(chat_stream=chat_stream),
                 configured_model=_configured_model(),
             )
     finally:
@@ -357,10 +378,23 @@ async def test_generate_timeout_is_504_and_cancels_provider_task(
     api, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(api, "_RUN_LOCK", asyncio.Lock())
-    monkeypatch.setattr(api, "WRITING_EVAL_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(api, "WRITING_EVAL_TIMEOUT_SECONDS", 0.01)
     cancelled = asyncio.Event()
+    secret_reasoning = "不得写入诊断证据的内部推理"
 
-    async def chat(*_args, **_kwargs):
+    async def chat_stream(*_args, **_kwargs):
+        yield SimpleNamespace(
+            type="model_response",
+            output=[
+                SimpleNamespace(
+                    type="message",
+                    role="assistant",
+                    content=[
+                        SimpleNamespace(type="reasoning", text=secret_reasoning)
+                    ],
+                )
+            ],
+        )
         try:
             await asyncio.Event().wait()
         finally:
@@ -371,14 +405,26 @@ async def test_generate_timeout_is_504_and_cancels_provider_task(
             api.EXPERIMENT_ID,
             "X05",
             Response(),
-            ctx=SimpleNamespace(chat=chat),
+            ctx=SimpleNamespace(chat_stream=chat_stream),
             configured_model=_configured_model(),
         )
 
     await asyncio.sleep(0)
     assert captured.value.status_code == 504
-    assert captured.value.detail == {
-        "type": "writing_evaluation_timed_out",
-        "sample_id": "X05",
-    }
+    detail = captured.value.detail
+    assert detail["type"] == "writing_evaluation_timed_out"
+    assert detail["sample_id"] == "X05"
+    assert detail["session_id"].startswith(
+        f"novel-writing-eval:{api.EXPERIMENT_ID}:X05:"
+    )
+    UUID(detail["session_id"].rsplit(":", 1)[-1])
+    assert detail["timeout_seconds"] == 0.01
+    assert detail["tool_policy_enforcement"] == "prompt_only"
+    diagnostics = detail["stream_diagnostics"]
+    assert diagnostics["stream_completed"] is False
+    assert diagnostics["event_count"] == 1
+    assert diagnostics["event_type_counts"] == {"model_response": 1}
+    assert diagnostics["content_part_type_counts"] == {"reasoning": 1}
+    assert diagnostics["content_recorded"] is False
+    assert secret_reasoning not in str(detail)
     assert cancelled.is_set()

@@ -230,5 +230,18 @@ R0 可并行，写代码阶段保持单一所有者：本运行器规模小，AP
 - `RR-CONTRACT`、`RR-API`、`RR-CLI`、`RR-TEST` 的源码候选已完成；普通 Compose 默认不启用研究开关，未写入数据库、迁移、正式 Skills 或小说正文。
 - 冻结合同、API、CLI 三组新增测试共 `52 passed`；相关 QwenPaw/Skill/模型编排定向回归 `166 passed`；项目全量回归 `2376 passed, 116 skipped`。
 - `scripts/run_writing_eval.py verify-contract`、Compose override 配置解析和 `scripts/package_plugin.py` 已通过；打包产物为本地生成物，不作为人工源文件编辑。
-- `RR-INT` 只完成源码与静态/自动化集成门禁。真实单样本哨兵尚未执行，也未切换唯一共享 QwenPaw 运行环境；执行前仍需用户明确确认模型调用成本，并核对其他专项没有占用共享运行环境。
+- `RR-INT` 已于 2026-08-27 在用户明确授权一次模型调用成本后执行 X01 真实哨兵：固定合同和路由预检通过，但唯一一次请求最终返回 HTTP 504，`0 completed / 1 failed`，没有取得正文、actual 模型或 token usage，且按合同没有自动重试。因此真实哨兵结论为**未通过**，不是“运行器已经可批量使用”。
+- 哨兵前后项目权威表计数完全一致：小说9、文档25、不可变正文版本126、working copy 25、章节生成任务50、候选26、故事事实510、情报提案29、创作生成任务162、模型运行记录53；前后活动后台任务和活动朗读请求均为0。研究窗口已关闭，研究路由恢复404，QwenPaw 根页面、PawApp 注册表和本项目健康接口均为200。
 - 在真实哨兵证明 actual/usage 可保存且数据库写入数不变之前，不得继续16样本，不得把运行器源码通过写成写作能力提升。
+
+### 8.6 首次超时诊断与只读观测修复（2026-08-28）
+
+用户同意先查明并修复诊断盲区，明确不再发起模型调用。首次 run 的 `dispatch.json` 与 `failure.json` 修改时间精确相差600秒，与服务端 `WRITING_EVAL_TIMEOUT_SECONDS=600` 一致；直接原因是公开 `ctx.chat()` 在硬上限内没有结束。题面只有727字符，运行前后数据库计数一致且无活动后台任务，QwenPaw/PawApp 健康，因此不能归因于题面过长、数据库写锁或安装失败。
+
+更深层原因仍需流式证据区分：当前 `AI小说作家` 启用9个 Skill 和29个工具，`PawAppContext.chat/chat_stream` 的公开参数没有逐请求工具禁用策略；`tools=forbidden` 只能作为提示约束。当前有效 `bigmodel/glm-5.3-flash` 公开配置为 `relay_reasoning=true`，未暴露本轮 thinking budget。现有失败证据无法区分长推理、Agent/工具多轮或 Provider 等待，不得选一个猜测写成已核实根因。
+
+本修复使用 `RR-DIAG`（`SER/MUTEX`）单一工作包，不并行：API事件摘要、失败 DTO、CLI 原子证据和三份共享测试紧密耦合，拆分会增加合同漂移风险。只允许修改 `backend/writing_eval_api.py`、`backend/writing_eval_contract.py`、`scripts/run_writing_eval.py`、`tests/test_writing_eval_*.py` 和本专项文档；禁止触碰 QwenPaw 上游、Agent/Provider设置、正式 Skills、数据库、小说正文和共享运行环境。
+
+`RR-DIAG` 采用公开 `ctx.chat_stream()` 收集事件，只保存事件、消息角色和内容块类型的有界计数及首末事件耗时，明确 `content_recorded=false`，不保存 reasoning、正文片段或工具参数。超时/Provider/模型核验失败响应携带 session id、开始时间、请求模型、Skill请求方式、`tool_policy_enforcement=prompt_only` 和流式摘要；CLI 保存至多64 KiB的 JSON 错误正文、HTTP状态、正文哈希、派发/失败时间和客户端耗时。任何旧失败 run 保持不可覆盖；本轮不启用研究开关、不安装插件、不执行 X01。
+
+`RR-DIAG` 源码候选验证结果：新增定向测试 `54 passed`，项目全量回归 `2436 passed, 116 skipped`；合同自检、Compose override 静态解析、Python 编译和 PawApp 本地打包均通过。两条全量警告均为既有 Starlette 弃用警告。本验证没有启用研究入口、安装插件或发起模型调用，不能据此宣称更深层超时原因已经确定。

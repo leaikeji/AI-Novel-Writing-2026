@@ -55,6 +55,20 @@ def _valid_result(sample_id: str) -> dict[str, object]:
             "total_tokens": 120,
         },
         "session_id": f"eval-session:{sample_id}",
+        "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
+        "tool_policy_enforcement": "prompt_only",
+        "stream_diagnostics": {
+            "contract": "writing-eval-stream-diagnostics-v1",
+            "content_recorded": False,
+            "stream_completed": True,
+            "event_count": 1,
+            "first_event_elapsed_ms": 10,
+            "last_event_elapsed_ms": 20,
+            "event_type_counts": {"model_response": 1},
+            "message_role_counts": {"assistant": 1},
+            "message_type_counts": {"message": 1},
+            "content_part_type_counts": {"output_text": 1},
+        },
         "output_text": output_text,
         "output_sha256": runner.sha256_text(output_text),
         "deterministic_checks": {
@@ -236,12 +250,94 @@ def test_failed_dispatch_is_recorded_once_and_resume_never_retries(
     )
     assert failure["automatic_retry"] is False
     assert failure["error_class"] == "RuntimeError"
+    assert isinstance(failure["dispatch_started_at"], str)
+    assert isinstance(failure["failed_at"], str)
+    assert isinstance(failure["client_duration_ms"], int)
     assert [method for method, _path in calls].count("POST") == 1
 
     args.resume = True
     with pytest.raises(runner.RunnerError, match="AMBIGUOUS_OR_FAILED_ATTEMPT"):
         runner.command_run(args)
     assert [method for method, _path in calls].count("POST") == 1
+
+
+def test_http_failure_preserves_bounded_server_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = runner.httpx.Request(
+        "POST",
+        "http://qwenpaw.invalid/api/ai-novel-world-2026/research/"
+        "writing-evaluations/mystery-ab-20260827-v1/samples/X01/generate",
+    )
+    server_detail = {
+        "detail": {
+            "type": "writing_evaluation_timed_out",
+            "sample_id": "X01",
+            "session_id": "novel-writing-eval:test-session",
+            "stream_diagnostics": {
+                "content_recorded": False,
+                "event_count": 4,
+            },
+        }
+    }
+    response = runner.httpx.Response(504, request=request, json=server_detail)
+    error = runner.httpx.HTTPStatusError(
+        "server timeout",
+        request=request,
+        response=response,
+    )
+    evidence_root = tmp_path / "evidence"
+    calls = _install_httpx_client(monkeypatch, post_error=error)
+
+    assert runner.command_run(_args(evidence_root, sample=["X01"])) == 2
+
+    sample_dir = evidence_root / "rr-test" / "samples" / "X01"
+    dispatch = runner._read_json(sample_dir / "dispatch.json")
+    failure = runner._read_json(sample_dir / "failure.json")
+    assert dispatch["state"] == "dispatching"
+    assert isinstance(dispatch["dispatch_started_at"], str)
+    assert failure["http_status"] == 504
+    assert failure["response_json"] == server_detail
+    assert failure["response_body_bytes"] <= runner.MAX_HTTP_ERROR_BODY_BYTES
+    assert len(failure["response_body_sha256"]) == 64
+    assert [method for method, _path in calls].count("POST") == 1
+
+
+def test_http_failure_hashes_but_does_not_store_oversized_body(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = runner.httpx.Request(
+        "POST",
+        "http://qwenpaw.invalid/api/ai-novel-world-2026/research/"
+        "writing-evaluations/mystery-ab-20260827-v1/samples/X01/generate",
+    )
+    oversized_body = b"x" * (runner.MAX_HTTP_ERROR_BODY_BYTES + 1)
+    response = runner.httpx.Response(
+        502,
+        request=request,
+        headers={"content-type": "text/plain"},
+        content=oversized_body,
+    )
+    error = runner.httpx.HTTPStatusError(
+        "server failure",
+        request=request,
+        response=response,
+    )
+    evidence_root = tmp_path / "evidence"
+    _install_httpx_client(monkeypatch, post_error=error)
+
+    assert runner.command_run(_args(evidence_root, sample=["X01"])) == 2
+
+    failure = runner._read_json(
+        evidence_root / "rr-test" / "samples" / "X01" / "failure.json"
+    )
+    assert failure["response_body_bytes"] == len(oversized_body)
+    assert failure["response_body_sha256"] == runner._sha256_bytes(oversized_body)
+    assert failure["response_body_truncated"] is True
+    assert "response_json" not in failure
+    assert oversized_body.decode() not in json.dumps(failure)
 
 
 @pytest.mark.parametrize(

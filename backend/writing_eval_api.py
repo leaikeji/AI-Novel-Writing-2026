@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 import hashlib
 import hmac
 import os
 from pathlib import Path
+import re
 import time
 from typing import Any
 from uuid import uuid4
@@ -34,7 +36,10 @@ from .writing_eval_contract import (
     RIGHTS_BASIS,
     RUBRIC_SHA256,
     SCHEMA_VERSION,
+    SKILL_SELECTION_ENFORCEMENT,
     SOURCE_SUITE_SHA256,
+    STREAM_DIAGNOSTIC_CONTRACT_VERSION,
+    TOOL_POLICY_ENFORCEMENT,
     WritingEvalContractError,
     build_sample,
     deterministic_output_checks,
@@ -48,12 +53,127 @@ WRITING_EVAL_HEADER = "X-AI-Novel-Writing-Eval"
 WRITING_EVAL_TIMEOUT_SECONDS = 600.0
 _SKILL_ID = "prose-writing"
 _RUN_LOCK = asyncio.Lock()
+_DIAGNOSTIC_LABEL = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+_DIAGNOSTIC_MAX_LABELS = 32
 
 router = APIRouter(prefix="/research/writing-evaluations", tags=["research"])
 
 
 class WritingEvalTimeoutError(TimeoutError):
     """Raised when a bounded research generation does not return in time."""
+
+
+class _ObservedReply:
+    """Minimal public-reply shape consumed by the existing audit helpers."""
+
+    def __init__(self, chunks: list[Any]) -> None:
+        self.chunks = tuple(chunks)
+
+
+def _field(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _diagnostic_label(value: Any, *, fallback: str) -> str:
+    candidates = (value, fallback)
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            candidate = getattr(candidate, "value", None)
+        if isinstance(candidate, str):
+            normalized = candidate.strip().lower()
+            if _DIAGNOSTIC_LABEL.fullmatch(normalized):
+                return normalized
+    return "unknown"
+
+
+def _increment_bounded(counter: dict[str, int], label: str) -> None:
+    if label not in counter and len(counter) >= _DIAGNOSTIC_MAX_LABELS:
+        label = "other"
+    counter[label] = counter.get(label, 0) + 1
+
+
+class _StreamDiagnostics:
+    """Collect content-free event structure from one public chat stream."""
+
+    def __init__(self, *, started_monotonic: float) -> None:
+        self.started_monotonic = started_monotonic
+        self.event_count = 0
+        self.first_event_elapsed_ms: int | None = None
+        self.last_event_elapsed_ms: int | None = None
+        self.event_type_counts: dict[str, int] = {}
+        self.message_role_counts: dict[str, int] = {}
+        self.message_type_counts: dict[str, int] = {}
+        self.content_part_type_counts: dict[str, int] = {}
+        self.stream_completed = False
+
+    def observe(self, event: Any) -> None:
+        elapsed_ms = max(
+            0, round((time.monotonic() - self.started_monotonic) * 1000)
+        )
+        if self.first_event_elapsed_ms is None:
+            self.first_event_elapsed_ms = elapsed_ms
+        self.last_event_elapsed_ms = elapsed_ms
+        self.event_count += 1
+        _increment_bounded(
+            self.event_type_counts,
+            _diagnostic_label(
+                _field(event, "type"), fallback=type(event).__name__.lower()
+            ),
+        )
+        output = _field(event, "output")
+        messages = output if isinstance(output, (list, tuple)) else (event,)
+        for message in messages:
+            role = _field(message, "role")
+            message_type = _field(message, "type")
+            if role is not None:
+                _increment_bounded(
+                    self.message_role_counts,
+                    _diagnostic_label(role, fallback="unknown"),
+                )
+            if message_type is not None:
+                _increment_bounded(
+                    self.message_type_counts,
+                    _diagnostic_label(message_type, fallback="unknown"),
+                )
+            content = _field(message, "content")
+            parts = content if isinstance(content, (list, tuple)) else (content,)
+            for part in parts:
+                if part is None or isinstance(part, str):
+                    continue
+                part_type = _field(part, "type")
+                _increment_bounded(
+                    self.content_part_type_counts,
+                    _diagnostic_label(part_type, fallback="unknown"),
+                )
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "contract": STREAM_DIAGNOSTIC_CONTRACT_VERSION,
+            "content_recorded": False,
+            "stream_completed": self.stream_completed,
+            "event_count": self.event_count,
+            "first_event_elapsed_ms": self.first_event_elapsed_ms,
+            "last_event_elapsed_ms": self.last_event_elapsed_ms,
+            "event_type_counts": dict(sorted(self.event_type_counts.items())),
+            "message_role_counts": dict(sorted(self.message_role_counts.items())),
+            "message_type_counts": dict(sorted(self.message_type_counts.items())),
+            "content_part_type_counts": dict(
+                sorted(self.content_part_type_counts.items())
+            ),
+        }
+
+
+async def _collect_stream_reply(
+    stream: AsyncIterator[Any], diagnostics: _StreamDiagnostics
+) -> _ObservedReply:
+    chunks: list[Any] = []
+    async for event in stream:
+        diagnostics.observe(event)
+        chunks.append(event)
+    diagnostics.stream_completed = True
+    return _ObservedReply(chunks)
 
 
 def _enabled() -> bool:
@@ -179,6 +299,25 @@ def _model_payload(audit: ModelAudit) -> dict[str, Any]:
     }
 
 
+def _execution_diagnostics(
+    *,
+    session_id: str,
+    started_at: datetime,
+    configured_model: ModelAudit,
+    stream: _StreamDiagnostics,
+) -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "started_at": _iso(started_at),
+        "timeout_seconds": WRITING_EVAL_TIMEOUT_SECONDS,
+        "requested_model": _model_payload(configured_model),
+        "skill_id": _SKILL_ID,
+        "skill_selection_enforcement": SKILL_SELECTION_ENFORCEMENT,
+        "tool_policy_enforcement": TOOL_POLICY_ENFORCEMENT,
+        "stream_diagnostics": stream.snapshot(),
+    }
+
+
 @router.get("/{experiment_id}", dependencies=[Depends(require_writing_eval_enabled)])
 def writing_evaluation_contract_get(
     experiment_id: str, response: Response
@@ -219,15 +358,19 @@ async def writing_evaluation_generate(
     )
     started_at = _utc_now()
     started_monotonic = time.monotonic()
+    stream_diagnostics = _StreamDiagnostics(started_monotonic=started_monotonic)
     actual_model: ModelAudit | None = None
     try:
         async with _RUN_LOCK:
             ensure_prompt_within_effective_limit(sample.prompt, configured_model)
             reply = await _await_reply(
-                ctx.chat(
-                    sample.prompt,
-                    skill=_SKILL_ID,
-                    session_id=session_id,
+                _collect_stream_reply(
+                    ctx.chat_stream(
+                        sample.prompt,
+                        skill=_SKILL_ID,
+                        session_id=session_id,
+                    ),
+                    stream_diagnostics,
                 )
             )
             _strict_public_usage(reply)
@@ -237,15 +380,31 @@ async def writing_evaluation_generate(
             actual_model.ensure_matches(configured_model)
             final_text = reply_final_text(reply)
     except WritingEvalTimeoutError as error:
+        diagnostics = _execution_diagnostics(
+            session_id=session_id,
+            started_at=started_at,
+            configured_model=configured_model,
+            stream=stream_diagnostics,
+        )
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail={"type": "writing_evaluation_timed_out", "sample_id": sample_id},
+            detail={
+                "type": "writing_evaluation_timed_out",
+                "sample_id": sample_id,
+                **diagnostics,
+            },
         ) from error
     except ModelVerificationError as error:
         detail: dict[str, Any] = {
             "type": "writing_evaluation_model_verification_failed",
             "sample_id": sample_id,
             "message": str(error),
+            **_execution_diagnostics(
+                session_id=session_id,
+                started_at=started_at,
+                configured_model=configured_model,
+                stream=stream_diagnostics,
+            ),
         }
         if actual_model is not None:
             detail["actual_model"] = _model_payload(actual_model)
@@ -267,6 +426,12 @@ async def writing_evaluation_generate(
                 "type": "writing_evaluation_provider_failed",
                 "sample_id": sample_id,
                 "error_class": type(error).__name__,
+                **_execution_diagnostics(
+                    session_id=session_id,
+                    started_at=started_at,
+                    configured_model=configured_model,
+                    stream=stream_diagnostics,
+                ),
             },
         ) from error
 
@@ -304,6 +469,9 @@ async def writing_evaluation_generate(
         "started_at": _iso(started_at),
         "finished_at": _iso(finished_at),
         "duration_ms": duration_ms,
+        "skill_selection_enforcement": SKILL_SELECTION_ENFORCEMENT,
+        "tool_policy_enforcement": TOOL_POLICY_ENFORCEMENT,
+        "stream_diagnostics": stream_diagnostics.snapshot(),
         "final_text_source": "structured_reply_chunks",
         "output_text": final_text,
         "output_sha256": sha256_text(final_text),

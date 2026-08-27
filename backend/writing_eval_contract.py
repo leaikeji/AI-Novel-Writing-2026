@@ -24,6 +24,9 @@ CANDIDATE_OVERLAY_SHA256 = (
 MANIFEST_SHA256 = "19d5bb361b74c93f51f1580dea8d8977a7c21fa7f9a0a80dec781aee449d640f"
 RUBRIC_SHA256 = "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6"
 PROMPT_CONTRACT_VERSION = "writing-eval-prompt-v1"
+STREAM_DIAGNOSTIC_CONTRACT_VERSION = "writing-eval-stream-diagnostics-v1"
+SKILL_SELECTION_ENFORCEMENT = "requested_via_pawapp_context_parameter"
+TOOL_POLICY_ENFORCEMENT = "prompt_only"
 
 
 class WritingEvalContractError(ValueError):
@@ -326,6 +329,9 @@ def experiment_contract(experiment_id: str) -> dict[str, Any]:
         "rubric_sha256": RUBRIC_SHA256,
         "generation_contract": GENERATION_CONTRACT_VERSION,
         "prompt_contract": PROMPT_CONTRACT_VERSION,
+        "stream_diagnostic_contract": STREAM_DIAGNOSTIC_CONTRACT_VERSION,
+        "skill_selection_enforcement": SKILL_SELECTION_ENFORCEMENT,
+        "tool_policy_enforcement": TOOL_POLICY_ENFORCEMENT,
         "sample_ids": list(_ASSIGNMENTS),
         "case_ids": list(_CASES),
         "blind_pairs": [dict(item) for item in _BLIND_PAIRS],

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -27,7 +28,10 @@ from backend.writing_eval_contract import (  # noqa: E402
     MANIFEST_SHA256,
     PROMPT_CONTRACT_VERSION,
     RUBRIC_SHA256,
+    SKILL_SELECTION_ENFORCEMENT,
     SOURCE_SUITE_SHA256,
+    STREAM_DIAGNOSTIC_CONTRACT_VERSION,
+    TOOL_POLICY_ENFORCEMENT,
     build_sample,
     experiment_contract,
     sha256_text,
@@ -44,6 +48,7 @@ DEFAULT_EVIDENCE_ROOT = (
     / "runs"
 )
 RUN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+MAX_HTTP_ERROR_BODY_BYTES = 64 * 1024
 
 
 class RunnerError(RuntimeError):
@@ -52,6 +57,30 @@ class RunnerError(RuntimeError):
 
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _http_error_evidence(error: httpx.HTTPStatusError) -> dict[str, Any]:
+    response = error.response
+    payload: dict[str, Any] = {
+        "http_status": response.status_code,
+        "response_content_type": response.headers.get("content-type", ""),
+        "response_body_bytes": len(response.content),
+        "response_body_sha256": _sha256_bytes(response.content),
+    }
+    if len(response.content) > MAX_HTTP_ERROR_BODY_BYTES:
+        payload["response_body_truncated"] = True
+        return payload
+    try:
+        response_json = response.json()
+    except (ValueError, UnicodeDecodeError):
+        return payload
+    if isinstance(response_json, (dict, list)):
+        payload["response_json"] = response_json
+    return payload
 
 
 def _safe_directory(path: Path) -> None:
@@ -180,6 +209,9 @@ def _validate_server_contract(server: dict[str, Any], local: dict[str, Any]) -> 
         "rubric_sha256",
         "generation_contract",
         "prompt_contract",
+        "stream_diagnostic_contract",
+        "skill_selection_enforcement",
+        "tool_policy_enforcement",
         "sample_ids",
         "case_ids",
         "blind_pairs",
@@ -229,6 +261,18 @@ def _validate_result(result: dict[str, Any], sample_id: str) -> None:
         or requested.get("model_id") != actual.get("model_id")
     ):
         raise RunnerError("RESULT_MODEL_MISMATCH")
+    diagnostics = result.get("stream_diagnostics")
+    if (
+        not isinstance(diagnostics, dict)
+        or diagnostics.get("contract") != STREAM_DIAGNOSTIC_CONTRACT_VERSION
+        or diagnostics.get("content_recorded") is not False
+        or diagnostics.get("stream_completed") is not True
+    ):
+        raise RunnerError("RESULT_STREAM_DIAGNOSTICS_INVALID")
+    if result.get("tool_policy_enforcement") != TOOL_POLICY_ENFORCEMENT:
+        raise RunnerError("RESULT_TOOL_POLICY_EVIDENCE_INVALID")
+    if result.get("skill_selection_enforcement") != SKILL_SELECTION_ENFORCEMENT:
+        raise RunnerError("RESULT_SKILL_SELECTION_EVIDENCE_INVALID")
 
 
 def _terminal_result_valid(sample_dir: Path, sample_id: str) -> bool:
@@ -260,7 +304,13 @@ def _blind_markdown(result: dict[str, Any]) -> str:
     )
 
 
-def _save_result(run_dir: Path, result: dict[str, Any]) -> None:
+def _save_result(
+    run_dir: Path,
+    result: dict[str, Any],
+    *,
+    dispatch_started_at: str | None = None,
+    client_duration_ms: int | None = None,
+) -> None:
     sample_id = str(result["sample_id"])
     sample = build_sample(EXPERIMENT_ID, sample_id)
     sample_dir = run_dir / "samples" / sample_id
@@ -275,15 +325,17 @@ def _save_result(run_dir: Path, result: dict[str, Any]) -> None:
         run_dir / "blind-samples" / f"{sample_id}.md",
         _blind_markdown(result).encode("utf-8"),
     )
-    _write_json(
-        sample_dir / "dispatch.json",
-        {
-            "state": "received",
-            "sample_id": sample_id,
-            "session_id": result["session_id"],
-            "output_sha256": result["output_sha256"],
-        },
-    )
+    dispatch: dict[str, Any] = {
+        "state": "received",
+        "sample_id": sample_id,
+        "session_id": result["session_id"],
+        "output_sha256": result["output_sha256"],
+    }
+    if dispatch_started_at is not None:
+        dispatch["dispatch_started_at"] = dispatch_started_at
+    if client_duration_ms is not None:
+        dispatch["client_duration_ms"] = client_duration_ms
+    _write_json(sample_dir / "dispatch.json", dispatch)
 
 
 def _plan_payload(run_id: str, contract: dict[str, Any]) -> dict[str, Any]:
@@ -392,12 +444,15 @@ def command_run(args: argparse.Namespace) -> int:
                     )
                 _safe_directory(sample_dir)
                 sample = build_sample(EXPERIMENT_ID, sample_id)
+                dispatch_started_at = _utc_now_iso()
+                dispatch_started_monotonic = time.monotonic()
                 _write_json(
                     dispatch_path,
                     {
                         "state": "dispatching",
                         "sample_id": sample_id,
                         "prompt_sha256": sha256_text(sample.prompt),
+                        "dispatch_started_at": dispatch_started_at,
                     },
                 )
                 try:
@@ -419,19 +474,42 @@ def command_run(args: argparse.Namespace) -> int:
                         run_model = current_model
                     elif run_model != current_model:
                         raise RunnerError("MODEL_DRIFT")
-                    _save_result(run_dir, result)
+                    _save_result(
+                        run_dir,
+                        result,
+                        dispatch_started_at=dispatch_started_at,
+                        client_duration_ms=max(
+                            0,
+                            round(
+                                (time.monotonic() - dispatch_started_monotonic)
+                                * 1000
+                            ),
+                        ),
+                    )
                     completed += 1
                 except Exception as error:
                     failed += 1
+                    failure: dict[str, Any] = {
+                        "state": "failed",
+                        "sample_id": sample_id,
+                        "error_class": type(error).__name__,
+                        "message": str(error),
+                        "dispatch_started_at": dispatch_started_at,
+                        "failed_at": _utc_now_iso(),
+                        "client_duration_ms": max(
+                            0,
+                            round(
+                                (time.monotonic() - dispatch_started_monotonic)
+                                * 1000
+                            ),
+                        ),
+                        "automatic_retry": False,
+                    }
+                    if isinstance(error, httpx.HTTPStatusError):
+                        failure.update(_http_error_evidence(error))
                     _write_json(
                         failure_path,
-                        {
-                            "state": "failed",
-                            "sample_id": sample_id,
-                            "error_class": type(error).__name__,
-                            "message": str(error),
-                            "automatic_retry": False,
-                        },
+                        failure,
                     )
                     break
         _write_json(
