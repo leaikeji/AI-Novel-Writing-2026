@@ -1,0 +1,16 @@
+AI小说世界2026 MOSS-TTS dependency Sidecar layer
+
+This image layer is an integration work of the AI小说世界2026 project. It
+does not modify, fork, copy, or replace QwenPaw core code. It intentionally
+contains no MOSS model weights, MOSS runtime source tree, novel media, private
+reference audio, database credentials, or Sidecar business server.
+
+Pinned external components include OpenMOSS MOSS-TTS-Nano source metadata,
+OpenMOSS-Team ONNX model metadata, FFmpeg, PyTorch, ONNX Runtime and their
+locked Python dependency closure. Their respective licenses and notices
+continue to apply. See THIRD_PARTY_NOTICES.md and the package metadata bundled
+with the installed wheels. Model and source bytes must be supplied later via a
+read-only managed volume after their independent lifecycle gate passes.
+
+T1-DEP state: dependency layer only. The default entrypoint fails closed until
+the T1-B runtime/server work package replaces it through an approved change.

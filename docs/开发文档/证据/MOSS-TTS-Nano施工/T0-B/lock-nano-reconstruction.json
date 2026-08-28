@@ -1,0 +1,58 @@
+{
+  "schema_version": "moss-tts-lock-reconstruction/1.0",
+  "generated_at": "2026-08-26T05:54:45+08:00",
+  "lock_name": "LOCK-NANO",
+  "record_kind": "machine_interval_plus_coordinator_attestation",
+  "independent_os_lock": false,
+  "exact_acquire_time_available": false,
+  "exact_release_time_available": false,
+  "machine_evidence": {
+    "prewarm": {
+      "captured_at": "2026-08-26T04:56:18+08:00",
+      "file_birth_and_mtime": "2026-08-26T04:56:39+08:00",
+      "nano_lock_state": "not_acquired",
+      "nano_model_loaded": false,
+      "matching_nano_process_count": 0,
+      "matching_tts_container_count": 0,
+      "classification": "pre-lock baseline"
+    },
+    "first_real_gate_failure": {
+      "captured_at": "2026-08-26T04:57:28+08:00",
+      "phase": "runtime import before model ready"
+    },
+    "endurance_result": {
+      "generated_at_and_file_birth": "2026-08-26T05:31:57+08:00",
+      "actual_duration_seconds": 1804.466,
+      "status": "passed"
+    },
+    "postshutdown": {
+      "captured_at": "2026-08-26T05:32:10+08:00",
+      "remaining_compose_container_count": 0,
+      "remaining_benchmark_or_sidecar_process_count": 0,
+      "orphan_count": 0
+    }
+  },
+  "reconstructed_interval": {
+    "acquire": {
+      "lower_bound_exclusive": "2026-08-26T04:56:18+08:00",
+      "upper_bound_inclusive": "2026-08-26T04:57:28+08:00",
+      "precision": "interval_only"
+    },
+    "coverage": "exclusive ownership was declared before real smoke and continuously covered real smoke, the complete 1804.466-second endurance, and shutdown",
+    "release": {
+      "not_before": "2026-08-26T05:32:10+08:00",
+      "exact_time": null,
+      "precision": "lower_bound_only"
+    }
+  },
+  "coordinator_attestation": {
+    "attested_by": "root unique integration owner",
+    "attestation_received_on": "2026-08-26",
+    "statement": "The 04:56:18 prewarm snapshot is the pre-lock baseline. The owner declared exclusive LOCK-NANO before real smoke; acquisition occurred in (04:56:18, 04:57:28]. The lock continuously covered smoke, the 1804-second endurance, and shutdown. At 05:32:10 machine state had zero TTS containers/processes; the owner then explicitly declared release. Exact release time is unavailable and file birth must not be represented as a lock event."
+  },
+  "limitations": [
+    "No independent OS lock file or timestamped lock service event existed.",
+    "File birth times prove evidence persistence, not acquire or release instants.",
+    "This record must not be upgraded from an interval/attestation into an exact lock timestamp."
+  ]
+}

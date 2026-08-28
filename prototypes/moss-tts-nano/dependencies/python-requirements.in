@@ -1,0 +1,19 @@
+# T0-A / 2026-08-26 / Python 3.11+ / macOS arm64 candidate.
+#
+# The official MOSS-TTS-Nano source revision cc7bdf19 pins torch/torchaudio
+# and transformers but leaves most other packages open.  This input closes
+# those ranges for a reproducible Stage 0 environment.  WeTextProcessing is
+# intentionally absent: its required pynini 2.1.6.post1 has no macOS arm64
+# wheel on PyPI.  Stage 0 must run with WeText disabled until a separately
+# reviewed conda-forge or source-build path is approved.
+fastapi==0.141.1
+huggingface-hub==0.36.0
+numpy==2.3.3
+onnxruntime==1.24.3
+python-multipart==0.0.32
+sentencepiece==0.2.2
+soundfile==0.14.0
+torch==2.7.0
+torchaudio==2.7.0
+transformers==4.57.1
+uvicorn==0.52.4

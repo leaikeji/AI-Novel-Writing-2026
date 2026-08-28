@@ -1,0 +1,2757 @@
+{
+  "cases": [
+    {
+      "case_id": "narration-neutral",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "narration"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1715273728,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2235.825833,
+            "request_wall_ms": 2237.709709,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-narrator"
+        ],
+        "text_sha256": [
+          "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 22,
+          "clipped_sample_ratio": 3.8711e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 2.8235e-05,
+          "duration_seconds": 5.92,
+          "frame_count": 284160,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -17.317749,
+          "rms_normalized": 0.136179757,
+          "sample_count": 568320,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 86306,
+          "silent_frame_ratio": 0.303723255,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1136684,
+            "read_only_inspection": true,
+            "sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb",
+        "ready_segment_sha256": [
+          "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1715273728
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 5.92,
+        "first_packet_ms": 2235.825833,
+        "rtf": 0.377991505,
+        "synthesis_wall_ms": 2237.709709
+      }
+    },
+    {
+      "case_id": "dialogue-explicit-speaker",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "explicit-speaker"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "0685b378a8e3da0b9ba86d848f471eef30f358fe04db90c3a6f3da97d70bfef8",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1751449600,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1248.59825,
+            "request_wall_ms": 1249.14875,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "0ecfa13658e8a6f2c7ba6721556a28583b9e87fb809f49fd99738f6689458e1b",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-explicit-speaker"
+        ],
+        "text_sha256": [
+          "0ecfa13658e8a6f2c7ba6721556a28583b9e87fb809f49fd99738f6689458e1b"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 0,
+          "clipped_sample_ratio": 0.0,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 0.000198243,
+          "duration_seconds": 3.36,
+          "frame_count": 161280,
+          "peak_abs_normalized": 0.794708252,
+          "peak_dbfs": -1.995846,
+          "rms_dbfs": -17.67024,
+          "rms_normalized": 0.130763941,
+          "sample_count": 322560,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 52865,
+          "silent_frame_ratio": 0.327783978,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 645164,
+            "read_only_inspection": true,
+            "sha256": "0685b378a8e3da0b9ba86d848f471eef30f358fe04db90c3a6f3da97d70bfef8"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "0685b378a8e3da0b9ba86d848f471eef30f358fe04db90c3a6f3da97d70bfef8",
+        "ready_segment_sha256": [
+          "0685b378a8e3da0b9ba86d848f471eef30f358fe04db90c3a6f3da97d70bfef8"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1751449600
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 3.36,
+        "first_packet_ms": 1248.59825,
+        "rtf": 0.371770461,
+        "synthesis_wall_ms": 1249.14875
+      }
+    },
+    {
+      "case_id": "dialogue-two-person",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "two-person-dialogue"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "393044bdbb2bdaec1245c5c0fab0a263393307572d92117e26e20f2e5cb632ac",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2443.62075,
+            "request_wall_ms": 2444.492375,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "6dc99fb08ece09bf14c20300687f7a72a18a9c170ffef655f8c356c867873e75",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-two-person"
+        ],
+        "text_sha256": [
+          "6dc99fb08ece09bf14c20300687f7a72a18a9c170ffef655f8c356c867873e75"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 12,
+          "clipped_sample_ratio": 1.8825e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 6.1802e-05,
+          "duration_seconds": 6.64,
+          "frame_count": 318720,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -18.346074,
+          "rms_normalized": 0.120975191,
+          "sample_count": 637440,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 110845,
+          "silent_frame_ratio": 0.347781752,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1274924,
+            "read_only_inspection": true,
+            "sha256": "393044bdbb2bdaec1245c5c0fab0a263393307572d92117e26e20f2e5cb632ac"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "393044bdbb2bdaec1245c5c0fab0a263393307572d92117e26e20f2e5cb632ac",
+        "ready_segment_sha256": [
+          "393044bdbb2bdaec1245c5c0fab0a263393307572d92117e26e20f2e5cb632ac"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 6.64,
+        "first_packet_ms": 2443.62075,
+        "rtf": 0.368146442,
+        "synthesis_wall_ms": 2444.492375
+      }
+    },
+    {
+      "case_id": "dialogue-multi-person",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "multi-person-dialogue"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "3f0bb3e523b554434a3324b36002fc9e3166870ca2000125b140b3240c8fcd39",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 3397.905375,
+            "request_wall_ms": 3400.888,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "5cc8817d0ca2310fcaa8536c76d1013759c655bc6fd3d3828110462dfe65f881",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-multi-person"
+        ],
+        "text_sha256": [
+          "5cc8817d0ca2310fcaa8536c76d1013759c655bc6fd3d3828110462dfe65f881"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 102,
+          "clipped_sample_ratio": 0.000119651,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -1.5422e-05,
+          "duration_seconds": 8.88,
+          "frame_count": 426240,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -18.819502,
+          "rms_normalized": 0.114557861,
+          "sample_count": 852480,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 228709,
+          "silent_frame_ratio": 0.536573292,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1705004,
+            "read_only_inspection": true,
+            "sha256": "3f0bb3e523b554434a3324b36002fc9e3166870ca2000125b140b3240c8fcd39"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "3f0bb3e523b554434a3324b36002fc9e3166870ca2000125b140b3240c8fcd39",
+        "ready_segment_sha256": [
+          "3f0bb3e523b554434a3324b36002fc9e3166870ca2000125b140b3240c8fcd39"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 8.88,
+        "first_packet_ms": 3397.905375,
+        "rtf": 0.382982883,
+        "synthesis_wall_ms": 3400.888
+      }
+    },
+    {
+      "case_id": "dialogue-omitted-subject",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "omitted-subject"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "e5c3df28a20da9849417edbbf2200c92d9f3511a389fdd494801ba5cf34e744c",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1652.413625,
+            "request_wall_ms": 1653.069,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "bb972b1056e84fa2fa40c815f0919be1ce4cef507ca024c5dac76656a5f7426d",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-omitted-subject"
+        ],
+        "text_sha256": [
+          "bb972b1056e84fa2fa40c815f0919be1ce4cef507ca024c5dac76656a5f7426d"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 0,
+          "clipped_sample_ratio": 0.0,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 7.6551e-05,
+          "duration_seconds": 4.56,
+          "frame_count": 218880,
+          "peak_abs_normalized": 0.934020996,
+          "peak_dbfs": -0.592867,
+          "rms_dbfs": -19.76241,
+          "rms_normalized": 0.102773116,
+          "sample_count": 437760,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 116532,
+          "silent_frame_ratio": 0.532401316,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 875564,
+            "read_only_inspection": true,
+            "sha256": "e5c3df28a20da9849417edbbf2200c92d9f3511a389fdd494801ba5cf34e744c"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "e5c3df28a20da9849417edbbf2200c92d9f3511a389fdd494801ba5cf34e744c",
+        "ready_segment_sha256": [
+          "e5c3df28a20da9849417edbbf2200c92d9f3511a389fdd494801ba5cf34e744c"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 4.56,
+        "first_packet_ms": 1652.413625,
+        "rtf": 0.362515132,
+        "synthesis_wall_ms": 1653.069
+      }
+    },
+    {
+      "case_id": "inner-monologue",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "inner-monologue"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "4231485e64dbae3435261e102466661c888472f99dfc3e22b474fa19821a8825",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2328.996625,
+            "request_wall_ms": 2329.818459,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "793e090b07a37fa5a5ca19da2a32631103ee3547cf5775aae6e7d7a6e51d6913",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-inner-monologue"
+        ],
+        "text_sha256": [
+          "793e090b07a37fa5a5ca19da2a32631103ee3547cf5775aae6e7d7a6e51d6913"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 18,
+          "clipped_sample_ratio": 2.8582e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 0.000154205,
+          "duration_seconds": 6.56,
+          "frame_count": 314880,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -18.513451,
+          "rms_normalized": 0.118666312,
+          "sample_count": 629760,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 184962,
+          "silent_frame_ratio": 0.587404726,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1259564,
+            "read_only_inspection": true,
+            "sha256": "4231485e64dbae3435261e102466661c888472f99dfc3e22b474fa19821a8825"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "4231485e64dbae3435261e102466661c888472f99dfc3e22b474fa19821a8825",
+        "ready_segment_sha256": [
+          "4231485e64dbae3435261e102466661c888472f99dfc3e22b474fa19821a8825"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 6.56,
+        "first_packet_ms": 2328.996625,
+        "rtf": 0.355155253,
+        "synthesis_wall_ms": 2329.818459
+      }
+    },
+    {
+      "case_id": "anonymous-young",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "anonymous-young"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "949c547bc12a45ec28cc8f34bba91bf7baa4046df4ee0e1e3954743d1d8938cf",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1590.518291,
+            "request_wall_ms": 1591.470916,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "f9f6a34020eeee3827ae8412795969582f36e8c99dab56265337f0d424938ac7",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-anon-young"
+        ],
+        "text_sha256": [
+          "f9f6a34020eeee3827ae8412795969582f36e8c99dab56265337f0d424938ac7"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 0,
+          "clipped_sample_ratio": 0.0,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 5.6048e-05,
+          "duration_seconds": 4.48,
+          "frame_count": 215040,
+          "peak_abs_normalized": 0.912353516,
+          "peak_dbfs": -0.796737,
+          "rms_dbfs": -19.208613,
+          "rms_normalized": 0.109539149,
+          "sample_count": 430080,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 79032,
+          "silent_frame_ratio": 0.367522321,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 860204,
+            "read_only_inspection": true,
+            "sha256": "949c547bc12a45ec28cc8f34bba91bf7baa4046df4ee0e1e3954743d1d8938cf"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "949c547bc12a45ec28cc8f34bba91bf7baa4046df4ee0e1e3954743d1d8938cf",
+        "ready_segment_sha256": [
+          "949c547bc12a45ec28cc8f34bba91bf7baa4046df4ee0e1e3954743d1d8938cf"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 4.48,
+        "first_packet_ms": 1590.518291,
+        "rtf": 0.355239044,
+        "synthesis_wall_ms": 1591.470916
+      }
+    },
+    {
+      "case_id": "anonymous-middle-aged",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "anonymous-middle-aged"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "d3d73f4bc337c345ee3fd9a8a5f25a30374caa6423acf7f37f16f184972a9c7f",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2278.081,
+            "request_wall_ms": 2278.939708,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-anon-middle-aged"
+        ],
+        "text_sha256": [
+          "d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 0,
+          "clipped_sample_ratio": 0.0,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -1.7838e-05,
+          "duration_seconds": 5.76,
+          "frame_count": 276480,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -17.693443,
+          "rms_normalized": 0.13041509,
+          "sample_count": 552960,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 97443,
+          "silent_frame_ratio": 0.352441406,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1105964,
+            "read_only_inspection": true,
+            "sha256": "d3d73f4bc337c345ee3fd9a8a5f25a30374caa6423acf7f37f16f184972a9c7f"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "d3d73f4bc337c345ee3fd9a8a5f25a30374caa6423acf7f37f16f184972a9c7f",
+        "ready_segment_sha256": [
+          "d3d73f4bc337c345ee3fd9a8a5f25a30374caa6423acf7f37f16f184972a9c7f"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 5.76,
+        "first_packet_ms": 2278.081,
+        "rtf": 0.395649255,
+        "synthesis_wall_ms": 2278.939708
+      }
+    },
+    {
+      "case_id": "anonymous-elder",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "anonymous-elder"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "f3631f5858e0312727a8cc0a0ec167af5451854ba9fadf10851ad9ea8e178499",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2436.661333,
+            "request_wall_ms": 2437.748834,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "ab821b1a48823cf034759ff759e6adf6b0cf44fc0f0a15f53ef95c2920c690ad",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-anon-elder"
+        ],
+        "text_sha256": [
+          "ab821b1a48823cf034759ff759e6adf6b0cf44fc0f0a15f53ef95c2920c690ad"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 0,
+          "clipped_sample_ratio": 0.0,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -3.8333e-05,
+          "duration_seconds": 6.56,
+          "frame_count": 314880,
+          "peak_abs_normalized": 0.858978271,
+          "peak_dbfs": -1.320356,
+          "rms_dbfs": -21.749915,
+          "rms_normalized": 0.081753108,
+          "sample_count": 629760,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 134140,
+          "silent_frame_ratio": 0.426003557,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1259564,
+            "read_only_inspection": true,
+            "sha256": "f3631f5858e0312727a8cc0a0ec167af5451854ba9fadf10851ad9ea8e178499"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "f3631f5858e0312727a8cc0a0ec167af5451854ba9fadf10851ad9ea8e178499",
+        "ready_segment_sha256": [
+          "f3631f5858e0312727a8cc0a0ec167af5451854ba9fadf10851ad9ea8e178499"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 6.56,
+        "first_packet_ms": 2436.661333,
+        "rtf": 0.371608054,
+        "synthesis_wall_ms": 2437.748834
+      }
+    },
+    {
+      "case_id": "anonymous-child",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "anonymous-child"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "024a86a4a5a9315aced6f3e7cd20efe5d66ace7ba6706154d8f007a00c11f3a1",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1329.7495,
+            "request_wall_ms": 1330.329334,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "0cab7e320cb90e58f53f767b19044e035a7f983f1498b12942e8d8929917e909",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-anon-child"
+        ],
+        "text_sha256": [
+          "0cab7e320cb90e58f53f767b19044e035a7f983f1498b12942e8d8929917e909"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 0,
+          "clipped_sample_ratio": 0.0,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -0.0001835,
+          "duration_seconds": 3.68,
+          "frame_count": 176640,
+          "peak_abs_normalized": 0.994506836,
+          "peak_dbfs": -0.047845,
+          "rms_dbfs": -17.567366,
+          "rms_normalized": 0.132321886,
+          "sample_count": 353280,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 44018,
+          "silent_frame_ratio": 0.249196105,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 706604,
+            "read_only_inspection": true,
+            "sha256": "024a86a4a5a9315aced6f3e7cd20efe5d66ace7ba6706154d8f007a00c11f3a1"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "024a86a4a5a9315aced6f3e7cd20efe5d66ace7ba6706154d8f007a00c11f3a1",
+        "ready_segment_sha256": [
+          "024a86a4a5a9315aced6f3e7cd20efe5d66ace7ba6706154d8f007a00c11f3a1"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 3.68,
+        "first_packet_ms": 1329.7495,
+        "rtf": 0.361502536,
+        "synthesis_wall_ms": 1330.329334
+      }
+    },
+    {
+      "case_id": "crowd-voice",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "crowd"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "9c59419f20495834c088fc58a5bd72e334d34a9c105c5b477e63ac406cdc0ec3",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1763.361125,
+            "request_wall_ms": 1764.226917,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "b1ff0266194aec1d8891bc5db9eb0c6edcf208ade0a2a14c02fb38ad8597bcc4",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-crowd"
+        ],
+        "text_sha256": [
+          "b1ff0266194aec1d8891bc5db9eb0c6edcf208ade0a2a14c02fb38ad8597bcc4"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 10,
+          "clipped_sample_ratio": 2.1346e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -6.3776e-05,
+          "duration_seconds": 4.88,
+          "frame_count": 234240,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -18.764966,
+          "rms_normalized": 0.115279392,
+          "sample_count": 468480,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 92489,
+          "silent_frame_ratio": 0.394847165,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 937004,
+            "read_only_inspection": true,
+            "sha256": "9c59419f20495834c088fc58a5bd72e334d34a9c105c5b477e63ac406cdc0ec3"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "9c59419f20495834c088fc58a5bd72e334d34a9c105c5b477e63ac406cdc0ec3",
+        "ready_segment_sha256": [
+          "9c59419f20495834c088fc58a5bd72e334d34a9c105c5b477e63ac406cdc0ec3"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 4.88,
+        "first_packet_ms": 1763.361125,
+        "rtf": 0.361521909,
+        "synthesis_wall_ms": 1764.226917
+      }
+    },
+    {
+      "case_id": "markdown-input",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "markdown"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "1a63651f4a961df90eeef3d58dd3769c4e4c249e44e6b4ce2d86dd937c60c3fe",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 4532.144125,
+            "request_wall_ms": 4534.163334,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "8715266efb3d35d78f63d29ca451cf12b3ccf19e17a3760b2d587450e0d99ed5",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-markdown"
+        ],
+        "text_sha256": [
+          "8715266efb3d35d78f63d29ca451cf12b3ccf19e17a3760b2d587450e0d99ed5"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 256,
+          "clipped_sample_ratio": 0.000208333,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -5.8021e-05,
+          "duration_seconds": 12.8,
+          "frame_count": 614400,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -19.003956,
+          "rms_normalized": 0.11215075,
+          "sample_count": 1228800,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 321667,
+          "silent_frame_ratio": 0.523546549,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 2457644,
+            "read_only_inspection": true,
+            "sha256": "1a63651f4a961df90eeef3d58dd3769c4e4c249e44e6b4ce2d86dd937c60c3fe"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "1a63651f4a961df90eeef3d58dd3769c4e4c249e44e6b4ce2d86dd937c60c3fe",
+        "ready_segment_sha256": [
+          "1a63651f4a961df90eeef3d58dd3769c4e4c249e44e6b4ce2d86dd937c60c3fe"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 12.8,
+        "first_packet_ms": 4532.144125,
+        "rtf": 0.35423151,
+        "synthesis_wall_ms": 4534.163334
+      }
+    },
+    {
+      "case_id": "emoji-and-combining",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "emoji",
+          "unicode-combining-character"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "fa5ad1853c637be82c85600d8c64cd6deb4bc13007ba934082ba3327c6775a93",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2428.377208,
+            "request_wall_ms": 2429.414792,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "b0bd841105220a10a50319053842387ecb2ea53cc5d1e5f6c05cbbf3ca685fde",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-emoji-combining"
+        ],
+        "text_sha256": [
+          "b0bd841105220a10a50319053842387ecb2ea53cc5d1e5f6c05cbbf3ca685fde"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 0,
+          "clipped_sample_ratio": 0.0,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -9.306e-06,
+          "duration_seconds": 6.88,
+          "frame_count": 330240,
+          "peak_abs_normalized": 0.914642334,
+          "peak_dbfs": -0.774974,
+          "rms_dbfs": -18.767579,
+          "rms_normalized": 0.115244722,
+          "sample_count": 660480,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 148944,
+          "silent_frame_ratio": 0.451017442,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1321004,
+            "read_only_inspection": true,
+            "sha256": "fa5ad1853c637be82c85600d8c64cd6deb4bc13007ba934082ba3327c6775a93"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "fa5ad1853c637be82c85600d8c64cd6deb4bc13007ba934082ba3327c6775a93",
+        "ready_segment_sha256": [
+          "fa5ad1853c637be82c85600d8c64cd6deb4bc13007ba934082ba3327c6775a93"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 6.88,
+        "first_packet_ms": 2428.377208,
+        "rtf": 0.353112615,
+        "synthesis_wall_ms": 2429.414792
+      }
+    },
+    {
+      "case_id": "nested-quotes",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "nested-quotes"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "8a9253706a15fa2b1f937b4c1a5c24787956213651e2064881f63d0e1680aef2",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2324.725333,
+            "request_wall_ms": 2325.729583,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "2f42a99a7634b7f47ad87af7d23552fa36b020c05ed119872f393c7f1546cefd",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-nested-quotes"
+        ],
+        "text_sha256": [
+          "2f42a99a7634b7f47ad87af7d23552fa36b020c05ed119872f393c7f1546cefd"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 2,
+          "clipped_sample_ratio": 3.138e-06,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 1.5069e-05,
+          "duration_seconds": 6.64,
+          "frame_count": 318720,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -16.441101,
+          "rms_normalized": 0.150641603,
+          "sample_count": 637440,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 115115,
+          "silent_frame_ratio": 0.361179091,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1274924,
+            "read_only_inspection": true,
+            "sha256": "8a9253706a15fa2b1f937b4c1a5c24787956213651e2064881f63d0e1680aef2"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "8a9253706a15fa2b1f937b4c1a5c24787956213651e2064881f63d0e1680aef2",
+        "ready_segment_sha256": [
+          "8a9253706a15fa2b1f937b4c1a5c24787956213651e2064881f63d0e1680aef2"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 6.64,
+        "first_packet_ms": 2324.725333,
+        "rtf": 0.350260479,
+        "synthesis_wall_ms": 2325.729583
+      }
+    },
+    {
+      "case_id": "special-punctuation",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "special-punctuation"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "d990bf36d26109d84c601a5ef06a7f5c818f2cb6fde852d709b3095be0cceda2",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 5949.676083,
+            "request_wall_ms": 5951.6625,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "7400a69873608f9276f5aa3277500ede29e14d6e1959e080f044a53ff0bf7a83",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-special-punctuation"
+        ],
+        "text_sha256": [
+          "7400a69873608f9276f5aa3277500ede29e14d6e1959e080f044a53ff0bf7a83"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 22,
+          "clipped_sample_ratio": 1.3576e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -0.000202621,
+          "duration_seconds": 16.88,
+          "frame_count": 810240,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -22.878708,
+          "rms_normalized": 0.07179011,
+          "sample_count": 1620480,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 692351,
+          "silent_frame_ratio": 0.854501135,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 3241004,
+            "read_only_inspection": true,
+            "sha256": "d990bf36d26109d84c601a5ef06a7f5c818f2cb6fde852d709b3095be0cceda2"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "d990bf36d26109d84c601a5ef06a7f5c818f2cb6fde852d709b3095be0cceda2",
+        "ready_segment_sha256": [
+          "d990bf36d26109d84c601a5ef06a7f5c818f2cb6fde852d709b3095be0cceda2"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 16.88,
+        "first_packet_ms": 5949.676083,
+        "rtf": 0.352586641,
+        "synthesis_wall_ms": 5951.6625
+      }
+    },
+    {
+      "case_id": "polyphonic-characters",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "polyphonic-characters"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "43ff3e31eb98dcb3817b0f79ac475349f76114356429e7dc69c866be659ae79a",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1820.578333,
+            "request_wall_ms": 1821.484875,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "35258e576f90aa6bdca04637691f33d2884f39cf7e219d2a780896f49f8c81ff",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-polyphonic"
+        ],
+        "text_sha256": [
+          "35258e576f90aa6bdca04637691f33d2884f39cf7e219d2a780896f49f8c81ff"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 6,
+          "clipped_sample_ratio": 1.2401e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -0.000184728,
+          "duration_seconds": 5.04,
+          "frame_count": 241920,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -17.986376,
+          "rms_normalized": 0.126090156,
+          "sample_count": 483840,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 55356,
+          "silent_frame_ratio": 0.228819444,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 967724,
+            "read_only_inspection": true,
+            "sha256": "43ff3e31eb98dcb3817b0f79ac475349f76114356429e7dc69c866be659ae79a"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "43ff3e31eb98dcb3817b0f79ac475349f76114356429e7dc69c866be659ae79a",
+        "ready_segment_sha256": [
+          "43ff3e31eb98dcb3817b0f79ac475349f76114356429e7dc69c866be659ae79a"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 5.04,
+        "first_packet_ms": 1820.578333,
+        "rtf": 0.361405729,
+        "synthesis_wall_ms": 1821.484875
+      }
+    },
+    {
+      "case_id": "name-year-date",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "person-name",
+          "year-and-date"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "5e266b1abc457521c5b3e77548cd45b5f62ab666c4bf53183be8d81303a20364",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1915.465542,
+            "request_wall_ms": 1916.324,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "7698862a0aa82c5c843fea94c5140f2116548fe3609b80590ba5a5d616563513",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-name-date"
+        ],
+        "text_sha256": [
+          "7698862a0aa82c5c843fea94c5140f2116548fe3609b80590ba5a5d616563513"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 6,
+          "clipped_sample_ratio": 1.166e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -7.9138e-05,
+          "duration_seconds": 5.36,
+          "frame_count": 257280,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -18.460912,
+          "rms_normalized": 0.119386275,
+          "sample_count": 514560,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 71082,
+          "silent_frame_ratio": 0.276282649,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1029164,
+            "read_only_inspection": true,
+            "sha256": "5e266b1abc457521c5b3e77548cd45b5f62ab666c4bf53183be8d81303a20364"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "5e266b1abc457521c5b3e77548cd45b5f62ab666c4bf53183be8d81303a20364",
+        "ready_segment_sha256": [
+          "5e266b1abc457521c5b3e77548cd45b5f62ab666c4bf53183be8d81303a20364"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 5.36,
+        "first_packet_ms": 1915.465542,
+        "rtf": 0.357523134,
+        "synthesis_wall_ms": 1916.324
+      }
+    },
+    {
+      "case_id": "mixed-chinese-english",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "mixed-chinese-english"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "e7c1a1cb3b395bcd130023c2b07d51bfcbb53b3bfaa9d7d55d3add24f515ef3a",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2320.462417,
+            "request_wall_ms": 2322.442667,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "eb8453ce273328bc0a93d67f0f300f996ced5960dd4f4e9d9a482dee0e94190f",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-mixed-language"
+        ],
+        "text_sha256": [
+          "eb8453ce273328bc0a93d67f0f300f996ced5960dd4f4e9d9a482dee0e94190f"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 10,
+          "clipped_sample_ratio": 1.6482e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -0.000114654,
+          "duration_seconds": 6.32,
+          "frame_count": 303360,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -18.371087,
+          "rms_normalized": 0.120627312,
+          "sample_count": 606720,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 122833,
+          "silent_frame_ratio": 0.40490836,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1213484,
+            "read_only_inspection": true,
+            "sha256": "e7c1a1cb3b395bcd130023c2b07d51bfcbb53b3bfaa9d7d55d3add24f515ef3a"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "e7c1a1cb3b395bcd130023c2b07d51bfcbb53b3bfaa9d7d55d3add24f515ef3a",
+        "ready_segment_sha256": [
+          "e7c1a1cb3b395bcd130023c2b07d51bfcbb53b3bfaa9d7d55d3add24f515ef3a"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 6.32,
+        "first_packet_ms": 2320.462417,
+        "rtf": 0.367475106,
+        "synthesis_wall_ms": 2322.442667
+      }
+    },
+    {
+      "case_id": "long-sentence",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "long-sentence"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "1c1cce3081f4fbebe61e3267e0173f83e3b6ced038309c343e8912be804b7c71",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 7195.815708,
+            "request_wall_ms": 7197.81925,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 1,
+        "segment_mode": "single",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "4a233d29b904aad04e6e8e32528b7dc1ebec3ebd986ffe1d3a0bd85776ab7e60",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-long"
+        ],
+        "text_sha256": [
+          "4a233d29b904aad04e6e8e32528b7dc1ebec3ebd986ffe1d3a0bd85776ab7e60"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 60,
+          "clipped_sample_ratio": 3.1125e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": -8.2317e-05,
+          "duration_seconds": 20.08,
+          "frame_count": 963840,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -17.273348,
+          "rms_normalized": 0.136877667,
+          "sample_count": 1927680,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 169285,
+          "silent_frame_ratio": 0.175635998,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 3855404,
+            "read_only_inspection": true,
+            "sha256": "1c1cce3081f4fbebe61e3267e0173f83e3b6ced038309c343e8912be804b7c71"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "1c1cce3081f4fbebe61e3267e0173f83e3b6ced038309c343e8912be804b7c71",
+        "ready_segment_sha256": [
+          "1c1cce3081f4fbebe61e3267e0173f83e3b6ced038309c343e8912be804b7c71"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 20.08,
+        "first_packet_ms": 7195.815708,
+        "rtf": 0.358457134,
+        "synthesis_wall_ms": 7197.81925
+      }
+    },
+    {
+      "case_id": "independent-segment-seams",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "independent-segments"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": true,
+        "managed_worker_segments": [
+          {
+            "audio_sha256": "96fb298730a47e7d6f18525efef8a5e6217a0fb51dc996eb3cc3bb4c9477a0c2",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 409.126291,
+            "request_wall_ms": 409.703542,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          },
+          {
+            "audio_sha256": "e694284e26b08788b53594bcde3af1e95ae2a5583ef8617d4c507f208a7fb5b3",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 1544.660167,
+            "request_wall_ms": 1545.304042,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          },
+          {
+            "audio_sha256": "c8947f12fb8aeb185c6f08d51a2867215f6fb7e2ca335a6fa1914ec9db71b3f3",
+            "event_order": [
+              "started",
+              "inference_entered",
+              "ready",
+              "published"
+            ],
+            "peak_rss_bytes": 1753530368,
+            "request_parameters": {
+              "max_new_frames": 375,
+              "sample_mode": "fixed",
+              "seed": 0,
+              "voice": "Junhao"
+            },
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 399.01625,
+            "request_wall_ms": 399.403083,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "runner_invocations": 3,
+        "segment_mode": "independent",
+        "timing_semantics": {
+          "first_packet_ms": "request_to_ready_wav_ms; first playable complete WAV at worker boundary",
+          "internal_first_audio_is_not_client_playable": true,
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "rtf": "steady-state request wall divided by final audio duration",
+          "synthesis_wall_ms": "sum of steady-state worker request wall times; excludes process startup"
+        }
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "ea16f64a765328d4b5bfbbb409da647401a4ad24d6328b6d3ff8826c313a9119",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-independent-1",
+          "txt-independent-2",
+          "txt-independent-3"
+        ],
+        "text_sha256": [
+          "fa2f6df06f1f610b5fad5d9f92eb10c822c9ad28183d8ff82a13eb06b0ae9440",
+          "14b02b0660cca15eb4ccee5c73e3f4120fef449b7fa0aeb56406892c3d199d4d",
+          "796cb5cd04d3de7601d592247b6636dd26c72dcc30771fe52cf28c779bbdeea9"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 6,
+          "clipped_sample_ratio": 1.0417e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 7.3653e-05,
+          "duration_seconds": 6.0,
+          "frame_count": 288000,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -18.848286,
+          "rms_normalized": 0.114178862,
+          "sample_count": 576000,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 138676,
+          "silent_frame_ratio": 0.481513889,
+          "source": {
+            "file_name": "joined-independent-segments.wav",
+            "file_size_bytes": 1152044,
+            "read_only_inspection": true,
+            "sha256": "5b75771766f6e4d10104e709eb68b35ff7eb38a094cc1a189b876e46173de05d"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "5b75771766f6e4d10104e709eb68b35ff7eb38a094cc1a189b876e46173de05d",
+        "ready_segment_sha256": [
+          "96fb298730a47e7d6f18525efef8a5e6217a0fb51dc996eb3cc3bb4c9477a0c2",
+          "e694284e26b08788b53594bcde3af1e95ae2a5583ef8617d4c507f208a7fb5b3",
+          "c8947f12fb8aeb185c6f08d51a2867215f6fb7e2ca335a6fa1914ec9db71b3f3"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1753530368
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 6.0,
+        "first_packet_ms": 409.126291,
+        "rtf": 0.392401778,
+        "synthesis_wall_ms": 2354.410667
+      }
+    }
+  ],
+  "run": {
+    "benchmark_id": "nano-quality",
+    "command": {
+      "argv": [
+        "python",
+        "scripts/tts/benchmark_nano_quality.py",
+        "--fixture-manifest",
+        "tests/fixtures/narration/benchmark_manifest.json",
+        "--output-dir",
+        "<evidence-output-dir>",
+        "--source-dir",
+        "<source-dir>",
+        "--model-dir",
+        "<model-dir>",
+        "--media-output-dir",
+        "<media-output-dir>",
+        "--source-revision",
+        "cc7bdf19c7639c0870dab22045a33b442760f6be",
+        "--model-revision",
+        "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+        "--expected-source-tree-sha256",
+        "dfeedbbfae13dd04c78280e660de7d3d3c5297a82f720da44e7cb9029b4ccc65",
+        "--expected-model-tree-sha256",
+        "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d",
+        "--quality-matrix",
+        "--voice",
+        "Junhao",
+        "--seed",
+        "0",
+        "--cpu-threads",
+        "4",
+        "--sample-mode",
+        "fixed",
+        "--max-new-frames",
+        "375",
+        "--same-worker-probe-case-id",
+        "narration-neutral",
+        "--same-worker-probe-repetitions",
+        "3",
+        "--case-timeout-seconds",
+        "600"
+      ],
+      "exit_code": 0
+    },
+    "environment": {
+      "architecture": "arm64",
+      "hardware": "Apple M4",
+      "os_name": "Darwin",
+      "os_version": "25.5.0",
+      "physical_memory_bytes": 17179869184,
+      "python_version": "3.11.16"
+    },
+    "finished_at": "2026-08-26T04:15:10+08:00",
+    "model": {
+      "artifacts": [
+        {
+          "hash_status": "verified",
+          "name": "nano-model-tree",
+          "revision": "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+          "sha256": "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d",
+          "source": "explicit controlled model directory"
+        },
+        {
+          "hash_status": "verified",
+          "name": "nano-source-tree",
+          "revision": "cc7bdf19c7639c0870dab22045a33b442760f6be",
+          "sha256": "dfeedbbfae13dd04c78280e660de7d3d3c5297a82f720da44e7cb9029b4ccc65",
+          "source": "explicit pinned official source directory"
+        },
+        {
+          "hash_status": "verified",
+          "name": "managed-worker",
+          "revision": "2ccf2ca714d66371c4ca09b1608512f7d4c51d9fda5f7c980742988c1ca1abb1",
+          "sha256": "2ccf2ca714d66371c4ca09b1608512f7d4c51d9fda5f7c980742988c1ca1abb1",
+          "source": "frozen T0-B managed worker implementation"
+        }
+      ],
+      "execution_backend": "managed-subprocess-onnx-cpu",
+      "name": "MOSS-TTS-Nano-100M",
+      "revision": "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+      "revision_hash_status": "verified",
+      "revision_sha256": "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d"
+    },
+    "parameters": {
+      "authorized_texts_fixture_set_id": "moss-tts-t0i-original-zh-v1",
+      "automatic_download": false,
+      "case_timeout_seconds": 600.0,
+      "cpu_threads": 4,
+      "dry_run": false,
+      "enable_normalize_tts_text": true,
+      "enable_wetext": false,
+      "exact_argv_sha256": "c600e24c5917848605fd469a96e380a0edb60d052a1d0c1e0c42d4b1713e6a93",
+      "fixture_manifest_sha256": "6750b722ad411839e369c617a9245c9578335d05b0c6117bcedfec3cfd6bbe35",
+      "managed_worker": {
+        "contract": "scripts/tts/benchmark_nano_topologies.py __worker__ JSONL",
+        "fake_worker": false,
+        "observed_case_worker_generations": [
+          1
+        ],
+        "observed_case_worker_pids": [
+          31506
+        ],
+        "process_start_to_ready_ms": 2922.6882500079228,
+        "same_generation_across_case_requests": true,
+        "same_pid_across_case_requests": true,
+        "single_process_for_selected_cases": true,
+        "telemetry": {
+          "current_pid": 31506,
+          "event_log": {
+            "event_count": 101,
+            "file_name": "managed-worker.events.jsonl",
+            "sha256": "0913cb77ea8e211cecf2910fd992da269d004174651ed8e2398aecf675aeb7ca"
+          },
+          "last_restart": null,
+          "pid_history": [
+            31506
+          ],
+          "process_start_to_ready_ms": 2922.6882500079228,
+          "raw_events_excluded_from_evidence": true,
+          "synthesis_counts_by_text_sha256": {
+            "0cab7e320cb90e58f53f767b19044e035a7f983f1498b12942e8d8929917e909": 1,
+            "0ecfa13658e8a6f2c7ba6721556a28583b9e87fb809f49fd99738f6689458e1b": 1,
+            "14b02b0660cca15eb4ccee5c73e3f4120fef449b7fa0aeb56406892c3d199d4d": 1,
+            "2f42a99a7634b7f47ad87af7d23552fa36b020c05ed119872f393c7f1546cefd": 1,
+            "35258e576f90aa6bdca04637691f33d2884f39cf7e219d2a780896f49f8c81ff": 1,
+            "4a233d29b904aad04e6e8e32528b7dc1ebec3ebd986ffe1d3a0bd85776ab7e60": 1,
+            "5cc8817d0ca2310fcaa8536c76d1013759c655bc6fd3d3828110462dfe65f881": 1,
+            "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f": 4,
+            "6dc99fb08ece09bf14c20300687f7a72a18a9c170ffef655f8c356c867873e75": 1,
+            "7400a69873608f9276f5aa3277500ede29e14d6e1959e080f044a53ff0bf7a83": 1,
+            "7698862a0aa82c5c843fea94c5140f2116548fe3609b80590ba5a5d616563513": 1,
+            "793e090b07a37fa5a5ca19da2a32631103ee3547cf5775aae6e7d7a6e51d6913": 1,
+            "796cb5cd04d3de7601d592247b6636dd26c72dcc30771fe52cf28c779bbdeea9": 1,
+            "8715266efb3d35d78f63d29ca451cf12b3ccf19e17a3760b2d587450e0d99ed5": 1,
+            "ab821b1a48823cf034759ff759e6adf6b0cf44fc0f0a15f53ef95c2920c690ad": 1,
+            "b0bd841105220a10a50319053842387ecb2ea53cc5d1e5f6c05cbbf3ca685fde": 1,
+            "b1ff0266194aec1d8891bc5db9eb0c6edcf208ade0a2a14c02fb38ad8597bcc4": 1,
+            "bb972b1056e84fa2fa40c815f0919be1ce4cef507ca024c5dac76656a5f7426d": 1,
+            "d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b": 1,
+            "eb8453ce273328bc0a93d67f0f300f996ced5960dd4f4e9d9a482dee0e94190f": 1,
+            "f9f6a34020eeee3827ae8412795969582f36e8c99dab56265337f0d424938ac7": 1,
+            "fa2f6df06f1f610b5fad5d9f92eb10c822c9ad28183d8ff82a13eb06b0ae9440": 1
+          },
+          "worker_generation": 1
+        }
+      },
+      "managed_worker_same_request_probe": {
+        "case_id": "narration-neutral",
+        "distinct_audio_hash_count": 1,
+        "repetitions": 3,
+        "rows": [
+          {
+            "audio_sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb",
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2120.117917,
+            "request_wall_ms": 2121.109583,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          },
+          {
+            "audio_sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb",
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2097.346959,
+            "request_wall_ms": 2098.317458,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          },
+          {
+            "audio_sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb",
+            "request_to_internal_first_audio_ms": null,
+            "request_to_ready_wav_ms": 2127.313458,
+            "request_wall_ms": 2128.196375,
+            "worker_generation": 1,
+            "worker_pid": 31506
+          }
+        ],
+        "same_generation": true,
+        "same_pid": true
+      },
+      "managed_worker_sha256": "2ccf2ca714d66371c4ca09b1608512f7d4c51d9fda5f7c980742988c1ca1abb1",
+      "max_new_frames": 375,
+      "media_retained_externally": true,
+      "model_artifact_bytes": 763191513,
+      "model_artifact_count": 16,
+      "model_tree_sha256": "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d",
+      "path_values_redacted_in_command": true,
+      "post_run_evidence_correction": {
+        "corrected_fields": [
+          "managed_worker.telemetry.event_log.event_count",
+          "managed_worker.telemetry.event_log.sha256",
+          "managed_worker.telemetry.synthesis_counts_by_text_sha256[6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f]"
+        ],
+        "original_metrics_sha256": "a7e66791fc284ea10ea41cac75c8f7428a8218d15b2a6bd41556a6cab26f0b8c",
+        "reason": "the initial driver snapshot was taken before the three same-worker probes; fields were deterministically re-read from the completed external event log",
+        "retry_performed": false
+      },
+      "reference_duration_tolerance_seconds": 0.75,
+      "reference_profiles_supplied": [],
+      "sample_mode": "fixed",
+      "seed": 0,
+      "selected_case_ids": [
+        "narration-neutral",
+        "dialogue-explicit-speaker",
+        "dialogue-two-person",
+        "dialogue-multi-person",
+        "dialogue-omitted-subject",
+        "inner-monologue",
+        "anonymous-young",
+        "anonymous-middle-aged",
+        "anonymous-elder",
+        "anonymous-child",
+        "crowd-voice",
+        "markdown-input",
+        "emoji-and-combining",
+        "nested-quotes",
+        "special-punctuation",
+        "polyphonic-characters",
+        "name-year-date",
+        "mixed-chinese-english",
+        "long-sentence",
+        "independent-segment-seams"
+      ],
+      "source_artifact_bytes": 184171,
+      "source_artifact_count": 13,
+      "source_revision": "cc7bdf19c7639c0870dab22045a33b442760f6be",
+      "source_tree_sha256": "dfeedbbfae13dd04c78280e660de7d3d3c5297a82f720da44e7cb9029b4ccc65",
+      "streaming": true,
+      "unexpected_terminal_case_ids": [],
+      "voice": "Junhao",
+      "voice_clone_max_text_tokens": 75
+    },
+    "privacy": {
+      "contains_private_reference_audio": false,
+      "contains_user_text": false,
+      "evidence_contains_audio": false,
+      "fixture_only": true
+    },
+    "run_id": "T0-C-20260826T041358+0800-31505-aee0deec",
+    "started_at": "2026-08-26T04:13:58+08:00",
+    "status": "passed",
+    "work_package_id": "T0-C"
+  },
+  "schema_version": "moss-tts-benchmark-result/1.0"
+}

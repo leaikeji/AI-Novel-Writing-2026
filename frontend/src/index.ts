@@ -25,6 +25,7 @@ import { CreativeCenterEntry } from "./creative-center-entry";
 import { NovelLibraryPage } from "./creative-center";
 import { NovelWorkbench } from "./workbench-v2";
 import { activeWorkbenchRouteSession } from "./workbench-route";
+import { ensureNarrationStyles } from "./narration/styles";
 import { ensureNovelStyles } from "./styles";
 
 
@@ -33,6 +34,7 @@ const { message } = window.QwenPaw.host.antd;
 
 
 ensureNovelStyles();
+ensureNarrationStyles();
 
 
 window.QwenPaw.chat.disposeAll(APP_ID);

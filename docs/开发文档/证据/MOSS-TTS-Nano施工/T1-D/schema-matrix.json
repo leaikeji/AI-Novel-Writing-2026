@@ -1,0 +1,107 @@
+{
+  "schema_version": "narration-foundation-schema/1",
+  "foundation_revision": "20260826_0010",
+  "foundation_down_revision": "20260825_0009",
+  "current_head": "20260826_0015",
+  "linear_fix_forward_revisions": [
+    "20260826_0011",
+    "20260826_0012",
+    "20260826_0013",
+    "20260826_0014",
+    "20260826_0015"
+  ],
+  "dialect": "postgresql",
+  "native_enum_count": 0,
+  "existing_tables_extended": [
+    "novels",
+    "volumes",
+    "documents",
+    "document_revisions",
+    "novel_characters",
+    "media_assets"
+  ],
+  "new_table_count": 39,
+  "groups": {
+    "request_settings": [
+      "narration_requests",
+      "narration_request_sources",
+      "novel_narration_settings",
+      "narration_settings_snapshots",
+      "narration_scope_overrides",
+      "narration_cloud_consents"
+    ],
+    "voice_rights_casting": [
+      "voice_rights_records",
+      "voice_rights_events",
+      "voice_profiles",
+      "voice_profile_versions",
+      "character_aliases",
+      "character_voice_bindings",
+      "generic_voice_pools",
+      "generic_voice_slots",
+      "voice_casting_rules",
+      "anonymous_speakers",
+      "pronunciation_profiles",
+      "pronunciation_entries"
+    ],
+    "script": [
+      "narration_scripts",
+      "narration_script_versions",
+      "narration_script_issues",
+      "narration_scenes",
+      "narration_segments"
+    ],
+    "jobs": [
+      "background_jobs",
+      "background_job_attempts",
+      "background_resource_locks",
+      "model_run_records"
+    ],
+    "production_playback": [
+      "narration_editions",
+      "narration_edition_segments",
+      "narration_segment_renders",
+      "narration_render_assets",
+      "narration_exports",
+      "narration_manifests",
+      "narration_manifest_segments",
+      "narration_edition_state",
+      "document_narration_state",
+      "narration_playback_progress"
+    ],
+    "deletion": [
+      "voice_deletion_requests",
+      "asset_tombstones"
+    ]
+  },
+  "hard_guards": {
+    "fixed_local_scope": true,
+    "composite_novel_document_character_scope": true,
+    "analyze_only_reverse_fk": true,
+    "generated_media_structured_reachability": true,
+    "ready_render_master_asset_reachability": true,
+    "request_and_job_canonical_rebinding_blocked": true,
+    "batch_source_early_stage_only": true,
+    "edition_provenance_closure": true,
+    "request_script_policy_equality_at_approval_and_edition": true,
+    "render_voice_and_source_job_scope": true,
+    "manifest_render_provenance": true,
+    "referenced_parent_canonical_identity_frozen": true,
+    "generic_voice_slot_version_rows_immutable": true,
+    "pending_render_scope_and_input_frozen": true,
+    "attempt_fencing_tuple_immutable": true,
+    "profile_version_and_speaker_shape_checks": true,
+    "voice_quality_accepted_before_lock": true,
+    "approval_actor_and_taxonomy_exact": true,
+    "terminal_states_cannot_reopen": true,
+    "polymorphic_parent_reverse_guards": true,
+    "generated_media_requires_ready_parent": true,
+    "state_and_nonnegative_checks": true,
+    "approved_child_insert_update_delete_guard": true,
+    "locked_voice_guard": true,
+    "rights_append_only": true,
+    "manifest_append_only": true,
+    "cas_version_plus_one": true,
+    "taxonomy_exact_check": true
+  }
+}

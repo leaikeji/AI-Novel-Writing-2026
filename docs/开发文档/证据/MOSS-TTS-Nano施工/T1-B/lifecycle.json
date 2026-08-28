@@ -1,0 +1,70 @@
+{
+  "schema_version": "t1-b-lifecycle-evidence/3",
+  "status": "real_pass_product_capability_false",
+  "protocol_version": "moss-tts-sidecar/1.1",
+  "worker_lease": {
+    "ttl_seconds": 60,
+    "control_and_worker_tokens_separated": true,
+    "renewal_proven": true,
+    "expiry_unloads_model": true,
+    "release_unloads_model": true,
+    "stale_worker_token_rejected": true,
+    "unload_stall_poison_exit_75": true
+  },
+  "current_runner": {
+    "sha256": "23305c611d115361b378a142c2e675625d2eb9fbda045c14f1570210edd4c999",
+    "schema_version": "t1-b-sidecar-lifecycle-transcript/1.2",
+    "default_mode": "dry-run",
+    "real_requires_explicit_confirmations": true,
+    "real_requires_private_lock_nano": true,
+    "host_bind_mount_count": 0,
+    "token_staging": "docker-create-copy-start",
+    "source_model_volume_readonly": true,
+    "source_model_volume_cleanup_permitted": false,
+    "cleanup_requires_exact_ownership": true,
+    "dry_transcript": {
+      "file": "runner-dry-transcript.json",
+      "file_sha256": "7e547c5ebc040e2743200f4aee53f4c2b81ae59425088caa15294daad715c994",
+      "payload_sha256": "30ebb33d8a1ab695911eed1b853f3cf694c6b7561925809b64cc6d6206118349",
+      "status": "dry_run"
+    },
+    "fake_transcript": {
+      "file": "runner-fake-transcript.json",
+      "file_sha256": "213852ff907d4811a1323b76c0827cbde3e0def29d00abff392d75b36bc3f477",
+      "payload_sha256": "5f2ca6d424046adabd3c024cb5cc904db03332222132312437bd52093e6564ed",
+      "status": "fake_pass"
+    },
+    "real_transcript": {
+      "file": "runner-real-lease-1.1-transcript.json",
+      "file_sha256": "4829a11804dee2238a08e1db2eaeb0da01743cab4703c458d51383707e090cd4",
+      "payload_sha256": "c520c60ea6a4920521fb8463d8d4be5990ded18dc02fa7ef4dde48065ea01645",
+      "status": "real_pass",
+      "image_id": "sha256:78a2af56924f5593bc9391b9f288ffef428d3350cd6b859476e8ee29a9bc9422",
+      "first_generation": 9183407905447616316,
+      "recovery_generation": 7531935992487800683,
+      "generation_changed": true,
+      "renewals_per_smoke": 5,
+      "final_status": "unloaded",
+      "cleanup_failures": []
+    }
+  },
+  "formal_runtime": {
+    "sidecar_image_id": "sha256:78a2af56924f5593bc9391b9f288ffef428d3350cd6b859476e8ee29a9bc9422",
+    "sidecar_healthy": true,
+    "model_volume_readonly": true,
+    "secret_volume_readonly": true,
+    "qwenpaw_container_unchanged": true,
+    "qwenpaw_healthy": true,
+    "qwenpaw_tts_runtime_enabled": false,
+    "formal_database_connected_by_upgrade": false,
+    "completed_init_containers_removed": 2,
+    "persistent_volumes_removed": 0
+  },
+  "product_boundary": {
+    "product_visible": false,
+    "formal_installed_plugin_replaced": false,
+    "current_candidate_verified_in_isolated_qwenpaw": true,
+    "old_image_snapshot_available": false,
+    "failure_rollback": "keep capability false, stop sidecar, rebuild pinned verified image; preserve all volumes"
+  }
+}

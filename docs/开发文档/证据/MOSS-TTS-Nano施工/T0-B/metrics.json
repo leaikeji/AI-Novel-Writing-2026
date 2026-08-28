@@ -1,0 +1,122 @@
+{
+  "case_count": 4,
+  "case_statuses": {
+    "blocked": 2,
+    "passed": 2
+  },
+  "listening": {
+    "defects": {},
+    "statuses": {
+      "pending": 2,
+      "skipped_with_reason": 2
+    },
+    "verdicts": {
+      "not_reviewed": 4
+    }
+  },
+  "performance": {
+    "first_packet_ms": {
+      "count": 2,
+      "max": 1813.218958,
+      "median": 1683.624709,
+      "p95": 1813.218958
+    },
+    "peak_accelerator_bytes_max": null,
+    "peak_rss_bytes_max": 1608450048,
+    "rtf": {
+      "count": 2,
+      "max": 0.298227,
+      "median": 0.276912,
+      "p95": 0.298227
+    }
+  },
+  "privacy": {
+    "contains_private_reference_audio": false,
+    "contains_user_text": false,
+    "evidence_contains_audio": false,
+    "fixture_only": true
+  },
+  "recovery": {
+    "cancel_acknowledged_cases": 0,
+    "cancel_requested_cases": 0,
+    "crash_recovered_cases": 0,
+    "failure_injected_cases": 0,
+    "ready_segment_outputs": 2,
+    "ready_segments_reused": 0
+  },
+  "run_count": 4,
+  "run_statuses": {
+    "blocked": 2,
+    "passed": 2
+  },
+  "runs": [
+    {
+      "benchmark_id": "nano-topology/browser_onnx_preview",
+      "case_statuses": {
+        "blocked": 1
+      },
+      "execution_backend": "blocked/browser_onnx_preview",
+      "exit_code": 4,
+      "model_revision": "pinned-assets-not-loaded",
+      "run_id": "T0-B-browser_onnx_preview-20260826T023436+0800-55cc6188",
+      "status": "blocked",
+      "work_package_id": "T0-B"
+    },
+    {
+      "benchmark_id": "nano-topology/in_process_onnx_cpu",
+      "case_statuses": {
+        "passed": 1
+      },
+      "execution_backend": "in_process_onnx_cpu",
+      "exit_code": 4,
+      "model_revision": "moss-tts-nano-100m-onnx@f52645cb467506d8e18e746ddd59482685b74e58+moss-audio-tokenizer-nano-onnx@ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae+moss-tts-nano-source@cc7bdf19c7639c0870dab22045a33b442760f6be",
+      "run_id": "T0-B-in_process_onnx_cpu-20260826T023427+0800-962445f7",
+      "status": "passed",
+      "work_package_id": "T0-B"
+    },
+    {
+      "benchmark_id": "nano-topology/linux_arm64_sidecar_onnx",
+      "case_statuses": {
+        "blocked": 1
+      },
+      "execution_backend": "blocked/linux_arm64_sidecar_onnx",
+      "exit_code": 4,
+      "model_revision": "pinned-assets-not-loaded",
+      "run_id": "T0-B-linux_arm64_sidecar_onnx-20260826T023436+0800-b5c7f109",
+      "status": "blocked",
+      "work_package_id": "T0-B"
+    },
+    {
+      "benchmark_id": "nano-topology/managed_subprocess_onnx_cpu",
+      "case_statuses": {
+        "passed": 1
+      },
+      "execution_backend": "managed_subprocess_onnx_cpu",
+      "exit_code": 4,
+      "model_revision": "moss-tts-nano-100m-onnx@f52645cb467506d8e18e746ddd59482685b74e58+moss-audio-tokenizer-nano-onnx@ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae+moss-tts-nano-source@cc7bdf19c7639c0870dab22045a33b442760f6be",
+      "run_id": "T0-B-managed_subprocess_onnx_cpu-20260826T023432+0800-6373987c",
+      "status": "passed",
+      "work_package_id": "T0-B"
+    }
+  ],
+  "schema_version": "moss-tts-benchmark-summary/1.0",
+  "source_schema_version": "moss-tts-benchmark-result/1.0",
+  "sources": [
+    {
+      "file_name": "T0-B-browser_onnx_preview-20260826T023436+0800-55cc6188.json",
+      "sha256": "7250be381cbc4fc2370cd1d4d63659bdd759fcffed0ce0730b48462ba56c6aa0"
+    },
+    {
+      "file_name": "T0-B-in_process_onnx_cpu-20260826T023427+0800-962445f7.json",
+      "sha256": "6365afe518a768d4c2c9e39221d178c30aec5d737873532ecb5562c59efe4402"
+    },
+    {
+      "file_name": "T0-B-linux_arm64_sidecar_onnx-20260826T023436+0800-b5c7f109.json",
+      "sha256": "7888dac714d07642e94758801809101187f89f0dc66dc97010d569d83749479a"
+    },
+    {
+      "file_name": "T0-B-managed_subprocess_onnx_cpu-20260826T023432+0800-6373987c.json",
+      "sha256": "27f72a602ef92d76549163957a8c80bff2d707096f88701fd4de609078ef0cd9"
+    }
+  ]
+}

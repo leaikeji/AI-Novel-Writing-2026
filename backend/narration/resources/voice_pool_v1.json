@@ -1,0 +1,40 @@
+{
+  "schema_version": "generic-voice-pack-catalog/1",
+  "catalog_id": "ai-novel-world-2026-generic-casting-taxonomy-v1",
+  "catalog_status": "taxonomy_only",
+  "required_slot_count": 24,
+  "asset_pack_id": null,
+  "rights_approved": false,
+  "quality_approved": false,
+  "production_ready": false,
+  "reason_codes": [
+    "GENERIC_VOICE_ASSETS_UNAVAILABLE",
+    "GENERIC_VOICE_PACK_NOT_APPROVED"
+  ],
+  "slots": [
+    {"slot_key": "female_child_bright", "label": "女童·明亮", "category": "female_child"},
+    {"slot_key": "female_teen_gentle", "label": "少女·温柔", "category": "female_teen"},
+    {"slot_key": "female_young_gentle", "label": "青年女性·温柔", "category": "female_young_adult"},
+    {"slot_key": "female_young_bright", "label": "青年女性·明快", "category": "female_young_adult"},
+    {"slot_key": "female_young_cool", "label": "青年女性·冷静", "category": "female_young_adult"},
+    {"slot_key": "female_middle_warm", "label": "中年女性·温暖", "category": "female_middle_aged"},
+    {"slot_key": "female_middle_authoritative", "label": "中年女性·沉稳", "category": "female_middle_aged"},
+    {"slot_key": "female_elderly_kind", "label": "老年女性·慈祥", "category": "female_elderly"},
+    {"slot_key": "female_elderly_stern", "label": "老年女性·严肃", "category": "female_elderly"},
+    {"slot_key": "male_child_bright", "label": "男童·明亮", "category": "male_child"},
+    {"slot_key": "male_teen_clean", "label": "少年·清朗", "category": "male_teen"},
+    {"slot_key": "male_young_warm", "label": "青年男性·温和", "category": "male_young_adult"},
+    {"slot_key": "male_young_calm", "label": "青年男性·沉静", "category": "male_young_adult"},
+    {"slot_key": "male_young_cool", "label": "青年男性·冷峻", "category": "male_young_adult"},
+    {"slot_key": "male_middle_warm", "label": "中年男性·温厚", "category": "male_middle_aged"},
+    {"slot_key": "male_middle_authoritative", "label": "中年男性·威严", "category": "male_middle_aged"},
+    {"slot_key": "male_elderly_kind", "label": "老年男性·慈和", "category": "male_elderly"},
+    {"slot_key": "male_elderly_stern", "label": "老年男性·严肃", "category": "male_elderly"},
+    {"slot_key": "neutral_young", "label": "青年·中性", "category": "neutral_young_adult"},
+    {"slot_key": "neutral_middle", "label": "中年·中性", "category": "neutral_middle_aged"},
+    {"slot_key": "announcer_female", "label": "播报·女性", "category": "female_announcer"},
+    {"slot_key": "announcer_male", "label": "播报·男性", "category": "male_announcer"},
+    {"slot_key": "crowd_female", "label": "群体·女性", "category": "female_group"},
+    {"slot_key": "crowd_male", "label": "群体·男性", "category": "male_group"}
+  ]
+}

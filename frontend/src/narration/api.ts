@@ -1,0 +1,784 @@
+import { ApiError, apiErrorMessage, apiRequest } from "../api";
+import { APP_ID } from "../contracts";
+import {
+  ChapterNarrationContractError,
+  normalizeChapterUuid,
+  parseCreateNarrationWorkflowRequest,
+  parseDocumentNarrationContext,
+  parseFailedNarrationSegmentsProjection,
+  parseNarrationEditionResource,
+  parseNarrationProductionApiErrorDetail,
+  parseNarrationWorkflowResource,
+  parseRetryFailedNarrationSegmentsRequest,
+  parseRetryFailedNarrationSegmentsResponse,
+  parseSwitchNarrationEditionRequest,
+  parseSwitchNarrationEditionResponse,
+} from "./chapter-contracts";
+import type {
+  CreateNarrationWorkflowRequest,
+  DocumentNarrationContext,
+  FailedNarrationSegmentsProjection,
+  NarrationEditionResource,
+  NarrationProductionApiErrorDetail,
+  NarrationWorkflowResource,
+  RetryFailedNarrationSegmentsRequest,
+  RetryFailedNarrationSegmentsResponse,
+  SwitchNarrationEditionRequest,
+  SwitchNarrationEditionResponse,
+} from "./chapter-contracts";
+import {
+  NarrationContractError,
+  REFERENCE_UPLOAD_MAX_BYTES,
+  REFERENCE_UPLOAD_MIME_TYPES,
+  parseCharacterVoiceBindingListResponse,
+  parseCharacterVoiceBindingResource,
+  parseNarrationApiErrorDetail,
+  parseNarrationCacheCleanupPreview,
+  parseNarrationCacheCleanupResult,
+  parseNarrationCacheStatus,
+  parseNarrationCloudConsent,
+  parseNarrationOverviewResponse,
+  parseNarrationScopeOverrideListResponse,
+  parseNarrationScopeOverrideResource,
+  parseNarrationSettingsResource,
+  parseOfficialPresetCatalogResponse,
+  parsePronunciationProfileResource,
+  parseVoicePreviewResource,
+  parseVoiceProfileListResponse,
+  parseVoiceProfileResource,
+  parseVoiceProfileVersionResource,
+  parseVoiceCastingRulesResource,
+} from "./contracts";
+import type {
+  CharacterVoiceBindingListResponse,
+  CharacterVoiceBindingResource,
+  CreateNarrationCloudConsentRequest,
+  CreatePresetVoiceVersionRequest,
+  CreateVoicePreviewRequest,
+  CreateVoiceProfileRequest,
+  ExecuteNarrationCacheCleanupRequest,
+  LockVoiceProfileRequest,
+  NarrationApiErrorDetail,
+  NarrationCacheCleanupPreview,
+  NarrationCacheCleanupResult,
+  NarrationCacheStatus,
+  NarrationCloudConsent,
+  NarrationOverviewResponse,
+  NarrationScopeKind,
+  NarrationScopeOverrideListResponse,
+  NarrationScopeOverrideResource,
+  NarrationSettingsResource,
+  OfficialPresetCatalogResponse,
+  PreviewNarrationCacheCleanupRequest,
+  PronunciationProfileResource,
+  PutCharacterVoiceBindingRequest,
+  PutNarrationScopeOverrideRequest,
+  PutPronunciationProfileRequest,
+  PutVoiceCastingRulesRequest,
+  RevokeNarrationCloudConsentRequest,
+  UpdateNarrationSettingsRequest,
+  UpdateVoiceProfileRequest,
+  UploadedVoiceVersionMetadata,
+  VoicePreviewResource,
+  VoiceProfileListResponse,
+  VoiceProfileResource,
+  VoiceProfileVersionResource,
+  VoiceCastingRulesResource,
+} from "./contracts";
+
+type ResponseParser<T> = (value: unknown) => T;
+
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+
+export class NarrationApiError extends Error {
+  readonly status: number;
+  readonly detail: NarrationApiErrorDetail;
+
+  constructor(status: number, detail: NarrationApiErrorDetail) {
+    super(detail.message);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+
+export class NarrationProductionApiError extends Error {
+  readonly status: number;
+  readonly detail: NarrationProductionApiErrorDetail;
+
+  constructor(status: number, detail: NarrationProductionApiErrorDetail) {
+    super(detail.message);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function jsonInit(method: "POST" | "PUT" | "DELETE", payload: object, signal?: AbortSignal): RequestInit {
+  return {
+    method,
+    body: JSON.stringify(payload),
+    signal,
+  };
+}
+
+function idempotencyHeaders(idempotencyKey: string): HeadersInit {
+  if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    throw new NarrationContractError(
+      "idempotency_key",
+      "must be 8-128 safe characters",
+    );
+  }
+  return { "Idempotency-Key": idempotencyKey };
+}
+
+function normalizeNarrationError(reason: unknown): never {
+  if (!(reason instanceof ApiError)) throw reason;
+  try {
+    throw new NarrationApiError(
+      reason.status,
+      parseNarrationApiErrorDetail(reason.detail),
+    );
+  } catch (error) {
+    if (error instanceof NarrationApiError) throw error;
+    throw reason;
+  }
+}
+
+
+function normalizeProductionError(reason: unknown): never {
+  if (!(reason instanceof ApiError)) throw reason;
+  try {
+    throw new NarrationProductionApiError(
+      reason.status,
+      parseNarrationProductionApiErrorDetail(reason.detail),
+    );
+  } catch (error) {
+    if (error instanceof NarrationProductionApiError) throw error;
+    throw reason;
+  }
+}
+
+async function parsedRequest<T>(
+  path: string,
+  parser: ResponseParser<T>,
+  init?: RequestInit,
+): Promise<T> {
+  try {
+    const payload = await apiRequest<unknown>(path, init);
+    return parser(payload);
+  } catch (reason) {
+    normalizeNarrationError(reason);
+  }
+}
+
+
+async function parsedProductionRequest<T>(
+  path: string,
+  parser: ResponseParser<T>,
+  init?: RequestInit,
+): Promise<T> {
+  try {
+    const payload = await apiRequest<unknown>(path, init);
+    return parser(payload);
+  } catch (reason) {
+    normalizeProductionError(reason);
+  }
+}
+
+async function multipartRequest<T>(
+  path: string,
+  form: FormData,
+  parser: ResponseParser<T>,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await window.QwenPaw.host.fetch(`/${APP_ID}${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      ...idempotencyHeaders(idempotencyKey),
+    },
+    body: form,
+    signal,
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const responseRecord = payload !== null && typeof payload === "object"
+      ? payload as Record<string, unknown>
+      : null;
+    const detail = responseRecord?.detail ?? payload;
+    const provisional = new ApiError(response.status, `HTTP ${response.status}`, detail);
+    const error = new ApiError(
+      response.status,
+      apiErrorMessage(provisional, `HTTP ${response.status}`),
+      detail,
+    );
+    normalizeNarrationError(error);
+  }
+  return parser(payload);
+}
+
+export function getNarrationOverview(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<NarrationOverviewResponse> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-overview`,
+    parseNarrationOverviewResponse,
+    { signal },
+  );
+}
+
+export function getNarrationSettings(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<NarrationSettingsResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-settings`,
+    parseNarrationSettingsResource,
+    { signal },
+  );
+}
+
+export function putNarrationSettings(
+  novelId: string,
+  payload: UpdateNarrationSettingsRequest,
+  signal?: AbortSignal,
+): Promise<NarrationSettingsResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-settings`,
+    parseNarrationSettingsResource,
+    jsonInit("PUT", payload, signal),
+  );
+}
+
+export function listNarrationScopeOverrides(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<NarrationScopeOverrideListResponse> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-scope-overrides`,
+    parseNarrationScopeOverrideListResponse,
+    { signal },
+  );
+}
+
+export function putNarrationScopeOverride(
+  novelId: string,
+  scopeKind: NarrationScopeKind,
+  scopeId: string,
+  payload: PutNarrationScopeOverrideRequest,
+  signal?: AbortSignal,
+): Promise<NarrationScopeOverrideResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-scope-overrides/${scopeKind}/${pathSegment(scopeId)}`,
+    parseNarrationScopeOverrideResource,
+    jsonInit("PUT", payload, signal),
+  );
+}
+
+export function createNarrationCloudConsent(
+  novelId: string,
+  payload: CreateNarrationCloudConsentRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<NarrationCloudConsent> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cloud-consents`,
+    parseNarrationCloudConsent,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export function revokeNarrationCloudConsent(
+  novelId: string,
+  payload: RevokeNarrationCloudConsentRequest,
+  signal?: AbortSignal,
+): Promise<NarrationCloudConsent> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cloud-consents/current`,
+    parseNarrationCloudConsent,
+    jsonInit("DELETE", payload, signal),
+  );
+}
+
+export function listVoiceProfiles(
+  options: { readonly novelId?: string; readonly includeLibrary?: boolean; readonly signal?: AbortSignal } = {},
+): Promise<VoiceProfileListResponse> {
+  const query = new URLSearchParams();
+  if (options.novelId) query.set("novel_id", options.novelId);
+  query.set("include_library", String(options.includeLibrary ?? true));
+  return parsedRequest(
+    `/voice-profiles?${query.toString()}`,
+    parseVoiceProfileListResponse,
+    { signal: options.signal },
+  );
+}
+
+export function createVoiceProfile(
+  payload: CreateVoiceProfileRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<VoiceProfileResource> {
+  return parsedRequest(
+    "/voice-profiles",
+    parseVoiceProfileResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export function getVoiceProfile(
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<VoiceProfileResource> {
+  return parsedRequest(
+    `/voice-profiles/${pathSegment(profileId)}`,
+    parseVoiceProfileResource,
+    { signal },
+  );
+}
+
+export function updateVoiceProfile(
+  profileId: string,
+  payload: UpdateVoiceProfileRequest,
+  signal?: AbortSignal,
+): Promise<VoiceProfileResource> {
+  return parsedRequest(
+    `/voice-profiles/${pathSegment(profileId)}`,
+    parseVoiceProfileResource,
+    jsonInit("PUT", payload, signal),
+  );
+}
+
+export function archiveVoiceProfile(
+  profileId: string,
+  expectedVersion: number,
+  signal?: AbortSignal,
+): Promise<VoiceProfileResource> {
+  const query = new URLSearchParams({ expected_version: String(expectedVersion) });
+  return parsedRequest(
+    `/voice-profiles/${pathSegment(profileId)}?${query.toString()}`,
+    parseVoiceProfileResource,
+    { method: "DELETE", signal },
+  );
+}
+
+export function createPresetVoiceVersion(
+  profileId: string,
+  payload: CreatePresetVoiceVersionRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<VoiceProfileVersionResource> {
+  return parsedRequest(
+    `/voice-profiles/${pathSegment(profileId)}/versions/preset`,
+    parseVoiceProfileVersionResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export function listOfficialVoicePresets(
+  signal?: AbortSignal,
+): Promise<OfficialPresetCatalogResponse> {
+  return parsedRequest(
+    "/voice-presets",
+    parseOfficialPresetCatalogResponse,
+    { signal },
+  );
+}
+
+export function buildUploadedVoiceVersionFormData(
+  metadata: UploadedVoiceVersionMetadata,
+  referenceAudio: Blob,
+): FormData {
+  if (!REFERENCE_UPLOAD_MIME_TYPES.includes(referenceAudio.type as typeof REFERENCE_UPLOAD_MIME_TYPES[number])) {
+    throw new NarrationContractError(
+      "reference_audio.type",
+      `must be one of ${REFERENCE_UPLOAD_MIME_TYPES.join(",")}`,
+    );
+  }
+  if (referenceAudio.size <= 0 || referenceAudio.size > REFERENCE_UPLOAD_MAX_BYTES) {
+    throw new NarrationContractError(
+      "reference_audio.size",
+      `must be 1-${REFERENCE_UPLOAD_MAX_BYTES} bytes`,
+    );
+  }
+  if (metadata.original_filename.includes("/") || metadata.original_filename.includes("\\")) {
+    throw new NarrationContractError("metadata.original_filename", "must not contain a path");
+  }
+  const form = new FormData();
+  form.append("metadata", JSON.stringify(metadata));
+  form.append("reference_audio", referenceAudio, metadata.original_filename);
+  return form;
+}
+
+export function createUploadedVoiceVersion(
+  profileId: string,
+  metadata: UploadedVoiceVersionMetadata,
+  referenceAudio: Blob,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<VoiceProfileVersionResource> {
+  return multipartRequest(
+    `/voice-profiles/${pathSegment(profileId)}/versions/uploaded`,
+    buildUploadedVoiceVersionFormData(metadata, referenceAudio),
+    parseVoiceProfileVersionResource,
+    idempotencyKey,
+    signal,
+  );
+}
+
+export function createVoicePreview(
+  profileId: string,
+  payload: CreateVoicePreviewRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<VoicePreviewResource> {
+  return parsedRequest(
+    `/voice-profiles/${pathSegment(profileId)}/previews`,
+    parseVoicePreviewResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export function getVoicePreview(
+  previewId: string,
+  signal?: AbortSignal,
+): Promise<VoicePreviewResource> {
+  return parsedRequest(
+    `/voice-previews/${pathSegment(previewId)}`,
+    parseVoicePreviewResource,
+    { signal },
+  );
+}
+
+export function lockVoiceProfile(
+  profileId: string,
+  payload: LockVoiceProfileRequest,
+  signal?: AbortSignal,
+): Promise<VoiceProfileResource> {
+  return parsedRequest(
+    `/voice-profiles/${pathSegment(profileId)}/lock`,
+    parseVoiceProfileResource,
+    jsonInit("POST", payload, signal),
+  );
+}
+
+export function getCharacterVoiceBinding(
+  novelId: string,
+  characterId: string,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceBindingResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/voice-binding`,
+    parseCharacterVoiceBindingResource,
+    { signal },
+  );
+}
+
+export function listCharacterVoiceBindings(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceBindingListResponse> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/character-voice-bindings`,
+    parseCharacterVoiceBindingListResponse,
+    { signal },
+  );
+}
+
+export function putCharacterVoiceBinding(
+  novelId: string,
+  characterId: string,
+  payload: PutCharacterVoiceBindingRequest,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceBindingResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/voice-binding`,
+    parseCharacterVoiceBindingResource,
+    jsonInit("PUT", payload, signal),
+  );
+}
+
+export function getVoiceCastingRules(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<VoiceCastingRulesResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/casting-rules`,
+    parseVoiceCastingRulesResource,
+    { signal },
+  );
+}
+
+export function putVoiceCastingRules(
+  novelId: string,
+  payload: PutVoiceCastingRulesRequest,
+  signal?: AbortSignal,
+): Promise<VoiceCastingRulesResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/casting-rules`,
+    parseVoiceCastingRulesResource,
+    jsonInit("PUT", payload, signal),
+  );
+}
+
+export function getPronunciationProfile(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<PronunciationProfileResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/pronunciation-profile`,
+    parsePronunciationProfileResource,
+    { signal },
+  );
+}
+
+export function putPronunciationProfile(
+  novelId: string,
+  payload: PutPronunciationProfileRequest,
+  signal?: AbortSignal,
+): Promise<PronunciationProfileResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/pronunciation-profile`,
+    parsePronunciationProfileResource,
+    jsonInit("PUT", payload, signal),
+  );
+}
+
+export function getNarrationCacheStatus(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<NarrationCacheStatus> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cache`,
+    parseNarrationCacheStatus,
+    { signal },
+  );
+}
+
+export function previewNarrationCacheCleanup(
+  novelId: string,
+  payload: PreviewNarrationCacheCleanupRequest,
+  signal?: AbortSignal,
+): Promise<NarrationCacheCleanupPreview> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cache/cleanup-preview`,
+    parseNarrationCacheCleanupPreview,
+    jsonInit("POST", payload, signal),
+  );
+}
+
+export function executeNarrationCacheCleanup(
+  novelId: string,
+  payload: ExecuteNarrationCacheCleanupRequest,
+  signal?: AbortSignal,
+): Promise<NarrationCacheCleanupResult> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cache/cleanup`,
+    parseNarrationCacheCleanupResult,
+    jsonInit("POST", payload, signal),
+  );
+}
+
+
+function chapterPathId(value: string, field: string): string {
+  return pathSegment(normalizeChapterUuid(value, field));
+}
+
+
+function requireChapterIdentity(
+  actual: string | null,
+  expected: string | null,
+  field: string,
+): void {
+  if (actual !== expected) {
+    throw new ChapterNarrationContractError(field, "response scope mismatch");
+  }
+}
+
+
+export async function getDocumentNarrationContext(
+  documentId: string,
+  activeEditionId?: string,
+  signal?: AbortSignal,
+): Promise<DocumentNarrationContext> {
+  const normalizedDocumentId = normalizeChapterUuid(documentId, "document_id");
+  const normalizedActiveId = activeEditionId === undefined
+    ? undefined
+    : normalizeChapterUuid(activeEditionId, "active_edition_id");
+  const query = normalizedActiveId === undefined
+    ? ""
+    : `?${new URLSearchParams({ active_edition_id: normalizedActiveId }).toString()}`;
+  const resource = await parsedProductionRequest(
+    `/documents/${chapterPathId(normalizedDocumentId, "document_id")}/narration-playback-context${query}`,
+    parseDocumentNarrationContext,
+    { signal },
+  );
+  requireChapterIdentity(resource.document_id, normalizedDocumentId, "document_id");
+  requireChapterIdentity(
+    resource.active_edition_id,
+    normalizedActiveId ?? resource.current_edition_id,
+    "active_edition_id",
+  );
+  return resource;
+}
+
+
+export async function getNarrationEdition(
+  editionId: string,
+  signal?: AbortSignal,
+): Promise<NarrationEditionResource> {
+  const normalizedEditionId = normalizeChapterUuid(editionId, "edition_id");
+  const resource = await parsedProductionRequest(
+    `/narration-editions/${chapterPathId(normalizedEditionId, "edition_id")}`,
+    parseNarrationEditionResource,
+    { signal },
+  );
+  requireChapterIdentity(resource.edition_id, normalizedEditionId, "edition_id");
+  return resource;
+}
+
+
+export async function getFailedNarrationSegments(
+  editionId: string,
+  signal?: AbortSignal,
+): Promise<FailedNarrationSegmentsProjection> {
+  const normalizedEditionId = normalizeChapterUuid(editionId, "edition_id");
+  const resource = await parsedProductionRequest(
+    `/narration-editions/${chapterPathId(normalizedEditionId, "edition_id")}/failed-segments`,
+    parseFailedNarrationSegmentsProjection,
+    { signal },
+  );
+  requireChapterIdentity(resource.edition_id, normalizedEditionId, "edition_id");
+  return resource;
+}
+
+
+export async function retryFailedNarrationSegments(
+  editionId: string,
+  request: RetryFailedNarrationSegmentsRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RetryFailedNarrationSegmentsResponse> {
+  const normalizedEditionId = normalizeChapterUuid(editionId, "edition_id");
+  const payload = parseRetryFailedNarrationSegmentsRequest(request);
+  const resource = await parsedProductionRequest(
+    `/narration-editions/${chapterPathId(normalizedEditionId, "edition_id")}/retry-failed-segments`,
+    parseRetryFailedNarrationSegmentsResponse,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+  requireChapterIdentity(resource.edition_id, normalizedEditionId, "edition_id");
+  const accepted = new Set(resource.accepted_segment_ids);
+  if (
+    accepted.size !== payload.segment_ids.length
+    || payload.segment_ids.some((segmentId) => !accepted.has(segmentId))
+  ) {
+    throw new ChapterNarrationContractError(
+      "retry_response.accepted_segment_ids",
+      "response does not match the requested selection",
+    );
+  }
+  return resource;
+}
+
+
+export async function createNarrationWorkflow(
+  documentId: string,
+  request: CreateNarrationWorkflowRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<NarrationWorkflowResource> {
+  const normalizedDocumentId = normalizeChapterUuid(documentId, "document_id");
+  const payload = parseCreateNarrationWorkflowRequest(request);
+  const resource = await parsedProductionRequest(
+    `/documents/${chapterPathId(normalizedDocumentId, "document_id")}/narration-requests`,
+    parseNarrationWorkflowResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+  if (
+    resource.intent !== payload.intent
+    || resource.source_content_hash !== payload.expected_content_hash
+  ) {
+    throw new ChapterNarrationContractError(
+      "workflow",
+      "response does not match the requested intent and saved source",
+    );
+  }
+  return resource;
+}
+
+
+export async function getNarrationWorkflow(
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<NarrationWorkflowResource> {
+  const normalizedRequestId = normalizeChapterUuid(requestId, "request_id");
+  const resource = await parsedProductionRequest(
+    `/narration-requests/${chapterPathId(normalizedRequestId, "request_id")}`,
+    parseNarrationWorkflowResource,
+    { signal },
+  );
+  requireChapterIdentity(resource.request_id, normalizedRequestId, "request_id");
+  return resource;
+}
+
+
+export async function switchNarrationEdition(
+  documentId: string,
+  request: SwitchNarrationEditionRequest,
+  signal?: AbortSignal,
+): Promise<SwitchNarrationEditionResponse> {
+  const normalizedDocumentId = normalizeChapterUuid(documentId, "document_id");
+  const payload = parseSwitchNarrationEditionRequest(request);
+  const resource = await parsedProductionRequest(
+    `/documents/${chapterPathId(normalizedDocumentId, "document_id")}/current-narration-edition`,
+    parseSwitchNarrationEditionResponse,
+    jsonInit("PUT", payload, signal),
+  );
+  if (
+    resource.document_id !== normalizedDocumentId
+    || resource.current_edition_id !== payload.target_edition_id
+    || resource.pointer_version !== payload.expected_version + 1
+    || resource.switch_mode !== payload.switch_mode
+    || (
+      payload.start_segment_id !== null
+      && resource.start_segment_id !== payload.start_segment_id
+    )
+    || (
+      payload.switch_mode === "immediate"
+      && (resource.start_segment_id === null || resource.playback_progress_id === null)
+    )
+    || (
+      payload.switch_mode === "next_playback"
+      && (resource.start_segment_id !== null || resource.playback_progress_id !== null)
+    )
+  ) {
+    throw new ChapterNarrationContractError(
+      "switch_response",
+      "response does not match target, CAS, mode, or start guards",
+    );
+  }
+  return resource;
+}

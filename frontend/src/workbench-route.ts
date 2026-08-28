@@ -4,6 +4,32 @@ const CHAT_ROOT_PATH = "/chat";
 const CREATIVE_CENTER_ROUTE_SCOPE_ID = "ai-novel-world-2026:creative-center";
 
 
+export const WORKBENCH_ROUTE_SECTIONS = [
+  "chapters",
+  "outline",
+  "roles",
+  "clues",
+  "settings",
+  "reading",
+] as const;
+
+
+export type WorkbenchRouteSection = typeof WORKBENCH_ROUTE_SECTIONS[number];
+
+
+export const WORKBENCH_READING_PANELS = [
+  "overview",
+  "narrator",
+  "characters",
+  "casting-rules",
+  "pronunciation",
+  "audio-cache",
+] as const;
+
+
+export type WorkbenchReadingPanel = typeof WORKBENCH_READING_PANELS[number];
+
+
 export type RouteSessionState =
   | "ordinary-chat"
   | "workbench-no-session"
@@ -16,6 +42,8 @@ export interface WorkbenchRouteState {
   documentId?: string;
   chatPath?: string;
   roleView?: "list" | "graph";
+  section?: WorkbenchRouteSection;
+  readingPanel?: WorkbenchReadingPanel;
 }
 
 
@@ -51,6 +79,12 @@ export interface RouteSessionStateMachineOptions {
 }
 
 
+export interface WorkbenchHistory {
+  readonly state: unknown;
+  replaceState(data: unknown, unused: string, url?: string | URL | null): void;
+}
+
+
 interface StoredWorkbenchRoute extends OwnedWorkbenchRouteState {
   storageVersion: typeof WORKBENCH_ROUTE_STORAGE_VERSION;
   state: "workbench-no-session" | "workbench-session";
@@ -61,6 +95,15 @@ interface ExplicitWorkbenchRoute {
   novelId: string;
   documentId?: string;
   roleView?: "list" | "graph";
+  section?: WorkbenchRouteSection;
+  readingPanel?: WorkbenchReadingPanel;
+}
+
+
+export interface WorkbenchLocationUpdate {
+  documentId?: string;
+  section: WorkbenchRouteSection;
+  readingPanel?: WorkbenchReadingPanel;
 }
 
 
@@ -102,6 +145,31 @@ function nonEmptyQueryValue(query: URLSearchParams, key: string): string | undef
 }
 
 
+export function isWorkbenchRouteSection(value: unknown): value is WorkbenchRouteSection {
+  return typeof value === "string"
+    && (WORKBENCH_ROUTE_SECTIONS as readonly string[]).includes(value);
+}
+
+
+export function isWorkbenchReadingPanel(value: unknown): value is WorkbenchReadingPanel {
+  return typeof value === "string"
+    && (WORKBENCH_READING_PANELS as readonly string[]).includes(value);
+}
+
+
+function routePageLocation(
+  section: WorkbenchRouteSection | undefined,
+  readingPanel: WorkbenchReadingPanel | undefined,
+): Pick<WorkbenchRouteState, "section" | "readingPanel"> {
+  if (!section) return {};
+  if (section !== "reading") return { section };
+  return {
+    section,
+    readingPanel: readingPanel ?? "overview",
+  };
+}
+
+
 function explicitWorkbenchRoute(
   location: RouteSessionLocation,
 ): ExplicitWorkbenchRoute | null {
@@ -111,12 +179,22 @@ function explicitWorkbenchRoute(
   const novelId = nonEmptyQueryValue(query, "novel_id");
   if (query.get("novel_workbench") === "1" && novelId) {
     const queryRoleView = query.get("role_view");
+    const querySection = query.get("section");
+    const section = isWorkbenchRouteSection(querySection) && querySection !== "chapters"
+      ? querySection
+      : undefined;
+    const readingPanel = section === "reading" && isWorkbenchReadingPanel(
+      query.get("reading_panel"),
+    )
+      ? query.get("reading_panel") as WorkbenchReadingPanel
+      : undefined;
     return {
       novelId,
       documentId: nonEmptyQueryValue(query, "document_id"),
       roleView: queryRoleView === "list" || queryRoleView === "graph"
         ? queryRoleView
         : undefined,
+      ...routePageLocation(section, readingPanel),
     };
   }
   return query.get("novel_center") === "1"
@@ -143,6 +221,14 @@ function optionalRoleView(value: unknown): value is "list" | "graph" | undefined
 }
 
 
+function validStoredPageLocation(candidate: Record<string, unknown>): boolean {
+  if (candidate.section === undefined) return candidate.readingPanel === undefined;
+  if (!isWorkbenchRouteSection(candidate.section) || candidate.section === "chapters") return false;
+  if (candidate.section !== "reading") return candidate.readingPanel === undefined;
+  return isWorkbenchReadingPanel(candidate.readingPanel);
+}
+
+
 function isStoredWorkbenchRoute(value: unknown): value is StoredWorkbenchRoute {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
@@ -159,6 +245,7 @@ function isStoredWorkbenchRoute(value: unknown): value is StoredWorkbenchRoute {
     && optionalString(candidate.documentId)
     && validChatPath
     && optionalRoleView(candidate.roleView)
+    && validStoredPageLocation(candidate)
     && validOwnerToken(candidate.ownerToken)
     && (candidate.state !== "workbench-session" || candidate.chatPath !== undefined);
 }
@@ -186,6 +273,22 @@ function cloneSnapshot(snapshot: RouteSessionSnapshot): RouteSessionSnapshot {
     route: snapshot.route ? cloneRoute(snapshot.route) : null,
     ownerToken: snapshot.ownerToken,
   };
+}
+
+
+export function replaceWorkbenchHistoryUrl(
+  history: WorkbenchHistory,
+  currentHref: string,
+  targetUrl: string,
+): void {
+  const current = new URL(currentHref);
+  const target = new URL(targetUrl, current);
+  target.hash = current.hash;
+  history.replaceState(
+    history.state,
+    "",
+    `${target.pathname}${target.search}${target.hash}`,
+  );
 }
 
 
@@ -233,6 +336,7 @@ export class RouteSessionStateMachine {
         documentId: explicit.documentId,
         chatPath: sessionPath ?? reusable?.chatPath,
         roleView: explicit.roleView ?? reusable?.roleView,
+        ...routePageLocation(explicit.section, explicit.readingPanel),
         ownerToken,
       };
       const state = sessionPath ? "workbench-session" : "workbench-no-session";
@@ -255,6 +359,7 @@ export class RouteSessionStateMachine {
         documentId: activeRoute.documentId,
         chatPath: undefined,
         roleView: activeRoute.roleView,
+        ...routePageLocation(activeRoute.section, activeRoute.readingPanel),
         ownerToken: activeRoute.ownerToken,
       });
     }
@@ -269,6 +374,7 @@ export class RouteSessionStateMachine {
       documentId: stored.documentId,
       chatPath: sessionPath,
       roleView: stored.roleView,
+      ...routePageLocation(stored.section, stored.readingPanel),
       ownerToken: stored.ownerToken,
     };
     return this.persistWorkbench("workbench-session", route);
@@ -290,6 +396,7 @@ export class RouteSessionStateMachine {
       documentId,
       chatPath: activeRoute?.chatPath,
       roleView: activeRoute?.roleView,
+      ...routePageLocation(activeRoute?.section, activeRoute?.readingPanel),
       ownerToken,
     };
     const state = activeRoute && active.state === "workbench-session"
@@ -324,7 +431,43 @@ export class RouteSessionStateMachine {
       documentId: active.route.documentId,
       chatPath: active.route.chatPath,
       roleView,
+      ...routePageLocation(active.route.section, active.route.readingPanel),
       ownerToken: active.route.ownerToken,
+    });
+  }
+
+  rememberLocation(
+    novelId: string,
+    update: WorkbenchLocationUpdate,
+  ): RouteSessionSnapshot {
+    const normalizedNovelId = novelId.trim();
+    if (!normalizedNovelId || !isWorkbenchRouteSection(update.section)) {
+      return this.toOrdinaryChat();
+    }
+
+    const active = this.resolve();
+    const activeRoute = active.route?.novelId === normalizedNovelId
+      ? active.route
+      : null;
+    const ownerToken = activeRoute?.ownerToken ?? this.newOwnerToken();
+    if (!ownerToken) return this.toOrdinaryChat();
+
+    const section = update.section === "chapters" ? undefined : update.section;
+    const readingPanel = section === "reading" && isWorkbenchReadingPanel(update.readingPanel)
+      ? update.readingPanel
+      : section === "reading"
+        ? "overview"
+        : undefined;
+    const state = activeRoute && active.state === "workbench-session"
+      ? "workbench-session"
+      : "workbench-no-session";
+    return this.persistWorkbench(state, {
+      novelId: normalizedNovelId,
+      documentId: update.documentId,
+      chatPath: activeRoute?.chatPath,
+      roleView: activeRoute?.roleView,
+      ...routePageLocation(section, readingPanel),
+      ownerToken,
     });
   }
 
@@ -422,6 +565,14 @@ function browserStateMachine(): RouteSessionStateMachine {
 
 export function rememberWorkbenchRoute(novelId: string, documentId?: string): void {
   browserStateMachine().enterWorkbench(novelId, documentId);
+}
+
+
+export function rememberWorkbenchLocation(
+  novelId: string,
+  update: WorkbenchLocationUpdate,
+): void {
+  browserStateMachine().rememberLocation(novelId, update);
 }
 
 

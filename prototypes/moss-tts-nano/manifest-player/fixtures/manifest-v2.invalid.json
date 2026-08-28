@@ -1,0 +1,64 @@
+{
+  "schema_version": "narration-manifest/2.0",
+  "edition_id": "edition-invalid",
+  "chapter_id": "chapter-1",
+  "source_revision_id": "revision-1",
+  "source_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "buffer_policy": {
+    "version": "initial-buffer/v1-3-segments-8000ms",
+    "minimum_segments": 3,
+    "minimum_duration_ms": 8000,
+    "target_segments": 2,
+    "chapter_end_exception": true
+  },
+  "manifest_revision": 0,
+  "etag": "weak-etag",
+  "generated_at": "not-a-date",
+  "status": "ready",
+  "ready_prefix_count": 2,
+  "default_start_ready": true,
+  "last_playable_start_ordinal": 7,
+  "ready_ranges": [
+    {
+      "start_ordinal": 0,
+      "end_ordinal_exclusive": 2,
+      "segment_count": 9,
+      "duration_ms": 1,
+      "last_playable_start_ordinal": 7
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "seg-0",
+      "ordinal": 0,
+      "paragraph_ordinal": 0,
+      "source_block_key": "block-0",
+      "source_start_utf16": 5,
+      "source_end_utf16": 5,
+      "gap_after_ms": 250,
+      "render_status": "ready",
+      "text_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "audio": {
+        "url": "/api/ai-novel-world-2026/narration/media/asset-seg-0?token=secret",
+        "actual_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "duration_ms": 3000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "etag": "\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\""
+      },
+      "failure": null
+    },
+    {
+      "segment_id": "seg-1",
+      "ordinal": 4,
+      "paragraph_ordinal": 1,
+      "source_block_key": "block-1",
+      "source_start_utf16": 0,
+      "source_end_utf16": 8,
+      "gap_after_ms": 0,
+      "render_status": "pending",
+      "audio": null,
+      "failure": null
+    }
+  ]
+}

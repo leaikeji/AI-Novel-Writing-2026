@@ -1,0 +1,36 @@
+T1-G database-role catalog (secret-free)
+current validator expected head: 20260826_0015
+last live role validation head: 20260826_0012
+current 0015 live role validation: NOT RUN
+production role switch: HOLD
+root compose integrated: false
+same PostgreSQL role design, not a second business database: true
+formal database head: 20260825_0009
+formal database touched by role evidence refresh: false
+
+Historical 0012 disposable catalog:
+database owner: ai_novel_schema_owner
+public schema owner: ai_novel_schema_owner
+application relation owner violations: 0
+application routine owner violations: 0
+application type owner violations: 0
+external extension: vector (administrator provisioned)
+
+ai_novel_schema_owner login=false super=false createdb=false createrole=false inherit=false replication=false bypassrls=false
+ai_novel_migrator     login=true  super=false createdb=false createrole=false inherit=false replication=false bypassrls=false scram=true
+ai_novel_api          login=true  super=false createdb=false createrole=false inherit=false replication=false bypassrls=false scram=true
+ai_novel_worker       login=true  super=false createdb=false createrole=false inherit=false replication=false bypassrls=false scram=true
+
+historical public base/partitioned tables: 77
+historical protected authority tables: 55
+historical api mutable public tables: 0
+historical worker mutable public tables: 0
+historical public routines: 165
+historical PUBLIC executable public routines: 0
+historical api executable public routines: 0
+historical worker executable public routines: 0
+historical SECURITY DEFINER public routines: 0
+
+worker business procedures present: false
+role package business-write usable: false
+password material recorded in this evidence: false

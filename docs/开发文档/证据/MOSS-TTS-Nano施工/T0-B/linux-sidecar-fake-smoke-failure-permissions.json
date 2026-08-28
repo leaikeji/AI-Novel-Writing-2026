@@ -1,0 +1,15 @@
+{
+  "schema_version": "moss-tts-linux-sidecar-gate-failure/1.0",
+  "status": "failed",
+  "mode": "smoke",
+  "error_class": "PermissionError",
+  "root_cause": "the non-root PawApp harness could not write the newly created root-owned named test-media volume",
+  "failed_fix_attempt": "a one-shot CAP_CHOWN initializer was also denied by Docker Desktop user-namespace isolation and was removed",
+  "final_fix": "the PawApp harness uses an explicitly marked, host-created isolated test directory with pre-established permissions; the Sidecar remains non-root and never mounts PawApp media",
+  "contains_audio": false,
+  "cleanup": {
+    "exact_test_project_stopped": true,
+    "exact_test_volume_removed": true,
+    "orphan_container_count": 0
+  }
+}

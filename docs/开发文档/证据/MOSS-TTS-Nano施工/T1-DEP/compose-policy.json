@@ -1,0 +1,72 @@
+{
+  "schema_version": "moss-tts-t1-dep-compose-policy/1.0",
+  "captured_at": "2026-08-26T06:49:07+08:00",
+  "compose_sha256": "91be1097c196b0c6a155940298072e98ba0a1741cac2b7032424de61d6895937",
+  "default_profile": {
+    "services": ["qwenpaw"],
+    "tts_sidecar_present": false
+  },
+  "tts_profile": {
+    "services": ["qwenpaw", "tts-sidecar"],
+    "sidecar_build": {
+      "context": ".",
+      "dockerfile": "docker/tts-sidecar/Dockerfile",
+      "target": "production-runtime",
+      "image_tag": "ai-novel-world/moss-tts-sidecar:t1-runtime-linux-arm64-candidate"
+    },
+    "sidecar": {
+      "platform": "linux/arm64",
+      "host_ports": [],
+      "exposed_ports": [],
+      "healthcheck": null,
+      "networks": ["tts-private"],
+      "network_internal": true,
+      "user": "65532:65532",
+      "read_only_rootfs": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "database_credentials": false,
+      "database_mount": false,
+      "novel_media_mount": false,
+      "qwenpaw_volume_mount": false,
+      "model_mount": {
+        "volume": "moss-models",
+        "target": "/opt/moss-assets",
+        "read_only": true,
+        "write_owner": "model-lifecycle-only"
+      },
+      "token": {
+        "transport": "Compose secret file",
+        "container_path": "/run/secrets/moss_tts_sidecar_token",
+        "host_path_example": "./runtime/secrets/moss-tts-sidecar-token.secret",
+        "value_in_environment": false,
+        "format": "32-128 printable non-whitespace ASCII bytes with no trailing newline"
+      }
+    }
+  },
+  "volumes": {
+    "moss-models": {
+      "persistent_name": "ai-novel-2026-moss-models",
+      "sidecar_mode": "read_only",
+      "initialization": "Only the later model-lifecycle Owner may attach read-write through an explicit one-off installer; the nonroot dependency image precreates an empty 0750 root owned by 65532:65532."
+    },
+    "novel-media": {
+      "persistent_name": "ai-novel-2026-novel-media",
+      "pawapp_target": "/app/working/ai-novel-world-2026/novel-media",
+      "pawapp_mode": "read_write",
+      "sidecar_attached": false
+    }
+  },
+  "current_runtime_read_only_audit": {
+    "qwenpaw_container_id_unchanged": true,
+    "qwenpaw_started_at": "2026-08-25T13:34:06.506289214Z",
+    "qwenpaw_status": "running",
+    "qwenpaw_health": "healthy",
+    "qwenpaw_oom_killed": false,
+    "qwenpaw_http_status": 200,
+    "running_tts_container_count": 0,
+    "created_tts_volume_count": 0,
+    "created_tts_network_count": 0,
+    "note": "T1-DEP did not run compose up/down or reconfigure the existing QwenPaw container. The new media mount and private network are declarations for the next controlled deployment, not claims about the current container."
+  }
+}

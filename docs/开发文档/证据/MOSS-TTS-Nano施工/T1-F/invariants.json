@@ -1,0 +1,102 @@
+{
+  "schema_version": "moss-tts-t1-f-domain-evidence/3",
+  "work_package": "T1-F",
+  "date": "2026-08-26",
+  "status": "ready_for_t1_gate_review_gate_not_decided",
+  "current_head": "20260826_0015",
+  "transaction_boundary": {
+    "caller_owns_short_transaction": true,
+    "service_commits": false,
+    "service_flushes": true,
+    "external_io_in_transaction": false,
+    "publication_order": "combined fence -> deterministic files -> model-run/media/link/render-ready/attempt-complete -> caller commit"
+  },
+  "invariants": {
+    "fixed_local_scope": true,
+    "canonical_request_hash_and_idempotency": true,
+    "single_document_analyze_only_requires_revision_and_hash": true,
+    "full_book_analyze_only_uses_sealed_structured_sources": true,
+    "full_book_analyze_only_live_postgresql_accepted": true,
+    "analyze_only_creates_edition_or_render": false,
+    "settings_snapshot_from_persisted_rows": true,
+    "settings_and_override_lock_order_live_verified": true,
+    "approved_script_terminal": true,
+    "approved_script_child_mutation_live_blocked": true,
+    "script_children_and_issues_in_immutable_hash": true,
+    "edition_covers_approved_script_exactly_once": true,
+    "edition_segment_fingerprint_server_derived": true,
+    "render_input_schema": "narration-render-input/1",
+    "render_input_server_derived": true,
+    "new_render_requires_source_job": true,
+    "ready_render_requires_combined_fence": true,
+    "rights_rechecked_for_edition_render_cache_and_manifest": true,
+    "voice_use_and_revoke_lock_order_live_verified": true,
+    "cross_novel_render_cache_allowed": false,
+    "manifest_schema_version": "narration-manifest/2.0",
+    "manifest_audio_from_playback_media_asset": true,
+    "manifest_append_only": true,
+    "manifest_etag_projection": "sha256(canonical_json(manifest_without_etag))",
+    "manifest_pending_persisted": false,
+    "manifest_projection_validation_level": "domain unit plus database constraints; no browser or T4 worker stress claim",
+    "progress_cas": "select_for_update+monotonic_updated_at_token",
+    "progress_inside_concrete_ready_range": true,
+    "publication_database_atomicity_live_verified": true,
+    "publication_file_re_adoption_live_verified": true
+  },
+  "validation": {
+    "non_database_combined": {
+      "passed": 175,
+      "failed": 0,
+      "skipped": 0,
+      "domain_services_slice_passed": 12,
+      "contracts_and_adapters_slice_passed": 53,
+      "t1f_plus_t1a_slice_passed": 65
+    },
+    "request_source_sealing": {"passed": 8, "failed": 0, "skipped": 0},
+    "current_head_live_suite": {"passed": 56, "failed": 0, "skipped": 0, "head": "20260826_0015"},
+    "snapshots_postgresql_slice": {"passed": 6},
+    "domain_concurrency": {"passed": 10, "real_two_session_lock_wait": true},
+    "publication_atomicity": {"passed": 1, "successful_runs": 2},
+    "foundation_integration_slice": {"passed": 6},
+    "crash_recovery_slice": {"passed": 6}
+  },
+  "source_sha256": {
+    "backend/narration/requests.py": "72d3e88c15ec33dda6ec9902ce41018fe6aee6055c0035db063e6c871fe92493",
+    "backend/narration/snapshots.py": "a3e5997c6b1f1e38a74ffe1f7213239df11596c626d693f6a7b9a22f3a21a78f",
+    "backend/narration/settings.py": "77d8ad0d3f2a4375d9672c547c4ee33c4801b5e8385a88c94c2e3ce78805981a",
+    "backend/narration/script_versions.py": "d745da76564998a8b093721b376c15a1bc38f091da87f235dc89af7d950c2fd0",
+    "backend/narration/editions.py": "553546d1200482bf20fd2ba14d5c62c12297e1f72f55bfabbec846f769a1f6fd",
+    "backend/narration/renders.py": "68a743dc8147320ea111ee864a58da26ab8a150dd1f3ce6b1055f7e9e6f0122b",
+    "backend/narration/manifest.py": "e814bef268a7fbe6708797e16344c1499539f06b0e1d15337322f53df7c11584",
+    "backend/narration/progress.py": "2b713746b7e002888869b3b34543554aa687a4612cf8b21364be857a863df3f9",
+    "backend/narration/services.py": "2be849e80bca38a9de738ef11193bddd4e199483e423b8a3afde4393f3c31e11",
+    "backend/narration/publication.py": "09ec2b404b73e61ab6e0ac6c223276e2e19092da66d06bb21050f10fbb4bb344",
+    "tests/narration/test_domain_services.py": "ca2555dfb206e68a2148dbb6fc27ad8acd1a1473222dd65669b8ac4a9a90e8e8",
+    "tests/narration/test_snapshots_postgres.py": "1c0e087c21781979ac051e4d064908ac13fba7591fe68d5e925ee3ce54aafccb",
+    "tests/narration/test_domain_concurrency_postgres.py": "7b56b46a64852ff9e33bff3399800d634fe112c53da442193d89c3ab961aaa7d",
+    "tests/narration/test_publication_postgres.py": "ef73b71535696f234c032331f6d33a15cb5dfbfa9268dc893bfb32f72742965d"
+  },
+  "database_isolation": {
+    "formal_database_used": false,
+    "formal_database_head": "20260825_0009",
+    "formal_database_migrated": false
+  },
+  "capability": {
+    "product_visible": false,
+    "false_is_acceptable_at_t1_gate": true
+  },
+  "database_roles": {
+    "production_role_switch": "HOLD",
+    "secure_fail_closed_candidate": true,
+    "business_write_path_usable": false,
+    "same_postgresql_not_second_database": true,
+    "root_compose_integrated": false
+  },
+  "claims_not_made": [
+    "T1-GATE pass",
+    "T2 API readiness",
+    "T4 scheduler or worker readiness",
+    "browser player readiness",
+    "manual listening acceptance"
+  ]
+}

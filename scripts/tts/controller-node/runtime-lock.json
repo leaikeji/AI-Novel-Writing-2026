@@ -1,0 +1,25 @@
+{
+  "archives": {
+    "darwin-arm64": {
+      "filename": "node-v24.19.0-darwin-arm64.tar.gz",
+      "sha256": "8294b7aa9b03997481c06babf1e8b270c859358f27da57a11509afe537ac381d"
+    },
+    "darwin-x64": {
+      "filename": "node-v24.19.0-darwin-x64.tar.gz",
+      "sha256": "d1b5e999db158c62fe8f7267a4476b035d8bd93b1a605bac24a3f0dd166e3316"
+    }
+  },
+  "base_url": "https://nodejs.org/download/release/v24.19.0",
+  "dependency": {
+    "archive_filename": "playwright-core-1.62.1.tgz",
+    "archive_sha512_base64": "wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==",
+    "name": "playwright-core",
+    "package_json_sha256": "1d962c9af7d389e0ec0d659c480878bc136aa35298d143716c6ac35ac678cb42",
+    "pnpm_lock_sha256": "c8637967e2632eaebd8948d719cd8f5829cfed78ca2d2376536ea6e0916b4b8c",
+    "registry_tarball_url": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.62.1.tgz",
+    "version": "1.62.1"
+  },
+  "node_version": "24.19.0",
+  "schema_version": "moss-tts-t4k-controller-node-runtime-lock/1.0",
+  "shasums_url": "https://nodejs.org/download/release/v24.19.0/SHASUMS256.txt"
+}

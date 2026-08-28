@@ -1,0 +1,146 @@
+{
+  "schema_version": "narration-manifest/2.0",
+  "edition_id": "edition-1",
+  "chapter_id": "chapter-1",
+  "source_revision_id": "revision-1",
+  "source_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "buffer_policy": {
+    "version": "initial-buffer/v1-3-segments-8000ms",
+    "minimum_segments": 3,
+    "minimum_duration_ms": 8000,
+    "target_segments": 5,
+    "chapter_end_exception": true
+  },
+  "manifest_revision": 4,
+  "etag": "\"9999999999999999999999999999999999999999999999999999999999999999\"",
+  "generated_at": "2026-08-26T08:00:00+08:00",
+  "status": "partial_ready",
+  "ready_prefix_count": 3,
+  "default_start_ready": true,
+  "last_playable_start_ordinal": 5,
+  "ready_ranges": [
+    {
+      "start_ordinal": 0,
+      "end_ordinal_exclusive": 3,
+      "segment_count": 3,
+      "duration_ms": 9500,
+      "last_playable_start_ordinal": 0
+    },
+    {
+      "start_ordinal": 4,
+      "end_ordinal_exclusive": 6,
+      "segment_count": 2,
+      "duration_ms": 3250,
+      "last_playable_start_ordinal": 5
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "seg-0",
+      "ordinal": 0,
+      "paragraph_ordinal": 0,
+      "source_block_key": "block-0",
+      "source_start_utf16": 0,
+      "source_end_utf16": 8,
+      "gap_after_ms": 250,
+      "render_status": "ready",
+      "audio": {
+        "url": "/api/ai-novel-world-2026/narration/media/asset-seg-0",
+        "actual_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "duration_ms": 3000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "etag": "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+      },
+      "failure": null
+    },
+    {
+      "segment_id": "seg-1",
+      "ordinal": 1,
+      "paragraph_ordinal": 1,
+      "source_block_key": "block-1",
+      "source_start_utf16": 0,
+      "source_end_utf16": 8,
+      "gap_after_ms": 250,
+      "render_status": "ready",
+      "audio": {
+        "url": "/api/ai-novel-world-2026/narration/media/asset-seg-1",
+        "actual_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "duration_ms": 3000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "etag": "\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\""
+      },
+      "failure": null
+    },
+    {
+      "segment_id": "seg-2",
+      "ordinal": 2,
+      "paragraph_ordinal": 1,
+      "source_block_key": "block-1",
+      "source_start_utf16": 8,
+      "source_end_utf16": 16,
+      "gap_after_ms": 250,
+      "render_status": "ready",
+      "audio": {
+        "url": "/api/ai-novel-world-2026/narration/media/asset-seg-2",
+        "actual_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "duration_ms": 3000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "etag": "\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\""
+      },
+      "failure": null
+    },
+    {
+      "segment_id": "seg-3",
+      "ordinal": 3,
+      "paragraph_ordinal": 2,
+      "source_block_key": "block-2",
+      "source_start_utf16": 0,
+      "source_end_utf16": 8,
+      "gap_after_ms": 250,
+      "render_status": "pending",
+      "audio": null,
+      "failure": null
+    },
+    {
+      "segment_id": "seg-4",
+      "ordinal": 4,
+      "paragraph_ordinal": 3,
+      "source_block_key": "block-3",
+      "source_start_utf16": 0,
+      "source_end_utf16": 8,
+      "gap_after_ms": 250,
+      "render_status": "ready",
+      "audio": {
+        "url": "/api/ai-novel-world-2026/narration/media/asset-seg-4",
+        "actual_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "duration_ms": 2000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "etag": "\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\""
+      },
+      "failure": null
+    },
+    {
+      "segment_id": "seg-5",
+      "ordinal": 5,
+      "paragraph_ordinal": 3,
+      "source_block_key": "block-3",
+      "source_start_utf16": 8,
+      "source_end_utf16": 16,
+      "gap_after_ms": 0,
+      "render_status": "ready",
+      "audio": {
+        "url": "/api/ai-novel-world-2026/narration/media/asset-seg-5",
+        "actual_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "duration_ms": 1000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "etag": "\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\""
+      },
+      "failure": null
+    }
+  ]
+}

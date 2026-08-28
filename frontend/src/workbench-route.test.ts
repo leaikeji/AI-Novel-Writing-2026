@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   isCreativeCenterRouteSession,
   isNovelWorkbenchRouteSession,
+  replaceWorkbenchHistoryUrl,
   RouteSessionLocation,
   RouteSessionStateMachine,
   RouteSessionStorage,
@@ -266,6 +267,90 @@ describe("RouteSessionStateMachine", () => {
     });
   });
 
+  it("atomically restores a reading panel after the host removes the public query", () => {
+    const harness = createHarness(
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=characters",
+    );
+    const explicit = harness.machine.resolve();
+
+    expect(explicit.route).toMatchObject({
+      novelId: "novel-1",
+      chatPath: "/chat/session-1",
+      section: "reading",
+      readingPanel: "characters",
+    });
+
+    harness.navigate("/chat/session-1");
+    const normalized = harness.machine.resolve();
+    const refreshedMachine = new RouteSessionStateMachine({
+      getLocation: () => locationOf("/chat/session-1"),
+      storage: harness.storage,
+      createOwnerToken: () => OWNER_TWO,
+    });
+    const refreshed = refreshedMachine.resolve();
+
+    expect(normalized.route).toMatchObject({
+      section: "reading",
+      readingPanel: "characters",
+    });
+    expect(refreshed.route).toMatchObject({
+      section: "reading",
+      readingPanel: "characters",
+    });
+    expect(refreshed.ownerToken).toBe(explicit.ownerToken);
+  });
+
+  it("lets an explicit URL replace a stale panel and rejects unknown panels", () => {
+    const harness = createHarness(
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=characters",
+    );
+    harness.machine.resolve();
+
+    harness.navigate(
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=voice-generator",
+    );
+    const invalidPanel = harness.machine.resolve();
+    expect(invalidPanel.route).toMatchObject({
+      section: "reading",
+      readingPanel: "overview",
+    });
+
+    harness.navigate(
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=roles&reading_panel=characters",
+    );
+    const leftReading = harness.machine.resolve();
+    expect(leftReading.route).toMatchObject({ section: "roles" });
+    expect(leftReading.route).not.toHaveProperty("readingPanel");
+  });
+
+  it("clears a reading panel when leaving reading or switching novels", () => {
+    const harness = createHarness(
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=characters",
+    );
+    harness.machine.resolve();
+
+    const chapters = harness.machine.rememberLocation("novel-1", {
+      section: "chapters",
+    });
+    expect(chapters.route).not.toHaveProperty("section");
+    expect(chapters.route).not.toHaveProperty("readingPanel");
+
+    const switched = harness.machine.rememberLocation("novel-2", {
+      section: "reading",
+      readingPanel: "narrator",
+    });
+    expect(switched.ownerToken).toBe(OWNER_TWO);
+    expect(switched.route).toMatchObject({
+      novelId: "novel-2",
+      section: "reading",
+      readingPanel: "narrator",
+    });
+    expect(harness.storage.dump().join("\n")).not.toContain("novel-1");
+
+    harness.machine.leaveWorkbench();
+    expect(harness.storage.dump()).toEqual([]);
+  });
+
   it("reconstructs a deep link from its public URL without restoring selection state", () => {
     const harness = createHarness(
       "/chat/session-9?novel_workbench=1&novel_id=novel-9&document_id=document-3&role_view=graph",
@@ -364,5 +449,28 @@ describe("RouteSessionStateMachine", () => {
       chatPath: "/chat/session-1",
       roleView: "graph",
     });
+  });
+});
+
+
+describe("workbench history replacement", () => {
+  it("preserves host history state and hash without creating a pushed entry", () => {
+    const hostState = { session: "session-1" };
+    const replaceState = vi.fn();
+    const history = { state: hostState, replaceState };
+
+    replaceWorkbenchHistoryUrl(
+      history,
+      "https://qwenpaw.test/chat/session-1?old=1#assistant",
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=characters",
+    );
+
+    expect(replaceState).toHaveBeenCalledOnce();
+    expect(replaceState).toHaveBeenCalledWith(
+      hostState,
+      "",
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=characters#assistant",
+    );
+    expect(history).not.toHaveProperty("pushState");
   });
 });

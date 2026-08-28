@@ -1,0 +1,4 @@
+# Intentionally empty production trust root.
+# T4-K remains CONTROLLER_TRUST_ROOT_HOLD until an author-approved Ed25519
+# public key is added together with a matching policy entry. Private keys and
+# SSH_AUTH_SOCK must never be stored here, mounted into QwenPaw, or committed.

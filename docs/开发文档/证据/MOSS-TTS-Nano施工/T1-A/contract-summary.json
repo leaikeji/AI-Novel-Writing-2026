@@ -1,0 +1,89 @@
+{
+  "schema_version": "moss-tts-t1a-contract-summary/1.0",
+  "work_package": "T1-A",
+  "status": "contract_and_test_double_implemented_product_disabled",
+  "frozen_inputs": {
+    "t0_gate_status": "PASS_WITH_EXPLICIT_NO-GO_CAPABILITIES",
+    "t1_dep_status": "ACCEPT",
+    "t0_evidence_manifest_sha256": "5a65e4d939b2ab39e26948964f0f0ada9aaaa8e8e8b5a7934e837ff7eac254e9",
+    "t0_h_gate_decisions_sha256": "2437be4e13e182aae554cb853f16afbc0b475d51848ce2d413eb4c3d9076e283",
+    "t0_h_contract_review_sha256": "afed19c3cca22bed3de919caa2ec0219efc8e067648063751a0efe95d8e83a5e"
+  },
+  "scope": {
+    "contract_version": "narration-scope/1",
+    "owner_id": "29cf94d9-a5c9-54ec-912c-5dfff8738c4c",
+    "workspace_id": "f0e2e632-bc99-52d2-9916-bb906aa4da6e",
+    "app_id": "ai-novel-world-2026",
+    "is_local_only": true,
+    "authority": "server_fixed",
+    "client_override_allowed": false,
+    "authentication_claim": false
+  },
+  "taxonomy": {
+    "schema_version": "narration-review-taxonomy/1",
+    "warning_count": 7,
+    "blocker_count": 11,
+    "workflow_failure_count": 7,
+    "total_code_count": 25,
+    "unknown_issue_code_policy": "reject_fail_closed",
+    "unknown_failure_code_policy": "reject_fail_closed",
+    "model_supplied_severity_policy": "ignore_and_recompute_server_side",
+    "workflow_failure_is_review_issue": false
+  },
+  "fingerprints": {
+    "hash": "sha256",
+    "encoding": "utf-8",
+    "json_keys": "sorted",
+    "json_separators": [
+      ",",
+      ":"
+    ],
+    "unicode": "NFC",
+    "schema_version_in_envelope": true,
+    "unknown_schema_version": "reject",
+    "floats": "reject_use_integer_or_fixed_point",
+    "bytes": "reject_use_verified_lowercase_sha256",
+    "model_parameter_values": "exact_scalar_str_int_bool_or_null_only",
+    "nested_mutable_parameter_values": "reject",
+    "non_string_mapping_keys": "reject",
+    "duplicate_keys_after_unicode_normalization": "reject",
+    "supported_schema_versions": [
+      "narration-scope/1",
+      "moss-model-fingerprint/1",
+      "narration-edition-fingerprint/1",
+      "narration-render-fingerprint/1",
+      "narration-adapter-capabilities-fingerprint/1"
+    ]
+  },
+  "public_abstractions": {
+    "nano": "MossNanoTTSAdapter",
+    "voice_design": "VoiceDesignAdapter",
+    "nano_methods": [
+      "capabilities",
+      "health",
+      "model_fingerprint",
+      "warmup",
+      "synthesize",
+      "cancel"
+    ],
+    "voice_design_methods": [
+      "capabilities",
+      "health",
+      "model_fingerprint",
+      "warmup",
+      "design_voice",
+      "cancel"
+    ]
+  },
+  "safety": {
+    "starts_model_on_import": false,
+    "connects_sidecar_on_import": false,
+    "writes_database": false,
+    "registers_api_or_tool": false,
+    "changes_qwenpaw": false,
+    "product_flags_changed": false,
+    "all_product_capabilities_default_false": true,
+    "capability_boolean_and_enum_runtime_types": "exact_fail_closed",
+    "model_fingerprint_parameters_copied_and_scalar_only": true
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": "t1-b-protocol-validation/3",
+  "protocol_version": "moss-tts-sidecar/1.1",
+  "status": "real_nano_short_lease_and_recovery_pass_product_capability_false",
+  "current_candidate": {
+    "targeted_tests_passed": 104,
+    "targeted_tests_total": 104,
+    "control_worker_token_separation": "pass",
+    "lease_acquire_renew_release_expiry": "pass",
+    "stale_token_and_generation_fencing": "pass",
+    "expiry_and_release_model_unload": "pass",
+    "unload_stall_poison_supervisor_exit": "pass",
+    "response_loss_same_generation_inert_proof": "pass",
+    "request_protocol_generation_model_error_fencing": "pass",
+    "ready_payload_actual_model_header_atomicity": "pass",
+    "wav_flac_complete_decode_or_fail_closed": "pass",
+    "active_cancel_without_byte_publication": "pass",
+    "runner_sha256": "23305c611d115361b378a142c2e675625d2eb9fbda045c14f1570210edd4c999",
+    "runner_real": {
+      "transcript_file": "runner-real-lease-1.1-transcript.json",
+      "transcript_file_sha256": "4829a11804dee2238a08e1db2eaeb0da01743cab4703c458d51383707e090cd4",
+      "transcript_payload_sha256": "c520c60ea6a4920521fb8463d8d4be5990ded18dc02fa7ef4dde48065ea01645",
+      "status": "pass",
+      "auth_negative_status": 401,
+      "worker_lease_ttl_seconds": 60,
+      "renewal_count_per_smoke": 5,
+      "stale_worker_token_rejected": true,
+      "initial_final_status": "unloaded",
+      "recovery_final_status": "unloaded",
+      "generation_changed": true,
+      "active_cancel_observed": true,
+      "active_fault_observed": true,
+      "cleanup_failures": []
+    }
+  },
+  "real_audio": {
+    "ordinary": {"bytes": 430124, "frames": 107520, "sample_rate_hz": 48000, "channels": 2, "sample_width_bytes": 2},
+    "reference": {"bytes": 476204, "frames": 119040, "sample_rate_hz": 48000, "channels": 2, "sample_width_bytes": 2}
+  },
+  "privacy": {
+    "current_transcripts_secret_logged": false,
+    "current_transcripts_text_recorded": false,
+    "current_transcripts_audio_bytes_recorded": false,
+    "host_bind_mounts_used_by_runner": false,
+    "host_ports_published_by_runner": false
+  },
+  "human_listening": "not_run"
+}

@@ -160,6 +160,28 @@ class VerifyApi:
                 "selection_edit_operations": list(
                     self.verifier.SELECTION_EDIT_OPERATIONS
                 ),
+                "narration": {
+                    "technical_enabled": False,
+                    "lifecycle_status": "disabled",
+                    "sidecar_reachable": False,
+                    "model_ready": False,
+                    "product_visible": False,
+                    "protocol_version": self.verifier.TTS_PROTOCOL_VERSION,
+                    "worker_generation": None,
+                    "lease_generation": None,
+                    "model_fingerprint_sha256": None,
+                    "reason_code": None,
+                },
+                "narration_production": {
+                    "product_requested": False,
+                    "lifecycle_status": "playback_only",
+                    "playback_installed": True,
+                    "digest_keyring_loaded": False,
+                    "production_backend_installed": False,
+                    "worker_running": False,
+                    "reference_clone_ready": False,
+                    "reason_code": None,
+                },
             }
         if path == "/api/agents":
             return {
@@ -261,6 +283,9 @@ def test_verifier_reads_all_agent_tool_scopes_and_accepts_target_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verifier = load_script("verify_qwenpaw_lab")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_RUNTIME", "disabled")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_PRODUCT", "disabled")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_VALIDATION", "disabled")
     api = VerifyApi(verifier)
     monkeypatch.setattr(verifier, "get_json", api.get_json)
 
@@ -286,6 +311,9 @@ def test_verifier_requires_the_complete_selection_edit_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verifier = load_script("verify_qwenpaw_lab")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_RUNTIME", "disabled")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_PRODUCT", "disabled")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_VALIDATION", "disabled")
     api = VerifyApi(verifier)
     original_get_json = api.get_json
 
@@ -311,6 +339,9 @@ def test_verifier_rejects_missing_or_leaked_workspace_tool_scope(
     failure: str,
 ) -> None:
     verifier = load_script("verify_qwenpaw_lab")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_RUNTIME", "disabled")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_PRODUCT", "disabled")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_VALIDATION", "disabled")
     api = VerifyApi(verifier)
     if failure == "missing-target":
         del api.tool_states[verifier.NOVEL_AGENT_ID][
@@ -322,3 +353,85 @@ def test_verifier_rejects_missing_or_leaked_workspace_tool_scope(
 
     with pytest.raises(AssertionError):
         verifier.verify()
+
+
+def test_verifier_accepts_ready_hidden_validation_pipeline_without_visibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier = load_script("verify_qwenpaw_lab")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_RUNTIME", "ready")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_PRODUCT", "disabled")
+    monkeypatch.setattr(verifier, "EXPECTED_TTS_VALIDATION", "ready")
+    monkeypatch.setattr(
+        verifier,
+        "TTS_VALIDATION_NOVEL_ID",
+        "11111111-1111-4111-8111-111111111111",
+    )
+    monkeypatch.setattr(
+        verifier,
+        "TTS_VALIDATION_DOCUMENT_ID",
+        "22222222-2222-4222-8222-222222222222",
+    )
+    api = VerifyApi(verifier)
+    original_get_json = api.get_json
+
+    def get_json(path: str, *, agent_id: str | None = None) -> object:
+        payload = original_get_json(path, agent_id=agent_id)
+        if path != f"/api/{verifier.APP_ID}/health":
+            return payload
+        assert isinstance(payload, dict)
+        return {
+            **payload,
+            "narration": {
+                "technical_enabled": True,
+                "lifecycle_status": "ready",
+                "sidecar_reachable": True,
+                "model_ready": True,
+                "product_visible": False,
+                "protocol_version": verifier.TTS_PROTOCOL_VERSION,
+                "worker_generation": 7,
+                "lease_generation": 7,
+                "model_fingerprint_sha256": (
+                    verifier.TTS_MODEL_FINGERPRINT_SHA256
+                ),
+                "reason_code": None,
+            },
+            "narration_production": verifier.expected_narration_production(),
+        }
+
+    monkeypatch.setattr(verifier, "get_json", get_json)
+
+    def request_json(
+        path: str,
+        *,
+        agent_id: str | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> object:
+        del agent_id, headers
+        overview = (
+            f"/api/{verifier.APP_ID}/novels/"
+            f"{verifier.TTS_VALIDATION_NOVEL_ID}/narration-overview"
+        )
+        if path == overview:
+            return verifier.JsonHttpResponse(
+                status=200,
+                headers={"cache-control": "no-store"},
+                payload={
+                    "contract_version": "narration-settings-api/1",
+                    "novel_id": verifier.TTS_VALIDATION_NOVEL_ID,
+                    "capabilities": verifier.T2_CAPABILITY_MATRIX,
+                    "runtime": {"product_visible": False},
+                },
+            )
+        return verifier.JsonHttpResponse(
+            status=404,
+            headers={"cache-control": "no-store"},
+            payload=verifier.HIDDEN_TTS_NOT_FOUND,
+        )
+
+    monkeypatch.setattr(verifier, "request_json", request_json)
+
+    result = verifier.verify()
+
+    assert result["narration"]["product_visible"] is False
+    assert result["narration_production"]["worker_running"] is True

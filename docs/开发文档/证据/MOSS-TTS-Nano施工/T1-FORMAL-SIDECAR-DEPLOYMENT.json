@@ -1,0 +1,53 @@
+{
+  "schema_version": "t1-formal-sidecar-deployment/1",
+  "recorded_at": "2026-08-26",
+  "status": "passed_with_product_disabled",
+  "before": {
+    "sidecar_image_id": "sha256:6163676d60e347f82ed615228decc50b1e851770c52796b1f4fc9167170f0120",
+    "protocol_version": "moss-tts-sidecar/1.0",
+    "old_image_snapshot_available": false,
+    "snapshot_failure_reason": "Docker had already removed one content digest referenced by the running old container"
+  },
+  "pre_recreate_probe": {
+    "temporary_container_count": 1,
+    "used_formal_model_volume_readonly": true,
+    "used_formal_secret_volume_readonly": true,
+    "protocol_version": "moss-tts-sidecar/1.1",
+    "status": "passed",
+    "temporary_container_removed": true
+  },
+  "after": {
+    "container_name": "ai-novel-2026-moss-tts-sidecar",
+    "sidecar_image_id": "sha256:78a2af56924f5593bc9391b9f288ffef428d3350cd6b859476e8ee29a9bc9422",
+    "protocol_version": "moss-tts-sidecar/1.1",
+    "status": "running",
+    "health": "healthy",
+    "model_volume_readonly": true,
+    "secret_volume_readonly": true,
+    "host_ports": 0
+  },
+  "non_regression": {
+    "qwenpaw_container_id_unchanged": true,
+    "qwenpaw_started_at_unchanged": true,
+    "qwenpaw_health": "healthy",
+    "qwenpaw_tts_runtime_enabled": false,
+    "postgres_connected_or_migrated": false,
+    "persistent_volumes_removed": 0
+  },
+  "cleanup": {
+    "completed_runtime_init_container_removed": true,
+    "completed_model_installer_container_removed": true,
+    "temporary_probe_container_removed": true,
+    "long_lived_project_containers": [
+      "ai-novel-2026-qwenpaw-lab",
+      "ai-novel-2026-postgres",
+      "ai-novel-2026-moss-tts-sidecar"
+    ],
+    "broad_cleanup_used": false
+  },
+  "rollback": {
+    "capability_remains_false": true,
+    "strategy": "stop sidecar, preserve every volume, rebuild the pinned verified protocol-1.1 image",
+    "old_protocol_1_0_image_rollback_available": false
+  }
+}

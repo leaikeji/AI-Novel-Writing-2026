@@ -1,0 +1,48 @@
+{
+  "schema_version": "moss-tts-topology-endurance-failure/1.0",
+  "work_package_id": "T0-B",
+  "status": "failed",
+  "run_group": "20260826T031112+0800-1c54ac36",
+  "topology": "managed_subprocess_onnx_cpu",
+  "fixture_only": true,
+  "failure": {
+    "failed_endurance_request_index": 551,
+    "last_completed_endurance_request_index": 550,
+    "last_progress_elapsed_seconds": 1200.807,
+    "ready_event_observed": true,
+    "atomic_final_file_observed": true,
+    "published_event_observed_by_parent": false,
+    "final_file_sha256": "8bbbd534895b799422f6c9f9b7e92d1d8f87241fc2bbcf48ef4b6d1b8dba4f07",
+    "partial_file_count_after_stop": 0,
+    "cause": "select() observed the OS descriptor while TextIOWrapper.readline() had already prefetched the adjacent published JSON line into user-space",
+    "classification": "control_plane_reader_deadlock_not_onnx_inference_failure"
+  },
+  "event_log": {
+    "sha256": "3cf020d5c2b82da9c1b161b580881cc1ddc2bd7f002192bb59fac332603536b3",
+    "process_ready": 1,
+    "started": 555,
+    "ready": 555,
+    "published": 554,
+    "initial_non_endurance_successful_requests": 4
+  },
+  "process_cleanup": {
+    "parent_pid": 25435,
+    "worker_pid": 25436,
+    "stop_scope": "exact foreground process tree only",
+    "worker_processes_after_stop": 0,
+    "orphan_processes_after_stop": 0,
+    "partial_files_after_stop": 0
+  },
+  "remediation": {
+    "strategy": "one dedicated blocking stdout reader thread plus Queue; no select/readline mixing",
+    "late_event_policy": "an active request protocol failure poisons the adapter until explicit restart",
+    "identity_policy": "every request event requires exact request_id, PID and generation",
+    "concurrency_policy": "single-flight; concurrent calls fail closed",
+    "regression_status": "covered by T0-B unit and final real protocol probes"
+  },
+  "privacy": {
+    "contains_user_text": false,
+    "contains_audio": false,
+    "contains_absolute_runtime_path": false
+  }
+}

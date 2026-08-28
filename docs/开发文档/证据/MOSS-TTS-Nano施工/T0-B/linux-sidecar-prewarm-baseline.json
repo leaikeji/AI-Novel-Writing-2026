@@ -1,0 +1,39 @@
+{
+  "schema_version": "moss-tts-linux-sidecar-prewarm-baseline/1.0",
+  "captured_at": "2026-08-26T04:56:18+08:00",
+  "contains_audio": false,
+  "contains_secret": false,
+  "nano_lock_state": "not_acquired",
+  "nano_model_loaded": false,
+  "process_probe": {
+    "patterns": ["benchmark_nano", "sidecar_server", "run_sidecar_gate"],
+    "matching_process_count": 0,
+    "matching_tts_container_count": 0
+  },
+  "qwenpaw": {
+    "container_id_prefix": "f2b3a28c49e4",
+    "status": "running",
+    "health": "healthy",
+    "oom_killed": false,
+    "stats": {
+      "cpu_percent": "1.25%",
+      "memory_usage": "659.7MiB / 7.748GiB",
+      "memory_percent": "8.31%",
+      "pids": "127",
+      "block_io": "360kB / 6.21MB",
+      "network_io": "26.8MB / 34.7MB"
+    },
+    "mounts": [
+      {"destination": "/app/working", "type": "volume", "read_write": true},
+      {"destination": "/app/working.backups", "type": "volume", "read_write": true},
+      {"destination": "/app/working.secret", "type": "volume", "read_write": true}
+    ]
+  },
+  "host": {
+    "memory_pressure_free_percentage": 34,
+    "swap_total_mib": 8192.0,
+    "swap_used_mib": 7037.5,
+    "swap_free_mib": 1154.5,
+    "causality": "snapshot_only; this is a prewarm baseline for later comparison, not proof that Sidecar caused or avoided swap activity"
+  }
+}

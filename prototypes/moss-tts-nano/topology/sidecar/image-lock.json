@@ -1,0 +1,65 @@
+{
+  "schema_version": "moss-tts-sidecar-image-lock/1.0",
+  "captured_at": "2026-08-26T04:59:00+08:00",
+  "provenance_metadata_completed_at": "2026-08-26T05:54:09+08:00",
+  "provenance_metadata_note": "Added hashes for sidecar_client.py and pawapp_harness.py that were already COPY inputs of the verified image; no image byte, digest, tag, model, source, or runtime dependency changed.",
+  "candidate_only": true,
+  "platform": "linux/arm64",
+  "image": {
+    "tag": "ai-novel-world/moss-tts-sidecar:t0b-linux-arm64-candidate",
+    "production_reference": "ai-novel-world/moss-tts-sidecar@sha256:56bb12bdef8f0c8c174ec86aa4dfbeac1dee1dd9cb9a215ff305eca7c8307fe0",
+    "manifest_list_sha256": "56bb12bdef8f0c8c174ec86aa4dfbeac1dee1dd9cb9a215ff305eca7c8307fe0",
+    "arm64_manifest_sha256": "6a35e39920a0bfff4f18c16079e5ca4d816dcc32e48b3aa961f04283f7eb58b1",
+    "config_sha256": "262d6b8f88e42ac6c720fb514d65d9c3d3585eaaab0d874852c17018a11b2223",
+    "size_bytes": 284675452,
+    "runtime_user": "65532:65532"
+  },
+  "build_inputs": {
+    "dockerfile_sha256": "95dd3f2fe0ee98cd75f53dc370bbee0af13c90eec1a7d33a78aaec045218bb86",
+    "compose_production_sha256": "19d80ebec9edd656a43c9f21946cd6a69171171c705d6706e5b7795ccf3b66d9",
+    "python_requirements_lock_sha256": "196885c7bdb417ca6df16406ca8eb9784a29a993726c5e75ded3df832d6f0ac3",
+    "model_sources_lock_sha256": "0485cdfb15eb01f7c4c0f65049f1c477fb6391ec523c5b7159ab25f763ab469d",
+    "sidecar_protocol_sha256": "df57e9f8cdbfeffa367497f964f9fc7d4ca578348944e46c6eda00e29a614321",
+    "sidecar_server_sha256": "75254a9fa7053c90a19979eb597222eea663f09a04d27b4eb8ba1ba83fa34f9a",
+    "sidecar_client_sha256": "21d96bb82495275330746be4dbb04103659118dc492c8ee4bd85544523a9e208",
+    "pawapp_harness_sha256": "cfa6325133a264d6b34f15e32a7b73b0b11e2b3b6ce527d68eea92fa1857ceb6",
+    "dockerfile_frontend": "docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e",
+    "python_base": "python:3.11.16-slim-bookworm@sha256:0bee7276f83efd4a1ee05bbbf4281d95ed28e079220a9457f25a93e3f1e3c31b",
+    "debian_snapshot": "20260825T000000Z"
+  },
+  "python_wheels": [
+    {"name": "numpy", "version": "2.3.3", "sha256": "afd07d377f478344ec6ca2b8d4ca08ae8bd44706763d1efb56397de606393f48", "filename": "numpy-2.3.3-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"},
+    {"name": "onnxruntime", "version": "1.24.3", "sha256": "8b2ebc54c6d8281dccff78d4b06e47d4cf07535937584ab759448390a70f4978", "filename": "onnxruntime-1.24.3-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl"},
+    {"name": "soundfile", "version": "0.14.0", "sha256": "e85724a90bc99a6e8062c0b4ddf725f53b2a3b70afd4da875e9d2cfc4e92f377", "filename": "soundfile-0.14.0-py2.py3-none-manylinux_2_28_aarch64.whl"},
+    {"name": "tokenizers", "version": "0.22.2", "sha256": "2249487018adec45d6e3554c71d46eb39fa8ea67156c640f7513eb26f318cec7", "filename": "tokenizers-0.22.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"},
+    {"name": "torch", "version": "2.7.0", "sha256": "2b7813e904757b125faf1a9a3154e1d50381d539ced34da1992f52440567c156", "filename": "torch-2.7.0-cp311-cp311-manylinux_2_28_aarch64.whl"},
+    {"name": "torchaudio", "version": "2.7.0", "sha256": "677bd32031310ee73a47d6eebc2e74e74c1cf467932945ee88082a3935b5c950", "filename": "torchaudio-2.7.0-cp311-cp311-manylinux_2_28_aarch64.whl"},
+    {"name": "transformers", "version": "4.57.1", "sha256": "b10d05da8fa67dc41644dbbf9bc45a44cb86ae33da6f9295f5fbf5b7890bd267", "filename": "transformers-4.57.1-py3-none-any.whl"}
+  ],
+  "ffmpeg": {
+    "version": "9.0.1",
+    "license_profile": "LGPL-2.1-or-later narrow static build; GPL/version3/nonfree/network disabled",
+    "source_sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635",
+    "ffmpeg_binary_sha256": "13bf31d7ca85cc26ae5fd783183af3dfc7512fd60eb38326117b14cf03747ed3",
+    "ffmpeg_binary_size_bytes": 3542520,
+    "ffprobe_binary_sha256": "3bb9de3597ee5bada04172e201b9df434be5d3c8076f20c0460867d07716b47d",
+    "ffprobe_binary_size_bytes": 3345768,
+    "copying_lgpl_v2_1_sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
+    "license_md_sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
+  },
+  "system_runtime": {
+    "libgomp_source": "same fixed 20260825T000000Z Debian snapshot builder stage",
+    "libgomp_so_1_sha256": "9d8c6a6175f6a7cda286c80f4de577edd58077ac3f4102356ec546869d170d30",
+    "runtime_import_probe": "torch 2.7.0+cpu; torchaudio 2.7.0; OnnxTtsRuntime"
+  },
+  "external_runtime_artifacts": {
+    "copied_into_image": false,
+    "model_repository": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX",
+    "model_revision": "f52645cb467506d8e18e746ddd59482685b74e58",
+    "model_tree_sha256": "92419b269673cd698afab06ef0e3f0b60673862c86190cc6c57ed010db9aca98",
+    "source_repository": "OpenMOSS/MOSS-TTS-Nano",
+    "source_revision": "cc7bdf19c7639c0870dab22045a33b442760f6be",
+    "source_tree_sha256": "547f61c24427a59d802cc31dfe532e135303b6b9f71469be19a7f35acd5d4c94",
+    "mount_policy": "read-only bind mounts at runtime"
+  }
+}

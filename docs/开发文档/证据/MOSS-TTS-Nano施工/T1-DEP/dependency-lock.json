@@ -1,0 +1,49 @@
+{
+  "schema_version": "moss-tts-t1-dep-dependency-lock/1.0",
+  "captured_at": "2026-08-26T07:04:48+08:00",
+  "platform": "linux/arm64",
+  "python": "3.11.16",
+  "root_runtime_dependencies": {
+    "changed": false,
+    "reason": "PawApp already has httpx 0.28.1; heavy Nano/ONNX/Torch/FFmpeg dependencies are isolated in the Sidecar image and must not enter /app/venv.",
+    "pyproject_sha256": "7fe0b4421ff3f3ed2516c9a2c9d02ca10cd58e01b5d65c09b7e162685ea0d88b",
+    "requirements_sha256": "5a613ad38a74a5c9e378b71d5017593bc4cd0c8764b1b8e30c2231a2b103cb5c",
+    "requirements_dev_lock_sha256": "3544375fa77cb5470519231fd37290e20fd200232cfcd2007f3448622f20f67c",
+    "qwenpaw_dockerfile_sha256": "8fc7a885454a553ccd1b2097d20418e8aa7068ea787d54ff2ef104c377447320"
+  },
+  "sidecar": {
+    "requirements_lock_sha256": "196885c7bdb417ca6df16406ca8eb9784a29a993726c5e75ded3df832d6f0ac3",
+    "requirements_lock_source": "T0-A accepted immutable lock; copied byte-for-byte into the production build context",
+    "install_policy": ["exact versions", "--require-hashes", "--only-binary=:all:", "--no-cache-dir", "120 second read timeout", "3 retries"],
+    "key_packages": {
+      "fastapi": "0.141.1",
+      "numpy": "2.3.3",
+      "onnxruntime": "1.24.3",
+      "soundfile": "0.14.0",
+      "torch": "2.7.0",
+      "torchaudio": "2.7.0",
+      "transformers": "4.57.1",
+      "uvicorn": "0.52.4"
+    },
+    "base_image": "python:3.11.16-slim-bookworm@sha256:0bee7276f83efd4a1ee05bbbf4281d95ed28e079220a9457f25a93e3f1e3c31b",
+    "dockerfile_frontend": "docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e",
+    "debian_snapshot": "20260825T000000Z",
+    "model_source_lock_sha256": "c6491f44c87e05d3d8075a102d65c019e7b40608a977baa05366929e7684e137",
+    "model_source_inventory_sha256": "d0f173dbc661d0352825dd28a5b35a1c65d60be540badacf7ef3b1a57b0b416d",
+    "model_source_component_count": 3,
+    "model_source_artifact_count": 29,
+    "model_source_original_T0_lock_sha256": "0485cdfb15eb01f7c4c0f65049f1c477fb6391ec523c5b7159ab25f763ab469d",
+    "model_tree_sha256": "92419b269673cd698afab06ef0e3f0b60673862c86190cc6c57ed010db9aca98",
+    "source_tree_sha256": "547f61c24427a59d802cc31dfe532e135303b6b9f71469be19a7f35acd5d4c94",
+    "ffmpeg": {
+      "version": "9.0.1",
+      "source_sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635",
+      "profile": "narrow LGPL-2.1-or-later; GPL/version3/nonfree/network/autodetect disabled"
+    }
+  },
+  "frozen_input": {
+    "t0_gate_status": "PASS_WITH_EXPLICIT_NO-GO_CAPABILITIES",
+    "t0_evidence_manifest_artifact_count": 37,
+    "t0_evidence_manifest_sha256": "5a65e4d939b2ab39e26948964f0f0ada9aaaa8e8e8b5a7934e837ff7eac254e9"
+  }
+}

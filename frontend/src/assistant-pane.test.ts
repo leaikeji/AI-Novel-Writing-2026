@@ -153,6 +153,32 @@ describe("resolveAssistantPaneLayout", () => {
     expect(layout.renderedWidth).toBe(ASSISTANT_PANE_COLLAPSED_WIDTH);
     expect(layout.expandedWidth).toBe(520);
   });
+
+  it("keeps a narrow collapsed rail inline while an expanded pane overlays", () => {
+    const collapsed = resolveAssistantPaneLayout({
+      availableWidth: 324,
+      collapsed: true,
+      mainMinWidth: 272,
+      preferredWidth: 380,
+    });
+    const expanded = resolveAssistantPaneLayout({
+      availableWidth: 324,
+      collapsed: false,
+      mainMinWidth: 272,
+      preferredWidth: 380,
+    });
+
+    expect(collapsed).toMatchObject({
+      mode: "inline",
+      expandedWidth: 380,
+      renderedWidth: ASSISTANT_PANE_COLLAPSED_WIDTH,
+    });
+    expect(expanded).toMatchObject({
+      mode: "overlay",
+      expandedWidth: 380,
+      renderedWidth: 380,
+    });
+  });
 });
 
 
@@ -318,6 +344,40 @@ describe("renderQwenPawAssistantPane", () => {
     expect(toggle.props["aria-label"]).toBe("展开 QwenPaw 助手");
     expect(innerContainer.props["aria-hidden"]).toBe(true);
     expect(elementChildren(innerContainer)[0].type).toBe(Inner);
+  });
+
+  it("renders the narrow collapsed rail in flow and the expanded pane as an overlay", () => {
+    const common = {
+      availableWidth: 324,
+      mainMinWidth: 272,
+      preferredWidth: 380,
+    };
+    const collapsed = renderQwenPawAssistantPane(TestReact, Inner, {
+      ...common,
+      collapsed: true,
+    }) as TestElement;
+    const expanded = renderQwenPawAssistantPane(TestReact, Inner, {
+      ...common,
+      collapsed: false,
+    }) as TestElement;
+    const collapsedStyle = collapsed.props.style as Record<string, unknown>;
+    const expandedStyle = expanded.props.style as Record<string, unknown>;
+
+    expect(collapsed.props.className).toBe("anw-assistant-pane is-collapsed");
+    expect(collapsed.props["data-assistant-pane-mode"]).toBe("inline");
+    expect(collapsedStyle).toMatchObject({
+      flex: `0 0 ${ASSISTANT_PANE_COLLAPSED_WIDTH}px`,
+      position: "relative",
+      width: `${ASSISTANT_PANE_COLLAPSED_WIDTH}px`,
+    });
+    expect(expanded.props.className).toBe("anw-assistant-pane is-overlay");
+    expect(expanded.props["data-assistant-pane-mode"]).toBe("overlay");
+    expect(expandedStyle).toMatchObject({
+      position: "absolute",
+      right: 0,
+      top: 0,
+      width: "380px",
+    });
   });
 
   it("exposes an accessible collapse action and keyboard width control", () => {

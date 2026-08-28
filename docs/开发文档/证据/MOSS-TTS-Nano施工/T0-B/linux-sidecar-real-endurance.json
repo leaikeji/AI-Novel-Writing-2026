@@ -1,0 +1,1209 @@
+{
+  "actual_duration_seconds": 1804.466,
+  "completed_request_count": 750,
+  "contains_audio": false,
+  "distinct_actual_audio_hash_count": 24,
+  "evidence_kind": "real_nano",
+  "failure_count": 0,
+  "failures": [],
+  "final_capability": {
+    "limits": {
+      "audio_bytes": 16777216,
+      "reference_audio_bytes": 12582912,
+      "reference_audio_duration_seconds": 12.5,
+      "request_bytes": 65536
+    },
+    "model": {
+      "ffmpeg_build": "ffmpeg-9.0.1-lgpl-narrow-linux-arm64-v1",
+      "model_sha256": "92419b269673cd698afab06ef0e3f0b60673862c86190cc6c57ed010db9aca98",
+      "source_sha256": "547f61c24427a59d802cc31dfe532e135303b6b9f71469be19a7f35acd5d4c94"
+    },
+    "process": {
+      "accepted_request_count": 751,
+      "active_request_count": 0,
+      "completed_request_count": 751,
+      "generation": "bd578ba28aee48639cdd96eca3223b61",
+      "pid": 7,
+      "uptime_ms": 1869176.851518
+    },
+    "protocol_version": "moss-tts-sidecar/1.0",
+    "status": "ready"
+  },
+  "generated_at": "2026-08-26T05:31:57+08:00",
+  "host_final": {
+    "causality": "snapshot_only",
+    "memory_pressure_free": "System-wide memory free percentage: 35%",
+    "swapusage": "vm.swapusage: total = 9216.00M  used = 8549.75M  free = 666.25M  (encrypted)"
+  },
+  "peak_ru_maxrss_bytes": 1972305920,
+  "qwenpaw_final": {
+    "container_id_prefix": "f2b3a28c49e4",
+    "health": "healthy",
+    "stats": {
+      "BlockIO": "2.37MB / 6.52MB",
+      "CPUPerc": "1.16%",
+      "Container": "ai-novel-2026-qwenpaw-lab",
+      "ID": "f2b3a28c49e4",
+      "MemPerc": "8.30%",
+      "MemUsage": "658.7MiB / 7.748GiB",
+      "Name": "ai-novel-2026-qwenpaw-lab",
+      "NetIO": "28.4MB / 36.9MB",
+      "PIDs": "124"
+    },
+    "status": "running"
+  },
+  "requested_duration_seconds": 1800,
+  "resource_snapshots": [
+    {
+      "captured_at": "2026-08-26T05:01:53+08:00",
+      "elapsed_seconds": 2.886,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 39%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8605.75M  free = 610.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.35MB / 6.27MB",
+          "CPUPerc": "0.88%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.3MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27MB / 35.1MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.11%",
+        "MemUsage": "1.605GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "5.69kB / 1.85MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:02:52+08:00",
+      "elapsed_seconds": 61.775,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 40%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8605.75M  free = 610.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.35MB / 6.28MB",
+          "CPUPerc": "0.56%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.30%",
+          "MemUsage": "658.9MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.1MB / 35.2MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.07%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.20%",
+        "MemUsage": "1.608GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "49.8kB / 24MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:03:52+08:00",
+      "elapsed_seconds": 121.56,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 37%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8597.75M  free = 618.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.35MB / 6.29MB",
+          "CPUPerc": "6.36%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.30%",
+          "MemUsage": "658.8MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.1MB / 35.2MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "15.52%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.20%",
+        "MemUsage": "1.608GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "93.6kB / 46.2MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:04:51+08:00",
+      "elapsed_seconds": 180.82,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 34%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8597.75M  free = 618.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.3MB",
+          "CPUPerc": "1.25%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.7MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.2MB / 35.3MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.21%",
+        "MemUsage": "1.608GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "136kB / 68.4MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:05:51+08:00",
+      "elapsed_seconds": 240.571,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 37%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8597.75M  free = 618.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.3MB",
+          "CPUPerc": "1.02%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "659.7MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.2MB / 35.3MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.21%",
+        "MemUsage": "1.608GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "183kB / 91.5MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:06:52+08:00",
+      "elapsed_seconds": 301.316,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 38%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.31MB",
+          "CPUPerc": "0.51%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.7MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.3MB / 35.4MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.21%",
+        "MemUsage": "1.608GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "228kB / 115MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:07:53+08:00",
+      "elapsed_seconds": 362.428,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 35%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.32MB",
+          "CPUPerc": "0.54%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "660.2MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.3MB / 35.5MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.20%",
+        "MemUsage": "1.608GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "273kB / 138MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:08:52+08:00",
+      "elapsed_seconds": 421.994,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 38%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.33MB",
+          "CPUPerc": "5.33%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "659.8MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.4MB / 35.5MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.22%",
+        "MemUsage": "1.609GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "317kB / 160MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:09:52+08:00",
+      "elapsed_seconds": 481.676,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 39%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.34MB",
+          "CPUPerc": "5.48%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.1MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.4MB / 35.6MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.05%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.21%",
+        "MemUsage": "1.608GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "363kB / 183MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:10:52+08:00",
+      "elapsed_seconds": 541.883,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 41%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.34MB",
+          "CPUPerc": "0.81%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.30%",
+          "MemUsage": "658.7MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.4MB / 35.6MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "14.11%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.22%",
+        "MemUsage": "1.609GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "408kB / 206MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:11:52+08:00",
+      "elapsed_seconds": 601.92,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 40%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.35MB",
+          "CPUPerc": "0.89%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.1MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.5MB / 35.7MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.17%",
+        "MemUsage": "1.607GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "454kB / 229MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:12:52+08:00",
+      "elapsed_seconds": 662.139,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 38%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.36MB",
+          "CPUPerc": "0.59%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.5MB / 35.8MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.07%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.17%",
+        "MemUsage": "1.607GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "500kB / 252MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:13:52+08:00",
+      "elapsed_seconds": 721.681,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 38%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.37MB",
+          "CPUPerc": "0.90%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.2MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.6MB / 35.8MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.16%",
+        "MemUsage": "1.607GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "544kB / 274MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:14:51+08:00",
+      "elapsed_seconds": 780.381,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 39%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.38MB",
+          "CPUPerc": "1.03%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "660MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.6MB / 35.9MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.17%",
+        "MemUsage": "1.607GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "587kB / 297MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:15:51+08:00",
+      "elapsed_seconds": 840.251,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 40%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.39MB",
+          "CPUPerc": "1.51%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.4MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.7MB / 36MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.07%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.68%",
+        "MemUsage": "1.627GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "631kB / 320MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:16:53+08:00",
+      "elapsed_seconds": 902.492,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 37%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8589.75M  free = 626.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.39MB",
+          "CPUPerc": "2.67%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.35%",
+          "MemUsage": "662.5MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.7MB / 36MB",
+          "PIDs": "128"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.05%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.78%",
+        "MemUsage": "1.631GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "678kB / 344MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:17:52+08:00",
+      "elapsed_seconds": 961.907,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 37%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.4MB",
+          "CPUPerc": "0.71%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "659.8MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.8MB / 36.1MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.52%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.83%",
+        "MemUsage": "1.633GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "723kB / 367MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:18:52+08:00",
+      "elapsed_seconds": 1021.775,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 39%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.41MB",
+          "CPUPerc": "0.61%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.6MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.8MB / 36.1MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.87%",
+        "MemUsage": "1.635GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "769kB / 390MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:19:51+08:00",
+      "elapsed_seconds": 1080.646,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 38%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.42MB",
+          "CPUPerc": "6.01%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.2MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.9MB / 36.2MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.07%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.91%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "814kB / 413MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:20:52+08:00",
+      "elapsed_seconds": 1142.118,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 39%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.43MB",
+          "CPUPerc": "5.41%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.2MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "27.9MB / 36.3MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "862kB / 437MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:21:52+08:00",
+      "elapsed_seconds": 1201.397,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 38%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.44MB",
+          "CPUPerc": "0.66%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.3MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28MB / 36.3MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.08%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "907kB / 460MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:22:51+08:00",
+      "elapsed_seconds": 1261.121,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 38%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.45MB",
+          "CPUPerc": "1.22%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.30%",
+          "MemUsage": "658.8MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28MB / 36.4MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "952kB / 483MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:23:52+08:00",
+      "elapsed_seconds": 1321.91,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 40%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.45MB",
+          "CPUPerc": "0.91%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.1MB / 36.4MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.05%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1e+03kB / 507MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:24:51+08:00",
+      "elapsed_seconds": 1380.466,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 40%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.46MB",
+          "CPUPerc": "0.71%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "659.8MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.1MB / 36.5MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "12.86%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.04MB / 530MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:25:52+08:00",
+      "elapsed_seconds": 1441.267,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 36%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.47MB",
+          "CPUPerc": "1.02%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "659.8MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.2MB / 36.6MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.07%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.09MB / 555MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:26:51+08:00",
+      "elapsed_seconds": 1500.838,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 37%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.48MB",
+          "CPUPerc": "0.77%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "660MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.2MB / 36.6MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.07%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.89%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.14MB / 578MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:27:51+08:00",
+      "elapsed_seconds": 1560.385,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 36%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8581.75M  free = 634.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.49MB",
+          "CPUPerc": "1.15%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.7MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.3MB / 36.7MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.07%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.18MB / 601MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:28:50+08:00",
+      "elapsed_seconds": 1620.045,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 36%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8557.75M  free = 658.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.5MB",
+          "CPUPerc": "2.27%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.32%",
+          "MemUsage": "659.9MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.3MB / 36.7MB",
+          "PIDs": "127"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.03%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.23MB / 624MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:29:52+08:00",
+      "elapsed_seconds": 1681.507,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 37%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8557.75M  free = 658.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.51MB",
+          "CPUPerc": "1.01%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.3MB / 36.8MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.06%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.27MB / 648MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:30:51+08:00",
+      "elapsed_seconds": 1741.125,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 37%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8557.75M  free = 658.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.51MB",
+          "CPUPerc": "5.75%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.31%",
+          "MemUsage": "659.2MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.4MB / 36.9MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.05%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.91%",
+        "MemUsage": "1.637GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.32MB / 671MB",
+        "PIDs": "35"
+      }
+    },
+    {
+      "captured_at": "2026-08-26T05:31:51+08:00",
+      "elapsed_seconds": 1800.47,
+      "host": {
+        "causality": "snapshot_only",
+        "memory_pressure_free": "System-wide memory free percentage: 36%",
+        "swapusage": "vm.swapusage: total = 9216.00M  used = 8549.75M  free = 666.25M  (encrypted)"
+      },
+      "qwenpaw": {
+        "container_id_prefix": "f2b3a28c49e4",
+        "health": "healthy",
+        "stats": {
+          "BlockIO": "2.37MB / 6.52MB",
+          "CPUPerc": "0.87%",
+          "Container": "ai-novel-2026-qwenpaw-lab",
+          "ID": "f2b3a28c49e4",
+          "MemPerc": "8.30%",
+          "MemUsage": "658.4MiB / 7.748GiB",
+          "Name": "ai-novel-2026-qwenpaw-lab",
+          "NetIO": "28.4MB / 36.9MB",
+          "PIDs": "124"
+        },
+        "status": "running"
+      },
+      "sidecar": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "13.31%",
+        "Container": "bf11f2bde1a859ca13d6d7902346dd844802fc6c0f6df4b2eb9ed05b275e02b1",
+        "ID": "bf11f2bde1a8",
+        "MemPerc": "40.90%",
+        "MemUsage": "1.636GiB / 4GiB",
+        "Name": "moss-tts-sidecar-t0b-sidecar-1",
+        "NetIO": "1.37MB / 694MB",
+        "PIDs": "35"
+      }
+    }
+  ],
+  "ru_maxrss_semantics": "Linux getrusage(RUSAGE_SELF).ru_maxrss KiB converted to bytes; lifetime high-water mark, not current RSS",
+  "schema_version": "moss-tts-linux-sidecar-endurance/1.0",
+  "scratch": {
+    "partial_count": 0,
+    "scratch_file_count": 0
+  },
+  "script_sha256": "e5bbb1d08517ed22138ea2c1ee4aa183d38f5ba72fe870b12d1ce5f3c464b4f0",
+  "shutdown": {
+    "orphan_container_count": 0,
+    "performed": true,
+    "remaining_container_ids": [],
+    "test_media_cleanup": {
+      "performed": true,
+      "removed_bytes": 697745948,
+      "removed_file_count": 757
+    }
+  },
+  "single_generation": true,
+  "status": "passed",
+  "storage": {
+    "partial_count": 0,
+    "unexpected_file_count": 0,
+    "wav_count": 757
+  },
+  "wall_ms": {
+    "maximum": 2615.259252,
+    "median": 1970.588501,
+    "minimum": 1851.061793
+  },
+  "worker_generations": [
+    "bd578ba28aee48639cdd96eca3223b61"
+  ],
+  "worker_pids": [
+    7
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": "moss-tts-t1-dep-image-lock/1.0",
+  "captured_at": "2026-08-26T07:04:48+08:00",
+  "candidate_only": true,
+  "target": "dependency-runtime",
+  "business_runtime_installed": false,
+  "model_or_source_bytes_in_image": false,
+  "image": {
+    "tag": "ai-novel-world/moss-tts-sidecar:t1-dep-linux-arm64",
+    "local_repo_digest": "ai-novel-world/moss-tts-sidecar@sha256:60780eaf16dafde8d3b379ec16637fd900dad11713180d5884698695ac165be9",
+    "manifest_list_sha256": "60780eaf16dafde8d3b379ec16637fd900dad11713180d5884698695ac165be9",
+    "linux_arm64_manifest_sha256": "dfd9ef97dac64fa72926254682d55a235304b17b92c424d92f4fb551f76254ed",
+    "config_sha256": "ac4cedc5f302ab29d818952e6e6f75933f4b2c11afb3846c82bf80e9650822e2",
+    "attestation_manifest_sha256": "e8e50cc68e63a53e5c9936bf6cea81d7dab740b7117e753c53bd2b47261b8068",
+    "size_bytes": 284667658,
+    "os": "linux",
+    "architecture": "arm64",
+    "runtime_user": "65532:65532",
+    "entrypoint": ["python", "/opt/ai-novel-world/tts-sidecar/entrypoint.py"]
+  },
+  "t0_image_comparison": {
+    "t0_manifest_list_sha256": "56bb12bdef8f0c8c174ec86aa4dfbeac1dee1dd9cb9a215ff305eca7c8307fe0",
+    "same_bytes": false,
+    "reason": "T1-DEP uses the root production context, a dependency-only fail-closed entrypoint, new provenance labels and a future exact-file production target. The T0 digest is not reused as if bytes were identical."
+  },
+  "build_inputs": {
+    "root_dockerignore_sha256": "e0c151e86552273b8d2ef296b01e1884f32697d18b16efa6c586c17ac0c25865",
+    "dockerfile_sha256": "f4859c9ed5dc5ef76833978bf9a180d79d8ecdcd1b8fcf70c5be5ddf29fd5366",
+    "requirements_lock_sha256": "196885c7bdb417ca6df16406ca8eb9784a29a993726c5e75ded3df832d6f0ac3",
+    "model_source_lock_sha256": "c6491f44c87e05d3d8075a102d65c019e7b40608a977baa05366929e7684e137",
+    "model_source_inventory_sha256": "d0f173dbc661d0352825dd28a5b35a1c65d60be540badacf7ef3b1a57b0b416d",
+    "notice_sha256": "8e77feaa7f7185fee87b0bacc049ef882f5f14965ece2937c24fbec768187842",
+    "third_party_notices_sha256": "b6321e87704d39699c62189ff56267b501f5d101229ce47fbc6edebd3cfdb813",
+    "entrypoint_sha256": "2264c1d24b8af123b2ed2505146fead620666f7f2421b1a4074d8f74b667efd4",
+    "runtime_verifier_sha256": "7fa5bc1eeb08c2030f97604a52b453fafd26c05424c84e960ada3bb55027e3b2"
+  },
+  "runtime_verification": {
+    "status": "passed",
+    "pip_check": "passed",
+    "ffmpeg_sha256": "13bf31d7ca85cc26ae5fd783183af3dfc7512fd60eb38326117b14cf03747ed3",
+    "ffprobe_sha256": "3bb9de3597ee5bada04172e201b9df434be5d3c8076f20c0460867d07716b47d",
+    "libgomp_so_1_sha256": "9d8c6a6175f6a7cda286c80f4de577edd58077ac3f4102356ec546869d170d30",
+    "asset_root_mode": "0750",
+    "asset_root_owner": "65532:65532",
+    "asset_root_empty": true
+  },
+  "superseded_provenance": [
+    {
+      "manifest_list_sha256": "1a89a24b4513a09d563f28c91df9d7a0d5ef81528d1d5df0e41c8771f156a663",
+      "reason": "Superseded after red-team P0: its model/source lock lacked the 29-item production artifact allowlist and its verifier did not enforce that inventory."
+    }
+  ],
+  "digest_semantics": "This is the content address produced by the local Docker Desktop BuildKit manifest list for one linux/arm64 image plus provenance attestation. Registry publication has not occurred; release must push, resolve and freeze the registry manifest digest before deployment.",
+  "production_target": {
+    "compose_tag": "ai-novel-world/moss-tts-sidecar:t1-runtime-linux-arm64-candidate",
+    "status": "expected_unbuildable_until_T1-B",
+    "missing_exact_inputs": [
+      "backend/narration/sidecar_server.py",
+      "backend/narration/runtime.py",
+      "backend/narration/model_assets.py"
+    ],
+    "current_build_exit_code": 1,
+    "current_failure_class": "COPY source not found",
+    "not_a_T1_DEP_failure": true
+  }
+}

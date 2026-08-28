@@ -1,0 +1,17 @@
+{
+  "schema_version": "moss-tts-topology-config/1.0",
+  "runners": {
+    "browser_onnx_preview": {
+      "argv": [
+        "/absolute/path/to/audited-browser-runner"
+      ],
+      "timeout_seconds": 600
+    },
+    "linux_arm64_sidecar_onnx": {
+      "argv": [
+        "/absolute/path/to/audited-sidecar-runner"
+      ],
+      "timeout_seconds": 600
+    }
+  }
+}

@@ -1,0 +1,64 @@
+name: moss-tts-sidecar-fake-t0b
+
+services:
+  sidecar:
+    image: ai-novel-world/moss-tts-sidecar-protocol:t0b-linux-arm64-candidate
+    platform: linux/arm64
+    build:
+      context: ../..
+      dockerfile: topology/sidecar/Dockerfile
+      target: protocol
+    command: ["--host", "0.0.0.0", "--port", "8765"]
+    environment:
+      MOSS_SIDECAR_BACKEND: fake
+      MOSS_FAKE_STEP_DELAY_SECONDS: "0.02"
+      MOSS_SIDECAR_TOKEN_FILE: /run/secrets/moss_sidecar_token
+    secrets: [moss_sidecar_token]
+    expose: ["8765"]
+    networks: [tts_private]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"]
+    user: "65532:65532"
+    init: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health/live', timeout=2).read()"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  pawapp-harness:
+    image: ai-novel-world/moss-tts-sidecar-protocol:t0b-linux-arm64-candidate
+    platform: linux/arm64
+    entrypoint: ["python", "-c", "import time; time.sleep(86400)"]
+    secrets: [moss_sidecar_token]
+    volumes:
+      - type: bind
+        source: ${MOSS_PAWAPP_MEDIA_ROOT:?required}
+        target: /pawapp-media
+      - type: bind
+        source: ${MOSS_REFERENCE_FIXTURE_ROOT:?required}
+        target: /authorized-reference-fixtures
+        read_only: true
+    networks: [tts_private]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"]
+    user: "65532:65532"
+    init: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    depends_on:
+      sidecar: {condition: service_healthy}
+
+networks:
+  tts_private: {internal: true}
+
+secrets:
+  moss_sidecar_token:
+    file: ${MOSS_SIDECAR_TOKEN_FILE:?required}

@@ -1,0 +1,301 @@
+{
+  "contains_audio": false,
+  "contains_private_reference_audio": false,
+  "events": [
+    {
+      "event": "published",
+      "request_id": "smoke-request-00000001",
+      "result": {
+        "channels": 1,
+        "file_name": "smoke-asset-00000001.wav",
+        "frames": 3200,
+        "inference_entered_ms": 0.0,
+        "peak_rss_bytes": 28594176,
+        "ready_wav_ms": 755.702708,
+        "sample_rate": 16000,
+        "sample_width": 2,
+        "sha256": "0ed46a9dd4203bab515da01096be30e8a12ed72231e7e60b9cddbc837958016f",
+        "sidecar_request_skipped": false,
+        "status": "published",
+        "wall_ms": 755.702708,
+        "worker_generation": "8b73c2cb39c7419c9a57309daf2bdf35",
+        "worker_pid": 7
+      }
+    },
+    {
+      "event": "ready_reused_without_synthesis",
+      "request_id": "smoke-request-00000001",
+      "result": {
+        "channels": 1,
+        "file_name": "smoke-asset-00000001.wav",
+        "frames": 3200,
+        "sample_rate": 16000,
+        "sample_width": 2,
+        "sha256": "0ed46a9dd4203bab515da01096be30e8a12ed72231e7e60b9cddbc837958016f",
+        "sidecar_request_skipped": true,
+        "status": "reused"
+      }
+    },
+    {
+      "ack": {
+        "asset_id": "cancel-asset-00000100",
+        "protocol_version": "moss-tts-sidecar/1.0",
+        "request_id": "cancel-request-00000100",
+        "status": "cancel_requested"
+      },
+      "event": "cancelled_without_publish",
+      "terminal": {
+        "error_class": "harness_failed:ProtocolError",
+        "response": null,
+        "returncode": 2
+      }
+    },
+    {
+      "crash_terminal": {
+        "error_class": "harness_failed:RemoteDisconnected",
+        "response": null,
+        "returncode": 2
+      },
+      "event": "sigkill_recovered",
+      "new_container_id_prefix": "367b4defa2d7",
+      "new_generation": "1311cec82cb848f083bfa00f7de801a1",
+      "old_container_id_prefix": "367b4defa2d7",
+      "old_generation": "8b73c2cb39c7419c9a57309daf2bdf35",
+      "recovery": {
+        "channels": 1,
+        "file_name": "recovery-asset-00000111.wav",
+        "frames": 3200,
+        "inference_entered_ms": 0.0,
+        "peak_rss_bytes": 28631040,
+        "ready_wav_ms": 823.465751,
+        "sample_rate": 16000,
+        "sample_width": 2,
+        "sha256": "0ed46a9dd4203bab515da01096be30e8a12ed72231e7e60b9cddbc837958016f",
+        "sidecar_request_skipped": false,
+        "status": "published",
+        "wall_ms": 823.465751,
+        "worker_generation": "1311cec82cb848f083bfa00f7de801a1",
+        "worker_pid": 7
+      }
+    },
+    {
+      "event": "container_restart",
+      "new_generation": "c9f4d40b02bf4f31bb354961b7d4e471",
+      "old_generation": "1311cec82cb848f083bfa00f7de801a1",
+      "post_restart": {
+        "channels": 1,
+        "file_name": "restart-asset-00000120.wav",
+        "frames": 3200,
+        "inference_entered_ms": 0.0,
+        "peak_rss_bytes": 28598272,
+        "ready_wav_ms": 794.145292,
+        "sample_rate": 16000,
+        "sample_width": 2,
+        "sha256": "0ed46a9dd4203bab515da01096be30e8a12ed72231e7e60b9cddbc837958016f",
+        "sidecar_request_skipped": false,
+        "status": "published",
+        "wall_ms": 794.145292,
+        "worker_generation": "c9f4d40b02bf4f31bb354961b7d4e471",
+        "worker_pid": 7
+      }
+    }
+  ],
+  "evidence_kind": "fake_protocol",
+  "generated_at": "2026-08-26T04:50:08+08:00",
+  "post": {
+    "capability": {
+      "limits": {
+        "audio_bytes": 16777216,
+        "reference_audio_bytes": 12582912,
+        "reference_audio_duration_seconds": 12.5,
+        "request_bytes": 65536
+      },
+      "model": {
+        "ffmpeg_build": null,
+        "model_sha256": null,
+        "source_sha256": null
+      },
+      "process": {
+        "accepted_request_count": 1,
+        "active_request_count": 0,
+        "completed_request_count": 1,
+        "generation": "c9f4d40b02bf4f31bb354961b7d4e471",
+        "pid": 7,
+        "uptime_ms": 7255.752378
+      },
+      "protocol_version": "moss-tts-sidecar/1.0",
+      "status": "ready"
+    },
+    "captured_at": "2026-08-26T04:50:04+08:00",
+    "host": {
+      "causality": "snapshot_only",
+      "memory_pressure_free": "System-wide memory free percentage: 41%",
+      "swapusage": "vm.swapusage: total = 7168.00M  used = 5662.88M  free = 1505.12M  (encrypted)"
+    },
+    "qwenpaw": {
+      "container_id_prefix": "f2b3a28c49e4",
+      "health": "healthy",
+      "stats": {
+        "BlockIO": "360kB / 6.14MB",
+        "CPUPerc": "0.83%",
+        "Container": "ai-novel-2026-qwenpaw-lab",
+        "ID": "f2b3a28c49e4",
+        "MemPerc": "8.31%",
+        "MemUsage": "659.3MiB / 7.748GiB",
+        "Name": "ai-novel-2026-qwenpaw-lab",
+        "NetIO": "26.5MB / 34.4MB",
+        "PIDs": "124"
+      },
+      "status": "running"
+    },
+    "scratch": {
+      "partial_count": 0,
+      "scratch_file_count": 0
+    },
+    "sidecar": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "container_id_prefix": "367b4defa2d7",
+      "health": "healthy",
+      "image": "sha256:726b47e9e5f76c4902999045b778282e23f162d1214ca4e4b43fd3ea3fee65b7",
+      "memory_limit_bytes": 268435456,
+      "mounts": [
+        {
+          "destination": "/run/secrets/moss_sidecar_token",
+          "read_write": false,
+          "type": "bind"
+        }
+      ],
+      "networks": [
+        "moss-tts-sidecar-fake-t0b_tts_private"
+      ],
+      "pids_limit": 64,
+      "platform": "linux",
+      "privileged": false,
+      "published_host_bindings": {},
+      "read_only_rootfs": true,
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
+    },
+    "sidecar_stats": {
+      "BlockIO": "0B / 0B",
+      "CPUPerc": "10.02%",
+      "Container": "367b4defa2d7fba08ab6fb7ac71b187cbfde1ec8383225656a3f3f711b6d3b39",
+      "ID": "367b4defa2d7",
+      "MemPerc": "7.93%",
+      "MemUsage": "20.31MiB / 256MiB",
+      "Name": "moss-tts-sidecar-fake-t0b-sidecar-1",
+      "NetIO": "2.56kB / 8.78kB",
+      "PIDs": "2"
+    },
+    "storage": {
+      "partial_count": 0,
+      "unexpected_file_count": 0,
+      "wav_count": 3
+    }
+  },
+  "pre": {
+    "capability": {
+      "limits": {
+        "audio_bytes": 16777216,
+        "reference_audio_bytes": 12582912,
+        "reference_audio_duration_seconds": 12.5,
+        "request_bytes": 65536
+      },
+      "model": {
+        "ffmpeg_build": null,
+        "model_sha256": null,
+        "source_sha256": null
+      },
+      "process": {
+        "accepted_request_count": 0,
+        "active_request_count": 0,
+        "completed_request_count": 0,
+        "generation": "8b73c2cb39c7419c9a57309daf2bdf35",
+        "pid": 7,
+        "uptime_ms": 5944.751545
+      },
+      "protocol_version": "moss-tts-sidecar/1.0",
+      "status": "ready"
+    },
+    "captured_at": "2026-08-26T04:49:49+08:00",
+    "host": {
+      "causality": "snapshot_only",
+      "memory_pressure_free": "System-wide memory free percentage: 40%",
+      "swapusage": "vm.swapusage: total = 7168.00M  used = 5662.88M  free = 1505.12M  (encrypted)"
+    },
+    "qwenpaw": {
+      "container_id_prefix": "f2b3a28c49e4",
+      "health": "healthy",
+      "stats": {
+        "BlockIO": "360kB / 6.14MB",
+        "CPUPerc": "0.82%",
+        "Container": "ai-novel-2026-qwenpaw-lab",
+        "ID": "f2b3a28c49e4",
+        "MemPerc": "8.31%",
+        "MemUsage": "659.3MiB / 7.748GiB",
+        "Name": "ai-novel-2026-qwenpaw-lab",
+        "NetIO": "26.4MB / 34.4MB",
+        "PIDs": "124"
+      },
+      "status": "running"
+    },
+    "scratch": {
+      "partial_count": 0,
+      "scratch_file_count": 0
+    },
+    "sidecar": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "container_id_prefix": "367b4defa2d7",
+      "health": "healthy",
+      "image": "sha256:726b47e9e5f76c4902999045b778282e23f162d1214ca4e4b43fd3ea3fee65b7",
+      "memory_limit_bytes": 268435456,
+      "mounts": [
+        {
+          "destination": "/run/secrets/moss_sidecar_token",
+          "read_write": false,
+          "type": "bind"
+        }
+      ],
+      "networks": [
+        "moss-tts-sidecar-fake-t0b_tts_private"
+      ],
+      "pids_limit": 64,
+      "platform": "linux",
+      "privileged": false,
+      "published_host_bindings": {},
+      "read_only_rootfs": true,
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
+    },
+    "sidecar_stats": {
+      "BlockIO": "0B / 0B",
+      "CPUPerc": "0.06%",
+      "Container": "367b4defa2d7fba08ab6fb7ac71b187cbfde1ec8383225656a3f3f711b6d3b39",
+      "ID": "367b4defa2d7",
+      "MemPerc": "8.05%",
+      "MemUsage": "20.6MiB / 256MiB",
+      "Name": "moss-tts-sidecar-fake-t0b-sidecar-1",
+      "NetIO": "1.84kB / 126B",
+      "PIDs": "2"
+    }
+  },
+  "schema_version": "moss-tts-linux-sidecar-smoke/1.0",
+  "script_sha256": "e5bbb1d08517ed22138ea2c1ee4aa183d38f5ba72fe870b12d1ce5f3c464b4f0",
+  "shutdown": {
+    "orphan_container_count": 0,
+    "performed": true,
+    "remaining_container_ids": [],
+    "test_media_cleanup": {
+      "performed": true,
+      "removed_bytes": 19332,
+      "removed_file_count": 3
+    }
+  },
+  "status": "passed"
+}

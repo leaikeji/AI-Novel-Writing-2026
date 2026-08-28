@@ -1,0 +1,42 @@
+{
+  "schema_version": "moss-tts-linux-sidecar-postshutdown/1.0",
+  "captured_at": "2026-08-26T05:32:10+08:00",
+  "contains_audio": false,
+  "contains_secret": false,
+  "sidecar": {
+    "remaining_compose_container_count": 0,
+    "remaining_benchmark_or_sidecar_process_count": 0,
+    "orphan_count": 0,
+    "test_media_root_exists": false,
+    "ephemeral_token_root_exists": false
+  },
+  "qwenpaw": {
+    "container_id_prefix": "f2b3a28c49e4",
+    "status": "running",
+    "health": "healthy",
+    "oom_killed": false,
+    "stats": {
+      "cpu_percent": "5.62%",
+      "memory_usage": "659.1MiB / 7.748GiB",
+      "memory_percent": "8.31%",
+      "pids": "124",
+      "block_io": "2.37MB / 6.52MB",
+      "network_io": "28.5MB / 36.9MB"
+    }
+  },
+  "host": {
+    "memory_pressure_free_percentage": 35,
+    "swap_total_mib": 9216.0,
+    "swap_used_mib": 8549.75,
+    "swap_free_mib": 666.25,
+    "causality": "snapshot_only; compare with prewarm and endurance snapshots, but do not attribute host swap changes to one process"
+  },
+  "cleanup": {
+    "removed_generated_wav_count": 757,
+    "removed_generated_wav_bytes": 697745948,
+    "removed_partial_count": 0,
+    "reference_fixture_modified": false,
+    "model_or_source_modified": false,
+    "qwenpaw_volume_modified": false
+  }
+}

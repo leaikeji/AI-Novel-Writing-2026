@@ -1,0 +1,108 @@
+{
+  "schema_version": "moss-nano-t1g-integration-validation/2",
+  "work_package": "T1-G",
+  "recorded_at": "2026-08-26",
+  "status": "ready_for_t1_gate_review_gate_not_decided",
+  "environment": {
+    "postgresql": "isolated loopback PostgreSQL 18",
+    "database_identity_policy": "exact disposable test identity, different from formal database",
+    "alembic_head": "20260826_0015",
+    "formal_database_head": "20260825_0009",
+    "formal_database_used": false,
+    "formal_database_migrated": false,
+    "formal_volume_mounted": false
+  },
+  "validation_runs": [
+    {
+      "name": "migration_gate",
+      "test_file": "tests/narration/test_migrations.py",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "request_source_sealing_gate",
+      "test_file": "tests/narration/test_request_source_sealing_postgres.py",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "asset_scoped_migration_gate",
+      "test_file": "tests/narration/test_asset_scoped_migration.py",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "current_head_live_suite",
+      "head": "20260826_0015",
+      "test_files": {
+        "tests/narration/test_jobs_postgres.py": 10,
+        "tests/narration/test_media_postgres.py": 11,
+        "tests/narration/test_media_asset_scope_postgres.py": 6,
+        "tests/narration/test_snapshots_postgres.py": 6,
+        "tests/narration/test_domain_concurrency_postgres.py": 10,
+        "tests/narration/test_publication_postgres.py": 1,
+        "tests/narration/test_foundation_integration.py": 6,
+        "tests/narration/test_crash_recovery.py": 6
+      },
+      "passed": 56,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "current_non_database_combined",
+      "command": "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts='' -q -ra tests/narration/test_jobs.py tests/narration/test_media.py tests/narration/test_domain_services.py tests/narration/test_contracts.py tests/narration/test_adapters.py",
+      "passed": 175,
+      "failed": 0,
+      "skipped": 0,
+      "exit_code": 0
+    }
+  ],
+  "strong_evidence": {
+    "domain_concurrency": {
+      "passed": 10,
+      "real_two_session_lock_wait": true,
+      "mocked_lock_wait": false
+    },
+    "publication_atomicity": {
+      "passed": 1,
+      "successful_runs": 2,
+      "database_failure_rolls_back_all_authority_rows": true,
+      "deterministic_files_retained_and_re_adopted": true,
+      "ready_render_and_attempt_completion_same_transaction": true
+    },
+    "recovery": {
+      "claim_before_commit_replay": true,
+      "expired_lease_reconcile": true,
+      "new_epoch_blocks_old_fence": true,
+      "gc_retains_live_reference": true,
+      "media_re_adoption_after_database_abort": true
+    },
+    "source_integrity": {
+      "authoritative_revision_unchanged": true,
+      "working_copy_unchanged": true,
+      "analyze_only_generation_blocked": true,
+      "sealed_request_sources_immutable": true
+    }
+  },
+  "source_sha256": {
+    "tests/narration/test_foundation_integration.py": "27712b59959ffe73b52d20ce86487453d24be5510e988fcef2bbef0277df06e3",
+    "tests/narration/test_crash_recovery.py": "cbf662014a0ce7b7109f6144e1d13517e9f62a1a08deb9a20aa9278f7fa0d452",
+    "tests/narration/test_domain_concurrency_postgres.py": "7b56b46a64852ff9e33bff3399800d634fe112c53da442193d89c3ab961aaa7d",
+    "tests/narration/test_publication_postgres.py": "ef73b71535696f234c032331f6d33a15cb5dfbfa9268dc893bfb32f72742965d",
+    "backend/narration/publication.py": "09ec2b404b73e61ab6e0ac6c223276e2e19092da66d06bb21050f10fbb4bb344",
+    "backend/migrations/versions/20260826_0015_narration_domain_concurrency_guards.py": "553874380655e9762bba9de59e9230a69ff5364b76cf8a2d36d60196f7583a58"
+  },
+  "t1_gate_policy": {
+    "capability_false_allowed": true,
+    "production_role_switch_hold_allowed_with_explicit_no_go": true,
+    "t2_api_is_t1_blocker": false,
+    "t4_worker_is_t1_blocker": false,
+    "frontend_is_t1_blocker": false,
+    "pawapp_minimal_runtime_lifecycle_must_be_evaluated_by_gate_owner": true,
+    "install_disable_uninstall_non_regression_must_be_evaluated_by_gate_owner": true,
+    "t1_gate_complete": false
+  }
+}

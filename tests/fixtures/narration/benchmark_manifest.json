@@ -1,0 +1,507 @@
+{
+  "schema_version": "moss-tts-benchmark-manifest/1.0",
+  "fixture_set_id": "moss-tts-t0i-benchmark-v1",
+  "authorized_texts": {
+    "path": "tests/fixtures/narration/authorized-texts.json",
+    "schema_version": "moss-tts-authorized-texts/1.0",
+    "required_fixture_set_id": "moss-tts-t0i-original-zh-v1"
+  },
+  "input_hashing": {
+    "encoding": "UTF-8",
+    "unicode_normalization": "none",
+    "single_text": "SHA-256 of the exact decoded JSON text string",
+    "multiple_texts": "SHA-256 of exact decoded strings joined in order with \\n<SEGMENT>\\n"
+  },
+  "privacy": {
+    "fixture_only": true,
+    "contains_user_text": false,
+    "contains_private_reference_audio": false,
+    "reference_placeholders_are_audio": false,
+    "evidence_may_contain_audio": false,
+    "forbidden_evidence": [
+      "用户小说正文",
+      "私人参考音频",
+      "生成的完整音频",
+      "模型权重",
+      "未脱敏的本机绝对媒体路径"
+    ]
+  },
+  "result_contract": {
+    "schema_version": "moss-tts-benchmark-result/1.0",
+    "summary_schema_version": "moss-tts-benchmark-summary/1.0",
+    "audio_inspection_schema_version": "moss-tts-audio-inspection/1.0",
+    "run_statuses": [
+      "pending",
+      "running",
+      "passed",
+      "partial",
+      "failed",
+      "cancelled",
+      "crashed",
+      "skipped",
+      "blocked"
+    ],
+    "case_statuses": ["passed", "failed", "cancelled", "crashed", "skipped", "blocked"],
+    "required_work_packages": ["T0-B", "T0-C", "T0-D", "T4-K"],
+    "required_run_records": [
+      "hardware/os/Python",
+      "model revision and artifact SHA-256",
+      "execution backend and parameters",
+      "exact argv and exit code",
+      "privacy declaration"
+    ],
+    "required_case_records": [
+      "fixture text IDs and SHA-256",
+      "first packet latency and RTF",
+      "peak RSS and accelerator memory",
+      "cancel/failure/crash/reuse state",
+      "final output SHA-256, ready segment SHA-256 records and WAV technical inspection",
+      "manual listening status, defects and verdict"
+    ]
+  },
+  "required_coverage": [
+    "narration",
+    "explicit-speaker",
+    "two-person-dialogue",
+    "multi-person-dialogue",
+    "omitted-subject",
+    "inner-monologue",
+    "anonymous-young",
+    "anonymous-middle-aged",
+    "anonymous-elder",
+    "anonymous-child",
+    "crowd",
+    "markdown",
+    "emoji",
+    "unicode-combining-character",
+    "nested-quotes",
+    "special-punctuation",
+    "polyphonic-characters",
+    "person-name",
+    "year-and-date",
+    "mixed-chinese-english",
+    "long-sentence",
+    "reference-3-seconds-placeholder",
+    "reference-5-seconds-placeholder",
+    "reference-8-seconds-placeholder",
+    "reference-12-seconds-placeholder",
+    "independent-segments",
+    "failure-recovery",
+    "cancellation",
+    "crash-recovery"
+  ],
+  "reference_profiles": [
+    {
+      "id": "ref-placeholder-03s",
+      "target_duration_seconds": 3,
+      "asset_path": null,
+      "sha256": null,
+      "asset_state": "placeholder_only",
+      "authorization_state": "not_supplied",
+      "allowed_action": "record blocked status until a separately authorized reference is supplied",
+      "must_not": "create, infer, download or commit a substitute reference audio file"
+    },
+    {
+      "id": "ref-placeholder-05s",
+      "target_duration_seconds": 5,
+      "asset_path": null,
+      "sha256": null,
+      "asset_state": "placeholder_only",
+      "authorization_state": "not_supplied",
+      "allowed_action": "record blocked status until a separately authorized reference is supplied",
+      "must_not": "create, infer, download or commit a substitute reference audio file"
+    },
+    {
+      "id": "ref-placeholder-08s",
+      "target_duration_seconds": 8,
+      "asset_path": null,
+      "sha256": null,
+      "asset_state": "placeholder_only",
+      "authorization_state": "not_supplied",
+      "allowed_action": "record blocked status until a separately authorized reference is supplied",
+      "must_not": "create, infer, download or commit a substitute reference audio file"
+    },
+    {
+      "id": "ref-placeholder-12s",
+      "target_duration_seconds": 12,
+      "asset_path": null,
+      "sha256": null,
+      "asset_state": "placeholder_only",
+      "authorization_state": "not_supplied",
+      "allowed_action": "record blocked status until a separately authorized reference is supplied",
+      "must_not": "create, infer, download or commit a substitute reference audio file"
+    }
+  ],
+  "cases": [
+    {
+      "id": "narration-neutral",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-narrator"],
+        "text_sha256": ["6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f"],
+        "combined_sha256": "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["narration"]
+    },
+    {
+      "id": "dialogue-explicit-speaker",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-explicit-speaker"],
+        "text_sha256": ["0ecfa13658e8a6f2c7ba6721556a28583b9e87fb809f49fd99738f6689458e1b"],
+        "combined_sha256": "0ecfa13658e8a6f2c7ba6721556a28583b9e87fb809f49fd99738f6689458e1b"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["explicit-speaker"]
+    },
+    {
+      "id": "dialogue-two-person",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-two-person"],
+        "text_sha256": ["6dc99fb08ece09bf14c20300687f7a72a18a9c170ffef655f8c356c867873e75"],
+        "combined_sha256": "6dc99fb08ece09bf14c20300687f7a72a18a9c170ffef655f8c356c867873e75"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["two-person-dialogue"]
+    },
+    {
+      "id": "dialogue-multi-person",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-multi-person"],
+        "text_sha256": ["5cc8817d0ca2310fcaa8536c76d1013759c655bc6fd3d3828110462dfe65f881"],
+        "combined_sha256": "5cc8817d0ca2310fcaa8536c76d1013759c655bc6fd3d3828110462dfe65f881"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["multi-person-dialogue"]
+    },
+    {
+      "id": "dialogue-omitted-subject",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-omitted-subject"],
+        "text_sha256": ["bb972b1056e84fa2fa40c815f0919be1ce4cef507ca024c5dac76656a5f7426d"],
+        "combined_sha256": "bb972b1056e84fa2fa40c815f0919be1ce4cef507ca024c5dac76656a5f7426d"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["omitted-subject"]
+    },
+    {
+      "id": "inner-monologue",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-inner-monologue"],
+        "text_sha256": ["793e090b07a37fa5a5ca19da2a32631103ee3547cf5775aae6e7d7a6e51d6913"],
+        "combined_sha256": "793e090b07a37fa5a5ca19da2a32631103ee3547cf5775aae6e7d7a6e51d6913"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["inner-monologue"]
+    },
+    {
+      "id": "anonymous-young",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-anon-young"],
+        "text_sha256": ["f9f6a34020eeee3827ae8412795969582f36e8c99dab56265337f0d424938ac7"],
+        "combined_sha256": "f9f6a34020eeee3827ae8412795969582f36e8c99dab56265337f0d424938ac7"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["anonymous-young"]
+    },
+    {
+      "id": "anonymous-middle-aged",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-anon-middle-aged"],
+        "text_sha256": ["d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b"],
+        "combined_sha256": "d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["anonymous-middle-aged"]
+    },
+    {
+      "id": "anonymous-elder",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-anon-elder"],
+        "text_sha256": ["ab821b1a48823cf034759ff759e6adf6b0cf44fc0f0a15f53ef95c2920c690ad"],
+        "combined_sha256": "ab821b1a48823cf034759ff759e6adf6b0cf44fc0f0a15f53ef95c2920c690ad"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["anonymous-elder"]
+    },
+    {
+      "id": "anonymous-child",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-anon-child"],
+        "text_sha256": ["0cab7e320cb90e58f53f767b19044e035a7f983f1498b12942e8d8929917e909"],
+        "combined_sha256": "0cab7e320cb90e58f53f767b19044e035a7f983f1498b12942e8d8929917e909"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["anonymous-child"]
+    },
+    {
+      "id": "crowd-voice",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-crowd"],
+        "text_sha256": ["b1ff0266194aec1d8891bc5db9eb0c6edcf208ade0a2a14c02fb38ad8597bcc4"],
+        "combined_sha256": "b1ff0266194aec1d8891bc5db9eb0c6edcf208ade0a2a14c02fb38ad8597bcc4"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["crowd"]
+    },
+    {
+      "id": "markdown-input",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-markdown"],
+        "text_sha256": ["8715266efb3d35d78f63d29ca451cf12b3ccf19e17a3760b2d587450e0d99ed5"],
+        "combined_sha256": "8715266efb3d35d78f63d29ca451cf12b3ccf19e17a3760b2d587450e0d99ed5"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["markdown"]
+    },
+    {
+      "id": "emoji-and-combining",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-emoji-combining"],
+        "text_sha256": ["b0bd841105220a10a50319053842387ecb2ea53cc5d1e5f6c05cbbf3ca685fde"],
+        "combined_sha256": "b0bd841105220a10a50319053842387ecb2ea53cc5d1e5f6c05cbbf3ca685fde"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["emoji", "unicode-combining-character"]
+    },
+    {
+      "id": "nested-quotes",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-nested-quotes"],
+        "text_sha256": ["2f42a99a7634b7f47ad87af7d23552fa36b020c05ed119872f393c7f1546cefd"],
+        "combined_sha256": "2f42a99a7634b7f47ad87af7d23552fa36b020c05ed119872f393c7f1546cefd"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["nested-quotes"]
+    },
+    {
+      "id": "special-punctuation",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-special-punctuation"],
+        "text_sha256": ["7400a69873608f9276f5aa3277500ede29e14d6e1959e080f044a53ff0bf7a83"],
+        "combined_sha256": "7400a69873608f9276f5aa3277500ede29e14d6e1959e080f044a53ff0bf7a83"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["special-punctuation"]
+    },
+    {
+      "id": "polyphonic-characters",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-polyphonic"],
+        "text_sha256": ["35258e576f90aa6bdca04637691f33d2884f39cf7e219d2a780896f49f8c81ff"],
+        "combined_sha256": "35258e576f90aa6bdca04637691f33d2884f39cf7e219d2a780896f49f8c81ff"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["polyphonic-characters"]
+    },
+    {
+      "id": "name-year-date",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-name-date"],
+        "text_sha256": ["7698862a0aa82c5c843fea94c5140f2116548fe3609b80590ba5a5d616563513"],
+        "combined_sha256": "7698862a0aa82c5c843fea94c5140f2116548fe3609b80590ba5a5d616563513"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["person-name", "year-and-date"]
+    },
+    {
+      "id": "mixed-chinese-english",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-mixed-language"],
+        "text_sha256": ["eb8453ce273328bc0a93d67f0f300f996ced5960dd4f4e9d9a482dee0e94190f"],
+        "combined_sha256": "eb8453ce273328bc0a93d67f0f300f996ced5960dd4f4e9d9a482dee0e94190f"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["mixed-chinese-english"]
+    },
+    {
+      "id": "long-sentence",
+      "kind": "synthesis",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-long"],
+        "text_sha256": ["4a233d29b904aad04e6e8e32528b7dc1ebec3ebd986ffe1d3a0bd85776ab7e60"],
+        "combined_sha256": "4a233d29b904aad04e6e8e32528b7dc1ebec3ebd986ffe1d3a0bd85776ab7e60"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "covers": ["long-sentence"]
+    },
+    {
+      "id": "reference-placeholder-03s",
+      "kind": "reference_cloning",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-reference-prompt"],
+        "text_sha256": ["d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"],
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+      },
+      "reference_profile_id": "ref-placeholder-03s",
+      "expected_terminal_status": "blocked",
+      "covers": ["reference-3-seconds-placeholder"]
+    },
+    {
+      "id": "reference-placeholder-05s",
+      "kind": "reference_cloning",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-reference-prompt"],
+        "text_sha256": ["d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"],
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+      },
+      "reference_profile_id": "ref-placeholder-05s",
+      "expected_terminal_status": "blocked",
+      "covers": ["reference-5-seconds-placeholder"]
+    },
+    {
+      "id": "reference-placeholder-08s",
+      "kind": "reference_cloning",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-reference-prompt"],
+        "text_sha256": ["d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"],
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+      },
+      "reference_profile_id": "ref-placeholder-08s",
+      "expected_terminal_status": "blocked",
+      "covers": ["reference-8-seconds-placeholder"]
+    },
+    {
+      "id": "reference-placeholder-12s",
+      "kind": "reference_cloning",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-reference-prompt"],
+        "text_sha256": ["d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"],
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+      },
+      "reference_profile_id": "ref-placeholder-12s",
+      "expected_terminal_status": "blocked",
+      "covers": ["reference-12-seconds-placeholder"]
+    },
+    {
+      "id": "independent-segment-seams",
+      "kind": "synthesis",
+      "segment_mode": "independent",
+      "input": {
+        "text_ids": ["txt-independent-1", "txt-independent-2", "txt-independent-3"],
+        "text_sha256": [
+          "fa2f6df06f1f610b5fad5d9f92eb10c822c9ad28183d8ff82a13eb06b0ae9440",
+          "14b02b0660cca15eb4ccee5c73e3f4120fef449b7fa0aeb56406892c3d199d4d",
+          "796cb5cd04d3de7601d592247b6636dd26c72dcc30771fe52cf28c779bbdeea9"
+        ],
+        "combined_sha256": "ea16f64a765328d4b5bfbbb409da647401a4ad24d6328b6d3ff8826c313a9119"
+      },
+      "reference_profile_id": null,
+      "expected_terminal_status": "passed",
+      "assertions": ["each segment is synthesized independently", "listen to both joins without hiding them by cross-fade"],
+      "covers": ["independent-segments"]
+    },
+    {
+      "id": "injected-adapter-failure",
+      "kind": "recovery",
+      "segment_mode": "single",
+      "input": {
+        "text_ids": ["txt-failure"],
+        "text_sha256": ["ac082ce24381f35169178317ce075c0cc01cf3fdc0b734a4a61bf82c1e18a58c"],
+        "combined_sha256": "ac082ce24381f35169178317ce075c0cc01cf3fdc0b734a4a61bf82c1e18a58c"
+      },
+      "reference_profile_id": null,
+      "fault_injection": {"kind": "adapter_error", "after_ready_segments": 0},
+      "expected_terminal_status": "failed",
+      "assertions": ["error is redacted", "no output audio is claimed", "source text remains unchanged"],
+      "covers": ["failure-recovery"]
+    },
+    {
+      "id": "cancel-after-first-ready",
+      "kind": "recovery",
+      "segment_mode": "independent",
+      "input": {
+        "text_ids": ["txt-independent-1", "txt-cancel", "txt-independent-3"],
+        "text_sha256": [
+          "fa2f6df06f1f610b5fad5d9f92eb10c822c9ad28183d8ff82a13eb06b0ae9440",
+          "e277e3159e03ced3f355a630c9f1356101a5a98a34d13e56fd0c9eb8bba671e3",
+          "796cb5cd04d3de7601d592247b6636dd26c72dcc30771fe52cf28c779bbdeea9"
+        ],
+        "combined_sha256": "d8fe8c419f28e5a1c45b0e91642cf51d8ce39cfd4e4c9d9e6752f645085af84d"
+      },
+      "reference_profile_id": null,
+      "fault_injection": {"kind": "cancel_request", "after_ready_segments": 1},
+      "expected_terminal_status": "cancelled",
+      "assertions": ["cancel is acknowledged", "unstarted segments do not run", "already-ready legal output is not deleted"],
+      "covers": ["cancellation"]
+    },
+    {
+      "id": "crash-and-resume",
+      "kind": "recovery",
+      "segment_mode": "independent",
+      "input": {
+        "text_ids": ["txt-independent-1", "txt-crash", "txt-independent-3"],
+        "text_sha256": [
+          "fa2f6df06f1f610b5fad5d9f92eb10c822c9ad28183d8ff82a13eb06b0ae9440",
+          "b67d265b3ac1839f606bb3e0470fbd727f2050cb335a37dde096bf9e419c5cbf",
+          "796cb5cd04d3de7601d592247b6636dd26c72dcc30771fe52cf28c779bbdeea9"
+        ],
+        "combined_sha256": "5145b72ebff52cc3d805b8d70a403e46105d38e5c85e82352a1c555cf38a74e7"
+      },
+      "reference_profile_id": null,
+      "fault_injection": {"kind": "worker_crash", "after_ready_segments": 1, "restart": true},
+      "expected_terminal_status": "passed",
+      "assertions": ["at least one ready segment is reused", "completed segment is not synthesized twice", "final hashes are recorded"],
+      "covers": ["crash-recovery"]
+    }
+  ]
+}

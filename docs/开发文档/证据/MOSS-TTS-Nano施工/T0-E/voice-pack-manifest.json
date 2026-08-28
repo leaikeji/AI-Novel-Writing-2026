@@ -1,0 +1,921 @@
+{
+  "schema_version": "narration-voice-pack-manifest/1.0",
+  "pack_id": "generic-zh-cn-v1",
+  "pack_version": "0.0.0-stage0-candidate-plan",
+  "captured_on": "2026-08-26",
+  "status": "blocked_zero_ready_voices",
+  "summary": {
+    "required_slots": 24,
+    "planned_candidates": 48,
+    "generated_candidates": 0,
+    "selected_slots": 0,
+    "rights_approved_slots": 0,
+    "human_listening_accepted_slots": 0,
+    "production_ready_slots": 0,
+    "official_chinese_presets_visible_in_pinned_onnx_manifest": 6,
+    "official_presets_allowed_for_isolated_test": 16,
+    "official_chinese_presets_allowed_for_isolated_test": 5,
+    "official_chinese_presets_usable_for_user_visible_installation_or_fallback": 0,
+    "official_presets_allowed_for_distribution": 0,
+    "official_presets_allowed_for_commercial_product": 0,
+    "python_runtime_presets_allowed_for_isolated_test": 6,
+    "python_runtime_presets_allowed_for_distribution": 0,
+    "python_runtime_presets_allowed_for_commercial_product": 0,
+    "reference_audio_files_allowed_for_isolated_test": 11,
+    "reference_audio_files_allowed_for_distribution": 0,
+    "reference_audio_files_allowed_for_commercial_product": 0,
+    "official_presets_cleared_for_production_pack": 0
+  },
+  "input_fingerprints": {
+    "slot_fixture": {
+      "path": "tests/fixtures/narration/voice_pool_slots_v1.json",
+      "sha256": "b4b4410f6fbef702bc28358fb16558e0fe1032613674c597cb48d5bf6c0cc911"
+    },
+    "model_source_lock": {
+      "path": "prototypes/moss-tts-nano/model-sources.lock.json",
+      "sha256": "0485cdfb15eb01f7c4c0f65049f1c477fb6391ec523c5b7159ab25f763ab469d"
+    },
+    "onnx_builtin_voice_manifest": {
+      "repository": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX",
+      "revision": "f52645cb467506d8e18e746ddd59482685b74e58",
+      "path": "browser_poc_manifest.json",
+      "sha256": "097d80e993dc29f0bae427590b4f77084a161cb578b50d82c29f455d5faa9eee"
+    },
+    "python_runtime_voice_mapping": {
+      "repository": "OpenMOSS/MOSS-TTS-Nano",
+      "revision": "cc7bdf19c7639c0870dab22045a33b442760f6be",
+      "path": "moss_tts_nano_runtime.py",
+      "sha256": "696abcc54dae09e0f8eda701a3ad45e1a28277fd1516379a77ef9ec97c51cfc3"
+    }
+  },
+  "rights_policy": {
+    "permission_semantics": "allowed_for_isolated_test is a narrow project risk decision for local, non-user-facing, non-redistributed evaluation of an officially published artifact. It is not a speaker-consent, personality-rights, distribution, commercial-use or production clearance.",
+    "model_repository_metadata": "The pinned ONNX model card and repository metadata declare Apache-2.0, and the pinned GitHub source repository has a root Apache-2.0 LICENSE. Those facts establish a copyright-license basis for the published repository artifacts, but do not by themselves prove reference-speaker consent, voice/personality rights, training-data rights, or every downstream use.",
+    "production_rule": "A preset or generated candidate is not production-cleared until a slot-specific rights record is approved and the no-public-figure/no-impersonation check passes.",
+    "reader_rule": "MOSS-TTS-Nano-Reader at the pinned revision is NOASSERTION and must not be copied, packaged, or treated as a source of licensed voices.",
+    "child_voice_rule": "A real child reference requires documented guardian and usage authorization; synthetic child-like candidates still require likeness and safety review.",
+    "celebrity_rule": "Named public-figure imitation is excluded even from isolated testing. This excludes Trump and the Xiaoyu/zh_11.wav preset because the pinned official demo metadata labels the latter 杨幂 - 与自己同行.",
+    "unknown_rule": "Any missing or ambiguous source, speaker identity, consent, likeness, redistribution or commercial-use evidence is unresolved and therefore no-go for distribution, commercial product use and the production 24-slot pack."
+  },
+  "official_inventory_comparison": {
+    "onnx_manifest_count": 18,
+    "onnx_language_counts": {
+      "zh-CN": 6,
+      "en": 5,
+      "ja": 7
+    },
+    "python_runtime_count": 16,
+    "python_runtime_language_counts": {
+      "zh-CN": 6,
+      "en": 5,
+      "ja": 5
+    },
+    "same_name_count": 12,
+    "same_name_and_file_count": 8,
+    "runtime_only_names": ["Sakura", "Yui", "Aoi", "Hina"],
+    "onnx_only_names": ["Soyo", "Saki", "Mortis", "Umiri", "Anon", "Arisa"],
+    "same_name_file_mismatches": [
+      {
+        "voice": "Zhiming",
+        "onnx_file": "zh_3.wav",
+        "python_file": "zh_2.wav"
+      },
+      {
+        "voice": "Weiguo",
+        "onnx_file": "zh_10.wav",
+        "python_file": "zh_5.wav"
+      },
+      {
+        "voice": "Xiaoyu",
+        "onnx_file": "zh_11.wav",
+        "python_file": "zh_3.wav"
+      },
+      {
+        "voice": "Nathan",
+        "onnx_file": "en_8.wav",
+        "python_file": "en_5.wav"
+      }
+    ],
+    "decision": "The ONNX manifest is the contract input for ONNX built-ins; no name-only cross-runtime substitution is allowed. Every runtime must expose a model-fingerprinted inventory, and a mismatch blocks automatic preset migration.",
+    "github_source_audio_count": 13,
+    "onnx_referenced_audio_files_present_in_github_source": 11,
+    "python_referenced_audio_files_present_in_github_source": 8
+  },
+  "official_presets": [
+    {
+      "preset_id": "onnx.Junhao",
+      "voice": "Junhao",
+      "language": "zh-CN",
+      "group": "Chinese Male",
+      "display_name": "CN 欢迎关注模思智能",
+      "onnx_audio_file": "zh_1.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Age/timbre classification, reference-speaker authorization, likeness risk, Nano quality and cross-slot distinctness are unverified."
+    },
+    {
+      "preset_id": "onnx.Zhiming",
+      "voice": "Zhiming",
+      "language": "zh-CN",
+      "group": "Chinese Male",
+      "display_name": "CN 京味胡同闲聊",
+      "onnx_audio_file": "zh_3.wav",
+      "python_mapping": "same_name_different_file_zh_2.wav",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Runtime mapping mismatch plus unverified reference-speaker authorization and quality."
+    },
+    {
+      "preset_id": "onnx.Weiguo",
+      "voice": "Weiguo",
+      "language": "zh-CN",
+      "group": "Chinese Male",
+      "display_name": "CN 说书",
+      "onnx_audio_file": "zh_10.wav",
+      "python_mapping": "same_name_different_file_zh_5.wav",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Runtime mapping mismatch plus unverified reference-speaker authorization and quality."
+    },
+    {
+      "preset_id": "onnx.Xiaoyu",
+      "voice": "Xiaoyu",
+      "language": "zh-CN",
+      "group": "Chinese Female",
+      "display_name": "CN 明星",
+      "onnx_audio_file": "zh_11.wav",
+      "python_mapping": "same_name_different_file_zh_3.wav",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "rejected",
+      "quality_status": "not_tested",
+      "production_status": "excluded",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Pinned official assets/demo.jsonl labels zh_11.wav as 杨幂 - 与自己同行; named public-figure imitation is excluded from isolated testing, distribution, commercial product use and the 24-slot pack."
+    },
+    {
+      "preset_id": "onnx.Yuewen",
+      "voice": "Yuewen",
+      "language": "zh-CN",
+      "group": "Chinese Female",
+      "display_name": "CN 机车",
+      "onnx_audio_file": "zh_4.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Reference-speaker authorization, age/timbre classification, quality and distinctness are unverified."
+    },
+    {
+      "preset_id": "onnx.Lingyu",
+      "voice": "Lingyu",
+      "language": "zh-CN",
+      "group": "Chinese Female",
+      "display_name": "CN 深夜电台",
+      "onnx_audio_file": "zh_6.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Reference-speaker authorization, age/timbre classification, quality and distinctness are unverified."
+    },
+    {
+      "preset_id": "onnx.Trump",
+      "voice": "Trump",
+      "language": "en",
+      "group": "English Male",
+      "display_name": "EN Trump",
+      "onnx_audio_file": "en_1.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "rejected",
+      "quality_status": "not_tested",
+      "production_status": "excluded",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Named public-figure imitation is outside the project voice policy."
+    },
+    {
+      "preset_id": "onnx.Ava",
+      "voice": "Ava",
+      "language": "en",
+      "group": "English Female",
+      "display_name": "EN The Bitter Lesson",
+      "onnx_audio_file": "en_2.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese diagnostic preset with no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Bella",
+      "voice": "Bella",
+      "language": "en",
+      "group": "English Female",
+      "display_name": "EN A Gentle Reminder",
+      "onnx_audio_file": "en_3.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese diagnostic preset with no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Adam",
+      "voice": "Adam",
+      "language": "en",
+      "group": "English Male",
+      "display_name": "EN English News",
+      "onnx_audio_file": "en_4.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese diagnostic preset with no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Nathan",
+      "voice": "Nathan",
+      "language": "en",
+      "group": "English Male",
+      "display_name": "EN The Quiet Motion of the World",
+      "onnx_audio_file": "en_8.wav",
+      "python_mapping": "same_name_different_file_en_5.wav",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese preset, runtime mapping mismatch, and no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Soyo",
+      "voice": "Soyo",
+      "language": "ja",
+      "group": "Japanese Female",
+      "display_name": "JP Soyo",
+      "onnx_audio_file": "jp_1.wav",
+      "python_mapping": "runtime_uses_Sakura_jp_1.mp3",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese preset with name/file mismatch and no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Saki",
+      "voice": "Saki",
+      "language": "ja",
+      "group": "Japanese Female",
+      "display_name": "JP Saki",
+      "onnx_audio_file": "jp_2.wav",
+      "python_mapping": "runtime_uses_Yui_jp_2.wav",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese preset with name mismatch and no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Mortis",
+      "voice": "Mortis",
+      "language": "ja",
+      "group": "Japanese Female",
+      "display_name": "JP Mortis",
+      "onnx_audio_file": "jp_3.wav",
+      "python_mapping": "runtime_uses_Aoi_jp_3.wav",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese preset with name mismatch and no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Umiri",
+      "voice": "Umiri",
+      "language": "ja",
+      "group": "Japanese Female",
+      "display_name": "JP Umiri",
+      "onnx_audio_file": "jp_4.wav",
+      "python_mapping": "runtime_uses_Hina_jp_4.wav",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese preset with name mismatch and no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Mei",
+      "voice": "Mei",
+      "language": "ja",
+      "group": "Japanese Female",
+      "display_name": "JP Togawa",
+      "onnx_audio_file": "jp_5.wav",
+      "python_mapping": "exact_name_and_file",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese diagnostic preset with no slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Anon",
+      "voice": "Anon",
+      "language": "ja",
+      "group": "Japanese Female",
+      "display_name": "JP Anon",
+      "onnx_audio_file": "jp_6.wav",
+      "python_mapping": "absent",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese preset absent from Python mapping and without slot-specific rights or Mandarin quality evidence."
+    },
+    {
+      "preset_id": "onnx.Arisa",
+      "voice": "Arisa",
+      "language": "ja",
+      "group": "Japanese Female",
+      "display_name": "JP Arisa",
+      "onnx_audio_file": "jp_7.wav",
+      "python_mapping": "absent",
+      "source_status": "manifest_prompt_codes_present",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "eligible_for_24_slot_pack": false,
+      "reason": "Non-Chinese preset absent from Python mapping and without slot-specific rights or Mandarin quality evidence."
+    }
+  ],
+  "official_preset_permission_assessments": [
+    {
+      "preset_id": "onnx.Junhao",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Zhiming",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "runtime_audio_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Weiguo",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "runtime_audio_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Xiaoyu",
+      "allowed_for_isolated_test": false,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["demo_label_names_public_figure_yang_mi", "reference_speaker_consent", "voice_and_personality_rights", "runtime_audio_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Yuewen",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Lingyu",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Trump",
+      "allowed_for_isolated_test": false,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["named_public_figure_imitation", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Ava",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Bella",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Adam",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Nathan",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "runtime_audio_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Soyo",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "reference_audio_absent_from_pinned_source", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Saki",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Mortis",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "reference_audio_absent_from_pinned_source", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Umiri",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "reference_audio_absent_from_pinned_source", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Mei",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "reference_audio_absent_from_pinned_source", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Anon",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "reference_audio_absent_from_pinned_source", "redistribution_scope", "commercial_use_scope"]
+    },
+    {
+      "preset_id": "onnx.Arisa",
+      "allowed_for_isolated_test": true,
+      "allowed_for_distribution": false,
+      "allowed_for_commercial_product": false,
+      "unresolved": ["reference_speaker_identity", "reference_speaker_consent", "voice_and_personality_rights", "reference_audio_absent_from_pinned_source", "redistribution_scope", "commercial_use_scope"]
+    }
+  ],
+  "python_runtime_permission_assessments": [
+    {"preset_id": "python.Junhao", "audio_file": "zh_1.wav", "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Zhiming", "audio_file": "zh_2.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["reference_audio_absent_from_pinned_source", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Weiguo", "audio_file": "zh_5.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["reference_audio_absent_from_pinned_source", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Xiaoyu", "audio_file": "zh_3.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["same_audio_is_different_onnx_identity", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Yuewen", "audio_file": "zh_4.wav", "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Lingyu", "audio_file": "zh_6.wav", "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Trump", "audio_file": "en_1.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["named_public_figure_imitation", "reference_audio_absent_from_pinned_source", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Ava", "audio_file": "en_2.wav", "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Bella", "audio_file": "en_3.wav", "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Adam", "audio_file": "en_4.wav", "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Nathan", "audio_file": "en_5.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["reference_audio_absent_from_pinned_source", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Sakura", "audio_file": "jp_1.mp3", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["reference_audio_absent_from_pinned_source", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_name_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Yui", "audio_file": "jp_2.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["same_audio_is_different_onnx_identity", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_name_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Aoi", "audio_file": "jp_3.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["reference_audio_absent_from_pinned_source", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_name_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Hina", "audio_file": "jp_4.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["reference_audio_absent_from_pinned_source", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_name_mismatch", "redistribution_scope", "commercial_use_scope"]},
+    {"preset_id": "python.Mei", "audio_file": "jp_5.wav", "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["reference_audio_absent_from_pinned_source", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]}
+  ],
+  "reference_audio_source_audit": {
+    "repository": "OpenMOSS/MOSS-TTS-Nano",
+    "revision": "cc7bdf19c7639c0870dab22045a33b442760f6be",
+    "root_license": {
+      "spdx": "Apache-2.0",
+      "git_blob_sha1": "f95ac2d6ec3449e33a18b54792e733a1701d6482",
+      "separate_audio_rights_or_consent_file_found": false
+    },
+    "demo_metadata": {
+      "path": "assets/demo.jsonl",
+      "git_blob_sha1": "5713a8f0e3c7e9addbd4d86d63a19d47bec36f86",
+      "public_figure_labels": {
+        "assets/audio/zh_11.wav": "杨幂 - 与自己同行",
+        "assets/audio/en_7.wav": "Taylor Swift - You Are Not Alone Tonight"
+      },
+      "speaker_consent_or_rights_fields_present": false
+    },
+    "rule": "The root copyright license covers the published repository work, but no per-recording speaker identity, consent, voice/personality-rights, redistribution or commercial-product grant was found. Therefore every audio asset remains blocked for distribution and commercial product use.",
+    "files": [
+      {"path": "assets/audio/en_2.wav", "size": 694618, "git_blob_sha1": "9b1609e9bae6dd530a0c4a5ba9e1d3fff250d2ba", "linked_presets": ["onnx.Ava", "python.Ava"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/en_3.wav", "size": 455372, "git_blob_sha1": "ed3d0fe42012ab5015d091525b7ba2c9021415c8", "linked_presets": ["onnx.Bella", "python.Bella"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/en_4.wav", "size": 458948, "git_blob_sha1": "39b00fea0cc55162c9b42f54ca128a9e3b1cd029", "linked_presets": ["onnx.Adam", "python.Adam"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/en_6.wav", "size": 298654, "git_blob_sha1": "6989b91d4583600fb5c8bc02be35df36ea22141c", "linked_presets": [], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "preset_provenance", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/en_7.wav", "size": 284680, "git_blob_sha1": "674c1e4f76946042f4a84b1448ae52d660069cce", "linked_presets": [], "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["demo_label_names_public_figure_taylor_swift", "speaker_identity", "speaker_consent", "voice_and_personality_rights", "preset_provenance", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/en_8.wav", "size": 322923, "git_blob_sha1": "5de9bb6db75ef1d59bf96f0208d8391f64f2f32d", "linked_presets": ["onnx.Nathan"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "runtime_audio_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/jp_2.wav", "size": 227600, "git_blob_sha1": "0319a88f55cd37697ad13ba7ed8b995e5b9f98d2", "linked_presets": ["onnx.Saki", "python.Yui"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_name_mismatch", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/zh_1.wav", "size": 314286, "git_blob_sha1": "1966f0c7f97ac7cc2904a0bb74ac6d3adbcf060b", "linked_presets": ["onnx.Junhao", "python.Junhao"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/zh_10.wav", "size": 270765, "git_blob_sha1": "7814ab2afd338728c040f495e76199eb1be20347", "linked_presets": ["onnx.Weiguo"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "runtime_audio_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/zh_11.wav", "size": 347949, "git_blob_sha1": "0a2258edd941a53b8d6d9aac8c3f02dc9e43e8ad", "linked_presets": ["onnx.Xiaoyu"], "allowed_for_isolated_test": false, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["demo_label_names_public_figure_yang_mi", "speaker_consent", "voice_and_personality_rights", "runtime_audio_mapping_mismatch", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/zh_3.wav", "size": 251214, "git_blob_sha1": "54f93190cc0a4dfbaa308af353b98cd684e77c8e", "linked_presets": ["onnx.Zhiming", "python.Xiaoyu"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "cross_runtime_name_mismatch", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/zh_4.wav", "size": 263502, "git_blob_sha1": "57750ad00efd42f33019e2e5bdd4b46c9eff6ab9", "linked_presets": ["onnx.Yuewen", "python.Yuewen"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]},
+      {"path": "assets/audio/zh_6.wav", "size": 837198, "git_blob_sha1": "1cb86e2050c71b0d07b14963d59e5676f55b5e36", "linked_presets": ["onnx.Lingyu", "python.Lingyu"], "allowed_for_isolated_test": true, "allowed_for_distribution": false, "allowed_for_commercial_product": false, "unresolved": ["speaker_identity", "speaker_consent", "voice_and_personality_rights", "redistribution_scope", "commercial_use_scope"]}
+    ],
+    "referenced_but_missing_audio_files": ["assets/audio/en_1.wav", "assets/audio/en_5.wav", "assets/audio/jp_1.mp3", "assets/audio/jp_1.wav", "assets/audio/jp_3.wav", "assets/audio/jp_4.wav", "assets/audio/jp_5.wav", "assets/audio/jp_6.wav", "assets/audio/jp_7.wav", "assets/audio/zh_2.wav", "assets/audio/zh_5.wav"]
+  },
+  "planned_slot_candidates": [
+    {
+      "slot_id": "generic.child.male.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.child.male.a.01", "description_zh": "普通话男童感，清亮轻盈，自然天真，中等语速，非任何真实人物或角色仿声"},
+        {"candidate_id": "vg.generic.child.male.a.02", "description_zh": "普通话男童感，略带活泼笑意，高音不尖锐，节奏轻快，非任何真实人物或角色仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.child.female.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.child.female.a.01", "description_zh": "普通话女童感，清澈柔软，自然纯真，中等语速，非任何真实人物或角色仿声"},
+        {"candidate_id": "vg.generic.child.female.a.02", "description_zh": "普通话女童感，明亮活泼，语气轻快但不夸张，非任何真实人物或角色仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.adolescent.male.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.adolescent.male.a.01", "description_zh": "普通话少年男声，清朗偏瘦，真诚沉静，发音自然，非真实人物仿声"},
+        {"candidate_id": "vg.generic.adolescent.male.a.02", "description_zh": "普通话少年男声，清亮稍带青涩，语速中等，情绪克制，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.adolescent.male.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.adolescent.male.b.01", "description_zh": "普通话少年男声，明亮活力，节奏利落，表达直接，非真实人物仿声"},
+        {"candidate_id": "vg.generic.adolescent.male.b.02", "description_zh": "普通话少年男声，轻快外向，音色较薄，语尾有朝气，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.adolescent.female.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.adolescent.female.a.01", "description_zh": "普通话少女声，清澈柔和，真诚内敛，语速中等，非真实人物仿声"},
+        {"candidate_id": "vg.generic.adolescent.female.a.02", "description_zh": "普通话少女声，轻柔干净，语气平静，保留自然青涩感，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.adolescent.female.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.adolescent.female.b.01", "description_zh": "普通话少女声，明亮活泼，节奏轻快，表达灵动，非真实人物仿声"},
+        {"candidate_id": "vg.generic.adolescent.female.b.02", "description_zh": "普通话少女声，音色轻盈，快速但清晰，带自然笑意，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.young_adult.male.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.young_adult.male.a.01", "description_zh": "普通话青年男声，清晰均衡，稳重真诚，中等语速，非真实人物仿声"},
+        {"candidate_id": "vg.generic.young_adult.male.a.02", "description_zh": "普通话青年男声，干净有弹性，友善自信，发音利落，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.young_adult.male.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.young_adult.male.b.01", "description_zh": "普通话青年男声，偏低温暖，音色饱满，温和克制，非真实人物仿声"},
+        {"candidate_id": "vg.generic.young_adult.male.b.02", "description_zh": "普通话青年男声，柔和厚实，语速稍慢，安静内敛，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.young_adult.male.c",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.young_adult.male.c.01", "description_zh": "普通话青年男声，偏低冷静，音色紧实，表达果断，非真实人物仿声"},
+        {"candidate_id": "vg.generic.young_adult.male.c.02", "description_zh": "普通话青年男声，冷峻清瘦，语句短促利落，情绪克制，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.young_adult.female.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.young_adult.female.a.01", "description_zh": "普通话青年女声，清亮活力，自信利落，中等语速，非真实人物仿声"},
+        {"candidate_id": "vg.generic.young_adult.female.a.02", "description_zh": "普通话青年女声，明亮干净，节奏轻快，表达爽朗，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.young_adult.female.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.young_adult.female.b.01", "description_zh": "普通话青年女声，温暖柔和，语速中慢，沉静内敛，非真实人物仿声"},
+        {"candidate_id": "vg.generic.young_adult.female.b.02", "description_zh": "普通话青年女声，柔和圆润，温婉但不娇弱，节奏自然，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.young_adult.female.c",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.young_adult.female.c.01", "description_zh": "普通话青年女声，冷静干净，音色偏中低，表达果断，非真实人物仿声"},
+        {"candidate_id": "vg.generic.young_adult.female.c.02", "description_zh": "普通话青年女声，清冷克制，节奏稳定，逻辑感强，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.middle_aged.male.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.middle_aged.male.a.01", "description_zh": "普通话中年男声，中低音饱满，稳重有权威感，节奏克制，非真实人物仿声"},
+        {"candidate_id": "vg.generic.middle_aged.male.a.02", "description_zh": "普通话中年男声，浑厚清晰，语句沉稳，态度坚定，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.middle_aged.male.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.middle_aged.male.b.01", "description_zh": "普通话中年男声，温暖圆润，亲切耐心，中等语速，非真实人物仿声"},
+        {"candidate_id": "vg.generic.middle_aged.male.b.02", "description_zh": "普通话中年男声，厚实随和，带轻微笑意，表达平稳，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.middle_aged.male.c",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.middle_aged.male.c.01", "description_zh": "普通话中年男声，低沉粗粝，饱经风霜，表达直率，非真实人物仿声"},
+        {"candidate_id": "vg.generic.middle_aged.male.c.02", "description_zh": "普通话中年男声，沙质密度高，语速稍慢，坚韧干练，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.middle_aged.female.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.middle_aged.female.a.01", "description_zh": "普通话中年女声，清晰坚定，干练克制，节奏稳定，非真实人物仿声"},
+        {"candidate_id": "vg.generic.middle_aged.female.a.02", "description_zh": "普通话中年女声，中音紧实，沉着有权威感，发音利落，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.middle_aged.female.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.middle_aged.female.b.01", "description_zh": "普通话中年女声，温暖圆润，亲切耐心，语速中慢，非真实人物仿声"},
+        {"candidate_id": "vg.generic.middle_aged.female.b.02", "description_zh": "普通话中年女声，柔和厚实，安定包容，表达自然，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.middle_aged.female.c",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.middle_aged.female.c.01", "description_zh": "普通话中年女声，中低音沉稳，冷静内敛，带权威感，非真实人物仿声"},
+        {"candidate_id": "vg.generic.middle_aged.female.c.02", "description_zh": "普通话中年女声，音色厚实克制，态度坚决，节奏缓稳，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.senior.male.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.senior.male.a.01", "description_zh": "普通话老年男声，低沉温暖，略带质感，智慧从容，非真实人物仿声"},
+        {"candidate_id": "vg.generic.senior.male.a.02", "description_zh": "普通话老年男声，浑厚慈和，语速稍慢，讲述感自然，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.senior.male.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.senior.male.b.01", "description_zh": "普通话老年男声，低音干涩粗粝，饱经风霜，表达直率，非真实人物仿声"},
+        {"candidate_id": "vg.generic.senior.male.b.02", "description_zh": "普通话老年男声，沙质低沉，节奏缓慢，坚韧不夸张，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.senior.female.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.senior.female.a.01", "description_zh": "普通话老年女声，中低音温暖，轻微沙质，慈和智慧，非真实人物仿声"},
+        {"candidate_id": "vg.generic.senior.female.a.02", "description_zh": "普通话老年女声，柔和有质感，语速缓稳，亲切从容，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.senior.female.b",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.senior.female.b.01", "description_zh": "普通话老年女声，低音干涩密度高，坚定经世，节奏缓慢，非真实人物仿声"},
+        {"candidate_id": "vg.generic.senior.female.b.02", "description_zh": "普通话老年女声，沙质低沉，克制果断，表达清晰，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "generic.unknown.neutral.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.generic.unknown.neutral.a.01", "description_zh": "普通话中性声线，中音均衡干净，年龄标记弱，表达克制，非真实人物仿声"},
+        {"candidate_id": "vg.generic.unknown.neutral.a.02", "description_zh": "普通话中性声线，音高居中，质感平衡，平静清晰，非真实人物仿声"}
+      ]
+    },
+    {
+      "slot_id": "group.mixed.neutral.a",
+      "source_status": "planned_no_asset",
+      "rights_status": "unresolved",
+      "quality_status": "not_tested",
+      "production_status": "blocked",
+      "dedup_status": "not_tested",
+      "lock_status": "unlocked",
+      "selected_candidate_id": null,
+      "candidates": [
+        {"candidate_id": "vg.group.mixed.neutral.a.01", "description_zh": "普通话群体代表声，投射感强、整齐有力，但不声称是多人同时发声，非真实人物仿声"},
+        {"candidate_id": "vg.group.mixed.neutral.a.02", "description_zh": "普通话人群代表声，中音浑厚、呼应感强，作为单一代表音色，非真实人物仿声"}
+      ]
+    }
+  ],
+  "pending_dependencies": {
+    "T0-C": "The real Nano 20-case technical matrix passed, but no 24-voice candidate, real reference-clone case, rights review or human listening has passed; no candidate can receive quality acceptance.",
+    "T0-D": "The metadata/code-path spike recommends voice_generator_visible=false on M4/16 GB; no model was downloaded or loaded and no candidate was generated. All 48 candidate IDs remain reservation-only and have no assets.",
+    "rights_review": "No official preset or planned output has a slot-specific approved rights record.",
+    "human_dedup": "No all-slot listening matrix exists; acoustic metrics must not substitute for human distinctness review."
+  },
+  "fallback_if_voice_generator_no_go": {
+    "mode": "authorized_reference_pack_or_limited_preview",
+    "requirements": [
+      "at_least_24_independently_authorized_reference voices for the full pack",
+      "source URL or contributor record plus immutable asset hash",
+      "license or consent scope covering the intended local TTS use",
+      "guardian authorization for any real child reference",
+      "Nano clone and independent-segment technical pass",
+      "human quality and all-slot dedup acceptance"
+    ],
+    "degraded_release": "If fewer than 24 voices clear every gate, expose only a capability-labelled limited preview with missing categories and collision risk; keep automatic generic casting off by default."
+  },
+  "lock_rule": {
+    "status": "unlocked",
+    "selected_candidate_ids": [],
+    "pool_content_sha256": null,
+    "locked_at": null,
+    "locked_by": null,
+    "rule": "A locked pack is immutable. Any candidate, rights, prompt, model, normalization or quality change creates a new pack version; historical NarrationEditions retain the old pool and voice versions."
+  }
+}

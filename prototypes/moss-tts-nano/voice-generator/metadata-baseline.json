@@ -1,0 +1,113 @@
+{
+  "schema_version": "moss-tts-voice-generator-metadata/1.0",
+  "observed_at": "2026-08-26T02:34:00+08:00",
+  "scope": "T0-D metadata-only feasibility audit; no model artifact was downloaded, imported, loaded or executed by this work package",
+  "voice_generator": {
+    "repository": "OpenMOSS-Team/MOSS-VoiceGenerator",
+    "revision": "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4",
+    "license_metadata": "apache-2.0",
+    "selected_bytes": 4244233010,
+    "snapshot_bytes": 4244249582,
+    "model_weight": {
+      "path": "model.safetensors",
+      "bytes": 4228278872,
+      "sha256": "dbe345257ff9f6cc84195bed830a268b39d5e0b728ff3ba90e715150a49b16d4"
+    },
+    "config": {
+      "model_type": "moss_tts_delay",
+      "architecture": "MossTTSDelayModel",
+      "language_backbone": "Qwen/Qwen3-1.7B",
+      "declared_dtype": "bfloat16",
+      "sampling_rate_hz": 24000,
+      "n_vq": 16,
+      "transformers_version_in_config": "4.57.1"
+    },
+    "official_sources": {
+      "model_card": "https://huggingface.co/OpenMOSS-Team/MOSS-VoiceGenerator/blob/97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4/README.md",
+      "config": "https://huggingface.co/OpenMOSS-Team/MOSS-VoiceGenerator/blob/97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4/config.json",
+      "processor": "https://huggingface.co/OpenMOSS-Team/MOSS-VoiceGenerator/blob/97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4/processing_moss_tts.py",
+      "source_model_card": "https://github.com/OpenMOSS/MOSS-TTS/blob/58b20a0d5fcc6766658d50967a90a9d890009a46/docs/moss_voice_generator_model_card.md",
+      "source_pyproject": "https://github.com/OpenMOSS/MOSS-TTS/blob/58b20a0d5fcc6766658d50967a90a9d890009a46/pyproject.toml"
+    }
+  },
+  "official_example_audit": {
+    "source_revision": "58b20a0d5fcc6766658d50967a90a9d890009a46",
+    "source_model_card_git_blob_sha1": "be5c953fb262c2cade361281a80de161441d3a8f",
+    "device_selection": "cuda_if_available_else_cpu",
+    "cuda_dtype": "bfloat16",
+    "cpu_dtype": "float32",
+    "mps_branch_present": false,
+    "flash_attention_scope": "supported_cuda_only",
+    "runtime_dependency_claim": {
+      "torch": "2.9.1+cu128",
+      "torchaudio": "2.9.1+cu128",
+      "transformers": "5.0.0"
+    },
+    "status": "verified_by_reading_fixed_official_model_card_and_source_metadata; not a runtime result"
+  },
+  "default_audio_tokenizer": {
+    "repository": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
+    "observed_revision": "3cd226ba2947efa357ef453bcad111b6eafba782",
+    "revision_state": "observed_unfrozen_not_present_in_t0_a_model_lock",
+    "license_metadata": "apache-2.0",
+    "snapshot_bytes": 7101115998,
+    "config_dtype": "float32",
+    "weight_files": [
+      {
+        "path": "model-00001-of-00002.safetensors",
+        "bytes": 4998259168,
+        "sha256": "037f441ed30a0ab59f6049de83b824a1b3bd6feb7dbd46c3fbca41fc2f649f28"
+      },
+      {
+        "path": "model-00002-of-00002.safetensors",
+        "bytes": 2100202560,
+        "sha256": "a187d73d2cda1c2d0676586d9d03c09c0a5813450266af32029c871493fc9582"
+      }
+    ],
+    "official_sources": {
+      "repository_api": "https://huggingface.co/api/models/OpenMOSS-Team/MOSS-Audio-Tokenizer?blobs=true",
+      "config": "https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer/blob/3cd226ba2947efa357ef453bcad111b6eafba782/config.json"
+    },
+    "processor_default_evidence": "MossTTSDelayProcessor.from_pretrained defaults codec_path to OpenMOSS-Team/MOSS-Audio-Tokenizer",
+    "status": "official metadata observed on 2026-08-26; not downloaded or locally hash-verified"
+  },
+  "host_gate": {
+    "target_hardware": "Apple M4",
+    "physical_memory_bytes": 17179869184,
+    "physical_memory_gib": 16,
+    "minimum_free_memory_headroom_bytes": 4294967296,
+    "require_isolated_runtime_lock": true,
+    "require_real_peak_rss": true,
+    "require_real_first_packet_and_rtf": true,
+    "require_real_candidate_listening": true,
+    "require_real_nano_clone_retention": true,
+    "require_explicit_mps_or_acceptable_cpu_path": true
+  },
+  "project_owned_prompt_profiles": [
+    {
+      "id": "vg-neutral-young-adult-woman-zh",
+      "description": "年轻成年女性中文声线，清晰、温和、自然，中等音高与中等语速，无模仿特定真人的特征。",
+      "fixture_case_id": "narration-neutral"
+    },
+    {
+      "id": "vg-warm-middle-aged-woman-zh",
+      "description": "中年女性中文声线，温暖、沉稳、略带生活感，语速从容，无模仿特定真人的特征。",
+      "fixture_case_id": "anonymous-middle-aged"
+    }
+  ],
+  "decision_policy": {
+    "visible_requires_all": [
+      "voice_generator_revision_and_every_used_weight_are_locally_hash_verified",
+      "full_audio_tokenizer_revision_and_every_used_weight_are_frozen_and_locally_hash_verified",
+      "isolated_rebuildable_runtime_is_validated_on_python_3_11",
+      "official_or_project_adapter_has_an_explicit_tested_mps_path_or_cpu_path_meets_thresholds",
+      "real_peak_memory_leaves_at_least_4_gib_headroom_on_16_gib_host",
+      "candidate_generation_has_measured_first_packet_rtf_and_technical_audio_checks",
+      "manual_listening_is_completed",
+      "voice_generator_process_exits_before_nano_clone_process_starts",
+      "nano_clone_retention_is_completed_without_voice_drift_or_text_loss"
+    ],
+    "default_until_all_pass": "hide",
+    "fallback": "authorized uploaded or locked preset reference audio with Nano; do not expose text-described voice generation"
+  }
+}

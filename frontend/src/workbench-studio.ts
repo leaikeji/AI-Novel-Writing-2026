@@ -54,6 +54,16 @@ import {
 import { chapterDisplayTitle } from "./presenters";
 import { RelationshipEditor } from "./relationship-editor";
 import { RelationshipWorkspace } from "./relationship-workspace";
+import {
+  createCharacterVoiceCardPanel,
+  createNarrationReadingPage,
+  type ReadingScopeTarget,
+  type ReadingSectionKey,
+} from "./narration";
+import {
+  characterModalTabFromKey,
+  type CharacterModalTab,
+} from "./narration/character-modal-tabs";
 import { rememberWorkbenchRoleView } from "./workbench-route";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
@@ -93,13 +103,28 @@ const {
   RobotOutlined,
   SearchOutlined,
   SettingOutlined,
+  SoundOutlined,
   TeamOutlined,
   UnorderedListOutlined,
   UploadOutlined,
 } = host.antdIcons;
 
 
-export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings";
+const NarrationReadingPage = createNarrationReadingPage(React);
+const CharacterVoiceCardPanel = createCharacterVoiceCardPanel(React);
+
+
+export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings" | "reading";
+
+
+export const WORKBENCH_SECTIONS: readonly WorkbenchSection[] = [
+  "chapters",
+  "outline",
+  "roles",
+  "clues",
+  "settings",
+  "reading",
+] as const;
 
 
 export const STUDIO_ASSISTANT_FIELD_IDS = {
@@ -449,6 +474,7 @@ function sectionIcon(section: WorkbenchSection): any {
     roles: TeamOutlined,
     clues: BulbOutlined,
     settings: SettingOutlined,
+    reading: SoundOutlined,
   }[section];
 }
 
@@ -460,6 +486,7 @@ function sectionLabel(section: WorkbenchSection): string {
     roles: "角色",
     clues: "线索",
     settings: "设定",
+    reading: "朗读",
   }[section];
 }
 
@@ -1878,7 +1905,9 @@ function ChapterCreationWizard({
 interface StudioProps {
   novel: NovelRecord;
   section: WorkbenchSection;
+  readingPanel: ReadingSectionKey;
   onSectionChange: (section: WorkbenchSection) => void;
+  onReadingPanelChange: (section: ReadingSectionKey) => void;
   onSelectDocument: (documentId: string) => void;
   onNovelChanged: (novel: NovelRecord) => void;
   onReload: () => Promise<NovelRecord | null>;
@@ -1893,7 +1922,9 @@ interface StudioProps {
 export function StudioProjectView({
   novel,
   section,
+  readingPanel,
   onSectionChange,
+  onReadingPanelChange,
   onSelectDocument,
   onNovelChanged,
   onReload,
@@ -1925,6 +1956,7 @@ export function StudioProjectView({
   const [volumeTitle, setVolumeTitle] = React.useState("");
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterEditing, setCharacterEditing] = React.useState(null as NovelCharacterRecord | null);
+  const [characterModalTab, setCharacterModalTab] = React.useState("profile" as CharacterModalTab);
   const [characterForm, setCharacterForm] = React.useState({ role_type: "main" as "main" | "supporting", name: "", gender: "", age: "", identity: "", personality: "", description: "" });
   const [relationshipOpen, setRelationshipOpen] = React.useState(false);
   const [relationshipFocusCharacterId, setRelationshipFocusCharacterId] = React.useState(null as string | null);
@@ -1964,6 +1996,20 @@ export function StudioProjectView({
   const foreshadowAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
   const settingsAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
   const assistantControlRefs = React.useRef(new Map<string, StudioFocusableControl>()) as StudioMutableRef<Map<string, StudioFocusableControl>>;
+  const characterProfileTabRef = React.useRef(null as HTMLButtonElement | null) as StudioMutableRef<HTMLButtonElement | null>;
+  const characterVoiceTabRef = React.useRef(null as HTMLButtonElement | null) as StudioMutableRef<HTMLButtonElement | null>;
+
+  const selectCharacterModalTabFromKey = (
+    current: CharacterModalTab,
+    event: { key: string; preventDefault: () => void },
+  ): void => {
+    const next = characterModalTabFromKey(current, event.key);
+    if (!next) return;
+    event.preventDefault();
+    setCharacterModalTab(next);
+    const nextRef = next === "profile" ? characterProfileTabRef : characterVoiceTabRef;
+    nextRef.current?.focus();
+  };
 
   const wrapSelectionReview = (
     fieldIds: readonly string[],
@@ -2139,7 +2185,7 @@ export function StudioProjectView({
   }, [novel.id, novel.title, roleTab, section, settingsOpen]);
 
   React.useEffect(() => {
-    if (!characterOpen || section !== "roles" || roleTab !== "list") return;
+    if (!characterOpen || characterModalTab !== "profile" || section !== "roles" || roleTab !== "list") return;
     const background = studioAssistantPageEnvelope(novel, "roles", "list");
     if (!background) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
@@ -2234,7 +2280,7 @@ export function StudioProjectView({
       }
       mounted.dispose();
     };
-  }, [characterEditing?.id, characterOpen, novel.id, novel.title, roleTab, section]);
+  }, [characterEditing?.id, characterModalTab, characterOpen, novel.id, novel.title, roleTab, section]);
 
   React.useEffect(() => {
     if (!storylineOpen || section !== "clues") return;
@@ -2721,6 +2767,7 @@ export function StudioProjectView({
 
   const openCharacterForm = (roleType: "main" | "supporting", item: NovelCharacterRecord | null = null) => {
     setCharacterEditing(item);
+    setCharacterModalTab("profile");
     characterDirtyFieldsRef.current.clear();
     replaceStudioControlledState(characterFormRef, setCharacterForm, {
       role_type: item?.role_type ?? roleType,
@@ -3040,6 +3087,43 @@ export function StudioProjectView({
         ))) : h("div", { className: "mb-large-empty" }, h(Empty, { description: "暂无伏笔" })),
       );
 
+  const narrationScopeTargets: ReadingScopeTarget[] = novel.tree.flatMap(
+    (volume: VolumeRecord) => {
+      const volumeTarget: ReadingScopeTarget[] = volume.id
+        ? [{
+            novelId: novel.id,
+            scopeKind: "volume",
+            scopeId: volume.id,
+            label: `${volume.title}（分卷）`,
+          }]
+        : [];
+      const chapterTargets: ReadingScopeTarget[] = volume.documents
+        .filter((document: DocumentRecord) => document.kind === "chapter")
+        .map((document: DocumentRecord) => ({
+          novelId: novel.id,
+          scopeKind: "chapter",
+          scopeId: document.id,
+          label: `${document.title}（章节）`,
+        }));
+      return [...volumeTarget, ...chapterTargets];
+    },
+  );
+
+  const renderReading = () => h(NarrationReadingPage, {
+    novelId: novel.id,
+    novelTitle: novel.title,
+    initialSection: readingPanel,
+    scopeTargets: narrationScopeTargets,
+    characters: characters
+      .filter((character: NovelCharacterRecord) => character.lifecycle_state === "active")
+      .map((character: NovelCharacterRecord) => ({
+        novelId: novel.id,
+        characterId: character.id,
+        characterName: character.name,
+      })),
+    onSectionChange: onReadingPanelChange,
+  });
+
   const panelActions = section === "chapters"
     ? h(React.Fragment, null,
         h(Button, { icon: h(volumeDescending ? ArrowDownOutlined : ArrowUpOutlined), title: volumeDescending ? "按分卷倒序显示" : "按分卷正序显示", "aria-label": volumeDescending ? "按分卷倒序显示" : "按分卷正序显示", onClick: () => setVolumeDescending((current: boolean) => !current) }),
@@ -3055,9 +3139,21 @@ export function StudioProjectView({
         ? h("div", { className: "mb-top-tabs" }, h("button", { type: "button", className: roleTab === "list" ? "is-active" : "", onClick: () => setRoleSubview("list") }, "角色列表"), h("button", { type: "button", className: roleTab === "graph" ? "is-active" : "", onClick: () => setRoleSubview("graph") }, "关系网"))
         : section === "clues"
           ? h("div", { className: "mb-top-tabs is-four" }, ...(Object.keys(storylineLabels) as StorylineType[]).map((type) => h("button", { key: type, type: "button", className: clueTab === type ? "is-active" : "", onClick: () => setClueTab(type) }, storylineLabels[type])))
-          : h("div", { className: "mb-top-tabs is-settings" }, h("button", { type: "button", className: settingsTab === "template" ? "is-active" : "", onClick: () => setSettingsTab("template") }, "模板设定"), h("button", { type: "button", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => setSettingsTab("foreshadow") }, "伏笔管理"));
+          : section === "settings"
+            ? h("div", { className: "mb-top-tabs is-settings" }, h("button", { type: "button", className: settingsTab === "template" ? "is-active" : "", onClick: () => setSettingsTab("template") }, "模板设定"), h("button", { type: "button", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => setSettingsTab("foreshadow") }, "伏笔管理"))
+            : null;
 
-  const panelBody = section === "chapters" ? renderChapters() : section === "outline" ? renderOutline() : section === "roles" ? renderRoles() : section === "clues" ? renderClues() : renderSettings();
+  const panelBody = section === "chapters"
+    ? renderChapters()
+    : section === "outline"
+      ? renderOutline()
+      : section === "roles"
+        ? renderRoles()
+        : section === "clues"
+          ? renderClues()
+          : section === "settings"
+            ? renderSettings()
+            : renderReading();
 
   return h(
     React.Fragment,
@@ -3087,9 +3183,15 @@ export function StudioProjectView({
           h(
             "nav",
             { className: "mb-book-nav", "aria-label": "作品创作流程" },
-            ...(["chapters", "outline", "roles", "clues", "settings"] as WorkbenchSection[]).map((item) => {
+            ...WORKBENCH_SECTIONS.map((item) => {
               const Icon = sectionIcon(item);
-              return h("button", { key: item, type: "button", className: section === item ? "is-active" : "", onClick: () => onSectionChange(item) }, h(Icon), h("span", null, sectionLabel(item)));
+              return h("button", {
+                key: item,
+                type: "button",
+                className: section === item ? "is-active" : "",
+                "aria-current": section === item ? "page" : undefined,
+                onClick: () => onSectionChange(item),
+              }, h(Icon), h("span", null, sectionLabel(item)));
             }),
           ),
           h("div", { className: "mb-back-center-wrap" }, h(Button, { className: "mb-back-center", onClick: onBack }, "返回创作中心")),
@@ -3097,8 +3199,10 @@ export function StudioProjectView({
         h(
           "section",
           { className: "mb-workbench-main" },
-          h("header", { className: `mb-panel-header ${section === "roles" || section === "clues" || section === "settings" ? "is-tabs-only" : ""}` }, h("h2", null, section === "chapters" ? "章节列表" : sectionLabel(section)), h("div", { className: "mb-panel-actions" }, panelActions)),
-          h("div", { className: "mb-panel-body" }, panelBody),
+          section === "reading"
+            ? null
+            : h("header", { className: `mb-panel-header ${section === "roles" || section === "clues" || section === "settings" ? "is-tabs-only" : ""}` }, h("h2", null, section === "chapters" ? "章节列表" : sectionLabel(section)), h("div", { className: "mb-panel-actions" }, panelActions)),
+          h("div", { className: `mb-panel-body${section === "reading" ? " is-reading" : ""}` }, panelBody),
         ),
       ),
     ),
@@ -3177,22 +3281,77 @@ export function StudioProjectView({
       ),
     ),
     h(Modal, { open: characterOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 720, title: characterEditing ? "编辑角色" : "新增角色", footer: null, onCancel: () => setCharacterOpen(false) },
-      wrapSelectionReview(
-        STUDIO_SELECTION_REVIEW_FIELD_GROUPS.character,
-        "mb-character-selection-review-host",
-        h("div", { className: "mb-form-stack" },
-          field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
-          field("角色姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
-          h("div", { className: "mb-form-grid mb-character-demographics" },
-            field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }, { label: "未知", value: "未知" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
-            field("年龄", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterAge), value: characterForm.age, onChange: (event: any) => changeCharacterFieldValue("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterAge) })),
+      characterEditing
+        ? h(
+            "div",
+            { className: "anw-character-modal-tabs", role: "tablist", "aria-label": "人物卡设置" },
+            h("button", {
+              id: "anw-character-profile-tab",
+              ref: characterProfileTabRef,
+              type: "button",
+              role: "tab",
+              "aria-controls": "anw-character-profile-panel",
+              "aria-selected": characterModalTab === "profile",
+              tabIndex: characterModalTab === "profile" ? 0 : -1,
+              className: characterModalTab === "profile" ? "is-active" : "",
+              onClick: () => setCharacterModalTab("profile"),
+              onKeyDown: (event: { key: string; preventDefault: () => void }) => selectCharacterModalTabFromKey("profile", event),
+            }, "人物资料"),
+            h("button", {
+              id: "anw-character-voice-tab",
+              ref: characterVoiceTabRef,
+              type: "button",
+              role: "tab",
+              "aria-controls": "anw-character-voice-panel",
+              "aria-selected": characterModalTab === "voice",
+              tabIndex: characterModalTab === "voice" ? 0 : -1,
+              className: characterModalTab === "voice" ? "is-active" : "",
+              onClick: () => setCharacterModalTab("voice"),
+              onKeyDown: (event: { key: string; preventDefault: () => void }) => selectCharacterModalTabFromKey("voice", event),
+            }, "声音"),
+          )
+        : null,
+      characterEditing && characterModalTab === "voice"
+        ? h(
+            "div",
+            {
+              id: "anw-character-voice-panel",
+              role: "tabpanel",
+              "aria-labelledby": "anw-character-voice-tab",
+            },
+            h(CharacterVoiceCardPanel, {
+              novelId: novel.id,
+              characterId: characterEditing.id,
+              characterName: characterEditing.name,
+              onReturnFocus: () => characterVoiceTabRef.current?.focus({ preventScroll: true }),
+            }),
+          )
+        : h(
+            "div",
+            characterEditing
+              ? {
+                  id: "anw-character-profile-panel",
+                  role: "tabpanel",
+                  "aria-labelledby": "anw-character-profile-tab",
+                }
+              : {},
+            wrapSelectionReview(
+              STUDIO_SELECTION_REVIEW_FIELD_GROUPS.character,
+              "mb-character-selection-review-host",
+              h("div", { className: "mb-form-stack" },
+                field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
+                field("角色姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
+                h("div", { className: "mb-form-grid mb-character-demographics" },
+                  field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }, { label: "未知", value: "未知" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
+                  field("年龄", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterAge), value: characterForm.age, onChange: (event: any) => changeCharacterFieldValue("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterAge) })),
+                ),
+                field("身份", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity), className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => changeCharacterFieldValue("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity) })),
+                field("性格", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality), rows: 3, value: characterForm.personality, onChange: (event: any) => changeCharacterFieldValue("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality) })),
+                field("人物小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),
+                h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "保存"),
+              ),
+            ),
           ),
-          field("身份", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity), className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => changeCharacterFieldValue("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity) })),
-          field("性格", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality), rows: 3, value: characterForm.personality, onChange: (event: any) => changeCharacterFieldValue("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality) })),
-          field("人物小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),
-          h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "保存"),
-        ),
-      ),
     ),
     h(RelationshipEditor, {
       novelId: novel.id,

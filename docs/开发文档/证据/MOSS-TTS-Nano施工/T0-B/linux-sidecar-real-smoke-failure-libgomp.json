@@ -1,0 +1,38 @@
+{
+  "schema_version": "moss-tts-linux-sidecar-startup-failure/1.0",
+  "captured_at": "2026-08-26T04:57:28+08:00",
+  "status": "failed",
+  "evidence_kind": "real_nano_startup",
+  "contains_audio": false,
+  "contains_secret": false,
+  "phase": "runtime_import_before_model_ready",
+  "image_manifest_list_sha256": "e662f8c091bf022bbc0859feb1d8bde9a402afc9eda77c957c8c2fe831c4c692",
+  "container_id_prefix": "11a2f960f1f0",
+  "container_exit_code": 1,
+  "container_oom_killed": false,
+  "error_class": "OSError",
+  "error_summary": "torchaudio import failed because libgomp.so.1 was absent from the slim runtime image",
+  "import_chain": ["onnx_tts_runtime", "torchaudio", "libtorchaudio"],
+  "classification": "fixed arm64 wheel system-runtime dependency gap; not a protocol, model-output, or user-media failure",
+  "mount_audit": {
+    "model": {"destination": "/models", "read_write": false},
+    "source": {"destination": "/source", "read_write": false},
+    "token_secret": {"destination": "/run/secrets/moss_sidecar_token", "read_write": false},
+    "database_or_novel_media_mount_count": 0
+  },
+  "publish_audit": {
+    "model_ready": false,
+    "synthesis_started": false,
+    "published_audio_count": 0,
+    "partial_file_count": 0,
+    "test_media_file_count_excluding_marker": 0
+  },
+  "cleanup": {
+    "exact_compose_tree_removed": true,
+    "remaining_tts_container_count": 0,
+    "test_media_root_preserved_for_clean_rerun": true,
+    "reference_assets_modified": false,
+    "model_assets_modified": false
+  },
+  "remediation": "copy libgomp.so.1 and its versioned target from the same fixed Debian snapshot ffmpeg-builder into runtime; rebuild and rerun the full smoke from zero"
+}

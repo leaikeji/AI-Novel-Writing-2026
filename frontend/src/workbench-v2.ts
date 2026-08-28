@@ -34,6 +34,7 @@ import { workbenchStore } from "./store";
 import {
   DocumentRecord,
   GenerationModelStatus,
+  NovelCharacterRecord,
   NovelRecord,
   NovelSummary,
   RestorePreviewRecord,
@@ -43,15 +44,85 @@ import {
 import {
   activeWorkbenchRoute,
   clearWorkbenchRoute,
-  rememberWorkbenchRoute,
+  isWorkbenchReadingPanel,
+  isWorkbenchRouteSection,
+  rememberWorkbenchLocation,
+  replaceWorkbenchHistoryUrl,
+  type WorkbenchReadingPanel,
+  type WorkbenchRouteSection,
 } from "./workbench-route";
+import { canReuseActiveDocumentLoad } from "./workbench-document-load-fence";
 import { StudioProjectView, WorkbenchSection } from "./workbench-studio";
 import type { AssistantWorkspaceLayout } from "./assistant-layout";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import {
-  observeEditorTextareaAutoSize,
-  resizeEditorTextareaToContent,
-} from "./editor-textarea-auto-size";
+  createChapterEditorSurface,
+  type ChapterEditorSurfaceHandle,
+} from "./narration/chapter-editor-surface";
+import {
+  createChapterNarrationPanel,
+  type ChapterNarrationPanelPhase,
+  type ChapterNarrationSourceKind,
+} from "./narration/chapter-narration-panel";
+import {
+  DEFAULT_PLAYBACK_PROFILE_ID,
+  createChapterNarrationSession,
+  type ChapterNarrationSession,
+  type ChapterNarrationSessionPlayResult,
+  type ChapterNarrationSessionSnapshot,
+} from "./narration/chapter-narration-session";
+import {
+  ChapterNarrationWorkflowError,
+  startChapterNarrationWorkflow,
+  type ChapterNarrationWorkflowProgress,
+  type StableChapterNarrationSource,
+} from "./narration/chapter-narration-workflow";
+import {
+  getNarrationOverview,
+  getFailedNarrationSegments,
+  getNarrationWorkflow,
+  listCharacterVoiceBindings,
+  NarrationProductionApiError,
+  retryFailedNarrationSegments,
+  switchNarrationEdition,
+} from "./narration/api";
+import {
+  loadChapterNarrationCapabilityGate,
+  retainEquivalentChapterNarrationCapabilityGate,
+  type ChapterNarrationCapabilityGate,
+} from "./narration/chapter-capability-gate";
+import {
+  getNarrationScriptVersionForEdition,
+  patchNarrationScriptSegment,
+  type ScriptReviewVersionScope,
+} from "./narration/script-api";
+import {
+  buildScriptReviewSpeakerChoices,
+  createScriptReviewPanel,
+  type ScriptReviewActiveCharacterBinding,
+  type ScriptReviewFocusRef,
+  type ScriptReviewSpeakerChoice,
+} from "./narration/script-review-panel";
+import { continueApprovedScriptProduction } from "./narration/script-review-continue";
+import type {
+  NarrationWorkflowResource,
+} from "./narration/chapter-contracts";
+import {
+  createFailedSegmentRetryController,
+  type FailedSegmentRetryController,
+  type FailedSegmentRetrySnapshot,
+} from "./narration/failed-segment-retry-state";
+import type { EditionHistoryItem } from "./narration/edition-history";
+import type { SegmentRenderStatus } from "./narration/playback-contracts";
+import type {
+  ScriptReviewResource,
+  ScriptReviewSegmentResource,
+} from "./narration/script-contracts";
+import {
+  createParagraphGutterController,
+  type NarrationParagraphDescriptor,
+  type ParagraphGutterController,
+} from "./narration/paragraph-gutter";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 import { navigateNovelSurface } from "./novel-surface-navigation";
 
@@ -59,6 +130,9 @@ import { navigateNovelSurface } from "./novel-surface-navigation";
 const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
+const ChapterNarrationPanel = createChapterNarrationPanel(React);
+const ScriptReviewPanel = createScriptReviewPanel(React);
+const NARRATION_GATE_REFRESH_MILLISECONDS = 5_000;
 const {
   Alert,
   Button,
@@ -84,13 +158,19 @@ const {
   SaveOutlined,
   SearchOutlined,
   SettingOutlined,
+  SoundOutlined,
   TeamOutlined,
   UnorderedListOutlined,
   UserOutlined,
 } = host.antdIcons;
 
 
-type ProjectSection = WorkbenchSection;
+type ProjectSection = WorkbenchRouteSection;
+
+
+function isProjectSection(value: string | null): value is ProjectSection {
+  return isWorkbenchRouteSection(value);
+}
 
 
 function currentQuery(): URLSearchParams {
@@ -103,6 +183,10 @@ function currentQuery(): URLSearchParams {
     query.set("novel_workbench", "1");
     query.set("novel_id", stored.novelId);
     if (stored.documentId) query.set("document_id", stored.documentId);
+    if (stored.section) query.set("section", stored.section);
+    if (stored.section === "reading" && stored.readingPanel !== "overview") {
+      query.set("reading_panel", stored.readingPanel ?? "overview");
+    }
   }
   return query;
 }
@@ -111,13 +195,22 @@ function currentQuery(): URLSearchParams {
 function workbenchUrl(
   novelId: string,
   documentId?: string,
-  section?: ProjectSection,
+  section: ProjectSection = "chapters",
+  readingPanel?: WorkbenchReadingPanel,
 ): string {
-  rememberWorkbenchRoute(novelId, documentId);
+  rememberWorkbenchLocation(novelId, { documentId, section, readingPanel });
   const query = new URLSearchParams({ novel_workbench: "1", novel_id: novelId });
   if (documentId) query.set("document_id", documentId);
-  if (section && section !== "chapters") query.set("section", section);
+  if (section !== "chapters") query.set("section", section);
+  if (section === "reading" && readingPanel && readingPanel !== "overview") {
+    query.set("reading_panel", readingPanel);
+  }
   return `/chat?${query.toString()}`;
+}
+
+
+function replaceWorkbenchUrl(url: string): void {
+  replaceWorkbenchHistoryUrl(window.history, window.location.href, url);
 }
 
 
@@ -163,6 +256,113 @@ function toolButton(
 
 function latestChapterTitle(novel: NovelSummary): string {
   return novel.chapter_count > 0 ? `最新进度：已完成 ${novel.chapter_count} 章` : "尚未开始正文创作";
+}
+
+
+function isAbortFailure(reason: unknown): boolean {
+  return reason !== null
+    && typeof reason === "object"
+    && "name" in reason
+    && (reason as { readonly name?: unknown }).name === "AbortError";
+}
+
+
+function delayWithAbort(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException("operation aborted", "AbortError"));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(handle);
+      reject(new DOMException("operation aborted", "AbortError"));
+    };
+    const handle = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+
+function failedSegmentRetryIdempotencyKey(): string {
+  return `failed-segment-retry:${crypto.randomUUID()}`;
+}
+
+
+function narrationFailureMessage(reason: unknown): string {
+  if (reason instanceof ChapterNarrationWorkflowError) return reason.message;
+  if (reason instanceof NarrationProductionApiError) {
+    if (reason.detail.code === "VOICE_RIGHTS_UNAVAILABLE") {
+      return "当前旁白或人物音色没有可用于合成的授权版本，请到书本管理的“朗读”中处理。";
+    }
+    if (["VERSION_CONFLICT", "STALE_INPUT"].includes(reason.detail.code)) {
+      return "正文或朗读设置已经变化，请保存并重新发起朗读。";
+    }
+    if (reason.detail.code === "STORAGE_UNAVAILABLE") {
+      return "朗读生产数据库当前不可用；正文和既有朗读版本均未被修改。";
+    }
+    return reason.detail.message;
+  }
+  return reason instanceof Error && reason.message.trim()
+    ? reason.message
+    : "章节朗读操作失败；正文和既有朗读版本均未被覆盖。";
+}
+
+
+interface ScriptReviewEditDraft {
+  readonly segmentId: string;
+  readonly idempotencyKey: string;
+  readonly pendingReview: ScriptReviewResource | null;
+  readonly speakerChoiceKey: string;
+  readonly spokenText: string;
+  readonly reason: string;
+}
+
+
+function scriptReviewScope(review: ScriptReviewResource): ScriptReviewVersionScope {
+  return {
+    novel_id: review.novel_id,
+    document_id: review.document_id,
+    revision_id: review.revision_id,
+    source_content_hash: review.source_content_hash,
+    script_id: review.script_id,
+    script_version_id: review.script_version_id,
+  };
+}
+
+
+function assertWorkflowMatchesReview(
+  workflow: NarrationWorkflowResource,
+  requestId: string,
+  review: ScriptReviewResource,
+  options: {
+    readonly newerThanRequestVersion?: number;
+    readonly requireReview?: boolean;
+  } = {},
+): void {
+  if (
+    workflow.request_id !== requestId
+    || workflow.script_version_id !== review.script_version_id
+    || workflow.source_revision_id !== review.revision_id
+    || workflow.source_content_hash !== review.source_content_hash
+  ) {
+    throw new Error("脚本复核状态与当前章节请求不一致，已拒绝应用。请重新载入章节。");
+  }
+  if (
+    options.newerThanRequestVersion !== undefined
+    && workflow.request_version <= options.newerThanRequestVersion
+  ) {
+    throw new Error("服务端尚未发布修正后的 request_version，已阻止继续操作。");
+  }
+  if (options.requireReview && workflow.workflow_state !== "review_required") {
+    throw new Error("修正后的生产请求未回到人工复核状态，已阻止继续操作。");
+  }
+}
+
+
+function secureScriptReviewActionKey(prefix: string): string {
+  const value = globalThis.crypto?.randomUUID?.();
+  if (!value) throw new Error("浏览器未提供安全随机数，无法安全提交脚本修正。");
+  return `${prefix}:${value}`;
 }
 
 
@@ -370,6 +570,7 @@ function sectionLabel(section: ProjectSection): string {
     roles: "角色",
     clues: "线索",
     settings: "设定",
+    reading: "朗读",
   }[section];
 }
 
@@ -381,6 +582,7 @@ function sectionIcon(section: ProjectSection): any {
     roles: TeamOutlined,
     clues: BulbOutlined,
     settings: SettingOutlined,
+    reading: SoundOutlined,
   }[section];
 }
 
@@ -391,17 +593,51 @@ interface NovelWorkbenchProps {
 }
 
 
+type ChapterNarrationGateState =
+  | { readonly phase: "loading" }
+  | { readonly phase: "blocked"; readonly message: string }
+  | { readonly phase: "ready"; readonly gate: ChapterNarrationCapabilityGate };
+
+
+function reconcileChapterNarrationGateState(
+  current: ChapterNarrationGateState,
+  next: ChapterNarrationGateState,
+): ChapterNarrationGateState {
+  if (current.phase === "ready" && next.phase === "ready") {
+    const retainedGate = retainEquivalentChapterNarrationCapabilityGate(
+      current.gate,
+      next.gate,
+    );
+    return retainedGate === current.gate ? current : next;
+  }
+  if (current.phase === "blocked" && next.phase === "blocked") {
+    return current.message === next.message ? current : next;
+  }
+  if (current.phase === "loading" && next.phase === "loading") return current;
+  return next;
+}
+
+
 export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const query = currentQuery();
   const SelectionEditReviewHost = props.selectionEditReviewHost;
   const queryNovelId = query.get("novel_id");
   const queryDocumentId = query.get("document_id");
-  const initialSection = (query.get("section") as ProjectSection | null) ?? "chapters";
+  const requestedSection = query.get("section");
+  const initialSection: ProjectSection = isProjectSection(requestedSection)
+    ? requestedSection
+    : "chapters";
+  const requestedReadingPanel = query.get("reading_panel");
+  const initialReadingPanel: WorkbenchReadingPanel = initialSection === "reading"
+    && isWorkbenchReadingPanel(requestedReadingPanel)
+    ? requestedReadingPanel
+    : "overview";
 
   const [novel, setNovel] = React.useState(null as NovelRecord | null);
   const [document, setDocument] = React.useState(null as DocumentRecord | null);
   const [content, setContent] = React.useState("");
   const [section, setSection] = React.useState(initialSection as ProjectSection);
+  const [readingPanel, setReadingPanel] = React.useState(initialReadingPanel);
   const [editorOpen, setEditorOpen] = React.useState(Boolean(queryDocumentId));
   const [saveState, setSaveState] = React.useState("正在加载…");
   const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
@@ -429,7 +665,63 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const timerRef = React.useRef(null as ReturnType<typeof setTimeout> | null);
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
-  const editorTextareaRef = React.useRef(null as HTMLTextAreaElement | null);
+  const documentGenerationRef = React.useRef(0);
+  const saveInFlightRef = React.useRef(null as Promise<DocumentRecord | null> | null);
+  const editorSurfaceParentRef = React.useRef(null as HTMLDivElement | null);
+  const editorSurfaceRef = React.useRef(null as ChapterEditorSurfaceHandle | null);
+  const editorControlRef = React.useRef(null as AssistantTextControl | null);
+  const [editorSurfaceGeneration, setEditorSurfaceGeneration] = React.useState(0);
+  const [narrationSnapshot, setNarrationSnapshot] = React.useState(
+    null as ChapterNarrationSessionSnapshot | null,
+  );
+  const [narrationWorkflow, setNarrationWorkflow] = React.useState(
+    null as NarrationWorkflowResource | null,
+  );
+  const [narrationBusy, setNarrationBusy] = React.useState(false);
+  const [narrationStatus, setNarrationStatus] = React.useState(
+    "正在读取本章朗读状态…",
+  );
+  const [narrationError, setNarrationError] = React.useState(null as string | null);
+  const [narrationGateState, setNarrationGateState] = React.useState(
+    { phase: "loading" } as ChapterNarrationGateState,
+  );
+  const [failedSegmentRetrySnapshot, setFailedSegmentRetrySnapshot] = React.useState(
+    Object.freeze({
+      phase: "idle",
+      scope: null,
+      projection: null,
+      busySegmentIds: Object.freeze([]),
+      statusMessage: null,
+      errorMessage: null,
+    }) as FailedSegmentRetrySnapshot,
+  );
+  const [failedSegmentRetryFocusId, setFailedSegmentRetryFocusId] = React.useState(
+    null as string | null,
+  );
+  const [scriptReview, setScriptReview] = React.useState(null as ScriptReviewResource | null);
+  const [scriptReviewRequestId, setScriptReviewRequestId] = React.useState(null as string | null);
+  const [scriptReviewOpen, setScriptReviewOpen] = React.useState(false);
+  const [scriptReviewEdit, setScriptReviewEdit] = React.useState(
+    null as ScriptReviewEditDraft | null,
+  );
+  const [scriptReviewEditError, setScriptReviewEditError] = React.useState(
+    null as string | null,
+  );
+  const [scriptReviewCharacterBindings, setScriptReviewCharacterBindings] = React.useState(
+    [] as ScriptReviewActiveCharacterBinding[],
+  );
+  const narrationSessionRef = React.useRef(null as ChapterNarrationSession | null);
+  const paragraphGutterControllerRef = React.useRef(null as ParagraphGutterController | null);
+  const narrationActionAbortRef = React.useRef(null as AbortController | null);
+  const failedSegmentRetryControllerRef = React.useRef(
+    null as FailedSegmentRetryController | null,
+  );
+  const failedSegmentRetryTriggerRef = React.useRef(
+    null as { focus(): void } | null,
+  );
+  const failedSegmentRetryWasSubmittingRef = React.useRef(false);
+  const scriptReviewActionAbortRef = React.useRef(null as AbortController | null);
+  const scriptReviewTriggerRef = React.useRef(null) as ScriptReviewFocusRef;
   const titleDraftRef = React.useRef("");
   const titleBaselineRef = React.useRef("");
   const titleInputRef = React.useRef(null as AssistantTitleInputRef | null);
@@ -460,10 +752,114 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       ])
     : "";
 
+  React.useEffect(() => {
+    let mounted = true;
+    const controller = createFailedSegmentRetryController({
+      getProjection: getFailedNarrationSegments,
+      retry: retryFailedNarrationSegments,
+      createIdempotencyKey: failedSegmentRetryIdempotencyKey,
+      formatFailure: narrationFailureMessage,
+      onState: (snapshot) => {
+        if (mounted) setFailedSegmentRetrySnapshot(snapshot);
+      },
+      afterAccepted: async (response, scope, signal) => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (
+            signal.aborted
+            || documentGenerationRef.current !== scope.documentGeneration
+          ) {
+            throw new DOMException("failed-segment retry superseded", "AbortError");
+          }
+          const session = narrationSessionRef.current;
+          if (!session) throw new Error("当前章节朗读会话已经失效，请重新载入章节。");
+          let result;
+          try {
+            result = await session.refresh();
+          } catch (reason) {
+            if (signal.aborted || isAbortFailure(reason)) throw reason;
+            if (attempt === 19) throw reason;
+            await delayWithAbort(1_500, signal);
+            continue;
+          }
+          if (
+            signal.aborted
+            || narrationSessionRef.current !== session
+            || documentGenerationRef.current !== scope.documentGeneration
+          ) {
+            throw new DOMException("failed-segment retry superseded", "AbortError");
+          }
+          if (
+            result.status !== "ready"
+            || result.bundle.edition.edition_id !== scope.editionId
+          ) {
+            throw new Error("重试后的朗读版本发生变化，已停止等待且未改写正文。");
+          }
+          const statusById = new Map(result.bundle.manifest.segments.map((segment: {
+            readonly segment_id: string;
+            readonly render_status: SegmentRenderStatus;
+          }) => (
+            [segment.segment_id, segment.render_status] as const
+          )));
+          if (response.affected_segment_ids.every(
+            (segmentId) => statusById.get(segmentId) === "ready",
+          )) return;
+          if (attempt < 19) await delayWithAbort(1_500, signal);
+        }
+        throw new Error("重试已受理，但句段音频仍未就绪；可以稍后再次重试。");
+      },
+    });
+    failedSegmentRetryControllerRef.current = controller;
+    return () => {
+      mounted = false;
+      if (failedSegmentRetryControllerRef.current === controller) {
+        failedSegmentRetryControllerRef.current = null;
+      }
+      controller.dispose();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const submitting = failedSegmentRetrySnapshot.phase === "submitting";
+    if (failedSegmentRetryWasSubmittingRef.current && !submitting) {
+      failedSegmentRetryTriggerRef.current?.focus();
+    }
+    failedSegmentRetryWasSubmittingRef.current = submitting;
+  }, [failedSegmentRetrySnapshot.phase]);
+
   const loadDocument = React.useCallback(async (documentId: string) => {
+    if (canReuseActiveDocumentLoad({
+      requestedDocumentId: documentId,
+      activeDocumentId: documentRef.current?.id ?? null,
+      activeGeneration: documentGenerationRef.current,
+      surfaceLease: editorSurfaceRef.current?.bridge.lease ?? null,
+    })) return;
+    const generation = documentGenerationRef.current + 1;
+    documentGenerationRef.current = generation;
+    narrationActionAbortRef.current?.abort("chapter switched");
+    narrationActionAbortRef.current = null;
+    failedSegmentRetryControllerRef.current?.reset("chapter switched");
+    setFailedSegmentRetryFocusId(null);
+    scriptReviewActionAbortRef.current?.abort("chapter switched");
+    scriptReviewActionAbortRef.current = null;
+    narrationSessionRef.current?.dispose();
+    narrationSessionRef.current = null;
+    paragraphGutterControllerRef.current?.dispose();
+    paragraphGutterControllerRef.current = null;
+    setNarrationSnapshot(null);
+    setNarrationWorkflow(null);
+    setNarrationBusy(false);
+    setNarrationError(null);
+    setNarrationStatus("正在读取本章朗读状态…");
+    setScriptReview(null);
+    setScriptReviewRequestId(null);
+    setScriptReviewOpen(false);
+    setScriptReviewEdit(null);
+    setScriptReviewEditError(null);
+    setScriptReviewCharacterBindings([]);
     setBusy(true);
     try {
       const loaded = await apiRequest<DocumentRecord>(`/documents/${documentId}`);
+      if (documentGenerationRef.current !== generation) return;
       documentRef.current = loaded;
       contentRef.current = loaded.content_markdown;
       setDocument(loaded);
@@ -480,8 +876,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       setEditorOpen(true);
       setSaveState("已保存");
       workbenchStore.getState().select(loaded.novel_id, loaded.id);
-      window.history.replaceState(null, "", workbenchUrl(loaded.novel_id, loaded.id));
+      replaceWorkbenchUrl(workbenchUrl(loaded.novel_id, loaded.id));
       const local = await loadRecoveryDraft(loaded.id);
+      if (
+        documentGenerationRef.current !== generation
+        || documentRef.current?.id !== loaded.id
+      ) return;
       if (local && local.contentMarkdown !== loaded.content_markdown) {
         setRecovery(local);
         setSaveState("发现未同步本地草稿");
@@ -490,9 +890,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         await clearRecoveryDraft(loaded.id);
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "加载章节失败");
+      if (documentGenerationRef.current === generation) {
+        setError(reason instanceof Error ? reason.message : "加载章节失败");
+      }
     } finally {
-      setBusy(false);
+      if (documentGenerationRef.current === generation) setBusy(false);
     }
   }, []);
 
@@ -518,6 +920,60 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   }, [loadDocument, queryDocumentId]);
 
   React.useEffect(() => { if (queryNovelId) void loadNovel(queryNovelId); }, [loadNovel, queryNovelId]);
+
+  React.useEffect(() => {
+    const novelId = novel?.id;
+    if (!novelId) {
+      setNarrationGateState((current: ChapterNarrationGateState) => (
+        reconcileChapterNarrationGateState(current, { phase: "loading" })
+      ));
+      return;
+    }
+    const controller = new AbortController();
+    let refreshInFlight = false;
+    setNarrationGateState((current: ChapterNarrationGateState) => (
+      reconcileChapterNarrationGateState(current, { phase: "loading" })
+    ));
+    const refresh = async (): Promise<void> => {
+      if (refreshInFlight || controller.signal.aborted) return;
+      refreshInFlight = true;
+      try {
+        const gate = await loadChapterNarrationCapabilityGate(
+          novelId,
+          getNarrationOverview,
+          controller.signal,
+        );
+        if (!controller.signal.aborted) {
+          setNarrationGateState((current: ChapterNarrationGateState) => (
+            reconcileChapterNarrationGateState(current, { phase: "ready", gate })
+          ));
+        }
+      } catch (reason) {
+        if (!controller.signal.aborted) {
+          const blockedState: ChapterNarrationGateState = {
+            phase: "blocked",
+            message: reason instanceof Error && reason.message.trim()
+              ? reason.message
+              : "无法核实章节朗读产品门禁，朗读入口已关闭。",
+          };
+          setNarrationGateState((current: ChapterNarrationGateState) => (
+            reconcileChapterNarrationGateState(current, blockedState)
+          ));
+        }
+      } finally {
+        refreshInFlight = false;
+      }
+    };
+    void refresh();
+    const refreshTimer = window.setInterval(
+      () => { void refresh(); },
+      NARRATION_GATE_REFRESH_MILLISECONDS,
+    );
+    return () => {
+      window.clearInterval(refreshTimer);
+      controller.abort("novel narration gate changed");
+    };
+  }, [novel?.id]);
 
   React.useLayoutEffect(() => {
     // Section and chapter routes share the workbench's own scroll container.
@@ -565,18 +1021,6 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     });
   }, [document?.id, document?.volume_id, novel?.id]);
 
-  React.useLayoutEffect(() => {
-    const textarea = editorTextareaRef.current;
-    if (!textarea || !editorOpen) return;
-    resizeEditorTextareaToContent(textarea);
-  }, [content, document?.id, editorOpen]);
-
-  React.useLayoutEffect(() => {
-    const textarea = editorTextareaRef.current;
-    if (!textarea || !editorOpen || bodyGenerationState.active) return;
-    return observeEditorTextareaAutoSize(textarea);
-  }, [bodyGenerationState.active, document?.id, editorOpen, manualEditorOpen]);
-
   React.useEffect(() => {
     if (!novel || (section !== "roles" && section !== "clues")) return;
     let cancelled = false;
@@ -591,45 +1035,113 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   }, [novel?.id, section]);
 
   const saveNow = React.useCallback(async (markdown: string): Promise<DocumentRecord | null> => {
+    const previous = saveInFlightRef.current;
+    if (previous) {
+      await previous;
+      return saveNow(markdown);
+    }
     const active = documentRef.current;
     if (!active) return null;
+    const generation = documentGenerationRef.current;
     if (active.content_markdown === markdown) {
       setSaveState("已保存");
       return active;
     }
     setSaveState("正在保存…");
+    const operation = (async (): Promise<DocumentRecord | null> => {
+      try {
+        const saved = await apiRequest<DocumentRecord>(`/documents/${active.id}/draft`, {
+          method: "PATCH",
+          body: JSON.stringify({ expected_draft_version: active.draft_version, content_markdown: markdown }),
+        });
+        if (
+          documentGenerationRef.current !== generation
+          || documentRef.current?.id !== active.id
+        ) return null;
+        const merged = {
+          ...saved,
+          revisions: saved.revisions ?? active.revisions ?? [],
+        };
+        documentRef.current = merged;
+        setDocument(merged);
+        if (contentRef.current === markdown) {
+          setSaveState("已保存");
+          await clearRecoveryDraft(merged.id);
+        } else {
+          setSaveState("有新内容待保存");
+          timerRef.current = setTimeout(() => {
+            if (
+              documentGenerationRef.current === generation
+              && documentRef.current?.id === active.id
+            ) void saveNow(contentRef.current);
+          }, 100);
+        }
+        return merged;
+      } catch (reason) {
+        if (
+          documentGenerationRef.current !== generation
+          || documentRef.current?.id !== active.id
+        ) return null;
+        if (reason instanceof ApiError && reason.status === 409) {
+          setConflict((reason.detail as ConflictDetail).current);
+          setSaveState("版本冲突，本地稿已保留");
+        } else {
+          setSaveState("同步失败，本地稿已保留");
+        }
+        return null;
+      }
+    })();
+    saveInFlightRef.current = operation;
     try {
-      const saved = await apiRequest<DocumentRecord>(`/documents/${active.id}/draft`, {
-        method: "PATCH",
-        body: JSON.stringify({ expected_draft_version: active.draft_version, content_markdown: markdown }),
-      });
-      const merged = {
-        ...saved,
-        revisions: saved.revisions ?? active.revisions ?? [],
-      };
-      documentRef.current = merged;
-      setDocument(merged);
-      if (contentRef.current === markdown) {
-        setSaveState("已保存");
-        await clearRecoveryDraft(merged.id);
-      } else {
-        setSaveState("有新内容待保存");
-        timerRef.current = setTimeout(() => void saveNow(contentRef.current), 100);
-      }
-      return merged;
-    } catch (reason) {
-      if (reason instanceof ApiError && reason.status === 409) {
-        setConflict((reason.detail as ConflictDetail).current);
-        setSaveState("版本冲突，本地稿已保留");
-      } else {
-        setSaveState("同步失败，本地稿已保留");
-      }
-      return null;
+      return await operation;
+    } finally {
+      if (saveInFlightRef.current === operation) saveInFlightRef.current = null;
     }
   }, []);
 
-  const onContentChange = (event: any) => {
-    const markdown = event.target.value as string;
+  const saveStableNarrationSource = React.useCallback(async (): Promise<StableChapterNarrationSource> => {
+    const active = documentRef.current;
+    if (!active || active.kind !== "chapter") {
+      throw new Error("当前没有可制作朗读的章节正文。");
+    }
+    const documentId = active.id;
+    const generation = documentGenerationRef.current;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      const target = contentRef.current;
+      const saved = await saveNow(target);
+      if (
+        documentGenerationRef.current !== generation
+        || documentRef.current?.id !== documentId
+      ) {
+        throw new Error("章节已经切换，旧章节朗读操作已取消。");
+      }
+      if (!saved) {
+        throw new Error("正文尚未稳定保存；请先处理保存失败或版本冲突。");
+      }
+      const current = documentRef.current;
+      if (
+        current
+        && current.id === documentId
+        && current.content_markdown === contentRef.current
+        && saved.content_markdown === contentRef.current
+        && current.content_hash === saved.content_hash
+      ) {
+        return Object.freeze({
+          documentId,
+          draftVersion: current.draft_version,
+          contentHash: current.content_hash,
+        });
+      }
+    }
+    throw new Error("正文仍在持续变化；停止输入后再创建或更新朗读。");
+  }, [saveNow]);
+
+  const applyContentChange = React.useCallback((markdown: string) => {
+    if (markdown === contentRef.current) return;
     const active = documentRef.current;
     setContent(markdown);
     contentRef.current = markdown;
@@ -644,6 +1156,966 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     });
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void saveNow(markdown), 600);
+  }, [saveNow]);
+
+  const editorShouldMount = editorOpen
+    && !bodyGenerationState.active
+    && (Boolean(content.trim()) || manualEditorOpen);
+
+  React.useLayoutEffect(() => {
+    const active = documentRef.current;
+    const parent = editorSurfaceParentRef.current;
+    if (!active || !parent || !editorShouldMount) return;
+    const generation = documentGenerationRef.current;
+    const handle = createChapterEditorSurface({
+      parent,
+      lease: { documentId: active.id, generation },
+      initialValue: contentRef.current,
+      currentContentHash: active.content_hash,
+      ariaLabel: `${active.title}正文编辑器`,
+      onDocChanged: (event) => {
+        if (
+          event.lease.documentId !== documentRef.current?.id
+          || event.lease.generation !== documentGenerationRef.current
+        ) return;
+        try {
+          narrationSessionRef.current?.noteWorkingCopyChanged();
+        } catch {
+          // A stale/disposed narration session cannot change the active editor.
+        }
+        applyContentChange(event.nextValue);
+      },
+      isLeaseCurrent: (lease) => (
+        lease.documentId === documentRef.current?.id
+        && lease.generation === documentGenerationRef.current
+      ),
+      onFocusChange: (focused) => assistantBodyBindingRef.current?.setFocusedField(focused),
+      onAuthorInteraction: (interruption) => {
+        try {
+          narrationSessionRef.current?.noteAuthorInteraction(interruption);
+        } catch {
+          // A chapter switch can dispose the session between the DOM event and
+          // this callback.  The editor interaction still remains authoritative.
+        }
+      },
+      onParagraphGutterActivate: (paragraphOrdinal) => {
+        const result = paragraphGutterControllerRef.current?.requestFromGutter(
+          paragraphOrdinal,
+        );
+        if (!result?.handled || !result.intentResult.accepted) {
+          setNarrationError("该段正文已变化，或当前编辑器朗读入口已经失效。");
+          return;
+        }
+        setNarrationError(null);
+        setNarrationStatus(`正在从第 ${paragraphOrdinal + 1} 段准备朗读。`);
+      },
+      onParagraphPlaybackCommand: (command) => {
+        const controller = paragraphGutterControllerRef.current;
+        const result = command.source === "keyboard"
+          ? controller?.requestFromKeyboard(command.event, command.lookup)
+          : controller?.requestFromContextMenu(command.lookup);
+        if (!result?.handled || !result.intentResult.accepted) {
+          setNarrationError("光标所在句段已变化，或当前朗读入口已经失效。");
+          return false;
+        }
+        setNarrationError(null);
+        setNarrationStatus("正在从当前段准备朗读。");
+        return true;
+      },
+    });
+    editorSurfaceRef.current = handle;
+    editorControlRef.current = handle.assistantControl;
+    setEditorSurfaceGeneration((current: number) => current + 1);
+    return () => {
+      if (editorSurfaceRef.current === handle) editorSurfaceRef.current = null;
+      if (editorControlRef.current === handle.assistantControl) editorControlRef.current = null;
+      handle.dispose();
+    };
+  }, [applyContentChange, document?.id, editorShouldMount]);
+
+  React.useEffect(() => {
+    const surface = editorSurfaceRef.current;
+    if (!surface || surface.readValue() === content) return;
+    surface.setValue(content, "external");
+  }, [content, document?.id, editorSurfaceGeneration]);
+
+  React.useEffect(() => {
+    const activeNovel = novel;
+    const activeDocument = documentRef.current;
+    const surface = editorSurfaceRef.current;
+    const narrationGate = narrationGateState.phase === "ready"
+      ? narrationGateState.gate
+      : null;
+    if (
+      !activeNovel
+      || !activeDocument
+      || activeDocument.kind !== "chapter"
+      || !editorOpen
+      || !editorShouldMount
+      || !surface
+      || !narrationGate?.canLoadSession
+      || surface.bridge.lease.documentId !== activeDocument.id
+    ) {
+      return;
+    }
+    const generation = surface.bridge.lease.generation;
+    const session = createChapterNarrationSession({
+      novelId: activeNovel.id,
+      documentId: activeDocument.id,
+      generation,
+      profileId: DEFAULT_PLAYBACK_PROFILE_ID,
+      bridge: surface.bridge,
+      isGenerationCurrent: (documentId, expectedGeneration) => (
+        documentRef.current?.id === documentId
+        && documentGenerationRef.current === expectedGeneration
+      ),
+      onState: (snapshot) => {
+        if (
+          narrationSessionRef.current !== session
+          || documentRef.current?.id !== activeDocument.id
+          || documentGenerationRef.current !== generation
+        ) return;
+        setNarrationSnapshot(snapshot);
+        if (snapshot.phase === "loading") {
+          setNarrationStatus("正在读取本章朗读版本与句段清单…");
+        } else if (snapshot.phase === "no-edition") {
+          setNarrationStatus("本章尚未生成朗读。保存正文后可开始智能朗读。");
+        } else if (snapshot.phase === "ready" && snapshot.bundle) {
+          const edition = snapshot.bundle.edition;
+          setNarrationStatus(
+            snapshot.workingCopyDiverged
+              ? "正文已修改；音频继续播放旧稿，需要时可显式更新朗读。"
+              : edition.state === "ready"
+              ? "本章朗读已经准备完成。"
+              : edition.state === "partial_ready"
+                ? `已有 ${edition.ready_segment_count}/${edition.segment_count} 句可播放，其余句段继续制作。`
+                : "朗读版本已建立，点击播放会优先准备所选句段。",
+          );
+          setNarrationError(null);
+        } else if (snapshot.phase === "error" && snapshot.error && !isAbortFailure(snapshot.error)) {
+          setNarrationError(narrationFailureMessage(snapshot.error));
+        }
+      },
+    });
+    narrationSessionRef.current?.dispose();
+    narrationSessionRef.current = session;
+    setNarrationSnapshot(session.readSnapshot());
+    void session.load().catch((reason: unknown) => {
+      if (
+        narrationSessionRef.current === session
+        && !isAbortFailure(reason)
+      ) setNarrationError(narrationFailureMessage(reason));
+    });
+    return () => {
+      if (narrationSessionRef.current === session) {
+        narrationSessionRef.current = null;
+      }
+      session.dispose();
+    };
+  }, [
+    document?.id,
+    editorOpen,
+    editorShouldMount,
+    editorSurfaceGeneration,
+    narrationGateState,
+    novel?.id,
+  ]);
+
+  React.useEffect(() => {
+    if (narrationSnapshot?.phase !== "ready" || !narrationSnapshot.bundle) return;
+    if (failedSegmentRetryControllerRef.current?.readSnapshot().phase === "submitting") return;
+    const bundle = narrationSnapshot.bundle;
+    void failedSegmentRetryControllerRef.current?.load({
+      editionId: bundle.edition.edition_id,
+      requestId: bundle.edition.request_id,
+      documentGeneration: documentGenerationRef.current,
+      manifestRevision: bundle.manifest.manifest_revision,
+    });
+  }, [
+    narrationSnapshot?.bundle?.edition.edition_id,
+    narrationSnapshot?.bundle?.edition.request_id,
+    narrationSnapshot?.bundle?.manifest.manifest_revision,
+    narrationSnapshot?.phase,
+  ]);
+
+  React.useEffect(() => {
+    const session = narrationSessionRef.current;
+    const surface = editorSurfaceRef.current;
+    const bundle = narrationSnapshot?.bundle;
+    paragraphGutterControllerRef.current?.dispose();
+    paragraphGutterControllerRef.current = null;
+    if (
+      !session
+      || !surface
+      || !bundle
+      || !session.player
+      || bundle.script.source_content_hash !== bundle.context.working_copy_content_hash
+      || surface.bridge.readSnapshot().edition?.editionId !== bundle.edition.edition_id
+    ) {
+      surface?.setParagraphGutter([]);
+      return;
+    }
+    const controller = createParagraphGutterController({
+      bridge: surface.bridge,
+      editionId: bundle.edition.edition_id,
+      paragraphs: bundle.paragraphs,
+      readPlaybackLease: () => {
+        const player = session.player;
+        if (!player) throw new Error("朗读播放器已经释放。");
+        return player.lease;
+      },
+      isPlaybackLeaseCurrent: (lease) => (
+        narrationSessionRef.current === session
+        && session.player?.lease.documentId === lease.documentId
+        && session.player?.lease.documentGeneration === lease.documentGeneration
+        && session.player?.lease.editionId === lease.editionId
+        && session.player?.lease.manifestRevision === lease.manifestRevision
+      ),
+    });
+    paragraphGutterControllerRef.current = controller;
+    const paragraphByOrdinal = new Map<number, NarrationParagraphDescriptor>(
+      bundle.paragraphs.map((paragraph: NarrationParagraphDescriptor) => [
+        paragraph.paragraphOrdinal,
+        paragraph,
+      ]),
+    );
+    const installed = surface.setParagraphGutter(
+      controller.listButtons().map((button) => ({
+        sourceStartUtf16: paragraphByOrdinal.get(button.paragraphOrdinal)?.range.startUtf16 ?? -1,
+        button,
+      })).filter((entry) => entry.sourceStartUtf16 >= 0),
+    );
+    if (!installed && surface.kind === "codemirror6") {
+      controller.dispose();
+      paragraphGutterControllerRef.current = null;
+      setNarrationError("段落朗读入口没有成功安装，播放器句段跳转仍可使用。");
+    }
+    return () => {
+      if (paragraphGutterControllerRef.current === controller) {
+        paragraphGutterControllerRef.current = null;
+      }
+      controller.dispose();
+      if (editorSurfaceRef.current === surface) surface.setParagraphGutter([]);
+    };
+  }, [editorSurfaceGeneration, narrationSnapshot?.bundle]);
+
+  React.useEffect(() => () => {
+    narrationActionAbortRef.current?.abort("workbench disposed");
+    narrationActionAbortRef.current = null;
+    scriptReviewActionAbortRef.current?.abort("workbench disposed");
+    scriptReviewActionAbortRef.current = null;
+  }, []);
+
+  React.useEffect(() => {
+    if (editorOpen) return;
+    scriptReviewActionAbortRef.current?.abort("chapter editor closed");
+    scriptReviewActionAbortRef.current = null;
+    setScriptReviewOpen(false);
+    setScriptReviewEdit(null);
+    setScriptReviewEditError(null);
+    setScriptReviewCharacterBindings([]);
+  }, [editorOpen]);
+
+  React.useEffect(() => {
+    const session = narrationSessionRef.current;
+    const snapshot = narrationSnapshot;
+    const edition = snapshot?.bundle?.edition;
+    const playerPhase = snapshot?.playerState?.phase;
+    if (
+      !session
+      || snapshot?.phase !== "ready"
+      || !edition
+      || !["created", "rendering"].includes(edition.state)
+      || ["preparing", "buffering", "playing", "paused"].includes(playerPhase ?? "idle")
+    ) return;
+    const handle = setTimeout(() => {
+      if (narrationSessionRef.current !== session) return;
+      void session.refresh().catch((reason: unknown) => {
+        if (!isAbortFailure(reason) && narrationSessionRef.current === session) {
+          setNarrationError(narrationFailureMessage(reason));
+        }
+      });
+    }, 2_500);
+    return () => clearTimeout(handle);
+  }, [
+    narrationSnapshot?.bundle?.edition.state,
+    narrationSnapshot?.bundle?.manifest.manifest_revision,
+    narrationSnapshot?.phase,
+    narrationSnapshot?.playerState?.phase,
+  ]);
+
+  const startNarration = async (intent: "create" | "update") => {
+    const activeNovel = novel;
+    const activeDocument = documentRef.current;
+    const session = narrationSessionRef.current;
+    if (narrationGateState.phase !== "ready" || !narrationGateState.gate.canProduce) {
+      const reasonCode = narrationGateState.phase === "ready"
+        ? narrationGateState.gate.reasonCode
+        : "NARRATION_CAPABILITY_UNVERIFIED";
+      setNarrationError(`章节智能朗读尚未通过产品门禁（${reasonCode ?? "CAPABILITY_DISABLED"}）。`);
+      return;
+    }
+    if (!activeNovel || !activeDocument || activeDocument.kind !== "chapter" || !session) {
+      setNarrationError("章节正文编辑器尚未准备完成，暂时不能创建朗读。");
+      return;
+    }
+    const generation = documentGenerationRef.current;
+    failedSegmentRetryControllerRef.current?.reset("new narration request started");
+    setFailedSegmentRetryFocusId(null);
+    narrationActionAbortRef.current?.abort("superseded narration action");
+    scriptReviewActionAbortRef.current?.abort("new narration request started");
+    scriptReviewActionAbortRef.current = null;
+    const controller = new AbortController();
+    narrationActionAbortRef.current = controller;
+    setNarrationBusy(true);
+    setNarrationError(null);
+    setScriptReviewOpen(false);
+    setScriptReviewEdit(null);
+    setScriptReviewEditError(null);
+    setScriptReviewCharacterBindings([]);
+    try {
+      const liveGate = await loadChapterNarrationCapabilityGate(
+        activeNovel.id,
+        getNarrationOverview,
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted
+        || documentRef.current?.id !== activeDocument.id
+        || documentGenerationRef.current !== generation
+      ) return;
+      setNarrationGateState((current: ChapterNarrationGateState) => (
+        reconcileChapterNarrationGateState(current, { phase: "ready", gate: liveGate })
+      ));
+      if (!liveGate.canProduce) {
+        setNarrationError(
+          `章节智能朗读运行态尚未就绪（${liveGate.reasonCode ?? "CAPABILITY_DISABLED"}）。`,
+        );
+        return;
+      }
+      const result = await startChapterNarrationWorkflow({
+        novelId: activeNovel.id,
+        documentId: activeDocument.id,
+        generation,
+        intent,
+        forceReview: false,
+        signal: controller.signal,
+        saveStableSource: saveStableNarrationSource,
+        isGenerationCurrent: (documentId, expectedGeneration) => (
+          documentRef.current?.id === documentId
+          && documentGenerationRef.current === expectedGeneration
+        ),
+        onProgress: (progress: ChapterNarrationWorkflowProgress) => {
+          if (
+            controller.signal.aborted
+            || documentRef.current?.id !== activeDocument.id
+            || documentGenerationRef.current !== generation
+          ) return;
+          setNarrationStatus(progress.message);
+          if (progress.workflow) setNarrationWorkflow(progress.workflow);
+        },
+      });
+      if (
+        controller.signal.aborted
+        || documentRef.current?.id !== activeDocument.id
+        || documentGenerationRef.current !== generation
+      ) return;
+      setNarrationWorkflow(result.workflow);
+      if (result.workflow.workflow_state === "review_required") {
+        if (!result.workflow.script_version_id) {
+          throw new Error("复核请求缺少脚本版本标识，已拒绝继续生产。");
+        }
+        const review = await getNarrationScriptVersionForEdition(
+          result.workflow.script_version_id,
+          {
+            novel_id: activeNovel.id,
+            document_id: activeDocument.id,
+            revision_id: result.workflow.source_revision_id,
+            source_content_hash: result.workflow.source_content_hash,
+          },
+          controller.signal,
+        );
+        if (
+          controller.signal.aborted
+          || documentRef.current?.id !== activeDocument.id
+          || documentGenerationRef.current !== generation
+        ) return;
+        setScriptReview(review);
+        setScriptReviewRequestId(result.workflow.request_id);
+        setScriptReviewOpen(true);
+        setNarrationStatus(
+          review.blocker_count > 0
+            ? `人物识别发现 ${review.blocker_count} 个阻塞；音频尚未生成。`
+            : "脚本等待作者复核；音频尚未生成。",
+        );
+        return;
+      }
+      if (["failed", "cancelled"].includes(result.workflow.workflow_state)) {
+        throw new Error(
+          result.workflow.workflow_state === "failed"
+            ? "朗读制作失败；正文和既有朗读版本均未被覆盖。"
+            : "朗读制作已取消。",
+        );
+      }
+      if (!result.workflow.edition_id) {
+        throw new Error("朗读请求没有建立 Edition，已拒绝显示可播放状态。");
+      }
+      setScriptReview(null);
+      setScriptReviewRequestId(null);
+      await session.load(result.workflow.edition_id);
+      if (!controller.signal.aborted) {
+        setNarrationStatus("朗读版本已建立；可从任一句或任一段开始准备并播放。");
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted && !isAbortFailure(reason)) {
+        setNarrationError(narrationFailureMessage(reason));
+      }
+    } finally {
+      if (narrationActionAbortRef.current === controller) {
+        narrationActionAbortRef.current = null;
+        setNarrationBusy(false);
+      }
+    }
+  };
+
+  const reportPlaybackResult = (result: ChapterNarrationSessionPlayResult): void => {
+    if (result.status === "completed") {
+      if (result.decision.kind === "play") {
+        setNarrationStatus("正在按句段播放；编辑或手动滚动会暂停自动跟随。");
+        setNarrationError(null);
+      } else if (result.decision.kind === "blocked") {
+        setNarrationError("当前播放窗口存在未完成或失败句段，播放器没有跳过缺口。");
+      } else if (result.decision.kind === "error") {
+        setNarrationError("句段音频加载失败；未切换到其他朗读版本。");
+      }
+      return;
+    }
+    if (result.status === "timeout") {
+      setNarrationError("目标句段仍在合成，可稍后再次点击播放。");
+    } else if (result.status === "error") {
+      setNarrationError(narrationFailureMessage(result.error));
+    } else if (result.status === "rejected") {
+      setNarrationError("目标句段已变化或不属于当前朗读版本，请更新后重试。");
+    }
+  };
+
+  const playNarrationOrdinal = (
+    ordinal: number,
+    source: "command" | "readonly-segment" = "command",
+    offsetMs = 0,
+  ) => {
+    const session = narrationSessionRef.current;
+    const segment = session?.readSnapshot().bundle?.script.segments[ordinal];
+    if (!session || !segment) {
+      setNarrationError("找不到这一句对应的当前朗读片段。");
+      return;
+    }
+    setNarrationError(null);
+    void session.playSegment(segment.segment_id, source, offsetMs).then(reportPlaybackResult);
+  };
+
+  const toggleNarrationPlayback = () => {
+    const session = narrationSessionRef.current;
+    if (!session) return;
+    const snapshot = session.readSnapshot();
+    if (snapshot.playerState?.phase === "playing") {
+      session.pause();
+      setNarrationStatus("朗读已暂停。");
+      return;
+    }
+    setNarrationError(null);
+    if (snapshot.playerState?.phase === "paused") {
+      void session.resume().then(reportPlaybackResult);
+      return;
+    }
+    playNarrationOrdinal(
+      snapshot.playerState?.currentOrdinal ?? 0,
+      "readonly-segment",
+      snapshot.playerState?.offsetMs ?? 0,
+    );
+  };
+
+  const closeScriptReview = (): void => {
+    const action = scriptReviewActionAbortRef.current;
+    if (action) {
+      action.abort("script review closed");
+      scriptReviewActionAbortRef.current = null;
+      setNarrationBusy(false);
+    }
+    setScriptReviewOpen(false);
+    setScriptReviewEdit(null);
+    setScriptReviewEditError(null);
+    setScriptReviewCharacterBindings([]);
+  };
+
+  const openNarrationReview = () => {
+    const session = narrationSessionRef.current;
+    const bundle = session?.readSnapshot().bundle;
+    if (!session || !bundle) return;
+    const generation = documentGenerationRef.current;
+    const requestId = bundle.edition.request_id;
+    scriptReviewActionAbortRef.current?.abort("review state refresh superseded");
+    const controller = new AbortController();
+    scriptReviewActionAbortRef.current = controller;
+    setNarrationBusy(true);
+    setNarrationError(null);
+    void getNarrationWorkflow(requestId, controller.signal).then((workflow) => {
+      assertWorkflowMatchesReview(workflow, requestId, bundle.script);
+      if (
+        controller.signal.aborted
+        || narrationSessionRef.current !== session
+        || documentRef.current?.id !== bundle.context.document_id
+        || documentGenerationRef.current !== generation
+      ) return;
+      setNarrationWorkflow(workflow);
+      setScriptReview(bundle.script);
+      setScriptReviewRequestId(requestId);
+      setScriptReviewEdit(null);
+      setScriptReviewEditError(null);
+      setScriptReviewCharacterBindings([]);
+      setScriptReviewOpen(true);
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted && !isAbortFailure(reason)) {
+        setNarrationError(narrationFailureMessage(reason));
+      }
+    }).finally(() => {
+      if (scriptReviewActionAbortRef.current === controller) {
+        scriptReviewActionAbortRef.current = null;
+        setNarrationBusy(false);
+      }
+    });
+  };
+
+  const synchronizeChangedScriptReview = (nextReview: ScriptReviewResource): void => {
+    const activeDocument = documentRef.current;
+    const session = narrationSessionRef.current;
+    const requestId = scriptReviewRequestId;
+    const currentWorkflow = narrationWorkflow;
+    if (
+      !activeDocument
+      || !session
+      || !requestId
+      || !currentWorkflow
+      || currentWorkflow.request_id !== requestId
+    ) {
+      setNarrationError("脚本复核请求状态已经失效，请重新载入章节。");
+      return;
+    }
+    const generation = documentGenerationRef.current;
+    scriptReviewActionAbortRef.current?.abort("script review action superseded");
+    const controller = new AbortController();
+    scriptReviewActionAbortRef.current = controller;
+    setNarrationBusy(true);
+    setNarrationError(null);
+    setScriptReviewOpen(false);
+    setScriptReviewEdit(null);
+    setScriptReviewEditError(null);
+    setScriptReviewCharacterBindings([]);
+    if (nextReview.state === "approved") {
+      setScriptReview(nextReview);
+      setNarrationStatus("脚本已由作者冻结；正在等待服务端建立真实朗读版本…");
+      void continueApprovedScriptProduction({
+        requestId,
+        approvedReview: nextReview,
+        dependencies: { getWorkflow: getNarrationWorkflow },
+        signal: controller.signal,
+        onWorkflow: (workflow) => {
+          if (
+            !controller.signal.aborted
+            && narrationSessionRef.current === session
+            && documentRef.current?.id === activeDocument.id
+            && documentGenerationRef.current === generation
+          ) {
+            setNarrationWorkflow(workflow);
+            setNarrationStatus(
+              workflow.workflow_state === "queued"
+                ? "脚本已冻结，音频任务已经排队。"
+                : workflow.workflow_state === "rendering"
+                  ? "脚本已冻结，正在合成句段音频。"
+                  : "脚本已冻结，正在确认可播放朗读版本。",
+            );
+          }
+        },
+      }).then(async (result) => {
+        if (
+          controller.signal.aborted
+          || narrationSessionRef.current !== session
+          || documentRef.current?.id !== activeDocument.id
+          || documentGenerationRef.current !== generation
+        ) return;
+        setNarrationWorkflow(result.workflow);
+        await session.load(result.editionId);
+        if (
+          controller.signal.aborted
+          || narrationSessionRef.current !== session
+          || documentRef.current?.id !== activeDocument.id
+          || documentGenerationRef.current !== generation
+        ) return;
+        setScriptReview(null);
+        setScriptReviewRequestId(null);
+        setScriptReviewOpen(false);
+        setNarrationStatus("作者批准已生效，真实朗读版本已经建立并载入。");
+      }).catch((reason: unknown) => {
+        if (!controller.signal.aborted && !isAbortFailure(reason)) {
+          setNarrationError(narrationFailureMessage(reason));
+          setNarrationStatus("脚本已经冻结，但服务端尚未确认可用的真实朗读版本。");
+          setScriptReviewOpen(true);
+        }
+      }).finally(() => {
+        if (scriptReviewActionAbortRef.current === controller) {
+          scriptReviewActionAbortRef.current = null;
+          setNarrationBusy(false);
+        }
+      });
+      return;
+    }
+    setNarrationStatus("脚本已生成新版本，正在同步服务端请求版本…");
+    void getNarrationWorkflow(requestId, controller.signal).then((workflow) => {
+      assertWorkflowMatchesReview(workflow, requestId, nextReview, {
+        newerThanRequestVersion: currentWorkflow.request_version,
+        requireReview: true,
+      });
+      if (
+        controller.signal.aborted
+        || narrationSessionRef.current !== session
+        || documentRef.current?.id !== activeDocument.id
+        || documentGenerationRef.current !== generation
+      ) return;
+      setNarrationWorkflow(workflow);
+      setScriptReview(nextReview);
+      setScriptReviewRequestId(requestId);
+      setScriptReviewOpen(true);
+      setNarrationStatus(`脚本仍有 ${nextReview.blocker_count} 个阻塞。`);
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted && !isAbortFailure(reason)) {
+        setNarrationError(narrationFailureMessage(reason));
+        setNarrationStatus("新脚本已经返回，但 request_version 尚未同步；已禁止继续操作。");
+      }
+    }).finally(() => {
+      if (scriptReviewActionAbortRef.current === controller) {
+        scriptReviewActionAbortRef.current = null;
+        setNarrationBusy(false);
+      }
+    });
+  };
+
+  const openScriptReviewSegmentEdit = (segment: ScriptReviewSegmentResource): void => {
+    const activeNovel = novel;
+    const activeDocument = documentRef.current;
+    const session = narrationSessionRef.current;
+    const review = scriptReview;
+    const workflow = narrationWorkflow;
+    const requestId = scriptReviewRequestId;
+    if (
+      !activeNovel
+      || !activeDocument
+      || !session
+      || !review
+      || !workflow
+      || !requestId
+      || workflow.request_id !== requestId
+      || workflow.script_version_id !== review.script_version_id
+      || workflow.workflow_state !== "review_required"
+      || !review.allowed_actions.includes("edit_segment")
+      || !segment.editable
+      || !review.segments.some((item: ScriptReviewSegmentResource) => (
+        item.segment_id === segment.segment_id && item.local_hash === segment.local_hash
+      ))
+    ) {
+      setNarrationError("当前脚本或请求版本不允许修正该句段。");
+      return;
+    }
+    try {
+      assertWorkflowMatchesReview(workflow, requestId, review, { requireReview: true });
+    } catch (reason) {
+      setNarrationError(narrationFailureMessage(reason));
+      return;
+    }
+    const generation = documentGenerationRef.current;
+    scriptReviewActionAbortRef.current?.abort("speaker choices refresh superseded");
+    const controller = new AbortController();
+    scriptReviewActionAbortRef.current = controller;
+    setNarrationBusy(true);
+    setNarrationError(null);
+    setNarrationStatus("正在读取活跃角色的当前音色绑定…");
+    setScriptReviewOpen(false);
+    void Promise.all([
+      apiRequest<NovelCharacterRecord[]>(`/novels/${activeNovel.id}/characters`, {
+        signal: controller.signal,
+      }),
+      listCharacterVoiceBindings(activeNovel.id, controller.signal),
+      getNarrationWorkflow(requestId, controller.signal),
+    ]).then(([characters, bindingList, refreshedWorkflow]) => {
+      if (bindingList.novel_id !== activeNovel.id) {
+        throw new Error("人物音色绑定返回了其他作品的数据，已拒绝显示。");
+      }
+      assertWorkflowMatchesReview(refreshedWorkflow, requestId, review, { requireReview: true });
+      if (refreshedWorkflow.request_version < workflow.request_version) {
+        throw new Error("脚本复核 request_version 发生倒退，已拒绝显示修正弹窗。");
+      }
+      const currentBindings = new Map(
+        bindingList.items.filter((binding) => (
+          binding.novel_id === activeNovel.id
+          && ["dedicated", "inherited"].includes(binding.binding_policy)
+          && binding.profile_id !== null
+          && binding.version_id !== null
+        )).map((binding) => [binding.character_id, binding] as const),
+      );
+      const activeBindings = characters.filter((character: NovelCharacterRecord) => (
+        character.novel_id === activeNovel.id
+        && character.lifecycle_state === "active"
+        && currentBindings.has(character.id)
+      )).map((character: NovelCharacterRecord) => Object.freeze({
+        characterId: character.id,
+        speakerLabel: character.name,
+      }));
+      const choices = buildScriptReviewSpeakerChoices(review, activeBindings);
+      const currentChoice = choices.find((choice) => (
+        (segment.speaker_kind === "narrator" && choice.speakerKind === "narrator")
+        || (
+          segment.speaker_kind === "character"
+          && choice.characterId !== null
+          && choice.characterId === segment.character_id
+        )
+        || (
+          segment.speaker_kind === "anonymous"
+          && choice.anonymousSpeakerId !== null
+          && choice.anonymousSpeakerId === segment.anonymous_speaker_id
+        )
+      )) ?? choices[0];
+      if (
+        controller.signal.aborted
+        || narrationSessionRef.current !== session
+        || documentRef.current?.id !== activeDocument.id
+        || documentGenerationRef.current !== generation
+      ) return;
+      setNarrationWorkflow(refreshedWorkflow);
+      setScriptReviewCharacterBindings(activeBindings);
+      setScriptReviewEdit({
+        segmentId: segment.segment_id,
+        idempotencyKey: secureScriptReviewActionKey("script-segment-patch"),
+        pendingReview: null,
+        speakerChoiceKey: currentChoice.key,
+        spokenText: segment.spoken_text,
+        reason: "作者人工确认句段说话人与朗读文本",
+      });
+      setScriptReviewEditError(null);
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted && !isAbortFailure(reason)) {
+        setNarrationError(narrationFailureMessage(reason));
+        setScriptReviewOpen(true);
+      }
+    }).finally(() => {
+      if (scriptReviewActionAbortRef.current === controller) {
+        scriptReviewActionAbortRef.current = null;
+        setNarrationBusy(false);
+      }
+    });
+  };
+
+  const submitScriptReviewSegmentEdit = (): void => {
+    const draft = scriptReviewEdit;
+    const review = scriptReview;
+    const workflow = narrationWorkflow;
+    const requestId = scriptReviewRequestId;
+    const activeDocument = documentRef.current;
+    const session = narrationSessionRef.current;
+    if (!draft || !review || !workflow || !requestId || !activeDocument || !session) return;
+    const segment = review.segments.find(
+      (item: ScriptReviewSegmentResource) => item.segment_id === draft.segmentId,
+    );
+    const choice = buildScriptReviewSpeakerChoices(review, scriptReviewCharacterBindings).find(
+      (item: ScriptReviewSpeakerChoice) => item.key === draft.speakerChoiceKey,
+    );
+    if (!segment || !choice || !draft.spokenText.trim() || !draft.reason.trim()) {
+      setScriptReviewEditError("请选择可验证的说话人，并填写朗读文本和修正原因。");
+      return;
+    }
+    try {
+      assertWorkflowMatchesReview(workflow, requestId, review, { requireReview: true });
+    } catch (reason) {
+      setScriptReviewEditError(narrationFailureMessage(reason));
+      return;
+    }
+    const generation = documentGenerationRef.current;
+    scriptReviewActionAbortRef.current?.abort("segment correction superseded");
+    const controller = new AbortController();
+    scriptReviewActionAbortRef.current = controller;
+    let patchApplied = draft.pendingReview !== null;
+    setNarrationBusy(true);
+    setNarrationError(null);
+    setScriptReviewEditError(null);
+    setScriptReviewOpen(false);
+    const operation = draft.pendingReview === null
+      ? patchNarrationScriptSegment(
+          review.script_version_id,
+          segment.segment_id,
+          {
+            expected_request_version: workflow.request_version,
+            expected_version_number: review.version_number,
+            expected_immutable_hash: review.immutable_hash,
+            expected_local_hash: segment.local_hash,
+            request_id: requestId,
+            speaker_kind: choice.speakerKind,
+            speaker_label: choice.speakerLabel,
+            character_id: choice.characterId,
+            anonymous_speaker_id: choice.anonymousSpeakerId,
+            group_key: null,
+            spoken_text: draft.spokenText.trim(),
+            reason: draft.reason.trim(),
+          },
+          scriptReviewScope(review),
+          draft.idempotencyKey,
+          controller.signal,
+        )
+      : Promise.resolve(draft.pendingReview);
+    void operation.then(async (nextReview) => {
+      patchApplied = true;
+      setScriptReviewEdit((current: ScriptReviewEditDraft | null) => (
+        current?.idempotencyKey === draft.idempotencyKey
+          ? { ...current, pendingReview: nextReview }
+          : current
+      ));
+      const nextWorkflow = await getNarrationWorkflow(requestId, controller.signal);
+      assertWorkflowMatchesReview(nextWorkflow, requestId, nextReview, {
+        newerThanRequestVersion: workflow.request_version,
+        requireReview: true,
+      });
+      if (
+        controller.signal.aborted
+        || narrationSessionRef.current !== session
+        || documentRef.current?.id !== activeDocument.id
+        || documentGenerationRef.current !== generation
+      ) return;
+      setNarrationWorkflow(nextWorkflow);
+      setScriptReview(nextReview);
+      setScriptReviewRequestId(requestId);
+      setScriptReviewEdit(null);
+      setScriptReviewEditError(null);
+      setScriptReviewCharacterBindings([]);
+      setScriptReviewOpen(true);
+      setNarrationStatus(`句段修正已保存；脚本仍有 ${nextReview.blocker_count} 个阻塞。`);
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted && !isAbortFailure(reason)) {
+        const message = narrationFailureMessage(reason);
+        setScriptReviewEditError(
+          patchApplied
+            ? `修正已提交，但请求版本同步失败：${message}。请重试同步，期间不能继续批准或重新分析。`
+            : message,
+        );
+        if (!patchApplied) setScriptReviewOpen(true);
+      }
+    }).finally(() => {
+      if (scriptReviewActionAbortRef.current === controller) {
+        scriptReviewActionAbortRef.current = null;
+        setNarrationBusy(false);
+      }
+    });
+  };
+
+  const closeScriptReviewSegmentEdit = (): void => {
+    const uncertain = scriptReviewActionAbortRef.current !== null
+      || (scriptReviewEdit !== null && scriptReviewEdit.pendingReview !== null);
+    scriptReviewActionAbortRef.current?.abort("segment correction dialog closed");
+    scriptReviewActionAbortRef.current = null;
+    setNarrationBusy(false);
+    setScriptReviewEdit(null);
+    setScriptReviewEditError(null);
+    setScriptReviewCharacterBindings([]);
+    if (uncertain) {
+      setScriptReviewOpen(false);
+      setNarrationError("句段修正状态尚未完成同步，请重新载入章节后再继续复核。");
+    } else {
+      setScriptReviewOpen(true);
+    }
+  };
+
+  const selectNarrationEdition = (editionId: string) => {
+    const session = narrationSessionRef.current;
+    const snapshot = session?.readSnapshot();
+    const context = snapshot?.bundle?.context
+      ?? (snapshot?.loadResult?.status === "no-edition" ? snapshot.loadResult.context : null);
+    const target = context?.edition_history.editions.find(
+      (item: EditionHistoryItem) => item.edition_id === editionId,
+    );
+    if (!session || !context || !target) {
+      setNarrationError("朗读版本列表已经变化，请重新加载本章。");
+      return;
+    }
+    if (target.is_current) {
+      failedSegmentRetryControllerRef.current?.reset("Edition selection changed");
+      setFailedSegmentRetryFocusId(null);
+      void session.load(target.edition_id).catch((reason: unknown) => {
+        if (!isAbortFailure(reason)) setNarrationError(narrationFailureMessage(reason));
+      });
+      return;
+    }
+    if (!target.playable || !target.switch_allowed) {
+      setNarrationError("该朗读版本尚未形成合法连续播放起点，暂时不能设为当前版本。");
+      return;
+    }
+    Modal.confirm({
+      className: "anw-modal anw-narration-edition-confirm",
+      title: "切换本章朗读版本？",
+      width: 620,
+      content: h(
+        "div",
+        { className: "anw-narration-edition-confirm__copy" },
+        h("p", null, `来源 revision：${target.source_revision_id}`),
+        h("p", null, `来源哈希：${target.source_content_hash}`),
+        h("p", null, target.source_content_hash === context.working_copy_content_hash
+          ? "该版本对应当前正文。"
+          : "该版本对应不可变旧稿，播放器会明确显示“旧稿朗读”。"),
+      ),
+      okText: "确认切换",
+      cancelText: "取消",
+      onOk: async () => {
+        const generation = documentGenerationRef.current;
+        const controller = new AbortController();
+        failedSegmentRetryControllerRef.current?.reset("Edition selection changed");
+        setFailedSegmentRetryFocusId(null);
+        narrationActionAbortRef.current?.abort("Edition switch superseded");
+        narrationActionAbortRef.current = controller;
+        setNarrationBusy(true);
+        setNarrationError(null);
+        try {
+          await switchNarrationEdition(
+            context.document_id,
+            {
+              target_edition_id: target.edition_id,
+              expected_version: context.pointer_version,
+              switch_mode: "next_playback",
+              start_segment_id: null,
+              playback_rate_millis: Math.round((snapshot?.playerState?.rate ?? 1) * 1_000),
+              confirmed: true,
+            },
+            controller.signal,
+          );
+          if (
+            controller.signal.aborted
+            || documentRef.current?.id !== context.document_id
+            || documentGenerationRef.current !== generation
+          ) return;
+          await session.load(target.edition_id);
+          setNarrationStatus("已切换本章朗读版本；下次播放从该版本的合法起点开始。");
+        } catch (reason) {
+          if (!controller.signal.aborted && !isAbortFailure(reason)) {
+            setNarrationError(narrationFailureMessage(reason));
+          }
+          throw reason;
+        } finally {
+          if (narrationActionAbortRef.current === controller) {
+            narrationActionAbortRef.current = null;
+            setNarrationBusy(false);
+          }
+        }
+      },
+    });
+  };
+
+  const retryFailedNarrationSegment = (segmentId: string) => {
+    setFailedSegmentRetryFocusId(segmentId);
+    void failedSegmentRetryControllerRef.current?.retrySegment(segmentId);
   };
 
   const refreshNovel = async (): Promise<NovelRecord | null> => {
@@ -757,8 +2229,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         setEditorOpen(false);
         setSection("chapters");
         setOpenChapterWizardSignal((current: number) => current + 1);
-        rememberWorkbenchRoute(novel.id);
-        window.history.replaceState(null, "", workbenchUrl(novel.id));
+        replaceWorkbenchUrl(workbenchUrl(novel.id));
       } else {
         Modal.success({ title: "提示", content: "保存成功", okText: "确定" });
       }
@@ -1022,7 +2493,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         return Boolean(active && contentRef.current !== active.content_markdown);
       },
       getSelection: () => readAssistantTextSelection(
-        editorTextareaRef.current,
+        editorControlRef.current,
         contentRef.current,
       ),
       applyEditorContent: (nextValue) => {
@@ -1030,15 +2501,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         if (!active || active.id !== document.id) {
           throw new Error("章节已切换，不能应用到旧正文");
         }
-        contentRef.current = nextValue;
-        setContent(nextValue);
+        const surface = editorSurfaceRef.current;
+        if (!surface || !surface.setValue(nextValue, "ai-apply")) {
+          applyContentChange(nextValue);
+        }
         setSaveState("已应用，正在自动保存");
-        void saveRecoveryDraft({
-          documentId: active.id,
-          draftVersion: active.draft_version,
-          contentMarkdown: nextValue,
-          updatedAt: Date.now(),
-        });
       },
       scheduleAutosave: (nextValue) => {
         const active = documentRef.current;
@@ -1048,10 +2515,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         timerRef.current = setTimeout(() => void saveNow(nextValue), 600);
       },
       restoreSelection: (range) => restoreAssistantTextSelection(
-        editorTextareaRef.current,
+        editorControlRef.current,
         range,
       ),
-      focus: () => editorTextareaRef.current?.focus(),
+      focus: () => editorControlRef.current?.focus(),
     });
     assistantPageLocationFingerprintRef.current = assistantPageLocationFingerprint;
     assistantBodyBindingRef.current = binding;
@@ -1061,7 +2528,16 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       }
       binding.dispose();
     };
-  }, [assistantChapterNumber, assistantPageScopeVersion, document?.id, editorOpen, novel?.id, saveNow]);
+  }, [
+    applyContentChange,
+    assistantChapterNumber,
+    assistantPageScopeVersion,
+    document?.id,
+    editorOpen,
+    editorSurfaceGeneration,
+    novel?.id,
+    saveNow,
+  ]);
 
   React.useEffect(() => {
     if (!titleEditOpen || !novel || !document || document.kind !== "chapter") return;
@@ -1105,12 +2581,23 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     setAssistantPageScopeVersion((current: number) => current + 1);
   }, [assistantPageLocationFingerprint, chapterOutlineAssistantOpen, titleEditOpen]);
 
+  React.useEffect(() => {
+    setSection(initialSection);
+    setReadingPanel(initialReadingPanel);
+  }, [queryNovelId, initialSection, initialReadingPanel]);
+
   const switchSection = async (next: ProjectSection) => {
     if (!novel) return;
     setSection(next);
+    setReadingPanel("overview");
     setEditorOpen(false);
-    rememberWorkbenchRoute(novel.id);
-    window.history.replaceState(null, "", workbenchUrl(novel.id, undefined, next));
+    replaceWorkbenchUrl(workbenchUrl(novel.id, undefined, next, "overview"));
+  };
+
+  const switchReadingPanel = (next: WorkbenchReadingPanel) => {
+    if (!novel || section !== "reading") return;
+    setReadingPanel(next);
+    replaceWorkbenchUrl(workbenchUrl(novel.id, undefined, "reading", next));
   };
 
   const backToProject = () => {
@@ -1122,8 +2609,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         : "chapters";
     setEditorOpen(false);
     setSection(nextSection);
-    rememberWorkbenchRoute(novel.id);
-    window.history.replaceState(null, "", workbenchUrl(novel.id, undefined, nextSection));
+    setReadingPanel("overview");
+    replaceWorkbenchUrl(workbenchUrl(novel.id, undefined, nextSection));
   };
 
   const confirmDeleteDocument = () => {
@@ -1310,16 +2797,247 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                   ),
             ),
           );
-    const bodyEditor = h("textarea", {
-      ref: editorTextareaRef,
-      className: "anw-editor-textarea",
-      value: content,
-      onChange: onContentChange,
-      onFocus: () => assistantBodyBindingRef.current?.setFocusedField(true),
-      onBlur: () => assistantBodyBindingRef.current?.setFocusedField(false),
-      spellCheck: false,
-      "aria-label": `${chapterDisplayTitle}正文编辑器`,
-      placeholder: "开始写作……Markdown 源文本会自动保存。",
+    const narrationBundle = narrationSnapshot?.bundle ?? null;
+    const narrationGate = narrationGateState.phase === "ready"
+      ? narrationGateState.gate
+      : null;
+    const narrationContext = narrationBundle?.context
+      ?? (narrationSnapshot?.loadResult?.status === "no-edition"
+        ? narrationSnapshot.loadResult.context
+        : null);
+    const narrationHistory = narrationContext?.edition_history.editions ?? [];
+    const activeNarrationHistoryItem = narrationContext?.active_edition_id
+      ? narrationHistory.find(
+          (item: EditionHistoryItem) => item.edition_id === narrationContext.active_edition_id,
+        ) ?? null
+      : null;
+    let narrationPanelPhase: ChapterNarrationPanelPhase = "loading";
+    if (narrationSnapshot?.phase === "no-edition") narrationPanelPhase = "no-edition";
+    if (narrationSnapshot?.phase === "ready") narrationPanelPhase = "ready";
+    if (narrationSnapshot?.phase === "error") narrationPanelPhase = "error";
+    if (narrationBundle?.edition.state === "unavailable") narrationPanelPhase = "unavailable";
+    if (narrationGate !== null && !narrationGate.canLoadSession) {
+      narrationPanelPhase = "unavailable";
+    }
+    let narrationSourceKind: ChapterNarrationSourceKind = "current";
+    if (
+      narrationSnapshot?.workingCopyDiverged
+      || (
+      narrationBundle
+      && narrationBundle.script.source_content_hash
+        !== narrationBundle.context.working_copy_content_hash
+      )
+    ) {
+      narrationSourceKind = "working-copy-diverged";
+    } else if (
+      narrationBundle
+      && !narrationBundle.context.active_is_current
+      && narrationBundle.context.current_edition_id !== null
+    ) {
+      narrationSourceKind = "historical";
+    }
+    const narrationPanel = isChapterEditor
+      && showEditor
+      && !scriptReviewOpen
+      && narrationGate?.visible
+      ? h(ChapterNarrationPanel, {
+          phase: narrationPanelPhase,
+          sourceKind: narrationSourceKind,
+          playerState: narrationSnapshot?.playerState ?? null,
+          segments: narrationBundle?.script.segments ?? [],
+          segmentStates: narrationBundle?.manifest.segments.map(
+            (segment: { readonly render_status: SegmentRenderStatus }) => segment.render_status,
+          ) ?? [],
+          editions: narrationHistory,
+          activeEditionId: narrationContext?.active_edition_id ?? null,
+          currentEditionId: narrationContext?.current_edition_id ?? null,
+          busy: narrationBusy,
+          productionAllowed: narrationGate.canProduce,
+          statusMessage: narrationGate.canLoadSession
+            ? narrationStatus
+            : `章节智能朗读尚未通过产品门禁（${narrationGate.reasonCode ?? "CAPABILITY_DISABLED"}）。`,
+          errorMessage: narrationError,
+          followPaused: narrationSnapshot?.playerState?.followPaused ?? false,
+          reviewAvailable: narrationBundle?.script !== undefined,
+          failedSegments: failedSegmentRetrySnapshot.scope?.editionId
+            === narrationContext?.active_edition_id
+            ? failedSegmentRetrySnapshot.projection
+            : null,
+          retryBusySegmentIds: failedSegmentRetrySnapshot.busySegmentIds,
+          retrySubmitting: failedSegmentRetrySnapshot.phase === "submitting",
+          retryStatusMessage: failedSegmentRetrySnapshot.statusMessage,
+          retryErrorMessage: failedSegmentRetrySnapshot.errorMessage,
+          retryFocusSegmentId: failedSegmentRetryFocusId,
+          updateRequired: Boolean(
+            narrationSnapshot?.workingCopyDiverged
+            || narrationContext?.explicit_update_required,
+          ),
+          onGenerate: () => { void startNarration("create"); },
+          onUpdate: () => { void startNarration("update"); },
+          onTogglePlayback: toggleNarrationPlayback,
+          onSeekOrdinal: (ordinal: number) => playNarrationOrdinal(ordinal),
+          cursorPlaybackAvailable: editorSurfaceRef.current?.kind === "textarea-fallback",
+          onPlaybackFromCursor: () => {
+            if (!editorSurfaceRef.current?.requestPlaybackFromCursor()) {
+              setNarrationError("无法从当前光标位置找到可朗读句段。");
+            }
+          },
+          onRateChange: (rate: number) => {
+            try {
+              narrationSessionRef.current?.setRate(rate);
+            } catch (reason) {
+              setNarrationError(narrationFailureMessage(reason));
+            }
+          },
+          onResumeFollow: () => {
+            try {
+              narrationSessionRef.current?.resumeFollow();
+              setNarrationStatus("已恢复跟随当前朗读句段。");
+            } catch (reason) {
+              setNarrationError(narrationFailureMessage(reason));
+            }
+          },
+          onSelectEdition: selectNarrationEdition,
+          onRetryFailedSegment: retryFailedNarrationSegment,
+          onOpenReview: openNarrationReview,
+          reviewTriggerRef: scriptReviewTriggerRef,
+          retryTriggerRef: failedSegmentRetryTriggerRef,
+        })
+      : null;
+    const reviewPlayerState = narrationSnapshot?.playerState ?? null;
+    const reviewCurrentSegment = reviewPlayerState?.currentOrdinal === null
+      || reviewPlayerState?.currentOrdinal === undefined
+      ? null
+      : narrationBundle?.script.segments[reviewPlayerState.currentOrdinal] ?? null;
+    const matchingReviewWorkflow = scriptReview
+      && scriptReviewRequestId
+      && narrationWorkflow?.request_id === scriptReviewRequestId
+      && narrationWorkflow.script_version_id === scriptReview.script_version_id
+      && narrationWorkflow.source_revision_id === scriptReview.revision_id
+      && narrationWorkflow.source_content_hash === scriptReview.source_content_hash
+      ? narrationWorkflow
+      : null;
+    const scriptReviewSurface = isChapterEditor
+      && scriptReviewOpen
+      && scriptReview
+      && scriptReviewRequestId
+      && matchingReviewWorkflow
+      ? h(
+          "div",
+          { className: "anw-script-review-shell" },
+          h(ScriptReviewPanel, {
+            review: scriptReview,
+            requestId: scriptReviewRequestId,
+            requestVersion: matchingReviewWorkflow.request_version,
+            triggerRef: scriptReviewTriggerRef,
+            onReviewChanged: synchronizeChangedScriptReview,
+            onEditSegment: openScriptReviewSegmentEdit,
+            onClose: closeScriptReview,
+            compactPlayer: narrationBundle && reviewPlayerState && reviewCurrentSegment
+              ? {
+                  editionId: narrationBundle.edition.edition_id,
+                  sourceStatus: activeNarrationHistoryItem?.source_status ?? "superseded",
+                  oldDraft: narrationBundle.script.source_content_hash
+                    !== narrationBundle.context.working_copy_content_hash,
+                  phase: reviewPlayerState.phase,
+                  speakerLabel: reviewCurrentSegment.speaker_label,
+                  offsetMs: reviewPlayerState.offsetMs,
+                  durationMs: reviewPlayerState.durationMs,
+                  onTogglePlayback: toggleNarrationPlayback,
+                }
+              : undefined,
+          }),
+        )
+      : null;
+    const scriptReviewEditChoices = scriptReview
+      ? buildScriptReviewSpeakerChoices(scriptReview, scriptReviewCharacterBindings)
+      : [];
+    const scriptReviewEditSegment = scriptReviewEdit && scriptReview
+      ? scriptReview.segments.find(
+          (segment: ScriptReviewSegmentResource) => segment.segment_id === scriptReviewEdit.segmentId,
+        ) ?? null
+      : null;
+    const scriptReviewEditSurface = isChapterEditor
+      && scriptReviewEdit
+      && scriptReview
+      && scriptReviewEditSegment
+      ? h(
+          Modal,
+          {
+            open: true,
+            className: "anw-modal anw-script-review-edit-modal",
+            title: "修正句段说话人与朗读文本",
+            width: 760,
+            okText: scriptReviewEdit.pendingReview ? "重新同步请求版本" : "保存修正",
+            cancelText: "关闭",
+            confirmLoading: narrationBusy,
+            onOk: submitScriptReviewSegmentEdit,
+            onCancel: closeScriptReviewSegmentEdit,
+          },
+          h(
+            "div",
+            {
+              className: "anw-script-review-edit",
+              "data-min-viewport": "1920x1080",
+            },
+            h("p", null, `原文：${scriptReviewEditSegment.source_text}`),
+            h(
+              "label",
+              { htmlFor: "anw-script-review-speaker" },
+              "说话人（仅当前脚本中服务端已验证的绑定）",
+            ),
+            h(
+              "select",
+              {
+                id: "anw-script-review-speaker",
+                value: scriptReviewEdit.speakerChoiceKey,
+                disabled: narrationBusy || scriptReviewEdit.pendingReview !== null,
+                onChange: (event: any) => setScriptReviewEdit((current: ScriptReviewEditDraft | null) => (
+                  current ? { ...current, speakerChoiceKey: event.target.value } : current
+                )),
+              },
+              ...scriptReviewEditChoices.map((choice) => h(
+                "option",
+                { key: choice.key, value: choice.key },
+                `${choice.speakerKind === "narrator" ? "旁白" : choice.speakerKind === "character" ? "角色" : "匿名人物"} · ${choice.speakerLabel}`,
+              )),
+            ),
+            h("label", { htmlFor: "anw-script-review-spoken-text" }, "朗读文本"),
+            h(Input.TextArea, {
+              id: "anw-script-review-spoken-text",
+              rows: 3,
+              maxLength: 4_000,
+              value: scriptReviewEdit.spokenText,
+              disabled: narrationBusy || scriptReviewEdit.pendingReview !== null,
+              onChange: (event: any) => setScriptReviewEdit((current: ScriptReviewEditDraft | null) => (
+                current ? { ...current, spokenText: event.target.value } : current
+              )),
+            }),
+            h("label", { htmlFor: "anw-script-review-reason" }, "修正原因"),
+            h(Input, {
+              id: "anw-script-review-reason",
+              maxLength: 500,
+              value: scriptReviewEdit.reason,
+              disabled: narrationBusy || scriptReviewEdit.pendingReview !== null,
+              onChange: (event: any) => setScriptReviewEdit((current: ScriptReviewEditDraft | null) => (
+                current ? { ...current, reason: event.target.value } : current
+              )),
+            }),
+            h(
+              "p",
+              { role: "note" },
+              "本操作只提交人物标识、句段文本和并发围栏；不会提交音色 profile、人物配音绑定或 casting。群体说话人暂不支持人工改派。",
+            ),
+            scriptReviewEditError
+              ? h(Alert, { type: "error", showIcon: true, message: scriptReviewEditError })
+              : null,
+          ),
+        )
+      : null;
+    const bodyEditor = h("div", {
+      ref: editorSurfaceParentRef,
+      className: "anw-chapter-editor-surface",
+      "data-editor-generation": documentGenerationRef.current,
     });
     const titleEditorForm = h(
       "div",
@@ -1373,7 +3091,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         chapterTree,
         h(
           "div",
-          { className: "anw-editor-content" },
+          {
+            className: `anw-editor-content ${
+              isChapterEditor && showEditor ? "has-chapter-narration" : ""
+            }`,
+          },
         h(
           "header",
           { className: "anw-editor-topbar" },
@@ -1486,6 +3208,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
             ),
           ),
         ),
+        narrationPanel,
+        scriptReviewSurface,
+        scriptReviewEditSurface,
         ),
         h(
           Modal,
@@ -1580,7 +3305,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   return h(StudioProjectView, {
     novel,
     section,
+    readingPanel,
     onSectionChange: (next: WorkbenchSection) => { void switchSection(next); },
+    onReadingPanelChange: switchReadingPanel,
     onSelectDocument: selectDocument,
     onNovelChanged: (updated: NovelRecord) => setNovel(updated),
     onReload: refreshNovel,
@@ -1821,7 +3548,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         h(
           "nav",
           { className: "anw-project-nav", "aria-label": "作品创作流程" },
-          ...(["chapters", "outline", "roles", "clues", "settings"] as ProjectSection[]).map((item) => {
+          ...(["chapters", "outline", "roles", "clues", "settings", "reading"] as ProjectSection[]).map((item) => {
             const Icon = sectionIcon(item);
             return h(
               "button",

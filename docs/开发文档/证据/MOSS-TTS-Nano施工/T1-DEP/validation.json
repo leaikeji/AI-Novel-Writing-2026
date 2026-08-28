@@ -1,0 +1,110 @@
+{
+  "schema_version": "moss-tts-t1-dep-validation/1.0",
+  "captured_at": "2026-08-26T07:04:48+08:00",
+  "status": "passed_with_expected_T1_B_production_hold",
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pip check",
+      "exit_code": 0,
+      "result": "No broken requirements found"
+    },
+    {
+      "command": "POSTGRES_PASSWORD=<validation-placeholder> docker compose config --quiet",
+      "exit_code": 0,
+      "result": "default profile parses; services=qwenpaw"
+    },
+    {
+      "command": "POSTGRES_PASSWORD=<validation-placeholder> docker compose --profile tts config --quiet",
+      "exit_code": 0,
+      "result": "tts profile parses; services=qwenpaw,tts-sidecar"
+    },
+    {
+      "command": "docker build --platform linux/arm64 --target dependency-runtime -f docker/tts-sidecar/Dockerfile .",
+      "exit_code": 0,
+      "wall_seconds": 3.0,
+      "result": "final cached rebuild after 29-item production allowlist P0 fix; manifest-list sha256:60780eaf16dafde8d3b379ec16637fd900dad11713180d5884698695ac165be9"
+    },
+    {
+      "command": "docker run --rm --read-only --user 65532:65532 --entrypoint python <dependency-image> verify_runtime.py",
+      "exit_code": 0,
+      "result": "linux/arm64 package imports, FFmpeg/FFprobe version/buildconf and fixed file hashes passed; model/source component_count=3, artifact_count=29, inventory SHA d0f173db...b416d and runtime tree hashes passed; business runtime absent"
+    },
+    {
+      "command": "host canonical equality assertion: select the three approved components from T0 model-sources.lock.json and compare to production lock components",
+      "exit_code": 0,
+      "result": "all copied component and artifact fields are canonical-equal; 13 source + 10 Nano ONNX + 6 codec ONNX artifacts"
+    },
+    {
+      "command": "temporary negative probes against validate_model_source_lock",
+      "exit_code": 0,
+      "result": "path traversal, URL without frozen revision, selected_bytes mismatch and unapproved hash algorithm all failed closed"
+    },
+    {
+      "command": "docker run --rm --read-only --user 65532:65532 --entrypoint python <dependency-image> -m pip check",
+      "exit_code": 0,
+      "result": "No broken requirements found"
+    },
+    {
+      "command": "docker run --rm --read-only --user 65532:65532 <dependency-image>",
+      "exit_code": 78,
+      "result": "default entrypoint returned inert fail-closed JSON; no health endpoint or business runtime"
+    },
+    {
+      "command": "docker build --platform linux/arm64 --target production-runtime -f docker/tts-sidecar/Dockerfile .",
+      "exit_code": 1,
+      "result": "expected pre-T1-B hold: exact backend/narration runtime files do not exist, so production target cannot be built"
+    },
+    {
+      "command": "curl --fail --silent --output /dev/null --write-out <status> http://127.0.0.1:18088/",
+      "exit_code": 0,
+      "result": "existing QwenPaw returned HTTP 200; container ID/start time unchanged, healthy, OOM false"
+    },
+    {
+      "command": ".venv/bin/python scripts/package_plugin.py",
+      "exit_code": 0,
+      "result": "existing PawApp package command completed; TTS image/model/media are not part of the plugin package"
+    }
+  ],
+  "preserved_build_history": [
+    {
+      "attempt": "obsolete subdirectory-context build",
+      "exit_code": 130,
+      "wall_seconds": 100.98,
+      "classification": "operator Ctrl-C after the integration Owner froze the corrected root-context design",
+      "image_published": false
+    },
+    {
+      "attempt": "first root-context dependency build",
+      "exit_code": 1,
+      "wall_seconds": 125.73,
+      "classification": "files.pythonhosted.org read timeout while downloading filelock; lock verification had passed",
+      "remediation": "one bounded retry after adding pip --timeout 120 --retries 3; versions and hashes unchanged",
+      "image_published": false
+    },
+    {
+      "attempt": "first successful cold dependency build",
+      "exit_code": 0,
+      "wall_seconds": 436.37,
+      "classification": "all fixed dependency layers and runtime probes passed",
+      "superseded_local_manifest_list_sha256": "2ad86315b7fa387629e898618e9fa594af7b9f055966bd9be7ba140afbc3e8d4",
+      "superseded_reason": "final review made the inert dependency entrypoint unconditionally report T1_B_RUNTIME_NOT_INSTALLED; all dependency/FFmpeg layers were reused unchanged"
+    },
+    {
+      "attempt": "pre-red-team dependency image",
+      "exit_code": 0,
+      "wall_seconds": 3.02,
+      "superseded_local_manifest_list_sha256": "1a89a24b4513a09d563f28c91df9d7a0d5ef81528d1d5df0e41c8771f156a663",
+      "superseded_reason": "P0: aggregate repository/revision/tree metadata was insufficient for a production installer; replaced by the exact 29-artifact allowlist and build-time inventory validation"
+    }
+  ],
+  "not_run": [
+    "real Nano inference",
+    "Sidecar health endpoint",
+    "TTS business server",
+    "model download or model lifecycle",
+    "docker compose up/down",
+    "QwenPaw rebuild/restart/stop",
+    "database migration or TTS schema",
+    "registry push or registry digest resolution"
+  ]
+}

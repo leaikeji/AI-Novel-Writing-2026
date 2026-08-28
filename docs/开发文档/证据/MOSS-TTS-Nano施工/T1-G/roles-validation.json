@@ -1,0 +1,54 @@
+{
+  "schema_version": "t1-g-database-roles/2",
+  "status": "SECURE_HOLD_LAST_LIVE_PASS_AT_0012_CURRENT_EXPECTED_HEAD_0015_NOT_RERUN",
+  "production_role_switch": "HOLD",
+  "architecture": {
+    "same_postgresql_not_second_business_database": true,
+    "root_compose_integrated": false,
+    "business_write_path_usable": false,
+    "worker_business_procedures_present": false
+  },
+  "current_source": {
+    "validator_expected_head": "20260826_0015",
+    "validator_sha256": "84acce0f9f1352dbbaf558641f2fc08b5db327f8f235c68209e600612a7a0074",
+    "tests_sha256": "7e875278c361a70639301d8ca54714b93e5937067dd2663ed0e2e7a8a4342bfa",
+    "live_role_suite_at_current_head_run": false
+  },
+  "historical_live_validation": {
+    "alembic_head": "20260826_0012",
+    "postgresql": "18.6 disposable test environment",
+    "storage": "disposable; no formal database volume",
+    "static_tests": "5 passed, 5 skipped",
+    "live_tests": "10 passed",
+    "protected_table_count": 55,
+    "actual_protected_dml_denials": 330,
+    "api_any_raw_dml_table_count": 0,
+    "worker_any_raw_dml_table_count": 0,
+    "public_routine_execute_count": 0,
+    "api_routine_execute_count": 0,
+    "worker_routine_execute_count": 0,
+    "security_definer_count": 0,
+    "future_objects_fail_closed": true,
+    "pgpass_mode": "0600",
+    "pgpass_parent_mode": "0700",
+    "passwords_recorded_in_evidence": false
+  },
+  "formal_database": {
+    "head": "20260825_0009",
+    "used": false,
+    "migrated": false,
+    "downgraded": false
+  },
+  "t1_gate_policy": {
+    "secure_hold_may_be_recorded_as_explicit_no_go": true,
+    "role_switch_required_for_t1_pass": false,
+    "role_package_may_be_called_production_ready": false,
+    "second_database_required": false
+  },
+  "future_activation_requirements": [
+    "implement and independently audit narrow write procedures or an equivalent adapter",
+    "run full role bootstrap, migration, ACL and DML-negative tests at the then-current head",
+    "keep API, worker and migrator credentials separately mounted",
+    "integrate root Compose only after a new explicit gate decision"
+  ]
+}

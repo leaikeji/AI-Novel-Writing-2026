@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
 from .creative_schemas import SELECTION_EDIT_OPERATIONS
 from .creative_services import sync_relationships_from_intelligence_proposal
-from .database import database_status, get_session
+from .database import database_status, get_engine, get_session
 from .generation_dependencies import (
     get_novel_effective_model,
     get_novel_generation_ctx,
@@ -31,6 +32,56 @@ from .model_runtime import (
     reply_model_audit,
 )
 from .writing_eval_api import router as writing_eval_router
+from .narration.pawapp_runtime import (
+    launch_narration_runtime,
+    narration_runtime_status,
+    stop_narration_runtime,
+)
+from .narration.health_api import router as narration_health_router
+from .narration.disk_guard import DISK_SPACE_INSUFFICIENT
+from .narration.narration_api import router as narration_production_router
+from .narration.official_presets import (
+    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+)
+from .narration.playback_api import router as narration_playback_router
+from .narration.production_runtime import (
+    PRODUCT_ENABLE_ENV,
+    REFERENCE_CLONE_ENABLE_ENV,
+    ValidationRuntimeScope,
+    VALIDATION_ENABLE_ENV,
+    current_narration_cache_runtime,
+    current_narration_production_policy,
+    current_validation_runtime_scope,
+    current_voice_product_port,
+    launch_narration_production_runtime,
+    narration_production_runtime_status,
+    stop_narration_production_runtime,
+    validation_route_token_authorized,
+)
+from .narration.privacy import (
+    FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION,
+    build_narration_settings_backend,
+    t2_settings_capabilities,
+    t4_product_capabilities,
+)
+from .narration.settings_api import (
+    install_narration_settings_backend_factory,
+    router as narration_settings_router,
+    uninstall_narration_settings_backend_factory,
+)
+from .narration.script_api import (
+    install_script_api_backend_factory,
+    router as narration_script_router,
+    uninstall_script_api_backend_factory,
+)
+from .narration.script_backend import build_script_api_backend
+from .narration.release_gate import (
+    VALIDATION_TOKEN_HEADER,
+    install_narration_t4_http_access_policy,
+    uninstall_narration_t4_http_access_policy,
+)
+from .narration.voice_product import SqlAlchemyVoiceActionReceiptPort
+from .narration.validation_access import validation_request_scope_authorized
 from .schemas import (
     AdoptCandidateRequest,
     CheckpointRequest,
@@ -91,7 +142,272 @@ pawapp = PawApp(name="AI小说世界2026", app_id=APP_ID)
 router = APIRouter()
 router.include_router(assistant_router)
 router.include_router(creative_router)
+router.include_router(narration_settings_router)
+router.include_router(narration_health_router)
+router.include_router(narration_script_router)
+router.include_router(narration_production_router)
+router.include_router(narration_playback_router)
 router.include_router(writing_eval_router)
+
+
+def _production_runtime_accessible(status_snapshot: dict[str, object]) -> bool:
+    """Keep existing playback readable while low space pauses new claims."""
+
+    reason_code = status_snapshot.get("reason_code")
+    return reason_code is None or (
+        type(reason_code) is str and reason_code == DISK_SPACE_INSUFFICIENT
+    )
+
+
+def _t4_product_release_runtime_ready() -> bool:
+    """Open public T4 capabilities only after the whole live chain is ready.
+
+    The hidden T4-K validation runtime deliberately installs the same backend
+    and worker while PRODUCT_ENABLE_ENV remains false.  It must never make this
+    predicate true or expose production controls in the ordinary workbench.
+    """
+
+    if (
+        os.environ.get(PRODUCT_ENABLE_ENV, "false") != "true"
+        or os.environ.get(VALIDATION_ENABLE_ENV, "false") != "false"
+    ):
+        return False
+    reference_clone = os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false")
+    if reference_clone not in {"true", "false"} or (
+        reference_clone == "true" and current_voice_product_port() is None
+    ):
+        return False
+    technical = narration_runtime_status()
+    production = narration_production_runtime_status()
+    return (
+        technical.get("technical_enabled") is True
+        and technical.get("lifecycle_status") == "ready"
+        and technical.get("sidecar_reachable") is True
+        and technical.get("model_ready") is True
+        and technical.get("product_visible") is True
+        and technical.get("reason_code") is None
+        and production.get("product_requested") is True
+        and production.get("lifecycle_status") == "ready"
+        and production.get("playback_installed") is True
+        and production.get("digest_keyring_loaded") is True
+        and production.get("production_backend_installed") is True
+        and production.get("worker_running") is True
+        and _production_runtime_accessible(production)
+    )
+
+
+def _t4_hidden_validation_runtime_ready() -> bool:
+    """Require the same healthy chain while keeping public product visibility off."""
+
+    if (
+        os.environ.get(PRODUCT_ENABLE_ENV, "false") != "false"
+        or os.environ.get(VALIDATION_ENABLE_ENV, "false") != "true"
+    ):
+        return False
+    reference_clone = os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false")
+    if reference_clone not in {"true", "false"} or (
+        reference_clone == "true" and current_voice_product_port() is None
+    ):
+        return False
+    technical = narration_runtime_status()
+    production = narration_production_runtime_status()
+    return (
+        technical.get("technical_enabled") is True
+        and technical.get("lifecycle_status") == "ready"
+        and technical.get("sidecar_reachable") is True
+        and technical.get("model_ready") is True
+        and technical.get("product_visible") is False
+        and technical.get("reason_code") is None
+        and production.get("product_requested") is True
+        and production.get("lifecycle_status") == "ready"
+        and production.get("playback_installed") is True
+        and production.get("digest_keyring_loaded") is True
+        and production.get("production_backend_installed") is True
+        and production.get("worker_running") is True
+        and _production_runtime_accessible(production)
+        and current_validation_runtime_scope() is not None
+    )
+
+
+def _validation_request_scope_allowed(
+    request: Request,
+    scope: ValidationRuntimeScope,
+) -> bool:
+    """Resolve the bearer-authenticated request through a SELECT-only scope check."""
+
+    try:
+        with Session(get_engine()) as session:
+            return validation_request_scope_authorized(
+                session,
+                request,
+                scope,
+            )
+    except Exception:
+        return False
+
+
+def _narration_t4_http_access_allowed(request: Request) -> bool:
+    """Allow released T4, or one header-authenticated hidden validation run."""
+
+    if _t4_product_release_runtime_ready():
+        return True
+    if not _t4_hidden_validation_runtime_ready():
+        return False
+    values = request.headers.getlist(VALIDATION_TOKEN_HEADER)
+    if len(values) != 1 or not validation_route_token_authorized(values[0]):
+        return False
+    scope = current_validation_runtime_scope()
+    if scope is None:
+        return False
+    return _validation_request_scope_allowed(request, scope)
+
+
+_NARRATION_T4_HTTP_ACCESS_POLICY = _narration_t4_http_access_allowed
+
+
+def _build_fixed_local_owner_narration_backend(
+    session: Session,
+    request: Request | None = None,
+):  # type: ignore[no-untyped-def]
+    """Bind T2 to the project's audited single-user, loopback-only trust domain."""
+
+    product_ready = _t4_product_release_runtime_ready() or (
+        request is not None and _narration_t4_http_access_allowed(request)
+    )
+    reference_clone_requested = (
+        os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false") == "true"
+    )
+    voice_product = current_voice_product_port()
+    production_policy = current_narration_production_policy()
+    official_presets_ready = (
+        product_ready
+        and voice_product is not None
+        and production_policy is not None
+        and production_policy.tts_fingerprint
+        == OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
+    )
+    reference_clone_ready = (
+        official_presets_ready
+        and reference_clone_requested
+    )
+    if product_ready and not official_presets_ready:
+        product_ready = False
+    return build_narration_settings_backend(
+        session,
+        authorization=FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION,
+        profile_creation_receipts=SqlAlchemyVoiceActionReceiptPort(session),
+        cache_runtime=current_narration_cache_runtime(),
+        voice_product=(voice_product if official_presets_ready else None),
+        capabilities=(
+            t4_product_capabilities(
+                reference_clone_released=reference_clone_ready,
+                official_presets_released=official_presets_ready,
+            )
+            if product_ready
+            else t2_settings_capabilities()
+        ),
+    )
+
+
+_NARRATION_SETTINGS_BACKEND_FACTORY = _build_fixed_local_owner_narration_backend
+
+
+def _build_fixed_local_owner_script_backend(session: Session):  # type: ignore[no-untyped-def]
+    """Bind script review to the same request-scoped DB and live TTS policy."""
+
+    return build_script_api_backend(
+        session,
+        production_policy_provider=current_narration_production_policy,
+    )
+
+
+_NARRATION_SCRIPT_BACKEND_FACTORY = _build_fixed_local_owner_script_backend
+
+
+@pawapp.hook("startup", priority=100)
+async def _launch_narration_runtime() -> None:
+    install_narration_t4_http_access_policy(
+        _NARRATION_T4_HTTP_ACCESS_POLICY,
+    )
+    try:
+        install_narration_settings_backend_factory(
+            _NARRATION_SETTINGS_BACKEND_FACTORY,
+        )
+        try:
+            install_script_api_backend_factory(
+                _NARRATION_SCRIPT_BACKEND_FACTORY,
+            )
+            try:
+                await launch_narration_runtime()
+                try:
+                    await launch_narration_production_runtime()
+                except BaseException:
+                    try:
+                        await stop_narration_production_runtime()
+                    finally:
+                        await stop_narration_runtime()
+                    raise
+            except BaseException:
+                uninstall_script_api_backend_factory(
+                    _NARRATION_SCRIPT_BACKEND_FACTORY,
+                )
+                raise
+        except BaseException:
+            uninstall_narration_settings_backend_factory(
+                _NARRATION_SETTINGS_BACKEND_FACTORY,
+            )
+            raise
+    except BaseException:
+        uninstall_narration_t4_http_access_policy(
+            _NARRATION_T4_HTTP_ACCESS_POLICY,
+        )
+        raise
+
+
+@pawapp.hook("shutdown", priority=100)
+async def _stop_narration_runtime() -> None:
+    try:
+        await stop_narration_production_runtime()
+    finally:
+        try:
+            await stop_narration_runtime()
+        finally:
+            try:
+                uninstall_script_api_backend_factory(
+                    _NARRATION_SCRIPT_BACKEND_FACTORY,
+                )
+            finally:
+                try:
+                    uninstall_narration_settings_backend_factory(
+                        _NARRATION_SETTINGS_BACKEND_FACTORY,
+                    )
+                finally:
+                    uninstall_narration_t4_http_access_policy(
+                        _NARRATION_T4_HTTP_ACCESS_POLICY,
+                    )
+
+
+@pawapp.on_uninstall
+async def _uninstall_narration_runtime() -> None:
+    try:
+        await stop_narration_production_runtime()
+    finally:
+        try:
+            await stop_narration_runtime()
+        finally:
+            try:
+                uninstall_script_api_backend_factory(
+                    _NARRATION_SCRIPT_BACKEND_FACTORY,
+                )
+            finally:
+                try:
+                    uninstall_narration_settings_backend_factory(
+                        _NARRATION_SETTINGS_BACKEND_FACTORY,
+                    )
+                finally:
+                    uninstall_narration_t4_http_access_policy(
+                        _NARRATION_T4_HTTP_ACCESS_POLICY,
+                    )
 
 
 def _raise_domain(error: Exception) -> None:
@@ -147,6 +463,8 @@ def health() -> dict[str, object]:
         "selection_edit_enabled": True,
         "selection_edit_operations": list(SELECTION_EDIT_OPERATIONS),
         "vector_retrieval_enabled": False,
+        "narration": narration_runtime_status(),
+        "narration_production": narration_production_runtime_status(),
     }
 
 

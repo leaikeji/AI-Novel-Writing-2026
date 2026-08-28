@@ -396,9 +396,18 @@ export function resolveAssistantPaneLayout(
     )),
   );
   const availableWidth = finiteNumberOr(input.availableWidth, Number.POSITIVE_INFINITY);
-  const hasInlineSpace = availableWidth >= mainMinWidth + ASSISTANT_PANE_MIN_WIDTH;
-  const mode: AssistantPaneMode = hasInlineSpace ? "inline" : "overlay";
-  const dynamicMaxWidth = hasInlineSpace
+  const collapsed = input.collapsed === true;
+  const hasExpandedInlineSpace = (
+    availableWidth >= mainMinWidth + ASSISTANT_PANE_MIN_WIDTH
+  );
+  // A collapsed rail is only 52px wide and must keep that space in the flex
+  // layout. Treating it as an overlay lets the main area grow underneath the
+  // rail on narrow screens, covering the rightmost content. Re-evaluating the
+  // same width after expansion still selects overlay when 320px cannot fit.
+  const mode: AssistantPaneMode = collapsed || hasExpandedInlineSpace
+    ? "inline"
+    : "overlay";
+  const dynamicMaxWidth = hasExpandedInlineSpace
     ? Math.round(clamp(
       availableWidth - mainMinWidth,
       ASSISTANT_PANE_MIN_WIDTH,
@@ -410,7 +419,6 @@ export function resolveAssistantPaneLayout(
     ASSISTANT_PANE_MIN_WIDTH,
     dynamicMaxWidth,
   );
-  const collapsed = input.collapsed === true;
 
   return {
     collapsed,

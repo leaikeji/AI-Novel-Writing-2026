@@ -1,0 +1,253 @@
+{
+  "cases": [
+    {
+      "case_id": "narration-neutral",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "audio_files_created": 0,
+        "nano_clone_invocations": 0,
+        "voice_generator_invocations": 0,
+        "voice_prompt_profile_id": "vg-neutral-young-adult-woman-zh"
+      },
+      "error": {
+        "category": "precondition",
+        "code": "VOICE_GENERATOR_REAL_PROBE_NOT_AUTHORIZED_OR_RUN",
+        "message_redacted": "Real VoiceGenerator and Nano clone phases were not run; model locks, an isolated dependency lock and external media paths are required."
+      },
+      "input": {
+        "combined_sha256": "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-narrator"
+        ],
+        "text_sha256": [
+          "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": "No candidate audio exists in this metadata-only audit.",
+        "status": "skipped_with_reason",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": null,
+        "audio_sha256": null,
+        "ready_segment_sha256": []
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": null
+      },
+      "status": "blocked",
+      "timing": {
+        "audio_duration_seconds": null,
+        "first_packet_ms": null,
+        "rtf": null,
+        "synthesis_wall_ms": null
+      }
+    },
+    {
+      "case_id": "anonymous-middle-aged",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "audio_files_created": 0,
+        "nano_clone_invocations": 0,
+        "voice_generator_invocations": 0,
+        "voice_prompt_profile_id": "vg-warm-middle-aged-woman-zh"
+      },
+      "error": {
+        "category": "precondition",
+        "code": "VOICE_GENERATOR_REAL_PROBE_NOT_AUTHORIZED_OR_RUN",
+        "message_redacted": "Real VoiceGenerator and Nano clone phases were not run; model locks, an isolated dependency lock and external media paths are required."
+      },
+      "input": {
+        "combined_sha256": "d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-anon-middle-aged"
+        ],
+        "text_sha256": [
+          "d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": "No candidate audio exists in this metadata-only audit.",
+        "status": "skipped_with_reason",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": null,
+        "audio_sha256": null,
+        "ready_segment_sha256": []
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": null
+      },
+      "status": "blocked",
+      "timing": {
+        "audio_duration_seconds": null,
+        "first_packet_ms": null,
+        "rtf": null,
+        "synthesis_wall_ms": null
+      }
+    }
+  ],
+  "run": {
+    "benchmark_id": "voice-generator-metadata-feasibility",
+    "command": {
+      "argv": [
+        "<external-python-3.11>",
+        "scripts/tts/benchmark_voice_generator.py",
+        "--fixture-manifest",
+        "tests/fixtures/narration/benchmark_manifest.json",
+        "--output-dir",
+        "docs/开发文档/证据/MOSS-TTS-Nano施工/T0-D"
+      ],
+      "exit_code": 0
+    },
+    "environment": {
+      "architecture": "arm64",
+      "hardware": "Apple M4",
+      "os_name": "Darwin",
+      "os_version": "26.5.2",
+      "physical_memory_bytes": 17179869184,
+      "python_version": "3.11.16"
+    },
+    "finished_at": "2026-08-26T02:55:04.982+08:00",
+    "model": {
+      "artifacts": [
+        {
+          "hash_status": "verified",
+          "name": "T0-D metadata baseline",
+          "revision": "moss-tts-voice-generator-metadata/1.0",
+          "sha256": "f45f2736196407d07055d296cfffd8032e7ffad1e79cb59a770885299a6032dd",
+          "source": "repository-owned prototype metadata baseline"
+        },
+        {
+          "hash_status": "unavailable",
+          "name": "MOSS-VoiceGenerator model.safetensors",
+          "revision": "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4",
+          "sha256": null,
+          "source": "official Hugging Face locked metadata; artifact not downloaded"
+        },
+        {
+          "hash_status": "unavailable",
+          "name": "MOSS-Audio-Tokenizer full codec",
+          "revision": "3cd226ba2947efa357ef453bcad111b6eafba782",
+          "sha256": null,
+          "source": "official Hugging Face observed metadata; revision not frozen in T0-A"
+        }
+      ],
+      "execution_backend": "metadata-audit-no-model-import",
+      "name": "OpenMOSS-Team/MOSS-VoiceGenerator",
+      "revision": "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4",
+      "revision_hash_status": "unavailable",
+      "revision_sha256": null
+    },
+    "parameters": {
+      "expected_codec_weight_sha256": [
+        "037f441ed30a0ab59f6049de83b824a1b3bd6feb7dbd46c3fbca41fc2f649f28",
+        "a187d73d2cda1c2d0676586d9d03c09c0a5813450266af32029c871493fc9582"
+      ],
+      "expected_voice_generator_weight_bytes": 4228278872,
+      "expected_voice_generator_weight_sha256": "dbe345257ff9f6cc84195bed830a268b39d5e0b728ff3ba90e715150a49b16d4",
+      "feasibility": {
+        "combined_snapshot_bytes": 11345349008,
+        "combined_snapshot_gib": 10.56618,
+        "combined_weight_bytes": 11326740600,
+        "combined_weight_fraction_of_16_gib": 0.659303,
+        "cpu_headroom_gate_passed": false,
+        "cpu_static_estimated_headroom_bytes": 1624849712,
+        "cpu_static_weight_estimate_bytes": 15555019472,
+        "cpu_static_weight_estimate_gib": 14.486741,
+        "cpu_static_weight_fraction_of_16_gib": 0.905421,
+        "decision": "hide",
+        "decision_scope": "current product capability; revisit only after all real gates pass",
+        "default_codec_snapshot_bytes": 7101115998,
+        "fallback": "authorized uploaded or locked preset reference audio with Nano; do not expose text-described voice generation",
+        "full_codec_revision_frozen_in_t0_a": false,
+        "host_matches_target_memory": true,
+        "host_torch_mps_available_is_not_model_support": true,
+        "isolated_voice_generator_runtime_lock_ready": false,
+        "manual_listening_completed": 0,
+        "metadata_only_cannot_measure": [
+          "first_packet_ms",
+          "rtf",
+          "peak_rss_bytes",
+          "peak_accelerator_bytes",
+          "candidate_audio_quality",
+          "nano_clone_retention"
+        ],
+        "observed_host_physical_memory_bytes": 17179869184,
+        "official_device_paths": [
+          "cuda",
+          "cpu"
+        ],
+        "official_mps_path_claimed": false,
+        "real_candidate_generations": 0,
+        "real_model_downloads": 0,
+        "real_model_imports": 0,
+        "real_model_loads": 0,
+        "real_nano_clone_runs": 0,
+        "required_free_memory_headroom_bytes": 4294967296,
+        "voice_generator_selected_bytes": 4244233010
+      },
+      "fixture_set_id": "moss-tts-t0i-benchmark-v1",
+      "metadata_source_audit": {
+        "imports_executed": 0,
+        "mode": "fixed-official-URL-manual-audit-recorded-in-baseline",
+        "official_mps_path_supported": false,
+        "runtime_result": false
+      },
+      "mode": "metadata-only-dry-run"
+    },
+    "privacy": {
+      "contains_private_reference_audio": false,
+      "contains_user_text": false,
+      "evidence_contains_audio": false,
+      "fixture_only": true
+    },
+    "run_id": "T0-D-20260826T025504+0800-e9709d6b",
+    "started_at": "2026-08-26T02:55:04.982+08:00",
+    "status": "blocked",
+    "work_package_id": "T0-D"
+  },
+  "schema_version": "moss-tts-benchmark-result/1.0"
+}

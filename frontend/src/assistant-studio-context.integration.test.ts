@@ -76,7 +76,16 @@ describe("workbench studio assistant context integration", () => {
     }
 
     expect(studio.studioAssistantPageEnvelope(NOVEL, "chapters")).toBeNull();
+    expect(studio.studioAssistantPageEnvelope(NOVEL, "reading")).toBeNull();
     expect(studio.studioAssistantPageEnvelope(NOVEL, "roles", "graph")).toBeNull();
+    expect(studio.WORKBENCH_SECTIONS).toEqual([
+      "chapters",
+      "outline",
+      "roles",
+      "clues",
+      "settings",
+      "reading",
+    ]);
   });
 
   it("overlays a modal, applies through live controlled state, stays dirty, and restores the page", async () => {

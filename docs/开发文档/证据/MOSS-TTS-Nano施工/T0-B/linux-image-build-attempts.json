@@ -1,0 +1,80 @@
+{
+  "schema_version": "moss-tts-linux-image-build-attempts/1.0",
+  "updated_at": "2026-08-26T04:59:00+08:00",
+  "contains_audio": false,
+  "contains_secret": false,
+  "attempts": [
+    {
+      "attempt": 1,
+      "target": "protocol",
+      "command_shape": "docker compose -f compose.fake.yaml build --pull sidecar",
+      "status": "stopped_after_no_progress",
+      "elapsed_seconds": 734.9,
+      "blocked_step": "fixed python:3.11.16-slim-bookworm arm64 base layer download",
+      "layer_sha256": "75782e20ea1f4a9d9259bc20a5ecbbea8d5943bf5370bf0f5727900728f1cc9a",
+      "downloaded_bytes_observed": 17830000,
+      "expected_bytes_observed": 28120000,
+      "last_progress_before_stop_seconds": 95.3,
+      "exit_code": 130,
+      "classification": "Docker Hub transport stalled after earlier slow progress; not an application/protocol failure",
+      "cleanup": "only the exact active build was interrupted; no image, container, volume, model or user media was removed"
+    },
+    {
+      "attempt": 2,
+      "target": "protocol",
+      "command_shape": "docker compose --progress plain -f compose.fake.yaml build sidecar",
+      "status": "passed",
+      "elapsed_seconds": 8.2,
+      "cache_policy": "no --pull; fixed Dockerfile frontend and base image digests still enforced",
+      "resumed_layer_from_bytes": 17830000,
+      "protocol_image_manifest_list_sha256": "e07b7684db6dbee6f862eaba4898322d2531d38be3edd9dfc0d8555b9e1c2745",
+      "protocol_image_arm64_manifest_sha256": "5049ff79363e0c4f68a6c9bcc3e98564dfb8eabc3053bbfb2413127cdb1b7fed",
+      "classification": "fixed digest cache resumed and completed; no mutable tag substitution"
+    },
+    {
+      "attempt": 3,
+      "target": "protocol-final",
+      "status": "passed",
+      "reason": "included final PawApp audit harness fix; production protocol and Sidecar code unchanged",
+      "protocol_image_manifest_list_sha256": "726b47e9e5f76c4902999045b778282e23f162d1214ca4e4b43fd3ea3fee65b7",
+      "protocol_image_arm64_manifest_sha256": "1d265321ca4ed1b602257cebf28ce91fa57a4c345510e94aba6b2e78dc58d673"
+    },
+    {
+      "attempt": 4,
+      "target": "runtime",
+      "status": "stopped_supply_chain_violation",
+      "exit_code": 130,
+      "classification": "base image retained /etc/apt/sources.list.d/debian.sources, so apt contacted mutable deb.debian.org alongside the pinned snapshot",
+      "observed": "both deb.debian.org and snapshot.debian.org package indexes appeared in build output",
+      "fix": "blank the inherited debian.sources file and use only HTTPS snapshot.debian.org entries before apt update",
+      "cleanup": "only the exact candidate build was interrupted; no candidate runtime image was published"
+    },
+    {
+      "attempt": 5,
+      "target": "runtime-final",
+      "command_shape": "docker compose --progress plain -f compose.production.yaml build sidecar",
+      "status": "passed",
+      "cache_policy": "no --pull; pinned Dockerfile frontend/base digests and hashes remained enforced",
+      "supply_policy": "inherited Debian sources blanked; apt output showed only the fixed 20260825T000000Z HTTPS Debian snapshot",
+      "platform": "linux/arm64",
+      "runtime_image_manifest_list_sha256": "e662f8c091bf022bbc0859feb1d8bde9a402afc9eda77c957c8c2fe831c4c692",
+      "runtime_image_arm64_manifest_sha256": "f8646e505fd59744463453bd829579b895fbdabf88f23b9ef11e33a9e471818b",
+      "runtime_image_config_sha256": "a2df3f72dc65343e56957fd64ac78dad1777ae2bf204d9d193dc379b276c154b",
+      "runtime_image_size_bytes": 284406703,
+      "classification": "fixed Linux/arm64 runtime dependency image built without loading or copying model/reference assets",
+      "runtime_gate_outcome": "failed before model ready because the fixed torchaudio wheel required libgomp.so.1, which was absent from the slim runtime"
+    },
+    {
+      "attempt": 6,
+      "target": "runtime-final-with-openmp",
+      "status": "passed",
+      "reason": "copied GNU OpenMP runtime from the same fixed Debian snapshot builder after the preserved attempt-5 import failure",
+      "runtime_import_probe": "torch 2.7.0+cpu, torchaudio 2.7.0, and OnnxTtsRuntime imported successfully as uid 65532",
+      "runtime_image_manifest_list_sha256": "56bb12bdef8f0c8c174ec86aa4dfbeac1dee1dd9cb9a215ff305eca7c8307fe0",
+      "runtime_image_arm64_manifest_sha256": "6a35e39920a0bfff4f18c16079e5ca4d816dcc32e48b3aa961f04283f7eb58b1",
+      "runtime_image_config_sha256": "262d6b8f88e42ac6c720fb514d65d9c3d3585eaaab0d874852c17018a11b2223",
+      "runtime_image_size_bytes": 284675452,
+      "libgomp_sha256": "9d8c6a6175f6a7cda286c80f4de577edd58077ac3f4102356ec546869d170d30"
+    }
+  ]
+}

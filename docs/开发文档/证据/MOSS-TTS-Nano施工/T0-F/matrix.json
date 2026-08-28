@@ -1,0 +1,240 @@
+{
+  "schemaVersion": "moss-tts-editor-candidate-matrix/1.0",
+  "workPackage": "T0-F",
+  "baselineCommit": "9b5be4a1f8d20c707e5cd612186ffaa44fbd1ae0",
+  "generatedAt": "2026-08-26T02:52:00+08:00",
+  "status": "prototype_and_isolated_chromium_pass_host_gate_pending",
+  "stateVocabulary": {
+    "fact": "由当前源码、锁文件或已完成命令直接核实；不等于候选已获准进入产品",
+    "prototype_result": "原型级结果；outcome 明确区分 pass、fail 与 not_run，不能外推为真实宿主通过",
+    "pending_real_browser": "必须在固定 QwenPaw Chromium、真实中文输入法和目标布局中执行；隔离 Chromium 子集已完成但不能替代宿主门禁"
+  },
+  "host": {
+    "bundleContract": {
+      "state": "fact",
+      "outcome": "verified",
+      "evidence": "vite.config.ts uses formats=[es] and inlineDynamicImports=true because QwenPaw evaluates the PawApp from a Blob URL"
+    },
+    "currentRootBuild": {
+      "state": "prototype_result",
+      "outcome": "pass",
+      "command": "pnpm build",
+      "exitCode": 0,
+      "artifacts": [
+        "frontend/dist/index.js"
+      ],
+      "metrics": {
+        "rawKb": 1984.66,
+        "gzipKb": 712.48,
+        "moduleCount": 48
+      },
+      "limits": "共享 dirty 工作树上的当前产品构建；尚未接入 CodeMirror 或 Monaco，只证明现有单文件 Blob 构建约束仍成立"
+    },
+    "isolatedInstall": {
+      "state": "fact",
+      "outcome": "pass",
+      "evidence": "The main integrator moved the partial cache aside and completed pnpm install --frozen-lockfile --ignore-workspace with exit 0 and 123/123 packages",
+      "limits": "pnpm policy ignored esbuild and protobufjs install scripts; the T0-F Vite/Vitest commands nevertheless executed successfully, while future clean-container reproducibility still belongs to T0-A"
+    }
+  },
+  "automationSummary": {
+    "semanticTypecheck": {
+      "outcome": "pass",
+      "exitCode": 0,
+      "files": 3
+    },
+    "vitest": {
+      "outcome": "pass",
+      "exitCode": 0,
+      "testFilesPassed": 1,
+      "testsPassed": 25,
+      "testsFailed": 0,
+      "durationSeconds": 2.89
+    },
+    "standaloneSingleEsmExecution": {
+      "outcome": "pass",
+      "exitCode": 0,
+      "chunkCount": 1,
+      "imports": 0,
+      "dynamicImports": 0,
+      "rawBytes": 602394,
+      "executedFromDataUrl": true,
+      "limits": "data URL is the local import-free ESM execution equivalent; actual QwenPaw Blob URL and CSP remain a browser gate"
+    },
+    "isolatedChromium": {
+      "outcome": "partial_pass",
+      "browser": "Chromium 151.0.0.0",
+      "devicePixelRatio": 2,
+      "checksPassed": [
+        "Chinese text input through browser automation",
+        "undo and redo",
+        "three document-change/autosave events",
+        "clickable line-number gutter with second-line UTF-16 offset 8",
+        "UTF-16 decoration for emoji and combining character fixture",
+        "synthetic composition follow guard",
+        "Blob URL ES module",
+        "clean-tab console has zero errors and warnings",
+        "1920x1080, 2560x1440, 1024x768 and 390x844 screenshots"
+      ],
+      "limits": "not the fixed QwenPaw host; synthetic composition is not a system Chinese IME; 200 percent zoom, accessibility and long chapter scrolling remain pending"
+    }
+  },
+  "candidates": [
+    {
+      "id": "codemirror6",
+      "role": "preferred_candidate_not_frozen",
+      "pinnedPackages": {
+        "@codemirror/commands": "6.11.0",
+        "@codemirror/state": "6.7.1",
+        "@codemirror/view": "6.43.9"
+      },
+      "dimensions": {
+        "publicTransactionDecorationGutterHistoryApi": {
+          "state": "prototype_result",
+          "outcome": "pass",
+          "automation": "editor-spike.test.ts / CodeMirror 6 public API prototype"
+        },
+        "utf16EmojiCombiningAndRangeMapping": {
+          "state": "prototype_result",
+          "outcome": "pass",
+          "automation": "UTF-16, paragraph-before/inside/after, split/merge, quote and punctuation boundary cases passed"
+        },
+        "undoRedoAndAutosaveHook": {
+          "state": "prototype_result",
+          "outcome": "pass",
+          "automation": "public history commands and EditorView.updateListener contract passed in jsdom"
+        },
+        "longChapter": {
+          "state": "prototype_result",
+          "outcome": "pass",
+          "automation": "1,500 source-block mapping case passed its correctness and bounded-time assertion"
+        },
+        "singleEsmBundle": {
+          "state": "prototype_result",
+          "outcome": "pass",
+          "automation": "in-memory Vite build produced and executed one import-free ES chunk through a data URL",
+          "metrics": {
+            "chunkCount": 1,
+            "imports": 0,
+            "dynamicImports": 0,
+            "rawBytes": 602394
+          },
+          "limits": "not an actual QwenPaw Blob/CSP browser run"
+        },
+        "chineseImeSelectionAndFollow": {
+          "state": "pending_real_browser",
+          "outcome": "partial_pass",
+          "evidence": "Chromium Chinese text fill, undo/redo, three change events and synthetic composition guard passed",
+          "systemImeAttempt": "Microsoft Edge key-event probe passed ordinary typing and undo cleanup, but automation could not invoke the macOS global input-source switch; no candidate window was observed and the result remains blocked_by_automation",
+          "required": "仍须真实系统中文输入法 compositionstart/update/end；输入期间不跟随；selection、undo/redo 与现有产品自动保存不被破坏"
+        },
+        "qwenpawBlobCspAndGutterInteraction": {
+          "state": "pending_real_browser",
+          "outcome": "partial_pass",
+          "evidence": "isolated Chromium Blob module passed; four line-number gutter elements rendered; second-line click emitted UTF-16 offset 8; target viewport screenshots captured",
+          "required": "固定 QwenPaw 2.1.0 Blob module/CSP 下复验，并确认普通正文点击只移动光标"
+        },
+        "editorVirtualizationAndManualScroll": {
+          "state": "pending_real_browser",
+          "outcome": "not_run",
+          "required": "真实长章节滚动、手动滚动暂停/恢复跟随、焦点与可见区域稳定性"
+        }
+      }
+    },
+    {
+      "id": "monaco",
+      "role": "risk_comparison_only",
+      "pinnedPackages": {
+        "monaco-editor": "0.56.0"
+      },
+      "dimensions": {
+        "publicModelRangeDecorationAndUndoApi": {
+          "state": "prototype_result",
+          "outcome": "pass",
+          "automation": "model UTF-16 offset, Range, deltaDecorations, pushEditOperations and undo probe passed in jsdom"
+        },
+        "workerAndCsp": {
+          "state": "pending_real_browser",
+          "outcome": "not_run",
+          "required": "worker URL creation, Blob origin, host CSP, cancellation and failure behavior"
+        },
+        "singleBlobBundleAndFootprint": {
+          "state": "pending_real_browser",
+          "outcome": "not_run",
+          "required": "single-module feasibility, worker asset policy, raw/gzip delta, parse/startup memory and time"
+        },
+        "chineseImeUndoDecorationAndGlyphMargin": {
+          "state": "pending_real_browser",
+          "outcome": "not_run",
+          "required": "真实中文 IME、selection、undo/redo、decoration、glyph margin 与现有自动保存"
+        }
+      },
+      "decisionConstraint": "只有无 worker 的 model API 探针通过；不得据此推定 Monaco worker/CSP/Blob/IME 或产品体积通过"
+    },
+    {
+      "id": "native_textarea",
+      "role": "safe_fallback_only",
+      "dimensions": {
+        "currentProductEditor": {
+          "state": "fact",
+          "outcome": "verified",
+          "evidence": "frontend/src/workbench-v2.ts renders the chapter body as a controlled textarea and schedules existing draft persistence outside this prototype"
+        },
+        "editableDecorationAndGutter": {
+          "state": "fact",
+          "outcome": "unsupported_by_contract",
+          "evidence": "the frozen fallback sets editableDecoration=false and editableGutterSeek=false; it does not use a visual overlay"
+        },
+        "allowedPlaybackSurfaces": {
+          "state": "fact",
+          "outcome": "frozen_prototype_contract",
+          "evidence": "only immutable read-only segments, a paragraph list, or an explicit command may seek; ordinary editor click remains caret-only"
+        },
+        "divergedWorkingCopy": {
+          "state": "fact",
+          "outcome": "frozen_prototype_contract",
+          "evidence": "current segment falls back to player subtitle or immutable edition drawer and requires explicit update-narration"
+        },
+        "realImeUndoReloadRegression": {
+          "state": "pending_real_browser",
+          "outcome": "not_run",
+          "required": "现有 textarea 中文输入、undo/redo、自动保存、旧稿字幕/抽屉、页面重载和键盘命令"
+        }
+      }
+    }
+  ],
+  "bridgeContract": {
+    "state": "fact",
+    "outcome": "implemented_source_candidate",
+    "exports": [
+      "NarrationEditorBridge",
+      "PrototypeNarrationEditorBridge",
+      "createCodeMirrorPrototypeExtensions",
+      "createCodeMirrorPrototypeState",
+      "TEXTAREA_SAFE_FALLBACK"
+    ],
+    "capabilities": [
+      "read text, UTF-16 selection and composition state",
+      "resolve sourceBlockKey plus UTF-16 range or cursor into a mapped segment",
+      "mark, scroll and clear the current segment without mutating selection",
+      "emit seek intents only for gutter, command or explicitly labelled immutable segments",
+      "map non-intersecting transactions and invalidate intersections, boundaries, paragraph splits/merges, quotes and punctuation neighbours",
+      "pause follow during IME composition and after manual scrolling",
+      "drop active-session mappings on a diverged page reload"
+    ],
+    "limits": "semantic typecheck, 25 prototype tests and an isolated Chromium subset passed; actual QwenPaw Blob/CSP, system Chinese IME, 200 percent zoom, accessibility and long-chapter evidence remain pending"
+  },
+  "provisionalDecision": {
+    "status": "conditional_go_to_qwenpaw_host_gate",
+    "preferredCandidate": "codemirror6",
+    "fallback": "native_textarea_safe_fallback",
+    "monaco": "comparison_only",
+    "reason": "CodeMirror passed the isolated contract, public API, single-module and isolated Chromium checks and remains the closest fit, but formal product integration waits for the QwenPaw host gate",
+    "screenshots": [
+      { "file": "editor-1920x1080.png", "pixelWidth": 1920, "pixelHeight": 1080 },
+      { "file": "editor-2560x1440.png", "pixelWidth": 2560, "pixelHeight": 1440 },
+      { "file": "editor-constrained-1024x768.png", "pixelWidth": 1024, "pixelHeight": 768 },
+      { "file": "editor-mobile-390x844.png", "pixelWidth": 390, "pixelHeight": 844 }
+    ]
+  }
+}

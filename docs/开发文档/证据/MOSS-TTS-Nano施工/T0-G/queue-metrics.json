@@ -1,0 +1,132 @@
+{
+  "schemaVersion": "moss-tts-manifest-player-metrics/1.0",
+  "workPackage": "T0-G",
+  "generatedAt": "2026-08-26T04:31:55+08:00",
+  "status": "wire_contract_frozen_product_hold",
+  "wireContract": {
+    "schemaVersion": "narration-manifest/2.0",
+    "jsonNaming": "snake_case",
+    "manifestRevisionMinimum": 1,
+    "ordinalBase": 0,
+    "ordinalRule": "contiguous",
+    "readyRangesAuthority": "server_wire_verified_against_segments_and_buffer_policy",
+    "publicShortTextDigestFields": false,
+    "mediaUrlCredentialsOrToken": false,
+    "productPlayerEnabled": false,
+    "humanListeningPassed": false
+  },
+  "environment": {
+    "hardware": "Apple M4, 16 GiB",
+    "browser": "Chromium 151.0.0.0",
+    "devicePixelRatio": 2,
+    "crossOriginIsolated": false,
+    "audioContextSampleRate": 48000
+  },
+  "initialBufferPolicy": {
+    "version": "initial-buffer/v1-3-segments-8000ms",
+    "minimumSegments": 3,
+    "minimumDurationMs": 8000,
+    "targetSegments": 5,
+    "chapterEndException": "play when the entire remaining ready range reaches chapter end",
+    "durationIncludesInternalGapAfterMs": true,
+    "decisionAuthority": "server_manifest_contract"
+  },
+  "automatedTests": {
+    "command": "pnpm --dir prototypes/moss-tts-nano exec vitest run --config manifest-player/vitest.config.ts",
+    "exitCode": 0,
+    "testFilesPassed": 1,
+    "testsPassed": 24,
+    "testsFailed": 0,
+    "durationMs": 164
+  },
+  "rangeEtagPrototype": {
+    "command": "prototypes/moss-tts-nano/.venv/bin/python prototypes/moss-tts-nano/manifest-player/test_range_etag_server.py",
+    "exitCode": 0,
+    "testsPassed": 21,
+    "testsFailed": 0,
+    "rootRerunDurationSeconds": 0.527,
+    "capabilities": [
+      "explicit authorized asset ID registry",
+      "actual response SHA-256 strong ETag",
+      "GET and HEAD",
+      "single byte Range 206 and invalid Range 416",
+      "If-None-Match and strong If-Range",
+      "path injection isolation",
+      "same-Edition and same-source Manifest CAS with revision>=1, strong ETag and revision collision rejection"
+    ],
+    "limits": "loopback in-memory standard-library prototype; no PawApp authentication, persistent transaction, reverse proxy or large-file streaming"
+  },
+  "browserDecisions": {
+    "chapterStartPendingGap": {
+      "kind": "prepare_required",
+      "reason": "ready_window_too_short",
+      "requestedStartOrdinal": 0,
+      "requestedEndOrdinalExclusive": 5
+    },
+    "explicitMiddleReadyWindow": {
+      "kind": "play",
+      "startOrdinal": 2,
+      "endOrdinalExclusive": 5,
+      "segmentCount": 3,
+      "durationMsIncludingInternalGaps": 18200
+    },
+    "failedGap": {
+      "kind": "blocked",
+      "reason": "gap_failed",
+      "failedSegmentId": "seg-2"
+    },
+    "rapidSeek": {
+      "supersededRequestIds": ["old"],
+      "oldCompletionAccepted": false,
+      "newCompletionAccepted": true,
+      "nextRequestId": "new"
+    },
+    "cleanTabConsole": {
+      "errorCount": 0,
+      "warningCount": 0
+    }
+  },
+  "realAudioSeam": {
+    "assetLocation": "external_stage0_media_directory",
+    "assetSha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb",
+    "durationSecondsPerSegment": 5.92,
+    "webAudio": {
+      "segments": 2,
+      "scheduledOnSingleClock": true,
+      "observedFirstEndedAtSeconds": 6.005333333333334,
+      "scheduledBoundarySeconds": 6.005333333333334,
+      "schedulingDriftMs": 0,
+      "completed": true
+    },
+    "dualAudioFallback": {
+      "segments": 2,
+      "preload": "auto",
+      "measuredStartDelayMs": 0.20000000298023224,
+      "completed": true
+    },
+    "limits": "The same authorized real segment was scheduled twice to isolate the playback seam. This proves the browser scheduling paths, not a human-rated seam between two independently synthesized segments."
+  },
+  "screenshots": [
+    {
+      "file": "player-1920x1080.png",
+      "pixelWidth": 1920,
+      "pixelHeight": 1080,
+      "devicePixelRatio": 1,
+      "sha256": "518e7168c2aca8283ac08f7a84b6dbc97aa09211ccd1e134571695f785472cd9"
+    },
+    {
+      "file": "player-mobile-390x844.png",
+      "pixelWidth": 390,
+      "pixelHeight": 844,
+      "devicePixelRatio": 1,
+      "sha256": "e484c5f227ca53e9ba4715abef839dad4fe68f9be2b403b18e98b86c62e5cdeb"
+    }
+  ],
+  "remainingGates": [
+    "fixed QwenPaw host Blob/CSP and media API",
+    "formal PawApp Range/strong ETag API with scope authorization, persistent CAS, reverse proxy and large-file streaming",
+    "two independently synthesized neighboring segments and human seam listening",
+    "200 percent zoom, keyboard and accessibility",
+    "real non-preemptible Nano prepare-range feedback and longer queue stability"
+  ]
+}

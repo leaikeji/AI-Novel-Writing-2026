@@ -1690,6 +1690,28 @@ export function ensureNovelStyles(): void {
     .mb-add-role.qwenpaw-btn { color:#fff!important; border:0!important; background:#ff7548!important; box-shadow:0 4px 10px rgba(255,117,72,.2); }
     .mb-add-role.is-supporting.qwenpaw-btn { background:#6b62d7!important; box-shadow:0 4px 10px rgba(107,98,215,.2); }
 
+    .anw-chapter-narration-failures {
+      display:grid;
+      min-width:0;
+      grid-column:1/-1;
+      gap:8px;
+      border-top:1px solid #eee3dc;
+      padding-top:10px;
+    }
+    .anw-chapter-narration-failures__header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+    .anw-chapter-narration-failures__header strong { color:#8f2f24; font-size:13px; }
+    .anw-chapter-narration-failures__header span { color:#82766e; font-size:11px; }
+    .anw-chapter-narration-failures__list { display:grid; max-height:168px; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:0; padding:0; overflow:auto; list-style:none; }
+    .anw-chapter-narration-failure { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; border:1px solid #ead8cf; border-radius:10px; padding:8px 10px; background:#fffaf7; }
+    .anw-chapter-narration-failure.is-busy { border-color:#e2a081; background:#fff4ed; }
+    .anw-chapter-narration-failure__copy { display:grid; min-width:0; gap:2px; }
+    .anw-chapter-narration-failure__copy strong { color:#5d4035; font-size:12px; }
+    .anw-chapter-narration-failure__copy span { overflow:hidden; color:#756861; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+    .anw-chapter-narration-failure__copy small { color:#9a6250; font-size:10px; line-height:1.45; }
+    .anw-chapter-narration-retry-button { min-height:32px; border:1px solid #d76832!important; border-radius:8px; padding:5px 10px; color:#a34421; background:#fff; font-size:12px; font-weight:700; white-space:nowrap; }
+    .anw-chapter-narration-retry-live { min-height:16px; color:#786a61; font-size:11px; }
+    .anw-chapter-narration-retry-live.is-error { color:#b3261e; }
+
     @media (max-height: 760px) {
       .mb-outline-modal .qwenpaw-modal-body { max-height:calc(100dvh - 80px); padding-top:14px!important; }
       .mb-outline-wizard { gap:12px; }
@@ -1746,6 +1768,78 @@ export function ensureNovelStyles(): void {
       .anw-latest { margin-top:12px; }
       .anw-novel-tools { padding-inline:10px; }
       .anw-start { padding-inline:12px; }
+
+      .mb-workbench,
+      .anw-workbench-frame[data-assistant-density="compact"] .mb-workbench,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-workbench {
+        display:block;
+        height:auto;
+        min-height:100%;
+        padding:0 0 72px;
+        overflow:auto;
+        background:#fff;
+      }
+      .mb-book-rail,
+      .anw-workbench-frame[data-assistant-density="compact"] .mb-book-rail,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-rail {
+        position:static;
+        display:grid;
+        max-height:none;
+        grid-template-columns:84px minmax(0,1fr);
+        align-items:start;
+        column-gap:14px;
+        border:0;
+        border-radius:0;
+        padding:16px 14px 0;
+        overflow:visible;
+        box-shadow:none;
+      }
+      .mb-book-cover-wrap,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-cover-wrap {
+        grid-row:1/4;
+        width:84px;
+        max-width:84px;
+        margin:0;
+      }
+      .mb-book-rail > h1 { margin:2px 0 4px; font-size:18px; }
+      .mb-book-rail > p { min-height:0; max-height:38px; margin:0; }
+      .mb-book-stats { margin:4px 0 10px; }
+      .anw-current-model-card { grid-column:1/-1; margin:8px 0 0; }
+      .mb-book-nav {
+        position:sticky;
+        z-index:8;
+        top:0;
+        display:flex;
+        grid-column:1/-1;
+        gap:0;
+        margin:8px -14px 0;
+        border-top:1px solid #eff0f2;
+        border-bottom:1px solid #eff0f2;
+        padding:0;
+        overflow-x:auto;
+        background:#fff;
+      }
+      .mb-book-nav > button {
+        min-height:48px;
+        flex:1 0 auto;
+        justify-content:center;
+        border-radius:0;
+        padding:0 14px;
+        background:#fff;
+        white-space:nowrap;
+      }
+      .mb-book-nav > button.is-active {
+        outline:0;
+        border-bottom:2px solid #ff7548;
+        background:#fff;
+      }
+      .mb-back-center-wrap { grid-column:1/-1; margin:10px 0 0; padding:0 0 12px; }
+      .mb-workbench-main { width:100%; border:0; border-radius:0; overflow:visible; box-shadow:none; }
+      .mb-panel-header,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-header { min-height:64px; padding:14px 16px; }
+      .mb-panel-header > h2 { font-size:20px; }
+      .mb-panel-body,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-body { padding:14px 14px 36px; }
 
       .anw-project { display:block; padding:0 0 72px; overflow:auto; }
       .anw-book-rail { position:static; border:0; border-radius:0; box-shadow:none; }

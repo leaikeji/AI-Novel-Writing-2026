@@ -1,0 +1,37 @@
+{
+  "schema_version": "moss-tts-external-endurance-ledger-audit/1.0",
+  "captured_at": "2026-08-26T05:54:45+08:00",
+  "contains_audio": false,
+  "contains_absolute_runtime_path": false,
+  "ledger_available": true,
+  "run_group": "20260826T034226+0800-be5d3e42",
+  "raw_result": {
+    "file_name": "T0-B-managed_subprocess_onnx_cpu-20260826T034226+0800-a44b52cc.json",
+    "sha256": "28a8c4f02929754cfbbdec7f55fc328a83c83c381c9c92a43b5bce1a95dfb841",
+    "size_bytes": 1494668
+  },
+  "event_ledger": {
+    "file_name": "managed-worker.events.jsonl",
+    "sha256": "39105a27262e14b4d3e5e7b22351cee1eb306f3f430636f29825d7aa13bb9c2e",
+    "size_bytes": 1055299,
+    "record_count": 3305,
+    "request_id_count": 826,
+    "event_counts": {
+      "process_ready": 1,
+      "started": 826,
+      "inference_entered": 826,
+      "ready": 826,
+      "published": 826
+    },
+    "pid_values": [29163],
+    "generation_values": [1]
+  },
+  "field_semantics": {
+    "process_ready": ["event", "generation", "pid", "process_start_to_ready_ms", "ru_maxrss_bytes", "status"],
+    "started": ["event", "generation", "max_new_frames", "pid", "request_id", "sample_mode", "seed", "status", "voice"],
+    "inference_entered": ["event", "generation", "pid", "request_id", "status"],
+    "ready": ["audio_sha256", "event", "generation", "internal_first_audio_ms", "pid", "ready_wav_ms", "request_id", "ru_maxrss_bytes", "status"],
+    "published": ["audio_path", "audio_sha256", "event", "generation", "internal_first_audio_ms", "pid", "ready_wav_ms", "request_id", "ru_maxrss_bytes", "status", "terminal", "wall_ms"]
+  },
+  "scope_note": "This is the repository-external managed-worker endurance ledger, not the Linux Sidecar endurance evidence. No audio or absolute runtime path was copied into repository evidence."
+}

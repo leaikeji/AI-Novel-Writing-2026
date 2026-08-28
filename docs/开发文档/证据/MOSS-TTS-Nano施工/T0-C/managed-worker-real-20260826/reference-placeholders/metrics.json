@@ -1,0 +1,351 @@
+{
+  "cases": [
+    {
+      "case_id": "reference-placeholder-03s",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "reference-3-seconds-placeholder"
+        ],
+        "expected_terminal_status": "blocked",
+        "runner_invocations": 0,
+        "segment_mode": "single"
+      },
+      "error": {
+        "category": "authorization",
+        "code": "reference_placeholder_only",
+        "message_redacted": "authorized reference audio has not been supplied"
+      },
+      "input": {
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199",
+        "reference_profile_id": "ref-placeholder-03s",
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-reference-prompt"
+        ],
+        "text_sha256": [
+          "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": "reference audio is a placeholder, not an audio asset",
+        "status": "skipped_with_reason",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": null,
+        "audio_sha256": null,
+        "ready_segment_sha256": []
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": null
+      },
+      "status": "blocked",
+      "timing": {
+        "audio_duration_seconds": null,
+        "first_packet_ms": null,
+        "rtf": null,
+        "synthesis_wall_ms": null
+      }
+    },
+    {
+      "case_id": "reference-placeholder-05s",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "reference-5-seconds-placeholder"
+        ],
+        "expected_terminal_status": "blocked",
+        "runner_invocations": 0,
+        "segment_mode": "single"
+      },
+      "error": {
+        "category": "authorization",
+        "code": "reference_placeholder_only",
+        "message_redacted": "authorized reference audio has not been supplied"
+      },
+      "input": {
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199",
+        "reference_profile_id": "ref-placeholder-05s",
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-reference-prompt"
+        ],
+        "text_sha256": [
+          "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": "reference audio is a placeholder, not an audio asset",
+        "status": "skipped_with_reason",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": null,
+        "audio_sha256": null,
+        "ready_segment_sha256": []
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": null
+      },
+      "status": "blocked",
+      "timing": {
+        "audio_duration_seconds": null,
+        "first_packet_ms": null,
+        "rtf": null,
+        "synthesis_wall_ms": null
+      }
+    },
+    {
+      "case_id": "reference-placeholder-08s",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "reference-8-seconds-placeholder"
+        ],
+        "expected_terminal_status": "blocked",
+        "runner_invocations": 0,
+        "segment_mode": "single"
+      },
+      "error": {
+        "category": "authorization",
+        "code": "reference_placeholder_only",
+        "message_redacted": "authorized reference audio has not been supplied"
+      },
+      "input": {
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199",
+        "reference_profile_id": "ref-placeholder-08s",
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-reference-prompt"
+        ],
+        "text_sha256": [
+          "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": "reference audio is a placeholder, not an audio asset",
+        "status": "skipped_with_reason",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": null,
+        "audio_sha256": null,
+        "ready_segment_sha256": []
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": null
+      },
+      "status": "blocked",
+      "timing": {
+        "audio_duration_seconds": null,
+        "first_packet_ms": null,
+        "rtf": null,
+        "synthesis_wall_ms": null
+      }
+    },
+    {
+      "case_id": "reference-placeholder-12s",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "reference-12-seconds-placeholder"
+        ],
+        "expected_terminal_status": "blocked",
+        "runner_invocations": 0,
+        "segment_mode": "single"
+      },
+      "error": {
+        "category": "authorization",
+        "code": "reference_placeholder_only",
+        "message_redacted": "authorized reference audio has not been supplied"
+      },
+      "input": {
+        "combined_sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199",
+        "reference_profile_id": "ref-placeholder-12s",
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-reference-prompt"
+        ],
+        "text_sha256": [
+          "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": "reference audio is a placeholder, not an audio asset",
+        "status": "skipped_with_reason",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": null,
+        "audio_sha256": null,
+        "ready_segment_sha256": []
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": null
+      },
+      "status": "blocked",
+      "timing": {
+        "audio_duration_seconds": null,
+        "first_packet_ms": null,
+        "rtf": null,
+        "synthesis_wall_ms": null
+      }
+    }
+  ],
+  "run": {
+    "benchmark_id": "nano-quality",
+    "command": {
+      "argv": [
+        "python",
+        "scripts/tts/benchmark_nano_quality.py",
+        "--fixture-manifest",
+        "tests/fixtures/narration/benchmark_manifest.json",
+        "--output-dir",
+        "<evidence-output-dir>",
+        "--case-id",
+        "reference-placeholder-03s",
+        "--case-id",
+        "reference-placeholder-05s",
+        "--case-id",
+        "reference-placeholder-08s",
+        "--case-id",
+        "reference-placeholder-12s",
+        "--dry-run"
+      ],
+      "exit_code": 0
+    },
+    "environment": {
+      "architecture": "arm64",
+      "hardware": "Apple M4",
+      "os_name": "Darwin",
+      "os_version": "25.5.0",
+      "physical_memory_bytes": 17179869184,
+      "python_version": "3.11.16"
+    },
+    "finished_at": "2026-08-26T04:15:55+08:00",
+    "model": {
+      "artifacts": [
+        {
+          "hash_status": "verified",
+          "name": "benchmark_nano_quality.py",
+          "revision": "f29868085e05a1726a8f0b597fcd4e9ee7e6bcdc14b00f6d7cf5a749e1813e91",
+          "sha256": "f29868085e05a1726a8f0b597fcd4e9ee7e6bcdc14b00f6d7cf5a749e1813e91",
+          "source": "repository benchmark driver"
+        }
+      ],
+      "execution_backend": "dry-run",
+      "name": "MOSS-TTS-Nano (not loaded)",
+      "revision": "not-loaded-dry-run",
+      "revision_hash_status": "not_applicable",
+      "revision_sha256": null
+    },
+    "parameters": {
+      "authorized_texts_fixture_set_id": "moss-tts-t0i-original-zh-v1",
+      "automatic_download": false,
+      "cpu_threads": 4,
+      "dry_run": true,
+      "enable_normalize_tts_text": true,
+      "enable_wetext": false,
+      "exact_argv_sha256": "5f78cef5afd96a54247b4cd647873849d9f1712ce101c2f7ae1e78d89a35c397",
+      "fixture_manifest_sha256": "6750b722ad411839e369c617a9245c9578335d05b0c6117bcedfec3cfd6bbe35",
+      "max_new_frames": 375,
+      "path_values_redacted_in_command": true,
+      "reference_duration_tolerance_seconds": 0.75,
+      "sample_mode": "fixed",
+      "seed": 0,
+      "selected_case_ids": [
+        "reference-placeholder-03s",
+        "reference-placeholder-05s",
+        "reference-placeholder-08s",
+        "reference-placeholder-12s"
+      ],
+      "streaming": true,
+      "voice": "Junhao",
+      "voice_clone_max_text_tokens": 75
+    },
+    "privacy": {
+      "contains_private_reference_audio": false,
+      "contains_user_text": false,
+      "evidence_contains_audio": false,
+      "fixture_only": true
+    },
+    "run_id": "T0-C-20260826T041555+0800-31891-1b18ae1a",
+    "started_at": "2026-08-26T04:15:55+08:00",
+    "status": "blocked",
+    "work_package_id": "T0-C"
+  },
+  "schema_version": "moss-tts-benchmark-result/1.0"
+}

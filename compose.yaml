@@ -12,12 +12,40 @@ services:
     environment:
       TZ: Asia/Shanghai
       AI_NOVEL_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_novel}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ai_novel_world_2026}
+      AI_NOVEL_TTS_RUNTIME_ENABLED: ${AI_NOVEL_TTS_RUNTIME_ENABLED:-false}
+      AI_NOVEL_TTS_PRODUCT_ENABLED: ${AI_NOVEL_TTS_PRODUCT_ENABLED:-false}
+      AI_NOVEL_TTS_VALIDATION_ENABLED: ${AI_NOVEL_TTS_VALIDATION_ENABLED:-false}
+      AI_NOVEL_TTS_VALIDATION_TOKEN_FILE: /app/working.secret/ai-novel-world-2026/t4k-validation/token
+      AI_NOVEL_TTS_VALIDATION_NOVEL_ID: ${AI_NOVEL_TTS_VALIDATION_NOVEL_ID:-}
+      AI_NOVEL_TTS_VALIDATION_DOCUMENT_ID: ${AI_NOVEL_TTS_VALIDATION_DOCUMENT_ID:-}
+      AI_NOVEL_TTS_VALIDATION_EXPIRES_AT: ${AI_NOVEL_TTS_VALIDATION_EXPIRES_AT:-}
+      AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED: ${AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED:-false}
+      AI_NOVEL_TTS_DIGEST_KEYRING_FILE: /app/working.secret/ai-novel-world-2026/narration-hmac-keyring.json
+      MOSS_TTS_SIDECAR_HOST: tts-sidecar
+      MOSS_TTS_SIDECAR_PORT: "8765"
+      MOSS_TTS_SIDECAR_TOKEN_FILE: /run/moss-tts-secrets/moss_tts_sidecar_token
+      MOSS_TTS_PROTOCOL_VERSION: moss-tts-sidecar/1.1
+      MOSS_TTS_EXPECTED_MODEL_FINGERPRINT_SHA256: 3c76f3e9e1381699c5555287cf66eeb023632d0c3ee94adc6d8ae1b1d455fd7d
+      MOSS_TTS_LIFECYCLE: compose_on_failure_supervisor
+      MOSS_TTS_REQUEST_TIMEOUT_SECONDS: "120"
+      AI_NOVEL_TTS_MODEL_METADATA_ROOT: /opt/ai-novel-world/narration-model-metadata
+      AI_NOVEL_TTS_MEDIA_ROOT: /app/working/ai-novel-world-2026/novel-media
+      AI_NOVEL_TTS_FFMPEG_PATH: /opt/ffmpeg/bin/ffmpeg
+      AI_NOVEL_TTS_FFPROBE_PATH: /opt/ffmpeg/bin/ffprobe
     ports:
       - "127.0.0.1:18088:8088"
     volumes:
       - qwenpaw-data:/app/working
       - qwenpaw-secrets:/app/working.secret
       - qwenpaw-backups:/app/working.backups
+      - novel-media:/app/working/ai-novel-world-2026/novel-media
+      - type: volume
+        source: moss-tts-secrets
+        target: /run/moss-tts-secrets
+        read_only: true
+    networks:
+      - default
+      - tts-private
     healthcheck:
       test:
         - CMD
@@ -49,6 +77,133 @@ services:
       retries: 10
       start_period: 10s
 
+  tts-runtime-init:
+    profiles: ["tts"]
+    build:
+      context: .
+      dockerfile: docker/tts-sidecar/Dockerfile
+      target: production-runtime
+    image: ${MOSS_TTS_SIDECAR_IMAGE:-ai-novel-world/moss-tts-sidecar:t1-b-linux-arm64}
+    container_name: ai-novel-2026-moss-tts-runtime-init
+    platform: linux/arm64
+    entrypoint:
+      - python
+      - /opt/ai-novel-world/tts-sidecar/runtime/init_runtime_volumes.py
+    restart: "no"
+    network_mode: none
+    volumes:
+      - type: volume
+        source: moss-models
+        target: /opt/moss-assets
+      - type: volume
+        source: moss-tts-secrets
+        target: /run/moss-tts-secrets
+    read_only: true
+    user: "0:0"
+    cap_drop: ["ALL"]
+    # The one-shot initializer must remain idempotent after the volume roots
+    # have already been narrowed to 0750/65532.  Without DAC_OVERRIDE a later
+    # root-run cannot reopen those mount roots after all ambient capabilities
+    # were dropped.  This capability never reaches the long-lived sidecar.
+    cap_add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.5
+
+  tts-model-installer:
+    profiles: ["tts"]
+    image: ${MOSS_TTS_SIDECAR_IMAGE:-ai-novel-world/moss-tts-sidecar:t1-b-linux-arm64}
+    container_name: ai-novel-2026-moss-tts-model-installer
+    platform: linux/arm64
+    entrypoint:
+      - python
+      - /opt/ai-novel-world/tts-sidecar/runtime/install_models.py
+    command:
+      - --lock
+      - /opt/ai-novel-world/tts-sidecar/model-source.lock.json
+      - --assets-root
+      - /opt/moss-assets
+      - --expected-uid
+      - "65532"
+      - --expected-gid
+      - "65532"
+      - --max-parallel-downloads
+      - "4"
+    restart: "no"
+    depends_on:
+      tts-runtime-init:
+        condition: service_completed_successfully
+    volumes:
+      - type: volume
+        source: moss-models
+        target: /opt/moss-assets
+    networks:
+      - tts-download
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+    user: "65532:65532"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2.0
+
+  tts-sidecar:
+    profiles: ["tts"]
+    build:
+      context: .
+      dockerfile: docker/tts-sidecar/Dockerfile
+      target: production-runtime
+    image: ${MOSS_TTS_SIDECAR_IMAGE:-ai-novel-world/moss-tts-sidecar:t1-b-linux-arm64}
+    container_name: ai-novel-2026-moss-tts-sidecar
+    platform: linux/arm64
+    restart: "on-failure:5"
+    depends_on:
+      tts-runtime-init:
+        condition: service_completed_successfully
+      tts-model-installer:
+        condition: service_completed_successfully
+    environment:
+      MOSS_MODEL_TREE_SHA256: ${MOSS_TTS_MODEL_TREE_SHA256:-92419b269673cd698afab06ef0e3f0b60673862c86190cc6c57ed010db9aca98}
+      MOSS_SOURCE_TREE_SHA256: ${MOSS_TTS_SOURCE_TREE_SHA256:-547f61c24427a59d802cc31dfe532e135303b6b9f71469be19a7f35acd5d4c94}
+      MOSS_TTS_SIDECAR_TOKEN_FILE: /run/moss-tts-secrets/moss_tts_sidecar_token
+    volumes:
+      - type: volume
+        source: moss-models
+        target: /opt/moss-assets
+        read_only: true
+      - type: volume
+        source: moss-tts-secrets
+        target: /run/moss-tts-secrets
+        read_only: true
+    networks:
+      - tts-private
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    user: "65532:65532"
+    init: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 4g
+    cpus: 4.0
+    ulimits:
+      nofile: {soft: 512, hard: 512}
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health/live', timeout=3).read(1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
 volumes:
   qwenpaw-data:
     name: ai-novel-2026-qwenpaw-data
@@ -70,3 +225,34 @@ volumes:
     labels:
       ai.novel.world.project: AI小说世界2026
       ai.novel.world.purpose: postgres-data
+  moss-models:
+    name: ai-novel-2026-moss-models
+    labels:
+      ai.novel.world.project: AI小说世界2026
+      ai.novel.world.purpose: tts-model-and-source-assets
+      ai.novel.world.write-owner: model-lifecycle-only
+  moss-tts-secrets:
+    name: ai-novel-2026-moss-tts-secrets
+    labels:
+      ai.novel.world.project: AI小说世界2026
+      ai.novel.world.purpose: tts-private-runtime-secrets
+      ai.novel.world.write-owner: tts-runtime-init-only
+  novel-media:
+    name: ai-novel-2026-novel-media
+    labels:
+      ai.novel.world.project: AI小说世界2026
+      ai.novel.world.purpose: pawapp-novel-media
+      ai.novel.world.write-owner: pawapp-only
+
+networks:
+  tts-private:
+    name: ai-novel-2026-tts-private
+    internal: true
+    labels:
+      ai.novel.world.project: AI小说世界2026
+      ai.novel.world.purpose: tts-private-control-plane
+  tts-download:
+    name: ai-novel-2026-tts-download
+    labels:
+      ai.novel.world.project: AI小说世界2026
+      ai.novel.world.purpose: tts-pinned-model-download-only

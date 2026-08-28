@@ -646,7 +646,10 @@ def get_document(session: Session, document_id: UUID) -> dict[str, Any]:
     payload = _document_payload(document, working)
     revisions = session.scalars(
         select(DocumentRevision)
-        .where(DocumentRevision.document_id == document.id)
+        .where(
+            DocumentRevision.document_id == document.id,
+            DocumentRevision.source != "tts_snapshot",
+        )
         .order_by(DocumentRevision.revision_number.desc())
     ).all()
     payload["revisions"] = [_revision_payload(revision) for revision in revisions]

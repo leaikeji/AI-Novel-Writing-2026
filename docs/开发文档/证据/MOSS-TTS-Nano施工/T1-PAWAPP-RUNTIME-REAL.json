@@ -1,0 +1,40 @@
+{
+  "schema_version": "t1-pawapp-runtime-real/1",
+  "recorded_at": "2026-08-26",
+  "status": "passed",
+  "candidate": {
+    "plugin": "ai-novel-world-2026@0.4.0",
+    "tree_sha256": "076330ec1c83216e4f45f384e330912e95fd60d2558d871695707f2c8d51167e",
+    "installed_into_formal_qwenpaw": false,
+    "staging": "temporary docker-cp directory in existing QwenPaw container",
+    "staging_removed": true
+  },
+  "runtime": {
+    "protocol_version": "moss-tts-sidecar/1.1",
+    "worker_generation": 8686308090244417869,
+    "lease_generation": 1,
+    "manual_renew_generation": 1,
+    "model_fingerprint_sha256": "3c76f3e9e1381699c5555287cf66eeb023632d0c3ee94adc6d8ae1b1d455fd7d",
+    "product_visible": false,
+    "after_stop": "disabled",
+    "after_stop_adapter_health": "unavailable",
+    "after_stop_reason_code": "WORKER_LEASE_INACTIVE"
+  },
+  "resource_boundary": {
+    "new_container_count": 0,
+    "database_accessed": false,
+    "formal_plugin_replaced": false,
+    "qwenpaw_healthy_after": true,
+    "sidecar_healthy_after": true,
+    "sidecar_model_release_proven_by_deactivate_completion": true
+  },
+  "privacy": {
+    "secrets_recorded": false,
+    "text_recorded": false,
+    "audio_bytes_recorded": false
+  },
+  "validation_script": {
+    "path": "scripts/tts/verify_pawapp_runtime_real.py",
+    "sha256": "3ac1582ecf2cd8b1b418f4151f7c7516be2a2608f82ef62b0bf1d2dd746e0544"
+  }
+}

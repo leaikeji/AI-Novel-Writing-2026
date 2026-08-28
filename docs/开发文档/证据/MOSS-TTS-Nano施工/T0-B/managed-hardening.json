@@ -1,0 +1,119 @@
+{
+  "schema_version": "moss-tts-managed-topology-hardening/1.0",
+  "work_package_id": "T0-B",
+  "status": "passed_with_scope_limitations",
+  "topology": "managed_subprocess_onnx_cpu",
+  "fixture_only": true,
+  "protocol_probe": {
+    "run_group": "20260826T034152+0800-a50186a3",
+    "run_id": "T0-B-managed_subprocess_onnx_cpu-20260826T034152+0800-d8078ead",
+    "raw_result_file_name": "T0-B-managed_subprocess_onnx_cpu-20260826T034152+0800-d8078ead.json",
+    "raw_result_sha256": "9231439447add46c717e1c4b8af88a2b4704d8b5b51d2e1604d2521969bcf5c1",
+    "event_log_sha256": "bcd4e91699c8ed3339308b5b7cf1477058604a605aada6887f63eb6bc11240a0",
+    "expected_status_match": true,
+    "cancel": {
+      "status": "cancelled",
+      "worker_acknowledged": true,
+      "ready_segment_count": 1
+    },
+    "crash_recovery": {
+      "status": "passed",
+      "signal_exit_code": -9,
+      "inference_entered_before_kill": true,
+      "old_pid": 29126,
+      "new_pid": 29129,
+      "old_generation": 1,
+      "new_generation": 2,
+      "pid_changed": true,
+      "final_output_published_by_killed_request": false,
+      "published_event_observed_for_killed_request": false,
+      "partial_file_count": 0,
+      "ready_asset_sha256_before": "2586f2d8ced702efb9b57ac77c65c61fc7846f1e0389e38cc3a8fd8a446258d5",
+      "ready_asset_sha256_after": "2586f2d8ced702efb9b57ac77c65c61fc7846f1e0389e38cc3a8fd8a446258d5",
+      "ready_asset_not_resynthesized": true,
+      "ready_segments_reused": 1
+    },
+    "same_worker_probe": {
+      "repetitions": 3,
+      "worker_pid": 29129,
+      "generation": 2,
+      "bit_exact_in_this_probe": true,
+      "actual_audio_sha256": "2586f2d8ced702efb9b57ac77c65c61fc7846f1e0389e38cc3a8fd8a446258d5"
+    },
+    "process_cleanup": {
+      "partial_files": 0,
+      "worker_processes_after_exit": 0,
+      "orphan_processes_after_exit": 0
+    }
+  },
+  "endurance": {
+    "run_group": "20260826T034226+0800-be5d3e42",
+    "run_id": "T0-B-managed_subprocess_onnx_cpu-20260826T034226+0800-a44b52cc",
+    "raw_result_file_name": "T0-B-managed_subprocess_onnx_cpu-20260826T034226+0800-a44b52cc.json",
+    "raw_result_sha256": "28a8c4f02929754cfbbdec7f55fc328a83c83c381c9c92a43b5bce1a95dfb841",
+    "strict_summary_sha256": "a1d9ca75aa1b09ba018ef54c4165c9575ce146a3bdf3d6ec49e4beb06ac548f5",
+    "event_log_sha256": "39105a27262e14b4d3e5e7b22351cee1eb306f3f430636f29825d7aa13bb9c2e",
+    "requested_duration_seconds": 1800,
+    "actual_duration_seconds": 1800.219,
+    "completed_endurance_requests": 822,
+    "initial_successful_requests": 4,
+    "total_request_count": 826,
+    "worker_pid": 29163,
+    "worker_generation": 1,
+    "same_worker": true,
+    "same_generation": true,
+    "poisoned_at_end": false,
+    "restart_count": 0,
+    "timeout_count": 0,
+    "protocol_mismatch_count": 0,
+    "event_counts": {
+      "process_ready": 1,
+      "started": 826,
+      "inference_entered": 826,
+      "ready": 826,
+      "published": 826
+    },
+    "wall_ms": {
+      "minimum": 2063.106708,
+      "median": 2173.539292,
+      "p95": 2317.647375,
+      "maximum": 2662.848542
+    },
+    "peak_rss_bytes": 1836892160,
+    "peak_rss_semantics": "macOS getrusage(RUSAGE_SELF).ru_maxrss lifetime high-water mark, reported directly in bytes",
+    "distinct_actual_audio_hash_count": 13,
+    "same_seed_is_not_content_addressing": true,
+    "output_checks": {
+      "endurance_wav_count_external_runtime": 822,
+      "partial_file_count": 0,
+      "worker_processes_after_exit": 0,
+      "orphan_processes_after_exit": 0,
+      "worker_terminated": true
+    },
+    "runtime_size_observation": "927M external runtime; no audio stored in repository evidence"
+  },
+  "host_resource_snapshot": {
+    "during_endurance": {
+      "memory_pressure_free_percent": 37,
+      "swap_used_mib": 5934.88
+    },
+    "captured_after_endurance": true,
+    "memory_pressure_free_percent": 42,
+    "swap_total_mib": 7168.0,
+    "swap_used_mib": 5918.88,
+    "swap_free_mib": 1249.12,
+    "attribution_limit": "no reliable pre-run baseline; swap usage cannot be attributed to this worker"
+  },
+  "limitations": [
+    "official Python runtime does not expose internal first-audio timing, so internal_first_audio_ms remains null",
+    "single utterance graceful preemption is not implemented; SIGKILL is a fault-recovery probe, not a user cancel path",
+    "13 actual hashes occurred across 822 same-text/same-parameter endurance requests, so seed is not an asset key",
+    "Linux Sidecar and browser candidates are not validated by this managed local worker evidence",
+    "full 27-case quality and human listening remain separate gates"
+  ],
+  "privacy": {
+    "contains_user_text": false,
+    "contains_audio": false,
+    "contains_absolute_runtime_path": false
+  }
+}

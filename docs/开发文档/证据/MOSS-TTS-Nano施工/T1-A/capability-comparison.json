@@ -1,0 +1,93 @@
+{
+  "schema_version": "moss-tts-t1a-capability-comparison/1.0",
+  "work_package": "T1-A",
+  "rows": [
+    {
+      "id": "moss_nano_linux_sidecar_contract",
+      "adapter": "MossNanoTTSAdapter",
+      "implementation": "not_implemented_by_t1a_t1b_consumer_target",
+      "evidence_class": "accepted_technical_contract_only",
+      "health_in_t1a": "not_instantiated",
+      "capabilities": {
+        "supports_warmup": true,
+        "supports_synthesis": true,
+        "supports_cancel": true,
+        "cancellation_granularity": "segment_boundary",
+        "supports_reference_audio": true,
+        "supports_streaming_response_bytes": true,
+        "supports_voice_design": false,
+        "max_inference_concurrency": 1,
+        "is_test_double": false,
+        "product_visible": false,
+        "production_ready": false
+      }
+    },
+    {
+      "id": "fake_moss_nano",
+      "adapter": "FakeMossNanoTTSAdapter",
+      "implementation": "implemented_test_double",
+      "evidence_class": "unit_test_only",
+      "health_in_t1a": "healthy_test_double",
+      "capabilities": {
+        "supports_warmup": true,
+        "supports_synthesis": true,
+        "supports_cancel": true,
+        "cancellation_granularity": "segment_boundary",
+        "supports_reference_audio": true,
+        "supports_streaming_response_bytes": true,
+        "supports_voice_design": false,
+        "max_inference_concurrency": 1,
+        "is_test_double": true,
+        "product_visible": false,
+        "production_ready": false
+      }
+    },
+    {
+      "id": "voice_design_current_no_go",
+      "adapter": "DisabledVoiceDesignAdapter",
+      "implementation": "implemented_fail_closed_disabled_boundary",
+      "evidence_class": "t0_gate_no_go",
+      "health_in_t1a": "disabled_voice_generator_no_go",
+      "capabilities": {
+        "supports_warmup": false,
+        "supports_synthesis": false,
+        "supports_cancel": false,
+        "cancellation_granularity": "none",
+        "supports_reference_audio": false,
+        "supports_streaming_response_bytes": false,
+        "supports_voice_design": false,
+        "max_inference_concurrency": 0,
+        "is_test_double": false,
+        "product_visible": false,
+        "production_ready": false
+      }
+    },
+    {
+      "id": "fake_voice_design",
+      "adapter": "FakeVoiceDesignAdapter",
+      "implementation": "implemented_test_double",
+      "evidence_class": "unit_test_only_not_a_reopen_decision",
+      "health_in_t1a": "healthy_test_double",
+      "capabilities": {
+        "supports_warmup": true,
+        "supports_synthesis": false,
+        "supports_cancel": true,
+        "cancellation_granularity": "segment_boundary",
+        "supports_reference_audio": false,
+        "supports_streaming_response_bytes": true,
+        "supports_voice_design": true,
+        "max_inference_concurrency": 1,
+        "is_test_double": true,
+        "product_visible": false,
+        "production_ready": false
+      }
+    }
+  ],
+  "comparison_invariants": {
+    "test_double_can_be_product_visible": false,
+    "test_double_can_be_production_ready": false,
+    "disabled_voice_design_can_load_model": false,
+    "technical_sidecar_contract_means_product_enabled": false,
+    "t1a_executed_real_model": false
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "schema_version": "t1-b-model-install-evidence/3",
+  "status": "real_model_assets_and_lifecycle_pass_product_capability_false",
+  "production_lock_sha256": "c6491f44c87e05d3d8075a102d65c019e7b40608a977baa05366929e7684e137",
+  "inventory_sha256": "d0f173dbc661d0352825dd28a5b35a1c65d60be540badacf7ef3b1a57b0b416d",
+  "source_tree_sha256": "547f61c24427a59d802cc31dfe532e135303b6b9f71469be19a7f35acd5d4c94",
+  "model_tree_sha256": "92419b269673cd698afab06ef0e3f0b60673862c86190cc6c57ed010db9aca98",
+  "components": 3,
+  "artifacts": 29,
+  "current_validation": {
+    "test_runtime_passed": 43,
+    "test_sidecar_server_passed": 61,
+    "tests_total_passed": 104,
+    "installer_dry_run_passed": true,
+    "real_source_kind": "existing_labeled_volume",
+    "source_label_inspection_count": 2,
+    "source_mount_readonly": true,
+    "offline_artifact_verification_count": 29,
+    "source_cleanup_permitted": false,
+    "lock_nano_acquired": true,
+    "lock_nano_released": true,
+    "real_lifecycle_status": "real_pass",
+    "frozen_local_image_id": "sha256:78a2af56924f5593bc9391b9f288ffef428d3350cd6b859476e8ee29a9bc9422"
+  },
+  "download_and_publish_policy": {
+    "https_only": true,
+    "max_redirects": 3,
+    "credential_forwarding": false,
+    "fixed_huggingface_hosts_and_paths": true,
+    "final_locked_size_and_hash_required": true,
+    "max_attempts": 3,
+    "range_and_content_range_exact": true,
+    "resume_partial_rehashed": true,
+    "first_error_cancels_peers": true,
+    "staging_exact_tree_before_publish": true,
+    "same_parent_atomic_rename": true,
+    "directory_fsync": true
+  },
+  "implementation_sha256": {
+    "backend/narration/runtime.py": "e82976db4cbb011f85cc754cbe65b3779d915df139a896a077f712184a531d61",
+    "backend/narration/model_assets.py": "868a8c9d73fedaea04ffd4293e518962154efabcdbd6e623bbf351a842e853e0",
+    "backend/narration/sidecar_server.py": "4f9601b9b7dc88eb83fb80018a17d14bcf5c212029842fad4ef37b48b1d750ed",
+    "backend/narration/pawapp_runtime.py": "aa0009ed330898dbf762fea7d8952398e83bb8a4ef1e56418a4f58231795b225",
+    "scripts/tts/install_models.py": "4513337e3819ef5b4c5d08c83baa3710587f62d97c1135e74e712ebdfef58385",
+    "scripts/tts/validate_sidecar_lifecycle.py": "23305c611d115361b378a142c2e675625d2eb9fbda045c14f1570210edd4c999",
+    "tests/narration/test_runtime.py": "54cc598fbbd694e93fb8e3efce84bd654e4fb8fb937a01050f72415ad4e47915",
+    "tests/narration/test_sidecar_server.py": "b79ce8e22906a40a3072b1a4ddc3b276278f93a867c14be7993baac867e74d3b",
+    "tests/narration/test_pawapp_runtime.py": "62e6f77723d9de26f3ed22b88a2aaba5d40ab656ece9b46157d26035eb6cf144",
+    "docker/tts-sidecar/Dockerfile": "49c45505c470ea849c6f2896bbd12d19b40f0c7dd3a2d6c50f2387536b4edcc1"
+  },
+  "residual_risk": {
+    "severity": "P2",
+    "items": [
+      "DNS validation and the later HTTP connection are not socket-address pinned",
+      "a same-UID local administrator can race parent-directory state outside the dedicated asset ownership boundary",
+      "the removed protocol-1.0 container image could not be snapshotted because Docker had already removed one referenced content digest"
+    ]
+  }
+}

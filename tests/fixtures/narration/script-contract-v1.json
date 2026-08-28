@@ -1,0 +1,1230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ai-novel-world-2026.invalid/contracts/narration-script-v1.schema.json",
+  "title": "AI小说世界2026 Narration Script Contract v1",
+  "description": "Frozen T3-A wire schema. Cross-field invariants are normative in backend/narration/script_contracts.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "taxonomy_version",
+    "script_id",
+    "script_version_id",
+    "novel_id",
+    "document_id",
+    "revision_id",
+    "source_content_hash",
+    "source_length_utf16",
+    "version_number",
+    "parent_version_id",
+    "state",
+    "effective_policy",
+    "analyzer_fingerprint",
+    "rules_fingerprint",
+    "settings_fingerprint",
+    "requested_model_fingerprint",
+    "actual_model_fingerprint",
+    "anonymous_speakers",
+    "scenes",
+    "segments",
+    "issues",
+    "warning_count",
+    "blocker_count",
+    "immutable_hash",
+    "approval"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "narration-script/1"
+    },
+    "taxonomy_version": {
+      "const": "narration-review-taxonomy/1"
+    },
+    "script_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "script_version_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "novel_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "document_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "revision_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "source_content_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_length_utf16": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "version_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "parent_version_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state": {
+      "enum": [
+        "draft",
+        "analyzing",
+        "analyzed",
+        "review_required",
+        "approved",
+        "failed"
+      ]
+    },
+    "effective_policy": {
+      "enum": [
+        "blockers_only",
+        "always_review"
+      ]
+    },
+    "analyzer_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "rules_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "settings_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "requested_model_fingerprint": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "actual_model_fingerprint": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "anonymous_speakers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/anonymous_speaker"
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scene"
+      }
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "warning_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blocker_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "immutable_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "approval": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/approval"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "nullable_uuid": {
+      "anyOf": [
+        { "$ref": "#/$defs/uuid" },
+        { "type": "null" }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullable_sha256": {
+      "anyOf": [
+        { "$ref": "#/$defs/sha256" },
+        { "type": "null" }
+      ]
+    },
+    "utf16_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end_exclusive"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_exclusive": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "speaker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "character_id",
+        "anonymous_speaker_id",
+        "group_key"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "narrator",
+            "character",
+            "anonymous",
+            "group",
+            "unknown"
+          ]
+        },
+        "character_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "anonymous_speaker_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "group_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^grp1_[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "casting_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "binding_id",
+        "character_id",
+        "anonymous_speaker_id",
+        "pool_id",
+        "slot_id",
+        "profile_id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "character_binding",
+            "anonymous_binding",
+            "generic_slot",
+            "profile"
+          ]
+        },
+        "binding_id": { "$ref": "#/$defs/nullable_uuid" },
+        "character_id": { "$ref": "#/$defs/nullable_uuid" },
+        "anonymous_speaker_id": { "$ref": "#/$defs/nullable_uuid" },
+        "pool_id": { "$ref": "#/$defs/nullable_uuid" },
+        "slot_id": { "$ref": "#/$defs/nullable_uuid" },
+        "profile_id": { "$ref": "#/$defs/nullable_uuid" }
+      }
+    },
+    "casting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "candidate_targets",
+        "final_target",
+        "origin",
+        "rule_id",
+        "rule_version"
+      ],
+      "properties": {
+        "contract_version": { "const": "narration-casting-decision/1" },
+        "candidate_targets": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/casting_target" }
+        },
+        "final_target": {
+          "anyOf": [
+            { "$ref": "#/$defs/casting_target" },
+            { "type": "null" }
+          ]
+        },
+        "origin": {
+          "enum": [
+            "narrator_setting",
+            "character_binding",
+            "anonymous_binding",
+            "casting_rule",
+            "manual_override",
+            "unresolved",
+            "not_applicable"
+          ]
+        },
+        "rule_id": { "$ref": "#/$defs/nullable_uuid" },
+        "rule_version": {
+          "anyOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "override_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "kind",
+        "action_id",
+        "owner_actor_id",
+        "recorded_at",
+        "source_script_version_id",
+        "source_segment_id",
+        "source_immutable_hash",
+        "source_local_hash",
+        "source_anchor_before_hash",
+        "source_anchor_after_hash",
+        "speaker_target_hash"
+      ],
+      "properties": {
+        "contract_version": { "const": "narration-override-provenance/1" },
+        "kind": { "enum": ["manual_current", "inherited"] },
+        "action_id": { "$ref": "#/$defs/uuid" },
+        "owner_actor_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(?:Z|\\+00:00)$"
+        },
+        "source_script_version_id": { "$ref": "#/$defs/nullable_uuid" },
+        "source_segment_id": { "$ref": "#/$defs/nullable_uuid" },
+        "source_immutable_hash": { "$ref": "#/$defs/nullable_sha256" },
+        "source_local_hash": { "$ref": "#/$defs/sha256" },
+        "source_anchor_before_hash": { "$ref": "#/$defs/nullable_sha256" },
+        "source_anchor_after_hash": { "$ref": "#/$defs/nullable_sha256" },
+        "speaker_target_hash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "rule_codes",
+        "candidate_character_ids",
+        "consent_id",
+        "model_run_id",
+        "input_digest_key_id",
+        "input_digest",
+        "output_digest",
+        "override_provenance"
+      ],
+      "properties": {
+        "origin": {
+          "enum": [
+            "local_rule",
+            "cloud_assisted",
+            "manual_override",
+            "inherited_override"
+          ]
+        },
+        "rule_codes": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$"
+          }
+        },
+        "candidate_character_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/uuid" }
+        },
+        "consent_id": { "$ref": "#/$defs/nullable_uuid" },
+        "model_run_id": { "$ref": "#/$defs/nullable_uuid" },
+        "input_digest_key_id": {
+          "anyOf": [
+            { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$" },
+            { "type": "null" }
+          ]
+        },
+        "input_digest": { "$ref": "#/$defs/nullable_sha256" },
+        "output_digest": { "$ref": "#/$defs/nullable_sha256" },
+        "override_provenance": {
+          "anyOf": [
+            { "$ref": "#/$defs/override_provenance" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "anonymous_speaker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anonymous_speaker_id",
+        "stable_key_algorithm",
+        "stable_key",
+        "display_name",
+        "scope_kind",
+        "scope_id",
+        "confidence"
+      ],
+      "properties": {
+        "anonymous_speaker_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "stable_key_algorithm": {
+          "const": "anonymous-speaker-stable-key/1"
+        },
+        "stable_key": {
+          "type": "string",
+          "pattern": "^as1_[a-f0-9]{64}$"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "scope_kind": {
+          "enum": [
+            "scene",
+            "chapter",
+            "novel"
+          ]
+        },
+        "scope_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scene_id",
+        "ordinal",
+        "source_range_utf16",
+        "boundary_source",
+        "local_hash",
+        "title"
+      ],
+      "properties": {
+        "scene_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_range_utf16": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/utf16_range"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boundary_source": {
+          "enum": [
+            "document_start",
+            "markdown_heading",
+            "scene_separator",
+            "paragraph_rule",
+            "manual"
+          ]
+        },
+        "local_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "ordinal",
+        "scene_id",
+        "segment_kind",
+        "source_block_kind",
+        "paragraph_ordinal",
+        "segment_ordinal_in_block",
+        "source_block_key",
+        "source_block_hash",
+        "source_range_utf16",
+        "source_text",
+        "spoken_text",
+        "local_hash",
+        "anchor_before_hash",
+        "anchor_after_hash",
+        "inheritance_anchor_before_hash",
+        "inheritance_anchor_after_hash",
+        "speaker",
+        "casting",
+        "confidence",
+        "emotion",
+        "emotion_confidence",
+        "delivery",
+        "attribution",
+        "pause_before_ms",
+        "pause_after_ms",
+        "manual_override"
+      ],
+      "properties": {
+        "segment_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scene_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "segment_kind": {
+          "enum": [
+            "narration",
+            "dialogue",
+            "inner_monologue",
+            "message",
+            "letter",
+            "broadcast",
+            "phone",
+            "chapter_title",
+            "synthetic_pause"
+          ]
+        },
+        "source_block_kind": {
+          "enum": [
+            "paragraph",
+            "heading",
+            "message",
+            "letter",
+            "broadcast",
+            "phone",
+            "synthetic"
+          ]
+        },
+        "paragraph_ordinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "segment_ordinal_in_block": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_block_key": {
+          "type": "string",
+          "pattern": "^sb1_[a-f0-9]{64}$"
+        },
+        "source_block_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source_range_utf16": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/utf16_range"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "spoken_text": {
+          "type": "string"
+        },
+        "local_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "anchor_before_hash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "anchor_after_hash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inheritance_anchor_before_hash": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "inheritance_anchor_after_hash": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "speaker": {
+          "$ref": "#/$defs/speaker"
+        },
+        "casting": {
+          "$ref": "#/$defs/casting"
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ]
+        },
+        "emotion": {
+          "enum": [
+            "neutral",
+            "happy",
+            "sad",
+            "angry",
+            "fearful",
+            "tense"
+          ]
+        },
+        "emotion_confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ]
+        },
+        "delivery": {
+          "enum": [
+            "normal",
+            "whisper",
+            "shout",
+            "inner_monologue"
+          ]
+        },
+        "attribution": {
+          "$ref": "#/$defs/attribution"
+        },
+        "pause_before_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pause_after_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "manual_override": {
+          "type": "boolean"
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "severity",
+        "segment_id",
+        "evidence_summary",
+        "evidence_digest",
+        "taxonomy_version"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "W_SPEAKER_MEDIUM_CONFIDENCE",
+            "W_NEW_ANONYMOUS_SPEAKER",
+            "W_GENERIC_VOICE_FALLBACK",
+            "W_MANUAL_OVERRIDE_INHERITED",
+            "W_PRONUNCIATION_SOFT_FALLBACK",
+            "W_CLOUD_ASSISTED_USED",
+            "W_SCENE_BOUNDARY_MEDIUM_CONFIDENCE",
+            "B_SPEAKER_UNKNOWN",
+            "B_SPEAKER_LOW_CONFIDENCE",
+            "B_CHARACTER_ALIAS_CONFLICT",
+            "B_CHARACTER_REFERENCE_INVALID",
+            "B_ANONYMOUS_IDENTITY_CONFLICT",
+            "B_CASTING_TARGET_UNRESOLVED",
+            "B_VOICE_MISSING",
+            "B_VOICE_VERSION_UNAVAILABLE",
+            "B_VOICE_RIGHTS_UNAVAILABLE",
+            "B_PRONUNCIATION_HARD_CONFLICT",
+            "B_CLOUD_DECISION_UNAVAILABLE"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "warning",
+            "blocker"
+          ]
+        },
+        "segment_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_summary": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_digest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "taxonomy_version": {
+          "const": "narration-review-taxonomy/1"
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "request_id",
+        "actor_type",
+        "actor_id",
+        "approved_at"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "auto_no_blockers",
+            "manual_after_review"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actor_type": {
+          "enum": [
+            "owner",
+            "system",
+            "service"
+          ]
+        },
+        "actor_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(?:Z|\\+00:00)$"
+        }
+      }
+    }
+  },
+  "x-offset-contract": {
+    "unit": "utf16_code_unit",
+    "range_semantics": "half_open",
+    "surrogate_pair_boundary": "reject",
+    "synthetic_source_range": "must_be_null",
+    "source_coverage": "source-bound segment ranges and source block spans completely partition the authoritative revision without gaps, overlap, or interleaving",
+    "structural_text": "newlines and markup remain in source_text/source ranges but may be omitted from spoken_text",
+    "grapheme_cluster_boundary": "not part of the offset protocol; segmentation must avoid user-visible partial graphemes"
+  },
+  "x-id-contract": {
+    "allocation_order": "the service preallocates the server-owned script_version_id before scene/segment derivation",
+    "ids": "canonical_lowercase_uuid",
+    "authority": "server",
+    "script_id_scope": "document_revision",
+    "script_version_id_scope": "immutable_script_version",
+    "scene_id": "uuidv5(script_version_id, narration-script-id/1 canonical scene payload)",
+    "segment_id": "uuidv5(script_version_id, narration-script-id/1 canonical segment payload)",
+    "source_block_key": "sb1_<sha256>; version-scoped; never a cross-revision permanent ID",
+    "anonymous_speaker_id": "uuidv5(novel_id, anonymous-speaker-stable-key/1 stable_key)",
+    "foreign_id_policy": "script_contract_from_dict requires ScriptAuthorityContext and rejects IDs outside the server-authorized novel/script-version sets",
+    "source_mapping_policy": "script_contract_from_dict also requires the authoritative revision source text and validates all UTF-16 scene/segment/block mappings before returning"
+  },
+  "x-workflow-failure-contract": {
+    "owner": "narration_request",
+    "script_state": "failed is retained without a duplicate script failure_code column",
+    "codes": [
+      "F_ANALYZER_RUNTIME",
+      "F_MODEL_IDENTITY_MISMATCH",
+      "F_MODEL_OUTPUT_SCHEMA_INVALID",
+      "F_INPUT_FINGERPRINT_CHANGED",
+      "F_SCOPE_VIOLATION",
+      "F_CONSENT_REVOKED_BEFORE_CALL",
+      "F_ADAPTER_UNAVAILABLE"
+    ]
+  },
+  "x-immutable-hash": {
+    "meaning": "immutable script content persistence projection; approval and lifecycle audit are protected separately",
+    "algorithm": "sha256(canonical_json_bytes(persistence_projection)) without a second envelope",
+    "included": [
+      "script_id",
+      "parent_version_id",
+      "source_content_hash",
+      "settings/analyzer/rules/model fingerprints",
+      "effective_policy",
+      "taxonomy_version",
+      "ordered scenes",
+      "ordered segments with narration-casting-decision/1 and narration-segment-evidence/1",
+      "canonically sorted issue code/severity/segment/evidence_digest"
+    ],
+    "excluded": [
+      "state",
+      "approval audit",
+      "warning/blocker derived counts",
+      "version_number",
+      "wire-only source scope fields",
+      "mutable anonymous display_name/confidence",
+      "issue evidence_summary"
+    ],
+    "persistence_bridge": "exactly matches NarrationScriptVersion immutable_hash projection; delivery maps to expression; extra contract fields live in versioned casting_json/evidence_json"
+  },
+  "x-casting-invariants": {
+    "voice_version_id_forbidden": true,
+    "final_target": "must be a candidate and match the speaker; unresolved requires B_CASTING_TARGET_UNRESOLVED",
+    "origin_and_speaker": "narrator_setting, character_binding, and anonymous_binding must match narrator, character, and anonymous speaker identity respectively",
+    "manual_casting": "requires manual/inherited attribution and narration-override-provenance/1",
+    "approved": "all non-pause segments have a server-authorized resolvable final target"
+  },
+  "x-cloud-scene-boundary": "cloud_assisted is intentionally unavailable in v1 because narration_scenes has no immutable cloud-evidence field; cloud suggestions require local/manual boundary materialization",
+  "x-state-machine": {
+    "draft": [
+      "analyzing",
+      "failed"
+    ],
+    "analyzing": [
+      "analyzed",
+      "review_required",
+      "failed"
+    ],
+    "analyzed": [
+      "review_required",
+      "approved",
+      "failed"
+    ],
+    "review_required": [
+      "approved",
+      "failed"
+    ],
+    "approved": [],
+    "failed": []
+  },
+  "x-approval-invariants": {
+    "approved_is_terminal": true,
+    "blockers_must_equal_zero": true,
+    "warnings_do_not_block_default_generation": true,
+    "auto_no_blockers": "blockers_only + system|service actor",
+    "manual_after_review": "owner actor after always_review or blocker-resolution review; blockers_only requires a corrected child version",
+    "author_correction": "creates a new script version; never mutates an approved version",
+    "workflow_failures_are_not_issues": true
+  },
+  "x-speaker-shape": {
+    "narrator": "no identity id",
+    "character": "character_id only",
+    "anonymous": "anonymous_speaker_id only",
+    "group": "group_key only",
+    "unknown": "no identity id and B_SPEAKER_UNKNOWN"
+  },
+  "x-example-source-text": "夜🌙。\n“谁？”",
+  "examples": [
+    {
+      "schema_version": "narration-script/1",
+      "taxonomy_version": "narration-review-taxonomy/1",
+      "script_id": "44444444-4444-4444-8444-444444444444",
+      "script_version_id": "55555555-5555-4555-8555-555555555555",
+      "novel_id": "11111111-1111-4111-8111-111111111111",
+      "document_id": "22222222-2222-4222-8222-222222222222",
+      "revision_id": "33333333-3333-4333-8333-333333333333",
+      "source_content_hash": "ead10b1e567fea655e0b2b5bca978d06e8e1f75d3d6429b5844ea7d8adee5b9d",
+      "source_length_utf16": 9,
+      "version_number": 1,
+      "parent_version_id": null,
+      "state": "review_required",
+      "effective_policy": "blockers_only",
+      "analyzer_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rules_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "settings_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "requested_model_fingerprint": null,
+      "actual_model_fingerprint": null,
+      "anonymous_speakers": [],
+      "scenes": [
+        {
+          "scene_id": "2f695fd7-74a0-51ae-a287-8af81f3512f8",
+          "ordinal": 0,
+          "source_range_utf16": {
+            "start": 0,
+            "end_exclusive": 9
+          },
+          "boundary_source": "document_start",
+          "local_hash": "ead10b1e567fea655e0b2b5bca978d06e8e1f75d3d6429b5844ea7d8adee5b9d",
+          "title": "示例场景"
+        }
+      ],
+      "segments": [
+        {
+          "segment_id": "a60cd67b-1600-59d3-a069-1facc49e0e25",
+          "ordinal": 0,
+          "scene_id": "2f695fd7-74a0-51ae-a287-8af81f3512f8",
+          "segment_kind": "narration",
+          "source_block_kind": "paragraph",
+          "paragraph_ordinal": 0,
+          "segment_ordinal_in_block": 0,
+          "source_block_key": "sb1_1c183d555079c1b5d751a80afb2dd948f0078bf4600ca3d0d38d300dc57fd891",
+          "source_block_hash": "49b76bc72afbce2eaf9597e04809e6b4795b1405d158bca184a342f0dc9dcf6c",
+          "source_range_utf16": {
+            "start": 0,
+            "end_exclusive": 5
+          },
+          "source_text": "夜🌙。\n",
+          "spoken_text": "夜🌙。",
+          "local_hash": "49b76bc72afbce2eaf9597e04809e6b4795b1405d158bca184a342f0dc9dcf6c",
+          "anchor_before_hash": null,
+          "anchor_after_hash": "d4b9428e341a8300abd79a8bd6b0583134f809904a5799595db5b6c92691c78d",
+          "inheritance_anchor_before_hash": null,
+          "inheritance_anchor_after_hash": "d4b9428e341a8300abd79a8bd6b0583134f809904a5799595db5b6c92691c78d",
+          "speaker": {
+            "kind": "narrator",
+            "character_id": null,
+            "anonymous_speaker_id": null,
+            "group_key": null
+          },
+          "casting": {
+            "contract_version": "narration-casting-decision/1",
+            "candidate_targets": [
+              {
+                "kind": "profile",
+                "binding_id": null,
+                "character_id": null,
+                "anonymous_speaker_id": null,
+                "pool_id": null,
+                "slot_id": null,
+                "profile_id": "77777777-7777-4777-8777-777777777777"
+              }
+            ],
+            "final_target": {
+              "kind": "profile",
+              "binding_id": null,
+              "character_id": null,
+              "anonymous_speaker_id": null,
+              "pool_id": null,
+              "slot_id": null,
+              "profile_id": "77777777-7777-4777-8777-777777777777"
+            },
+            "origin": "narrator_setting",
+            "rule_id": null,
+            "rule_version": null
+          },
+          "confidence": "high",
+          "emotion": "neutral",
+          "emotion_confidence": "high",
+          "delivery": "normal",
+          "attribution": {
+            "origin": "local_rule",
+            "rule_codes": [
+              "narration.paragraph"
+            ],
+            "candidate_character_ids": [],
+            "consent_id": null,
+            "model_run_id": null,
+            "input_digest_key_id": null,
+            "input_digest": null,
+            "output_digest": null,
+            "override_provenance": null
+          },
+          "pause_before_ms": 0,
+          "pause_after_ms": 180,
+          "manual_override": false
+        },
+        {
+          "segment_id": "856d3add-b5a7-5b21-af27-872ff82ddd74",
+          "ordinal": 1,
+          "scene_id": "2f695fd7-74a0-51ae-a287-8af81f3512f8",
+          "segment_kind": "dialogue",
+          "source_block_kind": "paragraph",
+          "paragraph_ordinal": 1,
+          "segment_ordinal_in_block": 0,
+          "source_block_key": "sb1_52428aa92dc828e5691a6eb028a9f3960c71a76fbdf4f8d8b391a72eb82ca04d",
+          "source_block_hash": "d4b9428e341a8300abd79a8bd6b0583134f809904a5799595db5b6c92691c78d",
+          "source_range_utf16": {
+            "start": 5,
+            "end_exclusive": 9
+          },
+          "source_text": "“谁？”",
+          "spoken_text": "“谁？”",
+          "local_hash": "d4b9428e341a8300abd79a8bd6b0583134f809904a5799595db5b6c92691c78d",
+          "anchor_before_hash": "49b76bc72afbce2eaf9597e04809e6b4795b1405d158bca184a342f0dc9dcf6c",
+          "anchor_after_hash": null,
+          "inheritance_anchor_before_hash": "49b76bc72afbce2eaf9597e04809e6b4795b1405d158bca184a342f0dc9dcf6c",
+          "inheritance_anchor_after_hash": null,
+          "speaker": {
+            "kind": "unknown",
+            "character_id": null,
+            "anonymous_speaker_id": null,
+            "group_key": null
+          },
+          "casting": {
+            "contract_version": "narration-casting-decision/1",
+            "candidate_targets": [],
+            "final_target": null,
+            "origin": "unresolved",
+            "rule_id": null,
+            "rule_version": null
+          },
+          "confidence": "unknown",
+          "emotion": "neutral",
+          "emotion_confidence": "unknown",
+          "delivery": "normal",
+          "attribution": {
+            "origin": "local_rule",
+            "rule_codes": [
+              "dialogue.unresolved"
+            ],
+            "candidate_character_ids": [],
+            "consent_id": null,
+            "model_run_id": null,
+            "input_digest_key_id": null,
+            "input_digest": null,
+            "output_digest": null,
+            "override_provenance": null
+          },
+          "pause_before_ms": 0,
+          "pause_after_ms": 180,
+          "manual_override": false
+        },
+        {
+          "segment_id": "d130fce2-6564-56b2-841c-bfab4dc4ab18",
+          "ordinal": 2,
+          "scene_id": "2f695fd7-74a0-51ae-a287-8af81f3512f8",
+          "segment_kind": "synthetic_pause",
+          "source_block_kind": "synthetic",
+          "paragraph_ordinal": null,
+          "segment_ordinal_in_block": 0,
+          "source_block_key": "sb1_8d3932383f7fc6ec4b58847a02e88ad977d0a0e431e431eaa2085c48a6ba762e",
+          "source_block_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "source_range_utf16": null,
+          "source_text": "",
+          "spoken_text": "",
+          "local_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "anchor_before_hash": null,
+          "anchor_after_hash": null,
+          "inheritance_anchor_before_hash": null,
+          "inheritance_anchor_after_hash": null,
+          "speaker": {
+            "kind": "narrator",
+            "character_id": null,
+            "anonymous_speaker_id": null,
+            "group_key": null
+          },
+          "casting": {
+            "contract_version": "narration-casting-decision/1",
+            "candidate_targets": [],
+            "final_target": null,
+            "origin": "not_applicable",
+            "rule_id": null,
+            "rule_version": null
+          },
+          "confidence": "high",
+          "emotion": "neutral",
+          "emotion_confidence": "high",
+          "delivery": "normal",
+          "attribution": {
+            "origin": "local_rule",
+            "rule_codes": [
+              "structure.synthetic_pause"
+            ],
+            "candidate_character_ids": [],
+            "consent_id": null,
+            "model_run_id": null,
+            "input_digest_key_id": null,
+            "input_digest": null,
+            "output_digest": null,
+            "override_provenance": null
+          },
+          "pause_before_ms": 0,
+          "pause_after_ms": 400,
+          "manual_override": false
+        }
+      ],
+      "issues": [
+        {
+          "code": "B_CASTING_TARGET_UNRESOLVED",
+          "severity": "blocker",
+          "segment_id": "856d3add-b5a7-5b21-af27-872ff82ddd74",
+          "evidence_summary": "说话人未确定，无法解析最终选角目标",
+          "evidence_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "taxonomy_version": "narration-review-taxonomy/1"
+        },
+        {
+          "code": "B_SPEAKER_LOW_CONFIDENCE",
+          "severity": "blocker",
+          "segment_id": "856d3add-b5a7-5b21-af27-872ff82ddd74",
+          "evidence_summary": "置信等级为 unknown",
+          "evidence_digest": "6c1ff09db3a73dc4a854f695d20d174a848d55f2d743bab2ee1f8fc75be454f3",
+          "taxonomy_version": "narration-review-taxonomy/1"
+        },
+        {
+          "code": "B_SPEAKER_UNKNOWN",
+          "severity": "blocker",
+          "segment_id": "856d3add-b5a7-5b21-af27-872ff82ddd74",
+          "evidence_summary": "说话人无法确定",
+          "evidence_digest": "b23a6a8439c0dde5515893e7c90c1e3233b8616e634470f20dc4928bcf3609bc",
+          "taxonomy_version": "narration-review-taxonomy/1"
+        }
+      ],
+      "warning_count": 0,
+      "blocker_count": 3,
+      "immutable_hash": "125f359a4375e4ac3c7c504afff0c9bf732dd94e8360da7ded2c7f085b0ae91d",
+      "approval": null
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@ai-novel-world-2026/t4k-fixed-browser-observer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.19.0",
+  "bin": {
+    "t4k-fixed-browser-observer": "./bin/observe.mjs"
+  },
+  "engines": {
+    "node": "24.19.0"
+  },
+  "scripts": {
+    "observe": "node bin/observe.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

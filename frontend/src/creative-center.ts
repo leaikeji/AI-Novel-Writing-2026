@@ -54,6 +54,7 @@ const {
   ReloadOutlined,
   RobotOutlined,
   SearchOutlined,
+  SoundOutlined,
   StarOutlined,
   TeamOutlined,
   UploadOutlined,
@@ -147,7 +148,10 @@ function taskModelLabel(job: CreativeGenerationRecord): string {
 }
 
 
-function workbenchUrl(novelId: string, section?: "chapters" | "outline" | "roles" | "clues" | "settings"): string {
+type CreativeCenterWorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings" | "reading";
+
+
+function workbenchUrl(novelId: string, section?: CreativeCenterWorkbenchSection): string {
   rememberWorkbenchRoute(novelId);
   const query = new URLSearchParams({ novel_workbench: "1", novel_id: novelId });
   if (section && section !== "chapters") query.set("section", section);
@@ -210,7 +214,7 @@ function CenterAction(props: { icon: any; label: string; onClick: () => void }) 
 
 function NovelCard(props: {
   novel: NovelSummary;
-  onOpen: (section?: "chapters" | "outline" | "roles" | "clues") => void;
+  onOpen: (section?: CreativeCenterWorkbenchSection) => void;
   onDelete: () => void;
 }) {
   const { novel, onOpen, onDelete } = props;
@@ -218,6 +222,7 @@ function NovelCard(props: {
     [FileTextOutlined, "大纲", "outline"],
     [TeamOutlined, "角色", "roles"],
     [ClockCircleOutlined, "线索", "clues"],
+    [SoundOutlined, "朗读", "reading"],
     [DeleteOutlined, "删除", "delete"],
   ] as const;
   return h(
@@ -249,7 +254,7 @@ function NovelCard(props: {
     h("div", { className: "mb-latest-chapter" }, latestChapterTitle(novel)),
     h(
       "div",
-      { className: "mb-novel-tool-row" },
+      { className: "mb-novel-tool-row has-reading" },
       ...tools.map(([Icon, label, target]) => h(
         "button",
         {
@@ -1414,7 +1419,7 @@ export function NovelLibraryPage() {
 
   const activeNovel = novels.find((novel) => novel.id === activeNovelId) || novels[0];
 
-  const openNovel = (novelId: string, section?: "chapters" | "outline" | "roles" | "clues") => {
+  const openNovel = (novelId: string, section?: CreativeCenterWorkbenchSection) => {
     navigateNovelSurface(workbenchUrl(novelId, section));
   };
 
@@ -1462,7 +1467,7 @@ export function NovelLibraryPage() {
               null,
               h(NovelCard, {
                 novel: activeNovel,
-                onOpen: (section?: "chapters" | "outline" | "roles" | "clues") => openNovel(activeNovel.id, section),
+                onOpen: (section?: CreativeCenterWorkbenchSection) => openNovel(activeNovel.id, section),
                 onDelete: () => deleteNovel(activeNovel),
               }),
               h(

@@ -11,9 +11,11 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -32,8 +34,19 @@ class Base(DeclarativeBase):
 
 class Novel(Base):
     __tablename__ = "novels"
+    __table_args__ = (
+        UniqueConstraint("id", "owner_id", "workspace_id", name="uq_novel_local_scope"),
+        Index("ix_novels_local_scope", "owner_id", "workspace_id"),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_novel_fixed_local_scope",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, server_default=text("'29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid"))
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, server_default=text("'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid"))
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     author_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -71,7 +84,10 @@ class Novel(Base):
 
 class Volume(Base):
     __tablename__ = "volumes"
-    __table_args__ = (UniqueConstraint("novel_id", "position", name="uq_volume_position"),)
+    __table_args__ = (
+        UniqueConstraint("novel_id", "position", name="uq_volume_position"),
+        UniqueConstraint("id", "novel_id", name="uq_volume_novel_scope"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     novel_id: Mapped[UUID] = mapped_column(
@@ -93,6 +109,7 @@ class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
         UniqueConstraint("novel_id", "kind", "position", name="uq_document_position"),
+        UniqueConstraint("id", "novel_id", name="uq_document_novel_scope"),
         Index("ix_documents_novel_kind", "novel_id", "kind"),
     )
 
@@ -127,6 +144,19 @@ class DocumentRevision(Base):
     __tablename__ = "document_revisions"
     __table_args__ = (
         UniqueConstraint("document_id", "revision_number", name="uq_document_revision_number"),
+        UniqueConstraint("id", "document_id", name="uq_document_revision_document_scope"),
+        UniqueConstraint(
+            "id", "document_id", "content_hash", name="uq_document_revision_source_guard"
+        ),
+        Index(
+            "uq_document_revision_tts_snapshot",
+            "document_id",
+            "content_hash",
+            "source",
+            unique=True,
+            postgresql_where=text("source='tts_snapshot'"),
+            sqlite_where=text("source='tts_snapshot'"),
+        ),
         Index("ix_document_revisions_document_created", "document_id", "created_at"),
         Index("ix_document_revisions_restored_from", "restored_from_revision_id"),
     )
@@ -467,20 +497,152 @@ class NovelChunk(Base):
 
 class MediaAsset(Base):
     __tablename__ = "media_assets"
-    __table_args__ = (Index("ix_media_assets_novel_kind", "novel_id", "kind"),)
+    __table_args__ = (
+        UniqueConstraint("id", "owner_id", "workspace_id", name="uq_media_asset_local_scope"),
+        UniqueConstraint(
+            "id", "owner_id", "workspace_id", "novel_id",
+            name="uq_media_asset_job_scope",
+        ),
+        UniqueConstraint(
+            "storage_backend", "storage_path", name="uq_media_asset_physical_blob"
+        ),
+        ForeignKeyConstraint(
+            ["novel_id", "owner_id", "workspace_id"],
+            ["novels.id", "novels.owner_id", "novels.workspace_id"],
+            name="fk_media_asset_novel_scope",
+        ),
+        Index("ix_media_assets_novel_kind", "novel_id", "kind"),
+        Index("ix_media_assets_scope_class_state", "owner_id", "workspace_id", "asset_class", "state"),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_media_asset_fixed_local_scope",
+        ),
+        CheckConstraint(
+            "asset_class IS NULL OR asset_class IN "
+            "('source','voice_reference','preview','segment_master','segment_playback','export')",
+            name="ck_media_asset_class",
+        ),
+        CheckConstraint(
+            "(kind NOT LIKE 'narration_%' AND kind NOT LIKE 'tts_%') OR asset_class IS NOT NULL",
+            name="ck_media_asset_tts_class_required",
+        ),
+        CheckConstraint(
+            "state IN ('staging','ready','quarantined','deleting','deleted')",
+            name="ck_media_asset_state",
+        ),
+        CheckConstraint("byte_size IS NULL OR byte_size >= 0", name="ck_media_asset_byte_size"),
+        CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_media_asset_duration"),
+        CheckConstraint(
+            "octet_length(storage_path) BETWEEN 1 AND 1024",
+            name="ck_media_asset_storage_path_length",
+        ),
+        CheckConstraint(
+            "state <> 'ready' OR asset_class IS NULL OR "
+            "(byte_size IS NOT NULL AND mime_type IS NOT NULL "
+            "AND checksum_algorithm='sha256' "
+            "AND content_hash ~ '^[0-9a-f]{64}$' AND verified_at IS NOT NULL)",
+            name="ck_media_asset_ready_narration_identity",
+        ),
+        CheckConstraint(
+            "asset_class IS NULL OR storage_backend <> 'local' OR "
+            "(content_hash ~ '^[0-9a-f]{64}$' AND storage_path ~ "
+            "('^assets/' || substr(replace(id::text,'-',''),1,2) || '/' || "
+            "replace(id::text,'-','') || '/' || content_hash || "
+            "'\\.(aac|flac|m4a|mp3|ogg|opus|wav)$'))",
+            name="ck_media_asset_narration_canonical_path",
+        ),
+        CheckConstraint(
+            "state <> 'ready' OR asset_class IS NULL OR storage_backend <> 'local' OR "
+            "(CASE substring(storage_path from '\\.[^.]+$') "
+            "WHEN '.aac' THEN mime_type='audio/aac' "
+            "WHEN '.flac' THEN mime_type='audio/flac' "
+            "WHEN '.m4a' THEN mime_type='audio/mp4' "
+            "WHEN '.mp3' THEN mime_type='audio/mpeg' "
+            "WHEN '.ogg' THEN mime_type='audio/ogg' "
+            "WHEN '.opus' THEN mime_type='audio/ogg' "
+            "WHEN '.wav' THEN mime_type='audio/wav' ELSE FALSE END)",
+            name="ck_media_asset_narration_mime_path",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    novel_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, server_default=text("'29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid"))
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, server_default=text("'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid"))
+    novel_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE")
     )
     source_revision_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
     )
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    asset_class: Mapped[str | None] = mapped_column(String(32))
+    mime_type: Mapped[str | None] = mapped_column(String(120))
+    byte_size: Mapped[int | None] = mapped_column(BigInteger)
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
+    sample_rate: Mapped[int | None] = mapped_column(Integer)
+    channels: Mapped[int | None] = mapped_column(Integer)
+    storage_backend: Mapped[str] = mapped_column(String(40), nullable=False, default="local")
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="ready")
+    retention_policy: Mapped[str] = mapped_column(String(40), nullable=False, default="legacy")
+    checksum_algorithm: Mapped[str] = mapped_column(String(20), nullable=False, default="sha256")
+    validation_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gc_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    gc_marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MediaGcDeletionRecord(Base):
+    """Durable, immutable physical identity frozen before an out-of-tx unlink."""
+
+    __tablename__ = "media_gc_deletion_plans"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["asset_id", "owner_id", "workspace_id"],
+            ["media_assets.id", "media_assets.owner_id", "media_assets.workspace_id"],
+            name="fk_media_gc_plan_asset_local_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("asset_id", "generation", name="uq_media_gc_plan_generation"),
+        CheckConstraint("generation >= 0", name="ck_media_gc_plan_generation"),
+        CheckConstraint("byte_size >= 0", name="ck_media_gc_plan_byte_size"),
+        CheckConstraint(
+            "(file_present IS TRUE AND device IS NOT NULL AND inode IS NOT NULL) OR "
+            "(file_present IS FALSE AND device IS NULL AND inode IS NULL)",
+            name="ck_media_gc_plan_file_identity",
+        ),
+        CheckConstraint(
+            "octet_length(storage_path) BETWEEN 1 AND 1024",
+            name="ck_media_gc_plan_storage_path_length",
+        ),
+        CheckConstraint(
+            "reason_code IN ('staging_orphan','unreferenced_derivative_after_grace',"
+            "'recover_interrupted_delete')",
+            name="ck_media_gc_plan_reason_code",
+        ),
+    )
+
+    asset_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    storage_backend: Mapped[str] = mapped_column(String(40), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    file_present: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    device: Mapped[int | None] = mapped_column(BigInteger)
+    inode: Mapped[int | None] = mapped_column(BigInteger)
+    reason_code: Mapped[str] = mapped_column(String(96), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class NovelCreationDraft(Base):
@@ -578,6 +740,7 @@ class NovelCharacter(Base):
     __table_args__ = (
         UniqueConstraint("novel_id", "name", name="uq_novel_character_name"),
         UniqueConstraint("novel_id", "position", name="uq_novel_character_position"),
+        UniqueConstraint("id", "novel_id", name="uq_novel_character_novel_scope"),
         Index("ix_novel_characters_novel_role", "novel_id", "role_type"),
     )
 
@@ -888,6 +1051,78 @@ class CreativeGenerationJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CharacterProfileApplyBatch(Base):
+    """Immutable audit snapshot for one author-confirmed profile application."""
+
+    __tablename__ = "character_profile_apply_batches"
+    __table_args__ = (
+        UniqueConstraint(
+            "novel_id",
+            "idempotency_key",
+            name="uq_character_profile_apply_batch_idempotency",
+        ),
+        Index(
+            "ix_character_profile_apply_batch_novel_created",
+            "novel_id",
+            "created_at",
+        ),
+        CheckConstraint(
+            "state IN ('applied','restored')",
+            name="ck_character_profile_apply_batch_state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("novels.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    generation_job_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("creative_generation_jobs.id", ondelete="SET NULL"),
+    )
+    restored_from_batch_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("character_profile_apply_batches.id", ondelete="SET NULL"),
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="applied")
+    decisions_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
+    before_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+    after_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+    base_versions: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+    result_versions: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    applied_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class NovelExport(Base):
     __tablename__ = "novel_exports"
     __table_args__ = (Index("ix_novel_exports_novel_created", "novel_id", "created_at"),)
@@ -903,3 +1138,1803 @@ class NovelExport(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Narration foundation schema.  The service layer deliberately lives outside
+# this module; these rows only establish scope, immutability and reachability.
+class NarrationRequest(Base):
+    __tablename__ = "narration_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["novel_id", "owner_id", "workspace_id"],
+            ["novels.id", "novels.owner_id", "novels.workspace_id"],
+            name="fk_narration_request_novel_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["document_id", "novel_id"], ["documents.id", "documents.novel_id"],
+            name="fk_narration_request_document_scope",
+        ),
+        ForeignKeyConstraint(
+            ["source_revision_id", "document_id", "source_content_hash"],
+            ["document_revisions.id", "document_revisions.document_id", "document_revisions.content_hash"],
+            name="fk_narration_request_source_guard",
+        ),
+        ForeignKeyConstraint(
+            ["review_script_id", "document_id"],
+            ["narration_scripts.id", "narration_scripts.document_id"],
+            name="fk_narration_request_review_script_document",
+            use_alter=True,
+        ),
+        ForeignKeyConstraint(
+            ["current_review_version_id", "review_script_id"],
+            ["narration_script_versions.id", "narration_script_versions.script_id"],
+            name="fk_narration_request_current_review_version",
+            use_alter=True,
+        ),
+        UniqueConstraint("owner_id", "workspace_id", "idempotency_key", name="uq_narration_request_idempotency"),
+        UniqueConstraint("id", "allows_edition", name="uq_narration_request_edition_guard"),
+        UniqueConstraint("id", "allows_render", name="uq_narration_request_render_guard"),
+        UniqueConstraint("id", "novel_id", name="uq_narration_request_novel_guard"),
+        UniqueConstraint(
+            "id", "review_script_id", name="uq_narration_request_review_script_guard"
+        ),
+        UniqueConstraint(
+            "id", "owner_id", "workspace_id", "novel_id", "allows_render",
+            name="uq_narration_request_full_render_guard",
+        ),
+        CheckConstraint("intent IN ('analyze_only','create','update','batch')", name="ck_narration_request_intent"),
+        CheckConstraint(
+            "state IN ('created','analyzing','analyzed','review_required','queued','rendering',"
+            "'partial_ready','ready','cancel_requested','cancelled','failed')",
+            name="ck_narration_request_state",
+        ),
+        CheckConstraint("effective_policy IN ('blockers_only','always_review')", name="ck_narration_request_policy"),
+        CheckConstraint(
+            "force_review IS FALSE OR effective_policy='always_review'",
+            name="ck_narration_request_force_review_policy",
+        ),
+        CheckConstraint(
+            "(intent = 'analyze_only' AND explicit_generation_intent_at IS NULL "
+            "AND explicit_generation_actor IS NULL) OR "
+            "(intent IN ('create','update','batch') AND explicit_generation_intent_at IS NOT NULL "
+            "AND explicit_generation_actor IS NOT NULL)",
+            name="ck_narration_request_generation_intent",
+        ),
+        CheckConstraint(
+            "(intent IN ('create','update') AND document_id IS NOT NULL AND source_revision_id IS NOT NULL "
+            "AND source_content_hash IS NOT NULL) OR "
+            "(intent='analyze_only' AND ((document_id IS NOT NULL "
+            "AND source_revision_id IS NOT NULL AND source_content_hash IS NOT NULL) OR "
+            "(document_id IS NULL AND source_revision_id IS NULL AND source_content_hash IS NULL))) OR "
+            "(intent='batch' AND document_id IS NULL AND source_revision_id IS NULL "
+            "AND source_content_hash IS NULL)",
+            name="ck_narration_request_source_shape",
+        ),
+        CheckConstraint(
+            "intent <> 'analyze_only' OR state NOT IN ('queued','rendering','partial_ready','ready')",
+            name="ck_narration_request_analyze_state",
+        ),
+        CheckConstraint(
+            "source_count >= 0",
+            name="ck_narration_request_source_count",
+        ),
+        CheckConstraint(
+            "(review_script_id IS NULL AND current_review_version_id IS NULL) OR "
+            "(review_script_id IS NOT NULL AND current_review_version_id IS NOT NULL)",
+            name="ck_narration_request_review_pointer_shape",
+        ),
+        CheckConstraint(
+            "source_set_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_narration_request_source_set_hash",
+        ),
+        CheckConstraint(
+            "(document_id IS NOT NULL AND source_count=0 AND "
+            "source_set_hash='4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945') OR "
+            "(document_id IS NULL AND source_count>0)",
+            name="ck_narration_request_source_manifest_shape",
+        ),
+        Index("ix_narration_requests_scope_state", "owner_id", "workspace_id", "novel_id", "state"),
+        Index(
+            "ix_narration_requests_review_pointer",
+            "review_script_id",
+            "current_review_version_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    document_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    intent: Mapped[str] = mapped_column(String(20), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_revision_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    source_content_hash: Mapped[str | None] = mapped_column(String(64))
+    review_script_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    current_review_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_set_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    sources_sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settings_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    force_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    effective_policy: Mapped[str] = mapped_column(String(24), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="created")
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    allows_edition: Mapped[bool] = mapped_column(Boolean, Computed("intent <> 'analyze_only'", persisted=True))
+    allows_render: Mapped[bool] = mapped_column(Boolean, Computed("intent <> 'analyze_only'", persisted=True))
+    explicit_generation_intent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    explicit_generation_actor: Mapped[str | None] = mapped_column(String(120))
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_actor: Mapped[str | None] = mapped_column(String(120))
+    cancel_reason_code: Mapped[str | None] = mapped_column(String(96))
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NarrationRequestSource(Base):
+    __tablename__ = "narration_request_sources"
+    __table_args__ = (
+        ForeignKeyConstraint(["request_id", "novel_id"], ["narration_requests.id", "narration_requests.novel_id"], name="fk_narration_request_source_request_scope", ondelete="CASCADE"),
+        ForeignKeyConstraint(["document_id", "novel_id"], ["documents.id", "documents.novel_id"], name="fk_narration_request_source_document"),
+        ForeignKeyConstraint(
+            ["revision_id", "document_id", "content_hash"],
+            ["document_revisions.id", "document_revisions.document_id", "document_revisions.content_hash"],
+            name="fk_narration_request_source_revision",
+        ),
+        UniqueConstraint("request_id", "document_id", name="uq_narration_request_source_document"),
+        UniqueConstraint("request_id", "position", name="uq_narration_request_source_position"),
+        CheckConstraint("position >= 0", name="ck_narration_request_source_position"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    revision_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class NovelNarrationSettings(Base):
+    __tablename__ = "novel_narration_settings"
+    __table_args__ = (
+        UniqueConstraint("novel_id", name="uq_novel_narration_settings_novel"),
+        CheckConstraint("script_review_policy IN ('blockers_only','always_review')", name="ck_narration_settings_review_policy"),
+        CheckConstraint("analysis_mode IN ('local_rules_only','cloud_assisted')", name="ck_narration_settings_analysis_mode"),
+        CheckConstraint(
+            "(narrator_profile_id IS NULL AND narrator_version_id IS NULL) OR "
+            "(narrator_profile_id IS NOT NULL AND narrator_version_id IS NOT NULL)",
+            name="ck_narration_settings_narrator_shape",
+        ),
+        ForeignKeyConstraint(["narrator_version_id", "narrator_profile_id"], ["voice_profile_versions.id", "voice_profile_versions.profile_id"], name="fk_narration_settings_narrator_version", ondelete="RESTRICT"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
+    narrator_profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    narrator_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    script_review_policy: Mapped[str] = mapped_column(String(24), nullable=False, default="blockers_only")
+    analysis_mode: Mapped[str] = mapped_column(String(24), nullable=False, default="local_rules_only")
+    settings_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationSettingsSnapshot(Base):
+    __tablename__ = "narration_settings_snapshots"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "workspace_id", "fingerprint", name="uq_narration_settings_snapshot_fingerprint"),
+        UniqueConstraint(
+            "id", "owner_id", "workspace_id", "novel_id",
+            name="uq_narration_settings_snapshot_edition_guard",
+        ),
+        ForeignKeyConstraint(["novel_id", "owner_id", "workspace_id"], ["novels.id", "novels.owner_id", "novels.workspace_id"], name="fk_narration_settings_snapshot_novel_scope"),
+        CheckConstraint(
+            "taxonomy_version = 'narration-review-taxonomy/1'",
+            name="ck_narration_settings_snapshot_taxonomy_version",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT"), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    taxonomy_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationScopeOverride(Base):
+    __tablename__ = "narration_scope_overrides"
+    __table_args__ = (
+        UniqueConstraint("novel_id", "scope_kind", "scope_id", name="uq_narration_scope_override"),
+        CheckConstraint("scope_kind IN ('volume','chapter')", name="ck_narration_scope_override_kind"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
+    scope_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    settings_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+
+
+class NarrationCloudConsent(Base):
+    __tablename__ = "narration_cloud_consents"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT"), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(80), nullable=False)
+    data_scope: Mapped[str] = mapped_column(String(120), nullable=False)
+    notice_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_id: Mapped[str | None] = mapped_column(String(160))
+    model_id: Mapped[str | None] = mapped_column(String(160))
+    confirmed_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class VoiceRightsRecord(Base):
+    __tablename__ = "voice_rights_records"
+    __table_args__ = (
+        ForeignKeyConstraint(["novel_id", "owner_id", "workspace_id"], ["novels.id", "novels.owner_id", "novels.workspace_id"], name="fk_voice_rights_record_novel_scope"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT"))
+    source_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_identifier: Mapped[str] = mapped_column(String(240), nullable=False)
+    notice_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(120), nullable=False)
+    commercial_use: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    redistribution: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    voice_cloning: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    subject_consent_reference: Mapped[str | None] = mapped_column(String(240))
+    confirmed_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    risk_flags_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class VoiceRightsEvent(Base):
+    __tablename__ = "voice_rights_events"
+    __table_args__ = (
+        UniqueConstraint("rights_record_id", "event_key", name="uq_voice_rights_event_key"),
+        CheckConstraint("event_type IN ('confirmed','revoked','expired','review_blocked')", name="ck_voice_rights_event_type"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    rights_record_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_rights_records.id", ondelete="RESTRICT"), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(96))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class VoiceProfile(Base):
+    __tablename__ = "voice_profiles"
+    __table_args__ = (
+        UniqueConstraint("id", "owner_id", "workspace_id", name="uq_voice_profile_local_scope"),
+        ForeignKeyConstraint(["novel_id", "owner_id", "workspace_id"], ["novels.id", "novels.owner_id", "novels.workspace_id"], name="fk_voice_profile_novel_scope"),
+        Index("ix_voice_profiles_scope_novel", "owner_id", "workspace_id", "novel_id", "status"),
+        CheckConstraint("status IN ('draft','active','archived','unavailable')", name="ck_voice_profile_status"),
+        ForeignKeyConstraint(["current_version_id", "id"], ["voice_profile_versions.id", "voice_profile_versions.profile_id"], name="fk_voice_profile_current_version", ondelete="RESTRICT"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT"))
+    name: Mapped[str] = mapped_column(String(240), nullable=False)
+    current_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class VoiceProfileVersion(Base):
+    __tablename__ = "voice_profile_versions"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "version_number", name="uq_voice_profile_version_number"),
+        UniqueConstraint("id", "profile_id", name="uq_voice_profile_version_profile_guard"),
+        UniqueConstraint("owner_id", "workspace_id", "fingerprint", name="uq_voice_profile_version_fingerprint"),
+        CheckConstraint("source_type IN ('preset','uploaded','generated')", name="ck_voice_profile_version_source_type"),
+        CheckConstraint("state IN ('draft','preview_ready','locked','unavailable','deleted')", name="ck_voice_profile_version_state"),
+        CheckConstraint(
+            "quality_state IN ('pending','accepted','rejected')",
+            name="ck_voice_profile_version_quality_state",
+        ),
+        CheckConstraint(
+            "state <> 'locked' OR (quality_state = 'accepted' AND locked_actor IS NOT NULL AND locked_at IS NOT NULL)",
+            name="ck_voice_profile_version_locked_shape",
+        ),
+        CheckConstraint(
+            "source_type <> 'uploaded' OR reference_asset_id IS NOT NULL",
+            name="ck_voice_profile_version_uploaded_reference",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    profile_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"), nullable=False)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    provider_id: Mapped[str | None] = mapped_column(String(160))
+    model_id: Mapped[str | None] = mapped_column(String(160))
+    model_revision: Mapped[str | None] = mapped_column(String(160))
+    preset_key: Mapped[str | None] = mapped_column(String(160))
+    reference_asset_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"))
+    preview_asset_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="SET NULL"))
+    rights_record_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_rights_records.id", ondelete="RESTRICT"), nullable=False)
+    description_digest_key_id: Mapped[str | None] = mapped_column(String(80))
+    description_digest: Mapped[str | None] = mapped_column(String(64))
+    language: Mapped[str] = mapped_column(String(40), nullable=False, default="zh-CN")
+    seed: Mapped[int | None] = mapped_column(BigInteger)
+    parameters_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    quality_state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    locked_actor: Mapped[str | None] = mapped_column(String(120))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class VoiceActionReceipt(Base):
+    """Durable cross-process idempotency receipt for product voice actions."""
+
+    __tablename__ = "voice_action_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "workspace_id",
+            "operation",
+            "idempotency_key",
+            name="uq_voice_action_receipt_idempotency",
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "workspace_id",
+            "operation",
+            "resource_id",
+            name="uq_voice_action_receipt_resource",
+        ),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_voice_action_receipt_fixed_local_scope",
+        ),
+        CheckConstraint(
+            "operation ~ '^[a-z][a-z0-9_]{2,47}$'",
+            name="ck_voice_action_receipt_operation",
+        ),
+        CheckConstraint(
+            "idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$'",
+            name="ck_voice_action_receipt_idempotency_key",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_voice_action_receipt_request_hash",
+        ),
+        CheckConstraint(
+            "state IN ('reserved','completed')",
+            name="ck_voice_action_receipt_state",
+        ),
+        CheckConstraint(
+            "(state='reserved' AND completed_at IS NULL) OR "
+            "(state='completed' AND completed_at IS NOT NULL "
+            "AND completed_at >= reserved_at)",
+            name="ck_voice_action_receipt_lifecycle",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        nullable=False,
+        server_default=text("'29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid"),
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        nullable=False,
+        server_default=text("'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid"),
+    )
+    operation: Mapped[str] = mapped_column(String(48), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="reserved")
+    reserved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class VoiceReferenceAssetLink(Base):
+    """Immutable provenance from an uploaded original to a normalized reference."""
+
+    __tablename__ = "voice_reference_asset_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["voice_version_id", "profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_voice_reference_link_version_profile",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "voice_version_id", name="uq_voice_reference_link_version"
+        ),
+        Index(
+            "ix_voice_reference_links_scope_profile",
+            "owner_id",
+            "workspace_id",
+            "novel_id",
+            "profile_id",
+        ),
+        Index("ix_voice_reference_links_source_asset", "source_asset_id"),
+        Index("ix_voice_reference_links_reference_asset", "reference_asset_id"),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_voice_reference_link_fixed_local_scope",
+        ),
+        CheckConstraint(
+            "normalization_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_voice_reference_link_normalization_fingerprint",
+        ),
+        CheckConstraint(
+            "validation_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_voice_reference_link_validation_fingerprint",
+        ),
+        CheckConstraint(
+            "source_asset_id <> reference_asset_id",
+            name="ck_voice_reference_link_distinct_assets",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT")
+    )
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"), nullable=False
+    )
+    voice_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    rights_record_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("voice_rights_records.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_asset_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"), nullable=False
+    )
+    reference_asset_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"), nullable=False
+    )
+    normalization_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    validation_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class VoicePreview(Base):
+    """Private, expiring Nano preview execution and publication record."""
+
+    __tablename__ = "voice_previews"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_voice_preview_version_profile",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("job_id", name="uq_voice_preview_job"),
+        Index(
+            "ix_voice_previews_scope_status",
+            "owner_id",
+            "workspace_id",
+            "novel_id",
+            "status",
+        ),
+        Index("ix_voice_previews_expiry", "expires_at", "status"),
+        Index("ix_voice_previews_reference_asset", "reference_asset_id"),
+        Index("ix_voice_previews_result_asset", "result_asset_id"),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_voice_preview_fixed_local_scope",
+        ),
+        CheckConstraint(
+            "status IN ('queued','running','ready','failed','cancelled')",
+            name="ck_voice_preview_status",
+        ),
+        CheckConstraint(
+            "preview_text_digest_key_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$' "
+            "AND preview_text_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_voice_preview_text_digest",
+        ),
+        CheckConstraint(
+            "model_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND reference_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND parameters_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_voice_preview_fingerprints",
+        ),
+        CheckConstraint(
+            "preview_text IS NULL OR "
+            "(char_length(preview_text) BETWEEN 1 AND 500 AND btrim(preview_text) <> '')",
+            name="ck_voice_preview_private_text_bounds",
+        ),
+        CheckConstraint(
+            "(status='queued' AND preview_text IS NOT NULL AND started_at IS NULL "
+            "AND completed_at IS NULL AND result_asset_id IS NULL "
+            "AND expires_at IS NULL AND failure_code IS NULL) OR "
+            "(status='running' AND preview_text IS NOT NULL AND started_at IS NOT NULL "
+            "AND completed_at IS NULL AND result_asset_id IS NULL "
+            "AND expires_at IS NULL AND failure_code IS NULL) OR "
+            "(status='ready' AND preview_text IS NULL AND completed_at IS NOT NULL "
+            "AND result_asset_id IS NOT NULL AND expires_at IS NOT NULL "
+            "AND expires_at > completed_at AND failure_code IS NULL) OR "
+            "(status='failed' AND preview_text IS NULL AND completed_at IS NOT NULL "
+            "AND result_asset_id IS NULL AND expires_at IS NULL "
+            "AND failure_code IS NOT NULL AND btrim(failure_code) <> '') OR "
+            "(status='cancelled' AND preview_text IS NULL AND completed_at IS NOT NULL "
+            "AND result_asset_id IS NULL AND expires_at IS NULL AND failure_code IS NULL)",
+            name="ck_voice_preview_lifecycle_shape",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT")
+    )
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"), nullable=False
+    )
+    version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    rights_record_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("voice_rights_records.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    job_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("background_jobs.id", ondelete="RESTRICT"), nullable=False
+    )
+    reference_asset_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT")
+    )
+    result_asset_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT")
+    )
+    preview_text: Mapped[str | None] = mapped_column(Text)
+    preview_text_digest_key_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    preview_text_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    reference_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    parameters_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CharacterAlias(Base):
+    __tablename__ = "character_aliases"
+    __table_args__ = (
+        ForeignKeyConstraint(["character_id", "novel_id"], ["novel_characters.id", "novel_characters.novel_id"], name="fk_character_alias_character_scope", ondelete="CASCADE"),
+        UniqueConstraint("character_id", "normalized_alias", name="uq_character_alias_character_value"),
+        Index("ix_character_aliases_novel_normalized", "novel_id", "normalized_alias", "lifecycle_state"),
+        CheckConstraint("lifecycle_state IN ('active','conflicted','archived')", name="ck_character_alias_lifecycle"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    alias: Mapped[str] = mapped_column(String(240), nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(String(240), nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    lifecycle_state: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CharacterVoiceBinding(Base):
+    __tablename__ = "character_voice_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(["character_id", "novel_id"], ["novel_characters.id", "novel_characters.novel_id"], name="fk_character_voice_binding_character", ondelete="CASCADE"),
+        ForeignKeyConstraint(["voice_version_id", "profile_id"], ["voice_profile_versions.id", "voice_profile_versions.profile_id"], name="fk_character_voice_binding_version"),
+        UniqueConstraint("character_id", name="uq_character_voice_binding_character"),
+        CheckConstraint("binding_policy IN ('dedicated','inherited','unset')", name="ck_character_voice_binding_policy"),
+        CheckConstraint(
+            "(binding_policy='unset' AND profile_id IS NULL AND voice_version_id IS NULL) OR "
+            "(binding_policy IN ('dedicated','inherited') AND profile_id IS NOT NULL AND voice_version_id IS NOT NULL)",
+            name="ck_character_voice_binding_shape",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"))
+    voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    binding_policy: Mapped[str] = mapped_column(String(20), nullable=False, default="unset")
+    language: Mapped[str] = mapped_column(String(40), nullable=False, default="zh-CN")
+    parameters_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GenericVoicePool(Base):
+    __tablename__ = "generic_voice_pools"
+    __table_args__ = (UniqueConstraint("novel_id", "name", "version_number", name="uq_generic_voice_pool_version"),)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    attributes_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class GenericVoiceSlot(Base):
+    __tablename__ = "generic_voice_slots"
+    __table_args__ = (
+        UniqueConstraint("pool_id", "position", name="uq_generic_voice_slot_position"),
+        UniqueConstraint("pool_id", "slot_key", name="uq_generic_voice_slot_key"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    pool_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("generic_voice_pools.id", ondelete="CASCADE"), nullable=False)
+    slot_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    voice_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profile_versions.id", ondelete="RESTRICT"), nullable=False)
+    labels_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class VoiceCastingRule(Base):
+    __tablename__ = "voice_casting_rules"
+    __table_args__ = (UniqueConstraint("novel_id", "priority", "version_number", name="uq_voice_casting_rule_priority"),)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    condition_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    target_pool_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("generic_voice_pools.id", ondelete="RESTRICT"))
+    target_slot_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("generic_voice_slots.id", ondelete="RESTRICT"))
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AnonymousSpeaker(Base):
+    __tablename__ = "anonymous_speakers"
+    __table_args__ = (
+        UniqueConstraint("novel_id", "stable_key_algorithm", "stable_key", name="uq_anonymous_speaker_stable_key"),
+        CheckConstraint("scope_kind IN ('scene','chapter','novel')", name="ck_anonymous_speaker_scope_kind"),
+        CheckConstraint("confidence IN ('high','medium','low','unknown')", name="ck_anonymous_speaker_confidence"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
+    stable_key_algorithm: Mapped[str] = mapped_column(String(120), nullable=False)
+    stable_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    scope_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    inferred_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    confidence: Mapped[str] = mapped_column(String(16), nullable=False)
+    slot_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("generic_voice_slots.id", ondelete="SET NULL"))
+    voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profile_versions.id", ondelete="RESTRICT"))
+    promoted_character_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novel_characters.id", ondelete="SET NULL"))
+    lifecycle_state: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
+
+
+class PronunciationProfile(Base):
+    __tablename__ = "pronunciation_profiles"
+    __table_args__ = (
+        UniqueConstraint("novel_id", "version_number", name="uq_pronunciation_profile_version"),
+        UniqueConstraint("novel_id", "fingerprint", name="uq_pronunciation_profile_fingerprint"),
+        UniqueConstraint("id", "novel_id", name="uq_pronunciation_profile_edition_guard"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PronunciationEntry(Base):
+    __tablename__ = "pronunciation_entries"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "scope_kind", "scope_id", "normalized_source", "priority", name="uq_pronunciation_entry_match"),
+        CheckConstraint("scope_kind IN ('novel','volume','chapter')", name="ck_pronunciation_entry_scope_kind"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    profile_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("pronunciation_profiles.id", ondelete="CASCADE"), nullable=False)
+    scope_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_source: Mapped[str] = mapped_column(Text, nullable=False)
+    spoken_text: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str] = mapped_column(String(40), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+
+
+class NarrationScript(Base):
+    __tablename__ = "narration_scripts"
+    __table_args__ = (
+        ForeignKeyConstraint(["document_id", "novel_id"], ["documents.id", "documents.novel_id"], name="fk_narration_script_document_scope"),
+        ForeignKeyConstraint(["revision_id", "document_id", "content_hash"], ["document_revisions.id", "document_revisions.document_id", "document_revisions.content_hash"], name="fk_narration_script_revision_guard"),
+        UniqueConstraint("document_id", "revision_id", name="uq_narration_script_revision"),
+        UniqueConstraint("id", "document_id", name="uq_narration_script_document_guard"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    revision_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationScriptVersion(Base):
+    __tablename__ = "narration_script_versions"
+    __table_args__ = (
+        UniqueConstraint("script_id", "version_number", name="uq_narration_script_version_number"),
+        UniqueConstraint("script_id", "id", name="uq_narration_script_version_script_guard"),
+        UniqueConstraint("id", "is_approved", name="uq_narration_script_version_approved_guard"),
+        UniqueConstraint("script_id", "idempotency_key", name="uq_narration_script_version_idempotency"),
+        ForeignKeyConstraint(
+            ["script_id", "parent_version_id"],
+            ["narration_script_versions.script_id", "narration_script_versions.id"],
+            name="fk_narration_script_version_parent_same_script",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(["approval_request_id", "approval_request_allows_edition"], ["narration_requests.id", "narration_requests.allows_edition"], name="fk_narration_script_version_approval_request"),
+        CheckConstraint("state IN ('draft','analyzing','analyzed','review_required','approved','failed')", name="ck_narration_script_version_state"),
+        CheckConstraint("approval_kind IS NULL OR approval_kind IN ('auto_no_blockers','manual_after_review')", name="ck_narration_script_version_approval_kind"),
+        CheckConstraint("effective_policy IN ('blockers_only','always_review')", name="ck_narration_script_version_policy"),
+        CheckConstraint("blocker_count >= 0 AND warning_count >= 0", name="ck_narration_script_version_counts"),
+        CheckConstraint(
+            "state <> 'approved' OR (blocker_count = 0 AND approval_kind IS NOT NULL AND approved_at IS NOT NULL "
+            "AND approved_actor_type IS NOT NULL AND approved_actor_id IS NOT NULL "
+            "AND approval_request_id IS NOT NULL AND approval_request_allows_edition IS TRUE)",
+            name="ck_narration_script_version_approved_shape",
+        ),
+        CheckConstraint(
+            "taxonomy_version = 'narration-review-taxonomy/1'",
+            name="ck_narration_script_version_taxonomy_version",
+        ),
+        CheckConstraint(
+            "approval_kind <> 'auto_no_blockers' OR (effective_policy = 'blockers_only' AND approval_request_id IS NOT NULL AND approval_request_allows_edition IS TRUE)",
+            name="ck_narration_script_version_auto_policy",
+        ),
+        CheckConstraint(
+            "approval_kind <> 'manual_after_review' OR (approved_actor_type = 'owner' AND approved_actor_id IS NOT NULL)",
+            name="ck_narration_script_version_manual_actor",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    script_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_scripts.id", ondelete="CASCADE"), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    is_approved: Mapped[bool] = mapped_column(Boolean, Computed("state = 'approved'", persisted=True))
+    analyzer_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    rules_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    settings_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_model_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    actual_model_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    taxonomy_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    immutable_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    warning_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blocker_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    approval_kind: Mapped[str | None] = mapped_column(String(32))
+    approval_request_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    approval_request_allows_edition: Mapped[bool | None] = mapped_column(Boolean)
+    effective_policy: Mapped[str] = mapped_column(String(24), nullable=False)
+    approved_actor_type: Mapped[str | None] = mapped_column(String(24))
+    approved_actor_id: Mapped[str | None] = mapped_column(String(120))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationScene(Base):
+    __tablename__ = "narration_scenes"
+    __table_args__ = (UniqueConstraint("script_version_id", "ordinal", name="uq_narration_scene_ordinal"), UniqueConstraint("id", "script_version_id", name="uq_narration_scene_version_guard"))
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    script_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_script_versions.id", ondelete="CASCADE"), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_start: Mapped[int | None] = mapped_column(Integer)
+    source_end: Mapped[int | None] = mapped_column(Integer)
+    boundary_source: Mapped[str] = mapped_column(String(40), nullable=False)
+    local_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(240))
+
+
+class NarrationSegment(Base):
+    __tablename__ = "narration_segments"
+    __table_args__ = (
+        ForeignKeyConstraint(["scene_id", "script_version_id"], ["narration_scenes.id", "narration_scenes.script_version_id"], name="fk_narration_segment_scene_guard"),
+        UniqueConstraint("script_version_id", "ordinal", name="uq_narration_segment_ordinal"),
+        UniqueConstraint("id", "script_version_id", name="uq_narration_segment_version_guard"),
+        CheckConstraint("speaker_kind IN ('narrator','character','anonymous','group','unknown')", name="ck_narration_segment_speaker_kind"),
+        CheckConstraint("confidence IN ('high','medium','low','unknown')", name="ck_narration_segment_confidence"),
+        CheckConstraint(
+            "(source_start_utf16 IS NULL AND source_end_utf16 IS NULL) OR "
+            "(source_start_utf16 IS NOT NULL AND source_end_utf16 IS NOT NULL "
+            "AND source_start_utf16 >= 0 AND source_end_utf16 >= source_start_utf16)",
+            name="ck_narration_segment_source_range",
+        ),
+        CheckConstraint("ordinal >= 0 AND pause_before_ms >= 0 AND pause_after_ms >= 0", name="ck_narration_segment_nonnegative"),
+        CheckConstraint(
+            "(speaker_kind='character' AND character_id IS NOT NULL AND anonymous_speaker_id IS NULL) OR "
+            "(speaker_kind='anonymous' AND anonymous_speaker_id IS NOT NULL AND character_id IS NULL) OR "
+            "(speaker_kind IN ('narrator','group','unknown') AND character_id IS NULL AND anonymous_speaker_id IS NULL)",
+            name="ck_narration_segment_speaker_shape",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    script_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_script_versions.id", ondelete="CASCADE"), nullable=False)
+    scene_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    segment_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    paragraph_ordinal: Mapped[int | None] = mapped_column(Integer)
+    source_block_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_start_utf16: Mapped[int | None] = mapped_column(Integer)
+    source_end_utf16: Mapped[int | None] = mapped_column(Integer)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    spoken_text: Mapped[str] = mapped_column(Text, nullable=False)
+    local_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    anchor_before_hash: Mapped[str | None] = mapped_column(String(64))
+    anchor_after_hash: Mapped[str | None] = mapped_column(String(64))
+    speaker_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    character_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novel_characters.id", ondelete="RESTRICT"))
+    anonymous_speaker_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("anonymous_speakers.id", ondelete="RESTRICT"))
+    casting_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    evidence_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    confidence: Mapped[str] = mapped_column(String(16), nullable=False)
+    emotion: Mapped[str | None] = mapped_column(String(24))
+    expression: Mapped[str | None] = mapped_column(String(24))
+    pause_before_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pause_after_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    manual_override: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class NarrationScriptIssue(Base):
+    __tablename__ = "narration_script_issues"
+    __table_args__ = (
+        ForeignKeyConstraint(["segment_id", "script_version_id"], ["narration_segments.id", "narration_segments.script_version_id"], name="fk_narration_issue_segment_guard"),
+        CheckConstraint("severity IN ('warning','blocker')", name="ck_narration_issue_severity"),
+        CheckConstraint("taxonomy_version = 'narration-review-taxonomy/1'", name="ck_narration_issue_taxonomy_version"),
+        CheckConstraint(
+            "(severity='warning' AND code IN ('W_SPEAKER_MEDIUM_CONFIDENCE','W_NEW_ANONYMOUS_SPEAKER','W_GENERIC_VOICE_FALLBACK','W_MANUAL_OVERRIDE_INHERITED','W_PRONUNCIATION_SOFT_FALLBACK','W_CLOUD_ASSISTED_USED','W_SCENE_BOUNDARY_MEDIUM_CONFIDENCE')) OR "
+            "(severity='blocker' AND code IN ('B_SPEAKER_UNKNOWN','B_SPEAKER_LOW_CONFIDENCE','B_CHARACTER_ALIAS_CONFLICT','B_CHARACTER_REFERENCE_INVALID','B_ANONYMOUS_IDENTITY_CONFLICT','B_CASTING_TARGET_UNRESOLVED','B_VOICE_MISSING','B_VOICE_VERSION_UNAVAILABLE','B_VOICE_RIGHTS_UNAVAILABLE','B_PRONUNCIATION_HARD_CONFLICT','B_CLOUD_DECISION_UNAVAILABLE'))",
+            name="ck_narration_issue_taxonomy_code",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    script_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_script_versions.id", ondelete="CASCADE"), nullable=False)
+    segment_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    taxonomy_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(96), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    evidence_summary: Mapped[str | None] = mapped_column(String(500))
+    evidence_digest: Mapped[str | None] = mapped_column(String(64))
+
+
+class NarrationScriptReviewActionRecord(Base):
+    """Immutable idempotency and provenance ledger for an owner review action."""
+
+    __tablename__ = "narration_script_review_actions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            [
+                "request_id",
+                "owner_id",
+                "workspace_id",
+                "novel_id",
+                "request_allows_render",
+            ],
+            [
+                "narration_requests.id",
+                "narration_requests.owner_id",
+                "narration_requests.workspace_id",
+                "narration_requests.novel_id",
+                "narration_requests.allows_render",
+            ],
+            name="fk_narration_review_action_request_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["script_id", "parent_version_id"],
+            ["narration_script_versions.script_id", "narration_script_versions.id"],
+            name="fk_narration_review_action_parent_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["script_id", "result_version_id"],
+            ["narration_script_versions.script_id", "narration_script_versions.id"],
+            name="fk_narration_review_action_result_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["request_id", "script_id"],
+            ["narration_requests.id", "narration_requests.review_script_id"],
+            name="fk_narration_review_action_request_script",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["result_edition_id", "request_id"],
+            ["narration_editions.id", "narration_editions.request_id"],
+            name="fk_narration_review_action_result_edition",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        ForeignKeyConstraint(
+            ["result_edition_id", "result_version_id"],
+            ["narration_editions.id", "narration_editions.script_version_id"],
+            name="fk_narration_review_action_edition_version",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "workspace_id",
+            "idempotency_key",
+            name="uq_narration_review_action_idempotency",
+        ),
+        UniqueConstraint(
+            "request_id",
+            "request_version_after",
+            name="uq_narration_review_action_request_version",
+        ),
+        CheckConstraint(
+            "action_kind IN ('patch_segment','reanalyze_segments','approve')",
+            name="ck_narration_review_action_kind",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_narration_review_action_request_hash",
+        ),
+        CheckConstraint(
+            "request_allows_render IS TRUE",
+            name="ck_narration_review_action_generation_request",
+        ),
+        CheckConstraint(
+            "request_version_before >= 1 AND "
+            "request_version_after = request_version_before + 1",
+            name="ck_narration_review_action_request_versions",
+        ),
+        CheckConstraint(
+            "actor_type = 'owner' AND length(btrim(actor_id)) > 0",
+            name="ck_narration_review_action_owner_actor",
+        ),
+        CheckConstraint(
+            "length(btrim(idempotency_key)) > 0",
+            name="ck_narration_review_action_idempotency_key",
+        ),
+        CheckConstraint(
+            "(action_kind = 'approve' AND result_version_id = parent_version_id "
+            "AND result_edition_id IS NOT NULL) OR "
+            "(action_kind IN ('patch_segment','reanalyze_segments') "
+            "AND result_version_id <> parent_version_id "
+            "AND result_edition_id IS NULL)",
+            name="ck_narration_review_action_result_shape",
+        ),
+        Index(
+            "ix_narration_review_actions_request_created",
+            "request_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_narration_review_actions_parent",
+            "script_id",
+            "parent_version_id",
+        ),
+        Index(
+            "ix_narration_review_actions_result",
+            "script_id",
+            "result_version_id",
+        ),
+        Index("ix_narration_review_actions_edition", "result_edition_id"),
+        Index(
+            "uq_narration_review_action_approve_request",
+            "request_id",
+            unique=True,
+            postgresql_where=text("action_kind = 'approve'"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    request_allows_render: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    script_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    parent_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    result_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    result_edition_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    action_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_version_before: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    request_version_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actor_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class BackgroundResourceClassPolicy(Base):
+    """Server-owned registry for schedulable resource classes.
+
+    Rows are installed by migrations.  API/tool payloads may name a job kind,
+    but they cannot invent a resource class or publication-fence policy.
+    """
+
+    __tablename__ = "background_resource_class_policies"
+    __table_args__ = (
+        CheckConstraint("max_concurrency > 0", name="ck_background_resource_policy_slots"),
+        CheckConstraint("version > 0", name="ck_background_resource_policy_version"),
+        CheckConstraint(
+            "requires_publish_fence IS FALSE OR exact_resource_key IS NOT NULL",
+            name="ck_background_resource_policy_fence_key",
+        ),
+    )
+
+    resource_class: Mapped[str] = mapped_column(String(80), primary_key=True)
+    requires_publish_fence: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    exact_resource_key: Mapped[str | None] = mapped_column(String(160), unique=True)
+    max_concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    created_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BackgroundResourceClassSlot(Base):
+    __tablename__ = "background_resource_class_slots"
+    __table_args__ = (
+        UniqueConstraint("resource_key", name="uq_background_resource_slot_key"),
+        CheckConstraint("slot_number >= 0", name="ck_background_resource_slot_number"),
+    )
+
+    resource_class: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("background_resource_class_policies.resource_class", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    slot_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resource_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BackgroundJobKindPolicy(Base):
+    __tablename__ = "background_job_kind_policies"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="ck_background_job_kind_policy_version"),
+    )
+
+    job_kind: Mapped[str] = mapped_column(String(80), primary_key=True)
+    resource_class: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("background_resource_class_policies.resource_class", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    created_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BackgroundExecutorEpoch(Base):
+    __tablename__ = "background_executor_epochs"
+    __table_args__ = (
+        UniqueConstraint(
+            "executor_key", "generation", name="uq_background_executor_epoch_generation"
+        ),
+        Index(
+            "uq_background_executor_epoch_active",
+            "executor_key",
+            unique=True,
+            postgresql_where=text("state='active'"),
+        ),
+        CheckConstraint("generation > 0", name="ck_background_executor_epoch_generation"),
+        CheckConstraint(
+            "state IN ('active','revoked')", name="ck_background_executor_epoch_state"
+        ),
+        CheckConstraint(
+            "(state='active' AND revoked_at IS NULL AND revoked_actor IS NULL "
+            "AND revoked_reason_code IS NULL) OR "
+            "(state='revoked' AND revoked_at IS NOT NULL AND revoked_actor IS NOT NULL "
+            "AND revoked_reason_code IS NOT NULL)",
+            name="ck_background_executor_epoch_lifecycle",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    executor_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    activated_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_actor: Mapped[str | None] = mapped_column(String(120))
+    revoked_reason_code: Mapped[str | None] = mapped_column(String(96))
+
+
+class BackgroundJob(Base):
+    __tablename__ = "background_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "owner_id", "workspace_id", "novel_id", "request_allows_render"],
+            ["narration_requests.id", "narration_requests.owner_id", "narration_requests.workspace_id", "narration_requests.novel_id", "narration_requests.allows_render"],
+            name="fk_background_job_request_render_guard",
+        ),
+        ForeignKeyConstraint(["novel_id", "owner_id", "workspace_id"], ["novels.id", "novels.owner_id", "novels.workspace_id"], name="fk_background_job_novel_scope"),
+        UniqueConstraint(
+            "id", "owner_id", "workspace_id", "novel_id",
+            name="uq_background_job_media_scope",
+        ),
+        UniqueConstraint(
+            "id", "owner_id", "workspace_id",
+            name="uq_background_job_command_scope",
+        ),
+        UniqueConstraint(
+            "id", "owner_id", "workspace_id", "novel_id", "request_id",
+            name="uq_background_job_publication_scope",
+        ),
+        UniqueConstraint("owner_id", "workspace_id", "idempotency_key", name="uq_background_job_idempotency"),
+        CheckConstraint("state IN ('queued','running','retry_wait','succeeded','failed','dead_letter','cancel_requested','cancelled')", name="ck_background_job_state"),
+        CheckConstraint(
+            "job_kind NOT IN ('narration.segment_render','narration.export') OR "
+            "(request_id IS NOT NULL AND novel_id IS NOT NULL AND request_allows_render IS TRUE)",
+            name="ck_background_job_render_guard",
+        ),
+        CheckConstraint("attempt_count >= 0 AND max_attempts > 0", name="ck_background_job_attempts"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"))
+    request_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    request_allows_render: Mapped[bool | None] = mapped_column(Boolean)
+    job_kind: Mapped[str] = mapped_column(String(80), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    resource_class: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("background_resource_class_policies.resource_class", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    base_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    interactive_priority: Mapped[int | None] = mapped_column(Integer)
+    interactive_priority_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="queued")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_actor: Mapped[str | None] = mapped_column(String(120))
+    cancel_reason_code: Mapped[str | None] = mapped_column(String(96))
+    progress_current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ActiveJobAsset(Base):
+    """Persistent asset reachability for non-terminal background jobs.
+
+    Rows are append-only apart from the one-way ``released_at`` transition.
+    A terminal job must have released every row in the same transaction.
+    """
+
+    __tablename__ = "active_job_assets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_id", "owner_id", "workspace_id", "novel_id"],
+            ["background_jobs.id", "background_jobs.owner_id", "background_jobs.workspace_id", "background_jobs.novel_id"],
+            name="fk_active_job_asset_job_scope",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["asset_id", "owner_id", "workspace_id", "novel_id"],
+            ["media_assets.id", "media_assets.owner_id", "media_assets.workspace_id", "media_assets.novel_id"],
+            name="fk_active_job_asset_media_scope",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        CheckConstraint(
+            "role IN ('input','working','output','checkpoint')",
+            name="ck_active_job_asset_role",
+        ),
+        CheckConstraint(
+            "released_at IS NULL OR released_at >= acquired_at",
+            name="ck_active_job_asset_lifecycle",
+        ),
+        Index("ix_active_job_assets_unreleased", "asset_id", "released_at"),
+    )
+
+    job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    asset_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    role: Mapped[str] = mapped_column(String(24), nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BackgroundManualRetryCommand(Base):
+    """Immutable, idempotent authorisation for one manual retry attempt."""
+
+    __tablename__ = "background_manual_retry_commands"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_id", "owner_id", "workspace_id"],
+            ["background_jobs.id", "background_jobs.owner_id", "background_jobs.workspace_id"],
+            name="fk_background_manual_retry_job_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "owner_id", "workspace_id", "idempotency_key",
+            name="uq_background_manual_retry_idempotency",
+        ),
+        UniqueConstraint(
+            "claimed_attempt_id", name="uq_background_manual_retry_claimed_attempt"
+        ),
+        Index(
+            "uq_background_manual_retry_pending_job",
+            "job_id",
+            unique=True,
+            postgresql_where=text("state='pending'"),
+        ),
+        CheckConstraint(
+            "state IN ('pending','claimed','cancelled')",
+            name="ck_background_manual_retry_state",
+        ),
+        CheckConstraint(
+            "(state='pending' AND claimed_attempt_id IS NULL AND claimed_at IS NULL "
+            "AND cancelled_at IS NULL AND cancelled_actor IS NULL "
+            "AND cancelled_reason_code IS NULL) OR "
+            "(state='claimed' AND claimed_attempt_id IS NOT NULL AND claimed_at IS NOT NULL "
+            "AND cancelled_at IS NULL AND cancelled_actor IS NULL "
+            "AND cancelled_reason_code IS NULL) OR "
+            "(state='cancelled' AND claimed_attempt_id IS NULL AND claimed_at IS NULL "
+            "AND cancelled_at IS NOT NULL AND cancelled_actor IS NOT NULL "
+            "AND cancelled_reason_code IS NOT NULL)",
+            name="ck_background_manual_retry_lifecycle",
+        ),
+        CheckConstraint(
+            "trim(idempotency_key) <> '' AND trim(actor) <> '' AND trim(reason) <> ''",
+            name="ck_background_manual_retry_audit_text",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    reason: Mapped[str] = mapped_column(String(240), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    claimed_attempt_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(
+            "background_job_attempts.id",
+            name="fk_background_manual_retry_claimed_attempt",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_actor: Mapped[str | None] = mapped_column(String(120))
+    cancelled_reason_code: Mapped[str | None] = mapped_column(String(96))
+
+
+class BackgroundJobAttempt(Base):
+    __tablename__ = "background_job_attempts"
+    __table_args__ = (
+        UniqueConstraint("job_id", "attempt_number", name="uq_background_job_attempt_number"),
+        CheckConstraint("retry_kind IN ('initial','automatic','manual')", name="ck_background_job_attempt_retry_kind"),
+        CheckConstraint("error_classification IS NULL OR error_classification IN ('retryable','non_retryable','cancelled','security_failure')", name="ck_background_job_attempt_error_class"),
+        CheckConstraint("attempt_number > 0 AND lease_generation > 0", name="ck_background_job_attempt_positive"),
+        UniqueConstraint(
+            "manual_retry_command_id",
+            name="uq_background_job_attempt_manual_retry_command",
+        ),
+        UniqueConstraint(
+            "resource_key", "resource_lease_generation",
+            name="uq_background_job_attempt_resource_generation",
+        ),
+        CheckConstraint(
+            "(retry_kind='manual' AND manual_retry_command_id IS NOT NULL "
+            "AND manual_actor IS NOT NULL AND manual_reason IS NOT NULL) OR "
+            "(retry_kind IN ('initial','automatic') AND manual_retry_command_id IS NULL "
+            "AND manual_actor IS NULL AND manual_reason IS NULL)",
+            name="ck_background_job_attempt_manual_shape",
+        ),
+        CheckConstraint(
+            "resource_lease_generation > 0",
+            name="ck_background_job_attempt_resource_generation",
+        ),
+        CheckConstraint(
+            "(completed_at IS NULL AND error_classification IS NULL "
+            "AND error_code IS NULL AND actual_result_digest IS NULL) OR "
+            "(completed_at IS NOT NULL AND ((actual_result_digest ~ '^[0-9a-f]{64}$' "
+            "AND error_classification IS NULL AND error_code IS NULL) OR "
+            "(actual_result_digest IS NULL AND error_classification IS NOT NULL "
+            "AND error_code IS NOT NULL)))",
+            name="ck_background_job_attempt_completion_shape",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("background_jobs.id", ondelete="CASCADE"), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    retry_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    manual_retry_command_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(
+            "background_manual_retry_commands.id",
+            name="fk_background_job_attempt_manual_retry_command",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+    manual_actor: Mapped[str | None] = mapped_column(String(120))
+    manual_reason: Mapped[str | None] = mapped_column(String(240))
+    executor_epoch_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(
+            "background_executor_epochs.id",
+            name="fk_background_job_attempt_executor_epoch",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    resource_key: Mapped[str] = mapped_column(
+        String(160),
+        ForeignKey(
+            "background_resource_class_slots.resource_key",
+            name="fk_background_job_attempt_resource_slot",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    resource_lease_token: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    resource_lease_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    lease_owner: Mapped[str] = mapped_column(String(160), nullable=False)
+    lease_token: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    lease_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_classification: Mapped[str | None] = mapped_column(String(24))
+    error_code: Mapped[str | None] = mapped_column(String(96))
+    actual_result_digest: Mapped[str | None] = mapped_column(String(64))
+
+
+class BackgroundResourceLock(Base):
+    __tablename__ = "background_resource_locks"
+    resource_key: Mapped[str] = mapped_column(
+        String(160),
+        ForeignKey(
+            "background_resource_class_slots.resource_key",
+            name="fk_background_resource_lock_slot",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    lease_owner: Mapped[str] = mapped_column(String(160), nullable=False)
+    lease_token: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    lease_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ModelRunRecord(Base):
+    __tablename__ = "model_run_records"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", name="uq_model_run_attempt"),
+        CheckConstraint(
+            "result_classification IN "
+            "('success','retryable_failure','non_retryable_failure','cancelled','security_failure')",
+            name="ck_model_run_result_classification",
+        ),
+        CheckConstraint(
+            "output_digest IS NULL OR output_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_model_run_output_digest_sha256",
+        ),
+        CheckConstraint(
+            "result_classification <> 'success' OR "
+            "(actual_model_id IS NOT NULL AND model_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND output_digest IS NOT NULL AND duration_ms IS NOT NULL AND duration_ms >= 0)",
+            name="ck_model_run_success_shape",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    attempt_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("background_job_attempts.id", ondelete="RESTRICT"), nullable=False)
+    requested_provider_id: Mapped[str | None] = mapped_column(String(160))
+    requested_model_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    requested_revision: Mapped[str | None] = mapped_column(String(160))
+    actual_provider_id: Mapped[str | None] = mapped_column(String(160))
+    actual_model_id: Mapped[str | None] = mapped_column(String(160))
+    actual_revision: Mapped[str | None] = mapped_column(String(160))
+    model_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    parameters_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_digest_key_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    output_digest: Mapped[str | None] = mapped_column(String(64))
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
+    provider_request_id: Mapped[str | None] = mapped_column(String(240))
+    result_classification: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationEdition(Base):
+    __tablename__ = "narration_editions"
+    __table_args__ = (
+        ForeignKeyConstraint(["request_id", "request_allows_edition"], ["narration_requests.id", "narration_requests.allows_edition"], name="fk_narration_edition_request_guard"),
+        ForeignKeyConstraint(["script_version_id", "script_is_approved"], ["narration_script_versions.id", "narration_script_versions.is_approved"], name="fk_narration_edition_approved_guard"),
+        ForeignKeyConstraint(["novel_id", "owner_id", "workspace_id"], ["novels.id", "novels.owner_id", "novels.workspace_id"], name="fk_narration_edition_novel_scope"),
+        ForeignKeyConstraint(
+            ["settings_snapshot_id", "owner_id", "workspace_id", "novel_id"],
+            ["narration_settings_snapshots.id", "narration_settings_snapshots.owner_id", "narration_settings_snapshots.workspace_id", "narration_settings_snapshots.novel_id"],
+            name="fk_narration_edition_settings_scope",
+        ),
+        ForeignKeyConstraint(
+            ["pronunciation_profile_id", "novel_id"],
+            ["pronunciation_profiles.id", "pronunciation_profiles.novel_id"],
+            name="fk_narration_edition_pronunciation_scope",
+        ),
+        UniqueConstraint("owner_id", "workspace_id", "edition_fingerprint", name="uq_narration_edition_fingerprint"),
+        UniqueConstraint("id", "script_version_id", name="uq_narration_edition_script_guard"),
+        UniqueConstraint("id", "request_id", name="uq_narration_edition_request_guard"),
+        CheckConstraint("request_allows_edition IS TRUE AND script_is_approved IS TRUE", name="ck_narration_edition_guards"),
+        CheckConstraint("context_mode = 'independent_segment'", name="ck_narration_edition_context_mode"),
+        CheckConstraint(
+            "state IN ('created','rendering','partial_ready','ready','unavailable')",
+            name="ck_narration_edition_state",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT"), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False)
+    request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    request_allows_edition: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    script_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    script_is_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    settings_snapshot_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_settings_snapshots.id", ondelete="RESTRICT"), nullable=False)
+    pronunciation_profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("pronunciation_profiles.id", ondelete="RESTRICT"))
+    tts_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    tokenizer_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalizer_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    postprocess_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    context_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="independent_segment")
+    buffer_policy_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    edition_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="created")
+    unavailable_reason: Mapped[str | None] = mapped_column(String(96))
+    created_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationEditionSegment(Base):
+    __tablename__ = "narration_edition_segments"
+    __table_args__ = (
+        ForeignKeyConstraint(["edition_id", "script_version_id"], ["narration_editions.id", "narration_editions.script_version_id"], name="fk_narration_edition_segment_edition"),
+        ForeignKeyConstraint(["segment_id", "script_version_id"], ["narration_segments.id", "narration_segments.script_version_id"], name="fk_narration_edition_segment_script"),
+        ForeignKeyConstraint(["voice_version_id", "profile_id"], ["voice_profile_versions.id", "voice_profile_versions.profile_id"], name="fk_narration_edition_segment_voice_guard"),
+        UniqueConstraint("edition_id", "ordinal", name="uq_narration_edition_segment_ordinal"),
+        UniqueConstraint("id", "edition_id", name="uq_narration_edition_segment_edition_guard"),
+        CheckConstraint(
+            "render_state IN ('pending','queued','rendering','ready','failed','cancelled','quarantined')",
+            name="ck_narration_edition_segment_state",
+        ),
+        CheckConstraint(
+            "render_digest_key_id IS NULL OR "
+            "render_digest_key_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$'",
+            name="ck_narration_edition_segment_digest_key_id",
+        ),
+        CheckConstraint("ordinal >= 0 AND gap_after_ms >= 0", name="ck_narration_edition_segment_nonnegative"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    edition_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    script_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    segment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    slot_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("generic_voice_slots.id", ondelete="RESTRICT"))
+    profile_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"), nullable=False)
+    voice_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profile_versions.id", ondelete="RESTRICT"), nullable=False)
+    resolution_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    render_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # NULL identifies legacy narration-render-input/1 rows.  Every new v2
+    # Edition freezes the HMAC key identity used for its private spoken-text
+    # cache digest so later key rotation cannot make the Edition unverifiable.
+    render_digest_key_id: Mapped[str | None] = mapped_column(String(80))
+    render_state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    gap_after_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+
+
+class NarrationSegmentRender(Base):
+    __tablename__ = "narration_segment_renders"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "owner_id", "workspace_id", "novel_id", "request_allows_render"],
+            ["narration_requests.id", "narration_requests.owner_id", "narration_requests.workspace_id", "narration_requests.novel_id", "narration_requests.allows_render"],
+            name="fk_narration_segment_render_request_guard",
+        ),
+        ForeignKeyConstraint(["novel_id", "owner_id", "workspace_id"], ["novels.id", "novels.owner_id", "novels.workspace_id"], name="fk_narration_segment_render_novel_scope"),
+        ForeignKeyConstraint(
+            ["source_job_id", "owner_id", "workspace_id", "novel_id", "request_id"],
+            ["background_jobs.id", "background_jobs.owner_id", "background_jobs.workspace_id", "background_jobs.novel_id", "background_jobs.request_id"],
+            name="fk_narration_segment_render_source_job_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("owner_id", "workspace_id", "render_fingerprint", name="uq_narration_segment_render_fingerprint"),
+        UniqueConstraint("source_job_id", name="uq_narration_segment_render_source_job"),
+        CheckConstraint("request_allows_render IS TRUE", name="ck_narration_segment_render_request_guard"),
+        CheckConstraint("state IN ('pending','rendering','ready','failed','cancelled','quarantined')", name="ck_narration_segment_render_state"),
+        CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_narration_segment_render_duration"),
+        CheckConstraint(
+            "state <> 'ready' OR (duration_ms IS NOT NULL AND ready_at IS NOT NULL)",
+            name="ck_narration_segment_render_ready_shape",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    request_allows_render: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    render_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    canonical_input_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    voice_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profile_versions.id", ondelete="RESTRICT"), nullable=False)
+    model_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    postprocess_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    source_job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
+    audio_validation_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NarrationRenderAsset(Base):
+    __tablename__ = "narration_render_assets"
+    __table_args__ = (
+        UniqueConstraint("render_id", "role", name="uq_narration_render_asset_role"),
+        UniqueConstraint("asset_id", name="uq_narration_render_asset_asset"),
+        CheckConstraint("role IN ('master','playback')", name="ck_narration_render_asset_role"),
+        CheckConstraint(
+            "actual_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_narration_render_asset_sha256",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    render_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_segment_renders.id", ondelete="CASCADE"), nullable=False)
+    asset_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    actual_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NarrationExport(Base):
+    __tablename__ = "narration_exports"
+    __table_args__ = (
+        ForeignKeyConstraint(["request_id", "request_allows_render"], ["narration_requests.id", "narration_requests.allows_render"], name="fk_narration_export_request_guard"),
+        ForeignKeyConstraint(
+            ["edition_id", "request_id"], ["narration_editions.id", "narration_editions.request_id"],
+            name="fk_narration_export_edition_request_guard",
+        ),
+        UniqueConstraint("edition_id", "export_fingerprint", name="uq_narration_export_fingerprint"),
+        UniqueConstraint("asset_id", name="uq_narration_export_asset"),
+        CheckConstraint("request_allows_render IS TRUE", name="ck_narration_export_request_guard"),
+        CheckConstraint("state IN ('staging','ready','failed','cancelled','quarantined')", name="ck_narration_export_state"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    edition_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_editions.id", ondelete="RESTRICT"), nullable=False)
+    request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    request_allows_render: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    export_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    asset_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationManifest(Base):
+    __tablename__ = "narration_manifests"
+    __table_args__ = (
+        UniqueConstraint("edition_id", "manifest_revision", name="uq_narration_manifest_revision"),
+        UniqueConstraint("id", "edition_id", "manifest_revision", name="uq_narration_manifest_state_guard"),
+        UniqueConstraint("id", "edition_id", name="uq_narration_manifest_edition_guard"),
+        CheckConstraint("manifest_revision >= 1", name="ck_narration_manifest_revision"),
+        CheckConstraint("schema_version = 'narration-manifest/2.0'", name="ck_narration_manifest_schema"),
+        CheckConstraint("status IN ('partial_ready','ready','unavailable')", name="ck_narration_manifest_status"),
+        CheckConstraint("ready_prefix_count >= 0 AND total_duration_ms >= 0", name="ck_narration_manifest_nonnegative"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    edition_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_editions.id", ondelete="RESTRICT"), nullable=False)
+    manifest_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    canonical_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    etag_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    ready_prefix_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    ready_ranges_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    total_duration_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NarrationManifestSegment(Base):
+    __tablename__ = "narration_manifest_segments"
+    __table_args__ = (
+        UniqueConstraint("manifest_id", "ordinal", name="uq_narration_manifest_segment_ordinal"),
+        ForeignKeyConstraint(["edition_segment_id", "edition_id"], ["narration_edition_segments.id", "narration_edition_segments.edition_id"], name="fk_narration_manifest_segment_edition"),
+        ForeignKeyConstraint(["manifest_id", "edition_id"], ["narration_manifests.id", "narration_manifests.edition_id"], name="fk_narration_manifest_segment_manifest_edition"),
+        CheckConstraint(
+            "render_state IN ('pending','rendering','ready','failed','unavailable')",
+            name="ck_narration_manifest_segment_state",
+        ),
+        CheckConstraint(
+            "ordinal >= 0 AND gap_after_ms >= 0 AND (duration_ms IS NULL OR duration_ms >= 0)",
+            name="ck_narration_manifest_segment_nonnegative",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    manifest_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_manifests.id", ondelete="CASCADE"), nullable=False)
+    edition_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    edition_segment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    render_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_segment_renders.id", ondelete="RESTRICT"))
+    render_state: Mapped[str] = mapped_column(String(24), nullable=False)
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
+    gap_after_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class NarrationEditionState(Base):
+    __tablename__ = "narration_edition_state"
+    __table_args__ = (
+        ForeignKeyConstraint(["current_manifest_id", "edition_id", "current_manifest_revision"], ["narration_manifests.id", "narration_manifests.edition_id", "narration_manifests.manifest_revision"], name="fk_narration_edition_state_manifest"),
+        UniqueConstraint("edition_id", name="uq_narration_edition_state_edition"),
+        CheckConstraint(
+            "(current_manifest_id IS NULL AND current_manifest_revision IS NULL) OR "
+            "(current_manifest_id IS NOT NULL AND current_manifest_revision IS NOT NULL)",
+            name="ck_narration_edition_state_manifest_shape",
+        ),
+    )
+    edition_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_editions.id", ondelete="CASCADE"), primary_key=True)
+    current_manifest_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    current_manifest_revision: Mapped[int | None] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    updated_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocumentNarrationState(Base):
+    __tablename__ = "document_narration_state"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "workspace_id", "document_id", name="uq_document_narration_state_document"),
+        ForeignKeyConstraint(["current_script_version_id", "script_id"], ["narration_script_versions.id", "narration_script_versions.script_id"], name="fk_document_narration_state_script_version"),
+        ForeignKeyConstraint(["script_id", "document_id"], ["narration_scripts.id", "narration_scripts.document_id"], name="fk_document_narration_state_script"),
+        CheckConstraint(
+            "(script_id IS NULL AND current_script_version_id IS NULL) OR "
+            "(script_id IS NOT NULL AND current_script_version_id IS NOT NULL)",
+            name="ck_document_narration_state_script_shape",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    script_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    current_script_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    current_edition_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_editions.id", ondelete="RESTRICT"))
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    switched_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    switched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NarrationPlaybackProgress(Base):
+    __tablename__ = "narration_playback_progress"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "workspace_id", "profile_id", "edition_id", name="uq_narration_playback_progress"),
+        ForeignKeyConstraint(["edition_id", "manifest_revision"], ["narration_manifests.edition_id", "narration_manifests.manifest_revision"], name="fk_narration_playback_manifest_revision"),
+        ForeignKeyConstraint(["edition_segment_id", "edition_id"], ["narration_edition_segments.id", "narration_edition_segments.edition_id"], name="fk_narration_playback_edition_segment"),
+        CheckConstraint(
+            "offset_ms >= 0 AND last_legal_start_ordinal >= 0 "
+            "AND playback_rate_millis BETWEEN 250 AND 4000",
+            name="ck_narration_playback_nonnegative",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    profile_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    edition_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_editions.id", ondelete="CASCADE"), nullable=False)
+    manifest_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    edition_segment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_edition_segments.id", ondelete="CASCADE"), nullable=False)
+    offset_ms: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    last_legal_start_ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    playback_rate_millis: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class VoiceDeletionRequest(Base):
+    __tablename__ = "voice_deletion_requests"
+    __table_args__ = (
+        CheckConstraint("state IN ('requested','live_deleting','live_deleted_backup_pending','completed','failed')", name="ck_voice_deletion_request_state"),
+        CheckConstraint(
+            "command IN ('delete_uploaded_original_only','true_delete_private_voice')",
+            name="ck_voice_deletion_request_command",
+        ),
+        CheckConstraint(
+            "state NOT IN ('live_deleting','live_deleted_backup_pending','completed') OR "
+            "(confirmed_actor IS NOT NULL AND confirmed_at IS NOT NULL)",
+            name="ck_voice_deletion_confirmation_shape",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    voice_profile_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"), nullable=False)
+    command: Mapped[str] = mapped_column(String(48), nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="requested")
+    impact_digest_key_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    impact_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    confirmed_actor: Mapped[str | None] = mapped_column(String(120))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+
+
+class AssetTombstone(Base):
+    __tablename__ = "asset_tombstones"
+    __table_args__ = (
+        UniqueConstraint(
+            "original_asset_id", name="uq_asset_tombstone_original_asset"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    original_asset_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    deletion_request_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_deletion_requests.id", ondelete="RESTRICT"))
+    digest_key_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(96), nullable=False)
+    deleted_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

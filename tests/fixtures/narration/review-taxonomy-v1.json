@@ -1,0 +1,153 @@
+{
+  "schema_version": "narration-review-taxonomy/1",
+  "confidence_levels": [
+    "high",
+    "medium",
+    "low",
+    "unknown"
+  ],
+  "confidence_policy": {
+    "high": "continue_to_deterministic_scope_candidate_voice_and_rights_rules",
+    "medium": "warning",
+    "low": "blocker",
+    "unknown": "blocker"
+  },
+  "unknown_code_policy": {
+    "review_issue": "reject_fail_closed",
+    "workflow_failure": "reject_fail_closed",
+    "model_supplied_severity": "ignore_and_recompute_server_side",
+    "version": "reject_for_write; explicit_read_only_compatibility_requires_a_new_gate"
+  },
+  "warnings": [
+    {
+      "code": "W_SPEAKER_MEDIUM_CONFIDENCE",
+      "severity": "warning",
+      "meaning": "speaker candidate is unique and in scope, but evidence is only medium confidence"
+    },
+    {
+      "code": "W_NEW_ANONYMOUS_SPEAKER",
+      "severity": "warning",
+      "meaning": "a stable anonymous-speaker candidate is new and has no detected conflict"
+    },
+    {
+      "code": "W_GENERIC_VOICE_FALLBACK",
+      "severity": "warning",
+      "meaning": "a permitted generic voice is used instead of a dedicated voice"
+    },
+    {
+      "code": "W_MANUAL_OVERRIDE_INHERITED",
+      "severity": "warning",
+      "meaning": "a manual override is inherited from a uniquely verified earlier segment"
+    },
+    {
+      "code": "W_PRONUNCIATION_SOFT_FALLBACK",
+      "severity": "warning",
+      "meaning": "no dedicated pronunciation entry matched and a verified normalizer rule is used"
+    },
+    {
+      "code": "W_CLOUD_ASSISTED_USED",
+      "severity": "warning",
+      "meaning": "at least one uncertain window used explicitly authorized cloud assistance"
+    },
+    {
+      "code": "W_SCENE_BOUNDARY_MEDIUM_CONFIDENCE",
+      "severity": "warning",
+      "meaning": "scene boundary confidence is medium but speaker and voice resolution remain complete"
+    }
+  ],
+  "blockers": [
+    {
+      "code": "B_SPEAKER_UNKNOWN",
+      "severity": "blocker",
+      "meaning": "speaker kind or identity cannot be determined"
+    },
+    {
+      "code": "B_SPEAKER_LOW_CONFIDENCE",
+      "severity": "blocker",
+      "meaning": "speaker confidence is low or unknown"
+    },
+    {
+      "code": "B_CHARACTER_ALIAS_CONFLICT",
+      "severity": "blocker",
+      "meaning": "one normalized alias resolves to multiple active characters"
+    },
+    {
+      "code": "B_CHARACTER_REFERENCE_INVALID",
+      "severity": "blocker",
+      "meaning": "candidate character is outside the allowed set or target novel scope"
+    },
+    {
+      "code": "B_ANONYMOUS_IDENTITY_CONFLICT",
+      "severity": "blocker",
+      "meaning": "anonymous identity stable key, merge, or scope conflicts"
+    },
+    {
+      "code": "B_CASTING_TARGET_UNRESOLVED",
+      "severity": "blocker",
+      "meaning": "speaker is known but the casting target is not unique"
+    },
+    {
+      "code": "B_VOICE_MISSING",
+      "severity": "blocker",
+      "meaning": "no usable final voice profile, version, or slot exists"
+    },
+    {
+      "code": "B_VOICE_VERSION_UNAVAILABLE",
+      "severity": "blocker",
+      "meaning": "voice version is not locked, is unavailable, or is outside scope"
+    },
+    {
+      "code": "B_VOICE_RIGHTS_UNAVAILABLE",
+      "severity": "blocker",
+      "meaning": "rights record is missing, revoked, expired, or review-blocked"
+    },
+    {
+      "code": "B_PRONUNCIATION_HARD_CONFLICT",
+      "severity": "blocker",
+      "meaning": "equal-priority manual pronunciation rules conflict or yield invalid spoken text"
+    },
+    {
+      "code": "B_CLOUD_DECISION_UNAVAILABLE",
+      "severity": "blocker",
+      "meaning": "cloud assistance is required but valid consent is unavailable and local evidence is insufficient"
+    }
+  ],
+  "workflow_failures": [
+    {
+      "code": "F_ANALYZER_RUNTIME",
+      "kind": "workflow_failure"
+    },
+    {
+      "code": "F_MODEL_IDENTITY_MISMATCH",
+      "kind": "workflow_failure"
+    },
+    {
+      "code": "F_MODEL_OUTPUT_SCHEMA_INVALID",
+      "kind": "workflow_failure"
+    },
+    {
+      "code": "F_INPUT_FINGERPRINT_CHANGED",
+      "kind": "workflow_failure"
+    },
+    {
+      "code": "F_SCOPE_VIOLATION",
+      "kind": "workflow_failure"
+    },
+    {
+      "code": "F_CONSENT_REVOKED_BEFORE_CALL",
+      "kind": "workflow_failure"
+    },
+    {
+      "code": "F_ADAPTER_UNAVAILABLE",
+      "kind": "workflow_failure"
+    }
+  ],
+  "approval_invariants": {
+    "warnings_block_default_generation": false,
+    "any_blocker_blocks_approval_and_edition": true,
+    "workflow_failure_can_be_persisted_as_issue": false,
+    "server_recomputes_severity_and_counts": true,
+    "published_code_meaning_is_immutable": true,
+    "meaning_changes_require_new_taxonomy_version": true
+  }
+}

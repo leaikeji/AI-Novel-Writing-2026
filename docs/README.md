@@ -22,6 +22,7 @@
 - [QwenPaw 原生 UI 盘点与小说工作台 UI 基线](./开发文档/12-QwenPaw原生UI盘点与小说工作台UI基线.md)
 - [新项目初始化与兼容性验证](./开发文档/13-新项目初始化与兼容性验证.md)
 - [阶段 3–6 实现与验收记录](./开发文档/14-阶段3至6实现与验收.md)
+- [MOSS-TTS-Nano 多角色智能朗读产品与技术设计](./开发文档/18-MOSS-TTS-Nano多角色智能朗读产品与技术设计.md)：个人、本地、单用户的中文多角色网页朗读有限核心已通过 [T4-GATE](./开发文档/证据/MOSS-TTS-Nano施工/T4-GATE.md)。正式产品只展示 6 个中文 `official_preset`；固定 18 项 manifest 仅作底层兼容和技术溯源。旁白 `onnx.Zhiming`、林晚 `onnx.Xiaoyu`、沈川 `onnx.Junhao` 使用官方 prompt codes 与默认参数，canonical run `bb03ccaf-4681-490a-b987-84bec9199b3b` 已通过真实 Nano、播放器、CodeMirror、跳播、Range/ETag、四桌面、30 分钟、作者完整章节听检、resume／teardown。最终 tree `7a57471ebe9e…20bde13` 已部署到 `0024` product mode；旧 24 槽前端页面已安全移除。自动 supplement 未形成完整 envelope，作为非阻断证据缺口保留；云端辅助说话人识别和高级匿名选角继续 `HOLD`。
 - [ADR-0001：QwenPaw 原生聊天组合与小说 Agent 作用域](./开发文档/ADR/ADR-0001-QwenPaw原生聊天组合与小说Agent作用域.md)
 - [ADR-0002：MVP-0 正文版本与崩溃恢复](./开发文档/ADR/ADR-0002-MVP0正文版本与崩溃恢复.md)
 - [QwenPaw 原生助手与创作上下文联动施工计划 V2](./开发文档/20-QwenPaw原生助手与创作上下文联动施工计划.md)

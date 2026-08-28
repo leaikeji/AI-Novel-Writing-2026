@@ -1,0 +1,234 @@
+{
+  "cases": [
+    {
+      "case_id": "narration-neutral",
+      "control": {
+        "cancel_acknowledged": false,
+        "cancel_requested": false,
+        "crash_recovered": false,
+        "failure_injected": false,
+        "ready_segments_reused": 0
+      },
+      "diagnostics": {
+        "covers": [
+          "narration"
+        ],
+        "expected_terminal_status": "passed",
+        "independent_segments_joined_without_crossfade": false,
+        "runner_invocations": 1,
+        "runner_stderr_sha256": [],
+        "segment_mode": "single"
+      },
+      "error": null,
+      "input": {
+        "combined_sha256": "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f",
+        "reference_profile_id": null,
+        "reference_sha256": null,
+        "text_ids": [
+          "txt-narrator"
+        ],
+        "text_sha256": [
+          "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f"
+        ]
+      },
+      "listening": {
+        "defects": {
+          "abnormal_pauses": null,
+          "clipping_or_noise": null,
+          "loudness_inconsistent": null,
+          "missing_text": null,
+          "repeated_text": null,
+          "seam_artifacts": null,
+          "voice_drift": null
+        },
+        "notes_redacted": null,
+        "reviewer": null,
+        "skipped_reason": null,
+        "status": "pending",
+        "verdict": "not_reviewed"
+      },
+      "output": {
+        "audio_inspection": {
+          "bits_per_sample": 16,
+          "channels": 2,
+          "clipped_sample_count": 22,
+          "clipped_sample_ratio": 3.8711e-05,
+          "codec": "pcm_sle",
+          "container": "WAV",
+          "dc_offset_normalized": 2.8235e-05,
+          "duration_seconds": 5.92,
+          "frame_count": 284160,
+          "peak_abs_normalized": 0.999969482,
+          "peak_dbfs": -0.000265,
+          "rms_dbfs": -17.317749,
+          "rms_normalized": 0.136179757,
+          "sample_count": 568320,
+          "sample_rate_hz": 48000,
+          "sample_width_bytes": 2,
+          "schema_version": "moss-tts-audio-inspection/1.0",
+          "silence_threshold_dbfs": -50.0,
+          "silent_frame_count": 86306,
+          "silent_frame_ratio": 0.303723255,
+          "source": {
+            "file_name": "segment-001.wav",
+            "file_size_bytes": 1136684,
+            "read_only_inspection": true,
+            "sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb"
+          },
+          "status": "ok"
+        },
+        "audio_sha256": "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb",
+        "ready_segment_sha256": [
+          "2627997330f3df9d61f7a3565f11fc1a1af2bfbce333714b2222b62d26efa4bb"
+        ]
+      },
+      "resources": {
+        "peak_accelerator_bytes": null,
+        "peak_rss_bytes": 1607991296
+      },
+      "status": "passed",
+      "timing": {
+        "audio_duration_seconds": 5.92,
+        "first_packet_ms": 171.82025,
+        "rtf": 1.401171333,
+        "synthesis_wall_ms": 8294.934291
+      }
+    }
+  ],
+  "run": {
+    "benchmark_id": "nano-quality",
+    "command": {
+      "argv": [
+        "python",
+        "scripts/tts/benchmark_nano_quality.py",
+        "--fixture-manifest",
+        "tests/fixtures/narration/benchmark_manifest.json",
+        "--output-dir",
+        "docs/开发文档/证据/MOSS-TTS-Nano施工/T0-C",
+        "--source-dir",
+        "<source-dir>",
+        "--model-dir",
+        "<model-dir>",
+        "--media-output-dir",
+        "<media-output-dir>",
+        "--runner-script",
+        "<runner-script>",
+        "--case-id",
+        "narration-neutral",
+        "--voice",
+        "default",
+        "--seed",
+        "0",
+        "--cpu-threads",
+        "4",
+        "--sample-mode",
+        "fixed",
+        "--max-new-frames",
+        "375",
+        "--voice-clone-max-text-tokens",
+        "75",
+        "--execution-backend",
+        "onnx-cpu",
+        "--source-revision",
+        "cc7bdf19c7639c0870dab22045a33b442760f6be",
+        "--model-revision",
+        "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+        "--expected-source-tree-sha256",
+        "dfeedbbfae13dd04c78280e660de7d3d3c5297a82f720da44e7cb9029b4ccc65",
+        "--expected-model-tree-sha256",
+        "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d",
+        "--case-timeout-seconds",
+        "600",
+        "--replace-existing"
+      ],
+      "exit_code": 0
+    },
+    "environment": {
+      "architecture": "arm64",
+      "hardware": "Apple M4",
+      "os_name": "Darwin",
+      "os_version": "25.5.0",
+      "physical_memory_bytes": 17179869184,
+      "python_version": "3.11.16"
+    },
+    "finished_at": "2026-08-26T02:30:18+08:00",
+    "model": {
+      "artifacts": [
+        {
+          "hash_status": "verified",
+          "name": "nano-model-tree",
+          "revision": "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+          "sha256": "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d",
+          "source": "explicit controlled model directory"
+        },
+        {
+          "hash_status": "verified",
+          "name": "nano-source-tree",
+          "revision": "cc7bdf19c7639c0870dab22045a33b442760f6be",
+          "sha256": "dfeedbbfae13dd04c78280e660de7d3d3c5297a82f720da44e7cb9029b4ccc65",
+          "source": "explicit pinned official source directory"
+        },
+        {
+          "hash_status": "verified",
+          "name": "quality-runner",
+          "revision": "31b4888ecec57892d11e575f885cec44ebfca4d758be894ae949bd2a7577a081",
+          "sha256": "31b4888ecec57892d11e575f885cec44ebfca4d758be894ae949bd2a7577a081",
+          "source": "explicit local runner adapter"
+        }
+      ],
+      "execution_backend": "onnx-cpu",
+      "name": "MOSS-TTS-Nano-100M",
+      "revision": "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+      "revision_hash_status": "verified",
+      "revision_sha256": "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d"
+    },
+    "parameters": {
+      "authorized_texts_fixture_set_id": "moss-tts-t0i-original-zh-v1",
+      "automatic_download": false,
+      "case_timeout_seconds": 600.0,
+      "cpu_threads": 4,
+      "dry_run": false,
+      "enable_normalize_tts_text": true,
+      "enable_wetext": false,
+      "exact_argv_sha256": "14fe196d854ca7d04da37ff59c87c65a11b111cfd5c9448b341ea14119412c28",
+      "fixture_manifest_sha256": "6750b722ad411839e369c617a9245c9578335d05b0c6117bcedfec3cfd6bbe35",
+      "max_new_frames": 375,
+      "media_retained_externally": true,
+      "model_artifact_bytes": 763191513,
+      "model_artifact_count": 16,
+      "model_tree_sha256": "0aa88a384369f3b9a3bdc12a039559b7bced3ce47be8360106895b2dd81b634d",
+      "path_values_redacted_in_command": true,
+      "reference_duration_tolerance_seconds": 0.75,
+      "reference_profiles_supplied": [],
+      "replaced_dry_run_candidate": {
+        "run_id": "T0-C-20260826T022215+0800-87515-9b30042d",
+        "sha256": "93c5e56b8df75feda178585b1b43f7644b3457cbff99b4e73870fc71d64d3525"
+      },
+      "runner_sha256": "31b4888ecec57892d11e575f885cec44ebfca4d758be894ae949bd2a7577a081",
+      "sample_mode": "fixed",
+      "seed": 0,
+      "selected_case_ids": [
+        "narration-neutral"
+      ],
+      "source_artifact_bytes": 184171,
+      "source_artifact_count": 13,
+      "source_revision": "cc7bdf19c7639c0870dab22045a33b442760f6be",
+      "source_tree_sha256": "dfeedbbfae13dd04c78280e660de7d3d3c5297a82f720da44e7cb9029b4ccc65",
+      "streaming": true,
+      "unexpected_terminal_case_ids": [],
+      "voice": "default",
+      "voice_clone_max_text_tokens": 75
+    },
+    "privacy": {
+      "contains_private_reference_audio": false,
+      "contains_user_text": false,
+      "evidence_contains_audio": false,
+      "fixture_only": true
+    },
+    "run_id": "T0-C-20260826T023010+0800-88391-747d2a44",
+    "started_at": "2026-08-26T02:30:10+08:00",
+    "status": "passed",
+    "work_package_id": "T0-C"
+  },
+  "schema_version": "moss-tts-benchmark-result/1.0"
+}

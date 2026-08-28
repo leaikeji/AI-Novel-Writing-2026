@@ -1,0 +1,242 @@
+{
+  "schema_version": "moss-tts-authorized-texts/1.0",
+  "fixture_set_id": "moss-tts-t0i-original-zh-v1",
+  "normalization": "Hash the exact decoded JSON string as UTF-8 bytes; do not normalize Unicode or line endings.",
+  "privacy_classification": "project_owned_synthetic_test_text",
+  "texts": [
+    {
+      "id": "txt-narrator",
+      "text": "晨雾贴着石桥缓缓散开，卖花人推着木车，铃铛轻响了两声。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["旁白", "中性中文", "基础性能"],
+      "sha256": "6776fab31d8a6ca4d9d511fd0df6cd211e9dce947afdb1ab343e4e54879d076f"
+    },
+    {
+      "id": "txt-explicit-speaker",
+      "text": "林知夏说：“别急，我把地图再看一遍。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["明确说话人", "人物对白"],
+      "sha256": "0ecfa13658e8a6f2c7ba6721556a28583b9e87fb809f49fd99738f6689458e1b"
+    },
+    {
+      "id": "txt-two-person",
+      "text": "“你听见了吗？”周远压低声音。苏棠点头：“钟楼里有人。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["双人对白", "说话人切换"],
+      "sha256": "6dc99fb08ece09bf14c20300687f7a72a18a9c170ffef655f8c356c867873e75"
+    },
+    {
+      "id": "txt-multi-person",
+      "text": "苏棠说：“先关窗。”老顾摇头：“留一条缝。”周远答道：“我去守门。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["多人对白", "连续切换"],
+      "sha256": "5cc8817d0ca2310fcaa8536c76d1013759c655bc6fd3d3828110462dfe65f881"
+    },
+    {
+      "id": "txt-omitted-subject",
+      "text": "“还走不走？”“走。”“现在？”“就现在。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["省略主语", "短句轮替"],
+      "sha256": "bb972b1056e84fa2fa40c815f0919be1ce4cef507ca024c5dac76656a5f7426d"
+    },
+    {
+      "id": "txt-inner-monologue",
+      "text": "她想：如果现在回头，那封信就永远送不到了。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["内心独白", "叙述与心理边界"],
+      "sha256": "793e090b07a37fa5a5ca19da2a32631103ee3547cf5775aae6e7d7a6e51d6913"
+    },
+    {
+      "id": "txt-anon-young",
+      "text": "一个年轻女孩笑道：“雨停后，我们去看海吧。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["匿名角色", "年轻女性"],
+      "sha256": "f9f6a34020eeee3827ae8412795969582f36e8c99dab56265337f0d424938ac7"
+    },
+    {
+      "id": "txt-anon-middle-aged",
+      "text": "中年妇人掸去围裙上的面粉：“汤马上就好，先坐下。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["匿名角色", "中年女性"],
+      "sha256": "d80605444fb16a5351b97162df07f0813ead54943f12d07f1d06fe61cd6bc08b"
+    },
+    {
+      "id": "txt-anon-elder",
+      "text": "老人扶住栏杆，慢慢说道：“这条路，我四十年前走过。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["匿名角色", "老人"],
+      "sha256": "ab821b1a48823cf034759ff759e6adf6b0cf44fc0f0a15f53ef95c2920c690ad"
+    },
+    {
+      "id": "txt-anon-child",
+      "text": "孩子踮起脚尖：“星星为什么不会掉下来？”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["匿名角色", "儿童"],
+      "sha256": "0cab7e320cb90e58f53f767b19044e035a7f983f1498b12942e8d8929917e909"
+    },
+    {
+      "id": "txt-crowd",
+      "text": "人群齐声喊道：“开门！我们要知道真相！”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["群体", "齐声对白"],
+      "sha256": "b1ff0266194aec1d8891bc5db9eb0c6edcf208ade0a2a14c02fb38ad8597bcc4"
+    },
+    {
+      "id": "txt-markdown",
+      "text": "## 第三幕\n\n风从窗缝钻进来，**桌上的灯**忽明忽暗。\n\n- 门外：三次敲门\n- 屋内：无人回应",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["Markdown", "换行", "列表标记"],
+      "sha256": "8715266efb3d35d78f63d29ca451cf12b3ccf19e17a3760b2d587450e0d99ed5"
+    },
+    {
+      "id": "txt-emoji-combining",
+      "text": "她在便签上写下“出发 🚀”，又补了咖啡杯 ☕️ 和组合字符 é。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["emoji", "变体选择符", "Unicode 组合字符"],
+      "sha256": "b0bd841105220a10a50319053842387ecb2ea53cc5d1e5f6c05cbbf3ca685fde"
+    },
+    {
+      "id": "txt-nested-quotes",
+      "text": "程野问：“你说的‘明天’，是指她留言里的‘九点以后’吗？”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["嵌套引号", "疑问语气"],
+      "sha256": "2f42a99a7634b7f47ad87af7d23552fa36b020c05ed119872f393c7f1546cefd"
+    },
+    {
+      "id": "txt-special-punctuation",
+      "text": "等等——不是这里……你看：门牌号是“7-B”；对吗？！",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["特殊标点", "停顿", "中英文符号"],
+      "sha256": "7400a69873608f9276f5aa3277500ede29e14d6e1959e080f044a53ff0bf7a83"
+    },
+    {
+      "id": "txt-polyphonic",
+      "text": "银行行长沿着长街步行，重新丈量重庆重建后的道路。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["多音字", "连续中文"],
+      "sha256": "35258e576f90aa6bdca04637691f33d2884f39cf7e219d2a780896f49f8c81ff"
+    },
+    {
+      "id": "txt-name-date",
+      "text": "二〇二六年八月二十六日，欧阳澈在长安街写下第十一封信。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["人名", "年代", "序数"],
+      "sha256": "7698862a0aa82c5c843fea94c5140f2116548fe3609b80590ba5a5d616563513"
+    },
+    {
+      "id": "txt-mixed-language",
+      "text": "Mia 打开 README，轻声说：“Build passed，版本是 v2.1.0。”",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["中英混合", "版本号", "英文缩写"],
+      "sha256": "eb8453ce273328bc0a93d67f0f300f996ced5960dd4f4e9d9a482dee0e94190f"
+    },
+    {
+      "id": "txt-long",
+      "text": "当最后一班渡船离开北岸时，负责守塔的年轻人仍站在风里，他一边核对写满潮汐时间的旧册子，一边等待那盏本应在午夜前亮起却迟迟没有出现的蓝灯，因为只有确认灯光连续闪烁三次，他才能把藏在铜盒里的回信交给山路尽头的邮差。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["长句", "复杂停顿", "稳定性"],
+      "sha256": "4a233d29b904aad04e6e8e32528b7dc1ebec3ebd986ffe1d3a0bd85776ab7e60"
+    },
+    {
+      "id": "txt-reference-prompt",
+      "text": "请在清晨六点提醒我带上钥匙、车票和那本蓝色笔记。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["参考克隆目标文本", "3/5/8/12 秒占位测试"],
+      "sha256": "d244ff7a73e6697b4dccc0e306d74f146fd80ac05a68a7155c71396a0e4ea199"
+    },
+    {
+      "id": "txt-independent-1",
+      "text": "雨停了。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["独立句段", "接缝前段"],
+      "sha256": "fa2f6df06f1f610b5fad5d9f92eb10c822c9ad28183d8ff82a13eb06b0ae9440"
+    },
+    {
+      "id": "txt-independent-2",
+      "text": "他推开门。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["独立句段", "接缝中段"],
+      "sha256": "14b02b0660cca15eb4ccee5c73e3f4120fef449b7fa0aeb56406892c3d199d4d"
+    },
+    {
+      "id": "txt-independent-3",
+      "text": "屋里没有人。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["独立句段", "接缝后段"],
+      "sha256": "796cb5cd04d3de7601d592247b6636dd26c72dcc30771fe52cf28c779bbdeea9"
+    },
+    {
+      "id": "txt-failure",
+      "text": "故障注入前，系统只应生成可丢弃的测试音频。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["失败恢复", "适配器错误注入"],
+      "sha256": "ac082ce24381f35169178317ce075c0cc01cf3fdc0b734a4a61bf82c1e18a58c"
+    },
+    {
+      "id": "txt-cancel",
+      "text": "取消请求到达后，未开始的句段不得继续执行。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["取消", "未开始任务停止"],
+      "sha256": "e277e3159e03ced3f355a630c9f1356101a5a98a34d13e56fd0c9eb8bba671e3"
+    },
+    {
+      "id": "txt-crash",
+      "text": "进程恢复后，已完成的合法片段不应重复生成。",
+      "author": "AI小说世界2026 项目（T0-I 新编）",
+      "source": "本文件原创，无外部小说正文来源",
+      "license": "项目自有测试语料；仅限本仓库开发与验收使用",
+      "purpose": ["崩溃恢复", "就绪片段复用"],
+      "sha256": "b67d265b3ac1839f606bb3e0470fbd727f2050cb335a37dde096bf9e419c5cbf"
+    }
+  ]
+}

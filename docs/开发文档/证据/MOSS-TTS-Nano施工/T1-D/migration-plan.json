@@ -1,0 +1,31 @@
+{
+  "schema_version": "t1-d-migration-plan/2",
+  "head_before_tts": "20260825_0009",
+  "current_head": "20260826_0015",
+  "multi_head": false,
+  "revision_chain": [
+    {"revision": "20260826_0010", "purpose": "narration foundation", "down_revision": "20260825_0009"},
+    {"revision": "20260826_0011", "purpose": "media safety", "down_revision": "20260826_0010"},
+    {"revision": "20260826_0012", "purpose": "execution safety", "down_revision": "20260826_0011"},
+    {"revision": "20260826_0013", "purpose": "asset-scoped paths", "down_revision": "20260826_0012"},
+    {"revision": "20260826_0014", "purpose": "request source sealing", "down_revision": "20260826_0013"},
+    {"revision": "20260826_0015", "purpose": "domain concurrency guards", "down_revision": "20260826_0014"}
+  ],
+  "external_io_during_migrations": false,
+  "history_rewritten": false,
+  "isolated_postgresql18_validation": {
+    "formal_database_used": false,
+    "formal_database_head": "20260825_0009",
+    "formal_database_migrated": false,
+    "migration_tests": {"passed": 6, "failed": 0, "skipped": 0},
+    "request_source_sealing": {"passed": 8, "failed": 0, "skipped": 0},
+    "asset_scoped_migration": {"passed": 2, "failed": 0, "skipped": 0},
+    "current_head_live_suite": {"head": "20260826_0015", "passed": 56, "failed": 0, "skipped": 0}
+  },
+  "known_locking": [
+    "ALTER TABLE and FK or uniqueness validation may lock existing project tables",
+    "formal upgrade requires backup and maintenance-window ownership",
+    "only one Alembic owner may mutate schema"
+  ],
+  "rollback_policy": "conditional downgrade only where each revision explicitly permits it; otherwise fix-forward or restore the pre-upgrade backup"
+}

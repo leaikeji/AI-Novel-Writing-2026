@@ -1,0 +1,89 @@
+{
+  "schema_version": "moss-tts-t4-gate-final-product/1.0",
+  "captured_at": "2026-08-28T16:19:00+08:00",
+  "decision": "PASS_LOCAL_CHINESE_CORE",
+  "scope": {
+    "deployment": "personal_local_single_user",
+    "language_quality_gate": "zh-CN",
+    "minimum_ui_viewport": "1920x1080",
+    "product_official_preset_ids": [
+      "onnx.Junhao",
+      "onnx.Zhiming",
+      "onnx.Weiguo",
+      "onnx.Xiaoyu",
+      "onnx.Yuewen",
+      "onnx.Lingyu"
+    ],
+    "formal_bindings": {
+      "narrator": "onnx.Zhiming",
+      "沈川": "onnx.Junhao",
+      "林晚": "onnx.Xiaoyu"
+    }
+  },
+  "canonical_chapter_run": {
+    "run_id": "bb03ccaf-4681-490a-b987-84bec9199b3b",
+    "technical_result": "PASS_CANDIDATE",
+    "human_listening": "PASS",
+    "same_run_resume": "PASS",
+    "teardown": "TOOLS_CLEANED",
+    "listening_record_sha256": "70f005a209be1b75cde351e0352bb89654a29256b7c5004decc5fd7bfa2a3ec0",
+    "listening_receipt_sha256": "1d8c69a23de5cdd41fed50f6c715836887b7992bbcfa938cea34cce6119a66e1",
+    "result_sha256": "afc70316e08a7ea8cc053a622c5733c27c48e18a0a605ce8eef557b65bdd49f5"
+  },
+  "installed_product": {
+    "candidate_tree_sha256": "7a57471ebe9ea6cffc6d76529e3fdcab6c1683ad236499fbc2d1fdfb720bde13",
+    "installed_source_tree_sha256_excluding_runtime_bytecode": "7a57471ebe9ea6cffc6d76529e3fdcab6c1683ad236499fbc2d1fdfb720bde13",
+    "alembic_head": "20260828_0024",
+    "runtime": true,
+    "product": true,
+    "validation": false,
+    "reference_clone": false,
+    "product_visible": true,
+    "playback_installed": true,
+    "digest_keyring_loaded": true,
+    "production_backend_installed": true,
+    "worker_running": true,
+    "container_validation_token_present": false,
+    "model_fingerprint_sha256": "3c76f3e9e1381699c5555287cf66eeb023632d0c3ee94adc6d8ae1b1d455fd7d"
+  },
+  "containers": {
+    "qwenpaw": { "healthy": true, "restart_count": 0 },
+    "postgresql": { "healthy": true, "restart_count": 0 },
+    "moss_tts_sidecar": { "healthy": true, "restart_count": 0 }
+  },
+  "final_ui_observation": {
+    "reading_navigation": [
+      "总览",
+      "旁白",
+      "人物配音",
+      "选角规则",
+      "发音与停顿",
+      "音频与缓存"
+    ],
+    "six_chinese_official_preset_copy_visible": true,
+    "generic_24_slot_ui_present": false,
+    "below_1920_layout_in_scope": false
+  },
+  "automated_verification": {
+    "python": { "passed": 2821, "skipped": 126, "warnings": 2 },
+    "frontend": { "test_files": 88, "passed": 813 },
+    "package_and_install_contracts_passed": 128,
+    "controller_node_passed": 54,
+    "browser_supplement_python_passed": 11,
+    "storage_retry_narrow_passed": 342,
+    "failed_segment_retry_postgresql_passed": 9,
+    "media_postgresql_passed": 11
+  },
+  "evidence_boundaries": {
+    "system_ime": "AUTHOR_PERSONALLY_CONFIRMED_AT_LEAST_TWO_HAN_CHARACTERS",
+    "supplemental_browser_envelope": "NOT_PRODUCED_NON_BLOCKING",
+    "cryptographic_remote_attestation_claimed": false,
+    "destructive_real_product_low_disk_injection_performed": false,
+    "destructive_real_product_cache_deletion_injection_performed": false,
+    "real_product_failed_segment_injection_performed": false
+  },
+  "backup_sha256": {
+    "custom_format_dump": "667e06e5c4e628c4863f7347a3a1cff2c035954fab923616c53d4ec65a7340d8",
+    "schema_only_sql": "79c2aaba72084bb3c7efabb769ec050cc3b95853ca8c304bc45d0c95b641df6e"
+  }
+}

@@ -12,7 +12,13 @@ AI小说世界2026 是运行在 QwenPaw 2.1.0 中的个人小说写作 PawApp。
 - 三个只读小说工具；HTTP UI 与工具共用同一领域服务。
 - Docker Compose、迁移、前后端测试、安装和运行验证脚本。
 
-当前不包含 AI 正文写回、确认、Diff、向量检索、TTS、图片或富文本编辑器。聊天模型仍由用户在 QwenPaw 原生模型页选择；项目不另建模型配置页。
+当前不包含 AI 正文写回、确认、Diff、向量检索、图片或富文本编辑器。聊天模型仍由用户在 QwenPaw 原生模型页选择；项目不另建模型配置页。
+
+## MOSS-TTS-Nano 当前范围
+
+MOSS-TTS-Nano 是个人、本地、单用户功能。正式产品范围仅包含 6 个中文 `official_preset`：`onnx.Zhiming`、`onnx.Junhao`、`onnx.Weiguo`、`onnx.Xiaoyu`、`onnx.Yuewen`、`onnx.Lingyu`；固定 ONNX manifest 的 18 项目录只用于底层兼容和技术溯源，不代表 18 项全部进入当前产品范围。作者已确认并锁定绑定旁白 `onnx.Zhiming`、林晚 `onnx.Xiaoyu`、沈川 `onnx.Junhao`，正式产品只使用官方 manifest prompt codes 与官方默认参数。2026-08-28 canonical run `bb03ccaf-4681-490a-b987-84bec9199b3b` 已完成真实 Nano、网页播放器、CodeMirror、跳播、Range/ETag、四桌面组合与固定 30 分钟稳定性；作者随后明确确认“完整章节通过”，同 run listening finalize、resume 与 teardown 已完成，最终 result 为 `PASS_CANDIDATE`、human state 为 `PASS`。长期 QwenPaw 已升级到迁移 `20260828_0024` 并在 `runtime=true / product=true / validation=false / reference=false` 的个人本地产品模式通过验证，隐藏验证 token 已销毁。系统中文输入法另由作者本人确认亲自输入至少两个汉字且功能正常；验收执行器曾因只允许三次撤销而在输入后的基线恢复阶段返回 `HOLD`，该执行器缺陷已修复并通过自动回归，不得反写成用户输入失败。
+
+商业发布／再分发审批、英文／日文专项、云端／远程／共享／复杂继承、OS signing／SSHSIG 以及章节／全书音频导出均是当前非目标，不阻断 T4；历史商业和签名审计保留，但其作为本地产品放行前置的旧口径已被取代。云端辅助说话人识别与高级匿名选角继续 `HOLD`，等待单独裁决。个人本地中文有限核心已通过 [T4-GATE](./docs/开发文档/证据/MOSS-TTS-Nano施工/T4-GATE.md)；最终候选 tree 为 `7a57471ebe9ea6cffc6d76529e3fdcab6c1683ad236499fbc2d1fdfb720bde13`。
 
 ## 目录
 

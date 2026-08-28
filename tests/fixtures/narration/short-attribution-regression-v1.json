@@ -1,0 +1,123 @@
+{
+  "schema_version": "moss-tts-nano-short-attribution-regression/1.0",
+  "fixture_id": "t4-k-zhiming-short-attribution-v1",
+  "authorization": {
+    "text_owner": "project_owned",
+    "authorization_reference": "project-original-t4-k-short-attribution-v1",
+    "authorized_for_tts": true,
+    "contains_private_reference_audio": false
+  },
+  "source_chapter_fixture": {
+    "path": "tests/fixtures/narration/chapter-e2e-v2.json",
+    "sha256": "e970e4f837d2f96b2675e8922e43bb5dfcffc352e86f0f96b84e34db1065380b"
+  },
+  "model_scope": {
+    "preset_id": "onnx.Zhiming",
+    "language": "zh-CN",
+    "speaker_kind": "narrator",
+    "segment_kind": "narration",
+    "policy_version": "nano-zh-attribution-sampling/2",
+    "strategy_status": "author_confirmed",
+    "allowed_strategies": [
+      "fixed_seed_1"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "known-lin-colon",
+      "text": "林晚说道：",
+      "text_sha256": "1d5fcad362dbe21212a093cd8f18ad5752465f3e9bf92ee0d7feb245db7b8e51",
+      "maximum_duration_ms": 3200,
+      "occurrence_count": 2,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "voice_consistency"
+      ]
+    },
+    {
+      "case_id": "known-shen-colon",
+      "text": "沈川说道：",
+      "text_sha256": "3954e283ccc7dd919866fda4036784ad84f06286e44917a4273ffd83da3e89d9",
+      "maximum_duration_ms": 3200,
+      "occurrence_count": 2,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "voice_consistency"
+      ]
+    },
+    {
+      "case_id": "other-sutang-colon",
+      "text": "苏棠说道：",
+      "text_sha256": "59138da1b2c75ee971c315276b7f92be5865f9b923d685edd312c15e290da65e",
+      "maximum_duration_ms": 3200,
+      "occurrence_count": 1,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "voice_consistency"
+      ]
+    },
+    {
+      "case_id": "other-ouyangche-colon",
+      "text": "欧阳澈说道：",
+      "text_sha256": "8b9b53da62444066aeebabd160431b8de2e18e98e3043c1ffc73897456095430",
+      "maximum_duration_ms": 3600,
+      "occurrence_count": 1,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "voice_consistency"
+      ]
+    },
+    {
+      "case_id": "punct-lin-period",
+      "text": "林晚说道。",
+      "text_sha256": "b3cb87875667d859870d2d2b36d60d782b9c8ae27856c9f9b6b3aed79aa0dc92",
+      "maximum_duration_ms": 3200,
+      "occurrence_count": 1,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "natural_ending"
+      ]
+    },
+    {
+      "case_id": "punct-shen-period",
+      "text": "沈川说道。",
+      "text_sha256": "ec6dd7e19a9c468479664ab76f0b24214b0a37644bfb176abaece9a216829df6",
+      "maximum_duration_ms": 3200,
+      "occurrence_count": 1,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "natural_ending"
+      ]
+    },
+    {
+      "case_id": "normal-station",
+      "text": "站台上的灯忽然闪了一次，四周仍然没有人影。",
+      "text_sha256": "408e491c9be8c5db19cfddd1efafee4abd878bab9820e9c63978a28fefb4630b",
+      "maximum_duration_ms": 9600,
+      "occurrence_count": 1,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "voice_consistency"
+      ]
+    },
+    {
+      "case_id": "normal-truck",
+      "text": "远处传来货车压过石子的声音，随后又恢复安静。",
+      "text_sha256": "d7df03530f8045a7d9c29f2e7303bc5b50c813816d60c4b5ecb81fbcbfbc80e7",
+      "maximum_duration_ms": 10000,
+      "occurrence_count": 1,
+      "required_human_checks": [
+        "intelligible_mandarin",
+        "exact_words",
+        "voice_consistency"
+      ]
+    }
+  ]
+}

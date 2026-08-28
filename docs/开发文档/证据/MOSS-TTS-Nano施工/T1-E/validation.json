@@ -1,0 +1,91 @@
+{
+  "schema_version": "moss-tts-t1-e-media-evidence/3",
+  "work_package": "T1-E",
+  "date": "2026-08-26",
+  "status": "ready_for_t1_gate_review_gate_not_decided",
+  "scope": {
+    "implemented": [
+      "fd-relative immutable local storage",
+      "atomic no-replace publication with recoverable staging",
+      "GET/HEAD and bounded single-range decision contract",
+      "structured database reference roots and active-job assets",
+      "durable full-identity GC plans and path-free HMAC tombstones",
+      "asset-scoped canonical media paths",
+      "deterministic publication re-adoption after database rollback"
+    ],
+    "not_claimed": [
+      "T1-GATE pass",
+      "T2 production HTTP or authorization wiring",
+      "T4 scheduler or worker",
+      "browser player readiness",
+      "real audio listening acceptance",
+      "product-visible capability"
+    ]
+  },
+  "environment": {
+    "postgresql": "isolated loopback PostgreSQL 18",
+    "database_identity": "exact disposable test identity, different from formal database",
+    "alembic_head": "20260826_0015",
+    "formal_database_head": "20260825_0009",
+    "formal_database_used": false,
+    "formal_database_migrated": false,
+    "formal_media_volume_used": false,
+    "formal_model_volume_used": false
+  },
+  "validation": {
+    "non_database_combined": {
+      "command": "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts='' -q -ra tests/narration/test_jobs.py tests/narration/test_media.py tests/narration/test_domain_services.py tests/narration/test_contracts.py tests/narration/test_adapters.py",
+      "passed": 175,
+      "failed": 0,
+      "skipped": 0,
+      "media_unit_slice_passed": 76,
+      "exit_code": 0
+    },
+    "asset_scoped_migration": {
+      "test_file": "tests/narration/test_asset_scoped_migration.py",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "current_head_live_suite": {
+      "head": "20260826_0015",
+      "passed": 56,
+      "failed": 0,
+      "skipped": 0,
+      "media_postgresql_slice_passed": 11,
+      "media_asset_scope_slice_passed": 6,
+      "crash_recovery_slice_passed": 6
+    },
+    "publication_atomicity": {
+      "test_file": "tests/narration/test_publication_postgres.py",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "successful_runs": 2,
+      "database_rollback_preserved_files": true,
+      "retry_re_adopted_deterministic_files": true,
+      "authoritative_rows_committed_atomically": true
+    }
+  },
+  "source_sha256": {
+    "backend/narration/storage.py": "17302a870d6ae31aa3d400a818095e3e7a90d42638e9a8778f9d37d7211c42a1",
+    "backend/narration/media.py": "7a6d8358ddcbd9bb4d74acec22560f52e1e5f5bc4fb7068f766f7f2e8d368be2",
+    "backend/narration/publication.py": "09ec2b404b73e61ab6e0ac6c223276e2e19092da66d06bb21050f10fbb4bb344",
+    "tests/narration/test_media.py": "6322eb61dfaefee4d8892997f088d145d0f35a392f1a75c39ca6c0be56c756be",
+    "tests/narration/test_media_postgres.py": "3d6b5ecb4a115915ebd89f64315b84176a10da00fd3b92f3bb507f568faabe5e",
+    "tests/narration/test_media_asset_scope_postgres.py": "5e26ab14a49a2c789741de57016770cf054d7bca86243f012304fc17fdf31f8d",
+    "tests/narration/test_publication_postgres.py": "ef73b71535696f234c032331f6d33a15cb5dfbfa9268dc893bfb32f72742965d",
+    "backend/migrations/versions/20260826_0013_narration_asset_scoped_paths.py": "574762bfc63761cde77731118335549079758f221c9889e4ad0fdca8f95ec18e"
+  },
+  "database_roles": {
+    "production_role_switch": "HOLD",
+    "secure_fail_closed_candidate": true,
+    "business_write_path_usable": false,
+    "same_postgresql_not_second_database": true,
+    "root_compose_integrated": false
+  },
+  "capability": {
+    "product_visible": false,
+    "false_is_acceptable_at_t1_gate": true
+  }
+}
