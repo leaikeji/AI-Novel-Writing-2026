@@ -1021,7 +1021,7 @@ function OutlineWizard({
     : step === 2
       ? h(
           "div",
-          { className: "mb-outline-step-body" },
+          { className: "mb-outline-step-body is-text-editor" },
           h(
             "div",
             { className: "mb-outline-heading-row" },
@@ -1042,7 +1042,7 @@ function OutlineWizard({
             ),
             "aria-label": "故事背景设定",
           }),
-          h("div", { className: "mb-count-hint" }, `最多2000字，当前：${visibleCount(draft.background_text)}/2000`),
+          h("div", { className: "mb-count-hint" }, `${draft.background_text.length} / 2000 字符`),
         )
       : step === 3
         ? h(
@@ -1080,7 +1080,7 @@ function OutlineWizard({
         : step === 4
           ? h(
               "div",
-              { className: "mb-outline-step-body" },
+              { className: "mb-outline-step-body is-text-editor" },
               h(
                 "div",
                 { className: "mb-outline-heading-row" },
@@ -1101,11 +1101,11 @@ function OutlineWizard({
                 ),
                 "aria-label": "故事主要情节",
               }),
-              h("div", { className: "mb-count-hint" }, `最多5000字，当前：${visibleCount(draft.plot_text)}/5000`),
+              h("div", { className: "mb-count-hint" }, `${draft.plot_text.length} / 5000 字符`),
             )
           : h(
               "div",
-              { className: "mb-outline-step-body is-highlight" },
+              { className: "mb-outline-step-body is-text-editor is-highlight" },
               h(
                 "div",
                 { className: "mb-outline-heading-row" },
@@ -1126,7 +1126,7 @@ function OutlineWizard({
                 ),
                 "aria-label": "亮点与简介",
               }),
-              h("div", { className: "mb-count-hint" }, `最多200字，当前：${visibleCount(draft.highlight_text)}/200`),
+              h("div", { className: "mb-count-hint" }, `${draft.highlight_text.length} / 200 字符`),
             );
 
   return h(
@@ -3217,7 +3217,7 @@ export function StudioProjectView({
           section === "reading"
             ? null
             : h("header", { className: `mb-panel-header ${section === "roles" || section === "clues" || section === "settings" ? "is-tabs-only" : ""}` }, h("h2", null, section === "chapters" ? "章节列表" : sectionLabel(section)), h("div", { className: "mb-panel-actions" }, panelActions)),
-          h("div", { className: `mb-panel-body${section === "reading" ? " is-reading" : ""}` }, panelBody),
+          h("div", { className: `mb-panel-body${section === "reading" ? " is-reading" : ""}${section === "outline" ? " is-outline" : ""}` }, panelBody),
         ),
       ),
     ),
