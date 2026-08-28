@@ -1,4 +1,5 @@
 import { EditorState, Transaction } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -75,6 +76,19 @@ function bridgeUpdate(transaction: Transaction, composing = false) {
 
 
 describe("CodeMirror narration public state", () => {
+  it("enables visual line wrapping without changing the stored document", () => {
+    const text = `${"长段落。".repeat(80)}\n第二段。`;
+    const harness = createHarness(text);
+    const state = createCodeMirrorNarrationState(text, harness.bridge);
+
+    expect(state.facet(EditorView.contentAttributes)).toContainEqual({
+      class: "cm-lineWrapping",
+    });
+    expect(state.doc.toString()).toBe(text);
+    expect(state.doc.lines).toBe(2);
+    expect(harness.onDocChanged).not.toHaveBeenCalled();
+  });
+
   it("maps a decoration through UTF-16 edits without changing selection or saving", () => {
     const harness = createHarness();
     let state = createCodeMirrorNarrationState("甲🙂乙\n第二段。", harness.bridge);

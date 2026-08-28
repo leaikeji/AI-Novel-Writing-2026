@@ -345,6 +345,7 @@ export function createCodeMirrorNarrationExtensions(
       },
     }),
     lineNumbers(),
+    EditorView.lineWrapping,
     ...(options.ariaLabel
       ? [EditorView.contentAttributes.of({ "aria-label": options.ariaLabel })]
       : []),

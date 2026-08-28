@@ -475,11 +475,11 @@ export function ensureNovelStyles(): void {
     .anw-chapter-tree-chapter > small { color:#a0a4ab; font-size:10px; font-weight:500; white-space:nowrap; }
     .anw-chapter-tree-chapter.is-active > small { color:#ba8a78; }
     .anw-chapter-tree-empty { display:grid; min-height:180px; place-items:center; padding:24px 12px; color:#a0a4ab; font-size:12px; text-align:center; }
-    .anw-editor.has-chapter-tree .anw-editor-topbar { width:min(1000px,calc(100% - 48px)); transform:none; }
+    .anw-editor.has-chapter-tree .anw-editor-topbar { width:min(1440px,calc(100% - 48px)); transform:none; }
     .anw-editor.has-chapter-tree .anw-editor-scroll { padding-right:var(--anw-editor-inline-gutter); padding-left:var(--anw-editor-inline-gutter); }
     .anw-editor-topbar {
       display: flex;
-      width: min(1000px, calc(100% - 196px));
+      width: min(1440px, calc(100% - 196px));
       align-items: center;
       align-self: center;
       gap: 12px;
@@ -509,7 +509,7 @@ export function ensureNovelStyles(): void {
       .anw-editor-topbar > .qwenpaw-btn { padding-right:8px!important; padding-left:8px!important; }
     }
 
-    .anw-editor-scroll { position:relative; display:grid; width:100%; min-height:auto; grid-template-columns:minmax(0,1000px); align-items:start; justify-content:center; overflow:visible; padding:14px var(--anw-editor-inline-gutter); }
+    .anw-editor-scroll { position:relative; display:grid; width:100%; min-height:auto; grid-template-columns:minmax(0,1440px); align-items:start; justify-content:center; overflow:visible; padding:14px var(--anw-editor-inline-gutter); }
     .anw-editor-paper { display:flex; width:100%; min-width:0; min-height:calc(100vh - 220px); grid-column:1; flex-direction:column; margin:0; border:1px solid var(--anw-line); border-radius:18px; padding:36px 40px 38px; background:#fff; box-shadow:var(--anw-shadow); }
     .anw-editor-title-row { display:flex; flex-wrap:wrap; align-items:flex-start; gap:16px; padding-bottom:20px; border-bottom:1px solid var(--anw-line); }
     .anw-editor-title-row > :first-child { min-width:0; flex:1 1 260px; }
@@ -1221,7 +1221,7 @@ export function ensureNovelStyles(): void {
     .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-body { padding:16px 16px 32px; }
     .anw-workbench-frame[data-assistant-density="constrained"] .mb-volume-grid { grid-template-columns:1fr; }
     .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor-content { --anw-editor-inline-gutter:14px; }
-    .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor.has-chapter-tree .anw-editor-topbar { width:min(1000px,calc(100% - 28px)); }
+    .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor.has-chapter-tree .anw-editor-topbar { width:min(1440px,calc(100% - 28px)); }
     .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor-scroll { grid-template-columns:minmax(0,1fr); }
     .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor-paper { grid-column:1; }
     .mb-panel-header { display:flex; min-height:84px; align-items:center; justify-content:space-between; gap:20px; border-bottom:1px solid #eceef1; padding:18px 28px; }

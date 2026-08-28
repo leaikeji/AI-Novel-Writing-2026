@@ -107,7 +107,7 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     z-index: 35;
     bottom: 14px;
     display: grid;
-    width: min(1120px, calc(100% - 48px));
+    width: min(1440px, calc(100% - 48px));
     min-height: var(--anw-chapter-player-height, 94px);
     grid-template-columns: minmax(190px, 0.9fr) auto minmax(260px, 1.35fr) auto;
     grid-template-rows: auto auto;
