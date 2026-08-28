@@ -1,0 +1,32 @@
+{
+  "state": "restored_with_concurrent_tts_activity",
+  "candidate_prose_writing_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+  "candidate_scene_craft_sha256": "49832573e8316d918b99ec2cb4710a47ca2481b7f95ded4fbf2c83836e623a34",
+  "research_route_http_status": 404,
+  "qwenpaw_root_http_status": 200,
+  "pawapp_health_http_status": 200,
+  "qwenpaw_healthy": true,
+  "tts_sidecar_docker_health": "healthy",
+  "tts_runtime_fields_restored": true,
+  "temporary_override_files_deleted": true,
+  "temporary_host_directory_moved_to_trash": true,
+  "temporary_container_packages_deleted": true,
+  "backup_retained": "/app/working.backups/writing-eval-skill-v2-20260828-pre",
+  "database_snapshot": {
+    "alembic": "20260827_0023",
+    "novels": 9,
+    "documents": 25,
+    "document_revisions": 142,
+    "document_working_copies": 25,
+    "chapter_generation_jobs": 51,
+    "candidate_revisions": 26,
+    "story_facts": 510,
+    "intelligence_proposals": 29,
+    "creative_generation_jobs": 167,
+    "model_run_records": 112,
+    "narration_requests": 18
+  },
+  "database_attribution": "Shared TTS validation continued during and after restoration. New rows were observed with document revision source tts_snapshot and narration intent update; the writing evaluation route has no project database persistence and produced no output artifact.",
+  "variant_b_started": false,
+  "secrets_recorded": false
+}

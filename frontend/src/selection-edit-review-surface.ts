@@ -2,6 +2,7 @@ import type { QwenPawReactRuntime } from "./assistant-pane";
 import {
   selectionEditReviewMetrics,
   type SelectionEditDiffSegment,
+  type SelectionEditOperation,
   type SelectionEditReviewDecision,
   type SelectionEditReviewDraft,
   type SelectionEditReviewEvent,
@@ -103,6 +104,17 @@ interface SurfaceKeyboardEvent {
 
 const HEADING_ID = "anw-selection-edit-review-heading";
 const LIVE_STATUS_ID = "anw-selection-edit-review-live-status";
+
+
+const OPERATION_REVIEW_LABELS: Readonly<Record<SelectionEditOperation, string>> = {
+  polish: "AI 润色审阅",
+  rewrite: "AI 改写审阅",
+  expand: "AI 扩写审阅",
+  shorten: "AI 缩写审阅",
+  dialogue: "AI 增强对白审阅",
+  review: "AI 问题检查审阅",
+  custom: "AI 自定义修改审阅",
+};
 
 
 function stateDraft(
@@ -328,38 +340,78 @@ export function createSelectionEditReviewSurface(
               "aria-label": `第 ${segmentIndex + 1} 处修改，${decision === "accept"
                 ? "已接受"
                 : decision === "reject" ? "已拒绝" : "未决定"}`,
+              "data-review-decision": decision ?? "undecided",
+              "data-review-segment-id": segment.segment_id,
               tabIndex: -1,
             },
-            original !== undefined
-              ? h(
-                "div",
-                { className: "anw-selection-edit-review-delete" },
-                h("span", { "aria-hidden": "true" }, "−"),
-                h("strong", null, "删除"),
-                h("span", null, original || "（空文本）"),
-              )
-              : null,
-            replacement !== undefined
-              ? h(
-                "div",
-                { className: "anw-selection-edit-review-insert" },
-                h("span", { "aria-hidden": "true" }, "+"),
-                h("strong", null, "新增"),
-                h("span", null, replacement || "（空文本）"),
-              )
-              : null,
-            segment.kind === "delete"
-              ? h("p", { className: "anw-selection-edit-review-empty-result" }, "应用后删除这段文字")
-              : null,
-            interactive
-              ? h(
-                "div",
-                {
-                  className: "anw-selection-edit-review-change-actions",
-                  role: "group",
-                  "aria-label": `第 ${segmentIndex + 1} 处修改决定`,
-                },
-                h(
+            h(
+              "div",
+              { className: "anw-selection-edit-review-change-lines" },
+              original !== undefined
+                ? h(
+                  "div",
+                  {
+                    className: [
+                      "anw-selection-edit-review-line",
+                      "anw-selection-edit-review-delete",
+                    ].join(" "),
+                    "data-diff-kind": "delete",
+                  },
+                  h("span", { "aria-hidden": "true" }, "−"),
+                  h("strong", null, "删除"),
+                  h("span", null, original || "（空文本）"),
+                )
+                : null,
+              replacement !== undefined
+                ? h(
+                  "div",
+                  {
+                    className: [
+                      "anw-selection-edit-review-line",
+                      "anw-selection-edit-review-insert",
+                    ].join(" "),
+                    "data-diff-kind": "insert",
+                  },
+                  h("span", { "aria-hidden": "true" }, "+"),
+                  h("strong", null, "新增"),
+                  h("span", null, replacement || "（空文本）"),
+                )
+                : null,
+              segment.kind === "delete"
+                ? h(
+                  "div",
+                  {
+                    className: [
+                      "anw-selection-edit-review-line",
+                      "anw-selection-edit-review-result",
+                      "anw-selection-edit-review-empty-result",
+                    ].join(" "),
+                    "data-diff-kind": "result-empty",
+                    role: "note",
+                    "aria-label": "应用后结果为空，删除此段文字",
+                  },
+                  h("span", { "aria-hidden": "true" }, "="),
+                  h("strong", null, "应用后结果"),
+                  h("span", null, "为空（删除此段，不保留文字）"),
+                )
+                : null,
+            ),
+            h(
+              "div",
+              {
+                className: [
+                  "anw-selection-edit-review-inline-actions",
+                  interactive ? "" : "is-read-only",
+                ].filter(Boolean).join(" "),
+                ...(interactive
+                  ? {
+                    role: "group",
+                    "aria-label": `第 ${segmentIndex + 1} 处修改决定`,
+                  }
+                  : {}),
+              },
+              interactive
+                ? h(
                   "button",
                   {
                     type: "button",
@@ -373,8 +425,14 @@ export function createSelectionEditReviewSurface(
                     title: "接受当前修改（Alt+A）",
                   },
                   "接受",
+                )
+                : h(
+                  "p",
+                  { className: "anw-selection-edit-review-decision-label" },
+                  decision === "accept" ? "已接受" : decision === "reject" ? "已拒绝" : "未决定",
                 ),
-                h(
+              interactive
+                ? h(
                   "button",
                   {
                     type: "button",
@@ -388,13 +446,9 @@ export function createSelectionEditReviewSurface(
                     title: "拒绝当前修改（Alt+R）",
                   },
                   "拒绝",
-                ),
-              )
-              : h(
-                "p",
-                { className: "anw-selection-edit-review-decision-label" },
-                decision === "accept" ? "已接受" : decision === "reject" ? "已拒绝" : "未决定",
-              ),
+                )
+                : null,
+            ),
           );
         }),
       );
@@ -519,27 +573,11 @@ export function createSelectionEditReviewSurface(
       ? `应用已接受修改（${metrics.acceptedCount}处）`
       : "接受全部";
     const activeHumanIndex = reviewState.activeChangeIndex + 1;
+    const operationReviewLabel = OPERATION_REVIEW_LABELS[identity.operation];
 
     return h(
       "section",
       commonRootProps,
-      h(
-        "header",
-        { className: "anw-selection-edit-review-header" },
-        heading(isApplying ? "正在应用选区修改" : `审阅 ${identity.target.fieldLabel} 修改`),
-        h("p", null, reviewState.draft.result.short_summary),
-        reviewState.draft.result.warnings.length > 0
-          ? h(
-            "ul",
-            { className: "anw-selection-edit-review-warnings", "aria-label": "候选提醒" },
-            ...reviewState.draft.result.warnings.map((warning, index) => h(
-              "li",
-              { key: `${index}:${warning}` },
-              warning,
-            )),
-          )
-          : null,
-      ),
       h(
         "div",
         {
@@ -547,7 +585,16 @@ export function createSelectionEditReviewSurface(
           role: "toolbar",
           "aria-label": "差异审阅操作",
         },
-        h("span", null, `${metrics.changeCount} 处修改`),
+        h(
+          "div",
+          { className: "anw-selection-edit-review-toolbar-summary" },
+          heading(operationReviewLabel),
+          h(
+            "span",
+            { className: "anw-selection-edit-review-change-count" },
+            `${metrics.changeCount} 处修改`,
+          ),
+        ),
         h(
           "button",
           {
@@ -598,6 +645,25 @@ export function createSelectionEditReviewSurface(
           },
           "退出审阅",
         ),
+      ),
+      h(
+        "header",
+        {
+          className: "anw-selection-edit-review-header",
+          "aria-label": isApplying ? "正在应用选区修改" : "候选摘要",
+        },
+        h("p", null, reviewState.draft.result.short_summary),
+        reviewState.draft.result.warnings.length > 0
+          ? h(
+            "ul",
+            { className: "anw-selection-edit-review-warnings", "aria-label": "候选提醒" },
+            ...reviewState.draft.result.warnings.map((warning, index) => h(
+              "li",
+              { key: `${index}:${warning}` },
+              warning,
+            )),
+          )
+          : null,
       ),
       metrics.changeCount === 0
         ? h(

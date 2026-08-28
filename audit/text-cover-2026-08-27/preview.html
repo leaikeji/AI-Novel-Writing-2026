@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>文字封面组件浏览器验证</title>
+    <style>
+      body { margin:0; background:#eef1f4; }
+      .preview-page { min-height:100vh; padding:40px; }
+      .preview-grid { display:flex; flex-wrap:wrap; align-items:flex-start; gap:36px; }
+      .preview-item { display:grid; justify-items:center; gap:12px; color:#3d424a; }
+      .preview-item > span { font-size:13px; }
+      .preview-item .mb-book-cover-wrap { width:220px; }
+      .preview-item .mb-novel-switcher { width:auto; margin:0; }
+    </style>
+  </head>
+  <body>
+    <main class="anw-app preview-page">
+      <div id="preview" class="preview-grid"></div>
+    </main>
+    <script type="module">
+      import { createNovelCoverView } from "../../frontend/src/novel-cover.ts";
+      import { ensureNovelStyles } from "../../frontend/src/styles.ts";
+
+      const React = {
+        createElement(type, props, ...children) {
+          if (typeof type === "function") return type({ ...(props || {}), children });
+          const element = document.createElement(type);
+          for (const [key, value] of Object.entries(props || {})) {
+            if (key === "className") element.className = value;
+            else if (key !== "key" && value !== undefined) element.setAttribute(key, String(value));
+          }
+          for (const child of children.flat(Infinity)) {
+            if (child instanceof Node) element.appendChild(child);
+            else if (child !== null && child !== undefined && child !== false) element.append(String(child));
+          }
+          return element;
+        },
+      };
+
+      ensureNovelStyles();
+      const NovelCoverView = createNovelCoverView(React);
+      const novel = {
+        title: "潮声替我说晚安",
+        author_name: "海岸线",
+        cover_mode: "text",
+        cover_image_data: "",
+      };
+      const samples = [
+        ["作品卡", "mb-novel-cover"],
+        ["新建完成页", "mb-complete-cover"],
+        ["工作台侧栏", "mb-book-cover"],
+        ["作品切换器", "mb-novel-switch-cover"],
+      ];
+      const root = document.getElementById("preview");
+      for (const [label, className] of samples) {
+        const item = document.createElement("section");
+        item.className = "preview-item";
+        let wrap = document.createElement("div");
+        if (className === "mb-book-cover") wrap.className = "mb-book-cover-wrap";
+        if (className === "mb-novel-switch-cover") {
+          wrap.className = "mb-novel-switcher";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.appendChild(NovelCoverView({ novel, className, fallbackSrc: "" }));
+          wrap.appendChild(button);
+        } else {
+          wrap.appendChild(NovelCoverView({ novel, className, fallbackSrc: "" }));
+        }
+        item.append(wrap, Object.assign(document.createElement("span"), { textContent: label }));
+        root.appendChild(item);
+      }
+    </script>
+  </body>
+</html>

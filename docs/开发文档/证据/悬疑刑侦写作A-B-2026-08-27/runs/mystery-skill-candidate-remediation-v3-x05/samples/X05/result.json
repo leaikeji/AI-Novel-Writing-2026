@@ -1,0 +1,129 @@
+{
+  "actual_model": null,
+  "attempt": 2,
+  "base_prompt_sha256": "9d8179eaa6cb6ba627cdca4a247e54c761ff7e6613ae3f7f488ddb79ad602367",
+  "case_id": "SP-02",
+  "deterministic_checks": {
+    "empty": false,
+    "length_pass": true,
+    "non_whitespace_chars": 733,
+    "output_purity_pass": false,
+    "required_anchor_hits": {
+      "二十二分钟": true,
+      "十八分钟": true,
+      "手动复核": true,
+      "氧传感器": true
+    },
+    "semantic_review_required": true,
+    "wrapper_flags": {
+      "agent_status_capsule": true,
+      "analysis_prefix": false,
+      "json_or_xml_wrapper": false,
+      "markdown_fence": false,
+      "markdown_heading": false
+    }
+  },
+  "duration_ms": 314754,
+  "execution_agent_id": "ai-novel-writer",
+  "experiment_id": "mystery-skill-ab-20260828-v3",
+  "final_text_source": "structured_reply_chunks",
+  "finished_at": "2026-08-28T04:10:53.087414Z",
+  "manifest_sha256": "e0019fc951819c2fc40055cd7e866d2ec15a1602ea99fcdc023d643d76838cd4",
+  "model_evidence": {
+    "actual_model_policy": "provider_usage_optional_not_exposed_allowed",
+    "actual_model_status": "not_exposed",
+    "contract": "writing-eval-effective-model-pre-post-v1",
+    "effective_model_pre_post_match": true,
+    "private_usage_buffer_used": false,
+    "usage_status": "not_exposed"
+  },
+  "output_purity_contract": "writing-eval-output-purity-v1",
+  "output_sha256": "aaa1119227d911fa64c20bedf3f2bc8be121aea49a2a9764e655e64a9982b295",
+  "output_text": "七号区的隔离门上方，红灯每两秒闪一次。饶真的手指还压在申请键上。\n\n“芯片里是污染源的唯一光谱，无人机失联前没回传。”他说，“门不开，证据就死在里面。”\n\n路宁的手停在控制台上方，没有落下。“仪表读数：防护服可用十八分钟，往返标准二十二分钟。我开门，就是放你死在半路。”\n\n“至少放我试——”\n\n“我不跟你赌。”她的声音很平，“我只照记录开门。”\n\n反驳的话到了嘴边，饶真忽然咽了回去。他想起今早七点自己干的事：三号防护服的氧传感器漂移报警，他领了新件换上，装到一半被无人机失联的事叫走。手动复核——拿气瓶机械压力表核对读数——一直没做。也就是说，那十八分钟，是从一枚没人验过的传感器上算出来的。它可能偏保守，也可能偏乐观，连这条拦住他的线是真是假，都没人知道。\n\n他把手从申请键上挪开。\n\n“先别开门。”他说，“把三号服接上检测台，手动复核氧传感器，跟瓶身机械表对读数。记录上先要有两个数，再谈开不开。”\n\n路宁盯了他几秒。“要是复核证明仪表没错呢？”\n\n“要是复核下来，可用时长撑不到二十二分钟，门就关着，芯片记我放弃，污染源定不了性的账记我头上。”饶真说，“要是撑得到，你把复核结果录进当班记录，注明依据复核放行，再开门。我进去按复核时长折半计时，到点必回，拿不到芯片也回。”\n\n“异常放行要签字，签我的名字。”她说。\n\n“复核栏上也有我的。”他说。\n\n路宁把检测台推到三号服跟前，又调出维修日志，把空白的复核栏转到两人中间。“开始吧。每一步都进记录。”\n\n饶真蹲下去接检测台的管线，接头冰凉。红灯仍在头顶闪，他把检测台的屏转过来，正对气瓶上机械表的表盘——两个数，第一次要当面互相作证。\n\n⟦ 七号区芯片场景正文｜已完成：饶真限知成文，18/22分钟+氧传感器+手动复核锚点保留，先复核后放行与折半计时停止条件落地 ⟧",
+  "postflight_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "prompt_contract": "writing-eval-prompt-v3",
+  "prompt_sha256": "9d8179eaa6cb6ba627cdca4a247e54c761ff7e6613ae3f7f488ddb79ad602367",
+  "prompt_variant_policy": "identical-prompt-skill-package-swap",
+  "requested_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "rights_basis": "project-synthetic",
+  "rubric_sha256": "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6",
+  "sample_id": "X05",
+  "sampling_parameters": "not_exposed",
+  "schema_version": "1.4",
+  "server_persistence": "none",
+  "session_id": "novel-writing-eval:mystery-skill-ab-20260828-v3:X05:05a70cc9-e16a-4755-b191-df921b4871ea",
+  "skill_evidence": {
+    "actual_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+    "contract": "writing-eval-skill-package-sha256-v1",
+    "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+    "match": true,
+    "variant": "B"
+  },
+  "skill_id": "prose-writing",
+  "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
+  "skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+  "source_suite_sha256": "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf",
+  "started_at": "2026-08-28T04:05:38.338868Z",
+  "state": "generated",
+  "stream_diagnostics": {
+    "assistant_messages_observed": 12,
+    "content_part_type_counts": {
+      "data": 4,
+      "text": 6
+    },
+    "content_recorded": false,
+    "contract": "writing-eval-stream-diagnostics-v2",
+    "event_count": 14179,
+    "event_type_counts": {
+      "agentresponse": 3,
+      "data": 6,
+      "message": 2,
+      "plugin_call": 2,
+      "plugin_call_output": 2,
+      "reasoning": 4,
+      "text": 14160
+    },
+    "first_event_elapsed_ms": 188,
+    "last_event_elapsed_ms": 314721,
+    "last_event_type": "agentresponse",
+    "message_role_counts": {
+      "assistant": 12,
+      "tool": 3
+    },
+    "message_type_counts": {
+      "data": 6,
+      "message": 3,
+      "plugin_call": 3,
+      "plugin_call_output": 3,
+      "reasoning": 6,
+      "text": 14160
+    },
+    "public_usage_envelopes_observed": 0,
+    "stream_completed": true,
+    "text_chars_max_single_value": 35130,
+    "text_chars_total_observed": 158432,
+    "text_value_char_totals": {
+      "text": 158432
+    },
+    "text_value_count": 14166,
+    "text_value_max_chars": {
+      "text": 35130
+    }
+  },
+  "tool_policy_enforcement": "prompt_only",
+  "usage": null,
+  "variant": "B",
+  "variant_policy_sha256": "6e64c9590c330ac89a2a48c79bc6aa989bb86a0237b3d7f36feef05537f9a4db"
+}

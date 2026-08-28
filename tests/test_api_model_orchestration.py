@@ -28,6 +28,8 @@ def _import_creative_api(monkeypatch):
 
 def _reply_with_usage(provider_id: str, model_id: str, *, text: str):
     message = SimpleNamespace(
+        role="assistant",
+        content=[SimpleNamespace(type="output_text", text=text)],
         metadata={
             "qwenpaw_turn_usage": {
                 "usage": {
@@ -288,6 +290,80 @@ async def test_selection_edit_uses_operation_skill_and_project_owned_diff(
     assert output["replacement_character_count"] == len(output["replacement_text"])
     assert completed[0]["output_text"] == output["replacement_text"]
     assert all("segment_id" in item for item in output["diff_segments"])
+
+
+@pytest.mark.asyncio
+async def test_selection_edit_retries_one_ambiguous_model_reply_then_completes(
+    monkeypatch,
+) -> None:
+    api = _import_creative_api(monkeypatch)
+    novel_id = uuid4()
+    job_id = uuid4()
+    snapshot = _selection_snapshot(novel_id, operation="polish")
+    chat_calls: list[dict[str, object]] = []
+    completed: list[dict[str, object]] = []
+    replies = iter(
+        [
+            (
+                '{"replacement_text":"她攥紧车票。","short_summary":"候选一。"}\n'
+                '{"replacement_text":"她收紧手指。","short_summary":"候选二。"}'
+            ),
+            (
+                '{"replacement_text":"她把湿透的旧车票攥在掌心。",'
+                '"short_summary":"补充物件质感。"}'
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        api,
+        "start_creative_generation",
+        lambda *args, **kwargs: {
+            "id": str(job_id),
+            "kind": "selection_edit",
+            "state": "running",
+            "should_execute": True,
+            "input_snapshot": snapshot,
+        },
+    )
+    monkeypatch.setattr(api, "ensure_prompt_within_effective_limit", lambda *args: None)
+
+    async def chat(prompt, **kwargs):
+        chat_calls.append({"prompt": prompt, **kwargs})
+        return _reply_with_usage("provider-a", "model-a", text=next(replies))
+
+    def complete(session, received_job_id, **kwargs):
+        assert received_job_id == job_id
+        completed.append(kwargs)
+        return {"id": str(job_id), "state": "ready", **kwargs}
+
+    monkeypatch.setattr(api, "complete_creative_generation", complete)
+    request = api.StartCreativeGenerationRequest(
+        scope_type="novel",
+        scope_id=novel_id,
+        kind="selection_edit",
+        input_snapshot=snapshot,
+        novel_id=novel_id,
+    )
+
+    result = await api.creative_generations_create(
+        request,
+        ctx=SimpleNamespace(chat=chat),
+        configured_model=ModelAudit(
+            provider_id="provider-a",
+            model_id="model-a",
+            source="effective-model-api",
+        ),
+        session=_FakeSession(),
+    )
+
+    assert result["state"] == "ready"
+    assert len(chat_calls) == 2
+    assert chat_calls[0]["session_id"] == f"novel-creative-generation:{job_id}"
+    assert chat_calls[1]["session_id"] == (
+        f"novel-creative-generation:{job_id}:verification-retry-1"
+    )
+    assert "上一次响应未通过严格 JSON 验证" in str(chat_calls[1]["prompt"])
+    assert completed[0]["output_text"] == "她把湿透的旧车票攥在掌心。"
 
 
 @pytest.mark.asyncio

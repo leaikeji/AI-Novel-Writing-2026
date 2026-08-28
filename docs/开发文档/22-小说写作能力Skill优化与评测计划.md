@@ -294,7 +294,7 @@ CLI 同时验证 schema、前后非空模型身份、模型证据状态、usage 
 
 ## 9. 真实样本驱动的 Skill 优化方案
 
-状态：**方案已形成，尚未修改正式 Skill。当前先修复评测可信度；正式 Skill 候选必须等待其现有工作区改动完成归属确认后再施工。不得直接启动完整16样本。**
+状态：**`prose-writing` 与 `scene-craft` 窄幅候选已完成，V2 同提示/不同 Skill 包合同及自动化门禁已通过；真实 A 侧被共享 TTS 流程重建 QwenPaw 中断，B 侧依门禁未启动。不得直接启动完整16样本，也不得表述为写作能力已经提升。**
 
 ### 9.1 结论
 
@@ -347,3 +347,68 @@ CLI 同时验证 schema、前后非空模型身份、模型证据状态、usage 
 - 无评测数据库写入，研究入口恢复404，备份和回退可执行。
 
 只有同题 A/B 哨兵通过，才进入完整16样本；只有第3.3节整体门槛通过，才允许写成“Skill 写作能力已提升”。
+
+## 10. WSO-CONTRACT 至 WSO-EVAL-V2 候选结果（2026-08-28）
+
+### 10.1 Skill 候选
+
+本轮没有新增第十个 Skill，也没有修改 `style-review` 或其他六个 Skill。`prose-writing` 在既有 `chapter_generation` 和选区任务改动之上增加两条窄规则：最终回答首尾都属于小说正文，正文结束立即停止，禁止状态胶囊、执行摘要、约束复述和字数/锚点/禁项核对；承担关键判断或解决核心冲突的设备、路线、权限、时间收益、技术结论和精确数值必须来自题面或已采用前文，允许新增时需先建立来源并支付可见代价。`scene-craft` 只同步后一条场景资源来源规则。
+
+修改前 `prose-writing` 已按字节冻结到 V2 证据目录，SHA-256 为 `cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2`；候选 SHA-256 为 `1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2`。候选 `scene-craft` SHA-256 为 `49832573e8316d918b99ec2cb4710a47ca2481b7f95ded4fbf2c83836e623a34`。这三项只冻结版本身份，不证明行为质量。
+
+### 10.2 V2 可比性修复
+
+新实验为 `mystery-skill-ab-20260828-v2`，结果 schema 为 `1.3`，prompt contract 为 `writing-eval-prompt-v2`，Skill 证据合同为 `writing-eval-skill-package-sha256-v1`。与旧 V1 的“安装 Skill + 可选覆盖层”不同，V2 的 A/B 题面、可信封套和最终输出要求逐字节相同；A 侧只允许基线 Skill 哈希，B 侧只允许候选 Skill 哈希。研究 API 在模型调用前读取当前 PawApp 包内 `prose-writing/SKILL.md` 哈希，错配时以 `model_called=false` 拒绝；CLI 再核验响应中的 expected/actual Skill 证据，防止错误安装进入盲评。
+
+旧 V1 的 manifest 与 candidate overlay 增加不可变哈希回归，不改写 v1/v2/v3/v4 运行证据。V2 冻结资料见 `docs/开发文档/证据/悬疑刑侦写作A-B-2026-08-27/experiments/mystery-skill-ab-20260828-v2/`。
+
+### 10.3 自动化与当前运行门禁
+
+- `skill-creator` quick validator：`prose-writing` 与 `scene-craft` 均为 `Skill is valid!`；校验器所需 PyYAML 只安装到一次性临时目录，未加入项目依赖，临时目录已移入废纸篓。
+- Skill、安装、QwenPaw、模型编排与写作评测相关回归：231项通过。
+- 项目全量：`2459 passed, 116 skipped`，2条警告均为既有 Starlette 弃用警告。
+- Python 编译、V2 合同自检、PawApp 打包、Compose override 静态解析和 `git diff --check` 通过。
+
+真实哨兵第一次前置检查发现唯一共享 QwenPaw 正在运行另一项带独占锁的 TTS 真实章节验收，因此先等待其主进程自然结束；确认最近两分钟无模型记录后，建立插件/PostgreSQL备份，保留既有 TTS 运行字段，安装 A 侧基线包并启动 X01。实际结果见下节。
+
+### 10.4 V2 A 侧被共享运行环境重建中断
+
+`mystery-skill-ab-sentinel-v2-a` 于 `2026-08-27T18:37:45.545546Z` 派发 X01。基线 `prose-writing` 安装哈希、schema 1.3 合同、研究入口、QwenPaw 健康和 TTS 字段均在调用前通过；备份保留于 `/app/working.backups/writing-eval-skill-v2-20260828-pre`，插件包哈希为 `3637851d5cef03c6302e64aa4532b3b7bf00cddb02699dc2dffc2ae7c78374bf`，PostgreSQL dump 哈希为 `839bcccdb545d5c874d40b152cd29e000fdddb0a6ec8931eabbfa7bbaeb68c52`。
+
+请求尚未返回时，另一个 TTS 验收的外层流程于 `18:38:40Z` 重建唯一 QwenPaw；新容器于 `18:38:44.417591047Z` 启动，客户端在两者之间的 `18:38:43.858202Z` 得到 `RemoteProtocolError: Server disconnected without sending a response`。时间顺序与容器事实共同证明本次失败由共享运行环境重建直接触发，不是可评价的 Skill 输出失败。运行器保存 `0 completed / 1 failed`，没有 `output.txt`、`result.json`、盲评文件或自动重试。
+
+冻结规则规定任一侧失败即停止，因此没有启动 X14/B，也没有为了取得结果改写失败记录或使用新 run 偷偷重试。候选 `prose-writing` 与 `scene-craft` 已通过公开插件热安装恢复，当前安装哈希分别为 `1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2` 和 `49832573e8316d918b99ec2cb4710a47ca2481b7f95ded4fbf2c83836e623a34`；根页面和 PawApp 健康为200，研究入口为404，TTS Sidecar healthy，原有 TTS 字段等值恢复，临时敏感 override 已删除。
+
+恢复窗口内新的数据库行带 `tts_snapshot` 和 narration `update` 元数据，且下一轮带独占锁的 TTS 真实验收随即启动；本专项未读取正文或干预这些任务，也不能把共享计数变化表述为写作评测写入。V2 A/B 仍没有有效样本。若后续重跑，必须重新获得一个覆盖“前置空闲—两侧生成—最终恢复”全窗口的共享运行锁，并使用新 run id；当前失败证据保持不可变。
+
+### 10.5 V2 新运行在无外部重建时达到600秒超时
+
+用户要求继续后，`mystery-skill-ab-sentinel-v2b` 通过新的备份、空闲、Skill 哈希、合同和健康前置检查，只派发 X01/A 一次。该窗口没有 QwenPaw 重建，公开流在99毫秒出现首事件并持续至599.944秒，共20,013个结构事件，但没有完整结束；固定600秒门禁返回 HTTP 504并取消任务。项目 `model_run_records` 在请求时间窗新增0条，评测器未保存正文、结果包或盲评材料。
+
+这证明上次外部重建并非当前唯一阻断，也证明超时取消与不自动重试按合同工作；它不证明基线文质差，更不证明候选 Skill 已提升。按 W4 任一侧失败即停止，X14/B 未启动。候选 Skill、普通关闭态和 TTS 字段已经恢复，备份保留。WSO-SENTINEL 仍未通过；在重新裁决可完成基线样本的取得方式前，不进入 WSO-AB，也不修改 Skill 质量结论。
+
+### 10.6 已批准的 V3 第二组预登记哨兵
+
+用户于2026-08-28批准使用现有16样本矩阵中预先登记的 SP-02 attempt 2，而不是重试 X01、单跑候选或临时改题。V3 experiment 为 `mystery-skill-ab-20260828-v3`，执行顺序固定为 X11/A→X05/B；X11 任一失败即停止，不启动 X05。两侧仍使用相同的450–800字符级冻结样本体系，其中 SP-02 目标为500–800个非空白 Unicode 字符，并非长章节，因此保持600秒服务端上限，不把前次超时解释为篇幅必然过长。
+
+V3 结果 schema 为1.4，prompt contract 为 `writing-eval-prompt-v3`，流诊断升级为 `writing-eval-stream-diagnostics-v2`。新增诊断只记录事件/角色/内容类型计数、观察到的文本值数量与字符长度、单值最大长度、末事件类型、assistant 消息数和公开 usage 封套数；固定 `content_recorded=false`，不保存、摘要或回传超时流正文。V2 manifest、策略和基线原文继续由不可变哈希回归保护。
+
+V3 variant policy SHA-256 为 `6e64c9590c330ac89a2a48c79bc6aa989bb86a0237b3d7f36feef05537f9a4db`，manifest SHA-256 为 `e0019fc951819c2fc40055cd7e866d2ec15a1602ea99fcdc023d643d76838cd4`。这只冻结恢复尝试规则；只有 X11/X05 均完整生成、确定性纯净度通过且人工语义门禁通过，WSO-SENTINEL 才可放行。
+
+### 10.7 V3 X11/A 完整生成但纯净度失败
+
+`mystery-skill-ab-sentinel-v3a` 的 X11/A 在500.567秒后完整结束，生成前后公开模型均为 `bigmodel/glm-5.3-flash`，actual/usage 未公开并按合同标记 `not_exposed`。原始输出665个非空白字符，500–800篇幅和四个字符串锚点通过；但末尾再次附加独立 `⟦…⟧` 状态胶囊，复述可信封套、篇幅、锚点、策略变化和禁项检查，因此 `agent_status_capsule=true`、`output_purity_pass=false`。原文与哈希保留，不裁剪，不生成盲评文件，不进行语义质量评分。
+
+诊断 v2 记录流完整结束，共18,011个事件；观察到的公开文本值最大单值长度52,535、累计长度212,900，只是公开流各事件中字符串值的长度统计，不代表最终正文长度，也未保存诊断正文。请求窗口内新增42条项目模型记录，经关系表核对全部属于 `narration.segment_render`（41成功、1不可重试失败），不是写作评测持久化。
+
+按已批准的“X11 任一失败即停止”规则，X05/B 未启动，V3 哨兵失败。候选两个 Skill、普通关闭态、TTS 字段和健康状态已恢复；备份保留于 `/app/working.backups/writing-eval-skill-v3-20260828-pre`。该结果再次确认基线会产生状态胶囊，但由于候选未运行，仍不能形成 A/B 改进结论。
+
+### 10.8 减重后的 X05/B 候选缺陷检查仍失败
+
+用户批准先验证候选是否修复已知缺陷，不继续执行完整矩阵。为避免篡改 V3 冻结顺序，X05/B 以独立 run `mystery-skill-candidate-remediation-v3-x05` 保存，证据身份明确为 candidate-only remediation check：它沿用冻结题面、提示、候选 Skill 哈希和600秒上限，但不是 V3 A/B 的续跑或替代结果。该窄检查只调用一次、不重试；研究路由不持久化项目数据库，因此按批准的轻量协议不重复制作 PostgreSQL dump。
+
+X05/B 在314.754秒后完整结束，共14,179个事件。生成前后公开 effective 模型均为 `bigmodel/glm-5.3-flash`，actual/usage 未公开；候选 `prose-writing` 哈希为 `1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2`。原始输出733个非空白字符，500—800篇幅和四个字符串锚点均通过，但末尾仍附加独立状态胶囊，故 `agent_status_capsule=true`、`output_purity_pass=false`，运行器返回 `0 completed / 1 failed`，没有盲评文件和自动重试。
+
+该结果足以否定“候选规则已经修复状态胶囊”，不足以评价候选正文整体文质。后续四场景小样本保持停止。只读核对显示评测题面、候选 `prose-writing` 和专用 Agent 已分别要求正文结束立即停止；当前未提交的章节生成服务候选还会在 `_clean_model_candidate` 中仅移除末尾已知胶囊并拒绝嵌入式状态说明。因此当前缺陷更像宿主/模型编排输出未服从现有边界，而不是少写一条同义 Skill 规则；这是基于行为证据的技术推断，不是对 QwenPaw 内部根因的确认，也不把工作区候选表述为已经正式验收。
+
+下一版评测应减重为三层，不再向 Skill 堆叠同义规则：保留原始输出纯净度作为独立诊断；以生产路径相同的窄清理生成“产品可用正文候选”；只对该候选进行文质评分，同时始终单列 raw purity 失败，禁止把清理后的正文冒充原始模型合规。该合同尚未实施，需另行冻结后再施工和调用模型。

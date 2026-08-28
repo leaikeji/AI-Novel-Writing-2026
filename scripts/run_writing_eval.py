@@ -24,20 +24,24 @@ if str(ROOT) not in sys.path:
 
 from backend.writing_eval_contract import (  # noqa: E402
     ACTUAL_MODEL_POLICY,
-    CANDIDATE_OVERLAY_SHA256,
     EXPERIMENT_ID,
+    GENERATION_TIMEOUT_SECONDS,
     MANIFEST_SHA256,
     MODEL_EVIDENCE_CONTRACT_VERSION,
     OUTPUT_PURITY_CONTRACT_VERSION,
+    PROMPT_VARIANT_POLICY,
     PROMPT_CONTRACT_VERSION,
     RUBRIC_SHA256,
     SCHEMA_VERSION,
+    SKILL_EVIDENCE_CONTRACT_VERSION,
     SKILL_SELECTION_ENFORCEMENT,
     SOURCE_SUITE_SHA256,
     STREAM_DIAGNOSTIC_CONTRACT_VERSION,
     TOOL_POLICY_ENFORCEMENT,
+    VARIANT_POLICY_SHA256,
     build_sample,
     deterministic_output_checks,
+    expected_skill_sha256,
     experiment_contract,
     sha256_text,
 )
@@ -175,31 +179,41 @@ class _RunLock:
 def _local_contract() -> dict[str, Any]:
     contract = experiment_contract(EXPERIMENT_ID)
     cases_path = ROOT / "tests" / "fixtures" / "writing_skill_eval" / "cases.json"
-    overlay_path = (
+    experiment_root = (
         ROOT
         / "docs"
         / "开发文档"
         / "证据"
         / "悬疑刑侦写作A-B-2026-08-27"
-        / "candidate-overlay.md"
+        / "experiments"
+        / EXPERIMENT_ID
     )
-    manifest_path = overlay_path.parent / "manifest.json"
-    rubric_path = overlay_path.parent / "rubric.md"
+    variant_policy_path = experiment_root / "variant-policy.md"
+    manifest_path = experiment_root / "manifest.json"
+    rubric_path = experiment_root.parents[1] / "rubric.md"
+    baseline_skill_path = experiment_root / "baseline" / "prose-writing.SKILL.md"
+    candidate_skill_path = ROOT / "skills" / "prose-writing" / "SKILL.md"
     try:
         cases_sha = _sha256_bytes(cases_path.read_bytes())
-        overlay_sha = _sha256_bytes(overlay_path.read_bytes())
+        variant_policy_sha = _sha256_bytes(variant_policy_path.read_bytes())
         manifest_sha = _sha256_bytes(manifest_path.read_bytes())
         rubric_sha = _sha256_bytes(rubric_path.read_bytes())
+        baseline_skill_sha = _sha256_bytes(baseline_skill_path.read_bytes())
+        candidate_skill_sha = _sha256_bytes(candidate_skill_path.read_bytes())
     except OSError as error:
         raise RunnerError("冻结评测输入不可读") from error
     if cases_sha != SOURCE_SUITE_SHA256:
         raise RunnerError("CONTRACT_HASH_MISMATCH: cases.json")
-    if overlay_sha != CANDIDATE_OVERLAY_SHA256:
-        raise RunnerError("CONTRACT_HASH_MISMATCH: candidate-overlay.md")
+    if variant_policy_sha != VARIANT_POLICY_SHA256:
+        raise RunnerError("CONTRACT_HASH_MISMATCH: variant-policy.md")
     if manifest_sha != MANIFEST_SHA256:
         raise RunnerError("CONTRACT_HASH_MISMATCH: manifest.json")
     if rubric_sha != RUBRIC_SHA256:
         raise RunnerError("CONTRACT_HASH_MISMATCH: rubric.md")
+    if baseline_skill_sha != expected_skill_sha256("A"):
+        raise RunnerError("CONTRACT_HASH_MISMATCH: baseline prose-writing")
+    if candidate_skill_sha != expected_skill_sha256("B"):
+        raise RunnerError("CONTRACT_HASH_MISMATCH: candidate prose-writing")
     return contract
 
 
@@ -209,7 +223,7 @@ def _validate_server_contract(server: dict[str, Any], local: dict[str, Any]) -> 
         "experiment_id",
         "rights_basis",
         "source_suite_sha256",
-        "candidate_overlay_sha256",
+        "variant_policy_sha256",
         "manifest_sha256",
         "rubric_sha256",
         "generation_contract",
@@ -217,14 +231,19 @@ def _validate_server_contract(server: dict[str, Any], local: dict[str, Any]) -> 
         "stream_diagnostic_contract",
         "model_evidence_contract",
         "output_purity_contract",
+        "skill_evidence_contract",
+        "prompt_variant_policy",
+        "variant_skill_sha256",
         "actual_model_policy",
         "skill_selection_enforcement",
         "tool_policy_enforcement",
+        "generation_timeout_seconds",
         "sample_ids",
         "case_ids",
         "blind_pairs",
         "same_model_required",
         "attempts_per_variant",
+        "sentinel_sample_ids",
         "server_persistence",
         "arbitrary_prompt_allowed",
     )
@@ -245,11 +264,12 @@ def _validate_result(result: dict[str, Any], sample_id: str) -> None:
         "variant": sample.variant,
         "attempt": sample.attempt,
         "source_suite_sha256": SOURCE_SUITE_SHA256,
-        "candidate_overlay_sha256": CANDIDATE_OVERLAY_SHA256,
+        "variant_policy_sha256": VARIANT_POLICY_SHA256,
         "manifest_sha256": MANIFEST_SHA256,
         "rubric_sha256": RUBRIC_SHA256,
         "prompt_contract": PROMPT_CONTRACT_VERSION,
         "output_purity_contract": OUTPUT_PURITY_CONTRACT_VERSION,
+        "prompt_variant_policy": PROMPT_VARIANT_POLICY,
         "base_prompt_sha256": sha256_text(sample.base_prompt),
         "prompt_sha256": sha256_text(sample.prompt),
         "server_persistence": "none",
@@ -262,6 +282,20 @@ def _validate_result(result: dict[str, Any], sample_id: str) -> None:
         raise RunnerError("RESULT_OUTPUT_MISSING")
     if result.get("output_sha256") != sha256_text(output_text):
         raise RunnerError("RESULT_OUTPUT_HASH_MISMATCH")
+    expected_skill = expected_skill_sha256(sample.variant)
+    if result.get("skill_id") != "prose-writing":
+        raise RunnerError("RESULT_SKILL_EVIDENCE_INVALID")
+    if result.get("skill_sha256") != expected_skill:
+        raise RunnerError("RESULT_SKILL_VARIANT_MISMATCH")
+    skill_evidence = result.get("skill_evidence")
+    if skill_evidence != {
+        "contract": SKILL_EVIDENCE_CONTRACT_VERSION,
+        "variant": sample.variant,
+        "expected_skill_sha256": expected_skill,
+        "actual_skill_sha256": expected_skill,
+        "match": True,
+    }:
+        raise RunnerError("RESULT_SKILL_EVIDENCE_INVALID")
     expected_checks = deterministic_output_checks(sample.case_id, output_text)
     if result.get("deterministic_checks") != expected_checks:
         raise RunnerError("RESULT_DETERMINISTIC_CHECKS_MISMATCH")
@@ -332,6 +366,41 @@ def _validate_result(result: dict[str, Any], sample_id: str) -> None:
         or diagnostics.get("stream_completed") is not True
     ):
         raise RunnerError("RESULT_STREAM_DIAGNOSTICS_INVALID")
+    diagnostic_counts = (
+        "event_count",
+        "text_value_count",
+        "text_chars_total_observed",
+        "text_chars_max_single_value",
+        "assistant_messages_observed",
+        "public_usage_envelopes_observed",
+    )
+    if any(
+        type(diagnostics.get(field)) is not int or diagnostics[field] < 0
+        for field in diagnostic_counts
+    ):
+        raise RunnerError("RESULT_STREAM_DIAGNOSTICS_INVALID")
+    if diagnostics["event_count"] < 1:
+        raise RunnerError("RESULT_STREAM_DIAGNOSTICS_INVALID")
+    last_event_type = diagnostics.get("last_event_type")
+    if not isinstance(last_event_type, str) or not last_event_type:
+        raise RunnerError("RESULT_STREAM_DIAGNOSTICS_INVALID")
+    for field in (
+        "event_type_counts",
+        "message_role_counts",
+        "message_type_counts",
+        "content_part_type_counts",
+        "text_value_char_totals",
+        "text_value_max_chars",
+    ):
+        counter = diagnostics.get(field)
+        if not isinstance(counter, dict) or any(
+            not isinstance(label, str)
+            or not label
+            or type(value) is not int
+            or value < 0
+            for label, value in counter.items()
+        ):
+            raise RunnerError("RESULT_STREAM_DIAGNOSTICS_INVALID")
     if result.get("tool_policy_enforcement") != TOOL_POLICY_ENFORCEMENT:
         raise RunnerError("RESULT_TOOL_POLICY_EVIDENCE_INVALID")
     if result.get("skill_selection_enforcement") != SKILL_SELECTION_ENFORCEMENT:
@@ -417,6 +486,7 @@ def _plan_payload(run_id: str, contract: dict[str, Any]) -> dict[str, Any]:
                 "attempt": sample.attempt,
                 "base_prompt_sha256": sha256_text(sample.base_prompt),
                 "prompt_sha256": sha256_text(sample.prompt),
+                "expected_skill_sha256": expected_skill_sha256(sample.variant),
             }
         )
     return {
@@ -449,9 +519,7 @@ def command_verify_contract(_: argparse.Namespace) -> int:
                 "experiment_id": contract["experiment_id"],
                 "sample_count": len(contract["sample_ids"]),
                 "source_suite_sha256": contract["source_suite_sha256"],
-                "candidate_overlay_sha256": contract[
-                    "candidate_overlay_sha256"
-                ],
+                "variant_policy_sha256": contract["variant_policy_sha256"],
             },
             ensure_ascii=False,
         )
@@ -683,7 +751,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--sample", action="append", choices=experiment_contract(EXPERIMENT_ID)["sample_ids"])
     run.add_argument("--resume", action="store_true")
     run.add_argument("--acknowledge-model-cost", action="store_true")
-    run.add_argument("--timeout-seconds", type=float, default=620.0)
+    run.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=GENERATION_TIMEOUT_SECONDS + 20.0,
+    )
     run.set_defaults(handler=command_run)
 
     status_parser = subparsers.add_parser("status", parents=[shared])

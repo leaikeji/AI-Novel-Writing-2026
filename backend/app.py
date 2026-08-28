@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 from uuid import UUID
@@ -20,6 +21,7 @@ from .generation_dependencies import (
     get_novel_effective_model,
     get_novel_generation_ctx,
 )
+from .generation_runtime import await_chapter_generation
 from .model_runtime import (
     GENERATION_CONTRACT_VERSION,
     NOVEL_AGENT_ID,
@@ -29,6 +31,7 @@ from .model_runtime import (
     ensure_prompt_within_effective_limit,
     normalize_intelligence_generation_json,
     parse_model_json,
+    reply_final_text,
     reply_model_audit,
 )
 from .writing_eval_api import router as writing_eval_router
@@ -730,23 +733,41 @@ async def generation_jobs_create_body(
         prompt = build_chapter_generation_prompt(job["generation_context_snapshot"])
         ensure_prompt_within_effective_limit(prompt, configured_model)
         generation_session_id = f"novel-generation:{job['id']}"
-        reply = await ctx.chat(
-            prompt,
-            skill="prose-writing",
-            session_id=generation_session_id,
+        # ``start_chapter_generation`` has committed the immutable snapshot.
+        # End the payload-read transaction before waiting on an external model.
+        session.rollback()
+        reply = await await_chapter_generation(
+            ctx.chat(
+                prompt,
+                skill="prose-writing",
+                session_id=generation_session_id,
+            )
         )
         actual_model = reply_model_audit(
             reply,
             session_id=generation_session_id,
         )
         actual_model.ensure_matches(configured_model)
+        final_text = reply_final_text(reply)
         return complete_chapter_generation(
             session,
             UUID(str(job["id"])),
-            content_markdown=reply.text,
+            content_markdown=final_text,
             actual_provider_id=actual_model.provider_id,
             actual_model_id=actual_model.model_id,
         )
+    except asyncio.CancelledError:
+        session.rollback()
+        if job is not None:
+            try:
+                fail_chapter_generation(
+                    session,
+                    UUID(str(job["id"])),
+                    "章节生成请求已中断，正式正文未修改；请重新生成。",
+                )
+            except Exception:
+                session.rollback()
+        raise
     except Exception as error:
         session.rollback()
         if job is not None:
@@ -871,11 +892,12 @@ async def intelligence_proposals_create(
             session_id=intelligence_session_id,
         )
         actual_model.ensure_matches(configured_model)
+        final_text = reply_final_text(reply)
         try:
-            payload = parse_model_json(reply.text)
+            payload = parse_model_json(final_text)
         except ModelVerificationError:
             payload = {}
-        raw_items = normalize_intelligence_generation_json(payload, reply.text)
+        raw_items = normalize_intelligence_generation_json(payload, final_text)
         return complete_intelligence_proposal(
             session,
             UUID(str(proposal["id"])),

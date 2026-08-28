@@ -32,6 +32,9 @@ test-results/
 
 # Local database safety snapshots
 audit/db-backups/
+docs/开发文档/证据/关系网P0优化-2026-08-25/pre-relationship-cleanup.dump
+docs/开发文档/证据/助手计划V2验证-2026-08-25/pre-a3a4-install.dump
+docs/开发文档/证据/角色卡性格补全/pre-cpc-0016-20260826.dump
 
 # Local browser-audit captures (keep the report, manifest, and selected evidence)
 docs/开发文档/证据/妙笔双站全流程-2026-08-24/raw/

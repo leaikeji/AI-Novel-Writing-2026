@@ -17,6 +17,146 @@ _MAX_SEQUENCE_UNITS = 512
 _CHAR_REFINEMENT_LIMIT = 1_024
 _CHAR_REFINEMENT_PRODUCT_LIMIT = 250_000
 _BOUNDARY_CHARACTERS = frozenset("。！？!?；;.\n\r")
+_DOUBLE_QUOTE_CHARACTERS = frozenset({'"', "“", "”", "＂"})
+_SINGLE_QUOTE_CHARACTERS = frozenset({"'", "‘", "’", "＇"})
+_QUOTE_CANONICAL_TRANSLATION = str.maketrans(
+    {
+        "“": '"',
+        "”": '"',
+        "＂": '"',
+        "‘": "'",
+        "’": "'",
+        "＇": "'",
+    }
+)
+_NO_SUBSTANTIVE_CHANGE_SUMMARY = "未发现可验证的实质差异。"
+_SUMMARY_PREVIEW_CHARACTERS = 24
+_SUMMARY_CHANGE_LIMIT = 2
+
+
+def _quote_family(character: str) -> str | None:
+    if character in _DOUBLE_QUOTE_CHARACTERS:
+        return "double"
+    if character in _SINGLE_QUOTE_CHARACTERS:
+        return "single"
+    return None
+
+
+def _quotes_are_typographically_equivalent(
+    original_character: str,
+    replacement_character: str,
+) -> bool:
+    original_family = _quote_family(original_character)
+    return (
+        original_family is not None
+        and original_family == _quote_family(replacement_character)
+    )
+
+
+def _restore_original_quote_typography(
+    original_text: str,
+    replacement_text: str,
+) -> str:
+    """Remove quote-glyph-only noise without changing substantive candidate text."""
+
+    canonical_original = original_text.translate(_QUOTE_CANONICAL_TRANSLATION)
+    canonical_replacement = replacement_text.translate(_QUOTE_CANONICAL_TRANSLATION)
+    if canonical_original == canonical_replacement:
+        return original_text
+
+    original_quotes = [
+        (index, character, family)
+        for index, character in enumerate(original_text)
+        if (family := _quote_family(character)) is not None
+    ]
+    replacement_quotes = [
+        (index, character, family)
+        for index, character in enumerate(replacement_text)
+        if (family := _quote_family(character)) is not None
+    ]
+    if [item[2] for item in original_quotes] == [
+        item[2] for item in replacement_quotes
+    ]:
+        # Content insertions and deletions often move every later quote. Pairing
+        # the unchanged family sequence by order is deterministic and linear.
+        output = list(replacement_text)
+        for original, replacement in zip(original_quotes, replacement_quotes):
+            output[replacement[0]] = original[1]
+        return "".join(output)
+
+    def restore_aligned_quotes(original: str, replacement: str) -> str:
+        return "".join(
+            original_character
+            if _quotes_are_typographically_equivalent(
+                original_character,
+                replacement_character,
+            )
+            else replacement_character
+            for original_character, replacement_character in zip(original, replacement)
+        )
+
+    # Most model edits preserve length. This linear path also avoids ambiguous
+    # alignment in long, repetitive prose while retaining every non-quote edit.
+    if len(original_text) == len(replacement_text):
+        return restore_aligned_quotes(original_text, replacement_text)
+
+    # Character alignment remains bounded. Long inputs whose quote sequences
+    # changed retain the ambiguous middle and only normalize exact outer context.
+    if (
+        len(original_text) > _CHAR_REFINEMENT_LIMIT
+        or len(replacement_text) > _CHAR_REFINEMENT_LIMIT
+        or len(original_text) * len(replacement_text)
+        > _CHAR_REFINEMENT_PRODUCT_LIMIT
+    ):
+        output = list(replacement_text)
+        prefix_limit = min(len(original_text), len(replacement_text))
+        prefix = 0
+        while (
+            prefix < prefix_limit
+            and canonical_original[prefix] == canonical_replacement[prefix]
+        ):
+            if _quotes_are_typographically_equivalent(
+                original_text[prefix],
+                replacement_text[prefix],
+            ):
+                output[prefix] = original_text[prefix]
+            prefix += 1
+
+        original_index = len(original_text) - 1
+        replacement_index = len(replacement_text) - 1
+        while (
+            original_index >= prefix
+            and replacement_index >= prefix
+            and canonical_original[original_index]
+            == canonical_replacement[replacement_index]
+        ):
+            if _quotes_are_typographically_equivalent(
+                original_text[original_index],
+                replacement_text[replacement_index],
+            ):
+                output[replacement_index] = original_text[original_index]
+            original_index -= 1
+            replacement_index -= 1
+        return "".join(output)
+
+    matcher = SequenceMatcher(
+        None,
+        canonical_original,
+        canonical_replacement,
+        autojunk=False,
+    )
+    output: list[str] = []
+    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        original = original_text[left_start:left_end]
+        replacement = replacement_text[right_start:right_end]
+        if tag == "equal":
+            # Canonical equality guarantees identical text except for quote glyphs.
+            output.append(original)
+        elif tag == "replace" and len(original) == len(replacement):
+            output.append(restore_aligned_quotes(original, replacement))
+        else:
+            output.append(replacement)
+    return "".join(output)
 
 
 def _bounded_text_units(text: str) -> list[str]:
@@ -228,6 +368,46 @@ def build_selection_edit_diff(
     return segments
 
 
+def _summary_preview(text: str) -> str:
+    compact = " ".join(text.split())
+    if not compact and text:
+        if text == " ":
+            return "一个空格"
+        if set(text) <= {"\r", "\n"}:
+            return "换行"
+        return "空白字符"
+    if len(compact) <= _SUMMARY_PREVIEW_CHARACTERS:
+        return compact
+    return f"{compact[:_SUMMARY_PREVIEW_CHARACTERS]}…"
+
+
+def _verified_change_summary(segments: Iterable[dict[str, str]]) -> str:
+    """Describe only edits that the persisted diff can independently verify."""
+
+    changes = [segment for segment in segments if segment["kind"] != "equal"]
+    if not changes:
+        return _NO_SUBSTANTIVE_CHANGE_SUMMARY
+
+    descriptions: list[str] = []
+    for segment in changes[:_SUMMARY_CHANGE_LIMIT]:
+        kind = segment["kind"]
+        if kind == "delete":
+            descriptions.append(f"删除「{_summary_preview(segment['original_text'])}」")
+        elif kind == "insert":
+            descriptions.append(f"新增「{_summary_preview(segment['replacement_text'])}」")
+        else:
+            descriptions.append(
+                "将「"
+                f"{_summary_preview(segment['original_text'])}"
+                "」改为「"
+                f"{_summary_preview(segment['replacement_text'])}"
+                "」"
+            )
+    remaining = len(changes) - len(descriptions)
+    suffix = f"；另有 {remaining} 处" if remaining else ""
+    return f"共 {len(changes)} 处实质修改：{'；'.join(descriptions)}{suffix}。"
+
+
 def build_selection_edit_result(
     *,
     job_id: str,
@@ -239,6 +419,20 @@ def build_selection_edit_result(
 ) -> dict[str, Any]:
     """Add project-owned metadata and diff to a normalized model result."""
 
+    replacement_text = _restore_original_quote_typography(
+        original_text,
+        replacement_text,
+    )
+    diff_segments = build_selection_edit_diff(
+        original_text,
+        replacement_text,
+        job_id=job_id,
+    )
+    # The model summary is deliberately not persisted as authoritative prose:
+    # it can claim edits that are absent from the candidate. The author-facing
+    # summary is reconstructed from the same immutable diff shown in review.
+    short_summary = _verified_change_summary(diff_segments)
+
     return {
         "schema_version": 2,
         "selection_id": selection_id,
@@ -247,11 +441,7 @@ def build_selection_edit_result(
         "short_summary": short_summary,
         "replacement_character_count": len(replacement_text),
         "warnings": [],
-        "diff_segments": build_selection_edit_diff(
-            original_text,
-            replacement_text,
-            job_id=job_id,
-        ),
+        "diff_segments": diff_segments,
     }
 
 

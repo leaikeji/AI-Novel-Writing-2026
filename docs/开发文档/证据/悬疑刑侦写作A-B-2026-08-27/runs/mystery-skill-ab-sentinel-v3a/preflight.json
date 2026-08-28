@@ -1,0 +1,27 @@
+{
+  "state": "passed_before_dispatch",
+  "experiment_id": "mystery-skill-ab-20260828-v3",
+  "run_id": "mystery-skill-ab-sentinel-v3a",
+  "sample_id": "X11",
+  "variant": "A",
+  "attempt": 2,
+  "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+  "installed_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+  "contract_schema": "1.4",
+  "stream_diagnostic_contract": "writing-eval-stream-diagnostics-v2",
+  "generation_timeout_seconds": 600,
+  "sentinel_execution_order": ["X11", "X05"],
+  "research_enabled": true,
+  "qwenpaw_healthy": true,
+  "tts_sidecar_docker_health": "healthy",
+  "tts_runtime_fields_preserved": true,
+  "active_tts_or_writing_eval_host_processes": 0,
+  "recent_model_records_last_two_minutes": 0,
+  "qwenpaw_container_created_at": "2026-08-28T03:31:36.192319555Z",
+  "backup": {
+    "path": "/app/working.backups/writing-eval-skill-v3-20260828-pre",
+    "plugin_sha256": "3569fcfb117e92634ec02621f351ba241aedb9c35b20958c1ed095927ed37287",
+    "postgres_dump_sha256": "2f613bcb4a3ccdb6c904633ce06d359abb567170850f89d610d6570e4de63ec4"
+  },
+  "secrets_recorded": false
+}

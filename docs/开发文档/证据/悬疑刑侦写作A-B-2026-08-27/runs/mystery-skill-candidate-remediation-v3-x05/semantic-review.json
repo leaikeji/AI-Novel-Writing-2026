@@ -1,0 +1,20 @@
+{
+  "state": "reviewed_after_deterministic_failure",
+  "evidence_scope": "candidate_only_remediation_check",
+  "sample_id": "X05",
+  "variant": "B",
+  "output_sha256": "aaa1119227d911fa64c20bedf3f2bc8be121aea49a2a9764e655e64a9982b295",
+  "deterministic_hard_gate": {
+    "length_pass": true,
+    "non_whitespace_chars": 733,
+    "all_required_anchor_strings_present": true,
+    "output_purity_pass": false,
+    "agent_status_capsule": true
+  },
+  "blind_review_eligible": false,
+  "prose_quality_scored": false,
+  "candidate_defect_remediated": false,
+  "overall_skill_improvement_claim_allowed": false,
+  "finding": "候选 prose-writing 的原始输出仍在正文末尾附加独立状态胶囊，复述场景完成情况；确定性纯净度门禁正确拒绝该样本。",
+  "interpretation_boundary": "本次只验证已知状态胶囊缺陷，不是冻结 V3 A/B 顺序的续跑，也不比较两份失盲正文的文质。"
+}

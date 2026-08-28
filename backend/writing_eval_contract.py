@@ -12,24 +12,32 @@ from typing import Any, Literal
 from .model_runtime import GENERATION_CONTRACT_VERSION
 
 
-EXPERIMENT_ID = "mystery-ab-20260827-v1"
-SCHEMA_VERSION = "1.2"
+EXPERIMENT_ID = "mystery-skill-ab-20260828-v3"
+SCHEMA_VERSION = "1.4"
 RIGHTS_BASIS = "project-synthetic"
 SOURCE_SUITE_SHA256 = (
     "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf"
 )
-CANDIDATE_OVERLAY_SHA256 = (
-    "8fd672fcefcc657f8d3998f0b896d89a3326f5e0e0e6ce5ecf232beea0a3863d"
+VARIANT_POLICY_SHA256 = (
+    "6e64c9590c330ac89a2a48c79bc6aa989bb86a0237b3d7f36feef05537f9a4db"
 )
-MANIFEST_SHA256 = "19d5bb361b74c93f51f1580dea8d8977a7c21fa7f9a0a80dec781aee449d640f"
+MANIFEST_SHA256 = "e0019fc951819c2fc40055cd7e866d2ec15a1602ea99fcdc023d643d76838cd4"
 RUBRIC_SHA256 = "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6"
-PROMPT_CONTRACT_VERSION = "writing-eval-prompt-v1"
-STREAM_DIAGNOSTIC_CONTRACT_VERSION = "writing-eval-stream-diagnostics-v1"
+PROMPT_CONTRACT_VERSION = "writing-eval-prompt-v3"
+STREAM_DIAGNOSTIC_CONTRACT_VERSION = "writing-eval-stream-diagnostics-v2"
 MODEL_EVIDENCE_CONTRACT_VERSION = "writing-eval-effective-model-pre-post-v1"
 OUTPUT_PURITY_CONTRACT_VERSION = "writing-eval-output-purity-v1"
+SKILL_EVIDENCE_CONTRACT_VERSION = "writing-eval-skill-package-sha256-v1"
+PROMPT_VARIANT_POLICY = "identical-prompt-skill-package-swap"
 ACTUAL_MODEL_POLICY = "provider_usage_optional_not_exposed_allowed"
 SKILL_SELECTION_ENFORCEMENT = "requested_via_pawapp_context_parameter"
 TOOL_POLICY_ENFORCEMENT = "prompt_only"
+GENERATION_TIMEOUT_SECONDS = 600.0
+VARIANT_SKILL_SHA256: dict[Literal["A", "B"], str] = {
+    "A": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+    "B": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+}
+SENTINEL_SAMPLE_IDS = ("X11", "X05")
 
 
 class WritingEvalContractError(ValueError):
@@ -219,22 +227,6 @@ _BLIND_PAIRS = (
 )
 
 
-_OVERLAY_COMMON = """临时候选研究约束（仅本次测试）：
-任何核验、代价或行动决定都只能使用题面已给人物、物品、设备、权限、记录和时间条件；不得借“推进”新增事实，且 forbidden_additions、knowledge_boundaries 和 required_state_changes 始终优先。
-1. 场景结束时，至少让事实理解、证据资格、人物知识、行动许可、嫌疑权重、风险或关系代价中的一项发生可观察变化；不要用只增加气氛但不改变下一步的段落冒充推进。
-2. 调查者或强行动者的关键判断必须来自题面已有观察、可执行核验或明确承担的失败代价。直觉只能提出暂时假设，不能直接充当证据或结论。
-3. 上述约束只控制因果和信息。正文不得出现本覆盖层的英文 mode 名，也不得出现“状态变化、证据资格、证明链、原因竞争、失败代价”等研究标签；这些只用于内部控制。不得复现任何参考小说的专名、情节排列或作者声音。"""
-
-
-_MODE_RULES = {
-    "unknown-truth": "给出有限假设和下一步验证，不提前公布真相。",
-    "known-hard-to-prove": "读者可知道部分事实，但调查者只能推进可核验的证明过程。",
-    "known-action-unknown-cause": (
-        "先固定已知行动或异常，再保留多个可能原因，避免一次解释封死案件。"
-    ),
-}
-
-
 _TRUSTED_HEADER = f"""【AI小说世界2026 PawApp可信任务封套】
 kind=chapter_generation
 contract={GENERATION_CONTRACT_VERSION}
@@ -246,7 +238,9 @@ tools=forbidden
 output=final-prose-only"""
 
 _FINAL_REQUIREMENT = (
-    "最终只输出连续小说正文，不要标题、分析、说明、评分、提纲或提示词复述。"
+    "最终回答从第一字到最后一字都属于连续小说正文，正文结束立即停止。"
+    "不得附加标题、分析、说明、评分、提纲、提示词或约束复述、执行摘要、"
+    "完成状态、字数/锚点/禁项核对、下一步或任何括号状态胶囊。"
 )
 
 
@@ -287,9 +281,6 @@ def build_sample(experiment_id: str, sample_id: str) -> WritingEvalSample:
     prompt_prefix = _base_prompt(case)
     base_prompt = f"{prompt_prefix}\n{_FINAL_REQUIREMENT}"
     prompt = base_prompt
-    if variant == "B":
-        prompt = f"{prompt_prefix}\n\n{candidate_overlay_text(case_id)}\n"
-        prompt += f"\n{_FINAL_REQUIREMENT}"
     return WritingEvalSample(
         sample_id=sample_id,
         case_id=case_id,
@@ -307,14 +298,8 @@ def case_contract(case_id: str) -> dict[str, Any]:
     return deepcopy(case)
 
 
-def candidate_overlay_text(case_id: str) -> str:
-    case = _CASES.get(case_id)
-    if case is None:
-        raise WritingEvalContractError("case_not_found", "未登记的写作研究 case")
-    return (
-        f"{_OVERLAY_COMMON}\n"
-        f"- 本题的信息释放规则：{_MODE_RULES[case['mode']]}"
-    )
+def expected_skill_sha256(variant: Literal["A", "B"]) -> str:
+    return VARIANT_SKILL_SHA256[variant]
 
 
 def experiment_contract(experiment_id: str) -> dict[str, Any]:
@@ -327,7 +312,7 @@ def experiment_contract(experiment_id: str) -> dict[str, Any]:
         "experiment_id": EXPERIMENT_ID,
         "rights_basis": RIGHTS_BASIS,
         "source_suite_sha256": SOURCE_SUITE_SHA256,
-        "candidate_overlay_sha256": CANDIDATE_OVERLAY_SHA256,
+        "variant_policy_sha256": VARIANT_POLICY_SHA256,
         "manifest_sha256": MANIFEST_SHA256,
         "rubric_sha256": RUBRIC_SHA256,
         "generation_contract": GENERATION_CONTRACT_VERSION,
@@ -335,14 +320,19 @@ def experiment_contract(experiment_id: str) -> dict[str, Any]:
         "stream_diagnostic_contract": STREAM_DIAGNOSTIC_CONTRACT_VERSION,
         "model_evidence_contract": MODEL_EVIDENCE_CONTRACT_VERSION,
         "output_purity_contract": OUTPUT_PURITY_CONTRACT_VERSION,
+        "skill_evidence_contract": SKILL_EVIDENCE_CONTRACT_VERSION,
+        "prompt_variant_policy": PROMPT_VARIANT_POLICY,
+        "variant_skill_sha256": dict(VARIANT_SKILL_SHA256),
         "actual_model_policy": ACTUAL_MODEL_POLICY,
         "skill_selection_enforcement": SKILL_SELECTION_ENFORCEMENT,
         "tool_policy_enforcement": TOOL_POLICY_ENFORCEMENT,
+        "generation_timeout_seconds": GENERATION_TIMEOUT_SECONDS,
         "sample_ids": list(_ASSIGNMENTS),
         "case_ids": list(_CASES),
         "blind_pairs": [dict(item) for item in _BLIND_PAIRS],
         "same_model_required": True,
         "attempts_per_variant": 2,
+        "sentinel_sample_ids": list(SENTINEL_SAMPLE_IDS),
         "server_persistence": "none",
         "arbitrary_prompt_allowed": False,
     }

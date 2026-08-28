@@ -1,0 +1,54 @@
+{
+  "automatic_retry": false,
+  "client_duration_ms": 600097,
+  "dispatch_started_at": "2026-08-28T03:05:33.808927Z",
+  "error_class": "HTTPStatusError",
+  "failed_at": "2026-08-28T03:15:33.896444Z",
+  "http_status": 504,
+  "message": "Server error '504 Gateway Timeout' for url 'http://127.0.0.1:18088/api/ai-novel-world-2026/research/writing-evaluations/mystery-skill-ab-20260828-v2/samples/X01/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504",
+  "response_body_bytes": 931,
+  "response_body_sha256": "05d6eab5f0ac2ac527bcfbd3dfb2cd7beca3389174631133c06dafc946f85b19",
+  "response_content_type": "application/json",
+  "response_json": {
+    "detail": {
+      "requested_model": {
+        "agent_id": "ai-novel-writer",
+        "effective_max_input_length": 131072,
+        "model_id": "glm-5.3-flash",
+        "provider_id": "bigmodel",
+        "source": "effective-model-api"
+      },
+      "sample_id": "X01",
+      "session_id": "novel-writing-eval:mystery-skill-ab-20260828-v2:X01:9dadafa5-714c-4faf-97a0-dc4a6ea30cb3",
+      "skill_id": "prose-writing",
+      "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
+      "started_at": "2026-08-28T03:05:33.819068Z",
+      "stream_diagnostics": {
+        "content_part_type_counts": {},
+        "content_recorded": false,
+        "contract": "writing-eval-stream-diagnostics-v1",
+        "event_count": 20013,
+        "event_type_counts": {
+          "agentresponse": 2,
+          "reasoning": 1,
+          "text": 20010
+        },
+        "first_event_elapsed_ms": 99,
+        "last_event_elapsed_ms": 599944,
+        "message_role_counts": {
+          "assistant": 1
+        },
+        "message_type_counts": {
+          "reasoning": 1,
+          "text": 20010
+        },
+        "stream_completed": false
+      },
+      "timeout_seconds": 600.0,
+      "tool_policy_enforcement": "prompt_only",
+      "type": "writing_evaluation_timed_out"
+    }
+  },
+  "sample_id": "X01",
+  "state": "failed"
+}

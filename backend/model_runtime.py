@@ -18,7 +18,7 @@ import httpx
 from .selection_edit_diff import SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS
 
 NOVEL_AGENT_ID = "ai-novel-writer"
-GENERATION_CONTRACT_VERSION = "follow-agent-effective-v3"
+GENERATION_CONTRACT_VERSION = "follow-agent-effective-v4"
 
 
 _CHARACTER_GENDER_ALIASES = {
@@ -55,6 +55,37 @@ def _normalize_generated_character_gender(value: Any) -> str:
     if normalized is None:
         raise ModelVerificationError("模型角色性别字段无效，请重新生成")
     return normalized
+
+
+_GENERIC_PERSONALITY_LABELS = {
+    "聪明",
+    "善良",
+    "冷酷",
+    "勇敢",
+    "温柔",
+    "坚强",
+    "开朗",
+    "内向",
+    "外向",
+}
+
+
+def _normalize_generated_character_personality(value: Any) -> str:
+    """Validate an actionable personality description, not a label list."""
+
+    if not isinstance(value, str):
+        raise ModelVerificationError("模型角色性格字段缺失，请重新生成")
+    clean_value = re.sub(r"\s+", " ", value).strip()
+    if not 8 <= len(clean_value) <= 120:
+        raise ModelVerificationError("模型角色性格字段长度无效，请重新生成")
+    labels = {
+        item.strip()
+        for item in re.split(r"[、，,；;。\s]+", clean_value)
+        if item.strip()
+    }
+    if labels and labels.issubset(_GENERIC_PERSONALITY_LABELS):
+        raise ModelVerificationError("模型角色性格只有空泛标签，请重新生成")
+    return clean_value
 
 INTELLIGENCE_ITEM_TYPES = {
     "fact",
@@ -711,6 +742,9 @@ def normalize_creative_generation_json(
                 raise ModelVerificationError("模型角色性别字段互相冲突，请重新生成")
             details["gender"] = _normalize_generated_character_gender(
                 nested_gender if nested_gender is not None else top_level_gender
+            )
+            details["personality"] = _normalize_generated_character_personality(
+                details.get("personality")
             )
             normalized = dict(item)
             normalized["name"] = name

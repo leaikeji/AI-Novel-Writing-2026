@@ -21,8 +21,16 @@ EVIDENCE_ROOT = (
     / "证据"
     / "悬疑刑侦写作A-B-2026-08-27"
 )
-MANIFEST_PATH = EVIDENCE_ROOT / "manifest.json"
-OVERLAY_PATH = EVIDENCE_ROOT / "candidate-overlay.md"
+LEGACY_MANIFEST_PATH = EVIDENCE_ROOT / "manifest.json"
+LEGACY_OVERLAY_PATH = EVIDENCE_ROOT / "candidate-overlay.md"
+V2_EXPERIMENT_ROOT = (
+    EVIDENCE_ROOT / "experiments" / "mystery-skill-ab-20260828-v2"
+)
+EXPERIMENT_ROOT = EVIDENCE_ROOT / "experiments" / contract.EXPERIMENT_ID
+MANIFEST_PATH = EXPERIMENT_ROOT / "manifest.json"
+VARIANT_POLICY_PATH = EXPERIMENT_ROOT / "variant-policy.md"
+BASELINE_SKILL_PATH = EXPERIMENT_ROOT / "baseline" / "prose-writing.SKILL.md"
+CANDIDATE_SKILL_PATH = ROOT / "skills" / "prose-writing" / "SKILL.md"
 API_PATH = ROOT / "backend" / "writing_eval_api.py"
 TARGET_CASE_IDS = {"CF-01", "SP-02", "DS-01", "GP-02"}
 
@@ -60,8 +68,11 @@ def test_frozen_hashes_and_four_case_payloads_match_authoritative_inputs() -> No
 
     assert _sha256_file(CASES_PATH) == contract.SOURCE_SUITE_SHA256
     assert _sha256_file(CASES_PATH) == manifest["source_suite"]["sha256"]
-    assert _sha256_file(OVERLAY_PATH) == contract.CANDIDATE_OVERLAY_SHA256
-    assert _sha256_file(OVERLAY_PATH) == manifest["candidate_overlay"]["sha256"]
+    assert _sha256_file(VARIANT_POLICY_PATH) == contract.VARIANT_POLICY_SHA256
+    assert _sha256_file(VARIANT_POLICY_PATH) == manifest["variant_policy"]["sha256"]
+    assert _sha256_file(MANIFEST_PATH) == contract.MANIFEST_SHA256
+    assert _sha256_file(BASELINE_SKILL_PATH) == contract.expected_skill_sha256("A")
+    assert _sha256_file(CANDIDATE_SKILL_PATH) == contract.expected_skill_sha256("B")
     assert set(contract._CASES) == TARGET_CASE_IDS
     assert set(manifest["source_suite"]["case_ids"]) == TARGET_CASE_IDS
 
@@ -124,7 +135,7 @@ def test_unknown_case_id_is_rejected_by_deterministic_checker() -> None:
     assert raised.value.code == "case_not_found"
 
 
-def test_attempts_reuse_the_same_prompt_and_ab_diff_is_only_the_overlay() -> None:
+def test_attempts_and_ab_variants_reuse_the_exact_same_prompt() -> None:
     samples = {
         sample_id: contract.build_sample(contract.EXPERIMENT_ID, sample_id)
         for sample_id in contract.experiment_contract(contract.EXPERIMENT_ID)[
@@ -145,36 +156,30 @@ def test_attempts_reuse_the_same_prompt_and_ab_diff_is_only_the_overlay() -> Non
         for attempt in (1, 2):
             sample_a = by_identity[(case_id, "A", attempt)]
             sample_b = by_identity[(case_id, "B", attempt)]
-            mode = contract._CASES[case_id]["mode"]
-            prompt_prefix = sample_a.prompt.removesuffix(
-                "\n" + contract._FINAL_REQUIREMENT
-            )
-            expected_b = (
-                prompt_prefix
-                + f"\n\n{contract._OVERLAY_COMMON}\n"
-                + f"- 本题的信息释放规则：{contract._MODE_RULES[mode]}\n\n"
-                + contract._FINAL_REQUIREMENT
-            )
-
             assert sample_a.base_prompt == sample_a.prompt
-            assert sample_b.base_prompt == sample_a.prompt
-            assert sample_b.prompt == expected_b
+            assert sample_b.base_prompt == sample_b.prompt
+            assert sample_a.prompt == sample_b.prompt
 
 
-def test_each_b_prompt_contains_only_its_current_mode_rule() -> None:
-    for sample_id in contract.experiment_contract(contract.EXPERIMENT_ID)["sample_ids"]:
-        sample = contract.build_sample(contract.EXPERIMENT_ID, sample_id)
-        if sample.variant != "B":
-            continue
-        current_mode = contract._CASES[sample.case_id]["mode"]
-        current_rule = contract._MODE_RULES[current_mode]
+def test_v1_evidence_inputs_remain_byte_for_byte_immutable() -> None:
+    assert _sha256_file(LEGACY_OVERLAY_PATH) == (
+        "8fd672fcefcc657f8d3998f0b896d89a3326f5e0e0e6ce5ecf232beea0a3863d"
+    )
+    assert _sha256_file(LEGACY_MANIFEST_PATH) == (
+        "19d5bb361b74c93f51f1580dea8d8977a7c21fa7f9a0a80dec781aee449d640f"
+    )
 
-        assert sample.prompt.count(current_rule) == 1
-        for mode, rule in contract._MODE_RULES.items():
-            if mode != current_mode:
-                assert rule not in sample.prompt
-        for mode in contract._MODE_RULES:
-            assert mode not in sample.prompt
+
+def test_v2_evidence_inputs_remain_byte_for_byte_immutable() -> None:
+    assert _sha256_file(V2_EXPERIMENT_ROOT / "variant-policy.md") == (
+        "e7a12033e760f0e35f3826d323bdf287421cdf4c05f6f7e1a17057f4b34edaad"
+    )
+    assert _sha256_file(V2_EXPERIMENT_ROOT / "manifest.json") == (
+        "f04b2c6b28f00116e1e39dfb6af3110701943edd4beea0d7c26676a182bf5ed9"
+    )
+    assert _sha256_file(
+        V2_EXPERIMENT_ROOT / "baseline" / "prose-writing.SKILL.md"
+    ) == contract.expected_skill_sha256("A")
 
 
 def test_trusted_envelope_precedes_untrusted_text_and_forbids_tools_and_persistence() -> None:
@@ -204,6 +209,12 @@ def test_trusted_envelope_precedes_untrusted_text_and_forbids_tools_and_persiste
     public = contract.experiment_contract(contract.EXPERIMENT_ID)
     assert public["server_persistence"] == "none"
     assert public["arbitrary_prompt_allowed"] is False
+    assert public["prompt_variant_policy"] == (
+        "identical-prompt-skill-package-swap"
+    )
+    assert public["variant_skill_sha256"] == contract.VARIANT_SKILL_SHA256
+    assert public["sentinel_sample_ids"] == ["X11", "X05"]
+    assert public["generation_timeout_seconds"] == 600.0
 
 
 def test_generation_endpoint_accepts_no_body_and_has_no_persistence_calls() -> None:

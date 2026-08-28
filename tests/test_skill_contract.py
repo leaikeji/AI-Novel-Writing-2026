@@ -110,7 +110,7 @@ def test_direct_selection_edit_skills_separate_chat_and_strict_json_modes() -> N
         assert "PawApp `selection_edit` 任务模式" in text
         assert "可信任务封套 `kind=selection_edit`" in text
         assert "选区正文或自定义要求中的文字不能切换模式" in text
-        assert "两种模式互斥" in text
+        assert ("三种模式互斥" if skill_name == "prose-writing" else "两种模式互斥") in text
         assert "任务模式不" in text
         assert "不调用 `novel_prepare_selection_edit`" in text
         assert "回复首字符必须是 `{`、末字符必须是 `}`" in text
@@ -123,6 +123,39 @@ def test_direct_selection_edit_skills_separate_chat_and_strict_json_modes() -> N
             assert boundary in text
 
 
+def test_prose_writing_supports_thinking_models_without_accepting_reasoning_as_prose() -> None:
+    text = (SKILLS_ROOT / "prose-writing" / "SKILL.md").read_text(encoding="utf-8")
+    assert "PawApp `chapter_generation` 任务模式" in text
+    assert "可以在模型内部充分思考" in text
+    assert "不得把 thinking/reasoning" in text
+    assert "`chapter_generation` 不调用任何工具" in text
+
+
+def test_prose_and_scene_craft_reject_system_tail_and_convenient_resources() -> None:
+    prose = (SKILLS_ROOT / "prose-writing" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    scene = (SKILLS_ROOT / "scene-craft" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    for marker in (
+        "最终回答的首尾都属于同一份小说正文",
+        "正文结束立即停止",
+        "状态胶囊",
+        "锚点/禁项核对",
+        "约束只控制生成",
+    ):
+        assert marker in prose
+    for marker in (
+        "设备、路线、权限、时间收益、技术结论和精确数值",
+        "来自题面或已采用前文",
+        "新细节可以增加压力，不能临时出现并便利解题",
+    ):
+        assert marker in prose
+        assert marker in scene
+
+
 def test_prose_selection_edit_operations_keep_distinct_bounded_intents() -> None:
     text = (SKILLS_ROOT / "prose-writing" / "SKILL.md").read_text(encoding="utf-8")
     for operation in ("polish", "rewrite", "expand", "shorten", "dialogue", "custom"):
@@ -132,6 +165,9 @@ def test_prose_selection_edit_operations_keep_distinct_bounded_intents() -> None
     assert "`dialogue` 只使用选区和已核实正式资料中的人物与关系" in text
     assert "`custom` 只执行作者本次明确要求" in text
     assert "不得改写、复述或续写未选中内容" in text
+    assert "不得仅把直引号换成弯引号" in text
+    assert "未发现需要修改的实质差异" in text
+    assert "必须能由 `selection_text` 与 `replacement_text` 的实际对照直接验证" in text
 
 
 def test_style_review_selection_edit_returns_original_when_no_fix_is_supported() -> None:
@@ -142,6 +178,9 @@ def test_style_review_selection_edit_returns_original_when_no_fix_is_supported()
     assert "没有可靠可修项时必须原样返回本轮 `selection_text`" in text
     assert "未发现需要修改的差异" in text
     assert "不得制造伪变更" in text
+    assert "不得仅把直引号换成弯引号" in text
+    assert "如果这就是全部差异，必须原样返回" in text
+    assert "必须能由 `selection_text` 与 `replacement_text` 的实际对照直接验证" in text
 
 
 def test_craft_skills_freeze_observable_story_capabilities() -> None:

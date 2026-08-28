@@ -1,0 +1,153 @@
+{
+  "automatic_retry": false,
+  "execution": "strict-serial",
+  "experiment_id": "mystery-skill-ab-20260828-v2",
+  "run_id": "mystery-skill-ab-sentinel-v2-a",
+  "samples": [
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "case_id": "SP-02",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "sample_id": "X01",
+      "variant": "A"
+    },
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "case_id": "CF-01",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "sample_id": "X02",
+      "variant": "B"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "case_id": "GP-02",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "sample_id": "X03",
+      "variant": "B"
+    },
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "case_id": "DS-01",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "sample_id": "X04",
+      "variant": "B"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "case_id": "SP-02",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "sample_id": "X05",
+      "variant": "B"
+    },
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "case_id": "GP-02",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "sample_id": "X06",
+      "variant": "A"
+    },
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "case_id": "CF-01",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "sample_id": "X07",
+      "variant": "A"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "case_id": "DS-01",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "sample_id": "X08",
+      "variant": "A"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "case_id": "CF-01",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "sample_id": "X09",
+      "variant": "B"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "case_id": "GP-02",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "sample_id": "X10",
+      "variant": "A"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "case_id": "SP-02",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "sample_id": "X11",
+      "variant": "A"
+    },
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "case_id": "GP-02",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "56cc2d0e6adf5e880ba8479ef631536ee722a00e6c745a811e14a693fc6f8565",
+      "sample_id": "X12",
+      "variant": "B"
+    },
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "case_id": "DS-01",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "sample_id": "X13",
+      "variant": "A"
+    },
+    {
+      "attempt": 1,
+      "base_prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "case_id": "SP-02",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "2da5fb23606beae97788447e3ad6458f6555102c6077f19468ed2fb549f8ccc8",
+      "sample_id": "X14",
+      "variant": "B"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "case_id": "CF-01",
+      "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "prompt_sha256": "b8fac21243d14f7f5b3b1b07a01bf7800c873253c59d5545125cfdaed85f8d63",
+      "sample_id": "X15",
+      "variant": "A"
+    },
+    {
+      "attempt": 2,
+      "base_prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "case_id": "DS-01",
+      "expected_skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "prompt_sha256": "9200b56feb287cfcbcf4e705359dd82a81ce4e54755d79954ca3632b55c4d8c6",
+      "sample_id": "X16",
+      "variant": "B"
+    }
+  ],
+  "schema_version": "1.0"
+}

@@ -125,11 +125,13 @@ import {
 } from "./narration/paragraph-gutter";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 import { navigateNovelSurface } from "./novel-surface-navigation";
+import { createNovelCoverView } from "./novel-cover";
 
 
 const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
+const NovelCoverView = createNovelCoverView(React);
 const ChapterNarrationPanel = createChapterNarrationPanel(React);
 const ScriptReviewPanel = createScriptReviewPanel(React);
 const NARRATION_GATE_REFRESH_MILLISECONDS = 5_000;
@@ -231,12 +233,8 @@ function chapterNumberFor(novel: NovelRecord, documentId: string): number | unde
 }
 
 
-function novelCover(title: string, className = "anw-cover"): unknown {
-  return h("img", {
-    className,
-    src: defaultNovelCover,
-    alt: `${title}封面`,
-  });
+function novelCover(novel: NovelSummary | NovelRecord, className = "anw-cover"): unknown {
+  return h(NovelCoverView, { novel, className, fallbackSrc: defaultNovelCover });
 }
 
 
@@ -486,7 +484,7 @@ export function NovelLibraryPage() {
                 h(
                   "div",
                   { className: "anw-novel-hero" },
-                  novelCover(novel.title),
+                  novelCover(novel),
                   h(
                     "div",
                     { className: "anw-novel-meta" },
@@ -3540,7 +3538,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         h(
           "div",
           { className: "anw-book-rail-top" },
-          novel ? novelCover(novel.title, "anw-book-cover-large") : null,
+          novel ? novelCover(novel, "anw-book-cover-large") : null,
           h("h1", { className: "anw-book-title" }, novel?.title ?? "加载中"),
           h("div", { className: "anw-book-description" }, novel?.description || "长篇小说创作项目"),
           h("div", { className: "anw-book-counts" }, h("span", null, `${chapterDocuments.length} 章节`), h("span", null, `${chapterDocuments.reduce((sum: number, item: DocumentRecord) => sum + item.visible_character_count, 0)} 字`)),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import os
 from threading import Barrier
 from uuid import UUID
@@ -58,6 +59,7 @@ from backend.creative_services import (
 )
 from backend.models import (
     CandidateRevision,
+    ChapterGenerationJob,
     Document,
     IntelligenceCommitBatch,
     Novel,
@@ -172,6 +174,8 @@ def _create_long_novel_via_wizard(
     title: str,
     audience: str = "female",
     genre: str = "年代言情",
+    cover_mode: str = "system",
+    cover_image_data: str = "data:image/jpeg;base64,AA==",
 ) -> dict[str, object]:
     draft = get_or_create_novel_creation_draft(session, draft_key)
     draft = update_novel_creation_draft(
@@ -190,8 +194,8 @@ def _create_long_novel_via_wizard(
             "template_data": {"structure": "起承转合"},
             "title": title,
             "author_name": "pytest-作者",
-            "cover_mode": "system",
-            "cover_image_data": "data:image/jpeg;base64,AA==",
+            "cover_mode": cover_mode,
+            "cover_image_data": cover_image_data,
         },
     )
     return complete_novel_creation_draft(
@@ -1164,6 +1168,20 @@ def test_six_step_creation_is_persisted_validated_and_idempotent(
     session.rollback()
 
 
+def test_six_step_creation_accepts_a_text_only_cover(session: Session) -> None:
+    completed = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-文字封面建书",
+        title="pytest-文字封面成品",
+        cover_mode="text",
+        cover_image_data="",
+    )
+
+    novel = completed["novel"]
+    assert novel["cover_mode"] == "text"
+    assert novel["cover_image_data"] == ""
+
+
 def test_novel_delete_requires_current_version_and_removes_the_exact_novel(
     session: Session,
 ) -> None:
@@ -1287,7 +1305,12 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         role_type="main",
         name="林知夏",
         description="重返高三",
-        details={"gender": "其他", "identity": "学生"},
+        details={
+            "gender": "其他",
+            "identity": "学生",
+            "personality": "面对压力时会先保护同伴，却容易独自承担风险。",
+            "secret": "不得被大纲表单删除",
+        },
     )
 
     create_novel_character(
@@ -1328,7 +1351,11 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         "顾老师",
     ]
     assert len({item["position"] for item in characters}) == 4
-    assert next(item for item in characters if item["name"] == "林知夏")["details"]["gender"] == "其他"
+    rematerialized_lead = next(item for item in characters if item["name"] == "林知夏")
+    assert rematerialized_lead["details"]["gender"] == "其他"
+    assert rematerialized_lead["details"]["secret"] == "不得被大纲表单删除"
+    assert rematerialized_lead["details"]["personality"].startswith("面对压力")
+    assert all(item.get("character_id") for item in second["outline"]["characters"])
     main_line = next(
         item for item in list_storylines(session, novel_id) if item["storyline_type"] == "main"
     )
@@ -1552,7 +1579,7 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
         session,
         document_id,
         expected_version=0,
-        target_word_count=5000,
+        target_word_count=2500,
         expectation_text="建立冲突",
         outline_text="人物发现关键证据。",
         forbidden_text="",
@@ -1563,7 +1590,10 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
         document_id,
         expected_brief_version=brief["version"],
     )
-    assert first_job["target_visible_character_count"] == 1000
+    assert first_job["target_visible_character_count"] == 2125
+    assert first_job["minimum_visible_character_count"] == 2125
+    assert first_job["maximum_visible_character_count"] == 2875
+    assert first_job["requested_visible_character_count"] == 2500
     with pytest.raises(ValidationError, match="必须整章重写"):
         complete_chapter_generation(
             session,
@@ -1596,25 +1626,82 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
         expected_brief_version=brief["version"],
         force_new=True,
     )
+    with pytest.raises(ValidationError, match="上浮15%"):
+        complete_chapter_generation(
+            session,
+            UUID(second_job["id"]),
+            content_markdown=_long_chapter("人物反复解释线索。", paragraphs=60),
+            actual_model_id=TEST_MODEL_ID,
+            provider_profile=TEST_PROVIDER_ID,
+        )
+    above = list_chapter_generation_jobs(session, document_id)[0]
+    assert above["validation_state"] == "above_target"
+
+    third_job = start_chapter_generation(
+        session,
+        document_id,
+        expected_brief_version=brief["version"],
+        force_new=True,
+    )
     completed = complete_chapter_generation(
         session,
-        UUID(second_job["id"]),
-        content_markdown=_long_chapter("人物终于找到能够推进调查的关键证据。", paragraphs=22),
+        UUID(third_job["id"]),
+        content_markdown=_long_chapter("人物终于找到能够推进调查的关键证据。", paragraphs=40),
         actual_model_id=TEST_MODEL_ID,
         provider_profile=TEST_PROVIDER_ID,
     )
-    assert completed["attempt"] == 2
+    assert completed["attempt"] == 3
     assert completed["state"] == "ready"
     assert completed["validation_state"] == "meets_target"
-    assert 1000 <= completed["output_visible_character_count"] <= 1500
+    assert 2125 <= completed["output_visible_character_count"] <= 2875
     assert completed["actual_model_id"] == TEST_MODEL_ID
     still_ready = fail_chapter_generation(
         session,
-        UUID(second_job["id"]),
+        UUID(third_job["id"]),
         "迟到的失败回调",
     )
     assert still_ready["state"] == "ready"
     assert still_ready["failure_message"] is None
+
+
+def test_stale_chapter_generation_is_failed_before_new_attempt(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-章节生成超时恢复")
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    brief = save_chapter_brief(
+        session,
+        document_id,
+        expected_version=0,
+        target_word_count=2500,
+        expectation_text="",
+        outline_text="人物发现关键证据。",
+        forbidden_text="",
+        role_constraints={},
+    )
+    first = start_chapter_generation(
+        session,
+        document_id,
+        expected_brief_version=brief["version"],
+    )
+    stale = session.get(ChapterGenerationJob, UUID(first["id"]))
+    assert stale is not None
+    stale.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    session.commit()
+
+    second = start_chapter_generation(
+        session,
+        document_id,
+        expected_brief_version=brief["version"],
+        force_new=True,
+    )
+    history = list_chapter_generation_jobs(session, document_id)
+
+    assert second["attempt"] == 2
+    assert history[0]["state"] == "running"
+    assert history[1]["state"] == "failed"
+    assert history[1]["validation_state"] == "runtime_timeout"
+    assert "正式正文未修改" in str(history[1]["failure_message"])
 
 
 def test_fail_path_preserves_known_actual_model_and_terminal_state(
@@ -1706,6 +1793,21 @@ def test_cover_settings_and_narrative_foreshadow_progress_persist(
         cover_image_data="data:image/jpeg;base64,ZmFrZQ==",
     )
     assert updated["cover_image_data"] == "data:image/jpeg;base64,ZmFrZQ=="
+
+    text_cover = update_novel_settings(
+        session,
+        novel_id,
+        expected_version=updated["version"],
+        genre=updated["genre"],
+        subgenre=updated["subgenre"],
+        idea=updated["idea"],
+        template_name=updated["template_name"],
+        template_data=updated["template_data"],
+        cover_mode="text",
+        cover_image_data="",
+    )
+    assert text_cover["cover_mode"] == "text"
+    assert text_cover["cover_image_data"] == ""
 
     created = create_foreshadow(
         session,

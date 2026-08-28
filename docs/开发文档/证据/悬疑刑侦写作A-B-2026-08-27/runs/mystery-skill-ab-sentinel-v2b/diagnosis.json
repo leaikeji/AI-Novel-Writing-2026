@@ -1,0 +1,34 @@
+{
+  "state": "failed_model_stream_timeout",
+  "sample_id": "X01",
+  "variant": "A",
+  "dispatch_started_at": "2026-08-28T03:05:33.808927Z",
+  "failed_at": "2026-08-28T03:15:33.896444Z",
+  "client_duration_ms": 600097,
+  "http_status": 504,
+  "failure_type": "writing_evaluation_timed_out",
+  "requested_model": {
+    "provider_id": "bigmodel",
+    "model_id": "glm-5.3-flash",
+    "source": "effective-model-api"
+  },
+  "stream_diagnostics": {
+    "event_count": 20013,
+    "event_type_counts": {
+      "agentresponse": 2,
+      "reasoning": 1,
+      "text": 20010
+    },
+    "first_event_elapsed_ms": 99,
+    "last_event_elapsed_ms": 599944,
+    "stream_completed": false,
+    "content_recorded": false
+  },
+  "container_recreated_during_request": false,
+  "project_model_run_records_in_request_window": 0,
+  "model_output_saved": false,
+  "output_quality_assessed": false,
+  "automatic_retry": false,
+  "variant_b_started": false,
+  "conclusion": "The public model stream remained active until the fixed 600 second timeout and never emitted a completed reply. The timeout and cancellation gate worked as designed, but this run cannot compare baseline and candidate writing quality."
+}

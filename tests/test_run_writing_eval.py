@@ -43,13 +43,23 @@ def _valid_result(
         "variant": sample.variant,
         "attempt": sample.attempt,
         "source_suite_sha256": runner.SOURCE_SUITE_SHA256,
-        "candidate_overlay_sha256": runner.CANDIDATE_OVERLAY_SHA256,
+        "variant_policy_sha256": runner.VARIANT_POLICY_SHA256,
         "manifest_sha256": runner.MANIFEST_SHA256,
         "rubric_sha256": runner.RUBRIC_SHA256,
         "prompt_contract": runner.PROMPT_CONTRACT_VERSION,
         "output_purity_contract": runner.OUTPUT_PURITY_CONTRACT_VERSION,
+        "prompt_variant_policy": runner.PROMPT_VARIANT_POLICY,
         "base_prompt_sha256": runner.sha256_text(sample.base_prompt),
         "prompt_sha256": runner.sha256_text(sample.prompt),
+        "skill_id": "prose-writing",
+        "skill_sha256": runner.expected_skill_sha256(sample.variant),
+        "skill_evidence": {
+            "contract": runner.SKILL_EVIDENCE_CONTRACT_VERSION,
+            "variant": sample.variant,
+            "expected_skill_sha256": runner.expected_skill_sha256(sample.variant),
+            "actual_skill_sha256": runner.expected_skill_sha256(sample.variant),
+            "match": True,
+        },
         "requested_model": dict(model, source="effective-model-api"),
         "postflight_model": dict(model, source="effective-model-api"),
         "actual_model": model if actual_exposed else None,
@@ -76,16 +86,24 @@ def _valid_result(
         "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
         "tool_policy_enforcement": "prompt_only",
         "stream_diagnostics": {
-            "contract": "writing-eval-stream-diagnostics-v1",
+            "contract": "writing-eval-stream-diagnostics-v2",
             "content_recorded": False,
             "stream_completed": True,
             "event_count": 1,
             "first_event_elapsed_ms": 10,
             "last_event_elapsed_ms": 20,
+            "last_event_type": "model_response",
             "event_type_counts": {"model_response": 1},
             "message_role_counts": {"assistant": 1},
             "message_type_counts": {"message": 1},
             "content_part_type_counts": {"output_text": 1},
+            "text_value_count": 1,
+            "text_chars_total_observed": len(output_text),
+            "text_chars_max_single_value": len(output_text),
+            "text_value_char_totals": {"output_text": len(output_text)},
+            "text_value_max_chars": {"output_text": len(output_text)},
+            "assistant_messages_observed": 1,
+            "public_usage_envelopes_observed": 1,
         },
         "output_text": output_text,
         "output_sha256": runner.sha256_text(output_text),
@@ -405,6 +423,14 @@ def test_result_rejects_forged_deterministic_checks() -> None:
     with pytest.raises(
         runner.RunnerError, match="RESULT_DETERMINISTIC_CHECKS_MISMATCH"
     ):
+        runner._validate_result(result, "X01")
+
+
+def test_result_rejects_wrong_installed_skill_variant_hash() -> None:
+    result = _valid_result("X01")
+    result["skill_sha256"] = runner.expected_skill_sha256("B")
+
+    with pytest.raises(runner.RunnerError, match="RESULT_SKILL_VARIANT_MISMATCH"):
         runner._validate_result(result, "X01")
 
 

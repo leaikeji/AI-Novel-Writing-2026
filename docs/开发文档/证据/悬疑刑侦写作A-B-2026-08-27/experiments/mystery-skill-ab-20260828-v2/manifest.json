@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "experiment_id": "mystery-skill-ab-20260828-v2",
+  "status": "candidate-frozen",
+  "purpose": "same-prompt-skill-package-ab-sentinel",
+  "not_formal_skill_validation": true,
+  "source_suite": {
+    "path": "tests/fixtures/writing_skill_eval/cases.json",
+    "sha256": "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf",
+    "case_ids": ["CF-01", "SP-02", "DS-01", "GP-02"],
+    "rights_basis": "project-synthetic"
+  },
+  "variants": {
+    "A": {
+      "label": "baseline-prose-writing",
+      "skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+      "source": "baseline/prose-writing.SKILL.md"
+    },
+    "B": {
+      "label": "candidate-prose-writing",
+      "skill_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+      "source": "skills/prose-writing/SKILL.md"
+    }
+  },
+  "scene_craft_candidate_sha256": "49832573e8316d918b99ec2cb4710a47ca2481b7f95ded4fbf2c83836e623a34",
+  "variant_policy": {
+    "path": "variant-policy.md",
+    "sha256": "e7a12033e760f0e35f3826d323bdf287421cdf4c05f6f7e1a17057f4b34edaad"
+  },
+  "rubric": {
+    "path": "../../rubric.md",
+    "sha256": "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6"
+  },
+  "runner_contract": {
+    "version": "writing-eval-prompt-v2",
+    "skill_evidence_contract": "writing-eval-skill-package-sha256-v1",
+    "prompt_variant_policy": "identical-prompt-skill-package-swap",
+    "server_persistence": "none",
+    "arbitrary_prompt_allowed": false,
+    "automatic_retry": false,
+    "execution": "strict-serial"
+  },
+  "attempts_per_variant": 2,
+  "new_chat_per_sample": true,
+  "same_model_required": true,
+  "sentinel_samples": ["X01", "X14"],
+  "candidate_modes": {
+    "CF-01": "unknown-truth",
+    "SP-02": "known-action-unknown-cause",
+    "DS-01": "known-hard-to-prove",
+    "GP-02": "unknown-truth"
+  },
+  "blind_pairs": [
+    {"case_id": "CF-01", "attempt": 1, "left": "X02", "right": "X07"},
+    {"case_id": "CF-01", "attempt": 2, "left": "X15", "right": "X09"},
+    {"case_id": "SP-02", "attempt": 1, "left": "X01", "right": "X14"},
+    {"case_id": "SP-02", "attempt": 2, "left": "X05", "right": "X11"},
+    {"case_id": "DS-01", "attempt": 1, "left": "X13", "right": "X04"},
+    {"case_id": "DS-01", "attempt": 2, "left": "X16", "right": "X08"},
+    {"case_id": "GP-02", "attempt": 1, "left": "X06", "right": "X12"},
+    {"case_id": "GP-02", "attempt": 2, "left": "X03", "right": "X10"}
+  ],
+  "assignment_key": {
+    "X01": {"case_id": "SP-02", "variant": "A", "attempt": 1},
+    "X02": {"case_id": "CF-01", "variant": "B", "attempt": 1},
+    "X03": {"case_id": "GP-02", "variant": "B", "attempt": 2},
+    "X04": {"case_id": "DS-01", "variant": "B", "attempt": 1},
+    "X05": {"case_id": "SP-02", "variant": "B", "attempt": 2},
+    "X06": {"case_id": "GP-02", "variant": "A", "attempt": 1},
+    "X07": {"case_id": "CF-01", "variant": "A", "attempt": 1},
+    "X08": {"case_id": "DS-01", "variant": "A", "attempt": 2},
+    "X09": {"case_id": "CF-01", "variant": "B", "attempt": 2},
+    "X10": {"case_id": "GP-02", "variant": "A", "attempt": 2},
+    "X11": {"case_id": "SP-02", "variant": "A", "attempt": 2},
+    "X12": {"case_id": "GP-02", "variant": "B", "attempt": 1},
+    "X13": {"case_id": "DS-01", "variant": "A", "attempt": 1},
+    "X14": {"case_id": "SP-02", "variant": "B", "attempt": 1},
+    "X15": {"case_id": "CF-01", "variant": "A", "attempt": 2},
+    "X16": {"case_id": "DS-01", "variant": "B", "attempt": 2}
+  }
+}

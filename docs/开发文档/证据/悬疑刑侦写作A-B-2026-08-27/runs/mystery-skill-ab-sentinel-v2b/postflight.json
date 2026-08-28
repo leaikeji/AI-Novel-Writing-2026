@@ -1,0 +1,17 @@
+{
+  "state": "restored_after_timeout",
+  "candidate_prose_writing_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+  "candidate_scene_craft_sha256": "49832573e8316d918b99ec2cb4710a47ca2481b7f95ded4fbf2c83836e623a34",
+  "research_route_http_status": 404,
+  "qwenpaw_root_http_status": 200,
+  "pawapp_health_http_status": 200,
+  "qwenpaw_healthy": true,
+  "tts_sidecar_docker_health": "healthy",
+  "tts_runtime_fields_restored": true,
+  "temporary_override_files_deleted": true,
+  "temporary_host_directory_moved_to_trash": true,
+  "temporary_container_packages_deleted": true,
+  "backup_retained": "/app/working.backups/writing-eval-skill-v2b-20260828-pre",
+  "variant_b_started": false,
+  "secrets_recorded": false
+}

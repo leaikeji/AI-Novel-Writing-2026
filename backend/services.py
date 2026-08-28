@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import unified_diff
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
+
+from .generation_runtime import (
+    CHAPTER_GENERATION_STALE_GRACE_SECONDS,
+    CHAPTER_GENERATION_TIMEOUT_SECONDS,
+)
 
 from .models import (
     CandidateRevision,
@@ -78,9 +84,48 @@ class RestorationPlanConflictError(DomainError):
 
 
 CURRENT_FACT_STATUSES = ("active", "source_restored")
-MINIMUM_COMPLETED_CHAPTER_CHARACTERS = 1000
-TARGET_COMPLETED_CHAPTER_CHARACTERS = 1250
-MAXIMUM_COMPLETED_CHAPTER_CHARACTERS = 1500
+CHAPTER_LENGTH_TOLERANCE_RATIO = 0.15
+CHAPTER_GENERATION_STALE_FAILURE_MESSAGE = (
+    "上一次章节生成未在规定时间内完成，系统已结束该任务，正式正文未修改；"
+    "请检查当前 Agent 模型后重新生成。"
+)
+
+
+def _chapter_length_window(target_count: int) -> tuple[int, int]:
+    target = max(1, int(target_count))
+    minimum = math.floor(target * (1 - CHAPTER_LENGTH_TOLERANCE_RATIO))
+    maximum = math.ceil(target * (1 + CHAPTER_LENGTH_TOLERANCE_RATIO))
+    return max(1, minimum), max(1, maximum)
+
+
+def _generation_acceptance_window(
+    job: ChapterGenerationJob,
+) -> tuple[int, int, int]:
+    snapshot = (
+        job.generation_context_snapshot
+        if isinstance(job.generation_context_snapshot, dict)
+        else {}
+    )
+    acceptance = snapshot.get("acceptance")
+    acceptance = acceptance if isinstance(acceptance, dict) else {}
+    brief = snapshot.get("brief")
+    brief = brief if isinstance(brief, dict) else {}
+    requested = int(
+        acceptance.get("requested_visible_character_count")
+        or brief.get("target_word_count")
+        or job.target_visible_character_count
+    )
+    default_minimum, default_maximum = _chapter_length_window(requested)
+    minimum = int(
+        acceptance.get("minimum_visible_character_count")
+        or acceptance.get("target_visible_character_count")
+        or job.target_visible_character_count
+        or default_minimum
+    )
+    maximum = int(
+        acceptance.get("maximum_visible_character_count") or default_maximum
+    )
+    return minimum, max(minimum, maximum), requested
 
 
 def content_hash(markdown: str) -> str:
@@ -263,6 +308,7 @@ def _generation_job_payload(
     candidate = session.scalar(
         select(CandidateRevision).where(CandidateRevision.generation_job_id == job.id)
     )
+    minimum_count, maximum_count, requested_count = _generation_acceptance_window(job)
     payload: dict[str, Any] = {
         "id": str(job.id),
         "document_id": str(job.document_id),
@@ -283,6 +329,9 @@ def _generation_job_payload(
         "actual_model_id": job.actual_model_id,
         "provider_profile": job.actual_provider_id or job.provider_profile,
         "target_visible_character_count": job.target_visible_character_count,
+        "minimum_visible_character_count": minimum_count,
+        "maximum_visible_character_count": maximum_count,
+        "requested_visible_character_count": requested_count,
         "output_visible_character_count": job.output_visible_character_count,
         "validation_state": job.validation_state,
         "attempt": job.attempt,
@@ -822,16 +871,14 @@ def start_chapter_generation(
         session, asset_ids=asset_ids, preset_id=preset_id
     )
     snapshot = _generation_snapshot(session, document, working, brief, asset_snapshot)
-    # The current paired-flow acceptance run requires every generated chapter
-    # to land inside a strict 1000—1500 visible-character window.  The chapter
-    # brief keeps the source product's planning target, while generation uses
-    # a centered target to avoid repeatedly overshooting the upper boundary.
-    acceptance_target = MINIMUM_COMPLETED_CHAPTER_CHARACTERS
+    requested_count = int(brief.target_word_count)
+    minimum_count, maximum_count = _chapter_length_window(requested_count)
     snapshot["acceptance"] = {
-        "minimum_visible_character_count": MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
-        "maximum_visible_character_count": MAXIMUM_COMPLETED_CHAPTER_CHARACTERS,
-        "target_visible_character_count": acceptance_target,
-        "requested_visible_character_count": TARGET_COMPLETED_CHAPTER_CHARACTERS,
+        "minimum_visible_character_count": minimum_count,
+        "maximum_visible_character_count": maximum_count,
+        "target_visible_character_count": minimum_count,
+        "requested_visible_character_count": requested_count,
+        "tolerance_ratio": CHAPTER_LENGTH_TOLERANCE_RATIO,
     }
     hash_material = {
         "input_snapshot": snapshot,
@@ -847,6 +894,7 @@ def start_chapter_generation(
         separators=(",", ":"),
     )
     input_hash = content_hash(serialized)
+    expire_stale_chapter_generation_jobs(session, document_id)
     _lock_generation_attempt(
         session,
         namespace="chapter-body",
@@ -881,7 +929,7 @@ def start_chapter_generation(
         requested_provider_id=requested_provider_id,
         requested_model_id=requested_model_id,
         generation_contract_version=generation_contract_version,
-        target_visible_character_count=acceptance_target,
+        target_visible_character_count=minimum_count,
         attempt=attempt,
     )
     session.add(job)
@@ -894,33 +942,30 @@ def start_chapter_generation(
 def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
     brief = snapshot["brief"]
     acceptance = snapshot.get("acceptance") or {}
-    minimum_visible_character_count = max(
-        MINIMUM_COMPLETED_CHAPTER_CHARACTERS,
-        int(
-            acceptance.get("target_visible_character_count")
-            or MINIMUM_COMPLETED_CHAPTER_CHARACTERS
-        ),
+    requested_visible_character_count = int(
+        acceptance.get("requested_visible_character_count")
+        or brief["target_word_count"]
     )
-    requested_visible_character_count = max(
-        minimum_visible_character_count,
-        int(
-            acceptance.get("requested_visible_character_count")
-            or brief["target_word_count"]
-        ),
+    default_minimum, default_maximum = _chapter_length_window(
+        requested_visible_character_count
     )
-    maximum_visible_character_count = max(
-        minimum_visible_character_count,
-        int(
-            acceptance.get("maximum_visible_character_count")
-            or MAXIMUM_COMPLETED_CHAPTER_CHARACTERS
-        ),
+    minimum_visible_character_count = int(
+        acceptance.get("minimum_visible_character_count")
+        or acceptance.get("target_visible_character_count")
+        or default_minimum
     )
-    requested_visible_character_count = min(
-        requested_visible_character_count,
-        maximum_visible_character_count,
+    maximum_visible_character_count = int(
+        acceptance.get("maximum_visible_character_count") or default_maximum
     )
     roles = brief["role_constraints"]
-    previous_context = snapshot.get("previous_context", [])
+    current_document_id = str(snapshot["chapter"].get("document_id") or "")
+    current_draft_text = str(snapshot["chapter"].get("base_content_markdown") or "")
+    current_draft_count = visible_character_count(current_draft_text)
+    previous_context = [
+        item
+        for item in snapshot.get("previous_context", [])
+        if str(item.get("document_id") or "") != current_document_id
+    ]
     context_text = "\n\n".join(
         f"【{item['title']}】\n{item.get('content_markdown', '')}" for item in previous_context
     )
@@ -932,7 +977,12 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
         f"- [{asset['asset_type']}] {asset['title']}：{asset['content']}"
         for asset in snapshot.get("private_assets", [])
     )
-    return f"""你正在为作者生成一份可审阅的章节正文候选。请遵循 prose-writing Skill。
+    return f"""【AI小说世界2026 PawApp可信任务封套】
+kind=chapter_generation
+contract=chapter-prose-candidate/v2
+此任务已经携带完成正文所需的本次输入。允许在模型内部充分思考，但不得输出思考过程，不得调用任何工具，不得开启后续 Agent 轮次；只返回一次最终正文。
+
+你正在为作者生成一份可审阅的章节正文候选。请遵循 prose-writing Skill。
 
 只输出小说正文，不要解释、不要写标题、不要使用 Markdown 代码围栏，也不要声称已经保存。
 正文结束后立即停止；禁止追加“完成”“下一步”“等待作者反馈”“进入下一章”“修订本稿”等工作状态或流程提示。
@@ -945,7 +995,7 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
 章节：{snapshot['chapter']['title']}
 创作目标：约 {requested_visible_character_count} 个中文可见字符
 验收范围：{minimum_visible_character_count}—{maximum_visible_character_count} 个中文可见字符；低于下限或超过上限都必须整章重写
-固定输出 6 个自然段，每段约 180—220 个中文可见字符，全部正文控制在 1100—1400 个可见字符；不得拆成第 7 段，也不得用短句单独成段。
+按情节自然分段，不限定机械段数；全文围绕 {requested_visible_character_count} 字展开，并严格控制在 {minimum_visible_character_count}—{maximum_visible_character_count} 个可见字符范围内。
 本章期望：{brief['expectation_text'] or '按章纲推进，不额外扩张设定'}
 章节大纲：
 {brief['outline_text'] or '无固定章纲，保持前文连续并形成完整章节推进'}
@@ -962,8 +1012,11 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
 本次作者选用的私有库资料：
 {asset_text or '- 未选择，按章纲与前文创作'}
 
-截至本章的上下文（可能包含本章当前工作稿，仅作连续性参考）：
-{context_text or '暂无前文'}
+当前章旧稿（{current_draft_count} 个可见字符，仅用于保留事实、人物声音和连续性；它不是本次最终答案。必须依照任务书生成一份完整的新候选，达到上述目标范围，不得原样返回旧稿）：
+{current_draft_text or '当前章尚无旧稿'}
+
+本章之前的正文上下文（仅作连续性参考）：
+{context_text or '暂无前文章节'}
 """.strip()
 
 
@@ -1047,24 +1100,29 @@ def complete_chapter_generation(
         raise ValidationError(job.failure_message)
     candidate_text = _clean_model_candidate(content_markdown)
     output_visible_character_count = visible_character_count(candidate_text)
-    if output_visible_character_count < job.target_visible_character_count:
+    minimum_visible_character_count, maximum_visible_character_count, requested_visible_character_count = (
+        _generation_acceptance_window(job)
+    )
+    if output_visible_character_count < minimum_visible_character_count:
         job.state = "failed"
         job.output_visible_character_count = output_visible_character_count
         job.validation_state = "below_target"
         job.failure_message = (
             f"正文仅有{output_visible_character_count}个可见字符，"
-            f"低于{job.target_visible_character_count}字门槛，必须整章重写"
+            f"低于目标{requested_visible_character_count}字允许的下浮15%范围"
+            f"（下限{minimum_visible_character_count}字），必须整章重写"
         )
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
         raise ValidationError(job.failure_message)
-    if output_visible_character_count > MAXIMUM_COMPLETED_CHAPTER_CHARACTERS:
+    if output_visible_character_count > maximum_visible_character_count:
         job.state = "failed"
         job.output_visible_character_count = output_visible_character_count
         job.validation_state = "above_target"
         job.failure_message = (
             f"正文共有{output_visible_character_count}个可见字符，"
-            f"超过{MAXIMUM_COMPLETED_CHAPTER_CHARACTERS}字范围，必须整章重写"
+            f"超过目标{requested_visible_character_count}字允许的上浮15%范围"
+            f"（上限{maximum_visible_character_count}字），必须整章重写"
         )
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
@@ -1121,12 +1179,46 @@ def fail_chapter_generation(
 
 def list_chapter_generation_jobs(session: Session, document_id: UUID) -> list[dict[str, Any]]:
     _require_document(session, document_id)
+    expire_stale_chapter_generation_jobs(session, document_id)
     jobs = session.scalars(
         select(ChapterGenerationJob)
         .where(ChapterGenerationJob.document_id == document_id)
         .order_by(ChapterGenerationJob.created_at.desc())
     ).all()
     return [_generation_job_payload(session, job) for job in jobs]
+
+
+def expire_stale_chapter_generation_jobs(
+    session: Session,
+    document_id: UUID,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Fail request-scoped chapter jobs that can no longer have a live owner."""
+
+    current_time = now or datetime.now(timezone.utc)
+    stale_after_seconds = (
+        CHAPTER_GENERATION_TIMEOUT_SECONDS
+        + CHAPTER_GENERATION_STALE_GRACE_SECONDS
+    )
+    cutoff = current_time - timedelta(seconds=stale_after_seconds)
+    stale_jobs = session.scalars(
+        select(ChapterGenerationJob)
+        .where(
+            ChapterGenerationJob.document_id == document_id,
+            ChapterGenerationJob.state == "running",
+            ChapterGenerationJob.created_at <= cutoff,
+        )
+        .with_for_update()
+    ).all()
+    for job in stale_jobs:
+        job.state = "failed"
+        job.validation_state = "runtime_timeout"
+        job.failure_message = CHAPTER_GENERATION_STALE_FAILURE_MESSAGE
+        job.completed_at = current_time
+    if stale_jobs:
+        session.commit()
+    return len(stale_jobs)
 
 
 def get_candidate(session: Session, candidate_id: UUID) -> dict[str, Any]:

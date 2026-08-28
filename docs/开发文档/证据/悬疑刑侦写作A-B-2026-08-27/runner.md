@@ -1,6 +1,6 @@
 # 写作研究运行器
 
-状态：源码候选；默认关闭；第四次 X01 已验证 schema 1.2 能保留并拒绝末尾 Agent 状态说明，正式盲评有效样本仍为0；其余15个样本保持停止。
+状态：schema 1.4 源码候选；默认关闭；V3 基线与独立 X05 候选缺陷检查均因末尾状态胶囊未通过纯净度门禁；正式盲评有效样本仍为0，批量保持停止。
 
 2026-08-27 源码门禁：冻结合同/API/CLI 新增测试 `52 passed`，相关定向回归 `166 passed`，项目全量回归 `2376 passed, 116 skipped`；合同自检、Compose override 配置解析和 PawApp 打包通过。以上只证明运行器候选可进入真实哨兵，不证明模型侧链路或写作质量已经通过。
 
@@ -103,3 +103,39 @@ docker compose -f compose.yaml up -d --force-recreate qwenpaw
 `mystery-ab-runner-sentinel-v4` 只派发 X01 一次，326.836秒后完整结束。模型生成前后公开身份均为 `bigmodel/glm-5.3-flash`，actual/usage 未公开并透明标记。输出再次附加状态说明，新门禁正确返回 `0 completed / 1 failed`，保留 `output.txt`、`result.json`、`hard-gates.json` 和 `failure.json`，没有生成 `blind-samples/X01.md`，其余15项没有启动。
 
 自动化为定向64项、相关228项、全量2451项通过（116项跳过、2条既有警告）。研究入口已恢复404，项目健康恢复200，数据库计数前后相同，备份保留。正式 Skill 优化方案见开发计划第9节；在新 prompt contract 和两个目标 Skill 候选完成前，批量仍停止。
+
+## V2 同提示 Skill 包对照
+
+新实验 `mystery-skill-ab-20260828-v2` 使用 schema `1.3` 与 `writing-eval-prompt-v2`。A/B 不再通过不同 prompt overlay 制造差异：同 case、同 attempt 的 prompt 必须逐字节相同，A 只接受冻结基线 `prose-writing` 哈希，B 只接受候选哈希。服务端在调用模型前核对 PawApp 包内 Skill 文件；错配返回 `writing_evaluation_skill_variant_mismatch` 与 `model_called=false`，CLI 再核对 `writing-eval-skill-package-sha256-v1` 证据。
+
+冻结 manifest、variant policy 和基线 Skill 原文位于 `experiments/mystery-skill-ab-20260828-v2/`。V1 manifest/overlay 由旧哈希回归保护，历史运行证据保持只读。V2 自动化相关231项、全量2459项通过（116项跳过、2条既有警告），Skill quick validator、编译、合同自检、打包、Compose 静态解析和 diff 检查通过。
+
+V2 A 侧随后以 `mystery-skill-ab-sentinel-v2-a` 派发 X01。调用前基线 Skill 哈希、合同、备份、健康和 TTS 字段均通过；但请求窗口内另一项 TTS 流程重建唯一 QwenPaw，客户端在58.313秒后得到 `RemoteProtocolError`，没有正文或结果包。容器创建、启动与客户端失败时间构成直接证据，不能归因于 Skill 质量。
+
+运行器保留 `0 completed / 1 failed` 且未自动重试；按任一侧失败即停止的冻结规则，X14/B 未启动。候选两个 Skill 已恢复，研究入口为404，根页面和 PawApp 健康为200，TTS Sidecar healthy，既有 TTS 字段等值恢复，备份保留。下一轮 TTS 真实验收已再次占用共享锁，因此本轮不创建新 run 重试。X01/X14 只显式调用 `prose-writing`，不能把 `scene-craft` 候选质量写成已经由该哨兵验证。
+
+## V2 新运行的600秒流超时
+
+用户明确要求继续后，新 run `mystery-skill-ab-sentinel-v2b` 在无活动 TTS/写作评测进程、最近两分钟项目模型记录为0、基线 Skill 哈希与 schema 1.3 合同一致的条件下，只派发 X01/A 一次。该请求没有发生 QwenPaw 重建或断连；公开模型流在99毫秒出现首事件，持续到599.944秒，共观察到20,013个结构事件，但始终没有完成信号，最终由固定600秒服务端门禁取消并返回 HTTP 504。
+
+本次没有可保存正文、结果包、硬门禁或盲评样本，不能评价基线文质，也不能将超时归因于候选 Skill。运行器保持 `0 completed / 1 failed`、不重试，X14/B 未启动。候选 Skill 已恢复，研究入口恢复404，QwenPaw/PawApp/TTS Sidecar 健康，TTS 运行字段等值恢复；新备份保留于 `/app/working.backups/writing-eval-skill-v2b-20260828-pre`。下一次真实模型调用前必须先裁决“保持一次调用不重抽样”与“如何取得可完成的基线样本”，不得通过偷偷延长超时、裁剪未完成流或把超时计作写作质量分数绕过可比性门禁。
+
+## V3 第二组预登记哨兵
+
+用户已批准 `mystery-skill-ab-20260828-v3` 使用原16样本矩阵中预登记的 SP-02 attempt 2，固定顺序 X11/A→X05/B。它不是 X01 的重试：V2 两次 X01 失败保持不可变，V3 有独立 experiment、manifest、策略和 run id；X11 失败即停止，X05 不启动。题面、500–800字符目标、最终输出要求、600秒服务端上限及基线/候选 Skill 哈希保持不变。
+
+`writing-eval-stream-diagnostics-v2` 在不记录正文的前提下增加文本值数量/长度、末事件类型、assistant 消息数和公开 usage 封套数。它只能帮助区分大量重复/累计文本事件、缺少结束消息和正常完成，不能从长度计数恢复正文，也不能替代质量审阅。冻结文件位于 `experiments/mystery-skill-ab-20260828-v3/`；variant policy SHA-256 为 `6e64c9590c330ac89a2a48c79bc6aa989bb86a0237b3d7f36feef05537f9a4db`，manifest SHA-256 为 `e0019fc951819c2fc40055cd7e866d2ec15a1602ea99fcdc023d643d76838cd4`。
+
+### V3 实际结果
+
+`mystery-skill-ab-sentinel-v3a` 只派发 X11/A。公开流在500.567秒后完整结束，最终原始输出665个非空白字符、四锚点和目标篇幅通过，但末尾再次出现独立状态胶囊；纯净度门禁正确返回 `0 completed / 1 failed`，没有盲评文件。诊断 v2 保存18,011个事件及长度计数，不保存诊断正文。按冻结顺序门禁，X05/B 未启动。
+
+候选 Skill 和普通关闭态已恢复，研究入口404，QwenPaw/PawApp/TTS Sidecar健康，备份保留。请求窗口的42条项目模型记录全部关联 `narration.segment_render`，不是研究路由持久化。V3 证明第二次预登记基线能够完整返回，也再次复现基线状态胶囊；它仍没有候选输出，不能形成 A/B 质量结论。
+
+## X05 候选缺陷修复检查
+
+`mystery-skill-candidate-remediation-v3-x05` 是用户批准的独立、单样本候选检查，不是 V3 冻结顺序的续跑。它只派发 X05/B 一次，沿用同一 SP-02 attempt 2 题面和 schema 1.4 合同，不重试、不改题、不延长600秒上限，也不进入完整矩阵。
+
+公开流在314.754秒后完整结束，共14,179个事件。候选 Skill 哈希核对通过，生成前后公开 effective 模型均为 `bigmodel/glm-5.3-flash`，actual/usage 未公开。输出733个非空白字符，目标篇幅与四锚点通过，但末尾仍有独立 `⟦…⟧` 状态胶囊；纯净度门禁返回 `0 completed / 1 failed`，没有盲评文件。该检查否定了“候选已修复状态胶囊”，不形成 A/B 文质结论，后续四场景评测不启动。
+
+运行后候选哈希、普通关闭态和健康状态恢复，研究入口404；请求时间窗内项目 `model_run_records` 为0。证据见 `runs/mystery-skill-candidate-remediation-v3-x05/`。

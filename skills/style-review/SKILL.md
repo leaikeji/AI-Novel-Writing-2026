@@ -27,9 +27,11 @@ metadata:
 - 只修正确有文本证据的连贯性、事实、视角或语言问题；保留核心事实、信息归属、人物关系、叙事视角、时态和作者声音。
 - `selection_text` 是唯一可替换范围；`before`、`after` 只是只读连续性上下文。不得修改、复述或续写未选中内容，不得把未选中上下文写进 `replacement_text`，不得越过核心事实、视角和选区边界。
 - 没有可靠可修项时必须原样返回本轮 `selection_text`，`short_summary` 写“未发现需要修改的差异”；不得制造伪变更或为产生 Diff 而改写好句。
+- 不得仅把直引号换成弯引号、半角换成全角、互换等价引号样式，或只做不影响阅读的排版统一来制造 Diff；如果这就是全部差异，必须原样返回。
 - 只返回一个可解析的严格 JSON 对象，不得输出 Markdown 围栏、HTML、诊断列表、状态胶囊、工具调用或对象前后的自然语言。回复首字符必须是 `{`、末字符必须是 `}`；严格 JSON 对象只含 `replacement_text` 和 `short_summary` 两个字段，例如 `{"replacement_text":"纯文本候选","short_summary":"不超过240字符的实际修改摘要"}`。
 
 - `replacement_text` 必须是非空纯文本；`short_summary` 只描述实际修改，不声称已经采用或保存。不得生成项目负责的 Diff、哈希、字符数，不得返回 `diff_segments`、`segment_id` 或任何写回指令。
+- `short_summary` 必须能由 `selection_text` 与 `replacement_text` 的实际对照直接验证；没有实际改变句群节奏、重复动作、视角或信息时，不得声称完成了这些修改。
 
 ## 先选择修订层级
 

@@ -1,0 +1,17 @@
+{
+  "state": "hard_gate_failed",
+  "sample_id": "X11",
+  "case_id": "SP-02",
+  "variant": "A",
+  "attempt": 2,
+  "output_sha256": "6e52ac37faa9d89bda3aa468eda6de596c502b7bb9f40918e19c746aa56d6ce7",
+  "output_purity_pass": false,
+  "blocking_flag": "agent_status_capsule",
+  "length_pass": true,
+  "non_whitespace_chars": 665,
+  "all_required_anchor_strings_present": true,
+  "blind_review_eligible": false,
+  "semantic_quality_scored": false,
+  "variant_b_started": false,
+  "reason": "The completed baseline output appended a standalone status capsule that restated the trusted envelope, length, anchors, strategy change and forbidden-item checks. The frozen purity gate rejects the entire untrimmed output before semantic scoring."
+}

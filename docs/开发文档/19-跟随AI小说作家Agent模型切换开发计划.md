@@ -1,6 +1,6 @@
 # 跟随“AI 小说作家”Agent 模型切换开发计划
 
-状态：**计划已完成 2026-08-25 三次审核，是本项目模型切换的唯一批准方案。2026-08-25 已完成阶段 0–4 施工、数据库单向迁移、真实 QwenPaw 安装升级和当前 effective 模型验证；仍待第二个真实可用模型的付费/连接 E2E，不因此保留固定模型、双轨或回退路径。**
+状态：**计划已完成 2026-08-25 三次审核，是本项目模型切换的唯一批准方案。2026-08-25 已完成阶段 0–4 施工与数据库单向迁移；2026-08-26 已完成思考模型 final 分离、章节目标字数 ±15% 修复，以及 Qwen3.7-Plus、DeepSeek V4 Flash 两个真实模型的付费 E2E。唯一生产路径仍为 `follow-agent-effective`，不保留固定模型、双轨或回退路径。**
 
 制定日期：2026-08-25（Asia/Shanghai）
 
@@ -673,7 +673,7 @@ model_verification_mode = preflight-effective+provider-usage
 - [x] PawApp 后端通过公开 active-model API 读取 effective 模型的同进程调用方式。
 - [ ] `ai-novel-writer` 模型热切换与 workspace reload 的精确时间边界。
 - [ ] 所有支持的 Provider 都在回复用量中提供可核验的 provider/model；缺失时的失败路径必须实测。
-- [ ] 两个真实模型下的结构化输出、正文长度和 Skill 遵循结果。
+- [x] 两个真实思考模型下的正文 final、长度和 Skill 遵循结果；Qwen3.7-Plus 2134 字、DeepSeek V4 Flash 2580 字，均落在本章 2500±15% 范围。
 - [x] 数据库单向迁移已在当前真实历史记录上 upgrade 到 `20260825_0009`，迁移前备份与只前滚边界已核对。
 - [ ] 主动注入迁移中断后的备份恢复演练；本次不为演练破坏已升级的真实数据库。
 
@@ -702,3 +702,13 @@ model_verification_mode = preflight-effective+provider-usage
 - Python 完整测试 83 项通过；前端 22 项通过；TypeScript、Vite 生产构建、Compose 配置、插件打包和真实 QwenPaw 验证通过。
 - 当前真实 `ai-novel-writer` effective 模型为 `minimax-cn / MiniMax-M3`；重新安装没有写入或覆盖 Agent 模型设置，工作台和关系补全确认框均与公开 API 一致。
 - 详细证据见 [模型切换施工验收记录](./证据/模型切换施工-2026-08-25/验收记录.md)。
+
+## 16. 2026-08-26 思考模型章节正文兼容修复
+
+- 公开配置不能证明 MiniMax-M3 关闭了思考；Qwen、DeepSeek 与 MiniMax 的 `thinking_enabled` 均为 `null`。本次方案明确保留思考模式。
+- 通用结果边界从聚合 `reply.text` 改为最后结构化 Agent 响应中的最终 `message`；reasoning、thinking、工具过程、中间轮次和 delta 不进入正文或 JSON 结果。
+- `prose-writing` 增加 `chapter_generation` 严格任务模式；允许内部思考，但章节候选不调用工具、不开启后续 Agent 轮次，不建设逐模型 Skill。
+- 章节目标从历史硬编码 1000–1500 改为任务书目标 ±15%；本章 2500 字对应 2125–2875 字。
+- 当前章旧稿只作为连续性材料，不能原样返回；生成契约前滚到 `follow-agent-effective-v2`。
+- DeepSeek V4 Flash 真实生成 2580 字、Qwen3.7-Plus 真实生成 2134 字，均为 requested=actual 且 `ready/meets_target`；候选未采用，正式正文未修改，验收结束后 Agent 恢复为 DeepSeek V4 Flash。
+- 完整证据见[思考模型章节正文兼容修复](./证据/思考模型章节正文兼容修复-2026-08-26/README.md)。

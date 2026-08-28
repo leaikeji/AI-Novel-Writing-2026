@@ -19,6 +19,7 @@ import {
 } from "./types";
 import { rememberWorkbenchRoute } from "./workbench-route";
 import { compressCover, generateSystemCover } from "./cover-utils";
+import { createNovelCoverView } from "./novel-cover";
 import { navigateNovelSurface } from "./novel-surface-navigation";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
@@ -26,6 +27,7 @@ import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
+const NovelCoverView = createNovelCoverView(React);
 const {
   Alert,
   Button,
@@ -183,11 +185,6 @@ function setLibraryUrl(view: LibraryView): void {
 }
 
 
-function coverSource(novel: Pick<NovelSummary, "cover_image_data">): string {
-  return novel.cover_image_data || defaultNovelCover;
-}
-
-
 function audienceLabel(audience: string): string {
   if (audience === "female") return "女频";
   if (audience === "male") return "男频";
@@ -231,7 +228,7 @@ function NovelCard(props: {
     h(
       "div",
       { className: "mb-novel-card-hero" },
-      h("img", { className: "mb-novel-cover", src: coverSource(novel), alt: `${novel.title}封面` }),
+      h(NovelCoverView, { novel, className: "mb-novel-cover", fallbackSrc: defaultNovelCover }),
       h(
         "div",
         { className: "mb-novel-card-meta" },
@@ -906,6 +903,10 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         };
         updateData(patch);
         await persist(6, patch);
+      } else if (step === 5 && data.cover_mode === "text") {
+        const patch = { cover_image_data: "", cover_file_name: "" };
+        updateData(patch);
+        await persist(6, patch);
       } else if (step === 5 && data.cover_mode === "ai" && !data.cover_prompt) {
         if (!draft) throw new Error("建书草稿尚未就绪");
         const currentModel = await getGenerationModelStatus();
@@ -1200,7 +1201,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           disabled: busy,
           onClick: generateName,
         }, busy ? "AI生成中..." : data.title ? "重新生成名称" : "AI帮我取名"),
-        busy || data.naming_generation_job_id
+        namingTaskModelLabel
           ? h("small", { className: "mb-name-cost" }, `取名模型：${namingTaskModelLabel}`)
           : null,
       );
@@ -1208,6 +1209,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     if (step === 5) {
       const coverModes = [
         { key: "ai", icon: RobotOutlined, title: "AI智能生成", badge: "推荐", copy: "AI根据您的故事风格生成独一无二的封面方案", button: "开始生成精美封面" },
+        { key: "text", icon: FileTextOutlined, title: "文字封面", copy: "直接显示书名和作者，不生成、不上传、也不保存图片", button: "使用文字封面" },
         { key: "system", icon: BookOutlined, title: "系统封面", copy: "根据小说分类自动生成，包含书名和作者", button: "生成系统封面" },
         { key: "upload", icon: PictureOutlined, title: "上传图片", copy: "上传您自己的图片，自动裁剪为3:4", button: "确认使用此封面" },
       ];
@@ -1240,7 +1242,18 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
                 : h("span", null, h(UploadOutlined), "点击上传图片"),
               h("input", { type: "file", accept: "image/*", onChange: uploadCover }),
             )
-          : null,
+          : data.cover_mode === "text"
+            ? h(NovelCoverView, {
+                novel: {
+                  title: String(data.title || "未命名小说"),
+                  author_name: String(data.author_name || "佚名"),
+                  cover_mode: "text",
+                  cover_image_data: "",
+                },
+                className: "mb-cover-text-preview",
+                fallbackSrc: defaultNovelCover,
+              })
+            : null,
       );
     }
     return h(
@@ -1248,13 +1261,22 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
       { className: "mb-wizard-body mb-complete-step" },
       h("h2", null, "封面生成完成"),
       h("p", null, "您的专属封面已准备就绪"),
-      h("img", { className: "mb-complete-cover", src: data.cover_image_data || defaultNovelCover, alt: `${data.title || "新小说"}封面` }),
+      h(NovelCoverView, {
+        novel: {
+          title: String(data.title || "新小说"),
+          author_name: String(data.author_name || "佚名"),
+          cover_mode: data.cover_mode,
+          cover_image_data: String(data.cover_image_data || ""),
+        },
+        className: "mb-complete-cover",
+        fallbackSrc: defaultNovelCover,
+      }),
       h("div", { className: "mb-complete-book" }, h("strong", null, data.title), h("span", null, `${data.author_name} 著`)),
     );
   };
 
   const footerLabel = step === 0 ? "下一步" : step === 2 ? "确认并生成模板" : step === 3 ? "确认模板" : step === 5
-    ? ({ ai: "开始生成精美封面", system: "生成系统封面", upload: "确认使用此封面" }[data.cover_mode as "ai" | "system" | "upload"] || "下一步")
+    ? ({ ai: "开始生成精美封面", text: "使用文字封面", system: "生成系统封面", upload: "确认使用此封面" }[data.cover_mode as "ai" | "text" | "system" | "upload"] || "下一步")
     : "下一步";
 
   return h(
@@ -1476,7 +1498,7 @@ export function NovelLibraryPage() {
                 ...novels.map((novel) => h(
                   "button",
                   { key: novel.id, type: "button", className: novel.id === activeNovel.id ? "is-active" : "", onClick: () => setActiveNovelId(novel.id), title: novel.title },
-                  h("img", { src: coverSource(novel), alt: `${novel.title}封面` }),
+                  h(NovelCoverView, { novel, className: "mb-novel-switch-cover", fallbackSrc: defaultNovelCover }),
                   novel.id === activeNovel.id ? h(CheckOutlined, { className: "mb-novel-switch-check" }) : null,
                 )),
                 h("button", { type: "button", className: "mb-new-novel-tile", onClick: () => setWizardOpen(true) }, h(PlusOutlined), h("span", null, "新建")),

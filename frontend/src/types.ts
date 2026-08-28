@@ -43,6 +43,8 @@ export interface VolumeRecord {
   documents: DocumentRecord[];
 }
 
+export type NovelCoverMode = "ai" | "system" | "upload" | "text";
+
 export interface NovelSummary {
   id: string;
   title: string;
@@ -52,7 +54,7 @@ export interface NovelSummary {
   audience: string;
   genre: string;
   subgenre: string;
-  cover_mode: "ai" | "system" | "upload";
+  cover_mode: NovelCoverMode;
   cover_image_data: string;
   cover_asset_id: string | null;
   version: number;
@@ -75,7 +77,7 @@ export interface NovelRecord {
   template_key: string | null;
   template_name: string;
   template_data: Record<string, unknown>;
-  cover_mode: "ai" | "system" | "upload";
+  cover_mode: NovelCoverMode;
   cover_image_data: string;
   cover_asset_id: string | null;
   outline_target_chapters: number;
@@ -240,6 +242,9 @@ export interface GenerationJobRecord {
   actual_model_id: string | null;
   provider_profile: string | null;
   target_visible_character_count: number;
+  minimum_visible_character_count?: number;
+  maximum_visible_character_count?: number;
+  requested_visible_character_count?: number;
   output_visible_character_count: number;
   validation_state: string;
   attempt: number;
@@ -348,6 +353,7 @@ export interface RestorePreviewRecord {
 }
 
 export interface OutlineCharacterDraft {
+  character_id?: string;
   name: string;
   role_type: "main" | "supporting";
   description: string;

@@ -1,0 +1,22 @@
+{
+  "state": "passed_before_dispatch",
+  "experiment_id": "mystery-skill-ab-20260828-v2",
+  "run_id": "mystery-skill-ab-sentinel-v2b",
+  "sample_id": "X01",
+  "variant": "A",
+  "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+  "installed_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+  "contract_schema": "1.3",
+  "research_enabled": true,
+  "qwenpaw_healthy": true,
+  "tts_sidecar_docker_health": "healthy",
+  "tts_runtime_fields_preserved": true,
+  "active_tts_or_writing_eval_processes": 0,
+  "recent_model_records_last_two_minutes": 0,
+  "backup": {
+    "path": "/app/working.backups/writing-eval-skill-v2b-20260828-pre",
+    "plugin_sha256": "5bbd685d07cfc4cde60c6006454f4d2bad40af266dbbb0d4e4f356b0f528a7f8",
+    "postgres_dump_sha256": "687c5eb10edd2154f4bd52eec32415ea0171289c8d86df0c1982a3e01cb1a21e"
+  },
+  "secrets_recorded": false
+}

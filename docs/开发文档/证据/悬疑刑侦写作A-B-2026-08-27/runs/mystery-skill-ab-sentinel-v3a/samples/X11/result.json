@@ -1,0 +1,121 @@
+{
+  "actual_model": null,
+  "attempt": 2,
+  "base_prompt_sha256": "9d8179eaa6cb6ba627cdca4a247e54c761ff7e6613ae3f7f488ddb79ad602367",
+  "case_id": "SP-02",
+  "deterministic_checks": {
+    "empty": false,
+    "length_pass": true,
+    "non_whitespace_chars": 665,
+    "output_purity_pass": false,
+    "required_anchor_hits": {
+      "二十二分钟": true,
+      "十八分钟": true,
+      "手动复核": true,
+      "氧传感器": true
+    },
+    "semantic_review_required": true,
+    "wrapper_flags": {
+      "agent_status_capsule": true,
+      "analysis_prefix": false,
+      "json_or_xml_wrapper": false,
+      "markdown_fence": false,
+      "markdown_heading": false
+    }
+  },
+  "duration_ms": 500567,
+  "execution_agent_id": "ai-novel-writer",
+  "experiment_id": "mystery-skill-ab-20260828-v3",
+  "final_text_source": "structured_reply_chunks",
+  "finished_at": "2026-08-28T03:40:16.394638Z",
+  "manifest_sha256": "e0019fc951819c2fc40055cd7e866d2ec15a1602ea99fcdc023d643d76838cd4",
+  "model_evidence": {
+    "actual_model_policy": "provider_usage_optional_not_exposed_allowed",
+    "actual_model_status": "not_exposed",
+    "contract": "writing-eval-effective-model-pre-post-v1",
+    "effective_model_pre_post_match": true,
+    "private_usage_buffer_used": false,
+    "usage_status": "not_exposed"
+  },
+  "output_purity_contract": "writing-eval-output-purity-v1",
+  "output_sha256": "6e52ac37faa9d89bda3aa468eda6de596c502b7bb9f40918e19c746aa56d6ce7",
+  "output_text": "饶真的掌心还贴在门禁请求键上，红光从指缝里透出来。\n\n“不开。”路宁没有抬头，仪表面板上的绿字映在她脸上，“防护服的氧只够十八分钟，往返标准二十二分钟。差四分钟，我不能开。”\n\n“芯片是唯一的光谱记录！”这句话冲到喉咙口，饶真自己先停住了。她听见自己的声音在控制室里撞了一下，又落回来。再吵，红灯也还是红灯。\n\n她改盯供氧架上那行氧读数。读数来自今早她亲手换上的氧传感器——工单催得急，她跳过了手动复核，直接把新件投了线。\n\n“调凌晨的换件记录。”她把声音放平，“我换的氧传感器，没做手动复核。这个十八分钟，可能不是真的十八分钟。”\n\n路宁终于转过椅子。她没有走向门，而是走向基准分析仪。\n\n“我只对记录开门。”她说，“复核拿它做比对。测出来够二十二分钟，我开一次门；测出来不够，门就焊死在原处。”\n\n“七号区的腐蚀雾不会等。”饶真说。复核要占掉无人机电池最后的保温时间，电池一停，芯片舱的密封圈撑不过雾。这笔账她比谁都清楚：证明读数可信的时间，可能正是弄丢记录的时间。\n\n“那就把代价记在你名下。”路宁把申请单推过来，“停止条件：服内读数偏离复核曲线，折返；第九分钟还没拿到芯片，空手回来。”\n\n饶真签了字，笔尖比她想的稳。她把工具包能省的全倒在桌上，只留下芯片盒。\n\n“无人机壳子不要了，只带芯片。”她说，“剩下的时间，全用在路上。”\n\n分析仪开始预热。两个人都没有再看那扇红灯。\n\n⟦ 七号区取芯场景｜已完成：按封套final-prose-only交付连续正文（饶真第三限知，约570字；锚点十八分钟/二十二分钟/氧传感器/手动复核齐全；策略转向+带停止条件决定；无禁项）⟧",
+  "postflight_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "prompt_contract": "writing-eval-prompt-v3",
+  "prompt_sha256": "9d8179eaa6cb6ba627cdca4a247e54c761ff7e6613ae3f7f488ddb79ad602367",
+  "prompt_variant_policy": "identical-prompt-skill-package-swap",
+  "requested_model": {
+    "agent_id": "ai-novel-writer",
+    "effective_max_input_length": 131072,
+    "model_id": "glm-5.3-flash",
+    "provider_id": "bigmodel",
+    "source": "effective-model-api"
+  },
+  "rights_basis": "project-synthetic",
+  "rubric_sha256": "819276c93de7f7fc46fda0c38cb2c9102a29977ad1c2b8aa22c8df1f0f5126e6",
+  "sample_id": "X11",
+  "sampling_parameters": "not_exposed",
+  "schema_version": "1.4",
+  "server_persistence": "none",
+  "session_id": "novel-writing-eval:mystery-skill-ab-20260828-v3:X11:e2843cc0-7db1-4043-9a70-931a7422a522",
+  "skill_evidence": {
+    "actual_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+    "contract": "writing-eval-skill-package-sha256-v1",
+    "expected_skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+    "match": true,
+    "variant": "A"
+  },
+  "skill_id": "prose-writing",
+  "skill_selection_enforcement": "requested_via_pawapp_context_parameter",
+  "skill_sha256": "cbf113c0a2b71cda1f54ca029d98ee9263323c21db75cd76539bffb0867d72e2",
+  "source_suite_sha256": "86ce85e26070bb66355f83f76a09ff37e02d18c806cbe7b955ee7fe571acbebf",
+  "started_at": "2026-08-28T03:31:55.836376Z",
+  "state": "generated",
+  "stream_diagnostics": {
+    "assistant_messages_observed": 6,
+    "content_part_type_counts": {
+      "text": 4
+    },
+    "content_recorded": false,
+    "contract": "writing-eval-stream-diagnostics-v2",
+    "event_count": 18011,
+    "event_type_counts": {
+      "agentresponse": 3,
+      "message": 2,
+      "reasoning": 2,
+      "text": 18004
+    },
+    "first_event_elapsed_ms": 154,
+    "last_event_elapsed_ms": 500502,
+    "last_event_type": "agentresponse",
+    "message_role_counts": {
+      "assistant": 6
+    },
+    "message_type_counts": {
+      "message": 3,
+      "reasoning": 3,
+      "text": 18004
+    },
+    "public_usage_envelopes_observed": 0,
+    "stream_completed": true,
+    "text_chars_max_single_value": 52535,
+    "text_chars_total_observed": 212900,
+    "text_value_char_totals": {
+      "text": 212900
+    },
+    "text_value_count": 18008,
+    "text_value_max_chars": {
+      "text": 52535
+    }
+  },
+  "tool_policy_enforcement": "prompt_only",
+  "usage": null,
+  "variant": "A",
+  "variant_policy_sha256": "6e64c9590c330ac89a2a48c79bc6aa989bb86a0237b3d7f36feef05537f9a4db"
+}

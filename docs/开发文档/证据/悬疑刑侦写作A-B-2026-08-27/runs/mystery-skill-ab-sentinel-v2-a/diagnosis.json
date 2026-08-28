@@ -1,0 +1,22 @@
+{
+  "state": "failed_external_runtime_recreation",
+  "sample_id": "X01",
+  "dispatch_started_at": "2026-08-27T18:37:45.545546Z",
+  "client_failure_at": "2026-08-27T18:38:43.858202Z",
+  "client_duration_ms": 58313,
+  "client_error_class": "RemoteProtocolError",
+  "client_error_message": "Server disconnected without sending a response.",
+  "interrupted_container_created_at": "2026-08-27T18:38:40Z",
+  "interrupted_container_started_at": "2026-08-27T18:38:44.417591047Z",
+  "evidence": [
+    "The QwenPaw container was recreated during the open HTTP request.",
+    "The client failure timestamp falls between container creation and restart completion.",
+    "After restart the compose labels referenced compose.yaml without the research override and the research route returned 404.",
+    "A new locked TTS real chapter validation process started at 2026-08-28 02:40:03 Asia/Shanghai, confirming the shared runtime was still under another workflow's control."
+  ],
+  "model_output_received": false,
+  "output_quality_assessed": false,
+  "automatic_retry": false,
+  "variant_b_started": false,
+  "conclusion": "This run cannot evaluate baseline prose quality; the frozen stop-on-first-failure gate remains closed."
+}

@@ -16,6 +16,7 @@ from backend.model_runtime import (
     normalize_creative_generation_json,
     normalize_intelligence_generation_json,
     parse_model_json,
+    reply_final_text,
     reply_model_audit,
 )
 from backend.services import build_chapter_generation_prompt
@@ -41,7 +42,7 @@ def _reply_with_usage(provider_id: str, model_name: str) -> SimpleNamespace:
 
 
 def test_model_matching_uses_exact_provider_and_model_ids() -> None:
-    assert GENERATION_CONTRACT_VERSION == "follow-agent-effective-v3"
+    assert GENERATION_CONTRACT_VERSION == "follow-agent-effective-v4"
     configured = ModelAudit(
         provider_id="provider-a",
         model_id="Model-A.1",
@@ -137,9 +138,13 @@ def test_chapter_prompt_enforces_current_acceptance_window() -> None:
     prompt = build_chapter_generation_prompt(
         {
             "novel": {"title": "长篇小说"},
-            "chapter": {"title": "第四章", "base_content_markdown": ""},
+            "chapter": {
+                "document_id": "chapter-4",
+                "title": "第四章",
+                "base_content_markdown": "旧稿内容。",
+            },
             "brief": {
-                "target_word_count": 5000,
+                "target_word_count": 2500,
                 "expectation_text": "推进防汛主线",
                 "outline_text": "人物核对值班表。",
                 "forbidden_text": "",
@@ -151,23 +156,36 @@ def test_chapter_prompt_enforces_current_acceptance_window() -> None:
                 },
             },
             "acceptance": {
-                "minimum_visible_character_count": 1000,
-                "maximum_visible_character_count": 1500,
-                "target_visible_character_count": 1000,
-                "requested_visible_character_count": 1250,
+                "minimum_visible_character_count": 2125,
+                "maximum_visible_character_count": 2875,
+                "target_visible_character_count": 2125,
+                "requested_visible_character_count": 2500,
             },
-            "previous_context": [],
+            "previous_context": [
+                {
+                    "document_id": "chapter-4",
+                    "title": "第四章",
+                    "content_markdown": "旧稿内容。",
+                }
+            ],
             "story_facts": [],
             "private_assets": [],
         }
     )
 
-    assert "创作目标：约 1250 个中文可见字符" in prompt
-    assert "验收范围：1000—1500 个中文可见字符" in prompt
-    assert "固定输出 6 个自然段" in prompt
+    assert "创作目标：约 2500 个中文可见字符" in prompt
+    assert "验收范围：2125—2875 个中文可见字符" in prompt
+    assert "按情节自然分段，不限定机械段数" in prompt
     assert "不得输出“我需要先加载”等内部工作语句" in prompt
     assert "内容禁区、角色限制和验收规则只用于约束创作，不是正文素材" in prompt
     assert "不得用“没有……”“不出现……”“不靠……”等作者说明" in prompt
+    assert prompt.startswith("【AI小说世界2026 PawApp可信任务封套】")
+    assert "kind=chapter_generation" in prompt
+    assert "允许在模型内部充分思考" in prompt
+    assert "不得调用任何工具" in prompt
+    assert "它不是本次最终答案" in prompt
+    assert "不得原样返回旧稿" in prompt
+    assert "本章之前的正文上下文（仅作连续性参考）" in prompt
 
 
 def test_reply_audit_reads_actual_provider_usage_metadata() -> None:
@@ -186,6 +204,119 @@ def test_reply_audit_reads_actual_provider_usage_metadata() -> None:
     assert audit.total_tokens == 579
     assert audit.provider_id == "bailian"
     assert audit.model_id == "qwen-next"
+
+
+def test_reply_final_text_excludes_reasoning_and_prior_agent_turns() -> None:
+    reply = SimpleNamespace(
+        chunks=[
+            SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        content=[
+                            SimpleNamespace(type="reasoning", text="先分析人物动机。"),
+                            SimpleNamespace(type="text", text="不应采用的中间轮。"),
+                        ],
+                    )
+                ]
+            ),
+            SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        content=[
+                            {"type": "thinking", "text": "静默检查字数。"},
+                            {"type": "output_text", "text": "雨水沿着档案袋边缘滴下。"},
+                        ],
+                    )
+                ]
+            ),
+        ],
+        text="先分析人物动机。不应采用的中间轮。静默检查字数。雨水沿着档案袋边缘滴下。",
+    )
+
+    assert reply_final_text(reply) == "雨水沿着档案袋边缘滴下。"
+
+
+def test_reply_final_text_rejects_reasoning_only_structured_reply() -> None:
+    reply = SimpleNamespace(
+        chunks=[
+            SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="reasoning",
+                        role="assistant",
+                        content=[
+                            {"type": "text", "text": "仍在思考。"},
+                        ],
+                    )
+                ]
+            )
+        ],
+        text="仍在思考。调用上下文工具。",
+    )
+
+    with pytest.raises(ModelVerificationError, match="没有返回独立的最终回答"):
+        reply_final_text(reply)
+
+
+def test_reply_final_text_skips_trailing_reasoning_after_final_message() -> None:
+    reply = SimpleNamespace(
+        chunks=[
+            SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        content=[{"type": "text", "text": "最终正文。"}],
+                    ),
+                    SimpleNamespace(
+                        type="reasoning",
+                        role="assistant",
+                        content=[{"type": "text", "text": "尾部自检。"}],
+                    ),
+                ]
+            )
+        ],
+        text="最终正文。尾部自检。",
+    )
+
+    assert reply_final_text(reply) == "最终正文。"
+
+
+def test_reply_final_text_does_not_reuse_message_from_prior_response() -> None:
+    reply = SimpleNamespace(
+        chunks=[
+            SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="message",
+                        role="assistant",
+                        content=[{"type": "text", "text": "先调用工具检查。"}],
+                    )
+                ]
+            ),
+            SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="reasoning",
+                        role="assistant",
+                        content=[{"type": "text", "text": "仍未形成最终回答。"}],
+                    )
+                ]
+            ),
+        ],
+        text="先调用工具检查。仍未形成最终回答。",
+    )
+
+    with pytest.raises(ModelVerificationError, match="没有返回独立的最终回答"):
+        reply_final_text(reply)
+
+
+def test_reply_final_text_keeps_legacy_plain_reply_fallback() -> None:
+    assert reply_final_text(SimpleNamespace(text="  最终正文  ")) == "最终正文"
 
 
 def test_reply_audit_rejects_wrong_or_unverifiable_model() -> None:
@@ -430,19 +561,28 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                     "role_type": "main",
                     "gender": "male",
                     "description": "刑侦科长。",
-                    "details": {"age": 37},
+                    "details": {
+                        "age": 37,
+                        "personality": "重事实也重控制，压力下会把求真变成对他人的逼迫。",
+                    },
                 },
                 {
                     "name": "林青瓷",
                     "role_type": "supporting",
                     "description": "省报记者。",
-                    "details": {"gender": "女性"},
+                    "details": {
+                        "gender": "女性",
+                        "personality": "外表冷静克制，涉及家人时会主动冒险并隐瞒代价。",
+                    },
                 },
                 {
                     "name": "未定角色",
                     "role_type": "supporting",
                     "description": "身份尚未确定。",
-                    "details": {"gender": "unknown"},
+                    "details": {
+                        "gender": "unknown",
+                        "personality": "习惯观察后行动，但身份未定使其选择仍保留弹性。",
+                    },
                 },
             ]
         },
@@ -466,7 +606,10 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                             "name": "无有效性别",
                             "role_type": "main",
                             "description": "不能根据姓名猜测。",
-                            "details": {"gender": invalid_gender},
+                            "details": {
+                                "gender": invalid_gender,
+                                "personality": "会根据证据调整行动，不用姓名或身份替代判断。",
+                            },
                         }
                     ]
                 },
@@ -482,12 +625,35 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                         "name": "冲突角色",
                         "role_type": "main",
                         "gender": "男",
-                        "details": {"gender": "女"},
+                        "details": {
+                            "gender": "女",
+                            "personality": "面对冲突先保护同伴，再追查事实并承担后果。",
+                        },
                     }
                 ]
             },
             "",
         )
+
+    for invalid_personality in (None, "", "聪明、善良、冷酷", "太短"):
+        with pytest.raises(ModelVerificationError, match="性格"):
+            normalize_creative_generation_json(
+                "outline_characters",
+                {
+                    "characters": [
+                        {
+                            "name": "性格无效角色",
+                            "role_type": "supporting",
+                            "description": "性格必须可指导行动。",
+                            "details": {
+                                "gender": "未知",
+                                "personality": invalid_personality,
+                            },
+                        }
+                    ]
+                },
+                "",
+            )
 
 
 def test_novel_template_generation_normalizes_editable_fields() -> None:

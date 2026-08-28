@@ -1,0 +1,17 @@
+{
+  "state": "restored_after_candidate_purity_failure",
+  "checked_at": "2026-08-28T04:14:36Z",
+  "candidate_prose_writing_sha256": "1139c7bea46a7781c17ba55fb8543ec2d5f6aa42a65f1f4f960354d1c76317a2",
+  "candidate_hash_verified_in_plugin_and_ai_novel_writer_workspace": true,
+  "research_route_http_status": 404,
+  "qwenpaw_root_http_status": 200,
+  "pawapp_health_http_status": 200,
+  "qwenpaw_docker_health": "healthy",
+  "qwenpaw_restored_container_created_at": "2026-08-28T04:11:22.116899964Z",
+  "tts_sidecar_docker_health": "healthy",
+  "tts_runtime_fields_restored": true,
+  "project_model_records_during_request": 0,
+  "database_attribution": "No model_run_records were created between the X05 result started_at and finished_at timestamps. The writing evaluation route has no project database persistence.",
+  "additional_model_calls_after_failure": false,
+  "secrets_recorded": false
+}

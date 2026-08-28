@@ -29,7 +29,21 @@ def api(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(sys.modules, "qwenpaw.pawapp", pawapp_module)
     monkeypatch.delitem(sys.modules, "backend.generation_dependencies", raising=False)
     monkeypatch.delitem(sys.modules, "backend.writing_eval_api", raising=False)
-    return importlib.import_module("backend.writing_eval_api")
+    module = importlib.import_module("backend.writing_eval_api")
+    real_verified_skill_evidence = module._verified_skill_evidence
+    monkeypatch.setattr(
+        module,
+        "_verified_skill_evidence",
+        lambda sample: {
+            "contract": module.SKILL_EVIDENCE_CONTRACT_VERSION,
+            "variant": sample.variant,
+            "expected_skill_sha256": module.expected_skill_sha256(sample.variant),
+            "actual_skill_sha256": module.expected_skill_sha256(sample.variant),
+            "match": True,
+        },
+    )
+    module._test_real_verified_skill_evidence = real_verified_skill_evidence
+    return module
 
 
 def _configured_model(
@@ -119,15 +133,41 @@ def test_contract_endpoint_exposes_only_frozen_samples(api) -> None:
         "writing-eval-effective-model-pre-post-v1"
     )
     assert payload["output_purity_contract"] == "writing-eval-output-purity-v1"
+    assert payload["skill_evidence_contract"] == (
+        "writing-eval-skill-package-sha256-v1"
+    )
+    assert payload["prompt_variant_policy"] == (
+        "identical-prompt-skill-package-swap"
+    )
     assert payload["actual_model_policy"] == (
         "provider_usage_optional_not_exposed_allowed"
     )
+    assert payload["stream_diagnostic_contract"] == (
+        "writing-eval-stream-diagnostics-v2"
+    )
+    assert payload["generation_timeout_seconds"] == 600.0
     assert response.headers["Cache-Control"] == "no-store"
 
     with pytest.raises(HTTPException) as captured:
         api.writing_evaluation_contract_get("unknown-experiment", Response())
     assert captured.value.status_code == 404
     assert captured.value.detail["type"] == "experiment_not_found"
+
+
+def test_skill_variant_mismatch_is_rejected_before_model_call(
+    api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sample = api.build_sample(api.EXPERIMENT_ID, "X01")
+    monkeypatch.setattr(api, "_skill_sha256", lambda: "0" * 64)
+
+    with pytest.raises(HTTPException) as captured:
+        api._test_real_verified_skill_evidence(sample)
+
+    assert captured.value.status_code == 409
+    assert captured.value.detail["type"] == (
+        "writing_evaluation_skill_variant_mismatch"
+    )
+    assert captured.value.detail["model_called"] is False
 
 
 def test_gate_is_disabled_by_default_and_rejects_wrong_header(
@@ -252,6 +292,15 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
     assert result["variant"] == "A"
     assert result["attempt"] == 1
     assert result["execution_agent_id"] == "ai-novel-writer"
+    expected_skill_sha256 = api.expected_skill_sha256("A")
+    assert result["skill_sha256"] == expected_skill_sha256
+    assert result["skill_evidence"] == {
+        "contract": "writing-eval-skill-package-sha256-v1",
+        "variant": "A",
+        "expected_skill_sha256": expected_skill_sha256,
+        "actual_skill_sha256": expected_skill_sha256,
+        "match": True,
+    }
     assert result["requested_model"]["model_id"] == "model-a"
     assert result["postflight_model"]["model_id"] == "model-a"
     assert result["actual_model"]["model_id"] == "model-a"
@@ -275,7 +324,7 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
     )
     assert result["tool_policy_enforcement"] == "prompt_only"
     assert result["stream_diagnostics"] == {
-        "contract": "writing-eval-stream-diagnostics-v1",
+        "contract": "writing-eval-stream-diagnostics-v2",
         "content_recorded": False,
         "stream_completed": True,
         "event_count": 1,
@@ -289,6 +338,14 @@ async def test_generate_uses_fixed_skill_unique_session_and_matching_actual(
         "message_role_counts": {"assistant": 1},
         "message_type_counts": {"message": 1},
         "content_part_type_counts": {"output_text": 1},
+        "last_event_type": "simplenamespace",
+        "text_value_count": 1,
+        "text_chars_total_observed": len(final_text),
+        "text_chars_max_single_value": len(final_text),
+        "text_value_char_totals": {"output_text": len(final_text)},
+        "text_value_max_chars": {"output_text": len(final_text)},
+        "assistant_messages_observed": 1,
+        "public_usage_envelopes_observed": 1,
     }
     assert result["server_persistence"] == "none"
     assert response.headers["Cache-Control"] == "no-store"
@@ -536,6 +593,18 @@ async def test_generate_timeout_is_504_and_cancels_provider_task(
     assert diagnostics["event_count"] == 1
     assert diagnostics["event_type_counts"] == {"model_response": 1}
     assert diagnostics["content_part_type_counts"] == {"reasoning": 1}
+    assert diagnostics["last_event_type"] == "model_response"
+    assert diagnostics["text_value_count"] == 1
+    assert diagnostics["text_chars_total_observed"] == len(secret_reasoning)
+    assert diagnostics["text_chars_max_single_value"] == len(secret_reasoning)
+    assert diagnostics["text_value_char_totals"] == {
+        "reasoning": len(secret_reasoning)
+    }
+    assert diagnostics["text_value_max_chars"] == {
+        "reasoning": len(secret_reasoning)
+    }
+    assert diagnostics["assistant_messages_observed"] == 1
+    assert diagnostics["public_usage_envelopes_observed"] == 0
     assert diagnostics["content_recorded"] is False
     assert secret_reasoning not in str(detail)
     assert cancelled.is_set()

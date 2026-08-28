@@ -13,6 +13,13 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .character_profile_services import (
+    CharacterProfileValidationError,
+    build_character_profile_snapshot,
+    calculate_character_profile_completion_status,
+    normalize_character_profile_output,
+    validate_character_profile_apply_plan,
+)
 from .creative_schemas import OutlineGenerationRequestSnapshot, SelectionEditInputSnapshot
 from .models import (
     AssetPreset,
@@ -21,6 +28,7 @@ from .models import (
     ChapterCreationDraft,
     CharacterRelationship,
     CharacterRelationshipRevision,
+    CharacterProfileApplyBatch,
     CreativeGenerationJob,
     Document,
     DocumentRevision,
@@ -80,6 +88,7 @@ RELATIONSHIP_STATUSES = {"active", "resolved", "archived"}
 STORYLINE_TYPES = {"main", "support", "romance", "faction"}
 STORYLINE_STATUSES = {"active", "paused", "completed", "archived"}
 FORESHADOW_STATUSES = {"planned", "active", "resolved", "dropped"}
+COVER_MODES = {"ai", "system", "upload", "text"}
 CREATIVE_GENERATION_KINDS = {
     "novel_template",
     "novel_naming",
@@ -91,6 +100,7 @@ CREATIVE_GENERATION_KINDS = {
     "chapter_storyline_recommendation",
     "chapter_outline",
     "relationship_graph",
+    "character_profile_completion",
     "review",
     "selection_edit",
 }
@@ -257,7 +267,7 @@ def complete_novel_creation_draft(
     if len(author_name) > 120:
         raise ValidationError("作者名称不能超过120个字符")
     cover_mode = str(data.get("cover_mode", "system"))
-    if cover_mode not in {"ai", "system", "upload"}:
+    if cover_mode not in COVER_MODES:
         raise ValidationError("请选择有效封面方式")
     novel = Novel(
         id=uuid4(),
@@ -547,6 +557,7 @@ def update_outline_draft(
     if characters is not None:
         normalized: list[dict[str, Any]] = []
         seen: set[str] = set()
+        seen_character_ids: set[UUID] = set()
         for item in characters[:200]:
             name = str(item.get("name", "")).strip()
             role_type = str(item.get("role_type", "supporting"))
@@ -554,15 +565,34 @@ def update_outline_draft(
                 continue
             if role_type not in ROLE_TYPES:
                 role_type = "supporting"
+            character_id: UUID | None = None
+            raw_character_id = item.get("character_id")
+            if raw_character_id not in (None, ""):
+                try:
+                    character_id = UUID(str(raw_character_id))
+                except (TypeError, ValueError) as error:
+                    raise ValidationError("大纲角色 character_id 无效") from error
+                belongs_to_novel = session.scalar(
+                    select(NovelCharacter.id).where(
+                        NovelCharacter.id == character_id,
+                        NovelCharacter.novel_id == novel_id,
+                    )
+                )
+                if belongs_to_novel is None:
+                    raise ValidationError("大纲角色 character_id 不属于当前小说")
+                if character_id in seen_character_ids:
+                    raise ValidationError("大纲角色 character_id 不能重复")
+                seen_character_ids.add(character_id)
             seen.add(name)
-            normalized.append(
-                {
+            normalized_item = {
                     "name": name,
                     "role_type": role_type,
                     "description": str(item.get("description", "")).strip(),
                     "details": dict(item.get("details") or {}),
-                }
-            )
+            }
+            if character_id is not None:
+                normalized_item["character_id"] = str(character_id)
+            normalized.append(normalized_item)
         draft.characters_json = normalized
     if plot_text is not None:
         draft.plot_text = plot_text.strip()
@@ -621,18 +651,33 @@ def complete_outline_draft(
         .order_by(NovelCharacter.position)
         .with_for_update()
     ).all()
-    existing = {item.name: item for item in existing_rows}
+    existing_by_id = {item.id: item for item in existing_rows}
+    existing_by_name = {item.name: item for item in existing_rows}
     # Move all current rows to collision-free temporary positions before
     # reapplying the outline order. This keeps repeated outline completion and
     # renamed roles safe under the (novel_id, position) unique constraint.
     for index, character in enumerate(existing_rows, start=1):
         character.position = -(index * 1000)
     session.flush()
-    outlined_names: set[str] = set()
+    outlined_character_ids: set[UUID] = set()
+    materialized_characters: list[dict[str, Any]] = []
     for index, item in enumerate(draft.characters_json, start=1):
         name = str(item["name"])
-        outlined_names.add(name)
-        character = existing.get(name)
+        raw_character_id = item.get("character_id")
+        character = None
+        legacy_name_match = False
+        if raw_character_id:
+            try:
+                character = existing_by_id.get(UUID(str(raw_character_id)))
+            except (TypeError, ValueError) as error:
+                raise ValidationError("大纲角色 character_id 无效") from error
+            if character is None:
+                raise ValidationError("大纲角色 character_id 不属于当前小说")
+        elif name in existing_by_name:
+            # Legacy drafts did not carry stable IDs. Link the row once, but do
+            # not let a same-name draft silently overwrite formal profile data.
+            character = existing_by_name[name]
+            legacy_name_match = True
         if character is None:
             character = NovelCharacter(
                 id=uuid4(), novel_id=novel_id, name=name, position=index * 1000
@@ -642,18 +687,33 @@ def complete_outline_draft(
             character.version += 1
             character.position = index * 1000
         incoming_details = dict(item.get("details") or {})
-        existing_gender = str((character.details or {}).get("gender") or "").strip()
-        if existing_gender:
-            # Completing or regenerating an outline must not silently replace a
-            # gender already saved on the formal character card. The author can
-            # still change that field explicitly in the character editor.
-            incoming_details["gender"] = existing_gender
+        existing_details = dict(character.details or {})
+        for key, value in existing_details.items():
+            if value not in (None, "", [], {}):
+                # Formal profile data is author-owned. Outline regeneration may
+                # fill missing keys for a matched character but cannot silently
+                # replace any existing non-empty detail.
+                incoming_details[key] = value
         character.lifecycle_state = "active"
         character.archived_at = None
-        character.role_type = str(item.get("role_type", "supporting"))
-        character.description = str(item.get("description", ""))
+        if not legacy_name_match:
+            character.name = name
+            character.role_type = str(item.get("role_type", "supporting"))
+            character.description = str(item.get("description", ""))
         character.details = incoming_details
-    remaining = [item for item in existing_rows if item.name not in outlined_names]
+        outlined_character_ids.add(character.id)
+        materialized_characters.append(
+            {
+                **dict(item),
+                "character_id": str(character.id),
+                "name": character.name,
+                "role_type": character.role_type,
+                "description": character.description,
+                "details": dict(character.details or {}),
+            }
+        )
+    draft.characters_json = materialized_characters
+    remaining = [item for item in existing_rows if item.id not in outlined_character_ids]
     for offset, character in enumerate(remaining, start=len(draft.characters_json) + 1):
         character.position = offset * 1000
 
@@ -843,7 +903,10 @@ def update_novel_character(
     character.role_type = role_type
     character.name = clean_name
     character.description = description.strip()
-    character.details = details
+    # Character forms expose only a subset of the extensible details object.
+    # Treat incoming details as a patch so editing one visible field never
+    # erases hidden author or generation metadata.
+    character.details = {**dict(character.details or {}), **dict(details or {})}
     character.version += 1
     session.commit()
     return _character_payload(character)
@@ -1603,6 +1666,463 @@ def get_relationship_auto_sync_status(
         },
         "job": _creative_job_payload(current_job) if current_job is not None else None,
     }
+
+
+def _character_profile_batch_payload(batch: CharacterProfileApplyBatch) -> dict[str, Any]:
+    return {
+        "id": str(batch.id),
+        "novel_id": str(batch.novel_id),
+        "generation_job_id": (
+            str(batch.generation_job_id) if batch.generation_job_id else None
+        ),
+        "restored_from_batch_id": (
+            str(batch.restored_from_batch_id) if batch.restored_from_batch_id else None
+        ),
+        "idempotency_key": batch.idempotency_key,
+        "state": batch.state,
+        "decisions": list(batch.decisions_json or []),
+        "before_snapshot": dict(batch.before_snapshot or {}),
+        "after_snapshot": dict(batch.after_snapshot or {}),
+        "base_versions": dict(batch.base_versions or {}),
+        "result_versions": dict(batch.result_versions or {}),
+        "created_at": _iso(batch.created_at),
+        "applied_at": _iso(batch.applied_at),
+    }
+
+
+def build_character_profile_completion_snapshot(
+    session: Session,
+    novel_id: UUID,
+) -> dict[str, Any]:
+    """Build model input exclusively from current formal, server-scoped records."""
+
+    novel = _require_novel(session, novel_id)
+    characters = session.scalars(
+        select(NovelCharacter)
+        .where(
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.lifecycle_state == "active",
+        )
+        .order_by(NovelCharacter.position, NovelCharacter.id)
+        .limit(200)
+    ).all()
+    formal_revision_rows = session.execute(
+        select(Document, DocumentRevision)
+        .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
+        .join(
+            DocumentRevision,
+            DocumentRevision.id == DocumentWorkingCopy.base_revision_id,
+        )
+        .where(Document.novel_id == novel_id, Document.kind == "chapter")
+        .order_by(Document.position, Document.id)
+        .limit(1000)
+    ).all()
+    current_revision_ids = [revision.id for _, revision in formal_revision_rows]
+    fact_query = select(StoryFact).where(
+        StoryFact.novel_id == novel_id,
+        StoryFact.fact_type == "character_state",
+        StoryFact.status.in_(("active", "source_restored")),
+    )
+    if current_revision_ids:
+        fact_query = fact_query.where(
+            (StoryFact.source_revision_id.is_(None))
+            | (StoryFact.source_revision_id.in_(current_revision_ids))
+        )
+    else:
+        fact_query = fact_query.where(StoryFact.source_revision_id.is_(None))
+    facts = session.scalars(
+        fact_query.order_by(StoryFact.created_at.desc(), StoryFact.id.desc()).limit(300)
+    ).all()
+
+    return build_character_profile_snapshot(
+        novel={
+            "id": str(novel.id),
+            "title": novel.title,
+            "genre": novel.genre,
+            "subgenre": novel.subgenre,
+        },
+        outline={
+            "id": f"outline:{novel.id}",
+            "background": novel.background,
+            "main_plot": novel.main_plot,
+        },
+        characters=[
+            {
+                "id": str(character.id),
+                "version": character.version,
+                "name": character.name,
+                "role_type": character.role_type,
+                "description": character.description,
+                "details": dict(character.details or {}),
+                "position": character.position,
+                "lifecycle_state": character.lifecycle_state,
+            }
+            for character in characters
+        ],
+        story_facts=[
+            {
+                "id": str(fact.id),
+                "fact_type": fact.fact_type,
+                "status": fact.status,
+                "subject": fact.subject,
+                "predicate": fact.predicate,
+                "object_text": fact.object_text,
+                "details": dict(fact.details or {}),
+                "source_revision_id": (
+                    str(fact.source_revision_id) if fact.source_revision_id else None
+                ),
+                "position": index,
+            }
+            for index, fact in enumerate(facts)
+        ],
+        chapter_revisions=[
+            {
+                "id": str(revision.id),
+                "document_id": str(document.id),
+                "title": document.title,
+                "position": document.position,
+                "content_text": revision.content_text,
+            }
+            for document, revision in formal_revision_rows
+        ],
+    )
+
+
+def _character_profile_jobs(
+    session: Session,
+    novel_id: UUID,
+) -> list[dict[str, Any]]:
+    jobs = session.scalars(
+        select(CreativeGenerationJob)
+        .where(
+            CreativeGenerationJob.scope_type == "novel",
+            CreativeGenerationJob.scope_id == novel_id,
+            CreativeGenerationJob.novel_id == novel_id,
+            CreativeGenerationJob.kind == "character_profile_completion",
+        )
+        .order_by(
+            CreativeGenerationJob.created_at.desc(),
+            CreativeGenerationJob.attempt.desc(),
+            CreativeGenerationJob.id.desc(),
+        )
+        .limit(30)
+    ).all()
+    return [_creative_job_payload(job) for job in jobs]
+
+
+def get_character_profile_completion_status(
+    session: Session,
+    novel_id: UUID,
+) -> dict[str, Any]:
+    snapshot = build_character_profile_completion_snapshot(session, novel_id)
+    jobs = _character_profile_jobs(session, novel_id)
+    batches = session.scalars(
+        select(CharacterProfileApplyBatch)
+        .where(CharacterProfileApplyBatch.novel_id == novel_id)
+        .order_by(
+            CharacterProfileApplyBatch.created_at.desc(),
+            CharacterProfileApplyBatch.id.desc(),
+        )
+        .limit(30)
+    ).all()
+    batch_payloads = [_character_profile_batch_payload(batch) for batch in batches]
+    domain_status = calculate_character_profile_completion_status(
+        snapshot,
+        jobs=jobs,
+        apply_batches=batch_payloads,
+    )
+    job = domain_status.get("job") or domain_status.get("latest_job")
+    output_characters = (
+        (job.get("output_json") or {}).get("characters")
+        if isinstance(job, dict)
+        else []
+    )
+    current_by_id = {
+        str(character.get("id")): character
+        for character in snapshot.get("characters") or []
+        if isinstance(character, dict)
+    }
+    candidates: list[dict[str, Any]] = []
+    for item in output_characters or []:
+        if not isinstance(item, dict):
+            continue
+        current = current_by_id.get(str(item.get("character_id") or ""))
+        if current is None:
+            continue
+        details = current.get("details") if isinstance(current.get("details"), dict) else {}
+        candidates.append(
+            {
+                **item,
+                "character_name": str(current.get("name") or ""),
+                "current_personality": str(details.get("personality") or "") or None,
+            }
+        )
+    current_batch = domain_status.get("apply_batch")
+    if not isinstance(current_batch, dict):
+        current_batch = None
+    can_restore = bool(
+        domain_status["state"] == "applied"
+        and current_batch is not None
+        and current_batch.get("state") == "applied"
+    )
+    source_summary = dict(domain_status["source_summary"])
+    source_summary["characters_without_personality"] = sum(
+        not str((item.get("details") or {}).get("personality") or "").strip()
+        for item in snapshot.get("characters") or []
+        if isinstance(item, dict)
+    )
+    return {
+        "eligible": domain_status["eligible"],
+        "state": domain_status["state"],
+        "stale": domain_status["stale"],
+        "source_summary": source_summary,
+        "job": (
+            {
+                **job,
+                "requested_model": job.get("requested_model_id"),
+                "actual_model": job.get("actual_model_id"),
+            }
+            if isinstance(job, dict)
+            else None
+        ),
+        "candidates": candidates,
+        "last_error": job.get("failure_message") if isinstance(job, dict) else None,
+        "last_applied_at": (
+            current_batch.get("applied_at") if current_batch is not None else None
+        ),
+        "can_restore": can_restore,
+        "last_apply_batch_id": (
+            current_batch.get("id") if can_restore and current_batch is not None else None
+        ),
+    }
+
+
+def get_character_profile_completion_job(
+    session: Session,
+    novel_id: UUID,
+    job_id: UUID,
+) -> dict[str, Any]:
+    job = session.scalar(
+        select(CreativeGenerationJob).where(
+            CreativeGenerationJob.id == job_id,
+            CreativeGenerationJob.novel_id == novel_id,
+            CreativeGenerationJob.scope_type == "novel",
+            CreativeGenerationJob.scope_id == novel_id,
+            CreativeGenerationJob.kind == "character_profile_completion",
+        )
+    )
+    if job is None:
+        raise NotFoundError(f"character profile generation job {job_id} not found")
+    return _creative_job_payload(job)
+
+
+def apply_character_profile_completion(
+    session: Session,
+    novel_id: UUID,
+    job_id: UUID,
+    *,
+    idempotency_key: str,
+    decisions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    _require_novel(session, novel_id)
+    clean_key = idempotency_key.strip()
+    normalized_decisions = sorted(
+        (
+            {
+                "character_id": str(item.get("character_id") or ""),
+                "base_version": int(item.get("base_version") or 0),
+                "replace_existing": bool(item.get("replace_existing", False)),
+            }
+            for item in decisions
+        ),
+        key=lambda item: item["character_id"],
+    )
+    _lock_generation_attempt(
+        session,
+        namespace="character-profile-apply",
+        scope_key=str(novel_id),
+        input_hash=clean_key,
+    )
+    existing = session.scalar(
+        select(CharacterProfileApplyBatch).where(
+            CharacterProfileApplyBatch.novel_id == novel_id,
+            CharacterProfileApplyBatch.idempotency_key == clean_key,
+        )
+    )
+    if existing is not None:
+        if (
+            existing.state != "applied"
+            or existing.generation_job_id != job_id
+            or list(existing.decisions_json or []) != normalized_decisions
+        ):
+            raise ValidationError("角色卡应用幂等键已用于不同请求")
+        return get_character_profile_completion_status(session, novel_id)
+    job = session.scalar(
+        select(CreativeGenerationJob)
+        .where(
+            CreativeGenerationJob.id == job_id,
+            CreativeGenerationJob.novel_id == novel_id,
+            CreativeGenerationJob.scope_type == "novel",
+            CreativeGenerationJob.scope_id == novel_id,
+            CreativeGenerationJob.kind == "character_profile_completion",
+        )
+        .with_for_update()
+    )
+    if job is None:
+        raise NotFoundError(f"character profile generation job {job_id} not found")
+    character_ids = sorted(UUID(item["character_id"]) for item in normalized_decisions)
+    characters = session.scalars(
+        select(NovelCharacter)
+        .where(
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.id.in_(character_ids),
+        )
+        .order_by(NovelCharacter.id)
+        .with_for_update()
+    ).all()
+    snapshot = build_character_profile_completion_snapshot(session, novel_id)
+    current_records = [
+        {
+            "id": str(character.id),
+            "version": character.version,
+            "lifecycle_state": character.lifecycle_state,
+            "details": dict(character.details or {}),
+        }
+        for character in characters
+    ]
+    try:
+        plan = validate_character_profile_apply_plan(
+            snapshot,
+            dict(job.output_json or {}),
+            decisions=normalized_decisions,
+            current_characters=current_records,
+            job=_creative_job_payload(job),
+        )
+    except CharacterProfileValidationError as error:
+        if "版本冲突" in str(error) or "已过期" in str(error):
+            raise EntityConflictError(
+                get_character_profile_completion_status(session, novel_id)
+            ) from error
+        raise ValidationError(str(error)) from error
+    by_id = {str(character.id): character for character in characters}
+    before_snapshot: dict[str, Any] = {}
+    after_snapshot: dict[str, Any] = {}
+    result_versions: dict[str, int] = {}
+    for decision in plan["decisions"]:
+        character = by_id[decision["character_id"]]
+        before_details = dict(character.details or {})
+        after_details = {**before_details, "personality": decision["personality"]}
+        before_snapshot[str(character.id)] = before_details
+        after_snapshot[str(character.id)] = after_details
+        character.details = after_details
+        character.version += 1
+        result_versions[str(character.id)] = character.version
+    batch = CharacterProfileApplyBatch(
+        id=uuid4(),
+        novel_id=novel_id,
+        generation_job_id=job_id,
+        idempotency_key=clean_key,
+        state="applied",
+        decisions_json=normalized_decisions,
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        base_versions=plan["base_versions"],
+        result_versions=result_versions,
+    )
+    session.add(batch)
+    session.commit()
+    return get_character_profile_completion_status(session, novel_id)
+
+
+def restore_character_profile_apply_batch(
+    session: Session,
+    novel_id: UUID,
+    batch_id: UUID,
+    *,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    _require_novel(session, novel_id)
+    clean_key = idempotency_key.strip()
+    _lock_generation_attempt(
+        session,
+        namespace="character-profile-restore",
+        scope_key=str(novel_id),
+        input_hash=clean_key,
+    )
+    existing = session.scalar(
+        select(CharacterProfileApplyBatch).where(
+            CharacterProfileApplyBatch.novel_id == novel_id,
+            CharacterProfileApplyBatch.idempotency_key == clean_key,
+        )
+    )
+    if existing is not None:
+        if existing.state != "restored" or existing.restored_from_batch_id != batch_id:
+            raise ValidationError("角色卡恢复幂等键已用于不同请求")
+        return get_character_profile_completion_status(session, novel_id)
+    source_batch = session.scalar(
+        select(CharacterProfileApplyBatch)
+        .where(
+            CharacterProfileApplyBatch.id == batch_id,
+            CharacterProfileApplyBatch.novel_id == novel_id,
+        )
+        .with_for_update()
+    )
+    if source_batch is None:
+        raise NotFoundError(f"character profile apply batch {batch_id} not found")
+    if source_batch.state != "applied":
+        raise ValidationError("只能恢复一次正式应用批次")
+    result_versions = dict(source_batch.result_versions or {})
+    character_ids = sorted(UUID(character_id) for character_id in result_versions)
+    characters = session.scalars(
+        select(NovelCharacter)
+        .where(
+            NovelCharacter.novel_id == novel_id,
+            NovelCharacter.id.in_(character_ids),
+        )
+        .order_by(NovelCharacter.id)
+        .with_for_update()
+    ).all()
+    if len(characters) != len(character_ids):
+        raise ValidationError("恢复目标角色已不存在，整批未修改")
+    before_restore: dict[str, Any] = {}
+    after_restore: dict[str, Any] = {}
+    restore_base_versions: dict[str, int] = {}
+    restore_result_versions: dict[str, int] = {}
+    source_before = dict(source_batch.before_snapshot or {})
+    source_after = dict(source_batch.after_snapshot or {})
+    for character in characters:
+        character_id = str(character.id)
+        current_details = dict(character.details or {})
+        if (
+            character.version != int(result_versions.get(character_id) or 0)
+            or current_details != dict(source_after.get(character_id) or {})
+        ):
+            raise EntityConflictError(
+                get_character_profile_completion_status(session, novel_id)
+            )
+        restored_details = dict(source_before.get(character_id) or {})
+        before_restore[character_id] = current_details
+        after_restore[character_id] = restored_details
+        restore_base_versions[character_id] = character.version
+        character.details = restored_details
+        character.version += 1
+        restore_result_versions[character_id] = character.version
+    restored_batch = CharacterProfileApplyBatch(
+        id=uuid4(),
+        novel_id=novel_id,
+        generation_job_id=source_batch.generation_job_id,
+        restored_from_batch_id=source_batch.id,
+        idempotency_key=clean_key,
+        state="restored",
+        decisions_json=list(source_batch.decisions_json or []),
+        before_snapshot=before_restore,
+        after_snapshot=after_restore,
+        base_versions=restore_base_versions,
+        result_versions=restore_result_versions,
+    )
+    session.add(restored_batch)
+    session.commit()
+    return get_character_profile_completion_status(session, novel_id)
 
 
 def _manual_relationship_blocks(
@@ -3220,6 +3740,8 @@ def _validated_selection_edit_snapshot(
 def creative_generation_skill(job: dict[str, Any]) -> str:
     """Resolve one public PawApp Skill without creating a second model policy."""
 
+    if str(job.get("kind") or "") == "character_profile_completion":
+        return "character-craft"
     if str(job.get("kind") or "") != "selection_edit":
         return "story-foundation"
     operation = str((job.get("input_snapshot") or {}).get("operation") or "")
@@ -3606,7 +4128,7 @@ def start_creative_generation(
         raise ValidationError("生成输入快照不能超过500000个字符")
     input_digest = content_hash(serialized)
     attempt = 1
-    if kind == "relationship_graph":
+    if kind in {"relationship_graph", "character_profile_completion"}:
         _lock_generation_attempt(
             session,
             namespace=f"creative:{scope_type}:{kind}",
@@ -3694,6 +4216,10 @@ def _validate_creative_generation_scope(
         if novel_id is None or scope_type != "novel" or scope_id != novel_id:
             raise ValidationError("关系网自动生成必须绑定当前小说")
         return
+    if kind == "character_profile_completion":
+        if novel_id is None or scope_type != "novel" or scope_id != novel_id:
+            raise ValidationError("角色卡性格补全必须绑定当前小说")
+        return
     if kind in {"novel_template", "novel_naming", "novel_cover"}:
         draft = session.get(NovelCreationDraft, scope_id)
         if scope_type != "novel_creation" or draft is None:
@@ -3731,7 +4257,11 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
     if kind == "selection_edit":
         operation = str(snapshot.get("operation") or "")
         operation_instruction = {
-            "polish": "保持事实、视角和语气，改善选区表达，不扩写选区之外的内容。",
+            "polish": (
+                "保持事实、视角和语气；只有存在可指出且能实际改善的表达问题时才修改。"
+                "不得仅互换直/弯引号、半角/全角或其他等价排版来制造差异；"
+                "没有实质提升时原样返回 selection_text。"
+            ),
             "rewrite": "保持核心事实，明显调整选区的表达组织。",
             "expand": "只扩展 selection_text，不续写 before 或 after 中的内容。",
             "shorten": "保留选区关键信息并显著压缩。",
@@ -3759,7 +4289,9 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "回复的第一个字符必须是{，最后一个字符必须是}；对象前后不得出现任何其他字符。"
             "replacement_text 必须是非空纯文本且不超过"
             f"{SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS}字符；short_summary 必须简短说明"
-            "本次结果且不超过240字符。不要返回 schema_version、selection_id、operation、"
+            "本次结果且不超过240字符，并且必须能由 selection_text 与 replacement_text 的"
+            "实际对照验证；候选没有改变节奏、重复动作、视角或信息时，不得声称完成了这些修改。"
+            "不要返回 schema_version、selection_id、operation、"
             "warnings、字符数、哈希、diff_segments、segment_id、Markdown 代码围栏、解释、"
             "状态胶囊、保存声明或 Skill 工作过程。\n"
             "返回格式：{\"replacement_text\":\"...\",\"short_summary\":\"...\"}\n"
@@ -3800,9 +4332,11 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "人物动机、缺陷、秘密和成长方向必须彼此咬合。顶层只能有characters数组，"
             "即使只有一个人物也不得把人物对象直接放在顶层。每个角色的details必须包含"
             "gender字段，值只能是男、女、其他、未知；只有创作材料确实没有设定时才使用未知，"
-            "不得根据姓名猜测性别。返回"
+            "不得根据姓名猜测性别。details还必须包含personality字段，使用8到120个中文可见字符"
+            "描述能指导人物选择的行为倾向或内在矛盾，不得只返回聪明、善良、冷酷等标签。返回"
             " {\"characters\":[{\"name\":\"...\",\"role_type\":\"main|supporting\","
-            "\"description\":\"...\",\"details\":{\"gender\":\"男|女|其他|未知\"}}]}。"
+            "\"description\":\"...\",\"details\":{\"gender\":\"男|女|其他|未知\","
+            "\"personality\":\"...\"}}]}。"
         ),
         "outline_plot": (
             "生成覆盖目标章节数的主要情节，控制在1200到1800个中文可见字符。"
@@ -3842,6 +4376,21 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "\"relation_kind\":\"family|colleague|mentor|ally|enemy|romance|other\","
             "\"label\":\"...\",\"description\":\"...\",\"confidence\":85,"
             "\"evidence\":[\"角色设定：...\"]}]}。没有可靠关系时也必须返回空relationships数组。"
+        ),
+        "character_profile_completion": (
+            "根据服务端提供的正式角色资料、大纲、已确认角色事实和正式章节证据，为每个角色生成"
+            "可审阅的性格候选。只能使用输入characters中的character_id和base_version，不得按姓名、"
+            "性别、职业或题材刻板印象猜测。personality使用8到120个中文可见字符，必须说明能指导"
+            "人物选择的行为倾向或内在矛盾，不得只列聪明、善良、冷酷等标签。basis只能是designed、"
+            "mixed或observed；只有至少两个不同正式章节都有逐字证据时才能使用observed。每条evidence"
+            "的source_type、source_id和quote必须逐字对应输入characters、outline、"
+            "chapter_evidence或story_facts中的同一来源。资料不足时返回"
+            "status=insufficient_evidence并省略personality、basis和confidence，不得编造。返回"
+            " {\"characters\":[{\"character_id\":\"uuid\",\"base_version\":1,"
+            "\"status\":\"candidate|insufficient_evidence\",\"personality\":\"...\","
+            "\"basis\":\"designed|mixed|observed\",\"confidence\":85,"
+            "\"evidence\":[{\"source_type\":\"character|outline|chapter|story_fact\","
+            "\"source_id\":\"...\",\"quote\":\"...\"}],\"warnings\":[]}] }。"
         ),
         "review": (
             "审阅正文的连续性、人物一致性、时间地点、因果、伏笔、重复段落和系统文本污染。"
@@ -4053,6 +4602,7 @@ def update_novel_settings(
     idea: str,
     template_name: str,
     template_data: dict[str, Any],
+    cover_mode: str | None = None,
     cover_image_data: str | None = None,
 ) -> dict[str, Any]:
     novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
@@ -4068,6 +4618,10 @@ def update_novel_settings(
     novel.idea = idea.strip()
     novel.template_name = template_name.strip()
     novel.template_data = template_data
+    if cover_mode is not None:
+        if cover_mode not in COVER_MODES:
+            raise ValidationError("请选择有效封面方式")
+        novel.cover_mode = cover_mode
     if cover_image_data is not None:
         novel.cover_image_data = cover_image_data
     novel.version += 1

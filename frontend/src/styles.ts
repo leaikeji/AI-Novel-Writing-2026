@@ -651,37 +651,45 @@ export function ensureNovelStyles(): void {
     .anw-selection-edit-host.is-reviewing { display:block; min-height:220px; }
     .anw-selection-edit-host.is-reviewing > :not(.anw-selection-edit-review) { display:none!important; }
     .anw-editor-selection-review-host.is-reviewing { min-height:clamp(520px,calc(100vh - 300px),1080px); }
-    .anw-selection-edit-review { display:grid; width:100%; min-width:0; align-content:start; overflow:visible; border:1px solid #e7e9ed; border-radius:12px; color:#34383f; background:#fff; box-shadow:0 5px 20px rgba(29,35,46,.06); }
-    .anw-selection-edit-review > header { grid-row:2; display:grid; gap:5px; border-bottom:1px solid #eceef1; padding:18px 20px 15px; }
-    .anw-selection-edit-review h2 { margin:0!important; color:#24282f!important; font-size:19px; font-weight:780; line-height:1.3; }
-    .anw-selection-edit-review > header > p { margin:0; color:#858a92; font-size:12px; line-height:1.6; }
-    .anw-selection-edit-review-toolbar { position:sticky; z-index:5; top:0; grid-row:1; display:flex; min-height:58px; flex-wrap:wrap; align-items:center; gap:8px; border-bottom:1px solid #e9ebee; padding:9px 14px; background:rgba(255,255,255,.97); box-shadow:0 3px 10px rgba(29,35,46,.04); backdrop-filter:blur(10px); }
-    .anw-selection-edit-review-toolbar > span { margin-right:auto; color:#ff6738; font-size:12px; font-weight:760; white-space:nowrap; }
-    .anw-selection-edit-review button { min-height:36px; border:1px solid #dfe2e6; border-radius:7px; padding:0 13px; color:#565c65; background:#fff; cursor:pointer; font:inherit; font-size:12px; font-weight:720; transition:border-color .15s ease,color .15s ease,background .15s ease,box-shadow .15s ease; }
+    .anw-selection-edit-review { display:grid; width:100%; min-width:0; align-content:start; overflow:visible; border:0; border-radius:0; color:#34383f; background:#fff; box-shadow:none; }
+    .anw-selection-edit-review > header { grid-row:2; display:grid; gap:5px; border-bottom:1px solid #eceef1; padding:11px 16px 12px; background:#fafbfc; }
+    .anw-selection-edit-review h2 { margin:0!important; color:#24282f!important; font-size:15px; font-weight:760; line-height:1.35; }
+    .anw-selection-edit-review > header > p { margin:0; color:#858a92; font-size:11px; line-height:1.55; }
+    .anw-selection-edit-review-toolbar { position:sticky; z-index:5; top:0; grid-row:1; display:flex; min-height:56px; flex-wrap:nowrap; align-items:center; gap:8px; overflow-x:auto; border-bottom:1px solid #e9ebee; padding:9px 14px; background:rgba(255,255,255,.98); box-shadow:none; backdrop-filter:blur(10px); scrollbar-width:thin; }
+    .anw-selection-edit-review-toolbar-summary { display:flex; min-width:max-content; align-items:center; gap:12px; margin-right:auto; }
+    .anw-selection-edit-review-change-count { color:#ff6738; font-size:12px; font-weight:760; white-space:nowrap; }
+    .anw-selection-edit-review button { min-height:34px; border:1px solid #dfe2e6; border-radius:7px; padding:0 12px; color:#565c65; background:#fff; cursor:pointer; font:inherit; font-size:12px; font-weight:720; white-space:nowrap; transition:border-color .15s ease,color .15s ease,background .15s ease,box-shadow .15s ease; }
     .anw-selection-edit-review button:hover,.anw-selection-edit-review button:focus-visible { border-color:#ff8d68; color:#e95e31; outline:0; box-shadow:0 0 0 3px rgba(255,112,67,.1); }
     .anw-selection-edit-review button:disabled { color:#a7abb2; border-color:#eceef1; cursor:not-allowed; background:#f6f7f8; box-shadow:none; }
-    .anw-selection-edit-review-toolbar > button:nth-last-child(2) { border-color:#ff7043; color:#fff; background:#ff7043; box-shadow:0 5px 13px rgba(255,112,67,.2); }
+    .anw-selection-edit-review-toolbar > button:nth-last-child(2) { border-color:#ff7043; color:#fff; background:#ff7043; box-shadow:0 4px 11px rgba(255,112,67,.18); }
     .anw-selection-edit-review-toolbar > button:nth-last-child(3) { border-color:#ffb197; color:#ef673c; background:#fff8f4; }
     .anw-selection-edit-review-toolbar > button:disabled { border-color:#eceef1; color:#a7abb2; background:#f6f7f8; box-shadow:none; }
     .anw-selection-edit-review-warnings { display:grid; gap:4px; margin:7px 0 0; border:1px solid #f1d9a8; border-radius:8px; padding:8px 10px 8px 27px; color:#986719; background:#fff9e9; font-size:11px; line-height:1.55; }
     .anw-selection-edit-review-diff { grid-row:3; margin:0; padding:0; list-style:none; background:#fff; }
     .anw-selection-edit-review-diff > li { min-width:0; overflow-wrap:anywhere; }
-    .anw-selection-edit-review-context { display:block; padding:16px 20px; color:#3d424a; font-size:14px; line-height:1.9; white-space:pre-wrap; }
-    .anw-selection-edit-review-change { display:grid; border-block:1px solid #ebecef; background:#fff; scroll-margin-top:72px; }
+    .anw-selection-edit-review-context { display:block; padding:13px 16px; color:#3d424a; font-size:14px; line-height:1.95; white-space:pre-wrap; }
+    .anw-selection-edit-review-change { display:grid; grid-template-columns:minmax(0,1fr) auto; border-block:1px solid #ebecef; background:#fff; scroll-margin-top:64px; }
     .anw-selection-edit-review-change + .anw-selection-edit-review-change { border-top:0; }
-    .anw-selection-edit-review-change.is-current { position:relative; box-shadow:inset 4px 0 #ff7548; }
-    .anw-selection-edit-review-delete,.anw-selection-edit-review-insert { display:grid; min-height:52px; grid-template-columns:22px 48px minmax(0,1fr); align-items:start; gap:7px; padding:13px 20px; font-size:14px; line-height:1.85; white-space:pre-wrap; }
+    .anw-selection-edit-review-change:focus { outline:0; }
+    .anw-selection-edit-review-change:focus-visible { outline:2px solid rgba(255,112,67,.48); outline-offset:-2px; }
+    .anw-selection-edit-review-change.is-current { position:relative; box-shadow:inset 3px 0 #ff7548; }
+    .anw-selection-edit-review-change-lines { display:grid; min-width:0; grid-column:1; }
+    .anw-selection-edit-review-line { display:grid; min-height:48px; grid-template-columns:18px 48px minmax(0,1fr); align-items:start; gap:7px; padding:10px 14px; font-size:14px; line-height:1.9; white-space:pre-wrap; }
     .anw-selection-edit-review-delete { color:#8b433d; background:#fff1ef; }
     .anw-selection-edit-review-insert { color:#276e50; background:#eef9f3; }
-    .anw-selection-edit-review-delete > span:first-child,.anw-selection-edit-review-insert > span:first-child { font-size:18px; font-weight:850; line-height:1.4; }
-    .anw-selection-edit-review-delete > strong,.anw-selection-edit-review-insert > strong { font-size:11px; font-weight:800; line-height:2.5; }
-    .anw-selection-edit-review-change-actions { display:flex; justify-content:flex-end; gap:8px; border-top:1px solid rgba(0,0,0,.045); padding:8px 20px 10px; background:#fff; }
-    .anw-selection-edit-review-change-actions button[aria-pressed="true"] { border-color:#ff7043; color:#fff; background:#ff7043; }
-    .anw-selection-edit-review-change.is-accept { box-shadow:inset 4px 0 #2e9f6d; }
-    .anw-selection-edit-review-change.is-reject { opacity:.72; box-shadow:inset 4px 0 #9ba0a8; }
-    .anw-selection-edit-review-decision-label { margin:0; border-top:1px solid #eceef1; padding:8px 20px; color:#737981; background:#fafbfc; font-size:11px; text-align:right; }
-    .anw-selection-edit-review-empty-result { margin:0; padding:8px 20px; color:#8e5550; background:#fff7f6; font-size:11px; }
-    .anw-selection-edit-review-footer { position:sticky; z-index:4; bottom:0; grid-row:4; display:flex; min-height:40px; align-items:center; justify-content:flex-end; gap:20px; border-top:1px solid #e8eaed; padding:8px 16px; color:#878c94; background:rgba(255,255,255,.97); font-size:11px; backdrop-filter:blur(10px); }
+    .anw-selection-edit-review-result { color:#34735a; background:#f4fbf7; }
+    .anw-selection-edit-review-line > span:first-child { font-size:17px; font-weight:850; line-height:1.55; }
+    .anw-selection-edit-review-line > strong { font-size:11px; font-weight:800; line-height:2.55; }
+    .anw-selection-edit-review-inline-actions { display:flex; min-width:88px; grid-column:2; grid-row:1; align-items:center; justify-content:center; gap:8px; border-left:1px solid rgba(0,0,0,.045); padding:8px 13px; background:#fff; }
+    .anw-selection-edit-review-inline-actions > button { min-height:30px; border:0; padding:0 2px; color:#5e776c; background:transparent; box-shadow:none; }
+    .anw-selection-edit-review-inline-actions > button:last-child { color:#9b5d57; }
+    .anw-selection-edit-review-inline-actions > button:hover,.anw-selection-edit-review-inline-actions > button:focus-visible { border:0; background:transparent; box-shadow:none; text-decoration:underline; text-underline-offset:3px; }
+    .anw-selection-edit-review-inline-actions button[aria-pressed="true"] { border:0; color:#fff; border-radius:6px; padding:0 8px; background:#ff7043; text-decoration:none; }
+    .anw-selection-edit-review-change.is-accept { box-shadow:inset 3px 0 #2e9f6d; }
+    .anw-selection-edit-review-change.is-reject { opacity:.68; box-shadow:inset 3px 0 #9ba0a8; }
+    .anw-selection-edit-review-decision-label { margin:0; color:#737981; font-size:11px; text-align:center; }
+    .anw-selection-edit-review-empty-result { margin:0; font-size:12px; }
+    .anw-selection-edit-review-footer { position:sticky; z-index:4; bottom:0; grid-row:4; display:flex; min-height:38px; align-items:center; justify-content:flex-end; gap:20px; border-top:1px solid #e8eaed; padding:7px 14px; color:#878c94; background:rgba(255,255,255,.98); font-size:11px; backdrop-filter:blur(10px); }
     .anw-selection-edit-review-live { position:absolute!important; width:1px!important; height:1px!important; margin:-1px!important; overflow:hidden!important; clip:rect(0 0 0 0)!important; white-space:nowrap!important; }
     .anw-selection-edit-review-original { max-height:none; margin:0; overflow:visible; border:1px solid #e8eaed; border-radius:9px; padding:16px; color:#4f555e; background:#fafbfc; font:13px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
     .anw-selection-edit-review.is-preparing,.anw-selection-edit-review.is-generating,.anw-selection-edit-review.is-failed,.anw-selection-edit-review.is-conflict,.anw-selection-edit-review.is-applied { gap:16px; min-height:260px; align-content:center; padding:28px; }
@@ -690,9 +698,45 @@ export function ensureNovelStyles(): void {
     .anw-selection-edit-review-status-actions > button:last-child { border-color:#ff7043; color:#fff; background:#ff7043; }
     .anw-selection-edit-review-error { margin:0; color:#b0473b; line-height:1.7; text-align:center; }
     .anw-selection-edit-review-empty { grid-row:3; min-height:180px; padding:70px 20px; color:#7c828b; text-align:center; }
-    .anw-selection-edit-review.is-compact { border-radius:10px; }
+    .anw-selection-edit-review.is-compact { border:1px solid #e7e9ed; border-radius:10px; }
+    .anw-selection-edit-review.is-compact .anw-selection-edit-review-toolbar { position:static; min-height:auto; flex-wrap:wrap; overflow:visible; padding:9px 12px; }
+    .anw-selection-edit-review.is-compact .anw-selection-edit-review-toolbar-summary { width:100%; flex:1 0 100%; margin-right:0; }
+    .anw-selection-edit-review.is-compact .anw-selection-edit-review-toolbar > button { min-width:0; flex:1 1 auto; padding-inline:8px; }
     .anw-selection-edit-review.is-compact .anw-selection-edit-review-context { padding:11px 14px; font-size:13px; }
-    .anw-selection-edit-review.is-compact .anw-selection-edit-review-delete,.anw-selection-edit-review.is-compact .anw-selection-edit-review-insert { min-height:44px; padding:10px 14px; font-size:13px; }
+    .anw-selection-edit-review.is-compact .anw-selection-edit-review-line { min-height:44px; padding:9px 12px; font-size:13px; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing),
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) { display:grid; min-height:calc(100vh - 74px); grid-template-columns:minmax(0,1fr); align-content:start; overflow:clip; border:0; border-radius:0; padding:0; background:#fff; box-shadow:none; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-title-row,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-title-row { grid-row:2; padding:20px 24px 18px; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-title-row > .anw-editor-title-actions,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-title-row > .anw-editor-title-actions { display:none; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-footer,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-footer { display:none; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review { display:contents; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-title-row,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-title-row,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-diff,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-diff,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-footer,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-footer { grid-column:1 / -1; min-width:0; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar { grid-row:1; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-header,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-header { display:none; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-diff,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-diff { grid-row:3; }
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-footer,
+    .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-footer { grid-row:4; }
+    @media (max-width:1100px) {
+      .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar { position:static; min-height:auto; flex-wrap:wrap; overflow:visible; }
+      .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar > .anw-selection-edit-review-toolbar-summary { width:100%; flex:1 0 100%; margin-right:0; }
+      .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar > button { min-width:0; flex:1 1 62px; padding-inline:6px; }
+    }
     html .qwenpaw-modal-root .qwenpaw-modal:has(.anw-outline-selection-review-host.is-reviewing) .qwenpaw-modal-footer,
     html .qwenpaw-modal-root .qwenpaw-modal:has(.mb-relationship-selection-review-host.is-reviewing) .qwenpaw-modal-footer { display:none!important; }
     .anw-assistant-review-editor { display:grid; box-sizing:border-box; width:100%; min-width:0; gap:0; overflow:hidden; border-block:1px solid #383b41; color:#e4e6e9; background:#17191c; box-shadow:none; }
@@ -900,6 +944,24 @@ export function ensureNovelStyles(): void {
     .mb-novel-card { box-sizing:border-box; width:min(760px,100%); margin:108px auto 0; overflow:hidden; border-radius:14px; background:#fff; box-shadow:0 12px 30px rgba(21,34,50,.1); }
     .mb-novel-card-hero { display:grid; grid-template-columns:136px minmax(0,1fr); gap:28px; min-height:236px; padding:28px 30px; background:linear-gradient(110deg,#edf9ff 0%,#eaf2f9 52%,#e6eef5 100%); }
     .mb-novel-cover { width:136px; height:181px; align-self:center; border-radius:8px; object-fit:cover; box-shadow:0 12px 22px rgba(19,43,67,.24); }
+    .anw-text-cover {
+      position:relative;
+      display:flex!important;
+      box-sizing:border-box;
+      flex-direction:column;
+      justify-content:space-between;
+      padding:12% 10%;
+      overflow:hidden;
+      color:#f8f5ee;
+      background:#243843;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);
+      text-align:left;
+      container-type:inline-size;
+    }
+    .anw-text-cover::after { position:absolute; right:10%; bottom:9%; left:10%; height:2px; content:""; background:#d9915b; opacity:.85; }
+    .anw-text-cover-kicker { position:relative; z-index:1; color:#dbc7b7; font-size:clamp(6px,5cqi,11px); letter-spacing:.18em; }
+    .anw-text-cover-title { position:relative; z-index:1; display:-webkit-box; overflow:hidden; color:inherit; font-size:clamp(8px,12cqi,32px); font-weight:750; letter-spacing:.04em; line-height:1.35; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:4; }
+    .anw-text-cover-author { position:relative; z-index:1; margin-bottom:9%; color:#f3e8de; font-size:clamp(7px,6cqi,14px); letter-spacing:.08em; }
     .mb-novel-card-meta { display:flex; min-width:0; flex-direction:column; justify-content:center; }
     .mb-novel-card-meta h2 { margin:0 0 14px; overflow:hidden; font-size:23px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
     .mb-novel-counts { display:flex; gap:18px; color:#777b83; font-size:12px; }
@@ -917,7 +979,9 @@ export function ensureNovelStyles(): void {
     .mb-novel-switcher { display:grid; box-sizing:border-box; width:min(760px,100%); grid-template-columns:repeat(auto-fit,88px); align-items:start; justify-content:center; gap:16px; margin:18px auto 0; }
     .mb-novel-switcher > button { position:relative; display:flex; width:88px; height:117px; align-items:center; justify-content:center; overflow:hidden; border:1px solid transparent; border-radius:6px; padding:0; background:#fff; cursor:pointer; }
     .mb-novel-switcher > button.is-active { border:2px solid #ff7848; box-shadow:0 5px 13px rgba(255,112,67,.2); }
-    .mb-novel-switcher > button > img { width:100%; height:100%; object-fit:cover; }
+    .mb-novel-switcher > button > img,
+    .mb-novel-switcher > button > .mb-novel-switch-cover { width:100%; height:100%; object-fit:cover; }
+    .mb-novel-switch-cover.anw-text-cover { border-radius:4px; box-shadow:none; }
     .mb-novel-switcher > button > .mb-novel-switch-check { position:absolute; right:2px; top:2px; z-index:1; border-radius:50%; padding:2px; color:#fff; background:#ff7848; font-size:9px; }
     .mb-novel-switcher > button.mb-new-novel-tile { flex-direction:column; gap:7px; border:1px dashed #f49c7c; color:#ef7044; background:#fffaf7; font-size:12px; }
     .mb-new-novel-tile > .qwenpawicon { position:static!important; padding:0!important; color:#ef7044!important; background:transparent!important; font-size:18px!important; }
@@ -1051,6 +1115,7 @@ export function ensureNovelStyles(): void {
     .mb-cover-upload input { display:none; }
     .mb-cover-upload.has-image { min-height:180px; }
     .mb-cover-upload img { width:120px; height:160px; object-fit:cover; }
+    .mb-cover-text-preview { width:150px; height:200px; margin:16px auto 0; border-radius:8px; box-shadow:0 7px 18px rgba(30,36,46,.15); }
     .mb-complete-step > p { margin-bottom:15px; }
     .mb-complete-cover { width:236px; height:315px; border-radius:11px; object-fit:cover; box-shadow:0 13px 27px rgba(27,37,51,.18); }
     .mb-complete-book { display:grid; gap:4px; margin-top:12px; }
@@ -1128,6 +1193,7 @@ export function ensureNovelStyles(): void {
     }
     .mb-book-cover-wrap { position:relative; width:100%; max-width:270px; margin:0 auto 20px; }
     .mb-book-cover { display:block; width:100%; aspect-ratio:3/4; object-fit:cover; border-radius:12px; box-shadow:0 10px 24px rgba(31,41,55,.14); }
+    .mb-book-cover.anw-text-cover { aspect-ratio:3/4; }
     .mb-book-cover-actions { position:absolute; top:10px; right:10px; display:flex; gap:6px; }
     .mb-book-cover-actions .qwenpaw-btn { display:grid; width:34px; min-width:34px; height:34px; place-items:center; border:0!important; border-radius:8px!important; padding:0!important; color:#fff!important; background:rgba(29,45,53,.72)!important; box-shadow:0 4px 10px rgba(0,0,0,.14)!important; backdrop-filter:blur(5px); }
     .mb-book-rail > h1 { margin:0 0 8px; font-size:23px; line-height:1.35; }
@@ -1566,7 +1632,7 @@ export function ensureNovelStyles(): void {
     html .qwenpaw-modal-root .qwenpaw-modal.mb-cover-edit-modal .qwenpaw-modal-content { border-radius:10px!important; }
     html .qwenpaw-modal-root .qwenpaw-modal.mb-cover-edit-modal .qwenpaw-modal-header { padding:28px 16px 20px!important; }
     html .qwenpaw-modal-root .qwenpaw-modal.mb-cover-edit-modal .qwenpaw-modal-body { padding:24px 0!important; }
-    .mb-cover-edit-modes { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    .mb-cover-edit-modes { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
     .mb-cover-edit-modes > button { display:grid; min-height:88px; place-content:center; justify-items:center; gap:8px; border:1px solid #e2e4e7; border-radius:9px; color:#565a61; background:#fff; cursor:pointer; }
     .mb-cover-edit-modes > button .qwenpawicon { color:#78808a; font-size:23px; }
     .mb-cover-edit-modes > button.is-active { border:2px solid #ff7548; color:#ef6d42; background:#fff8f4; }
@@ -1579,6 +1645,7 @@ export function ensureNovelStyles(): void {
     .mb-cover-edit-preview.is-upload { border:1px dashed #dadddf; cursor:pointer; }
     .mb-cover-edit-preview.has-image { min-height:240px; }
     .mb-cover-edit-preview img { width:150px; height:200px; border-radius:8px; object-fit:cover; box-shadow:0 7px 18px rgba(30,36,46,.15); }
+    .mb-cover-edit-text-preview { width:150px; height:200px; border-radius:8px; box-shadow:0 7px 18px rgba(30,36,46,.15); }
     .mb-cover-edit-stack > .qwenpaw-btn { min-height:48px; }
     html .qwenpaw-modal-root .qwenpaw-modal.mb-cover-edit-modal .mb-cover-edit-stack > .qwenpaw-btn:not(.anw-primary-button) { color:#4a4d52!important; border-color:#e2e3e6!important; background:#fff!important; box-shadow:none!important; }
 
@@ -1897,7 +1964,7 @@ export function ensureNovelStyles(): void {
       .mb-relation-accessible-list > header { align-items:start; flex-direction:column; gap:4px; }
       .mb-relation-accessible-list ul { grid-template-columns:1fr; }
       .mb-relationship-draft-grid { grid-template-columns:1fr; }
-      .mb-relationship-direction .qwenpaw-radio-group { display:grid; }
+    .mb-relationship-direction .qwenpaw-radio-group { display:grid; }
       .mb-relationship-editor-body { padding:16px; }
       html .qwenpaw-modal-root .qwenpaw-modal.mb-relationship-editor-modal .qwenpaw-modal-footer { padding:12px 16px!important; }
     }

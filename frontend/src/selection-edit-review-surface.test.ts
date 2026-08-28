@@ -96,6 +96,11 @@ function textContent(root: unknown): string {
 }
 
 
+function hasClass(element: FakeElement, className: string): boolean {
+  return String(element.props.className ?? "").split(/\s+/).includes(className);
+}
+
+
 const SELECTION_ID = "123e4567-e89b-42d3-a456-426614174000";
 const identity: SelectionEditReviewIdentity = {
   reviewSessionId: "review-session-1",
@@ -204,6 +209,82 @@ describe("SelectionEditReviewSurface reviewing state", () => {
       .toHaveLength(1);
     expect(findAll(tree, (element) => element.props["aria-live"] === "polite"))
       .toHaveLength(1);
+  });
+
+  it.each([
+    ["polish", "AI 润色审阅"],
+    ["rewrite", "AI 改写审阅"],
+    ["expand", "AI 扩写审阅"],
+    ["shorten", "AI 缩写审阅"],
+    ["dialogue", "AI 增强对白审阅"],
+    ["review", "AI 问题检查审阅"],
+    ["custom", "AI 自定义修改审阅"],
+  ] as const)("renders the %s operation and change count directly in the toolbar", (
+    operation,
+    expectedLabel,
+  ) => {
+    const selectedIdentity = { ...identity, operation };
+    const selectedResult = { ...result, operation };
+    const { tree } = renderSurface(reviewState(selectedIdentity, selectedResult));
+    const toolbar = findAll(tree, (element) => element.props.role === "toolbar")[0];
+    const summary = findAll(toolbar, (element) => (
+      hasClass(element, "anw-selection-edit-review-toolbar-summary")
+    ));
+
+    expect(summary).toHaveLength(1);
+    expect(textContent(summary[0])).toContain(expectedLabel);
+    expect(textContent(summary[0])).toContain("2 处修改");
+    expect(findAll(toolbar, (element) => element.props.id === "anw-selection-edit-review-heading"))
+      .toHaveLength(1);
+    expect(textContent(tree)).not.toContain("审阅 章节正文 修改");
+  });
+
+  it("keeps each change's lines and decisions in one continuous inline group", () => {
+    const { tree } = renderSurface(reviewState());
+    const changes = findAll(tree, (element) => (
+      hasClass(element, "anw-selection-edit-review-change")
+    ));
+
+    expect(changes).toHaveLength(2);
+    for (const change of changes) {
+      const directElements = change.children.filter(isFakeElement);
+      expect(directElements).toHaveLength(2);
+      expect(hasClass(directElements[0], "anw-selection-edit-review-change-lines")).toBe(true);
+      expect(hasClass(directElements[1], "anw-selection-edit-review-inline-actions")).toBe(true);
+      expect(directElements[1].props.role).toBe("group");
+      expect(findAll(directElements[0], (element) => (
+        hasClass(element, "anw-selection-edit-review-line")
+      ))).toHaveLength(2);
+    }
+    expect(findAll(tree, (element) => (
+      hasClass(element, "anw-selection-edit-review-change-actions")
+    ))).toHaveLength(0);
+  });
+
+  it("renders an explicit final-result line for a pure deletion", () => {
+    const deleteResult: SelectionEditResultV2 = {
+      ...result,
+      replacement_text: "潮声了。",
+      short_summary: "删除重复修饰",
+      replacement_character_count: 4,
+      warnings: [],
+      diff_segments: [
+        { segment_id: "before-delete", kind: "equal", text: "潮声" },
+        { segment_id: "delete-only", kind: "delete", original_text: "旧" },
+        { segment_id: "after-delete", kind: "equal", text: "了。" },
+      ],
+    };
+    const { tree } = renderSurface(reviewState(identity, deleteResult));
+    const emptyResult = findAll(tree, (element) => (
+      element.props["data-diff-kind"] === "result-empty"
+    ));
+
+    expect(emptyResult).toHaveLength(1);
+    expect(emptyResult[0].props.role).toBe("note");
+    expect(emptyResult[0].props["aria-label"]).toBe("应用后结果为空，删除此段文字");
+    expect(hasClass(emptyResult[0], "anw-selection-edit-review-result")).toBe(true);
+    expect(textContent(emptyResult[0])).toBe("=应用后结果为空（删除此段，不保留文字）");
+    expect(textContent(tree)).toContain("−删除旧");
   });
 
   it("emits per-change, navigation, accept-all, reject-all and exit actions", () => {

@@ -1,0 +1,19 @@
+{
+  "automatic_retry": false,
+  "client_duration_ms": 500597,
+  "dispatch_started_at": "2026-08-28T03:31:55.825306Z",
+  "error_class": "DeterministicHardGateFailure",
+  "failed_at": "2026-08-28T03:40:16.414168Z",
+  "failure_code": "output_purity_failed",
+  "message": "RESULT_OUTPUT_PURITY_FAILED",
+  "output_sha256": "6e52ac37faa9d89bda3aa468eda6de596c502b7bb9f40918e19c746aa56d6ce7",
+  "sample_id": "X11",
+  "state": "failed",
+  "wrapper_flags": {
+    "agent_status_capsule": true,
+    "analysis_prefix": false,
+    "json_or_xml_wrapper": false,
+    "markdown_fence": false,
+    "markdown_heading": false
+  }
+}

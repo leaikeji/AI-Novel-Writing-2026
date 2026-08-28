@@ -16,6 +16,7 @@ import {
   ForeshadowRecord,
   GenerationModelStatus,
   NovelCharacterRecord,
+  NovelCoverMode,
   NovelExportRecord,
   NovelRecord,
   NovelSearchResultRecord,
@@ -45,7 +46,8 @@ import {
 } from "./chapter-workflow";
 import type { SelectionRange, SelectionSnapshot } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
-import { compressCover } from "./cover-utils";
+import { compressCover, generateSystemCover } from "./cover-utils";
+import { createNovelCoverView } from "./novel-cover";
 import {
   nextOutlineGenerationTarget,
   outlineGenerationTarget,
@@ -54,6 +56,7 @@ import {
 import { chapterDisplayTitle } from "./presenters";
 import { RelationshipEditor } from "./relationship-editor";
 import { RelationshipWorkspace } from "./relationship-workspace";
+import { CharacterProfileCompletionPanel } from "./character-profile-completion-panel";
 import {
   createCharacterVoiceCardPanel,
   createNarrationReadingPage,
@@ -71,6 +74,7 @@ import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
+const NovelCoverView = createNovelCoverView(React);
 const {
   Alert,
   Button,
@@ -785,6 +789,9 @@ function OutlineWizard({
     if (!draftRef.current || !characterFormRef.current.name.trim()) return;
     const currentForm = characterFormRef.current;
     const next: OutlineCharacterDraft = {
+      ...(characterIndex >= 0 && draftRef.current.characters[characterIndex]?.character_id
+        ? { character_id: draftRef.current.characters[characterIndex].character_id }
+        : {}),
       name: currentForm.name.trim(),
       role_type: currentForm.role_type,
       description: currentForm.description.trim(),
@@ -1971,7 +1978,7 @@ export function StudioProjectView({
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [settingsForm, setSettingsForm] = React.useState({ genre: "", subgenre: "", idea: "", template_name: "", template_data: {} as Record<string, string> });
   const [coverOpen, setCoverOpen] = React.useState(false);
-  const [coverMode, setCoverMode] = React.useState("ai" as "ai" | "system" | "upload");
+  const [coverMode, setCoverMode] = React.useState("ai" as NovelCoverMode);
   const [coverImageData, setCoverImageData] = React.useState("");
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
@@ -2705,14 +2712,16 @@ export function StudioProjectView({
 
   const downloadCover = () => {
     const link = document.createElement("a");
-    link.href = novel.cover_image_data || defaultNovelCover;
+    link.href = novel.cover_mode === "text"
+      ? generateSystemCover(novel.title, novel.author_name, novel.audience)
+      : novel.cover_image_data || defaultNovelCover;
     link.download = `${novel.title}-封面.jpg`;
     link.click();
   };
 
   const openCover = () => {
-    setCoverMode("ai");
-    setCoverImageData("");
+    setCoverMode(novel.cover_mode);
+    setCoverImageData(novel.cover_mode === "upload" ? novel.cover_image_data : "");
     setCoverOpen(true);
   };
 
@@ -2747,8 +2756,10 @@ export function StudioProjectView({
       nextCover = novel.cover_image_data || defaultNovelCover;
     } else if (coverMode === "system") {
       nextCover = defaultNovelCover;
+    } else if (coverMode === "text") {
+      nextCover = "";
     }
-    if (!nextCover) throw new Error("请先选择或上传封面");
+    if (!nextCover && coverMode !== "text") throw new Error("请先选择或上传封面");
     const updated = await apiRequest<NovelRecord>(`/novels/${novel.id}/settings`, {
       method: "PUT",
       body: JSON.stringify({
@@ -2758,6 +2769,7 @@ export function StudioProjectView({
         idea: novel.idea,
         template_name: novel.template_name,
         template_data: templateData,
+        cover_mode: coverMode,
         cover_image_data: nextCover,
       }),
     });
@@ -2783,15 +2795,17 @@ export function StudioProjectView({
 
   const saveCharacter = () => perform(async () => {
     const current = characterFormRef.current;
+    const detailsPatch = { gender: current.gender.trim(), age: current.age.trim(), identity: current.identity.trim(), personality: current.personality.trim() };
     const payload = {
       role_type: current.role_type,
       name: current.name.trim(),
       description: current.description.trim(),
-      details: { gender: current.gender.trim(), age: current.age.trim(), identity: current.identity.trim(), personality: current.personality.trim() },
     };
     await apiRequest(`/novels/${novel.id}/characters${characterEditing ? `/${characterEditing.id}` : ""}`, {
       method: characterEditing ? "PUT" : "POST",
-      body: JSON.stringify(characterEditing ? { ...payload, expected_version: characterEditing.version } : payload),
+      body: JSON.stringify(characterEditing
+        ? { ...payload, expected_version: characterEditing.version, details_patch: detailsPatch }
+        : { ...payload, details: detailsPatch }),
     });
     setCharacterOpen(false);
     await loadDomains();
@@ -3003,6 +3017,7 @@ export function StudioProjectView({
     ? h(
         "div",
         { className: "mb-role-list" },
+        h(CharacterProfileCompletionPanel, { novelId: novel.id, onApplied: loadDomains }),
         ...characterGroups.map((group) => {
           const rows = characters.filter((item: NovelCharacterRecord) => item.role_type === group.type);
           return h(
@@ -3171,7 +3186,7 @@ export function StudioProjectView({
         h(
           "aside",
           { className: "mb-book-rail" },
-          h("div", { className: "mb-book-cover-wrap" }, h("img", { src: novel.cover_image_data || defaultNovelCover, alt: `${novel.title}封面`, className: "mb-book-cover" }), h("div", { className: "mb-book-cover-actions" }, h(Button, { type: "text", icon: h(DownloadOutlined), onClick: downloadCover, "aria-label": "下载封面" }), h(Button, { type: "text", icon: h(EditOutlined), onClick: openCover, "aria-label": "修改封面" }))),
+          h("div", { className: "mb-book-cover-wrap" }, h(NovelCoverView, { novel, className: "mb-book-cover", fallbackSrc: defaultNovelCover }), h("div", { className: "mb-book-cover-actions" }, h(Button, { type: "text", icon: h(DownloadOutlined), onClick: downloadCover, "aria-label": "下载封面" }), h(Button, { type: "text", icon: h(EditOutlined), onClick: openCover, "aria-label": "修改封面" }))),
           h("h1", null, novel.title),
           h("p", null, [novel.genre, novel.subgenre].filter(Boolean).join(" / ") || "长篇小说"),
           h("div", { className: "mb-book-stats" }, h("span", null, `${chapterDocuments.reduce((sum: number, item: DocumentRecord) => sum + item.visible_character_count, 0)} 字`), h("span", null, `${chapterDocuments.length} 章节`)),
@@ -3400,12 +3415,15 @@ export function StudioProjectView({
         h("div", { className: "mb-cover-edit-modes" },
           ...([
             ["ai", BgColorsOutlined, "智能生成"],
+            ["text", FileTextOutlined, "文字封面"],
             ["system", BookOutlined, "系统封面"],
             ["upload", UploadOutlined, "上传图片"],
-          ] as const).map(([mode, Icon, label]) => h("button", { key: mode, type: "button", className: coverMode === mode ? "is-active" : "", onClick: () => { setCoverMode(mode); setCoverImageData(mode === "system" ? defaultNovelCover : ""); } }, h(Icon), h("strong", null, label))),
+          ] as const).map(([mode, Icon, label]) => h("button", { key: mode, type: "button", className: coverMode === mode ? "is-active" : "", onClick: () => { setCoverMode(mode); setCoverImageData(mode === "system" ? defaultNovelCover : mode === "upload" && novel.cover_mode === "upload" ? novel.cover_image_data : ""); } }, h(Icon), h("strong", null, label))),
         ),
         coverMode === "upload" ? h("label", { className: `mb-cover-edit-preview is-upload${coverImageData ? " has-image" : ""}` }, coverImageData ? h("img", { src: coverImageData, alt: "上传封面预览" }) : h("span", null, h(UploadOutlined), "点击上传图片"), h("input", { type: "file", accept: "image/*", onChange: uploadCover }))
-          : h("div", { className: `mb-cover-edit-preview${coverMode === "system" ? " has-image" : ""}` }, coverMode === "system" ? h("img", { src: defaultNovelCover, alt: "系统封面预览" }) : h("span", null, h(PictureOutlined), "点击下方按钮生成封面")),
+          : coverMode === "text"
+            ? h("div", { className: "mb-cover-edit-preview has-image" }, h(NovelCoverView, { novel: { ...novel, cover_mode: "text", cover_image_data: "" }, className: "mb-cover-edit-text-preview", fallbackSrc: defaultNovelCover }))
+            : h("div", { className: `mb-cover-edit-preview${coverMode === "system" ? " has-image" : ""}` }, coverMode === "system" ? h("img", { src: defaultNovelCover, alt: "系统封面预览" }) : h("span", null, h(PictureOutlined), "点击下方按钮生成封面")),
         coverMode === "ai" ? h("small", { className: "mb-name-cost" }, `当前有效模型：${generationModelStatus ? generationModelLabel(generationModelStatus) : generationModelStatusError ? "无法读取" : "读取中…"}`) : null,
         h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: coverMode === "upload" && !coverImageData, onClick: () => void applyCover() }, coverMode === "ai" ? "开始生成" : "确认使用"),
         h(Button, { size: "large", block: true, onClick: () => setCoverOpen(false) }, "取消"),

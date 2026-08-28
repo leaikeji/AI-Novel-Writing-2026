@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from .character_profile_services import (
+    CharacterProfileValidationError,
+    normalize_character_profile_output,
+)
 from .creative_schemas import (
     ApplyOutlineGenerationRequest,
+    ApplyCharacterProfileCompletionRequest,
     BatchRelationshipsRequest,
     CompleteVersionedRequest,
     CreateAssetPresetRequest,
@@ -21,8 +27,10 @@ from .creative_schemas import (
     CreateRelationshipRequest,
     CreateStorylineRequest,
     DeleteVolumeRequest,
+    GenerateCharacterProfileCompletionRequest,
     ReorderChaptersRequest,
     ReorderVolumesRequest,
+    RestoreCharacterProfileBatchRequest,
     SaveRelationshipGraphViewRequest,
     StartCreativeGenerationRequest,
     SyncRelationshipsRequest,
@@ -45,6 +53,8 @@ from .creative_services import (
     archive_private_asset,
     apply_relationship_graph_generation,
     apply_outline_generation_candidate,
+    apply_character_profile_completion,
+    build_character_profile_completion_snapshot,
     build_relationship_graph_snapshot,
     build_creative_generation_prompt,
     build_novel_export,
@@ -68,6 +78,8 @@ from .creative_services import (
     delete_volume,
     fail_creative_generation,
     get_novel_creation_draft,
+    get_character_profile_completion_job,
+    get_character_profile_completion_status,
     get_relationship_graph_view,
     get_or_create_chapter_creation_draft,
     get_or_create_novel_creation_draft,
@@ -85,6 +97,7 @@ from .creative_services import (
     reorder_chapters,
     reorder_volumes,
     restore_character_relationship,
+    restore_character_profile_apply_batch,
     save_relationship_graph_view,
     start_creative_generation,
     update_asset_preset,
@@ -113,6 +126,7 @@ from .model_runtime import (
     ensure_prompt_within_effective_limit,
     normalize_creative_generation_json,
     parse_model_json,
+    reply_final_text,
     reply_model_audit,
 )
 from .services import NotFoundError, ValidationError, delete_novel
@@ -435,7 +449,11 @@ def characters_update(
             role_type=request.role_type,
             name=request.name,
             description=request.description,
-            details=request.details,
+            details=(
+                request.details_patch
+                if request.details_patch is not None
+                else request.details or {}
+            ),
         )
     except Exception as error:
         session.rollback()
@@ -455,6 +473,165 @@ def characters_delete(
             session, novel_id, character_id, expected_version=expected_version
         )
         return {"deleted": True}
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.get("/novels/{novel_id}/character-profile-completion/status")
+def character_profile_completion_status(
+    novel_id: UUID,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return get_character_profile_completion_status(session, novel_id)
+    except Exception as error:
+        _raise(error)
+        raise
+
+
+@router.post("/novels/{novel_id}/character-profile-completion/generate")
+async def character_profile_completion_generate(
+    novel_id: UUID,
+    request: GenerateCharacterProfileCompletionRequest,
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    job: dict[str, object] | None = None
+    owns_execution = False
+    actual_model: ModelAudit | None = None
+    try:
+        current_status = get_character_profile_completion_status(session, novel_id)
+        if not current_status["eligible"]:
+            raise ValidationError("当前没有可核验的正式角色设定或正文证据")
+        snapshot = build_character_profile_completion_snapshot(session, novel_id)
+        job = start_creative_generation(
+            session,
+            scope_type="novel",
+            scope_id=novel_id,
+            kind="character_profile_completion",
+            input_snapshot=snapshot,
+            execution_agent_id=NOVEL_AGENT_ID,
+            requested_provider_id=configured_model.provider_id,
+            requested_model_id=configured_model.model_id,
+            generation_contract_version=GENERATION_CONTRACT_VERSION,
+            novel_id=novel_id,
+            force_new=request.force_new,
+        )
+        owns_execution = bool(job.get("should_execute", True))
+        if job["state"] == "running" and owns_execution:
+            generation_session_id = f"novel-character-profile-completion:{job['id']}"
+            prompt = build_creative_generation_prompt(job)
+            ensure_prompt_within_effective_limit(prompt, configured_model)
+            reply = await ctx.chat(
+                prompt,
+                skill="character-craft",
+                session_id=generation_session_id,
+            )
+            actual_model = reply_model_audit(reply, session_id=generation_session_id)
+            actual_model.ensure_matches(configured_model)
+            final_text = reply_final_text(reply)
+            strict_candidate = final_text.strip()
+            if not strict_candidate.startswith("{") or not strict_candidate.endswith("}"):
+                raise ModelVerificationError(
+                    "模型没有返回可解析的 JSON："
+                    "角色卡补全必须只返回唯一裸 JSON 对象"
+                )
+            try:
+                parsed_output = json.loads(strict_candidate)
+            except json.JSONDecodeError as error:
+                raise ModelVerificationError("模型没有返回可解析的 JSON 对象") from error
+            if not isinstance(parsed_output, dict):
+                raise ModelVerificationError("角色卡补全模型结果必须是 JSON 对象")
+            normalized_output = normalize_character_profile_output(snapshot, parsed_output)
+            complete_creative_generation(
+                session,
+                UUID(str(job["id"])),
+                actual_provider_id=actual_model.provider_id,
+                actual_model_id=actual_model.model_id,
+                output_text=final_text,
+                output_json=normalized_output,
+            )
+        return get_character_profile_completion_status(session, novel_id)
+    except Exception as error:
+        session.rollback()
+        failed = job
+        if owns_execution and job is not None and job.get("id"):
+            try:
+                failed = fail_creative_generation(
+                    session,
+                    UUID(str(job["id"])),
+                    failure_message=str(error),
+                    actual_provider_id=(actual_model.provider_id if actual_model else None),
+                    actual_model_id=(actual_model.model_id if actual_model else None),
+                )
+            except Exception:
+                session.rollback()
+        if isinstance(error, (ModelVerificationError, CharacterProfileValidationError)):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"type": "model_verification_failed", "job": failed},
+            ) from error
+        _raise(error)
+        raise
+
+
+@router.get(
+    "/novels/{novel_id}/character-profile-completion/jobs/{job_id}"
+)
+def character_profile_completion_job(
+    novel_id: UUID,
+    job_id: UUID,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return get_character_profile_completion_job(session, novel_id, job_id)
+    except Exception as error:
+        _raise(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/character-profile-completion/jobs/{job_id}/apply"
+)
+def character_profile_completion_apply(
+    novel_id: UUID,
+    job_id: UUID,
+    request: ApplyCharacterProfileCompletionRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return apply_character_profile_completion(
+            session,
+            novel_id,
+            job_id,
+            idempotency_key=request.idempotency_key,
+            decisions=[item.model_dump(mode="json") for item in request.decisions],
+        )
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/character-profile-completion/apply-batches/{batch_id}/restore"
+)
+def character_profile_completion_restore(
+    novel_id: UUID,
+    batch_id: UUID,
+    request: RestoreCharacterProfileBatchRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return restore_character_profile_apply_batch(
+            session,
+            novel_id,
+            batch_id,
+            idempotency_key=request.idempotency_key,
+        )
     except Exception as error:
         session.rollback()
         _raise(error)
@@ -535,21 +712,22 @@ async def relationships_auto_sync(
                 session_id=generation_session_id,
             )
             actual_model.ensure_matches(configured_model)
+            final_text = reply_final_text(reply)
             try:
-                parsed_output = parse_model_json(reply.text)
+                parsed_output = parse_model_json(final_text)
             except ModelVerificationError:
                 parsed_output = {}
             output_json = normalize_creative_generation_json(
                 "relationship_graph",
                 parsed_output,
-                reply.text,
+                final_text,
             )
             job = complete_creative_generation(
                 session,
                 UUID(str(job["id"])),
                 actual_provider_id=actual_model.provider_id,
                 actual_model_id=actual_model.model_id,
-                output_text=reply.text,
+                output_text=final_text,
                 output_json=output_json,
             )
         return apply_relationship_graph_generation(
@@ -955,33 +1133,60 @@ async def creative_generations_create(
             return job
         generation_session_id = f"novel-creative-generation:{job['id']}"
         prompt = build_creative_generation_prompt(job)
-        ensure_prompt_within_effective_limit(prompt, configured_model)
-        reply = await ctx.chat(
-            prompt,
-            skill=creative_generation_skill(job),
-            session_id=generation_session_id,
-        )
-        actual_model = reply_model_audit(
-            reply,
-            session_id=generation_session_id,
-        )
-        actual_model.ensure_matches(configured_model)
-        try:
-            parsed_output = parse_model_json(reply.text)
-        except ModelVerificationError:
-            if str(job["kind"]) == "selection_edit":
+        kind = str(job["kind"])
+        verification_attempts = 2 if kind == "selection_edit" else 1
+        output_json: dict[str, object] = {}
+        reply = None
+        for verification_attempt in range(verification_attempts):
+            attempt_session_id = (
+                generation_session_id
+                if verification_attempt == 0
+                else f"{generation_session_id}:verification-retry-{verification_attempt}"
+            )
+            attempt_prompt = prompt
+            if verification_attempt > 0:
+                attempt_prompt += (
+                    "\n上一次响应未通过严格 JSON 验证。重新执行同一任务；"
+                    "只输出唯一一个两字段 JSON 对象，不要输出备选方案、示例或解释。"
+                )
+            ensure_prompt_within_effective_limit(attempt_prompt, configured_model)
+            reply = await ctx.chat(
+                attempt_prompt,
+                skill=creative_generation_skill(job),
+                session_id=attempt_session_id,
+            )
+            actual_model = reply_model_audit(
+                reply,
+                session_id=attempt_session_id,
+            )
+            actual_model.ensure_matches(configured_model)
+            final_text = reply_final_text(reply)
+            try:
+                parsed_output = parse_model_json(final_text)
+            except ModelVerificationError:
+                if kind == "selection_edit":
+                    if verification_attempt + 1 < verification_attempts:
+                        continue
+                    raise
+                # Single-text helpers can safely recover useful prose even when the
+                # model omitted its JSON envelope. Kind-aware normalization below
+                # still rejects every incomplete structured result.
+                parsed_output = {}
+            try:
+                output_json = normalize_creative_generation_json(
+                    kind,
+                    parsed_output,
+                    final_text,
+                )
+            except ModelVerificationError:
+                if kind == "selection_edit" and verification_attempt + 1 < verification_attempts:
+                    continue
                 raise
-            # Single-text helpers can safely recover useful prose even when the
-            # model omitted its JSON envelope. Kind-aware normalization below
-            # still rejects every incomplete structured result.
-            parsed_output = {}
-        output_json = normalize_creative_generation_json(
-            str(job["kind"]),
-            parsed_output,
-            reply.text,
-        )
-        output_text = reply.text
-        if str(job["kind"]) == "selection_edit":
+            break
+        if reply is None:
+            raise ModelVerificationError("模型选区编辑未返回候选")
+        output_text = final_text
+        if kind == "selection_edit":
             snapshot = dict(job.get("input_snapshot") or {})
             base = dict(snapshot.get("base") or {})
             output_json = build_selection_edit_result(
@@ -993,10 +1198,9 @@ async def creative_generations_create(
                 short_summary=str(output_json["short_summary"]),
             )
             output_text = str(output_json["replacement_text"])
-        elif str(job["kind"]).startswith("outline_"):
-            outline_kind = str(job["kind"])
+        elif kind.startswith("outline_"):
             output_json["candidate_review"] = outline_candidate_review(
-                outline_kind,
+                kind,
                 dict(job.get("input_snapshot") or {}),
                 output_json,
             )
@@ -1110,6 +1314,7 @@ def novels_update_settings(
             idea=request.idea,
             template_name=request.template_name,
             template_data=request.template_data,
+            cover_mode=request.cover_mode,
             cover_image_data=request.cover_image_data,
         )
     except Exception as error:

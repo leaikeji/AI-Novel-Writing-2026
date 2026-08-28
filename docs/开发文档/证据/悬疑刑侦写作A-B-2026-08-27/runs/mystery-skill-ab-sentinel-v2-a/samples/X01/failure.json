@@ -1,0 +1,10 @@
+{
+  "automatic_retry": false,
+  "client_duration_ms": 58313,
+  "dispatch_started_at": "2026-08-27T18:37:45.545546Z",
+  "error_class": "RemoteProtocolError",
+  "failed_at": "2026-08-27T18:38:43.858202Z",
+  "message": "Server disconnected without sending a response.",
+  "sample_id": "X01",
+  "state": "failed"
+}

@@ -153,6 +153,102 @@ def test_identical_candidate_has_no_fake_change_block() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "他说：“Don’t wait，今夜回来。”她只答：‘好。’",
+        "他说：＂Don＇t wait，今夜回来。＂她只答：＇好。＇",
+    ],
+)
+def test_result_restores_pure_quote_typography_and_truthful_summary(
+    candidate: str,
+) -> None:
+    original = "他说：\"Don't wait，今夜回来。\"她只答：'好。'"
+
+    result = build_selection_edit_result(
+        job_id="job-quote-only",
+        selection_id="selection-quote-only",
+        operation="polish",
+        original_text=original,
+        replacement_text=candidate,
+        short_summary="改善了节奏并删除重复动作。",
+    )
+
+    assert result["replacement_text"] == original
+    assert result["replacement_character_count"] == len(original)
+    assert result["short_summary"] == "未发现可验证的实质差异。"
+    assert [segment["kind"] for segment in result["diff_segments"]] == ["equal"]
+    assert (
+        reconstruct_selection_edit_diff(result["diff_segments"], candidate=False)
+        == original
+    )
+    assert (
+        reconstruct_selection_edit_diff(result["diff_segments"], candidate=True)
+        == original
+    )
+
+
+def test_result_removes_quote_noise_but_keeps_substantive_mixed_edit() -> None:
+    original = "她说：\"你今天回来。\"他答：'会的。'"
+    candidate = "她说：“你明天就回来。”他答：‘当然会。’"
+    expected = "她说：\"你明天就回来。\"他答：'当然会。'"
+
+    first = build_selection_edit_result(
+        job_id="job-quote-mixed",
+        selection_id="selection-quote-mixed",
+        operation="polish",
+        original_text=original,
+        replacement_text=candidate,
+        short_summary="调整了时间和回应。",
+    )
+    second = build_selection_edit_result(
+        job_id="job-quote-mixed",
+        selection_id="selection-quote-mixed",
+        operation="polish",
+        original_text=original,
+        replacement_text=candidate,
+        short_summary="调整了时间和回应。",
+    )
+
+    assert first == second
+    assert first["replacement_text"] == expected
+    assert first["short_summary"].startswith("共 4 处实质修改：")
+    assert "将「今」改为「明」" in first["short_summary"]
+    assert "新增「就」" in first["short_summary"]
+    assert "调整了时间和回应" not in first["short_summary"]
+    assert reconstruct_selection_edit_diff(first["diff_segments"], candidate=False) == original
+    assert reconstruct_selection_edit_diff(first["diff_segments"], candidate=True) == expected
+    assert any(segment["kind"] != "equal" for segment in first["diff_segments"])
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "他说：'今夜回来。'",  # Double to single quotes is substantive.
+        "他说： \"今夜回来。\"",  # Whitespace is outside this boundary.
+        "他说，\"今夜回来。\"",  # Other punctuation is not normalized.
+    ],
+)
+def test_quote_normalization_does_not_expand_to_other_changes(candidate: str) -> None:
+    original = "他说：\"今夜回来。\""
+
+    result = build_selection_edit_result(
+        job_id="job-quote-boundary",
+        selection_id="selection-quote-boundary",
+        operation="polish",
+        original_text=original,
+        replacement_text=candidate,
+        short_summary="修改了表达。",
+    )
+
+    assert result["replacement_text"] == candidate
+    assert result["short_summary"].startswith("共 ")
+    assert "实质修改" in result["short_summary"]
+    assert "修改了表达" not in result["short_summary"]
+    assert reconstruct_selection_edit_diff(result["diff_segments"], candidate=False) == original
+    assert reconstruct_selection_edit_diff(result["diff_segments"], candidate=True) == candidate
+
+
 def test_long_unaligned_change_safely_falls_back_to_one_replacement() -> None:
     original = "甲" * 2_000
     candidate = "乙" * 2_000
@@ -383,6 +479,11 @@ def test_operation_skill_mapping_and_prompt_contract(
     assert "diff_segments" in prompt
     assert "第一个字符必须是{" in prompt
     assert "最后一个字符必须是}" in prompt
+    assert "必须能由 selection_text 与 replacement_text 的实际对照验证" in prompt
+    if operation == "polish":
+        assert (
+            "不得仅互换直/弯引号、半角/全角或其他等价排版来制造差异" in prompt
+        )
 
 
 def test_service_reuses_ready_job_and_force_new_increments_attempt() -> None:
@@ -517,3 +618,57 @@ def test_12k_diff_p95_is_below_100ms() -> None:
             assert len(segments) > 20
         p95 = sorted(durations)[math.ceil(len(durations) * 0.95) - 1]
         assert p95 < 0.1, f"12k {case} diff p95 was {p95 * 1000:.2f}ms"
+
+
+def test_12k_quote_noise_normalization_p95_is_below_100ms() -> None:
+    original = ("她说：“今夜回来。”他答：‘好。’\n" * 1_000)[:12_000]
+    quote_noise_candidate = original.translate(
+        str.maketrans({"“": '\"', "”": '\"', "‘": "'", "’": "'"})
+    )
+    insertion_index = original.find("\n", len(original) // 2) + 1
+    mixed_candidate = (
+        quote_noise_candidate[:insertion_index]
+        + "忽然"
+        + quote_noise_candidate[insertion_index:]
+    )
+    mixed_expected = original[:insertion_index] + "忽然" + original[insertion_index:]
+
+    for case, candidate, expected, expected_summary in (
+        (
+            "quote-only",
+            quote_noise_candidate,
+            original,
+            "未发现可验证的实质差异。",
+        ),
+        (
+            "mixed-insertion",
+            mixed_candidate,
+            mixed_expected,
+            "共 1 处实质修改：新增「忽然」。",
+        ),
+    ):
+        durations: list[float] = []
+        for index in range(25):
+            started = time.perf_counter()
+            result = build_selection_edit_result(
+                job_id=f"performance-{case}-{index}",
+                selection_id="selection-performance-quote-noise",
+                operation="polish",
+                original_text=original,
+                replacement_text=candidate,
+                short_summary="增加了动作。",
+            )
+            durations.append(time.perf_counter() - started)
+            assert result["replacement_text"] == expected
+            assert result["short_summary"] == expected_summary
+            assert reconstruct_selection_edit_diff(
+                result["diff_segments"], candidate=False
+            ) == original
+            assert reconstruct_selection_edit_diff(
+                result["diff_segments"], candidate=True
+            ) == expected
+
+        p95 = sorted(durations)[math.ceil(len(durations) * 0.95) - 1]
+        assert p95 < 0.1, (
+            f"12k {case} quote normalization p95 was {p95 * 1000:.2f}ms"
+        )

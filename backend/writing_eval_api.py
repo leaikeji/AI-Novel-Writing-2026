@@ -39,22 +39,26 @@ from .model_runtime import (
 )
 from .writing_eval_contract import (
     ACTUAL_MODEL_POLICY,
-    CANDIDATE_OVERLAY_SHA256,
     EXPERIMENT_ID,
+    GENERATION_TIMEOUT_SECONDS,
     MANIFEST_SHA256,
     MODEL_EVIDENCE_CONTRACT_VERSION,
     OUTPUT_PURITY_CONTRACT_VERSION,
+    PROMPT_VARIANT_POLICY,
     PROMPT_CONTRACT_VERSION,
     RIGHTS_BASIS,
     RUBRIC_SHA256,
     SCHEMA_VERSION,
+    SKILL_EVIDENCE_CONTRACT_VERSION,
     SKILL_SELECTION_ENFORCEMENT,
     SOURCE_SUITE_SHA256,
     STREAM_DIAGNOSTIC_CONTRACT_VERSION,
     TOOL_POLICY_ENFORCEMENT,
+    VARIANT_POLICY_SHA256,
     WritingEvalContractError,
     build_sample,
     deterministic_output_checks,
+    expected_skill_sha256,
     experiment_contract,
     sha256_text,
 )
@@ -62,7 +66,7 @@ from .writing_eval_contract import (
 
 WRITING_EVAL_ENABLED_ENV = "AI_NOVEL_WRITING_EVAL_ENABLED"
 WRITING_EVAL_HEADER = "X-AI-Novel-Writing-Eval"
-WRITING_EVAL_TIMEOUT_SECONDS = 600.0
+WRITING_EVAL_TIMEOUT_SECONDS = GENERATION_TIMEOUT_SECONDS
 _SKILL_ID = "prose-writing"
 _RUN_LOCK = asyncio.Lock()
 _DIAGNOSTIC_LABEL = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
@@ -118,7 +122,37 @@ class _StreamDiagnostics:
         self.message_role_counts: dict[str, int] = {}
         self.message_type_counts: dict[str, int] = {}
         self.content_part_type_counts: dict[str, int] = {}
+        self.text_value_count = 0
+        self.text_chars_total_observed = 0
+        self.text_chars_max_single_value = 0
+        self.text_value_char_totals: dict[str, int] = {}
+        self.text_value_max_chars: dict[str, int] = {}
+        self.assistant_messages_observed = 0
+        self.public_usage_envelopes_observed = 0
+        self.last_event_type: str | None = None
         self.stream_completed = False
+
+    def _observe_text_value(self, value: Any, *, label: str) -> None:
+        if not isinstance(value, str):
+            return
+        bounded_label = _diagnostic_label(label, fallback="unknown")
+        length = len(value)
+        self.text_value_count += 1
+        self.text_chars_total_observed += length
+        self.text_chars_max_single_value = max(
+            self.text_chars_max_single_value, length
+        )
+        if (
+            bounded_label not in self.text_value_char_totals
+            and len(self.text_value_char_totals) >= _DIAGNOSTIC_MAX_LABELS
+        ):
+            bounded_label = "other"
+        self.text_value_char_totals[bounded_label] = (
+            self.text_value_char_totals.get(bounded_label, 0) + length
+        )
+        self.text_value_max_chars[bounded_label] = max(
+            self.text_value_max_chars.get(bounded_label, 0), length
+        )
 
     def observe(self, event: Any) -> None:
         elapsed_ms = max(
@@ -128,11 +162,13 @@ class _StreamDiagnostics:
             self.first_event_elapsed_ms = elapsed_ms
         self.last_event_elapsed_ms = elapsed_ms
         self.event_count += 1
+        event_type = _diagnostic_label(
+            _field(event, "type"), fallback=type(event).__name__.lower()
+        )
+        self.last_event_type = event_type
         _increment_bounded(
             self.event_type_counts,
-            _diagnostic_label(
-                _field(event, "type"), fallback=type(event).__name__.lower()
-            ),
+            event_type,
         )
         output = _field(event, "output")
         messages = output if isinstance(output, (list, tuple)) else (event,)
@@ -140,24 +176,43 @@ class _StreamDiagnostics:
             role = _field(message, "role")
             message_type = _field(message, "type")
             if role is not None:
+                normalized_role = _diagnostic_label(role, fallback="unknown")
                 _increment_bounded(
                     self.message_role_counts,
-                    _diagnostic_label(role, fallback="unknown"),
+                    normalized_role,
                 )
+                if normalized_role in {"assistant", "model"}:
+                    self.assistant_messages_observed += 1
             if message_type is not None:
                 _increment_bounded(
                     self.message_type_counts,
                     _diagnostic_label(message_type, fallback="unknown"),
                 )
+            metadata = _field(message, "metadata")
+            if isinstance(metadata, dict) and "qwenpaw_turn_usage" in metadata:
+                self.public_usage_envelopes_observed += 1
+            self._observe_text_value(
+                _field(message, "text"),
+                label=_diagnostic_label(message_type, fallback="message_text"),
+            )
             content = _field(message, "content")
             parts = content if isinstance(content, (list, tuple)) else (content,)
             for part in parts:
-                if part is None or isinstance(part, str):
+                if part is None:
+                    continue
+                if isinstance(part, str):
+                    self._observe_text_value(part, label="content_string")
                     continue
                 part_type = _field(part, "type")
+                normalized_part_type = _diagnostic_label(
+                    part_type, fallback="unknown"
+                )
                 _increment_bounded(
                     self.content_part_type_counts,
-                    _diagnostic_label(part_type, fallback="unknown"),
+                    normalized_part_type,
+                )
+                self._observe_text_value(
+                    _field(part, "text"), label=normalized_part_type
                 )
 
     def snapshot(self) -> dict[str, Any]:
@@ -168,11 +223,23 @@ class _StreamDiagnostics:
             "event_count": self.event_count,
             "first_event_elapsed_ms": self.first_event_elapsed_ms,
             "last_event_elapsed_ms": self.last_event_elapsed_ms,
+            "last_event_type": self.last_event_type,
             "event_type_counts": dict(sorted(self.event_type_counts.items())),
             "message_role_counts": dict(sorted(self.message_role_counts.items())),
             "message_type_counts": dict(sorted(self.message_type_counts.items())),
             "content_part_type_counts": dict(
                 sorted(self.content_part_type_counts.items())
+            ),
+            "text_value_count": self.text_value_count,
+            "text_chars_total_observed": self.text_chars_total_observed,
+            "text_chars_max_single_value": self.text_chars_max_single_value,
+            "text_value_char_totals": dict(
+                sorted(self.text_value_char_totals.items())
+            ),
+            "text_value_max_chars": dict(sorted(self.text_value_max_chars.items())),
+            "assistant_messages_observed": self.assistant_messages_observed,
+            "public_usage_envelopes_observed": (
+                self.public_usage_envelopes_observed
             ),
         }
 
@@ -323,6 +390,30 @@ def _skill_sha256() -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _verified_skill_evidence(sample) -> dict[str, Any]:
+    actual_sha256 = _skill_sha256()
+    expected_sha256 = expected_skill_sha256(sample.variant)
+    if not hmac.compare_digest(actual_sha256, expected_sha256):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "writing_evaluation_skill_variant_mismatch",
+                "sample_id": sample.sample_id,
+                "variant": sample.variant,
+                "expected_skill_sha256": expected_sha256,
+                "actual_skill_sha256": actual_sha256,
+                "model_called": False,
+            },
+        )
+    return {
+        "contract": SKILL_EVIDENCE_CONTRACT_VERSION,
+        "variant": sample.variant,
+        "expected_skill_sha256": expected_sha256,
+        "actual_skill_sha256": actual_sha256,
+        "match": True,
+    }
+
+
 def _model_payload(audit: ModelAudit) -> dict[str, Any]:
     return {
         "provider_id": audit.provider_id,
@@ -395,6 +486,7 @@ async def writing_evaluation_generate(
         sample = build_sample(experiment_id, sample_id)
     except WritingEvalContractError as error:
         raise _contract_error(error) from error
+    skill_evidence = _verified_skill_evidence(sample)
     if _RUN_LOCK.locked():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -402,7 +494,7 @@ async def writing_evaluation_generate(
         )
 
     session_id = (
-        f"novel-writing-eval:{EXPERIMENT_ID}:{sample.sample_id}:{uuid4()}"
+        f"novel-writing-eval:{experiment_id}:{sample.sample_id}:{uuid4()}"
     )
     started_at = _utc_now()
     started_monotonic = time.monotonic()
@@ -499,7 +591,7 @@ async def writing_evaluation_generate(
     return {
         "schema_version": SCHEMA_VERSION,
         "state": "generated",
-        "experiment_id": EXPERIMENT_ID,
+        "experiment_id": experiment_id,
         "sample_id": sample.sample_id,
         "case_id": sample.case_id,
         "variant": sample.variant,
@@ -507,13 +599,15 @@ async def writing_evaluation_generate(
         "rights_basis": RIGHTS_BASIS,
         "execution_agent_id": NOVEL_AGENT_ID,
         "skill_id": _SKILL_ID,
-        "skill_sha256": _skill_sha256(),
+        "skill_sha256": skill_evidence["actual_skill_sha256"],
+        "skill_evidence": skill_evidence,
         "source_suite_sha256": SOURCE_SUITE_SHA256,
+        "variant_policy_sha256": VARIANT_POLICY_SHA256,
         "manifest_sha256": MANIFEST_SHA256,
         "rubric_sha256": RUBRIC_SHA256,
         "prompt_contract": PROMPT_CONTRACT_VERSION,
         "output_purity_contract": OUTPUT_PURITY_CONTRACT_VERSION,
-        "candidate_overlay_sha256": CANDIDATE_OVERLAY_SHA256,
+        "prompt_variant_policy": PROMPT_VARIANT_POLICY,
         "base_prompt_sha256": sha256_text(sample.base_prompt),
         "prompt_sha256": sha256_text(sample.prompt),
         "requested_model": _model_payload(configured_model),

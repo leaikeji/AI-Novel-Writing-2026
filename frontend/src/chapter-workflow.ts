@@ -557,6 +557,13 @@ function briefToForm(brief: ChapterBriefRecord): BriefFormState {
   };
 }
 
+function chapterLengthWindow(targetWordCount: number): { minimum: number; maximum: number; label: string } {
+  const target = Math.max(1, Math.round(targetWordCount));
+  const minimum = Math.floor(target * 0.85);
+  const maximum = Math.ceil(target * 1.15);
+  return { minimum, maximum, label: `${minimum}—${maximum} 字（目标 ${target} 字，±15%）` };
+}
+
 
 function formRoleConstraints(form: BriefFormState): RoleConstraints {
   return {
@@ -928,6 +935,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       }
       const currentBrief = await ensureBrief();
+      const lengthWindow = chapterLengthWindow(currentBrief.target_word_count);
       let acceptedJob: GenerationJobRecord | null = null;
       let lastFailure: unknown = null;
       const maximumAttempts = 3;
@@ -935,12 +943,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
         const attemptStage = attempt === 1
           ? "正在分析角色关系、伏笔推进和章节情节"
-          : `第 ${attempt} 次整章重写：正在校准 1000—1500 字范围`;
+          : `第 ${attempt} 次整章重写：正在校准 ${lengthWindow.label}`;
         setGenerationStage(attemptStage);
         onBodyGenerationStateChange?.(true, attemptStage);
         onStatus(attempt === 1
           ? `${currentModelLabel} 正在创作章节正文…`
-          : `第 ${attempt} 次整章重写中，上次正文未达 1000—1500 字范围…`);
+          : `第 ${attempt} 次整章重写中，上次正文未达 ${lengthWindow.label}…`);
 
         try {
           const job = await apiRequest<GenerationJobRecord>(
@@ -983,7 +991,21 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     } catch (reason) {
       const message = errorMessage(reason, "生成正文失败");
       onError(message);
-      onStatus(message.includes("字范围") || message.includes("低于") || message.includes("超过") ? "本次未达 1000—1500 字范围，必须整章重写" : "正文生成失败");
+      const currentTarget = brief?.target_word_count ?? briefFormRef.current.targetWordCount;
+      const currentWindow = chapterLengthWindow(currentTarget);
+      onStatus(message.includes("字范围") || message.includes("低于") || message.includes("超过") ? `本次未达 ${currentWindow.label}，必须整章重写` : "正文生成失败");
+      Modal.error({
+        className: "anw-modal anw-generation-failure",
+        title: "章节正文生成失败",
+        width: 560,
+        centered: true,
+        content: h("div", { className: "anw-generation-confirm-copy" },
+          h("p", null, message),
+          h("strong", null, "本次没有修改正式正文。"),
+          h("p", null, "请确认“AI小说作家”的当前模型可用后，再点击“生成正文”重新尝试。"),
+        ),
+        okText: "我知道了",
+      });
     } finally {
       setGeneratingOpen(false);
       onBodyGenerationStateChange?.(false, "");
@@ -1006,8 +1028,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       width: 520,
       centered: true,
       content: h("div", { className: "anw-generation-confirm-copy" },
-        h("strong", null, "⚠️ 请确保网络畅通，并保持该页面始终显示在最上方"),
-        h("p", null, "若屏幕关闭 / 切换应用 / 网络波动，易导致生成失败。"),
+        h("strong", null, "⚠️ 请确保当前模型连接可用，并避免重复发起生成"),
+        h("p", null, "页面可以留在后台；若模型长时间无响应，系统会安全结束任务并显示失败原因。"),
         h("p", null, "生成开始后请勿重复发起；失败时系统会保留正式正文不变。"),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
         h("p", null, "若多次出现生成失败，请检查当前有效模型连接。"),
@@ -1422,11 +1444,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       const state = candidate?.state ?? job.state;
       const requestedModel = requestedGenerationModelLabel(job);
       const actualModel = actualGenerationModelLabel(job);
+      const minimumCount = job.minimum_visible_character_count ?? job.target_visible_character_count;
+      const maximumCount = job.maximum_visible_character_count;
       return h("article", { key: job.id, className: `anw-history-card${candidate?.id === featuredCandidateId ? " is-featured" : ""}` },
         h("header", null, h("div", null, h("strong", null, `第 ${job.attempt || 1} 次生成`), h("span", null, formatDate(job.completed_at || job.created_at))), h(Tag, { color: stateColor(state) }, stateLabel(state))),
         h("div", { className: "anw-history-meta" },
           h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`),
-          h("span", null, `验收 ${job.target_visible_character_count || 1000}-1500 字`),
+          h("span", null, maximumCount ? `验收 ${minimumCount}–${maximumCount} 字` : `验收不少于 ${minimumCount} 字`),
           state === "failed"
             ? h("span", null, actualModel ? `请求 ${requestedModel} · 实际 ${actualModel}` : `请求 ${requestedModel} · 实际未核验`)
             : h("span", null, verifiedGenerationModelLabel(job)),

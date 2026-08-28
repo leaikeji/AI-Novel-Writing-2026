@@ -302,8 +302,21 @@ class CreateCharacterRequest(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
-class UpdateCharacterRequest(CreateCharacterRequest):
+class UpdateCharacterRequest(BaseModel):
     expected_version: int = Field(ge=1)
+    role_type: str = Field(pattern="^(main|supporting)$")
+    name: str = Field(min_length=1, max_length=240)
+    description: str = Field(default="", max_length=20_000)
+    details: dict[str, Any] | None = None
+    details_patch: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_detail_patch(self) -> "UpdateCharacterRequest":
+        if self.details is not None and self.details_patch is not None:
+            raise ValueError("details 与 details_patch 不能同时提交")
+        if self.details is None and self.details_patch is None:
+            raise ValueError("角色更新必须提交 details_patch")
+        return self
 
 
 class CreateRelationshipRequest(BaseModel):
@@ -360,6 +373,39 @@ class BatchRelationshipsRequest(BaseModel):
 
 class SyncRelationshipsRequest(BaseModel):
     force_new: bool = False
+
+
+class GenerateCharacterProfileCompletionRequest(BaseModel):
+    force_new: bool = False
+
+
+class CharacterProfileApplyDecision(BaseModel):
+    character_id: UUID
+    base_version: int = Field(ge=1)
+    replace_existing: bool = False
+
+
+class ApplyCharacterProfileCompletionRequest(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=160)
+    decisions: list[CharacterProfileApplyDecision] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def normalize_idempotency_key(self) -> "ApplyCharacterProfileCompletionRequest":
+        self.idempotency_key = self.idempotency_key.strip()
+        if len(self.idempotency_key) < 8:
+            raise ValueError("幂等键去除空白后不能少于8个字符")
+        return self
+
+
+class RestoreCharacterProfileBatchRequest(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=160)
+
+    @model_validator(mode="after")
+    def normalize_idempotency_key(self) -> "RestoreCharacterProfileBatchRequest":
+        self.idempotency_key = self.idempotency_key.strip()
+        if len(self.idempotency_key) < 8:
+            raise ValueError("幂等键去除空白后不能少于8个字符")
+        return self
 
 
 class RelationshipGraphPositionRequest(BaseModel):
@@ -491,6 +537,7 @@ class UpdateNovelSettingsRequest(BaseModel):
     idea: str = Field(default="", max_length=30_000)
     template_name: str = Field(default="", max_length=160)
     template_data: dict[str, Any] = Field(default_factory=dict)
+    cover_mode: Literal["ai", "system", "upload", "text"] | None = None
     cover_image_data: str | None = Field(default=None, max_length=250_000)
 
 
