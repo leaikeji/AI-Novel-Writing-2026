@@ -100,7 +100,7 @@ function elementChildren(element: TestElement): TestElement[] {
 
 
 describe("resolveAssistantPaneLayout", () => {
-  it.each([320, 380, 520])("keeps the supported fixed width %ipx operable", (width) => {
+  it.each([320, 450, 750])("keeps the supported fixed width %ipx operable", (width) => {
     const layout = resolveAssistantPaneLayout({
       availableWidth: 1400,
       preferredWidth: width,
@@ -194,15 +194,15 @@ describe("assistantPaneWidthFromKey", () => {
 
   it("supports Home and End and ignores unrelated keys", () => {
     expect(assistantPaneWidthFromKey(layout, "Home")).toBe(320);
-    expect(assistantPaneWidthFromKey(layout, "End")).toBe(520);
+    expect(assistantPaneWidthFromKey(layout, "End")).toBe(750);
     expect(assistantPaneWidthFromKey(layout, "Escape")).toBeNull();
   });
 
   it("clamps both keyboard step sizes to the supported range", () => {
-    const nearMaximum = resolveAssistantPaneLayout({ preferredWidth: 510 });
+    const nearMaximum = resolveAssistantPaneLayout({ preferredWidth: 740 });
     const nearMinimum = resolveAssistantPaneLayout({ preferredWidth: 325 });
 
-    expect(assistantPaneWidthFromKey(nearMaximum, "ArrowLeft", true)).toBe(520);
+    expect(assistantPaneWidthFromKey(nearMaximum, "ArrowLeft", true)).toBe(750);
     expect(assistantPaneWidthFromKey(nearMinimum, "ArrowRight", true)).toBe(320);
   });
 });
@@ -219,7 +219,7 @@ describe("assistant pane preference", () => {
     expect(storage.values.has(ASSISTANT_PANE_PREFERENCE_KEY)).toBe(true);
     expect(loadAssistantPanePreference(storage)).toEqual({
       schemaVersion: 1,
-      preferredWidth: 520,
+      preferredWidth: 750,
       collapsed: true,
     });
     expect(Object.keys(JSON.parse(
@@ -393,7 +393,7 @@ describe("renderQwenPawAssistantPane", () => {
 
     expect(separator.props.role).toBe("separator");
     expect(separator.props["aria-valuemin"]).toBe(320);
-    expect(separator.props["aria-valuemax"]).toBe(520);
+    expect(separator.props["aria-valuemax"]).toBe(750);
     expect(separator.props["aria-valuenow"]).toBe(380);
     expect(separator.props["aria-controls"]).toBe("anw-qwenpaw-assistant-inner");
     expect(separator.props["aria-orientation"]).toBe("vertical");
@@ -583,7 +583,7 @@ describe("createQwenPawAssistantPane", () => {
     }) as TestElement;
     const [, toggle, innerContainer] = elementChildren(pane);
 
-    expect(pane.props["data-assistant-pane-width"]).toBe("380");
+    expect(pane.props["data-assistant-pane-width"]).toBe("450");
     expect(elementChildren(innerContainer)[0].type).toBe(Inner);
     (toggle.props.onClick as () => void)();
     runtime.unmount();
