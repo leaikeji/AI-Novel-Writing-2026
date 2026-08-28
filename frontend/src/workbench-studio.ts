@@ -674,6 +674,10 @@ function OutlineWizard({
           ? Boolean(current.plot_text.trim())
           : Boolean(current.highlight_text.trim());
 
+  const isStepComplete = (current: OutlineDraftRecord, targetStep: number): boolean => targetStep === 3
+    ? current.characters.some((item: OutlineCharacterDraft) => item.role_type === "main")
+    : hasContentForStep(current, targetStep);
+
   const patchForStep = (current: OutlineDraftRecord, targetStep: number): Record<string, unknown> => targetStep === 1
     ? { target_chapter_count: current.target_chapter_count }
     : targetStep === 2
@@ -741,6 +745,27 @@ function OutlineWizard({
     setGenerating(true);
     try {
       await saveDraft(draft, step - 1, {});
+    } catch (reason) {
+      onError(readableError(reason, "切换大纲步骤失败"));
+    } finally {
+      setGenerating(false);
+      setActivityText("");
+    }
+  };
+
+  const navigateToStep = async (targetStep: number) => {
+    if (
+      !draft
+      || generating
+      || targetStep === step
+      || targetStep < 1
+      || targetStep > OUTLINE_STEPS.length
+      || !isStepComplete(draft, targetStep)
+    ) return;
+    setActivityText("正在保存...");
+    setGenerating(true);
+    try {
+      await saveDraft(draft, targetStep, patchForStep(draft, step));
     } catch (reason) {
       onError(readableError(reason, "切换大纲步骤失败"));
     } finally {
@@ -989,13 +1014,7 @@ function OutlineWizard({
     };
   }, [characterIndex, characterOpen, draft?.id, novel.id, novel.title]);
 
-  const canContinue = draft && (
-    (step === 1 && draft.target_chapter_count >= 10 && draft.target_chapter_count <= 10000)
-    || (step === 2 && Boolean(draft.background_text.trim()))
-    || (step === 3 && draft.characters.some((item: OutlineCharacterDraft) => item.role_type === "main"))
-    || (step === 4 && Boolean(draft.plot_text.trim()))
-    || (step === 5 && Boolean(draft.highlight_text.trim()))
-  );
+  const canContinue = Boolean(draft && isStepComplete(draft, step));
   const currentStepHasContent = Boolean(draft && hasContentForStep(draft, step));
   const generationDetail = activityText === "正在保存..."
     ? "正在保存当前修改，请稍候"
@@ -1158,10 +1177,20 @@ function OutlineWizard({
               { className: "mb-outline-steps", "aria-label": "大纲生成步骤" },
               ...OUTLINE_STEPS.map((label, index) => {
                 const number = index + 1;
-                const stepCompleted = number < step;
+                const stepIsComplete = isStepComplete(draft, number);
+                const stepCompleted = number !== step && stepIsComplete;
+                const stepReachable = number === step || stepIsComplete;
                 return h(
-                  "div",
-                  { key: label, className: `mb-outline-step ${number === step ? "is-active" : ""} ${stepCompleted ? "is-complete" : ""}` },
+                  "button",
+                  {
+                    key: label,
+                    type: "button",
+                    className: `mb-outline-step ${number === step ? "is-active" : ""} ${stepCompleted ? "is-complete" : ""}`,
+                    disabled: generating || !stepReachable,
+                    "aria-current": number === step ? "step" : undefined,
+                    "aria-label": number === step ? `当前步骤：${label}` : `转到${label}步骤`,
+                    onClick: () => void navigateToStep(number),
+                  },
                   h("span", { className: "mb-outline-step-dot" }, stepCompleted ? "✓" : number),
                   h("span", { className: "mb-outline-step-label" }, label),
                 );

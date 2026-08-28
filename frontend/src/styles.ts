@@ -1715,10 +1715,14 @@ export function ensureNovelStyles(): void {
     .mb-outline-steps { position:relative; display:flex; box-sizing:border-box; width:100%; justify-content:space-between; margin:0 0 2px; padding:0 8px; }
     .mb-outline-steps::before { position:absolute; z-index:0; top:15px; right:15px; left:15px; height:3px; background:#e6e7e9; content:""; }
     .mb-outline-steps::after { position:absolute; z-index:0; top:15px; left:10%; width:calc((var(--mb-step-progress,0))*20%); height:3px; background:#ff7548; content:""; }
-    .mb-outline-step { position:relative; z-index:1; display:grid; width:30px; flex:0 0 30px; justify-items:center; gap:8px; color:#999da4; font-size:12px; }
+    .mb-outline-step { position:relative; z-index:1; display:grid; width:30px; flex:0 0 30px; appearance:none; justify-items:center; gap:8px; border:0; padding:0; color:#999da4; background:transparent; cursor:pointer; font:inherit; font-size:12px; }
     .mb-outline-step-dot { display:grid; width:30px; height:30px; place-items:center; border:2px solid #e1e3e6; border-radius:50%; color:#8d9198; background:#fff; font-weight:750; }
     .mb-outline-step.is-active,.mb-outline-step.is-complete { color:#f06d42; font-weight:700; }
     .mb-outline-step.is-active .mb-outline-step-dot,.mb-outline-step.is-complete .mb-outline-step-dot { border-color:#ff7548; color:#fff; background:#ff7548; box-shadow:0 4px 12px rgba(255,117,72,.24); }
+    .mb-outline-step:not(:disabled):hover .mb-outline-step-dot { border-color:#ff8b64; transform:translateY(-1px); }
+    .mb-outline-step:focus-visible { outline:0; }
+    .mb-outline-step:focus-visible .mb-outline-step-dot { outline:3px solid rgba(255,117,72,.2); outline-offset:2px; }
+    .mb-outline-step:disabled { cursor:not-allowed; opacity:.52; }
     .mb-outline-step.is-complete::after { display:none; }
     .mb-outline-step-body { display:grid; box-sizing:border-box; height:100%; min-height:260px; align-content:start; gap:12px; border:1px solid #eceef1; border-radius:16px; padding:24px; background:linear-gradient(180deg,#fcfcfd 0%,#fafafa 100%); box-shadow:inset 0 1px 0 rgba(255,255,255,.8); }
     .mb-outline-step-body > h3 { margin:0; color:#24272d; font-size:21px; line-height:1.3; text-align:center; }

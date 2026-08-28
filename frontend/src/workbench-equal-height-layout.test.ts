@@ -44,6 +44,16 @@ describe("workbench equal-height layout styles", () => {
     expect(styleSource).toMatch(/\.qwenpaw-input-number-input \{[^}]*border-radius:11px;[^}]*background:transparent!important;/);
   });
 
+  it("renders completed outline anchors as accessible direct navigation", () => {
+    expect(studioSource).toContain("const navigateToStep = async (targetStep: number)");
+    expect(studioSource).toContain("const isStepComplete = (current: OutlineDraftRecord, targetStep: number)");
+    expect(studioSource).toContain("const stepReachable = number === step || stepIsComplete;");
+    expect(studioSource).toContain('"aria-current": number === step ? "step" : undefined');
+    expect(studioSource).toContain("onClick: () => void navigateToStep(number)");
+    expect(styleSource).toContain(".mb-outline-step:not(:disabled):hover .mb-outline-step-dot");
+    expect(styleSource).toContain(".mb-outline-step:focus-visible .mb-outline-step-dot");
+  });
+
   it("keeps the existing mobile stacked layout override", () => {
     expect(styleSource).toMatch(/@media \(max-width: 720px\)[\s\S]*?\.mb-workbench,[\s\S]*?display:block;[\s\S]*?height:auto;/);
     expect(styleSource).toContain(".mb-back-center-wrap { grid-column:1/-1; margin:10px 0 0;");
