@@ -1,4 +1,4 @@
-import { ApiError, apiErrorMessage, apiRequest } from "../api";
+import { ApiError, apiRequest } from "../api";
 import {
   parseEmbeddingConfigResource,
   parseEmbeddingConnectionTestResult,
@@ -37,12 +37,52 @@ function jsonInit(method: "POST" | "PUT", payload: object, signal?: AbortSignal)
 }
 
 
+const ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  embedding_secret_unavailable: "向量密钥保险箱尚未初始化。",
+  secret_unavailable: "向量密钥保险箱不可用，请检查初始化状态。",
+  secret_permissions_invalid: "向量密钥保险箱权限不安全，请重新初始化。",
+  secret_key_invalid: "向量密钥保险箱根密钥无效。",
+  secret_record_invalid: "保存的 API Key 记录无效，请重新填写。",
+  secret_orphaned_records: "检测到无法解密的旧凭据记录，请先恢复原密钥保险箱。",
+  secret_value_invalid: "API Key 格式无效，请检查后重新输入。",
+  secret_write_failed: "API Key 加密保存失败，请稍后重试。",
+  secret_delete_failed: "API Key 清除失败，请稍后重试。",
+  embedding_base_url_invalid: "Base URL 无效，请填写阿里云百炼工作空间地址。",
+  embedding_dns_failed: "无法解析阿里云百炼服务地址，请检查网络。",
+  embedding_ssrf_blocked: "服务地址未通过安全检查，请使用阿里云百炼官方地址。",
+  embedding_auth_failed: "API Key 验证失败，请检查后重新输入。",
+  embedding_rate_limited: "阿里云百炼请求过于频繁，请稍后重试。",
+  embedding_unavailable: "阿里云百炼向量服务暂时不可用，请稍后重试。",
+  embedding_protocol_error: "阿里云百炼返回了无法识别的响应。",
+  embedding_request_invalid: "向量请求参数无效，请检查模型和维度。",
+  embedding_dimension_mismatch: "模型返回维度与所选受支持维度不一致。",
+  embedding_not_configured: "请先填写并保存 API Key。",
+  dimension_mismatch: "模型返回维度与所选受支持维度不一致，候选配置未保存。",
+  version_conflict: "配置已在其他窗口更新，请刷新后重试。",
+  candidate_missing: "请先保存并验证候选配置。",
+  candidate_not_ready: "候选索引尚未就绪。",
+  candidate_evaluation_failed: "候选检索评测尚未通过。",
+  previous_generation_missing: "没有可回退的上一代索引。",
+  previous_generation_not_ready: "上一代索引当前不可恢复。",
+  consent_not_found: "没有找到有效的小说向量授权。",
+  timeline_required: "当前小说包含多条时间线，请先选择时间线。",
+};
+
+
+function errorCode(detail: unknown): string | null {
+  if (detail === null || typeof detail !== "object") return null;
+  const code = (detail as Record<string, unknown>).code;
+  return typeof code === "string" ? code.toLowerCase() : null;
+}
+
+
 function normalizeError(reason: unknown, fallback: string): never {
   if (!(reason instanceof ApiError)) throw reason;
+  const code = errorCode(reason.detail);
   throw new EmbeddingApiError(
     reason.status,
     reason.detail,
-    apiErrorMessage(reason, fallback),
+    (code && ERROR_MESSAGES[code]) || fallback,
   );
 }
 
@@ -67,6 +107,18 @@ export function getEmbeddingConfig(signal?: AbortSignal): Promise<EmbeddingConfi
     parseEmbeddingConfigResource,
     "加载向量模型配置失败",
     { signal },
+  );
+}
+
+
+export function initializeEmbeddingSecretStore(
+  signal?: AbortSignal,
+): Promise<EmbeddingConfigResource> {
+  return request(
+    "/embedding-config/secret-store/initialize",
+    parseEmbeddingConfigResource,
+    "初始化向量密钥保险箱失败",
+    jsonInit("POST", {}, signal),
   );
 }
 

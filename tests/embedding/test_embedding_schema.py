@@ -5,12 +5,15 @@ No test in this module connects to PostgreSQL or invokes a cloud endpoint.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
 
 import backend.creative_data_models  # noqa: F401  # registers additive tables
+from backend.embedding import api as embedding_api
+from backend.embedding import persistence as embedding_persistence
 from backend.models import Base
 
 
@@ -201,6 +204,19 @@ def test_vector_dimension_is_recorded_and_checked_without_a_mixed_typmod() -> No
     for index in table.indexes:
         assert "hnsw" not in str(index).lower()
         assert "ivfflat" not in str(index).lower()
+
+
+def test_api_key_rotation_is_not_part_of_vector_space_fingerprint() -> None:
+    source = inspect.getsource(embedding_persistence.create_verified_candidate)
+    fingerprint_source = source.split("fingerprint = _digest(", 1)[1].split(")\n", 1)[0]
+    assert '"credential_ref"' not in fingerprint_source
+    assert "profile.credential_ref = configuration.credential_ref" in source
+
+
+def test_embedding_product_surface_has_no_billing_or_price_api() -> None:
+    paths = tuple(route.path.lower() for route in embedding_api.router.routes)
+    for forbidden in ("billing", "price", "cost", "balance", "charge"):
+        assert all(forbidden not in path for path in paths)
 
 
 def test_semantic_index_migration_is_linear_and_registers_reusable_batches() -> None:

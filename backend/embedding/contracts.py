@@ -30,7 +30,8 @@ SEMANTIC_SEARCH_SCHEMA_VERSION = "semantic-search/1"
 # Planning target only; it is not a claim that the live provider contract was
 # verified by this code package.
 TARGET_CANDIDATE_MODEL_ID = "qwen3.7-text-embedding"
-TARGET_CANDIDATE_DIMENSION = 1024
+SUPPORTED_EMBEDDING_DIMENSIONS = (256, 512, 768, 1024, 1536, 2048, 2560)
+TARGET_CANDIDATE_DIMENSION = 2048
 
 
 class _StrictModel(BaseModel):
@@ -192,6 +193,13 @@ class EmbeddingCandidateTarget(_StrictModel):
     query_text_type: Literal["query"] = "query"
     distance: Literal["cosine"] = "cosine"
     verification_status: Literal[VerificationStatus.UNVERIFIED] = VerificationStatus.UNVERIFIED
+
+    @field_validator("dimension")
+    @classmethod
+    def validate_dimension(cls, value: int) -> int:
+        if value not in SUPPORTED_EMBEDDING_DIMENSIONS:
+            raise ValueError("dimension is not supported by qwen3.7-text-embedding")
+        return value
 
 
 class EmbeddingProfileResource(_StrictModel):

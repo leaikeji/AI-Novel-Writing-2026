@@ -94,6 +94,16 @@ def _load_call(session: Session, *, lease: JobLease) -> BatchCallSnapshot:
     profile = session.get(EmbeddingProfile, generation.profile_id)
     if profile is None or profile.connection_state != "available":
         raise EmbeddingLifecycleError("profile_unavailable", "embedding profile is unavailable")
+    configuration = session.scalar(
+        select(EmbeddingConfiguration).where(
+            EmbeddingConfiguration.owner_id == generation.owner_id,
+            EmbeddingConfiguration.workspace_id == generation.workspace_id,
+        )
+    )
+    if configuration is None or configuration.credential_ref is None:
+        raise EmbeddingLifecycleError(
+            "embedding_not_configured", "embedding credential is missing"
+        )
     rows = session.execute(
         select(EmbeddingIndexBatchItem, SemanticChunk)
         .join(SemanticChunk, SemanticChunk.id == EmbeddingIndexBatchItem.chunk_id)
@@ -111,7 +121,7 @@ def _load_call(session: Session, *, lease: JobLease) -> BatchCallSnapshot:
     session.flush()
     return BatchCallSnapshot(
         batch_id=batch.id, generation_id=batch.generation_id, novel_id=batch.novel_id,
-        profile_id=profile.id, credential_ref=profile.credential_ref,
+        profile_id=profile.id, credential_ref=configuration.credential_ref,
         base_url=profile.base_url, model_id=profile.actual_model_id,
         model_revision=profile.actual_revision, dimension=profile.dimension,
         input_hash=batch.input_hash, chunk_ids=chunk_ids, texts=texts,

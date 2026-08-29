@@ -67,6 +67,7 @@ export const TEST_ANTD: EmbeddingAntdRuntime = {
   Empty: "empty",
   Input: "input",
   InputNumber: "input-number",
+  Select: "select",
   Spin: "spin",
   Tag: "tag",
 };

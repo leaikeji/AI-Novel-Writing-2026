@@ -21,6 +21,7 @@ from ..creative_data_models import (
     EmbeddingProfile,
     NovelEmbeddingConsent,
 )
+from .contracts import SUPPORTED_EMBEDDING_DIMENSIONS
 from .lifecycle import EmbeddingLifecycleError
 from ..models import Novel
 
@@ -113,7 +114,14 @@ def apply_credential_reference(
     configuration.api_key_last4 = last4
     configuration.api_key_updated_at = _now() if credential_ref else None
     configuration.connection_state = "unverified" if credential_ref else "unconfigured"
-    configuration.connection_summary_json = {}
+    previous_cleanup = dict(configuration.connection_summary_json or {}).get(
+        "credential_cleanup"
+    )
+    configuration.connection_summary_json = (
+        {"credential_cleanup": previous_cleanup}
+        if isinstance(previous_cleanup, dict)
+        else {}
+    )
     configuration.version += 1
     configuration.updated_at = _now()
     session.flush()
@@ -131,6 +139,7 @@ def create_verified_candidate(
     actual_revision: str | None,
     dimension: int,
     request_id: str,
+    document_request_id: str,
     total_tokens: int,
     latency_ms: int,
 ) -> tuple[EmbeddingProfile, EmbeddingGeneration]:
@@ -141,14 +150,15 @@ def create_verified_candidate(
         raise EmbeddingLifecycleError("embedding_not_configured", "embedding credential is missing")
     if configuration.version != expected_config_version:
         raise EmbeddingLifecycleError("version_conflict", "embedding configuration changed")
-    if dimension != 1024:
-        raise EmbeddingLifecycleError("dimension_mismatch", "verified dimension must be 1024")
+    if dimension not in SUPPORTED_EMBEDDING_DIMENSIONS:
+        raise EmbeddingLifecycleError(
+            "dimension_mismatch", "verified dimension is not supported"
+        )
     fingerprint = _digest(
         {
             "provider": "aliyun-bailian",
             "protocol": "dashscope-native-v1",
             "base_url": configuration.base_url,
-            "credential_ref": configuration.credential_ref,
             "model": actual_model_id,
             "revision": actual_revision,
             "dimension": dimension,
@@ -181,6 +191,11 @@ def create_verified_candidate(
         )
         session.add(profile)
         session.flush()
+    else:
+        # Credentials are connection state, not vector-space identity.  Keep the
+        # legacy column aligned while generation/profile fingerprints remain stable.
+        profile.credential_ref = configuration.credential_ref
+        profile.connection_state = "available"
     generation_number = int(
         session.scalar(
             select(func.max(EmbeddingGeneration.generation_number)).where(
@@ -230,12 +245,21 @@ def create_verified_candidate(
         )
     configuration.candidate_generation_id = generation.id
     configuration.connection_state = "available"
-    configuration.connection_summary_json = {
+    previous_cleanup = dict(configuration.connection_summary_json or {}).get(
+        "credential_cleanup"
+    )
+    connection_summary: dict[str, object] = {
         "request_id": request_id,
+        "document_request_id": document_request_id,
         "total_tokens": total_tokens,
         "latency_ms": latency_ms,
         "actual_dimension": dimension,
     }
+    if isinstance(previous_cleanup, dict):
+        # A successful candidate must not erase an unresolved, already
+        # committed orphan-secret cleanup warning from an earlier rotation.
+        connection_summary["credential_cleanup"] = previous_cleanup
+    configuration.connection_summary_json = connection_summary
     configuration.version += 1
     configuration.updated_at = _now()
     session.flush()

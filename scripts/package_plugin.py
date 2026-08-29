@@ -225,6 +225,7 @@ def main() -> None:
         copy_file("plugin.py")
         copy_file("requirements.txt")
         copy_file("alembic.ini")
+        copy_file("scripts/provision_embedding_secret_store.py")
         copy_file("scripts/tts/manage_digest_keyring.py")
         copy_file("scripts/tts/bootstrap_digest_keyring.py")
         copy_tree("backend")

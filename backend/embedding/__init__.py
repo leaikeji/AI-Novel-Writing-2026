@@ -1,13 +1,9 @@
-"""Semantic-index API contracts.
-
-This package intentionally contains no provider client, secret storage, ORM model,
-or route registration.  Those concerns are implemented only after the public
-contract and its security gates are approved.
-"""
+"""Public semantic-index contracts and frozen provider policy values."""
 
 from .contracts import (
     EMBEDDING_CONTRACT_VERSION,
     SEMANTIC_SEARCH_SCHEMA_VERSION,
+    SUPPORTED_EMBEDDING_DIMENSIONS,
     TARGET_CANDIDATE_DIMENSION,
     TARGET_CANDIDATE_MODEL_ID,
     ConsentAction,
@@ -38,6 +34,7 @@ from .contracts import (
 __all__ = [
     "EMBEDDING_CONTRACT_VERSION",
     "SEMANTIC_SEARCH_SCHEMA_VERSION",
+    "SUPPORTED_EMBEDDING_DIMENSIONS",
     "TARGET_CANDIDATE_DIMENSION",
     "TARGET_CANDIDATE_MODEL_ID",
     "ConsentAction",

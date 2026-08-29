@@ -13,6 +13,8 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from .contracts import SUPPORTED_EMBEDDING_DIMENSIONS, TARGET_CANDIDATE_DIMENSION
+
 
 DASHSCOPE_EMBEDDING_PATH = "/api/v1/services/embeddings/text-embedding/text-embedding"
 INTERNAL_MAX_BATCH_SIZE = 10
@@ -137,7 +139,7 @@ class DashScopeEmbeddingAdapter:
         texts: Sequence[str],
         text_type: Literal["document", "query"],
         model_id: str = "qwen3.7-text-embedding",
-        dimension: int = 1024,
+        dimension: int = TARGET_CANDIDATE_DIMENSION,
         instruct: str | None = None,
         client: httpx.AsyncClient | None = None,
         resolver: Resolver = _system_resolver,
@@ -149,6 +151,11 @@ class DashScopeEmbeddingAdapter:
             raise EmbeddingAdapterError("EMBEDDING_BATCH_INVALID", "Embedding text must not be blank")
         if instruct is not None and text_type != "query":
             raise EmbeddingAdapterError("EMBEDDING_REQUEST_INVALID", "instruct is valid only for query")
+        if dimension not in SUPPORTED_EMBEDDING_DIMENSIONS:
+            raise EmbeddingAdapterError(
+                "EMBEDDING_REQUEST_INVALID",
+                "Embedding dimension is not supported by qwen3.7-text-embedding",
+            )
         if not api_key or "\x00" in api_key:
             raise EmbeddingAdapterError("EMBEDDING_AUTH_FAILED", "Embedding credential is unavailable")
         await validate_public_resolution(self.base_url, resolver)

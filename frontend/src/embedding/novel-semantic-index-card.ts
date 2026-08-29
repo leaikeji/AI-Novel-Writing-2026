@@ -19,6 +19,7 @@ import {
   CORPUS_LABELS,
   CORPUS_STATE_LABELS,
   INDEX_STATE_LABELS,
+  formatEmbeddingReason,
   formatDateTime,
 } from "./presentation";
 import { ensureEmbeddingStyles } from "./styles";
@@ -337,7 +338,7 @@ export function createNovelSemanticIndexCard(
           h("div", null, h("dt", null, "授权时间"), h("dd", null, formatDateTime(consent.confirmed_at))),
           h("div", null, h("dt", null, "告知版本"), h("dd", null, consent.notice_version ?? "未记录")),
           h("div", null, h("dt", null, "当前模型"), h("dd", null, status.active_model_id ?? "尚未激活")),
-          h("div", null, h("dt", null, "维度 / generation"), h("dd", null,
+          h("div", null, h("dt", null, "向量维度 / 索引代次"), h("dd", null,
             status.active_dimension && status.active_generation_number
               ? `${status.active_dimension} / ${status.active_generation_number}`
               : "暂无",
@@ -359,7 +360,9 @@ export function createNovelSemanticIndexCard(
               `来源 ${corpus.source_count} · 分块 ${corpus.chunk_count} · 失败 ${corpus.failure_count}`,
             ),
             corpus.reason_code
-              ? h("span", { className: "anw-embedding-muted" }, `未索引原因：${corpus.reason_code}`)
+              ? h("span", { className: "anw-embedding-muted" },
+                `未索引原因：${formatEmbeddingReason(corpus.reason_code)}`,
+              )
               : null,
           )))
         : null,
@@ -368,7 +371,7 @@ export function createNovelSemanticIndexCard(
           type: "error",
           showIcon: true,
           message: "最近索引错误",
-          description: status.error_summary,
+          description: formatEmbeddingReason(status.error_summary),
         })
         : null,
       granted

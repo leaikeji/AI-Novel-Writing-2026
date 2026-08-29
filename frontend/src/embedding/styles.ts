@@ -10,11 +10,90 @@ export const EMBEDDING_STYLES = String.raw`
 
   .anw-embedding-page {
     display: grid;
-    gap: 16px;
-    width: min(1120px, 100%);
+    gap: 18px;
+    width: min(1180px, 100%);
     margin: 0 auto;
     padding: 20px;
     overflow: auto;
+  }
+
+  .anw-embedding-hero {
+    padding: 22px 24px;
+    border: 1px solid color-mix(in srgb, #1677ff 22%, transparent);
+    border-radius: 16px;
+    background:
+      radial-gradient(circle at 92% 16%, color-mix(in srgb, #722ed1 16%, transparent), transparent 34%),
+      linear-gradient(135deg, color-mix(in srgb, #1677ff 12%, transparent), transparent 62%);
+  }
+
+  .anw-embedding-eyebrow {
+    margin: 0 0 5px;
+    color: #1677ff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .12em;
+  }
+
+  .anw-embedding-hero__summary {
+    max-width: 700px;
+    margin: 8px 0 0;
+    line-height: 1.65;
+    opacity: .78;
+  }
+
+  .anw-embedding-hero__tags {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .anw-embedding-steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .anw-embedding-steps > div {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 1px 10px;
+    align-items: center;
+    min-width: 0;
+    padding: 13px 14px;
+    border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, currentColor 3%, transparent);
+  }
+
+  .anw-embedding-steps > div > span {
+    grid-row: 1 / span 2;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    font-weight: 700;
+  }
+
+  .anw-embedding-steps > div[data-state="done"] > span {
+    color: #fff;
+    background: #389e0d;
+  }
+
+  .anw-embedding-steps > div[data-state="current"] {
+    border-color: color-mix(in srgb, #1677ff 38%, transparent);
+  }
+
+  .anw-embedding-steps > div[data-state="current"] > span {
+    color: #fff;
+    background: #1677ff;
+  }
+
+  .anw-embedding-steps small {
+    opacity: .65;
   }
 
   .anw-embedding-page__header,
@@ -58,13 +137,70 @@ export const EMBEDDING_STYLES = String.raw`
     min-height: 40px;
   }
 
+  .anw-embedding-field .ant-select {
+    width: 100%;
+  }
+
+  .anw-embedding-field-error {
+    color: #ff4d4f;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
   .anw-embedding-readonly,
   .anw-embedding-metrics > div,
   .anw-semantic-corpora > li,
-  .anw-embedding-confirm {
+  .anw-embedding-confirm,
+  .anw-embedding-credential {
     border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
     border-radius: 10px;
     padding: 12px;
+  }
+
+  .anw-embedding-credential {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(120px, auto) minmax(180px, 1fr);
+    gap: 6px 14px;
+    align-items: center;
+    background: color-mix(in srgb, #1677ff 6%, transparent);
+  }
+
+  .anw-embedding-credential code {
+    justify-self: end;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, currentColor 7%, transparent);
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: .06em;
+    overflow-wrap: anywhere;
+  }
+
+  .anw-embedding-credential small {
+    grid-column: 1 / -1;
+    opacity: .68;
+    line-height: 1.55;
+  }
+
+  .anw-embedding-card {
+    overflow: hidden;
+    border-radius: 14px;
+  }
+
+  .anw-embedding-card--diagnostics {
+    opacity: .92;
+  }
+
+  .anw-embedding-actions {
+    margin-top: 16px;
+  }
+
+  .anw-embedding-live {
+    padding: 11px 14px;
+    border-left: 4px solid #1677ff;
+    border-radius: 8px;
+    background: color-mix(in srgb, #1677ff 8%, transparent);
   }
 
   .anw-embedding-readonly,
@@ -150,8 +286,25 @@ export const EMBEDDING_STYLES = String.raw`
 
     .anw-embedding-grid,
     .anw-embedding-metrics,
-    .anw-semantic-corpora {
+    .anw-semantic-corpora,
+    .anw-embedding-steps {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-embedding-hero {
+      padding: 18px;
+    }
+
+    .anw-embedding-hero__tags {
+      justify-content: flex-start;
+    }
+
+    .anw-embedding-credential {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-embedding-credential code {
+      justify-self: stretch;
     }
 
     .anw-embedding-actions > *,

@@ -1,5 +1,9 @@
 export const EMBEDDING_CONFIG_SCHEMA_VERSION = "embedding-config/1" as const;
 export const NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION = "novel-embedding-consent/1" as const;
+export const SUPPORTED_EMBEDDING_DIMENSIONS = [
+  256, 512, 768, 1024, 1536, 2048, 2560,
+] as const;
+export const DEFAULT_EMBEDDING_DIMENSION = 2048;
 
 
 export type EmbeddingConnectionState =
@@ -43,6 +47,7 @@ export interface EmbeddingGenerationSummary {
 
 export interface EmbeddingRequestEvidence {
   readonly request_id: string | null;
+  readonly document_request_id: string | null;
   readonly token_count: number | null;
   readonly latency_ms: number | null;
   readonly error_summary: string | null;
@@ -51,14 +56,17 @@ export interface EmbeddingRequestEvidence {
 
 
 export interface EmbeddingConfigResource {
-  readonly version?: number;
+  readonly version: number;
   readonly schema_version: typeof EMBEDDING_CONFIG_SCHEMA_VERSION;
   readonly provider_id: "aliyun-bailian";
   readonly provider_label: "阿里云百炼";
   readonly protocol: "dashscope-native-v1";
   readonly protocol_label: "DashScope Native";
   readonly base_url: string;
+  readonly secret_store_ready: boolean;
   readonly api_key_configured: boolean;
+  readonly api_key_masked: string | null;
+  readonly credential_cleanup_warning: string | null;
   readonly connection_state: EmbeddingConnectionState;
   readonly requested_model_id: string;
   readonly requested_dimension: number;
@@ -73,6 +81,7 @@ export interface EmbeddingConfigResource {
 
 
 export interface SaveEmbeddingCandidateRequest {
+  readonly expected_version: number;
   readonly base_url: string;
   readonly requested_model_id: string;
   readonly requested_dimension: number;
@@ -95,6 +104,7 @@ export interface EmbeddingConnectionTestResult {
   readonly actual_revision: string | null;
   readonly actual_dimension: number | null;
   readonly request_id: string | null;
+  readonly document_request_id: string | null;
   readonly token_count: number | null;
   readonly latency_ms: number | null;
   readonly error_summary: string | null;
@@ -240,6 +250,17 @@ function nullableInteger(value: unknown, field: string, minimum = 0): number | n
 }
 
 
+function embeddingDimension(value: unknown, field: string): number {
+  const parsed = integer(value, field, 1);
+  if (!SUPPORTED_EMBEDDING_DIMENSIONS.includes(
+    parsed as (typeof SUPPORTED_EMBEDDING_DIMENSIONS)[number],
+  )) {
+    throw new EmbeddingContractError(field, "is not supported by qwen3.7-text-embedding");
+  }
+  return parsed;
+}
+
+
 function enumValue<T extends string>(
   value: unknown,
   field: string,
@@ -263,7 +284,7 @@ const EVALUATION_STATES: readonly EmbeddingEvaluationState[] = [
 function parseGeneration(value: unknown, field: string): EmbeddingGenerationSummary | null {
   if (value === null) return null;
   const item = record(value, field);
-  const dimension = integer(item.dimension, `${field}.dimension`, 1);
+  const dimension = embeddingDimension(item.dimension, `${field}.dimension`);
   const state = enumValue(item.state, `${field}.state`, GENERATION_STATES);
   const failed = integer(item.failed_novel_count, `${field}.failed_novel_count`);
   const pending = integer(item.pending_novel_count, `${field}.pending_novel_count`);
@@ -312,22 +333,40 @@ export function parseEmbeddingConfigResource(value: unknown): EmbeddingConfigRes
   if (item.protocol !== "dashscope-native-v1" || item.protocol_label !== "DashScope Native") {
     throw new EmbeddingContractError("protocol", "is unsupported");
   }
+  const apiKeyConfigured = boolean(item.api_key_configured, "api_key_configured");
+  const secretStoreReady = boolean(item.secret_store_ready, "secret_store_ready");
+  const apiKeyMasked = nullableText(item.api_key_masked, "api_key_masked");
+  if (apiKeyMasked !== null && (
+    apiKeyMasked.length !== 12
+    || !apiKeyMasked.startsWith("********")
+  )) {
+    throw new EmbeddingContractError("api_key_masked", "is not a safe masked credential hint");
+  }
+  if (!apiKeyConfigured && apiKeyMasked !== null) {
+    throw new EmbeddingContractError("api_key_masked", "must match credential state");
+  }
   return {
-    version: item.version === undefined ? undefined : integer(item.version, "version"),
+    version: integer(item.version, "version"),
     schema_version: EMBEDDING_CONFIG_SCHEMA_VERSION,
     provider_id: "aliyun-bailian",
     provider_label: "阿里云百炼",
     protocol: "dashscope-native-v1",
     protocol_label: "DashScope Native",
     base_url: text(item.base_url, "base_url"),
-    api_key_configured: boolean(item.api_key_configured, "api_key_configured"),
+    secret_store_ready: secretStoreReady,
+    api_key_configured: apiKeyConfigured,
+    api_key_masked: apiKeyMasked,
+    credential_cleanup_warning: nullableText(
+      item.credential_cleanup_warning,
+      "credential_cleanup_warning",
+    ),
     connection_state: enumValue(
       item.connection_state,
       "connection_state",
       ["unconfigured", "untested", "ready", "failed"],
     ),
     requested_model_id: text(item.requested_model_id, "requested_model_id"),
-    requested_dimension: integer(item.requested_dimension, "requested_dimension", 1),
+    requested_dimension: embeddingDimension(item.requested_dimension, "requested_dimension"),
     active_generation: parseGeneration(item.active_generation, "active_generation"),
     candidate_generation: parseGeneration(item.candidate_generation, "candidate_generation"),
     previous_generation: parseGeneration(item.previous_generation, "previous_generation"),
@@ -347,6 +386,10 @@ function parseRequestEvidence(value: unknown): EmbeddingRequestEvidence | null {
   const item = record(value, "last_request");
   return {
     request_id: nullableText(item.request_id, "last_request.request_id"),
+    document_request_id: nullableText(
+      item.document_request_id,
+      "last_request.document_request_id",
+    ),
     token_count: nullableInteger(item.token_count, "last_request.token_count"),
     latency_ms: nullableInteger(item.latency_ms, "last_request.latency_ms"),
     error_summary: nullableText(item.error_summary, "last_request.error_summary"),
@@ -359,12 +402,16 @@ export function parseEmbeddingConnectionTestResult(
   value: unknown,
 ): EmbeddingConnectionTestResult {
   const item = record(value, "connection_test");
+  const actualDimension = item.actual_dimension === null
+    ? null
+    : embeddingDimension(item.actual_dimension, "actual_dimension");
   return {
     connection_state: enumValue(item.connection_state, "connection_state", ["ready", "failed"]),
     actual_model_id: nullableText(item.actual_model_id, "actual_model_id"),
     actual_revision: nullableText(item.actual_revision, "actual_revision"),
-    actual_dimension: nullableInteger(item.actual_dimension, "actual_dimension", 1),
+    actual_dimension: actualDimension,
     request_id: nullableText(item.request_id, "request_id"),
+    document_request_id: nullableText(item.document_request_id, "document_request_id"),
     token_count: nullableInteger(item.token_count, "token_count"),
     latency_ms: nullableInteger(item.latency_ms, "latency_ms"),
     error_summary: nullableText(item.error_summary, "error_summary"),

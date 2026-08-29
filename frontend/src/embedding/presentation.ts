@@ -27,6 +27,33 @@ export const GENERATION_LABELS: Readonly<Record<EmbeddingGenerationState, string
 };
 
 
+export const EVALUATION_LABELS = {
+  not_run: "尚未运行",
+  pending: "评测中",
+  passed: "已通过",
+  failed: "未通过",
+} as const;
+
+
+const REASON_LABELS: Readonly<Record<string, string>> = {
+  timeline_mapping_required: "正文尚未完成时间线映射。",
+  embedding_secret_unavailable: "向量密钥保险箱不可用。",
+  embedding_auth_failed: "API Key 验证失败。",
+  embedding_rate_limited: "阿里云百炼请求过于频繁。",
+  embedding_unavailable: "阿里云百炼向量服务暂时不可用。",
+  consent_revoked: "小说向量授权已经撤销。",
+  generation_cancelled: "本次索引构建已经取消。",
+  batch_hash_mismatch: "索引来源在处理期间发生变化。",
+};
+
+
+export function formatEmbeddingReason(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return REASON_LABELS[normalized] ?? `操作未完成（错误代码：${value}）`;
+}
+
+
 export const INDEX_STATE_LABELS: Readonly<Record<NovelSemanticIndexState, string>> = {
   not_authorized: "未授权",
   empty: "尚未构建",

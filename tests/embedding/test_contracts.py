@@ -37,10 +37,16 @@ def test_candidate_defaults_are_explicitly_unverified() -> None:
     candidate = EmbeddingCandidateTarget()
 
     assert candidate.model_id == TARGET_CANDIDATE_MODEL_ID
-    assert candidate.dimension == TARGET_CANDIDATE_DIMENSION == 1024
+    assert candidate.dimension == TARGET_CANDIDATE_DIMENSION == 2048
     assert candidate.verification_status == VerificationStatus.UNVERIFIED
     with pytest.raises(ValidationError):
         EmbeddingCandidateTarget(verification_status="verified")
+
+
+def test_candidate_dimension_supports_documented_values_only() -> None:
+    assert EmbeddingCandidateTarget(dimension=1024).dimension == 1024
+    with pytest.raises(ValueError, match="dimension"):
+        EmbeddingCandidateTarget(dimension=1234)
 
 
 def test_resource_contracts_never_expose_api_key() -> None:

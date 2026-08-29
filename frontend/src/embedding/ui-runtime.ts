@@ -22,6 +22,7 @@ export interface EmbeddingAntdRuntime {
   readonly Empty: unknown;
   readonly Input: unknown;
   readonly InputNumber: unknown;
+  readonly Select: unknown;
   readonly Spin: unknown;
   readonly Tag: unknown;
 }

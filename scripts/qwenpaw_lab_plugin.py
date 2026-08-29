@@ -50,6 +50,12 @@ INSTALLED_PLUGIN_DIR = f"/app/working/plugins/{PLUGIN_ID}"
 INSTALLED_DIGEST_KEYRING_PATH = (
     "/app/working.secret/ai-novel-world-2026/narration-hmac-keyring.json"
 )
+INSTALLED_EMBEDDING_ROOT_KEY_PATH = (
+    "/app/working.secret/ai-novel-world-2026/embedding/root.key"
+)
+INSTALLED_EMBEDDING_RECORDS_DIR = (
+    "/app/working.secret/ai-novel-world-2026/embedding/records"
+)
 VOLUMES = (
     "ai-novel-2026-qwenpaw-data:/app/working",
     "ai-novel-2026-qwenpaw-secrets:/app/working.secret",
@@ -676,6 +682,7 @@ def install() -> None:
     require_live_tts_flags_disabled()
     hot_install_packaged_plugin()
     migrate_installed_plugin()
+    provision_installed_embedding_secret_store()
     bootstrap_installed_digest_keyring()
     provision_installed_validation_token()
     run(sys.executable, str(ROOT / "scripts" / "configure_qwenpaw_novel_agent.py"))
@@ -734,6 +741,25 @@ def require_live_tts_flags_disabled() -> None:
             "installation requires the running QwenPaw container to have all "
             "narration runtime, product, validation, and reference flags exactly disabled"
         ) from error
+
+
+def provision_installed_embedding_secret_store() -> None:
+    """Idempotently provision the project-owned embedding secret store."""
+
+    run(
+        "docker",
+        "exec",
+        "--workdir",
+        INSTALLED_PLUGIN_DIR,
+        CONTAINER,
+        "/app/venv/bin/python",
+        "-m",
+        "scripts.provision_embedding_secret_store",
+        "--root-key",
+        INSTALLED_EMBEDDING_ROOT_KEY_PATH,
+        "--records-dir",
+        INSTALLED_EMBEDDING_RECORDS_DIR,
+    )
 
 
 def bootstrap_installed_digest_keyring() -> None:

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from time import monotonic
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..creative_data_models import (
@@ -36,7 +39,9 @@ from .contracts import (
     EmbeddingCorpus,
     NovelEmbeddingConsentMutation,
     PerspectiveKind,
+    SUPPORTED_EMBEDDING_DIMENSIONS,
     SemanticSearchRequest,
+    TARGET_CANDIDATE_DIMENSION,
 )
 from .indexing import prepare_v1_novel_index
 from .evaluation import EvaluationCase, evaluate_rankings
@@ -69,25 +74,11 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
-class CredentialRequest(_Strict):
-    expected_version: int = Field(ge=0)
-    action: CredentialAction
-    base_url: str = Field(min_length=1, max_length=500)
-    api_key: SecretStr | None = Field(default=None, repr=False)
-
-    @model_validator(mode="after")
-    def validate_secret(self) -> "CredentialRequest":
-        if self.action is CredentialAction.REPLACE and self.api_key is None:
-            raise ValueError("replace requires api_key")
-        if self.action is not CredentialAction.REPLACE and self.api_key is not None:
-            raise ValueError("api_key is valid only for replace")
-        return self
-
-
 class CandidateRequest(_Strict):
+    expected_version: int = Field(ge=0)
     base_url: str = Field(min_length=1, max_length=500)
     requested_model_id: str = Field(default="qwen3.7-text-embedding", min_length=1, max_length=160)
-    requested_dimension: int = Field(default=1024, ge=1, le=65536)
+    requested_dimension: int = Field(default=TARGET_CANDIDATE_DIMENSION)
     api_key_action: CredentialAction = CredentialAction.KEEP
     api_key: SecretStr | None = Field(default=None, repr=False)
 
@@ -99,12 +90,26 @@ class CandidateRequest(_Strict):
             raise ValueError("api_key is valid only for replace")
         return self
 
+    @field_validator("requested_dimension")
+    @classmethod
+    def validate_dimension(cls, value: int) -> int:
+        if value not in SUPPORTED_EMBEDDING_DIMENSIONS:
+            raise ValueError("unsupported qwen3.7-text-embedding dimension")
+        return value
+
 
 class ConnectionTestRequest(_Strict):
     base_url: str = Field(min_length=1, max_length=500)
     requested_model_id: str = Field(default="qwen3.7-text-embedding", min_length=1, max_length=160)
-    requested_dimension: int = Field(default=1024, ge=1, le=65536)
+    requested_dimension: int = Field(default=TARGET_CANDIDATE_DIMENSION)
     api_key: SecretStr | None = Field(default=None, repr=False)
+
+    @field_validator("requested_dimension")
+    @classmethod
+    def validate_dimension(cls, value: int) -> int:
+        if value not in SUPPORTED_EMBEDDING_DIMENSIONS:
+            raise ValueError("unsupported qwen3.7-text-embedding dimension")
+        return value
 
 
 class VersionRequest(_Strict):
@@ -120,6 +125,15 @@ class ConsentUiRequest(_Strict):
     expected_version: int = Field(ge=0)
     notice_version: str = Field(min_length=1, max_length=80)
     acknowledged_scopes: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SentinelEvidence:
+    query_request_id: str
+    document_request_id: str
+    actual_dimension: int
+    total_tokens: int
+    latency_ms: int
 
 
 async def _evaluate_candidate(
@@ -175,7 +189,12 @@ async def _evaluate_candidate(
         raise EmbeddingLifecycleError(
             "candidate_evaluation_empty", "candidate has no fixed retrieval evaluation cases"
         )
-    credential_ref = profile.credential_ref
+    credential_ref = configuration.credential_ref
+    configuration_version = configuration.version
+    if credential_ref is None:
+        raise EmbeddingLifecycleError(
+            "embedding_not_configured", "embedding credential is missing"
+        )
     base_url = profile.base_url
     model_id = profile.actual_model_id
     dimension = profile.dimension
@@ -216,6 +235,8 @@ async def _evaluate_candidate(
     if (
         current_configuration is None
         or current_configuration.candidate_generation_id != generation_id
+        or current_configuration.version != configuration_version
+        or current_configuration.credential_ref != credential_ref
         or current is None
         or current.index_fingerprint != generation.index_fingerprint
         or current.state != "ready"
@@ -243,7 +264,35 @@ def _secret_store() -> EmbeddingSecretStore:
     return EmbeddingSecretStore(root_key_path=Path(root), records_dir=Path(records))
 
 
+def _secret_store_ready() -> bool:
+    try:
+        store = _secret_store()
+        store.validate()
+    except (HTTPException, EmbeddingSecretError):
+        return False
+    return True
+
+
+def _masked_api_key(configuration: EmbeddingConfiguration | None) -> str | None:
+    if (
+        configuration is None
+        or configuration.credential_ref is None
+        or configuration.api_key_last4 is None
+        or len(configuration.api_key_last4) != 4
+    ):
+        return None
+    return f"********{configuration.api_key_last4}"
+
+
 def _raise(error: Exception) -> None:
+    if isinstance(error, IntegrityError):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "version_conflict",
+                "message": "向量配置已被其他操作更新",
+            },
+        ) from error
     if isinstance(error, EmbeddingLifecycleError):
         code = error.code
         http_status = status.HTTP_404_NOT_FOUND if code.endswith("not_found") else status.HTTP_409_CONFLICT
@@ -313,8 +362,12 @@ def embedding_config_get(session: Session = Depends(get_session)) -> dict[str, o
             "provider_id": "aliyun-bailian", "provider_label": "阿里云百炼",
             "protocol": "dashscope-native-v1", "protocol_label": "DashScope Native",
             "base_url": DEFAULT_BASE_URL,
-            "api_key_configured": False, "connection_state": "unconfigured",
-            "requested_model_id": "qwen3.7-text-embedding", "requested_dimension": 1024,
+            "secret_store_ready": _secret_store_ready(),
+            "api_key_configured": False, "api_key_masked": None,
+            "credential_cleanup_warning": None,
+            "connection_state": "unconfigured",
+            "requested_model_id": "qwen3.7-text-embedding",
+            "requested_dimension": TARGET_CANDIDATE_DIMENSION,
             "active_generation": None, "candidate_generation": None,
             "previous_generation": None, "authorized_novel_count": active_consents,
             "pending_rebuild_novel_count": 0, "failed_novel_count": 0,
@@ -336,10 +389,19 @@ def embedding_config_get(session: Session = Depends(get_session)) -> dict[str, o
         "provider_id": "aliyun-bailian", "provider_label": "阿里云百炼",
         "protocol": "dashscope-native-v1", "protocol_label": "DashScope Native",
         "base_url": configuration.base_url,
+        "secret_store_ready": _secret_store_ready(),
         "api_key_configured": configuration.credential_ref is not None,
+        "api_key_masked": _masked_api_key(configuration),
+        "credential_cleanup_warning": (
+            "旧 API Key 加密记录未能自动清理，请检查密钥保险箱。"
+            if (summary.get("credential_cleanup") or {}).get("state") == "pending"
+            else None
+        ),
         "connection_state": state,
         "requested_model_id": preferred["model_id"] if preferred else "qwen3.7-text-embedding",
-        "requested_dimension": preferred["dimension"] if preferred else 1024,
+        "requested_dimension": (
+            preferred["dimension"] if preferred else TARGET_CANDIDATE_DIMENSION
+        ),
         "active_generation": active_payload,
         "candidate_generation": candidate_payload,
         "previous_generation": previous_payload,
@@ -349,6 +411,7 @@ def embedding_config_get(session: Session = Depends(get_session)) -> dict[str, o
         "last_request": (
             {
                 "request_id": summary.get("request_id"),
+                "document_request_id": summary.get("document_request_id"),
                 "token_count": summary.get("total_tokens"),
                 "latency_ms": summary.get("latency_ms"),
                 "error_summary": summary.get("error_summary"),
@@ -359,71 +422,61 @@ def embedding_config_get(session: Session = Depends(get_session)) -> dict[str, o
     }
 
 
-@router.put("/embedding-config/credential")
-def embedding_credential_put(
-    request: CredentialRequest, session: Session = Depends(get_session)
+@router.post("/embedding-config/secret-store/initialize")
+def embedding_secret_store_initialize(
+    session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    new_secret_ref: str | None = None
-    old_secret_ref: str | None = None
-    store = _secret_store()
+    root = os.environ.get(SECRET_ROOT_ENV, "").strip()
+    records = os.environ.get(SECRET_DIR_ENV, "").strip()
+    if not root or not records:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "embedding_secret_unavailable", "message": "向量密钥保险箱路径尚未配置"},
+        )
     try:
-        base_url = normalize_dashscope_base_url(request.base_url)
-        configuration = get_configuration(
-            session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID,
-            for_update=True,
+        EmbeddingSecretStore.provision(
+            root_key_path=Path(root),
+            records_dir=Path(records),
         )
-        if configuration is None:
-            if request.expected_version != 0:
-                raise EmbeddingLifecycleError("version_conflict", "embedding configuration changed")
-            configuration = ensure_configuration(
-                session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID,
-                base_url=base_url,
-            )
-        elif configuration.version != request.expected_version:
-            raise EmbeddingLifecycleError("version_conflict", "embedding configuration changed")
-        old_secret_ref = configuration.credential_ref
-        credential_ref = old_secret_ref
-        last4 = configuration.api_key_last4
-        if request.action is CredentialAction.REPLACE:
-            assert request.api_key is not None
-            stored = store.put(request.api_key.get_secret_value())
-            new_secret_ref, credential_ref, last4 = stored.credential_ref, stored.credential_ref, stored.last4
-        elif request.action is CredentialAction.CLEAR:
-            credential_ref, last4 = None, None
-        configuration.base_url = base_url
-        result = apply_credential_reference(
-            session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID,
-            expected_version=configuration.version, credential_ref=credential_ref, last4=last4,
-        )
-        session.commit()
-        if request.action is CredentialAction.CLEAR and old_secret_ref:
-            store.delete(old_secret_ref)
-        return {"version": result.version, "credential_configured": result.credential_ref is not None}
-    except Exception as error:
-        session.rollback()
-        if new_secret_ref:
-            try:
-                store.delete(new_secret_ref)
-            except EmbeddingSecretError:
-                pass
+    except EmbeddingSecretError as error:
         _raise(error)
-        raise
+    return embedding_config_get(session)
 
 
 async def _sentinel(
     *, base_url: str, credential_ref: str | None, model_id: str, dimension: int,
     ephemeral_api_key: str | None = None,
-) -> tuple[object, int]:
+) -> _SentinelEvidence:
     if ephemeral_api_key is None and credential_ref is None:
         raise EmbeddingLifecycleError("embedding_not_configured", "embedding credential is missing")
     api_key = ephemeral_api_key or _secret_store().get(credential_ref or "")
     started = monotonic()
-    result = await DashScopeEmbeddingAdapter(base_url=base_url).embed(
+    adapter = DashScopeEmbeddingAdapter(base_url=base_url)
+    query_result = await adapter.embed(
         api_key=api_key, texts=["语义索引连接验证"], text_type="query",
         model_id=model_id, dimension=dimension,
         instruct="Retrieve relevant evidence for a novel-writing workspace.",
     )
-    return result, max(0, int((monotonic() - started) * 1000))
+    document_result = await adapter.embed(
+        api_key=api_key,
+        texts=["这是用于验证语义索引写入能力的非敏感测试文本。"],
+        text_type="document",
+        model_id=model_id,
+        dimension=dimension,
+    )
+    query_dimension = len(query_result.vectors[0].values)
+    document_dimension = len(document_result.vectors[0].values)
+    if query_dimension != document_dimension:
+        raise EmbeddingLifecycleError(
+            "dimension_mismatch", "query and document vector dimensions differ"
+        )
+    return _SentinelEvidence(
+        query_request_id=query_result.request_id,
+        document_request_id=document_result.request_id,
+        actual_dimension=query_dimension,
+        total_tokens=query_result.total_tokens + document_result.total_tokens,
+        latency_ms=max(0, int((monotonic() - started) * 1000)),
+    )
 
 
 @router.post("/embedding-config/test")
@@ -437,16 +490,17 @@ async def embedding_config_test(
         )
         credential_ref = configuration.credential_ref if configuration else None
         session.rollback()
-        result, latency = await _sentinel(
+        evidence = await _sentinel(
             base_url=base_url, credential_ref=credential_ref,
             model_id=request.requested_model_id, dimension=request.requested_dimension,
             ephemeral_api_key=(request.api_key.get_secret_value() if request.api_key else None),
         )
         return {
-            "connection_state": "ready", "request_id": result.request_id,
+            "connection_state": "ready", "request_id": evidence.query_request_id,
+            "document_request_id": evidence.document_request_id,
             "actual_model_id": request.requested_model_id, "actual_revision": None,
-            "actual_dimension": len(result.vectors[0].values),
-            "token_count": result.total_tokens, "latency_ms": latency,
+            "actual_dimension": evidence.actual_dimension,
+            "token_count": evidence.total_tokens, "latency_ms": evidence.latency_ms,
             "error_summary": None,
         }
     except Exception as error:
@@ -454,77 +508,221 @@ async def embedding_config_test(
         raise
 
 
+def _require_configuration_version(
+    configuration: EmbeddingConfiguration | None,
+    *,
+    expected_version: int,
+) -> None:
+    if expected_version == 0:
+        if configuration is not None:
+            raise EmbeddingLifecycleError(
+                "version_conflict", "embedding configuration changed"
+            )
+        return
+    if configuration is None or configuration.version != expected_version:
+        raise EmbeddingLifecycleError(
+            "version_conflict", "embedding configuration changed"
+        )
+
+
+def _discard_temporary_secret(
+    store: EmbeddingSecretStore,
+    credential_ref: str | None,
+) -> None:
+    if credential_ref is None:
+        return
+    try:
+        store.delete(credential_ref)
+    except EmbeddingSecretError as error:
+        raise EmbeddingSecretError(
+            "SECRET_DELETE_FAILED",
+            "临时 API Key 加密记录清理失败，请检查密钥保险箱",
+        ) from error
+
+
+def _delete_replaced_secret(
+    session: Session,
+    *,
+    store: EmbeddingSecretStore,
+    stale_credential_ref: str | None,
+    active_credential_ref: str | None,
+) -> str | None:
+    if stale_credential_ref is None or stale_credential_ref == active_credential_ref:
+        return None
+    try:
+        store.delete(stale_credential_ref)
+        return None
+    except EmbeddingSecretError as error:
+        warning = "旧 API Key 加密记录未能自动清理，请检查密钥保险箱。"
+        reference_digest = sha256(stale_credential_ref.encode("utf-8")).hexdigest()
+        try:
+            session.rollback()
+            current = get_configuration(
+                session,
+                owner_id=LOCAL_OWNER_ID,
+                workspace_id=LOCAL_WORKSPACE_ID,
+                for_update=True,
+            )
+            if current is not None and current.credential_ref == active_credential_ref:
+                summary = dict(current.connection_summary_json or {})
+                summary["credential_cleanup"] = {
+                    "state": "pending",
+                    "error_code": error.code,
+                    "reference_sha256": reference_digest,
+                    "observed_at": datetime.now(UTC).isoformat(),
+                }
+                current.connection_summary_json = summary
+                session.commit()
+            else:
+                session.rollback()
+        except Exception:
+            session.rollback()
+        return warning
+
+
 @router.put("/embedding-config/candidate")
 async def embedding_candidate_put(
     request: CandidateRequest, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    store = _secret_store()
     new_secret_ref: str | None = None
+    committed_secret_ref: str | None = None
+    old_secret_ref: str | None = None
     try:
         base_url = normalize_dashscope_base_url(request.base_url)
         configuration = get_configuration(
-            session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID,
-            for_update=True,
-        )
-        if configuration is None:
-            configuration = ensure_configuration(
-                session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID,
-                base_url=base_url,
-            )
-        old_secret_ref = configuration.credential_ref
-        credential_ref = old_secret_ref
-        last4 = configuration.api_key_last4
-        ephemeral_key: str | None = None
-        if request.api_key_action is CredentialAction.REPLACE:
-            assert request.api_key is not None
-            ephemeral_key = request.api_key.get_secret_value()
-            stored = _secret_store().put(ephemeral_key)
-            new_secret_ref = stored.credential_ref
-            credential_ref, last4 = stored.credential_ref, stored.last4
-        elif request.api_key_action is CredentialAction.CLEAR:
-            credential_ref, last4 = None, None
-        configuration.base_url = base_url
-        configuration = apply_credential_reference(
             session,
             owner_id=LOCAL_OWNER_ID,
             workspace_id=LOCAL_WORKSPACE_ID,
-            expected_version=configuration.version,
-            credential_ref=credential_ref,
-            last4=last4,
         )
-        saved_version = configuration.version
-        session.commit()
+        _require_configuration_version(
+            configuration,
+            expected_version=request.expected_version,
+        )
+        old_secret_ref = configuration.credential_ref if configuration is not None else None
+        credential_ref = old_secret_ref
+        last4 = configuration.api_key_last4 if configuration is not None else None
+        ephemeral_key: str | None = None
+        session.rollback()
+
         if request.api_key_action is CredentialAction.CLEAR:
-            if old_secret_ref:
-                _secret_store().delete(old_secret_ref)
-            return embedding_config_get(session)
-        credential_ref = configuration.credential_ref
-        result, latency = await _sentinel(
-            base_url=base_url, credential_ref=credential_ref,
-            model_id=request.requested_model_id, dimension=request.requested_dimension,
+            if configuration is None:
+                raise EmbeddingLifecycleError(
+                    "embedding_not_configured", "embedding configuration is missing"
+                )
+            current = get_configuration(
+                session,
+                owner_id=LOCAL_OWNER_ID,
+                workspace_id=LOCAL_WORKSPACE_ID,
+                for_update=True,
+            )
+            _require_configuration_version(
+                current,
+                expected_version=request.expected_version,
+            )
+            assert current is not None
+            cleared = apply_credential_reference(
+                session,
+                owner_id=LOCAL_OWNER_ID,
+                workspace_id=LOCAL_WORKSPACE_ID,
+                expected_version=current.version,
+                credential_ref=None,
+                last4=None,
+            )
+            session.commit()
+            warning = _delete_replaced_secret(
+                session,
+                store=store,
+                stale_credential_ref=old_secret_ref,
+                active_credential_ref=None,
+            )
+            payload = embedding_config_get(session)
+            if warning:
+                payload["credential_cleanup_warning"] = warning
+            del cleared
+            return payload
+
+        if request.api_key_action is CredentialAction.REPLACE:
+            assert request.api_key is not None
+            ephemeral_key = request.api_key.get_secret_value().strip()
+            stored = store.put(ephemeral_key)
+            new_secret_ref = stored.credential_ref
+            credential_ref, last4 = stored.credential_ref, stored.last4
+        elif credential_ref is None:
+            raise EmbeddingLifecycleError(
+                "embedding_not_configured", "embedding credential is missing"
+            )
+
+        evidence = await _sentinel(
+            base_url=base_url,
+            credential_ref=credential_ref,
+            model_id=request.requested_model_id,
+            dimension=request.requested_dimension,
             ephemeral_api_key=ephemeral_key,
         )
+
+        current = get_configuration(
+            session,
+            owner_id=LOCAL_OWNER_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            for_update=True,
+        )
+        _require_configuration_version(
+            current,
+            expected_version=request.expected_version,
+        )
+        if current is None:
+            current = ensure_configuration(
+                session,
+                owner_id=LOCAL_OWNER_ID,
+                workspace_id=LOCAL_WORKSPACE_ID,
+                base_url=base_url,
+            )
+        current.base_url = base_url
+        if request.api_key_action is CredentialAction.REPLACE:
+            current = apply_credential_reference(
+                session,
+                owner_id=LOCAL_OWNER_ID,
+                workspace_id=LOCAL_WORKSPACE_ID,
+                expected_version=current.version,
+                credential_ref=credential_ref,
+                last4=last4,
+            )
+        saved_version = current.version
         _, generation = create_verified_candidate(
             session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID,
             expected_config_version=saved_version,
             requested_model_id=request.requested_model_id,
             actual_model_id=request.requested_model_id,
-            actual_revision=None, dimension=len(result.vectors[0].values),
-            request_id=result.request_id, total_tokens=result.total_tokens, latency_ms=latency,
+            actual_revision=None, dimension=evidence.actual_dimension,
+            request_id=evidence.query_request_id,
+            document_request_id=evidence.document_request_id,
+            total_tokens=evidence.total_tokens,
+            latency_ms=evidence.latency_ms,
         )
         session.commit()
+        committed_secret_ref = credential_ref
+        warning = None
+        if request.api_key_action is CredentialAction.REPLACE:
+            warning = _delete_replaced_secret(
+                session,
+                store=store,
+                stale_credential_ref=old_secret_ref,
+                active_credential_ref=credential_ref,
+            )
         del generation
-        return embedding_config_get(session)
+        payload = embedding_config_get(session)
+        if warning:
+            payload["credential_cleanup_warning"] = warning
+        return payload
     except Exception as error:
         session.rollback()
-        if new_secret_ref:
-            configuration = get_configuration(
-                session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID
-            )
-            if configuration is None or configuration.credential_ref != new_secret_ref:
-                try:
-                    _secret_store().delete(new_secret_ref)
-                except EmbeddingSecretError:
-                    pass
+        if new_secret_ref is not None and committed_secret_ref != new_secret_ref:
+            try:
+                _discard_temporary_secret(store, new_secret_ref)
+            except EmbeddingSecretError as cleanup_error:
+                _raise(cleanup_error)
+                raise
         _raise(error)
         raise
 

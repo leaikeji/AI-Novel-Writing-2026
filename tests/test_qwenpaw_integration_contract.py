@@ -1756,6 +1756,11 @@ def test_install_waits_for_expected_runtime_before_final_verify(
     )
     monkeypatch.setattr(
         lab,
+        "provision_installed_embedding_secret_store",
+        lambda: events.append("embedding-secret-store"),
+    )
+    monkeypatch.setattr(
+        lab,
         "bootstrap_installed_digest_keyring",
         lambda: events.append("keyring"),
     )
@@ -1782,6 +1787,7 @@ def test_install_waits_for_expected_runtime_before_final_verify(
         "disabled-preflight",
         "hot-install",
         "migrate",
+        "embedding-secret-store",
         "keyring",
         "validation-token",
         "reload",
@@ -1829,6 +1835,7 @@ def test_install_runs_pytest_in_disabled_tts_environment(
     monkeypatch.setattr(lab, "require_live_tts_flags_disabled", lambda: None)
     monkeypatch.setattr(lab, "hot_install_packaged_plugin", lambda: None)
     monkeypatch.setattr(lab, "migrate_installed_plugin", lambda: None)
+    monkeypatch.setattr(lab, "provision_installed_embedding_secret_store", lambda: None)
     monkeypatch.setattr(lab, "bootstrap_installed_digest_keyring", lambda: None)
     monkeypatch.setattr(lab, "provision_installed_validation_token", lambda: None)
     monkeypatch.setattr(lab, "reload_installed_plugin", lambda: None)
@@ -1937,6 +1944,36 @@ def test_packager_includes_digest_keyring_bootstrap_commands() -> None:
 
     assert 'copy_file("scripts/tts/manage_digest_keyring.py")' in source
     assert 'copy_file("scripts/tts/bootstrap_digest_keyring.py")' in source
+
+
+def test_packager_and_installer_provision_embedding_secret_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = (ROOT / "scripts" / "package_plugin.py").read_text(encoding="utf-8")
+    assert 'copy_file("scripts/provision_embedding_secret_store.py")' in source
+
+    lab = load_script("qwenpaw_lab_plugin")
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(lab, "run", lambda *args, **_kwargs: calls.append(args) or "")
+
+    lab.provision_installed_embedding_secret_store()
+
+    assert calls == [
+        (
+            "docker",
+            "exec",
+            "--workdir",
+            lab.INSTALLED_PLUGIN_DIR,
+            lab.CONTAINER,
+            "/app/venv/bin/python",
+            "-m",
+            "scripts.provision_embedding_secret_store",
+            "--root-key",
+            lab.INSTALLED_EMBEDDING_ROOT_KEY_PATH,
+            "--records-dir",
+            lab.INSTALLED_EMBEDDING_RECORDS_DIR,
+        )
+    ]
 
 
 def test_packager_keeps_local_t4k_executor_out_of_product_payload() -> None:
