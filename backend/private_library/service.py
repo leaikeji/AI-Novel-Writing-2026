@@ -662,6 +662,8 @@ def replace_novel_bindings(
         row.updated_at = now
         active_rows.append(row)
     session.flush()
+    from ..embedding.indexing import request_active_novel_refresh
+    request_active_novel_refresh(session, novel_id)
     return BindingSetResult(
         tuple(_binding_views_from_rows(active_rows, pairs)), True
     )

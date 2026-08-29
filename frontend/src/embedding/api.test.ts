@@ -46,7 +46,7 @@ describe("embedding API client", () => {
       expected_version: 7,
       base_url: "https://dashscope.aliyuncs.com/api/v1",
       requested_model_id: "qwen3.7-text-embedding",
-      requested_dimension: 1024,
+      requested_dimension: 2048,
       api_key_action: "replace",
       api_key: "secret-write-only",
     });
@@ -90,14 +90,14 @@ describe("embedding API client", () => {
   it("turns provider and secret-store failures into Chinese reminders", async () => {
     fetchMock.mockResolvedValueOnce(errorResponse(
       503,
-      "embedding_auth_failed",
+      "embedding_authentication_failed",
       "Embedding authentication failed",
     ));
 
     await expect(testEmbeddingConnection({
       base_url: "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1",
       requested_model_id: "qwen3.7-text-embedding",
-      requested_dimension: 1024,
+      requested_dimension: 2048,
       api_key: "secret-write-only",
     })).rejects.toMatchObject({
       message: "API Key 验证失败，请检查后重新输入。",

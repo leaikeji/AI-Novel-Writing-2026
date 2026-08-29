@@ -51,6 +51,7 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   embedding_dns_failed: "无法解析阿里云百炼服务地址，请检查网络。",
   embedding_ssrf_blocked: "服务地址未通过安全检查，请使用阿里云百炼官方地址。",
   embedding_auth_failed: "API Key 验证失败，请检查后重新输入。",
+  embedding_authentication_failed: "API Key 验证失败，请检查后重新输入。",
   embedding_model_access_denied: "当前 API Key 无权使用该向量模型，请检查百炼业务空间和模型权限。",
   embedding_quota_unavailable: "当前百炼业务空间的向量模型额度不可用，请检查服务开通状态。",
   embedding_rate_limited: "阿里云百炼请求过于频繁，请稍后重试。",

@@ -17,6 +17,13 @@ from .creative_api import router as creative_router
 from .creative_schemas import SELECTION_EDIT_OPERATIONS
 from .creative_data_api import router as creative_data_router
 from .embedding.api import router as embedding_router
+from .embedding.contracts import RetrievalPurpose
+from .embedding.writing import (
+    WritingTimelineMappingRequired,
+    deterministic_query,
+    resolve_writing_position,
+    retrieve_for_writing,
+)
 from .embedding.runtime import (
     embedding_runtime_status,
     launch_embedding_runtime,
@@ -438,6 +445,11 @@ async def _uninstall_narration_runtime() -> None:
 
 
 def _raise_domain(error: Exception) -> None:
+    if isinstance(error, WritingTimelineMappingRequired):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     if isinstance(error, DraftConflictError):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -739,6 +751,22 @@ async def generation_jobs_create_body(
     job: dict[str, Any] | None = None
     actual_model: ModelAudit | None = None
     try:
+        position = resolve_writing_position(session, document_id)
+        brief = get_chapter_brief(session, document_id)
+        writing_retrieval = await retrieve_for_writing(
+            session,
+            novel_id=position.novel_id,
+            purpose=RetrievalPurpose.CHAPTER_BODY,
+            query=deterministic_query(
+                purpose=RetrievalPurpose.CHAPTER_BODY,
+                title=position.title,
+                outline=str(brief.get("outline_text") or ""),
+                expectation=str(brief.get("expectation_text") or ""),
+            ),
+            timeline_id=position.timeline_id,
+            narrative_sequence=position.narrative_sequence,
+            story_sequence_cutoff=position.story_sequence_cutoff,
+        )
         job = start_chapter_generation(
             session,
             document_id,
@@ -750,6 +778,9 @@ async def generation_jobs_create_body(
             force_new=request.force_new,
             asset_ids=request.asset_ids,
             preset_id=request.preset_id,
+            writing_retrieval=writing_retrieval,
+            writing_position=position,
+            effective_context_window_tokens=configured_model.effective_max_input_length,
         )
         if job["state"] == "ready" and job.get("candidate"):
             return job
@@ -817,6 +848,7 @@ async def generation_jobs_create_body(
                     DraftConflictError,
                     NotFoundError,
                     ValidationError,
+                    WritingTimelineMappingRequired,
                 ),
             ):
                 raise HTTPException(

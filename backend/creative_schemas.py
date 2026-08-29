@@ -197,6 +197,7 @@ class SelectionEditInputSnapshot(_StrictSelectionEditModel):
         "custom",
     ]
     custom_instruction: str | None = Field(default=None, max_length=2_000)
+    use_novel_context: bool = False
     target: SelectionEditTarget
     base: SelectionEditBase
 
@@ -216,6 +217,8 @@ class SelectionEditInputSnapshot(_StrictSelectionEditModel):
             self.custom_instruction = instruction
         elif self.custom_instruction is not None:
             raise ValueError("仅 custom 操作可携带 custom_instruction")
+        if self.operation != "custom" and self.use_novel_context:
+            raise ValueError("仅 custom 操作可显式开启参考全书资料")
         if (
             self.target.persistence == "autosave"
             and self.base.persistence_version_kind != "draft"

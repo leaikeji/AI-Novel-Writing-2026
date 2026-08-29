@@ -79,6 +79,7 @@ export function consent(
     model_id: null,
     confirmed_at: null,
     revoked_at: null,
+    writing_query_authorized: false,
     ...changes,
   };
 }
@@ -98,6 +99,11 @@ export function novelStatus(
     chunk_count: 0,
     failure_count: 0,
     last_indexed_at: null,
+    index_version: null,
+    authority_digest: null,
+    published_digest: null,
+    sync_state: null,
+    pending_refresh_count: 0,
     error_summary: null,
     can_rebuild: false,
     can_cancel: false,

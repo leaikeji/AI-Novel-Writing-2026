@@ -278,13 +278,14 @@ def test_config_get_never_returns_raw_key_or_last_eight(
     assert "12343456" not in serialized
 
 
-def test_candidate_request_defaults_to_2048_and_allows_1024() -> None:
+def test_candidate_request_is_permanently_fixed_to_2048() -> None:
     base = {
         "expected_version": 0,
         "base_url": "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1",
     }
     assert api.CandidateRequest(**base).requested_dimension == 2048
-    assert api.CandidateRequest(**base, requested_dimension=1024).requested_dimension == 1024
+    with pytest.raises(ValueError):
+        api.CandidateRequest(**base, requested_dimension=1024)
 
 
 @pytest.mark.asyncio
@@ -668,22 +669,34 @@ async def test_post_candidate_evaluate_uses_adapter_fake_and_marks_gate_passed(
 
         async def embed(self, **kwargs: Any) -> EmbeddingBatchResult:
             adapter_calls.append(kwargs)
-            assert kwargs["text_type"] == "query"
+            assert kwargs["text_type"] in {"document", "query"}
             assert len(kwargs["texts"]) == 1
-            values = (
-                (1.0, 0.0)
-                if kwargs["texts"] == ["fixed evaluation query"]
-                else (0.0, 1.0)
-            )
             return EmbeddingBatchResult(
                 request_id=f"fake-request-{len(adapter_calls)}",
-                vectors=(EmbeddingVector(text_index=0, values=values),),
+                vectors=(EmbeddingVector(text_index=0, values=(1.0, 0.0)),),
                 total_tokens=3,
                 input_tokens=3,
             )
 
     monkeypatch.setattr(api, "get_configuration", lambda *_args, **_kwargs: configuration)
     monkeypatch.setattr(api, "DashScopeEmbeddingAdapter", FakeAdapter)
+    monkeypatch.setattr(
+        api,
+        "load_frozen_evaluation_fixture",
+        lambda: SimpleNamespace(
+            sources=({"source_key": "source:1", "content": "冻结评测文档"},),
+            cases=({"case_id": "case:1", "query": "非原文改写查询"},),
+        ),
+    )
+    monkeypatch.setattr(
+        api,
+        "evaluate_frozen_vectors",
+        lambda *_args, **_kwargs: {
+            "schema_version": "embedding-evaluation/2",
+            "case_count": 36,
+            "passed": True,
+        },
+    )
     monkeypatch.setattr(
         api,
         "_secret_store",
@@ -719,6 +732,8 @@ async def test_post_candidate_evaluate_uses_adapter_fake_and_marks_gate_passed(
     ]
     assert session.commit_count == 2
     assert len(adapter_calls) == 2
+    assert [call["text_type"] for call in adapter_calls] == ["document", "query"]
+    assert adapter_calls[0]["texts"] != adapter_calls[1]["texts"]
 
 
 @pytest.mark.asyncio

@@ -24,13 +24,15 @@ from pydantic import (
 )
 
 
-EMBEDDING_CONTRACT_VERSION = "embedding-api/1"
-SEMANTIC_SEARCH_SCHEMA_VERSION = "semantic-search/1"
+EMBEDDING_CONTRACT_VERSION = "embedding-api/2"
+SEMANTIC_SEARCH_SCHEMA_VERSION = "semantic-search/2"
+NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION = "novel-embedding-consent/2"
+RETRIEVAL_POLICY_VERSION = "writing-retrieval/2"
 
 # Planning target only; it is not a claim that the live provider contract was
 # verified by this code package.
 TARGET_CANDIDATE_MODEL_ID = "qwen3.7-text-embedding"
-SUPPORTED_EMBEDDING_DIMENSIONS = (256, 512, 768, 1024, 1536, 2048, 2560)
+SUPPORTED_EMBEDDING_DIMENSIONS = (2048,)
 TARGET_CANDIDATE_DIMENSION = 2048
 
 
@@ -99,10 +101,13 @@ class SemanticIndexStatus(str, Enum):
     QUEUED = "queued"
     BUILDING = "building"
     READY = "ready"
+    UPDATING = "updating"
+    OUTDATED = "outdated"
     PARTIAL_FAILURE = "partial_failure"
     FAILED = "failed"
     STALE = "stale"
     DISABLED = "disabled"
+    REVOKED = "revoked"
 
 
 class SemanticMatchChannel(str, Enum):
@@ -128,6 +133,18 @@ class PerspectiveKind(str, Enum):
     AUTHOR = "author"
     READER = "reader"
     CHARACTER_INSTANCE = "character_instance"
+
+
+class RetrievalPurpose(str, Enum):
+    MANUAL_SEARCH = "manual_search"
+    CHAPTER_BODY = "chapter_body"
+    CHAPTER_OUTLINE = "chapter_outline"
+    CHAPTER_REVIEW = "chapter_review"
+    SELECTION_REWRITE = "selection_rewrite"
+    SELECTION_EXPAND = "selection_expand"
+    SELECTION_DIALOGUE = "selection_dialogue"
+    SELECTION_REVIEW = "selection_review"
+    SELECTION_CUSTOM = "selection_custom"
 
 
 class EmbeddingErrorCode(str, Enum):
@@ -286,6 +303,7 @@ class NovelEmbeddingConsentResource(_StrictModel):
     acknowledged_corpora: tuple[EmbeddingCorpus, ...] = ()
     granted_at: datetime | None = None
     revoked_at: datetime | None = None
+    writing_query_authorized: bool = False
 
     @field_validator("acknowledged_corpora")
     @classmethod
@@ -329,6 +347,7 @@ class SemanticPerspective(_StrictModel):
 class SemanticSearchRequest(_StrictModel):
     schema_version: Literal[SEMANTIC_SEARCH_SCHEMA_VERSION] = SEMANTIC_SEARCH_SCHEMA_VERSION
     query: str = Field(min_length=1, max_length=4000)
+    retrieval_purpose: RetrievalPurpose = RetrievalPurpose.MANUAL_SEARCH
     corpora: tuple[EmbeddingCorpus, ...] = (
         EmbeddingCorpus.MANUSCRIPT,
         EmbeddingCorpus.PLANNING,
@@ -337,6 +356,7 @@ class SemanticSearchRequest(_StrictModel):
     top_k: int = Field(default=10, ge=1, le=50)
     timeline_id: UUID | None = None
     narrative_sequence: int | None = Field(default=None, ge=0)
+    story_sequence_cutoff: int | None = Field(default=None, ge=0)
     perspective: SemanticPerspective = Field(default_factory=SemanticPerspective)
 
     @field_validator("query")
@@ -369,9 +389,13 @@ class SemanticSearchHit(_StrictModel):
     character_instance_id: UUID | None = None
     narrative_sequence_start: int | None = Field(default=None, ge=0)
     narrative_sequence_end: int | None = Field(default=None, ge=0)
+    story_sequence_start: int | None = Field(default=None, ge=0)
+    story_sequence_end: int | None = Field(default=None, ge=0)
     snippet: str = Field(min_length=1, max_length=4000)
     channels: tuple[SemanticMatchChannel, ...]
-    score: float = Field(ge=0)
+    lexical_score: float | None = Field(default=None, ge=0)
+    dense_distance: float | None = Field(default=None, ge=0, le=2)
+    fused_score: float = Field(ge=0)
 
     @field_validator("channels")
     @classmethod
@@ -384,7 +408,7 @@ class SemanticSearchHit(_StrictModel):
             raise ValueError("channels must not contain duplicates")
         return value
 
-    @field_validator("score")
+    @field_validator("fused_score")
     @classmethod
     def validate_finite_score(cls, value: float) -> float:
         if not isfinite(value):
@@ -407,10 +431,20 @@ class SemanticSearchHit(_StrictModel):
 class SemanticSearchResult(_StrictModel):
     schema_version: Literal[SEMANTIC_SEARCH_SCHEMA_VERSION] = SEMANTIC_SEARCH_SCHEMA_VERSION
     request_id: str = Field(min_length=1, max_length=160)
+    generation_id: UUID | None = None
+    index_version: int | None = Field(default=None, ge=1)
+    retrieval_policy_version: str = Field(
+        default=RETRIEVAL_POLICY_VERSION, min_length=1, max_length=120
+    )
     mode: SemanticSearchMode
     index_status: SemanticIndexStatus
     hits: tuple[SemanticSearchHit, ...] = ()
     omitted_count: int = Field(default=0, ge=0)
+    provider_request_id: str | None = Field(default=None, max_length=240)
+    token_count: int | None = Field(default=None, ge=0)
+    latency_ms: int | None = Field(default=None, ge=0)
+    degraded_reason: str | None = Field(default=None, max_length=120)
+    omission_summary: tuple[str, ...] = ()
     warnings: tuple[EmbeddingErrorCode, ...] = ()
 
     @field_validator("warnings")

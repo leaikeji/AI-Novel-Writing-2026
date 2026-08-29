@@ -331,6 +331,8 @@ def _write_outline(
     novel.highlight = revision.highlight_text
     novel.version = int(novel.version) + 1
     session.flush()
+    from ..embedding.indexing import request_active_novel_refresh
+    request_active_novel_refresh(session, novel_id)
     return AuthorityWriteResult(revision, head, False)
 
 
@@ -558,6 +560,8 @@ def _write_settings(
             setattr(novel, field, deepcopy(revision.settings_json[field]))
     novel.version = int(novel.version) + 1
     session.flush()
+    from ..embedding.indexing import request_active_novel_refresh
+    request_active_novel_refresh(session, novel_id)
     return AuthorityWriteResult(revision, head, False)
 
 

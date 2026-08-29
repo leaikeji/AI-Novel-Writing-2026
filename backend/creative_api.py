@@ -6,6 +6,7 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .character_profile_services import (
@@ -31,6 +32,7 @@ from .creative_schemas import (
     ReorderChaptersRequest,
     ReorderVolumesRequest,
     RestoreCharacterProfileBatchRequest,
+    SelectionEditInputSnapshot,
     SaveRelationshipGraphViewRequest,
     StartCreativeGenerationRequest,
     SyncRelationshipsRequest,
@@ -114,6 +116,16 @@ from .creative_services import (
     update_volume,
 )
 from .database import get_session
+from .context_v4 import RetrievalPurpose as ContextRetrievalPurpose
+from .context_v4_loader import assemble_writing_context_from_db
+from .embedding.contracts import RetrievalPurpose
+from .embedding.writing import (
+    WritingTimelineMappingRequired,
+    deterministic_query,
+    resolve_writing_position,
+    retrieval_purpose_for_selection,
+    retrieve_for_writing,
+)
 from .generation_dependencies import (
     get_novel_effective_model,
     get_novel_generation_ctx,
@@ -130,6 +142,7 @@ from .model_runtime import (
     reply_model_audit,
 )
 from .services import NotFoundError, ValidationError, delete_novel
+from .models import ChapterBrief
 from .story_state import StoryStateError
 from .selection_edit_diff import (
     SelectionEditDiffError,
@@ -140,7 +153,69 @@ from .selection_edit_diff import (
 router = APIRouter()
 
 
+async def _creative_writing_retrieval(
+    session: Session,
+    request: StartCreativeGenerationRequest,
+) -> dict[str, object] | None:
+    purpose: RetrievalPurpose | None = None
+    title = outline = expectation = selection = before = after = instruction = ""
+    if request.kind == "chapter_outline":
+        purpose = RetrievalPurpose.CHAPTER_OUTLINE
+    elif request.kind == "review":
+        purpose = RetrievalPurpose.CHAPTER_REVIEW
+    elif request.kind == "selection_edit":
+        snapshot = SelectionEditInputSnapshot.model_validate(request.input_snapshot)
+        use_novel_context = bool(getattr(snapshot, "use_novel_context", False))
+        purpose = retrieval_purpose_for_selection(
+            snapshot.operation,
+            use_novel_context=use_novel_context,
+        )
+        selection = snapshot.base.selection_text
+        before = snapshot.base.before
+        after = snapshot.base.after
+        instruction = snapshot.custom_instruction or ""
+    if purpose is None or request.novel_id is None:
+        return None
+    position = (
+        resolve_writing_position(session, request.document_id)
+        if request.document_id is not None
+        else None
+    )
+    if position is not None:
+        title = position.title
+        brief = session.scalar(
+            select(ChapterBrief).where(ChapterBrief.document_id == position.document_id)
+        )
+        if brief is not None:
+            outline = brief.outline_text
+            expectation = brief.expectation_text
+    query = deterministic_query(
+        purpose=purpose,
+        title=title,
+        outline=outline,
+        expectation=expectation,
+        selection=selection,
+        before=before,
+        after=after,
+        instruction=instruction,
+    )
+    return await retrieve_for_writing(
+        session,
+        novel_id=request.novel_id,
+        purpose=purpose,
+        query=query,
+        timeline_id=position.timeline_id if position else None,
+        narrative_sequence=position.narrative_sequence if position else None,
+        story_sequence_cutoff=position.story_sequence_cutoff if position else None,
+    )
+
+
 def _raise(error: Exception) -> None:
+    if isinstance(error, WritingTimelineMappingRequired):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     if isinstance(error, EntityConflictError):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1162,6 +1237,44 @@ async def creative_generations_create(
     job: dict[str, object] | None = None
     actual_model: ModelAudit | None = None
     try:
+        writing_retrieval = await _creative_writing_retrieval(session, request)
+        writing_context = None
+        if (
+            request.document_id is not None
+            and request.kind in {"chapter_outline", "review", "selection_edit"}
+        ):
+            if configured_model.effective_max_input_length is None:
+                raise ValidationError("当前正文模型没有提供可核验的有效上下文窗口")
+            position = resolve_writing_position(session, request.document_id)
+            context_purpose = (
+                ContextRetrievalPurpose.CHAPTER_OUTLINE
+                if request.kind == "chapter_outline"
+                else ContextRetrievalPurpose.REVIEW
+                if request.kind == "review"
+                else ContextRetrievalPurpose.SELECTION
+            )
+            brief = session.scalar(
+                select(ChapterBrief).where(ChapterBrief.document_id == request.document_id)
+            )
+            target = request.target_character_count or 0
+            reserved_output = max(
+                1024,
+                min(
+                    configured_model.effective_max_input_length // 4,
+                    target * 2 if target else configured_model.effective_max_input_length // 8,
+                ),
+            )
+            writing_context = assemble_writing_context_from_db(
+                session,
+                position=position,
+                purpose=context_purpose,
+                requested_model_id=configured_model.model_id,
+                actual_model_id=configured_model.model_id,
+                effective_context_window_tokens=configured_model.effective_max_input_length,
+                reserved_output_tokens=reserved_output,
+                chapter_brief=brief,
+                writing_retrieval=writing_retrieval,
+            )
         job = start_creative_generation(
             session,
             scope_type=request.scope_type,
@@ -1176,6 +1289,8 @@ async def creative_generations_create(
             document_id=request.document_id,
             target_character_count=request.target_character_count,
             force_new=request.force_new,
+            writing_retrieval=writing_retrieval,
+            writing_context=writing_context,
         )
         if job["state"] != "running" or not job.get("should_execute", True):
             return job

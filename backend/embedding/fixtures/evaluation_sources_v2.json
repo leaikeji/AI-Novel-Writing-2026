@@ -1,0 +1,125 @@
+{
+  "schema_version": "embedding-v2-sources/1",
+  "sources": [
+    {
+      "source_key": "manuscript:main:ch03:r1",
+      "corpus": "manuscript",
+      "content": "第三章里，林栖在西码头巡检房发现总闸上的新锉痕，值班表却没有检修记录，她由此确认停电源于蓄意切断。"
+    },
+    {
+      "source_key": "manuscript:main:ch06:r1",
+      "corpus": "manuscript",
+      "content": "第六章收尾，修表匠顾寻把一枚刻着两个相扣圆环的黄铜钥匙放进证物袋，并承认它来自失踪船长的抽屉。"
+    },
+    {
+      "source_key": "manuscript:main:ch07:r1",
+      "corpus": "manuscript",
+      "content": "约定时刻过去后，联络员没有现身，只让钟楼连续发出两短一长的钟声。熟悉约定的人都明白这表示仓库行动作废。"
+    },
+    {
+      "source_key": "manuscript:main:ch08:r1",
+      "corpus": "manuscript",
+      "content": "他们沿着排水沟追到废弃澡堂，在封死的锅炉间夹墙里取出被油布包住的航运账册。"
+    },
+    {
+      "source_key": "manuscript:main:ch04:r1",
+      "corpus": "manuscript",
+      "content": "黑影翻过矮墙时右腿明显拖滞，落地后又习惯性按住左肋。林栖记起白天见过同样的旧伤动作。"
+    },
+    {
+      "source_key": "manuscript:main:ch05:r1",
+      "corpus": "manuscript",
+      "content": "东闸的齿轮箱被铁屑卡住，强行启动会令闸板脱轨。值守员先派人疏散低岸住户，因此延后了开闸。"
+    },
+    {
+      "source_key": "manuscript:main:ch02:r1",
+      "corpus": "manuscript",
+      "content": "照片背面没有日期，但背景中的旧海关钟楼仍缺少后来加建的东翼。地方年鉴把扩建工程记在十二年前，时间范围因此被锁定。"
+    },
+    {
+      "source_key": "manuscript:main:ch01:r1",
+      "corpus": "manuscript",
+      "content": "海鸥号的末次呼叫只有半句话，随后频道里出现规律的金属敲击声；定位信号却指向早已封航的北礁水道。"
+    },
+    {
+      "source_key": "planning:outline:arc01:r3",
+      "corpus": "planning",
+      "content": "卷一终点不是抓住单一凶手，而是让林栖在公开矿难证据与保护养父免受追责之间作出不可撤销的选择。"
+    },
+    {
+      "source_key": "planning:outline:midpoint:r3",
+      "corpus": "planning",
+      "content": "中点揭示所谓海难目击证词经过多人拼接，前半卷建立的单一目击者叙事由此崩解，调查方向转向港务系统。"
+    },
+    {
+      "source_key": "planning:setting:tide-cost:r2",
+      "corpus": "planning",
+      "content": "潮汐感知不会立刻伤身，但每次主动调用都会永久抹去一段与陆地有关的个人记忆，且不能通过日记恢复情感联系。"
+    },
+    {
+      "source_key": "planning:setting:bell-rule:r2",
+      "corpus": "planning",
+      "content": "退潮后的钟声会沿地下盐穴传播并干扰承重柱，旧城禁令的实际用途是防止共振引发地面塌陷，而非宗教忌讳。"
+    },
+    {
+      "source_key": "planning:outline:antagonist:r3",
+      "corpus": "planning",
+      "content": "对手坚持保留废灯塔，是为了把它作为覆盖北礁航道的无线电中继点，继续篡改进港船只收到的导航信息。"
+    },
+    {
+      "source_key": "planning:outline:guxun-arc:r3",
+      "corpus": "planning",
+      "content": "顾寻的弧线从替权势者修补证据、保持沉默，走向主动在公开听证会上验证钥匙和机械痕迹，并承担作证后果。"
+    },
+    {
+      "source_key": "planning:outline:climax:r3",
+      "corpus": "planning",
+      "content": "高潮放在盐井，因为反派的通信设施、城市塌陷风险和林栖的记忆代价能在同一空间同时兑现；广场无法承载三条因果线。"
+    },
+    {
+      "source_key": "planning:outline:ending:r3",
+      "corpus": "planning",
+      "content": "尾声让修复后的北礁信标重新亮起，一艘小船平安回报位置，用稳定的灯光回应开篇那段中断的无线电呼叫。"
+    },
+    {
+      "source_key": "private_asset:dialect:v2:item01",
+      "corpus": "private_asset",
+      "content": "旧城口语表规定：本地晚辈称呼熟识的年长女性时用“阿嬢”，正式场合仍使用姓氏加职衔。"
+    },
+    {
+      "source_key": "private_asset:sailing:v3:item04",
+      "corpus": "private_asset",
+      "content": "术语表把帆船船艏越过风向、转到另一舷受风的动作记为“抢风换舷”，不宜笼统写成掉头。"
+    },
+    {
+      "source_key": "private_asset:medical:v1:item07",
+      "corpus": "private_asset",
+      "content": "溺水写作提示：短暂失去意识者即使很快恢复呼吸，也不应立刻奔跑或长篇对话，应保留咳嗽、乏力与进一步观察。"
+    },
+    {
+      "source_key": "private_asset:architecture:v2:item03",
+      "corpus": "private_asset",
+      "content": "沿海盐仓修缮笔记称，传统屋面会在瓦下铺设掺桐油的苇席作为隔潮层，接缝再压窄木条。"
+    },
+    {
+      "source_key": "private_asset:weather:v1:item05",
+      "corpus": "private_asset",
+      "content": "近岸经验记录：积雨云底部快速降低并出现横向碎云带，常比水面白沫更早提示强阵风逼近。"
+    },
+    {
+      "source_key": "private_asset:radio:v2:item02",
+      "corpus": "private_asset",
+      "content": "海事通信流程要求先完整记录收到的时间、频率、可辨词和方位，再按同一频道复诵确认，不能先猜测呼号。"
+    },
+    {
+      "source_key": "private_asset:sensory:v1:item06",
+      "corpus": "private_asset",
+      "content": "废盐井的环境笔记强调潮湿铁锈与微弱臭鸡蛋气味的混合，后者来自低处积聚的含硫气体。"
+    },
+    {
+      "source_key": "private_asset:archive:v2:item08",
+      "corpus": "private_asset",
+      "content": "旧港档案索引说明，临时增减船员通常不会重印船籍册，而会附记在每航次的出港签证申报表中。"
+    }
+  ]
+}

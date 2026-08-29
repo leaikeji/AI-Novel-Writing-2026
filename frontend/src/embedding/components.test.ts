@@ -102,7 +102,8 @@ describe("embedding configuration page", () => {
     expect("value" in secretInput.props).toBe(false);
     expect("aria-describedby" in secretInput.props).toBe(false);
     expect(textContent(root)).toContain("********cret");
-    expect(findAll(root, (element) => element.type === "select")[0].props.value).toBe(2048);
+    expect(findAll(root, (element) => element.type === "select")).toHaveLength(0);
+    expect(textContent(root)).toContain("2048 维（固定，只读）");
     expect(findButton(root, "激活候选").props.disabled).toBe(true);
 
     const secretRef = secretInput.props.ref as {
@@ -136,6 +137,7 @@ describe("embedding configuration page", () => {
     expect(saveCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
         expected_version: 7,
+        requested_dimension: 2048,
         api_key_action: "replace",
         api_key: "secret-only-in-request",
       }),
@@ -230,7 +232,114 @@ describe("novel semantic index card", () => {
     expect(disclosure).toContain("正式大纲与故事设定");
     expect(disclosure).toContain("作者秘密");
     expect(disclosure).toContain("已绑定的私有素材");
+    expect(disclosure).toContain("章纲要求");
+    expect(disclosure).toContain("工作稿选区");
+    expect(disclosure).toContain("自定义指令");
     expect(findButton(root, "授权并允许后续索引").props.disabled).toBe(true);
+  });
+
+
+  it("offers an explicit consent-v2 upgrade before enabling writing queries", async () => {
+    const oldConsent = consent({
+      state: "granted",
+      consent_id: "33333333-3333-4333-8333-333333333333",
+      version: 1,
+      notice_version: "novel-embedding-consent/1",
+      confirmed_at: "2026-08-29T09:00:00Z",
+      writing_query_authorized: false,
+    });
+    const putConsent = vi.fn<NovelSemanticIndexCardApi["putConsent"]>().mockResolvedValue(
+      consent({
+        state: "granted",
+        consent_id: "44444444-4444-4444-8444-444444444444",
+        version: 1,
+        notice_version: "novel-embedding-consent/2",
+        confirmed_at: "2026-08-29T10:00:00Z",
+        writing_query_authorized: true,
+      }),
+    );
+    const api: NovelSemanticIndexCardApi = {
+      getConsent: vi.fn().mockResolvedValue(oldConsent),
+      putConsent,
+      getStatus: vi.fn().mockResolvedValue(novelStatus({ state: "ready" })),
+      rebuild: vi.fn(),
+      cancel: vi.fn(),
+      retryFailed: vi.fn(),
+      clear: vi.fn(),
+    };
+    const harness = createReactHarness();
+    const Component = createNovelSemanticIndexCard(harness.React, TEST_ANTD, api);
+    let root = harness.render(Component, { novelId: TEST_NOVEL_ID });
+    harness.commitEffects();
+    await settle();
+    root = harness.render(Component, { novelId: TEST_NOVEL_ID });
+
+    expect(findAll(
+      root,
+      (element) => element.type === "alert"
+        && element.props.message === "现有授权不包含写作查询，请升级告知版本",
+    )).toHaveLength(1);
+    expect(textContent(root)).toContain("旧授权仍可维护已经披露的正式语料索引");
+    expect(textContent(root)).toContain("未授权，自动写作仅使用本地降级");
+    const upgrade = findButton(root, "升级授权并启用写作检索");
+    expect(upgrade.props.disabled).toBe(true);
+
+    const checkbox = findAll(root, (element) => element.type === "input"
+      && element.props.type === "checkbox")[0];
+    (checkbox.props.onChange as (event: unknown) => void)({ target: { checked: true } });
+    root = harness.render(Component, { novelId: TEST_NOVEL_ID });
+    (findButton(root, "升级授权并启用写作检索").props.onClick as () => void)();
+    await settle();
+
+    expect(putConsent).toHaveBeenCalledWith(
+      TEST_NOVEL_ID,
+      expect.objectContaining({
+        action: "grant",
+        expected_version: 1,
+        notice_version: "novel-embedding-consent/2",
+      }),
+      expect.any(AbortSignal),
+    );
+  });
+
+
+  it("labels a novel rebuild as an active-generation operation", async () => {
+    const rebuild = vi.fn<NovelSemanticIndexCardApi["rebuild"]>().mockResolvedValue(
+      novelStatus({ state: "updating", sync_state: "updating" }),
+    );
+    const api: NovelSemanticIndexCardApi = {
+      getConsent: vi.fn().mockResolvedValue(consent({
+        state: "granted",
+        consent_id: "33333333-3333-4333-8333-333333333333",
+        version: 1,
+        notice_version: "novel-embedding-consent/2",
+        confirmed_at: "2026-08-29T09:00:00Z",
+        writing_query_authorized: true,
+      })),
+      putConsent: vi.fn(),
+      getStatus: vi.fn().mockResolvedValue(novelStatus({
+        state: "ready",
+        sync_state: "current",
+        can_rebuild: true,
+      })),
+      rebuild,
+      cancel: vi.fn(),
+      retryFailed: vi.fn(),
+      clear: vi.fn(),
+    };
+    const harness = createReactHarness();
+    const Component = createNovelSemanticIndexCard(harness.React, TEST_ANTD, api);
+    let root = harness.render(Component, { novelId: TEST_NOVEL_ID });
+    harness.commitEffects();
+    await settle();
+    root = harness.render(Component, { novelId: TEST_NOVEL_ID });
+
+    (findButton(root, "按当前生效代次重建").props.onClick as () => void)();
+    await settle();
+
+    expect(rebuild).toHaveBeenCalledWith(TEST_NOVEL_ID, expect.any(AbortSignal));
+    root = harness.render(Component, { novelId: TEST_NOVEL_ID });
+    expect(textContent(root)).toContain("已按当前生效代次启动本小说索引重建");
   });
 
 
@@ -241,11 +350,12 @@ describe("novel semantic index card", () => {
       version: 1,
       notice_version: "novel-embedding-consent/1",
       confirmed_at: "2026-08-29T09:00:00Z",
+      writing_query_authorized: false,
     });
     const status = novelStatus({
-      state: "current",
+      state: "ready",
       active_model_id: "qwen3.7-text-embedding",
-      active_dimension: 1024,
+      active_dimension: 2048,
       active_generation_number: 1,
       can_rebuild: true,
       has_local_vectors: true,

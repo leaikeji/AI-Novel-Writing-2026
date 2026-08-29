@@ -32,6 +32,7 @@ export function createAssistantSelectionToolbar(
       () => controller.getState(),
     );
     const [customInstruction, setCustomInstruction] = React.useState("");
+    const [useNovelContext, setUseNovelContext] = React.useState(false);
     const toolbarRef = React.useRef<HTMLElement | null>(null);
 
     React.useEffect(() => controller.subscribe(setState), []);
@@ -42,7 +43,10 @@ export function createAssistantSelectionToolbar(
       controller.setToolbarSize(rect.width, rect.height);
     }, [state.visible, state.selectionId]);
     React.useEffect(() => {
-      if (state.phase !== "customizing") setCustomInstruction("");
+      if (state.phase !== "customizing") {
+        setCustomInstruction("");
+        setUseNovelContext(false);
+      }
     }, [state.phase, state.selectionId]);
 
     if (!state.visible || !state.placement) return null;
@@ -106,7 +110,7 @@ export function createAssistantSelectionToolbar(
             className: "anw-assistant-selection-custom",
             onSubmit: (event: Event) => {
               event.preventDefault();
-              controller.submitCustomInstruction(customInstruction);
+              controller.submitCustomInstruction(customInstruction, useNovelContext);
             },
           },
           h("label", { htmlFor: "anw-assistant-selection-custom-input" }, "自定义修改要求"),
@@ -121,6 +125,18 @@ export function createAssistantSelectionToolbar(
               setCustomInstruction(event.target.value);
             },
           }),
+          h(
+            "label",
+            { className: "anw-assistant-selection-context-opt-in" },
+            h("input", {
+              type: "checkbox",
+              checked: useNovelContext,
+              onChange: (event: { target: { checked: boolean } }) => {
+                setUseNovelContext(event.target.checked);
+              },
+            }),
+            "参考全书资料（可能向已授权的向量模型发送本次选区和自定义指令）",
+          ),
           h(
             "div",
             { className: "anw-assistant-selection-custom-actions" },

@@ -4101,6 +4101,8 @@ def start_creative_generation(
     document_id: UUID | None = None,
     target_character_count: int | None = None,
     force_new: bool = False,
+    writing_retrieval: dict[str, Any] | None = None,
+    writing_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if kind not in CREATIVE_GENERATION_KINDS:
         raise ValidationError("创作生成类型无效")
@@ -4152,6 +4154,12 @@ def start_creative_generation(
             kind=kind,
             request_snapshot=input_snapshot,
         )
+    if writing_retrieval is not None:
+        input_snapshot = dict(input_snapshot)
+        input_snapshot["writing_retrieval"] = writing_retrieval
+    if writing_context is not None:
+        input_snapshot = dict(input_snapshot)
+        input_snapshot["writing_context"] = writing_context
     serialized = json.dumps(
         {
             "input_snapshot": input_snapshot,

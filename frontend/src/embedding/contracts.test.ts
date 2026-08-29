@@ -5,9 +5,10 @@ import {
   candidateCanActivate,
   parseEmbeddingConfigResource,
   parseEmbeddingConnectionTestResult,
+  parseNovelEmbeddingConsentResource,
   parseNovelSemanticIndexStatus,
 } from "./contracts";
-import { config, generation, novelStatus } from "./test-fixtures";
+import { config, consent, generation, novelStatus } from "./test-fixtures";
 
 
 describe("embedding wire contracts", () => {
@@ -46,11 +47,10 @@ describe("embedding wire contracts", () => {
     expect(candidateCanActivate(generation())).toBe(true);
   });
 
-  it("uses 2048 by default while accepting only documented dimensions", () => {
+  it("freezes the qwen3.7 document space to read-only 2048 dimensions", () => {
     expect(config().requested_dimension).toBe(2048);
-    expect(parseEmbeddingConfigResource(config({ requested_dimension: 1024 })).requested_dimension)
-      .toBe(1024);
-    expect(() => parseEmbeddingConfigResource(config({ requested_dimension: 1234 })))
+    expect(parseEmbeddingConfigResource(config()).requested_dimension).toBe(2048);
+    expect(() => parseEmbeddingConfigResource(config({ requested_dimension: 1024 })))
       .toThrow(EmbeddingContractError);
   });
 
@@ -94,4 +94,37 @@ describe("embedding wire contracts", () => {
       chunk_count: -1,
     })).toThrow(EmbeddingContractError);
   });
+
+  it("parses consent v2 writing-query authority explicitly", () => {
+    const upgraded = parseNovelEmbeddingConsentResource(consent({
+      state: "granted",
+      consent_id: "33333333-3333-4333-8333-333333333333",
+      notice_version: "novel-embedding-consent/2",
+      confirmed_at: "2026-08-29T09:00:00Z",
+      writing_query_authorized: true,
+    }));
+    expect(upgraded.writing_query_authorized).toBe(true);
+    expect(() => parseNovelEmbeddingConsentResource({
+      ...upgraded,
+      writing_query_authorized: "yes",
+    })).toThrow(EmbeddingContractError);
+    expect(() => parseNovelEmbeddingConsentResource({
+      ...upgraded,
+      notice_version: "novel-embedding-consent/1",
+    })).toThrow(EmbeddingContractError);
+  });
+
+  it.each(["ready", "updating", "outdated", "partial_failed", "revoked"] as const)(
+    "accepts the %s novel synchronization state",
+    (state) => {
+      const parsed = parseNovelSemanticIndexStatus(novelStatus({
+        state,
+        sync_state: state === "ready" ? "current" : state,
+        index_version: 3,
+        authority_digest: "authority-v3",
+        published_digest: state === "outdated" ? "authority-v2" : "authority-v3",
+      }));
+      expect(parsed.state).toBe(state);
+    },
+  );
 });

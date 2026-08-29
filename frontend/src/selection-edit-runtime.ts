@@ -74,6 +74,7 @@ interface ActiveSelectionEdit {
   readonly adapter: AssistantEditableFieldContext["adapter"];
   readonly operation: AssistantSelectionOperation;
   readonly customInstruction?: string;
+  readonly useNovelContext?: boolean;
   jobId?: string;
   abort?: AbortController;
   generation: number;
@@ -223,6 +224,7 @@ export class SelectionEditRuntime {
       adapter: context.adapter,
       operation: request.operation,
       customInstruction: request.customInstruction,
+      useNovelContext: request.useNovelContext,
       generation: 0,
     };
     if (!sameContext(context, active)) {
@@ -448,6 +450,7 @@ export class SelectionEditRuntime {
       selection_id: record.selectionId,
       operation: active.operation,
       custom_instruction: active.operation === "custom" ? active.customInstruction : null,
+      use_novel_context: active.operation === "custom" && active.useNovelContext === true,
       target: {
         novel_id: context.novelId,
         document_id: documentId,

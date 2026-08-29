@@ -11,7 +11,6 @@ import {
 } from "./api";
 import {
   DEFAULT_EMBEDDING_DIMENSION,
-  SUPPORTED_EMBEDDING_DIMENSIONS,
   candidateCanActivate,
 } from "./contracts";
 import type {
@@ -70,7 +69,6 @@ type LoadState =
 interface FormState {
   readonly baseUrl: string;
   readonly modelId: string;
-  readonly dimension: number;
 }
 
 
@@ -125,7 +123,6 @@ function formFromResource(resource: EmbeddingConfigResource): FormState {
   return {
     baseUrl: resource.base_url,
     modelId: resource.requested_model_id,
-    dimension: resource.requested_dimension,
   };
 }
 
@@ -150,7 +147,6 @@ export function createEmbeddingConfigPage(
     const [form, setForm] = React.useState<FormState>({
       baseUrl: "",
       modelId: "qwen3.7-text-embedding",
-      dimension: DEFAULT_EMBEDDING_DIMENSION,
     });
     const [credentialDraftState, setCredentialDraftState] = React.useState<CredentialDraftState>(
       "empty",
@@ -245,7 +241,7 @@ export function createEmbeddingConfigPage(
       const payload: TestEmbeddingConnectionRequest = {
         base_url: form.baseUrl.trim(),
         requested_model_id: form.modelId.trim(),
-        requested_dimension: form.dimension,
+        requested_dimension: DEFAULT_EMBEDDING_DIMENSION,
         ...(credentialDraftState === "valid"
           ? { api_key: credentialInputRef.current?.input?.value ?? "" }
           : {}),
@@ -276,7 +272,7 @@ export function createEmbeddingConfigPage(
         expected_version: resource.version,
         base_url: form.baseUrl.trim(),
         requested_model_id: form.modelId.trim(),
-        requested_dimension: form.dimension,
+        requested_dimension: DEFAULT_EMBEDDING_DIMENSION,
         api_key_action: keyAction,
         ...(keyAction === "replace" ? { api_key: key } : {}),
       };
@@ -314,19 +310,14 @@ export function createEmbeddingConfigPage(
     const canActivate = candidateCanActivate(candidate);
     const baseUrlPresent = form.baseUrl.trim().length > 0;
     const modelValid = form.modelId.trim().length > 0;
-    const dimensionValid = SUPPORTED_EMBEDDING_DIMENSIONS.includes(
-      form.dimension as (typeof SUPPORTED_EMBEDDING_DIMENSIONS)[number],
-    );
     const credentialReady = credentialDraftState === "valid"
       || (credentialDraftState === "empty" && resource.api_key_configured);
     const formReady = resource.secret_store_ready
       && baseUrlPresent
       && modelValid
-      && dimensionValid
       && credentialReady;
     const hasUnsavedChanges = form.baseUrl.trim() !== resource.base_url
       || form.modelId.trim() !== resource.requested_model_id
-      || form.dimension !== resource.requested_dimension
       || credentialDraftState !== "empty";
     const credentialDisplay = credentialDraftState !== "empty"
       ? (credentialDraftState === "valid" ? "API Key 待验证" : null)
@@ -441,17 +432,9 @@ export function createEmbeddingConfigPage(
             )
             : null,
         ),
-        h("label", { className: "anw-embedding-field" },
-          h("span", null, "向量维度"),
-          h(antd.Select, {
-            value: form.dimension,
-            options: SUPPORTED_EMBEDDING_DIMENSIONS.map((dimension) => ({
-              value: dimension,
-              label: `${dimension} 维`,
-            })),
-            disabled: operation.busy,
-            onChange: (value: number) => updateForm({ dimension: value }),
-          }),
+        h("div", { className: "anw-embedding-readonly" },
+          h("strong", null, "向量维度"),
+          h("span", null, `${DEFAULT_EMBEDDING_DIMENSION} 维（固定，只读）`),
         ),
         h("label", { className: "anw-embedding-field" },
           h("span", null, resource.api_key_configured ? "替换 API Key（可选）" : "API Key"),

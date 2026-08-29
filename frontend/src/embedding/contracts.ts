@@ -1,8 +1,7 @@
 export const EMBEDDING_CONFIG_SCHEMA_VERSION = "embedding-config/1" as const;
-export const NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION = "novel-embedding-consent/1" as const;
-export const SUPPORTED_EMBEDDING_DIMENSIONS = [
-  256, 512, 768, 1024, 1536, 2048, 2560,
-] as const;
+export const EMBEDDING_CONTRACT_VERSION = "embedding-api/2" as const;
+export const NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION = "novel-embedding-consent/2" as const;
+export const SUPPORTED_EMBEDDING_DIMENSIONS = [2048] as const;
 export const DEFAULT_EMBEDDING_DIMENSION = 2048;
 
 
@@ -124,6 +123,7 @@ export interface NovelEmbeddingConsentResource {
   readonly model_id: string | null;
   readonly confirmed_at: string | null;
   readonly revoked_at: string | null;
+  readonly writing_query_authorized: boolean;
 }
 
 
@@ -175,11 +175,21 @@ export interface SemanticCorpusStatus {
 export type NovelSemanticIndexState =
   | "not_authorized"
   | "empty"
-  | "current"
+  | "ready"
+  | "updating"
+  | "outdated"
+  | "partial_failed"
+  | "revoked"
   | "update_pending"
-  | "building"
-  | "partial_failure"
   | "stale";
+
+
+export type NovelSemanticSyncState =
+  | "current"
+  | "updating"
+  | "outdated"
+  | "partial_failed"
+  | "revoked";
 
 
 export interface NovelSemanticIndexStatus {
@@ -193,6 +203,11 @@ export interface NovelSemanticIndexStatus {
   readonly chunk_count: number;
   readonly failure_count: number;
   readonly last_indexed_at: string | null;
+  readonly index_version: number | null;
+  readonly authority_digest: string | null;
+  readonly published_digest: string | null;
+  readonly sync_state: NovelSemanticSyncState | null;
+  readonly pending_refresh_count: number;
   readonly error_summary: string | null;
   readonly can_rebuild: boolean;
   readonly can_cancel: boolean;
@@ -440,16 +455,32 @@ export function parseNovelEmbeddingConsentResource(
   value: unknown,
 ): NovelEmbeddingConsentResource {
   const item = record(value, "embedding_consent");
+  const state = enumValue(item.state, "state", ["not_granted", "granted", "revoked"]);
+  const noticeVersion = nullableText(item.notice_version, "notice_version");
+  const writingQueryAuthorized = boolean(
+    item.writing_query_authorized,
+    "writing_query_authorized",
+  );
+  if (writingQueryAuthorized && (
+    state !== "granted"
+    || noticeVersion !== NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION
+  )) {
+    throw new EmbeddingContractError(
+      "writing_query_authorized",
+      "requires a granted novel-embedding-consent/2 record",
+    );
+  }
   return {
     novel_id: text(item.novel_id, "novel_id"),
-    state: enumValue(item.state, "state", ["not_granted", "granted", "revoked"]),
+    state,
     consent_id: nullableText(item.consent_id, "consent_id"),
     version: integer(item.version, "version"),
-    notice_version: nullableText(item.notice_version, "notice_version"),
+    notice_version: noticeVersion,
     provider_id: nullableText(item.provider_id, "provider_id"),
     model_id: nullableText(item.model_id, "model_id"),
     confirmed_at: nullableText(item.confirmed_at, "confirmed_at"),
     revoked_at: nullableText(item.revoked_at, "revoked_at"),
+    writing_query_authorized: writingQueryAuthorized,
   };
 }
 
@@ -487,12 +518,14 @@ export function parseNovelSemanticIndexStatus(value: unknown): NovelSemanticInde
       item.state,
       "state",
       [
-        "not_authorized", "empty", "current", "update_pending", "building",
-        "partial_failure", "stale",
+        "not_authorized", "empty", "ready", "updating", "outdated",
+        "partial_failed", "revoked", "update_pending", "stale",
       ],
     ),
     active_model_id: nullableText(item.active_model_id, "active_model_id"),
-    active_dimension: nullableInteger(item.active_dimension, "active_dimension", 1),
+    active_dimension: item.active_dimension === null
+      ? null
+      : embeddingDimension(item.active_dimension, "active_dimension"),
     active_generation_number: nullableInteger(
       item.active_generation_number,
       "active_generation_number",
@@ -503,6 +536,17 @@ export function parseNovelSemanticIndexStatus(value: unknown): NovelSemanticInde
     chunk_count: integer(item.chunk_count, "chunk_count"),
     failure_count: integer(item.failure_count, "failure_count"),
     last_indexed_at: nullableText(item.last_indexed_at, "last_indexed_at"),
+    index_version: nullableInteger(item.index_version, "index_version", 1),
+    authority_digest: nullableText(item.authority_digest, "authority_digest"),
+    published_digest: nullableText(item.published_digest, "published_digest"),
+    sync_state: item.sync_state === null
+      ? null
+      : enumValue(
+        item.sync_state,
+        "sync_state",
+        ["current", "updating", "outdated", "partial_failed", "revoked"] as const,
+      ),
+    pending_refresh_count: integer(item.pending_refresh_count, "pending_refresh_count"),
     error_summary: nullableText(item.error_summary, "error_summary"),
     can_rebuild: boolean(item.can_rebuild, "can_rebuild"),
     can_cancel: boolean(item.can_cancel, "can_cancel"),

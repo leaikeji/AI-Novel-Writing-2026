@@ -8,10 +8,20 @@ from typing import Literal
 from uuid import UUID
 
 
-V1_RENDERER_VERSION = "semantic-v1-renderers/1"
-V1_CHUNKER_VERSION = "semantic-char-chunker/4"
-V1_CHUNK_MAX_CHARACTERS = 256
-V1_CHUNK_OVERLAP_CHARACTERS = 32
+LEGACY_V1_RENDERER_VERSION = "semantic-v1-renderers/1"
+V1_RENDERER_VERSION = "semantic-v1-renderers/2"
+CHUNKER_CANDIDATES = {
+    # Read/build compatibility for immutable generations activated before VM34.
+    # New candidates never select this version.
+    "semantic-char-chunker/4": (256, 32),
+    "semantic-char-chunker/5a": (512, 64),
+    "semantic-char-chunker/5b": (800, 120),
+}
+V1_CHUNKER_VERSION = "semantic-char-chunker/5b"
+V1_CHUNK_MAX_CHARACTERS, V1_CHUNK_OVERLAP_CHARACTERS = CHUNKER_CANDIDATES[
+    V1_CHUNKER_VERSION
+]
+TOKEN_ESTIMATOR_VERSION = "unicode-char-estimate/1"
 
 
 def content_hash(value: str) -> str:
@@ -73,6 +83,8 @@ class RenderedSource:
     source_entity_id: UUID
     source_revision_id: UUID
     text: str
+    header: str
+    body: str
     renderer_version: str
     content_hash: str
     source_fingerprint: str
@@ -88,7 +100,17 @@ class RenderedChunk:
     chunker_version: str = V1_CHUNKER_VERSION
 
 
-def render_v1_source(source: V1SourceInput) -> RenderedSource:
+def estimate_token_count(value: str) -> int:
+    """Return a conservative, explicitly labelled estimate for Chinese prose."""
+
+    return max(1, (len(value) + 1) // 2)
+
+
+def render_v1_source(
+    source: V1SourceInput,
+    *,
+    renderer_version: str = V1_RENDERER_VERSION,
+) -> RenderedSource:
     title = normalize_text(source.title).strip()
     body = normalize_text(source.content)
     if not title:
@@ -104,12 +126,15 @@ def render_v1_source(source: V1SourceInput) -> RenderedSource:
     labels = [f"语料: {source.corpus}", f"标题: {title}"]
     if source.usage_policy is not None:
         labels.append(f"使用策略: {source.usage_policy}")
-    text = "\n".join((*labels, "", body))
+    if renderer_version not in {LEGACY_V1_RENDERER_VERSION, V1_RENDERER_VERSION}:
+        raise ValueError("unknown renderer version")
+    header = "\n".join(labels)
+    text = f"{header}\n\n{body}"
     digest = content_hash(text)
     fingerprint = content_hash(
         "\x1f".join(
             (
-                V1_RENDERER_VERSION,
+                renderer_version,
                 source.corpus,
                 source.source_type,
                 str(source.source_entity_id),
@@ -124,7 +149,9 @@ def render_v1_source(source: V1SourceInput) -> RenderedSource:
         source_entity_id=source.source_entity_id,
         source_revision_id=source.source_revision_id,
         text=text,
-        renderer_version=V1_RENDERER_VERSION,
+        header=header,
+        body=body,
+        renderer_version=renderer_version,
         content_hash=digest,
         source_fingerprint=fingerprint,
     )
@@ -175,6 +202,37 @@ def chunk_text(
             break
         start = max(start + 1, end - overlap_characters)
     return tuple(chunks)
+
+
+def chunk_rendered_source(
+    source: RenderedSource,
+    *,
+    chunker_version: str = V1_CHUNKER_VERSION,
+) -> tuple[RenderedChunk, ...]:
+    """Chunk a source body while repeating provenance labels in every chunk."""
+
+    try:
+        max_characters, overlap_characters = CHUNKER_CANDIDATES[chunker_version]
+    except KeyError as error:
+        raise ValueError("unknown chunker version") from error
+    legacy = chunker_version == "semantic-char-chunker/4"
+    body_chunks = chunk_text(
+        source.text if legacy else source.body,
+        max_characters=max_characters,
+        overlap_characters=overlap_characters,
+    )
+    prefix = "" if legacy else f"{source.header}\n分块版本: {chunker_version}\n\n"
+    return tuple(
+        RenderedChunk(
+            index=item.index,
+            source_start=item.source_start,
+            source_end=item.source_end,
+            text=f"{prefix}{item.text}",
+            content_hash=content_hash(f"{prefix}{item.text}"),
+            chunker_version=chunker_version,
+        )
+        for item in body_chunks
+    )
 
 
 def batch_chunks(

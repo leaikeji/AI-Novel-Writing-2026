@@ -498,30 +498,6 @@ class DerivedSourceBinding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class NovelChunk(Base):
-    __tablename__ = "novel_chunks"
-    __table_args__ = (
-        UniqueConstraint(
-            "revision_id", "embedding_profile", "chunk_index", name="uq_novel_chunk_profile_index"
-        ),
-        Index("ix_novel_chunks_revision", "revision_id"),
-    )
-
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    novel_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False
-    )
-    revision_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="CASCADE"), nullable=False
-    )
-    embedding_profile: Mapped[str] = mapped_column(String(160), nullable=False)
-    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    content_text: Mapped[str] = mapped_column(Text, nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    embedding: Mapped[list[float] | None] = mapped_column(VECTOR(), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
 class MediaAsset(Base):
     __tablename__ = "media_assets"
     __table_args__ = (

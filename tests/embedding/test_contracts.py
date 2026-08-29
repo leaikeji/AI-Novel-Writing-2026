@@ -44,7 +44,9 @@ def test_candidate_defaults_are_explicitly_unverified() -> None:
 
 
 def test_candidate_dimension_supports_documented_values_only() -> None:
-    assert EmbeddingCandidateTarget(dimension=1024).dimension == 1024
+    assert EmbeddingCandidateTarget(dimension=2048).dimension == 2048
+    with pytest.raises(ValidationError):
+        EmbeddingCandidateTarget(dimension=1024)
     with pytest.raises(ValueError, match="dimension"):
         EmbeddingCandidateTarget(dimension=1234)
 
@@ -223,7 +225,9 @@ def test_semantic_search_result_carries_source_and_scope_evidence() -> None:
         narrative_sequence_end=20,
         snippet="她在钟楼中看到了那封信。",
         channels=[SemanticMatchChannel.LEXICAL, SemanticMatchChannel.DENSE],
-        score=0.82,
+        lexical_score=0.5,
+        dense_distance=0.18,
+        fused_score=0.82,
     )
     result = SemanticSearchResult(
         request_id="request-1",

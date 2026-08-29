@@ -255,7 +255,7 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
                 "SELECT tablename FROM pg_tables "
                 "WHERE schemaname='public' AND tablename IN "
                 "('novels','documents','document_working_copies','document_revisions',"
-                "'story_facts','novel_chunks','media_assets','chapter_briefs',"
+                "'story_facts','media_assets','chapter_briefs',"
                 "'chapter_generation_jobs','candidate_revisions','intelligence_proposals',"
                 "'intelligence_proposal_items','intelligence_commit_batches',"
                 "'derived_source_bindings','novel_creation_drafts','private_assets',"
@@ -276,7 +276,6 @@ def test_migration_installs_pgvector_and_authority_tables(session: Session) -> N
         "document_working_copies",
         "document_revisions",
         "story_facts",
-        "novel_chunks",
         "media_assets",
         "chapter_briefs",
         "chapter_generation_jobs",
@@ -1009,6 +1008,7 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
     candidate = completed["candidate"]
 
     assert candidate["state"] == "ready"
+    assert completed["generation_context_snapshot"] == job["generation_context_snapshot"]
     assert get_document(session, document_id)["content_markdown"] == ""
 
     adopted = adopt_candidate(

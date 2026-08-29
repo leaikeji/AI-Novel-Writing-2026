@@ -28,9 +28,18 @@ from ..creative_data_models import (
     EmbeddingIndexBatch,
     EmbeddingIndexBatchItem,
     EmbeddingProfile,
+    NovelAssetBinding,
     NovelEmbeddingConsent,
+    NovelOutlineHead,
+    NovelOutlineRevision,
+    NovelSettingHead,
+    NovelSettingRevision,
+    PrivateAssetVersion,
+    RevisionTimelineMappingSegment,
     SemanticChunk,
     SemanticEmbedding,
+    SemanticSource,
+    SemanticSourceRefresh,
 )
 from .adapter import (
     DashScopeEmbeddingAdapter,
@@ -38,8 +47,16 @@ from .adapter import (
     EmbeddingBatchResult,
 )
 from .lifecycle import EmbeddingLifecycleError
+from .chunking import V1SourceInput, render_structured_setting, render_v1_source
+from .refresh import PublicationAuthority, service_for_session
 from .secrets import EmbeddingSecretError, EmbeddingSecretStore
-from ..models import BackgroundJob, ModelRunRecord
+from ..models import (
+    BackgroundJob,
+    Document,
+    DocumentRevision,
+    DocumentWorkingCopy,
+    ModelRunRecord,
+)
 
 
 SessionFactory = Callable[[], Session]
@@ -104,6 +121,7 @@ class BatchCallSnapshot:
     input_hash: str
     chunk_ids: tuple[UUID, ...]
     texts: tuple[str, ...]
+    refresh_id: UUID | None = None
 
 
 def _hash(value: object) -> str:
@@ -127,7 +145,7 @@ def _load_call(session: Session, *, lease: JobLease) -> BatchCallSnapshot:
             EmbeddingGenerationNovel.novel_id == batch.novel_id,
         )
     )
-    if build is None or build.state not in {"building", "pending"}:
+    if build is None or build.state not in {"building", "pending", "updating"}:
         raise EmbeddingLifecycleError("generation_cancelled", "novel index build is not active")
     consent = session.scalar(
         select(NovelEmbeddingConsent).where(
@@ -139,7 +157,7 @@ def _load_call(session: Session, *, lease: JobLease) -> BatchCallSnapshot:
     if consent is None:
         raise EmbeddingLifecycleError("consent_revoked", "cloud embedding consent is not active")
     generation = session.get(EmbeddingGeneration, batch.generation_id)
-    if generation is None or generation.state not in {"building", "draft"}:
+    if generation is None or generation.state not in {"building", "draft", "active"}:
         raise EmbeddingLifecycleError("generation_state_invalid", "embedding generation is not buildable")
     profile = session.get(EmbeddingProfile, generation.profile_id)
     if profile is None or profile.connection_state != "available":
@@ -168,6 +186,8 @@ def _load_call(session: Session, *, lease: JobLease) -> BatchCallSnapshot:
         raise EmbeddingLifecycleError("batch_hash_mismatch", "embedding batch input changed")
     batch.state = "running"
     batch.attempt_count += 1
+    if batch.refresh_id is not None:
+        service_for_session(session).mark_building(batch.refresh_id)
     session.flush()
     return BatchCallSnapshot(
         batch_id=batch.id, generation_id=batch.generation_id, novel_id=batch.novel_id,
@@ -175,6 +195,217 @@ def _load_call(session: Session, *, lease: JobLease) -> BatchCallSnapshot:
         base_url=profile.base_url, model_id=profile.actual_model_id,
         model_revision=profile.actual_revision, dimension=profile.dimension,
         input_hash=batch.input_hash, chunk_ids=chunk_ids, texts=texts,
+        refresh_id=batch.refresh_id,
+    )
+
+
+def _current_rendered_content_hash(
+    session: Session,
+    *,
+    refresh: SemanticSourceRefresh,
+    pending: SemanticSource,
+) -> str | None:
+    """Re-render the current immutable authority with the generation renderer."""
+
+    source_input: V1SourceInput | None = None
+    if refresh.source_type == "chapter_revision":
+        document = session.get(Document, refresh.source_entity_id)
+        working = session.get(DocumentWorkingCopy, refresh.source_entity_id)
+        revision = (
+            session.get(DocumentRevision, working.base_revision_id)
+            if working is not None and working.base_revision_id is not None
+            else None
+        )
+        if document is None or revision is None or revision.id != refresh.source_revision_id:
+            return None
+        start = pending.source_locator_json.get("source_start")
+        end = pending.source_locator_json.get("source_end")
+        content = revision.content_text
+        title = document.title
+        if isinstance(start, int) and isinstance(end, int):
+            if start < 0 or end <= start or end > len(content):
+                return None
+            content = content[start:end]
+            mapping_id = pending.source_locator_json.get("mapping_revision_id")
+            segments = tuple(
+                session.scalars(
+                    select(RevisionTimelineMappingSegment)
+                    .where(
+                        RevisionTimelineMappingSegment.mapping_revision_id
+                        == mapping_id
+                    )
+                    .order_by(RevisionTimelineMappingSegment.ordinal)
+                )
+            )
+            segment = next(
+                (
+                    item
+                    for item in segments
+                    if item.source_start == start and item.source_end == end
+                ),
+                None,
+            )
+            if segment is None:
+                return None
+            title = f"{document.title}·片段{segment.ordinal + 1}"
+        source_input = V1SourceInput(
+            corpus="manuscript",
+            source_type="chapter_revision",
+            source_entity_id=document.id,
+            source_revision_id=revision.id,
+            title=title,
+            content=content,
+        )
+    elif refresh.source_type == "outline_revision":
+        head = session.get(NovelOutlineHead, refresh.novel_id)
+        revision = (
+            session.get(NovelOutlineRevision, head.current_revision_id)
+            if head is not None
+            else None
+        )
+        if revision is None or revision.id != refresh.source_revision_id:
+            return None
+        content = "\n\n".join(
+            part
+            for part in (
+                revision.background_text,
+                revision.plot_text,
+                revision.highlight_text,
+            )
+            if part.strip()
+        )
+        source_input = V1SourceInput(
+            corpus="planning",
+            source_type="outline_revision",
+            source_entity_id=refresh.novel_id,
+            source_revision_id=revision.id,
+            title="正式大纲",
+            content=content,
+        )
+    elif refresh.source_type == "setting_revision":
+        head = session.get(NovelSettingHead, refresh.novel_id)
+        revision = (
+            session.get(NovelSettingRevision, head.current_revision_id)
+            if head is not None
+            else None
+        )
+        if revision is None or revision.id != refresh.source_revision_id:
+            return None
+        source_input = V1SourceInput(
+            corpus="planning",
+            source_type="setting_revision",
+            source_entity_id=refresh.novel_id,
+            source_revision_id=revision.id,
+            title="正式故事设定",
+            content=render_structured_setting(revision.settings_json),
+        )
+    elif refresh.source_type == "private_asset_version":
+        binding = session.scalar(
+            select(NovelAssetBinding).where(
+                NovelAssetBinding.novel_id == refresh.novel_id,
+                NovelAssetBinding.asset_id == refresh.source_entity_id,
+                NovelAssetBinding.lifecycle_state == "active",
+                NovelAssetBinding.usage_policy != "prohibited",
+            )
+        )
+        version = (
+            session.get(PrivateAssetVersion, binding.asset_version_id)
+            if binding is not None
+            else None
+        )
+        if version is None or version.id != refresh.source_revision_id:
+            return None
+        source_input = V1SourceInput(
+            corpus="private_asset",
+            source_type="private_asset_version",
+            source_entity_id=binding.asset_id,
+            source_revision_id=version.id,
+            title=version.title,
+            content=version.content,
+            usage_policy=binding.usage_policy,
+        )
+    if source_input is None:
+        return None
+    return render_v1_source(
+        source_input,
+        renderer_version=pending.renderer_version,
+    ).content_hash
+
+
+def _publication_authority(
+    session: Session,
+    *,
+    refresh: SemanticSourceRefresh,
+    build: EmbeddingGenerationNovel,
+) -> PublicationAuthority:
+    revision_id: UUID | None = None
+    content_hash = refresh.target_content_hash
+    in_scope = False
+    if refresh.source_type == "chapter_revision":
+        working = session.get(DocumentWorkingCopy, refresh.source_entity_id)
+        revision = (
+            session.get(DocumentRevision, working.base_revision_id)
+            if working is not None and working.base_revision_id is not None else None
+        )
+        if revision is not None:
+            revision_id, content_hash, in_scope = revision.id, revision.content_hash, True
+    elif refresh.source_type == "outline_revision":
+        head = session.get(NovelOutlineHead, refresh.novel_id)
+        revision = (
+            session.get(NovelOutlineRevision, head.current_revision_id)
+            if head is not None else None
+        )
+        if revision is not None:
+            revision_id, content_hash, in_scope = revision.id, revision.content_hash, True
+    elif refresh.source_type == "setting_revision":
+        head = session.get(NovelSettingHead, refresh.novel_id)
+        revision = (
+            session.get(NovelSettingRevision, head.current_revision_id)
+            if head is not None else None
+        )
+        if revision is not None:
+            revision_id, content_hash, in_scope = revision.id, revision.content_hash, True
+    elif refresh.source_type == "private_asset_version":
+        binding = session.scalar(
+            select(NovelAssetBinding).where(
+                NovelAssetBinding.novel_id == refresh.novel_id,
+                NovelAssetBinding.asset_id == refresh.source_entity_id,
+                NovelAssetBinding.lifecycle_state == "active",
+                NovelAssetBinding.usage_policy != "prohibited",
+            )
+        )
+        version = (
+            session.get(PrivateAssetVersion, binding.asset_version_id)
+            if binding is not None else None
+        )
+        if version is not None:
+            revision_id, content_hash, in_scope = version.id, version.content_hash, True
+    consent_active = session.scalar(
+        select(func.count()).select_from(NovelEmbeddingConsent).where(
+            NovelEmbeddingConsent.id == build.consent_id,
+            NovelEmbeddingConsent.novel_id == refresh.novel_id,
+            NovelEmbeddingConsent.revoked_at.is_(None),
+        )
+    ) == 1
+    pending = (
+        session.get(SemanticSource, refresh.pending_source_id)
+        if refresh.pending_source_id is not None
+        else None
+    )
+    if pending is not None and in_scope:
+        rendered_hash = _current_rendered_content_hash(
+            session, refresh=refresh, pending=pending
+        )
+        if rendered_hash is None:
+            in_scope = False
+        else:
+            content_hash = rendered_hash
+    return PublicationAuthority(
+        novel_authority_digest=build.authority_digest,
+        source_revision_id=revision_id,
+        content_hash=content_hash,
+        consent_active=consent_active,
+        source_in_scope=in_scope,
     )
 
 
@@ -343,7 +574,28 @@ def _record_success(
     batch.result_count = len(result.vectors)
     batch.failure_code = None
     batch.completed_at = datetime.now(UTC)
-    build.embedded_count += len(result.vectors)
+    session.flush()
+    if snapshot.refresh_id is not None:
+        refresh_service = service_for_session(session)
+        refresh_remaining = int(
+            session.scalar(
+                select(func.count()).select_from(EmbeddingIndexBatch).where(
+                    EmbeddingIndexBatch.refresh_id == snapshot.refresh_id,
+                    EmbeddingIndexBatch.state != "ready",
+                )
+            ) or 0
+        )
+        if refresh_remaining == 0:
+            refresh_service.mark_ready(snapshot.refresh_id)
+            refresh = session.get(SemanticSourceRefresh, snapshot.refresh_id)
+            if refresh is None:
+                raise EmbeddingLifecycleError("refresh_not_found", "source refresh is missing")
+            refresh_service.publish(
+                snapshot.refresh_id,
+                _publication_authority(session, refresh=refresh, build=build),
+            )
+    else:
+        build.embedded_count += len(result.vectors)
     remaining = int(
         session.scalar(
             select(func.count()).select_from(EmbeddingIndexBatch).where(
@@ -355,15 +607,22 @@ def _record_success(
         )
         or 0
     )
-    if remaining == 0 and build.embedded_count == build.chunk_count:
+    if (
+        snapshot.refresh_id is None
+        and remaining == 0
+        and build.embedded_count == build.chunk_count
+    ):
         build.state = "ready"
+        build.sync_state = "current"
+        build.published_digest = build.authority_digest
+        build.last_refresh_at = datetime.now(UTC)
         build.completed_at = datetime.now(UTC)
     complete_attempt(
         session, scope=LocalWorkspaceScope.fixed_local(), fence=lease.fence,
         actual_result_digest=output_digest,
     )
     generation = session.get(EmbeddingGeneration, snapshot.generation_id)
-    if generation is not None:
+    if generation is not None and snapshot.refresh_id is None:
         not_ready = int(
             session.scalar(
                 select(func.count()).select_from(EmbeddingGenerationNovel).where(

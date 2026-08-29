@@ -462,6 +462,9 @@ class EmbeddingConfiguration(Base):
     previous_generation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     connection_state: Mapped[str] = mapped_column(String(30), nullable=False, default="unconfigured")
     connection_summary_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    retrieval_policy_version: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="writing-retrieval/2"
+    )
     version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -471,7 +474,7 @@ class EmbeddingProfile(Base):
     __table_args__ = (
         UniqueConstraint("owner_id", "workspace_id", "index_fingerprint", name="uq_embedding_profile_fingerprint"),
         UniqueConstraint("id", "owner_id", "workspace_id", name="uq_embedding_profile_scope"),
-        CheckConstraint("dimension > 0", name="ck_embedding_profile_dimension"),
+        CheckConstraint("dimension = 2048", name="ck_embedding_profile_dimension"),
         CheckConstraint("char_length(index_fingerprint) = 64", name="ck_embedding_profile_fingerprint"),
     )
 
@@ -573,7 +576,9 @@ class EmbeddingGenerationNovel(Base):
         ForeignKeyConstraint(["novel_id", "owner_id", "workspace_id"], ["novels.id", "novels.owner_id", "novels.workspace_id"], name="fk_embedding_generation_novel_novel_scope", ondelete="CASCADE"),
         ForeignKeyConstraint(["consent_id", "novel_id"], ["novel_embedding_consents.id", "novel_embedding_consents.novel_id"], name="fk_embedding_generation_novel_consent_scope", ondelete="RESTRICT"),
         UniqueConstraint("generation_id", "novel_id", name="uq_embedding_generation_novel"),
-        CheckConstraint("state IN ('pending','building','ready','failed','cancelled','stale')", name="ck_embedding_generation_novel_state"),
+        CheckConstraint("state IN ('pending','building','ready','updating','outdated','partial_failed','failed','cancelled','stale')", name="ck_embedding_generation_novel_state"),
+        CheckConstraint("sync_state IN ('current','updating','outdated','partial_failed','revoked')", name="ck_embedding_generation_novel_sync_state"),
+        CheckConstraint("index_version > 0 AND pending_refresh_count >= 0", name="ck_embedding_generation_novel_refresh_counts"),
         CheckConstraint("source_count >= 0 AND chunk_count >= 0 AND embedded_count >= 0 AND failure_count >= 0", name="ck_embedding_generation_novel_counts"),
         CheckConstraint("char_length(input_digest) = 64", name="ck_embedding_generation_novel_digest"),
     )
@@ -592,6 +597,12 @@ class EmbeddingGenerationNovel(Base):
     embedded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failure_code: Mapped[str | None] = mapped_column(String(96))
+    index_version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    authority_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="0" * 64)
+    published_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="0" * 64)
+    sync_state: Mapped[str] = mapped_column(String(24), nullable=False, default="outdated")
+    pending_refresh_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -605,7 +616,7 @@ class SemanticSource(Base):
         UniqueConstraint("generation_id", "novel_id", "source_fingerprint", name="uq_semantic_source_fingerprint"),
         UniqueConstraint("id", "generation_id", name="uq_semantic_source_generation_scope"),
         CheckConstraint("corpus IN ('manuscript','planning','private_asset','character','relationship','story_event','storyline','foreshadow','timeline')", name="ck_semantic_source_corpus"),
-        CheckConstraint("status IN ('current','invalid','retired')", name="ck_semantic_source_status"),
+        CheckConstraint("status IN ('pending','current','invalid','retired')", name="ck_semantic_source_status"),
         CheckConstraint("char_length(content_hash) = 64 AND char_length(source_fingerprint) = 64", name="ck_semantic_source_hashes"),
     )
 
@@ -621,12 +632,63 @@ class SemanticSource(Base):
     renderer_version: Mapped[str] = mapped_column(String(120), nullable=False)
     timeline_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     character_instance_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
-    narrative_start: Mapped[int | None] = mapped_column(BigInteger)
-    narrative_end: Mapped[int | None] = mapped_column(BigInteger)
+    narrative_sequence_start: Mapped[int | None] = mapped_column(BigInteger)
+    narrative_sequence_end: Mapped[int | None] = mapped_column(BigInteger)
+    story_sequence_start: Mapped[int | None] = mapped_column(BigInteger)
+    story_sequence_end: Mapped[int | None] = mapped_column(BigInteger)
     visibility_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SemanticSourceRefresh(Base):
+    __tablename__ = "semantic_source_refreshes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["generation_id", "novel_id"],
+            ["embedding_generation_novels.generation_id", "embedding_generation_novels.novel_id"],
+            name="fk_semantic_refresh_generation_novel",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["pending_source_id", "generation_id"],
+            ["semantic_sources.id", "semantic_sources.generation_id"],
+            name="fk_semantic_refresh_pending_source",
+            ondelete="SET NULL",
+        ),
+        UniqueConstraint(
+            "generation_id", "novel_id", "request_digest",
+            name="uq_semantic_refresh_request",
+        ),
+        UniqueConstraint("id", "generation_id", name="uq_semantic_refresh_generation_scope"),
+        CheckConstraint(
+            "state IN ('pending','queued','building','ready','published','failed','cancelled','superseded')",
+            name="ck_semantic_refresh_state",
+        ),
+        CheckConstraint(
+            "char_length(target_content_hash) = 64 AND char_length(request_digest) = 64",
+            name="ck_semantic_refresh_hashes",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    generation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    source_entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    source_revision_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    target_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    pending_source_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SemanticChunk(Base):
@@ -635,7 +697,7 @@ class SemanticChunk(Base):
         ForeignKeyConstraint(["source_id", "generation_id"], ["semantic_sources.id", "semantic_sources.generation_id"], name="fk_semantic_chunk_source_generation", ondelete="CASCADE"),
         UniqueConstraint("source_id", "chunk_index", name="uq_semantic_chunk_index"),
         UniqueConstraint("id", "generation_id", name="uq_semantic_chunk_generation_scope"),
-        CheckConstraint("chunk_index >= 0 AND source_start >= 0 AND source_end > source_start AND token_count >= 0", name="ck_semantic_chunk_bounds"),
+        CheckConstraint("chunk_index >= 0 AND source_start >= 0 AND source_end > source_start AND estimated_token_count >= 0", name="ck_semantic_chunk_bounds"),
         CheckConstraint("char_length(content_hash) = 64", name="ck_semantic_chunk_hash"),
     )
 
@@ -647,7 +709,10 @@ class SemanticChunk(Base):
     source_end: Mapped[int] = mapped_column(Integer, nullable=False)
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    estimated_token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_estimator_version: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="unicode-char-estimate/1"
+    )
     chunker_version: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -656,6 +721,7 @@ class EmbeddingIndexBatch(Base):
     __tablename__ = "embedding_index_batches"
     __table_args__ = (
         ForeignKeyConstraint(["generation_id", "novel_id"], ["embedding_generation_novels.generation_id", "embedding_generation_novels.novel_id"], name="fk_embedding_batch_generation_novel", ondelete="CASCADE"),
+        ForeignKeyConstraint(["refresh_id", "generation_id"], ["semantic_source_refreshes.id", "semantic_source_refreshes.generation_id"], name="fk_embedding_batch_refresh", ondelete="CASCADE"),
         UniqueConstraint("generation_id", "novel_id", "batch_number", name="uq_embedding_batch_number"),
         UniqueConstraint("background_job_id", name="uq_embedding_batch_job"),
         UniqueConstraint("id", "generation_id", name="uq_embedding_batch_generation_scope"),
@@ -667,6 +733,7 @@ class EmbeddingIndexBatch(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     generation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    refresh_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     batch_number: Mapped[int] = mapped_column(Integer, nullable=False)
     background_job_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("background_jobs.id", ondelete="RESTRICT"))
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -702,7 +769,7 @@ class SemanticEmbedding(Base):
         ForeignKeyConstraint(["chunk_id", "generation_id"], ["semantic_chunks.id", "semantic_chunks.generation_id"], name="fk_semantic_embedding_chunk_generation", ondelete="CASCADE"),
         ForeignKeyConstraint(["batch_id", "generation_id"], ["embedding_index_batches.id", "embedding_index_batches.generation_id"], name="fk_semantic_embedding_batch_generation", ondelete="RESTRICT"),
         UniqueConstraint("generation_id", "chunk_id", name="uq_semantic_embedding_chunk"),
-        CheckConstraint("dimension > 0 AND vector_dims(embedding) = dimension", name="ck_semantic_embedding_dimension"),
+        CheckConstraint("dimension = 2048 AND vector_dims(embedding) = dimension", name="ck_semantic_embedding_dimension"),
         CheckConstraint("char_length(embedding_hash) = 64", name="ck_semantic_embedding_hash"),
     )
 

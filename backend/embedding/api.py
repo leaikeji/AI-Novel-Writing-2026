@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,7 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -39,13 +40,15 @@ from .contracts import (
     CredentialAction,
     EmbeddingCorpus,
     NovelEmbeddingConsentMutation,
+    NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION,
     PerspectiveKind,
+    RetrievalPurpose as ApiRetrievalPurpose,
     SUPPORTED_EMBEDDING_DIMENSIONS,
     SemanticSearchRequest,
     TARGET_CANDIDATE_DIMENSION,
 )
-from .indexing import prepare_v1_novel_index
-from .evaluation import EvaluationCase, evaluate_rankings
+from .indexing import prepare_v1_novel_index, request_active_novel_refresh
+from .evaluation_v2 import evaluate_frozen_vectors, load_frozen_evaluation_fixture
 from .lifecycle import EmbeddingLifecycleError
 from .persistence import (
     activate_candidate_generation,
@@ -56,8 +59,23 @@ from .persistence import (
     grant_consent,
     revoke_consent,
 )
-from .search import Candidate, SearchScope, reciprocal_rank_fusion
-from .search import derive_known_visibility_keys
+from .retrieval import (
+    CandidateVisibility,
+    RawChannelScore,
+    RetrievalCandidate,
+    RetrievalChannel,
+    RetrievalChannelEvidence,
+    RetrievalChannelStatus,
+    RetrievalPerspective,
+    RetrievalPolicyV1,
+    RetrievalPurpose as CoreRetrievalPurpose,
+    KnowledgeProjectionScope,
+    SearchScope,
+    SemanticSearchRequestV2,
+    TimelineSearchLimit,
+    derive_known_visibility_keys,
+    retrieve,
+)
 from .secrets import EmbeddingSecretError, EmbeddingSecretStore
 from ..models import BackgroundJob, DerivedSourceBinding, DocumentWorkingCopy, StoryFact
 from ..narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID, NarrationRequestScope
@@ -148,47 +166,7 @@ async def _evaluate_candidate(
     profile = session.get(EmbeddingProfile, generation.profile_id)
     if profile is None:
         raise EmbeddingLifecycleError("profile_missing", "candidate profile is missing")
-    rows = session.execute(
-        select(SemanticSource, SemanticChunk, SemanticEmbedding)
-        .join(SemanticChunk, SemanticChunk.source_id == SemanticSource.id)
-        .join(
-            SemanticEmbedding,
-            (SemanticEmbedding.chunk_id == SemanticChunk.id)
-            & (SemanticEmbedding.generation_id == generation.id),
-        )
-        .where(
-            SemanticSource.generation_id == generation.id,
-            SemanticSource.status == "current",
-        )
-        .order_by(
-            SemanticSource.novel_id,
-            SemanticSource.corpus,
-            SemanticSource.id,
-            SemanticChunk.chunk_index,
-        )
-    ).all()
-    grouped: dict[tuple[UUID, str], list[tuple[UUID, tuple[float, ...], str]]] = {}
-    for source, chunk, embedding in rows:
-        grouped.setdefault((source.novel_id, source.corpus), []).append(
-            (chunk.id, tuple(float(value) for value in embedding.embedding), chunk.content_text)
-        )
-    cases: list[EvaluationCase] = []
-    for key in sorted(grouped, key=lambda item: (str(item[0]), item[1])):
-        candidates = grouped[key]
-        for expected_id, _, text_value in candidates[:5]:
-            query = text_value.strip()[:240]
-            if query:
-                cases.append(
-                    EvaluationCase(
-                        query=query,
-                        expected_chunk_id=expected_id,
-                        candidate_vectors=tuple((chunk_id, vector) for chunk_id, vector, _ in candidates),
-                    )
-                )
-    if not cases:
-        raise EmbeddingLifecycleError(
-            "candidate_evaluation_empty", "candidate has no fixed retrieval evaluation cases"
-        )
+    fixture = load_frozen_evaluation_fixture()
     credential_ref = configuration.credential_ref
     configuration_version = configuration.version
     if credential_ref is None:
@@ -199,28 +177,53 @@ async def _evaluate_candidate(
     model_id = profile.actual_model_id
     dimension = profile.dimension
     generation.evaluation_state = "pending"
-    generation.evaluation_summary_json = {"case_count": len(cases)}
+    generation.evaluation_summary_json = {
+        "schema_version": "embedding-evaluation/2",
+        "case_count": len(fixture.cases),
+        "state": "running",
+    }
     session.commit()
 
     api_key = _secret_store().get(credential_ref)
     adapter = DashScopeEmbeddingAdapter(base_url=base_url)
-    query_vectors: list[tuple[float, ...]] = []
+    source_vectors: dict[str, tuple[float, ...]] = {}
+    query_vectors: dict[str, tuple[float, ...]] = {}
     request_ids: list[str] = []
     total_tokens = 0
-    for start in range(0, len(cases), EVALUATION_QUERY_BATCH_SIZE):
-        batch = cases[start : start + EVALUATION_QUERY_BATCH_SIZE]
+    for source in fixture.sources:
         result = await adapter.embed(
             api_key=api_key,
-            texts=[item.query for item in batch],
+            texts=[str(source["content"])],
+            text_type="document",
+            model_id=model_id,
+            dimension=dimension,
+        )
+        source_vectors[str(source["source_key"])] = tuple(
+            float(value) for value in result.vectors[0].values
+        )
+        request_ids.append(result.request_id)
+        total_tokens += result.total_tokens
+    for start in range(0, len(fixture.cases), EVALUATION_QUERY_BATCH_SIZE):
+        batch = fixture.cases[start : start + EVALUATION_QUERY_BATCH_SIZE]
+        result = await adapter.embed(
+            api_key=api_key,
+            texts=[str(item["query"]) for item in batch],
             text_type="query",
             model_id=model_id,
             dimension=dimension,
             instruct="Retrieve the matching evidence from this novel corpus.",
         )
-        query_vectors.extend(tuple(float(value) for value in item.values) for item in result.vectors)
+        for item, vector in zip(batch, result.vectors):
+            query_vectors[str(item["case_id"])] = tuple(
+                float(value) for value in vector.values
+            )
         request_ids.append(result.request_id)
         total_tokens += result.total_tokens
-    summary = evaluate_rankings(tuple(cases), tuple(query_vectors))
+    summary = evaluate_frozen_vectors(
+        fixture,
+        source_vectors=source_vectors,
+        query_vectors=query_vectors,
+    )
     current_configuration = get_configuration(
         session,
         owner_id=LOCAL_OWNER_ID,
@@ -243,9 +246,9 @@ async def _evaluate_candidate(
     ):
         session.rollback()
         raise EmbeddingLifecycleError("candidate_changed", "candidate changed during evaluation")
-    current.evaluation_state = "passed" if summary.passed else "failed"
+    current.evaluation_state = "passed" if summary["passed"] else "failed"
     current.evaluation_summary_json = {
-        **summary.as_json(),
+        **summary,
         "request_ids": request_ids,
         "total_tokens": total_tokens,
     }
@@ -886,6 +889,7 @@ def embedding_consent_get(
             "novel_id": str(novel_id), "state": "not_granted", "consent_id": None,
             "version": 0, "notice_version": None, "provider_id": None,
             "model_id": None, "confirmed_at": None, "revoked_at": None,
+            "writing_query_authorized": False,
         }
     return {
         "novel_id": str(novel_id),
@@ -894,6 +898,10 @@ def embedding_consent_get(
         "version": 1 if consent.revoked_at is None else 2,
         "provider_id": consent.provider_id, "model_id": consent.model_id,
         "confirmed_at": consent.confirmed_at, "revoked_at": consent.revoked_at,
+        "writing_query_authorized": (
+            consent.revoked_at is None
+            and consent.notice_version == NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION
+        ),
     }
 
 
@@ -905,16 +913,21 @@ def embedding_consent_put(
 ) -> dict[str, object]:
     try:
         if request.action is ConsentAction.GRANT:
-            if request.expected_version != 0:
+            if request.notice_version != NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION:
+                raise EmbeddingLifecycleError(
+                    "consent_notice_outdated", "writing queries require the current consent notice"
+                )
+            if request.expected_version not in {0, 1}:
                 raise EmbeddingLifecycleError("version_conflict", "consent state changed")
             consent = grant_consent(
                 session, novel_id=novel_id, owner_id=LOCAL_OWNER_ID,
                 workspace_id=LOCAL_WORKSPACE_ID,
                 idempotency_key=f"consent:{novel_id}:grant:{request.notice_version}",
                 notice_version=request.notice_version,
-                corpora=tuple(item.value for item in EmbeddingCorpus),
+                corpora=("manuscript", "planning", "private_asset"),
                 actor="local-author",
             )
+            request_active_novel_refresh(session, novel_id)
         else:
             if request.expected_version != 1:
                 raise EmbeddingLifecycleError("version_conflict", "consent state changed")
@@ -951,8 +964,7 @@ def semantic_index_status(
         session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID
     )
     active_generation_id = configuration.active_generation_id if configuration else None
-    candidate_generation_id = configuration.candidate_generation_id if configuration else None
-    generation_id = candidate_generation_id or active_generation_id
+    generation_id = active_generation_id
     build: EmbeddingGenerationNovel | None = None
     if generation_id is not None:
         build = session.scalar(
@@ -992,9 +1004,11 @@ def semantic_index_status(
     state = (
         "not_authorized" if consent is None else
         "empty" if build is None else
-        "current" if build.state == "ready" and build.generation_id == active_generation_id else
-        "building" if build.state in {"pending", "building"} else
-        "partial_failure" if build.state == "failed" else
+        "ready" if build.sync_state == "current" and build.generation_id == active_generation_id else
+        "updating" if build.sync_state == "updating" else
+        "outdated" if build.sync_state == "outdated" else
+        "partial_failed" if build.sync_state == "partial_failed" else
+        "revoked" if build.sync_state == "revoked" else
         "stale" if build.state == "stale" else
         "update_pending"
     )
@@ -1023,10 +1037,15 @@ def semantic_index_status(
         "chunk_count": build.chunk_count if build else 0,
         "failure_count": build.failure_count if build else 0,
         "last_indexed_at": build.completed_at if build else None,
+        "index_version": build.index_version if build else None,
+        "authority_digest": build.authority_digest if build else None,
+        "published_digest": build.published_digest if build else None,
+        "sync_state": build.sync_state if build else None,
+        "pending_refresh_count": build.pending_refresh_count if build else 0,
         "error_summary": build.failure_code if build else None,
-        "can_rebuild": consent is not None and candidate_generation_id is not None,
-        "can_cancel": bool(build and build.state in {"pending", "building"}),
-        "can_retry_failed": bool(build and build.state == "failed"),
+        "can_rebuild": consent is not None and active_generation_id is not None,
+        "can_cancel": bool(build and build.state in {"pending", "building", "updating"}),
+        "can_retry_failed": bool(build and build.state in {"failed", "partial_failed"}),
         "has_local_vectors": vector_count > 0,
     }
 
@@ -1039,10 +1058,10 @@ def semantic_index_rebuild(
         configuration = get_configuration(
             session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID
         )
-        if configuration is None or configuration.candidate_generation_id is None:
-            raise EmbeddingLifecycleError("candidate_missing", "save a candidate generation first")
+        if configuration is None or configuration.active_generation_id is None:
+            raise EmbeddingLifecycleError("active_generation_missing", "activate an embedding generation first")
         build = prepare_v1_novel_index(
-            session, generation_id=configuration.candidate_generation_id, novel_id=novel_id
+            session, generation_id=configuration.active_generation_id, novel_id=novel_id
         )
         session.commit()
         return semantic_index_status(novel_id, session)
@@ -1059,7 +1078,7 @@ def semantic_index_cancel(
         session.scalars(
             select(EmbeddingGenerationNovel).where(
                 EmbeddingGenerationNovel.novel_id == novel_id,
-                EmbeddingGenerationNovel.state.in_(("pending", "building")),
+                EmbeddingGenerationNovel.state.in_(("pending", "building", "updating")),
             )
         )
     )
@@ -1099,13 +1118,13 @@ def semantic_index_retry_failed(
     configuration = get_configuration(
         session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID
     )
-    if configuration is None or configuration.candidate_generation_id is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "candidate_missing"})
+    if configuration is None or configuration.active_generation_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "active_generation_missing"})
     rows = session.execute(
         select(EmbeddingIndexBatch, BackgroundJob)
         .join(BackgroundJob, BackgroundJob.id == EmbeddingIndexBatch.background_job_id)
         .where(
-            EmbeddingIndexBatch.generation_id == configuration.candidate_generation_id,
+            EmbeddingIndexBatch.generation_id == configuration.active_generation_id,
             EmbeddingIndexBatch.novel_id == novel_id,
             EmbeddingIndexBatch.state == "failed",
             BackgroundJob.state.in_(("failed", "dead_letter")),
@@ -1121,7 +1140,7 @@ def semantic_index_retry_failed(
             batch.state = "queued"; batch.failure_code = None
         build = session.scalar(
             select(EmbeddingGenerationNovel).where(
-                EmbeddingGenerationNovel.generation_id == configuration.candidate_generation_id,
+                EmbeddingGenerationNovel.generation_id == configuration.active_generation_id,
                 EmbeddingGenerationNovel.novel_id == novel_id,
             )
         )
@@ -1159,7 +1178,7 @@ def _inheritance_scope(
     *,
     novel_id: UUID,
     requested: UUID | None,
-    narrative_cutoff: int | None,
+    story_cutoff: int | None,
 ) -> tuple[frozenset[UUID], tuple[tuple[UUID, int | None], ...]]:
     timelines = tuple(
         session.scalars(
@@ -1179,7 +1198,7 @@ def _inheritance_scope(
     path: set[UUID] = set()
     target_to_root: list[tuple[UUID, int | None]] = []
     current: UUID | None = requested
-    current_limit = narrative_cutoff
+    current_limit = story_cutoff
     while current is not None:
         if current in path or current not in by_id:
             raise EmbeddingLifecycleError("timeline_conflict", "timeline inheritance is invalid")
@@ -1224,7 +1243,7 @@ def _known_visibility_keys(
     session: Session,
     *,
     novel_id: UUID,
-    scope: SearchScope,
+    scope: KnowledgeProjectionScope,
 ) -> frozenset[str]:
     observer_id = scope.observer_character_instance_id
     if scope.perspective != "character_instance" or observer_id is None:
@@ -1321,20 +1340,53 @@ def _source_is_current(session: Session, source: SemanticSource) -> bool:
     return False
 
 
-def _candidate(source: SemanticSource, chunk: SemanticChunk) -> Candidate:
-    visibility = None
-    if source.visibility_json:
-        visibility = source.visibility_json.get("visibility_key")
-        if visibility is None:
-            visibility = source.visibility_json.get("visibility")
-    return Candidate(
-        chunk_id=chunk.id, novel_id=source.novel_id, corpus=source.corpus,
-        source_id=source.source_entity_id, source_revision_id=source.source_revision_id,
-        source_type=source.source_type, text=chunk.content_text,
-        source_status=source.status, timeline_id=source.timeline_id,
-        character_instance_id=source.character_instance_id,
-        narrative_start=source.narrative_start, narrative_end=source.narrative_end,
-        visibility_key=str(visibility) if visibility else None,
+def _candidate(
+    session: Session,
+    *,
+    source: SemanticSource,
+    chunk: SemanticChunk,
+    generation_id: UUID,
+    index_version: int,
+) -> RetrievalCandidate:
+    visibility_json = source.visibility_json or {}
+    visibility_value = str(
+        visibility_json.get("visibility")
+        or visibility_json.get("visibility_key")
+        or "public"
+    )
+    if visibility_value in {"author", "author_only", "secret"}:
+        visibility = CandidateVisibility.AUTHOR_ONLY
+    elif visibility_value in {"knowledge", "knowledge_scoped"}:
+        visibility = CandidateVisibility.KNOWLEDGE
+    else:
+        visibility = CandidateVisibility.PUBLIC
+    raw_keys = visibility_json.get("required_knowledge_keys") or ()
+    required_keys = frozenset(str(item) for item in raw_keys if str(item).strip())
+    return RetrievalCandidate(
+        chunk_id=chunk.id,
+        owner_id=LOCAL_OWNER_ID,
+        workspace_id=LOCAL_WORKSPACE_ID,
+        novel_id=source.novel_id,
+        generation_id=generation_id,
+        index_version=index_version,
+        corpus=EmbeddingCorpus(source.corpus),
+        source_type=source.source_type,
+        source_id=source.source_entity_id,
+        source_revision_id=source.source_revision_id,
+        chunk_ordinal=chunk.chunk_index,
+        text=chunk.content_text,
+        source_current=_source_is_current(session, source),
+        binding_permitted=(
+            source.source_type != "private_asset_version"
+            or _source_is_current(session, source)
+        ),
+        timeline_id=source.timeline_id,
+        narrative_sequence_start=source.narrative_sequence_start,
+        narrative_sequence_end=source.narrative_sequence_end,
+        story_sequence_start=source.story_sequence_start,
+        story_sequence_end=source.story_sequence_end,
+        visibility=visibility,
+        required_knowledge_keys=required_keys,
     )
 
 
@@ -1362,129 +1414,361 @@ async def semantic_search(
                 NovelEmbeddingConsent.revoked_at.is_(None),
             )
         )
-        if consent is None:
-            raise EmbeddingLifecycleError("embedding_consent_required", "novel has no active consent")
-        if configuration is None or configuration.active_generation_id is None:
-            raise EmbeddingLifecycleError("embedding_generation_not_ready", "active index is unavailable")
-        generation = session.get(EmbeddingGeneration, configuration.active_generation_id)
-        if generation is None or generation.state != "active":
-            raise EmbeddingLifecycleError("embedding_generation_not_ready", "active index is unavailable")
-        build = session.scalar(
-            select(EmbeddingGenerationNovel).where(
-                EmbeddingGenerationNovel.generation_id == generation.id,
-                EmbeddingGenerationNovel.novel_id == novel_id,
-                EmbeddingGenerationNovel.state == "ready",
-            )
+        generation = (
+            session.get(EmbeddingGeneration, configuration.active_generation_id)
+            if configuration is not None and configuration.active_generation_id is not None
+            else None
         )
-        if build is None:
-            raise EmbeddingLifecycleError("embedding_generation_not_ready", "novel index is unavailable")
+        build = (
+            session.scalar(
+                select(EmbeddingGenerationNovel).where(
+                    EmbeddingGenerationNovel.generation_id == generation.id,
+                    EmbeddingGenerationNovel.novel_id == novel_id,
+                )
+            )
+            if generation is not None and generation.state == "active"
+            else None
+        )
         path, timeline_limits = _inheritance_scope(
             session,
             novel_id=novel_id,
             requested=request.timeline_id,
-            narrative_cutoff=request.narrative_sequence,
+            story_cutoff=request.story_sequence_cutoff,
         )
-        generation_id = generation.id
-        rows = session.execute(
-            select(SemanticSource, SemanticChunk)
-            .join(SemanticChunk, SemanticChunk.source_id == SemanticSource.id)
-            .where(
+        generation_id = generation.id if generation is not None else None
+        if generation_id is None or build is None:
+            return {
+                "schema_version": request.schema_version,
+                "request_id": f"semantic:{datetime.now(UTC).timestamp()}",
+                "generation_id": None,
+                "index_version": None,
+                "retrieval_policy_version": "writing-retrieval/2",
+                "mode": "lexical_only",
+                "index_status": "not_built",
+                "hits": [],
+                "omitted_count": 0,
+                "warnings": ["local_index_unavailable"],
+                "provider_request_id": None,
+                "token_count": None,
+                "latency_ms": None,
+                "degraded_reason": "dense_unavailable",
+                "omission_summary": ["当前小说尚无可用的本地语义分块索引"],
+            }
+
+        narrative_cutoff = request.narrative_sequence
+        if (
+            narrative_cutoff is not None
+            and request.retrieval_purpose
+            in {ApiRetrievalPurpose.CHAPTER_BODY, ApiRetrievalPurpose.CHAPTER_OUTLINE}
+        ):
+            narrative_cutoff = max(0, narrative_cutoff - 1)
+        eligible_conditions: list[object] = []
+        eligible_conditions.extend(
+            (
                 SemanticSource.generation_id == generation_id,
                 SemanticSource.novel_id == novel_id,
                 SemanticSource.corpus.in_(tuple(item.value for item in request.corpora)),
                 SemanticSource.status == "current",
-                SemanticChunk.content_text.ilike(f"%{request.query}%"),
+                or_(
+                    SemanticSource.timeline_id.is_(None),
+                    SemanticSource.timeline_id.in_(tuple(path)),
+                ),
             )
-            .limit(200)
-        ).all()
-        lexical = tuple(_candidate(source, chunk) for source, chunk in rows if _source_is_current(session, source))
-        perspective = request.perspective.kind.value
-        scope = SearchScope(
-            novel_id=novel_id, corpora=frozenset(item.value for item in request.corpora),
-            reachable_timeline_ids=path, narrative_sequence=request.narrative_sequence,
-            perspective=perspective,
+        )
+        if narrative_cutoff is not None:
+            eligible_conditions.append(
+                or_(
+                    SemanticSource.source_type != "chapter_revision",
+                    and_(
+                        SemanticSource.narrative_sequence_start.is_not(None),
+                        SemanticSource.narrative_sequence_start <= narrative_cutoff,
+                    ),
+                )
+            )
+        story_filters = [SemanticSource.timeline_id.is_(None)]
+        for scoped_timeline_id, cutoff in timeline_limits:
+            timeline_filter = SemanticSource.timeline_id == scoped_timeline_id
+            if cutoff is not None:
+                timeline_filter = and_(
+                    timeline_filter,
+                    SemanticSource.story_sequence_start.is_not(None),
+                    SemanticSource.story_sequence_start <= cutoff,
+                )
+            story_filters.append(timeline_filter)
+        eligible_conditions.append(or_(*story_filters))
+
+        legacy_scope = KnowledgeProjectionScope(
+            novel_id=novel_id,
+            reachable_timeline_ids=path,
+            story_sequence_cutoff=request.story_sequence_cutoff,
+            perspective=request.perspective.kind.value,
             observer_character_instance_id=request.perspective.character_instance_id,
             timeline_sequence_limits=timeline_limits,
         )
-        scope = SearchScope(
-            novel_id=scope.novel_id,
-            corpora=scope.corpora,
-            reachable_timeline_ids=scope.reachable_timeline_ids,
-            narrative_sequence=scope.narrative_sequence,
-            perspective=scope.perspective,
-            observer_character_instance_id=scope.observer_character_instance_id,
-            known_visibility_keys=_known_visibility_keys(
-                session,
-                novel_id=novel_id,
-                scope=scope,
-            ),
-            timeline_sequence_limits=scope.timeline_sequence_limits,
+        known_visibility_keys = _known_visibility_keys(
+            session,
+            novel_id=novel_id,
+            scope=legacy_scope,
         )
-        dense: tuple[Candidate, ...] = ()
-        warnings: list[str] = []
+
+        dense_status = RetrievalChannelStatus.UNAVAILABLE
+        dense_scores: tuple[RawChannelScore, ...] = ()
+        dense_error = "dense index, v2 consent, or credential unavailable"
+        provider_request_id = None
+        provider_token_count = None
+        provider_latency_ms = None
+        dense_allowed = (
+            consent is not None
+            and consent.notice_version == NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION
+            and build.published_digest != "0" * 64
+            and configuration.credential_ref is not None
+        )
         profile = session.get(EmbeddingProfile, generation.profile_id)
-        if profile is not None and configuration.credential_ref is not None:
+        if dense_allowed and profile is not None:
             try:
+                expected_generation_id = generation.id
+                expected_index_version = build.index_version
+                expected_published_digest = build.published_digest
+                expected_authority_digest = build.authority_digest
                 credential_ref = configuration.credential_ref
                 profile_base_url = profile.base_url
                 profile_model_id = profile.actual_model_id
                 profile_dimension = profile.dimension
                 session.rollback()
                 api_key = _secret_store().get(credential_ref)
-                query_result = await DashScopeEmbeddingAdapter(base_url=profile_base_url).embed(
-                    api_key=api_key, texts=[request.query], text_type="query",
-                    model_id=profile_model_id, dimension=profile_dimension,
-                    instruct="Retrieve relevant evidence for a novel-writing workspace.",
+                started = monotonic()
+                query_result = await asyncio.wait_for(
+                    DashScopeEmbeddingAdapter(base_url=profile_base_url).embed(
+                        api_key=api_key, texts=[request.query], text_type="query",
+                        model_id=profile_model_id, dimension=profile_dimension,
+                        instruct=(
+                            "Retrieve only current, scope-valid evidence for this novel-writing task."
+                        ),
+                    ),
+                    timeout=8.0,
                 )
+                provider_latency_ms = int((monotonic() - started) * 1000)
+                provider_request_id = query_result.request_id
+                provider_token_count = query_result.total_tokens
+                current_configuration = get_configuration(
+                    session,
+                    owner_id=LOCAL_OWNER_ID,
+                    workspace_id=LOCAL_WORKSPACE_ID,
+                )
+                current_build = session.scalar(
+                    select(EmbeddingGenerationNovel).where(
+                        EmbeddingGenerationNovel.generation_id == expected_generation_id,
+                        EmbeddingGenerationNovel.novel_id == novel_id,
+                    )
+                )
+                current_consent = session.scalar(
+                    select(NovelEmbeddingConsent).where(
+                        NovelEmbeddingConsent.novel_id == novel_id,
+                        NovelEmbeddingConsent.revoked_at.is_(None),
+                        NovelEmbeddingConsent.notice_version
+                        == NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION,
+                    )
+                )
+                if (
+                    current_configuration is None
+                    or current_configuration.active_generation_id
+                    != expected_generation_id
+                    or current_build is None
+                    or current_build.index_version != expected_index_version
+                    or current_build.published_digest != expected_published_digest
+                    or current_build.authority_digest != expected_authority_digest
+                    or current_consent is None
+                ):
+                    raise EmbeddingLifecycleError(
+                        "semantic_scope_changed", "semantic scope changed during query"
+                    )
                 distance = SemanticEmbedding.embedding.cosine_distance(
                     list(query_result.vectors[0].values)
                 )
                 dense_rows = session.execute(
-                    select(SemanticSource, SemanticChunk)
+                    select(SemanticChunk.id, distance.label("dense_distance"))
+                    .select_from(SemanticSource)
                     .join(SemanticChunk, SemanticChunk.source_id == SemanticSource.id)
-                    .join(SemanticEmbedding, SemanticEmbedding.chunk_id == SemanticChunk.id)
-                    .where(
-                        SemanticSource.generation_id == generation_id,
-                        SemanticSource.novel_id == novel_id,
-                        SemanticSource.corpus.in_(tuple(item.value for item in request.corpora)),
-                        SemanticSource.status == "current",
+                    .join(
+                        SemanticEmbedding,
+                        and_(
+                            SemanticEmbedding.chunk_id == SemanticChunk.id,
+                            SemanticEmbedding.generation_id == expected_generation_id,
+                        ),
                     )
+                    .where(*eligible_conditions, distance <= 2.0)
                     .order_by(distance)
-                    .limit(200)
                 ).all()
-                dense = tuple(
-                    _candidate(source, chunk)
-                    for source, chunk in dense_rows
-                    if _source_is_current(session, source)
+                dense_scores = tuple(
+                    RawChannelScore(chunk_id=chunk_id, score=1.0 - float(distance_value))
+                    for chunk_id, distance_value in dense_rows
                 )
+                dense_status = RetrievalChannelStatus.AVAILABLE
+                dense_error = None
+            except asyncio.TimeoutError:
+                dense_status = RetrievalChannelStatus.TIMEOUT
+                dense_error = "dense query timed out"
             except (EmbeddingAdapterError, EmbeddingSecretError):
-                warnings.append("embedding_unavailable")
-        ranked = reciprocal_rank_fusion(
-            lexical=lexical, dense=dense, scope=scope, top_k=request.top_k
+                dense_status = RetrievalChannelStatus.NETWORK_FAILURE
+                dense_error = "dense provider unavailable"
+            except EmbeddingLifecycleError:
+                dense_status = RetrievalChannelStatus.UNAVAILABLE
+                dense_error = "semantic scope changed during dense query"
+
+        similarity = func.similarity(SemanticChunk.content_text, request.query)
+        candidate_rows = session.execute(
+            select(SemanticSource, SemanticChunk, similarity.label("lexical_score"))
+            .join(SemanticChunk, SemanticChunk.source_id == SemanticSource.id)
+            .where(*eligible_conditions)
+            .order_by(SemanticSource.id, SemanticChunk.chunk_index)
+        ).all()
+        candidates = tuple(
+            _candidate(
+                session,
+                source=source,
+                chunk=chunk,
+                generation_id=generation_id,
+                index_version=build.index_version,
+            )
+            for source, chunk, _ in candidate_rows
+        )
+        lexical_scores = tuple(
+            RawChannelScore(chunk_id=chunk.id, score=float(score_value))
+            for _, chunk, score_value in candidate_rows
+            if float(score_value) > 0.01
+        )
+
+        perspective_map = {
+            PerspectiveKind.AUTHOR: RetrievalPerspective.AUTHOR,
+            PerspectiveKind.READER: RetrievalPerspective.READER,
+            PerspectiveKind.CHARACTER_INSTANCE: RetrievalPerspective.CHARACTER_INSTANCE,
+        }
+        purpose_map = {
+            ApiRetrievalPurpose.MANUAL_SEARCH: CoreRetrievalPurpose.REVIEW,
+            ApiRetrievalPurpose.CHAPTER_BODY: CoreRetrievalPurpose.CHAPTER_BODY,
+            ApiRetrievalPurpose.CHAPTER_OUTLINE: CoreRetrievalPurpose.CHAPTER_OUTLINE,
+            ApiRetrievalPurpose.CHAPTER_REVIEW: CoreRetrievalPurpose.CHAPTER_REVIEW,
+            ApiRetrievalPurpose.SELECTION_REWRITE: CoreRetrievalPurpose.SELECTION_REWRITE,
+            ApiRetrievalPurpose.SELECTION_EXPAND: CoreRetrievalPurpose.EXPAND,
+            ApiRetrievalPurpose.SELECTION_DIALOGUE: CoreRetrievalPurpose.DIALOGUE,
+            ApiRetrievalPurpose.SELECTION_REVIEW: CoreRetrievalPurpose.REVIEW,
+            ApiRetrievalPurpose.SELECTION_CUSTOM: CoreRetrievalPurpose.CUSTOM,
+        }
+        core_scope = SearchScope(
+            owner_id=LOCAL_OWNER_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            novel_id=novel_id,
+            generation_id=generation_id,
+            index_version=build.index_version,
+            corpora=frozenset(request.corpora),
+            target_timeline_id=timeline_limits[-1][0] if timeline_limits else None,
+            narrative_sequence_cutoff=narrative_cutoff,
+            story_sequence_cutoff=request.story_sequence_cutoff,
+            timeline_limits=tuple(
+                TimelineSearchLimit(
+                    timeline_id=timeline_id,
+                    story_sequence_cutoff=cutoff,
+                )
+                for timeline_id, cutoff in timeline_limits
+            ),
+            perspective=perspective_map[request.perspective.kind],
+            observer_character_instance_id=request.perspective.character_instance_id,
+            knowledge_keys=known_visibility_keys,
+        )
+        policy = RetrievalPolicyV1(
+            policy_version=(
+                configuration.retrieval_policy_version or "writing-retrieval/2"
+            )
+        )
+        core_result = retrieve(
+            SemanticSearchRequestV2(
+                query=request.query,
+                purpose=purpose_map[request.retrieval_purpose],
+                use_novel_context=(
+                    request.retrieval_purpose is ApiRetrievalPurpose.SELECTION_CUSTOM
+                ),
+                scope=core_scope,
+                top_k=request.top_k,
+            ),
+            candidates=candidates,
+            lexical=RetrievalChannelEvidence(
+                channel=RetrievalChannel.LEXICAL,
+                status=RetrievalChannelStatus.AVAILABLE,
+                scores=lexical_scores,
+                latency_ms=0,
+            ),
+            dense=RetrievalChannelEvidence(
+                channel=RetrievalChannel.DENSE,
+                status=dense_status,
+                scores=dense_scores,
+                provider_request_id=provider_request_id,
+                token_count=provider_token_count,
+                latency_ms=provider_latency_ms,
+                redacted_error=dense_error,
+            ),
+            policy=policy,
+        )
+        candidate_by_id = {item.chunk_id: item for item in candidates}
+        warnings = (
+            [core_result.degradation_reason.value]
+            if core_result.degradation_reason is not None
+            else []
         )
         return {
             "schema_version": request.schema_version,
             "request_id": f"semantic:{datetime.now(UTC).timestamp()}",
-            "mode": "hybrid" if dense else "lexical_only", "index_status": "ready",
+            "generation_id": str(generation_id) if generation_id else None,
+            "index_version": build.index_version if build else None,
+            "retrieval_policy_version": core_result.policy_version,
+            "mode": core_result.mode.value,
+            "index_status": (
+                "ready" if build is not None and build.sync_state == "current"
+                else build.sync_state if build is not None else "not_built"
+            ),
             "hits": [
                 {
-                    "corpus": item.candidate.corpus,
-                    "source_type": item.candidate.source_type,
-                    "source_state": _source_state(item.candidate.source_type),
-                    "source_id": str(item.candidate.source_id),
-                    "source_revision_id": str(item.candidate.source_revision_id) if item.candidate.source_revision_id else None,
-                    "chunk_id": str(item.candidate.chunk_id),
-                    "timeline_id": str(item.candidate.timeline_id) if item.candidate.timeline_id else None,
-                    "character_instance_id": str(item.candidate.character_instance_id) if item.candidate.character_instance_id else None,
-                    "narrative_sequence_start": item.candidate.narrative_start,
-                    "narrative_sequence_end": item.candidate.narrative_end,
-                    "snippet": item.candidate.text[:4000], "channels": list(item.channels),
-                    "score": item.score,
+                    "corpus": item.corpus.value,
+                    "source_type": item.source_type,
+                    "source_state": _source_state(item.source_type),
+                    "source_id": str(item.source_id),
+                    "source_revision_id": str(item.source_revision_id) if item.source_revision_id else None,
+                    "chunk_id": str(item.anchor_chunk_id),
+                    "timeline_id": str(candidate_by_id[item.anchor_chunk_id].timeline_id) if candidate_by_id[item.anchor_chunk_id].timeline_id else None,
+                    "character_instance_id": None,
+                    "narrative_sequence_start": candidate_by_id[item.anchor_chunk_id].narrative_sequence_start,
+                    "narrative_sequence_end": candidate_by_id[item.anchor_chunk_id].narrative_sequence_end,
+                    "story_sequence_start": candidate_by_id[item.anchor_chunk_id].story_sequence_start,
+                    "story_sequence_end": candidate_by_id[item.anchor_chunk_id].story_sequence_end,
+                    "snippet": "\n".join(chunk.text for chunk in item.chunks)[:4000],
+                    "channels": [channel.value for channel in item.channels],
+                    "lexical_score": item.lexical_raw_score,
+                    "dense_distance": (
+                        1.0 - item.dense_raw_score
+                        if item.dense_raw_score is not None
+                        else None
+                    ),
+                    "fused_score": item.fused_score,
                 }
-                for item in ranked
+                for item in core_result.hits
             ],
-            "omitted_count": max(0, len(lexical) + len(dense) - len(ranked)),
+            "omitted_count": (
+                core_result.diagnostics.below_threshold_count
+                + core_result.diagnostics.duplicate_source_count
+                + core_result.diagnostics.quota_omitted_count
+                + core_result.diagnostics.top_k_omitted_count
+            ),
             "warnings": warnings,
+            "provider_request_id": core_result.dense.provider_request_id,
+            "token_count": core_result.dense.token_count,
+            "latency_ms": core_result.dense.latency_ms,
+            "degraded_reason": warnings[0] if warnings else None,
+            "omission_summary": [
+                {
+                    "reason": item.reason.value,
+                    "count": item.count,
+                }
+                for item in core_result.diagnostics.filtered
+            ],
         }
     except Exception as error:
         _raise(error); raise

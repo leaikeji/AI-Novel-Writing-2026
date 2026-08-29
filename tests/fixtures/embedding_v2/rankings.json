@@ -1,0 +1,185 @@
+{
+  "schema_version": "embedding-v2-rankings/1",
+  "rankings": [
+    {
+      "case_id": "m01-sabotage-location",
+      "lexical_source_keys": ["manuscript:main:ch03:r1", "manuscript:main:ch05:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch03:r1", "manuscript:main:ch05:r1"]
+    },
+    {
+      "case_id": "m02-key-donor",
+      "lexical_source_keys": ["manuscript:main:ch03:r1", "manuscript:main:ch06:r1", "manuscript:main:ch02:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch06:r1", "manuscript:main:ch03:r1"]
+    },
+    {
+      "case_id": "m03-bell-signal",
+      "lexical_source_keys": ["manuscript:main:ch01:r1", "manuscript:main:ch06:r1", "manuscript:main:ch07:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch07:r1", "manuscript:main:ch01:r1"]
+    },
+    {
+      "case_id": "m04-ledger-hiding-place",
+      "lexical_source_keys": ["manuscript:main:ch01:r1", "manuscript:main:ch02:r1", "manuscript:main:ch07:r1", "manuscript:main:ch08:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch08:r1", "manuscript:main:ch07:r1"]
+    },
+    {
+      "case_id": "m05-injury-clue",
+      "lexical_source_keys": ["manuscript:main:ch03:r1", "manuscript:main:ch06:r1", "manuscript:main:ch07:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch04:r1", "manuscript:main:ch03:r1"]
+    },
+    {
+      "case_id": "m06-floodgate-choice",
+      "lexical_source_keys": ["manuscript:main:ch01:r1", "manuscript:main:ch03:r1", "manuscript:main:ch08:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch05:r1", "manuscript:main:ch08:r1"]
+    },
+    {
+      "case_id": "m07-photo-date",
+      "lexical_source_keys": ["manuscript:main:ch01:r1", "manuscript:main:ch04:r1", "manuscript:main:ch06:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch02:r1", "manuscript:main:ch01:r1"]
+    },
+    {
+      "case_id": "m08-radio-message",
+      "lexical_source_keys": ["manuscript:main:ch03:r1", "manuscript:main:ch05:r1", "manuscript:main:ch06:r1"],
+      "hybrid_source_keys": ["manuscript:main:ch01:r1", "manuscript:main:ch06:r1"]
+    },
+    {
+      "case_id": "p01-volume-choice",
+      "lexical_source_keys": ["planning:outline:arc01:r3", "planning:outline:ending:r3"],
+      "hybrid_source_keys": ["planning:outline:arc01:r3", "planning:outline:ending:r3"]
+    },
+    {
+      "case_id": "p02-midpoint-reversal",
+      "lexical_source_keys": ["planning:outline:arc01:r3", "planning:outline:midpoint:r3", "planning:outline:climax:r3"],
+      "hybrid_source_keys": ["planning:outline:midpoint:r3", "planning:outline:arc01:r3"]
+    },
+    {
+      "case_id": "p03-magic-cost",
+      "lexical_source_keys": ["planning:outline:antagonist:r3", "planning:outline:climax:r3", "planning:setting:tide-cost:r2"],
+      "hybrid_source_keys": ["planning:setting:tide-cost:r2", "planning:outline:climax:r3"]
+    },
+    {
+      "case_id": "p04-city-rule",
+      "lexical_source_keys": ["planning:outline:arc01:r3", "planning:outline:midpoint:r3", "planning:outline:ending:r3", "planning:setting:bell-rule:r2"],
+      "hybrid_source_keys": ["planning:setting:bell-rule:r2", "planning:outline:midpoint:r3"]
+    },
+    {
+      "case_id": "p05-antagonist-goal",
+      "lexical_source_keys": ["planning:outline:arc01:r3", "planning:setting:tide-cost:r2", "planning:outline:ending:r3"],
+      "hybrid_source_keys": ["planning:outline:antagonist:r3", "planning:outline:arc01:r3"]
+    },
+    {
+      "case_id": "p06-secondary-arc",
+      "lexical_source_keys": ["planning:outline:midpoint:r3", "planning:setting:bell-rule:r2", "planning:outline:climax:r3"],
+      "hybrid_source_keys": ["planning:outline:guxun-arc:r3", "planning:outline:midpoint:r3"]
+    },
+    {
+      "case_id": "p07-climax-location",
+      "lexical_source_keys": ["planning:outline:arc01:r3", "planning:outline:antagonist:r3", "planning:outline:ending:r3"],
+      "hybrid_source_keys": ["planning:outline:climax:r3", "planning:outline:antagonist:r3"]
+    },
+    {
+      "case_id": "p08-ending-image",
+      "lexical_source_keys": ["planning:outline:midpoint:r3", "planning:setting:tide-cost:r2", "planning:outline:guxun-arc:r3"],
+      "hybrid_source_keys": ["planning:outline:ending:r3", "planning:outline:arc01:r3"]
+    },
+    {
+      "case_id": "a01-dialect-address",
+      "lexical_source_keys": ["private_asset:dialect:v2:item01", "private_asset:archive:v2:item08"],
+      "hybrid_source_keys": ["private_asset:dialect:v2:item01", "private_asset:archive:v2:item08"]
+    },
+    {
+      "case_id": "a02-sailing-term",
+      "lexical_source_keys": ["private_asset:dialect:v2:item01", "private_asset:sailing:v3:item04", "private_asset:radio:v2:item02"],
+      "hybrid_source_keys": ["private_asset:sailing:v3:item04", "private_asset:radio:v2:item02"]
+    },
+    {
+      "case_id": "a03-medical-limit",
+      "lexical_source_keys": ["private_asset:weather:v1:item05", "private_asset:sensory:v1:item06", "private_asset:medical:v1:item07"],
+      "hybrid_source_keys": ["private_asset:medical:v1:item07", "private_asset:weather:v1:item05"]
+    },
+    {
+      "case_id": "a04-architecture-material",
+      "lexical_source_keys": ["private_asset:dialect:v2:item01", "private_asset:sailing:v3:item04", "private_asset:archive:v2:item08", "private_asset:architecture:v2:item03"],
+      "hybrid_source_keys": ["private_asset:architecture:v2:item03", "private_asset:archive:v2:item08"]
+    },
+    {
+      "case_id": "a05-weather-sign",
+      "lexical_source_keys": ["private_asset:dialect:v2:item01", "private_asset:radio:v2:item02", "private_asset:archive:v2:item08"],
+      "hybrid_source_keys": ["private_asset:weather:v1:item05", "private_asset:sailing:v3:item04"]
+    },
+    {
+      "case_id": "a06-radio-procedure",
+      "lexical_source_keys": ["private_asset:sailing:v3:item04", "private_asset:medical:v1:item07", "private_asset:sensory:v1:item06"],
+      "hybrid_source_keys": ["private_asset:radio:v2:item02", "private_asset:sailing:v3:item04"]
+    },
+    {
+      "case_id": "a07-saltwell-smell",
+      "lexical_source_keys": ["private_asset:dialect:v2:item01", "private_asset:architecture:v2:item03", "private_asset:weather:v1:item05"],
+      "hybrid_source_keys": ["private_asset:sensory:v1:item06", "private_asset:architecture:v2:item03"]
+    },
+    {
+      "case_id": "a08-legal-record",
+      "lexical_source_keys": ["private_asset:sailing:v3:item04", "private_asset:medical:v1:item07", "private_asset:radio:v2:item02"],
+      "hybrid_source_keys": ["private_asset:archive:v2:item08", "private_asset:radio:v2:item02"]
+    },
+    {
+      "case_id": "n01-future-chapter",
+      "lexical_source_keys": ["manuscript:main:ch06:r1"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n02-sibling-timeline",
+      "lexical_source_keys": ["manuscript:main:ch08:r1"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n03-cross-novel",
+      "lexical_source_keys": ["manuscript:main:ch03:r1"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n04-invalid-revision",
+      "lexical_source_keys": ["manuscript:main:ch08:r1"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n05-unadopted-candidate",
+      "lexical_source_keys": ["planning:outline:ending:r3"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n06-reader-secret",
+      "lexical_source_keys": ["planning:outline:arc01:r3"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n07-character-unknown",
+      "lexical_source_keys": ["planning:outline:guxun-arc:r3"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n08-unbound-private-asset",
+      "lexical_source_keys": ["private_asset:dialect:v2:item01"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n09-prohibited-private-asset",
+      "lexical_source_keys": ["private_asset:medical:v1:item07"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n10-revoked-binding",
+      "lexical_source_keys": ["private_asset:weather:v1:item05"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n11-cross-novel-planning",
+      "lexical_source_keys": ["planning:outline:arc01:r3"],
+      "hybrid_source_keys": []
+    },
+    {
+      "case_id": "n12-beyond-story-cutoff",
+      "lexical_source_keys": ["planning:outline:climax:r3"],
+      "hybrid_source_keys": []
+    }
+  ]
+}

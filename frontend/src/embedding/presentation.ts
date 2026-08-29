@@ -39,6 +39,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   timeline_mapping_required: "正文尚未完成时间线映射。",
   embedding_secret_unavailable: "向量密钥保险箱不可用。",
   embedding_auth_failed: "API Key 验证失败。",
+  embedding_authentication_failed: "API Key 验证失败。",
   embedding_rate_limited: "阿里云百炼请求过于频繁。",
   embedding_unavailable: "阿里云百炼向量服务暂时不可用。",
   consent_revoked: "小说向量授权已经撤销。",
@@ -57,10 +58,12 @@ export function formatEmbeddingReason(value: string | null): string | null {
 export const INDEX_STATE_LABELS: Readonly<Record<NovelSemanticIndexState, string>> = {
   not_authorized: "未授权",
   empty: "尚未构建",
-  current: "当前有效",
+  ready: "当前有效",
+  updating: "同步更新中",
+  outdated: "有正式内容待同步",
+  partial_failed: "部分同步失败",
+  revoked: "授权已撤销",
   update_pending: "有内容待更新",
-  building: "构建中",
-  partial_failure: "部分失败",
   stale: "已过期",
 };
 

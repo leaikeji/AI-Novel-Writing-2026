@@ -137,7 +137,7 @@ async def test_adapter_sends_native_roles_and_validates_response() -> None:
                 "request_id": "req-safe",
                 "output": {
                     "embeddings": [
-                        {"text_index": 0, "embedding": [0.1, 0.2] + [0.0] * 254}
+                        {"text_index": 0, "embedding": [0.1, 0.2] + [0.0] * 2046}
                     ]
                 },
                 "usage": {"total_tokens": 4, "input_tokens": 4},
@@ -151,13 +151,13 @@ async def test_adapter_sends_native_roles_and_validates_response() -> None:
             api_key="sk-not-logged",
             texts=["查询"],
             text_type="query",
-            dimension=256,
+            dimension=2048,
             instruct="Retrieve relevant novel evidence",
             client=client,
             resolver=_public_resolver,
         )
     assert result.request_id == "req-safe"
-    assert len(result.vectors[0].values) == 256
+    assert len(result.vectors[0].values) == 2048
     assert result.vectors[0].values[:2] == (0.1, 0.2)
     assert str(captured["url"]).endswith("/api/v1/services/embeddings/text-embedding/text-embedding")
     assert '"text_type":"query"' in str(captured["body"])
@@ -173,7 +173,7 @@ async def test_adapter_accepts_raw_http_success_without_sdk_status_code() -> Non
                 "request_id": "req-http-native",
                 "output": {
                     "embeddings": [
-                        {"text_index": 0, "embedding": [0.0] * 256}
+                        {"text_index": 0, "embedding": [0.0] * 2048}
                     ]
                 },
                 "usage": {"total_tokens": 2, "input_tokens": 2},
@@ -187,13 +187,13 @@ async def test_adapter_accepts_raw_http_success_without_sdk_status_code() -> Non
             api_key="sk-not-logged-long-enough",
             texts=["查询"],
             text_type="query",
-            dimension=256,
+            dimension=2048,
             client=client,
             resolver=_public_resolver,
         )
 
     assert result.request_id == "req-http-native"
-    assert len(result.vectors[0].values) == 256
+    assert len(result.vectors[0].values) == 2048
 
 
 @pytest.mark.asyncio
@@ -249,7 +249,7 @@ async def test_adapter_classifies_provider_errors_without_exposing_provider_mess
                 api_key="sk-not-logged-long-enough",
                 texts=["查询"],
                 text_type="query",
-                dimension=256,
+                    dimension=2048,
                 client=client,
                 resolver=_public_resolver,
             )

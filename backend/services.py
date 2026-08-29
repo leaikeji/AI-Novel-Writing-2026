@@ -16,6 +16,9 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .context_v3_loader import assemble_context_from_db
+from .context_v4 import RetrievalPurpose as ContextRetrievalPurpose
+from .context_v4_loader import assemble_writing_context_from_db
+from .embedding.writing import WritingPosition
 from .creative_data_models import (
     CharacterInstance,
     RevisionTimelineMappingHead,
@@ -872,7 +875,38 @@ def _generation_snapshot(
     working: DocumentWorkingCopy,
     brief: ChapterBrief,
     asset_snapshot: list[dict[str, Any]],
+    writing_retrieval: dict[str, Any] | None,
+    writing_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if writing_context is not None:
+        return {
+            "schema_version": 4,
+            "novel": {
+                "id": str(document.novel_id),
+                "title": str(
+                    session.scalar(select(Novel.title).where(Novel.id == document.novel_id))
+                    or ""
+                ),
+            },
+            "chapter": {
+                "document_id": str(document.id),
+                "title": document.title,
+                "base_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
+                "base_draft_version": working.draft_version,
+                "base_content_hash": working.content_hash,
+                "base_content_markdown": working.content_markdown,
+            },
+            "brief": {
+                "version": brief.version,
+                "target_word_count": brief.target_word_count,
+                "expectation_text": brief.expectation_text,
+                "outline_text": brief.outline_text,
+                "forbidden_text": brief.forbidden_text,
+                "role_constraints": _normalize_role_constraints(brief.role_constraints),
+            },
+            "writing_context": writing_context,
+            "writing_retrieval": writing_retrieval,
+        }
     context = get_novel_context(
         session, document.novel_id, document_id=document.id, max_chars=30_000
     )
@@ -899,6 +933,7 @@ def _generation_snapshot(
         "story_facts": context["story_facts"],
         "context_v3": context.get("context_v3"),
         "private_assets": asset_snapshot,
+        "writing_retrieval": writing_retrieval,
     }
 
 
@@ -938,6 +973,9 @@ def start_chapter_generation(
     force_new: bool = False,
     asset_ids: list[UUID] | None = None,
     preset_id: UUID | None = None,
+    writing_retrieval: dict[str, Any] | None = None,
+    writing_position: WritingPosition | None = None,
+    effective_context_window_tokens: int | None = None,
 ) -> dict[str, Any]:
     document = _require_document(session, document_id)
     if document.kind != "chapter":
@@ -963,7 +1001,25 @@ def start_chapter_generation(
     asset_snapshot = _generation_asset_snapshot(
         session, novel_id=document.novel_id, asset_ids=asset_ids, preset_id=preset_id
     )
-    snapshot = _generation_snapshot(session, document, working, brief, asset_snapshot)
+    writing_context = None
+    if writing_position is not None:
+        if effective_context_window_tokens is None or effective_context_window_tokens <= 0:
+            raise ValidationError("当前正文模型没有提供可核验的有效上下文窗口")
+        writing_context = assemble_writing_context_from_db(
+            session,
+            position=writing_position,
+            purpose=ContextRetrievalPurpose.CHAPTER_BODY,
+            requested_model_id=requested_model_id,
+            actual_model_id=requested_model_id,
+            effective_context_window_tokens=effective_context_window_tokens,
+            reserved_output_tokens=max(1, int(brief.target_word_count) * 2),
+            chapter_brief=brief,
+            private_assets=asset_snapshot,
+            writing_retrieval=writing_retrieval,
+        )
+    snapshot = _generation_snapshot(
+        session, document, working, brief, asset_snapshot, writing_retrieval, writing_context
+    )
     requested_count = int(brief.target_word_count)
     minimum_count, maximum_count = _chapter_length_window(requested_count)
     snapshot["acceptance"] = {
@@ -1054,29 +1110,65 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
     current_document_id = str(snapshot["chapter"].get("document_id") or "")
     current_draft_text = str(snapshot["chapter"].get("base_content_markdown") or "")
     current_draft_count = visible_character_count(current_draft_text)
-    previous_context = [
-        item
-        for item in snapshot.get("previous_context", [])
-        if str(item.get("document_id") or "") != current_document_id
-    ]
-    context_text = "\n\n".join(
-        f"【{item['title']}】\n{item.get('content_markdown', '')}" for item in previous_context
+    writing_context = snapshot.get("writing_context")
+    writing_context = writing_context if isinstance(writing_context, dict) else {}
+    envelope = writing_context.get("envelope")
+    envelope = envelope if isinstance(envelope, dict) else {}
+    v4_blocks = tuple(
+        item for item in envelope.get("included_blocks", []) if isinstance(item, dict)
     )
-    facts_text = "\n".join(
-        f"- {fact['subject']}｜{fact['predicate']}｜{fact['object']}"
-        for fact in snapshot.get("story_facts", [])
-    )
-    asset_text = "\n".join(
-        f"- [{asset['asset_type']}] {asset['title']}：{asset['content']}"
-        for asset in snapshot.get("private_assets", [])
-    )
+
+    def v4_section_text(section: str) -> str:
+        return "\n\n".join(
+            f"【{item.get('title', section)}】\n{item.get('content', '')}"
+            for item in v4_blocks if item.get("section") == section
+        )
+
     context_v3 = snapshot.get("context_v3")
     context_v3 = context_v3 if isinstance(context_v3, dict) else {}
-    planning_text = "\n\n".join(
-        f"【{item.get('title', '正式规划')}】\n{item.get('content', '')}"
-        for item in context_v3.get("formal_planning", [])
-        if isinstance(item, dict)
-    )
+    if envelope:
+        context_text = v4_section_text("manuscript")
+        planning_text = v4_section_text("formal_planning")
+        character_text = v4_section_text("character_state")
+        asset_text = v4_section_text("private_assets")
+        semantic_text = v4_section_text("semantic_evidence")
+        facts_text = "\n".join(
+            f"- {fact.get('subject', '')}｜{fact.get('predicate', '')}｜{fact.get('object_text', '')}"
+            for fact in envelope.get("current_story_facts", []) if isinstance(fact, dict)
+        )
+        chapter_timeline_text = json.dumps(
+            envelope.get("chapter_timeline", {}), ensure_ascii=False, sort_keys=True
+        )
+        chapter_requirements_text = v4_section_text("chapter_requirements")
+        diagnostics_text = json.dumps(
+            {
+                "assembly_hash": writing_context.get("assembly_hash"),
+                "context_policy_version": writing_context.get("context_policy_version"),
+                "diagnostics": envelope.get("diagnostics", {}),
+                "budget": envelope.get("budget", {}),
+            }, ensure_ascii=False, sort_keys=True
+        )
+    else:
+        previous_context = [
+            item for item in snapshot.get("previous_context", [])
+            if str(item.get("document_id") or "") != current_document_id
+        ]
+        context_text = "\n\n".join(
+            f"【{item['title']}】\n{item.get('content_markdown', '')}"
+            for item in previous_context
+        )
+        facts_text = "\n".join(
+            f"- {fact['subject']}｜{fact['predicate']}｜{fact['object']}"
+            for fact in snapshot.get("story_facts", [])
+        )
+        asset_text = "\n".join(
+            f"- [{asset['asset_type']}] {asset['title']}：{asset['content']}"
+            for asset in snapshot.get("private_assets", [])
+        )
+        planning_text = "\n\n".join(
+            f"【{item.get('title', '正式规划')}】\n{item.get('content', '')}"
+            for item in context_v3.get("formal_planning", []) if isinstance(item, dict)
+        )
     def character_context_line(item: dict[str, Any]) -> str:
         age = item.get("age_projection")
         age = age if isinstance(age, dict) else {}
@@ -1089,25 +1181,35 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
             f"{item.get('public_profile', '')}；按本章故事时间的年龄：{age_text}"
         )
 
-    character_text = "\n".join(
-        character_context_line(item)
-        for item in context_v3.get("character_state", [])
-        if isinstance(item, dict)
-    )
-    chapter_timeline_text = json.dumps(
-        context_v3.get("chapter_timeline", {}), ensure_ascii=False, sort_keys=True
-    ) if context_v3 else ""
-    chapter_requirements_text = json.dumps(
-        context_v3.get("chapter_requirements", {}), ensure_ascii=False, sort_keys=True
-    ) if context_v3 else ""
-    semantic_text = "\n".join(
-        f"- [{item.get('corpus', '')}] {item.get('content', '')}"
-        for item in context_v3.get("semantic_evidence", [])
-        if isinstance(item, dict)
-    )
-    diagnostics_text = json.dumps(
-        context_v3.get("diagnostics", {}), ensure_ascii=False, sort_keys=True
-    ) if context_v3 else ""
+    if not envelope:
+        character_text = "\n".join(
+            character_context_line(item)
+            for item in context_v3.get("character_state", []) if isinstance(item, dict)
+        )
+        chapter_timeline_text = json.dumps(
+            context_v3.get("chapter_timeline", {}), ensure_ascii=False, sort_keys=True
+        ) if context_v3 else ""
+        chapter_requirements_text = json.dumps(
+            context_v3.get("chapter_requirements", {}), ensure_ascii=False, sort_keys=True
+        ) if context_v3 else ""
+        retrieval = snapshot.get("writing_retrieval")
+        retrieval = retrieval if isinstance(retrieval, dict) else {}
+        semantic_text = "\n".join(
+            f"- [{item.get('corpus', '')}] {item.get('snippet', '')}"
+            for item in retrieval.get("hits", []) if isinstance(item, dict)
+        )
+        diagnostics_text = json.dumps(
+            {
+                "context": context_v3.get("diagnostics", {}),
+                "retrieval": {
+                    "generation_id": retrieval.get("generation_id"),
+                    "index_version": retrieval.get("index_version"),
+                    "retrieval_policy_version": retrieval.get("retrieval_policy_version"),
+                    "degraded_reason": retrieval.get("degraded_reason"),
+                    "omission_summary": retrieval.get("omission_summary", []),
+                },
+            }, ensure_ascii=False, sort_keys=True
+        ) if context_v3 or retrieval else ""
     return f"""【AI小说世界2026 PawApp可信任务封套】
 kind=chapter_generation
 contract=chapter-prose-candidate/v2
@@ -1138,8 +1240,8 @@ contract=chapter-prose-candidate/v2
 禁止出现：{'、'.join(roles['forbidden']) or '无'}
 
 本章稳定人物引用与时间线位置：
-{chapter_timeline_text or '- 暂无 V3 时间线位置'}
-{chapter_requirements_text or '- 暂无 V3 稳定人物约束'}
+{chapter_timeline_text or '- 暂无时间线位置'}
+{chapter_requirements_text or '- 暂无稳定人物约束'}
 
 正式大纲与故事设定：
 {planning_text or '- 暂无已正式化的大纲或设定'}
@@ -1163,7 +1265,7 @@ contract=chapter-prose-candidate/v2
 {semantic_text or '- 本次未提供语义证据'}
 
 来源、冲突和省略说明：
-{diagnostics_text or '- 使用旧实验数据兼容上下文，尚无 V3 诊断'}
+{diagnostics_text or '- 无额外诊断'}
 """.strip()
 
 
@@ -1294,7 +1396,7 @@ def complete_chapter_generation(
     job.completed_at = datetime.now(timezone.utc)
     session.add(candidate)
     session.commit()
-    return _generation_job_payload(session, job)
+    return _generation_job_payload(session, job, include_snapshot=True)
 
 
 def fail_chapter_generation(
@@ -1445,6 +1547,8 @@ def adopt_candidate(
     candidate.state = "accepted"
     candidate.adopted_revision_id = revision.id
     candidate.decided_at = datetime.now(timezone.utc)
+    from .embedding.indexing import request_active_novel_refresh
+    request_active_novel_refresh(session, document.novel_id)
     session.commit()
     return {
         "document": get_document(session, candidate.document_id),
@@ -2573,6 +2677,8 @@ def create_checkpoint(
     _reconcile_story_facts_for_revision(session, document_id, revision)
     working.base_revision_id = revision.id
     working.draft_version += 1
+    from .embedding.indexing import request_active_novel_refresh
+    request_active_novel_refresh(session, document.novel_id)
     session.commit()
     return {"document": get_document(session, document_id), "revision": _revision_payload(revision, include_content=True)}
 
@@ -2657,6 +2763,8 @@ def restore_revision(
     working.content_markdown = restored.content_markdown
     working.content_hash = restored.content_hash
     working.draft_version += 1
+    from .embedding.indexing import request_active_novel_refresh
+    request_active_novel_refresh(session, document.novel_id)
     session.commit()
     return {
         "document": get_document(session, document_id),

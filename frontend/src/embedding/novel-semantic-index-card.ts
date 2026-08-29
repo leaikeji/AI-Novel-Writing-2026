@@ -111,9 +111,9 @@ function errorMessage(reason: unknown, fallback: string): string {
 
 
 function statusColor(state: NovelSemanticIndexStatus["state"]): string {
-  if (state === "current") return "success";
-  if (state === "partial_failure") return "error";
-  if (state === "building") return "processing";
+  if (state === "ready") return "success";
+  if (state === "partial_failed") return "error";
+  if (state === "updating") return "processing";
   if (state === "not_authorized") return "default";
   return "warning";
 }
@@ -224,6 +224,7 @@ export function createNovelSemanticIndexCard(
       const controller = new AbortController();
       actionAbortRef.current = controller;
       const novelId = props.novelId;
+      const upgradingWritingQueries = action === "grant" && load.consent.state === "granted";
       const request: PutNovelEmbeddingConsentRequest = {
         action,
         expected_version: load.consent.version,
@@ -232,7 +233,11 @@ export function createNovelSemanticIndexCard(
       };
       setOperation({
         busy: true,
-        message: action === "grant" ? "正在保存小说云端向量授权…" : "正在撤销小说云端向量授权…",
+        message: action === "grant"
+          ? upgradingWritingQueries
+            ? "正在升级写作检索授权…"
+            : "正在保存小说云端向量授权…"
+          : "正在撤销小说云端向量授权…",
         kind: "idle",
       });
       void api.putConsent(novelId, request, controller.signal).then(async (consent) => {
@@ -245,7 +250,9 @@ export function createNovelSemanticIndexCard(
         setOperation({
           busy: false,
           message: action === "grant"
-            ? "授权已保存。后续新增正式内容与新绑定素材会进入该小说的后续索引。"
+            ? upgradingWritingQueries
+              ? "授权已升级；写作触发可以按策略发送查询并使用当前生效索引。"
+              : "授权已保存。后续新增正式内容与新绑定素材会进入该小说的后续索引。"
             : "授权已撤销，新的云端请求已停止；本地向量未自动清理。",
           kind: "success",
         });
@@ -282,6 +289,8 @@ export function createNovelSemanticIndexCard(
 
     const { consent, status } = load;
     const granted = consent.state === "granted";
+    const writingQueryAuthorized = granted && consent.writing_query_authorized;
+    const needsWritingQueryUpgrade = granted && !writingQueryAuthorized;
     const titleId = `anw-semantic-index-${props.novelId}-heading`;
 
     return h(antd.Card, { className: rootClassName },
@@ -308,16 +317,20 @@ export function createNovelSemanticIndexCard(
         }, operation.message)
         : null,
       h(antd.Alert, {
-        type: granted ? "warning" : "info",
+        type: needsWritingQueryUpgrade ? "warning" : granted ? "warning" : "info",
         showIcon: true,
-        message: granted ? "本小说已授权云端向量处理" : "授权前不会发起云端向量请求",
-        description: "授权会把本小说的正式正文、正式大纲与故事设定、作者秘密，以及已绑定的私有素材发送给阿里云百炼生成向量。未绑定的全局私有素材不会发送。",
+        message: needsWritingQueryUpgrade
+          ? "现有授权不包含写作查询，请升级告知版本"
+          : granted
+            ? "本小说已授权云端向量处理"
+            : "授权前不会发起云端向量请求",
+        description: "授权会把本小说的正式正文、正式大纲与故事设定、作者秘密，以及已绑定的私有素材发送给阿里云百炼生成向量。写作时，章纲要求、工作稿选区和自定义指令也可能作为查询发送。未绑定的全局私有素材不会发送。",
       }),
       !granted
         ? h("section", { className: "anw-embedding-confirm" },
           h("h4", null, "一次性小说授权"),
           h("p", { className: "anw-embedding-disclosure" },
-            "授权仅用于本小说的语义索引；之后新增的正式内容和新绑定素材无需重复弹窗，但页面会持续显示云端状态。",
+            "授权仅用于本小说的语义索引与已说明的写作检索；之后新增的正式内容和新绑定素材无需重复弹窗，但页面会持续显示云端状态。",
           ),
           h("label", null,
             h("input", {
@@ -326,7 +339,7 @@ export function createNovelSemanticIndexCard(
               disabled: operation.busy,
               onChange: (event: CheckedChangeEvent) => setAcknowledged(event.target.checked),
             }),
-            h("span", null, "我已了解上述四类内容会发送到阿里云百炼，并同意为本小说建立语义索引。"),
+            h("span", null, "我已了解上述正式内容会用于建索引，章纲要求、工作稿选区和自定义指令可能作为查询发送到阿里云百炼。"),
           ),
           h(antd.Button, {
             type: "primary",
@@ -337,6 +350,9 @@ export function createNovelSemanticIndexCard(
         : h("dl", { className: "anw-embedding-metrics" },
           h("div", null, h("dt", null, "授权时间"), h("dd", null, formatDateTime(consent.confirmed_at))),
           h("div", null, h("dt", null, "告知版本"), h("dd", null, consent.notice_version ?? "未记录")),
+          h("div", null, h("dt", null, "写作查询"), h("dd", null,
+            writingQueryAuthorized ? "已授权" : "未授权，自动写作仅使用本地降级",
+          )),
           h("div", null, h("dt", null, "当前模型"), h("dd", null, status.active_model_id ?? "尚未激活")),
           h("div", null, h("dt", null, "向量维度 / 索引代次"), h("dd", null,
             status.active_dimension && status.active_generation_number
@@ -346,8 +362,36 @@ export function createNovelSemanticIndexCard(
           h("div", null, h("dt", null, "来源 / 分块 / 失败"), h("dd", null,
             `${status.source_count} / ${status.chunk_count} / ${status.failure_count}`,
           )),
+          h("div", null, h("dt", null, "同步版本"), h("dd", null,
+            status.index_version === null ? "暂无" : `第 ${status.index_version} 版`,
+          )),
+          h("div", null, h("dt", null, "待刷新来源"), h("dd", null,
+            status.pending_refresh_count,
+          )),
           h("div", null, h("dt", null, "最近索引"), h("dd", null, formatDateTime(status.last_indexed_at))),
         ),
+      needsWritingQueryUpgrade
+        ? h("section", { className: "anw-embedding-confirm" },
+          h("h4", null, "升级至 novel-embedding-consent/2"),
+          h("p", { className: "anw-embedding-disclosure" },
+            "旧授权仍可维护已经披露的正式语料索引，但不会把章纲要求、工作稿选区或自定义指令作为云端查询。升级后才会启用自动写作 Dense 检索。",
+          ),
+          h("label", null,
+            h("input", {
+              type: "checkbox",
+              checked: acknowledged,
+              disabled: operation.busy,
+              onChange: (event: CheckedChangeEvent) => setAcknowledged(event.target.checked),
+            }),
+            h("span", null, "我已了解写作查询的发送范围，并同意升级本小说授权。"),
+          ),
+          h(antd.Button, {
+            type: "primary",
+            disabled: !acknowledged || operation.busy,
+            onClick: () => changeConsent("grant"),
+          }, "升级授权并启用写作检索"),
+        )
+        : null,
       granted && status.corpora.length === 0
         ? h(antd.Empty, { description: "尚无可显示的语料索引状态" })
         : null,
@@ -380,11 +424,11 @@ export function createNovelSemanticIndexCard(
             type: "primary",
             disabled: !status.can_rebuild || operation.busy,
             onClick: () => runStatusAction(
-              "正在启动本小说索引重建…",
-              "本小说索引重建已启动。",
+              "正在按当前生效代次重建本小说索引…",
+              "已按当前生效代次启动本小说索引重建。",
               api.rebuild,
             ),
-          }, "重建当前小说"),
+          }, "按当前生效代次重建"),
           h(antd.Button, {
             disabled: !status.can_cancel || operation.busy,
             onClick: () => runStatusAction(

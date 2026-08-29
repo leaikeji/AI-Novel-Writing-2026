@@ -307,7 +307,11 @@ def grant_consent(
         )
     )
     if active is not None:
-        raise EmbeddingLifecycleError("consent_already_active", "novel already has active consent")
+        if active.notice_version == notice_version:
+            raise EmbeddingLifecycleError("consent_already_active", "novel already has active consent")
+        active.revoked_actor = actor
+        active.revoked_reason = "notice_upgraded"
+        active.revoked_at = _now()
     consent = NovelEmbeddingConsent(
         id=uuid4(), novel_id=novel_id, purpose="semantic_index",
         data_scope_json=list(corpora), notice_version=notice_version,
@@ -333,7 +337,7 @@ def _attach_consent_to_candidate(
     owner_id: UUID,
     workspace_id: UUID,
 ) -> None:
-    """Add a late-authorized novel to the current candidate generation.
+    """Attach late authorization to active and candidate toolchain generations.
 
     A candidate may legitimately be saved while no novel is authorized.  Granting
     consent later must make that novel rebuildable without forcing the author to
@@ -343,55 +347,84 @@ def _attach_consent_to_candidate(
     configuration = get_configuration(
         session, owner_id=owner_id, workspace_id=workspace_id, for_update=True
     )
-    if configuration is None or configuration.candidate_generation_id is None:
+    if configuration is None:
         return
-    generation = session.scalar(
-        select(EmbeddingGeneration)
-        .where(
-            EmbeddingGeneration.id == configuration.candidate_generation_id,
-            EmbeddingGeneration.owner_id == owner_id,
-            EmbeddingGeneration.workspace_id == workspace_id,
+    generation_ids = tuple(
+        dict.fromkeys(
+            item
+            for item in (
+                getattr(configuration, "active_generation_id", None),
+                configuration.candidate_generation_id,
+            )
+            if item is not None
         )
-        .with_for_update()
-    )
-    if generation is None or generation.state not in {"draft", "building", "ready"}:
-        return
-    build = session.scalar(
-        select(EmbeddingGenerationNovel)
-        .where(
-            EmbeddingGenerationNovel.generation_id == generation.id,
-            EmbeddingGenerationNovel.novel_id == consent.novel_id,
-        )
-        .with_for_update()
     )
     changed = False
-    input_digest = _digest(
-        [str(generation.id), str(consent.novel_id), str(consent.id), consent.data_scope_json]
-    )
-    if build is None:
-        session.add(
-            EmbeddingGenerationNovel(
-                id=uuid4(), generation_id=generation.id, novel_id=consent.novel_id,
-                owner_id=owner_id, workspace_id=workspace_id, consent_id=consent.id,
-                state="pending", target_corpora_json=list(consent.data_scope_json),
-                input_digest=input_digest, source_count=0, chunk_count=0,
-                embedded_count=0, failure_count=0,
+    candidate_changed = False
+    candidate_generation: EmbeddingGeneration | None = None
+    for generation_id in generation_ids:
+        generation = session.scalar(
+            select(EmbeddingGeneration)
+            .where(
+                EmbeddingGeneration.id == generation_id,
+                EmbeddingGeneration.owner_id == owner_id,
+                EmbeddingGeneration.workspace_id == workspace_id,
             )
+            .with_for_update()
         )
-        changed = True
-    elif build.consent_id != consent.id or build.state in {"cancelled", "failed", "stale"}:
-        build.consent_id = consent.id
-        build.state = "pending"
-        build.target_corpora_json = list(consent.data_scope_json)
-        build.input_digest = input_digest
-        build.source_count = 0
-        build.chunk_count = 0
-        build.embedded_count = 0
-        build.failure_count = 0
-        build.failure_code = None
-        build.started_at = None
-        build.completed_at = None
-        changed = True
+        if generation is None or generation.state not in {
+            "active", "draft", "building", "ready"
+        }:
+            continue
+        if generation.id == configuration.candidate_generation_id:
+            candidate_generation = generation
+        build = session.scalar(
+            select(EmbeddingGenerationNovel)
+            .where(
+                EmbeddingGenerationNovel.generation_id == generation.id,
+                EmbeddingGenerationNovel.novel_id == consent.novel_id,
+            )
+            .with_for_update()
+        )
+        input_digest = _digest(
+            [str(generation.id), str(consent.novel_id), str(consent.id), consent.data_scope_json]
+        )
+        if build is None:
+            session.add(
+                EmbeddingGenerationNovel(
+                    id=uuid4(), generation_id=generation.id, novel_id=consent.novel_id,
+                    owner_id=owner_id, workspace_id=workspace_id, consent_id=consent.id,
+                    state="pending", target_corpora_json=list(consent.data_scope_json),
+                    input_digest=input_digest, source_count=0, chunk_count=0,
+                    embedded_count=0, failure_count=0, index_version=1,
+                    authority_digest=input_digest, published_digest="0" * 64,
+                    sync_state="outdated", pending_refresh_count=0,
+                )
+            )
+            changed = True
+            candidate_changed = candidate_changed or (
+                generation.id == configuration.candidate_generation_id
+            )
+        elif build.consent_id != consent.id or build.state in {
+            "cancelled", "failed", "stale", "partial_failed"
+        }:
+            build.consent_id = consent.id
+            build.state = "pending"
+            build.target_corpora_json = list(consent.data_scope_json)
+            build.input_digest = input_digest
+            build.authority_digest = input_digest
+            build.sync_state = "outdated"
+            build.source_count = 0
+            build.chunk_count = 0
+            build.embedded_count = 0
+            build.failure_count = 0
+            build.failure_code = None
+            build.started_at = None
+            build.completed_at = None
+            changed = True
+            candidate_changed = candidate_changed or (
+                generation.id == configuration.candidate_generation_id
+            )
     if not changed:
         return
     active_consents = tuple(
@@ -406,12 +439,13 @@ def _attach_consent_to_candidate(
             .order_by(NovelEmbeddingConsent.novel_id)
         )
     )
-    generation.consent_cohort_hash = _digest(
-        [(str(item.novel_id), str(item.id), item.notice_version) for item in active_consents]
-    )
-    generation.state = "draft"
-    generation.evaluation_state = "not_run"
-    generation.evaluation_summary_json = {}
+    if candidate_changed and candidate_generation is not None:
+        candidate_generation.consent_cohort_hash = _digest(
+            [(str(item.novel_id), str(item.id), item.notice_version) for item in active_consents]
+        )
+        candidate_generation.state = "draft"
+        candidate_generation.evaluation_state = "not_run"
+        candidate_generation.evaluation_summary_json = {}
     configuration.version += 1
     configuration.updated_at = _now()
     session.flush()
@@ -449,11 +483,12 @@ def revoke_consent(
             .where(
                 EmbeddingGenerationNovel.novel_id == novel_id,
                 EmbeddingGenerationNovel.consent_id == consent.id,
-                EmbeddingGenerationNovel.state.in_(("pending", "building")),
+                EmbeddingGenerationNovel.state.in_(("pending", "building", "updating")),
             )
             .with_for_update()
         ):
             build.state = "cancelled"
+            build.sync_state = "revoked"
             build.completed_at = _now()
     session.flush()
     return consent

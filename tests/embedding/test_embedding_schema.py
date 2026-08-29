@@ -198,7 +198,7 @@ def test_vector_dimension_is_recorded_and_checked_without_a_mixed_typmod() -> No
         "ck_semantic_embedding_dimension",
         CheckConstraint,
     )
-    assert "dimension > 0" in str(constraint.sqltext)
+    assert "dimension = 2048" in str(constraint.sqltext)
     assert "vector_dims(embedding) = dimension" in str(constraint.sqltext)
 
     for index in table.indexes:

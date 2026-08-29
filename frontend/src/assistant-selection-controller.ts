@@ -149,6 +149,7 @@ export interface AssistantSelectionEditorTaskRequest {
   readonly fieldLabel: string;
   readonly operation: AssistantSelectionOperation;
   readonly customInstruction?: string;
+  readonly useNovelContext?: boolean;
 }
 
 
@@ -557,7 +558,7 @@ export class AssistantSelectionController {
     return true;
   }
 
-  submitCustomInstruction(instruction: string): boolean {
+  submitCustomInstruction(instruction: string, useNovelContext = false): boolean {
     const active = this.validActive();
     const normalized = instruction.trim();
     if (!active || active.operation !== "custom") return false;
@@ -571,7 +572,7 @@ export class AssistantSelectionController {
       }));
       return false;
     }
-    this.startEditorTask(active, "custom", normalized);
+    this.startEditorTask(active, "custom", normalized, useNovelContext);
     return true;
   }
 
@@ -658,6 +659,7 @@ export class AssistantSelectionController {
     active: ActiveSelection,
     operation: AssistantSelectionOperation,
     customInstruction?: string,
+    useNovelContext = false,
   ): void {
     this.removeActiveSuggestion();
     const selectionId = active.record.selectionId;
@@ -682,6 +684,7 @@ export class AssistantSelectionController {
         fieldLabel: active.fieldLabel,
         operation,
         customInstruction,
+        useNovelContext,
       });
     } catch (reason) {
       this.publishStartFailure(selectionId, operation, reason);
