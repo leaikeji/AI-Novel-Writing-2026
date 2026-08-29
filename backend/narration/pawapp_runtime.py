@@ -24,6 +24,10 @@ from .runtime import (
 
 
 PRODUCT_ENABLE_ENV = "AI_NOVEL_TTS_PRODUCT_ENABLED"
+IDLE_UNLOAD_SECONDS_ENV = "AI_NOVEL_TTS_IDLE_UNLOAD_SECONDS"
+DEFAULT_IDLE_UNLOAD_SECONDS = 300
+MIN_IDLE_UNLOAD_SECONDS = 60
+MAX_IDLE_UNLOAD_SECONDS = 3600
 _REASON_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
 RuntimeFactory = Callable[
     [Mapping[str, str] | None],
@@ -37,7 +41,9 @@ class NarrationRuntimeSnapshot:
     lifecycle_status: str = "disabled"
     sidecar_reachable: bool = False
     model_ready: bool = False
+    model_loaded: bool = False
     product_visible: bool = False
+    idle_unload_seconds: int | None = None
     protocol_version: str = PROTOCOL_VERSION
     worker_generation: int | None = None
     lease_generation: int | None = None
@@ -71,6 +77,16 @@ def get_ready_narration_adapter() -> SidecarMossNanoTTSAdapter | None:
     if _snapshot.lifecycle_status != "ready" or not _snapshot.model_ready:
         return None
     return _adapter
+
+
+def _idle_unload_seconds(values: Mapping[str, str]) -> int:
+    raw = values.get(IDLE_UNLOAD_SECONDS_ENV, str(DEFAULT_IDLE_UNLOAD_SECONDS))
+    if re.fullmatch(r"[0-9]+", raw) is None:
+        raise ContractError("TTS idle unload duration must be a decimal integer")
+    seconds = int(raw)
+    if not MIN_IDLE_UNLOAD_SECONDS <= seconds <= MAX_IDLE_UNLOAD_SECONDS:
+        raise ContractError("TTS idle unload duration is outside the safe bounds")
+    return seconds
 
 
 async def _update_if_current(
@@ -122,6 +138,8 @@ async def _run_runtime(
     adapter: SidecarMossNanoTTSAdapter,
     *,
     product_visible_requested: bool,
+    lazy_load_requested: bool,
+    idle_unload_seconds: int,
 ) -> None:
     global _adapter, _runtime_task, _snapshot
     try:
@@ -132,24 +150,53 @@ async def _run_runtime(
                 health.reason_code or "SIDECAR_UNAVAILABLE",
                 "Sidecar health is unavailable",
             )
-        warmed, lease_generation = await _warmup_with_lease_renewal(
+        enable_on_demand = getattr(adapter, "enable_on_demand_warmup", None)
+        release_if_idle = getattr(adapter, "release_model_if_idle", None)
+        expected_fingerprint_sha256 = getattr(
             adapter,
-            lease_generation,
+            "expected_model_fingerprint_sha256",
+            None,
         )
-        if warmed.status is not AdapterHealthStatus.HEALTHY:
-            raise SidecarRuntimeError(
-                warmed.reason_code or "SIDECAR_WARMUP_UNAVAILABLE",
-                "Sidecar warmup is unavailable",
+        lazy_load = (
+            lazy_load_requested
+            and callable(enable_on_demand)
+            and callable(release_if_idle)
+            and isinstance(expected_fingerprint_sha256, str)
+            and re.fullmatch(r"[0-9a-f]{64}", expected_fingerprint_sha256)
+            is not None
+        )
+        if lazy_load:
+            enable_on_demand()
+            model_fingerprint_sha256 = (
+                health.model_fingerprint_sha256
+                or expected_fingerprint_sha256
             )
+            model_loaded = health.status is AdapterHealthStatus.HEALTHY
+        else:
+            warmed, lease_generation = await _warmup_with_lease_renewal(
+                adapter,
+                lease_generation,
+            )
+            if warmed.status is not AdapterHealthStatus.HEALTHY:
+                raise SidecarRuntimeError(
+                    warmed.reason_code or "SIDECAR_WARMUP_UNAVAILABLE",
+                    "Sidecar warmup is unavailable",
+                )
+            model_fingerprint_sha256 = warmed.model_fingerprint_sha256
+            model_loaded = True
         ready = NarrationRuntimeSnapshot(
             technical_enabled=True,
             lifecycle_status="ready",
             sidecar_reachable=True,
+            # In on-demand mode this means the frozen adapter can satisfy a
+            # request on demand; ``model_loaded`` reports actual residency.
             model_ready=True,
+            model_loaded=model_loaded,
             product_visible=product_visible_requested,
+            idle_unload_seconds=(idle_unload_seconds if lazy_load else None),
             worker_generation=adapter.worker_generation,
             lease_generation=lease_generation,
-            model_fingerprint_sha256=warmed.model_fingerprint_sha256,
+            model_fingerprint_sha256=model_fingerprint_sha256,
         )
         if not await _update_if_current(adapter, ready):
             await adapter.deactivate()
@@ -157,10 +204,26 @@ async def _run_runtime(
         while True:
             await asyncio.sleep(WORKER_LEASE_RENEW_INTERVAL_SECONDS)
             lease_generation = await adapter.renew_lease()
+            if lazy_load:
+                enable_on_demand()
+                await release_if_idle(idle_unload_seconds)
+                enable_on_demand()
+                current_lease_generation = getattr(
+                    adapter,
+                    "lease_generation",
+                    lease_generation,
+                )
+                if isinstance(current_lease_generation, int):
+                    lease_generation = current_lease_generation
             renewed = replace(
                 ready,
                 worker_generation=adapter.worker_generation,
                 lease_generation=lease_generation,
+                model_loaded=(
+                    bool(getattr(adapter, "model_loaded", False))
+                    if lazy_load
+                    else True
+                ),
             )
             if not await _update_if_current(adapter, renewed):
                 await adapter.deactivate()
@@ -205,10 +268,18 @@ async def launch_narration_runtime(
     values = os.environ if environ is None else environ
     requested = values.get("AI_NOVEL_TTS_RUNTIME_ENABLED", "false") == "true"
     product_visible_requested = values.get(PRODUCT_ENABLE_ENV, "false") == "true"
+    validation_requested = (
+        values.get("AI_NOVEL_TTS_VALIDATION_ENABLED", "false") == "true"
+    )
     async with _lifecycle_lock:
         if _runtime_task is not None or _adapter is not None:
             return
         try:
+            idle_unload_seconds = (
+                _idle_unload_seconds(values)
+                if requested
+                else DEFAULT_IDLE_UNLOAD_SECONDS
+            )
             adapter = factory(values)
         except (ContractError, SidecarRuntimeError, OSError) as error:
             _snapshot = NarrationRuntimeSnapshot(
@@ -229,6 +300,8 @@ async def launch_narration_runtime(
             _run_runtime(
                 adapter,
                 product_visible_requested=product_visible_requested,
+                lazy_load_requested=not validation_requested,
+                idle_unload_seconds=idle_unload_seconds,
             ),
             name="ai-novel-moss-tts-runtime",
         )
@@ -282,6 +355,10 @@ async def wait_narration_runtime_initialized(timeout_seconds: float = 180.0) -> 
 
 
 __all__ = [
+    "DEFAULT_IDLE_UNLOAD_SECONDS",
+    "IDLE_UNLOAD_SECONDS_ENV",
+    "MAX_IDLE_UNLOAD_SECONDS",
+    "MIN_IDLE_UNLOAD_SECONDS",
     "NarrationRuntimeSnapshot",
     "PRODUCT_ENABLE_ENV",
     "get_ready_narration_adapter",

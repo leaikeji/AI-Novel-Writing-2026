@@ -68,6 +68,8 @@ import {
   type CharacterModalTab,
 } from "./narration/character-modal-tabs";
 import { rememberWorkbenchRoleView } from "./workbench-route";
+import { createNovelSemanticIndexCard } from "./embedding";
+import { createStoryTimelineWorkspace } from "./story-timeline";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -116,6 +118,8 @@ const {
 
 const NarrationReadingPage = createNarrationReadingPage(React);
 const CharacterVoiceCardPanel = createCharacterVoiceCardPanel(React);
+const NovelSemanticIndexCard = createNovelSemanticIndexCard(React, host.antd);
+const StoryTimelineWorkspace = createStoryTimelineWorkspace(React, host.antd);
 
 
 export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings" | "reading";
@@ -1342,11 +1346,12 @@ function ChapterCreationWizard({
     const validCharacterIds = new Set(characters.map((item: NovelCharacterRecord) => item.id));
     const validForeshadowIds = new Set(selectableForeshadows.map((item: ForeshadowRecord) => item.id));
     const storedOptional = (data.optional_role_ids || []).map(String).filter((id: string) => validCharacterIds.has(id));
-    const defaultRequired = characters.filter((item: NovelCharacterRecord) => item.required_next_chapter).map((item: NovelCharacterRecord) => item.id);
+    const defaultRequired = (data.required_role_ids || [])
+      .map(String)
+      .filter((id: string) => validCharacterIds.has(id));
     setSelectedStorylineIds((data.storyline_ids || []).map(String).filter((id: string) => validStorylineIds.has(id)));
-    // Required roles are a read-only projection of the latest accepted
-    // chapter intelligence.  Never resurrect a stale stored snapshot after a
-    // reload or a validation-rule upgrade.
+    // Required roles come only from the author's persisted chapter draft.
+    // Production code never infers them from prose keywords or character names.
     setRequiredRoleIds(defaultRequired);
     setOptionalRoleIds(storedOptional.filter((id: string) => !defaultRequired.includes(id)));
     setSelectedForeshadowIds((data.foreshadow_ids || []).map(String).filter((id: string) => validForeshadowIds.has(id)));
@@ -1718,7 +1723,7 @@ function ChapterCreationWizard({
     h("p", null, "AI将根据角色配置生成更连贯的章节内容"),
     requiredCharacters.length ? h(React.Fragment, null,
       h("div", { className: "mb-chapter-section-heading" }, h("strong", null, "必选角色"), h("span", null, `${requiredCharacters.length} 人`)),
-      h("div", { className: "mb-chapter-soft-tip" }, "以下角色根据上一章的【下一章必现角色】自动添加"),
+      h("div", { className: "mb-chapter-soft-tip" }, "以下角色由作者在本章草稿中明确保存为必选"),
       h("div", { className: "mb-chapter-choice-list" }, requiredCharacters.map((item: NovelCharacterRecord) => roleCard(item, true, true))),
     ) : null,
     h("div", { className: "mb-chapter-section-heading" }, h("strong", null, "可选角色"), h("span", null, `已选 ${requiredRoleIds.length + optionalRoleIds.length} 人`)),
@@ -1981,7 +1986,7 @@ export function StudioProjectView({
     (new URLSearchParams(window.location.search).get("role_view") === "graph" ? "graph" : "list") as "list" | "graph",
   );
   const [clueTab, setClueTab] = React.useState("main" as StorylineType);
-  const [settingsTab, setSettingsTab] = React.useState("template" as "template" | "foreshadow");
+  const [settingsTab, setSettingsTab] = React.useState("template" as "template" | "foreshadow" | "timeline" | "semantic-index");
   const [expandedVolumes, setExpandedVolumes] = React.useState([] as string[]);
   const [volumeDescending, setVolumeDescending] = React.useState(true);
   const [outlineEditing, setOutlineEditing] = React.useState(false);
@@ -3114,7 +3119,7 @@ export function StudioProjectView({
           h("div", { className: "mb-template-grid" }, ...(templateEntries.length ? templateEntries : [["模板字段", "尚未填写"]]).map(([key, value]) => h("div", { key }, h("span", null, key), h("strong", null, String(value || "未填写"))))),
         ),
       )
-    : h(
+    : settingsTab === "foreshadow" ? h(
         "div",
         { className: "mb-foreshadow-board" },
         h("div", { className: "mb-foreshadow-summary" },
@@ -3129,7 +3134,14 @@ export function StudioProjectView({
           h("div", { className: "mb-foreshadow-progress" }, h("strong", null, "最新进展："), h("span", null, item.latest_progress || "暂无进展")),
           h("div", { className: "mb-card-actions" }, h(Button, { type: "text", icon: h(EditOutlined), onClick: () => openForeshadowForm(item) }, "编辑"), h(Button, { type: "text", danger: true, icon: h(DeleteOutlined), onClick: () => void deleteForeshadow(item) }, "删除")),
         ))) : h("div", { className: "mb-large-empty" }, h(Empty, { description: "暂无伏笔" })),
-      );
+      )
+    : settingsTab === "timeline"
+      ? h(StoryTimelineWorkspace, {
+          novelId: novel.id,
+          initialStoryLedgerVersion: novel.story_ledger_version,
+          characters: characters.map((item: NovelCharacterRecord) => ({ id: item.id, name: item.name })),
+        })
+      : h(NovelSemanticIndexCard, { novelId: novel.id, novelTitle: novel.title });
 
   const narrationScopeTargets: ReadingScopeTarget[] = novel.tree.flatMap(
     (volume: VolumeRecord) => {
@@ -3184,7 +3196,7 @@ export function StudioProjectView({
         : section === "clues"
           ? h("div", { className: "mb-top-tabs is-four" }, ...(Object.keys(storylineLabels) as StorylineType[]).map((type) => h("button", { key: type, type: "button", className: clueTab === type ? "is-active" : "", onClick: () => setClueTab(type) }, storylineLabels[type])))
           : section === "settings"
-            ? h("div", { className: "mb-top-tabs is-settings" }, h("button", { type: "button", className: settingsTab === "template" ? "is-active" : "", onClick: () => setSettingsTab("template") }, "模板设定"), h("button", { type: "button", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => setSettingsTab("foreshadow") }, "伏笔管理"))
+            ? h("div", { className: "mb-top-tabs is-settings" }, h("button", { type: "button", className: settingsTab === "template" ? "is-active" : "", onClick: () => setSettingsTab("template") }, "模板设定"), h("button", { type: "button", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => setSettingsTab("foreshadow") }, "伏笔管理"), h("button", { type: "button", className: settingsTab === "timeline" ? "is-active" : "", onClick: () => setSettingsTab("timeline") }, "时间线与人物实例"), h("button", { type: "button", className: settingsTab === "semantic-index" ? "is-active" : "", onClick: () => setSettingsTab("semantic-index") }, "语义索引"))
             : null;
 
   const panelBody = section === "chapters"

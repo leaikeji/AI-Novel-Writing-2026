@@ -651,20 +651,33 @@ def _validate_registered_job_kind(
     resource_class: str,
 ) -> BackgroundResourceClassPolicy:
     policy = _resource_policy(session, resource_class=resource_class)
-    if job_kind.startswith("narration."):
-        kind_policy = session.scalar(
-            select(BackgroundJobKindPolicy)
-            .where(
-                BackgroundJobKindPolicy.job_kind == job_kind,
-                BackgroundJobKindPolicy.resource_class == resource_class,
-            )
-            .execution_options(populate_existing=True)
-        )
-        if kind_policy is None:
-            raise JobValidationError(
-                "narration job kind/resource_class is not registered"
-            )
+    kind_policy = _registered_job_kind_policy(
+        session,
+        job_kind=job_kind,
+        resource_class=resource_class,
+    )
+    if not kind_policy.executor_key:
+        raise JobServiceError("job kind policy has no executor key")
     return policy
+
+
+def _registered_job_kind_policy(
+    session: Session,
+    *,
+    job_kind: str,
+    resource_class: str,
+) -> BackgroundJobKindPolicy:
+    kind_policy = session.scalar(
+        select(BackgroundJobKindPolicy)
+        .where(
+            BackgroundJobKindPolicy.job_kind == job_kind,
+            BackgroundJobKindPolicy.resource_class == resource_class,
+        )
+        .execution_options(populate_existing=True)
+    )
+    if kind_policy is None:
+        raise JobValidationError("background job kind/resource_class is not registered")
+    return kind_policy
 
 
 def _merge_queued_interactive_boost(
@@ -1074,18 +1087,20 @@ def _executor_epoch_for_update(
     return epoch
 
 
-def _active_executor_epoch_for_update(session: Session) -> BackgroundExecutorEpoch:
+def _active_executor_epoch_for_update(
+    session: Session, *, executor_key: str
+) -> BackgroundExecutorEpoch:
     epoch = session.scalar(
         select(BackgroundExecutorEpoch)
         .where(
-            BackgroundExecutorEpoch.executor_key == DEFAULT_EXECUTOR_KEY,
+            BackgroundExecutorEpoch.executor_key == executor_key,
             BackgroundExecutorEpoch.state == "active",
         )
         .with_for_update(read=True)
         .execution_options(populate_existing=True)
     )
     if epoch is None:
-        raise JobStateError("no active narration executor epoch is installed")
+        raise JobStateError("no active background executor epoch is installed")
     return epoch
 
 
@@ -1208,8 +1223,6 @@ def _lock_job_attempt_fence(
             raise JobFenceError("attempt fence is stale or not the current generation")
     if require_active_epoch and epoch.state != "active":
         raise JobFenceError("attempt executor epoch has been revoked")
-    if epoch.executor_key != DEFAULT_EXECUTOR_KEY:
-        raise JobFenceError("attempt belongs to an untrusted executor epoch")
     if resource_row is None:
         raise JobFenceError("attempt resource lease row does not exist")
     resource_is_current = True
@@ -1232,6 +1245,13 @@ def _lock_job_attempt_fence(
         job=job,
         attempt=attempt,
     )
+    kind_policy = _registered_job_kind_policy(
+        session,
+        job_kind=job.job_kind,
+        resource_class=job.resource_class,
+    )
+    if epoch.executor_key != kind_policy.executor_key:
+        raise JobFenceError("attempt executor does not match the registered job kind")
     return _LockedExecution(
         job=job,
         attempt=attempt,
@@ -1417,6 +1437,7 @@ def claim_next_job(
     job_kinds: Sequence[str] | None = None,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     aging_quantum_seconds: int = DEFAULT_AGING_QUANTUM_SECONDS,
+    executor_key: str = DEFAULT_EXECUTOR_KEY,
     test_only_now: datetime | None = None,
 ) -> JobLease | None:
     """Claim one fair queued job and append its immutable attempt identity."""
@@ -1441,11 +1462,23 @@ def claim_next_job(
     manual_command = _pending_manual_command_for_update(session, job=job)
     if manual_command is None and job.attempt_count >= job.max_attempts:
         raise JobStateError("queued job exhausted attempts without a manual command")
-    epoch = _active_executor_epoch_for_update(session)
     policy = _validate_registered_job_kind(
         session,
         job_kind=job.job_kind,
         resource_class=job.resource_class,
+    )
+    kind_policy = _registered_job_kind_policy(
+        session,
+        job_kind=job.job_kind,
+        resource_class=job.resource_class,
+    )
+    trusted_executor_key = _bounded_text(
+        executor_key, field_name="executor_key", maximum=80
+    )
+    if kind_policy.executor_key != trusted_executor_key:
+        raise JobStateError("scheduler executor does not own the selected job kind")
+    epoch = _active_executor_epoch_for_update(
+        session, executor_key=trusted_executor_key
     )
     resource_lease = _acquire_job_resource_slot(
         session,

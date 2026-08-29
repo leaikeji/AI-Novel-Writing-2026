@@ -88,13 +88,14 @@ def _normalize_generated_character_personality(value: Any) -> str:
     return clean_value
 
 INTELLIGENCE_ITEM_TYPES = {
-    "fact",
     "character_state",
-    "relationship",
+    "relationship_state",
     "storyline_event",
-    "foreshadow_progress",
-    "foreshadow_new",
-    "next_chapter_required_role",
+    "foreshadow_event",
+    "story_time",
+    "knowledge_event",
+    "world_state",
+    "general_fact",
 }
 
 
@@ -761,7 +762,7 @@ def normalize_creative_generation_json(
         candidates: list[dict[str, Any]] = [
             item for item in raw_relationships or [] if isinstance(item, dict)
         ] if explicit_relationship_array else []
-        if payload.get("source_name") and payload.get("target_name"):
+        if payload.get("source_key") and payload.get("target_key"):
             candidates.append(payload)
 
         # If prose quotes damaged only the outer JSON envelope, independently
@@ -777,22 +778,22 @@ def normalize_creative_generation_json(
                 continue
             if (
                 isinstance(recovered, dict)
-                and recovered.get("source_name")
-                and recovered.get("target_name")
+                and recovered.get("source_key")
+                and recovered.get("target_key")
             ):
                 candidates.append(recovered)
 
         normalized_by_slot: dict[tuple[str, str, str, str], dict[str, Any]] = {}
         for candidate in candidates:
-            source_name = str(candidate.get("source_name") or "").strip()
-            target_name = str(candidate.get("target_name") or "").strip()
+            source_key = str(candidate.get("source_key") or "").strip()
+            target_key = str(candidate.get("target_key") or "").strip()
             directionality = str(candidate.get("directionality") or "").strip()
             relation_kind = str(candidate.get("relation_kind") or "").strip()
             label = str(candidate.get("label") or "").strip()
             if (
-                not source_name
-                or not target_name
-                or source_name == target_name
+                not source_key
+                or not target_key
+                or source_key == target_key
                 or directionality not in {"directed", "undirected"}
                 or relation_kind
                 not in {"family", "colleague", "mentor", "ally", "enemy", "romance", "other"}
@@ -812,18 +813,15 @@ def normalize_creative_generation_json(
                 for item in raw_evidence or []
                 if str(item).strip()
             ][:5] if isinstance(raw_evidence, list) else []
-            if confidence < 80 or not any(
-                source_name in evidence_item and target_name in evidence_item
-                for evidence_item in evidence
-            ):
+            if confidence < 80 or not evidence:
                 continue
-            left, right = source_name, target_name
+            left, right = source_key, target_key
             if directionality == "undirected" and left.casefold() > right.casefold():
                 left, right = right, left
             slot = (left.casefold(), right.casefold(), directionality, relation_kind)
             normalized = {
-                "source_name": source_name,
-                "target_name": target_name,
+                "source_key": source_key,
+                "target_key": target_key,
                 "directionality": directionality,
                 "relation_kind": relation_kind,
                 "label": label,
@@ -848,8 +846,8 @@ def normalize_creative_generation_json(
                 normalized_by_slot.values(),
                 key=lambda item: (
                     -int(item["confidence"]),
-                    str(item["source_name"]),
-                    str(item["target_name"]),
+                    str(item["source_key"]),
+                    str(item["target_key"]),
                     str(item["relation_kind"]),
                 ),
             ),
@@ -923,14 +921,14 @@ def normalize_intelligence_generation_json(
     item objects intact.  ``parse_model_json`` intentionally returns the first
     independently valid object in that situation, so this kind-aware layer also
     scans every embedded object and deduplicates the valid intelligence items.
-    An empty result is never accepted as a successful synchronization.
+    An explicitly declared ``no_changes`` result is a valid synchronization.
     """
 
     candidates: list[dict[str, Any]] = []
     raw_items = payload.get("items")
     if isinstance(raw_items, list):
         candidates.extend(item for item in raw_items if isinstance(item, dict))
-    if payload.get("item_type"):
+    if payload.get("fact_type") or payload.get("item_type"):
         candidates.append(payload)
     candidates.extend(_intelligence_items_from_embedded_objects(output_text))
 
@@ -941,7 +939,7 @@ def normalize_intelligence_generation_json(
         if item is None:
             continue
         marker = (
-            item["item_type"],
+            item["fact_type"],
             item["subject"],
             item["predicate"],
             item["object"],
@@ -953,6 +951,8 @@ def normalize_intelligence_generation_json(
         output.append(item)
         if len(output) >= 200:
             break
+    if not output and payload.get("no_changes") is True and raw_items == []:
+        return []
     if not output:
         raise ModelVerificationError(
             "模型未返回可用的章节情报，请重新同步"
@@ -1032,7 +1032,7 @@ def _extract_relaxed_json_string_field(text: str, field: str) -> str:
 def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    item_type = str(value.get("item_type") or "").strip()
+    item_type = str(value.get("fact_type") or value.get("item_type") or "").strip()
     subject = str(value.get("subject") or "").strip()
     predicate = str(value.get("predicate") or "").strip()
     object_text = str(value.get("object") or "").strip()
@@ -1046,39 +1046,19 @@ def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         confidence = 50
     normalized = {
-        "item_type": item_type,
+        "fact_type": item_type,
+        "entity_key": str(value.get("entity_key") or "").strip(),
+        "dimension": str(value.get("dimension") or item_type).strip()[:80],
+        "event_kind": str(value.get("event_kind") or "confirmed").strip()[:80],
         "subject": subject,
         "predicate": predicate,
         "object": object_text,
         "source_text": source_text,
+        "visibility": str(value.get("visibility") or "author").strip(),
+        "details": dict(value.get("details") or {}) if isinstance(value.get("details"), dict) else {},
         "reasoning_summary": str(value.get("reasoning_summary") or "").strip(),
         "confidence": max(0, min(confidence, 100)),
     }
-    relationship_details = value.get("relationship_details")
-    if item_type == "relationship" and isinstance(relationship_details, dict):
-        source_name = str(relationship_details.get("source_name") or "").strip()
-        target_name = str(relationship_details.get("target_name") or "").strip()
-        directionality = str(relationship_details.get("directionality") or "").strip()
-        relation_kind = str(relationship_details.get("relation_kind") or "").strip()
-        label = str(relationship_details.get("label") or "").strip()
-        if (
-            source_name
-            and target_name
-            and source_name != target_name
-            and directionality in {"directed", "undirected"}
-            and relation_kind
-            in {"family", "colleague", "mentor", "ally", "enemy", "romance", "other"}
-            and label
-            and len(label) <= 80
-        ):
-            normalized["relationship_details"] = {
-                "source_name": source_name,
-                "target_name": target_name,
-                "directionality": directionality,
-                "relation_kind": relation_kind,
-                "label": label,
-                "description": str(relationship_details.get("description") or "").strip()[:2000],
-            }
     return normalized
 
 

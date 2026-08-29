@@ -58,6 +58,8 @@ class JobKindClaimGate(Protocol):
 @dataclass(frozen=True, slots=True)
 class SchedulerConfig:
     lease_owner: str
+    executor_key: str = "narration-worker"
+    resource_classes: tuple[str, ...] = ("moss-nano",)
     job_kinds: tuple[str, ...] = ("narration.segment_render",)
     novel_ids: tuple[UUID, ...] | None = None
     document_ids: tuple[UUID, ...] | None = None
@@ -75,6 +77,26 @@ class SchedulerConfig:
             or len(self.lease_owner) > 160
         ):
             raise ValueError("scheduler lease_owner must be a normalized value")
+        if (
+            type(self.executor_key) is not str
+            or not self.executor_key
+            or self.executor_key != self.executor_key.strip()
+            or len(self.executor_key) > 80
+        ):
+            raise ValueError("scheduler executor_key must be a normalized value")
+        if (
+            type(self.resource_classes) is not tuple
+            or not self.resource_classes
+            or len(self.resource_classes) != len(set(self.resource_classes))
+            or any(
+                type(value) is not str
+                or not value
+                or value != value.strip()
+                or len(value) > 80
+                for value in self.resource_classes
+            )
+        ):
+            raise ValueError("scheduler resource_classes must be a unique normalized tuple")
         if (
             type(self.job_kinds) is not tuple
             or not self.job_kinds
@@ -228,7 +250,7 @@ class NarrationJobScheduler:
                 scope=self._scope,
                 novel_ids=self._config.novel_ids,
                 document_ids=self._config.document_ids,
-                resource_classes=("moss-nano",),
+                resource_classes=self._config.resource_classes,
                 job_kinds=self._config.job_kinds,
                 limit=self._config.retry_promotion_limit,
             )
@@ -240,7 +262,7 @@ class NarrationJobScheduler:
                 scope=self._scope,
                 novel_ids=self._config.novel_ids,
                 document_ids=self._config.document_ids,
-                resource_classes=("moss-nano",),
+                resource_classes=self._config.resource_classes,
                 job_kinds=self._config.job_kinds,
                 limit=self._config.reconciliation_limit,
             )
@@ -289,10 +311,11 @@ class NarrationJobScheduler:
                 lease_owner=self._config.lease_owner,
                 novel_ids=self._config.novel_ids,
                 document_ids=self._config.document_ids,
-                resource_classes=("moss-nano",),
+                resource_classes=self._config.resource_classes,
                 job_kinds=allowed_job_kinds,
                 lease_seconds=self._config.lease_seconds,
                 aging_quantum_seconds=self._config.aging_quantum_seconds,
+                executor_key=self._config.executor_key,
             )
             if lease is None:
                 return None

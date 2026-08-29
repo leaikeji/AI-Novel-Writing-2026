@@ -15,7 +15,10 @@ from .assistant_api import router as assistant_router
 from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
 from .creative_schemas import SELECTION_EDIT_OPERATIONS
-from .creative_services import sync_relationships_from_intelligence_proposal
+from .creative_data_api import router as creative_data_router
+from .embedding.api import router as embedding_router
+from .embedding.runtime import launch_embedding_runtime, stop_embedding_runtime
+from .story_state.api import router as story_state_router
 from .database import database_status, get_engine, get_session
 from .generation_dependencies import (
     get_novel_effective_model,
@@ -145,12 +148,25 @@ pawapp = PawApp(name="AI小说世界2026", app_id=APP_ID)
 router = APIRouter()
 router.include_router(assistant_router)
 router.include_router(creative_router)
+router.include_router(creative_data_router)
 router.include_router(narration_settings_router)
 router.include_router(narration_health_router)
 router.include_router(narration_script_router)
 router.include_router(narration_production_router)
 router.include_router(narration_playback_router)
 router.include_router(writing_eval_router)
+router.include_router(embedding_router)
+router.include_router(story_state_router)
+
+
+@pawapp.hook("startup", priority=90)
+async def _launch_embedding_worker() -> None:
+    await launch_embedding_runtime()
+
+
+@pawapp.hook("shutdown", priority=90)
+async def _stop_embedding_worker() -> None:
+    await stop_embedding_runtime()
 
 
 def _production_runtime_accessible(status_snapshot: dict[str, object]) -> bool:
@@ -393,24 +409,27 @@ async def _stop_narration_runtime() -> None:
 @pawapp.on_uninstall
 async def _uninstall_narration_runtime() -> None:
     try:
-        await stop_narration_production_runtime()
+        await stop_embedding_runtime()
     finally:
         try:
-            await stop_narration_runtime()
+            await stop_narration_production_runtime()
         finally:
             try:
-                uninstall_script_api_backend_factory(
-                    _NARRATION_SCRIPT_BACKEND_FACTORY,
-                )
+                await stop_narration_runtime()
             finally:
                 try:
-                    uninstall_narration_settings_backend_factory(
-                        _NARRATION_SETTINGS_BACKEND_FACTORY,
+                    uninstall_script_api_backend_factory(
+                        _NARRATION_SCRIPT_BACKEND_FACTORY,
                     )
                 finally:
-                    uninstall_narration_t4_http_access_policy(
-                        _NARRATION_T4_HTTP_ACCESS_POLICY,
-                    )
+                    try:
+                        uninstall_narration_settings_backend_factory(
+                            _NARRATION_SETTINGS_BACKEND_FACTORY,
+                        )
+                    finally:
+                        uninstall_narration_t4_http_access_policy(
+                            _NARRATION_T4_HTTP_ACCESS_POLICY,
+                        )
 
 
 def _raise_domain(error: Exception) -> None:
@@ -962,11 +981,6 @@ def intelligence_proposals_commit(
             accepted_item_ids=request.accepted_item_ids,
             item_overrides=request.item_overrides,
         )
-        relationship_sync = sync_relationships_from_intelligence_proposal(
-            session,
-            proposal_id,
-        )
-        result["relationship_sync"] = relationship_sync["changes"]
         return result
     except Exception as error:
         session.rollback()

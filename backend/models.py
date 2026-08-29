@@ -68,6 +68,7 @@ class Novel(Base):
     background: Mapped[str] = mapped_column(Text, nullable=False, default="")
     main_plot: Mapped[str] = mapped_column(Text, nullable=False, default="")
     story_ledger_version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    character_catalog_version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -312,7 +313,14 @@ class CandidateRevision(Base):
 
 class StoryFact(Base):
     __tablename__ = "story_facts"
-    __table_args__ = (Index("ix_story_facts_novel_type", "novel_id", "fact_type"),)
+    __table_args__ = (
+        UniqueConstraint("id", "novel_id", name="uq_story_fact_novel_scope"),
+        Index("ix_story_facts_novel_type", "novel_id", "fact_type"),
+        Index("ix_story_facts_timeline_state", "novel_id", "timeline_id", "fact_type", "status", "story_sequence", "created_at"),
+        Index("ix_story_facts_character_instance", "novel_id", "character_instance_id", "fact_type", "status", "created_at"),
+        Index("uq_story_fact_event_fingerprint", "novel_id", "event_fingerprint", unique=True, postgresql_where=text("event_fingerprint IS NOT NULL")),
+        CheckConstraint("(source_start IS NULL AND source_end IS NULL) OR (source_start >= 0 AND source_end > source_start)", name="ck_story_fact_source_offsets"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     novel_id: Mapped[UUID] = mapped_column(
@@ -326,6 +334,22 @@ class StoryFact(Base):
     source_revision_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="SET NULL")
     )
+    source_document_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    schema_version: Mapped[str | None] = mapped_column(String(64))
+    timeline_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    character_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    character_instance_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    relationship_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    storyline_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    foreshadow_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    dimension: Mapped[str | None] = mapped_column(String(80))
+    event_kind: Mapped[str | None] = mapped_column(String(80))
+    story_sequence: Mapped[int | None] = mapped_column(BigInteger)
+    story_time_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    visibility_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    source_start: Mapped[int | None] = mapped_column(Integer)
+    source_end: Mapped[int | None] = mapped_column(Integer)
+    event_fingerprint: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -355,6 +379,9 @@ class IntelligenceProposal(Base):
         nullable=False,
     )
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    extraction_context_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     state: Mapped[str] = mapped_column(String(30), nullable=False, default="running")
     execution_agent_id: Mapped[str | None] = mapped_column(String(120))
     requested_provider_id: Mapped[str | None] = mapped_column(String(160))
@@ -675,6 +702,10 @@ class PrivateAsset(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    current_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    tags_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    source_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    rights_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -709,6 +740,8 @@ class AssetPresetItem(Base):
     asset_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("private_assets.id", ondelete="CASCADE"), nullable=False
     )
+    asset_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    usage_policy: Mapped[str] = mapped_column(String(24), nullable=False, default="preferred")
     position: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -772,8 +805,9 @@ class CharacterRelationship(Base):
         Index(
             "uq_character_relationship_active_semantics",
             "novel_id",
-            "source_character_id",
-            "target_character_id",
+            "timeline_id",
+            "source_character_instance_id",
+            "target_character_instance_id",
             "directionality",
             "relation_kind",
             "normalized_label",
@@ -782,6 +816,7 @@ class CharacterRelationship(Base):
         ),
         Index("ix_character_relationships_novel", "novel_id", "archived_at"),
         Index("ix_character_relationships_pair", "novel_id", "relation_pair_key"),
+        UniqueConstraint("id", "novel_id", name="uq_character_relationship_novel_scope"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -794,6 +829,9 @@ class CharacterRelationship(Base):
     target_character_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("novel_characters.id", ondelete="CASCADE"), nullable=False
     )
+    timeline_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    source_character_instance_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    target_character_instance_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     directionality: Mapped[str] = mapped_column(
         String(24), nullable=False, default="undirected"
     )
@@ -860,6 +898,9 @@ class CharacterRelationshipRevision(Base):
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
     source_character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     target_character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    timeline_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    source_character_instance_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    target_character_instance_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     directionality: Mapped[str] = mapped_column(String(24), nullable=False)
     relation_kind: Mapped[str] = mapped_column(String(30), nullable=False)
     label: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -934,6 +975,7 @@ class Storyline(Base):
     __table_args__ = (
         UniqueConstraint("novel_id", "position", name="uq_storyline_position"),
         Index("ix_storylines_novel_type", "novel_id", "storyline_type"),
+        UniqueConstraint("id", "novel_id", name="uq_storyline_novel_scope"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -958,6 +1000,7 @@ class Foreshadow(Base):
     __table_args__ = (
         UniqueConstraint("novel_id", "position", name="uq_foreshadow_position"),
         Index("ix_foreshadows_novel_status", "novel_id", "status"),
+        UniqueConstraint("id", "novel_id", name="uq_foreshadow_novel_scope"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -1017,6 +1060,7 @@ class CreativeGenerationJob(Base):
             "scope_type", "scope_id", "kind", "input_hash", "attempt",
             name="uq_creative_generation_attempt",
         ),
+        UniqueConstraint("id", "novel_id", name="uq_creative_generation_job_novel_scope"),
         Index("ix_creative_generation_scope_created", "scope_type", "scope_id", "created_at"),
     )
 
@@ -1061,6 +1105,7 @@ class CharacterProfileApplyBatch(Base):
             "idempotency_key",
             name="uq_character_profile_apply_batch_idempotency",
         ),
+        UniqueConstraint("id", "novel_id", name="uq_character_profile_apply_batch_novel_scope"),
         Index(
             "ix_character_profile_apply_batch_novel_created",
             "novel_id",
@@ -1747,6 +1792,14 @@ class CharacterAlias(Base):
     character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     alias: Mapped[str] = mapped_column(String(240), nullable=False)
     normalized_alias: Mapped[str] = mapped_column(String(240), nullable=False)
+    character_instance_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    timeline_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    alias_kind: Mapped[str | None] = mapped_column(String(30))
+    valid_from_sequence: Mapped[int | None] = mapped_column(BigInteger)
+    valid_to_sequence: Mapped[int | None] = mapped_column(BigInteger)
+    identity_layer: Mapped[str | None] = mapped_column(String(30))
+    knowledge_scope_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    source_revision_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     source: Mapped[str] = mapped_column(String(40), nullable=False)
     lifecycle_state: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -2242,6 +2295,7 @@ class BackgroundJobKindPolicy(Base):
         ForeignKey("background_resource_class_policies.resource_class", ondelete="RESTRICT"),
         nullable=False,
     )
+    executor_key: Mapped[str] = mapped_column(String(80), nullable=False, default="narration-worker")
     version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
     created_actor: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -1,0 +1,1 @@
+"""Structured renderer contract tests."""

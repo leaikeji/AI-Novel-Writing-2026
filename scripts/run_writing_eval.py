@@ -176,7 +176,9 @@ class _RunLock:
             self.descriptor = -1
 
 
-def _local_contract() -> dict[str, Any]:
+def _local_contract(
+    *, required_live_variants: frozenset[str] = frozenset()
+) -> dict[str, Any]:
     contract = experiment_contract(EXPERIMENT_ID)
     cases_path = ROOT / "tests" / "fixtures" / "writing_skill_eval" / "cases.json"
     experiment_root = (
@@ -212,7 +214,11 @@ def _local_contract() -> dict[str, Any]:
         raise RunnerError("CONTRACT_HASH_MISMATCH: rubric.md")
     if baseline_skill_sha != expected_skill_sha256("A"):
         raise RunnerError("CONTRACT_HASH_MISMATCH: baseline prose-writing")
-    if candidate_skill_sha != expected_skill_sha256("B"):
+    # Historical experiment metadata stays verifiable after the live Skill
+    # evolves.  A new B dispatch still fails closed unless the exact frozen
+    # package is installed; status/verification and A-only runs do not need
+    # the old B bytes to remain at the mutable production path forever.
+    if "B" in required_live_variants and candidate_skill_sha != expected_skill_sha256("B"):
         raise RunnerError("CONTRACT_HASH_MISMATCH: candidate prose-writing")
     return contract
 
@@ -530,7 +536,13 @@ def command_verify_contract(_: argparse.Namespace) -> int:
 def command_run(args: argparse.Namespace) -> int:
     if not args.acknowledge_model_cost:
         raise RunnerError("run 必须显式传入 --acknowledge-model-cost")
-    local_contract = _local_contract()
+    public_contract = experiment_contract(EXPERIMENT_ID)
+    requested_samples = args.sample or list(public_contract["sample_ids"])
+    required_live_variants = frozenset(
+        build_sample(EXPERIMENT_ID, sample_id).variant
+        for sample_id in requested_samples
+    )
+    local_contract = _local_contract(required_live_variants=required_live_variants)
     run_dir = _run_directory(args.evidence_root, args.run_id)
     if run_dir.exists() and not args.resume:
         raise RunnerError("run 已存在；继续时必须显式传入 --resume")
@@ -552,7 +564,6 @@ def command_run(args: argparse.Namespace) -> int:
             server_contract = response.json()
             _validate_server_contract(server_contract, local_contract)
 
-            requested_samples = args.sample or list(local_contract["sample_ids"])
             run_model: tuple[str, str] | None = None
             completed = 0
             failed = 0

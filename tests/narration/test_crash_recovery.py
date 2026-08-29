@@ -128,6 +128,17 @@ def _seed_execution_catalog(session: Session, *, epoch_id: UUID) -> None:
                 created_at=NOW,
             )
         )
+    for resource_class in EXPECTED_RESOURCE_POLICIES:
+        session.add(
+            BackgroundJobKindPolicy(
+                job_kind=f"test.t1g.{resource_class}",
+                resource_class=resource_class,
+                executor_key="narration-worker",
+                version=1,
+                created_actor="t1-g-sqlite-seed",
+                created_at=NOW,
+            )
+        )
     session.add(
         BackgroundExecutorEpoch(
             id=epoch_id,
@@ -168,7 +179,7 @@ def _enqueue(
     return jobs.enqueue_job(
         session,
         scope=SCOPE,
-        job_kind="test.t1g.integration",
+        job_kind=f"test.t1g.{resource_class}",
         input_hash="a" * 64,
         idempotency_key=key,
         resource_class=resource_class,

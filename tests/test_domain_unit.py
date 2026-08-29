@@ -1,19 +1,12 @@
 import pytest
-from types import SimpleNamespace
 from uuid import uuid4
 
 from backend.creative_services import (
     _canonical_relationship_endpoints,
-    _inferred_relationship_kind,
-    _inferred_relationship_label,
     _normalize_relationship_label,
-    _relationship_evidence_mentions_pair,
-    _relationship_known_character_mentions,
+    _relationship_character_key,
     _relationship_pair_key,
-    _should_archive_legacy_auto_storyline,
-    _storyline_topic_from_fact,
 )
-from backend.models import StoryFact
 from backend.services import (
     ValidationError,
     _clean_model_candidate,
@@ -21,19 +14,6 @@ from backend.services import (
     markdown_to_text,
     visible_character_count,
 )
-
-
-def _fact(fact_type: str, subject: str, predicate: str, object_text: str) -> StoryFact:
-    return StoryFact(
-        id=uuid4(),
-        novel_id=uuid4(),
-        fact_type=fact_type,
-        subject=subject,
-        predicate=predicate,
-        object_text=object_text,
-        details={},
-        status="active",
-    )
 
 
 def test_markdown_snapshots_are_separate_and_deterministic() -> None:
@@ -46,48 +26,6 @@ def test_markdown_snapshots_are_separate_and_deterministic() -> None:
 
 def test_content_hash_changes_with_author_text() -> None:
     assert content_hash("第一稿") != content_hash("第二稿")
-
-
-def test_storyline_topics_group_events_and_ignore_one_off_relationships() -> None:
-    characters = ["苏晚", "陆沉舟", "周柚"]
-    assert _storyline_topic_from_fact(
-        _fact("relationship", "周柚", "帮助", "苏晚"), characters
-    ) is None
-    assert _storyline_topic_from_fact(
-        _fact("relationship", "陆沉舟与苏晚", "克制重逢", "灯塔两端"), characters
-    ) == ("romance", "苏晚与陆沉舟感情线")
-    assert _storyline_topic_from_fact(
-        _fact("storyline_event", "苏晚", "拆开", "外婆退回的旧家书"), characters
-    ) == ("support", "外婆家书线")
-    assert _storyline_topic_from_fact(
-        _fact("storyline_event", "苏晚", "推开", "阁楼木门"), characters
-    ) is None
-
-
-def test_storyline_list_does_not_rearchive_canonical_aggregate_rows() -> None:
-    canonical = SimpleNamespace(
-        storyline_type="support",
-        title="外婆家书线",
-        description="苏晚拆开：外婆退回的旧家书",
-    )
-    legacy = SimpleNamespace(
-        storyline_type="support",
-        title="苏晚拆开外婆退回的旧家书线",
-        description="苏晚拆开：外婆退回的旧家书",
-    )
-    descriptions = {"苏晚拆开：外婆退回的旧家书"}
-    canonical_titles = {"外婆家书线"}
-
-    assert not _should_archive_legacy_auto_storyline(
-        canonical,  # type: ignore[arg-type]
-        auto_descriptions=descriptions,
-        canonical_titles=canonical_titles,
-    )
-    assert _should_archive_legacy_auto_storyline(
-        legacy,  # type: ignore[arg-type]
-        auto_descriptions=descriptions,
-        canonical_titles=canonical_titles,
-    )
 
 
 def test_undirected_relationships_have_canonical_endpoints_and_pair_keys() -> None:
@@ -116,35 +54,15 @@ def test_relationship_labels_normalize_whitespace_and_case() -> None:
     assert _normalize_relationship_label("  Old   FRIEND  ") == "old friend"
 
 
-def test_legacy_synced_relationship_gets_a_concise_graph_label() -> None:
-    source = "陈岁安与林知禾确立第一次真正意义上的同盟，共同调查档案篡改"
-    relation_kind = _inferred_relationship_kind(source)
+def test_relationship_model_keys_are_stable_and_do_not_depend_on_names() -> None:
+    character_id = uuid4()
 
-    assert relation_kind == "ally"
-    assert _inferred_relationship_label(relation_kind, source, "确立同盟") == "调查同盟"
+    first = _relationship_character_key(character_id)
+    renamed = _relationship_character_key(character_id)
 
-
-def test_relationship_sources_require_two_known_characters_and_pair_evidence() -> None:
-    known = ["陈岁安", "林知禾", "陈卫国"]
-
-    assert _relationship_known_character_mentions(
-        "陈岁安与林知禾在图书馆建立同盟。",
-        known,
-    ) == ["陈岁安", "林知禾"]
-    assert _relationship_known_character_mentions(
-        "林知夏与顾明川约定一起高考。",
-        known,
-    ) == []
-    assert _relationship_evidence_mentions_pair(
-        ["小说大纲：陈岁安与林知禾共同调查档案篡改"],
-        "陈岁安",
-        "林知禾",
-    )
-    assert not _relationship_evidence_mentions_pair(
-        ["小说大纲：林知禾开始调查档案"],
-        "陈岁安",
-        "林知禾",
-    )
+    assert first == renamed
+    assert first.startswith("character_")
+    assert str(character_id) not in first
 
 
 def test_clean_model_candidate_removes_only_final_agent_status_capsule() -> None:

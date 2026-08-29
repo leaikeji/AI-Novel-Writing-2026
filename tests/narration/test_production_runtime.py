@@ -677,6 +677,35 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
 
 
 @pytest.mark.asyncio
+async def test_cold_on_demand_adapter_uses_frozen_expected_model_identity(
+    production_owner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ColdAdapter:
+        expected_model_fingerprint = EXPECTED_PRODUCTION_MODEL_FINGERPRINT
+
+        async def model_fingerprint(self):  # type: ignore[no-untyped-def]
+            return None
+
+    adapter = ColdAdapter()
+    monkeypatch.setattr(
+        production_owner,
+        "get_ready_narration_adapter",
+        lambda: adapter,
+    )
+
+    current_task = asyncio.current_task()
+    assert current_task is not None
+    resolved = await production_owner._resolve_ready_sidecar(
+        {},
+        asyncio.Event(),
+        current_task,
+    )
+
+    assert resolved == (adapter, EXPECTED_PRODUCTION_MODEL_FINGERPRINT)
+
+
+@pytest.mark.asyncio
 async def test_ready_runtime_health_exposes_only_stable_disk_guard_reason(
     production_owner,
 ) -> None:

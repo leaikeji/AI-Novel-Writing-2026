@@ -21,6 +21,7 @@ import { rememberWorkbenchRoute } from "./workbench-route";
 import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
 import { navigateNovelSurface } from "./novel-surface-navigation";
+import { createEmbeddingConfigPage } from "./embedding";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -28,6 +29,7 @@ const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
 const NovelCoverView = createNovelCoverView(React);
+const EmbeddingConfigPage = createEmbeddingConfigPage(React, host.antd);
 const {
   Alert,
   Button,
@@ -65,7 +67,7 @@ const {
 
 
 const CREATION_DRAFT_KEY = "ai-novel-world-2026:creation-draft-key";
-type LibraryView = "center" | "private-library";
+type LibraryView = "center" | "private-library" | "embedding-settings";
 type TemplateTab = "system" | "custom";
 
 
@@ -162,9 +164,8 @@ function workbenchUrl(novelId: string, section?: CreativeCenterWorkbenchSection)
 
 
 function initialLibraryView(): LibraryView {
-  return new URLSearchParams(window.location.search).get("view") === "private-library"
-    ? "private-library"
-    : "center";
+  const view = new URLSearchParams(window.location.search).get("view");
+  return view === "private-library" || view === "embedding-settings" ? view : "center";
 }
 
 
@@ -175,7 +176,7 @@ function setLibraryUrl(view: LibraryView): void {
     target.pathname = currentPath;
   }
   const query = target.searchParams;
-  if (view === "private-library") query.set("view", view);
+  if (view !== "center") query.set("view", view);
   else query.delete("view");
   window.history.replaceState(
     null,
@@ -1467,6 +1468,18 @@ export function NovelLibraryPage() {
   if (view === "private-library") {
     return h(PrivateLibrary, { onBack: () => changeView("center") });
   }
+  if (view === "embedding-settings") {
+    return h(
+      "main",
+      { className: "anw-app mb-center-page" },
+      h(
+        "div",
+        { className: "mb-center-inner" },
+        h(Button, { icon: h(ArrowLeftOutlined), onClick: () => changeView("center") }, "返回创作中心"),
+        h(EmbeddingConfigPage),
+      ),
+    );
+  }
 
   return h(
     "main",
@@ -1479,6 +1492,7 @@ export function NovelLibraryPage() {
         "nav",
         { className: "mb-center-actions", "aria-label": "创作中心功能" },
         h(CenterAction, { icon: DatabaseOutlined, label: "私有库", onClick: () => changeView("private-library") }),
+        h(CenterAction, { icon: RobotOutlined, label: "向量模型接入", onClick: () => changeView("embedding-settings") }),
       ),
       error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
       loading

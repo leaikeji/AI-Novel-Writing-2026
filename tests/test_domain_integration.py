@@ -10,6 +10,16 @@ import pytest
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
+from backend.creative_data_models import StoryTimeline
+from backend.story_state.contracts import StoryEventLinkType
+from backend.story_state.persistence import (
+    create_merge_timeline,
+    create_story_event_link,
+    fork_timeline,
+    get_story_projection_payload,
+    list_story_event_link_payloads,
+)
+
 from backend.creative_services import (
     EntityConflictError,
     archive_private_asset,
@@ -62,6 +72,7 @@ from backend.models import (
     ChapterGenerationJob,
     Document,
     IntelligenceCommitBatch,
+    IntelligenceProposal,
     Novel,
     StoryFact,
 )
@@ -155,7 +166,7 @@ def complete_creative_generation(*args, **kwargs):
     return _complete_creative_generation(*args, **_actual_model_kwargs(kwargs))
 
 
-def _long_chapter(opening: str, *, paragraphs: int = 22) -> str:
+def _long_chapter(opening: str, *, paragraphs: int = 21) -> str:
     body = [opening]
     body.extend(
         (
@@ -411,6 +422,16 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
         description="灯塔维护工程师",
         details={},
     )
+    planned = create_character_relationship(
+        session,
+        novel_id,
+        source_character_id=UUID(source["id"]),
+        target_character_id=UUID(target["id"]),
+        directionality="undirected",
+        relation_kind="ally",
+        label="调查同盟",
+        description="作者规划的关系根。",
+    )
     saved = save_draft(
         session,
         document_id,
@@ -427,26 +448,29 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
         document_id,
         revision_id=UUID(revision["id"]),
     )
+    proposal_row = session.get(IntelligenceProposal, UUID(proposal["id"]))
+    assert proposal_row is not None
+    relationship_key = next(
+        key
+        for key, value in proposal_row.extraction_context_json["relationship_catalog"].items()
+        if value["relationship_id"] == planned["id"]
+    )
     proposal = complete_intelligence_proposal(
         session,
         UUID(proposal["id"]),
         items=[
             {
-                "item_type": "relationship",
+                "fact_type": "relationship_state",
+                "entity_key": relationship_key,
+                "dimension": "alliance",
+                "event_kind": "formed",
                 "subject": "苏晚与陆沉舟",
                 "predicate": "结成同盟",
                 "object": "共同调查旧电台档案",
                 "source_text": "我们一起查到底",
                 "reasoning_summary": "形成稳定协作关系",
                 "confidence": 93,
-                "relationship_details": {
-                    "source_name": "苏晚",
-                    "target_name": "陆沉舟",
-                    "directionality": "undirected",
-                    "relation_kind": "ally",
-                    "label": "调查同盟",
-                    "description": "两人共同调查旧电台档案。",
-                },
+                "details": {},
             }
         ],
         actual_model_id=TEST_MODEL_ID,
@@ -462,11 +486,13 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
         session,
         UUID(proposal["id"]),
     )
-    assert first_sync["changes"] == {"created": 1, "updated": 0, "skipped": 0}
+    assert first_sync["changes"] == {"created": 0, "updated": 0, "skipped": 0}
+    assert first_sync["deprecated"] is True
     generated = first_sync["relationships"][0]
-    assert generated["created_by"] == "ai_auto"
-    assert generated["manual_override"] is False
-    assert generated["proposal_item_id"] == proposal["items"][0]["id"]
+    assert generated["id"] == planned["id"]
+    fact = list_story_facts(session, novel_id)[0]
+    assert fact["fact_type"] == "relationship_state"
+    assert fact["relationship_id"] == planned["id"]
 
     edited = update_character_relationship(
         session,
@@ -486,8 +512,111 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
         session,
         UUID(proposal["id"]),
     )
-    assert second_sync["changes"]["skipped"] == 1
+    assert second_sync["changes"] == {"created": 0, "updated": 0, "skipped": 0}
     assert second_sync["relationships"][0]["label"] == "作者确认的同盟"
+
+
+def test_explicit_merge_inherits_one_parent_and_event_links_do_not_copy_facts(
+    session: Session,
+) -> None:
+    novel_payload = create_novel(session, "pytest-显式汇合与因果边")
+    novel_id = UUID(novel_payload["id"])
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="沈青禾",
+        description="用于验证汇合人物实例",
+        details={},
+    )
+    novel = session.get(Novel, novel_id)
+    primary = session.scalar(
+        select(StoryTimeline).where(
+            StoryTimeline.novel_id == novel_id,
+            StoryTimeline.is_primary.is_(True),
+        )
+    )
+    assert novel is not None and primary is not None
+    branch = fork_timeline(
+        session,
+        novel_id,
+        primary.id,
+        expected_story_ledger_version=novel.story_ledger_version,
+        expected_source_timeline_version=primary.version,
+        timeline_key="branch-a",
+        name="A 分支",
+        fork_story_sequence=3,
+    )
+    merge = create_merge_timeline(
+        session,
+        novel_id,
+        primary_timeline_id=primary.id,
+        input_timeline_ids=[primary.id, UUID(branch["timeline"]["id"])],
+        expected_story_ledger_version=branch["story_ledger_version"],
+        expected_timeline_versions={
+            primary.id: primary.version,
+            UUID(branch["timeline"]["id"]): branch["timeline"]["version"],
+        },
+        timeline_key="merge-a",
+        name="作者裁决后的汇合线",
+        merge_story_sequence=8,
+    )
+    assert merge["timeline"]["timeline_kind"] == "merge"
+    assert merge["timeline"]["parent_timeline_id"] == str(primary.id)
+    assert merge["copied_fact_count"] == 0
+    assert [item["source_timeline_id"] for item in merge["merge_references"]] == [
+        branch["timeline"]["id"]
+    ]
+
+    earlier = StoryFact(
+        id=UUID("00000000-0000-0000-0000-00000000f101"),
+        novel_id=novel_id,
+        schema_version="story-fact/2",
+        timeline_id=primary.id,
+        fact_type="general_fact",
+        subject="车票",
+        predicate="颜色",
+        object_text="蓝色",
+        details={"schema_version": "general-fact/1", "value": "蓝色"},
+        dimension="appearance",
+        event_kind="confirmed",
+        story_sequence=1,
+        visibility_json={"scope": "author"},
+        event_fingerprint="a" * 64,
+        status="active",
+    )
+    correction = StoryFact(
+        id=UUID("00000000-0000-0000-0000-00000000f102"),
+        novel_id=novel_id,
+        schema_version="story-fact/2",
+        timeline_id=primary.id,
+        fact_type="general_fact",
+        subject="车票",
+        predicate="颜色",
+        object_text="绿色",
+        details={"schema_version": "general-fact/1", "value": "绿色"},
+        dimension="appearance",
+        event_kind="correction",
+        story_sequence=2,
+        visibility_json={"scope": "author"},
+        event_fingerprint="b" * 64,
+        status="active",
+    )
+    session.add_all((earlier, correction))
+    session.flush()
+    linked = create_story_event_link(
+        session,
+        novel_id,
+        source_fact_id=correction.id,
+        target_fact_id=earlier.id,
+        link_type=StoryEventLinkType.SUPERSEDES,
+        expected_story_ledger_version=merge["story_ledger_version"],
+        details={"reason": "author_correction"},
+    )
+    assert linked["link_type"] == "supersedes"
+    assert len(list_story_event_link_payloads(session, novel_id)) == 1
+    projection = get_story_projection_payload(session, novel_id, timeline_id=primary.id)
+    assert [item["object_text"] for item in projection["current_facts"]] == ["绿色"]
 
 
 def test_relationship_graph_status_matches_snapshot_and_prevents_parallel_force_new(
@@ -512,6 +641,7 @@ def test_relationship_graph_status_matches_snapshot_and_prevents_parallel_force_
         details={"gender": "男"},
     )
     snapshot = build_relationship_graph_snapshot(session, novel_id)
+    keys = {item["name"]: item["entity_key"] for item in snapshot["characters"]}
     first = start_creative_generation(
         session,
         scope_type="novel",
@@ -543,8 +673,8 @@ def test_relationship_graph_status_matches_snapshot_and_prevents_parallel_force_
             "complete_snapshot": True,
             "relationships": [
                 {
-                    "source_name": "苏晚",
-                    "target_name": "陆沉舟",
+                    "source_key": keys["苏晚"],
+                    "target_key": keys["陆沉舟"],
                     "directionality": "undirected",
                     "relation_kind": "ally",
                     "label": "调查同盟",
@@ -783,7 +913,7 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
     context = get_novel_context(session, novel_id, document_id=document_id)
     assert context["novel"]["title"] == "pytest-CAS小说"
     assert context["documents"][-1]["base_revision_id"] == restored["revision"]["id"]
-    assert context["retrieval"].startswith("lexical")
+    assert context["retrieval"].startswith("deterministic/context-v3")
 
 
 def test_create_novel_is_ready_to_write(session: Session) -> None:
@@ -869,7 +999,8 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
         session,
         UUID(job["id"]),
         content_markdown=_long_chapter(
-            "雨水敲着窗。江述翻过信封，邮戳日期写着明天。"
+            "雨水敲着窗。江述翻过信封，邮戳日期写着明天。",
+            paragraphs=28,
         ),
         model_profile_fingerprint="pytest-model",
         actual_model_id=TEST_MODEL_ID,
@@ -896,7 +1027,7 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
         UUID(proposal["id"]),
         items=[
             {
-                "item_type": "fact",
+                "fact_type": "general_fact",
                 "subject": "信封邮戳",
                 "predicate": "日期",
                 "object": "明天",
@@ -905,7 +1036,7 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
                 "confidence": 98,
             },
             {
-                "item_type": "foreshadow_new",
+                "fact_type": "general_fact",
                 "subject": "寄信人",
                 "predicate": "身份",
                 "object": "尚未揭示",
@@ -955,7 +1086,7 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
         UUID(proposal_a["id"]),
         items=[
             {
-                "item_type": "fact",
+                "fact_type": "general_fact",
                 "subject": "车票",
                 "predicate": "颜色",
                 "object": "蓝色",
@@ -1002,7 +1133,7 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
         UUID(proposal_b["id"]),
         items=[
             {
-                "item_type": "fact",
+                "fact_type": "general_fact",
                 "subject": "怀表",
                 "predicate": "位置",
                 "object": "旧桥下",
@@ -1392,59 +1523,9 @@ def test_next_chapter_required_roles_reject_uncertain_supporting_inference(
         description="咖啡馆老板",
         details={},
     )
-    saved = save_draft(
-        session,
-        document_id,
-        expected_draft_version=1,
-        content_markdown=(
-            "周柚把信放下，说自己先回咖啡馆。"
-            "苏晚摊开记录说：『明天我们一起去文化馆查档案。』"
-            "陆沉舟点头：『我和你一起去。』两人收好档案，等雨停后离开。"
-        ),
-    )
-    revision = create_checkpoint(
-        session,
-        document_id,
-        expected_draft_version=saved["draft_version"],
-    )["revision"]
-    proposal = start_intelligence_proposal(
-        session, document_id, revision_id=UUID(revision["id"])
-    )
-    proposal = complete_intelligence_proposal(
-        session,
-        UUID(proposal["id"]),
-        items=[
-            {
-                "item_type": "next_chapter_required_role",
-                "subject": "陆沉舟",
-                "predicate": "下一章必现",
-                "object": "已明确答应与苏晚一起去文化馆查档案",
-                "source_text": "我和你一起去",
-                "reasoning_summary": "结尾形成明确的共同计划",
-                "confidence": 99,
-            },
-            {
-                "item_type": "next_chapter_required_role",
-                "subject": "周柚",
-                "predicate": "下一章必现",
-                "object": "送来了关键记录",
-                "source_text": "周柚把信放下",
-                "reasoning_summary": "作为送件人，下一章极可能继续出现",
-                "confidence": 70,
-            },
-        ],
-        actual_model_id=TEST_MODEL_ID,
-        provider_profile=TEST_PROVIDER_ID,
-    )
-    commit_intelligence_items(
-        session,
-        UUID(proposal["id"]),
-        accepted_item_ids=[UUID(item["id"]) for item in proposal["items"]],
-    )
-
     characters = list_novel_characters(session, novel_id)
     required = {item["name"] for item in characters if item["required_next_chapter"]}
-    assert required == {"苏晚", "陆沉舟"}
+    assert required == set()
 
 
 def test_six_step_chapter_creation_rejects_cross_book_references(

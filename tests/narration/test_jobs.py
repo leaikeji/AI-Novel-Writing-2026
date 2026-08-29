@@ -138,6 +138,8 @@ def session() -> Session:
                 created_at=NOW,
             )
             for job_kind, resource_class in (
+                ("test.deterministic", "cpu-analysis"),
+                ("test.heavy", "moss-nano"),
                 ("narration.segment_render", "moss-nano"),
                 ("narration.export", "cpu-transcode"),
                 ("narration.voice_generate", "voice-generator"),
@@ -176,10 +178,11 @@ def _enqueue(
     interactive_priority_expires_at: datetime | None = None,
     novel_id=None,  # type: ignore[no-untyped-def]
 ) -> jobs.EnqueueResult:
+    job_kind = "test.heavy" if resource_class == "moss-nano" else "test.deterministic"
     result = jobs.enqueue_job(
         session,
         scope=SCOPE,
-        job_kind="test.deterministic",
+        job_kind=job_kind,
         input_hash=digest_character * 64,
         idempotency_key=key,
         resource_class=resource_class,
@@ -239,7 +242,7 @@ def test_enqueue_is_idempotent_in_scope_and_conflicts_on_canonical_drift(
             resource_class="cpu-analysis",
             test_only_now=NOW + timedelta(seconds=2),
         )
-    with pytest.raises(JobIdempotencyConflict):
+    with pytest.raises(JobValidationError, match="not registered"):
         jobs.enqueue_job(
             session,
             scope=SCOPE,

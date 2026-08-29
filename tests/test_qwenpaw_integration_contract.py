@@ -313,8 +313,8 @@ def test_public_pawapp_register_delegates_lifecycle_hooks_to_plugin_api() -> Non
 
         api = RecordingPluginApi()
         app.pawapp.register(api)
-        assert len(api.startup) == 1 and api.startup[0]["priority"] == 100
-        assert len(api.shutdown) == 1 and api.shutdown[0]["priority"] == 100
+        assert sorted(item["priority"] for item in api.startup) == [90, 100]
+        assert sorted(item["priority"] for item in api.shutdown) == [90, 100]
         assert len(api.uninstall) == 1
         assert len(api.routers) == 1
         assert api.routers[0][1] == {
@@ -334,8 +334,8 @@ def test_public_pawapp_register_delegates_lifecycle_hooks_to_plugin_api() -> Non
         app.stop_narration_runtime = stop
 
         async def exercise():
-            await api.startup[0]["callback"]()
-            await api.shutdown[0]["callback"]()
+            await next(item for item in api.startup if item["priority"] == 100)["callback"]()
+            await next(item for item in api.shutdown if item["priority"] == 100)["callback"]()
             await api.uninstall[0]["callback"]()
 
         asyncio.run(exercise())
@@ -380,8 +380,8 @@ def test_public_pawapp_register_delegates_lifecycle_hooks_to_plugin_api() -> Non
     assert json.loads(result.stdout) == {
         "lifecycle_calls": ["launch", "stop", "stop"],
         "product_visible": False,
-        "shutdown": 1,
-        "startup": 1,
+        "shutdown": 2,
+        "startup": 2,
         "uninstall": 1,
     }
 
@@ -1243,6 +1243,45 @@ def test_runtime_waiter_accepts_only_complete_product_ready_topology(
             "sidecar_reachable": True,
             "model_ready": True,
             "worker_generation": 8,
+            "lease_generation": 8,
+            "product_visible": True,
+            "reason_code": None,
+        },
+        "narration_production": {
+            "product_requested": True,
+            "lifecycle_status": "ready",
+            "playback_installed": True,
+            "digest_keyring_loaded": True,
+            "production_backend_installed": True,
+            "worker_running": True,
+            "reference_clone_ready": False,
+            "reason_code": None,
+        },
+    }
+    monkeypatch.setattr(lab.time, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(
+        lab,
+        "read_public_plugin_health",
+        lambda *, timeout_seconds: health,
+    )
+
+    assert lab.wait_until_expected_tts_runtime() is health
+
+
+def test_runtime_waiter_accepts_ready_lazy_unloaded_product_topology(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    monkeypatch.setenv(lab.TTS_RUNTIME_EXPECTATION_ENV, "ready")
+    monkeypatch.setenv(lab.TTS_PRODUCT_EXPECTATION_ENV, "ready")
+    health = {
+        "narration": {
+            "technical_enabled": True,
+            "lifecycle_status": "ready",
+            "sidecar_reachable": True,
+            "model_ready": True,
+            "model_loaded": False,
+            "worker_generation": None,
             "lease_generation": 8,
             "product_visible": True,
             "reason_code": None,

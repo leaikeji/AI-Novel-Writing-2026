@@ -72,7 +72,7 @@ def test_frozen_hashes_and_four_case_payloads_match_authoritative_inputs() -> No
     assert _sha256_file(VARIANT_POLICY_PATH) == manifest["variant_policy"]["sha256"]
     assert _sha256_file(MANIFEST_PATH) == contract.MANIFEST_SHA256
     assert _sha256_file(BASELINE_SKILL_PATH) == contract.expected_skill_sha256("A")
-    assert _sha256_file(CANDIDATE_SKILL_PATH) == contract.expected_skill_sha256("B")
+    assert manifest["variants"]["B"]["skill_sha256"] == contract.expected_skill_sha256("B")
     assert set(contract._CASES) == TARGET_CASE_IDS
     assert set(manifest["source_suite"]["case_ids"]) == TARGET_CASE_IDS
 

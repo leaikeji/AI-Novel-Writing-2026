@@ -44,6 +44,7 @@ PROTOCOL_VERSION: Final = "moss-tts-sidecar/1.1"
 TOKEN_HEADER: Final = "X-MOSS-Sidecar-Token"
 WORKER_TOKEN_HEADER: Final = "X-MOSS-Worker-Token"
 VERSION_HEADER: Final = "X-MOSS-Protocol-Version"
+GENERATION_HEADER: Final = "X-MOSS-Worker-Generation"
 CAPABILITIES_SHA256: Final = capabilities_fingerprint(MOSS_NANO_SIDECAR_CONTRACT_CAPABILITIES)
 MAX_JSON_BYTES: Final = 64 * 1024
 MAX_AUDIO_BYTES: Final = 16 * 1024 * 1024
@@ -1058,6 +1059,8 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
         self._fingerprint: ModelFingerprint | None = None
         self._fingerprint_sha256: str | None = None
         self._generation: int | None = None
+        self._last_model_activity_at: float | None = None
+        self._on_demand_warmup_enabled = False
         self._control_lock = asyncio.Lock()
         self._lease_lock = asyncio.Lock()
         self._synthesis_lock = asyncio.Lock()
@@ -1078,6 +1081,29 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
     @property
     def worker_lease_active(self) -> bool:
         return self._worker_token is not None and self._lease_generation is not None
+
+    @property
+    def expected_model_fingerprint(self) -> ModelFingerprint:
+        """Return the frozen requested identity without claiming it is loaded."""
+
+        return self._expected_fingerprint
+
+    @property
+    def expected_model_fingerprint_sha256(self) -> str:
+        return self._expected_fingerprint_sha256
+
+    @property
+    def model_loaded(self) -> bool:
+        return (
+            self._fingerprint is not None
+            and self._fingerprint_sha256 is not None
+            and self._generation is not None
+        )
+
+    def enable_on_demand_warmup(self) -> None:
+        """Allow the lifecycle owner to make the next synthesis load the model."""
+
+        self._on_demand_warmup_enabled = True
 
     def _headers(
         self,
@@ -1268,9 +1294,11 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
         self._fingerprint = None
         self._fingerprint_sha256 = None
         self._generation = None
+        self._last_model_activity_at = None
 
     async def _poison_and_restart(self, error: SidecarRuntimeError) -> None:
         previous_generation = self._generation
+        self._on_demand_warmup_enabled = False
         self._clear_identity()
         self._worker_token = None
         self._lease_generation = None
@@ -1793,6 +1821,10 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
                     )
                 if row.get("ready") is True:
                     self._consume_ready(row, headers)
+                    if self._last_model_activity_at is None:
+                        self._last_model_activity_at = (
+                            asyncio.get_running_loop().time()
+                        )
                     return AdapterHealth(
                         AdapterHealthStatus.HEALTHY,
                         CAPABILITIES_SHA256,
@@ -1925,6 +1957,7 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
                 self._consume_ready(
                     row, headers, expected_request_id=request_id
                 )
+                self._last_model_activity_at = asyncio.get_running_loop().time()
                 return AdapterHealth(
                     AdapterHealthStatus.HEALTHY,
                     CAPABILITIES_SHA256,
@@ -2102,6 +2135,13 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
     async def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
         request.scope.ensure_fixed_local()
         async with self._synthesis_lock:
+            if not self.model_loaded and self._on_demand_warmup_enabled:
+                warmed = await self.warmup()
+                if warmed.status is not AdapterHealthStatus.HEALTHY:
+                    raise SidecarRuntimeError(
+                        warmed.reason_code or "SIDECAR_WARMUP_UNAVAILABLE",
+                        "Sidecar on-demand warmup is unavailable",
+                    )
             fingerprint = self._fingerprint
             fingerprint_sha256 = self._fingerprint_sha256
             generation = self._generation
@@ -2132,6 +2172,7 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
                         "Sidecar identity changed while synthesis was in flight",
                         poison=True,
                     )
+                self._last_model_activity_at = asyncio.get_running_loop().time()
                 return result
             except asyncio.CancelledError:
                 # ``to_thread`` cannot be stopped by coroutine cancellation.
@@ -2164,6 +2205,65 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
                 wrapped = SidecarRuntimeError("SIDECAR_TRANSPORT_FAILURE", "Sidecar transport failed", poison=True)
                 await self._poison_and_restart(wrapped)
                 raise wrapped from error
+
+    async def release_model_if_idle(
+        self,
+        idle_seconds: float,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        """Unload one idle model while keeping this adapter authoritative.
+
+        The existing lease release path first proves that the Sidecar is
+        unloaded.  Its supervised process is replaced to return native allocator
+        pages, then a fresh cold lease is acquired without rebuilding the
+        production worker.
+        """
+
+        if (
+            isinstance(idle_seconds, bool)
+            or not isinstance(idle_seconds, (int, float))
+            or idle_seconds <= 0
+        ):
+            raise ContractError("idle unload duration must be positive")
+        if self._synthesis_lock.locked() or not self.model_loaded:
+            return False
+        current = asyncio.get_running_loop().time() if now is None else now
+        if isinstance(current, bool) or not isinstance(current, (int, float)):
+            raise ContractError("idle unload clock must be numeric")
+        last_activity = self._last_model_activity_at
+        if last_activity is None or current - last_activity < float(idle_seconds):
+            return False
+
+        # There is no await between the lock observation above and acquisition,
+        # so another coroutine cannot enter synthesis on this event loop first.
+        async with self._synthesis_lock:
+            last_activity = self._last_model_activity_at
+            current = asyncio.get_running_loop().time() if now is None else now
+            if (
+                not self.model_loaded
+                or last_activity is None
+                or current - last_activity < float(idle_seconds)
+            ):
+                return False
+            previous_generation = self._generation
+            await self.deactivate()
+            # ONNX Runtime may retain native allocator arenas even after all
+            # sessions are dropped.  Replace the already-inert Sidecar process
+            # so those pages are actually returned to the host.
+            await self._lifecycle.restart_after_poison(
+                "IDLE_MODEL_RELEASE",
+                previous_generation=previous_generation,
+            )
+            await self.activate()
+            health = await self.health()
+            if health.status is AdapterHealthStatus.UNAVAILABLE:
+                raise SidecarRuntimeError(
+                    health.reason_code or "SIDECAR_UNAVAILABLE",
+                    "Sidecar did not return after idle unload",
+                )
+            self._on_demand_warmup_enabled = True
+            return True
 
     async def cancel(self, request_id: UUID) -> CancelDisposition:
         generation = self._generation

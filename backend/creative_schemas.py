@@ -322,6 +322,9 @@ class UpdateCharacterRequest(BaseModel):
 class CreateRelationshipRequest(BaseModel):
     source_character_id: UUID
     target_character_id: UUID
+    timeline_id: UUID | None = None
+    source_character_instance_id: UUID | None = None
+    target_character_instance_id: UUID | None = None
     label: str | None = Field(default=None, min_length=1, max_length=80)
     relation_type: str | None = Field(default=None, min_length=1, max_length=80)
     directionality: str = Field(default="undirected", pattern="^(directed|undirected)$")
@@ -336,6 +339,9 @@ class UpdateRelationshipRequest(BaseModel):
     expected_version: int = Field(ge=1)
     source_character_id: UUID | None = None
     target_character_id: UUID | None = None
+    timeline_id: UUID | None = None
+    source_character_instance_id: UUID | None = None
+    target_character_instance_id: UUID | None = None
     label: str | None = Field(default=None, min_length=1, max_length=80)
     relation_type: str | None = Field(default=None, min_length=1, max_length=80)
     directionality: str | None = Field(default=None, pattern="^(directed|undirected)$")
@@ -354,6 +360,9 @@ class RelationshipBatchOperation(BaseModel):
     expected_version: int | None = Field(default=None, ge=1)
     source_character_id: UUID | None = None
     target_character_id: UUID | None = None
+    timeline_id: UUID | None = None
+    source_character_instance_id: UUID | None = None
+    target_character_instance_id: UUID | None = None
     label: str | None = Field(default=None, min_length=1, max_length=80)
     relation_type: str | None = Field(default=None, min_length=1, max_length=80)
     directionality: str | None = Field(

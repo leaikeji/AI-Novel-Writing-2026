@@ -12,8 +12,11 @@ services:
     environment:
       TZ: Asia/Shanghai
       AI_NOVEL_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_novel}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ai_novel_world_2026}
+      AI_NOVEL_EMBEDDING_SECRET_ROOT_KEY_FILE: /app/working.secret/ai-novel-world-2026/embedding/root.key
+      AI_NOVEL_EMBEDDING_SECRET_RECORDS_DIR: /app/working.secret/ai-novel-world-2026/embedding/records
       AI_NOVEL_TTS_RUNTIME_ENABLED: ${AI_NOVEL_TTS_RUNTIME_ENABLED:-false}
       AI_NOVEL_TTS_PRODUCT_ENABLED: ${AI_NOVEL_TTS_PRODUCT_ENABLED:-false}
+      AI_NOVEL_TTS_IDLE_UNLOAD_SECONDS: ${AI_NOVEL_TTS_IDLE_UNLOAD_SECONDS:-300}
       AI_NOVEL_TTS_VALIDATION_ENABLED: ${AI_NOVEL_TTS_VALIDATION_ENABLED:-false}
       AI_NOVEL_TTS_VALIDATION_TOKEN_FILE: /app/working.secret/ai-novel-world-2026/t4k-validation/token
       AI_NOVEL_TTS_VALIDATION_NOVEL_ID: ${AI_NOVEL_TTS_VALIDATION_NOVEL_ID:-}
@@ -52,7 +55,7 @@ services:
         - python
         - -c
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/', timeout=5).read(1)"
-      interval: 5s
+      interval: 30s
       timeout: 5s
       retries: 12
       start_period: 30s
@@ -72,7 +75,7 @@ services:
       - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
+      interval: 30s
       timeout: 5s
       retries: 10
       start_period: 10s
@@ -199,7 +202,7 @@ services:
         - python
         - -c
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health/live', timeout=3).read(1)"
-      interval: 5s
+      interval: 30s
       timeout: 5s
       retries: 12
       start_period: 20s

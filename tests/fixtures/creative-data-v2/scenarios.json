@@ -1,0 +1,649 @@
+{
+  "schema_version": "creative-data-v2-scenarios/1.0",
+  "fixture_kind": "synthetic_regression_cases",
+  "language": "zh-CN",
+  "authorization": {
+    "content_origin": "fully_synthetic",
+    "contains_real_novel_text": false,
+    "contains_secrets": false,
+    "cloud_use_authorized": false,
+    "database_use_authorized": false
+  },
+  "conventions": {
+    "source_offsets": "zero_based_half_open",
+    "narrative_cutoff": "inclusive_document_position",
+    "fact_statuses_considered": [
+      "active",
+      "source_restored"
+    ],
+    "fact_statuses_excluded": [
+      "source_superseded",
+      "reverted"
+    ],
+    "perspectives": [
+      "author",
+      "reader",
+      "character_instance"
+    ],
+    "semantic_rule": "deterministic_scope_filter_before_lexical_or_vector_ranking"
+  },
+  "scenarios": [
+    {
+      "id": "CDV-FIX-001",
+      "title": "单时间线零配置写作",
+      "category": "single_timeline_default",
+      "setup": {
+        "novel": {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "title": "潮汐邮局",
+          "embedding_consent": "not_granted"
+        },
+        "timelines": [
+          {
+            "id": "11000000-0000-4000-8000-000000000001",
+            "key": "main",
+            "is_primary": true,
+            "parent_timeline_id": null,
+            "lifecycle_state": "active"
+          }
+        ],
+        "characters": [
+          {
+            "character_id": "12000000-0000-4000-8000-000000000001",
+            "canonical_name": "沈遥",
+            "instance_ids": [
+              "13000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ]
+      },
+      "request": {
+        "operation": "assemble_chapter_context",
+        "timeline_id": null,
+        "character_instance_id": null,
+        "narrative_cutoff": 2,
+        "perspective": "author"
+      },
+      "expected": {
+        "resolved_timeline_id": "11000000-0000-4000-8000-000000000001",
+        "resolved_character_instance_id": "13000000-0000-4000-8000-000000000001",
+        "error_code": null,
+        "additional_author_steps": 0,
+        "cloud_requests": 0,
+        "database_writes": 0
+      },
+      "invariants": [
+        "唯一活动时间线可以由服务端确定性补全",
+        "唯一人物实例可以由服务端确定性补全",
+        "读取上下文不得创建或更新任何行",
+        "未授权时不得调用向量云服务"
+      ]
+    },
+    {
+      "id": "CDV-FIX-002",
+      "title": "分支只继承分叉点之前事实",
+      "category": "timeline_branch",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000002",
+        "timelines": [
+          {
+            "id": "11000000-0000-4000-8000-000000000002",
+            "key": "main",
+            "parent_timeline_id": null,
+            "is_primary": true
+          },
+          {
+            "id": "11000000-0000-4000-8000-000000000003",
+            "key": "harbor-branch",
+            "parent_timeline_id": "11000000-0000-4000-8000-000000000002",
+            "fork_story_sequence": 200,
+            "is_primary": false
+          }
+        ],
+        "facts": [
+          {
+            "id": "14000000-0000-4000-8000-000000000001",
+            "timeline_id": "11000000-0000-4000-8000-000000000002",
+            "story_sequence": 100,
+            "event_kind": "joined_crew",
+            "status": "active"
+          },
+          {
+            "id": "14000000-0000-4000-8000-000000000002",
+            "timeline_id": "11000000-0000-4000-8000-000000000002",
+            "story_sequence": 300,
+            "event_kind": "left_harbor",
+            "status": "active"
+          },
+          {
+            "id": "14000000-0000-4000-8000-000000000003",
+            "timeline_id": "11000000-0000-4000-8000-000000000003",
+            "story_sequence": 260,
+            "event_kind": "stayed_in_harbor",
+            "status": "active"
+          }
+        ]
+      },
+      "request": {
+        "operation": "project_story_state",
+        "timeline_id": "11000000-0000-4000-8000-000000000003",
+        "story_sequence": 400,
+        "perspective": "author"
+      },
+      "expected": {
+        "included_fact_ids": [
+          "14000000-0000-4000-8000-000000000001",
+          "14000000-0000-4000-8000-000000000003"
+        ],
+        "excluded_fact_ids": [
+          "14000000-0000-4000-8000-000000000002"
+        ],
+        "conflict_state": "none",
+        "database_writes": 0
+      },
+      "invariants": [
+        "子线继承父线分叉锚点之前的有效事实",
+        "父线分叉后的事实不传播到子线",
+        "兄弟线和父线后续变化必须显式进入目标线"
+      ]
+    },
+    {
+      "id": "CDV-FIX-003",
+      "title": "穿越者与目标线对应人物并存",
+      "category": "time_travel",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000003",
+        "timelines": [
+          {
+            "id": "11000000-0000-4000-8000-000000000004",
+            "key": "origin"
+          },
+          {
+            "id": "11000000-0000-4000-8000-000000000005",
+            "key": "target"
+          }
+        ],
+        "character": {
+          "character_id": "12000000-0000-4000-8000-000000000003",
+          "canonical_name": "顾弦"
+        },
+        "instances": [
+          {
+            "id": "13000000-0000-4000-8000-000000000003",
+            "origin_timeline_id": "11000000-0000-4000-8000-000000000004",
+            "display_label": "来自原线的顾弦"
+          },
+          {
+            "id": "13000000-0000-4000-8000-000000000004",
+            "origin_timeline_id": "11000000-0000-4000-8000-000000000005",
+            "display_label": "目标线的顾弦"
+          }
+        ],
+        "timeline_link": {
+          "link_type": "travel",
+          "source_timeline_id": "11000000-0000-4000-8000-000000000004",
+          "target_timeline_id": "11000000-0000-4000-8000-000000000005"
+        },
+        "presence_fact": {
+          "id": "14000000-0000-4000-8000-000000000004",
+          "timeline_id": "11000000-0000-4000-8000-000000000005",
+          "character_instance_id": "13000000-0000-4000-8000-000000000003",
+          "event_kind": "arrived_from_timeline"
+        }
+      },
+      "request": {
+        "operation": "resolve_character_references",
+        "timeline_id": "11000000-0000-4000-8000-000000000005",
+        "query_name": "顾弦"
+      },
+      "expected": {
+        "candidate_instance_ids": [
+          "13000000-0000-4000-8000-000000000003",
+          "13000000-0000-4000-8000-000000000004"
+        ],
+        "automatic_choice": null,
+        "error_code": "character_instance_required"
+      },
+      "invariants": [
+        "穿越不把来源实例改写成目标线实例",
+        "同名的两个实例可以在同一目标线同时存在",
+        "无法唯一解析时不得按姓名、最近使用值或创建时间猜测"
+      ]
+    },
+    {
+      "id": "CDV-FIX-004",
+      "title": "时间循环建立新分支而不改写原历史",
+      "category": "time_loop",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000004",
+        "timelines": [
+          {
+            "id": "11000000-0000-4000-8000-000000000006",
+            "key": "first-pass",
+            "parent_timeline_id": null
+          },
+          {
+            "id": "11000000-0000-4000-8000-000000000007",
+            "key": "second-pass",
+            "parent_timeline_id": "11000000-0000-4000-8000-000000000006",
+            "fork_story_sequence": 100
+          }
+        ],
+        "timeline_link": {
+          "link_type": "loop_return",
+          "source_timeline_id": "11000000-0000-4000-8000-000000000006",
+          "source_story_sequence": 900,
+          "target_timeline_id": "11000000-0000-4000-8000-000000000007",
+          "target_story_sequence": 100
+        },
+        "facts": [
+          {
+            "id": "14000000-0000-4000-8000-000000000005",
+            "timeline_id": "11000000-0000-4000-8000-000000000006",
+            "story_sequence": 700,
+            "event_kind": "bridge_destroyed"
+          },
+          {
+            "id": "14000000-0000-4000-8000-000000000006",
+            "timeline_id": "11000000-0000-4000-8000-000000000007",
+            "story_sequence": 650,
+            "event_kind": "bridge_saved"
+          }
+        ]
+      },
+      "request": {
+        "operation": "project_story_state",
+        "timeline_id": "11000000-0000-4000-8000-000000000006",
+        "story_sequence": 950,
+        "perspective": "author"
+      },
+      "expected": {
+        "included_fact_ids": [
+          "14000000-0000-4000-8000-000000000005"
+        ],
+        "excluded_fact_ids": [
+          "14000000-0000-4000-8000-000000000006"
+        ],
+        "mutated_original_fact_ids": [],
+        "database_writes": 0
+      },
+      "invariants": [
+        "loop_return 是显式链接，不是事实复制规则",
+        "第二次循环的结果不能覆盖第一次循环历史",
+        "投影不自动求解循环因果"
+      ]
+    },
+    {
+      "id": "CDV-FIX-005",
+      "title": "汇合线只继承主输入线",
+      "category": "timeline_merge",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000005",
+        "timelines": [
+          {
+            "id": "11000000-0000-4000-8000-000000000008",
+            "key": "north-route"
+          },
+          {
+            "id": "11000000-0000-4000-8000-000000000009",
+            "key": "south-route"
+          },
+          {
+            "id": "11000000-0000-4000-8000-000000000010",
+            "key": "reunion",
+            "parent_timeline_id": "11000000-0000-4000-8000-000000000008"
+          }
+        ],
+        "merge_reference": {
+          "source_timeline_id": "11000000-0000-4000-8000-000000000009",
+          "target_timeline_id": "11000000-0000-4000-8000-000000000010",
+          "link_type": "merge_reference"
+        },
+        "facts": [
+          {
+            "id": "14000000-0000-4000-8000-000000000007",
+            "timeline_id": "11000000-0000-4000-8000-000000000008",
+            "event_kind": "map_recovered"
+          },
+          {
+            "id": "14000000-0000-4000-8000-000000000008",
+            "timeline_id": "11000000-0000-4000-8000-000000000009",
+            "event_kind": "seal_broken"
+          },
+          {
+            "id": "14000000-0000-4000-8000-000000000009",
+            "timeline_id": "11000000-0000-4000-8000-000000000010",
+            "event_kind": "learned_seal_was_broken",
+            "linked_source_fact_id": "14000000-0000-4000-8000-000000000008"
+          }
+        ]
+      },
+      "request": {
+        "operation": "project_story_state",
+        "timeline_id": "11000000-0000-4000-8000-000000000010",
+        "perspective": "author"
+      },
+      "expected": {
+        "included_fact_ids": [
+          "14000000-0000-4000-8000-000000000007",
+          "14000000-0000-4000-8000-000000000009"
+        ],
+        "excluded_fact_ids": [
+          "14000000-0000-4000-8000-000000000008"
+        ],
+        "merge_reference_imported_facts_automatically": false
+      },
+      "invariants": [
+        "汇合线必须有唯一主继承父线",
+        "merge_reference 不自动导入另一输入线事实",
+        "需要生效的信息必须在目标线创建有来源链接的新事实"
+      ]
+    },
+    {
+      "id": "CDV-FIX-006",
+      "title": "真实身份与知识揭示分离",
+      "category": "identity_reveal",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000006",
+        "timeline_id": "11000000-0000-4000-8000-000000000011",
+        "character_id": "12000000-0000-4000-8000-000000000006",
+        "character_instance_id": "13000000-0000-4000-8000-000000000006",
+        "facts": [
+          {
+            "id": "14000000-0000-4000-8000-000000000010",
+            "fact_type": "character_state",
+            "dimension": "identity",
+            "event_kind": "true_identity_established",
+            "narrative_position": 1,
+            "visibility": {
+              "author": true,
+              "reader_from_position": 8,
+              "character_instances": [
+                "13000000-0000-4000-8000-000000000006"
+              ]
+            }
+          },
+          {
+            "id": "14000000-0000-4000-8000-000000000011",
+            "fact_type": "knowledge_event",
+            "event_kind": "reader_revealed",
+            "narrative_position": 8,
+            "target_fact_id": "14000000-0000-4000-8000-000000000010"
+          },
+          {
+            "id": "14000000-0000-4000-8000-000000000012",
+            "fact_type": "knowledge_event",
+            "event_kind": "character_learned",
+            "narrative_position": 10,
+            "observer_character_instance_id": "13000000-0000-4000-8000-000000000007",
+            "target_fact_id": "14000000-0000-4000-8000-000000000010"
+          }
+        ]
+      },
+      "requests": [
+        {
+          "perspective": "reader",
+          "narrative_cutoff": 7,
+          "expected_visible_fact_ids": []
+        },
+        {
+          "perspective": "reader",
+          "narrative_cutoff": 8,
+          "expected_visible_fact_ids": [
+            "14000000-0000-4000-8000-000000000010",
+            "14000000-0000-4000-8000-000000000011"
+          ]
+        },
+        {
+          "perspective": "character_instance",
+          "observer_character_instance_id": "13000000-0000-4000-8000-000000000007",
+          "narrative_cutoff": 9,
+          "expected_visible_fact_ids": []
+        },
+        {
+          "perspective": "character_instance",
+          "observer_character_instance_id": "13000000-0000-4000-8000-000000000007",
+          "narrative_cutoff": 10,
+          "expected_visible_fact_ids": [
+            "14000000-0000-4000-8000-000000000010",
+            "14000000-0000-4000-8000-000000000012"
+          ]
+        }
+      ],
+      "expected": {
+        "identity_change_created_at_reveal": false,
+        "database_writes_during_projection": 0
+      },
+      "invariants": [
+        "真实身份从开篇成立不等于读者从开篇知道",
+        "读者揭示和人物获知是不同知识事件",
+        "揭示不得重写真实身份开始时间"
+      ]
+    },
+    {
+      "id": "CDV-FIX-007",
+      "title": "改名后稳定人物引用保持不变",
+      "category": "character_rename",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000007",
+        "character": {
+          "id": "12000000-0000-4000-8000-000000000007",
+          "version_before": 3,
+          "name_before": "陆青",
+          "name_after": "陆澄"
+        },
+        "instance_id": "13000000-0000-4000-8000-000000000008",
+        "relationship_id": "15000000-0000-4000-8000-000000000001",
+        "tts_binding_id": "16000000-0000-4000-8000-000000000001",
+        "alias_after": {
+          "alias": "陆青",
+          "alias_kind": "former_name",
+          "source": "rename_history"
+        }
+      },
+      "request": {
+        "operation": "rename_character",
+        "expected_character_version": 3,
+        "new_name": "陆澄"
+      },
+      "expected": {
+        "character_id": "12000000-0000-4000-8000-000000000007",
+        "character_version_after": 4,
+        "instance_id": "13000000-0000-4000-8000-000000000008",
+        "relationship_character_id": "12000000-0000-4000-8000-000000000007",
+        "tts_character_id": "12000000-0000-4000-8000-000000000007",
+        "historical_body_rewritten": false,
+        "old_name_resolves_to_character_id": "12000000-0000-4000-8000-000000000007"
+      },
+      "invariants": [
+        "姓名是显示属性而不是引用键",
+        "改名创建人物 revision 和历史 alias",
+        "关系、人物实例、StoryFact 和 TTS 绑定不改 ID",
+        "不得批量改写历史正文"
+      ]
+    },
+    {
+      "id": "CDV-FIX-008",
+      "title": "目标章节不得召回未来信息",
+      "category": "semantic_future_leak",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000008",
+        "timeline_id": "11000000-0000-4000-8000-000000000012",
+        "generation_id": "17000000-0000-4000-8000-000000000001",
+        "semantic_sources": [
+          {
+            "id": "18000000-0000-4000-8000-000000000001",
+            "corpus": "manuscript",
+            "document_position": 4,
+            "status": "current",
+            "text": "合成文本：旧钟在雨夜停摆。"
+          },
+          {
+            "id": "18000000-0000-4000-8000-000000000002",
+            "corpus": "story_event",
+            "document_position": 12,
+            "status": "current",
+            "text": "合成文本：第十二章才说明停摆原因。"
+          }
+        ]
+      },
+      "request": {
+        "operation": "semantic_search",
+        "query": "旧钟为什么停摆",
+        "narrative_cutoff": 6,
+        "timeline_id": "11000000-0000-4000-8000-000000000012",
+        "perspective": "reader",
+        "top_k": 5
+      },
+      "expected": {
+        "eligible_source_ids_before_ranking": [
+          "18000000-0000-4000-8000-000000000001"
+        ],
+        "excluded_source_ids_before_ranking": [
+          "18000000-0000-4000-8000-000000000002"
+        ],
+        "future_source_returned": false,
+        "leak_count": 0
+      },
+      "invariants": [
+        "叙事截止点过滤必须发生在向量和词面排序之前",
+        "相似度再高也不能召回未来章节",
+        "截断或 top_k 不得改变隔离边界"
+      ]
+    },
+    {
+      "id": "CDV-FIX-009",
+      "title": "兄弟时间线语义证据不得泄漏",
+      "category": "semantic_cross_timeline_leak",
+      "setup": {
+        "novel_id": "10000000-0000-4000-8000-000000000009",
+        "timelines": [
+          {
+            "id": "11000000-0000-4000-8000-000000000013",
+            "key": "root"
+          },
+          {
+            "id": "11000000-0000-4000-8000-000000000014",
+            "key": "east",
+            "parent_timeline_id": "11000000-0000-4000-8000-000000000013",
+            "fork_story_sequence": 200
+          },
+          {
+            "id": "11000000-0000-4000-8000-000000000015",
+            "key": "west",
+            "parent_timeline_id": "11000000-0000-4000-8000-000000000013",
+            "fork_story_sequence": 200
+          }
+        ],
+        "semantic_sources": [
+          {
+            "id": "18000000-0000-4000-8000-000000000003",
+            "timeline_id": "11000000-0000-4000-8000-000000000013",
+            "story_sequence": 150,
+            "text": "合成文本：分叉前发现一枚铜钥匙。"
+          },
+          {
+            "id": "18000000-0000-4000-8000-000000000004",
+            "timeline_id": "11000000-0000-4000-8000-000000000014",
+            "story_sequence": 400,
+            "text": "合成文本：东线用铜钥匙打开档案柜。"
+          },
+          {
+            "id": "18000000-0000-4000-8000-000000000005",
+            "timeline_id": "11000000-0000-4000-8000-000000000015",
+            "story_sequence": 420,
+            "text": "合成文本：西线把铜钥匙沉入井底。"
+          }
+        ]
+      },
+      "request": {
+        "operation": "semantic_search",
+        "query": "铜钥匙后来怎样",
+        "timeline_id": "11000000-0000-4000-8000-000000000014",
+        "perspective": "author",
+        "top_k": 5
+      },
+      "expected": {
+        "eligible_source_ids_before_ranking": [
+          "18000000-0000-4000-8000-000000000003",
+          "18000000-0000-4000-8000-000000000004"
+        ],
+        "excluded_source_ids_before_ranking": [
+          "18000000-0000-4000-8000-000000000005"
+        ],
+        "cross_timeline_source_returned": false,
+        "leak_count": 0
+      },
+      "invariants": [
+        "目标线可继承分叉前的父线证据",
+        "兄弟线分叉后的证据不可达",
+        "author 视角不等于跨时间线全量可见"
+      ]
+    },
+    {
+      "id": "CDV-FIX-010",
+      "title": "未绑定私有素材不得外发或索引",
+      "category": "semantic_unbound_private_asset_leak",
+      "setup": {
+        "novel": {
+          "id": "10000000-0000-4000-8000-000000000010",
+          "embedding_consent": "active",
+          "consent_notice_version": "embedding-consent-v1"
+        },
+        "private_asset_versions": [
+          {
+            "asset_id": "19000000-0000-4000-8000-000000000001",
+            "asset_version_id": "1a000000-0000-4000-8000-000000000001",
+            "title": "已绑定航海术语表",
+            "content": "合成素材：潮尺、浮标、泊位。",
+            "content_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          {
+            "asset_id": "19000000-0000-4000-8000-000000000002",
+            "asset_version_id": "1a000000-0000-4000-8000-000000000002",
+            "title": "未绑定密室构思",
+            "content": "合成素材：未被当前小说选择的机关构思。",
+            "content_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          }
+        ],
+        "novel_asset_bindings": [
+          {
+            "novel_id": "10000000-0000-4000-8000-000000000010",
+            "asset_version_id": "1a000000-0000-4000-8000-000000000001",
+            "usage_policy": "preferred",
+            "lifecycle_state": "active"
+          }
+        ]
+      },
+      "request": {
+        "operation": "plan_embedding_generation",
+        "novel_id": "10000000-0000-4000-8000-000000000010",
+        "corpora": [
+          "private_asset"
+        ]
+      },
+      "expected": {
+        "semantic_source_asset_version_ids": [
+          "1a000000-0000-4000-8000-000000000001"
+        ],
+        "excluded_asset_version_ids": [
+          "1a000000-0000-4000-8000-000000000002"
+        ],
+        "cloud_batch_asset_version_ids": [
+          "1a000000-0000-4000-8000-000000000001"
+        ],
+        "unbound_asset_in_semantic_sources": false,
+        "unbound_asset_in_semantic_chunks": false,
+        "unbound_asset_in_semantic_embeddings": false,
+        "unbound_asset_sent_to_cloud": false,
+        "leak_count": 0
+      },
+      "invariants": [
+        "小说授权不等于授权全部全局私有库",
+        "只有 active binding 指向的确切 asset version 可以进入该小说索引",
+        "素材根的新版本不能自动替换已固定版本",
+        "排除必须发生在创建 semantic source 和 background batch 之前"
+      ]
+    }
+  ]
+}

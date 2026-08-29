@@ -11,8 +11,24 @@ from difflib import unified_diff
 from typing import Any
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
+
+from .context_v3 import ChapterRoleConstraintsV3
+from .context_v3_loader import assemble_context_from_db
+from .creative_data_models import (
+    CharacterInstance,
+    RevisionTimelineMappingHead,
+    RevisionTimelineMappingSegment,
+    StoryTimeline,
+)
+from .story_state import StoryFactV2
+from .private_library import (
+    DirectAssetSelection,
+    UsagePolicy,
+    build_generation_asset_snapshot,
+)
 
 from .generation_runtime import (
     CHAPTER_GENERATION_STALE_GRACE_SECONDS,
@@ -23,6 +39,7 @@ from .models import (
     CandidateRevision,
     ChapterBrief,
     ChapterGenerationJob,
+    CharacterRelationship,
     DerivedSourceBinding,
     Document,
     DocumentRevision,
@@ -32,12 +49,15 @@ from .models import (
     IntelligenceProposalItem,
     Novel,
     NovelCharacter,
+    Foreshadow,
     AssetPreset,
     AssetPresetItem,
     PrivateAsset,
     StoryFact,
+    Storyline,
     Volume,
 )
+from .story_state.persistence import ensure_default_story_state
 
 
 class DomainError(RuntimeError):
@@ -210,13 +230,14 @@ def _revision_payload(revision: DocumentRevision, *, include_content: bool = Fal
 
 ROLE_CONSTRAINT_KEYS = ("required", "allowed", "context_only", "forbidden")
 INTELLIGENCE_ITEM_TYPES = {
-    "fact",
     "character_state",
-    "relationship",
+    "relationship_state",
     "storyline_event",
-    "foreshadow_progress",
-    "foreshadow_new",
-    "next_chapter_required_role",
+    "foreshadow_event",
+    "story_time",
+    "knowledge_event",
+    "world_state",
+    "general_fact",
 }
 
 
@@ -514,6 +535,14 @@ def create_novel(session: Session, title: str, description: str = "") -> dict[st
         position=1000,
         volume_id=volume.id,
     )
+    session.flush()
+    # Single-timeline novels require no author configuration: their primary
+    # timeline is part of the same creation transaction as the novel itself.
+    ensure_default_story_state(
+        session,
+        novel.id,
+        expected_story_ledger_version=novel.story_ledger_version,
+    )
     session.commit()
     return get_novel(session, novel.id)
 
@@ -730,6 +759,7 @@ def save_chapter_brief(
     brief = session.scalar(
         select(ChapterBrief).where(ChapterBrief.document_id == document_id).with_for_update()
     )
+    normalized_roles = _normalize_role_constraints(role_constraints)
     if brief is None:
         if expected_version != 0:
             raise BriefConflictError(_brief_payload(None, document_id))
@@ -741,18 +771,28 @@ def save_chapter_brief(
             expectation_text=expectation_text.strip(),
             outline_text=outline_text.strip(),
             forbidden_text=forbidden_text.strip(),
-            role_constraints=_normalize_role_constraints(role_constraints),
+            role_constraints=normalized_roles,
         )
         session.add(brief)
     else:
         if brief.version != expected_version:
             raise BriefConflictError(_brief_payload(brief, document_id))
+        previous_roles = _normalize_role_constraints(brief.role_constraints)
+        previous_v3 = (
+            (brief.role_constraints or {}).get("_v3")
+            if isinstance(brief.role_constraints, dict)
+            else None
+        )
         brief.version += 1
         brief.target_word_count = target_word_count
         brief.expectation_text = expectation_text.strip()
         brief.outline_text = outline_text.strip()
         brief.forbidden_text = forbidden_text.strip()
-        brief.role_constraints = _normalize_role_constraints(role_constraints)
+        brief.role_constraints = (
+            normalized_roles | {"_v3": previous_v3}
+            if previous_v3 is not None and previous_roles == normalized_roles
+            else normalized_roles
+        )
     session.commit()
     return _brief_payload(brief, document_id)
 
@@ -768,7 +808,7 @@ def _generation_snapshot(
         session, document.novel_id, document_id=document.id, max_chars=30_000
     )
     return {
-        "schema_version": 1,
+        "schema_version": 3,
         "novel": context["novel"],
         "chapter": {
             "document_id": str(document.id),
@@ -788,6 +828,7 @@ def _generation_snapshot(
         },
         "previous_context": context["documents"],
         "story_facts": context["story_facts"],
+        "context_v3": context.get("context_v3"),
         "private_assets": asset_snapshot,
     }
 
@@ -795,42 +836,25 @@ def _generation_snapshot(
 def _generation_asset_snapshot(
     session: Session,
     *,
+    novel_id: UUID,
     asset_ids: list[UUID] | None,
     preset_id: UUID | None,
 ) -> list[dict[str, Any]]:
-    combined = list(asset_ids or [])
-    if preset_id is not None:
-        preset = session.get(AssetPreset, preset_id)
-        if preset is None or preset.archived:
-            raise ValidationError("资料预设不存在或已删除")
-        combined.extend(
-            session.scalars(
-                select(AssetPresetItem.asset_id)
-                .where(AssetPresetItem.preset_id == preset_id)
-                .order_by(AssetPresetItem.position)
-            ).all()
+    direct = tuple(
+        DirectAssetSelection(
+            asset_id=asset_id,
+            usage_policy=UsagePolicy.PREFERRED,
+            selection_key=f"chapter-request:{index}",
         )
-    unique_ids = list(dict.fromkeys(combined))
-    if not unique_ids:
-        return []
-    assets = session.scalars(
-        select(PrivateAsset).where(
-            PrivateAsset.id.in_(unique_ids), PrivateAsset.archived.is_(False)
-        )
-    ).all()
-    by_id = {asset.id: asset for asset in assets}
-    if set(unique_ids) != set(by_id):
-        raise ValidationError("生成资料包含不存在或已删除的私有库条目")
-    return [
-        {
-            "id": str(by_id[asset_id].id),
-            "asset_type": by_id[asset_id].asset_type,
-            "title": by_id[asset_id].title,
-            "content": by_id[asset_id].content,
-            "version": by_id[asset_id].version,
-        }
-        for asset_id in unique_ids
-    ]
+        for index, asset_id in enumerate(dict.fromkeys(asset_ids or []))
+    )
+    return build_generation_asset_snapshot(
+        session,
+        novel_id,
+        direct_selections=direct,
+        preset_ids=((preset_id,) if preset_id is not None else ()),
+        include_novel_bindings=True,
+    )
 
 
 def start_chapter_generation(
@@ -868,7 +892,7 @@ def start_chapter_generation(
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
     asset_snapshot = _generation_asset_snapshot(
-        session, asset_ids=asset_ids, preset_id=preset_id
+        session, novel_id=document.novel_id, asset_ids=asset_ids, preset_id=preset_id
     )
     snapshot = _generation_snapshot(session, document, working, brief, asset_snapshot)
     requested_count = int(brief.target_word_count)
@@ -977,6 +1001,26 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
         f"- [{asset['asset_type']}] {asset['title']}：{asset['content']}"
         for asset in snapshot.get("private_assets", [])
     )
+    context_v3 = snapshot.get("context_v3")
+    context_v3 = context_v3 if isinstance(context_v3, dict) else {}
+    planning_text = "\n\n".join(
+        f"【{item.get('title', '正式规划')}】\n{item.get('content', '')}"
+        for item in context_v3.get("formal_planning", [])
+        if isinstance(item, dict)
+    )
+    character_text = "\n".join(
+        f"- {item.get('ref', {}).get('display_label', '')}：{item.get('public_profile', '')}"
+        for item in context_v3.get("character_state", [])
+        if isinstance(item, dict)
+    )
+    semantic_text = "\n".join(
+        f"- [{item.get('corpus', '')}] {item.get('content', '')}"
+        for item in context_v3.get("semantic_evidence", [])
+        if isinstance(item, dict)
+    )
+    diagnostics_text = json.dumps(
+        context_v3.get("diagnostics", {}), ensure_ascii=False, sort_keys=True
+    ) if context_v3 else ""
     return f"""【AI小说世界2026 PawApp可信任务封套】
 kind=chapter_generation
 contract=chapter-prose-candidate/v2
@@ -1006,7 +1050,13 @@ contract=chapter-prose-candidate/v2
 仅作上下文、不要安排现场出场：{'、'.join(roles['context_only']) or '无'}
 禁止出现：{'、'.join(roles['forbidden']) or '无'}
 
-已确认故事事实：
+正式大纲与故事设定：
+{planning_text or '- 暂无已正式化的大纲或设定'}
+
+指定时间线的人物实例档案：
+{character_text or '- 暂无可用人物实例档案'}
+
+关系、故事线、伏笔、时间与知识的确定性状态：
 {facts_text or '- 暂无结构化故事事实'}
 
 本次作者选用的私有库资料：
@@ -1017,6 +1067,12 @@ contract=chapter-prose-candidate/v2
 
 本章之前的正文上下文（仅作连续性参考）：
 {context_text or '暂无前文章节'}
+
+语义检索补充证据（只作线索，不能覆盖上面的确定性事实）：
+{semantic_text or '- 本次未提供语义证据'}
+
+来源、冲突和省略说明：
+{diagnostics_text or '- 使用旧实验数据兼容上下文，尚无 V3 诊断'}
 """.strip()
 
 
@@ -1502,6 +1558,171 @@ def _supersede_intelligence_for_document(
             fact.status = "source_superseded"
 
 
+def _intelligence_extraction_context(
+    session: Session,
+    document: Document,
+    revision: DocumentRevision,
+) -> dict[str, Any]:
+    """Freeze server-owned IDs exposed to the extractor as short opaque keys."""
+
+    timelines = tuple(
+        session.scalars(
+            select(StoryTimeline)
+            .where(
+                StoryTimeline.novel_id == document.novel_id,
+                StoryTimeline.lifecycle_state == "active",
+            )
+            .order_by(StoryTimeline.position, StoryTimeline.id)
+        )
+    )
+    if not timelines:
+        raise ValidationError("小说尚未初始化主时间线")
+    if len(timelines) == 1:
+        timeline_segments = [{
+            "timeline_id": str(timelines[0].id),
+            "source_start": 0,
+            "source_end": len(revision.content_text),
+            "story_sequence": None,
+        }]
+    else:
+        head = session.get(RevisionTimelineMappingHead, revision.id)
+        if head is None or head.source_content_hash != revision.content_hash:
+            raise ValidationError("timeline_required: 多时间线正文必须先完成当前 revision 的区间映射")
+        segments = tuple(
+            session.scalars(
+                select(RevisionTimelineMappingSegment)
+                .where(
+                    RevisionTimelineMappingSegment.mapping_revision_id
+                    == head.current_mapping_revision_id
+                )
+                .order_by(RevisionTimelineMappingSegment.ordinal)
+            )
+        )
+        if not segments:
+            raise ValidationError("timeline_required: 当前 revision 没有可用时间线区间")
+        timeline_segments = [
+            {
+                "timeline_id": str(item.timeline_id),
+                "source_start": item.source_start,
+                "source_end": item.source_end,
+                "story_sequence": item.story_sequence,
+            }
+            for item in segments
+        ]
+    chapter_timeline_ids = {UUID(item["timeline_id"]) for item in timeline_segments}
+    by_timeline = {item.id: item for item in timelines}
+    reachable = set(chapter_timeline_ids)
+    for timeline_id in tuple(chapter_timeline_ids):
+        current = by_timeline.get(timeline_id)
+        while current is not None and current.parent_timeline_id is not None:
+            reachable.add(current.parent_timeline_id)
+            current = by_timeline.get(current.parent_timeline_id)
+
+    instances = tuple(
+        session.scalars(
+            select(CharacterInstance)
+            .where(
+                CharacterInstance.novel_id == document.novel_id,
+                CharacterInstance.lifecycle_state == "active",
+                CharacterInstance.origin_timeline_id.in_(reachable),
+            )
+            .order_by(CharacterInstance.created_at, CharacterInstance.id)
+        )
+    )
+    roots = {
+        item.id: item
+        for item in session.scalars(
+            select(NovelCharacter).where(
+                NovelCharacter.novel_id == document.novel_id,
+                NovelCharacter.lifecycle_state == "active",
+            )
+        )
+    }
+    character_catalog = {
+        f"character_{index}": {
+            "character_id": str(instance.character_id),
+            "character_instance_id": str(instance.id),
+            "timeline_id": str(instance.origin_timeline_id),
+            "label": instance.display_label or roots[instance.character_id].name,
+        }
+        for index, instance in enumerate(instances, start=1)
+        if instance.character_id in roots
+    }
+    relationship_scope = CharacterRelationship.timeline_id.in_(reachable)
+    if len(timelines) == 1:
+        # Legacy single-line rows remain readable until the experimental test
+        # database is rebuilt.  Once a second line exists, every relationship
+        # presented to the extractor must be explicitly scoped.
+        relationship_scope = (
+            relationship_scope | CharacterRelationship.timeline_id.is_(None)
+        )
+    relationship_catalog = {
+        f"relationship_{index}": {
+            "relationship_id": str(item.id),
+            "timeline_id": str(item.timeline_id) if item.timeline_id else None,
+            "label": item.label,
+        }
+        for index, item in enumerate(
+            session.scalars(
+                select(CharacterRelationship)
+                .where(
+                    CharacterRelationship.novel_id == document.novel_id,
+                    CharacterRelationship.archived_at.is_(None),
+                    relationship_scope,
+                )
+                .order_by(CharacterRelationship.created_at, CharacterRelationship.id)
+            ),
+            start=1,
+        )
+    }
+    storyline_catalog = {
+        f"storyline_{index}": {"storyline_id": str(item.id), "label": item.title}
+        for index, item in enumerate(
+            session.scalars(
+                select(Storyline)
+                .where(
+                    Storyline.novel_id == document.novel_id,
+                    Storyline.status != "archived",
+                )
+                .order_by(Storyline.position, Storyline.id)
+            ),
+            start=1,
+        )
+    }
+    foreshadow_catalog = {
+        f"foreshadow_{index}": {"foreshadow_id": str(item.id), "label": item.title}
+        for index, item in enumerate(
+            session.scalars(
+                select(Foreshadow)
+                .where(Foreshadow.novel_id == document.novel_id)
+                .order_by(Foreshadow.position, Foreshadow.id)
+            ),
+            start=1,
+        )
+    }
+    chapter_sequence = int(
+        session.scalar(
+            select(func.count()).select_from(Document).where(
+                Document.novel_id == document.novel_id,
+                Document.kind == "chapter",
+                Document.position <= document.position,
+            )
+        )
+        or 0
+    )
+    return {
+        "schema_version": "story-extraction-context/2",
+        "timeline_segments": timeline_segments,
+        "character_catalog": character_catalog,
+        "relationship_catalog": relationship_catalog,
+        "storyline_catalog": storyline_catalog,
+        "foreshadow_catalog": foreshadow_catalog,
+        "chapter_sequence": chapter_sequence,
+        "source_revision_id": str(revision.id),
+        "source_content_hash": revision.content_hash,
+    }
+
+
 def start_intelligence_proposal(
     session: Session,
     document_id: UUID,
@@ -1531,7 +1752,8 @@ def start_intelligence_proposal(
         )
     ):
         raise ValidationError("章节情报生成缺少可核验的 Agent 或 requested 模型证据")
-    extractor_contract = "story-ledger-extractor-v3"
+    extraction_context = _intelligence_extraction_context(session, document, revision)
+    extractor_contract = "story-ledger-extractor-v4"
     input_hash = content_hash(
         json.dumps(
             {
@@ -1541,6 +1763,7 @@ def start_intelligence_proposal(
                 "requested_provider_id": requested_provider_id,
                 "requested_model_id": requested_model_id,
                 "generation_contract_version": generation_contract_version,
+                "extraction_context": extraction_context,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -1576,6 +1799,7 @@ def start_intelligence_proposal(
         requested_model_id=requested_model_id,
         generation_contract_version=generation_contract_version,
         attempt=attempt,
+        extraction_context_json=extraction_context,
     )
     session.add(proposal)
     session.commit()
@@ -1592,10 +1816,18 @@ def build_intelligence_prompt(session: Session, proposal_id: UUID) -> str:
     revision = session.get(DocumentRevision, proposal.chapter_revision_id)
     if revision is None:
         raise NotFoundError(f"revision {proposal.chapter_revision_id} not found")
+    extraction_context = dict(proposal.extraction_context_json or {})
+    timeline_ids = {
+        UUID(str(item["timeline_id"]))
+        for item in extraction_context.get("timeline_segments", [])
+        if isinstance(item, dict) and item.get("timeline_id")
+    }
     existing_facts = session.scalars(
         select(StoryFact)
         .where(
             StoryFact.novel_id == proposal.novel_id,
+            StoryFact.schema_version == "story-fact/2",
+            StoryFact.timeline_id.in_(timeline_ids),
             StoryFact.status.in_(CURRENT_FACT_STATUSES),
         )
         .order_by(StoryFact.created_at)
@@ -1605,40 +1837,37 @@ def build_intelligence_prompt(session: Session, proposal_id: UUID) -> str:
         f"- {fact.fact_type}｜{fact.subject}｜{fact.predicate}｜{fact.object_text}"
         for fact in existing_facts
     )
-    character_names = session.scalars(
-        select(NovelCharacter.name)
-        .where(
-            NovelCharacter.novel_id == proposal.novel_id,
-            NovelCharacter.lifecycle_state == "active",
-        )
-        .order_by(NovelCharacter.position)
-    ).all()
     return f"""请从下面这章正式正文中提取“候选情报”。只返回严格 JSON，不要代码围栏或解释。
 
 JSON 结构：
-{{"items":[{{"item_type":"fact|character_state|relationship|storyline_event|foreshadow_progress|foreshadow_new|next_chapter_required_role","subject":"主体","predicate":"变化或关系","object":"客体或内容","source_text":"正文中的短证据","reasoning_summary":"为何值得进入故事账本","confidence":0到100,"relationship_details":{{"source_name":"关系起点角色","target_name":"关系终点角色","directionality":"directed|undirected","relation_kind":"family|colleague|mentor|ally|enemy|romance|other","label":"简短关系名","description":"当前关系说明"}}}}]}}
+{{"no_changes":false,"items":[{{"fact_type":"character_state|relationship_state|storyline_event|foreshadow_event|story_time|knowledge_event|world_state|general_fact","entity_key":"下方目录短键；general_fact/world_state/story_time可为空","dimension":"状态维度短键","event_kind":"事件动作短键","subject":"主体显示文字","predicate":"变化描述","object":"客体或内容","source_text":"正文中的逐字短证据","visibility":"author|reader|all","details":{{}},"reasoning_summary":"为何值得进入故事账本","confidence":0到100}}]}}
 
 规则：
 1. 只提取正文明确发生或明确揭示的内容，不把猜测写成事实。
-2. 调查、协作、敌对和线索交换不能误分成恋爱关系。
-3. 已有相同事实不要重复；不确定时省略。
+2. 只能引用下方服务器目录给出的短键；禁止输出姓名作为实体定位信息，禁止自行构造 UUID。
+3. 已有相同事实不要重复；不确定时省略。正文没有新增或变化事实时，必须返回空 items，即 {{"no_changes":true,"items":[]}}。
 4. 每项必须有可在正文中找到的 source_text。
 5. 所有字符串内禁止使用未转义的英文双引号；引用原文时统一改用中文引号「」。
-6. 正文不为空时至少返回 1 条情报，不得返回空 items。
+6. 不要为了满足数量制造情报。
 7. 小说时间线与现实系统日期无关。严禁用当前现实年份补全「今年」「去年」「本月」等相对日期；必须以正文最近的明确场景日期为锚点推断。无法可靠推断时保留正文原有相对表述，不得擅自补全年份。
 8. source_text 与 object 中的日期必须彼此一致；正文写明发生在 1992 年的场景，不得改写成 2026 年或其他现实年份。
-9. 只有当本章结尾明确决定、约定或迫使某个已知角色在下一章继续出场时，才增加 next_chapter_required_role；subject 必须只写角色姓名，predicate 固定写「下一章必现」，object 简述正文依据。没有明确依据时不要输出此类型。
-10. foreshadow_new 只用于本章新出现、尚未解决且会影响后续章节的悬念；subject 必须写成可直接展示的简短伏笔名称（如「码头老板的阴谋线」），不得只写角色名或普通物件名。foreshadow_progress 只能推进现有故事账本中同名伏笔，不得凭角色名新建伏笔。
-11. storyline_event 只用于推进可跨越多个章节的稳定故事线；subject 应写故事线名称或稳定主题，不得把一次动作、普通物件、地点切换或一句对白各自拆成新故事线。
-12. item_type=relationship 时必须填写 relationship_details；source_name 与 target_name 只能逐字使用下面“已知角色”中的姓名。亲属、恋爱、盟友、敌对等稳定双向关系用 undirected；师徒、影响、控制等有明确施受方的关系用 directed。label 使用2到12个中文字符。其他 item_type 必须省略 relationship_details。
+9. character_state 和 knowledge_event 必须使用 character_catalog 的短键；relationship_state、storyline_event、foreshadow_event 必须分别使用对应目录短键。
+10. 不得在提取阶段创建人物、关系、故事线或伏笔根对象；目录没有对应对象时省略并交给作者另行规划。
+11. visibility 默认 author；只有正文已经向读者或所有在场视角明确揭露时才能填写 reader 或 all。
+12. details 只填写类型所需结构：knowledge_event 使用 operation/knowledge_key；story_time 使用 transition/from_time/to_time；foreshadow_event 使用 event/note。其他类型可留空对象，由服务器按类型补成版本化结构。
 
 章节：{document.title}
-已知角色：{', '.join(character_names) or '暂无'}
+服务器实体短键目录：
+{json.dumps({key: extraction_context.get(key, {}) for key in ('character_catalog', 'relationship_catalog', 'storyline_catalog', 'foreshadow_catalog')}, ensure_ascii=False, sort_keys=True)}
+
+正文区间时间线映射：
+{json.dumps(extraction_context.get('timeline_segments', []), ensure_ascii=False, sort_keys=True)}
+
 现有故事账本：
 {ledger or '- 暂无'}
 
 正式正文：
-{revision.content_markdown}
+{revision.content_text}
 """.strip()
 
 
@@ -1684,6 +1913,11 @@ def complete_intelligence_proposal(
         proposal.state = "superseded"
         session.commit()
         raise ProposalSupersededError(_intelligence_proposal_payload(session, proposal))
+    novel = session.scalar(
+        select(Novel).where(Novel.id == proposal.novel_id).with_for_update()
+    )
+    if novel is None:
+        raise NotFoundError(f"novel {proposal.novel_id} not found")
     existing = session.scalar(
         select(func.count(IntelligenceProposalItem.id)).where(
             IntelligenceProposalItem.proposal_id == proposal_id
@@ -1692,16 +1926,55 @@ def complete_intelligence_proposal(
     if existing:
         return _intelligence_proposal_payload(session, proposal)
     normalized: list[IntelligenceProposalItem] = []
+    extraction_context = dict(proposal.extraction_context_json or {})
+    catalog_by_type = {
+        "character_state": extraction_context.get("character_catalog", {}),
+        "knowledge_event": extraction_context.get("character_catalog", {}),
+        "relationship_state": extraction_context.get("relationship_catalog", {}),
+        "storyline_event": extraction_context.get("storyline_catalog", {}),
+        "foreshadow_event": extraction_context.get("foreshadow_catalog", {}),
+    }
+    segments = [
+        item
+        for item in extraction_context.get("timeline_segments", [])
+        if isinstance(item, dict)
+    ]
     for position, raw in enumerate(items[:200], start=1):
-        item_type = str(raw.get("item_type", "fact")).strip()
+        item_type = str(raw.get("fact_type", raw.get("item_type", ""))).strip()
         if item_type not in INTELLIGENCE_ITEM_TYPES:
-            item_type = "fact"
+            continue
         subject = str(raw.get("subject", "")).strip()
         predicate = str(raw.get("predicate", "")).strip()
         object_text = str(raw.get("object", "")).strip()
         source_text = str(raw.get("source_text", "")).strip()
         if not subject or not predicate or not object_text or not source_text:
             continue
+        occurrences: list[int] = []
+        offset = revision.content_text.find(source_text)
+        while offset >= 0:
+            occurrences.append(offset)
+            offset = revision.content_text.find(source_text, offset + 1)
+        if len(occurrences) != 1:
+            continue
+        source_start = occurrences[0]
+        source_end = source_start + len(source_text)
+        matching_segments = [
+            segment
+            for segment in segments
+            if int(segment.get("source_start", -1)) <= source_start
+            and int(segment.get("source_end", -1)) >= source_end
+        ]
+        if len(matching_segments) != 1:
+            continue
+        segment = matching_segments[0]
+        entity_key = str(raw.get("entity_key", "")).strip()
+        entity_metadata: dict[str, Any] = {}
+        catalog = catalog_by_type.get(item_type)
+        if isinstance(catalog, dict):
+            candidate = catalog.get(entity_key)
+            if not isinstance(candidate, dict):
+                continue
+            entity_metadata = dict(candidate)
         try:
             confidence = int(raw.get("confidence", 50))
         except (TypeError, ValueError):
@@ -1716,11 +1989,21 @@ def complete_intelligence_proposal(
                     "subject": subject,
                     "predicate": predicate,
                     "object": object_text,
-                    **(
-                        {"relationship_details": raw["relationship_details"]}
-                        if item_type == "relationship"
-                        and isinstance(raw.get("relationship_details"), dict)
-                        else {}
+                    "entity_key": entity_key or None,
+                    "entity": entity_metadata,
+                    "timeline_id": str(segment["timeline_id"]),
+                    "story_sequence": (
+                        segment.get("story_sequence")
+                        if segment.get("story_sequence") is not None
+                        else extraction_context.get("chapter_sequence")
+                    ),
+                    "source_start": source_start,
+                    "source_end": source_end,
+                    "dimension": str(raw.get("dimension") or item_type)[:80],
+                    "event_kind": str(raw.get("event_kind") or "confirmed")[:80],
+                    "visibility": str(raw.get("visibility") or "author"),
+                    "details": (
+                        raw.get("details") if isinstance(raw.get("details"), dict) else {}
                     ),
                 },
                 confidence=max(0, min(confidence, 100)),
@@ -1804,6 +2087,119 @@ def review_intelligence_item(
     return _intelligence_proposal_payload(session, proposal)
 
 
+def _typed_story_fact_candidate(
+    *,
+    proposal: IntelligenceProposal,
+    revision: DocumentRevision,
+    item: IntelligenceProposalItem,
+    payload: dict[str, object],
+) -> StoryFactV2:
+    fact_type = item.item_type
+    entity = payload.get("entity")
+    entity = entity if isinstance(entity, dict) else {}
+    object_text = str(payload.get("object", "")).strip()
+    predicate = str(payload.get("predicate", "")).strip()
+    raw_details = payload.get("details")
+    raw_details = raw_details if isinstance(raw_details, dict) else {}
+    if fact_type == "character_state":
+        details = {"schema_version": "character-state/1", "value": object_text}
+    elif fact_type == "relationship_state":
+        details = {"schema_version": "relationship-state/1", "value": object_text}
+    elif fact_type == "storyline_event":
+        details = {
+            "schema_version": "storyline-event/1",
+            "event": str(raw_details.get("event") or predicate),
+            "value": raw_details.get("value", object_text),
+        }
+    elif fact_type == "foreshadow_event":
+        event = str(raw_details.get("event") or payload.get("event_kind") or "reinforce")
+        if event not in {"plant", "reinforce", "reveal", "resolve", "cancel"}:
+            event = "reinforce"
+        details = {
+            "schema_version": "foreshadow-event/1",
+            "event": event,
+            "note": str(raw_details.get("note") or object_text),
+        }
+    elif fact_type == "story_time":
+        transition = str(raw_details.get("transition") or "unknown")
+        if transition not in {"advance", "flashback", "flashforward", "anchor", "unknown"}:
+            transition = "unknown"
+        details = {
+            "schema_version": "story-time-event/1",
+            "transition": transition,
+            "from_time": raw_details.get("from_time"),
+            "to_time": raw_details.get("to_time"),
+        }
+    elif fact_type == "knowledge_event":
+        operation = str(raw_details.get("operation") or "learn")
+        if operation not in {"learn", "forget", "believe", "doubt", "reveal"}:
+            operation = "learn"
+        details = {
+            "schema_version": "knowledge-event/1",
+            "operation": operation,
+            "knowledge_key": str(raw_details.get("knowledge_key") or payload.get("dimension")),
+        }
+    elif fact_type == "world_state":
+        details = {"schema_version": "world-state/1", "value": object_text}
+    else:
+        details = {"schema_version": "general-fact/1", "value": object_text}
+    visibility = str(payload.get("visibility") or "author")
+    if visibility not in {"author", "reader", "all"}:
+        visibility = "author"
+    fingerprint_material = {
+        "novel_id": str(proposal.novel_id),
+        "source_revision_id": str(proposal.chapter_revision_id),
+        "source_start": payload.get("source_start"),
+        "source_end": payload.get("source_end"),
+        "timeline_id": payload.get("timeline_id"),
+        "fact_type": fact_type,
+        "dimension": payload.get("dimension"),
+        "event_kind": payload.get("event_kind"),
+        "entity": entity,
+        "object": object_text,
+    }
+    fingerprint = content_hash(
+        json.dumps(
+            fingerprint_material,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    try:
+        return StoryFactV2.model_validate(
+            {
+            "id": uuid4(),
+            "novel_id": proposal.novel_id,
+            "fact_type": fact_type,
+            "subject": str(payload.get("subject", "")).strip(),
+            "predicate": predicate,
+            "object_text": object_text,
+            "details": details,
+            "source_revision_id": proposal.chapter_revision_id,
+            "source_document_id": proposal.document_id,
+            "timeline_id": payload.get("timeline_id"),
+            "character_id": entity.get("character_id"),
+            "character_instance_id": entity.get("character_instance_id"),
+            "relationship_id": entity.get("relationship_id"),
+            "storyline_id": entity.get("storyline_id"),
+            "foreshadow_id": entity.get("foreshadow_id"),
+            "dimension": payload.get("dimension"),
+            "event_kind": payload.get("event_kind"),
+            "story_sequence": payload.get("story_sequence"),
+            "story_time_json": raw_details.get("to_time") if fact_type == "story_time" else None,
+            "visibility_json": {"scope": visibility},
+            "source_start": payload.get("source_start"),
+            "source_end": payload.get("source_end"),
+            "event_fingerprint": fingerprint,
+            "status": "active",
+            "created_at": datetime.now(timezone.utc),
+            }
+        )
+    except PydanticValidationError as error:
+        raise ValidationError("候选情报不符合 StoryFact v2 类型契约") from error
+
+
 def commit_intelligence_items(
     session: Session,
     proposal_id: UUID,
@@ -1826,6 +2222,11 @@ def commit_intelligence_items(
     )
     if proposal is None:
         raise NotFoundError(f"intelligence proposal {proposal_id} not found")
+    novel = session.scalar(
+        select(Novel).where(Novel.id == proposal.novel_id).with_for_update()
+    )
+    if novel is None:
+        raise NotFoundError(f"novel {proposal.novel_id} not found")
     revision = session.get(DocumentRevision, proposal.chapter_revision_id)
     current_revision = (
         session.get(DocumentRevision, working.base_revision_id)
@@ -1873,6 +2274,7 @@ def commit_intelligence_items(
         state="committing",
         accepted_item_ids=sorted(str(item_id) for item_id in selected),
         inverse_operations={"created_story_fact_ids": []},
+        expected_story_ledger_version=novel.story_ledger_version,
     )
     if existing_batch is None:
         session.add(batch)
@@ -1888,58 +2290,57 @@ def commit_intelligence_items(
         if item.committed_story_fact_id:
             continue
         override = overrides.get(str(item.id), {})
-        payload = {**item.suggested_payload, **override}
+        allowed_override_keys = {
+            "subject", "predicate", "object", "dimension", "event_kind", "visibility", "details"
+        }
+        payload = {
+            **item.suggested_payload,
+            **{key: value for key, value in override.items() if key in allowed_override_keys},
+        }
         subject = str(payload.get("subject", "")).strip()
         predicate = str(payload.get("predicate", "")).strip()
         object_text = str(payload.get("object", "")).strip()
         if not subject or not predicate or not object_text:
             raise ValidationError("accepted intelligence item requires subject, predicate and object")
-        fact = StoryFact(
-            id=uuid4(),
-            novel_id=proposal.novel_id,
-            fact_type=item.item_type,
-            subject=subject,
-            predicate=predicate,
-            object_text=object_text,
-            details={
-                "proposal_id": str(proposal.id),
-                "proposal_item_id": str(item.id),
-                "source_text": item.source_text,
-                "reasoning_summary": item.reasoning_summary,
-                "model_suggestion": item.suggested_payload,
-                "commit_batch_id": str(batch.id),
-            },
-            source_revision_id=proposal.chapter_revision_id,
-            status="active",
+        candidate = _typed_story_fact_candidate(
+            proposal=proposal, revision=revision, item=item, payload=payload
         )
-        session.add(fact)
-        session.flush()
-        session.add(
-            DerivedSourceBinding(
-                id=uuid4(),
-                derived_entity_type="story_fact",
-                derived_entity_id=fact.id,
-                source_chapter_id=proposal.document_id,
-                source_chapter_revision_id=proposal.chapter_revision_id,
-                source_content_hash=revision.content_hash,
-                proposal_item_id=item.id,
-                commit_batch_id=batch.id,
-                validity_state="current",
+        fact = session.scalar(
+            select(StoryFact).where(
+                StoryFact.novel_id == proposal.novel_id,
+                StoryFact.event_fingerprint == candidate.event_fingerprint,
             )
         )
-        created_fact_ids.append(str(fact.id))
+        if fact is None:
+            candidate_data = candidate.model_dump(mode="python")
+            candidate_data["details"] = candidate.details.model_dump(mode="json")
+            candidate_data["visibility_json"] = candidate.visibility_json.model_dump(mode="json")
+            story_time = candidate.story_time_json
+            candidate_data["story_time_json"] = (
+                story_time.model_dump(mode="json") if story_time is not None else None
+            )
+            candidate_data["schema_version"] = "story-fact/2"
+            candidate_data["fact_type"] = candidate.fact_type.value
+            candidate_data["status"] = candidate.status.value
+            fact = StoryFact(**candidate_data)
+            session.add(fact)
+            session.flush()
+            session.add(
+                DerivedSourceBinding(
+                    id=uuid4(),
+                    derived_entity_type="story_fact",
+                    derived_entity_id=fact.id,
+                    source_chapter_id=proposal.document_id,
+                    source_chapter_revision_id=proposal.chapter_revision_id,
+                    source_content_hash=revision.content_hash,
+                    proposal_item_id=item.id,
+                    commit_batch_id=batch.id,
+                    validity_state="current",
+                )
+            )
+            created_fact_ids.append(str(fact.id))
         item.review_state = "accepted"
-        item.suggested_payload = {
-            "subject": subject,
-            "predicate": predicate,
-            "object": object_text,
-            **(
-                {"relationship_details": payload["relationship_details"]}
-                if item.item_type == "relationship"
-                and isinstance(payload.get("relationship_details"), dict)
-                else {}
-            ),
-        }
+        item.suggested_payload = payload
         item.committed_story_fact_id = fact.id
     pending = sum(1 for item in items if item.review_state == "pending")
     accepted = sum(1 for item in items if item.review_state == "accepted")
@@ -1951,6 +2352,8 @@ def commit_intelligence_items(
     batch.state = "committed"
     batch.inverse_operations = {"created_story_fact_ids": created_fact_ids}
     batch.committed_at = proposal.reviewed_at
+    if created_fact_ids:
+        novel.story_ledger_version += 1
     session.commit()
     result = _intelligence_proposal_payload(session, proposal)
     result["commit_batch"] = _intelligence_commit_batch_payload(batch)
@@ -1977,6 +2380,29 @@ def list_story_facts(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
             "source_revision_id": (
                 str(fact.source_revision_id) if fact.source_revision_id else None
             ),
+            "source_document_id": (
+                str(fact.source_document_id) if fact.source_document_id else None
+            ),
+            "timeline_id": str(fact.timeline_id) if fact.timeline_id else None,
+            "character_id": str(fact.character_id) if fact.character_id else None,
+            "character_instance_id": (
+                str(fact.character_instance_id)
+                if fact.character_instance_id
+                else None
+            ),
+            "relationship_id": (
+                str(fact.relationship_id) if fact.relationship_id else None
+            ),
+            "storyline_id": str(fact.storyline_id) if fact.storyline_id else None,
+            "foreshadow_id": str(fact.foreshadow_id) if fact.foreshadow_id else None,
+            "dimension": fact.dimension,
+            "event_kind": fact.event_kind,
+            "story_sequence": fact.story_sequence,
+            "story_time": fact.story_time_json,
+            "visibility": fact.visibility_json,
+            "source_start": fact.source_start,
+            "source_end": fact.source_end,
+            "event_fingerprint": fact.event_fingerprint,
             "status": fact.status,
             "created_at": fact.created_at.isoformat() if fact.created_at else None,
         }
@@ -2217,7 +2643,13 @@ def get_novel_context(
         working = session.get(DocumentWorkingCopy, document.id)
         if working is None:
             continue
-        text = working.content_markdown[-remaining:]
+        revision = (
+            session.get(DocumentRevision, working.base_revision_id)
+            if working.base_revision_id
+            else None
+        )
+        formal_markdown = revision.content_markdown if revision is not None else ""
+        text = formal_markdown[-remaining:]
         selected.append(
             {
                 "document_id": str(document.id),
@@ -2231,20 +2663,68 @@ def get_novel_context(
         if remaining <= 0:
             break
     selected.reverse()
-    facts = session.scalars(
-        select(StoryFact)
-        .where(
-            StoryFact.novel_id == novel_id,
-            StoryFact.status.in_(CURRENT_FACT_STATUSES),
-        )
-        .order_by(StoryFact.created_at)
-        .limit(200)
-    ).all()
-    return {
-        "novel": {"id": str(novel.id), "title": novel.title, "description": novel.description},
-        "current_document_id": str(document_id) if document_id else None,
-        "documents": selected,
-        "story_facts": [
+    envelope = None
+    if session.scalar(
+        select(StoryTimeline.id).where(
+            StoryTimeline.novel_id == novel_id,
+            StoryTimeline.lifecycle_state == "active",
+        ).limit(1)
+    ) is not None:
+        context_kwargs: dict[str, Any] = {"document_id": document_id}
+        if document_id is not None:
+            brief = session.scalar(
+                select(ChapterBrief).where(ChapterBrief.document_id == document_id)
+            )
+            raw_v3 = (
+                dict((brief.role_constraints or {}).get("_v3") or {})
+                if brief is not None and isinstance(brief.role_constraints, dict)
+                else {}
+            )
+            raw_timeline_id = raw_v3.pop("timeline_id", None)
+            if raw_timeline_id is not None:
+                try:
+                    context_kwargs["timeline_id"] = UUID(str(raw_timeline_id))
+                    context_kwargs["chapter_requirements"] = (
+                        ChapterRoleConstraintsV3.model_validate(raw_v3)
+                    )
+                except (ValueError, PydanticValidationError) as error:
+                    raise ValidationError("章节时间线或人物实例约束无效") from error
+        envelope = assemble_context_from_db(session, novel_id, **context_kwargs)
+    if envelope is not None:
+        projected_facts = [
+            *(fact for item in envelope.character_state for fact in item.current_state_facts),
+            *envelope.story_state.current_facts,
+            *envelope.chapter_requirements.author_secret_facts,
+        ]
+        fact_payloads = [
+            {
+                "id": str(fact.id),
+                "type": fact.fact_type.value,
+                "subject": fact.subject,
+                "predicate": fact.predicate,
+                "object": fact.object_text,
+                "source_revision_id": str(fact.source_revision_id) if fact.source_revision_id else None,
+                "timeline_id": str(fact.timeline_id) if fact.timeline_id else None,
+                "character_instance_id": (
+                    str(fact.character_instance_id) if fact.character_instance_id else None
+                ),
+            }
+            for fact in projected_facts
+        ]
+    else:
+        # Temporary read compatibility for experimental rows created before
+        # migration 0026.  It is removed when the separately authorized test
+        # database rebuild occurs; no new write path creates such rows.
+        facts = session.scalars(
+            select(StoryFact)
+            .where(
+                StoryFact.novel_id == novel_id,
+                StoryFact.status.in_(CURRENT_FACT_STATUSES),
+            )
+            .order_by(StoryFact.created_at)
+            .limit(200)
+        ).all()
+        fact_payloads = [
             {
                 "id": str(fact.id),
                 "type": fact.fact_type,
@@ -2254,6 +2734,16 @@ def get_novel_context(
                 "source_revision_id": str(fact.source_revision_id) if fact.source_revision_id else None,
             }
             for fact in facts
-        ],
-        "retrieval": "lexical/current-revision context; vector retrieval is intentionally disabled in MVP-0",
+        ]
+    return {
+        "novel": {"id": str(novel.id), "title": novel.title, "description": novel.description},
+        "current_document_id": str(document_id) if document_id else None,
+        "documents": selected,
+        "story_facts": fact_payloads,
+        "context_v3": envelope.model_dump(mode="json") if envelope is not None else None,
+        "retrieval": (
+            "deterministic/context-v3; semantic evidence is supplemental"
+            if envelope is not None
+            else "legacy-current-revision; awaiting authorized experimental data rebuild"
+        ),
     }

@@ -1411,7 +1411,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       footer: [h(Button, { key: "skip", onClick: () => confirmGenerateBody([]) }, "跳过"), h(Button, { key: "generate", type: "primary", onClick: () => confirmGenerateBody(selectedAssetIds) }, `确定选择${selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ""}`)],
     }, h("section", { className: "anw-asset-picker" },
       h("p", { className: "anw-asset-picker-copy" }, "AI 将重点展示选中的内容到生成结果中"),
-      h("div", { className: "anw-asset-search-row" }, h(Input, { value: assetSearch, prefix: h(SearchOutlined), placeholder: "搜索公有库配置", onChange: (event: any) => setAssetSearch(event.target.value) }), h(Button, { type: "link", icon: h(PlusOutlined), onClick: () => setQuickAssetOpen(true) }, "快速添加公有库到配置")),
+      h("div", { className: "anw-asset-search-row" }, h(Input, { value: assetSearch, prefix: h(SearchOutlined), placeholder: "搜索私有库素材", onChange: (event: any) => setAssetSearch(event.target.value) }), h(Button, { type: "link", icon: h(PlusOutlined), onClick: () => setQuickAssetOpen(true) }, "快速添加私有素材")),
       h(Tabs, { activeKey: assetTab, onChange: (key: string) => setAssetTab(key as PrivateAssetType), items: ASSET_TABS.map((tab) => ({
         key: tab.key,
         label: tab.label,

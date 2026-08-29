@@ -172,11 +172,19 @@ async def test_disabled_factory_returns_before_token_or_http(
         return sidecar_runtime_module.build_moss_adapter_from_environment(environ)
 
     await runtime_owner.launch_narration_runtime(
-        {"AI_NOVEL_TTS_RUNTIME_ENABLED": "false"},
+        {
+            "AI_NOVEL_TTS_RUNTIME_ENABLED": "false",
+            "AI_NOVEL_TTS_IDLE_UNLOAD_SECONDS": "ignored-while-disabled",
+        },
         factory=production_factory,
     )
 
-    assert factory_calls == [{"AI_NOVEL_TTS_RUNTIME_ENABLED": "false"}]
+    assert factory_calls == [
+        {
+            "AI_NOVEL_TTS_RUNTIME_ENABLED": "false",
+            "AI_NOVEL_TTS_IDLE_UNLOAD_SECONDS": "ignored-while-disabled",
+        }
+    ]
     assert token_reads == 0
     assert http_connections == 0
     assert runtime_owner.get_ready_narration_adapter() is None
@@ -185,7 +193,9 @@ async def test_disabled_factory_returns_before_token_or_http(
         "lifecycle_status": "disabled",
         "sidecar_reachable": False,
         "model_ready": False,
+        "model_loaded": False,
         "product_visible": False,
+        "idle_unload_seconds": None,
         "protocol_version": "moss-tts-sidecar/1.1",
         "worker_generation": None,
         "lease_generation": None,
@@ -260,7 +270,9 @@ async def test_enabled_launch_is_nonblocking_then_becomes_ready_and_renews(
         "lifecycle_status": "ready",
         "sidecar_reachable": True,
         "model_ready": True,
+        "model_loaded": True,
         "product_visible": False,
+        "idle_unload_seconds": None,
         "protocol_version": "moss-tts-sidecar/1.1",
         "worker_generation": 41,
         "lease_generation": 7,
@@ -277,6 +289,78 @@ async def test_enabled_launch_is_nonblocking_then_becomes_ready_and_renews(
             "x-moss-worker-token",
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_released_product_starts_cold_and_defers_warmup_until_synthesis(
+    runtime_owner,
+) -> None:
+    class OnDemandAdapter(ControlledAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.on_demand_enabled = 0
+            self.model_loaded = False
+
+        @property
+        def expected_model_fingerprint_sha256(self) -> str:
+            return MODEL_FINGERPRINT_SHA256
+
+        def enable_on_demand_warmup(self) -> None:
+            self.on_demand_enabled += 1
+
+        async def release_model_if_idle(self, _seconds: float) -> bool:
+            raise AssertionError("a cold model must not be released again")
+
+    adapter = OnDemandAdapter()
+    _, factory = _factory(adapter)
+
+    await runtime_owner.launch_narration_runtime(
+        {
+            "AI_NOVEL_TTS_RUNTIME_ENABLED": "true",
+            "AI_NOVEL_TTS_PRODUCT_ENABLED": "true",
+            "AI_NOVEL_TTS_IDLE_UNLOAD_SECONDS": "300",
+        },
+        factory=factory,
+    )
+    await runtime_owner.wait_narration_runtime_initialized(timeout_seconds=1)
+
+    status = runtime_owner.narration_runtime_status()
+    assert adapter.calls == ["activate", "health"]
+    assert adapter.on_demand_enabled == 1
+    assert status["lifecycle_status"] == "ready"
+    assert status["model_ready"] is True
+    assert status["model_loaded"] is False
+    assert status["idle_unload_seconds"] == 300
+    assert status["model_fingerprint_sha256"] == MODEL_FINGERPRINT_SHA256
+    assert status["product_visible"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["59", "3601", "300.0", "five-minutes"])
+async def test_idle_unload_configuration_is_strict_and_fail_closed(
+    runtime_owner,
+    value: str,
+) -> None:
+    factory_calls = 0
+
+    def factory(_environ):  # noqa: ANN001
+        nonlocal factory_calls
+        factory_calls += 1
+        return ControlledAdapter()
+
+    await runtime_owner.launch_narration_runtime(
+        {
+            "AI_NOVEL_TTS_RUNTIME_ENABLED": "true",
+            "AI_NOVEL_TTS_PRODUCT_ENABLED": "true",
+            "AI_NOVEL_TTS_IDLE_UNLOAD_SECONDS": value,
+        },
+        factory=factory,
+    )
+
+    assert factory_calls == 0
+    status = runtime_owner.narration_runtime_status()
+    assert status["lifecycle_status"] == "configuration_error"
+    assert status["reason_code"] == "SIDECAR_CONFIGURATION_INVALID"
 
 
 @pytest.mark.asyncio
@@ -490,7 +574,9 @@ async def test_background_failure_degrades_without_failing_host_or_leaking_task(
         "lifecycle_status": "unavailable",
         "sidecar_reachable": False,
         "model_ready": False,
+        "model_loaded": False,
         "product_visible": False,
+        "idle_unload_seconds": None,
         "protocol_version": "moss-tts-sidecar/1.1",
         "worker_generation": None,
         "lease_generation": None,

@@ -688,13 +688,13 @@ def test_novel_template_generation_normalizes_editable_fields() -> None:
 def test_intelligence_payload_recovers_valid_items_from_malformed_envelope() -> None:
     malformed = (
         '{"items":['
-        '{"item_type":"fact","subject":"沈青禾","predicate":"重生",'
+        '{"fact_type":"general_fact","subject":"沈青禾","predicate":"重生",'
         '"object":"回到1992年","source_text":"她睁开眼",'
         '"reasoning_summary":"时间锚点","confidence":96},'
-        '{"item_type":"fact","subject":"沈佑平","predicate":"被处分",'
+        '{"fact_type":"general_fact","subject":"沈佑平","predicate":"被处分",'
         '"object":"处分事由"扣留单据"","source_text":"处分公告",'
         '"reasoning_summary":"未转义引号使这一项无效"},'
-        '{"item_type":"storyline_event","subject":"沈青禾",'
+        '{"fact_type":"storyline_event","entity_key":"storyline_1","subject":"沈青禾",'
         '"predicate":"启动调查","object":"列下三项计划",'
         '"source_text":"她写下三条线",'
         '"reasoning_summary":"主线启动","confidence":88}]}'
@@ -705,7 +705,7 @@ def test_intelligence_payload_recovers_valid_items_from_malformed_envelope() -> 
     items = normalize_intelligence_generation_json(parsed, malformed)
 
     assert [item["subject"] for item in items] == ["沈青禾", "沈青禾"]
-    assert items[1]["item_type"] == "storyline_event"
+    assert items[1]["fact_type"] == "storyline_event"
 
 
 def test_intelligence_payload_rejects_empty_success() -> None:
@@ -713,33 +713,34 @@ def test_intelligence_payload_rejects_empty_success() -> None:
         normalize_intelligence_generation_json({"items": []}, '{"items":[]}')
 
 
-def test_intelligence_relationship_preserves_graph_details() -> None:
+def test_intelligence_payload_accepts_explicit_no_changes() -> None:
+    assert normalize_intelligence_generation_json(
+        {"no_changes": True, "items": []},
+        '{"no_changes":true,"items":[]}',
+    ) == []
+
+
+def test_intelligence_relationship_preserves_stable_entity_key() -> None:
     payload = {
         "items": [
             {
-                "item_type": "relationship",
+                "fact_type": "relationship_state",
+                "entity_key": "relationship_1",
                 "subject": "苏晚与陆沉舟",
                 "predicate": "结成同盟",
                 "object": "共同调查旧电台档案",
                 "source_text": "我们一起把这件事查到底",
                 "reasoning_summary": "形成稳定协作关系",
                 "confidence": 92,
-                "relationship_details": {
-                    "source_name": "苏晚",
-                    "target_name": "陆沉舟",
-                    "directionality": "undirected",
-                    "relation_kind": "ally",
-                    "label": "调查同盟",
-                    "description": "两人共同调查旧电台档案。",
-                },
+                "details": {},
             }
         ]
     }
 
     items = normalize_intelligence_generation_json(payload, "")
 
-    assert items[0]["relationship_details"]["relation_kind"] == "ally"
-    assert items[0]["relationship_details"]["source_name"] == "苏晚"
+    assert items[0]["fact_type"] == "relationship_state"
+    assert items[0]["entity_key"] == "relationship_1"
 
 
 def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slot() -> None:
@@ -747,8 +748,8 @@ def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slo
         "complete_snapshot": True,
         "relationships": [
             {
-                "source_name": "苏晚",
-                "target_name": "陆沉舟",
+                "source_key": "character_a",
+                "target_key": "character_b",
                 "directionality": "undirected",
                 "relation_kind": "ally",
                 "label": "临时合作",
@@ -757,8 +758,8 @@ def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slo
                 "evidence": ["苏晚与陆沉舟共同查档案"],
             },
             {
-                "source_name": "陆沉舟",
-                "target_name": "苏晚",
+                "source_key": "character_b",
+                "target_key": "character_a",
                 "directionality": "undirected",
                 "relation_kind": "ally",
                 "label": "调查同盟",
@@ -776,7 +777,7 @@ def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slo
     assert result["relationships"][0]["label"] == "调查同盟"
 
 
-def test_relationship_graph_generation_rejects_nonempty_candidates_without_pair_evidence() -> None:
+def test_relationship_graph_generation_rejects_nonempty_candidates_without_evidence() -> None:
     with pytest.raises(ModelVerificationError, match="没有可用关系"):
         normalize_creative_generation_json(
             "relationship_graph",
@@ -784,13 +785,13 @@ def test_relationship_graph_generation_rejects_nonempty_candidates_without_pair_
                 "complete_snapshot": True,
                 "relationships": [
                     {
-                        "source_name": "苏晚",
-                        "target_name": "陆沉舟",
+                        "source_key": "character_a",
+                        "target_key": "character_b",
                         "directionality": "undirected",
                         "relation_kind": "ally",
                         "label": "调查同盟",
                         "confidence": 94,
-                        "evidence": ["两人共同调查旧电台档案"],
+                        "evidence": [],
                     }
                 ],
             },

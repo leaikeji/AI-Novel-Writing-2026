@@ -487,7 +487,9 @@ def verify() -> dict[str, object]:
             "lifecycle_status": "disabled",
             "sidecar_reachable": False,
             "model_ready": False,
+            "model_loaded": False,
             "product_visible": False,
+            "idle_unload_seconds": None,
             "protocol_version": TTS_PROTOCOL_VERSION,
             "worker_generation": None,
             "lease_generation": None,
@@ -499,12 +501,31 @@ def verify() -> dict[str, object]:
         assert narration.get("lifecycle_status") == "ready"
         assert narration.get("sidecar_reachable") is True
         assert narration.get("model_ready") is True
+        assert isinstance(narration.get("model_loaded"), bool)
+        idle_unload_seconds = narration.get("idle_unload_seconds")
+        assert (
+            isinstance(idle_unload_seconds, int)
+            and not isinstance(idle_unload_seconds, bool)
+            and idle_unload_seconds > 0
+        )
         assert narration.get("model_fingerprint_sha256") == (
             TTS_MODEL_FINGERPRINT_SHA256
         )
-        for field in ("worker_generation", "lease_generation"):
-            value = narration.get(field)
-            assert isinstance(value, int) and not isinstance(value, bool) and value > 0
+        lease_generation = narration.get("lease_generation")
+        assert (
+            isinstance(lease_generation, int)
+            and not isinstance(lease_generation, bool)
+            and lease_generation > 0
+        )
+        worker_generation = narration.get("worker_generation")
+        if narration.get("model_loaded") is True:
+            assert (
+                isinstance(worker_generation, int)
+                and not isinstance(worker_generation, bool)
+                and worker_generation > 0
+            )
+        else:
+            assert worker_generation is None
         assert narration.get("reason_code") is None
 
     narration_production = health.get("narration_production")

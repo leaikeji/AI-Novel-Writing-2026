@@ -1141,6 +1141,60 @@ async def test_health_does_not_claim_ready_until_warmup(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_demand_synthesis_warms_a_cold_sidecar(tmp_path: Path) -> None:
+    with running_server() as (server, state):
+        adapter = adapter_for(tmp_path, server)
+        await adapter.activate()
+        assert (await adapter.health()).status is AdapterHealthStatus.DEGRADED
+
+        adapter.enable_on_demand_warmup()
+        result = await adapter.synthesize(synthesis_request())
+
+        assert result.audio_bytes.startswith(b"RIFF")
+        assert adapter.model_loaded is True
+        with state.lock:
+            assert state.status == "ready"
+            assert state.model_fingerprint_sha256 is not None
+
+
+@pytest.mark.asyncio
+async def test_idle_release_unloads_then_next_synthesis_warms_again(
+    tmp_path: Path,
+) -> None:
+    with running_server() as (server, state):
+        lifecycle = RecordingLifecycle()
+        lifecycle.state = state
+        adapter = adapter_for(tmp_path, server, lifecycle=lifecycle)
+        await adapter.activate()
+        await adapter.health()
+        adapter.enable_on_demand_warmup()
+        await adapter.synthesize(synthesis_request())
+        last_activity = adapter._last_model_activity_at
+        assert last_activity is not None
+
+        released = await adapter.release_model_if_idle(
+            300,
+            now=last_activity + 300,
+        )
+
+        assert released is True
+        assert adapter.worker_lease_active is True
+        assert adapter.model_loaded is False
+        assert lifecycle.reasons == ["IDLE_MODEL_RELEASE"]
+        assert len(lifecycle.previous_generations) == 1
+        assert lifecycle.previous_generations[0] is not None
+        assert isinstance(state.backend, FakeBackend)
+        assert state.backend.unload_count == 1
+        with state.lock:
+            assert state.status == "unloaded"
+            assert state.worker_token is not None
+
+        second = await adapter.synthesize(synthesis_request())
+        assert second.audio_bytes.startswith(b"RIFF")
+        assert adapter.model_loaded is True
+
+
+@pytest.mark.asyncio
 async def test_adapter_activate_renew_warmup_and_deactivate_is_inert(
     tmp_path: Path,
 ) -> None:
@@ -1401,6 +1455,19 @@ def test_authenticated_restart_endpoint_poison_exits_server() -> None:
         assert row["worker"]["generation"] == state.generation
         assert state.poisoned is True
         assert server._restart_scheduled is True
+
+
+def test_supervisor_reads_generation_from_exact_response_header() -> None:
+    class Response:
+        def getheaders(self):  # type: ignore[no-untyped-def]
+            return [("X-MOSS-Worker-Generation", "41")]
+
+    generation = SupervisorManagedSidecarLifecycle._response_generation(
+        Response(),  # type: ignore[arg-type]
+        {"worker": {"generation": 41}},
+    )
+
+    assert generation == 41
 
 
 @pytest.mark.asyncio

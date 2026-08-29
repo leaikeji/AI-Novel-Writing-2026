@@ -108,7 +108,7 @@ NORMALIZER_FINGERPRINT_VERSION = "narration-spoken-text-normalizer/1"
 WORKER_TASK_NAME = "ai-novel-moss-tts-production-worker"
 WORKER_CYCLE_TASK_NAME = "ai-novel-moss-tts-worker-cycle"
 SIDECAR_RETRY_SECONDS = 1.0
-EXPECTED_DATABASE_REVISION = "20260828_0024"
+EXPECTED_DATABASE_REVISION = "20260829_0028"
 PRODUCTION_TRANSCODING_POLICY = replace(
     DEFAULT_TRANSCODING_POLICY,
     allow_wav_fallback=False,
@@ -882,6 +882,8 @@ async def _resolve_ready_sidecar(
                     ),
                 )
             else:
+                if model is None:
+                    model = getattr(adapter, "expected_model_fingerprint", None)
                 if model is not None:
                     return adapter, model
         runtime = narration_runtime_status()
@@ -924,6 +926,8 @@ async def _resolve_ready_sidecar(
                     ),
                 )
             else:
+                if model is None:
+                    model = getattr(adapter, "expected_model_fingerprint", None)
                 if model is not None:
                     return adapter, model
         runtime = narration_runtime_status()
@@ -1005,7 +1009,7 @@ async def _run_shared_nano_worker(
     voice_preview_processor: VoicePreviewProcessor,
     stop_event: asyncio.Event,
     *,
-    idle_poll_seconds: float = 0.5,
+    idle_poll_seconds: float = 1.0,
     maintenance_interval_seconds: float = 30.0,
 ) -> None:
     """Fairly dispatch both Nano job kinds through one single-concurrency loop."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -19,6 +20,19 @@ from .character_profile_services import (
     calculate_character_profile_completion_status,
     normalize_character_profile_output,
     validate_character_profile_apply_plan,
+)
+from .creative_authority import (
+    establish_character_revision,
+    get_outline,
+    get_settings,
+    save_character_root,
+    save_outline,
+    save_settings,
+)
+from .creative_data_models import (
+    CharacterInstance,
+    NovelCharacterRevision,
+    StoryTimeline,
 )
 from .creative_schemas import OutlineGenerationRequestSnapshot, SelectionEditInputSnapshot
 from .models import (
@@ -48,6 +62,7 @@ from .models import (
     Storyline,
     Volume,
 )
+from .private_library import UsagePolicy, create_asset, get_asset, update_asset
 from .services import (
     DomainError,
     NotFoundError,
@@ -70,6 +85,7 @@ from .selection_edit_diff import (
     SelectionEditDiffError,
     validate_selection_edit_result,
 )
+from .story_state.persistence import ensure_default_story_state
 
 
 PRIVATE_ASSET_TYPES = {"plot", "writing_style", "vocabulary", "idea"}
@@ -289,6 +305,11 @@ def complete_novel_creation_draft(
     # author explicitly creates and names the first volume from the chapter page.
     session.add(novel)
     session.flush()
+    ensure_default_story_state(
+        session,
+        novel.id,
+        expected_story_ledger_version=novel.story_ledger_version,
+    )
     draft.state = "completed"
     draft.step = 6
     draft.completed_novel_id = novel.id
@@ -304,6 +325,9 @@ def _asset_payload(asset: PrivateAsset) -> dict[str, Any]:
         "title": asset.title,
         "content": asset.content,
         "version": asset.version,
+        "current_version_id": (
+            str(asset.current_version_id) if asset.current_version_id else None
+        ),
         "archived": asset.archived,
         "created_at": _iso(asset.created_at),
         "updated_at": _iso(asset.updated_at),
@@ -329,12 +353,17 @@ def create_private_asset(
 ) -> dict[str, Any]:
     if asset_type not in PRIVATE_ASSET_TYPES:
         raise ValidationError("私有库资料类型无效")
-    asset = PrivateAsset(
-        id=uuid4(), asset_type=asset_type, title=_clean_title(title), content=content.strip()
+    asset_id = uuid4()
+    result = create_asset(
+        session,
+        asset_id=asset_id,
+        asset_type=asset_type,
+        title=_clean_title(title),
+        content=content.strip(),
+        operation_key=f"legacy-create:{asset_id}",
     )
-    session.add(asset)
     session.commit()
-    return _asset_payload(asset)
+    return _asset_payload(result.asset)
 
 
 def update_private_asset(
@@ -352,11 +381,17 @@ def update_private_asset(
         raise NotFoundError(f"private asset {asset_id} not found")
     if asset.version != expected_version:
         raise EntityConflictError(_asset_payload(asset))
-    asset.title = _clean_title(title)
-    asset.content = content.strip()
-    asset.version += 1
+    digest = content_hash(f"{title.strip()}\x1f{content.strip()}")[:24]
+    result = update_asset(
+        session,
+        asset_id,
+        expected_root_version=expected_version,
+        operation_key=f"legacy-update:{expected_version}:{digest}",
+        title=_clean_title(title),
+        content=content.strip(),
+    )
     session.commit()
-    return _asset_payload(asset)
+    return _asset_payload(result.asset)
 
 
 def archive_private_asset(
@@ -425,7 +460,12 @@ def create_asset_preset(
     session.add(preset)
     session.flush()
     session.add_all(
-        AssetPresetItem(id=uuid4(), preset_id=preset.id, asset_id=asset.id, position=index * 1000)
+        AssetPresetItem(
+            id=uuid4(), preset_id=preset.id, asset_id=asset.id,
+            asset_version_id=asset.current_version_id,
+            usage_policy=UsagePolicy.PREFERRED.value,
+            position=index * 1000,
+        )
         for index, asset in enumerate(assets, start=1)
     )
     session.commit()
@@ -456,7 +496,12 @@ def update_asset_preset(
         session.delete(item)
     session.flush()
     session.add_all(
-        AssetPresetItem(id=uuid4(), preset_id=preset.id, asset_id=asset.id, position=index * 1000)
+        AssetPresetItem(
+            id=uuid4(), preset_id=preset.id, asset_id=asset.id,
+            asset_version_id=asset.current_version_id,
+            usage_policy=UsagePolicy.PREFERRED.value,
+            position=index * 1000,
+        )
         for index, asset in enumerate(assets, start=1)
     )
     preset.title = _clean_title(title, "预设名称")
@@ -486,18 +531,54 @@ def snapshot_private_assets(
     session: Session, *, asset_ids: list[UUID], preset_id: UUID | None = None
 ) -> list[dict[str, Any]]:
     combined = list(asset_ids)
+    preset_versions: dict[UUID, UUID] = {}
     if preset_id is not None:
         preset = session.get(AssetPreset, preset_id)
         if preset is None or preset.archived:
             raise ValidationError("资料预设不存在或已删除")
-        combined.extend(
-            session.scalars(
-                select(AssetPresetItem.asset_id)
-                .where(AssetPresetItem.preset_id == preset_id)
-                .order_by(AssetPresetItem.position)
-            ).all()
+        preset_items = session.scalars(
+            select(AssetPresetItem)
+            .where(AssetPresetItem.preset_id == preset_id)
+            .order_by(AssetPresetItem.position)
+        ).all()
+        for item in preset_items:
+            combined.append(item.asset_id)
+            preset_versions[item.asset_id] = item.asset_version_id
+    snapshots: list[dict[str, Any]] = []
+    for asset in _validated_assets(session, combined):
+        current_asset, current_version = get_asset(session, asset.id)
+        selected_version_id = preset_versions.get(asset.id)
+        version = (
+            session.get(type(current_version), selected_version_id)
+            if selected_version_id is not None
+            else current_version
         )
-    return [_asset_payload(asset) for asset in _validated_assets(session, combined)]
+        if version is None or version.asset_id != current_asset.id:
+            raise ValidationError("资料预设绑定的素材版本无效")
+        snapshots.append(
+            {
+                "snapshot_schema_version": "private-asset-snapshot/2",
+                "asset_id": str(current_asset.id),
+                "asset_version_id": str(version.id),
+                "version_number": version.version_number,
+                # Temporary response alias for the existing UI/test contract;
+                # immutable generation consumers should use version_number.
+                "version": version.version_number,
+                "asset_type": current_asset.asset_type,
+                "title": version.title,
+                "content": version.content,
+                "metadata": dict(version.metadata_json or {}),
+                "source": dict(version.source_json or {}),
+                "rights": dict(version.rights_json or {}),
+                "content_hash": version.content_hash,
+                "usage_policy": "preferred",
+                "selection_source": {
+                    "kind": "preset" if asset.id in preset_versions else "direct",
+                    "source_id": str(preset_id) if asset.id in preset_versions else str(asset.id),
+                },
+            }
+        )
+    return snapshots
 
 
 def _outline_payload(draft: OutlineDraft) -> dict[str, Any]:
@@ -645,6 +726,8 @@ def complete_outline_draft(
     if not any(item.get("role_type") == "main" for item in draft.characters_json):
         raise ValidationError("大纲至少需要一个主角")
 
+    outline_state = get_outline(session, novel_id)
+    outline_head_version = int(outline_state[0].version) if outline_state else 0
     existing_rows = session.scalars(
         select(NovelCharacter)
         .where(NovelCharacter.novel_id == novel_id)
@@ -678,29 +761,63 @@ def complete_outline_draft(
             # not let a same-name draft silently overwrite formal profile data.
             character = existing_by_name[name]
             legacy_name_match = True
+        incoming_details = dict(item.get("details") or {})
         if character is None:
             character = NovelCharacter(
-                id=uuid4(), novel_id=novel_id, name=name, position=index * 1000
+                id=uuid4(),
+                novel_id=novel_id,
+                name=name,
+                role_type=str(item.get("role_type", "supporting")),
+                description=str(item.get("description", "")),
+                details=incoming_details,
+                lifecycle_state="active",
+                position=index * 1000,
             )
             session.add(character)
+            session.flush()
+            revision_result = establish_character_revision(
+                session,
+                novel_id,
+                character.id,
+                expected_catalog_version=novel.character_catalog_version,
+                expected_character_version=character.version,
+                operation_key=f"outline-complete:{draft.id}:{expected_version}:{character.id}",
+                source_kind="outline_apply",
+                change_set={"created_from_outline": True},
+            )
         else:
-            character.version += 1
-            character.position = index * 1000
-        incoming_details = dict(item.get("details") or {})
-        existing_details = dict(character.details or {})
-        for key, value in existing_details.items():
-            if value not in (None, "", [], {}):
-                # Formal profile data is author-owned. Outline regeneration may
-                # fill missing keys for a matched character but cannot silently
-                # replace any existing non-empty detail.
-                incoming_details[key] = value
-        character.lifecycle_state = "active"
-        character.archived_at = None
-        if not legacy_name_match:
-            character.name = name
-            character.role_type = str(item.get("role_type", "supporting"))
-            character.description = str(item.get("description", ""))
-        character.details = incoming_details
+            existing_details = dict(character.details or {})
+            for key, value in existing_details.items():
+                if value not in (None, "", [], {}):
+                    # Formal profile data is author-owned. Outline regeneration may
+                    # fill missing keys for a matched character but cannot silently
+                    # replace any existing non-empty detail.
+                    incoming_details[key] = value
+            revision_result = save_character_root(
+                session,
+                novel_id,
+                character.id,
+                expected_catalog_version=novel.character_catalog_version,
+                expected_character_version=character.version,
+                operation_key=f"outline-complete:{draft.id}:{expected_version}:{character.id}",
+                source_kind="outline_apply",
+                role_type=(
+                    character.role_type
+                    if legacy_name_match
+                    else str(item.get("role_type", "supporting"))
+                ),
+                name=character.name if legacy_name_match else name,
+                description=(
+                    character.description
+                    if legacy_name_match
+                    else str(item.get("description", ""))
+                ),
+                details=incoming_details,
+                lifecycle_state="active",
+                position=index * 1000,
+                change_set={"applied_from_outline": True},
+            )
+        character = revision_result.character
         outlined_character_ids.add(character.id)
         materialized_characters.append(
             {
@@ -715,14 +832,62 @@ def complete_outline_draft(
     draft.characters_json = materialized_characters
     remaining = [item for item in existing_rows if item.id not in outlined_character_ids]
     for offset, character in enumerate(remaining, start=len(draft.characters_json) + 1):
-        character.position = offset * 1000
+        save_character_root(
+            session,
+            novel_id,
+            character.id,
+            expected_catalog_version=novel.character_catalog_version,
+            expected_character_version=character.version,
+            operation_key=f"outline-complete:{draft.id}:{expected_version}:{character.id}",
+            source_kind="outline_apply",
+            role_type=character.role_type,
+            name=character.name,
+            description=character.description,
+            details=dict(character.details or {}),
+            lifecycle_state=character.lifecycle_state,
+            position=offset * 1000,
+            change_set={"reordered_after_outline": True},
+        )
 
-    novel.outline_target_chapters = draft.target_chapter_count
-    novel.background = draft.background_text
-    novel.main_plot = draft.plot_text
-    novel.highlight = draft.highlight_text
-    novel.description = draft.highlight_text
-    novel.version += 1
+    ensure_default_story_state(
+        session,
+        novel_id,
+        expected_story_ledger_version=novel.story_ledger_version,
+    )
+    current_character_revisions: dict[UUID, NovelCharacterRevision] = {}
+    for row in session.scalars(
+        select(NovelCharacterRevision)
+        .where(NovelCharacterRevision.novel_id == novel_id)
+        .order_by(
+            NovelCharacterRevision.character_id,
+            NovelCharacterRevision.character_version.desc(),
+        )
+    ).all():
+        current_character_revisions.setdefault(row.character_id, row)
+    save_outline(
+        session,
+        novel_id,
+        expected_head_version=outline_head_version,
+        idempotency_key=f"outline-complete:{draft.id}:{expected_version}",
+        source_kind="outline_apply",
+        target_chapter_count=draft.target_chapter_count,
+        background_text=draft.background_text,
+        plot_text=draft.plot_text,
+        highlight_text=draft.highlight_text,
+        character_revision_refs=[
+            {
+                "character_id": str(character_id),
+                "revision_id": str(current_character_revisions[character_id].id),
+                "character_version": current_character_revisions[
+                    character_id
+                ].character_version,
+            }
+            for character_id in (
+                UUID(str(item["character_id"])) for item in materialized_characters
+            )
+        ],
+        change_set={"completed_outline_draft_id": str(draft.id)},
+    )
     main_line = session.scalar(
         select(Storyline).where(
             Storyline.novel_id == novel_id,
@@ -761,72 +926,8 @@ def list_novel_characters(session: Session, novel_id: UUID) -> list[dict[str, An
         )
         .order_by(NovelCharacter.position)
     ).all()
-    latest_source_revision_id = session.scalar(
-        select(StoryFact.source_revision_id)
-        .where(
-            StoryFact.novel_id == novel_id,
-            StoryFact.status.in_(("active", "source_restored")),
-            StoryFact.source_revision_id.is_not(None),
-        )
-        .order_by(StoryFact.created_at.desc(), StoryFact.id.desc())
-        .limit(1)
-    )
-    required_names: set[str] = set()
-    if latest_source_revision_id is not None:
-        candidate_facts = session.scalars(
-            select(StoryFact).where(
-                StoryFact.novel_id == novel_id,
-                StoryFact.source_revision_id == latest_source_revision_id,
-                StoryFact.status.in_(("active", "source_restored")),
-                StoryFact.fact_type == "next_chapter_required_role",
-            )
-        ).all()
-        revision = session.get(DocumentRevision, latest_source_revision_id)
-        closing_text = (revision.content_text if revision is not None else "")[-900:]
-        uncertainty_markers = ("可能", "或许", "也许", "大概", "预计", "推测", "概率")
-        commitment_markers = (
-            "一起",
-            "一同",
-            "共同",
-            "决定",
-            "约定",
-            "答应",
-            "明天",
-            "随后",
-            "前往",
-            "继续",
-            "必须",
-            "不得不",
-        )
-        for fact in candidate_facts:
-            details = fact.details if isinstance(fact.details, dict) else {}
-            evidence = " ".join(
-                (
-                    fact.object_text,
-                    str(details.get("source_text", "")),
-                    str(details.get("reasoning_summary", "")),
-                )
-            )
-            if any(marker in evidence for marker in uncertainty_markers):
-                continue
-            if not any(marker in evidence for marker in commitment_markers):
-                continue
-            required_names.add(fact.subject)
-
-        # A closing joint commitment is frequently expressed with pronouns (for
-        # example, “我们去查档案”).  Once at least one explicit participant has
-        # survived validation, include named main characters present in the same
-        # closing passage so the next-step role picker does not drop the speaker.
-        if required_names:
-            required_names.update(
-                character.name
-                for character in characters
-                if character.role_type == "main" and character.name in closing_text
-            )
     return [
-        _character_payload(
-            character, required_next_chapter=character.name in required_names
-        )
+        _character_payload(character, required_next_chapter=False)
         for character in characters
     ]
 
@@ -862,6 +963,29 @@ def create_novel_character(
         position=_next_position(session, NovelCharacter, novel_id),
     )
     session.add(character)
+    session.flush()
+    # This also initializes the primary timeline for an older experimental
+    # novel that has not been rebuilt yet.  Existing active roots are filled in
+    # deterministically, so creating one character never leaves a partial
+    # single-line catalog.
+    novel = session.get(Novel, novel_id)
+    if novel is None:  # Defensive: _require_novel above already proved scope.
+        raise NotFoundError(f"novel {novel_id} not found")
+    establish_character_revision(
+        session,
+        novel_id,
+        character.id,
+        expected_catalog_version=novel.character_catalog_version,
+        expected_character_version=character.version,
+        operation_key=f"character-create:{character.id}",
+        source_kind="manual",
+        change_set={"created": True},
+    )
+    ensure_default_story_state(
+        session,
+        novel_id,
+        expected_story_ledger_version=novel.story_ledger_version,
+    )
     session.commit()
     return _character_payload(character)
 
@@ -900,16 +1024,31 @@ def update_novel_character(
     )
     if duplicate:
         raise ValidationError("当前小说已存在同名角色")
-    character.role_type = role_type
-    character.name = clean_name
-    character.description = description.strip()
+    novel = session.get(Novel, novel_id)
+    if novel is None:
+        raise NotFoundError(f"novel {novel_id} not found")
     # Character forms expose only a subset of the extensible details object.
     # Treat incoming details as a patch so editing one visible field never
     # erases hidden author or generation metadata.
-    character.details = {**dict(character.details or {}), **dict(details or {})}
-    character.version += 1
+    merged_details = {**dict(character.details or {}), **dict(details or {})}
+    result = save_character_root(
+        session,
+        novel_id,
+        character_id,
+        expected_catalog_version=novel.character_catalog_version,
+        expected_character_version=expected_version,
+        operation_key=f"character-update:{character_id}:{uuid4()}",
+        source_kind="manual",
+        role_type=role_type,
+        name=clean_name,
+        description=description.strip(),
+        details=merged_details,
+        lifecycle_state=character.lifecycle_state,
+        position=character.position,
+        change_set={"edited_fields": ["role_type", "name", "description", "details"]},
+    )
     session.commit()
-    return _character_payload(character)
+    return _character_payload(result.character)
 
 
 def delete_novel_character(
@@ -986,12 +1125,101 @@ def _require_relationship_characters(
         raise ValidationError("关系两端角色必须属于当前小说且未归档")
 
 
+def _resolve_relationship_scope(
+    session: Session,
+    *,
+    novel_id: UUID,
+    source_character_id: UUID,
+    target_character_id: UUID,
+    directionality: str,
+    timeline_id: UUID | None,
+    source_character_instance_id: UUID | None,
+    target_character_instance_id: UUID | None,
+) -> tuple[UUID, UUID, UUID, UUID, UUID]:
+    """Resolve only unique single-line defaults; multi-line writes are explicit."""
+
+    original_source = source_character_id
+    source_character_id, target_character_id = _canonical_relationship_endpoints(
+        source_character_id, target_character_id, directionality
+    )
+    if source_character_id != original_source:
+        source_character_instance_id, target_character_instance_id = (
+            target_character_instance_id,
+            source_character_instance_id,
+        )
+    _require_relationship_characters(
+        session, novel_id, source_character_id, target_character_id
+    )
+    timelines = tuple(
+        session.scalars(
+            select(StoryTimeline).where(
+                StoryTimeline.novel_id == novel_id,
+                StoryTimeline.lifecycle_state == "active",
+            )
+        )
+    )
+    if timeline_id is None:
+        if len(timelines) != 1:
+            raise ValidationError("timeline_required: 多时间线关系必须明确时间线")
+        timeline_id = timelines[0].id
+    elif not any(item.id == timeline_id for item in timelines):
+        raise ValidationError("关系时间线不属于当前小说或已归档")
+
+    resolved_instances: list[CharacterInstance] = []
+    for character_id, instance_id in (
+        (source_character_id, source_character_instance_id),
+        (target_character_id, target_character_instance_id),
+    ):
+        if instance_id is None:
+            if len(timelines) != 1:
+                raise ValidationError(
+                    "character_instance_required: 多时间线关系必须明确两端人物实例"
+                )
+            matches = tuple(
+                session.scalars(
+                    select(CharacterInstance).where(
+                        CharacterInstance.novel_id == novel_id,
+                        CharacterInstance.character_id == character_id,
+                        CharacterInstance.origin_timeline_id == timeline_id,
+                        CharacterInstance.lifecycle_state == "active",
+                    )
+                )
+            )
+            if len(matches) != 1:
+                raise ValidationError(
+                    "character_instance_required: 无法唯一解析关系人物实例"
+                )
+            instance = matches[0]
+        else:
+            instance = session.get(CharacterInstance, instance_id)
+            if (
+                instance is None
+                or instance.novel_id != novel_id
+                or instance.character_id != character_id
+                or instance.lifecycle_state != "active"
+            ):
+                raise ValidationError("关系人物实例与人物根或小说范围不一致")
+        resolved_instances.append(instance)
+    if resolved_instances[0].id == resolved_instances[1].id:
+        raise ValidationError("关系两端不能是同一人物实例")
+    return (
+        source_character_id,
+        target_character_id,
+        timeline_id,
+        resolved_instances[0].id,
+        resolved_instances[1].id,
+    )
+
+
 def _relationship_duplicate(
     session: Session,
     *,
     novel_id: UUID,
     source_character_id: UUID,
     target_character_id: UUID,
+    timeline_id: UUID,
+    source_character_instance_id: UUID,
+    target_character_instance_id: UUID,
     directionality: str,
     relation_kind: str,
     normalized_label: str,
@@ -1001,6 +1229,9 @@ def _relationship_duplicate(
         CharacterRelationship.novel_id == novel_id,
         CharacterRelationship.source_character_id == source_character_id,
         CharacterRelationship.target_character_id == target_character_id,
+        CharacterRelationship.timeline_id == timeline_id,
+        CharacterRelationship.source_character_instance_id == source_character_instance_id,
+        CharacterRelationship.target_character_instance_id == target_character_instance_id,
         CharacterRelationship.directionality == directionality,
         CharacterRelationship.relation_kind == relation_kind,
         CharacterRelationship.normalized_label == normalized_label,
@@ -1017,6 +1248,15 @@ def _relationship_payload(relation: CharacterRelationship) -> dict[str, Any]:
         "novel_id": str(relation.novel_id),
         "source_character_id": str(relation.source_character_id),
         "target_character_id": str(relation.target_character_id),
+        "timeline_id": str(relation.timeline_id) if relation.timeline_id else None,
+        "source_character_instance_id": (
+            str(relation.source_character_instance_id)
+            if relation.source_character_instance_id else None
+        ),
+        "target_character_instance_id": (
+            str(relation.target_character_instance_id)
+            if relation.target_character_instance_id else None
+        ),
         "directionality": relation.directionality,
         "relation_kind": relation.relation_kind,
         "label": relation.label,
@@ -1058,6 +1298,15 @@ def _relationship_revision_payload(
         "revision_number": revision.revision_number,
         "source_character_id": str(revision.source_character_id),
         "target_character_id": str(revision.target_character_id),
+        "timeline_id": str(revision.timeline_id) if revision.timeline_id else None,
+        "source_character_instance_id": (
+            str(revision.source_character_instance_id)
+            if revision.source_character_instance_id else None
+        ),
+        "target_character_instance_id": (
+            str(revision.target_character_instance_id)
+            if revision.target_character_instance_id else None
+        ),
         "directionality": revision.directionality,
         "relation_kind": revision.relation_kind,
         "label": revision.label,
@@ -1101,6 +1350,9 @@ def _record_relationship_revision(
         revision_number=int(current_number or 0) + 1,
         source_character_id=relation.source_character_id,
         target_character_id=relation.target_character_id,
+        timeline_id=relation.timeline_id,
+        source_character_instance_id=relation.source_character_instance_id,
+        target_character_instance_id=relation.target_character_instance_id,
         directionality=relation.directionality,
         relation_kind=relation.relation_kind,
         label=relation.label,
@@ -1127,6 +1379,9 @@ def _create_relationship_entity(
     *,
     source_character_id: UUID,
     target_character_id: UUID,
+    timeline_id: UUID | None = None,
+    source_character_instance_id: UUID | None = None,
+    target_character_instance_id: UUID | None = None,
     label: str,
     directionality: str,
     relation_kind: str,
@@ -1141,16 +1396,21 @@ def _create_relationship_entity(
 ) -> CharacterRelationship:
     if relation_kind not in RELATIONSHIP_KINDS:
         raise ValidationError("关系分类无效")
-    source_character_id, target_character_id = _canonical_relationship_endpoints(
+    (
         source_character_id,
         target_character_id,
-        directionality,
-    )
-    _require_relationship_characters(
+        timeline_id,
+        source_character_instance_id,
+        target_character_instance_id,
+    ) = _resolve_relationship_scope(
         session,
-        novel_id,
-        source_character_id,
-        target_character_id,
+        novel_id=novel_id,
+        source_character_id=source_character_id,
+        target_character_id=target_character_id,
+        directionality=directionality,
+        timeline_id=timeline_id,
+        source_character_instance_id=source_character_instance_id,
+        target_character_instance_id=target_character_instance_id,
     )
     clean_label = _clean_title(label, "关系名称")
     if len(clean_label) > 80:
@@ -1161,6 +1421,9 @@ def _create_relationship_entity(
         novel_id=novel_id,
         source_character_id=source_character_id,
         target_character_id=target_character_id,
+        timeline_id=timeline_id,
+        source_character_instance_id=source_character_instance_id,
+        target_character_instance_id=target_character_instance_id,
         directionality=directionality,
         relation_kind=relation_kind,
         normalized_label=normalized_label,
@@ -1172,6 +1435,9 @@ def _create_relationship_entity(
         novel_id=novel_id,
         source_character_id=source_character_id,
         target_character_id=target_character_id,
+        timeline_id=timeline_id,
+        source_character_instance_id=source_character_instance_id,
+        target_character_instance_id=target_character_instance_id,
         directionality=directionality,
         relation_kind=relation_kind,
         label=clean_label,
@@ -1201,6 +1467,9 @@ def _update_relationship_entity(
     expected_version: int,
     source_character_id: UUID | None = None,
     target_character_id: UUID | None = None,
+    timeline_id: UUID | None = None,
+    source_character_instance_id: UUID | None = None,
+    target_character_instance_id: UUID | None = None,
     label: str | None = None,
     directionality: str | None = None,
     relation_kind: str | None = None,
@@ -1226,16 +1495,37 @@ def _update_relationship_entity(
     next_status = status or ("active" if relation.status == "archived" else relation.status)
     if next_status not in {"active", "resolved"}:
         raise ValidationError("关系状态无效")
-    next_source, next_target = _canonical_relationship_endpoints(
-        source_character_id or relation.source_character_id,
-        target_character_id or relation.target_character_id,
-        next_directionality,
-    )
-    _require_relationship_characters(
-        session,
-        relation.novel_id,
+    (
         next_source,
         next_target,
+        next_timeline_id,
+        next_source_instance_id,
+        next_target_instance_id,
+    ) = _resolve_relationship_scope(
+        session,
+        novel_id=relation.novel_id,
+        source_character_id=source_character_id or relation.source_character_id,
+        target_character_id=target_character_id or relation.target_character_id,
+        directionality=next_directionality,
+        timeline_id=timeline_id or relation.timeline_id,
+        source_character_instance_id=(
+            source_character_instance_id
+            if source_character_instance_id is not None
+            else None
+            if source_character_id is not None
+            or target_character_id is not None
+            or directionality is not None
+            else relation.source_character_instance_id
+        ),
+        target_character_instance_id=(
+            target_character_instance_id
+            if target_character_instance_id is not None
+            else None
+            if source_character_id is not None
+            or target_character_id is not None
+            or directionality is not None
+            else relation.target_character_instance_id
+        ),
     )
     clean_label = _clean_title(label if label is not None else relation.label, "关系名称")
     if len(clean_label) > 80:
@@ -1246,6 +1536,9 @@ def _update_relationship_entity(
         novel_id=relation.novel_id,
         source_character_id=next_source,
         target_character_id=next_target,
+        timeline_id=next_timeline_id,
+        source_character_instance_id=next_source_instance_id,
+        target_character_instance_id=next_target_instance_id,
         directionality=next_directionality,
         relation_kind=next_kind,
         normalized_label=normalized_label,
@@ -1255,6 +1548,9 @@ def _update_relationship_entity(
         raise ValidationError("相同方向、分类和名称的关系已经存在")
     relation.source_character_id = next_source
     relation.target_character_id = next_target
+    relation.timeline_id = next_timeline_id
+    relation.source_character_instance_id = next_source_instance_id
+    relation.target_character_instance_id = next_target_instance_id
     relation.directionality = next_directionality
     relation.relation_kind = next_kind
     relation.label = clean_label
@@ -1337,11 +1633,30 @@ def _restore_relationship_entity(
         return relation
     if relation.directionality not in RELATIONSHIP_DIRECTIONALITIES:
         raise ValidationError("旧关系恢复前必须先确认有向或无向")
+    (
+        relation.source_character_id,
+        relation.target_character_id,
+        relation.timeline_id,
+        relation.source_character_instance_id,
+        relation.target_character_instance_id,
+    ) = _resolve_relationship_scope(
+        session,
+        novel_id=relation.novel_id,
+        source_character_id=relation.source_character_id,
+        target_character_id=relation.target_character_id,
+        directionality=relation.directionality,
+        timeline_id=relation.timeline_id,
+        source_character_instance_id=relation.source_character_instance_id,
+        target_character_instance_id=relation.target_character_instance_id,
+    )
     duplicate = _relationship_duplicate(
         session,
         novel_id=relation.novel_id,
         source_character_id=relation.source_character_id,
         target_character_id=relation.target_character_id,
+        timeline_id=relation.timeline_id,
+        source_character_instance_id=relation.source_character_instance_id,
+        target_character_instance_id=relation.target_character_instance_id,
         directionality=relation.directionality,
         relation_kind=relation.relation_kind,
         normalized_label=relation.normalized_label,
@@ -1408,37 +1723,10 @@ def list_character_relationship_history(
     return [_relationship_revision_payload(revision) for revision in revisions]
 
 
-def _relationship_name_key(value: str) -> str:
-    return re.sub(r"\s+", "", value).casefold()
+def _relationship_character_key(character_id: UUID) -> str:
+    """Return a stable opaque model-facing key without exposing an internal UUID."""
 
-
-def _relationship_known_character_mentions(
-    text_value: str,
-    character_names: Iterable[str],
-) -> list[str]:
-    """Return stable, de-duplicated known names mentioned by one source."""
-
-    found: list[str] = []
-    seen: set[str] = set()
-    for name in character_names:
-        clean_name = str(name or "").strip()
-        key = _relationship_name_key(clean_name)
-        if not clean_name or key in seen or clean_name not in text_value:
-            continue
-        seen.add(key)
-        found.append(clean_name)
-    return found
-
-
-def _relationship_evidence_mentions_pair(
-    evidence: Iterable[str],
-    source_name: str,
-    target_name: str,
-) -> bool:
-    return any(
-        source_name in str(source_text) and target_name in str(source_text)
-        for source_text in evidence
-    )
+    return f"character_{hashlib.sha256(str(character_id).encode('utf-8')).hexdigest()[:12]}"
 
 
 def _relationship_snapshot_text(value: Any, limit: int) -> str:
@@ -1471,7 +1759,9 @@ def build_relationship_graph_snapshot(
         .limit(80)
     ).all()
     character_by_id = {character.id: character for character in characters}
-    character_names = [character.name for character in characters]
+    character_key_by_id = {
+        character.id: _relationship_character_key(character.id) for character in characters
+    }
 
     document_rows = session.execute(
         select(Document, DocumentWorkingCopy)
@@ -1501,8 +1791,8 @@ def build_relationship_graph_snapshot(
             continue
         author_overrides.append(
             {
-                "source_name": source.name,
-                "target_name": target.name,
+                "source_key": character_key_by_id[source.id],
+                "target_key": character_key_by_id[target.id],
                 "directionality": relation.directionality,
                 "relation_kind": relation.relation_kind,
                 "label": relation.label,
@@ -1515,7 +1805,9 @@ def build_relationship_graph_snapshot(
         select(StoryFact)
         .where(
             StoryFact.novel_id == novel_id,
-            StoryFact.fact_type == "relationship",
+            StoryFact.schema_version == "story-fact/2",
+            StoryFact.fact_type == "relationship_state",
+            StoryFact.relationship_id.is_not(None),
             StoryFact.status.in_(("active", "source_restored")),
             StoryFact.source_revision_id.in_(current_revision_ids),
         )
@@ -1525,19 +1817,9 @@ def build_relationship_graph_snapshot(
     accepted_facts: list[dict[str, Any]] = []
     for fact in facts:
         details = fact.details if isinstance(fact.details, dict) else {}
-        searchable = " ".join(
-            (
-                fact.subject,
-                fact.predicate,
-                fact.object_text,
-                str(details.get("source_text") or ""),
-            )
-        )
-        mentioned = _relationship_known_character_mentions(searchable, character_names)
-        if len(set(mentioned)) < 2:
-            continue
         accepted_facts.append(
             {
+                "relationship_id": str(fact.relationship_id),
                 "subject": fact.subject,
                 "predicate": fact.predicate,
                 "object": _relationship_snapshot_text(fact.object_text, 900),
@@ -1547,13 +1829,8 @@ def build_relationship_graph_snapshot(
         )
 
     relevant_chapters: list[tuple[Document, DocumentWorkingCopy, str]] = []
-    excluded_chapter_count = 0
     for document, working in document_rows[:1000]:
         text_value = markdown_to_text(working.content_markdown).strip()
-        mentioned = _relationship_known_character_mentions(text_value, character_names)
-        if len(mentioned) < 2:
-            excluded_chapter_count += 1
-            continue
         relevant_chapters.append((document, working, text_value))
     chapter_index = [
         {
@@ -1590,6 +1867,7 @@ def build_relationship_graph_snapshot(
         },
         "characters": [
             {
+                "entity_key": character_key_by_id[character.id],
                 "name": character.name,
                 "role_type": character.role_type,
                 "description": _relationship_snapshot_text(character.description, 1800),
@@ -1603,7 +1881,7 @@ def build_relationship_graph_snapshot(
         "author_relationship_overrides": author_overrides,
         "accepted_relationship_facts": accepted_facts,
         "chapter_index": chapter_index,
-        "excluded_chapter_count": excluded_chapter_count,
+        "excluded_chapter_count": 0,
         "recent_chapter_excerpts": recent_excerpts,
     }
 
@@ -1645,7 +1923,16 @@ def get_relationship_auto_sync_status(
             CharacterRelationship.archived_at.is_(None),
         )
     ).all()
-    eligible = len(snapshot["characters"]) >= 2
+    timeline_count = int(
+        session.scalar(
+            select(func.count()).select_from(StoryTimeline).where(
+                StoryTimeline.novel_id == novel_id,
+                StoryTimeline.lifecycle_state == "active",
+            )
+        )
+        or 0
+    )
+    eligible = len(snapshot["characters"]) >= 2 and timeline_count == 1
     return {
         "eligible": eligible,
         "stale": eligible and (current_job is None or current_job.state != "ready"),
@@ -2162,6 +2449,17 @@ def apply_relationship_graph_generation(
         raise NotFoundError(f"creative generation job {job_id} not found")
     if job.state != "ready":
         raise ValidationError("关系网自动分析尚未完成")
+    timeline_count = int(
+        session.scalar(
+            select(func.count()).select_from(StoryTimeline).where(
+                StoryTimeline.novel_id == novel_id,
+                StoryTimeline.lifecycle_state == "active",
+            )
+        )
+        or 0
+    )
+    if timeline_count != 1:
+        raise ValidationError("timeline_required: 多时间线关系网必须在高级工作区逐线维护")
 
     characters = session.scalars(
         select(NovelCharacter).where(
@@ -2169,8 +2467,8 @@ def apply_relationship_graph_generation(
             NovelCharacter.lifecycle_state == "active",
         )
     ).all()
-    character_by_name = {
-        _relationship_name_key(character.name): character for character in characters
+    character_by_key = {
+        _relationship_character_key(character.id): character for character in characters
     }
     all_rows = session.scalars(
         select(CharacterRelationship)
@@ -2195,8 +2493,8 @@ def apply_relationship_graph_generation(
     changes = {"created": 0, "updated": 0, "archived": 0, "skipped": 0}
 
     for item in candidates[:200]:
-        source = character_by_name.get(_relationship_name_key(str(item.get("source_name") or "")))
-        target = character_by_name.get(_relationship_name_key(str(item.get("target_name") or "")))
+        source = character_by_key.get(str(item.get("source_key") or "").strip())
+        target = character_by_key.get(str(item.get("target_key") or "").strip())
         directionality = str(item.get("directionality") or "")
         relation_kind = str(item.get("relation_kind") or "")
         label = str(item.get("label") or "").strip()
@@ -2218,11 +2516,7 @@ def apply_relationship_graph_generation(
             or relation_kind not in RELATIONSHIP_KINDS
             or not label
             or confidence < 80
-            or not _relationship_evidence_mentions_pair(
-                evidence,
-                source.name,
-                target.name,
-            )
+            or not evidence
         ):
             changes["skipped"] += 1
             continue
@@ -2333,240 +2627,24 @@ def apply_relationship_graph_generation(
     }
 
 
-def _inferred_relationship_kind(value: str) -> str:
-    lowered = value.casefold()
-    keyword_groups = (
-        ("family", ("父", "母", "兄", "弟", "姐", "妹", "夫妻", "亲属", "家人")),
-        ("romance", ("恋", "爱人", "情侣", "暧昧", "婚约", "心动")),
-        ("mentor", ("师父", "师徒", "导师", "教导", "传授", "引路人")),
-        ("enemy", ("敌", "仇", "对手", "冲突", "背叛", "追杀")),
-        ("ally", ("盟友", "同盟", "合作", "并肩", "共同调查", "互助")),
-        ("colleague", ("同事", "同学", "战友", "队友", "搭档")),
-    )
-    for relation_kind, keywords in keyword_groups:
-        if any(keyword in lowered for keyword in keywords):
-            return relation_kind
-    return "other"
-
-
-def _inferred_relationship_label(
-    relation_kind: str,
-    searchable: str,
-    predicate: str,
-) -> str:
-    if relation_kind == "ally":
-        return "调查同盟" if "调查" in searchable or "档案" in searchable else "同盟"
-    defaults = {
-        "family": "亲属",
-        "romance": "情感关系",
-        "mentor": "师徒",
-        "enemy": "敌对",
-        "colleague": "同事",
-    }
-    if relation_kind in defaults:
-        return defaults[relation_kind]
-    cleaned = re.sub(r'["“”「」『』]', "", predicate).strip()
-    return cleaned[:12] or "关联"
-
-
 def sync_relationships_from_intelligence_proposal(
     session: Session,
     proposal_id: UUID,
 ) -> dict[str, Any]:
-    """Incrementally materialize accepted chapter relationship intelligence.
+    """Compatibility read for callers predating StoryFact v2.
 
-    This is the normal day-to-day path: the same “同步进展” operation that writes
-    the story ledger also adds or updates graph edges. It never archives missing
-    edges because a single chapter is only an incremental observation.
+    Relationship changes are now accepted as typed StoryFact events. This
+    function intentionally performs no inference and no database write.
     """
 
     proposal = session.get(IntelligenceProposal, proposal_id)
     if proposal is None:
         raise NotFoundError(f"intelligence proposal {proposal_id} not found")
-    characters = session.scalars(
-        select(NovelCharacter)
-        .where(
-            NovelCharacter.novel_id == proposal.novel_id,
-            NovelCharacter.lifecycle_state == "active",
-        )
-        .order_by(NovelCharacter.position)
-    ).all()
-    character_by_name = {
-        _relationship_name_key(character.name): character for character in characters
-    }
-    accepted_items = session.scalars(
-        select(IntelligenceProposalItem)
-        .where(
-            IntelligenceProposalItem.proposal_id == proposal_id,
-            IntelligenceProposalItem.item_type == "relationship",
-            IntelligenceProposalItem.review_state == "accepted",
-            IntelligenceProposalItem.committed_story_fact_id.is_not(None),
-        )
-        .order_by(IntelligenceProposalItem.position)
-    ).all()
-    all_rows = session.scalars(
-        select(CharacterRelationship)
-        .where(CharacterRelationship.novel_id == proposal.novel_id)
-        .order_by(
-            CharacterRelationship.archived_at.is_(None).desc(),
-            CharacterRelationship.created_at,
-        )
-        .with_for_update()
-    ).all()
-    manual_rows = [relation for relation in all_rows if relation.manual_override]
-    ai_rows = [relation for relation in all_rows if not relation.manual_override]
-    changes = {"created": 0, "updated": 0, "skipped": 0}
-
-    for item in accepted_items:
-        payload = dict(item.suggested_payload or {})
-        details = payload.get("relationship_details")
-        source: NovelCharacter | None = None
-        target: NovelCharacter | None = None
-        directionality = "undirected"
-        relation_kind = "other"
-        label = str(payload.get("predicate") or "").strip()[:80]
-        description = ""
-        if isinstance(details, dict):
-            source = character_by_name.get(
-                _relationship_name_key(str(details.get("source_name") or ""))
-            )
-            target = character_by_name.get(
-                _relationship_name_key(str(details.get("target_name") or ""))
-            )
-            directionality = str(details.get("directionality") or "")
-            relation_kind = str(details.get("relation_kind") or "")
-            label = str(details.get("label") or "").strip()[:80]
-            description = str(details.get("description") or "").strip()[:2000]
-
-        if source is None or target is None:
-            searchable = " ".join(
-                (
-                    str(payload.get("subject") or ""),
-                    str(payload.get("predicate") or ""),
-                    str(payload.get("object") or ""),
-                    item.source_text,
-                )
-            )
-            mentioned = [
-                character
-                for character in characters
-                if character.name and character.name in searchable
-            ]
-            if len(mentioned) == 2:
-                source, target = mentioned
-                relation_kind = _inferred_relationship_kind(searchable)
-                directionality = "undirected"
-                label = _inferred_relationship_label(
-                    relation_kind,
-                    searchable,
-                    str(payload.get("predicate") or relation_kind),
-                )
-
-        if (
-            source is None
-            or target is None
-            or source.id == target.id
-            or directionality not in RELATIONSHIP_DIRECTIONALITIES
-            or relation_kind not in RELATIONSHIP_KINDS
-            or not label
-            # Legacy intelligence proposals used 50 as the verified default.
-            # Once an item is explicitly typed as a relationship and resolves to
-            # two known characters, keep it eligible for incremental backfill.
-            or item.confidence < 50
-        ):
-            changes["skipped"] += 1
-            continue
-        source_id, target_id = _canonical_relationship_endpoints(
-            source.id,
-            target.id,
-            directionality,
-        )
-        pair_key = _relationship_pair_key(source_id, target_id)
-        if _manual_relationship_blocks(
-            manual_rows,
-            pair_key=pair_key,
-            relation_kind=relation_kind,
-        ):
-            changes["skipped"] += 1
-            continue
-        if not description:
-            description = (
-                f"{payload.get('predicate', '')}：{payload.get('object', '')}"
-            ).strip("： ")[:2000]
-        matching = [
-            relation
-            for relation in ai_rows
-            if relation.source_character_id == source_id
-            and relation.target_character_id == target_id
-            and relation.directionality == directionality
-            and relation.relation_kind == relation_kind
-        ]
-        relation = matching[0] if matching else None
-        next_evidence = list(relation.evidence_json or []) if relation is not None else []
-        if item.source_text and item.source_text not in next_evidence:
-            next_evidence.append(item.source_text[:500])
-        next_evidence = next_evidence[-5:]
-        if relation is None:
-            relation = _create_relationship_entity(
-                session,
-                proposal.novel_id,
-                source_character_id=source_id,
-                target_character_id=target_id,
-                label=label,
-                directionality=directionality,
-                relation_kind=relation_kind,
-                description=description,
-                created_by="ai_auto",
-                manual_override=False,
-                confidence=item.confidence,
-                evidence=next_evidence,
-                source_chapter_revision_id=proposal.chapter_revision_id,
-                proposal_item_id=item.id,
-            )
-            ai_rows.append(relation)
-            changes["created"] += 1
-            continue
-        changed = any(
-            (
-                relation.label != label,
-                relation.description != description,
-                relation.status != "active",
-                relation.archived_at is not None,
-                relation.confidence != item.confidence,
-                list(relation.evidence_json or []) != next_evidence,
-                relation.source_chapter_revision_id != proposal.chapter_revision_id,
-                relation.proposal_item_id != item.id,
-            )
-        )
-        if not changed:
-            continue
-        _update_relationship_entity(
-            session,
-            relation,
-            expected_version=relation.version,
-            source_character_id=source_id,
-            target_character_id=target_id,
-            label=label,
-            directionality=directionality,
-            relation_kind=relation_kind,
-            description=description,
-            status="active",
-            changed_by="ai_sync",
-            change_reason="chapter_sync",
-            promote_to_manual=False,
-            confidence=item.confidence,
-            evidence=next_evidence,
-            source_chapter_revision_id=proposal.chapter_revision_id,
-            proposal_item_id=item.id,
-        )
-        changes["updated"] += 1
-
-    session.commit()
     return {
-        "changes": changes,
+        "changes": {"created": 0, "updated": 0, "skipped": 0},
         "relationships": list_character_relationships(session, proposal.novel_id),
+        "deprecated": True,
     }
-
 
 def create_character_relationship(
     session: Session,
@@ -2574,6 +2652,9 @@ def create_character_relationship(
     *,
     source_character_id: UUID,
     target_character_id: UUID,
+    timeline_id: UUID | None = None,
+    source_character_instance_id: UUID | None = None,
+    target_character_instance_id: UUID | None = None,
     label: str,
     directionality: str = "undirected",
     relation_kind: str = "other",
@@ -2585,6 +2666,9 @@ def create_character_relationship(
         novel_id,
         source_character_id=source_character_id,
         target_character_id=target_character_id,
+        timeline_id=timeline_id,
+        source_character_instance_id=source_character_instance_id,
+        target_character_instance_id=target_character_instance_id,
         label=label,
         directionality=directionality,
         relation_kind=relation_kind,
@@ -2602,6 +2686,9 @@ def update_character_relationship(
     expected_version: int,
     source_character_id: UUID | None = None,
     target_character_id: UUID | None = None,
+    timeline_id: UUID | None = None,
+    source_character_instance_id: UUID | None = None,
+    target_character_instance_id: UUID | None = None,
     label: str | None = None,
     directionality: str | None = None,
     relation_kind: str | None = None,
@@ -2624,6 +2711,9 @@ def update_character_relationship(
         expected_version=expected_version,
         source_character_id=source_character_id,
         target_character_id=target_character_id,
+        timeline_id=timeline_id,
+        source_character_instance_id=source_character_instance_id,
+        target_character_instance_id=target_character_instance_id,
         label=label,
         directionality=directionality,
         relation_kind=relation_kind,
@@ -2709,6 +2799,9 @@ def batch_character_relationships(
                 novel_id,
                 source_character_id=source_character_id,
                 target_character_id=target_character_id,
+                timeline_id=operation.get("timeline_id"),
+                source_character_instance_id=operation.get("source_character_instance_id"),
+                target_character_instance_id=operation.get("target_character_instance_id"),
                 label=str(label),
                 directionality=str(operation.get("directionality") or "undirected"),
                 relation_kind=str(operation.get("relation_kind") or "other"),
@@ -2724,6 +2817,9 @@ def batch_character_relationships(
                 expected_version=int(expected_version),
                 source_character_id=operation.get("source_character_id"),
                 target_character_id=operation.get("target_character_id"),
+                timeline_id=operation.get("timeline_id"),
+                source_character_instance_id=operation.get("source_character_instance_id"),
+                target_character_instance_id=operation.get("target_character_instance_id"),
                 label=operation.get("label") or operation.get("relation_type"),
                 directionality=operation.get("directionality"),
                 relation_kind=operation.get("relation_kind"),
@@ -2930,159 +3026,17 @@ def _storyline_payload(item: Storyline) -> dict[str, Any]:
     }
 
 
-def _storyline_topic_from_fact(
-    fact: StoryFact, character_names: list[str]
-) -> tuple[str, str] | None:
-    combined = f"{fact.subject}{fact.predicate}{fact.object_text}"
-    romance_tokens = (
-        "感情",
-        "暗恋",
-        "爱意",
-        "重逢",
-        "克制",
-        "默契",
-        "心动",
-        "喜欢",
-        "恋人",
-        "亲吻",
-        "告白",
-    )
-    if fact.fact_type == "relationship":
-        if not any(token in combined for token in romance_tokens):
-            return None
-        participants = [name for name in character_names if name and name in combined]
-        if len(participants) >= 2:
-            return "romance", f"{participants[0]}与{participants[1]}感情线"
-        subject = fact.subject.strip()[:18] or "人物"
-        return "romance", f"{subject}感情线"
+def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
+    """Return author-maintained storyline roots without mutating projections.
 
-    if fact.fact_type != "storyline_event":
-        return None
-    topic_rules = (
-        (("匿名举报", "灯塔承包权", "会议记录", "旧档案"), "灯塔承包权真相线"),
-        (("家书", "旧木盒", "铁盒", "不必再寄"), "外婆家书线"),
-        (("纪录片", "唐知渔", "拍摄", "机器"), "纪录片拍摄线"),
-        (("深夜广播", "磁带", "录音", "晚安"), "外婆的深夜广播线"),
-        (("旧电台", "频率", "传动轮", "收录机", "电容"), "旧电台修复线"),
-        (("何漫", "口述史"), "何漫口述史线"),
-        (("周柚", "转交", "送信"), "周柚送信线"),
-        (("灯塔", "雾号", "鹤嘴岬"), "鹤嘴岬灯塔线"),
-    )
-    for tokens, title in topic_rules:
-        if any(token in combined for token in tokens):
-            return "support", title
-    return None
-
-
-def _should_archive_legacy_auto_storyline(
-    item: Storyline,
-    *,
-    auto_descriptions: set[str],
-    canonical_titles: set[str],
-) -> bool:
-    """Identify only obsolete fine-grained rows, never canonical buckets.
-
-    Canonical aggregate rows deliberately reuse the latest source fact as
-    their description.  Archiving by description alone therefore toggled each
-    canonical row inactive and active again on every GET, incrementing its
-    version despite no author or source change.
+    Story progress is projected from accepted StoryFact events by the story
+    state service.  A list/read path must never materialize or reconcile rows.
     """
 
-    return (
-        item.storyline_type != "main"
-        and item.title not in canonical_titles
-        and item.description in auto_descriptions
-    )
-
-
-def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
     _require_novel(session, novel_id)
     rows = session.scalars(
         select(Storyline).where(Storyline.novel_id == novel_id).order_by(Storyline.position)
     ).all()
-    # Intelligence sync writes fine-grained events to the provenance ledger.
-    # The author-facing board must group those events into stable narrative
-    # threads instead of creating one new "line" for every action or object.
-    facts = session.scalars(
-        select(StoryFact)
-        .where(
-            StoryFact.novel_id == novel_id,
-            StoryFact.status.in_(("active", "source_restored")),
-            StoryFact.fact_type.in_(("storyline_event", "relationship")),
-        )
-        .order_by(StoryFact.created_at)
-    ).all()
-    character_names = session.scalars(
-        select(NovelCharacter.name)
-        .where(NovelCharacter.novel_id == novel_id)
-        .order_by(NovelCharacter.position)
-    ).all()
-    buckets: dict[tuple[str, str], list[StoryFact]] = {}
-    for fact in facts:
-        topic = _storyline_topic_from_fact(fact, list(character_names))
-        if topic is not None:
-            buckets.setdefault(topic, []).append(fact)
-
-    auto_descriptions = {
-        f"{fact.subject}{fact.predicate}：{fact.object_text}".strip("：")
-        for fact in facts
-    }
-    canonical_titles = {title for _storyline_type, title in buckets}
-    by_title: dict[str, Storyline] = {}
-    for item in rows:
-        by_title.setdefault(item.title, item)
-    next_position = max((int(item.position or 0) for item in rows), default=0) + 1000
-    changed = False
-
-    for item in rows:
-        if not _should_archive_legacy_auto_storyline(
-            item,
-            auto_descriptions=auto_descriptions,
-            canonical_titles=canonical_titles,
-        ):
-            continue
-        if item.status != "archived":
-            item.status = "archived"
-            item.version = int(item.version or 0) + 1
-            changed = True
-
-    for (storyline_type, title), topic_facts in buckets.items():
-        latest = topic_facts[-1]
-        description = f"{latest.subject}{latest.predicate}：{latest.object_text}".strip("：")
-        progress = min(90, 10 + max(0, len(topic_facts) - 1) * 10)
-        existing = by_title.get(title)
-        if existing is not None:
-            if (
-                existing.storyline_type != storyline_type
-                or existing.description != description
-                or existing.status != "active"
-                or int(existing.progress or 0) != progress
-            ):
-                existing.storyline_type = storyline_type
-                existing.description = description
-                existing.status = "active"
-                existing.progress = progress
-                existing.version = int(existing.version or 0) + 1
-                changed = True
-            continue
-        created = Storyline(
-            id=uuid4(),
-            novel_id=novel_id,
-            storyline_type=storyline_type,
-            title=title,
-            description=description,
-            status="active",
-            progress=progress,
-            position=next_position,
-            version=1,
-        )
-        next_position += 1000
-        session.add(created)
-        by_title[title] = created
-        rows.append(created)
-        changed = True
-    if changed:
-        session.commit()
     return [_storyline_payload(item) for item in rows if item.status != "archived"]
 
 
@@ -3177,186 +3131,13 @@ def _foreshadow_payload(item: Foreshadow) -> dict[str, Any]:
     }
 
 
-def _foreshadow_title_from_fact(fact: StoryFact) -> str:
-    raw_title = fact.subject.strip()[:240] or "未命名伏笔"
-    context = f"{fact.subject} {fact.predicate} {fact.object_text}"
-    if "灯塔承包权" in context and ("举报" in context or "抢" in context):
-        return "灯塔承包权阴谋线"
-    return raw_title
-
-
 def list_foreshadows(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
+    """Return author-maintained foreshadow roots without write-on-read sync."""
+
     _require_novel(session, novel_id)
     rows = session.scalars(
         select(Foreshadow).where(Foreshadow.novel_id == novel_id).order_by(Foreshadow.position)
     ).all()
-    # Intelligence extraction writes provenance-backed StoryFact rows. Mirror
-    # its foreshadow items into the author-facing foreshadow board so the next
-    # chapter wizard immediately sees the clues created by the previous chapter.
-    facts = session.scalars(
-        select(StoryFact)
-        .where(
-            StoryFact.novel_id == novel_id,
-            StoryFact.status.in_(("active", "source_restored")),
-            StoryFact.fact_type.in_(("foreshadow_new", "foreshadow_progress")),
-        )
-        .order_by(StoryFact.created_at)
-    ).all()
-    latest_source_revision_id = next(
-        (fact.source_revision_id for fact in reversed(facts) if fact.source_revision_id is not None),
-        None,
-    )
-    latest_new_facts = [
-        fact
-        for fact in facts
-        if fact.source_revision_id == latest_source_revision_id
-        and fact.fact_type == "foreshadow_new"
-    ]
-    latest_progress_facts = [
-        fact
-        for fact in facts
-        if fact.source_revision_id == latest_source_revision_id
-        and fact.fact_type == "foreshadow_progress"
-    ]
-    unresolved_markers = ("未", "尚", "仍", "待", "疑似", "身份不明", "未点出")
-    unresolved_progress_facts = [
-        fact
-        for fact in latest_progress_facts
-        if any(
-            marker in f"{fact.subject}{fact.predicate}{fact.object_text}"
-            for marker in unresolved_markers
-        )
-    ]
-    latest_active_facts = [*latest_new_facts, *unresolved_progress_facts]
-    all_auto_titles = {fact.subject.strip()[:240] for fact in facts if fact.subject.strip()}
-    all_auto_titles.update(
-        _foreshadow_title_from_fact(fact)
-        for fact in facts
-        if fact.fact_type == "foreshadow_new"
-    )
-    latest_active_titles = {
-        _foreshadow_title_from_fact(fact) for fact in latest_active_facts
-    }
-    by_title = {item.title: item for item in rows}
-    next_position = max((int(item.position or 0) for item in rows), default=0) + 1
-    changed = False
-
-    # Automatically extracted伏笔 are a projection of the latest accepted
-    # chapter, not an ever-growing pile of every noun the model once noticed.
-    # Retire raw noun-level cards; compact resolved history is materialized
-    # below as a small number of author-readable summaries.
-    for item in rows:
-        if item.title in all_auto_titles and item.title not in latest_active_titles:
-            if item.status != "dropped" or int(item.progress or 0) != 100:
-                item.status = "dropped"
-                item.progress = 100
-                item.version = int(item.version or 0) + 1
-                changed = True
-
-    for fact in latest_active_facts:
-        title = _foreshadow_title_from_fact(fact)
-        content = f"{fact.predicate}：{fact.object_text}".strip("：")
-        existing = by_title.get(title)
-        if existing is not None:
-            if (
-                existing.content != content
-                or existing.latest_progress != fact.object_text
-                or existing.status != "active"
-            ):
-                existing.content = content
-                existing.latest_progress = fact.object_text
-                existing.status = "active"
-                existing.progress = min(90, max(10, int(existing.progress or 0)))
-                existing.version = int(existing.version or 0) + 1
-                changed = True
-            continue
-        created = Foreshadow(
-            id=uuid4(),
-            novel_id=novel_id,
-            title=title,
-            content=content,
-            latest_progress=fact.object_text,
-            status="active",
-            progress=10,
-            position=next_position,
-            version=1,
-        )
-        next_position += 1
-        session.add(created)
-        by_title[title] = created
-        rows.append(created)
-        changed = True
-
-    history_text = " ".join(
-        f"{fact.subject} {fact.predicate} {fact.object_text}" for fact in facts
-    )
-    resolved_specs: list[tuple[str, str, str]] = []
-    if any(token in history_text for token in ("磁带", "录音", "深夜广播", "阿舟")):
-        resolved_specs.append(
-            (
-                "磁带里的秘密",
-                "广播磁带中反复出现的名字、声音与未寄出的内容已在后续章节得到确认。",
-                "录音来源、阿舟身份与外婆留声的用意已经厘清",
-            )
-        )
-    main_character_names = session.scalars(
-        select(NovelCharacter.name)
-        .where(
-            NovelCharacter.novel_id == novel_id,
-            NovelCharacter.role_type == "main",
-        )
-        .order_by(NovelCharacter.position)
-    ).all()
-    secret_character = next(
-        (
-            name
-            for name in main_character_names[1:]
-            if name in history_text
-            and any(token in history_text for token in ("等待", "未说", "隐瞒", "旧电台"))
-        ),
-        None,
-    )
-    if secret_character:
-        resolved_specs.append(
-            (
-                f"{secret_character}的隐瞒",
-                f"{secret_character}曾经未说出口的离开、等待与守护原因已在后续章节揭开。",
-                "人物旧日选择与沉默的原因已经得到回应",
-            )
-        )
-    for title, content, latest_progress in resolved_specs[:2]:
-        existing = by_title.get(title)
-        if existing is None:
-            existing = Foreshadow(
-                id=uuid4(),
-                novel_id=novel_id,
-                title=title,
-                content=content,
-                latest_progress=latest_progress,
-                status="resolved",
-                progress=100,
-                position=next_position,
-                version=1,
-            )
-            next_position += 1
-            session.add(existing)
-            by_title[title] = existing
-            rows.append(existing)
-            changed = True
-        elif (
-            existing.content != content
-            or existing.latest_progress != latest_progress
-            or existing.status != "resolved"
-            or int(existing.progress or 0) != 100
-        ):
-            existing.content = content
-            existing.latest_progress = latest_progress
-            existing.status = "resolved"
-            existing.progress = 100
-            existing.version = int(existing.version or 0) + 1
-            changed = True
-    if changed:
-        session.commit()
     return [_foreshadow_payload(item) for item in rows if item.status != "dropped"]
 
 
@@ -3537,6 +3318,90 @@ def _ids_from_data(data: dict[str, Any], key: str) -> list[UUID]:
     return list(dict.fromkeys(values))
 
 
+def _chapter_role_constraints_v3(
+    session: Session,
+    draft: ChapterCreationDraft,
+    required: list[NovelCharacter],
+) -> dict[str, Any]:
+    """Resolve chapter roles by stable IDs; never infer an instance from a name."""
+
+    timelines = tuple(
+        session.scalars(
+            select(StoryTimeline)
+            .where(
+                StoryTimeline.novel_id == draft.novel_id,
+                StoryTimeline.lifecycle_state == "active",
+            )
+            .order_by(StoryTimeline.position, StoryTimeline.id)
+        )
+    )
+    if not timelines:
+        raise ValidationError("小说尚未初始化主时间线")
+    data = dict(draft.data_json or {})
+    raw_timeline_id = data.get("timeline_id")
+    if raw_timeline_id is None:
+        if len(timelines) != 1:
+            raise ValidationError("timeline_required: 多时间线章节必须明确主时间线")
+        timeline = timelines[0]
+    else:
+        try:
+            timeline_id = UUID(str(raw_timeline_id))
+        except (TypeError, ValueError):
+            raise ValidationError("章节主时间线 ID 无效") from None
+        timeline = next((item for item in timelines if item.id == timeline_id), None)
+        if timeline is None:
+            raise ValidationError("章节主时间线不属于当前小说或已归档")
+
+    instance_ids = _ids_from_data(data, "required_role_instance_ids")
+    if instance_ids and len(instance_ids) != len(required):
+        raise ValidationError("必须出场人物根与人物实例数量不一致")
+    if required and not instance_ids and len(timelines) > 1:
+        raise ValidationError("character_instance_required: 多时间线章节必须明确人物实例")
+
+    refs: list[dict[str, str]] = []
+    for index, character in enumerate(required):
+        if instance_ids:
+            instance = session.get(CharacterInstance, instance_ids[index])
+            if (
+                instance is None
+                or instance.novel_id != draft.novel_id
+                or instance.character_id != character.id
+                or instance.lifecycle_state != "active"
+            ):
+                raise ValidationError("章节人物实例不属于对应人物根或当前小说")
+        else:
+            candidates = tuple(
+                session.scalars(
+                    select(CharacterInstance).where(
+                        CharacterInstance.novel_id == draft.novel_id,
+                        CharacterInstance.character_id == character.id,
+                        CharacterInstance.origin_timeline_id == timeline.id,
+                        CharacterInstance.lifecycle_state == "active",
+                    )
+                )
+            )
+            if len(candidates) != 1:
+                raise ValidationError("character_instance_required: 无法唯一解析章节人物实例")
+            instance = candidates[0]
+        refs.append(
+            {
+                "character_id": str(character.id),
+                "character_instance_id": str(instance.id),
+                "display_label": instance.display_label or character.name,
+            }
+        )
+    return {
+        "schema_version": "chapter-role-constraints/3",
+        "timeline_id": str(timeline.id),
+        "required_characters": refs,
+        "point_of_view": None,
+        "public_requirements": [],
+        "prohibited_outcomes": [],
+        "author_secret_constraints": [],
+        "author_secret_facts": [],
+    }
+
+
 def _validate_chapter_references(
     session: Session, draft: ChapterCreationDraft
 ) -> tuple[list[NovelCharacter], list[NovelCharacter]]:
@@ -3595,6 +3460,7 @@ def complete_chapter_creation_draft(
     if draft.volume_id:
         _require_volume(session, draft.novel_id, draft.volume_id)
     required, optional = _validate_chapter_references(session, draft)
+    role_constraints_v3 = _chapter_role_constraints_v3(session, draft, required)
     position = _next_position(session, Document, draft.novel_id)
     document = _new_document(
         session,
@@ -3621,7 +3487,7 @@ def complete_chapter_creation_draft(
                     "context_only": [],
                     "forbidden": [],
                 }
-            ),
+            ) | {"_v3": role_constraints_v3},
         )
     )
     draft.state = "completed"
@@ -4361,18 +4227,19 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
         ),
         "relationship_graph": (
             "根据角色设定、小说大纲、作者关系覆盖项、已确认章节情报和最近正文，"
-            "生成当前小说完整且克制的人物关系网。source_name与target_name只能逐字使用"
-            "输入characters中的真实姓名；不得创造人物，不得把临时同场或一次性动作当成稳定关系。"
+            "生成当前小说完整且克制的人物关系网。source_key与target_key只能使用"
+            "输入characters中的entity_key；姓名只用于阅读，禁止按姓名定位或创建人物。"
+            "不得创造人物，不得把临时同场或一次性动作当成稳定关系。"
             "作者关系覆盖项是最高优先级真相：active=true不得重复或冲突，active=false代表作者已删除，"
             "绝对不得复活。每对人物同一relation_kind最多一条。directionality只能是directed或"
             "undirected；师徒、影响、命令等有明确施受方的关系用directed，其余稳定双向关系用"
             "undirected。relation_kind只能从family、colleague、mentor、ally、enemy、romance、"
             "other中选择；label使用2到12个中文字符；description用一句话说明关系现状；confidence"
             "为0到100，只输出置信度不低于80的关系；evidence返回1到3条简短来源依据，"
-            "其中至少一条必须逐字同时包含source_name与target_name。"
+            "每条证据必须来自输入中的角色设定、已确认事实或章节摘录。"
             "relationships必须代表本次快照中的完整AI关系集合，并返回"
-            " {\"complete_snapshot\":true,\"relationships\":[{\"source_name\":\"...\","
-            "\"target_name\":\"...\",\"directionality\":\"directed|undirected\","
+            " {\"complete_snapshot\":true,\"relationships\":[{\"source_key\":\"character_...\","
+            "\"target_key\":\"character_...\",\"directionality\":\"directed|undirected\","
             "\"relation_kind\":\"family|colleague|mentor|ally|enemy|romance|other\","
             "\"label\":\"...\",\"description\":\"...\",\"confidence\":85,"
             "\"evidence\":[\"角色设定：...\"]}]}。没有可靠关系时也必须返回空relationships数组。"
@@ -4613,18 +4480,35 @@ def update_novel_settings(
     serialized = json.dumps(template_data, ensure_ascii=False, separators=(",", ":"))
     if len(serialized) > 100_000:
         raise ValidationError("模板设定不能超过100000个字符")
-    novel.genre = genre.strip()
-    novel.subgenre = subgenre.strip()
-    novel.idea = idea.strip()
-    novel.template_name = template_name.strip()
-    novel.template_data = template_data
+    settings_state = get_settings(session, novel_id)
+    setting_head_version = int(settings_state[0].version) if settings_state else 0
     if cover_mode is not None:
         if cover_mode not in COVER_MODES:
             raise ValidationError("请选择有效封面方式")
         novel.cover_mode = cover_mode
     if cover_image_data is not None:
         novel.cover_image_data = cover_image_data
-    novel.version += 1
+    save_settings(
+        session,
+        novel_id,
+        expected_head_version=setting_head_version,
+        idempotency_key=f"novel-settings:{novel_id}:{expected_version}",
+        source_kind="manual",
+        schema_id="novel-settings/1",
+        schema_version=1,
+        settings={
+            "author_name": novel.author_name,
+            "writing_type": novel.writing_type,
+            "audience": novel.audience,
+            "genre": genre.strip(),
+            "subgenre": subgenre.strip(),
+            "idea": idea.strip(),
+            "template_key": novel.template_key,
+            "template_name": template_name.strip(),
+            "template_data": template_data,
+        },
+        change_set={"saved_from": "novel_settings"},
+    )
     session.commit()
     return get_novel(session, novel_id)
 

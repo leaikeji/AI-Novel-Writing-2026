@@ -369,12 +369,20 @@ def narration_matches_expected_topology(
     def is_positive_generation(value: object) -> bool:
         return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
+    model_loaded = narration.get("model_loaded")
+    worker_generation = narration.get("worker_generation")
+    worker_state_ready = (
+        model_loaded is False and worker_generation is None
+    ) or (
+        model_loaded in {None, True} and is_positive_generation(worker_generation)
+    )
+
     return (
         narration.get("technical_enabled") is True
         and narration.get("lifecycle_status") == "ready"
         and narration.get("sidecar_reachable") is True
         and narration.get("model_ready") is True
-        and is_positive_generation(narration.get("worker_generation"))
+        and worker_state_ready
         and is_positive_generation(narration.get("lease_generation"))
         and narration.get("product_visible")
         is (expected_product == "ready" and expected_validation != "ready")
