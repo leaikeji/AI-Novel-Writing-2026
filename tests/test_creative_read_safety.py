@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+import pytest
+
 from backend.creative_services import list_foreshadows, list_storylines
 from backend.models import (
     Document,
@@ -67,7 +69,9 @@ def _novel(novel_id: UUID) -> Novel:
     return Novel(id=novel_id, title="零写读取回归")
 
 
-def test_list_storylines_is_read_only_and_does_not_reconcile_rows() -> None:
+def test_list_storylines_is_read_only_and_does_not_reconcile_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     novel_id = uuid4()
     active = Storyline(
         id=uuid4(),
@@ -96,6 +100,16 @@ def test_list_storylines_is_read_only_and_does_not_reconcile_rows() -> None:
         rows={Storyline: [active, archived]},
     )
     before = (active.status, active.progress, active.version, archived.status, archived.version)
+    monkeypatch.setattr(
+        "backend.creative_services.get_story_projection_payload",
+        lambda *_args, **_kwargs: {
+            "timeline_id": str(uuid4()),
+            "narrative_cutoff": None,
+            "visible_facts": [],
+            "current_facts": [],
+            "conflicts": [],
+        },
+    )
 
     result = list_storylines(session, novel_id)  # type: ignore[arg-type]
 
@@ -103,7 +117,9 @@ def test_list_storylines_is_read_only_and_does_not_reconcile_rows() -> None:
     assert (active.status, active.progress, active.version, archived.status, archived.version) == before
 
 
-def test_list_foreshadows_is_read_only_and_does_not_reconcile_rows() -> None:
+def test_list_foreshadows_is_read_only_and_does_not_reconcile_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     novel_id = uuid4()
     active = Foreshadow(
         id=uuid4(),
@@ -132,11 +148,71 @@ def test_list_foreshadows_is_read_only_and_does_not_reconcile_rows() -> None:
         rows={Foreshadow: [active, dropped]},
     )
     before = (active.status, active.progress, active.version, dropped.status, dropped.version)
+    monkeypatch.setattr(
+        "backend.creative_services.get_story_projection_payload",
+        lambda *_args, **_kwargs: {
+            "timeline_id": str(uuid4()),
+            "narrative_cutoff": None,
+            "visible_facts": [],
+            "current_facts": [],
+            "conflicts": [],
+        },
+    )
 
     result = list_foreshadows(session, novel_id)  # type: ignore[arg-type]
 
     assert [item["id"] for item in result] == [str(active.id)]
     assert (active.status, active.progress, active.version, dropped.status, dropped.version) == before
+
+
+def test_storyline_and_foreshadow_lists_overlay_typed_projection_without_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    novel_id = uuid4()
+    timeline_id = uuid4()
+    storyline = Storyline(
+        id=uuid4(), novel_id=novel_id, storyline_type="main", title="主线",
+        description="规划根", status="active", progress=10, position=1, version=1,
+    )
+    foreshadow = Foreshadow(
+        id=uuid4(), novel_id=novel_id, title="伏笔", content="规划根",
+        latest_progress="作者规划", status="planned", progress=0, position=1, version=1,
+    )
+    storyline_fact = {
+        "id": str(uuid4()), "fact_type": "storyline_event",
+        "storyline_id": str(storyline.id), "story_sequence": 3,
+        "event_kind": "advance", "predicate": "推进", "object_text": "取得关键证据",
+        "details": {"schema_version": "storyline-event/1", "event": "证据确认", "status": "completed", "progress": 80},
+    }
+    foreshadow_fact = {
+        "id": str(uuid4()), "fact_type": "foreshadow_event",
+        "foreshadow_id": str(foreshadow.id), "story_sequence": 3,
+        "event_kind": "resolve", "predicate": "回收", "object_text": "用途已经确认",
+        "details": {"schema_version": "foreshadow-event/1", "event": "resolve", "note": "完成"},
+    }
+    projection = {
+        "timeline_id": str(timeline_id), "narrative_cutoff": 3,
+        "visible_facts": [storyline_fact, foreshadow_fact],
+        "current_facts": [storyline_fact, foreshadow_fact], "conflicts": [],
+    }
+    monkeypatch.setattr(
+        "backend.creative_services.get_story_projection_payload",
+        lambda *_args, **_kwargs: projection,
+    )
+    session = _ReadOnlySession(
+        objects=[_novel(novel_id)], rows={Storyline: [storyline], Foreshadow: [foreshadow]}
+    )
+
+    storyline_payload = list_storylines(session, novel_id)[0]  # type: ignore[arg-type]
+    foreshadow_payload = list_foreshadows(session, novel_id)[0]  # type: ignore[arg-type]
+
+    assert (storyline_payload["status"], storyline_payload["progress"]) == ("completed", 80)
+    assert storyline_payload["planning_progress"] == 10
+    assert storyline_payload["latest_progress"] == "取得关键证据"
+    assert foreshadow_payload["status"] == "resolved"
+    assert foreshadow_payload["progress"] == 100
+    assert foreshadow_payload["planning_status"] == "planned"
+    assert foreshadow_payload["latest_progress"] == "用途已经确认"
 
 
 def test_production_backend_contains_no_sample_novel_tokens() -> None:

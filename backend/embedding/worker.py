@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,7 +15,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..background.contracts import LocalWorkspaceScope
-from ..background.jobs import JobLease
+from ..background.jobs import (
+    JobLease,
+    acknowledge_cancel,
+    complete_attempt,
+    fail_attempt,
+)
 from ..creative_data_models import (
     EmbeddingConfiguration,
     EmbeddingGeneration,
@@ -33,11 +39,55 @@ from .adapter import (
 )
 from .lifecycle import EmbeddingLifecycleError
 from .secrets import EmbeddingSecretError, EmbeddingSecretStore
-from ..models import ModelRunRecord
-from ..narration.jobs import complete_attempt, fail_attempt
+from ..models import BackgroundJob, ModelRunRecord
 
 
 SessionFactory = Callable[[], Session]
+EMBEDDING_CALL_DEADLINE_SECONDS = 60
+
+
+def _consume_abandoned_task(task: asyncio.Task[EmbeddingBatchResult]) -> None:
+    """Observe a late transport outcome without allowing it to publish vectors."""
+
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except (asyncio.CancelledError, Exception):
+        return
+
+
+async def _embed_with_hard_deadline(
+    adapter: DashScopeEmbeddingAdapter,
+    *,
+    api_key: str,
+    texts: tuple[str, ...],
+    model_id: str,
+    dimension: int,
+) -> EmbeddingBatchResult:
+    task = asyncio.create_task(
+        adapter.embed(
+            api_key=api_key,
+            texts=texts,
+            text_type="document",
+            model_id=model_id,
+            dimension=dimension,
+        )
+    )
+    try:
+        done, _ = await asyncio.wait({task}, timeout=EMBEDDING_CALL_DEADLINE_SECONDS)
+    except asyncio.CancelledError:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        raise
+    if task not in done:
+        task.add_done_callback(_consume_abandoned_task)
+        task.cancel()
+        raise TimeoutError("embedding call exceeded the total deadline")
+    return task.result()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +189,7 @@ def _record_failure(
 ) -> None:
     session.add(
         ModelRunRecord(
-            id=uuid4(), attempt_id=lease.attempt_id,
+            id=uuid4(), attempt_id=lease.fence.attempt_id,
             requested_provider_id="aliyun-bailian", requested_model_id=snapshot.model_id,
             requested_revision=snapshot.model_revision, actual_provider_id=None,
             actual_model_id=None, actual_revision=None, model_fingerprint=None,
@@ -159,6 +209,71 @@ def _record_failure(
         batch.state = "queued" if outcome.state == "retry_wait" else "failed"
         batch.failure_code = code
     session.flush()
+
+
+def _settle_preflight_failure(
+    session: Session,
+    *,
+    lease: JobLease,
+    error: EmbeddingLifecycleError,
+) -> None:
+    """Settle a claimed job that became invalid before cloud I/O starts."""
+
+    batch = session.scalar(
+        select(EmbeddingIndexBatch)
+        .where(EmbeddingIndexBatch.background_job_id == lease.fence.job_id)
+        .with_for_update()
+    )
+    job = session.get(BackgroundJob, lease.fence.job_id)
+    if job is not None and job.state == "cancel_requested":
+        acknowledge_cancel(
+            session,
+            scope=LocalWorkspaceScope.fixed_local(),
+            fence=lease.fence,
+        )
+    else:
+        fail_attempt(
+            session,
+            scope=LocalWorkspaceScope.fixed_local(),
+            fence=lease.fence,
+            classification="non_retryable",
+            error_code=error.code.upper(),
+        )
+    if batch is not None:
+        batch.state = (
+            "cancelled"
+            if error.code
+            in {"generation_cancelled", "generation_state_invalid", "consent_revoked"}
+            else "failed"
+        )
+        batch.failure_code = error.code.upper()
+        batch.completed_at = datetime.now(UTC)
+    session.flush()
+
+
+def _acknowledge_requested_cancel(
+    session: Session,
+    *,
+    lease: JobLease,
+    snapshot: BatchCallSnapshot,
+) -> bool:
+    """Discard a late transport result when cancellation won the race."""
+
+    job = session.get(BackgroundJob, lease.fence.job_id)
+    if job is None or job.state != "cancel_requested":
+        return False
+    acknowledge_cancel(
+        session,
+        scope=LocalWorkspaceScope.fixed_local(),
+        fence=lease.fence,
+    )
+    batch = session.get(EmbeddingIndexBatch, snapshot.batch_id)
+    if batch is not None:
+        batch.state = "cancelled"
+        batch.failure_code = "JOB_CANCELLED"
+        batch.completed_at = datetime.now(UTC)
+    session.flush()
+    return True
 
 
 def _record_success(
@@ -196,7 +311,7 @@ def _record_success(
         raise EmbeddingLifecycleError("response_count_invalid", "embedding response count changed")
     output_digest = _hash([list(vector.values) for vector in result.vectors])
     run = ModelRunRecord(
-        id=uuid4(), attempt_id=lease.attempt_id,
+        id=uuid4(), attempt_id=lease.fence.attempt_id,
         requested_provider_id="aliyun-bailian", requested_model_id=snapshot.model_id,
         requested_revision=snapshot.model_revision, actual_provider_id="aliyun-bailian",
         actual_model_id=snapshot.model_id, actual_revision=snapshot.model_revision,
@@ -288,12 +403,20 @@ async def execute_embedding_batch(
     """Execute one claimed batch.  Caller owns scheduler heartbeat/retry loops."""
 
     with session_factory() as session:
-        snapshot = _load_call(session, lease=lease)
+        try:
+            snapshot = _load_call(session, lease=lease)
+        except EmbeddingLifecycleError as error:
+            _settle_preflight_failure(session, lease=lease, error=error)
+            session.commit()
+            return
         session.commit()
     try:
         api_key = secret_store.get(snapshot.credential_ref)
     except EmbeddingSecretError:
         with session_factory() as session:
+            if _acknowledge_requested_cancel(session, lease=lease, snapshot=snapshot):
+                session.commit()
+                return
             _record_failure(
                 session, lease=lease, snapshot=snapshot,
                 code="EMBEDDING_SECRET_UNAVAILABLE", retryable=False, duration_ms=0,
@@ -303,13 +426,47 @@ async def execute_embedding_batch(
     adapter = DashScopeEmbeddingAdapter(base_url=snapshot.base_url)
     started = monotonic()
     try:
-        result = await adapter.embed(
-            api_key=api_key, texts=snapshot.texts, text_type="document",
-            model_id=snapshot.model_id, dimension=snapshot.dimension,
+        result = await _embed_with_hard_deadline(
+            adapter,
+            api_key=api_key,
+            texts=snapshot.texts,
+            model_id=snapshot.model_id,
+            dimension=snapshot.dimension,
         )
+    except asyncio.CancelledError:
+        elapsed = max(0, int((monotonic() - started) * 1000))
+        with session_factory() as session:
+            if not _acknowledge_requested_cancel(
+                session, lease=lease, snapshot=snapshot
+            ):
+                _record_failure(
+                    session,
+                    lease=lease,
+                    snapshot=snapshot,
+                    code="EMBEDDING_WORKER_INTERRUPTED",
+                    retryable=True,
+                    duration_ms=elapsed,
+                )
+            session.commit()
+        raise
+    except TimeoutError:
+        elapsed = max(0, int((monotonic() - started) * 1000))
+        with session_factory() as session:
+            if _acknowledge_requested_cancel(session, lease=lease, snapshot=snapshot):
+                session.commit()
+                return
+            _record_failure(
+                session, lease=lease, snapshot=snapshot,
+                code="EMBEDDING_TOTAL_TIMEOUT", retryable=False, duration_ms=elapsed,
+            )
+            session.commit()
+        return
     except EmbeddingAdapterError as error:
         elapsed = max(0, int((monotonic() - started) * 1000))
         with session_factory() as session:
+            if _acknowledge_requested_cancel(session, lease=lease, snapshot=snapshot):
+                session.commit()
+                return
             _record_failure(
                 session, lease=lease, snapshot=snapshot, code=error.code,
                 retryable=error.retryable, duration_ms=elapsed,
@@ -319,6 +476,9 @@ async def execute_embedding_batch(
     elapsed = max(0, int((monotonic() - started) * 1000))
     try:
         with session_factory() as session:
+            if _acknowledge_requested_cancel(session, lease=lease, snapshot=snapshot):
+                session.commit()
+                return
             _record_success(
                 session, lease=lease, snapshot=snapshot, result=result, duration_ms=elapsed
             )

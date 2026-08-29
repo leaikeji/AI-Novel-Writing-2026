@@ -46,7 +46,7 @@ from backend.narration.snapshots import (
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_HEAD = "20260828_0024"
+EXPECTED_HEAD = "20260829_0029"
 SOURCE_TEXT = "她望向窗外。\n\n“我们现在出发。”"
 
 

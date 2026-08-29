@@ -18,6 +18,7 @@ from backend.embedding.adapter import (
 )
 from backend.embedding.lifecycle import EmbeddingLifecycleError
 from backend.embedding.persistence import activate_candidate_generation
+from backend.embedding import persistence
 from backend.embedding.secrets import EmbeddingSecretError
 
 
@@ -103,6 +104,26 @@ class CandidateSession:
         self.rollback_count += 1
 
 
+class LateConsentSession:
+    def __init__(self, generation: Any, consent: Any) -> None:
+        self._scalar_rows = iter((generation, None))
+        self.consent = consent
+        self.added: list[Any] = []
+        self.flush_count = 0
+
+    def scalar(self, _statement: Any) -> Any:
+        return next(self._scalar_rows)
+
+    def scalars(self, _statement: Any) -> tuple[Any, ...]:
+        return (self.consent,)
+
+    def add(self, value: Any) -> None:
+        self.added.append(value)
+
+    def flush(self) -> None:
+        self.flush_count += 1
+
+
 class FakeSecretStore:
     def __init__(self, *, fail_delete_ref: str | None = None) -> None:
         self.fail_delete_ref = fail_delete_ref
@@ -161,6 +182,48 @@ def _sentinel_evidence(dimension: int = 2048) -> Any:
     )
 
 
+def test_late_consent_is_attached_to_existing_empty_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner_id = uuid4()
+    workspace_id = uuid4()
+    novel_id = uuid4()
+    consent = SimpleNamespace(
+        id=uuid4(), novel_id=novel_id, notice_version="notice/1",
+        data_scope_json=["manuscript", "planning"],
+    )
+    generation = SimpleNamespace(
+        id=uuid4(), owner_id=owner_id, workspace_id=workspace_id,
+        state="ready", evaluation_state="passed", evaluation_summary_json={"old": True},
+        consent_cohort_hash="old",
+    )
+    configuration = SimpleNamespace(
+        candidate_generation_id=generation.id, version=3, updated_at=None,
+    )
+    session = LateConsentSession(generation, consent)
+    monkeypatch.setattr(persistence, "get_configuration", lambda *_args, **_kwargs: configuration)
+
+    persistence._attach_consent_to_candidate(
+        session,
+        consent=consent,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+    )
+
+    assert len(session.added) == 1
+    build = session.added[0]
+    assert build.generation_id == generation.id
+    assert build.novel_id == novel_id
+    assert build.consent_id == consent.id
+    assert build.state == "pending"
+    assert build.target_corpora_json == ["manuscript", "planning"]
+    assert generation.state == "draft"
+    assert generation.evaluation_state == "not_run"
+    assert generation.evaluation_summary_json == {}
+    assert configuration.version == 4
+    assert session.flush_count == 1
+
+
 def test_config_mask_uses_only_database_last_four() -> None:
     configuration = SimpleNamespace(
         credential_ref="credential:test",
@@ -168,6 +231,20 @@ def test_config_mask_uses_only_database_last_four() -> None:
     )
     assert api._masked_api_key(configuration) == "********3456"
     assert "12345678" not in api._masked_api_key(configuration)
+
+
+def test_unconfigured_config_does_not_prefill_a_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = SimpleNamespace(scalar=lambda _statement: 0)
+    monkeypatch.setattr(api, "get_configuration", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(api, "_secret_store_ready", lambda: True)
+
+    payload = api.embedding_config_get(session)
+
+    assert payload["version"] == 0
+    assert payload["connection_state"] == "unconfigured"
+    assert payload["base_url"] == ""
 
 
 def test_config_get_never_returns_raw_key_or_last_eight(
@@ -567,12 +644,22 @@ async def test_post_candidate_evaluate_uses_adapter_fake_and_marks_gate_passed(
         actual_model_id="qwen3.7-text-embedding",
         dimension=2,
     )
-    source = SimpleNamespace(novel_id=uuid4(), corpus="manuscript", id=uuid4())
+    novel_id = uuid4()
+    source = SimpleNamespace(novel_id=novel_id, corpus="manuscript", id=uuid4())
+    second_source = SimpleNamespace(novel_id=novel_id, corpus="manuscript", id=uuid4())
     chunk = SimpleNamespace(
         id=uuid4(), chunk_index=0, content_text="fixed evaluation query"
     )
+    second_chunk = SimpleNamespace(
+        id=uuid4(), chunk_index=1, content_text="second fixed evaluation query"
+    )
     embedding = SimpleNamespace(embedding=(1.0, 0.0))
-    session = EvaluationSession(generation, profile, [(source, chunk, embedding)])
+    second_embedding = SimpleNamespace(embedding=(0.0, 1.0))
+    session = EvaluationSession(
+        generation,
+        profile,
+        [(source, chunk, embedding), (second_source, second_chunk, second_embedding)],
+    )
     adapter_calls: list[dict[str, Any]] = []
 
     class FakeAdapter:
@@ -582,10 +669,15 @@ async def test_post_candidate_evaluate_uses_adapter_fake_and_marks_gate_passed(
         async def embed(self, **kwargs: Any) -> EmbeddingBatchResult:
             adapter_calls.append(kwargs)
             assert kwargs["text_type"] == "query"
-            assert kwargs["texts"] == ["fixed evaluation query"]
+            assert len(kwargs["texts"]) == 1
+            values = (
+                (1.0, 0.0)
+                if kwargs["texts"] == ["fixed evaluation query"]
+                else (0.0, 1.0)
+            )
             return EmbeddingBatchResult(
-                request_id="fake-request-id",
-                vectors=(EmbeddingVector(text_index=0, values=(1.0, 0.0)),),
+                request_id=f"fake-request-{len(adapter_calls)}",
+                vectors=(EmbeddingVector(text_index=0, values=values),),
                 total_tokens=3,
                 input_tokens=3,
             )
@@ -621,9 +713,12 @@ async def test_post_candidate_evaluate_uses_adapter_fake_and_marks_gate_passed(
     assert response.status_code == 200
     assert response.json() == {"evaluation_state": "passed"}
     assert generation.evaluation_summary_json["passed"] is True
-    assert generation.evaluation_summary_json["request_ids"] == ["fake-request-id"]
+    assert generation.evaluation_summary_json["request_ids"] == [
+        "fake-request-1",
+        "fake-request-2",
+    ]
     assert session.commit_count == 2
-    assert len(adapter_calls) == 1
+    assert len(adapter_calls) == 2
 
 
 @pytest.mark.asyncio

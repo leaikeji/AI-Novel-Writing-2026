@@ -5,7 +5,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from backend.embedding.chunking import V1SourceInput, batch_chunks, chunk_text, render_v1_source
+from backend.embedding.chunking import (
+    V1_CHUNKER_VERSION,
+    V1SourceInput,
+    batch_chunks,
+    chunk_text,
+    render_v1_source,
+)
 from backend.embedding.lifecycle import (
     ConsentSnapshot,
     EmbeddingLifecycleError,
@@ -47,6 +53,18 @@ def test_v1_renderer_and_chunker_are_stable_and_lossless() -> None:
     assert chunks[-1].source_end == len(first.text)
     assert all(first.text[item.source_start:item.source_end] == item.text for item in chunks)
     assert batch_chunks(chunks, batch_size=10)
+
+
+def test_default_chunker_limits_high_density_novel_text() -> None:
+    chunks = chunk_text("潮" * 1_500)
+
+    assert V1_CHUNKER_VERSION == "semantic-char-chunker/4"
+    assert len(chunks) == 7
+    assert all(len(chunk.text) <= 256 for chunk in chunks)
+    assert chunks[1].source_start == chunks[0].source_end - 32
+
+    punctuation_boundary = chunk_text(("潮" * 256) + "。" + ("汐" * 300))
+    assert all(len(chunk.text) <= 256 for chunk in punctuation_boundary)
 
 
 def test_private_asset_must_be_fixed_and_indexable() -> None:

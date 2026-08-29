@@ -42,7 +42,7 @@ export function config(
     provider_label: "阿里云百炼",
     protocol: "dashscope-native-v1",
     protocol_label: "DashScope Native",
-    base_url: "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1",
+    base_url: "https://dashscope.aliyuncs.com/api/v1",
     secret_store_ready: true,
     api_key_configured: true,
     api_key_masked: "********cret",

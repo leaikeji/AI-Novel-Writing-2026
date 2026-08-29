@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import inspect
+from sqlalchemy.sql import operators
 from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
 from backend.creative_authority import (
@@ -31,7 +32,7 @@ from backend.creative_data_models import (
     NovelSettingHead,
     NovelSettingRevision,
 )
-from backend.models import Novel, NovelCharacter
+from backend.models import CharacterAlias, Novel, NovelCharacter
 
 
 class _ScalarRows:
@@ -40,6 +41,9 @@ class _ScalarRows:
 
     def all(self) -> list[Any]:
         return list(self._rows)
+
+    def __iter__(self):
+        return iter(self._rows)
 
 
 class MemorySession:
@@ -99,6 +103,8 @@ def _matches(row: Any, expression: Any) -> bool:
     if isinstance(expression, BinaryExpression):
         left = getattr(row, expression.left.key)
         right = expression.right.value
+        if expression.operator is operators.in_op:
+            return left in right
         return bool(expression.operator(left, right))
     raise AssertionError(f"unsupported SQL expression in MemorySession: {expression!r}")
 
@@ -325,6 +331,10 @@ def test_character_root_revision_catalog_cas_restore_and_late_replay() -> None:
     assert established.revision.parent_revision_id is None
     assert character.version == 1
     assert novel.character_catalog_version == 1
+    aliases = session.rows[CharacterAlias]
+    assert [(item.alias, item.alias_kind) for item in aliases] == [
+        ("Old Name", "official_name")
+    ]
 
     saved = save_character_root(
         session,
@@ -346,6 +356,13 @@ def test_character_root_revision_catalog_cas_restore_and_late_replay() -> None:
     assert character.name == "New Name"
     assert character.version == 2
     assert novel.character_catalog_version == 2
+    assert {
+        (item.alias, item.alias_kind, item.lifecycle_state)
+        for item in session.rows[CharacterAlias]
+    } == {
+        ("Old Name", "former_name", "active"),
+        ("New Name", "official_name", "active"),
+    }
 
     # Establishment replay remains stable even though the live root has evolved.
     establish_replay = establish_character_revision(
@@ -396,6 +413,13 @@ def test_character_root_revision_catalog_cas_restore_and_late_replay() -> None:
     assert character.name == "Old Name"
     assert character.version == 3
     assert novel.character_catalog_version == 3
+    assert {
+        (item.alias, item.alias_kind, item.lifecycle_state)
+        for item in session.rows[CharacterAlias]
+    } == {
+        ("Old Name", "official_name", "active"),
+        ("New Name", "former_name", "active"),
+    }
     assert [item.character_version for item in list_character_history(
         session, novel.id, character.id
     )] == [3, 2, 1]
@@ -443,3 +467,28 @@ def test_character_catalog_version_is_novel_wide() -> None:
         source_kind="formalize",
     )
     assert second.catalog_version == 2
+
+
+def test_character_alias_collision_is_explicitly_conflicted() -> None:
+    novel = _novel()
+    first = _character(novel.id, position=0)
+    first.name = "Ａ"
+    second = _character(novel.id, position=1)
+    second.name = "a"
+    session = MemorySession(novel, first, second)
+
+    establish_character_revision(
+        session, novel.id, first.id,
+        expected_catalog_version=0, expected_character_version=1,
+        operation_key="alias-first", source_kind="formalize",
+    )
+    establish_character_revision(
+        session, novel.id, second.id,
+        expected_catalog_version=1, expected_character_version=1,
+        operation_key="alias-second", source_kind="formalize",
+    )
+
+    aliases = session.rows[CharacterAlias]
+    assert {item.normalized_alias for item in aliases} == {"a"}
+    assert {item.lifecycle_state for item in aliases} == {"conflicted"}
+    assert {item.character_id for item in aliases} == {first.id, second.id}

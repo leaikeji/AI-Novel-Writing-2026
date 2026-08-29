@@ -9,7 +9,9 @@ from uuid import UUID
 
 
 V1_RENDERER_VERSION = "semantic-v1-renderers/1"
-V1_CHUNKER_VERSION = "semantic-char-chunker/1"
+V1_CHUNKER_VERSION = "semantic-char-chunker/4"
+V1_CHUNK_MAX_CHARACTERS = 256
+V1_CHUNK_OVERLAP_CHARACTERS = 32
 
 
 def content_hash(value: str) -> str:
@@ -131,8 +133,8 @@ def render_v1_source(source: V1SourceInput) -> RenderedSource:
 def chunk_text(
     text: str,
     *,
-    max_characters: int = 1800,
-    overlap_characters: int = 180,
+    max_characters: int = V1_CHUNK_MAX_CHARACTERS,
+    overlap_characters: int = V1_CHUNK_OVERLAP_CHARACTERS,
 ) -> tuple[RenderedChunk, ...]:
     """Return complete, ordered chunks; no suffix is silently discarded."""
 
@@ -150,9 +152,9 @@ def chunk_text(
         end = hard_end
         if hard_end < len(normalized):
             candidates = (
-                normalized.rfind("\n\n", start + 1, hard_end + 1),
-                normalized.rfind("\n", start + 1, hard_end + 1),
-                normalized.rfind("。", start + 1, hard_end + 1),
+                normalized.rfind("\n\n", start + 1, hard_end),
+                normalized.rfind("\n", start + 1, hard_end),
+                normalized.rfind("。", start + 1, hard_end),
             )
             boundary = max(candidates)
             if boundary >= start + max_characters // 2:

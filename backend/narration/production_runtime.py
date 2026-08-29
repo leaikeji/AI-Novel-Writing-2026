@@ -108,7 +108,7 @@ NORMALIZER_FINGERPRINT_VERSION = "narration-spoken-text-normalizer/1"
 WORKER_TASK_NAME = "ai-novel-moss-tts-production-worker"
 WORKER_CYCLE_TASK_NAME = "ai-novel-moss-tts-worker-cycle"
 SIDECAR_RETRY_SECONDS = 1.0
-EXPECTED_DATABASE_REVISION = "20260829_0028"
+EXPECTED_DATABASE_REVISION = "20260829_0029"
 PRODUCTION_TRANSCODING_POLICY = replace(
     DEFAULT_TRANSCODING_POLICY,
     allow_wav_fallback=False,

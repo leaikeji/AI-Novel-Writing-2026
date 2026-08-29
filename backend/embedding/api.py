@@ -31,6 +31,7 @@ from ..creative_data_models import (
     SemanticSource,
     StoryTimeline,
 )
+from ..background.jobs import manual_retry, request_cancel
 from ..database import get_session
 from .adapter import DashScopeEmbeddingAdapter, EmbeddingAdapterError, normalize_dashscope_base_url
 from .contracts import (
@@ -60,14 +61,13 @@ from .search import derive_known_visibility_keys
 from .secrets import EmbeddingSecretError, EmbeddingSecretStore
 from ..models import BackgroundJob, DerivedSourceBinding, DocumentWorkingCopy, StoryFact
 from ..narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID, NarrationRequestScope
-from ..narration.jobs import manual_retry
 from ..story_state.contracts import StoryFactV2
 
 
 router = APIRouter(tags=["embedding"])
-DEFAULT_BASE_URL = "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1"
 SECRET_ROOT_ENV = "AI_NOVEL_EMBEDDING_SECRET_ROOT_KEY_FILE"
 SECRET_DIR_ENV = "AI_NOVEL_EMBEDDING_SECRET_RECORDS_DIR"
+EVALUATION_QUERY_BATCH_SIZE = 1
 
 
 class _Strict(BaseModel):
@@ -207,8 +207,8 @@ async def _evaluate_candidate(
     query_vectors: list[tuple[float, ...]] = []
     request_ids: list[str] = []
     total_tokens = 0
-    for start in range(0, len(cases), 10):
-        batch = cases[start : start + 10]
+    for start in range(0, len(cases), EVALUATION_QUERY_BATCH_SIZE):
+        batch = cases[start : start + EVALUATION_QUERY_BATCH_SIZE]
         result = await adapter.embed(
             api_key=api_key,
             texts=[item.query for item in batch],
@@ -361,7 +361,7 @@ def embedding_config_get(session: Session = Depends(get_session)) -> dict[str, o
             "schema_version": "embedding-config/1", "version": 0,
             "provider_id": "aliyun-bailian", "provider_label": "阿里云百炼",
             "protocol": "dashscope-native-v1", "protocol_label": "DashScope Native",
-            "base_url": DEFAULT_BASE_URL,
+            "base_url": "",
             "secret_store_ready": _secret_store_ready(),
             "api_key_configured": False, "api_key_masked": None,
             "credential_cleanup_warning": None,
@@ -777,6 +777,24 @@ def embedding_candidate_cancel(
             ):
                 build.state = "cancelled"
                 build.completed_at = datetime.now(UTC)
+            jobs = tuple(
+                session.scalars(
+                    select(BackgroundJob)
+                    .join(
+                        EmbeddingIndexBatch,
+                        EmbeddingIndexBatch.background_job_id == BackgroundJob.id,
+                    )
+                    .where(EmbeddingIndexBatch.generation_id == generation.id)
+                )
+            )
+            for job in jobs:
+                request_cancel(
+                    session,
+                    scope=NarrationRequestScope.fixed_local(),
+                    job_id=job.id,
+                    actor="local-author",
+                    reason_code="EMBEDDING_GENERATION_CANCELLED",
+                )
         configuration.candidate_generation_id = None
         configuration.version += 1
         session.commit()
@@ -1045,8 +1063,31 @@ def semantic_index_cancel(
             )
         )
     )
+    generation_ids = tuple(build.generation_id for build in builds)
     for build in builds:
         build.state = "cancelled"; build.completed_at = datetime.now(UTC)
+    if generation_ids:
+        jobs = tuple(
+            session.scalars(
+                select(BackgroundJob)
+                .join(
+                    EmbeddingIndexBatch,
+                    EmbeddingIndexBatch.background_job_id == BackgroundJob.id,
+                )
+                .where(
+                    EmbeddingIndexBatch.generation_id.in_(generation_ids),
+                    EmbeddingIndexBatch.novel_id == novel_id,
+                )
+            )
+        )
+        for job in jobs:
+            request_cancel(
+                session,
+                scope=NarrationRequestScope.fixed_local(),
+                job_id=job.id,
+                actor="local-author",
+                reason_code="EMBEDDING_NOVEL_BUILD_CANCELLED",
+            )
     session.commit()
     return semantic_index_status(novel_id, session)
 

@@ -1471,7 +1471,7 @@ export function NovelLibraryPage() {
   if (view === "embedding-settings") {
     return h(
       "main",
-      { className: "anw-app mb-center-page" },
+      { className: "anw-app mb-center-page mb-center-page--embedding" },
       h(
         "div",
         { className: "mb-center-inner" },

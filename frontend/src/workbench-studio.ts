@@ -2878,7 +2878,7 @@ export function StudioProjectView({
   const openStorylineForm = (type: StorylineType, item: StorylineRecord | null = null) => {
     setStorylineEditing(item);
     storylineDirtyFieldsRef.current.clear();
-    replaceStudioControlledState(storylineFormRef, setStorylineForm, { storyline_type: item?.storyline_type ?? type, title: item?.title ?? "", description: item?.description ?? "", status: item?.status ?? "active", progress: item?.progress ?? 0 });
+    replaceStudioControlledState(storylineFormRef, setStorylineForm, { storyline_type: item?.storyline_type ?? type, title: item?.title ?? "", description: item?.description ?? "", status: item?.planning_status ?? item?.status ?? "active", progress: item?.planning_progress ?? item?.progress ?? 0 });
     setStorylineOpen(true);
   };
 
@@ -2901,7 +2901,7 @@ export function StudioProjectView({
   const openForeshadowForm = (item: ForeshadowRecord | null = null) => {
     setForeshadowEditing(item);
     foreshadowDirtyFieldsRef.current.clear();
-    replaceStudioControlledState(foreshadowFormRef, setForeshadowForm, { title: item?.title ?? "", content: item?.content ?? "", latest_progress: item?.latest_progress ?? "", status: item?.status ?? "active", progress: item?.progress ?? 0 });
+    replaceStudioControlledState(foreshadowFormRef, setForeshadowForm, { title: item?.title ?? "", content: item?.content ?? "", latest_progress: item?.planning_latest_progress ?? item?.latest_progress ?? "", status: item?.planning_status ?? item?.status ?? "active", progress: item?.planning_progress ?? item?.progress ?? 0 });
     setForeshadowOpen(true);
   };
 
@@ -3101,7 +3101,7 @@ export function StudioProjectView({
       ? h("div", { className: "mb-storyline-timeline" }, ...activeStorylines.map((item: StorylineRecord, index: number) => h(
           "article", { key: item.id, className: "mb-storyline-card" },
           h("span", { className: "mb-timeline-index" }, index + 1),
-          h("div", { className: "mb-storyline-content" }, h("header", null, h("h3", null, item.title), h("span", null, `${item.progress}%`)), h("p", null, item.description || "尚未填写情节说明"), h(Progress, { percent: item.progress, showInfo: false, strokeColor: "#ff7548" })),
+          h("div", { className: "mb-storyline-content" }, h("header", null, h("h3", null, item.title), h("span", null, `${item.progress}%`)), h("p", null, item.description || "尚未填写情节说明"), item.latest_progress ? h("small", null, `最近确认：${item.latest_progress}`) : null, h(Progress, { percent: item.progress, showInfo: false, strokeColor: "#ff7548" })),
           h("div", { className: "mb-card-actions" }, h(Button, { type: "text", icon: h(EditOutlined), onClick: () => openStorylineForm(activeClueTab, item) }), h(Button, { type: "text", danger: true, icon: h(DeleteOutlined), onClick: () => void deleteStoryline(item) })),
         )))
       : h("div", { className: "mb-large-empty" }, h(Empty, { description: `暂无${storylineLabels[activeClueTab]}，可以从真实创作计划中新增。` }), h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: () => openStorylineForm(activeClueTab) }, `新增${storylineLabels[activeClueTab]}`)),

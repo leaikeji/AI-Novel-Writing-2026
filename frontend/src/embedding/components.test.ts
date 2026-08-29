@@ -20,6 +20,52 @@ import {
 
 
 describe("embedding configuration page", () => {
+  it("does not prefill a Base URL and leaves format validation to the service", async () => {
+    const resource = config({
+      version: 0,
+      base_url: "",
+      connection_state: "unconfigured",
+      active_generation: null,
+      candidate_generation: null,
+    });
+    const api: EmbeddingConfigPageApi = {
+      getConfig: vi.fn().mockResolvedValue(resource),
+      initializeSecretStore: vi.fn(),
+      testConnection: vi.fn(),
+      saveCandidate: vi.fn(),
+      rebuildCandidate: vi.fn(),
+      cancelCandidate: vi.fn(),
+      evaluateCandidate: vi.fn(),
+      activateCandidate: vi.fn(),
+      rollback: vi.fn(),
+    };
+    const harness = createReactHarness();
+    const Component = createEmbeddingConfigPage(harness.React, TEST_ANTD, api);
+    let root = harness.render(Component, {});
+    harness.commitEffects();
+    await settle();
+    root = harness.render(Component, {});
+
+    const baseUrlInput = findAll(
+      root,
+      (element) => element.props.autoComplete === "url",
+    )[0];
+    expect(baseUrlInput.props.value).toBe("");
+    expect(textContent(root)).not.toContain("请输入以 /api/v1 结尾");
+    expect(textContent(root)).not.toContain("请填写 Base URL");
+    expect(textContent(root)).not.toContain("首次不预填");
+    expect(textContent(root)).not.toContain("尚未配置向量模型");
+    expect(textContent(root)).not.toContain("与正文生成模型相互独立");
+    expect(textContent(root)).not.toContain("正式默认使用 2048 维");
+    expect(textContent(root)).not.toContain("API Key 采用只写保护");
+
+    (baseUrlInput.props.onChange as (event: unknown) => void)({
+      target: { value: "https://user-entered.example/custom-path" },
+    });
+    root = harness.render(Component, {});
+    expect(findButton(root, "仅测试连接（不保存）").props.disabled).toBe(false);
+  });
+
   it("keeps the key write-only and disables an unready candidate", async () => {
     const resource = config({
       candidate_generation: generation({
@@ -54,7 +100,7 @@ describe("embedding configuration page", () => {
     const secretInput = findAll(root, (element) => element.props.type === "password")[0];
     expect(secretInput.props.defaultValue).toBe("");
     expect("value" in secretInput.props).toBe(false);
-    expect(textContent(root)).toContain("只写保护");
+    expect("aria-describedby" in secretInput.props).toBe(false);
     expect(textContent(root)).toContain("********cret");
     expect(findAll(root, (element) => element.type === "select")[0].props.value).toBe(2048);
     expect(findButton(root, "激活候选").props.disabled).toBe(true);

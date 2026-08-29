@@ -54,6 +54,20 @@ describe("embedding wire contracts", () => {
       .toThrow(EmbeddingContractError);
   });
 
+  it("accepts an empty Base URL only for the untouched initial configuration", () => {
+    expect(parseEmbeddingConfigResource(config({
+      version: 0,
+      base_url: "",
+      connection_state: "unconfigured",
+      api_key_configured: false,
+      api_key_masked: null,
+      active_generation: null,
+      candidate_generation: null,
+    })).base_url).toBe("");
+    expect(() => parseEmbeddingConfigResource(config({ base_url: "" })))
+      .toThrow(EmbeddingContractError);
+  });
+
   it("keeps separate query and document sentinel request evidence", () => {
     const parsed = parseEmbeddingConnectionTestResult({
       connection_state: "ready",

@@ -932,6 +932,7 @@ export function ensureNovelStyles(): void {
     .mb-orange-button.qwenpaw-btn:disabled { color:#fff!important; background:#ffc3aa!important; box-shadow:none!important; }
 
     .mb-center-page { min-height:100%; overflow:auto; padding:24px 30px 72px; background:#fff; }
+    .mb-center-page--embedding { height:100%; max-height:100%; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
     .mb-center-inner { position:relative; width:min(1100px,100%); min-height:760px; margin:0 auto; }
     .mb-center-header { display:flex; align-items:center; justify-content:space-between; min-height:42px; }
     .mb-center-header h1 { margin:0; font-size:18px; font-weight:600; }

@@ -18,6 +18,13 @@ from .contracts import SUPPORTED_EMBEDDING_DIMENSIONS, TARGET_CANDIDATE_DIMENSIO
 
 DASHSCOPE_EMBEDDING_PATH = "/api/v1/services/embeddings/text-embedding/text-embedding"
 INTERNAL_MAX_BATCH_SIZE = 10
+PUBLIC_DASHSCOPE_HOSTS = frozenset(
+    {
+        "dashscope.aliyuncs.com",
+        "dashscope-intl.aliyuncs.com",
+        "dashscope-us.aliyuncs.com",
+    }
+)
 
 
 class EmbeddingAdapterError(RuntimeError):
@@ -60,10 +67,19 @@ class _ResponseUsage(BaseModel):
 
 class _DashScopeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    status_code: int
+    # Raw HTTP responses may omit this SDK convenience field. The transport
+    # status remains authoritative and is checked before parsing the body.
+    status_code: int | None = None
     request_id: str = Field(min_length=1, max_length=300)
     output: _ResponseOutput
     usage: _ResponseUsage
+
+
+class _DashScopeErrorResponse(BaseModel):
+    """Provider error envelope; only the code is used for safe classification."""
+
+    model_config = ConfigDict(extra="ignore")
+    code: str | None = Field(default=None, max_length=200)
 
 
 Resolver = Callable[[str], Awaitable[Sequence[str]]]
@@ -76,7 +92,16 @@ async def _system_resolver(hostname: str) -> Sequence[str]:
 
 
 def normalize_dashscope_base_url(raw_url: str) -> str:
-    parsed = urlsplit(raw_url.strip())
+    candidate = raw_url.strip()
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port
+    except ValueError as error:
+        raise EmbeddingAdapterError(
+            "EMBEDDING_BASE_URL_INVALID", "Base URL is invalid"
+        ) from error
     hostname = (parsed.hostname or "").lower()
     if (
         parsed.scheme != "https"
@@ -85,21 +110,30 @@ def normalize_dashscope_base_url(raw_url: str) -> str:
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
-        or parsed.port not in (None, 443)
+        or port not in (None, 443)
     ):
         raise EmbeddingAdapterError("EMBEDDING_BASE_URL_INVALID", "Base URL is invalid")
     labels = hostname.split(".")
-    if len(labels) < 5 or not hostname.endswith(".maas.aliyuncs.com"):
+    is_public_dashscope_host = hostname in PUBLIC_DASHSCOPE_HOSTS
+    is_workspace_host = len(labels) >= 5 and hostname.endswith(".maas.aliyuncs.com")
+    if not is_public_dashscope_host and not is_workspace_host:
         raise EmbeddingAdapterError(
             "EMBEDDING_BASE_URL_INVALID", "Base URL must use an official Model Studio domain"
         )
     workspace_label = labels[0]
-    if not workspace_label or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789-" for character in workspace_label):
+    if is_workspace_host and (
+        not workspace_label
+        or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+            for character in workspace_label
+        )
+    ):
         raise EmbeddingAdapterError("EMBEDDING_BASE_URL_INVALID", "Workspace host label is invalid")
     path = parsed.path.rstrip("/")
-    if path != "/api/v1":
+    if path not in {"", "/api/v1", DASHSCOPE_EMBEDDING_PATH}:
         raise EmbeddingAdapterError(
-            "EMBEDDING_BASE_URL_INVALID", "Base URL must end with /api/v1"
+            "EMBEDDING_BASE_URL_INVALID",
+            "Base URL must use the DashScope Native API path",
         )
     return urlunsplit(("https", hostname, "/api/v1", "", ""))
 
@@ -125,6 +159,64 @@ async def validate_public_resolution(base_url: str, resolver: Resolver = _system
             raise EmbeddingAdapterError(
                 "EMBEDDING_SSRF_BLOCKED", "Model endpoint resolved to a non-public address"
             )
+
+
+def _provider_error(response: httpx.Response) -> EmbeddingAdapterError:
+    """Map known DashScope failures without returning provider text or request data."""
+
+    provider_code = ""
+    try:
+        parsed = _DashScopeErrorResponse.model_validate(response.json())
+        provider_code = "".join(character for character in (parsed.code or "").lower() if character.isalnum())
+    except (ValueError, ValidationError):
+        pass
+
+    if response.status_code in (401, 403) or provider_code in {
+        "invalidapikey",
+        "invalidaccesskeyid",
+        "unauthorized",
+        "accessdenied",
+        "permissiondenied",
+        "forbidden",
+    }:
+        return EmbeddingAdapterError("EMBEDDING_AUTH_FAILED", "Embedding authentication failed")
+    if provider_code in {
+        "modelaccessdenied",
+        "modelpermissiondenied",
+        "modelnotfound",
+        "invalidmodel",
+    }:
+        return EmbeddingAdapterError(
+            "EMBEDDING_MODEL_ACCESS_DENIED",
+            "Embedding model is unavailable to this credential",
+        )
+    if response.status_code == 429 or any(
+        marker in provider_code for marker in ("ratelimit", "throttl", "toomanyrequests")
+    ):
+        return EmbeddingAdapterError(
+            "EMBEDDING_RATE_LIMITED",
+            "Embedding request was rate limited",
+            retryable=True,
+        )
+    if any(marker in provider_code for marker in ("quota", "arrears", "balance")):
+        return EmbeddingAdapterError(
+            "EMBEDDING_QUOTA_UNAVAILABLE",
+            "Embedding quota is unavailable",
+        )
+    if response.status_code >= 500:
+        return EmbeddingAdapterError(
+            "EMBEDDING_UNAVAILABLE",
+            "Embedding service is unavailable",
+            retryable=True,
+        )
+    if response.status_code in (400, 404, 405, 409, 415, 422) or any(
+        marker in provider_code for marker in ("invalidparameter", "badrequest", "unsupported")
+    ):
+        return EmbeddingAdapterError(
+            "EMBEDDING_REQUEST_INVALID",
+            "Embedding request was rejected",
+        )
+    return EmbeddingAdapterError("EMBEDDING_PROTOCOL_ERROR", "Embedding request was rejected")
 
 
 class DashScopeEmbeddingAdapter:
@@ -189,19 +281,13 @@ class DashScopeEmbeddingAdapter:
                 await active_client.aclose()
         if response.is_redirect:
             raise EmbeddingAdapterError("EMBEDDING_PROTOCOL_ERROR", "Embedding redirect is forbidden")
-        if response.status_code in (401, 403):
-            raise EmbeddingAdapterError("EMBEDDING_AUTH_FAILED", "Embedding authentication failed")
-        if response.status_code == 429:
-            raise EmbeddingAdapterError("EMBEDDING_RATE_LIMITED", "Embedding request was rate limited", retryable=True)
-        if response.status_code >= 500:
-            raise EmbeddingAdapterError("EMBEDDING_UNAVAILABLE", "Embedding service is unavailable", retryable=True)
         if response.status_code != 200:
-            raise EmbeddingAdapterError("EMBEDDING_PROTOCOL_ERROR", "Embedding request was rejected")
+            raise _provider_error(response)
         try:
             parsed = _DashScopeResponse.model_validate(response.json())
         except (ValueError, ValidationError) as error:
             raise EmbeddingAdapterError("EMBEDDING_PROTOCOL_ERROR", "Embedding response is invalid") from error
-        if parsed.status_code != 200 or len(parsed.output.embeddings) != len(cleaned):
+        if parsed.status_code not in (None, 200) or len(parsed.output.embeddings) != len(cleaned):
             raise EmbeddingAdapterError("EMBEDDING_PROTOCOL_ERROR", "Embedding response count is invalid")
         ordered = sorted(parsed.output.embeddings, key=lambda item: item.text_index)
         if [item.text_index for item in ordered] != list(range(len(cleaned))):

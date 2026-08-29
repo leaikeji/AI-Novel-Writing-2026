@@ -39,6 +39,7 @@ from .story_state.persistence import (
     _fact_record,
     _timeline_record,
 )
+from .story_state import StoryTimeV1
 
 from .context_v3.assembler import assemble_novel_context
 from .context_v3.contracts import (
@@ -61,6 +62,60 @@ from .context_v3.contracts import (
 
 class ContextPersistenceError(ValueError):
     pass
+
+
+def _merge_story_times(
+    segments: Sequence[RevisionTimelineMappingSegment],
+) -> StoryTimeV1 | None:
+    times: list[StoryTimeV1] = []
+    for segment in segments:
+        try:
+            item = StoryTimeV1.model_validate(dict(segment.story_time_json or {}))
+        except ValueError as error:
+            raise ContextPersistenceError("revision timeline mapping contains invalid story time") from error
+        if item != StoryTimeV1():
+            times.append(item)
+    if not times:
+        return None
+    if all(item == times[0] for item in times[1:]):
+        return times[0]
+    calendars = {item.calendar_id for item in times}
+    if len(calendars) != 1 or any(
+        item.lower_bound is None or item.upper_bound is None for item in times
+    ):
+        return None
+    labels = list(dict.fromkeys(item.label for item in times if item.label))
+    label = " → ".join(labels)
+    if len(label) > 300:
+        label = "章节包含多个可比较故事时间"
+    return StoryTimeV1(
+        label=label or None,
+        calendar_id=times[0].calendar_id,
+        lower_bound=min(int(item.lower_bound) for item in times if item.lower_bound is not None),
+        upper_bound=max(int(item.upper_bound) for item in times if item.upper_bound is not None),
+        precision="range",
+    )
+
+
+def _chapter_requirements_from_brief(
+    session: Session,
+    document_id: UUID,
+) -> tuple[ChapterRoleConstraintsV3 | None, UUID | None]:
+    brief = session.scalar(
+        select(ChapterBrief).where(ChapterBrief.document_id == document_id)
+    )
+    if brief is None or not isinstance(brief.role_constraints, dict):
+        return None, None
+    raw = dict(brief.role_constraints.get("_v3") or {})
+    if not raw:
+        return None, None
+    raw_timeline_id = raw.pop("timeline_id", None)
+    try:
+        requirements = ChapterRoleConstraintsV3.model_validate(raw)
+        parsed_timeline_id = UUID(str(raw_timeline_id)) if raw_timeline_id else None
+    except ValueError as error:
+        raise ContextPersistenceError("chapter brief contains invalid V3 role constraints") from error
+    return requirements, parsed_timeline_id
 
 
 def _latest_root_revision(
@@ -134,6 +189,7 @@ def _story_position(
 ) -> StoryPositionV2:
     narrative_sequence: int | None = None
     revision_id: UUID | None = None
+    story_time: StoryTimeV1 | None = None
     if document_id is not None:
         document = session.scalar(
             select(Document).where(Document.id == document_id, Document.novel_id == novel_id)
@@ -169,11 +225,13 @@ def _story_position(
                 sequences = [item.story_sequence for item in segments if item.story_sequence is not None]
                 if sequences:
                     narrative_sequence = max(sequences)
+                story_time = _merge_story_times(segments)
     return StoryPositionV2(
         timeline_id=timeline_id,
         narrative_sequence=narrative_sequence,
         chapter_id=document_id,
         document_revision_id=revision_id,
+        story_time=story_time,
     )
 
 
@@ -191,6 +249,17 @@ def load_context_snapshot(
 
     if session.get(Novel, novel_id) is None:
         raise ContextPersistenceError("novel was not found")
+    if document_id is not None and chapter_requirements is None:
+        stored_requirements, stored_timeline_id = _chapter_requirements_from_brief(
+            session, document_id
+        )
+        chapter_requirements = stored_requirements
+        if stored_timeline_id is not None:
+            if timeline_id is not None and timeline_id != stored_timeline_id:
+                raise ContextPersistenceError(
+                    "requested timeline conflicts with the chapter brief"
+                )
+            timeline_id = stored_timeline_id
     timelines = tuple(
         _timeline_record(item)
         for item in session.scalars(
@@ -229,6 +298,19 @@ def load_context_snapshot(
         )
         if root_revision is None or instance_revision is None:
             continue
+        profile = dict(instance_revision.profile_json or {})
+        raw_birth_year = profile.get("birth_year")
+        birth_year = (
+            raw_birth_year
+            if isinstance(raw_birth_year, int) and not isinstance(raw_birth_year, bool)
+            else None
+        )
+        raw_birth_calendar = profile.get("birth_calendar_id")
+        birth_calendar_id = (
+            str(raw_birth_calendar).strip()
+            if isinstance(raw_birth_calendar, str) and raw_birth_calendar.strip()
+            else None
+        )
         ref = CharacterRefV2(
             character_id=root.id,
             character_instance_id=instance.id,
@@ -241,6 +323,8 @@ def load_context_snapshot(
                 root_revision_id=root_revision.id,
                 instance_revision_id=instance_revision.id,
                 present_on_timeline_ids=(instance.origin_timeline_id,),
+                birth_year=birth_year,
+                birth_calendar_id=birth_calendar_id,
                 public_profile=_public_profile(root_revision, instance_revision),
                 author_secret_constraints=_secret_constraints(instance_revision, ref),
             )

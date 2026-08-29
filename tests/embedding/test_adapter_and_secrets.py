@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -91,6 +92,8 @@ def test_secret_store_rejects_weak_root_permissions(tmp_path: Path) -> None:
         "http://workspace.cn-beijing.maas.aliyuncs.com/api/v1",
         "https://user@example.com/api/v1",
         "https://127.0.0.1/api/v1",
+        "https://dashscope.aliyuncs.com:abc/api/v1",
+        "https://dashscope.aliyuncs.com.evil.example/api/v1",
         "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
         "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1?key=x",
     ),
@@ -98,6 +101,26 @@ def test_secret_store_rejects_weak_root_permissions(tmp_path: Path) -> None:
 def test_base_url_rejects_unsafe_or_wrong_protocol(value: str) -> None:
     with pytest.raises(EmbeddingAdapterError):
         normalize_dashscope_base_url(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "https://dashscope.aliyuncs.com/api/v1",
+        "https://dashscope-intl.aliyuncs.com/api/v1/",
+        "https://dashscope-us.aliyuncs.com/api/v1",
+        "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1",
+        "https://workspace.ap-southeast-1.maas.aliyuncs.com/api/v1",
+        "llm-workspace123.cn-beijing.maas.aliyuncs.com",
+        "llm-workspace123.cn-beijing.maas.aliyuncs.com/",
+        "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
+    ),
+)
+def test_base_url_accepts_official_public_and_workspace_hosts(value: str) -> None:
+    candidate = value if "://" in value else f"https://{value}"
+    assert normalize_dashscope_base_url(value) == (
+        f"https://{urlsplit(candidate).hostname}/api/v1"
+    )
 
 
 @pytest.mark.asyncio
@@ -142,6 +165,38 @@ async def test_adapter_sends_native_roles_and_validates_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_adapter_accepts_raw_http_success_without_sdk_status_code() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "req-http-native",
+                "output": {
+                    "embeddings": [
+                        {"text_index": 0, "embedding": [0.0] * 256}
+                    ]
+                },
+                "usage": {"total_tokens": 2, "input_tokens": 2},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await DashScopeEmbeddingAdapter(
+            base_url="https://workspace.cn-beijing.maas.aliyuncs.com/api/v1"
+        ).embed(
+            api_key="sk-not-logged-long-enough",
+            texts=["查询"],
+            text_type="query",
+            dimension=256,
+            client=client,
+            resolver=_public_resolver,
+        )
+
+    assert result.request_id == "req-http-native"
+    assert len(result.vectors[0].values) == 256
+
+
+@pytest.mark.asyncio
 async def test_adapter_rejects_an_unsupported_dimension_before_network() -> None:
     with pytest.raises(EmbeddingAdapterError, match="not supported"):
         await DashScopeEmbeddingAdapter(
@@ -153,6 +208,55 @@ async def test_adapter_rejects_an_unsupported_dimension_before_network() -> None
             dimension=1234,
             resolver=_public_resolver,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "provider_code", "expected_code", "retryable"),
+    (
+        (400, "InvalidApiKey", "EMBEDDING_AUTH_FAILED", False),
+        (403, "Forbidden", "EMBEDDING_AUTH_FAILED", False),
+        (400, "Model.AccessDenied", "EMBEDDING_MODEL_ACCESS_DENIED", False),
+        (400, "InvalidParameter", "EMBEDDING_REQUEST_INVALID", False),
+        (429, "Throttling.RateQuota", "EMBEDDING_RATE_LIMITED", True),
+        (400, "QuotaExhausted", "EMBEDDING_QUOTA_UNAVAILABLE", False),
+        (503, "InternalError", "EMBEDDING_UNAVAILABLE", True),
+    ),
+)
+async def test_adapter_classifies_provider_errors_without_exposing_provider_message(
+    status_code: int,
+    provider_code: str,
+    expected_code: str,
+    retryable: bool,
+) -> None:
+    secret_marker = "provider-message-must-not-escape"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            json={
+                "code": provider_code,
+                "message": secret_marker,
+                "request_id": "req-safe",
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(EmbeddingAdapterError) as caught:
+            await DashScopeEmbeddingAdapter(
+                base_url="https://workspace.cn-beijing.maas.aliyuncs.com/api/v1"
+            ).embed(
+                api_key="sk-not-logged-long-enough",
+                texts=["查询"],
+                text_type="query",
+                dimension=256,
+                client=client,
+                resolver=_public_resolver,
+            )
+
+    assert caught.value.code == expected_code
+    assert caught.value.retryable is retryable
+    assert secret_marker not in str(caught.value)
 
 
 @pytest.mark.asyncio

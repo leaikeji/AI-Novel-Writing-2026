@@ -258,6 +258,8 @@ class StorylineEventDetailsV1(_StrictModel):
     schema_version: Literal["storyline-event/1"] = "storyline-event/1"
     event: str = Field(min_length=1, max_length=120)
     value: JsonValue | None = None
+    status: Literal["active", "paused", "completed", "archived"] | None = None
+    progress: int | None = Field(default=None, ge=0, le=100)
 
 
 class ForeshadowEventDetailsV1(_StrictModel):

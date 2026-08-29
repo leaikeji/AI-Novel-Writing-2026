@@ -130,6 +130,7 @@ from .model_runtime import (
     reply_model_audit,
 )
 from .services import NotFoundError, ValidationError, delete_novel
+from .story_state import StoryStateError
 from .selection_edit_diff import (
     SelectionEditDiffError,
     build_selection_edit_result,
@@ -150,6 +151,15 @@ def _raise(error: Exception) -> None:
     if isinstance(error, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+        ) from error
+    if isinstance(error, StoryStateError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": error.code.value,
+                "message": str(error),
+                "details": error.details,
+            },
         ) from error
     raise error
 
@@ -642,13 +652,21 @@ def character_profile_completion_restore(
 def relationships_index(
     novel_id: UUID,
     include_archived: bool = Query(default=False),
+    timeline_id: UUID | None = Query(default=None),
+    narrative_cutoff: int | None = Query(default=None, ge=0),
     session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
-    return list_character_relationships(
-        session,
-        novel_id,
-        include_archived=include_archived,
-    )
+    try:
+        return list_character_relationships(
+            session,
+            novel_id,
+            include_archived=include_archived,
+            timeline_id=timeline_id,
+            narrative_cutoff=narrative_cutoff,
+        )
+    except Exception as error:
+        _raise(error)
+        raise
 
 
 @router.get("/novels/{novel_id}/relationships/auto-sync/status")
@@ -917,9 +935,21 @@ def relationships_delete(
 
 @router.get("/novels/{novel_id}/storylines")
 def storylines_index(
-    novel_id: UUID, session: Session = Depends(get_session)
+    novel_id: UUID,
+    timeline_id: UUID | None = Query(default=None),
+    narrative_cutoff: int | None = Query(default=None, ge=0),
+    session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
-    return list_storylines(session, novel_id)
+    try:
+        return list_storylines(
+            session,
+            novel_id,
+            timeline_id=timeline_id,
+            narrative_cutoff=narrative_cutoff,
+        )
+    except Exception as error:
+        _raise(error)
+        raise
 
 
 @router.post("/novels/{novel_id}/storylines", status_code=status.HTTP_201_CREATED)
@@ -985,9 +1015,21 @@ def storylines_delete(
 
 @router.get("/novels/{novel_id}/foreshadows")
 def foreshadows_index(
-    novel_id: UUID, session: Session = Depends(get_session)
+    novel_id: UUID,
+    timeline_id: UUID | None = Query(default=None),
+    narrative_cutoff: int | None = Query(default=None, ge=0),
+    session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
-    return list_foreshadows(session, novel_id)
+    try:
+        return list_foreshadows(
+            session,
+            novel_id,
+            timeline_id=timeline_id,
+            narrative_cutoff=narrative_cutoff,
+        )
+    except Exception as error:
+        _raise(error)
+        raise
 
 
 @router.post("/novels/{novel_id}/foreshadows", status_code=status.HTTP_201_CREATED)

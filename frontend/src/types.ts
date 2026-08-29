@@ -402,6 +402,24 @@ export type RelationshipKind =
   | "romance"
   | "other";
 
+export interface StoryProjectionSummary {
+  timeline_id: string;
+  narrative_cutoff: number | null;
+  event_count: number;
+  fact_ids: string[];
+  current_fact_ids: string[];
+  latest_event: {
+    fact_id: string;
+    story_sequence: number | null;
+    event_kind: string;
+    predicate: string;
+    text: string;
+    details: Record<string, unknown>;
+  } | null;
+  conflicted: boolean;
+  conflicts: Array<{ conflict_key: string; fact_ids: string[]; reason: string }>;
+}
+
 export interface CharacterRelationshipRecord {
   id: string;
   novel_id: string;
@@ -413,6 +431,9 @@ export interface CharacterRelationshipRecord {
   relation_type: string;
   description: string;
   status: "active" | "resolved" | "archived";
+  definition_status?: "active" | "resolved" | "archived";
+  latest_state?: string;
+  projection?: StoryProjectionSummary | null;
   created_by: "manual" | "ai_accepted" | "ai_auto" | "import";
   manual_override: boolean;
   confidence: number | null;
@@ -488,6 +509,10 @@ export interface StorylineRecord {
   description: string;
   status: "active" | "paused" | "completed" | "archived";
   progress: number;
+  planning_status?: "active" | "paused" | "completed" | "archived";
+  planning_progress?: number;
+  latest_progress?: string;
+  projection?: StoryProjectionSummary | null;
   position: number;
   version: number;
   created_at: string | null;
@@ -502,6 +527,10 @@ export interface ForeshadowRecord {
   latest_progress: string;
   status: "planned" | "active" | "resolved" | "dropped";
   progress: number;
+  planning_latest_progress?: string;
+  planning_status?: "planned" | "active" | "resolved" | "dropped";
+  planning_progress?: number;
+  projection?: StoryProjectionSummary | null;
   position: number;
   version: number;
   created_at: string | null;

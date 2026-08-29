@@ -121,24 +121,6 @@ function errorMessage(reason: unknown, fallback: string): string {
 }
 
 
-function validBaseUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value.trim());
-    const labels = parsed.hostname.split(".");
-    return parsed.protocol === "https:"
-      && parsed.port === ""
-      && labels.length >= 5
-      && parsed.hostname.endsWith(".maas.aliyuncs.com")
-      && /^[a-z0-9-]+$/.test(labels[0] ?? "")
-      && parsed.pathname.replace(/\/$/, "") === "/api/v1"
-      && !parsed.search
-      && !parsed.hash;
-  } catch {
-    return false;
-  }
-}
-
-
 function formFromResource(resource: EmbeddingConfigResource): FormState {
   return {
     baseUrl: resource.base_url,
@@ -166,7 +148,7 @@ export function createEmbeddingConfigPage(
   return function EmbeddingConfigPage(props: EmbeddingConfigPageProps): unknown {
     const [load, setLoad] = React.useState<LoadState>({ phase: "loading" });
     const [form, setForm] = React.useState<FormState>({
-      baseUrl: "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1",
+      baseUrl: "",
       modelId: "qwen3.7-text-embedding",
       dimension: DEFAULT_EMBEDDING_DIMENSION,
     });
@@ -330,7 +312,7 @@ export function createEmbeddingConfigPage(
     const candidate = resource.candidate_generation;
     const candidateBuilding = candidate?.state === "building";
     const canActivate = candidateCanActivate(candidate);
-    const baseUrlValid = validBaseUrl(form.baseUrl);
+    const baseUrlPresent = form.baseUrl.trim().length > 0;
     const modelValid = form.modelId.trim().length > 0;
     const dimensionValid = SUPPORTED_EMBEDDING_DIMENSIONS.includes(
       form.dimension as (typeof SUPPORTED_EMBEDDING_DIMENSIONS)[number],
@@ -338,7 +320,7 @@ export function createEmbeddingConfigPage(
     const credentialReady = credentialDraftState === "valid"
       || (credentialDraftState === "empty" && resource.api_key_configured);
     const formReady = resource.secret_store_ready
-      && baseUrlValid
+      && baseUrlPresent
       && modelValid
       && dimensionValid
       && credentialReady;
@@ -412,15 +394,6 @@ export function createEmbeddingConfigPage(
         description: resource.credential_cleanup_warning,
       })
       : null,
-    resource.connection_state === "unconfigured"
-      ? h(antd.Empty, { description: "尚未配置向量模型。填写下方候选配置后先测试连接。" })
-      : null,
-    h(antd.Alert, {
-      type: "info",
-      showIcon: true,
-      message: "与正文生成模型相互独立",
-      description: "此页面只配置阿里云百炼文本向量模型，不修改 AI 小说作家 Agent，也不新增向量数据库。",
-    }),
     hasUnsavedChanges
       ? h(antd.Alert, {
         type: "warning",
@@ -447,20 +420,13 @@ export function createEmbeddingConfigPage(
           h("strong", null, "协议"), h("span", null, resource.protocol_label),
         ),
         h("label", { className: "anw-embedding-field" },
-          h("span", null, "服务地址（Base URL）"),
+          h("span", null, "API Host / Base URL"),
           h(antd.Input, {
             value: form.baseUrl,
             disabled: operation.busy,
             autoComplete: "url",
             onChange: (event: InputChangeEvent) => updateForm({ baseUrl: event.target.value }),
           }),
-          !baseUrlValid
-            ? h("span", { className: "anw-embedding-field-error", role: "alert" },
-              "请输入以 /api/v1 结尾的阿里云百炼工作空间 HTTPS 地址。",
-            )
-            : h("span", { className: "anw-embedding-secret-note" },
-              "地域由服务地址决定，无需单独选择。",
-            ),
         ),
         h("label", { className: "anw-embedding-field" },
           h("span", null, "模型名称"),
@@ -486,9 +452,6 @@ export function createEmbeddingConfigPage(
             disabled: operation.busy,
             onChange: (value: number) => updateForm({ dimension: value }),
           }),
-          h("span", { className: "anw-embedding-secret-note" },
-            "正式默认使用 2048 维；切换维度会创建新的候选索引空间。",
-          ),
         ),
         h("label", { className: "anw-embedding-field" },
           h("span", null, resource.api_key_configured ? "替换 API Key（可选）" : "API Key"),
@@ -500,15 +463,11 @@ export function createEmbeddingConfigPage(
             autoComplete: "new-password",
             spellCheck: false,
             placeholder: resource.api_key_configured ? "留空则保持现有 Key" : "仅用于本次写入，不会回显",
-            "aria-describedby": "anw-embedding-secret-help",
             onChange: (event: InputChangeEvent) => {
               const length = event.target.value.trim().length;
               setCredentialDraftState(length === 0 ? "empty" : length >= 16 ? "valid" : "invalid");
             },
           }),
-          h("span", { id: "anw-embedding-secret-help", className: "anw-embedding-secret-note" },
-            "API Key 采用只写保护：完整内容不会从接口回显，保存后最多显示数据库记录的末 4 位。",
-          ),
           credentialDraftState === "invalid"
             ? h("span", { className: "anw-embedding-field-error", role: "alert" },
               "API Key 至少需要 16 个字符。",

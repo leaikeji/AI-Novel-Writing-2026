@@ -583,7 +583,7 @@ def test_migration_exec_reasserts_all_four_disabled_flags(
     runner: ModuleType,
     candidate: Path,
 ) -> None:
-    assert runner.EXPECTED_MIGRATION_HEAD == "20260828_0024"
+    assert runner.EXPECTED_MIGRATION_HEAD == "20260829_0029"
 
     class MigrationExecutor:
         def __init__(self) -> None:
@@ -620,7 +620,7 @@ def test_migration_exec_reasserts_all_four_disabled_flags(
         executor=executor,
     )
     plan = runner.build_dry_run_plan(gate.config, names)
-    assert "migrate-to-20260828_0024" in plan["lifecycle"]
+    assert "migrate-to-20260829_0029" in plan["lifecycle"]
 
     gate._migrate_and_verify_head()
 

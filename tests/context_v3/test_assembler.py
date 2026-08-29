@@ -38,6 +38,7 @@ from backend.story_state import (
     StoryFactV2,
     StoryStateError,
     StoryStateErrorCode,
+    StoryTimeV1,
     StoryTimelineRecord,
     StoryVisibilityV1,
     TimelineKind,
@@ -158,6 +159,61 @@ def _character_record(
         public_profile="public character profile",
         author_secret_constraints=secrets,
     )
+
+
+def test_age_projection_uses_story_time_bounds_and_never_server_time() -> None:
+    novel_id = uuid4()
+    main = _timeline(novel_id, key="main", kind=TimelineKind.MAIN, primary=True)
+    ref = CharacterRefV2(
+        character_id=uuid4(), character_instance_id=uuid4(), display_label="A"
+    )
+    record = CharacterContextRecordV2(
+        novel_id=novel_id,
+        ref=ref,
+        root_revision_id=uuid4(),
+        instance_revision_id=uuid4(),
+        present_on_timeline_ids=(main.id,),
+        birth_year=1989,
+        birth_calendar_id="gregorian",
+        public_profile="profile",
+    )
+    envelope = assemble_novel_context(
+        NovelContextAssemblySnapshotV3(
+            novel_id=novel_id,
+            position=StoryPositionV2(
+                narrative_sequence=1,
+                story_time=StoryTimeV1(
+                    label="2017",
+                    calendar_id="gregorian",
+                    lower_bound=2017,
+                    upper_bound=2017,
+                    precision="exact",
+                ),
+            ),
+            perspective=PerspectiveV1(kind=PerspectiveKind.AUTHOR),
+            chapter_requirements=ChapterRoleConstraintsV3(required_characters=(ref,)),
+            timelines=(main,),
+            character_records=(record,),
+        )
+    )
+
+    age = envelope.character_state[0].age_projection
+    assert (age.minimum_age, age.maximum_age, age.precision) == (27, 28, "range")
+    assert age.reason == "year_only_birth"
+
+    unknown = assemble_novel_context(
+        NovelContextAssemblySnapshotV3(
+            novel_id=novel_id,
+            position=StoryPositionV2(narrative_sequence=1),
+            perspective=PerspectiveV1(kind=PerspectiveKind.AUTHOR),
+            chapter_requirements=ChapterRoleConstraintsV3(required_characters=(ref,)),
+            timelines=(main,),
+            character_records=(record,),
+        )
+    ).character_state[0].age_projection
+    assert unknown.precision == "unknown"
+    assert unknown.reason == "missing_story_time_bounds"
+    assert unknown.minimum_age is None
 
 
 def _semantic(

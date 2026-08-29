@@ -15,7 +15,6 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from .context_v3 import ChapterRoleConstraintsV3
 from .context_v3_loader import assemble_context_from_db
 from .creative_data_models import (
     CharacterInstance,
@@ -742,6 +741,74 @@ def get_chapter_brief(session: Session, document_id: UUID) -> dict[str, Any]:
     return _brief_payload(brief, document_id)
 
 
+def _derive_brief_role_constraints_v3(
+    session: Session,
+    document: Document,
+    normalized_roles: dict[str, list[str]],
+) -> dict[str, Any]:
+    """Resolve legacy display names once, then persist only stable V3 refs."""
+
+    timelines = tuple(
+        session.scalars(
+            select(StoryTimeline)
+            .where(
+                StoryTimeline.novel_id == document.novel_id,
+                StoryTimeline.lifecycle_state == "active",
+            )
+            .order_by(StoryTimeline.position, StoryTimeline.id)
+        )
+    )
+    if len(timelines) != 1:
+        raise ValidationError("timeline_required: 多时间线章纲必须在时间线工作区保存")
+    timeline = timelines[0]
+    refs: list[dict[str, str]] = []
+    for name in normalized_roles["required"]:
+        characters = tuple(
+            session.scalars(
+                select(NovelCharacter).where(
+                    NovelCharacter.novel_id == document.novel_id,
+                    NovelCharacter.name == name,
+                    NovelCharacter.lifecycle_state == "active",
+                )
+            )
+        )
+        if len(characters) != 1:
+            raise ValidationError(f"required_character_unavailable: 无法唯一解析人物“{name}”")
+        character = characters[0]
+        instances = tuple(
+            session.scalars(
+                select(CharacterInstance).where(
+                    CharacterInstance.novel_id == document.novel_id,
+                    CharacterInstance.character_id == character.id,
+                    CharacterInstance.origin_timeline_id == timeline.id,
+                    CharacterInstance.lifecycle_state == "active",
+                )
+            )
+        )
+        if len(instances) != 1:
+            raise ValidationError(
+                f"character_instance_required: 无法唯一解析人物“{name}”的时间线实例"
+            )
+        instance = instances[0]
+        refs.append(
+            {
+                "character_id": str(character.id),
+                "character_instance_id": str(instance.id),
+                "display_label": instance.display_label or character.name,
+            }
+        )
+    return {
+        "schema_version": "chapter-role-constraints/3",
+        "timeline_id": str(timeline.id),
+        "required_characters": refs,
+        "point_of_view": None,
+        "public_requirements": [],
+        "prohibited_outcomes": [],
+        "author_secret_constraints": [],
+        "author_secret_facts": [],
+    }
+
+
 def save_chapter_brief(
     session: Session,
     document_id: UUID,
@@ -763,6 +830,7 @@ def save_chapter_brief(
     if brief is None:
         if expected_version != 0:
             raise BriefConflictError(_brief_payload(None, document_id))
+        v3 = _derive_brief_role_constraints_v3(session, document, normalized_roles)
         brief = ChapterBrief(
             id=uuid4(),
             document_id=document_id,
@@ -771,7 +839,7 @@ def save_chapter_brief(
             expectation_text=expectation_text.strip(),
             outline_text=outline_text.strip(),
             forbidden_text=forbidden_text.strip(),
-            role_constraints=normalized_roles,
+            role_constraints=normalized_roles | {"_v3": v3},
         )
         session.add(brief)
     else:
@@ -788,11 +856,12 @@ def save_chapter_brief(
         brief.expectation_text = expectation_text.strip()
         brief.outline_text = outline_text.strip()
         brief.forbidden_text = forbidden_text.strip()
-        brief.role_constraints = (
-            normalized_roles | {"_v3": previous_v3}
+        next_v3 = (
+            previous_v3
             if previous_v3 is not None and previous_roles == normalized_roles
-            else normalized_roles
+            else _derive_brief_role_constraints_v3(session, document, normalized_roles)
         )
+        brief.role_constraints = normalized_roles | {"_v3": next_v3}
     session.commit()
     return _brief_payload(brief, document_id)
 
@@ -1008,11 +1077,29 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
         for item in context_v3.get("formal_planning", [])
         if isinstance(item, dict)
     )
+    def character_context_line(item: dict[str, Any]) -> str:
+        age = item.get("age_projection")
+        age = age if isinstance(age, dict) else {}
+        if age.get("precision") == "range":
+            age_text = f"{age.get('minimum_age')}—{age.get('maximum_age')}岁"
+        else:
+            age_text = f"未知（{age.get('reason') or '缺少故事时间依据'}）"
+        return (
+            f"- {item.get('ref', {}).get('display_label', '')}："
+            f"{item.get('public_profile', '')}；按本章故事时间的年龄：{age_text}"
+        )
+
     character_text = "\n".join(
-        f"- {item.get('ref', {}).get('display_label', '')}：{item.get('public_profile', '')}"
+        character_context_line(item)
         for item in context_v3.get("character_state", [])
         if isinstance(item, dict)
     )
+    chapter_timeline_text = json.dumps(
+        context_v3.get("chapter_timeline", {}), ensure_ascii=False, sort_keys=True
+    ) if context_v3 else ""
+    chapter_requirements_text = json.dumps(
+        context_v3.get("chapter_requirements", {}), ensure_ascii=False, sort_keys=True
+    ) if context_v3 else ""
     semantic_text = "\n".join(
         f"- [{item.get('corpus', '')}] {item.get('content', '')}"
         for item in context_v3.get("semantic_evidence", [])
@@ -1049,6 +1136,10 @@ contract=chapter-prose-candidate/v2
 允许出场：{'、'.join(roles['allowed']) or '无'}
 仅作上下文、不要安排现场出场：{'、'.join(roles['context_only']) or '无'}
 禁止出现：{'、'.join(roles['forbidden']) or '无'}
+
+本章稳定人物引用与时间线位置：
+{chapter_timeline_text or '- 暂无 V3 时间线位置'}
+{chapter_requirements_text or '- 暂无 V3 稳定人物约束'}
 
 正式大纲与故事设定：
 {planning_text or '- 暂无已正式化的大纲或设定'}
@@ -2110,6 +2201,8 @@ def _typed_story_fact_candidate(
             "schema_version": "storyline-event/1",
             "event": str(raw_details.get("event") or predicate),
             "value": raw_details.get("value", object_text),
+            "status": raw_details.get("status"),
+            "progress": raw_details.get("progress"),
         }
     elif fact_type == "foreshadow_event":
         event = str(raw_details.get("event") or payload.get("event_kind") or "reinforce")
@@ -2670,26 +2763,12 @@ def get_novel_context(
             StoryTimeline.lifecycle_state == "active",
         ).limit(1)
     ) is not None:
-        context_kwargs: dict[str, Any] = {"document_id": document_id}
-        if document_id is not None:
-            brief = session.scalar(
-                select(ChapterBrief).where(ChapterBrief.document_id == document_id)
+        try:
+            envelope = assemble_context_from_db(
+                session, novel_id, document_id=document_id
             )
-            raw_v3 = (
-                dict((brief.role_constraints or {}).get("_v3") or {})
-                if brief is not None and isinstance(brief.role_constraints, dict)
-                else {}
-            )
-            raw_timeline_id = raw_v3.pop("timeline_id", None)
-            if raw_timeline_id is not None:
-                try:
-                    context_kwargs["timeline_id"] = UUID(str(raw_timeline_id))
-                    context_kwargs["chapter_requirements"] = (
-                        ChapterRoleConstraintsV3.model_validate(raw_v3)
-                    )
-                except (ValueError, PydanticValidationError) as error:
-                    raise ValidationError("章节时间线或人物实例约束无效") from error
-        envelope = assemble_context_from_db(session, novel_id, **context_kwargs)
+        except ValueError as error:
+            raise ValidationError("章节时间线或人物实例约束无效") from error
     if envelope is not None:
         projected_facts = [
             *(fact for item in envelope.character_state for fact in item.current_state_facts),

@@ -17,7 +17,12 @@ from .creative_api import router as creative_router
 from .creative_schemas import SELECTION_EDIT_OPERATIONS
 from .creative_data_api import router as creative_data_router
 from .embedding.api import router as embedding_router
-from .embedding.runtime import launch_embedding_runtime, stop_embedding_runtime
+from .embedding.runtime import (
+    embedding_runtime_status,
+    launch_embedding_runtime,
+    semantic_retrieval_enabled,
+    stop_embedding_runtime,
+)
 from .story_state.api import router as story_state_router
 from .database import database_status, get_engine, get_session
 from .generation_dependencies import (
@@ -484,7 +489,8 @@ def health() -> dict[str, object]:
         "model_verification_mode": "preflight-effective+provider-usage",
         "selection_edit_enabled": True,
         "selection_edit_operations": list(SELECTION_EDIT_OPERATIONS),
-        "vector_retrieval_enabled": False,
+        "vector_retrieval_enabled": semantic_retrieval_enabled(),
+        "embedding_runtime": embedding_runtime_status(),
         "narration": narration_runtime_status(),
         "narration_production": narration_production_runtime_status(),
     }

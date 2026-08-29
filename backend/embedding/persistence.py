@@ -21,13 +21,13 @@ from ..creative_data_models import (
     EmbeddingProfile,
     NovelEmbeddingConsent,
 )
+from .chunking import V1_CHUNKER_VERSION
 from .contracts import SUPPORTED_EMBEDDING_DIMENSIONS
 from .lifecycle import EmbeddingLifecycleError
 from ..models import Novel
 
 
 DEFAULT_RENDERER_BUNDLE_VERSION = "semantic-renderers/1"
-DEFAULT_CHUNKER_VERSION = "semantic-char-chunker/1"
 DEFAULT_QUERY_POLICY_VERSION = "semantic-query-policy/1"
 
 
@@ -167,7 +167,7 @@ def create_verified_candidate(
             "query_role": "query",
             "distance": "cosine",
             "renderers": DEFAULT_RENDERER_BUNDLE_VERSION,
-            "chunker": DEFAULT_CHUNKER_VERSION,
+            "chunker": V1_CHUNKER_VERSION,
             "query_policy": DEFAULT_QUERY_POLICY_VERSION,
         }
     )
@@ -224,7 +224,7 @@ def create_verified_candidate(
         id=uuid4(), owner_id=owner_id, workspace_id=workspace_id,
         profile_id=profile.id, generation_number=generation_number, state="draft",
         renderer_bundle_version=DEFAULT_RENDERER_BUNDLE_VERSION,
-        chunker_version=DEFAULT_CHUNKER_VERSION,
+        chunker_version=V1_CHUNKER_VERSION,
         query_policy_version=DEFAULT_QUERY_POLICY_VERSION,
         index_fingerprint=fingerprint, consent_cohort_hash=cohort_hash,
         evaluation_state="not_run", evaluation_summary_json={},
@@ -293,6 +293,12 @@ def grant_consent(
     if replay is not None:
         if replay.operation_hash != operation_hash:
             raise EmbeddingLifecycleError("idempotency_conflict", "consent command changed")
+        _attach_consent_to_candidate(
+            session,
+            consent=replay,
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+        )
         return replay
     active = session.scalar(
         select(NovelEmbeddingConsent).where(
@@ -311,7 +317,104 @@ def grant_consent(
     )
     session.add(consent)
     session.flush()
+    _attach_consent_to_candidate(
+        session,
+        consent=consent,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+    )
     return consent
+
+
+def _attach_consent_to_candidate(
+    session: Session,
+    *,
+    consent: NovelEmbeddingConsent,
+    owner_id: UUID,
+    workspace_id: UUID,
+) -> None:
+    """Add a late-authorized novel to the current candidate generation.
+
+    A candidate may legitimately be saved while no novel is authorized.  Granting
+    consent later must make that novel rebuildable without forcing the author to
+    replace an otherwise valid model configuration.
+    """
+
+    configuration = get_configuration(
+        session, owner_id=owner_id, workspace_id=workspace_id, for_update=True
+    )
+    if configuration is None or configuration.candidate_generation_id is None:
+        return
+    generation = session.scalar(
+        select(EmbeddingGeneration)
+        .where(
+            EmbeddingGeneration.id == configuration.candidate_generation_id,
+            EmbeddingGeneration.owner_id == owner_id,
+            EmbeddingGeneration.workspace_id == workspace_id,
+        )
+        .with_for_update()
+    )
+    if generation is None or generation.state not in {"draft", "building", "ready"}:
+        return
+    build = session.scalar(
+        select(EmbeddingGenerationNovel)
+        .where(
+            EmbeddingGenerationNovel.generation_id == generation.id,
+            EmbeddingGenerationNovel.novel_id == consent.novel_id,
+        )
+        .with_for_update()
+    )
+    changed = False
+    input_digest = _digest(
+        [str(generation.id), str(consent.novel_id), str(consent.id), consent.data_scope_json]
+    )
+    if build is None:
+        session.add(
+            EmbeddingGenerationNovel(
+                id=uuid4(), generation_id=generation.id, novel_id=consent.novel_id,
+                owner_id=owner_id, workspace_id=workspace_id, consent_id=consent.id,
+                state="pending", target_corpora_json=list(consent.data_scope_json),
+                input_digest=input_digest, source_count=0, chunk_count=0,
+                embedded_count=0, failure_count=0,
+            )
+        )
+        changed = True
+    elif build.consent_id != consent.id or build.state in {"cancelled", "failed", "stale"}:
+        build.consent_id = consent.id
+        build.state = "pending"
+        build.target_corpora_json = list(consent.data_scope_json)
+        build.input_digest = input_digest
+        build.source_count = 0
+        build.chunk_count = 0
+        build.embedded_count = 0
+        build.failure_count = 0
+        build.failure_code = None
+        build.started_at = None
+        build.completed_at = None
+        changed = True
+    if not changed:
+        return
+    active_consents = tuple(
+        session.scalars(
+            select(NovelEmbeddingConsent)
+            .join(Novel, Novel.id == NovelEmbeddingConsent.novel_id)
+            .where(
+                Novel.owner_id == owner_id,
+                Novel.workspace_id == workspace_id,
+                NovelEmbeddingConsent.revoked_at.is_(None),
+            )
+            .order_by(NovelEmbeddingConsent.novel_id)
+        )
+    )
+    generation.consent_cohort_hash = _digest(
+        [(str(item.novel_id), str(item.id), item.notice_version) for item in active_consents]
+    )
+    generation.state = "draft"
+    generation.evaluation_state = "not_run"
+    generation.evaluation_summary_json = {}
+    configuration.version += 1
+    configuration.updated_at = _now()
+    session.flush()
 
 
 def revoke_consent(

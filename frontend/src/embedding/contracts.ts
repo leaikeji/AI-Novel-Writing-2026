@@ -224,6 +224,14 @@ function text(value: unknown, field: string): string {
 }
 
 
+function stringValue(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new EmbeddingContractError(field, "must be a string");
+  }
+  return value;
+}
+
+
 function nullableText(value: unknown, field: string): string | null {
   if (value === null) return null;
   return text(value, field);
@@ -345,14 +353,27 @@ export function parseEmbeddingConfigResource(value: unknown): EmbeddingConfigRes
   if (!apiKeyConfigured && apiKeyMasked !== null) {
     throw new EmbeddingContractError("api_key_masked", "must match credential state");
   }
+  const version = integer(item.version, "version");
+  const connectionState = enumValue(
+    item.connection_state,
+    "connection_state",
+    ["unconfigured", "untested", "ready", "failed"],
+  );
+  const baseUrl = stringValue(item.base_url, "base_url");
+  if (!baseUrl.trim() && (version !== 0 || connectionState !== "unconfigured")) {
+    throw new EmbeddingContractError(
+      "base_url",
+      "may be blank only before the first configuration",
+    );
+  }
   return {
-    version: integer(item.version, "version"),
+    version,
     schema_version: EMBEDDING_CONFIG_SCHEMA_VERSION,
     provider_id: "aliyun-bailian",
     provider_label: "阿里云百炼",
     protocol: "dashscope-native-v1",
     protocol_label: "DashScope Native",
-    base_url: text(item.base_url, "base_url"),
+    base_url: baseUrl,
     secret_store_ready: secretStoreReady,
     api_key_configured: apiKeyConfigured,
     api_key_masked: apiKeyMasked,
@@ -360,11 +381,7 @@ export function parseEmbeddingConfigResource(value: unknown): EmbeddingConfigRes
       item.credential_cleanup_warning,
       "credential_cleanup_warning",
     ),
-    connection_state: enumValue(
-      item.connection_state,
-      "connection_state",
-      ["unconfigured", "untested", "ready", "failed"],
-    ),
+    connection_state: connectionState,
     requested_model_id: text(item.requested_model_id, "requested_model_id"),
     requested_dimension: embeddingDimension(item.requested_dimension, "requested_dimension"),
     active_generation: parseGeneration(item.active_generation, "active_generation"),

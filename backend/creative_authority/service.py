@@ -16,7 +16,8 @@ from ..creative_data_models import (
     NovelSettingHead,
     NovelSettingRevision,
 )
-from ..models import Novel, NovelCharacter
+from ..models import CharacterAlias, Novel, NovelCharacter
+from ..narration.aliases import normalize_character_alias
 
 from .errors import (
     AuthorityConflictError,
@@ -660,6 +661,130 @@ def _latest_character_revision(
     )
 
 
+def _upsert_authority_alias(
+    session: Session,
+    *,
+    character: NovelCharacter,
+    revision: NovelCharacterRevision,
+    alias: str,
+    alias_kind: str,
+) -> CharacterAlias:
+    normalized = normalize_character_alias(alias)
+    existing = session.scalar(
+        select(CharacterAlias).where(
+            CharacterAlias.character_id == character.id,
+            CharacterAlias.normalized_alias == normalized,
+        )
+    )
+    if existing is None:
+        existing = CharacterAlias(
+            id=uuid4(),
+            novel_id=character.novel_id,
+            character_id=character.id,
+            alias=alias,
+            normalized_alias=normalized,
+            alias_kind=alias_kind,
+            identity_layer="public",
+            source="character_authority",
+            source_character_revision_id=revision.id,
+            lifecycle_state="active",
+        )
+        session.add(existing)
+    else:
+        existing.alias = alias
+        existing.alias_kind = alias_kind
+        existing.identity_layer = existing.identity_layer or "public"
+        existing.source = "character_authority"
+        existing.source_character_revision_id = revision.id
+    return existing
+
+
+def _refresh_authority_alias_states(
+    session: Session,
+    *,
+    novel_id: UUID,
+    normalized_aliases: set[str],
+) -> None:
+    """Make alias ambiguity explicit; never choose one character by recency."""
+
+    for normalized in normalized_aliases:
+        rows = list(
+            session.scalars(
+                select(CharacterAlias).where(
+                    CharacterAlias.novel_id == novel_id,
+                    CharacterAlias.normalized_alias == normalized,
+                )
+            )
+        )
+        active_character_ids = {
+            item.id
+            for item in session.scalars(
+                select(NovelCharacter).where(
+                    NovelCharacter.novel_id == novel_id,
+                    NovelCharacter.id.in_([row.character_id for row in rows]),
+                    NovelCharacter.lifecycle_state == "active",
+                )
+            )
+        } if rows else set()
+        state = "active" if len(active_character_ids) == 1 else (
+            "conflicted" if len(active_character_ids) > 1 else "archived"
+        )
+        for row in rows:
+            row.lifecycle_state = (
+                state if row.character_id in active_character_ids else "archived"
+            )
+
+
+def _sync_character_authority_aliases(
+    session: Session,
+    *,
+    character: NovelCharacter,
+    revision: NovelCharacterRevision,
+    parent: NovelCharacterRevision | None,
+) -> None:
+    """Persist official/former names in the same transaction as the revision."""
+
+    current_name = str(revision.name).strip()
+    current_normalized = normalize_character_alias(current_name)
+    affected = {current_normalized}
+    _upsert_authority_alias(
+        session,
+        character=character,
+        revision=revision,
+        alias=current_name,
+        alias_kind="official_name",
+    )
+    if parent is not None:
+        former_name = str(parent.name).strip()
+        former_normalized = normalize_character_alias(former_name)
+        affected.add(former_normalized)
+        if former_normalized != current_normalized:
+            _upsert_authority_alias(
+                session,
+                character=character,
+                revision=revision,
+                alias=former_name,
+                alias_kind="former_name",
+            )
+    for row in session.scalars(
+        select(CharacterAlias).where(
+            CharacterAlias.character_id == character.id,
+            CharacterAlias.alias_kind.in_(("official_name", "former_name")),
+        )
+    ):
+        affected.add(row.normalized_alias)
+        row.alias_kind = (
+            "official_name"
+            if row.normalized_alias == current_normalized
+            else "former_name"
+        )
+    _refresh_authority_alias_states(
+        session,
+        novel_id=character.novel_id,
+        normalized_aliases=affected,
+    )
+
+
 def establish_character_revision(
     session: Session,
     novel_id: UUID,
@@ -895,6 +1020,12 @@ def _write_character_revision(
     )
     session.add(revision)
     novel.character_catalog_version = expected_catalog_version + 1
+    _sync_character_authority_aliases(
+        session,
+        character=character,
+        revision=revision,
+        parent=parent,
+    )
     session.flush()
     return CharacterRevisionResult(
         revision, character, int(novel.character_catalog_version), False

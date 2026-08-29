@@ -363,7 +363,7 @@ function fromRelationship(relationship: CharacterRelationshipRecord): Relationsh
     relation_kind: relationship.relation_kind,
     label: relationship.label || relationship.relation_type,
     description: relationship.description,
-    status: relationship.status,
+    status: relationship.definition_status || relationship.status,
     original: null,
   };
   draft.original = draftComparable(draft);

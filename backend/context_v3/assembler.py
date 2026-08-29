@@ -13,6 +13,7 @@ from uuid import UUID
 from ..story_state import (
     StoryFactType,
     StoryFactV2,
+    StoryTimeV1,
     StoryTimelineRecord,
     project_story_facts,
     resolve_timeline,
@@ -21,6 +22,7 @@ from ..story_state import (
 from ..story_state.contracts import VisibilityScope
 
 from .contracts import (
+    AgeProjectionV1,
     CONTEXT_SECTION_ORDER,
     AuthorSecretConstraintV1,
     BoundPrivateAssetRecordV1,
@@ -491,6 +493,58 @@ def _omission_records(
     )
 
 
+def _age_projection(
+    record: CharacterContextRecordV2,
+    story_time: StoryTimeV1 | None,
+) -> AgeProjectionV1:
+    if record.birth_year is None:
+        return AgeProjectionV1(
+            birth_calendar_id=record.birth_calendar_id,
+            as_of_story_time=story_time,
+            reason="missing_birth_year",
+        )
+    if (
+        story_time is None
+        or story_time.lower_bound is None
+        or story_time.upper_bound is None
+    ):
+        return AgeProjectionV1(
+            birth_year=record.birth_year,
+            birth_calendar_id=record.birth_calendar_id,
+            as_of_story_time=story_time,
+            reason="missing_story_time_bounds",
+        )
+    if (
+        record.birth_calendar_id is not None
+        and story_time.calendar_id is not None
+        and record.birth_calendar_id != story_time.calendar_id
+    ):
+        return AgeProjectionV1(
+            birth_year=record.birth_year,
+            birth_calendar_id=record.birth_calendar_id,
+            as_of_story_time=story_time,
+            reason="calendar_mismatch",
+        )
+    minimum_age = story_time.lower_bound - record.birth_year - 1
+    maximum_age = story_time.upper_bound - record.birth_year
+    if maximum_age < 0:
+        return AgeProjectionV1(
+            birth_year=record.birth_year,
+            birth_calendar_id=record.birth_calendar_id,
+            as_of_story_time=story_time,
+            reason="before_birth",
+        )
+    return AgeProjectionV1(
+        birth_year=record.birth_year,
+        birth_calendar_id=record.birth_calendar_id or story_time.calendar_id,
+        as_of_story_time=story_time,
+        minimum_age=max(0, minimum_age),
+        maximum_age=maximum_age,
+        precision="range",
+        reason="year_only_birth",
+    )
+
+
 def assemble_novel_context(
     snapshot: NovelContextAssemblySnapshotV3,
 ) -> NovelContextEnvelopeV3:
@@ -602,6 +656,7 @@ def assemble_novel_context(
             root_revision_id=record.root_revision_id,
             instance_revision_id=record.instance_revision_id,
             public_profile=record.public_profile,
+            age_projection=_age_projection(record, snapshot.position.story_time),
             current_state_facts=tuple(
                 current_character_facts.get(record.ref.character_instance_id, ())
             ),

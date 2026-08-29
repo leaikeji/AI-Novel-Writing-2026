@@ -4,6 +4,7 @@ from .assembler import assemble_novel_context
 from .contracts import (
     CONTEXT_SECTION_ORDER,
     NOVEL_CONTEXT_SCHEMA_VERSION,
+    AgeProjectionV1,
     AuthorSecretConstraintV1,
     BoundPrivateAssetRecordV1,
     ChapterRoleConstraintsV3,
@@ -38,6 +39,7 @@ from .contracts import (
 __all__ = [
     "CONTEXT_SECTION_ORDER",
     "NOVEL_CONTEXT_SCHEMA_VERSION",
+    "AgeProjectionV1",
     "AuthorSecretConstraintV1",
     "BoundPrivateAssetRecordV1",
     "ChapterRoleConstraintsV3",

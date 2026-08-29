@@ -465,7 +465,7 @@ export function RelationshipWorkspace({
                   h("strong", null, relationship.label || relationship.relation_type),
                   h("em", { className: relationship.manual_override ? "is-manual" : "is-ai" }, relationship.manual_override ? "人工确认" : `AI生成${relationship.confidence ? ` ${relationship.confidence}%` : ""}`),
                 ),
-                h("small", null, relationship.description || "未填写关系说明"),
+                h("small", null, relationship.latest_state ? `当前变化：${relationship.latest_state}` : (relationship.description || "未填写关系说明")),
               ),
             )),
           )

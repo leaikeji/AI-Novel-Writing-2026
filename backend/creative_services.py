@@ -85,7 +85,7 @@ from .selection_edit_diff import (
     SelectionEditDiffError,
     validate_selection_edit_result,
 )
-from .story_state.persistence import ensure_default_story_state
+from .story_state.persistence import ensure_default_story_state, get_story_projection_payload
 
 
 PRIVATE_ASSET_TYPES = {"plot", "writing_style", "vocabulary", "idea"}
@@ -1242,7 +1242,68 @@ def _relationship_duplicate(
     return session.scalar(query)
 
 
-def _relationship_payload(relation: CharacterRelationship) -> dict[str, Any]:
+def _entity_story_projection(
+    projection: dict[str, Any],
+    *,
+    fact_type: str,
+    entity_field: str,
+    entity_id: UUID,
+) -> dict[str, Any]:
+    visible = [
+        item
+        for item in projection.get("visible_facts", [])
+        if item.get("fact_type") == fact_type
+        and str(item.get(entity_field) or "") == str(entity_id)
+    ]
+    current = [
+        item
+        for item in projection.get("current_facts", [])
+        if item.get("fact_type") == fact_type
+        and str(item.get(entity_field) or "") == str(entity_id)
+    ]
+    fact_ids = {str(item.get("id")) for item in visible}
+    conflicts = [
+        item
+        for item in projection.get("conflicts", [])
+        if fact_ids.intersection(str(value) for value in item.get("fact_ids", []))
+    ]
+    latest = visible[-1] if visible else None
+    latest_event = None if latest is None else {
+        "fact_id": str(latest["id"]),
+        "story_sequence": latest.get("story_sequence"),
+        "event_kind": latest.get("event_kind"),
+        "predicate": latest.get("predicate"),
+        "text": latest.get("object_text"),
+        "details": dict(latest.get("details") or {}),
+    }
+    return {
+        "timeline_id": projection.get("timeline_id"),
+        "narrative_cutoff": projection.get("narrative_cutoff"),
+        "event_count": len(visible),
+        "fact_ids": [str(item["id"]) for item in visible],
+        "current_fact_ids": [str(item["id"]) for item in current],
+        "latest_event": latest_event,
+        "conflicted": bool(conflicts),
+        "conflicts": conflicts,
+    }
+
+
+def _relationship_payload(
+    relation: CharacterRelationship,
+    *,
+    projection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    entity_projection = (
+        _entity_story_projection(
+            projection,
+            fact_type="relationship_state",
+            entity_field="relationship_id",
+            entity_id=relation.id,
+        )
+        if projection is not None
+        else None
+    )
+    latest_event = entity_projection.get("latest_event") if entity_projection else None
     return {
         "id": str(relation.id),
         "novel_id": str(relation.novel_id),
@@ -1263,6 +1324,9 @@ def _relationship_payload(relation: CharacterRelationship) -> dict[str, Any]:
         "relation_type": relation.label,
         "description": relation.description,
         "status": relation.status,
+        "definition_status": relation.status,
+        "latest_state": latest_event.get("text") if latest_event else "",
+        "projection": entity_projection,
         "created_by": relation.created_by,
         "manual_override": relation.manual_override,
         "confidence": relation.confidence,
@@ -1696,6 +1760,8 @@ def list_character_relationships(
     novel_id: UUID,
     *,
     include_archived: bool = False,
+    timeline_id: UUID | None = None,
+    narrative_cutoff: int | None = None,
 ) -> list[dict[str, Any]]:
     _require_novel(session, novel_id)
     query = select(CharacterRelationship).where(CharacterRelationship.novel_id == novel_id)
@@ -1704,7 +1770,15 @@ def list_character_relationships(
     relations = session.scalars(
         query.order_by(CharacterRelationship.created_at, CharacterRelationship.id)
     ).all()
-    return [_relationship_payload(relation) for relation in relations]
+    projection = get_story_projection_payload(
+        session,
+        novel_id,
+        timeline_id=timeline_id,
+        narrative_cutoff=narrative_cutoff,
+    )
+    return [
+        _relationship_payload(relation, projection=projection) for relation in relations
+    ]
 
 
 def list_character_relationship_history(
@@ -2853,9 +2927,17 @@ def batch_character_relationships(
             }
         )
     session.commit()
+    current_relations = session.scalars(
+        select(CharacterRelationship)
+        .where(
+            CharacterRelationship.novel_id == novel_id,
+            CharacterRelationship.archived_at.is_(None),
+        )
+        .order_by(CharacterRelationship.created_at, CharacterRelationship.id)
+    ).all()
     return {
         "operations": results,
-        "relationships": list_character_relationships(session, novel_id),
+        "relationships": [_relationship_payload(item) for item in current_relations],
     }
 
 
@@ -3010,15 +3092,47 @@ def save_relationship_graph_view(
     return _relationship_graph_view_payload(session, view, novel_id=novel_id)
 
 
-def _storyline_payload(item: Storyline) -> dict[str, Any]:
+def _storyline_payload(
+    item: Storyline,
+    *,
+    projection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    entity_projection = (
+        _entity_story_projection(
+            projection,
+            fact_type="storyline_event",
+            entity_field="storyline_id",
+            entity_id=item.id,
+        )
+        if projection is not None
+        else None
+    )
+    latest_event = entity_projection.get("latest_event") if entity_projection else None
+    latest_details = dict(latest_event.get("details") or {}) if latest_event else {}
+    projected_status = latest_details.get("status")
+    projected_progress = latest_details.get("progress")
+    effective_status = (
+        projected_status if projected_status in STORYLINE_STATUSES else item.status
+    )
+    effective_progress = (
+        projected_progress
+        if isinstance(projected_progress, int)
+        and not isinstance(projected_progress, bool)
+        and 0 <= projected_progress <= 100
+        else item.progress
+    )
     return {
         "id": str(item.id),
         "novel_id": str(item.novel_id),
         "storyline_type": item.storyline_type,
         "title": item.title,
         "description": item.description,
-        "status": item.status,
-        "progress": item.progress,
+        "status": effective_status,
+        "progress": effective_progress,
+        "planning_status": item.status,
+        "planning_progress": item.progress,
+        "latest_progress": latest_event.get("text") if latest_event else "",
+        "projection": entity_projection,
         "position": item.position,
         "version": item.version,
         "created_at": _iso(item.created_at),
@@ -3026,7 +3140,13 @@ def _storyline_payload(item: Storyline) -> dict[str, Any]:
     }
 
 
-def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
+def list_storylines(
+    session: Session,
+    novel_id: UUID,
+    *,
+    timeline_id: UUID | None = None,
+    narrative_cutoff: int | None = None,
+) -> list[dict[str, Any]]:
     """Return author-maintained storyline roots without mutating projections.
 
     Story progress is projected from accepted StoryFact events by the story
@@ -3037,7 +3157,17 @@ def list_storylines(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
     rows = session.scalars(
         select(Storyline).where(Storyline.novel_id == novel_id).order_by(Storyline.position)
     ).all()
-    return [_storyline_payload(item) for item in rows if item.status != "archived"]
+    projection = get_story_projection_payload(
+        session,
+        novel_id,
+        timeline_id=timeline_id,
+        narrative_cutoff=narrative_cutoff,
+    )
+    return [
+        _storyline_payload(item, projection=projection)
+        for item in rows
+        if item.status != "archived"
+    ]
 
 
 def create_storyline(
@@ -3115,15 +3245,44 @@ def delete_storyline(
     session.commit()
 
 
-def _foreshadow_payload(item: Foreshadow) -> dict[str, Any]:
+def _foreshadow_payload(
+    item: Foreshadow,
+    *,
+    projection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    entity_projection = (
+        _entity_story_projection(
+            projection,
+            fact_type="foreshadow_event",
+            entity_field="foreshadow_id",
+            entity_id=item.id,
+        )
+        if projection is not None
+        else None
+    )
+    latest_event = entity_projection.get("latest_event") if entity_projection else None
+    event = str((latest_event or {}).get("details", {}).get("event") or "")
+    status_by_event = {
+        "plant": "active",
+        "reinforce": "active",
+        "reveal": "active",
+        "resolve": "resolved",
+        "cancel": "dropped",
+    }
+    effective_status = status_by_event.get(event, item.status)
+    effective_progress = 100 if event == "resolve" else item.progress
     return {
         "id": str(item.id),
         "novel_id": str(item.novel_id),
         "title": item.title,
         "content": item.content,
-        "latest_progress": item.latest_progress,
-        "status": item.status,
-        "progress": item.progress,
+        "latest_progress": latest_event.get("text") if latest_event else item.latest_progress,
+        "status": effective_status,
+        "progress": effective_progress,
+        "planning_latest_progress": item.latest_progress,
+        "planning_status": item.status,
+        "planning_progress": item.progress,
+        "projection": entity_projection,
         "position": item.position,
         "version": item.version,
         "created_at": _iso(item.created_at),
@@ -3131,14 +3290,30 @@ def _foreshadow_payload(item: Foreshadow) -> dict[str, Any]:
     }
 
 
-def list_foreshadows(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
+def list_foreshadows(
+    session: Session,
+    novel_id: UUID,
+    *,
+    timeline_id: UUID | None = None,
+    narrative_cutoff: int | None = None,
+) -> list[dict[str, Any]]:
     """Return author-maintained foreshadow roots without write-on-read sync."""
 
     _require_novel(session, novel_id)
     rows = session.scalars(
         select(Foreshadow).where(Foreshadow.novel_id == novel_id).order_by(Foreshadow.position)
     ).all()
-    return [_foreshadow_payload(item) for item in rows if item.status != "dropped"]
+    projection = get_story_projection_payload(
+        session,
+        novel_id,
+        timeline_id=timeline_id,
+        narrative_cutoff=narrative_cutoff,
+    )
+    return [
+        _foreshadow_payload(item, projection=projection)
+        for item in rows
+        if item.status != "dropped"
+    ]
 
 
 def create_foreshadow(

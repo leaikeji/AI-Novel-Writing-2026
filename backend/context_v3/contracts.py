@@ -179,6 +179,8 @@ class CharacterContextRecordV2(_StrictModel):
     present_on_timeline_ids: tuple[UUID, ...] = Field(min_length=1)
     active_from_sequence: int | None = Field(default=None, ge=0)
     active_to_sequence: int | None = Field(default=None, ge=0)
+    birth_year: int | None = Field(default=None, ge=-100_000, le=100_000)
+    birth_calendar_id: str | None = Field(default=None, max_length=80)
     public_profile: str = Field(default="", max_length=100_000)
     author_secret_constraints: tuple[AuthorSecretConstraintV1, ...] = ()
 
@@ -262,11 +264,40 @@ class ContextTextBlockV1(_StrictModel):
     policy: PrivateAssetPolicy | None = None
 
 
+class AgeProjectionV1(_StrictModel):
+    schema_version: Literal["age-projection/1"] = "age-projection/1"
+    birth_year: int | None = Field(default=None, ge=-100_000, le=100_000)
+    birth_calendar_id: str | None = Field(default=None, max_length=80)
+    as_of_story_time: StoryTimeV1 | None = None
+    minimum_age: int | None = Field(default=None, ge=0)
+    maximum_age: int | None = Field(default=None, ge=0)
+    precision: Literal["range", "unknown"] = "unknown"
+    reason: Literal[
+        "year_only_birth",
+        "missing_birth_year",
+        "missing_story_time_bounds",
+        "calendar_mismatch",
+        "before_birth",
+    ]
+
+    @model_validator(mode="after")
+    def validate_age_range(self) -> "AgeProjectionV1":
+        if self.precision == "range":
+            if self.minimum_age is None or self.maximum_age is None:
+                raise ValueError("range age projection requires both bounds")
+            if self.maximum_age < self.minimum_age:
+                raise ValueError("age projection range is reversed")
+        elif self.minimum_age is not None or self.maximum_age is not None:
+            raise ValueError("unknown age projection cannot contain age bounds")
+        return self
+
+
 class CharacterContextV2(_StrictModel):
     ref: CharacterRefV2
     root_revision_id: UUID
     instance_revision_id: UUID
     public_profile: str
+    age_projection: AgeProjectionV1
     current_state_facts: tuple[StoryFactV2, ...]
 
 

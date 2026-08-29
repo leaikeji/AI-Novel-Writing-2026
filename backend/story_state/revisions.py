@@ -60,6 +60,7 @@ class CharacterInstanceProfileV1(BaseModel):
     true_identity: str | None = Field(default=None, max_length=2_000)
     cover_identity: str | None = Field(default=None, max_length=2_000)
     birth_year: int | None = Field(default=None, ge=-100_000, le=100_000)
+    birth_calendar_id: str | None = Field(default=None, max_length=80)
     birth_information: str | None = Field(default=None, max_length=2_000)
     occupation: str | None = Field(default=None, max_length=2_000)
     personality: str | None = Field(default=None, max_length=4_000)

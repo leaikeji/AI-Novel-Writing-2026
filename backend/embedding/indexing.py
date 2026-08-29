@@ -39,11 +39,39 @@ from ..models import Document, DocumentRevision, DocumentWorkingCopy
 
 
 V1_CORPORA = frozenset({"manuscript", "planning", "private_asset"})
+# The current DashScope workspace endpoint is fast for one 2048-dimension
+# document (including 1,800-character chunks) but can keep multi-document
+# arrays open for minutes.  Preserve the protocol cap of ten while using the
+# verified singleton product policy for predictable local-job fencing.
+EMBEDDING_BATCH_MAX_ITEMS = 1
+EMBEDDING_BATCH_MAX_CHARACTERS = 1_200
 
 
 def _digest(value: object) -> str:
     text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return sha256(text.encode("utf-8")).hexdigest()
+
+
+def _batch_chunks(chunks: list[SemanticChunk]) -> tuple[tuple[SemanticChunk, ...], ...]:
+    """Apply the verified item policy and the long-text request budget."""
+
+    batches: list[tuple[SemanticChunk, ...]] = []
+    current: list[SemanticChunk] = []
+    current_characters = 0
+    for chunk in chunks:
+        chunk_characters = len(chunk.content_text)
+        if current and (
+            len(current) >= EMBEDDING_BATCH_MAX_ITEMS
+            or current_characters + chunk_characters > EMBEDDING_BATCH_MAX_CHARACTERS
+        ):
+            batches.append(tuple(current))
+            current = []
+            current_characters = 0
+        current.append(chunk)
+        current_characters += chunk_characters
+    if current:
+        batches.append(tuple(current))
+    return tuple(batches)
 
 
 def _persist_source(
@@ -260,10 +288,7 @@ def prepare_v1_novel_index(
             visibility=visibility,
         )
         persisted_chunks.extend(records)
-    batches = tuple(
-        tuple(persisted_chunks[offset : offset + 10])
-        for offset in range(0, len(persisted_chunks), 10)
-    )
+    batches = _batch_chunks(persisted_chunks)
     scope = LocalWorkspaceScope.fixed_local()
     if (build.owner_id, build.workspace_id) != (scope.owner_id, scope.workspace_id):
         raise EmbeddingLifecycleError("scope_violation", "generation is outside fixed local scope")
