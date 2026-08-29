@@ -288,11 +288,34 @@ class UpdateAssetPresetRequest(CreateAssetPresetRequest):
     expected_version: int = Field(ge=1)
 
 
+class OutlineCharacterDraftV2(BaseModel):
+    """Typed planning record; formal identity is linked only by stable ID."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    schema_version: Literal["outline-character-draft/2"] = (
+        "outline-character-draft/2"
+    )
+    draft_key: str = Field(min_length=1, max_length=160)
+    character_id: UUID | None = None
+    role_type: Literal["main", "supporting"] = "supporting"
+    name: str = Field(min_length=1, max_length=240)
+    gender: str | None = Field(default=None, max_length=120)
+    age_at_story_start_note: str | None = Field(default=None, max_length=2_000)
+    identity_summary: str | None = Field(default=None, max_length=2_000)
+    personality_summary: str | None = Field(default=None, max_length=4_000)
+    core_goal: str | None = Field(default=None, max_length=2_000)
+    bio: str = Field(default="", max_length=20_000)
+    origin: Literal["manual", "ai_candidate"] = "manual"
+
+
 class UpdateOutlineDraftRequest(BaseModel):
     expected_version: int = Field(ge=1)
     step: int = Field(ge=1, le=5)
     target_chapter_count: int | None = Field(default=None, ge=10, le=10_000)
     background_text: str | None = Field(default=None, max_length=30_000)
+    # Legacy dictionary rows remain accepted at the HTTP boundary and are
+    # normalized to OutlineCharacterDraftV2 before persistence.
     characters: list[dict[str, Any]] | None = Field(default=None, max_length=200)
     plot_text: str | None = Field(default=None, max_length=50_000)
     highlight_text: str | None = Field(default=None, max_length=200)

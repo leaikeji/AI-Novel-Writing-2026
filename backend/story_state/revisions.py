@@ -35,6 +35,7 @@ class RevisionServiceErrorCode(str, Enum):
     REVISION_NOT_FOUND = "character_instance_revision_not_found"
     IDEMPOTENCY_CONFLICT = "idempotency_conflict"
     INVALID_OPERATION_KEY = "invalid_operation_key"
+    INVALID_PROFILE_SCHEMA = "invalid_character_instance_profile_schema"
 
 
 class RevisionServiceError(ValueError):
@@ -76,6 +77,53 @@ class CharacterInstanceProfileV1(BaseModel):
         if len(cleaned) != len(set(cleaned)):
             raise ValueError("profile list fields must not contain duplicates")
         return cleaned
+
+
+class CharacterInstanceProfileV2(CharacterInstanceProfileV1):
+    """V2 adds an author note without introducing a computed-age authority."""
+
+    schema_version: Literal["character-instance-profile/2"] = (
+        "character-instance-profile/2"
+    )
+    age_at_story_start_note: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2_000,
+        description=(
+            "Author-authored display note only; deterministic age projection "
+            "continues to use birth_year, calendar and story time."
+        ),
+    )
+
+
+CharacterInstanceProfile = CharacterInstanceProfileV1 | CharacterInstanceProfileV2
+
+
+def _profile_schema_version(profile: CharacterInstanceProfile) -> int:
+    return 2 if isinstance(profile, CharacterInstanceProfileV2) else 1
+
+
+def _validate_stored_profile(
+    profile_schema_version: int,
+    profile_json: dict[str, object],
+) -> None:
+    model: type[CharacterInstanceProfileV1]
+    if profile_schema_version == 1:
+        model = CharacterInstanceProfileV1
+    elif profile_schema_version == 2:
+        model = CharacterInstanceProfileV2
+    else:
+        raise RevisionServiceError(
+            RevisionServiceErrorCode.INVALID_PROFILE_SCHEMA,
+            "character instance profile schema version is unsupported",
+        )
+    try:
+        model.model_validate(profile_json)
+    except ValueError as error:
+        raise RevisionServiceError(
+            RevisionServiceErrorCode.INVALID_PROFILE_SCHEMA,
+            "stored character instance profile does not match its schema version",
+        ) from error
 
 
 def _validate_operation_key(operation_key: str) -> str:
@@ -253,7 +301,7 @@ def save_character_instance_profile(
     expected_story_ledger_version: int,
     expected_instance_version: int,
     operation_key: str,
-    profile: CharacterInstanceProfileV1,
+    profile: CharacterInstanceProfile,
     source_kind: Literal["manual", "ai_adopt"] = "manual",
     id_factory: IdFactory = uuid4,
     clock: Clock = _now,
@@ -275,7 +323,7 @@ def save_character_instance_profile(
         expected_instance_version=expected_instance_version,
         operation_key=key,
         operation_hash=operation_hash,
-        profile_schema_version=1,
+        profile_schema_version=_profile_schema_version(profile),
         profile_json=profile_json,
         source_kind=source_kind,
         restored_from_revision_id=None,
@@ -305,6 +353,8 @@ def restore_character_instance_profile(
             RevisionServiceErrorCode.REVISION_NOT_FOUND,
             "target character instance revision was not found in the novel",
         )
+    target_profile = dict(target.profile_json or {})
+    _validate_stored_profile(target.profile_schema_version, target_profile)
     key = _validate_operation_key(operation_key)
     operation_hash = _canonical_hash(
         {
@@ -323,7 +373,7 @@ def restore_character_instance_profile(
         operation_key=key,
         operation_hash=operation_hash,
         profile_schema_version=target.profile_schema_version,
-        profile_json=dict(target.profile_json or {}),
+        profile_json=target_profile,
         source_kind="restore",
         restored_from_revision_id=target.id,
         id_factory=id_factory,

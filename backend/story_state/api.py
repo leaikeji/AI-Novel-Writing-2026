@@ -46,6 +46,7 @@ from .mappings import (
 )
 from .revisions import (
     CharacterInstanceProfileV1,
+    CharacterInstanceProfileV2,
     RevisionServiceError,
     RevisionServiceErrorCode,
     get_character_instance_profile,
@@ -157,7 +158,7 @@ class CharacterInstanceProfileSaveRequest(_Strict):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
     )
     source_kind: Literal["manual", "ai_adopt"] = "manual"
-    profile: CharacterInstanceProfileV1
+    profile: CharacterInstanceProfileV1 | CharacterInstanceProfileV2
 
 
 class CharacterInstanceProfileRestoreRequest(_Strict):

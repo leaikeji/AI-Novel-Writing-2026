@@ -22,6 +22,7 @@ from ..story_state import (
 
 NOVEL_CONTEXT_SCHEMA_VERSION = "novel-context/4"
 WRITING_CONTEXT_SNAPSHOT_VERSION = "writing-context-snapshot/1"
+WRITING_CONTEXT_SNAPSHOT_VERSION_V2 = "writing-context-snapshot/2"
 SINGLE_TIMELINE_MAPPING_VERSION = "single-timeline-identity/1"
 
 
@@ -212,6 +213,38 @@ class ContextBudgetV1(_StrictModel):
         )
 
 
+class ContextBudgetV2(_StrictModel):
+    """Pre-call budget identity without invented actual-model evidence."""
+
+    schema_version: Literal["context-budget/2"] = "context-budget/2"
+    requested_provider_id: str = Field(min_length=1, max_length=160)
+    requested_model_id: str = Field(min_length=1, max_length=240)
+    budget_provider_id: str = Field(min_length=1, max_length=160)
+    budget_model_id: str = Field(min_length=1, max_length=240)
+    effective_context_window_tokens: int = Field(ge=1)
+    reserved_output_tokens: int = Field(ge=0)
+    reserved_prompt_tokens: int = Field(ge=0)
+    fixed_overhead_tokens: int = Field(ge=0)
+    estimator_version: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_window(self) -> "ContextBudgetV2":
+        if (
+            self.reserved_output_tokens + self.reserved_prompt_tokens
+            >= self.effective_context_window_tokens
+        ):
+            raise ValueError("model reservations leave no input context budget")
+        return self
+
+    @property
+    def hard_input_token_budget(self) -> int:
+        return (
+            self.effective_context_window_tokens
+            - self.reserved_output_tokens
+            - self.reserved_prompt_tokens
+        )
+
+
 class ContextAssemblyErrorCode(str, Enum):
     TIMELINE_REQUIRED = "timeline_required"
     TIMELINE_MAPPING_REQUIRED = "timeline_mapping_required"
@@ -291,6 +324,41 @@ class ContextBudgetResultV1(_StrictModel):
         return self
 
 
+class ContextBudgetResultV2(_StrictModel):
+    schema_version: Literal["context-budget-result/2"] = "context-budget-result/2"
+    requested_provider_id: str = Field(min_length=1, max_length=160)
+    requested_model_id: str = Field(min_length=1, max_length=240)
+    budget_provider_id: str = Field(min_length=1, max_length=160)
+    budget_model_id: str = Field(min_length=1, max_length=240)
+    effective_context_window_tokens: int = Field(ge=1)
+    reserved_output_tokens: int = Field(ge=0)
+    reserved_prompt_tokens: int = Field(ge=0)
+    hard_input_token_budget: int = Field(ge=1)
+    fixed_overhead_tokens: int = Field(ge=0)
+    included_block_tokens: int = Field(ge=0)
+    omitted_block_tokens: int = Field(ge=0)
+    remaining_tokens: int = Field(ge=0)
+    estimator_version: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_accounting(self) -> "ContextBudgetResultV2":
+        if (
+            self.effective_context_window_tokens
+            - self.reserved_output_tokens
+            - self.reserved_prompt_tokens
+            != self.hard_input_token_budget
+        ):
+            raise ValueError("hard input budget does not match the model window")
+        if (
+            self.fixed_overhead_tokens
+            + self.included_block_tokens
+            + self.remaining_tokens
+            != self.hard_input_token_budget
+        ):
+            raise ValueError("context budget accounting is inconsistent")
+        return self
+
+
 class ContextDiagnosticsV2(_StrictModel):
     omissions: tuple[ContextOmissionV2, ...]
     conflicts: tuple[ContextConflictV2, ...]
@@ -306,7 +374,7 @@ class NovelContextAssemblySnapshotV4(_StrictModel):
     purpose: RetrievalPurpose
     position: StoryPositionV3
     perspective: PerspectiveV1
-    budget: ContextBudgetV1
+    budget: ContextBudgetV1 | ContextBudgetV2
     timelines: tuple[StoryTimelineRecord, ...]
     facts: tuple[StoryFactV2, ...] = ()
     event_links: tuple[StoryEventLinkRecord, ...] = ()
@@ -339,7 +407,7 @@ class NovelContextEnvelopeV4(_StrictModel):
     visible_story_facts: tuple[StoryFactV2, ...]
     included_blocks: tuple[ContextBlockV2, ...]
     diagnostics: ContextDiagnosticsV2
-    budget: ContextBudgetResultV1
+    budget: ContextBudgetResultV1 | ContextBudgetResultV2
     section_order: tuple[ContextSection, ...] = CONTEXT_SECTION_ORDER
 
     @field_validator("section_order")
@@ -375,4 +443,47 @@ class WritingContextSnapshotV1(_StrictModel):
     def validate_scope(self) -> "WritingContextSnapshotV1":
         if self.novel_id != self.envelope.novel_id or self.purpose is not self.envelope.purpose:
             raise ValueError("writing snapshot scope differs from its context envelope")
+        if not isinstance(self.envelope.budget, ContextBudgetResultV1):
+            raise ValueError("V1 writing snapshot requires a V1 context budget")
+        return self
+
+
+class WritingContextSnapshotV2(_StrictModel):
+    """Pre-call writing snapshot; actual identity is recorded after execution."""
+
+    schema_version: Literal[WRITING_CONTEXT_SNAPSHOT_VERSION_V2] = (
+        WRITING_CONTEXT_SNAPSHOT_VERSION_V2
+    )
+    novel_id: UUID
+    purpose: RetrievalPurpose
+    requested_provider_id: str = Field(min_length=1, max_length=160)
+    requested_model_id: str = Field(min_length=1, max_length=240)
+    budget_provider_id: str = Field(min_length=1, max_length=160)
+    budget_model_id: str = Field(min_length=1, max_length=240)
+    effective_context_window_tokens: int = Field(ge=1)
+    context_policy_version: str = Field(min_length=1, max_length=120)
+    envelope: NovelContextEnvelopeV4
+    assembly_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_scope_and_budget(self) -> "WritingContextSnapshotV2":
+        if self.novel_id != self.envelope.novel_id or self.purpose is not self.envelope.purpose:
+            raise ValueError("writing snapshot scope differs from its context envelope")
+        budget = self.envelope.budget
+        if not isinstance(budget, ContextBudgetResultV2):
+            raise ValueError("V2 writing snapshot requires a V2 context budget")
+        if (
+            self.requested_provider_id,
+            self.requested_model_id,
+            self.budget_provider_id,
+            self.budget_model_id,
+            self.effective_context_window_tokens,
+        ) != (
+            budget.requested_provider_id,
+            budget.requested_model_id,
+            budget.budget_provider_id,
+            budget.budget_model_id,
+            budget.effective_context_window_tokens,
+        ):
+            raise ValueError("writing snapshot identity differs from its context budget")
         return self

@@ -18,7 +18,7 @@ import httpx
 from .selection_edit_diff import SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS
 
 NOVEL_AGENT_ID = "ai-novel-writer"
-GENERATION_CONTRACT_VERSION = "follow-agent-effective-v4"
+GENERATION_CONTRACT_VERSION = "follow-agent-effective-v5"
 
 
 _CHARACTER_GENDER_ALIASES = {
@@ -305,10 +305,9 @@ def _iter_qwenpaw_turn_usages(value: Any) -> Iterable[dict[str, Any]]:
 def reply_model_audit(reply: Any, *, session_id: str | None = None) -> ModelAudit:
     """Resolve the actual provider/model recorded by QwenPaw for one reply.
 
-    The token recording wrapper stores ``provider_id`` and ``model_name`` under
-    ``qwenpaw_turn_usage.usage`` on the closing assistant message. We search the
-    raw PawApp reply chunks because the convenience ``reply.text`` intentionally
-    discards metadata.
+    Only public closing-message metadata is accepted. ``session_id`` remains a
+    compatibility-only argument for callers and historical tests; it is never
+    used to read QwenPaw private state.
     """
 
     chunks = getattr(reply, "chunks", None)
@@ -316,24 +315,8 @@ def reply_model_audit(reply: Any, *, session_id: str | None = None) -> ModelAudi
         audit = _audit_from_usage(usage, source="provider-usage")
         if audit is not None:
             return audit
-    if session_id:
-        try:
-            from qwenpaw.token_usage.model_wrapper import TokenRecordingModelWrapper
-
-            buffered_usage = TokenRecordingModelWrapper.pop_usage_for_session(
-                session_id
-            )
-        except Exception:  # pragma: no cover - production runtime boundary
-            buffered_usage = None
-        audit = _audit_from_usage(
-            buffered_usage,
-            source="provider-usage-buffer",
-        )
-        if audit is not None:
-            return audit
     raise ModelVerificationError(
-        "模型身份未核验：QwenPaw 回复缺少实际 provider/model 用量元数据，"
-        "生成结果已作废"
+        "QwenPaw 公开回复未提供 provider/model 用量元数据"
     )
 
 

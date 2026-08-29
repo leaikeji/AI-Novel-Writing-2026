@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .context_v4 import (
     ContextBlockV2,
     ContextBudgetV1,
+    ContextBudgetV2,
     ContextRequirement,
     ContextSection,
     NovelContextAssemblySnapshotV4,
@@ -23,6 +24,7 @@ from .context_v4 import (
     StoryPositionV3,
     assemble_novel_context,
     freeze_writing_context,
+    freeze_writing_context_v2,
 )
 from .creative_data_models import (
     CharacterInstance,
@@ -303,7 +305,10 @@ def assemble_writing_context_from_db(
     position: WritingPosition,
     purpose: RetrievalPurpose,
     requested_model_id: str,
-    actual_model_id: str,
+    actual_model_id: str | None = None,
+    requested_provider_id: str | None = None,
+    budget_provider_id: str | None = None,
+    budget_model_id: str | None = None,
     effective_context_window_tokens: int,
     reserved_output_tokens: int,
     chapter_brief: ChapterBrief | None = None,
@@ -379,14 +384,29 @@ def assemble_writing_context_from_db(
     )
     blocks.extend(_private_asset_blocks(position.novel_id, effective_assets))
     blocks.extend(_semantic_blocks(position.novel_id, writing_retrieval))
-    budget = ContextBudgetV1(
-        actual_model_id=actual_model_id,
-        effective_context_window_tokens=effective_context_window_tokens,
-        reserved_output_tokens=reserved_output_tokens,
-        reserved_prompt_tokens=max(256, effective_context_window_tokens // 100),
-        fixed_overhead_tokens=256,
-        estimator_version=TOKEN_ESTIMATOR_VERSION,
-    )
+    if requested_provider_id and budget_provider_id and budget_model_id:
+        budget: ContextBudgetV1 | ContextBudgetV2 = ContextBudgetV2(
+            requested_provider_id=requested_provider_id,
+            requested_model_id=requested_model_id,
+            budget_provider_id=budget_provider_id,
+            budget_model_id=budget_model_id,
+            effective_context_window_tokens=effective_context_window_tokens,
+            reserved_output_tokens=reserved_output_tokens,
+            reserved_prompt_tokens=max(256, effective_context_window_tokens // 100),
+            fixed_overhead_tokens=256,
+            estimator_version=TOKEN_ESTIMATOR_VERSION,
+        )
+    else:
+        if not actual_model_id:
+            raise ValueError("V1 context assembly requires actual_model_id")
+        budget = ContextBudgetV1(
+            actual_model_id=actual_model_id,
+            effective_context_window_tokens=effective_context_window_tokens,
+            reserved_output_tokens=reserved_output_tokens,
+            reserved_prompt_tokens=max(256, effective_context_window_tokens // 100),
+            fixed_overhead_tokens=256,
+            estimator_version=TOKEN_ESTIMATOR_VERSION,
+        )
     envelope = assemble_novel_context(
         NovelContextAssemblySnapshotV4(
             novel_id=position.novel_id,
@@ -407,9 +427,14 @@ def assemble_writing_context_from_db(
             blocks=tuple(blocks),
         )
     )
+    if isinstance(budget, ContextBudgetV2):
+        return freeze_writing_context_v2(
+            envelope,
+            context_policy_version=CONTEXT_POLICY_VERSION,
+        ).model_dump(mode="json")
     return freeze_writing_context(
         envelope,
         requested_model_id=requested_model_id,
-        actual_model_id=actual_model_id,
+        actual_model_id=str(actual_model_id),
         context_policy_version=CONTEXT_POLICY_VERSION,
     ).model_dump(mode="json")

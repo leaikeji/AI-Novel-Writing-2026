@@ -1,15 +1,22 @@
-from .assembler import assemble_novel_context, freeze_writing_context
+from .assembler import (
+    assemble_novel_context,
+    freeze_writing_context,
+    freeze_writing_context_v2,
+)
 from .contracts import (
     CONTEXT_SECTION_ORDER,
     NOVEL_CONTEXT_SCHEMA_VERSION,
     SINGLE_TIMELINE_MAPPING_VERSION,
     WRITING_CONTEXT_SNAPSHOT_VERSION,
+    WRITING_CONTEXT_SNAPSHOT_VERSION_V2,
     ChapterTimelineContextV3,
     ContextAssemblyError,
     ContextAssemblyErrorCode,
     ContextBlockV2,
     ContextBudgetResultV1,
+    ContextBudgetResultV2,
     ContextBudgetV1,
+    ContextBudgetV2,
     ContextConflictV2,
     ContextDiagnosticsV2,
     ContextOmissionV2,
@@ -25,6 +32,7 @@ from .contracts import (
     StoryPositionV3,
     TimelineMappingKind,
     WritingContextSnapshotV1,
+    WritingContextSnapshotV2,
 )
 
 __all__ = [
@@ -32,12 +40,15 @@ __all__ = [
     "NOVEL_CONTEXT_SCHEMA_VERSION",
     "SINGLE_TIMELINE_MAPPING_VERSION",
     "WRITING_CONTEXT_SNAPSHOT_VERSION",
+    "WRITING_CONTEXT_SNAPSHOT_VERSION_V2",
     "ChapterTimelineContextV3",
     "ContextAssemblyError",
     "ContextAssemblyErrorCode",
     "ContextBlockV2",
     "ContextBudgetResultV1",
+    "ContextBudgetResultV2",
     "ContextBudgetV1",
+    "ContextBudgetV2",
     "ContextConflictV2",
     "ContextDiagnosticsV2",
     "ContextOmissionV2",
@@ -53,6 +64,8 @@ __all__ = [
     "StoryPositionV3",
     "TimelineMappingKind",
     "WritingContextSnapshotV1",
+    "WritingContextSnapshotV2",
     "assemble_novel_context",
     "freeze_writing_context",
+    "freeze_writing_context_v2",
 ]

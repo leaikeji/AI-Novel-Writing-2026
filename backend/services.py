@@ -36,6 +36,7 @@ from .generation_runtime import (
     CHAPTER_GENERATION_STALE_GRACE_SECONDS,
     CHAPTER_GENERATION_TIMEOUT_SECONDS,
 )
+from .model_execution import ModelEvidencePolicyError, candidate_actual_identity
 
 from .models import (
     CandidateRevision,
@@ -350,6 +351,7 @@ def _generation_job_payload(
         "generation_contract_version": job.generation_contract_version,
         "actual_provider_id": job.actual_provider_id,
         "actual_model_id": job.actual_model_id,
+        "model_evidence": job.model_evidence_json,
         "provider_profile": job.actual_provider_id or job.provider_profile,
         "target_visible_character_count": job.target_visible_character_count,
         "minimum_visible_character_count": minimum_count,
@@ -420,6 +422,7 @@ def _intelligence_proposal_payload(
         "generation_contract_version": proposal.generation_contract_version,
         "actual_provider_id": proposal.actual_provider_id,
         "actual_model_id": proposal.actual_model_id,
+        "model_evidence": proposal.model_evidence_json,
         "provider_profile": proposal.actual_provider_id or proposal.provider_profile,
         "model_profile_fingerprint": proposal.model_profile_fingerprint,
         "attempt": proposal.attempt,
@@ -1009,8 +1012,10 @@ def start_chapter_generation(
             session,
             position=writing_position,
             purpose=ContextRetrievalPurpose.CHAPTER_BODY,
+            requested_provider_id=requested_provider_id,
             requested_model_id=requested_model_id,
-            actual_model_id=requested_model_id,
+            budget_provider_id=requested_provider_id,
+            budget_model_id=requested_model_id,
             effective_context_window_tokens=effective_context_window_tokens,
             reserved_output_tokens=max(1, int(brief.target_word_count) * 2),
             chapter_brief=brief,
@@ -1315,8 +1320,9 @@ def complete_chapter_generation(
     job_id: UUID,
     *,
     content_markdown: str,
-    actual_provider_id: str,
-    actual_model_id: str,
+    actual_provider_id: str | None = None,
+    actual_model_id: str | None = None,
+    model_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     job = session.scalar(
         select(ChapterGenerationJob)
@@ -1332,9 +1338,22 @@ def complete_chapter_generation(
         return _generation_job_payload(session, job)
     if job.state != "running":
         return _generation_job_payload(session, job)
-    job.actual_provider_id = actual_provider_id
-    job.actual_model_id = actual_model_id
-    if (
+    if model_evidence is not None:
+        try:
+            actual_provider_id, actual_model_id = candidate_actual_identity(
+                model_evidence,
+                requested_provider_id=str(job.requested_provider_id or ""),
+                requested_model_id=job.requested_model_id,
+            )
+        except ModelEvidencePolicyError as error:
+            job.model_evidence_json = dict(model_evidence)
+            job.state = "failed"
+            job.failure_message = str(error)
+            job.completed_at = datetime.now(timezone.utc)
+            session.commit()
+            raise ValidationError(str(error)) from error
+        job.model_evidence_json = dict(model_evidence)
+    elif (
         actual_provider_id != job.requested_provider_id
         or actual_model_id != job.requested_model_id
     ):
@@ -1347,6 +1366,8 @@ def complete_chapter_generation(
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
         raise ValidationError(job.failure_message)
+    job.actual_provider_id = actual_provider_id
+    job.actual_model_id = actual_model_id
     candidate_text = _clean_model_candidate(content_markdown)
     output_visible_character_count = visible_character_count(candidate_text)
     minimum_visible_character_count, maximum_visible_character_count, requested_visible_character_count = (
@@ -1406,6 +1427,7 @@ def fail_chapter_generation(
     *,
     actual_provider_id: str | None = None,
     actual_model_id: str | None = None,
+    model_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     job = session.scalar(
         select(ChapterGenerationJob)
@@ -1419,6 +1441,8 @@ def fail_chapter_generation(
     if actual_provider_id and actual_model_id:
         job.actual_provider_id = actual_provider_id
         job.actual_model_id = actual_model_id
+    if model_evidence is not None:
+        job.model_evidence_json = dict(model_evidence)
     job.state = "failed"
     job.failure_message = message[:4000]
     job.completed_at = datetime.now(timezone.utc)
@@ -2071,8 +2095,9 @@ def complete_intelligence_proposal(
     proposal_id: UUID,
     *,
     items: list[dict[str, Any]],
-    actual_provider_id: str,
-    actual_model_id: str,
+    actual_provider_id: str | None = None,
+    actual_model_id: str | None = None,
+    model_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     proposal = session.scalar(
         select(IntelligenceProposal)
@@ -2083,9 +2108,21 @@ def complete_intelligence_proposal(
         raise NotFoundError(f"intelligence proposal {proposal_id} not found")
     if proposal.state != "running":
         return _intelligence_proposal_payload(session, proposal)
-    proposal.actual_provider_id = actual_provider_id
-    proposal.actual_model_id = actual_model_id
-    if (
+    if model_evidence is not None:
+        try:
+            actual_provider_id, actual_model_id = candidate_actual_identity(
+                model_evidence,
+                requested_provider_id=str(proposal.requested_provider_id or ""),
+                requested_model_id=proposal.requested_model_id,
+            )
+        except ModelEvidencePolicyError as error:
+            proposal.model_evidence_json = dict(model_evidence)
+            proposal.state = "failed"
+            proposal.failure_message = str(error)
+            session.commit()
+            raise ValidationError(str(error)) from error
+        proposal.model_evidence_json = dict(model_evidence)
+    elif (
         actual_provider_id != proposal.requested_provider_id
         or actual_model_id != proposal.requested_model_id
     ):
@@ -2097,6 +2134,8 @@ def complete_intelligence_proposal(
         )
         session.commit()
         raise ValidationError(proposal.failure_message)
+    proposal.actual_provider_id = actual_provider_id
+    proposal.actual_model_id = actual_model_id
     working = session.get(DocumentWorkingCopy, proposal.document_id)
     revision = session.get(DocumentRevision, proposal.chapter_revision_id)
     if (
@@ -2221,6 +2260,7 @@ def fail_intelligence_proposal(
     *,
     actual_provider_id: str | None = None,
     actual_model_id: str | None = None,
+    model_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     proposal = session.scalar(
         select(IntelligenceProposal)
@@ -2234,6 +2274,8 @@ def fail_intelligence_proposal(
     if actual_provider_id and actual_model_id:
         proposal.actual_provider_id = actual_provider_id
         proposal.actual_model_id = actual_model_id
+    if model_evidence is not None:
+        proposal.model_evidence_json = dict(model_evidence)
     proposal.state = "failed"
     proposal.failure_message = message[:4000]
     session.commit()

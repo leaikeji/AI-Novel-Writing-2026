@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import Any
 from uuid import UUID
 
@@ -33,8 +34,13 @@ from .embedding.runtime import (
 from .story_state.api import router as story_state_router
 from .database import database_status, get_engine, get_session
 from .generation_dependencies import (
+    EffectiveModelProbe,
+    NovelModelEvidenceRejected,
+    failed_novel_model_evidence,
     get_novel_effective_model,
+    get_novel_effective_model_probe,
     get_novel_generation_ctx,
+    verify_novel_model_reply,
 )
 from .generation_runtime import await_chapter_generation
 from .model_runtime import (
@@ -47,9 +53,9 @@ from .model_runtime import (
     normalize_intelligence_generation_json,
     parse_model_json,
     reply_final_text,
-    reply_model_audit,
 )
 from .writing_eval_api import router as writing_eval_router
+from .character_workspace.api import router as character_workspace_router
 from .narration.pawapp_runtime import (
     launch_narration_runtime,
     narration_runtime_status,
@@ -159,6 +165,20 @@ from .services import (
 
 pawapp = PawApp(name="AI小说世界2026", app_id=APP_ID)
 router = APIRouter()
+
+
+def _reported_actual_ids(
+    evidence: dict[str, object] | None,
+) -> tuple[str | None, str | None]:
+    actual = evidence.get("reported_actual") if evidence else None
+    if not isinstance(actual, dict):
+        return None, None
+    provider = actual.get("provider_id")
+    model = actual.get("model_id")
+    return (
+        provider if isinstance(provider, str) else None,
+        model if isinstance(model, str) else None,
+    )
 router.include_router(assistant_router)
 router.include_router(creative_router)
 router.include_router(creative_data_router)
@@ -170,6 +190,7 @@ router.include_router(narration_playback_router)
 router.include_router(writing_eval_router)
 router.include_router(embedding_router)
 router.include_router(story_state_router)
+router.include_router(character_workspace_router)
 
 
 @pawapp.hook("startup", priority=90)
@@ -752,10 +773,11 @@ async def generation_jobs_create_body(
     request: GenerateChapterRequest,
     ctx=Depends(get_novel_generation_ctx),
     configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     job: dict[str, Any] | None = None
-    actual_model: ModelAudit | None = None
+    model_evidence: dict[str, object] | None = None
     try:
         position = resolve_writing_position(session, document_id)
         brief = get_chapter_brief(session, document_id)
@@ -798,6 +820,7 @@ async def generation_jobs_create_body(
         # ``start_chapter_generation`` has committed the immutable snapshot.
         # End the payload-read transaction before waiting on an external model.
         session.rollback()
+        started_monotonic = time.monotonic()
         reply = await await_chapter_generation(
             ctx.chat(
                 prompt,
@@ -805,18 +828,19 @@ async def generation_jobs_create_body(
                 session_id=generation_session_id,
             )
         )
-        actual_model = reply_model_audit(
+        evidence = await verify_novel_model_reply(
             reply,
-            session_id=generation_session_id,
+            configured=configured_model,
+            probe=model_probe,
+            started_monotonic=started_monotonic,
         )
-        actual_model.ensure_matches(configured_model)
+        model_evidence = evidence.as_dict()
         final_text = reply_final_text(reply)
         return complete_chapter_generation(
             session,
             UUID(str(job["id"])),
             content_markdown=final_text,
-            actual_provider_id=actual_model.provider_id,
-            actual_model_id=actual_model.model_id,
+            model_evidence=model_evidence,
         )
     except asyncio.CancelledError:
         session.rollback()
@@ -832,16 +856,22 @@ async def generation_jobs_create_body(
         raise
     except Exception as error:
         session.rollback()
+        if isinstance(error, NovelModelEvidenceRejected):
+            model_evidence = error.evidence.as_dict()
+        elif job is not None and model_evidence is None:
+            model_evidence = failed_novel_model_evidence(
+                configured_model, started_monotonic=time.monotonic()
+            ).as_dict()
         if job is not None:
             try:
+                actual_provider_id, actual_model_id = _reported_actual_ids(model_evidence)
                 failed = fail_chapter_generation(
                     session,
                     UUID(str(job["id"])),
                     str(error),
-                    actual_provider_id=(
-                        actual_model.provider_id if actual_model else None
-                    ),
-                    actual_model_id=(actual_model.model_id if actual_model else None),
+                    actual_provider_id=actual_provider_id,
+                    actual_model_id=actual_model_id,
+                    model_evidence=model_evidence,
                 )
             except Exception:
                 session.rollback()
@@ -926,10 +956,11 @@ async def intelligence_proposals_create(
     request: ExtractIntelligenceRequest,
     ctx=Depends(get_novel_generation_ctx),
     configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     proposal: dict[str, Any] | None = None
-    actual_model: ModelAudit | None = None
+    model_evidence: dict[str, object] | None = None
     try:
         proposal = start_intelligence_proposal(
             session,
@@ -945,16 +976,19 @@ async def intelligence_proposals_create(
         prompt = build_intelligence_prompt(session, UUID(str(proposal["id"])))
         ensure_prompt_within_effective_limit(prompt, configured_model)
         intelligence_session_id = f"novel-intelligence:{proposal['id']}"
+        started_monotonic = time.monotonic()
         reply = await ctx.chat(
             prompt,
             skill="story-foundation",
             session_id=intelligence_session_id,
         )
-        actual_model = reply_model_audit(
+        evidence = await verify_novel_model_reply(
             reply,
-            session_id=intelligence_session_id,
+            configured=configured_model,
+            probe=model_probe,
+            started_monotonic=started_monotonic,
         )
-        actual_model.ensure_matches(configured_model)
+        model_evidence = evidence.as_dict()
         final_text = reply_final_text(reply)
         try:
             payload = parse_model_json(final_text)
@@ -965,21 +999,26 @@ async def intelligence_proposals_create(
             session,
             UUID(str(proposal["id"])),
             items=raw_items,
-            actual_provider_id=actual_model.provider_id,
-            actual_model_id=actual_model.model_id,
+            model_evidence=model_evidence,
         )
     except Exception as error:
         session.rollback()
+        if isinstance(error, NovelModelEvidenceRejected):
+            model_evidence = error.evidence.as_dict()
+        elif proposal is not None and model_evidence is None:
+            model_evidence = failed_novel_model_evidence(
+                configured_model, started_monotonic=time.monotonic()
+            ).as_dict()
         if proposal is not None and not isinstance(error, ProposalSupersededError):
             try:
+                actual_provider_id, actual_model_id = _reported_actual_ids(model_evidence)
                 failed = fail_intelligence_proposal(
                     session,
                     UUID(str(proposal["id"])),
                     str(error),
-                    actual_provider_id=(
-                        actual_model.provider_id if actual_model else None
-                    ),
-                    actual_model_id=(actual_model.model_id if actual_model else None),
+                    actual_provider_id=actual_provider_id,
+                    actual_model_id=actual_model_id,
+                    model_evidence=model_evidence,
                 )
             except Exception:
                 session.rollback()

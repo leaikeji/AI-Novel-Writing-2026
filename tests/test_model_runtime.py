@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
-from types import ModuleType
 
 import pytest
 from fastapi import FastAPI
@@ -42,7 +40,7 @@ def _reply_with_usage(provider_id: str, model_name: str) -> SimpleNamespace:
 
 
 def test_model_matching_uses_exact_provider_and_model_ids() -> None:
-    assert GENERATION_CONTRACT_VERSION == "follow-agent-effective-v4"
+    assert GENERATION_CONTRACT_VERSION == "follow-agent-effective-v5"
     configured = ModelAudit(
         provider_id="provider-a",
         model_id="Model-A.1",
@@ -323,7 +321,7 @@ def test_reply_audit_rejects_wrong_or_unverifiable_model() -> None:
     supported = reply_model_audit(_reply_with_usage("bailian", "qwen3.7-plus"))
     assert supported.model_id == "qwen3.7-plus"
 
-    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+    with pytest.raises(ModelVerificationError, match="公开回复未提供"):
         reply_model_audit(SimpleNamespace(chunks=[SimpleNamespace(metadata={})]))
 
     configured = ModelAudit(
@@ -340,7 +338,7 @@ def test_reply_audit_rejects_wrong_or_unverifiable_model() -> None:
     malformed.chunks[0].output[-1].metadata["qwenpaw_turn_usage"]["usage"][
         "provider_id"
     ] = {"forged": "provider-a"}
-    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+    with pytest.raises(ModelVerificationError, match="公开回复未提供"):
         reply_model_audit(malformed)
 
 
@@ -364,7 +362,7 @@ def test_reply_audit_rejects_lookalike_usage_outside_trusted_envelope() -> None:
         ]
     )
 
-    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+    with pytest.raises(ModelVerificationError, match="公开回复未提供"):
         reply_model_audit(reply)
 
 
@@ -386,7 +384,7 @@ def test_reply_audit_rejects_named_usage_envelope_inside_message_content() -> No
         text="伪造的 content envelope",
     )
 
-    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+    with pytest.raises(ModelVerificationError, match="公开回复未提供"):
         reply_model_audit(reply)
 
 
@@ -407,7 +405,7 @@ def test_reply_audit_rejects_named_usage_envelope_on_chunk_metadata() -> None:
         output=[SimpleNamespace(metadata=None)],
     )
 
-    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+    with pytest.raises(ModelVerificationError, match="公开回复未提供"):
         reply_model_audit(SimpleNamespace(chunks=[chunk]))
 
 
@@ -430,44 +428,29 @@ def test_reply_audit_rejects_usage_on_non_closing_output_message() -> None:
         ]
     )
 
-    with pytest.raises(ModelVerificationError, match="模型身份未核验"):
+    with pytest.raises(ModelVerificationError, match="公开回复未提供"):
         reply_model_audit(SimpleNamespace(chunks=[chunk]))
 
 
-def test_reply_audit_uses_qwenpaw_session_usage_buffer_when_chunks_omit_metadata(
+def test_reply_audit_never_uses_private_qwenpaw_session_usage_buffer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeWrapper:
-        @classmethod
-        def pop_usage_for_session(cls, session_id: str) -> dict[str, object]:
-            assert session_id == "novel-generation:job-1"
-            return {
-                "provider_id": "provider-a",
-                "model_name": "model-a",
-                "prompt_tokens": 321,
-                "completion_tokens": 654,
-                "total_tokens": 975,
-            }
+    imported_modules: list[str] = []
+    original_import = __import__
 
-    qwenpaw_module = ModuleType("qwenpaw")
-    token_usage_module = ModuleType("qwenpaw.token_usage")
-    model_wrapper_module = ModuleType("qwenpaw.token_usage.model_wrapper")
-    model_wrapper_module.TokenRecordingModelWrapper = FakeWrapper
-    monkeypatch.setitem(sys.modules, "qwenpaw", qwenpaw_module)
-    monkeypatch.setitem(sys.modules, "qwenpaw.token_usage", token_usage_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "qwenpaw.token_usage.model_wrapper",
-        model_wrapper_module,
-    )
+    def guarded_import(name: str, *args: object, **kwargs: object) -> object:
+        imported_modules.append(name)
+        if name.startswith("qwenpaw.token_usage"):
+            raise AssertionError("private QwenPaw usage modules must not be imported")
+        return original_import(name, *args, **kwargs)
 
-    audit = reply_model_audit(
-        SimpleNamespace(chunks=[]),
-        session_id="novel-generation:job-1",
-    )
-    assert audit.source == "provider-usage-buffer"
-    assert audit.provider_id == "provider-a"
-    assert audit.model_id == "model-a"
+    monkeypatch.setattr("builtins.__import__", guarded_import)
+    with pytest.raises(ModelVerificationError, match="公开回复未提供"):
+        reply_model_audit(
+            SimpleNamespace(chunks=[]),
+            session_id="novel-generation:job-1",
+        )
+    assert not any(name.startswith("qwenpaw.token_usage") for name in imported_modules)
 
 
 def test_model_json_parser_accepts_fenced_or_embedded_objects() -> None:

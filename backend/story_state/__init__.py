@@ -40,11 +40,19 @@ from .engine import (
     resolve_timeline,
     validate_inheritance_dag,
 )
+from .revisions import (
+    CharacterInstanceProfile,
+    CharacterInstanceProfileV1,
+    CharacterInstanceProfileV2,
+)
 
 __all__ = [
     "STORY_FACT_SCHEMA_VERSION",
     "CharacterContinuityKind",
     "CharacterInstanceRecord",
+    "CharacterInstanceProfile",
+    "CharacterInstanceProfileV1",
+    "CharacterInstanceProfileV2",
     "CharacterStateDetailsV1",
     "DefaultStoryStatePlan",
     "ForeshadowEventDetailsV1",

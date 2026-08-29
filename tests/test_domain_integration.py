@@ -10,7 +10,11 @@ import pytest
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
-from backend.creative_data_models import StoryTimeline
+from backend.creative_data_models import (
+    CharacterInstance,
+    CharacterInstanceRevision,
+    StoryTimeline,
+)
 from backend.story_state.contracts import StoryEventLinkType
 from backend.story_state.persistence import (
     create_merge_timeline,
@@ -21,6 +25,7 @@ from backend.story_state.persistence import (
 )
 
 from backend.creative_services import (
+    CharacterLinkRequiredError,
     EntityConflictError,
     archive_private_asset,
     apply_relationship_graph_generation,
@@ -1412,7 +1417,13 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
                 "name": "林知夏",
                 "role_type": "main",
                 "description": "重返高三",
-                "details": {"gender": "女"},
+                "details": {
+                    "gender": "女",
+                    "age": "18岁左右",
+                    "identity": "重返高三的学生",
+                    "personality": "谨慎但敢于补救遗憾",
+                    "core_goal": "改变家人的命运",
+                },
             },
             {"name": "顾明川", "role_type": "main", "description": "理科尖子生"},
         ],
@@ -1426,6 +1437,21 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
     )
     assert first["novel"]["outline_target_chapters"] == 10
     assert [item["name"] for item in first["characters"]] == ["林知夏", "顾明川"]
+    lead_instance = session.scalar(
+        select(CharacterInstance).where(
+            CharacterInstance.novel_id == novel_id,
+            CharacterInstance.character_id == UUID(first["characters"][0]["id"]),
+        )
+    )
+    assert lead_instance is not None
+    lead_profile = session.get(
+        CharacterInstanceRevision, lead_instance.current_revision_id
+    )
+    assert lead_profile is not None
+    assert lead_profile.profile_schema_version == 2
+    assert lead_profile.profile_json["age_at_story_start_note"] == "18岁左右"
+    assert lead_profile.profile_json["public_identity"] == "重返高三的学生"
+    assert lead_profile.profile_json["goals"] == ["改变家人的命运"]
 
     formal_lead = first["characters"][0]
     update_novel_character(
@@ -1458,8 +1484,14 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         expected_version=first["outline"]["version"],
         step=5,
         characters=[
-            {"name": "顾明川", "role_type": "main", "description": "承担家庭压力"},
             {
+                "character_id": first["characters"][1]["id"],
+                "name": "顾明川",
+                "role_type": "main",
+                "description": "承担家庭压力",
+            },
+            {
+                "character_id": formal_lead["id"],
                 "name": "林知夏",
                 "role_type": "main",
                 "description": "主动修正遗憾",
@@ -1491,6 +1523,60 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         item for item in list_storylines(session, novel_id) if item["storyline_type"] == "main"
     )
     assert main_line["description"] == second["novel"]["main_plot"]
+
+
+def test_outline_completion_requires_explicit_same_name_character_link(
+    session: Session,
+) -> None:
+    created = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-大纲同名关联",
+        title="pytest-大纲同名关联",
+    )
+    novel_id = UUID(created["novel"]["id"])
+    existing = create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="林知夏",
+        description="已经存在的正式人物",
+        details={},
+    )
+    outline = get_or_create_outline_draft(session, novel_id)
+    outline = update_outline_draft(
+        session,
+        novel_id,
+        expected_version=outline["version"],
+        step=5,
+        background_text="同名人物冲突测试背景。",
+        plot_text="同名人物冲突测试情节。",
+        highlight_text="同名人物必须显式关联。",
+        characters=[
+            {
+                "draft_key": "same-name-unlinked",
+                "name": "林知夏",
+                "role_type": "main",
+                "bio": "没有稳定人物 ID 的同名草案",
+                "origin": "manual",
+            }
+        ],
+    )
+
+    with pytest.raises(CharacterLinkRequiredError) as captured:
+        complete_outline_draft(
+            session,
+            novel_id,
+            expected_version=outline["version"],
+        )
+
+    assert captured.value.conflicts == [
+        {
+            "draft_key": "same-name-unlinked",
+            "draft_name": "林知夏",
+            "existing_character_id": existing["id"],
+            "existing_character_name": "林知夏",
+        }
+    ]
 
 
 def test_next_chapter_required_roles_reject_uncertain_supporting_inference(

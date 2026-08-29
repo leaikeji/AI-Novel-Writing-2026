@@ -135,12 +135,28 @@ function strictJobError(job: CreativeGenerationRecord): string | null {
   if (job.execution_agent_id !== NOVEL_ASSISTANT_TARGET_AGENT_ID) {
     return "任务没有由 AI 小说作家执行";
   }
-  if (!job.requested_model_id || !job.actual_model_id || !job.requested_provider_id || !job.actual_provider_id) {
-    return "任务缺少 requested/actual 模型证据";
-  }
-  if (job.requested_model_id !== job.actual_model_id
-    || job.requested_provider_id !== job.actual_provider_id) {
-    return "任务请求模型与实际模型不一致";
+  const evidence = job.model_evidence;
+  if (evidence?.schema_version === "model-execution-evidence/2") {
+    if (evidence.status !== "verified_from_provider_usage" && evidence.status !== "not_exposed") {
+      return "任务模型公开证据已被拒绝";
+    }
+    const expected = { provider_id: job.requested_provider_id, model_id: job.requested_model_id };
+    const preflight = evidence.preflight_effective as Record<string, unknown> | undefined;
+    const postflight = evidence.postflight_effective as Record<string, unknown> | undefined;
+    if (preflight?.provider_id !== expected.provider_id
+      || preflight?.model_id !== expected.model_id
+      || postflight?.provider_id !== expected.provider_id
+      || postflight?.model_id !== expected.model_id) {
+      return "任务前后有效模型与请求模型不一致";
+    }
+  } else {
+    if (!job.requested_model_id || !job.actual_model_id || !job.requested_provider_id || !job.actual_provider_id) {
+      return "任务缺少 requested/actual 模型证据";
+    }
+    if (job.requested_model_id !== job.actual_model_id
+      || job.requested_provider_id !== job.actual_provider_id) {
+      return "任务请求模型与实际模型不一致";
+    }
   }
   if (job.state === "failed") return job.failure_message || "选区编辑任务失败";
   if (job.state !== "ready") return "选区编辑任务尚未完成";

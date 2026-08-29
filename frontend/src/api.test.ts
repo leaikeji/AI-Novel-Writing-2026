@@ -16,6 +16,7 @@ const task = (patch: Record<string, unknown> = {}) => ({
   actual_provider_id: "provider-a",
   actual_model_id: "model-a",
   provider_profile: null,
+  model_evidence: null,
   ...patch,
 }) as any;
 
@@ -32,6 +33,20 @@ describe("generation model presentation", () => {
     expect(completedGenerationModelLabel(record)).toBe("provider-a / model-a");
     expect(generationModelAuditLabel(record)).toContain("实际未核验");
     expect(verifiedGenerationModelLabel(record)).toBe("请求 provider-a / model-a · 实际未核验");
+  });
+
+  it("describes not-exposed public evidence without claiming actual verification", () => {
+    const record = task({
+      actual_provider_id: null,
+      actual_model_id: null,
+      model_evidence: {
+        schema_version: "model-execution-evidence/2",
+        status: "not_exposed",
+      },
+    });
+    expect(verifiedGenerationModelLabel(record)).toBe(
+      "宿主未公开实际模型；任务前后有效模型一致（provider-a / model-a）",
+    );
   });
 
   it("keeps a historical model label independent of the current effective model", () => {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -50,6 +51,7 @@ from .creative_schemas import (
     UpdateVolumeRequest,
 )
 from .creative_services import (
+    CharacterLinkRequiredError,
     EntityConflictError,
     archive_asset_preset,
     archive_private_asset,
@@ -127,8 +129,13 @@ from .embedding.writing import (
     retrieve_for_writing,
 )
 from .generation_dependencies import (
+    EffectiveModelProbe,
+    NovelModelEvidenceRejected,
+    failed_novel_model_evidence,
     get_novel_effective_model,
+    get_novel_effective_model_probe,
     get_novel_generation_ctx,
+    verify_novel_model_reply,
 )
 from .model_runtime import (
     GENERATION_CONTRACT_VERSION,
@@ -139,7 +146,6 @@ from .model_runtime import (
     normalize_creative_generation_json,
     parse_model_json,
     reply_final_text,
-    reply_model_audit,
 )
 from .services import NotFoundError, ValidationError, delete_novel
 from .models import ChapterBrief
@@ -151,6 +157,20 @@ from .selection_edit_diff import (
 
 
 router = APIRouter()
+
+
+def _reported_actual_ids(
+    evidence: dict[str, object] | None,
+) -> tuple[str | None, str | None]:
+    actual = evidence.get("reported_actual") if evidence else None
+    if not isinstance(actual, dict):
+        return None, None
+    provider = actual.get("provider_id")
+    model = actual.get("model_id")
+    return (
+        provider if isinstance(provider, str) else None,
+        model if isinstance(model, str) else None,
+    )
 
 
 async def _creative_writing_retrieval(
@@ -220,6 +240,15 @@ def _raise(error: Exception) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"type": "entity_conflict", "current": error.current},
+        ) from error
+    if isinstance(error, CharacterLinkRequiredError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "character_link_required",
+                "message": str(error),
+                "conflicts": error.conflicts,
+            },
         ) from error
     if isinstance(error, NotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
@@ -582,11 +611,12 @@ async def character_profile_completion_generate(
     request: GenerateCharacterProfileCompletionRequest,
     ctx=Depends(get_novel_generation_ctx),
     configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     job: dict[str, object] | None = None
     owns_execution = False
-    actual_model: ModelAudit | None = None
+    model_evidence: dict[str, object] | None = None
     try:
         current_status = get_character_profile_completion_status(session, novel_id)
         if not current_status["eligible"]:
@@ -610,13 +640,19 @@ async def character_profile_completion_generate(
             generation_session_id = f"novel-character-profile-completion:{job['id']}"
             prompt = build_creative_generation_prompt(job)
             ensure_prompt_within_effective_limit(prompt, configured_model)
+            started_monotonic = time.monotonic()
             reply = await ctx.chat(
                 prompt,
                 skill="character-craft",
                 session_id=generation_session_id,
             )
-            actual_model = reply_model_audit(reply, session_id=generation_session_id)
-            actual_model.ensure_matches(configured_model)
+            evidence = await verify_novel_model_reply(
+                reply,
+                configured=configured_model,
+                probe=model_probe,
+                started_monotonic=started_monotonic,
+            )
+            model_evidence = evidence.as_dict()
             final_text = reply_final_text(reply)
             strict_candidate = final_text.strip()
             if not strict_candidate.startswith("{") or not strict_candidate.endswith("}"):
@@ -634,23 +670,30 @@ async def character_profile_completion_generate(
             complete_creative_generation(
                 session,
                 UUID(str(job["id"])),
-                actual_provider_id=actual_model.provider_id,
-                actual_model_id=actual_model.model_id,
+                model_evidence=model_evidence,
                 output_text=final_text,
                 output_json=normalized_output,
             )
         return get_character_profile_completion_status(session, novel_id)
     except Exception as error:
         session.rollback()
+        if isinstance(error, NovelModelEvidenceRejected):
+            model_evidence = error.evidence.as_dict()
+        elif job is not None and model_evidence is None:
+            model_evidence = failed_novel_model_evidence(
+                configured_model, started_monotonic=time.monotonic()
+            ).as_dict()
         failed = job
         if owns_execution and job is not None and job.get("id"):
             try:
+                actual_provider_id, actual_model_id = _reported_actual_ids(model_evidence)
                 failed = fail_creative_generation(
                     session,
                     UUID(str(job["id"])),
                     failure_message=str(error),
-                    actual_provider_id=(actual_model.provider_id if actual_model else None),
-                    actual_model_id=(actual_model.model_id if actual_model else None),
+                    actual_provider_id=actual_provider_id,
+                    actual_model_id=actual_model_id,
+                    model_evidence=model_evidence,
                 )
             except Exception:
                 session.rollback()
@@ -762,11 +805,12 @@ async def relationships_auto_sync(
     request: SyncRelationshipsRequest,
     ctx=Depends(get_novel_generation_ctx),
     configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     job: dict[str, object] | None = None
     owns_execution = False
-    actual_model: ModelAudit | None = None
+    model_evidence: dict[str, object] | None = None
     try:
         snapshot = build_relationship_graph_snapshot(session, novel_id)
         job = start_creative_generation(
@@ -795,16 +839,19 @@ async def relationships_auto_sync(
             generation_session_id = f"novel-relationship-auto-sync:{job['id']}"
             prompt = build_creative_generation_prompt(job)
             ensure_prompt_within_effective_limit(prompt, configured_model)
+            started_monotonic = time.monotonic()
             reply = await ctx.chat(
                 prompt,
                 skill="story-foundation",
                 session_id=generation_session_id,
             )
-            actual_model = reply_model_audit(
+            evidence = await verify_novel_model_reply(
                 reply,
-                session_id=generation_session_id,
+                configured=configured_model,
+                probe=model_probe,
+                started_monotonic=started_monotonic,
             )
-            actual_model.ensure_matches(configured_model)
+            model_evidence = evidence.as_dict()
             final_text = reply_final_text(reply)
             try:
                 parsed_output = parse_model_json(final_text)
@@ -818,8 +865,7 @@ async def relationships_auto_sync(
             job = complete_creative_generation(
                 session,
                 UUID(str(job["id"])),
-                actual_provider_id=actual_model.provider_id,
-                actual_model_id=actual_model.model_id,
+                model_evidence=model_evidence,
                 output_text=final_text,
                 output_json=output_json,
             )
@@ -830,16 +876,22 @@ async def relationships_auto_sync(
         )
     except Exception as error:
         session.rollback()
+        if isinstance(error, NovelModelEvidenceRejected):
+            model_evidence = error.evidence.as_dict()
+        elif job is not None and model_evidence is None:
+            model_evidence = failed_novel_model_evidence(
+                configured_model, started_monotonic=time.monotonic()
+            ).as_dict()
         if owns_execution and job is not None and job.get("id"):
             try:
+                actual_provider_id, actual_model_id = _reported_actual_ids(model_evidence)
                 failed = fail_creative_generation(
                     session,
                     UUID(str(job["id"])),
                     failure_message=str(error),
-                    actual_provider_id=(
-                        actual_model.provider_id if actual_model else None
-                    ),
-                    actual_model_id=(actual_model.model_id if actual_model else None),
+                    actual_provider_id=actual_provider_id,
+                    actual_model_id=actual_model_id,
+                    model_evidence=model_evidence,
                 )
             except Exception:
                 session.rollback()
@@ -1232,10 +1284,11 @@ async def creative_generations_create(
     request: StartCreativeGenerationRequest,
     ctx=Depends(get_novel_generation_ctx),
     configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     job: dict[str, object] | None = None
-    actual_model: ModelAudit | None = None
+    model_evidence: dict[str, object] | None = None
     try:
         writing_retrieval = await _creative_writing_retrieval(session, request)
         writing_context = None
@@ -1268,8 +1321,10 @@ async def creative_generations_create(
                 session,
                 position=position,
                 purpose=context_purpose,
+                requested_provider_id=configured_model.provider_id,
                 requested_model_id=configured_model.model_id,
-                actual_model_id=configured_model.model_id,
+                budget_provider_id=configured_model.provider_id,
+                budget_model_id=configured_model.model_id,
                 effective_context_window_tokens=configured_model.effective_max_input_length,
                 reserved_output_tokens=reserved_output,
                 chapter_brief=brief,
@@ -1313,16 +1368,19 @@ async def creative_generations_create(
                     "只输出唯一一个两字段 JSON 对象，不要输出备选方案、示例或解释。"
                 )
             ensure_prompt_within_effective_limit(attempt_prompt, configured_model)
+            started_monotonic = time.monotonic()
             reply = await ctx.chat(
                 attempt_prompt,
                 skill=creative_generation_skill(job),
                 session_id=attempt_session_id,
             )
-            actual_model = reply_model_audit(
+            evidence = await verify_novel_model_reply(
                 reply,
-                session_id=attempt_session_id,
+                configured=configured_model,
+                probe=model_probe,
+                started_monotonic=started_monotonic,
             )
-            actual_model.ensure_matches(configured_model)
+            model_evidence = evidence.as_dict()
             final_text = reply_final_text(reply)
             try:
                 parsed_output = parse_model_json(final_text)
@@ -1370,23 +1428,28 @@ async def creative_generations_create(
         return complete_creative_generation(
             session,
             UUID(str(job["id"])),
-            actual_provider_id=actual_model.provider_id,
-            actual_model_id=actual_model.model_id,
+            model_evidence=model_evidence,
             output_text=output_text,
             output_json=output_json,
         )
     except Exception as error:
         session.rollback()
+        if isinstance(error, NovelModelEvidenceRejected):
+            model_evidence = error.evidence.as_dict()
+        elif job is not None and model_evidence is None:
+            model_evidence = failed_novel_model_evidence(
+                configured_model, started_monotonic=time.monotonic()
+            ).as_dict()
         if job is not None and job.get("id"):
             try:
+                actual_provider_id, actual_model_id = _reported_actual_ids(model_evidence)
                 failed = fail_creative_generation(
                     session,
                     UUID(str(job["id"])),
                     failure_message=str(error),
-                    actual_provider_id=(
-                        actual_model.provider_id if actual_model else None
-                    ),
-                    actual_model_id=(actual_model.model_id if actual_model else None),
+                    actual_provider_id=actual_provider_id,
+                    actual_model_id=actual_model_id,
+                    model_evidence=model_evidence,
                 )
             except Exception:
                 session.rollback()

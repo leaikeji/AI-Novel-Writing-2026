@@ -1,4 +1,5 @@
 import {
+  ApiError,
   apiErrorMessage,
   apiRequest,
   completedGenerationModelLabel,
@@ -63,13 +64,21 @@ import {
   type ReadingScopeTarget,
   type ReadingSectionKey,
 } from "./narration";
-import {
-  characterModalTabFromKey,
-  type CharacterModalTab,
-} from "./narration/character-modal-tabs";
 import { rememberWorkbenchRoleView } from "./workbench-route";
 import { createNovelSemanticIndexCard } from "./embedding";
-import { createStoryTimelineWorkspace } from "./story-timeline";
+import {
+  createStoryTimelineWorkspace,
+  type CharacterInstanceRecord,
+  type StoryTimelineRecord,
+  type TimelineIndexResource,
+} from "./story-timeline";
+import {
+  createCharacterWorkspaceDialog,
+  type CharacterWorkspaceSaveCommandV1,
+  type CharacterWorkspaceSelectionV1,
+  type CharacterWorkspaceV1,
+  type CharacterWorkspaceVoiceSlotProps,
+} from "./characters";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -77,6 +86,7 @@ const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
 const NovelCoverView = createNovelCoverView(React);
+const CharacterWorkspaceDialog = createCharacterWorkspaceDialog(React);
 const {
   Alert,
   Button,
@@ -123,6 +133,14 @@ const StoryTimelineWorkspace = createStoryTimelineWorkspace(React, host.antd);
 
 
 export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings" | "reading";
+
+interface CharacterWorkspacePickerState {
+  readonly character: NovelCharacterRecord;
+  readonly timelines: readonly StoryTimelineRecord[];
+  readonly instances: readonly CharacterInstanceRecord[];
+  readonly timelineId: string;
+  readonly instanceId: string;
+}
 
 
 export const WORKBENCH_SECTIONS: readonly WorkbenchSection[] = [
@@ -444,7 +462,7 @@ function requireStudioMaxLength(
 }
 
 
-const OUTLINE_STEPS = ["章节", "背景", "角色", "情节", "亮点"];
+const OUTLINE_STEPS = ["章节", "背景", "人物草案", "情节", "亮点"];
 
 
 function readableError(reason: unknown, fallback: string): string {
@@ -538,7 +556,12 @@ function OutlineWizard({
   const [characterIndex, setCharacterIndex] = React.useState(-1);
   const [characterForm, setCharacterForm] = React.useState({
     name: "", role_type: "main" as "main" | "supporting", gender: "", age: "",
-    personality: "", identity: "", description: "",
+    personality: "", identity: "", coreGoal: "", description: "",
+  });
+  const [characterLinkConflict, setCharacterLinkConflict] = React.useState(null as null | {
+    draftKey: string;
+    existingCharacterId: string;
+    existingCharacterName: string;
   });
   const draftRef = React.useRef(draft) as StudioMutableRef<OutlineDraftRecord | null>;
   const characterFormRef = React.useRef(characterForm) as StudioMutableRef<typeof characterForm>;
@@ -712,11 +735,28 @@ function OutlineWizard({
 
   const requestGeneration = async (targetStep: number) => {
     if (!draft || generating || targetStep < 2 || targetStep > 5) return;
+    if (targetStep === 3 && draft.characters.length > 0) {
+      Modal.confirm({
+        className: "anw-modal",
+        title: "重新生成人物草案？",
+        content: "新候选会替换当前草案，已正式化的人物卡不会被覆盖。",
+        okText: "确认重新生成",
+        cancelText: "保留当前草案",
+        onOk: () => requestGenerationWithoutConfirmation(targetStep),
+      });
+      return;
+    }
+    await requestGenerationWithoutConfirmation(targetStep);
+  };
+
+  const requestGenerationWithoutConfirmation = async (targetStep: number) => {
+    if (!draftRef.current || generating || targetStep < 2 || targetStep > 5) return;
+    const currentDraft = draftRef.current;
     const generationName = outlineGenerationTarget(targetStep).name;
     setGenerating(true);
     setActivityText(`正在生成${generationName}`);
     try {
-      const saved = await saveDraft(draft, step, patchForStep(draft, step));
+      const saved = await saveDraft(currentDraft, step, patchForStep(currentDraft, step));
       const updated = await generateAndApply(targetStep, saved);
       replaceDraft(updated);
       outlineDirtyFieldsRef.current.clear();
@@ -791,6 +831,23 @@ function OutlineWizard({
       replaceDraft(result.outline);
       onCompleted(result.novel);
     } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 409) {
+        const detail = reason.detail as { type?: string; conflicts?: Array<Record<string, unknown>> };
+        const conflict = detail?.type === "character_link_required" ? detail.conflicts?.[0] : null;
+        if (conflict) {
+          const draftKey = String(conflict.draft_key || "");
+          const index = draftRef.current?.characters.findIndex((item) => item.draft_key === draftKey) ?? -1;
+          if (index >= 0) {
+            setCharacterLinkConflict({
+              draftKey,
+              existingCharacterId: String(conflict.existing_character_id || ""),
+              existingCharacterName: String(conflict.existing_character_name || ""),
+            });
+            openCharacter(draftRef.current?.characters[index].role_type ?? "supporting", index);
+            return;
+          }
+        }
+      }
       onError(readableError(reason, "完成大纲失败"));
     } finally {
       setGenerating(false);
@@ -805,11 +862,12 @@ function OutlineWizard({
     replaceCharacterForm({
       name: current?.name ?? "",
       role_type: current?.role_type ?? roleType,
-      gender: String(current?.details?.gender ?? ""),
-      age: String(current?.details?.age ?? ""),
-      personality: String(current?.details?.personality ?? ""),
-      identity: String(current?.details?.identity ?? ""),
-      description: current?.description ?? "",
+      gender: String(current?.gender ?? current?.details?.gender ?? ""),
+      age: String(current?.age_at_story_start_note ?? current?.details?.age ?? ""),
+      personality: String(current?.personality_summary ?? current?.details?.personality ?? ""),
+      identity: String(current?.identity_summary ?? current?.details?.identity ?? ""),
+      coreGoal: String(current?.core_goal ?? current?.details?.core_goal ?? ""),
+      description: current?.bio ?? current?.description ?? "",
     });
     setCharacterOpen(true);
   };
@@ -818,11 +876,19 @@ function OutlineWizard({
     if (!draftRef.current || !characterFormRef.current.name.trim()) return;
     const currentForm = characterFormRef.current;
     const next: OutlineCharacterDraft = {
-      ...(characterIndex >= 0 && draftRef.current.characters[characterIndex]?.character_id
-        ? { character_id: draftRef.current.characters[characterIndex].character_id }
-        : {}),
+      schema_version: "outline-character-draft/2",
+      draft_key: draftRef.current.characters[characterIndex]?.draft_key
+        ?? `manual:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+      character_id: draftRef.current.characters[characterIndex]?.character_id ?? null,
       name: currentForm.name.trim(),
       role_type: currentForm.role_type,
+      gender: currentForm.gender.trim(),
+      age_at_story_start_note: currentForm.age.trim(),
+      personality_summary: currentForm.personality.trim(),
+      identity_summary: currentForm.identity.trim(),
+      core_goal: currentForm.coreGoal.trim(),
+      bio: currentForm.description.trim(),
+      origin: draftRef.current.characters[characterIndex]?.origin ?? "manual",
       description: currentForm.description.trim(),
       details: {
         gender: currentForm.gender.trim(),
@@ -835,6 +901,7 @@ function OutlineWizard({
     if (characterIndex >= 0) rows[characterIndex] = next;
     else rows.push(next);
     updateLocal({ characters: rows });
+    setCharacterLinkConflict(null);
     setCharacterOpen(false);
   };
 
@@ -1074,12 +1141,12 @@ function OutlineWizard({
             h(
               "div",
               { className: "mb-outline-heading-row" },
-              h("div", null, h("h3", null, "角色设定"), h("span", null, "点击角色标签可查看和修改详细信息")),
+              h("div", null, h("h3", null, "人物草案"), h("span", null, "这里只做创作规划；完成大纲后统一进入正式人物卡")),
               h(Button, {
                 icon: h(ReloadOutlined),
                 disabled: generating,
                 onClick: () => void requestGeneration(3),
-              }, currentStepHasContent ? "重新生成" : "生成角色"),
+              }, currentStepHasContent ? "重新生成" : "生成人物草案"),
             ),
             ...(["main", "supporting"] as const).map((roleType) => h(
               "section",
@@ -1242,9 +1309,9 @@ function OutlineWizard({
         wrapClassName: "anw-assistant-aware-modal-wrap",
         mask: false,
         width: 520,
-        title: characterIndex >= 0 ? "修改角色" : "新增角色",
+        title: characterIndex >= 0 ? "修改人物草案" : "新增人物草案",
         footer: null,
-        onCancel: () => setCharacterOpen(false),
+        onCancel: () => { setCharacterOpen(false); setCharacterLinkConflict(null); },
       },
       wrapSelectionReview(
         STUDIO_SELECTION_REVIEW_FIELD_GROUPS.outlineCharacter,
@@ -1252,6 +1319,33 @@ function OutlineWizard({
         h(
           "div",
           { className: "mb-form-stack" },
+          characterLinkConflict ? h(Alert, {
+            type: "warning",
+            showIcon: true,
+            message: `已存在同名正式人物“${characterLinkConflict.existingCharacterName}”`,
+            description: h("div", { className: "mb-form-stack" },
+              h("span", null, "系统不会按姓名自动合并，请明确关联，或改名后新建。"),
+              h("div", { className: "mb-inline-actions" },
+                h(Button, { onClick: () => {
+                  const currentDraft = draftRef.current;
+                  if (!currentDraft || characterIndex < 0) return;
+                  const rows = [...currentDraft.characters];
+                  rows[characterIndex] = {
+                    ...rows[characterIndex],
+                    character_id: characterLinkConflict.existingCharacterId,
+                    name: characterLinkConflict.existingCharacterName,
+                  };
+                  updateLocal({ characters: rows });
+                  setOutlineCharacterField("name", characterLinkConflict.existingCharacterName);
+                  setCharacterLinkConflict(null);
+                } }, "关联现有人物"),
+                h(Button, { onClick: () => {
+                  setCharacterLinkConflict(null);
+                  setOutlineCharacterField("name", "");
+                } }, "改名后新建"),
+              ),
+            ),
+          }) : null,
           h(
             "div",
             { className: "mb-form-grid mb-form-grid-three" },
@@ -1261,6 +1355,7 @@ function OutlineWizard({
           ),
           field("性格", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality), maxLength: 20, value: characterForm.personality, onChange: (event: any) => changeOutlineCharacterField("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterPersonality) })),
           field("身份", h(Input, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity), maxLength: 20, value: characterForm.identity, onChange: (event: any) => changeOutlineCharacterField("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterIdentity) })),
+          field("核心目标", h(Input.TextArea, { rows: 2, maxLength: 2000, value: characterForm.coreGoal, onChange: (event: any) => setOutlineCharacterField("coreGoal", event.target.value) })),
           field("人物小传", h(Input.TextArea, { ...outlineControlProps(outlineCharacterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription), rows: 4, maxLength: 100, value: characterForm.description, onChange: (event: any) => changeOutlineCharacterField("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.outlineCharacterDescription) })),
           h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: saveCharacter }, "保存修改"),
         ),
@@ -1997,8 +2092,11 @@ export function StudioProjectView({
   const [volumeTitle, setVolumeTitle] = React.useState("");
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterEditing, setCharacterEditing] = React.useState(null as NovelCharacterRecord | null);
-  const [characterModalTab, setCharacterModalTab] = React.useState("profile" as CharacterModalTab);
-  const [characterForm, setCharacterForm] = React.useState({ role_type: "main" as "main" | "supporting", name: "", gender: "", age: "", identity: "", personality: "", description: "" });
+  const [characterWorkspace, setCharacterWorkspace] = React.useState(null as CharacterWorkspaceV1 | null);
+  const [characterWorkspacePicker, setCharacterWorkspacePicker] = React.useState(
+    null as CharacterWorkspacePickerState | null,
+  );
+  const [characterForm, setCharacterForm] = React.useState({ role_type: "main" as "main" | "supporting", name: "", description: "" });
   const [relationshipOpen, setRelationshipOpen] = React.useState(false);
   const [relationshipFocusCharacterId, setRelationshipFocusCharacterId] = React.useState(null as string | null);
   const [relationshipFocusId, setRelationshipFocusId] = React.useState(null as string | null);
@@ -2037,20 +2135,6 @@ export function StudioProjectView({
   const foreshadowAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
   const settingsAssistantScopeRef = React.useRef(null as AssistantContextScopeHandle | null) as StudioMutableRef<AssistantContextScopeHandle | null>;
   const assistantControlRefs = React.useRef(new Map<string, StudioFocusableControl>()) as StudioMutableRef<Map<string, StudioFocusableControl>>;
-  const characterProfileTabRef = React.useRef(null as HTMLButtonElement | null) as StudioMutableRef<HTMLButtonElement | null>;
-  const characterVoiceTabRef = React.useRef(null as HTMLButtonElement | null) as StudioMutableRef<HTMLButtonElement | null>;
-
-  const selectCharacterModalTabFromKey = (
-    current: CharacterModalTab,
-    event: { key: string; preventDefault: () => void },
-  ): void => {
-    const next = characterModalTabFromKey(current, event.key);
-    if (!next) return;
-    event.preventDefault();
-    setCharacterModalTab(next);
-    const nextRef = next === "profile" ? characterProfileTabRef : characterVoiceTabRef;
-    nextRef.current?.focus();
-  };
 
   const wrapSelectionReview = (
     fieldIds: readonly string[],
@@ -2226,7 +2310,7 @@ export function StudioProjectView({
   }, [novel.id, novel.title, roleTab, section, settingsOpen]);
 
   React.useEffect(() => {
-    if (!characterOpen || characterModalTab !== "profile" || section !== "roles" || roleTab !== "list") return;
+    if (!characterOpen || section !== "roles" || roleTab !== "list") return;
     const background = studioAssistantPageEnvelope(novel, "roles", "list");
     if (!background) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
@@ -2249,41 +2333,6 @@ export function StudioProjectView({
         "角色姓名",
         () => characterFormRef.current.name,
         (value) => setCharacterFieldValue("name", value),
-      ),
-      controlledAssistantBinding(
-        characterAssistantScopeRef,
-        characterDirtyFieldsRef,
-        ids.characterGender,
-        "性别",
-        () => characterFormRef.current.gender,
-        (value) => setCharacterFieldValue(
-          "gender",
-          requireStudioChoice(value, ["", "男", "女", "其他", "未知"] as const, "性别"),
-        ),
-      ),
-      controlledAssistantBinding(
-        characterAssistantScopeRef,
-        characterDirtyFieldsRef,
-        ids.characterAge,
-        "年龄",
-        () => characterFormRef.current.age,
-        (value) => setCharacterFieldValue("age", value),
-      ),
-      controlledAssistantBinding(
-        characterAssistantScopeRef,
-        characterDirtyFieldsRef,
-        ids.characterIdentity,
-        "身份",
-        () => characterFormRef.current.identity,
-        (value) => setCharacterFieldValue("identity", value),
-      ),
-      controlledAssistantBinding(
-        characterAssistantScopeRef,
-        characterDirtyFieldsRef,
-        ids.characterPersonality,
-        "性格",
-        () => characterFormRef.current.personality,
-        (value) => setCharacterFieldValue("personality", value),
       ),
       controlledAssistantBinding(
         characterAssistantScopeRef,
@@ -2321,7 +2370,7 @@ export function StudioProjectView({
       }
       mounted.dispose();
     };
-  }, [characterEditing?.id, characterModalTab, characterOpen, novel.id, novel.title, roleTab, section]);
+  }, [characterEditing?.id, characterOpen, novel.id, novel.title, roleTab, section]);
 
   React.useEffect(() => {
     if (!storylineOpen || section !== "clues") return;
@@ -2811,47 +2860,161 @@ export function StudioProjectView({
     setCoverOpen(false);
   }, "修改封面失败");
 
+  const loadCharacterWorkspace = (
+    characterId: string,
+    selection?: CharacterWorkspaceSelectionV1,
+  ): Promise<CharacterWorkspaceV1> => {
+    const query = new URLSearchParams();
+    if (selection) {
+      query.set("timeline_id", selection.timelineId);
+      query.set("character_instance_id", selection.instanceId);
+    }
+    return apiRequest<CharacterWorkspaceV1>(
+      `/novels/${novel.id}/characters/${characterId}/workspace${query.size ? `?${query}` : ""}`,
+    );
+  };
+
   const openCharacterForm = (roleType: "main" | "supporting", item: NovelCharacterRecord | null = null) => {
+    if (item) {
+      setCharacterEditing(item);
+      setBusy(true);
+      void Promise.all([
+        apiRequest<TimelineIndexResource>(`/novels/${novel.id}/timelines`),
+        apiRequest<CharacterInstanceRecord[]>(
+          `/novels/${novel.id}/character-instances?character_id=${encodeURIComponent(item.id)}`,
+        ),
+      ])
+        .then(async ([timelineIndex, instanceRows]) => {
+          const activeTimelines = timelineIndex.items.filter(
+            (timeline) => timeline.lifecycle_state === "active",
+          );
+          const activeInstances = instanceRows.filter(
+            (instance) => instance.lifecycle_state === "active",
+          );
+          if (activeTimelines.length <= 1) {
+            setCharacterWorkspace(await loadCharacterWorkspace(item.id));
+            return;
+          }
+          setCharacterWorkspacePicker({
+            character: item,
+            timelines: activeTimelines,
+            instances: activeInstances,
+            timelineId: "",
+            instanceId: "",
+          });
+        })
+        .catch((reason) => onError(readableError(reason, "加载人物卡失败")))
+        .finally(() => setBusy(false));
+      return;
+    }
     setCharacterEditing(item);
-    setCharacterModalTab("profile");
     characterDirtyFieldsRef.current.clear();
     replaceStudioControlledState(characterFormRef, setCharacterForm, {
-      role_type: item?.role_type ?? roleType,
-      name: item?.name ?? "",
-      gender: String(item?.details?.gender ?? ""),
-      age: String(item?.details?.age ?? ""),
-      identity: String(item?.details?.identity ?? ""),
-      personality: String(item?.details?.personality ?? ""),
-      description: item?.description ?? "",
+      role_type: roleType,
+      name: "",
+      description: "",
     });
     setCharacterOpen(true);
   };
 
+  const confirmCharacterWorkspaceSelection = async (): Promise<void> => {
+    const picker = characterWorkspacePicker;
+    if (!picker?.timelineId || !picker.instanceId) return;
+    setBusy(true);
+    try {
+      const workspace = await loadCharacterWorkspace(picker.character.id, {
+        timelineId: picker.timelineId,
+        instanceId: picker.instanceId,
+      });
+      setCharacterWorkspace(workspace);
+      setCharacterWorkspacePicker(null);
+    } catch (reason) {
+      onError(readableError(reason, "加载人物卡失败"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveCharacterWorkspace = async (
+    command: CharacterWorkspaceSaveCommandV1,
+  ): Promise<CharacterWorkspaceV1> => {
+    if (command.root) {
+      await apiRequest(`/novels/${novel.id}/characters/${command.character_id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          expected_version: command.expected_character_version,
+          role_type: command.root.role_type,
+          name: command.root.name,
+          description: command.root.description,
+          details_patch: {
+            gender: command.root.gender,
+            core_theme: command.root.core_theme,
+          },
+        }),
+      });
+    }
+    if (command.profile) {
+      await apiRequest(
+        `/novels/${novel.id}/character-instances/${command.selected_instance_id}/profile`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            expected_story_ledger_version: command.expected_story_ledger_version,
+            expected_instance_version: command.expected_instance_version,
+            operation_key: `character-workspace:${crypto.randomUUID()}`,
+            source_kind: "manual",
+            profile: {
+              ...command.profile,
+              schema_version: "character-instance-profile/2",
+            },
+          }),
+        },
+      );
+    }
+    await loadDomains();
+    return loadCharacterWorkspace(command.character_id, {
+      timelineId: command.selected_timeline_id,
+      instanceId: command.selected_instance_id,
+    });
+  };
+
   const saveCharacter = () => perform(async () => {
     const current = characterFormRef.current;
-    const detailsPatch = { gender: current.gender.trim(), age: current.age.trim(), identity: current.identity.trim(), personality: current.personality.trim() };
     const payload = {
       role_type: current.role_type,
       name: current.name.trim(),
       description: current.description.trim(),
+      details: {},
     };
-    await apiRequest(`/novels/${novel.id}/characters${characterEditing ? `/${characterEditing.id}` : ""}`, {
-      method: characterEditing ? "PUT" : "POST",
-      body: JSON.stringify(characterEditing
-        ? { ...payload, expected_version: characterEditing.version, details_patch: detailsPatch }
-        : { ...payload, details: detailsPatch }),
+    const created = await apiRequest<NovelCharacterRecord>(`/novels/${novel.id}/characters`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
     setCharacterOpen(false);
     await loadDomains();
+    setCharacterEditing(created);
+    setCharacterWorkspace(await loadCharacterWorkspace(created.id));
   }, "保存角色失败");
 
-  const deleteCharacter = (item: NovelCharacterRecord) => Modal.confirm({
-    className: "anw-modal", title: `归档角色“${item.name}”？`, content: "角色和相关关系会归档并保留历史记录。", okText: "归档", cancelText: "取消", okButtonProps: { danger: true },
-    onOk: () => perform(async () => {
-      await apiRequest(`/novels/${novel.id}/characters/${item.id}?expected_version=${item.version}`, { method: "DELETE" });
-      await loadDomains();
-    }, "归档角色失败"),
-  });
+  const deleteCharacter = (item: NovelCharacterRecord) => {
+    void apiRequest<{
+      current_dependency_count: number;
+      preserved_history_count: number;
+    }>(`/novels/${novel.id}/characters/${item.id}/archive-impact`)
+      .then((impact) => Modal.confirm({
+        className: "anw-modal",
+        title: `归档人物“${item.name}”？`,
+        content: `当前有 ${impact.current_dependency_count} 处活跃引用需要复核；${impact.preserved_history_count} 条历史依据会继续保留。`,
+        okText: "确认归档",
+        cancelText: "取消",
+        okButtonProps: { danger: true },
+        onOk: () => perform(async () => {
+          await apiRequest(`/novels/${novel.id}/characters/${item.id}?expected_version=${item.version}`, { method: "DELETE" });
+          await loadDomains();
+        }, "归档人物失败"),
+      }))
+      .catch((reason) => onError(readableError(reason, "读取归档影响失败")));
+  };
 
   const openRelationshipsForCharacter = (characterId: string) => {
     setRelationshipFocusCharacterId(characterId);
@@ -3210,6 +3373,12 @@ export function StudioProjectView({
           : section === "settings"
             ? renderSettings()
             : renderReading();
+  const characterPickerInstances = characterWorkspacePicker
+    ? characterWorkspacePicker.instances.filter(
+        (instance: CharacterInstanceRecord) =>
+          instance.origin_timeline_id === characterWorkspacePicker.timelineId,
+      )
+    : [];
 
   return h(
     React.Fragment,
@@ -3336,78 +3505,108 @@ export function StudioProjectView({
         ),
       ),
     ),
-    h(Modal, { open: characterOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 720, title: characterEditing ? "编辑角色" : "新增角色", footer: null, onCancel: () => setCharacterOpen(false) },
-      characterEditing
+    h(
+      Modal,
+      {
+        open: Boolean(characterWorkspacePicker),
+        centered: true,
+        className: "anw-modal mb-entity-modal",
+        width: 560,
+        title: "选择人物所在的时间线",
+        footer: null,
+        onCancel: () => {
+          setCharacterWorkspacePicker(null);
+          setCharacterEditing(null);
+        },
+      },
+      characterWorkspacePicker
         ? h(
             "div",
-            { className: "anw-character-modal-tabs", role: "tablist", "aria-label": "人物卡设置" },
-            h("button", {
-              id: "anw-character-profile-tab",
-              ref: characterProfileTabRef,
-              type: "button",
-              role: "tab",
-              "aria-controls": "anw-character-profile-panel",
-              "aria-selected": characterModalTab === "profile",
-              tabIndex: characterModalTab === "profile" ? 0 : -1,
-              className: characterModalTab === "profile" ? "is-active" : "",
-              onClick: () => setCharacterModalTab("profile"),
-              onKeyDown: (event: { key: string; preventDefault: () => void }) => selectCharacterModalTabFromKey("profile", event),
-            }, "人物资料"),
-            h("button", {
-              id: "anw-character-voice-tab",
-              ref: characterVoiceTabRef,
-              type: "button",
-              role: "tab",
-              "aria-controls": "anw-character-voice-panel",
-              "aria-selected": characterModalTab === "voice",
-              tabIndex: characterModalTab === "voice" ? 0 : -1,
-              className: characterModalTab === "voice" ? "is-active" : "",
-              onClick: () => setCharacterModalTab("voice"),
-              onKeyDown: (event: { key: string; preventDefault: () => void }) => selectCharacterModalTabFromKey("voice", event),
-            }, "声音"),
+            { className: "mb-form-stack" },
+            h(Alert, {
+              type: "info",
+              showIcon: true,
+              message: "这部作品有多条时间线。请选择要查看的人物版本，系统不会按最近使用值猜测。",
+            }),
+            field(
+              "时间线",
+              h(Select, {
+                value: characterWorkspacePicker.timelineId || undefined,
+                placeholder: "请选择时间线",
+                options: characterWorkspacePicker.timelines.map((timeline: StoryTimelineRecord) => ({
+                  label: timeline.name,
+                  value: timeline.id,
+                })),
+                onChange: (timelineId: string) => setCharacterWorkspacePicker({
+                  ...characterWorkspacePicker,
+                  timelineId,
+                  instanceId: "",
+                }),
+              }),
+            ),
+            field(
+              "人物版本",
+              h(Select, {
+                value: characterWorkspacePicker.instanceId || undefined,
+                disabled: !characterWorkspacePicker.timelineId,
+                placeholder: characterWorkspacePicker.timelineId
+                  ? "请选择人物版本"
+                  : "请先选择时间线",
+                options: characterPickerInstances.map((instance: CharacterInstanceRecord) => ({
+                  label: instance.display_label || instance.continuity_kind,
+                  value: instance.id,
+                })),
+                onChange: (instanceId: string) => setCharacterWorkspacePicker({
+                  ...characterWorkspacePicker,
+                  instanceId,
+                }),
+              }),
+            ),
+            h(
+              "div",
+              { className: "mb-modal-actions" },
+              h(Button, { onClick: () => setCharacterWorkspacePicker(null) }, "取消"),
+              h(Button, {
+                className: "anw-primary-button",
+                disabled: !characterWorkspacePicker.timelineId || !characterWorkspacePicker.instanceId,
+                onClick: () => void confirmCharacterWorkspaceSelection(),
+              }, "打开人物卡"),
+            ),
           )
         : null,
-      characterEditing && characterModalTab === "voice"
-        ? h(
-            "div",
-            {
-              id: "anw-character-voice-panel",
-              role: "tabpanel",
-              "aria-labelledby": "anw-character-voice-tab",
-            },
-            h(CharacterVoiceCardPanel, {
-              novelId: novel.id,
-              characterId: characterEditing.id,
-              characterName: characterEditing.name,
-              onReturnFocus: () => characterVoiceTabRef.current?.focus({ preventScroll: true }),
-            }),
-          )
-        : h(
-            "div",
-            characterEditing
-              ? {
-                  id: "anw-character-profile-panel",
-                  role: "tabpanel",
-                  "aria-labelledby": "anw-character-profile-tab",
-                }
-              : {},
-            wrapSelectionReview(
-              STUDIO_SELECTION_REVIEW_FIELD_GROUPS.character,
-              "mb-character-selection-review-host",
-              h("div", { className: "mb-form-stack" },
-                field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
-                field("角色姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
-                h("div", { className: "mb-form-grid mb-character-demographics" },
-                  field("性别", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterGender), allowClear: true, value: characterForm.gender || undefined, options: [{ label: "男", value: "男" }, { label: "女", value: "女" }, { label: "其他", value: "其他" }, { label: "未知", value: "未知" }], onChange: (value: string) => changeCharacterFieldValue("gender", value || "", STUDIO_ASSISTANT_FIELD_IDS.characterGender) })),
-                  field("年龄", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterAge), value: characterForm.age, onChange: (event: any) => changeCharacterFieldValue("age", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterAge) })),
-                ),
-                field("身份", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity), className: "mb-character-identity-input", rows: 2, value: characterForm.identity, onChange: (event: any) => changeCharacterFieldValue("identity", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterIdentity) })),
-                field("性格", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality), rows: 3, value: characterForm.personality, onChange: (event: any) => changeCharacterFieldValue("personality", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterPersonality) })),
-                field("人物小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),
-                h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "保存"),
-              ),
-            ),
-          ),
+    ),
+    characterWorkspace ? h(CharacterWorkspaceDialog, {
+      workspace: characterWorkspace,
+      onSave: saveCharacterWorkspace,
+      onSelectionChange: (selection: CharacterWorkspaceSelectionV1) => loadCharacterWorkspace(
+        characterWorkspace.character.id,
+        selection,
+      ),
+      voiceSlot: ({ novelId, characterId, characterName }: CharacterWorkspaceVoiceSlotProps) => h(
+        CharacterVoiceCardPanel,
+        {
+          novelId,
+          characterId,
+          characterName,
+        },
+      ),
+      onRequestClose: () => {
+        setCharacterWorkspace(null);
+        setCharacterEditing(null);
+      },
+    }) : null,
+    h(Modal, { open: characterOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 720, title: "新增人物", footer: null, onCancel: () => setCharacterOpen(false) },
+      wrapSelectionReview(
+        STUDIO_SELECTION_REVIEW_FIELD_GROUPS.character,
+        "mb-character-selection-review-host",
+        h("div", { className: "mb-form-stack" },
+          h(Alert, { type: "info", showIcon: true, message: "创建后将自动建立主时间线档案，详细资料在正式人物卡中统一维护。" }),
+          field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
+          field("人物姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
+          field("公共小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),
+          h(Button, { size: "large", block: true, className: "anw-primary-button", disabled: !characterForm.name.trim(), onClick: () => void saveCharacter() }, "创建并打开人物卡"),
+        ),
+      ),
     ),
     h(RelationshipEditor, {
       novelId: novel.id,

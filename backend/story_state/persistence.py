@@ -543,19 +543,15 @@ def ensure_default_story_state(
     new_rows: list[object] = []
     if plan.timeline is not None:
         new_rows.append(_new_timeline(plan.timeline))
-    character_profiles = {
-        row.id: dict(row.details or {})
-        for row in session.scalars(
-            select(NovelCharacter).where(
-                NovelCharacter.novel_id == novel_id,
-                NovelCharacter.id.in_([item.character_id for item in plan.character_instances]),
-            )
-        )
-    } if plan.character_instances else {}
     revision_rows: list[CharacterInstanceRevision] = []
     for record in plan.character_instances:
         revision_id = id_factory()
-        profile = character_profiles.get(record.character_id, {})
+        # Root details (for example gender and cross-line themes) are not an
+        # instance profile.  Profile fields are populated explicitly through
+        # the versioned profile service after the stable instance exists.
+        profile: dict[str, object] = {
+            "schema_version": "character-instance-profile/1"
+        }
         operation_key = f"default-instance:{record.id}:v1"
         content_digest = sha256(
             json.dumps(

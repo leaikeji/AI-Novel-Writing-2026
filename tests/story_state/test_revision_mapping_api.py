@@ -71,6 +71,39 @@ def test_profile_save_api_owns_commit_and_passes_short_operation_key(monkeypatch
     assert session.rollbacks == 0
 
 
+def test_profile_save_api_accepts_explicit_v2_note_without_numeric_coercion(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_save(session, novel_id, instance_id, **kwargs):
+        captured.update(kwargs)
+        return {"revision": {"profile_schema_version": 2}, "replayed": False}
+
+    monkeypatch.setattr(api, "save_character_instance_profile", fake_save)
+    session = TransactionProbe()
+    request = api.CharacterInstanceProfileSaveRequest(
+        expected_story_ledger_version=3,
+        expected_instance_version=2,
+        operation_key="profile.save.web-v2",
+        profile={
+            "schema_version": "character-instance-profile/2",
+            "public_identity": "巡查员",
+            "age_at_story_start_note": "约十八岁，不作为计算值",
+        },
+    )
+
+    api.character_instance_profile_save(
+        uid(1), uid(30), request, session  # type: ignore[arg-type]
+    )
+
+    profile = captured["profile"]
+    assert type(profile).__name__ == "CharacterInstanceProfileV2"
+    assert profile.age_at_story_start_note == "约十八岁，不作为计算值"
+    assert profile.birth_year is None
+    assert session.commits == 1
+
+
 def test_mapping_save_api_passes_explicit_ranges_and_commits(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

@@ -13,6 +13,8 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+from .model_execution import ModelEvidencePolicyError, candidate_actual_identity
+
 
 SNAPSHOT_SCHEMA_VERSION = "character-profile-completion-v1"
 CHARACTER_DETAIL_ALLOWLIST = (
@@ -746,14 +748,25 @@ def validate_character_profile_apply_plan(
     requested_model = _clean_string(
         job.get("requested_model_id"), field="requested_model_id", required=True
     )
-    actual_provider = _clean_string(
-        job.get("actual_provider_id"), field="actual_provider_id", required=True
-    )
-    actual_model = _clean_string(
-        job.get("actual_model_id"), field="actual_model_id", required=True
-    )
-    if (requested_provider, requested_model) != (actual_provider, actual_model):
-        raise CharacterProfileValidationError("requested/actual 模型证据不一致")
+    evidence = job.get("model_evidence")
+    if isinstance(evidence, Mapping):
+        try:
+            candidate_actual_identity(
+                evidence,
+                requested_provider_id=requested_provider,
+                requested_model_id=requested_model,
+            )
+        except ModelEvidencePolicyError as error:
+            raise CharacterProfileValidationError(str(error)) from error
+    else:
+        actual_provider = _clean_string(
+            job.get("actual_provider_id"), field="actual_provider_id", required=True
+        )
+        actual_model = _clean_string(
+            job.get("actual_model_id"), field="actual_model_id", required=True
+        )
+        if (requested_provider, requested_model) != (actual_provider, actual_model):
+            raise CharacterProfileValidationError("requested/actual 模型证据不一致")
     if job.get("output_json") != normalized_output:
         raise CharacterProfileValidationError("应用结果不是生成任务已核验的 output_json")
     revalidated_output = normalize_character_profile_output(snapshot, normalized_output)

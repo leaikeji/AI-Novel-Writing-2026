@@ -31,10 +31,15 @@ from .creative_authority import (
 )
 from .creative_data_models import (
     CharacterInstance,
+    CharacterInstanceRevision,
     NovelCharacterRevision,
     StoryTimeline,
 )
-from .creative_schemas import OutlineGenerationRequestSnapshot, SelectionEditInputSnapshot
+from .creative_schemas import (
+    OutlineCharacterDraftV2,
+    OutlineGenerationRequestSnapshot,
+    SelectionEditInputSnapshot,
+)
 from .models import (
     AssetPreset,
     AssetPresetItem,
@@ -62,6 +67,7 @@ from .models import (
     Storyline,
     Volume,
 )
+from .model_execution import ModelEvidencePolicyError, candidate_actual_identity
 from .private_library import UsagePolicy, create_asset, get_asset, update_asset
 from .services import (
     DomainError,
@@ -86,6 +92,10 @@ from .selection_edit_diff import (
     validate_selection_edit_result,
 )
 from .story_state.persistence import ensure_default_story_state, get_story_projection_payload
+from .story_state.revisions import (
+    CharacterInstanceProfileV2,
+    save_character_instance_profile,
+)
 
 
 PRIVATE_ASSET_TYPES = {"plot", "writing_style", "vocabulary", "idea"}
@@ -150,6 +160,14 @@ class EntityConflictError(DomainError):
     def __init__(self, current: dict[str, Any]):
         super().__init__("entity version conflict")
         self.current = current
+
+
+class CharacterLinkRequiredError(DomainError):
+    """A same-name formal root exists but the draft carries no stable link."""
+
+    def __init__(self, conflicts: list[dict[str, str]]):
+        super().__init__("同名人物草案必须由作者显式关联或改名")
+        self.conflicts = conflicts
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -608,6 +626,66 @@ def get_or_create_outline_draft(session: Session, novel_id: UUID) -> dict[str, A
     return _outline_payload(draft)
 
 
+def _optional_outline_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _normalize_outline_character_draft(
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    """Upgrade one legacy/manual/model row to the stable V2 planning shape."""
+
+    details = dict(item.get("details") or {})
+    is_v2 = item.get("schema_version") == "outline-character-draft/2"
+    role_type = str(item.get("role_type") or "supporting")
+    if role_type not in ROLE_TYPES:
+        if is_v2:
+            raise ValidationError("人物草案角色类型无效")
+        role_type = "supporting"
+    raw_character_id = item.get("character_id")
+    try:
+        draft = OutlineCharacterDraftV2(
+            draft_key=str(item.get("draft_key") or uuid4()),
+            character_id=raw_character_id or None,
+            role_type=role_type,
+            name=str(item.get("name") or "").strip(),
+            gender=_optional_outline_text(item.get("gender", details.get("gender"))),
+            age_at_story_start_note=_optional_outline_text(
+                item.get("age_at_story_start_note", details.get("age"))
+            ),
+            identity_summary=_optional_outline_text(
+                item.get("identity_summary", details.get("identity"))
+            ),
+            personality_summary=_optional_outline_text(
+                item.get("personality_summary", details.get("personality"))
+            ),
+            core_goal=_optional_outline_text(
+                item.get("core_goal", details.get("core_goal"))
+            ),
+            bio=str(item.get("bio", item.get("description", ""))).strip(),
+            origin=str(item.get("origin") or "manual"),
+        )
+    except PydanticValidationError as error:
+        raise ValidationError("人物草案字段无效") from error
+    normalized = draft.model_dump(mode="json", exclude_none=True)
+    # Temporary read projection for older installed frontends. New writes and
+    # formalization consume the typed fields above, never this compatibility view.
+    normalized["description"] = draft.bio
+    normalized["details"] = {
+        key: value
+        for key, value in {
+            "gender": draft.gender,
+            "age": draft.age_at_story_start_note,
+            "identity": draft.identity_summary,
+            "personality": draft.personality_summary,
+            "core_goal": draft.core_goal,
+        }.items()
+        if value not in (None, "")
+    }
+    return normalized
+
+
 def update_outline_draft(
     session: Session,
     novel_id: UUID,
@@ -636,23 +714,22 @@ def update_outline_draft(
     if background_text is not None:
         draft.background_text = background_text.strip()
     if characters is not None:
+        if len(characters) > 200:
+            raise ValidationError("人物草案不能超过200条")
         normalized: list[dict[str, Any]] = []
         seen: set[str] = set()
         seen_character_ids: set[UUID] = set()
-        for item in characters[:200]:
-            name = str(item.get("name", "")).strip()
-            role_type = str(item.get("role_type", "supporting"))
-            if not name or name in seen:
-                continue
-            if role_type not in ROLE_TYPES:
-                role_type = "supporting"
-            character_id: UUID | None = None
-            raw_character_id = item.get("character_id")
-            if raw_character_id not in (None, ""):
-                try:
-                    character_id = UUID(str(raw_character_id))
-                except (TypeError, ValueError) as error:
-                    raise ValidationError("大纲角色 character_id 无效") from error
+        for raw_item in characters:
+            item = _normalize_outline_character_draft(dict(raw_item))
+            name = str(item["name"])
+            if name in seen:
+                raise ValidationError("人物草案姓名不能重复")
+            character_id = (
+                UUID(str(item["character_id"]))
+                if item.get("character_id")
+                else None
+            )
+            if character_id is not None:
                 belongs_to_novel = session.scalar(
                     select(NovelCharacter.id).where(
                         NovelCharacter.id == character_id,
@@ -665,15 +742,7 @@ def update_outline_draft(
                     raise ValidationError("大纲角色 character_id 不能重复")
                 seen_character_ids.add(character_id)
             seen.add(name)
-            normalized_item = {
-                    "name": name,
-                    "role_type": role_type,
-                    "description": str(item.get("description", "")).strip(),
-                    "details": dict(item.get("details") or {}),
-            }
-            if character_id is not None:
-                normalized_item["character_id"] = str(character_id)
-            normalized.append(normalized_item)
+            normalized.append(item)
         draft.characters_json = normalized
     if plot_text is not None:
         draft.plot_text = plot_text.strip()
@@ -719,6 +788,11 @@ def complete_outline_draft(
         raise NotFoundError(f"outline draft for novel {novel_id} not found")
     if draft.version != expected_version:
         raise EntityConflictError(_outline_payload(draft))
+    draft.characters_json = [
+        _normalize_outline_character_draft(dict(item))
+        for item in (draft.characters_json or [])
+        if isinstance(item, dict)
+    ]
     if not draft.background_text or not draft.plot_text or not draft.highlight_text:
         raise ValidationError("故事背景、主要情节和亮点简介必须填写完整")
     if not draft.characters_json:
@@ -736,6 +810,22 @@ def complete_outline_draft(
     ).all()
     existing_by_id = {item.id: item for item in existing_rows}
     existing_by_name = {item.name: item for item in existing_rows}
+    link_conflicts: list[dict[str, str]] = []
+    for item in draft.characters_json:
+        if item.get("character_id"):
+            continue
+        existing = existing_by_name.get(str(item.get("name") or ""))
+        if existing is not None:
+            link_conflicts.append(
+                {
+                    "draft_key": str(item.get("draft_key") or ""),
+                    "draft_name": str(item.get("name") or ""),
+                    "existing_character_id": str(existing.id),
+                    "existing_character_name": existing.name,
+                }
+            )
+    if link_conflicts:
+        raise CharacterLinkRequiredError(link_conflicts)
     # Move all current rows to collision-free temporary positions before
     # reapplying the outline order. This keeps repeated outline completion and
     # renamed roles safe under the (novel_id, position) unique constraint.
@@ -748,7 +838,6 @@ def complete_outline_draft(
         name = str(item["name"])
         raw_character_id = item.get("character_id")
         character = None
-        legacy_name_match = False
         if raw_character_id:
             try:
                 character = existing_by_id.get(UUID(str(raw_character_id)))
@@ -756,19 +845,16 @@ def complete_outline_draft(
                 raise ValidationError("大纲角色 character_id 无效") from error
             if character is None:
                 raise ValidationError("大纲角色 character_id 不属于当前小说")
-        elif name in existing_by_name:
-            # Legacy drafts did not carry stable IDs. Link the row once, but do
-            # not let a same-name draft silently overwrite formal profile data.
-            character = existing_by_name[name]
-            legacy_name_match = True
-        incoming_details = dict(item.get("details") or {})
+        incoming_details = {
+            "gender": item.get("gender")
+        } if item.get("gender") not in (None, "") else {}
         if character is None:
             character = NovelCharacter(
                 id=uuid4(),
                 novel_id=novel_id,
                 name=name,
                 role_type=str(item.get("role_type", "supporting")),
-                description=str(item.get("description", "")),
+                description=str(item.get("bio", item.get("description", ""))),
                 details=incoming_details,
                 lifecycle_state="active",
                 position=index * 1000,
@@ -787,12 +873,10 @@ def complete_outline_draft(
             )
         else:
             existing_details = dict(character.details or {})
-            for key, value in existing_details.items():
-                if value not in (None, "", [], {}):
-                    # Formal profile data is author-owned. Outline regeneration may
-                    # fill missing keys for a matched character but cannot silently
-                    # replace any existing non-empty detail.
-                    incoming_details[key] = value
+            merged_details = dict(existing_details)
+            for key, value in incoming_details.items():
+                if merged_details.get(key) in (None, "", [], {}):
+                    merged_details[key] = value
             revision_result = save_character_root(
                 session,
                 novel_id,
@@ -801,18 +885,13 @@ def complete_outline_draft(
                 expected_character_version=character.version,
                 operation_key=f"outline-complete:{draft.id}:{expected_version}:{character.id}",
                 source_kind="outline_apply",
-                role_type=(
-                    character.role_type
-                    if legacy_name_match
-                    else str(item.get("role_type", "supporting"))
-                ),
-                name=character.name if legacy_name_match else name,
+                role_type=character.role_type,
+                name=character.name,
                 description=(
                     character.description
-                    if legacy_name_match
-                    else str(item.get("description", ""))
+                    or str(item.get("bio", item.get("description", "")))
                 ),
-                details=incoming_details,
+                details=merged_details,
                 lifecycle_state="active",
                 position=index * 1000,
                 change_set={"applied_from_outline": True},
@@ -826,6 +905,8 @@ def complete_outline_draft(
                 "name": character.name,
                 "role_type": character.role_type,
                 "description": character.description,
+                "bio": character.description,
+                "gender": (character.details or {}).get("gender"),
                 "details": dict(character.details or {}),
             }
         )
@@ -854,6 +935,87 @@ def complete_outline_draft(
         novel_id,
         expected_story_ledger_version=novel.story_ledger_version,
     )
+    primary_timeline = session.scalar(
+        select(StoryTimeline).where(
+            StoryTimeline.novel_id == novel_id,
+            StoryTimeline.is_primary.is_(True),
+            StoryTimeline.lifecycle_state == "active",
+        )
+    )
+    if primary_timeline is None:
+        raise ValidationError("大纲正式化后未找到默认主时间线")
+    profile_keys = {
+        "public_identity",
+        "true_identity",
+        "cover_identity",
+        "birth_year",
+        "birth_calendar_id",
+        "birth_information",
+        "occupation",
+        "personality",
+        "goals",
+        "flaws",
+        "secrets",
+        "growth_direction",
+        "age_at_story_start_note",
+    }
+    for item in materialized_characters:
+        character_id = UUID(str(item["character_id"]))
+        instance = session.scalar(
+            select(CharacterInstance).where(
+                CharacterInstance.novel_id == novel_id,
+                CharacterInstance.character_id == character_id,
+                CharacterInstance.origin_timeline_id == primary_timeline.id,
+                CharacterInstance.lifecycle_state == "active",
+            )
+        )
+        if instance is None:
+            raise ValidationError("大纲人物未生成默认主线档案")
+        current_revision = (
+            session.get(CharacterInstanceRevision, instance.current_revision_id)
+            if instance.current_revision_id is not None
+            else None
+        )
+        raw_current_profile = dict(
+            current_revision.profile_json if current_revision else {}
+        )
+        current_schema = raw_current_profile.get("schema_version")
+        current_profile = {
+            key: value
+            for key, value in raw_current_profile.items()
+            if key in profile_keys
+        }
+        incoming_profile: dict[str, Any] = {
+            "public_identity": item.get("identity_summary"),
+            "personality": item.get("personality_summary"),
+            "goals": (
+                [str(item["core_goal"])] if item.get("core_goal") else []
+            ),
+            "age_at_story_start_note": item.get("age_at_story_start_note"),
+        }
+        merged_profile = dict(current_profile)
+        changed = False
+        for key, value in incoming_profile.items():
+            if value in (None, "", [], {}):
+                continue
+            if merged_profile.get(key) in (None, "", [], {}):
+                merged_profile[key] = value
+                changed = True
+        if not changed and current_schema == "character-instance-profile/2":
+            continue
+        merged_profile["schema_version"] = "character-instance-profile/2"
+        save_character_instance_profile(
+            session,
+            novel_id,
+            instance.id,
+            expected_story_ledger_version=novel.story_ledger_version,
+            expected_instance_version=instance.version,
+            operation_key=(
+                f"outline-complete-profile:{draft.id}:{expected_version}:{instance.id}"
+            ),
+            profile=CharacterInstanceProfileV2.model_validate(merged_profile),
+            source_kind="manual",
+        )
     current_character_revisions: dict[UUID, NovelCharacterRevision] = {}
     for row in session.scalars(
         select(NovelCharacterRevision)
@@ -3690,6 +3852,7 @@ def _creative_job_payload(job: CreativeGenerationJob) -> dict[str, Any]:
         "generation_contract_version": job.generation_contract_version,
         "actual_provider_id": job.actual_provider_id,
         "actual_model_id": job.actual_model_id,
+        "model_evidence": job.model_evidence_json,
         "provider_profile": job.actual_provider_id or job.provider_profile,
         "output_json": job.output_json,
         "output_text": job.output_text,
@@ -4494,8 +4657,9 @@ def complete_creative_generation(
     session: Session,
     job_id: UUID,
     *,
-    actual_provider_id: str,
-    actual_model_id: str,
+    actual_provider_id: str | None = None,
+    actual_model_id: str | None = None,
+    model_evidence: dict[str, Any] | None = None,
     output_text: str = "",
     output_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -4508,9 +4672,22 @@ def complete_creative_generation(
         raise NotFoundError(f"creative generation job {job_id} not found")
     if job.state != "running":
         return _creative_job_payload(job)
-    job.actual_provider_id = actual_provider_id
-    job.actual_model_id = actual_model_id
-    if (
+    if model_evidence is not None:
+        try:
+            actual_provider_id, actual_model_id = candidate_actual_identity(
+                model_evidence,
+                requested_provider_id=str(job.requested_provider_id or ""),
+                requested_model_id=job.requested_model_id,
+            )
+        except ModelEvidencePolicyError as error:
+            job.model_evidence_json = dict(model_evidence)
+            job.state = "failed"
+            job.failure_message = str(error)
+            job.completed_at = datetime.now(timezone.utc)
+            session.commit()
+            raise ValidationError(str(error)) from error
+        job.model_evidence_json = dict(model_evidence)
+    elif (
         actual_provider_id != job.requested_provider_id
         or actual_model_id != job.requested_model_id
     ):
@@ -4523,6 +4700,8 @@ def complete_creative_generation(
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
         raise ValidationError(job.failure_message)
+    job.actual_provider_id = actual_provider_id
+    job.actual_model_id = actual_model_id
     if job.kind == "selection_edit":
         snapshot = dict(job.input_snapshot or {})
         base = dict(snapshot.get("base") or {})
@@ -4553,6 +4732,7 @@ def fail_creative_generation(
     failure_message: str,
     actual_provider_id: str | None = None,
     actual_model_id: str | None = None,
+    model_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     job = session.scalar(
         select(CreativeGenerationJob)
@@ -4566,6 +4746,8 @@ def fail_creative_generation(
     if actual_provider_id and actual_model_id:
         job.actual_provider_id = actual_provider_id
         job.actual_model_id = actual_model_id
+    if model_evidence is not None:
+        job.model_evidence_json = dict(model_evidence)
     job.state = "failed"
     job.failure_message = failure_message[:4000]
     job.completed_at = datetime.now(timezone.utc)

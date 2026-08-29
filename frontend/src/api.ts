@@ -13,6 +13,7 @@ export type GenerationTaskModelEvidence = Pick<
   | "actual_provider_id"
   | "actual_model_id"
   | "provider_profile"
+  | "model_evidence"
 >;
 
 export class ApiError extends Error {
@@ -172,10 +173,24 @@ export function completedGenerationModelLabel(value: GenerationTaskModelEvidence
 export function generationModelAuditLabel(value: GenerationTaskModelEvidence): string {
   const requested = requestedGenerationModelLabel(value);
   const actual = actualGenerationModelLabel(value);
+  const evidence = objectRecord(value.model_evidence);
+  if (evidence?.schema_version === "model-execution-evidence/2") {
+    if (evidence.status === "not_exposed") {
+      return `宿主未公开实际模型；任务前后有效模型一致（${requested}）`;
+    }
+    if (evidence.status === "rejected") {
+      return `请求 ${requested} · 模型公开证据已拒绝`;
+    }
+  }
   return actual ? `请求 ${requested} · 实际 ${actual}` : `请求 ${requested} · 实际未核验`;
 }
 
 export function verifiedGenerationModelLabel(value: GenerationTaskModelEvidence): string {
+  const evidence = objectRecord(value.model_evidence);
+  if (evidence?.schema_version === "model-execution-evidence/2"
+    && evidence.status === "not_exposed") {
+    return generationModelAuditLabel(value);
+  }
   const actual = actualGenerationModelLabel(value);
   return actual ? `实际 ${actual}` : generationModelAuditLabel(value);
 }

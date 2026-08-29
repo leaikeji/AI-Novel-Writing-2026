@@ -84,6 +84,13 @@ def http(api):
     app.dependency_overrides[api.get_session] = lambda: session
     app.dependency_overrides[api.get_novel_generation_ctx] = lambda: ctx
     app.dependency_overrides[api.get_novel_effective_model] = lambda: configured_model
+
+    async def model_probe():
+        return configured_model
+
+    app.dependency_overrides[api.get_novel_effective_model_probe] = (
+        lambda: model_probe
+    )
     with TestClient(app, raise_server_exceptions=False) as client:
         yield SimpleNamespace(
             client=client,
@@ -93,7 +100,15 @@ def http(api):
         )
 
 
-def _generation_setup(monkeypatch, api, http, *, final_text: str, actual_model="model-a"):
+def _generation_setup(
+    monkeypatch,
+    api,
+    http,
+    *,
+    final_text: str,
+    actual_model="model-a",
+    expose_usage: bool = True,
+):
     novel_id = uuid4()
     job_id = uuid4()
     snapshot = {
@@ -143,6 +158,25 @@ def _generation_setup(monkeypatch, api, http, *, final_text: str, actual_model="
 
     async def chat(prompt, **kwargs):
         chat_calls.append({"prompt": prompt, **kwargs})
+        if not expose_usage:
+            return SimpleNamespace(
+                chunks=[
+                    SimpleNamespace(
+                        output=[
+                            SimpleNamespace(
+                                role="assistant",
+                                content=[
+                                    SimpleNamespace(
+                                        type="output_text", text=final_text
+                                    )
+                                ],
+                                metadata=None,
+                            )
+                        ]
+                    )
+                ],
+                text=final_text,
+            )
         return _reply_with_usage(
             "provider-a",
             actual_model,
@@ -298,14 +332,52 @@ def test_generate_uses_novel_agent_character_skill_and_verified_actual_model(
     assert normalize_calls == [
         (setup.snapshot, {"characters": [{"character_id": "placeholder"}]})
     ]
-    assert setup.complete_calls == [
-        {
-            "actual_provider_id": "provider-a",
-            "actual_model_id": "model-a",
-            "output_text": final_text,
-            "output_json": normalized,
-        }
-    ]
+    assert len(setup.complete_calls) == 1
+    completed = setup.complete_calls[0]
+    assert completed["output_text"] == final_text
+    assert completed["output_json"] == normalized
+    evidence = completed["model_evidence"]
+    assert evidence["status"] == "verified_from_provider_usage"
+    assert evidence["reported_actual"] == {
+        "provider_id": "provider-a",
+        "model_id": "model-a",
+    }
+    assert setup.fail_calls == []
+
+
+def test_generate_allows_not_exposed_usage_without_fabricating_actual_model(
+    monkeypatch: pytest.MonkeyPatch,
+    api,
+    http,
+) -> None:
+    final_text = '{"characters":[]}'
+    setup = _generation_setup(
+        monkeypatch,
+        api,
+        http,
+        final_text=final_text,
+        expose_usage=False,
+    )
+    monkeypatch.setattr(api, "ensure_prompt_within_effective_limit", lambda *_: None)
+    monkeypatch.setattr(
+        api,
+        "normalize_character_profile_output",
+        lambda *_: {
+            "schema_version": "character-profile-completion-output-v1",
+            "characters": [],
+        },
+    )
+
+    response = http.client.post(
+        f"/novels/{setup.novel_id}/character-profile-completion/generate",
+        json={},
+    )
+
+    assert response.status_code == 200
+    evidence = setup.complete_calls[0]["model_evidence"]
+    assert evidence["status"] == "not_exposed"
+    assert evidence["reported_actual"] is None
+    assert evidence["usage"]["status"] == "not_exposed"
     assert setup.fail_calls == []
 
 
@@ -343,7 +415,9 @@ def test_generate_model_audit_mismatch_fails_before_json_parsing_and_records_act
     assert setup.complete_calls == []
     assert setup.fail_calls[0]["actual_provider_id"] == "provider-a"
     assert setup.fail_calls[0]["actual_model_id"] == "model-b"
-    assert "与调用前活动模型不一致" in setup.fail_calls[0]["failure_message"]
+    assert "provider_usage_identity_mismatch" in setup.fail_calls[0][
+        "failure_message"
+    ]
 
 
 def test_generate_malformed_final_json_returns_502_and_never_completes(
@@ -682,4 +756,3 @@ def test_restore_rejects_whitespace_only_idempotency_key(
     )
 
     assert response.status_code == 422
-

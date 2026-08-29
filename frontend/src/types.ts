@@ -143,6 +143,7 @@ export interface CreativeGenerationRecord {
   generation_contract_version: string | null;
   actual_provider_id: string | null;
   actual_model_id: string | null;
+  model_evidence?: Record<string, unknown> | null;
   provider_profile: string | null;
   output_json: Record<string, any>;
   output_text: string;
@@ -240,6 +241,7 @@ export interface GenerationJobRecord {
   generation_contract_version: string | null;
   actual_provider_id: string | null;
   actual_model_id: string | null;
+  model_evidence?: Record<string, unknown> | null;
   provider_profile: string | null;
   target_visible_character_count: number;
   minimum_visible_character_count?: number;
@@ -293,6 +295,7 @@ export interface IntelligenceProposalRecord {
   generation_contract_version: string | null;
   actual_provider_id: string | null;
   actual_model_id: string | null;
+  model_evidence?: Record<string, unknown> | null;
   provider_profile: string | null;
   model_profile_fingerprint: string | null;
   attempt: number;
@@ -353,9 +356,19 @@ export interface RestorePreviewRecord {
 }
 
 export interface OutlineCharacterDraft {
-  character_id?: string;
+  schema_version?: "outline-character-draft/2";
+  draft_key?: string;
+  character_id?: string | null;
   name: string;
   role_type: "main" | "supporting";
+  gender?: string;
+  age_at_story_start_note?: string;
+  identity_summary?: string;
+  personality_summary?: string;
+  core_goal?: string;
+  bio?: string;
+  origin?: "manual" | "ai_candidate";
+  /** Read-only compatibility projection for older installed bundles. */
   description: string;
   details: Record<string, unknown>;
 }

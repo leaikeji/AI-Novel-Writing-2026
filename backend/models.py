@@ -260,6 +260,7 @@ class ChapterGenerationJob(Base):
     generation_contract_version: Mapped[str | None] = mapped_column(String(120))
     actual_provider_id: Mapped[str | None] = mapped_column(String(160))
     actual_model_id: Mapped[str | None] = mapped_column(String(160))
+    model_evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Legacy read-only columns. New generation code never writes them.
     provider_profile: Mapped[str | None] = mapped_column(String(160))
     target_visible_character_count: Mapped[int] = mapped_column(
@@ -389,6 +390,7 @@ class IntelligenceProposal(Base):
     generation_contract_version: Mapped[str | None] = mapped_column(String(120))
     actual_provider_id: Mapped[str | None] = mapped_column(String(160))
     actual_model_id: Mapped[str | None] = mapped_column(String(160))
+    model_evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Legacy read-only columns. New generation code never writes them.
     provider_profile: Mapped[str | None] = mapped_column(String(160))
     model_profile_fingerprint: Mapped[str | None] = mapped_column(String(160))
@@ -1059,6 +1061,7 @@ class CreativeGenerationJob(Base):
     generation_contract_version: Mapped[str | None] = mapped_column(String(120))
     actual_provider_id: Mapped[str | None] = mapped_column(String(160))
     actual_model_id: Mapped[str | None] = mapped_column(String(160))
+    model_evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Legacy read-only column. New generation code never writes it.
     provider_profile: Mapped[str | None] = mapped_column(String(160))
     output_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

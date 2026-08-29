@@ -29,6 +29,9 @@ from .contracts import (
     ContextAssemblyErrorCode,
     ContextBlockV2,
     ContextBudgetResultV1,
+    ContextBudgetResultV2,
+    ContextBudgetV1,
+    ContextBudgetV2,
     ContextConflictV2,
     ContextDiagnosticsV2,
     ContextOmissionV2,
@@ -41,7 +44,9 @@ from .contracts import (
     RetrievalPurpose,
     StoryPositionV3,
     TimelineMappingKind,
+    WRITING_CONTEXT_SNAPSHOT_VERSION_V2,
     WritingContextSnapshotV1,
+    WritingContextSnapshotV2,
 )
 from .hashing import canonical_hash
 
@@ -336,7 +341,10 @@ def _apply_budget(
     snapshot: NovelContextAssemblySnapshotV4,
     blocks: Sequence[ContextBlockV2],
     omissions: dict[OmissionCode, _OmissionAccumulator],
-) -> tuple[tuple[ContextBlockV2, ...], ContextBudgetResultV1]:
+) -> tuple[
+    tuple[ContextBlockV2, ...],
+    ContextBudgetResultV1 | ContextBudgetResultV2,
+]:
     budget = snapshot.budget
     hard = budget.hard_input_token_budget
     mandatory = [block for block in blocks if block.requirement.mandatory]
@@ -345,9 +353,18 @@ def _apply_budget(
     if forced_total > hard:
         raise ContextAssemblyError(
             ContextAssemblyErrorCode.CONTEXT_OVERFLOW,
-            "required context exceeds the actual model input budget",
+            "required context exceeds the effective model input budget",
             details={
-                "actual_model_id": budget.actual_model_id,
+                **(
+                    {"actual_model_id": budget.actual_model_id}
+                    if isinstance(budget, ContextBudgetV1)
+                    else {
+                        "requested_provider_id": budget.requested_provider_id,
+                        "requested_model_id": budget.requested_model_id,
+                        "budget_provider_id": budget.budget_provider_id,
+                        "budget_model_id": budget.budget_model_id,
+                    }
+                ),
                 "hard_input_token_budget": hard,
                 "fixed_overhead_tokens": budget.fixed_overhead_tokens,
                 "mandatory_block_tokens": mandatory_tokens,
@@ -380,21 +397,31 @@ def _apply_budget(
         )
     included.sort(key=_block_order)
     included_tokens = sum(block.estimated_token_count for block in included)
-    return (
-        tuple(included),
-        ContextBudgetResultV1(
+    common_result = {
+        "effective_context_window_tokens": budget.effective_context_window_tokens,
+        "reserved_output_tokens": budget.reserved_output_tokens,
+        "reserved_prompt_tokens": budget.reserved_prompt_tokens,
+        "hard_input_token_budget": hard,
+        "fixed_overhead_tokens": budget.fixed_overhead_tokens,
+        "included_block_tokens": included_tokens,
+        "omitted_block_tokens": omitted_tokens,
+        "remaining_tokens": hard - budget.fixed_overhead_tokens - included_tokens,
+        "estimator_version": budget.estimator_version,
+    }
+    if isinstance(budget, ContextBudgetV2):
+        result: ContextBudgetResultV1 | ContextBudgetResultV2 = ContextBudgetResultV2(
+            requested_provider_id=budget.requested_provider_id,
+            requested_model_id=budget.requested_model_id,
+            budget_provider_id=budget.budget_provider_id,
+            budget_model_id=budget.budget_model_id,
+            **common_result,
+        )
+    else:
+        result = ContextBudgetResultV1(
             actual_model_id=budget.actual_model_id,
-            effective_context_window_tokens=budget.effective_context_window_tokens,
-            reserved_output_tokens=budget.reserved_output_tokens,
-            reserved_prompt_tokens=budget.reserved_prompt_tokens,
-            hard_input_token_budget=hard,
-            fixed_overhead_tokens=budget.fixed_overhead_tokens,
-            included_block_tokens=included_tokens,
-            omitted_block_tokens=omitted_tokens,
-            remaining_tokens=hard - budget.fixed_overhead_tokens - included_tokens,
-            estimator_version=budget.estimator_version,
-        ),
-    )
+            **common_result,
+        )
+    return tuple(included), result
 
 
 def _fact_omissions(
@@ -537,6 +564,8 @@ def freeze_writing_context(
 ) -> WritingContextSnapshotV1:
     """Freeze the exact assembled envelope and its deterministic digest."""
 
+    if not isinstance(envelope.budget, ContextBudgetResultV1):
+        raise ValueError("V1 freeze requires a V1 context budget")
     if actual_model_id != envelope.budget.actual_model_id:
         raise ValueError("actual model differs from the model used for context budgeting")
     requested = requested_model_id.strip()
@@ -555,6 +584,45 @@ def freeze_writing_context(
         purpose=envelope.purpose,
         requested_model_id=requested,
         actual_model_id=actual,
+        context_policy_version=policy,
+        envelope=envelope,
+        assembly_hash=canonical_hash(hash_payload),
+    )
+
+
+def freeze_writing_context_v2(
+    envelope: NovelContextEnvelopeV4,
+    *,
+    context_policy_version: str,
+) -> WritingContextSnapshotV2:
+    """Freeze pre-call identities without requiring an actual model value."""
+
+    budget = envelope.budget
+    if not isinstance(budget, ContextBudgetResultV2):
+        raise ValueError("V2 freeze requires a V2 context budget")
+    policy = context_policy_version.strip()
+    if not policy:
+        raise ValueError("context_policy_version cannot be blank")
+    hash_payload = {
+        "schema_version": WRITING_CONTEXT_SNAPSHOT_VERSION_V2,
+        "novel_id": envelope.novel_id,
+        "purpose": envelope.purpose,
+        "requested_provider_id": budget.requested_provider_id,
+        "requested_model_id": budget.requested_model_id,
+        "budget_provider_id": budget.budget_provider_id,
+        "budget_model_id": budget.budget_model_id,
+        "effective_context_window_tokens": budget.effective_context_window_tokens,
+        "context_policy_version": policy,
+        "envelope": envelope,
+    }
+    return WritingContextSnapshotV2(
+        novel_id=envelope.novel_id,
+        purpose=envelope.purpose,
+        requested_provider_id=budget.requested_provider_id,
+        requested_model_id=budget.requested_model_id,
+        budget_provider_id=budget.budget_provider_id,
+        budget_model_id=budget.budget_model_id,
+        effective_context_window_tokens=budget.effective_context_window_tokens,
         context_policy_version=policy,
         envelope=envelope,
         assembly_hash=canonical_hash(hash_payload),

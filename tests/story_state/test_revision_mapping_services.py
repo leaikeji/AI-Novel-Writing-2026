@@ -24,6 +24,7 @@ from backend.story_state.mappings import (
 )
 from backend.story_state.revisions import (
     CharacterInstanceProfileV1,
+    CharacterInstanceProfileV2,
     RevisionServiceError,
     RevisionServiceErrorCode,
     get_character_instance_profile,
@@ -51,6 +52,7 @@ def profile_revision(
     parent: int | None = None,
     restored_from: int | None = None,
     operation_key: str | None = None,
+    profile_schema_version: int = 1,
 ) -> CharacterInstanceRevision:
     return CharacterInstanceRevision(
         id=uid(value),
@@ -62,7 +64,7 @@ def profile_revision(
         source_kind="manual",
         operation_key=operation_key or f"profile-{number}",
         operation_hash=f"{number:064x}",
-        profile_schema_version=1,
+        profile_schema_version=profile_schema_version,
         profile_json=profile,
         change_set_json={"changed_fields": sorted(profile)},
         content_hash=sha256(repr(profile).encode()).hexdigest(),
@@ -191,6 +193,56 @@ def test_profile_save_appends_immutable_revision_and_advances_both_cas_values() 
     assert session.commit_count == 0
 
 
+def test_profile_v2_note_is_persisted_as_text_and_never_becomes_computed_age() -> None:
+    novel_row = novel(version=4)
+    instance_row = instance(30, version=3)
+    session = FakeSession(
+        scalar_results={Novel: [novel_row], type(instance_row): [instance_row]},
+        scalars_results={CharacterInstanceRevision: [[]]},
+    )
+    profile = CharacterInstanceProfileV2(
+        public_identity="巡查员",
+        age_at_story_start_note="故事开篇约十八岁，月份尚未确定",
+    )
+
+    result = save_character_instance_profile(
+        session,
+        uid(1),
+        uid(30),
+        expected_story_ledger_version=4,
+        expected_instance_version=3,
+        operation_key="profile.v2.save.1",
+        profile=profile,
+        id_factory=id_factory(1050),
+        clock=lambda: NOW,
+    )
+
+    created = next(
+        item for item in session.added if isinstance(item, CharacterInstanceRevision)
+    )
+    assert created.profile_schema_version == 2
+    assert created.profile_json["schema_version"] == "character-instance-profile/2"
+    assert created.profile_json["age_at_story_start_note"] == profile.age_at_story_start_note
+    assert created.profile_json.get("birth_year") is None
+    assert "age_at_story_start" not in created.profile_json
+    assert result["story_ledger_version"] == 5
+    assert instance_row.version == 4
+
+
+def test_profile_v1_remains_the_default_for_payloads_without_schema_version() -> None:
+    from backend.story_state import api
+
+    request = api.CharacterInstanceProfileSaveRequest(
+        expected_story_ledger_version=2,
+        expected_instance_version=1,
+        operation_key="profile.v1.compat.1",
+        profile={"public_identity": "学徒"},
+    )
+
+    assert type(request.profile) is CharacterInstanceProfileV1
+    assert request.profile.schema_version == "character-instance-profile/1"
+
+
 def test_profile_restore_creates_new_revision_without_rewriting_target() -> None:
     novel_row = novel(version=7)
     instance_row = instance(30, current_revision_id=61, version=5)
@@ -228,6 +280,90 @@ def test_profile_restore_creates_new_revision_without_rewriting_target() -> None
     assert result["revision"]["source_kind"] == "restore"
     assert current.parent_revision_id == target.id
     assert target.restored_from_revision_id is None
+
+
+def test_profile_restore_accepts_v2_and_preserves_note_without_reinterpreting_it() -> None:
+    novel_row = novel(version=7)
+    instance_row = instance(30, current_revision_id=61, version=5)
+    target_profile = {
+        "schema_version": "character-instance-profile/2",
+        "public_identity": "学徒",
+        "age_at_story_start_note": "大约十八岁",
+    }
+    target = profile_revision(
+        60,
+        number=1,
+        profile=target_profile,
+        profile_schema_version=2,
+    )
+    current = profile_revision(
+        61,
+        number=2,
+        parent=60,
+        profile={"schema_version": "character-instance-profile/1", "public_identity": "巡查员"},
+    )
+    session = FakeSession(
+        scalar_results={Novel: [novel_row], type(instance_row): [instance_row]},
+        scalars_results={CharacterInstanceRevision: [[target, current]]},
+    )
+
+    restore_character_instance_profile(
+        session,
+        uid(1),
+        uid(30),
+        target.id,
+        expected_story_ledger_version=7,
+        expected_instance_version=5,
+        operation_key="profile.v2.restore.1",
+        id_factory=id_factory(1120),
+        clock=lambda: NOW,
+    )
+
+    created = next(
+        item for item in session.added if isinstance(item, CharacterInstanceRevision)
+    )
+    assert created.profile_schema_version == 2
+    assert created.profile_json == target_profile
+    assert "birth_year" not in created.profile_json
+
+
+def test_profile_restore_rejects_schema_column_payload_mismatch_without_cas_change() -> None:
+    novel_row = novel(version=7)
+    instance_row = instance(30, current_revision_id=61, version=5)
+    target = profile_revision(
+        60,
+        number=1,
+        profile={
+            "schema_version": "character-instance-profile/2",
+            "age_at_story_start_note": "十八岁",
+        },
+        profile_schema_version=1,
+    )
+    current = profile_revision(
+        61, number=2, parent=60, profile={"public_identity": "巡查员"}
+    )
+    session = FakeSession(
+        scalar_results={Novel: [novel_row], type(instance_row): [instance_row]},
+        scalars_results={CharacterInstanceRevision: [[target, current]]},
+    )
+
+    with pytest.raises(RevisionServiceError) as caught:
+        restore_character_instance_profile(
+            session,
+            uid(1),
+            uid(30),
+            target.id,
+            expected_story_ledger_version=7,
+            expected_instance_version=5,
+            operation_key="profile.invalid.restore.1",
+        )
+
+    assert caught.value.code is RevisionServiceErrorCode.INVALID_PROFILE_SCHEMA
+    assert session.added == []
+    assert session.flush_count == 0
+    assert instance_row.current_revision_id == current.id
+    assert instance_row.version == 5
+    assert novel_row.story_ledger_version == 7
 
 
 def test_profile_save_idempotent_retry_precedes_stale_cas_checks() -> None:
