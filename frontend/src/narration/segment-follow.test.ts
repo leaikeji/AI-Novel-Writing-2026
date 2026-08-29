@@ -46,6 +46,7 @@ function idlePlayerState(patch: Partial<NarrationPlayerState> = {}): NarrationPl
     offsetMs: 0,
     durationMs: 0,
     rate: 1,
+    volume: 1,
     followPaused: false,
     backend: null,
     source: null,
@@ -79,6 +80,7 @@ class FakeFollowPlayer implements FollowAwareNarrationPlayerController {
     return { kind: "noop", lease: this.currentLease, reason: "not_paused" };
   }
   setRate(_rate: number): void {}
+  setVolume(_volume: number): void {}
   updateManifest(_manifest: NarrationManifestV2): void {}
   subscribe(listener: (state: NarrationPlayerState) => void): () => void {
     this.listeners.add(listener);

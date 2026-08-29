@@ -668,6 +668,12 @@ def _fault_from_error(error: Exception) -> PlaybackApiFault:
             "Manifest 已更新，请刷新后重试。",
         )
     if isinstance(error, InvalidNarrationState):
+        if str(error) == "unavailable_private_voice_deleted":
+            return PlaybackApiFault(
+                PlaybackApiErrorCode.INVALID_STATE,
+                "这个历史朗读使用的私人音色已删除，声音文件不再可用。",
+                retryable=False,
+            )
         return PlaybackApiFault(
             PlaybackApiErrorCode.INVALID_STATE,
             "当前朗读版本尚不可播放。",

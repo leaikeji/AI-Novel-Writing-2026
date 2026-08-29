@@ -90,7 +90,7 @@ from tests.narration.test_domain_services import _novel
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_HEAD = "20260829_0029"
+EXPECTED_HEAD = "20260829_0032"
 NOW = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
 POLICY = NarrationProductionPolicy(
     tts_fingerprint="a" * 64,
@@ -271,6 +271,8 @@ def _create_voice(
         parameters_json={},
         fingerprint=text_sha256(f"t4-rc-voice:{marker}:{uuid4()}"),
         quality_state="accepted",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted",
         locked_actor="owner",
         locked_at=NOW,
     )

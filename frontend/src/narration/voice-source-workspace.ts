@@ -1,20 +1,16 @@
 import {
   NarrationApiError,
-  createPresetVoiceVersion,
   createUploadedVoiceVersion,
   createVoicePreview,
   createVoiceProfile,
   getVoicePreview,
   getVoiceProfile,
   listVoiceProfiles,
-  listOfficialVoicePresets,
   lockVoiceProfile,
 } from "./api";
 import type {
   NarrationAuthorizationState,
   NarrationCapabilities,
-  OfficialPresetCatalogItem,
-  OfficialPresetCatalogResponse,
   VoicePreviewResource,
   VoiceProfileResource,
   VoiceProfileVersionResource,
@@ -62,8 +58,6 @@ export interface VoiceSourceWorkspaceApi {
   listVoiceProfiles: typeof listVoiceProfiles;
   createVoiceProfile: typeof createVoiceProfile;
   getVoiceProfile: typeof getVoiceProfile;
-  listOfficialVoicePresets: typeof listOfficialVoicePresets;
-  createPresetVoiceVersion: typeof createPresetVoiceVersion;
   createUploadedVoiceVersion: typeof createUploadedVoiceVersion;
   createVoicePreview: typeof createVoicePreview;
   getVoicePreview: typeof getVoicePreview;
@@ -86,7 +80,6 @@ export type VoiceSourceWorkspacePhase =
   | "loading"
   | "ready"
   | "creating-profile"
-  | "creating-preset"
   | "uploading"
   | "creating-preview"
   | "polling-preview"
@@ -99,10 +92,8 @@ export interface VoiceSourceWorkspaceState {
   readonly scopeNovelId: string;
   readonly phase: VoiceSourceWorkspacePhase;
   readonly profiles: readonly VoiceProfileResource[];
-  readonly officialPresets: readonly OfficialPresetCatalogItem[];
   readonly selectedProfileId: string | null;
   readonly selectedVersionId: string | null;
-  readonly selectedPresetId: string | null;
   readonly selectedSource: VoiceSourceType | null;
   readonly profileName: string;
   readonly language: string;
@@ -134,8 +125,6 @@ const DEFAULT_API: VoiceSourceWorkspaceApi = {
   listVoiceProfiles,
   createVoiceProfile,
   getVoiceProfile,
-  listOfficialVoicePresets,
-  createPresetVoiceVersion,
   createUploadedVoiceVersion,
   createVoicePreview,
   getVoicePreview,
@@ -156,10 +145,8 @@ function initialState(novelId: string, suggestedName: string): VoiceSourceWorksp
     scopeNovelId: novelId,
     phase: "loading",
     profiles: [],
-    officialPresets: [],
     selectedProfileId: null,
     selectedVersionId: null,
-    selectedPresetId: null,
     selectedSource: null,
     profileName: suggestedName,
     language: "zh-CN",
@@ -339,7 +326,6 @@ export function createVoiceSourceWorkspace(
 
     const applyProfiles = (
       profiles: readonly VoiceProfileResource[],
-      officialPresets: readonly OfficialPresetCatalogItem[],
       preferredProfileId: string | null,
       message: string,
     ) => {
@@ -356,7 +342,6 @@ export function createVoiceSourceWorkspace(
         scopeNovelId: props.novelId,
         phase: "ready",
         profiles,
-        officialPresets,
         selectedProfileId: selectedProfile?.profile_id ?? null,
         selectedVersionId: currentVersionStillExists
           ? current.selectedVersionId
@@ -372,20 +357,14 @@ export function createVoiceSourceWorkspace(
       controller: AbortController,
       preferredProfileId: string | null,
       message: string,
-    ): Promise<readonly VoiceProfileResource[]> => Promise.all([
-      api.listVoiceProfiles({
+    ): Promise<readonly VoiceProfileResource[]> => api.listVoiceProfiles({
         novelId: props.novelId,
         includeLibrary: false,
         signal: controller.signal,
-      }),
-      api.listOfficialVoicePresets(controller.signal),
-    ]).then(([response, catalog]: [
-      { readonly items: readonly VoiceProfileResource[] },
-      OfficialPresetCatalogResponse,
-    ]) => {
+      }).then((response) => {
       const profiles = novelScopedVoiceProfiles(props.novelId, response.items);
       if (ownsScope(generation, sequence, controller)) {
-        applyProfiles(profiles, catalog.items, preferredProfileId, message);
+        applyProfiles(profiles, preferredProfileId, message);
       }
       return profiles;
     });
@@ -403,7 +382,7 @@ export function createVoiceSourceWorkspace(
         sequence,
         controller,
         null,
-        "作品音色与固定官方 ONNX 目录已加载。所有绑定仍需作者单独保存。",
+        "私人音色档案已加载。官方音色请在上方音色库直接使用。",
       ).catch((reason: unknown) => {
         if (!ownsScope(generation, sequence, controller) || isAbortLike(reason)) return;
         commit((current) => ({
@@ -447,7 +426,6 @@ export function createVoiceSourceWorkspace(
     });
     const busy = [
       "creating-profile",
-      "creating-preset",
       "uploading",
       "creating-preview",
       "polling-preview",
@@ -561,7 +539,6 @@ export function createVoiceSourceWorkspace(
         phase: "ready",
         selectedProfileId: profile.profile_id,
         selectedVersionId: defaultVersionId(profile),
-        selectedPresetId: current.officialPresets[0]?.preset_id ?? null,
         selectedSource: null,
         referenceAudio: null,
         workflow: IDLE_VOICE_SOURCE_WORKFLOW,
@@ -570,99 +547,6 @@ export function createVoiceSourceWorkspace(
         message: "已切换音色档案。尚未改变旁白或人物绑定。",
         failure: null,
       }));
-    };
-
-    const createPresetAction = () => {
-      const current = stateRef.current;
-      const profile = current.profiles.find((item) => item.profile_id === current.selectedProfileId) ?? null;
-      const preset = current.officialPresets.find((item) => item.preset_id === current.selectedPresetId) ?? null;
-      const sourceCard = panelModel.cards.find((card) => card.sourceType === "preset") ?? null;
-      if (
-        profile === null
-        || preset === null
-        || current.selectedSource !== "preset"
-        || sourceCard?.enabled !== true
-        || actionsBlocked
-      ) return;
-      operationAbortRef.current?.abort();
-      const generation = scopeGenerationRef.current;
-      const sequence = ++operationSequenceRef.current;
-      const controller = new AbortController();
-      operationAbortRef.current = controller;
-      const intent = operationIntent(
-        "official-preset",
-        profile.profile_id,
-        profile.version,
-        preset.preset_id,
-        preset.provenance.provenance_fingerprint_sha256,
-      );
-      const key = idempotencyKey(intent, "preset");
-      commit((latest) => ({
-        ...latest,
-        phase: "creating-preset",
-        workflow: IDLE_VOICE_SOURCE_WORKFLOW,
-        previewPlayed: false,
-        qualityConfirmed: false,
-        message: `正在从固定官方 ONNX 目录创建 ${preset.preset_id} 候选版本…`,
-        failure: null,
-      }));
-      const requestPreset = () => api.createPresetVoiceVersion(
-        profile.profile_id,
-        {
-          expected_profile_version: profile.version,
-          preset_id: preset.preset_id,
-        },
-        key,
-        controller.signal,
-      );
-      void requestPreset().catch(async (reason: unknown) => {
-        if (!ownsScope(generation, sequence, controller) || !networkFailure(reason)) throw reason;
-        return requestPreset();
-      }).then(async (created) => {
-        if (!ownsScope(generation, sequence, controller)) return;
-        if (
-          created.source_type !== "preset"
-          || created.preset_key !== preset.preset_id
-          || !voiceSourceEvidenceIsUsable(created)
-          || created.official_preset?.provenance_fingerprint_sha256
-            !== preset.provenance.provenance_fingerprint_sha256
-        ) throw new Error("官方预设响应与固定目录身份不一致。");
-        const refreshed = await refreshOneProfile(
-          profile.profile_id,
-          generation,
-          sequence,
-          controller,
-          "官方预设候选版本已创建。请生成真实 Nano 试听。",
-        );
-        if (!ownsScope(generation, sequence, controller)) return;
-        if (!refreshed.versions.some((item) => item.version_id === created.version_id)) {
-          throw new Error("官方预设响应未出现在刷新后的音色档案中。");
-        }
-        idempotencyRef.current.delete(intent);
-        commit((latest) => ({
-          ...latest,
-          phase: "ready",
-          selectedVersionId: created.version_id,
-          workflow: IDLE_VOICE_SOURCE_WORKFLOW,
-          previewPlayed: false,
-          qualityConfirmed: false,
-          message: "官方预设候选版本已创建。请生成真实 Nano 试听。",
-          failure: null,
-        }));
-        focusStatus();
-      }).catch((reason: unknown) => {
-        if (!ownsScope(generation, sequence, controller) || isAbortLike(reason)) return;
-        const failure = workspaceFailure(reason);
-        commit((latest) => ({
-          ...latest,
-          phase: failure.kind === "conflict" ? "conflict" : "error",
-          message: failure.kind === "conflict"
-            ? "音色档案版本已变化。请刷新后核对，再重新选择官方预设。"
-            : "创建官方预设候选失败；重试会复用同一幂等键。",
-          failure,
-        }));
-        focusStatus();
-      });
     };
 
     const uploadAction = () => {
@@ -1055,7 +939,7 @@ export function createVoiceSourceWorkspace(
           ),
         )
         : h("p", { className: "anw-voice-workspace__empty", role: "status" },
-          "当前作品还没有音色档案。先创建档案，再从 6 个中文官方预设中选择声音。",
+          "当前作品还没有私人音色档案。需要时可创建后上传有权使用的参考录音。",
         ),
       h("div", { className: "anw-voice-workspace__create-row" },
         h("label", { className: "anw-voice-workspace__field" },
@@ -1083,63 +967,6 @@ export function createVoiceSourceWorkspace(
       ),
     );
 
-    const selectedPreset = scopedState.officialPresets.find((preset) => (
-      preset.preset_id === scopedState.selectedPresetId
-    )) ?? null;
-    const presetControls = selectedProfile === null || scopedState.selectedSource !== "preset"
-      ? null
-      : h(
-        "section",
-        { className: "anw-voice-workspace__preset-catalog", "aria-labelledby": `${prefix}-preset-heading` },
-        h("div", { className: "anw-voice-workspace__section-heading" },
-          h("div", null,
-            h("h3", { id: `${prefix}-preset-heading` }, "固定官方 ONNX 音色目录"),
-            h("p", null,
-              "当前产品目录固定为官方 manifest 中的 6 个中文预设；名称与标签原样展示。商业发布／再分发尚未评估，但不影响本机个人使用。",
-            ),
-          ),
-        ),
-        h("label", { className: "anw-voice-workspace__field" },
-          h("span", null, "官方中文预设（6 项）"),
-          h("select", {
-            value: selectedPreset?.preset_id ?? "",
-            disabled: actionsBlocked,
-            onChange: (event: InputEvent) => commit((current) => ({
-              ...current,
-              selectedPresetId: event.target.value || null,
-              selectedVersionId: null,
-              workflow: IDLE_VOICE_SOURCE_WORKFLOW,
-              previewPlayed: false,
-              qualityConfirmed: false,
-              message: "已选择官方预设；尚未创建候选版本。",
-              failure: null,
-            })),
-          },
-          ...scopedState.officialPresets.map((preset) => h(
-            "option",
-            { key: preset.preset_id, value: preset.preset_id },
-            `${preset.preset_id} · ${preset.display_name} · ${preset.group} · ${preset.language}`,
-          )),
-          ),
-        ),
-        selectedPreset === null
-          ? h("p", { className: "anw-voice-workspace__empty", role: "status" }, "固定官方预设目录不可用。")
-          : h("dl", { className: "anw-voice-workspace__preset-evidence" },
-            h("div", null, h("dt", null, "Preset ID"), h("dd", null, selectedPreset.preset_id)),
-            h("div", null, h("dt", null, "语言／分组"), h("dd", null, `${selectedPreset.language}／${selectedPreset.group}`)),
-            h("div", null, h("dt", null, "本机个人使用"), h("dd", null, "可用")),
-            h("div", null, h("dt", null, "商业发布／再分发"), h("dd", null, "未评估（不阻断本机使用）")),
-            h("div", null, h("dt", null, "Manifest revision"), h("dd", null, selectedPreset.provenance.revision)),
-          ),
-        h("button", {
-          type: "button",
-          disabled: actionsBlocked
-            || selectedPreset === null
-            || panelModel.cards.find((card) => card.sourceType === "preset")?.enabled !== true,
-          onClick: createPresetAction,
-        }, scopedState.phase === "creating-preset" ? "创建中…" : "创建官方预设候选版本"),
-      );
-
     const versionControls = selectedProfile === null || scopedState.selectedSource === null
       ? null
       : h(
@@ -1153,9 +980,7 @@ export function createVoiceSourceWorkspace(
         ),
         sourceVersions.length === 0
           ? h("p", { className: "anw-voice-workspace__empty", role: "status" },
-            scopedState.selectedSource === "preset"
-              ? "还没有可试听的官方预设版本。请先从目录创建候选。"
-              : "还没有可试听的上传版本。请先完成参考录音与权利表单。",
+            "还没有可试听的上传版本。请先完成参考录音与权利表单。",
           )
           : h("div", { className: "anw-voice-workspace__preview-grid" },
             h("label", { className: "anw-voice-workspace__field" },
@@ -1232,9 +1057,9 @@ export function createVoiceSourceWorkspace(
       },
       h("header", { className: "anw-voice-workspace__header" },
         h("div", null,
-          h("p", { className: "anw-voice-workspace__eyebrow" }, "MOSS-TTS-Nano · 6 个中文官方预设"),
-          h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "创建、试听并锁定朗读音色"),
-          h("p", null, "档案、候选、试听和锁定是一条可恢复流程；最后的旁白/人物保存仍由作者决定。"),
+          h("p", { className: "anw-voice-workspace__eyebrow" }, "我的音色 · 私人来源"),
+          h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "管理私人朗读音色"),
+          h("p", null, "上传来源保留独立的权利、试听和质量流程；官方音色请在上方直接使用。"),
         ),
         h("span", { className: "anw-voice-workspace__scope" }, "当前作品专属"),
       ),
@@ -1306,21 +1131,16 @@ export function createVoiceSourceWorkspace(
             qualityConfirmationAllowed: scopedState.previewPlayed,
             qualityConfirmed: scopedState.qualityConfirmed,
             onSelectSource: (source: VoiceSourceType) => {
-              if (!["preset", "uploaded"].includes(source) || actionsBlocked) return;
+              if (source !== "uploaded" || actionsBlocked) return;
               commit((current) => ({
                 ...current,
                 selectedSource: source,
                 selectedVersionId: selectableVersions(selectedProfile)
                   .find((version) => version.source_type === source)?.version_id ?? null,
-                selectedPresetId: source === "preset"
-                  ? current.selectedPresetId ?? current.officialPresets[0]?.preset_id ?? null
-                  : current.selectedPresetId,
                 workflow: IDLE_VOICE_SOURCE_WORKFLOW,
                 previewPlayed: false,
                 qualityConfirmed: false,
-                message: source === "preset"
-                  ? "已选择固定官方 ONNX 预设。当前 6 项中文官方预设均会如实展示。"
-                  : "已选择上传参考录音。请完整填写权利表单。",
+                message: "已选择上传参考录音。请完整填写权利表单。",
                 failure: null,
               }));
             },
@@ -1347,7 +1167,6 @@ export function createVoiceSourceWorkspace(
             onCancel: cancelAction,
           }),
         ),
-      presetControls,
       versionControls,
     );
   };

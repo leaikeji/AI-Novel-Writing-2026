@@ -16,6 +16,7 @@ import {
 import {
   createCharacterVoiceCardPanel,
   createNarrationReadingPage,
+  stableOfficialVoiceAssignment,
 } from "./index";
 import type { ReadingPageApi } from "./reading-page";
 import { narratorOptionsFromVoiceProfiles } from "./reading-page";
@@ -120,6 +121,20 @@ const CREATED_AT = "2026-08-26T09:00:00.000Z";
 const XIAOYU_EVIDENCE = OFFICIAL_PRESET_EVIDENCE.find(
   (item) => item.presetId === "onnx.Xiaoyu",
 )!;
+
+
+describe("stableOfficialVoiceAssignment", () => {
+  it("is deterministic and stays inside the requested official language group", () => {
+    const first = stableOfficialVoiceAssignment(CHARACTER_ID, "zh-CN");
+    const second = stableOfficialVoiceAssignment(CHARACTER_ID, "zh-CN");
+    const japanese = stableOfficialVoiceAssignment(CHARACTER_ID, "ja-JP");
+
+    expect(second).toEqual(first);
+    expect(["Xiaoyu", "Vivian", "Lingyu"]).toContain(first.voiceName);
+    expect(["Soyo", "Saki", "Mortis", "Umiri", "Mei", "Anon", "Arisa"])
+      .toContain(japanese.voiceName);
+  });
+});
 
 
 function capability(key: typeof CAPABILITY_KEYS[number]): FeatureCapability {
@@ -293,6 +308,8 @@ function voiceProfile(
       language: "zh-CN",
       fingerprint: "a".repeat(64),
       quality_state: "accepted",
+      activation_basis: "preview_confirmed",
+      validation_basis: "human_accepted",
       rights: {
         rights_record_id: RIGHTS_ID,
         state: "active",
@@ -436,8 +453,17 @@ describe("T2-GATE narration composition", () => {
       onRefresh: vi.fn(),
       onNavigate: vi.fn(),
     });
-    expect(componentName(narratorWorkspace)).toBe("VoiceSourceWorkspace");
-    expect(narratorWorkspace.props.suggestedProfileName).toBe("作品旁白声音");
+    const narratorOfficial = findAll(
+      narratorWorkspace,
+      (element) => componentName(element) === "OfficialVoiceSelectionPanel",
+    )[0];
+    const narratorPrivate = findAll(
+      narratorWorkspace,
+      (element) => componentName(element) === "VoiceSourceWorkspace",
+    )[0];
+    expect(narratorOfficial.props.target).toEqual({ kind: "narrator" });
+    expect(narratorOfficial.props.settings).toBe(overview.settings);
+    expect(narratorPrivate.props.suggestedProfileName).toBe("作品旁白声音");
     tree = harness.render(
       pageHost.type as (props: typeof pageHost.props) => unknown,
       pageHost.props,
@@ -454,11 +480,10 @@ describe("T2-GATE narration composition", () => {
       sectionHost.type as (props: typeof sectionHost.props) => unknown,
       sectionHost.props,
     );
-    const characterPanel = findAll(characterTree, (element) => (
-      typeof element.type === "function"
-      && element.props.characterId === CHARACTER_ID
-      && element.props.capabilities === overview.capabilities
-    ))[0];
+    const characterPanel = findAll(
+      characterTree,
+      (element) => componentName(element) === "CharacterVoicePanel",
+    )[0];
     expect(characterPanel.props.capabilities).toBe(overview.capabilities);
     expect(characterPanel.props.authorization).toBe(overview.authorization);
     const characterWorkspace = findAll(
@@ -468,6 +493,15 @@ describe("T2-GATE narration composition", () => {
     expect(characterWorkspace.props.novelId).toBe(NOVEL_ID);
     expect(characterWorkspace.props.capabilities).toBe(overview.capabilities);
     expect(characterWorkspace.props.voiceSources).toBe(overview.voice_sources);
+    const characterOfficial = findAll(
+      characterTree,
+      (element) => componentName(element) === "OfficialVoiceSelectionPanel",
+    )[0];
+    expect(characterOfficial.props.target).toEqual({
+      kind: "character",
+      characterId: CHARACTER_ID,
+      characterName: "林岚",
+    });
 
     const pronunciationHarness = createReactHarness();
     const PronunciationPage = createNarrationReadingPage(pronunciationHarness.React, { readingApi: readingApi(overview) });
@@ -490,17 +524,18 @@ describe("T2-GATE narration composition", () => {
       pronunciationHost.type as (props: typeof pronunciationHost.props) => unknown,
       pronunciationHost.props,
     );
-    const pronunciationPanel = findAll(
+    const rulesWorkspace = findAll(
       pronunciationTree,
       (element) => (
         typeof element.type === "function"
-        && Array.isArray(element.props.scopeOptions)
-        && element.props.timing === overview.settings.values.timing
+        && Array.isArray(element.props.pronunciationScopeOptions)
+        && element.props.settings === overview.settings
       ),
     )[0];
-    expect(pronunciationPanel.props.capabilities).toBe(overview.capabilities);
-    expect(pronunciationPanel.props.timing).toBe(overview.settings.values.timing);
-    expect(pronunciationPanel.props.scopeOptions).toEqual([
+    expect(rulesWorkspace.props.capabilities).toBe(overview.capabilities);
+    expect(rulesWorkspace.props.settings).toBe(overview.settings);
+    expect(rulesWorkspace.props.initialSection).toBe("pronunciation");
+    expect(rulesWorkspace.props.pronunciationScopeOptions).toEqual([
       { kind: "volume", id: VOLUME_ID, label: "第一卷" },
     ]);
   });
@@ -518,9 +553,14 @@ describe("T2-GATE narration composition", () => {
     tree = harness.render(Card, props);
     const panel = findAll(tree, (element) => componentName(element) === "CharacterVoicePanel")[0];
     const workspace = findAll(tree, (element) => componentName(element) === "VoiceSourceWorkspace")[0];
+    const official = findAll(
+      tree,
+      (element) => componentName(element) === "OfficialVoiceSelectionPanel",
+    )[0];
     expect(panel.props.capabilities).toBe(overview.capabilities);
     expect(workspace.props.novelId).toBe(NOVEL_ID);
     expect(workspace.props.voiceSources).toBe(overview.voice_sources);
+    expect(official.props.settings).toBe(overview.settings);
     expect(loadOverview).toHaveBeenCalledWith(NOVEL_ID, expect.any(AbortSignal));
 
     const driftHarness = createReactHarness();

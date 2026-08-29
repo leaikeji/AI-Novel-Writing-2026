@@ -103,6 +103,7 @@ function playerState(patch: Partial<NarrationPlayerState> = {}): NarrationPlayer
     offsetMs: 0,
     durationMs: 0,
     rate: 1,
+    volume: 1,
     followPaused: false,
     backend: null,
     source: null,
@@ -173,6 +174,11 @@ class IntegratedFakePlayer implements FollowAwareNarrationPlayerController {
 
   setRate(rate: number): void {
     this.state = playerState({ ...this.state, rate });
+    this.emit();
+  }
+
+  setVolume(volume: number): void {
+    this.state = playerState({ ...this.state, volume });
     this.emit();
   }
 

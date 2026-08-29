@@ -9,6 +9,7 @@ import {
   parseDocumentNarrationContext,
   parseFailedNarrationSegmentsProjection,
   parseNarrationEditionResource,
+  parseNarrationEditionVoiceIdentitiesResource,
   parseNarrationWorkflowResource,
   parseRetryFailedNarrationSegmentsRequest,
   parseRetryFailedNarrationSegmentsResponse,
@@ -33,6 +34,8 @@ const PROGRESS_ID = "e1000000-0000-4000-8000-000000000012";
 const FAILED_SEGMENT_ID = "e1000000-0000-4000-8000-000000000013";
 const FANOUT_SEGMENT_ID = "e1000000-0000-4000-8000-000000000014";
 const RETRY_COMMAND_ID = "e1000000-0000-4000-8000-000000000015";
+const PROFILE_ID = "e1000000-0000-4000-8000-000000000016";
+const VOICE_VERSION_ID = "e1000000-0000-4000-8000-000000000017";
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
 const SHA_C = "c".repeat(64);
@@ -40,6 +43,24 @@ const SHA_C = "c".repeat(64);
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+
+function editionVoiceIdentities(changes: Record<string, unknown> = {}) {
+  return {
+    contract_version: "narration-edition-voice-identities/1",
+    edition_id: CURRENT_EDITION_ID,
+    items: [{
+      profile_id: PROFILE_ID,
+      voice_version_id: VOICE_VERSION_ID,
+      display_name: "小雨",
+      source_type: "preset",
+      preset_id: "onnx.Xiaoyu",
+      resolution_contract_version: "narration-edition-resolution/2",
+      legacy_fallback: false,
+    }],
+    ...changes,
+  };
 }
 
 
@@ -262,6 +283,31 @@ describe("chapter narration production wire contracts", () => {
     expect(Object.isFrozen(parsedWorkflow.job_ids)).toBe(true);
     expect(Object.isFrozen(parsedEdition)).toBe(true);
     expect(Object.isFrozen(parsedEdition.job_ids)).toBe(true);
+  });
+
+  it("parses frozen Edition voice identity and a truthful legacy fallback", () => {
+    const current = parseNarrationEditionVoiceIdentitiesResource(editionVoiceIdentities());
+    expect(current.items[0]?.display_name).toBe("小雨");
+    expect(Object.isFrozen(current.items)).toBe(true);
+
+    const legacy = parseNarrationEditionVoiceIdentitiesResource(editionVoiceIdentities({
+      items: [{
+        profile_id: PROFILE_ID,
+        voice_version_id: VOICE_VERSION_ID,
+        display_name: "旧版未保存名称",
+        source_type: null,
+        preset_id: null,
+        resolution_contract_version: "narration-edition-resolution/1",
+        legacy_fallback: true,
+      }],
+    }));
+    expect(legacy.items[0]?.legacy_fallback).toBe(true);
+    expect(() => parseNarrationEditionVoiceIdentitiesResource(editionVoiceIdentities({
+      items: [{
+        ...legacy.items[0],
+        display_name: "现在的可变名称",
+      }],
+    }))).toThrow(/legacy voice identity shape/u);
   });
 
   it.each([

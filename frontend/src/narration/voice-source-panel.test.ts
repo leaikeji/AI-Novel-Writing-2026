@@ -144,6 +144,8 @@ function version(
     language: "zh-CN",
     fingerprint: SHA_A,
     quality_state: "pending",
+    activation_basis: "preview_confirmed",
+    validation_basis: "pending",
     rights: {
       rights_record_id: UUID_C,
       state: "active",
@@ -284,7 +286,7 @@ function apiError(code: NarrationErrorCode, retryable = false): NarrationApiErro
 
 
 describe("T2-D voice source panel", () => {
-  it("renders the truthful T2-A hold: preset visible-disabled, clone and generator hidden", () => {
+  it("keeps the retired preset source out while hidden private sources stay absent", () => {
     const model = createVoiceSourcePanelModel({
       capabilities: capabilities({
         reading_settings: {
@@ -323,11 +325,8 @@ describe("T2-D voice source panel", () => {
       profile: null,
       selectedVersionId: null,
     });
-    expect(model.visibleCards.map((card) => card.sourceType)).toEqual(["preset"]);
-    expect(model.visibleCards[0]).toMatchObject({
-      enabled: false,
-      reasonCode: "OFFICIAL_PRESET_RUNTIME_UNAVAILABLE",
-    });
+    expect(model.visibleCards).toEqual([]);
+    expect(model.cards.map((card) => card.sourceType)).toEqual(["uploaded", "generated"]);
     expect(model.actions).toEqual({
       canCreateProfile: false,
       canPreview: false,
@@ -684,9 +683,8 @@ describe("T2-D voice source panel", () => {
       }) as FakeElement;
       const serialized = JSON.stringify(tree);
       expect(tree.props["aria-labelledby"]).toBe("anw-narration-voice-source-title");
-      expect(serialized).toContain("系统预设");
-      expect(serialized).toContain("当前产品范围的 6 个中文预设");
-      expect(serialized).not.toContain("18 个预设");
+      expect(serialized).toContain("官方音色请在上方音色库直接使用");
+      expect(serialized).not.toContain("系统预设");
       expect(serialized).not.toContain("上传参考录音");
       expect(serialized).not.toContain("文字描述生成");
       expect(serialized).toContain("aria-live");

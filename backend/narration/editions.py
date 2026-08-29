@@ -16,6 +16,8 @@ from ..models import (
     NarrationSegmentRender,
     NarrationSettingsSnapshot,
     PronunciationProfile,
+    VoiceProfile,
+    VoiceProfileVersion,
 )
 
 from .fingerprints import edition_fingerprint
@@ -45,6 +47,29 @@ EDITION_SEGMENT_TRANSITIONS = {
     "rendering": frozenset({"ready", "failed", "cancelled", "quarantined"}),
     "failed": frozenset({"queued"}),
 }
+NARRATION_EDITION_RESOLUTION_VERSION = "narration-edition-resolution/2"
+
+
+def _freeze_resolution_identity(
+    resolution_json: dict[str, object],
+    *,
+    profile: VoiceProfile,
+    voice: VoiceProfileVersion,
+) -> dict[str, object]:
+    """Freeze display identity in the Edition without trusting mutable callers."""
+
+    frozen = canonical_payload(resolution_json)
+    frozen["contract_version"] = NARRATION_EDITION_RESOLUTION_VERSION
+    frozen["profile_id"] = str(profile.id)
+    frozen["voice_version_id"] = str(voice.id)
+    frozen["voice_identity"] = {
+        "profile_id": str(profile.id),
+        "voice_version_id": str(voice.id),
+        "display_name": require_nonempty(profile.name, field="voice profile name"),
+        "source_type": voice.source_type,
+        "preset_id": voice.preset_key if voice.source_type == "preset" else None,
+    }
+    return frozen
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +192,7 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
     segment_payload: list[dict[str, object]] = []
     render_fingerprints: dict[UUID, str] = {}
     render_digest_key_ids: dict[UUID, str] = {}
+    frozen_resolutions: dict[UUID, dict[str, object]] = {}
     for item in command.segments:
         require_exact_int(item.ordinal, field="Edition segment ordinal", minimum=0)
         require_exact_int(item.gap_after_ms, field="segment gap", minimum=0)
@@ -178,6 +204,11 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
         profile, voice, _rights = usable_voices[item.voice_version_id]
         if profile.id != item.profile_id or voice.profile_id != item.profile_id:
             raise NarrationScopeMismatch("Edition profile and voice version mismatch")
+        frozen_resolutions[item.segment_id] = _freeze_resolution_identity(
+            item.resolution_json,
+            profile=profile,
+            voice=voice,
+        )
         if item.slot_id is not None:
             slot = require_row(store.get(GenericVoiceSlot, item.slot_id), label="voice slot")
             pool = require_row(store.get(GenericVoicePool, slot.pool_id), label="voice pool")
@@ -212,7 +243,7 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
                 "voice_version_id": str(item.voice_version_id),
                 "render_fingerprint": render_fingerprint_value,
                 "render_digest_key_id": command.digest_keyring.active_key_id,
-                "resolution": canonical_payload(item.resolution_json),
+                "resolution": frozen_resolutions[item.segment_id],
                 "gap_after_ms": item.gap_after_ms,
             }
         )
@@ -264,7 +295,7 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
                 item.slot_id,
                 item.profile_id,
                 item.voice_version_id,
-                canonical_payload(item.resolution_json),
+                frozen_resolutions[item.segment_id],
                 render_fingerprints[item.segment_id],
                 render_digest_key_ids[item.segment_id],
                 item.gap_after_ms,
@@ -324,7 +355,7 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
                 slot_id=item.slot_id,
                 profile_id=item.profile_id,
                 voice_version_id=item.voice_version_id,
-                resolution_json=canonical_payload(item.resolution_json),
+                resolution_json=frozen_resolutions[item.segment_id],
                 render_fingerprint=render_fingerprints[item.segment_id],
                 render_digest_key_id=render_digest_key_ids[item.segment_id],
                 render_state="pending",

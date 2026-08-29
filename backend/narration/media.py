@@ -32,6 +32,8 @@ from ..models import (
     NarrationRenderAsset,
     Novel,
     VoiceProfileVersion,
+    VoiceDeletionAssetPlan,
+    VoiceDeletionRequest,
 )
 from .storage import (
     NarrationStorage,
@@ -1086,6 +1088,113 @@ def finalize_gc_deletion_in_session(
     return tombstone
 
 
+def finalize_voice_deletion_asset_in_session(
+    session: Session,
+    storage: NarrationStorage,
+    *,
+    deletion_request_id: UUID,
+    asset_id: UUID,
+    digest_key_id: str,
+    digest_key: bytes,
+    deleted_actor: str,
+) -> AssetTombstone:
+    """Finalize one exact request-scoped private-voice asset after unlink.
+
+    Unlike ordinary GC, the structured voice/Edition references deliberately
+    remain as historical evidence.  Authorization therefore comes only from
+    the frozen request plan and never from a caller-supplied bypass flag.
+    """
+
+    request = session.scalar(
+        select(VoiceDeletionRequest)
+        .where(VoiceDeletionRequest.id == deletion_request_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    plan = session.scalar(
+        select(VoiceDeletionAssetPlan)
+        .where(
+            VoiceDeletionAssetPlan.deletion_request_id == deletion_request_id,
+            VoiceDeletionAssetPlan.asset_id == asset_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    asset = _locked_asset(session, asset_id)
+    if request is None or plan is None:
+        raise MediaConflict("voice deletion request plan is missing")
+    if request.state not in {"live_deleting", "failed"}:
+        raise MediaConflict("voice deletion request is not in its physical phase")
+    if plan.state == "finalized":
+        existing = session.scalar(
+            select(AssetTombstone).where(AssetTombstone.original_asset_id == asset_id)
+        )
+        if existing is None or existing.deletion_request_id != deletion_request_id:
+            raise MediaConflict("finalized voice asset lacks its request tombstone")
+        return existing
+    if plan.state != "unlinked":
+        raise MediaConflict("voice deletion asset has not crossed the unlink boundary")
+    exact_identity = (
+        asset.owner_id == plan.owner_id
+        and asset.workspace_id == plan.workspace_id
+        and asset.novel_id == plan.novel_id
+        and asset.storage_backend == plan.storage_backend
+        and asset.storage_path == plan.storage_path
+        and asset.content_hash == plan.content_hash
+        and asset.byte_size == plan.byte_size
+        and asset.gc_generation == plan.gc_generation
+        and asset.state == "deleting"
+    )
+    if not exact_identity:
+        raise MediaConflict("voice deletion asset changed after its plan was frozen")
+    if not isinstance(digest_key, bytes) or len(digest_key) < 32:
+        raise MediaPolicyError("tombstone HMAC key must contain at least 32 bytes")
+    storage.ensure_media_absent(plan.storage_path)
+    existing = session.scalar(
+        select(AssetTombstone).where(AssetTombstone.original_asset_id == asset_id)
+    )
+    if existing is not None:
+        if existing.deletion_request_id != deletion_request_id:
+            raise MediaConflict("asset was tombstoned by another deletion request")
+        plan.state = "finalized"
+        plan.finalized_at = _db_clock(session)
+        session.flush([plan])
+        return existing
+    now = _db_clock(session)
+    canonical = json.dumps(
+        {
+            "schema_version": "private-voice-asset-tombstone/1",
+            "deletion_request_id": str(deletion_request_id),
+            "asset_id": str(asset_id),
+            "storage_backend": plan.storage_backend,
+            "storage_path": plan.storage_path,
+            "content_hash": plan.content_hash,
+            "byte_size": plan.byte_size,
+            "gc_generation": plan.gc_generation,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    tombstone = AssetTombstone(
+        owner_id=asset.owner_id,
+        workspace_id=asset.workspace_id,
+        original_asset_id=asset.id,
+        deletion_request_id=deletion_request_id,
+        digest_key_id=digest_key_id,
+        digest=hmac.new(digest_key, canonical, hashlib.sha256).hexdigest(),
+        reason_code="true_delete_private_voice",
+        deleted_actor=deleted_actor,
+        deleted_at=now,
+    )
+    asset.state = "deleted"
+    asset.deleted_at = now
+    plan.state = "finalized"
+    plan.finalized_at = now
+    session.add(tombstone)
+    session.flush([asset, plan, tombstone])
+    return tombstone
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -1112,6 +1221,7 @@ __all__ = [
     "execute_gc_delete",
     "finalize_gc_deletion",
     "finalize_gc_deletion_in_session",
+    "finalize_voice_deletion_asset_in_session",
     "load_reference_roots_in_session",
     "mark_gc_candidate",
     "mark_gc_candidate_in_session",

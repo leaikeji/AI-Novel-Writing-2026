@@ -100,8 +100,8 @@ COPY --chown=65532:65532 \
      scripts/tts/install_models.py \
      docker/tts-sidecar/init_runtime_volumes.py \
      /opt/ai-novel-world/tts-sidecar/runtime/
-RUN echo "aef69741311ecc27274bb61586c0a0fbd77b0128ade37046869ae936df2fe36e  runtime/sidecar_server.py" | sha256sum --check --strict \
-    && echo "44c7f3ba0ed7f6b39d137bd428c054b7eb8d885ebeae6db9beeb3a9c7da2b021  runtime/runtime.py" | sha256sum --check --strict \
+RUN echo "fe7eeae02e63ebb9329cf7123a2489793230adfde3bdeeacf24a2d92ef3172d7  runtime/sidecar_server.py" | sha256sum --check --strict \
+    && echo "4c74dcc8cbd05615e5dbca1bb629777d052cce4b2d85aee773e93219b83e9593  runtime/runtime.py" | sha256sum --check --strict \
     && echo "868a8c9d73fedaea04ffd4293e518962154efabcdbd6e623bbf351a842e853e0  runtime/model_assets.py" | sha256sum --check --strict \
     && echo "4513337e3819ef5b4c5d08c83baa3710587f62d97c1135e74e712ebdfef58385  runtime/install_models.py" | sha256sum --check --strict \
     && echo "caf31a1cea8021970ab70fc489ee7a1c6fff9535bbfa269805c463e61e023e15  runtime/init_runtime_volumes.py" | sha256sum --check --strict

@@ -222,6 +222,8 @@ def _prepare_render(
         parameters_json={},
         fingerprint=voice_fingerprint,
         quality_state="accepted",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted",
         locked_actor="owner",
         locked_at=NOW,
     )

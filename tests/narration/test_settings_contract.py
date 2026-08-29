@@ -97,6 +97,8 @@ def locked_voice_version() -> dict[str, object]:
         "language": "zh-CN",
         "fingerprint": "a" * 64,
         "quality_state": "accepted",
+        "activation_basis": "preview_confirmed",
+        "validation_basis": "human_accepted",
         "rights": rights_summary(),
         "reference_asset_id": uuid4(),
         "preview_asset": None,
@@ -351,13 +353,50 @@ def test_voice_version_and_profile_freeze_locked_identity() -> None:
 
     invalid = locked_voice_version()
     invalid["quality_state"] = "pending"
-    with pytest.raises(ValidationError, match="locked version must be accepted"):
+    with pytest.raises(ValidationError, match="activation evidence is inconsistent"):
         wire.VoiceProfileVersionResource.model_validate(invalid)
 
     invalid_profile = profile_resource()
     invalid_profile["current_version_id"] = uuid4()
     with pytest.raises(ValidationError, match="current version must name"):
         wire.VoiceProfileResource.model_validate(invalid_profile)
+
+
+def test_official_voice_selection_request_has_one_exact_target_shape() -> None:
+    narrator = wire.OfficialVoiceSelectionRequest.model_validate(
+        {
+            "preset_id": "onnx.Junhao",
+            "target_kind": "narrator",
+            "character_id": None,
+            "expected_settings_version": 0,
+            "expected_binding_version": None,
+        }
+    )
+    assert narrator.target_kind is wire.OfficialVoiceSelectionTargetKind.NARRATOR
+
+    character = wire.OfficialVoiceSelectionRequest.model_validate(
+        {
+            "preset_id": "onnx.Arisa",
+            "target_kind": "character",
+            "character_id": CHARACTER_ID,
+            "expected_settings_version": 3,
+            "expected_binding_version": 0,
+        }
+    )
+    assert character.target_kind is wire.OfficialVoiceSelectionTargetKind.CHARACTER
+
+    with pytest.raises(ValidationError, match="cannot carry character"):
+        wire.OfficialVoiceSelectionRequest.model_validate(
+            {
+                **narrator.model_dump(mode="python"),
+                "character_id": CHARACTER_ID,
+                "expected_binding_version": 0,
+            }
+        )
+    with pytest.raises(ValidationError, match="absent from the pinned"):
+        wire.OfficialVoiceSelectionRequest.model_validate(
+            {**narrator.model_dump(mode="python"), "preset_id": "onnx.Unknown"}
+        )
 
     wrong_parent = locked_voice_version()
     wrong_parent["profile_id"] = uuid4()
@@ -729,11 +768,13 @@ def test_router_freezes_all_t2_paths_and_methods() -> None:
         ("GET", "/novels/{novel_id}/narration-overview"),
         ("GET", "/novels/{novel_id}/narration-settings"),
         ("PUT", "/novels/{novel_id}/narration-settings"),
+        ("PATCH", "/novels/{novel_id}/narration-settings/playback-preferences"),
         ("GET", "/novels/{novel_id}/narration-scope-overrides"),
         ("PUT", "/novels/{novel_id}/narration-scope-overrides/{scope_kind}/{scope_id}"),
         ("POST", "/novels/{novel_id}/narration-cloud-consents"),
         ("DELETE", "/novels/{novel_id}/narration-cloud-consents/current"),
         ("GET", "/voice-presets"),
+        ("POST", "/novels/{novel_id}/official-voice-selections"),
         ("GET", "/voice-profiles"),
         ("POST", "/voice-profiles"),
         ("GET", "/voice-profiles/{profile_id}"),

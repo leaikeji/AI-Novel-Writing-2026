@@ -916,6 +916,8 @@ def _seed_voice(engine: Engine) -> VoiceSeed:
         parameters_json={},
         fingerprint=content_hash(str(uuid4())),
         quality_state="accepted",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted",
         locked_actor="owner",
         locked_at=NOW,
     )

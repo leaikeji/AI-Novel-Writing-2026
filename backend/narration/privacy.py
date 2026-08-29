@@ -62,6 +62,7 @@ from .services import (
     require_same_novel,
     require_usable_voice,
     utc_now,
+    voice_activation_evidence_is_usable,
 )
 from .settings import NarrationSettingsUpdate, update_settings
 from .settings_api import (
@@ -75,6 +76,7 @@ from .voice_pool import (
     VoicePoolHandlers,
 )
 from .voices import (
+    OfficialVoiceSelectionPort,
     VoiceProductPort,
     VoiceProfileCreationReceiptPort,
     VoiceSettingsHandler,
@@ -97,6 +99,7 @@ READING_PRIVACY_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = froze
         NarrationSettingsOperation.GET_OVERVIEW,
         NarrationSettingsOperation.GET_SETTINGS,
         NarrationSettingsOperation.PUT_SETTINGS,
+        NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES,
         NarrationSettingsOperation.LIST_SCOPE_OVERRIDES,
         NarrationSettingsOperation.PUT_SCOPE_OVERRIDE,
         NarrationSettingsOperation.CREATE_CLOUD_CONSENT,
@@ -110,7 +113,9 @@ READING_PRIVACY_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = froze
 
 _MUTATION_CAPABILITY: Final[dict[NarrationSettingsOperation, wire.CapabilityKey]] = {
     NarrationSettingsOperation.LIST_OFFICIAL_PRESETS: wire.CapabilityKey.PRESET_VOICE_SOURCE,
+    NarrationSettingsOperation.SELECT_OFFICIAL_VOICE: wire.CapabilityKey.PRESET_VOICE_SOURCE,
     NarrationSettingsOperation.PUT_SETTINGS: wire.CapabilityKey.READING_SETTINGS,
+    NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.PUT_SCOPE_OVERRIDE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.CREATE_CLOUD_CONSENT: wire.CapabilityKey.CLOUD_ASSISTED_ANALYSIS,
     NarrationSettingsOperation.CREATE_VOICE_PROFILE: wire.CapabilityKey.READING_SETTINGS,
@@ -142,6 +147,7 @@ _TRANSACTIONAL_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
         NarrationSettingsOperation.LOCK_VOICE_PROFILE,
+        NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
         NarrationSettingsOperation.PREVIEW_CACHE_CLEANUP,
         NarrationSettingsOperation.EXECUTE_CACHE_CLEANUP,
     }
@@ -280,6 +286,7 @@ _READ_ONLY_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
 _CONFIGURE_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
     {
         NarrationSettingsOperation.PUT_SETTINGS,
+        NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES,
         NarrationSettingsOperation.PUT_SCOPE_OVERRIDE,
         NarrationSettingsOperation.CREATE_CLOUD_CONSENT,
         NarrationSettingsOperation.REVOKE_CLOUD_CONSENT,
@@ -306,11 +313,15 @@ _VOICE_RIGHTS_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozens
         NarrationSettingsOperation.LOCK_VOICE_PROFILE,
     }
 )
+_VOICE_SELECTION_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
+    {NarrationSettingsOperation.SELECT_OFFICIAL_VOICE}
+)
 _AUTHORIZATION_OPERATION_GROUPS: Final = (
     _READ_ONLY_OPERATIONS,
     _CONFIGURE_OPERATIONS,
     _VOICE_ASSET_OPERATIONS,
     _VOICE_RIGHTS_OPERATIONS,
+    _VOICE_SELECTION_OPERATIONS,
 )
 
 
@@ -330,6 +341,12 @@ def _require_authorized(
             allowed
             and authorization.can_manage_voice_assets
             and authorization.can_confirm_voice_rights
+        )
+    elif operation in _VOICE_SELECTION_OPERATIONS:
+        allowed = (
+            allowed
+            and authorization.can_configure
+            and authorization.can_manage_voice_assets
         )
     elif operation not in _READ_ONLY_OPERATIONS:
         raise AssertionError(f"unclassified narration authorization operation: {operation.value}")
@@ -664,6 +681,25 @@ def put_narration_settings(
         ),
     )
     return get_narration_settings(store, novel_id=novel_id)
+
+
+def put_playback_preferences(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    request: wire.UpdateNarrationPlaybackPreferencesRequest,
+    capabilities: wire.NarrationCapabilities,
+) -> wire.NarrationSettingsResource:
+    current = get_narration_settings(store, novel_id=novel_id)
+    return put_narration_settings(
+        store,
+        novel_id=novel_id,
+        request=wire.UpdateNarrationSettingsRequest(
+            expected_version=request.expected_version,
+            values=current.values.model_copy(update={"playback": request.playback}),
+        ),
+        capabilities=capabilities,
+    )
 
 
 def _require_scope_target(
@@ -1239,10 +1275,11 @@ def _binding_is_currently_usable(
         or profile.novel_id not in {None, novel_id}
         or profile.status != "active"
         or version.state != "locked"
-        or version.quality_state != "accepted"
     ):
         return False
     if rights.novel_id not in {None, novel_id}:
+        return False
+    if not voice_activation_evidence_is_usable(version, rights):
         return False
     if version.source_type == "uploaded" and not rights.voice_cloning:
         return False
@@ -1352,7 +1389,7 @@ def _fallback_cache_status(
 
 
 class NarrationSettingsBackend:
-    """All 29 frozen T2 operations, with one capability and scope boundary."""
+    """All frozen settings operations, with one capability and scope boundary."""
 
     def __init__(
         self,
@@ -1364,6 +1401,7 @@ class NarrationSettingsBackend:
         cache_runtime: NarrationCacheRuntime | None = None,
         profile_creation_receipts: VoiceProfileCreationReceiptPort | None = None,
         voice_product: VoiceProductPort | None = None,
+        official_voice_selection: OfficialVoiceSelectionPort | None = None,
     ) -> None:
         self.store = store
         self.authorization = authorization
@@ -1374,6 +1412,7 @@ class NarrationSettingsBackend:
             store,
             profile_creation_receipts=profile_creation_receipts,
             voice_product=voice_product,
+            official_voice_selection=official_voice_selection,
         )
         self.voice_pool = VoicePoolHandlers(store)
         self.pronunciation_handler = PronunciationSettingsHandler(
@@ -1433,6 +1472,16 @@ class NarrationSettingsBackend:
                 self.store,
                 novel_id=novel_id,
                 request=_payload(command, wire.UpdateNarrationSettingsRequest),
+                capabilities=self.capabilities,
+            )
+        if operation is NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES:
+            return put_playback_preferences(
+                self.store,
+                novel_id=novel_id,
+                request=_payload(
+                    command,
+                    wire.UpdateNarrationPlaybackPreferencesRequest,
+                ),
                 capabilities=self.capabilities,
             )
         if operation is NarrationSettingsOperation.LIST_SCOPE_OVERRIDES:
@@ -1554,6 +1603,7 @@ def build_narration_settings_backend(
     cache_runtime: NarrationCacheRuntime | None = None,
     profile_creation_receipts: VoiceProfileCreationReceiptPort | None = None,
     voice_product: VoiceProductPort | None = None,
+    official_voice_selection: OfficialVoiceSelectionPort | None = None,
 ) -> TransactionalNarrationSettingsBackend:
     store = SqlAlchemyNarrationSettingsStore(session)
     core = NarrationSettingsBackend(
@@ -1564,6 +1614,7 @@ def build_narration_settings_backend(
         cache_runtime=cache_runtime,
         profile_creation_receipts=profile_creation_receipts,
         voice_product=voice_product,
+        official_voice_selection=official_voice_selection,
     )
     return TransactionalNarrationSettingsBackend(session, core)
 

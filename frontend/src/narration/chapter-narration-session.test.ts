@@ -343,6 +343,7 @@ class TestQueue implements SegmentPlaybackQueuePort {
   disposeCount = 0;
   stopCount = 0;
   readonly rates: number[] = [];
+  readonly volumes: number[] = [];
 
   constructor(private readonly hooks: NarrationPlayerQueueHooks) {}
 
@@ -371,6 +372,7 @@ class TestQueue implements SegmentPlaybackQueuePort {
   pause(): void { this.pauseCount += 1; }
   async resume(): Promise<void> { this.resumeCount += 1; }
   setRate(rate: number): void { this.rates.push(rate); }
+  setVolume(volume: number): void { this.volumes.push(volume); }
   readPosition(): Readonly<{ segmentId: string; ordinal: number; offsetMs: number }> | null {
     const start = this.starts[this.starts.length - 1];
     if (!start) return null;
@@ -404,6 +406,12 @@ interface HarnessOptions {
   createPlayer?: ChapterNarrationSessionDependencies["createPlayer"];
   getProgress?: ChapterNarrationSessionDependencies["getNarrationPlaybackProgress"];
   putProgress?: ChapterNarrationSessionDependencies["putNarrationPlaybackProgress"];
+  getSettings?: NonNullable<ChapterNarrationSessionDependencies["getNarrationSettings"]>;
+  putPreferences?: NonNullable<ChapterNarrationSessionDependencies["putNarrationPlaybackPreferences"]>;
+  onPlaybackPreferenceStatus?: (
+    status: "saving" | "saved" | "conflict" | "error",
+    message?: string,
+  ) => void;
   bridgeContentHash?: string;
 }
 
@@ -419,6 +427,48 @@ function fixture(
     script: script(),
     manifest: initialManifest,
   };
+}
+
+
+function narrationSettings(
+  version = 4,
+  playback = { playback_rate: 0.9, volume: 0.4 },
+) {
+  return Object.freeze({
+    contract_version: "narration-settings-api/1" as const,
+    schema_version: "narration-settings/1" as const,
+    novel_id: NOVEL_ID,
+    settings_id: "10000000-0000-4000-8000-000000000098",
+    exists: true,
+    version,
+    values: Object.freeze({
+      narrator: null,
+      language: "zh-CN",
+      output_format: "m4a_aac_lc" as const,
+      script_review_policy: "blockers_only" as const,
+      analysis_mode: "local_rules_only" as const,
+      text_rules: Object.freeze({
+        read_chapter_title: true,
+        read_author_notes: false,
+        read_section_breaks: false,
+        first_person_mode: "narrator" as const,
+        first_person_character_id: null,
+        inner_monologue_mode: "character" as const,
+      }),
+      timing: Object.freeze({
+        sentence_gap_ms: 200,
+        paragraph_gap_ms: 500,
+        section_gap_ms: 900,
+      }),
+      casting: Object.freeze({
+        anonymous_reuse_scope: "scene" as const,
+        same_scene_voice_deduplication: true,
+        unknown_speaker_action: "block" as const,
+      }),
+      playback: Object.freeze(playback),
+    }),
+    updated_at: "2026-08-29T10:00:00Z",
+  });
 }
 
 
@@ -508,6 +558,8 @@ function createHarness(options: HarnessOptions = {}) {
     prepareNarrationRange: prepareRange,
     getNarrationPlaybackProgress: getProgress,
     putNarrationPlaybackProgress: putProgress,
+    getNarrationSettings: options.getSettings,
+    putNarrationPlaybackPreferences: options.putPreferences,
     createPlayer: options.createPlayer ?? ((playerOptions: CreateNarrationPlayerOptions) => (
       new ProductionNarrationPlayerController({
         ...playerOptions,
@@ -533,6 +585,7 @@ function createHarness(options: HarnessOptions = {}) {
       documentId === DOCUMENT_ID && generation === currentGeneration
     ),
     onState: options.onState,
+    onPlaybackPreferenceStatus: options.onPlaybackPreferenceStatus,
     pollScheduleMs: [1],
     pollTimeoutMs: options.pollTimeoutMs ?? 20,
     maxPollAttempts: 10,
@@ -670,6 +723,47 @@ describe("chapter narration bundle gates", () => {
 
 
 describe("chapter narration editor and playback integration", () => {
+  it("applies work playback preferences immediately and persists only the narrow CAS payload", async () => {
+    vi.useFakeTimers();
+    const statuses = vi.fn();
+    const getSettings = vi.fn<NonNullable<ChapterNarrationSessionDependencies["getNarrationSettings"]>>(
+      async () => narrationSettings(),
+    );
+    const putPreferences = vi.fn<NonNullable<ChapterNarrationSessionDependencies["putNarrationPlaybackPreferences"]>>(
+      async (_novelId, request) => narrationSettings(5, request.playback),
+    );
+    const harness = createHarness({
+      getSettings,
+      putPreferences,
+      onPlaybackPreferenceStatus: statuses,
+    });
+
+    try {
+      await harness.session.load();
+      expect(harness.session.readSnapshot().playerState).toMatchObject({
+        rate: 0.9,
+        volume: 0.4,
+      });
+
+      harness.session.setRate(1.5);
+      harness.session.setVolume(0.25);
+      expect(harness.session.readSnapshot().playerState).toMatchObject({
+        rate: 1.5,
+        volume: 0.25,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(putPreferences).toHaveBeenCalledWith(NOVEL_ID, {
+        expected_version: 4,
+        playback: { playback_rate: 1.5, volume: 0.25 },
+      });
+      expect(statuses).toHaveBeenLastCalledWith("saved");
+    } finally {
+      harness.session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("restores the exact profile position, rate, and real queue start offset", async () => {
     const resources = fixture();
     const getProgress = vi.fn<ChapterNarrationSessionDependencies["getNarrationPlaybackProgress"]>(

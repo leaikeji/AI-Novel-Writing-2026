@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { NarrationApiError } from "./api";
 import {
+  buildPronunciationHitPreview,
   buildPronunciationProfileRequest,
   createPronunciationPanel,
   pronunciationDraftsFromProfile,
+  pronunciationPriorityBand,
+  pronunciationPriorityForBand,
   validatePronunciationDrafts,
   type PronunciationPanelApi,
   type PronunciationPanelProps,
@@ -309,10 +312,79 @@ describe("pronunciation draft contract", () => {
     expect(validation.errors["three:scope"]).toContain("不属于");
     expect(buildPronunciationProfileRequest(current, drafts, NOVEL_ID, [])).toBeNull();
   });
+
+  it("maps author-friendly priority bands while retaining exact advanced values", () => {
+    expect(pronunciationPriorityForBand("high")).toBe("100");
+    expect(pronunciationPriorityForBand("normal")).toBe("0");
+    expect(pronunciationPriorityForBand("low")).toBe("-100");
+    expect(pronunciationPriorityBand("37")).toBe("custom");
+  });
+
+  it("previews current-scope hits locally in priority order", () => {
+    const base = pronunciationDraftsFromProfile(profile())[0];
+    if (!base) throw new Error("fixture entry missing");
+    const preview = buildPronunciationHitPreview("MOSS 与 AI", [
+      { ...base, clientKey: "moss", priorityText: "0" },
+      {
+        ...base,
+        clientKey: "ai",
+        sourceText: "AI",
+        spokenText: "人工智能",
+        scopeKind: "volume",
+        scopeId: VOLUME_ID,
+        priorityText: "100",
+      },
+    ], { scopeKind: "volume", scopeId: VOLUME_ID });
+    expect(preview.hits.map((item) => item.clientKey)).toEqual(["ai", "moss"]);
+    expect(preview.normalizedText).toBe("摩斯 与 人工智能");
+  });
 });
 
 
 describe("pronunciation panel", () => {
+  it("shows local hit preview and only exposes试听 when a real callback is wired", async () => {
+    const onPreviewHits = vi.fn();
+    const api: PronunciationPanelApi = {
+      getPronunciationProfile: vi.fn().mockResolvedValue(profile()),
+      putPronunciationProfile: vi.fn(),
+    };
+    const harness = createReactHarness();
+    const Panel = createPronunciationPanel(harness.React, api);
+    const panelProps = props({ onPreviewHits });
+    harness.beginRender();
+    Panel(panelProps);
+    harness.commitEffects();
+    await settle();
+    harness.beginRender();
+    let tree = Panel(panelProps);
+    harness.commitEffects();
+    const previewText = findAll(tree, (element) => element.type === "textarea")[0];
+    if (!previewText) throw new Error("preview textarea missing");
+    (previewText.props.onChange as (event: { target: { value: string } }) => void)({
+      target: { value: "MOSS 正在朗读" },
+    });
+    harness.beginRender();
+    tree = Panel(panelProps);
+    harness.commitEffects();
+    expect(textContent(tree)).toContain("命中 1 条规则");
+    (findButton(tree, "试听命中结果").props.onClick as () => void)();
+    expect(onPreviewHits).toHaveBeenCalledWith(expect.objectContaining({
+      sourceText: "MOSS 正在朗读",
+      normalizedText: "摩斯 正在朗读",
+    }));
+
+    const noPreviewHarness = createReactHarness();
+    const NoPreviewPanel = createPronunciationPanel(noPreviewHarness.React, api);
+    noPreviewHarness.beginRender();
+    NoPreviewPanel(props());
+    noPreviewHarness.commitEffects();
+    await settle();
+    noPreviewHarness.beginRender();
+    const noPreviewTree = NoPreviewPanel(props());
+    expect(findAll(noPreviewTree, (element) => element.type === "button" && textContent(element) === "试听命中结果")).toHaveLength(0);
+    expect(textContent(noPreviewTree)).toContain("接入真实试听能力后");
+  });
+
   it("loads actual pause values and saves edited pronunciation with current CAS", async () => {
     const saved = profile(NOVEL_ID, 2, "MOSS Nano");
     const api: PronunciationPanelApi = {

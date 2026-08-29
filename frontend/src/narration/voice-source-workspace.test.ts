@@ -5,15 +5,9 @@ import {
   NARRATION_CAPABILITY_SCHEMA_VERSION,
   NARRATION_SETTINGS_API_VERSION,
   NARRATION_VOICE_SCHEMA_VERSION,
-  OFFICIAL_PRESET_EVIDENCE,
-  OFFICIAL_PRESET_MANIFEST_IDENTITY,
-  PRODUCT_OFFICIAL_PRESET_EVIDENCE,
-  PRODUCT_OFFICIAL_PRESET_IDS,
   type FeatureCapability,
   type NarrationAuthorizationState,
   type NarrationCapabilities,
-  type OfficialPresetCatalogItem,
-  type OfficialPresetCatalogResponse,
   type VoicePreviewResource,
   type VoiceProfileResource,
   type VoiceProfileVersionResource,
@@ -142,41 +136,6 @@ const ASSET_ID = "71111111-1111-4111-8111-111111111111";
 const NOW = "2026-08-27T08:00:00Z";
 
 
-function officialPresetItem(
-  evidence: typeof OFFICIAL_PRESET_EVIDENCE[number],
-): OfficialPresetCatalogItem {
-  const manifestVoice = evidence.manifestVoice;
-  return {
-    preset_id: evidence.presetId,
-    display_name: manifestVoice === "Xiaoyu" ? "CN 明星" : manifestVoice === "Trump" ? "EN Trump" : manifestVoice,
-    group: ["Trump", "Adam", "Nathan"].includes(manifestVoice) ? "English Male" : "Chinese Female",
-    language: ["Trump", "Ava", "Bella", "Adam", "Nathan"].includes(manifestVoice) ? "en" : "zh-CN",
-    local_use_status: "available",
-    commercial_distribution_status: "not_evaluated",
-    provenance: {
-      schema_version: "moss-tts-official-preset-provenance/1.0",
-      repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
-      revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-      manifest_path: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
-      manifest_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestSha256,
-      preset_id: evidence.presetId,
-      manifest_voice: manifestVoice,
-      prompt_codes_sha256: evidence.promptCodesSha256,
-      prompt_frame_count: evidence.promptFrameCount,
-      prompt_quantizer_count: evidence.promptQuantizerCount,
-      model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
-      provenance_fingerprint_sha256: evidence.provenanceFingerprintSha256,
-    },
-  };
-}
-
-
-const officialPresetCatalog: OfficialPresetCatalogResponse = {
-  schema_version: "moss-tts-official-preset-catalog/1.0",
-  items: PRODUCT_OFFICIAL_PRESET_EVIDENCE.map(officialPresetItem),
-};
-
-
 function capability(key: FeatureCapability["key"]): FeatureCapability {
   if (["narration_product", "reading_settings", "reference_clone", "voice_preview"].includes(key)) {
     return { key, state: "enabled", visible: true, actionable: true, reason_code: null, required_gate: null };
@@ -299,53 +258,11 @@ function version(
     language: "zh-CN",
     fingerprint: "b".repeat(64),
     quality_state: locked ? "accepted" : "pending",
+    activation_basis: "preview_confirmed",
+    validation_basis: locked ? "human_accepted" : "pending",
     rights: rights(),
     official_preset: null,
     reference_asset_id: ASSET_ID,
-    preview_asset: previewReady ? {
-      asset_id: ASSET_ID,
-      content_path: `/media-assets/${ASSET_ID}/content`,
-      mime_type: "audio/wav",
-      byte_size: 4,
-      duration_ms: 800,
-      checksum_sha256: "c".repeat(64),
-    } : null,
-    description_available: false,
-    locked_at: locked ? NOW : null,
-    created_at: NOW,
-  };
-}
-
-
-function officialVersion(
-  state: VoiceProfileVersionResource["state"] = "draft",
-  preset = officialPresetCatalog.items[0],
-): VoiceProfileVersionResource {
-  const locked = state === "locked";
-  const previewReady = state === "preview_ready" || locked;
-  return {
-    schema_version: NARRATION_VOICE_SCHEMA_VERSION,
-    version_id: VERSION_ID,
-    profile_id: PROFILE_ID,
-    version_number: 1,
-    source_type: "preset",
-    state,
-    provider_id: "moss-tts-nano-onnx",
-    model_id: preset.provenance.repository,
-    model_revision: preset.provenance.revision,
-    preset_key: preset.preset_id,
-    language: preset.language,
-    fingerprint: "b".repeat(64),
-    quality_state: locked ? "accepted" : "pending",
-    rights: {
-      ...rights(),
-      notice_version: "official-preset-local-use/1",
-      source_kind: "official_preset",
-      voice_cloning: false,
-      subject_consent_recorded: false,
-    },
-    official_preset: preset.provenance,
-    reference_asset_id: null,
     preview_asset: previewReady ? {
       asset_id: ASSET_ID,
       content_path: `/media-assets/${ASSET_ID}/content`,
@@ -430,14 +347,12 @@ describe("voice source workspace", () => {
     const locked = profile(4, version("locked"));
     const api: VoiceSourceWorkspaceApi = {
       listVoiceProfiles: vi.fn(async () => empty),
-      listOfficialVoicePresets: vi.fn(async () => officialPresetCatalog),
       createVoiceProfile: vi.fn(async () => profile()),
       getVoiceProfile: vi.fn()
         .mockResolvedValueOnce(uploaded)
         .mockResolvedValueOnce(previewReady)
         .mockResolvedValueOnce(locked),
       createUploadedVoiceVersion: vi.fn(async () => version("draft")),
-      createPresetVoiceVersion: vi.fn(async () => officialVersion("draft")),
       createVoicePreview: vi.fn(async () => preview("queued")),
       getVoicePreview: vi.fn()
         .mockResolvedValueOnce(preview("running"))
@@ -547,17 +462,13 @@ describe("voice source workspace", () => {
     expect(textContent(tree)).toContain("旁白和人物绑定尚未改变");
   });
 
-  it("shows exactly the six Chinese product presets and creates an exact preset candidate", async () => {
+  it("keeps the retired official candidate workflow out of the private-source workspace", async () => {
     const draft = profile();
-    const created = officialVersion("draft", officialPresetCatalog.items[3]);
-    const withPreset = profile(2, created);
     const api: VoiceSourceWorkspaceApi = {
       listVoiceProfiles: vi.fn(async () => ({ contract_version: NARRATION_SETTINGS_API_VERSION, items: [draft] })),
-      listOfficialVoicePresets: vi.fn(async () => officialPresetCatalog),
       createVoiceProfile: vi.fn(),
-      getVoiceProfile: vi.fn(async () => withPreset),
+      getVoiceProfile: vi.fn(async () => draft),
       createUploadedVoiceVersion: vi.fn(),
-      createPresetVoiceVersion: vi.fn(async () => created),
       createVoicePreview: vi.fn(),
       getVoicePreview: vi.fn(),
       lockVoiceProfile: vi.fn(),
@@ -573,61 +484,23 @@ describe("voice source workspace", () => {
     let tree = harness.render(Workspace, props);
     await settle();
     tree = harness.render(Workspace, props);
-    let panel = sourcePanel(tree);
+    const panel = sourcePanel(tree);
     (panel.props.onSelectSource as (source: string) => void)("preset");
     tree = harness.render(Workspace, props);
-
-    expect(textContent(tree)).toContain("当前 6 项中文官方预设均会如实展示");
-    expect(textContent(tree)).not.toContain("onnx.Trump");
-    expect(textContent(tree)).toContain("onnx.Xiaoyu · CN 明星");
-    expect(textContent(tree)).toContain("官方中文预设（6 项）");
-    expect(textContent(tree)).toContain("当前产品目录固定为官方 manifest 中的 6 个中文预设");
-    expect(textContent(tree)).not.toContain("18 项");
-    expect(textContent(tree)).not.toContain("18 个预设");
-    expect(textContent(tree)).toContain("商业发布／再分发尚未评估，但不影响本机个人使用");
-    const presetOptions = findAll(tree, (element) => (
-      element.type === "option"
-      && typeof element.props.value === "string"
-      && (element.props.value as string).startsWith("onnx.")
-    ));
-    expect(presetOptions).toHaveLength(6);
-    expect(presetOptions.map((option) => option.props.value)).toEqual(
-      PRODUCT_OFFICIAL_PRESET_IDS,
-    );
-    const presetSelect = findAll(tree, (element) => (
-      element.type === "select" && element.props.value === "onnx.Junhao"
-    ))[0];
-    (presetSelect.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: "onnx.Xiaoyu" },
-    });
-    tree = harness.render(Workspace, props);
-    const createPreset = findAll(tree, (element) => (
-      element.type === "button" && textContent(element) === "创建官方预设候选版本"
-    ))[0];
-    (createPreset.props.onClick as () => void)();
-    await settle();
-    tree = harness.render(Workspace, props);
-
-    expect(api.createPresetVoiceVersion).toHaveBeenCalledWith(
-      PROFILE_ID,
-      { expected_profile_version: 1, preset_id: "onnx.Xiaoyu" },
-      expect.stringMatching(/^voice-preset-/),
-      expect.any(AbortSignal),
-    );
-    expect(textContent(tree)).toContain("官方预设候选版本已创建");
-    panel = sourcePanel(tree);
-    expect((panel.props.model as { actions: { canPreview: boolean } }).actions.canPreview).toBe(true);
+    expect(textContent(tree)).toContain("我的音色 · 私人来源");
+    expect(textContent(tree)).toContain("官方音色请在上方直接使用");
+    expect(textContent(tree)).not.toContain("官方中文预设（6 项）");
+    expect(findAll(tree, (element) => element.props["data-voice-source"] === "preset"))
+      .toHaveLength(0);
   });
 
   it("returns a resumable timeout with the last preview identity", async () => {
     const uploaded = profile(2, version("draft"));
     const api: VoiceSourceWorkspaceApi = {
       listVoiceProfiles: vi.fn(async () => ({ contract_version: NARRATION_SETTINGS_API_VERSION, items: [uploaded] })),
-      listOfficialVoicePresets: vi.fn(async () => officialPresetCatalog),
       createVoiceProfile: vi.fn(),
       getVoiceProfile: vi.fn(async () => uploaded),
       createUploadedVoiceVersion: vi.fn(),
-      createPresetVoiceVersion: vi.fn(),
       createVoicePreview: vi.fn(async () => preview("queued")),
       getVoicePreview: vi.fn(async () => preview("running")),
       lockVoiceProfile: vi.fn(),
@@ -657,11 +530,9 @@ describe("voice source workspace", () => {
     const upload = vi.fn().mockRejectedValue(new Error("connection lost after send"));
     const api: VoiceSourceWorkspaceApi = {
       listVoiceProfiles: vi.fn(async () => ({ contract_version: NARRATION_SETTINGS_API_VERSION, items: [draft] })),
-      listOfficialVoicePresets: vi.fn(async () => officialPresetCatalog),
       createVoiceProfile: vi.fn(),
       getVoiceProfile: vi.fn(async () => draft),
       createUploadedVoiceVersion: upload,
-      createPresetVoiceVersion: vi.fn(),
       createVoicePreview: vi.fn(),
       getVoicePreview: vi.fn(),
       lockVoiceProfile: vi.fn(),
@@ -710,11 +581,9 @@ describe("voice source workspace", () => {
     };
     const api: VoiceSourceWorkspaceApi = {
       listVoiceProfiles: vi.fn((options = {}) => options.novelId === NOVEL_ID ? first : second),
-      listOfficialVoicePresets: vi.fn(async () => officialPresetCatalog),
       createVoiceProfile: vi.fn(),
       getVoiceProfile: vi.fn(),
       createUploadedVoiceVersion: vi.fn(),
-      createPresetVoiceVersion: vi.fn(),
       createVoicePreview: vi.fn(),
       getVoicePreview: vi.fn(),
       lockVoiceProfile: vi.fn(),

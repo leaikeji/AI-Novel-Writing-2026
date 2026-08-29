@@ -102,6 +102,19 @@ OFFICIAL_PRESET_MANIFEST_SHA256: Final = (
 )
 OFFICIAL_PRESET_COUNT: Final = 18
 OFFICIAL_PRESET_QUANTIZER_COUNT: Final = 16
+MOSS_NANO_DECODE_PARAMETERS_V2: Final = "moss-nano-decode-parameters/2"
+_NANO_DECODE_PARAMETER_KEYS = frozenset(
+    {
+        "schema_version",
+        "text_temperature_milli",
+        "text_top_p_milli",
+        "text_top_k",
+        "audio_temperature_milli",
+        "audio_top_p_milli",
+        "audio_top_k",
+        "audio_repetition_penalty_milli",
+    }
+)
 _OFFICIAL_PRESET_MANIFEST_KEYS = frozenset(
     {
         "builtin_voices",
@@ -473,6 +486,22 @@ def _parse_json(body: bytes, expected_keys: frozenset[str]) -> dict[str, object]
     return row
 
 
+def _parse_json_one_of(
+    body: bytes, expected_key_sets: frozenset[frozenset[str]]
+) -> dict[str, object]:
+    if not body or len(body) > MAX_JSON_BYTES:
+        raise SidecarProtocolError("REQUEST_SIZE_INVALID", "JSON body size is invalid")
+    try:
+        row = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SidecarProtocolError("INVALID_JSON", "body is not valid UTF-8 JSON") from error
+    if not isinstance(row, dict) or frozenset(row) not in expected_key_sets:
+        raise SidecarProtocolError(
+            "REQUEST_FIELDS_INVALID", "request fields do not match protocol"
+        )
+    return row
+
+
 @dataclass(frozen=True, slots=True)
 class ReferenceAudio:
     content_type: str
@@ -492,6 +521,7 @@ class ParsedSynthesisRequest:
     sample_mode: str
     max_new_frames: int
     reference_audio: ReferenceAudio | None
+    decode_parameters: Mapping[str, str | int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -719,7 +749,15 @@ def _parse_metadata(body: bytes, reference: tuple[str, bytes] | None) -> ParsedS
         }
     )
     expected = keys | ({"reference_audio"} if reference is not None else set())
-    row = _parse_json(body, frozenset(expected))
+    row = _parse_json_one_of(
+        body,
+        frozenset(
+            {
+                frozenset(expected),
+                frozenset(expected | {"decode_parameters"}),
+            }
+        ),
+    )
     request_id = _request_uuid(row["request_id"])
     if row["scope_fingerprint"] != LOCAL_SCOPE_FINGERPRINT:
         raise SidecarProtocolError("SCOPE_MISMATCH", "scope fingerprint mismatch", status=HTTPStatus.FORBIDDEN)
@@ -755,6 +793,43 @@ def _parse_metadata(body: bytes, reference: tuple[str, bytes] | None) -> ParsedS
         raise SidecarProtocolError("SAMPLE_MODE_INVALID", "sample mode is invalid")
     if isinstance(frames, bool) or not isinstance(frames, int) or not (1 <= frames <= 2_000):
         raise SidecarProtocolError("FRAME_LIMIT_INVALID", "max_new_frames is invalid")
+    decoded_parameters: Mapping[str, str | int] | None = None
+    raw_decode_parameters = row.get("decode_parameters")
+    if raw_decode_parameters is not None:
+        if sample_mode != "full":
+            raise SidecarProtocolError(
+                "DECODE_PARAMETERS_MODE_INVALID",
+                "advanced decode parameters are effective only in full mode",
+            )
+        if (
+            not isinstance(raw_decode_parameters, dict)
+            or frozenset(raw_decode_parameters) != _NANO_DECODE_PARAMETER_KEYS
+            or raw_decode_parameters.get("schema_version")
+            != MOSS_NANO_DECODE_PARAMETERS_V2
+        ):
+            raise SidecarProtocolError(
+                "DECODE_PARAMETERS_INVALID", "decode parameter shape is invalid"
+            )
+        integer_fields = _NANO_DECODE_PARAMETER_KEYS - {"schema_version"}
+        if any(type(raw_decode_parameters.get(key)) is not int for key in integer_fields):
+            raise SidecarProtocolError(
+                "DECODE_PARAMETERS_INVALID", "decode parameter values are invalid"
+            )
+        if not (
+            100 <= raw_decode_parameters["text_temperature_milli"] <= 2_000
+            and 100 <= raw_decode_parameters["audio_temperature_milli"] <= 2_000
+            and 1 <= raw_decode_parameters["text_top_p_milli"] <= 1_000
+            and 1 <= raw_decode_parameters["audio_top_p_milli"] <= 1_000
+            and 1 <= raw_decode_parameters["text_top_k"] <= 100
+            and 1 <= raw_decode_parameters["audio_top_k"] <= 100
+            and 1_000
+            <= raw_decode_parameters["audio_repetition_penalty_milli"]
+            <= 2_000
+        ):
+            raise SidecarProtocolError(
+                "DECODE_PARAMETERS_INVALID", "decode parameters are outside bounds"
+            )
+        decoded_parameters = MappingProxyType(dict(raw_decode_parameters))
     parsed_reference = None
     if reference is not None:
         metadata_row = row["reference_audio"]
@@ -769,7 +844,18 @@ def _parse_metadata(body: bytes, reference: tuple[str, bytes] | None) -> ParsedS
         if not isinstance(declared_hash, str) or _sha256(payload) != declared_hash:
             raise SidecarProtocolError("REFERENCE_HASH_MISMATCH", "reference hash differs from bytes")
         parsed_reference = ReferenceAudio(content_type, declared_hash, payload, _inspect_reference(payload, content_type))
-    return ParsedSynthesisRequest(request_id, LOCAL_SCOPE_FINGERPRINT, requested, text, voice, seed, str(sample_mode), frames, parsed_reference)
+    return ParsedSynthesisRequest(
+        request_id=request_id,
+        scope_fingerprint=LOCAL_SCOPE_FINGERPRINT,
+        requested_model_fingerprint_sha256=requested,
+        text=text,
+        voice=voice,
+        seed=seed,
+        sample_mode=str(sample_mode),
+        max_new_frames=frames,
+        reference_audio=parsed_reference,
+        decode_parameters=decoded_parameters,
+    )
 
 
 def parse_multipart(body: bytes, content_type: str) -> tuple[bytes, tuple[str, bytes]]:
@@ -861,7 +947,20 @@ class FakeBackend(Backend):
         for _ in range(5):
             if self.step_delay_seconds:
                 time.sleep(self.step_delay_seconds)
-        frames = hashlib.sha256(f"{request.text}\0{request.voice}\0{request.seed}\0{request.sample_mode}".encode()).digest() * 128
+        decode_payload = (
+            dict(request.decode_parameters) if request.decode_parameters is not None else None
+        )
+        frames = hashlib.sha256(
+            _canonical_bytes(
+                {
+                    "text": request.text,
+                    "voice": request.voice,
+                    "seed": request.seed,
+                    "sample_mode": request.sample_mode,
+                    "decode_parameters": decode_payload,
+                }
+            )
+        ).digest() * 128
         samples = bytearray()
         for index in range(0, len(frames), 2):
             sample = int.from_bytes(frames[index : index + 2], "little", signed=False) - 32768
@@ -972,7 +1071,38 @@ class NanoBackend(Backend):
         output_root.mkdir(parents=True, exist_ok=True)
         output = output_root / f"{request.request_id}.wav"
         reference: Path | None = None
+        advanced_runtime_values: dict[str, float | int] = {}
+        generation_defaults: dict[str, object] | None = None
+        if request.decode_parameters is not None:
+            manifest = getattr(self._runtime, "manifest", None)
+            if not isinstance(manifest, dict) or not isinstance(
+                manifest.get("generation_defaults"), dict
+            ):
+                raise SidecarProtocolError(
+                    "MODEL_GENERATION_DEFAULTS_INVALID",
+                    "model generation defaults are unavailable",
+                    poison=True,
+                )
+            generation_defaults = manifest["generation_defaults"]
+            advanced_runtime_values = {
+                "text_temperature": int(request.decode_parameters["text_temperature_milli"]) / 1_000,
+                "text_top_p": int(request.decode_parameters["text_top_p_milli"]) / 1_000,
+                "text_top_k": int(request.decode_parameters["text_top_k"]),
+                "audio_temperature": int(request.decode_parameters["audio_temperature_milli"]) / 1_000,
+                "audio_top_p": int(request.decode_parameters["audio_top_p_milli"]) / 1_000,
+                "audio_top_k": int(request.decode_parameters["audio_top_k"]),
+                "audio_repetition_penalty": int(
+                    request.decode_parameters["audio_repetition_penalty_milli"]
+                ) / 1_000,
+            }
+        previous_runtime_values = (
+            {key: generation_defaults.get(key) for key in advanced_runtime_values}
+            if generation_defaults is not None
+            else {}
+        )
         try:
+            if generation_defaults is not None:
+                generation_defaults.update(advanced_runtime_values)
             if request.reference_audio is not None:
                 suffix = ".wav" if request.reference_audio.content_type == "audio/wav" else ".flac"
                 fd, raw_path = tempfile.mkstemp(prefix="reference-", suffix=suffix, dir="/tmp")
@@ -1000,6 +1130,8 @@ class NanoBackend(Backend):
                 raise SidecarProtocolError("OUTPUT_IDENTITY_MISMATCH", "backend output identity mismatch", poison=True)
             return produced.read_bytes()
         finally:
+            if generation_defaults is not None:
+                generation_defaults.update(previous_runtime_values)
             output.unlink(missing_ok=True)
             if reference is not None:
                 reference.unlink(missing_ok=True)

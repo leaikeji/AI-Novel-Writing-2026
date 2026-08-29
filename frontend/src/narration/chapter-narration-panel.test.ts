@@ -6,10 +6,15 @@ import {
   type ChapterNarrationPanelProps,
   type ChapterNarrationPanelReactRuntime,
 } from "./chapter-narration-panel";
-import { FAILED_SEGMENT_RETRY_CONTRACT_VERSION } from "./chapter-contracts";
+import {
+  FAILED_SEGMENT_RETRY_CONTRACT_VERSION,
+  type NarrationEditionVoiceIdentity,
+} from "./chapter-contracts";
 import type { EditionHistoryItem } from "./edition-history";
 import type { NarrationPlayerState } from "./narration-player";
+import type { ManifestSegmentV2 } from "./playback-contracts";
 import type { ScriptReviewSegmentResource } from "./script-contracts";
+import { T4_CHAPTER_NARRATION_STYLES } from "./styles/t4-chapter";
 
 
 interface FakeElement {
@@ -106,6 +111,7 @@ function playerState(phase: NarrationPlayerState["phase"] = "idle"): NarrationPl
     offsetMs: 0,
     durationMs: phase === "idle" ? 0 : 900,
     rate: 1,
+    volume: 0.8,
     followPaused: false,
     backend: phase === "idle" ? null : "web-audio",
     source: phase === "idle" ? null : "default",
@@ -135,6 +141,7 @@ function props(patch: Partial<ChapterNarrationPanelProps> = {}): ChapterNarratio
     onTogglePlayback: vi.fn(),
     onSeekOrdinal: vi.fn(),
     onRateChange: vi.fn(),
+    onVolumeChange: vi.fn(),
     onResumeFollow: vi.fn(),
     onSelectEdition: vi.fn(),
     ...patch,
@@ -175,9 +182,54 @@ function failedSegments(retryable = true) {
 }
 
 
+function manifestSegments(): readonly ManifestSegmentV2[] {
+  return Object.freeze([SEGMENT_1, SEGMENT_2].map((segmentId, ordinal) => Object.freeze({
+    segment_id: segmentId,
+    ordinal,
+    paragraph_ordinal: ordinal,
+    source_block_key: `paragraph-${ordinal}`,
+    source_start_utf16: ordinal * 4,
+    source_end_utf16: ordinal * 4 + 3,
+    gap_after_ms: ordinal === 0 ? 100 : 0,
+    render_status: "ready" as const,
+    audio: Object.freeze({
+      url: `/media/${segmentId}`,
+      actual_sha256: "a".repeat(64),
+      duration_ms: ordinal === 0 ? 1_000 : 2_000,
+      sample_rate: 48_000,
+      channels: 2,
+      etag: `"${"b".repeat(64)}"`,
+    }),
+    failure: null,
+  })));
+}
+
+
+function legacyVoiceIdentity(): NarrationEditionVoiceIdentity {
+  return Object.freeze({
+    profile_id: "80000000-0000-4000-8000-000000000001",
+    voice_version_id: "90000000-0000-4000-8000-000000000001",
+    display_name: "旧版未保存名称",
+    source_type: null,
+    preset_id: null,
+    resolution_contract_version: "narration-edition-resolution/1",
+    legacy_fallback: true,
+  });
+}
+
+
 const React: ChapterNarrationPanelReactRuntime = {
   createElement(type, elementProps, ...children): FakeElement {
     return { type, props: elementProps ?? {}, children };
+  },
+  useState<T>(initial: T | (() => T)): [T, (next: T | ((current: T) => T)) => void] {
+    return [typeof initial === "function" ? (initial as () => T)() : initial, () => undefined];
+  },
+  useRef<T>(initial: T): { current: T } {
+    return { current: initial };
+  },
+  useEffect(effect: () => void | (() => void)): void {
+    effect();
   },
 };
 
@@ -211,14 +263,87 @@ describe("chapter narration panel", () => {
     expect(findAll(root, (item) => item.type === "input" && item.props.type === "range")).toHaveLength(0);
   });
 
-  it("dispatches explicit sentence seek and exposes no unsupported volume control", () => {
+  it("dispatches sentence seek and applies volume immediately in normalized units", () => {
     const onSeekOrdinal = vi.fn();
+    const onVolumeChange = vi.fn();
     const Panel = createChapterNarrationPanel(React);
-    const root = Panel(props({ onSeekOrdinal }));
-    const slider = findAll(root, (item) => item.type === "input" && item.props.type === "range")[0];
+    const root = Panel(props({ onSeekOrdinal, onVolumeChange }));
+    const slider = findAll(
+      root,
+      (item) => item.type === "input" && item.props["aria-label"] === "按句段跳转章节朗读位置",
+    )[0];
     (slider.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "1" } });
     expect(onSeekOrdinal).toHaveBeenCalledWith(1);
-    expect(textContent(root)).not.toMatch(/音量/u);
+    const volume = findAll(
+      root,
+      (item) => item.type === "input" && item.props["aria-label"] === "章节朗读音量",
+    )[0];
+    expect(volume.props).toMatchObject({ min: 0, max: 100, value: 80 });
+    (volume.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "35" } });
+    expect(onVolumeChange).toHaveBeenCalledWith(0.35);
+  });
+
+  it("covers the complete 0.5–3 playback-rate range", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props());
+    const select = findAll(
+      root,
+      (item) => item.type === "select"
+        && item.props["aria-label"] === "朗读倍速，范围 0.5 到 3 倍",
+    )[0];
+    const values = findAll(select, (item) => item.type === "option")
+      .map((item) => item.props.value);
+    expect(values).toEqual([
+      "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75", "3",
+    ]);
+  });
+
+  it("shows truthful timing, whole-chapter generation, frozen legacy identity, and preference status", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({
+      manifestSegments: manifestSegments(),
+      voiceIdentities: [legacyVoiceIdentity()],
+      playbackPreferenceStatus: { state: "conflict" },
+    }));
+
+    expect(textContent(root)).toContain("可播放0:03 · 2/2 句");
+    expect(textContent(root)).toContain("全章生成100%");
+    expect(textContent(root)).toContain("旧版未保存名称");
+    expect(textContent(root)).toContain("播放偏好已在别处更新");
+    const player = findAll(root, (item) => item.props["aria-label"] === "章节智能朗读播放器")[0];
+    expect(player.props).toMatchObject({
+      "data-content-phase": "ready",
+      "data-player-phase": "idle",
+      "data-source-kind": "current",
+      "data-generation-state": "complete",
+      "data-layout-mode": "compact",
+      "data-preference-state": "conflict",
+    });
+  });
+
+  it("keeps failure rows in a closed details region instead of the compact bar", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({ failedSegments: failedSegments() }));
+    const trigger = findAll(
+      root,
+      (item) => item.type === "button" && textContent(item) === "失败 2",
+    )[0];
+    const details = findAll(root, (item) => item.props.id === "anw-chapter-player-details")[0];
+    const failures = findAll(root, (item) => item.props["aria-label"] === "失败句段重试")[0];
+    expect(trigger.props).toMatchObject({
+      "aria-controls": "anw-chapter-player-details",
+      "aria-expanded": false,
+    });
+    expect(details.props.hidden).toBe(true);
+    expect(failures.props.hidden).toBe(true);
+  });
+
+  it("uses natural player layout, explicit narrow-screen rules, and 44px controls", () => {
+    expect(T4_CHAPTER_NARRATION_STYLES).not.toContain("--anw-chapter-player-height");
+    expect(T4_CHAPTER_NARRATION_STYLES).not.toContain("94px");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("min-height: 44px");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 720px)");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 390px)");
   });
 
   it("exposes only bounded non-sensitive playback state for the fixed observer", () => {

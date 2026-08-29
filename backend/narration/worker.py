@@ -39,6 +39,8 @@ from .audio_pipeline import (
     process_synthesis_wav,
 )
 from .contracts import (
+    ContractError,
+    NanoDecodeParametersV2,
     NarrationRequestScope,
     PRODUCTION_NANO_MAX_NEW_FRAMES,
     PRODUCTION_NANO_SAMPLE_MODES,
@@ -207,6 +209,7 @@ class SegmentWorkItem:
     input_digest_key_id: str
     input_digest: str
     reference_media: ReferenceMedia | None = field(default=None, repr=False)
+    decode_parameters: NanoDecodeParametersV2 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -591,6 +594,21 @@ class SqlAlchemyNarrationWorkerRepository:
                 or sample_mode not in PRODUCTION_NANO_SAMPLE_MODES
             ):
                 raise WorkerContractError("voice sample_mode is invalid")
+            raw_decode_parameters = parameters.get("decode_parameters")
+            decode_parameters = None
+            if raw_decode_parameters is not None:
+                try:
+                    decode_parameters = NanoDecodeParametersV2.from_wire_payload(
+                        raw_decode_parameters
+                    )
+                except ContractError as error:
+                    raise WorkerContractError(
+                        "voice advanced decode parameters are invalid"
+                    ) from error
+                if sample_mode != "full":
+                    raise WorkerContractError(
+                        "voice advanced decode parameters require full mode"
+                    )
             base_seed = voice.seed if voice.seed is not None else 0
             effective_policy = resolve_effective_synthesis_policy(
                 spoken_text=segment.spoken_text,
@@ -666,6 +684,10 @@ class SqlAlchemyNarrationWorkerRepository:
                 "max_new_frames": configured_frames,
                 "seed": seed,
             }
+            if decode_parameters is not None:
+                request_parameters["decode_parameters"] = dict(
+                    decode_parameters.wire_payload()
+                )
             sidecar_metadata = canonical_sidecar_synthesis_metadata(
                 request_id=lease.fence.attempt_id,
                 scope=self._scope,
@@ -675,6 +697,7 @@ class SqlAlchemyNarrationWorkerRepository:
                 seed=seed,
                 sample_mode=sample_mode,
                 max_new_frames=configured_frames,
+                decode_parameters=decode_parameters,
                 reference_content_type=(reference.content_type if reference else None),
                 reference_actual_sha256=(reference.actual_sha256 if reference else None),
                 reference_size_bytes=(reference.byte_size if reference else None),
@@ -696,6 +719,7 @@ class SqlAlchemyNarrationWorkerRepository:
                 seed=seed,
                 sample_mode=sample_mode,
                 max_new_frames=configured_frames,
+                decode_parameters=decode_parameters,
                 requested_provider_id=voice.provider_id,
                 requested_model_id=voice.model_id or "OpenMOSS-Team/MOSS-TTS",
                 requested_revision=voice.model_revision,
@@ -1357,6 +1381,7 @@ class NarrationSegmentWorker:
             seed=work.seed,
             sample_mode=work.sample_mode,
             max_new_frames=work.max_new_frames,
+            decode_parameters=work.decode_parameters,
             reference_audio=await asyncio.to_thread(
                 self._reference_input, work.reference_media
             ),

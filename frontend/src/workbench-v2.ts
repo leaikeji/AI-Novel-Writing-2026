@@ -680,6 +680,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     "正在读取本章朗读状态…",
   );
   const [narrationError, setNarrationError] = React.useState(null as string | null);
+  const [narrationPlaybackPreferenceStatus, setNarrationPlaybackPreferenceStatus] = React.useState(
+    null as Readonly<{
+      state: "idle" | "saving" | "saved" | "conflict" | "error";
+      message?: string;
+    }> | null,
+  );
   const [narrationGateState, setNarrationGateState] = React.useState(
     { phase: "loading" } as ChapterNarrationGateState,
   );
@@ -847,6 +853,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     setNarrationWorkflow(null);
     setNarrationBusy(false);
     setNarrationError(null);
+    setNarrationPlaybackPreferenceStatus(null);
     setNarrationStatus("正在读取本章朗读状态…");
     setScriptReview(null);
     setScriptReviewRequestId(null);
@@ -1293,6 +1300,14 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         } else if (snapshot.phase === "error" && snapshot.error && !isAbortFailure(snapshot.error)) {
           setNarrationError(narrationFailureMessage(snapshot.error));
         }
+      },
+      onPlaybackPreferenceStatus: (state, message) => {
+        if (
+          narrationSessionRef.current !== session
+          || documentRef.current?.id !== activeDocument.id
+          || documentGenerationRef.current !== generation
+        ) return;
+        setNarrationPlaybackPreferenceStatus({ state, message });
       },
     });
     narrationSessionRef.current?.dispose();
@@ -2843,6 +2858,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           sourceKind: narrationSourceKind,
           playerState: narrationSnapshot?.playerState ?? null,
           segments: narrationBundle?.script.segments ?? [],
+          manifestSegments: narrationBundle?.manifest.segments ?? [],
           segmentStates: narrationBundle?.manifest.segments.map(
             (segment: { readonly render_status: SegmentRenderStatus }) => segment.render_status,
           ) ?? [],
@@ -2866,6 +2882,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           retryStatusMessage: failedSegmentRetrySnapshot.statusMessage,
           retryErrorMessage: failedSegmentRetrySnapshot.errorMessage,
           retryFocusSegmentId: failedSegmentRetryFocusId,
+          voiceIdentities: narrationBundle?.voiceIdentities.items ?? [],
+          playbackPreferenceStatus: narrationPlaybackPreferenceStatus,
           updateRequired: Boolean(
             narrationSnapshot?.workingCopyDiverged
             || narrationContext?.explicit_update_required,
@@ -2883,6 +2901,13 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           onRateChange: (rate: number) => {
             try {
               narrationSessionRef.current?.setRate(rate);
+            } catch (reason) {
+              setNarrationError(narrationFailureMessage(reason));
+            }
+          },
+          onVolumeChange: (volume: number) => {
+            try {
+              narrationSessionRef.current?.setVolume(volume);
             } catch (reason) {
               setNarrationError(narrationFailureMessage(reason));
             }

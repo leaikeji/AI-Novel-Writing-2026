@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from backend.narration import schemas as wire
 from backend.narration import settings_api
-from backend.narration.official_presets import PRODUCT_OFFICIAL_PRESET_IDS
+from backend.narration.official_presets import OFFICIAL_PRESETS
 from backend.narration.voices import list_official_presets
 
 
@@ -111,6 +111,20 @@ def _api_cases() -> list[ApiCase]:
             wire.UpdateNarrationSettingsRequest,
         ),
         ApiCase(
+            "playback-preferences-patch",
+            settings_api.NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES,
+            "PATCH",
+            f"/novels/{NOVEL_ID}/narration-settings/playback-preferences",
+            {
+                "json": {
+                    "expected_version": 0,
+                    "playback": {"playback_rate": 1.25, "volume": 0.7},
+                }
+            },
+            {"novel_id": NOVEL_ID},
+            wire.UpdateNarrationPlaybackPreferencesRequest,
+        ),
+        ApiCase(
             "scope-list",
             settings_api.NarrationSettingsOperation.LIST_SCOPE_OVERRIDES,
             "GET",
@@ -173,6 +187,28 @@ def _api_cases() -> list[ApiCase]:
             settings_api.NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
             "GET",
             "/voice-presets",
+        ),
+        ApiCase(
+            "official-voice-select",
+            settings_api.NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
+            "POST",
+            f"/novels/{NOVEL_ID}/official-voice-selections",
+            {
+                "headers": idempotency,
+                "json": {
+                    "preset_id": "onnx.Junhao",
+                    "target_kind": "narrator",
+                    "character_id": None,
+                    "expected_settings_version": 0,
+                    "expected_binding_version": None,
+                },
+            },
+            {
+                "novel_id": NOVEL_ID,
+                "character_id": None,
+                "idempotency_key": "tts-api-case-0001",
+            },
+            wire.OfficialVoiceSelectionRequest,
         ),
         ApiCase(
             "voice-profile-list",
@@ -418,7 +454,7 @@ def _api_cases() -> list[ApiCase]:
             wire.ExecuteNarrationCacheCleanupRequest,
         ),
     ]
-    assert len(cases) == 30
+    assert len(cases) == 32
     assert {case.operation for case in cases} == set(
         settings_api.NarrationSettingsOperation
     )
@@ -448,7 +484,7 @@ def _client(backend: settings_api.NarrationSettingsApiBackend) -> TestClient:
     return TestClient(app)
 
 
-def test_voice_presets_http_surface_exposes_only_product_six() -> None:
+def test_voice_presets_http_surface_exposes_all_pinned_presets() -> None:
     class ProductPresetBackend:
         def dispatch(
             self,
@@ -466,7 +502,7 @@ def test_voice_presets_http_surface_exposes_only_product_six() -> None:
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     assert tuple(item["preset_id"] for item in response.json()["items"]) == (
-        PRODUCT_OFFICIAL_PRESET_IDS
+        tuple(item.preset_id for item in OFFICIAL_PRESETS)
     )
 
 
@@ -687,7 +723,7 @@ def test_no_go_surface_has_no_synthesis_player_or_voice_generator_route() -> Non
     }
     paths = {path for _, path in operations}
 
-    assert len(operations) == 30
+    assert len(operations) == 32
     assert all("synthesis" not in path for path in paths)
     assert all("player" not in path for path in paths)
     assert all("voice-generator" not in path for path in paths)

@@ -1768,28 +1768,6 @@ export function ensureNovelStyles(): void {
     .mb-add-role.qwenpaw-btn { color:#fff!important; border:0!important; background:#ff7548!important; box-shadow:0 4px 10px rgba(255,117,72,.2); }
     .mb-add-role.is-supporting.qwenpaw-btn { background:#6b62d7!important; box-shadow:0 4px 10px rgba(107,98,215,.2); }
 
-    .anw-chapter-narration-failures {
-      display:grid;
-      min-width:0;
-      grid-column:1/-1;
-      gap:8px;
-      border-top:1px solid #eee3dc;
-      padding-top:10px;
-    }
-    .anw-chapter-narration-failures__header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
-    .anw-chapter-narration-failures__header strong { color:#8f2f24; font-size:13px; }
-    .anw-chapter-narration-failures__header span { color:#82766e; font-size:11px; }
-    .anw-chapter-narration-failures__list { display:grid; max-height:168px; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:0; padding:0; overflow:auto; list-style:none; }
-    .anw-chapter-narration-failure { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; border:1px solid #ead8cf; border-radius:10px; padding:8px 10px; background:#fffaf7; }
-    .anw-chapter-narration-failure.is-busy { border-color:#e2a081; background:#fff4ed; }
-    .anw-chapter-narration-failure__copy { display:grid; min-width:0; gap:2px; }
-    .anw-chapter-narration-failure__copy strong { color:#5d4035; font-size:12px; }
-    .anw-chapter-narration-failure__copy span { overflow:hidden; color:#756861; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
-    .anw-chapter-narration-failure__copy small { color:#9a6250; font-size:10px; line-height:1.45; }
-    .anw-chapter-narration-retry-button { min-height:32px; border:1px solid #d76832!important; border-radius:8px; padding:5px 10px; color:#a34421; background:#fff; font-size:12px; font-weight:700; white-space:nowrap; }
-    .anw-chapter-narration-retry-live { min-height:16px; color:#786a61; font-size:11px; }
-    .anw-chapter-narration-retry-live.is-error { color:#b3261e; }
-
     @media (max-height: 760px) {
       .mb-outline-modal .qwenpaw-modal-body { max-height:calc(100dvh - 80px); padding-top:14px!important; }
       .mb-outline-wizard { gap:12px; }

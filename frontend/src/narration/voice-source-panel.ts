@@ -27,16 +27,14 @@ export {
 } from "./styles/t2-d";
 
 
-const SOURCE_DEFINITIONS: Readonly<Record<VoiceSourceType, {
+type PrivateVoiceSourceType = Exclude<VoiceSourceType, "preset">;
+
+
+const SOURCE_DEFINITIONS: Readonly<Record<PrivateVoiceSourceType, {
   readonly capability: CapabilityKey;
   readonly label: string;
   readonly description: string;
 }>> = Object.freeze({
-  preset: {
-    capability: "preset_voice_source",
-    label: "系统预设",
-    description: "固定官方 ONNX manifest 中当前产品范围的 6 个中文预设会如实显示，可用于本机个人朗读。",
-  },
   uploaded: {
     capability: "reference_clone",
     label: "上传参考录音",
@@ -49,7 +47,7 @@ const SOURCE_DEFINITIONS: Readonly<Record<VoiceSourceType, {
   },
 });
 
-const SOURCE_ORDER: readonly VoiceSourceType[] = ["preset", "uploaded", "generated"];
+const SOURCE_ORDER: readonly PrivateVoiceSourceType[] = ["uploaded", "generated"];
 
 export type VoiceSourceWorkflowStatus =
   | "idle"
@@ -227,7 +225,7 @@ export function createVoiceSourcePanelModel(
   if (!input.authorization.can_manage_voice_assets) {
     permissionNotice = "当前身份只能查看音色，不能新增、上传、试听或锁定。";
   } else if (!input.authorization.can_confirm_voice_rights) {
-    permissionNotice = "当前身份不能确认参考录音权利；上传来源保持禁用，官方预设不受影响。";
+    permissionNotice = "当前身份不能确认参考录音权利；上传来源保持禁用。";
   }
   return Object.freeze({
     cards: Object.freeze(cards),
@@ -765,7 +763,7 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
         "div",
         null,
         h("h2", { id: "anw-narration-voice-source-title" }, "音色来源"),
-        h("p", null, "当前产品只展示固定 manifest 中通过技术校验的 6 个中文官方预设。"),
+        h("p", null, "官方音色请在上方音色库直接使用；这里仅管理私人音色来源。"),
       ),
     ),
     props.model.permissionNotice === null

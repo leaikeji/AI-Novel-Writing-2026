@@ -24,7 +24,11 @@ from backend.narration.contracts import (
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260829_0029"
+HEAD_REVISION = "20260829_0032"
+PRIVATE_VOICE_DELETION_REVISION = "20260829_0032"
+OFFICIAL_VOICE_SELECTION_REVISION = "20260829_0031"
+WRITING_RETRIEVAL_REVISION = "20260829_0030"
+CHARACTER_AUTHORITY_REVISION = "20260829_0029"
 SEMANTIC_INDEX_REVISION = "20260829_0028"
 PRIVATE_LIBRARY_REVISION = "20260829_0027"
 STORY_STATE_REVISION = "20260829_0026"
@@ -105,6 +109,22 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
+    assert (
+        scripts.get_revision(PRIVATE_VOICE_DELETION_REVISION).down_revision
+        == OFFICIAL_VOICE_SELECTION_REVISION
+    )
+    assert (
+        scripts.get_revision(OFFICIAL_VOICE_SELECTION_REVISION).down_revision
+        == WRITING_RETRIEVAL_REVISION
+    )
+    assert (
+        scripts.get_revision(WRITING_RETRIEVAL_REVISION).down_revision
+        == CHARACTER_AUTHORITY_REVISION
+    )
+    assert (
+        scripts.get_revision(CHARACTER_AUTHORITY_REVISION).down_revision
+        == SEMANTIC_INDEX_REVISION
+    )
     assert scripts.get_revision(SEMANTIC_INDEX_REVISION).down_revision == PRIVATE_LIBRARY_REVISION
     assert scripts.get_revision(PRIVATE_LIBRARY_REVISION).down_revision == STORY_STATE_REVISION
     assert scripts.get_revision(STORY_STATE_REVISION).down_revision == CREATIVE_AUTHORITY_REVISION

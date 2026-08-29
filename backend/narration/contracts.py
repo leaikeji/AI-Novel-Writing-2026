@@ -17,6 +17,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 NARRATION_SCOPE_CONTRACT_VERSION: Final = "narration-scope/1"
 NARRATION_REVIEW_TAXONOMY_VERSION: Final = "narration-review-taxonomy/1"
 MOSS_NANO_ADAPTER_CONTRACT_VERSION: Final = "moss-nano-tts-adapter/1"
+MOSS_NANO_DECODE_PARAMETERS_V2: Final = "moss-nano-decode-parameters/2"
 VOICE_DESIGN_ADAPTER_CONTRACT_VERSION: Final = "moss-voice-design-adapter/1"
 MODEL_FINGERPRINT_SCHEMA_VERSION: Final = "moss-model-fingerprint/1"
 EDITION_FINGERPRINT_SCHEMA_VERSION: Final = "narration-edition-fingerprint/1"
@@ -27,6 +28,10 @@ PRODUCTION_NANO_MAX_SEED: Final = 2**63 - 1
 PRODUCTION_NANO_SAMPLE_MODES: Final[frozenset[str]] = frozenset(
     {"greedy", "fixed", "full"}
 )
+NANO_TEMPERATURE_MILLI_RANGE: Final = (100, 2_000)
+NANO_TOP_P_MILLI_RANGE: Final = (1, 1_000)
+NANO_TOP_K_RANGE: Final = (1, 100)
+NANO_AUDIO_REPETITION_PENALTY_MILLI_RANGE: Final = (1_000, 2_000)
 
 LOCAL_OWNER_ID: Final = UUID("29cf94d9-a5c9-54ec-912c-5dfff8738c4c")
 LOCAL_WORKSPACE_ID: Final = UUID("f0e2e632-bc99-52d2-9916-bb906aa4da6e")
@@ -315,6 +320,102 @@ class ReferenceAudioInput:
 
 
 @dataclass(frozen=True, slots=True)
+class NanoDecodeParametersV2:
+    """Canonical advanced sampling values consumed by Nano ``full`` mode.
+
+    Fractional values use integer thousandths so version, HMAC, ModelRun and
+    render fingerprints never depend on non-canonical JSON floats.  The
+    official ``fixed`` path intentionally does not carry this object because
+    its sampler values are compiled into the fixed ONNX graph.
+    """
+
+    text_temperature_milli: int = 1_000
+    text_top_p_milli: int = 1_000
+    text_top_k: int = 50
+    audio_temperature_milli: int = 800
+    audio_top_p_milli: int = 950
+    audio_top_k: int = 25
+    audio_repetition_penalty_milli: int = 1_200
+    schema_version: str = MOSS_NANO_DECODE_PARAMETERS_V2
+
+    def __post_init__(self) -> None:
+        if self.schema_version != MOSS_NANO_DECODE_PARAMETERS_V2:
+            raise ContractError("unknown Nano decode parameter contract")
+        for field_name in (
+            "text_temperature_milli",
+            "text_top_p_milli",
+            "text_top_k",
+            "audio_temperature_milli",
+            "audio_top_p_milli",
+            "audio_top_k",
+            "audio_repetition_penalty_milli",
+        ):
+            if type(getattr(self, field_name)) is not int:
+                raise ContractError(f"{field_name} must be an exact integer")
+        if not NANO_TEMPERATURE_MILLI_RANGE[0] <= self.text_temperature_milli <= NANO_TEMPERATURE_MILLI_RANGE[1]:
+            raise ContractError("text_temperature_milli is outside the Nano bound")
+        if not NANO_TEMPERATURE_MILLI_RANGE[0] <= self.audio_temperature_milli <= NANO_TEMPERATURE_MILLI_RANGE[1]:
+            raise ContractError("audio_temperature_milli is outside the Nano bound")
+        if not NANO_TOP_P_MILLI_RANGE[0] <= self.text_top_p_milli <= NANO_TOP_P_MILLI_RANGE[1]:
+            raise ContractError("text_top_p_milli is outside the Nano bound")
+        if not NANO_TOP_P_MILLI_RANGE[0] <= self.audio_top_p_milli <= NANO_TOP_P_MILLI_RANGE[1]:
+            raise ContractError("audio_top_p_milli is outside the Nano bound")
+        if not NANO_TOP_K_RANGE[0] <= self.text_top_k <= NANO_TOP_K_RANGE[1]:
+            raise ContractError("text_top_k is outside the Nano bound")
+        if not NANO_TOP_K_RANGE[0] <= self.audio_top_k <= NANO_TOP_K_RANGE[1]:
+            raise ContractError("audio_top_k is outside the Nano bound")
+        if not (
+            NANO_AUDIO_REPETITION_PENALTY_MILLI_RANGE[0]
+            <= self.audio_repetition_penalty_milli
+            <= NANO_AUDIO_REPETITION_PENALTY_MILLI_RANGE[1]
+        ):
+            raise ContractError(
+                "audio_repetition_penalty_milli is outside the Nano bound"
+            )
+
+    def wire_payload(self) -> Mapping[str, str | int]:
+        return MappingProxyType(
+            {
+                "schema_version": self.schema_version,
+                "text_temperature_milli": self.text_temperature_milli,
+                "text_top_p_milli": self.text_top_p_milli,
+                "text_top_k": self.text_top_k,
+                "audio_temperature_milli": self.audio_temperature_milli,
+                "audio_top_p_milli": self.audio_top_p_milli,
+                "audio_top_k": self.audio_top_k,
+                "audio_repetition_penalty_milli": self.audio_repetition_penalty_milli,
+            }
+        )
+
+    @classmethod
+    def from_wire_payload(cls, value: object) -> "NanoDecodeParametersV2":
+        expected_keys = {
+            "schema_version",
+            "text_temperature_milli",
+            "text_top_p_milli",
+            "text_top_k",
+            "audio_temperature_milli",
+            "audio_top_p_milli",
+            "audio_top_k",
+            "audio_repetition_penalty_milli",
+        }
+        if type(value) is not dict or set(value) != expected_keys:
+            raise ContractError("Nano decode parameter shape is invalid")
+        return cls(
+            schema_version=value["schema_version"],
+            text_temperature_milli=value["text_temperature_milli"],
+            text_top_p_milli=value["text_top_p_milli"],
+            text_top_k=value["text_top_k"],
+            audio_temperature_milli=value["audio_temperature_milli"],
+            audio_top_p_milli=value["audio_top_p_milli"],
+            audio_top_k=value["audio_top_k"],
+            audio_repetition_penalty_milli=value[
+                "audio_repetition_penalty_milli"
+            ],
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SynthesisRequest:
     request_id: UUID
     scope: NarrationRequestScope
@@ -323,6 +424,7 @@ class SynthesisRequest:
     seed: int
     sample_mode: str
     max_new_frames: int
+    decode_parameters: NanoDecodeParametersV2 | None = None
     reference_audio: ReferenceAudioInput | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -334,6 +436,13 @@ class SynthesisRequest:
             raise ContractError("seed is outside the Nano runtime bound")
         if self.max_new_frames <= 0:
             raise ContractError("max_new_frames must be positive")
+        if self.decode_parameters is not None:
+            if type(self.decode_parameters) is not NanoDecodeParametersV2:
+                raise ContractError("decode_parameters must use the Nano v2 contract")
+            if self.sample_mode != "full":
+                raise ContractError(
+                    "advanced Nano decode parameters are effective only in full mode"
+                )
 
 
 @dataclass(frozen=True, slots=True)

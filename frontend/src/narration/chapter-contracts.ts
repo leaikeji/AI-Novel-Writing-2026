@@ -89,6 +89,24 @@ export interface NarrationEditionResource {
   readonly job_ids: readonly string[];
 }
 
+export interface NarrationEditionVoiceIdentity {
+  readonly profile_id: string;
+  readonly voice_version_id: string;
+  readonly display_name: string;
+  readonly source_type: "preset" | "uploaded" | "generated" | null;
+  readonly preset_id: string | null;
+  readonly resolution_contract_version:
+    | "narration-edition-resolution/1"
+    | "narration-edition-resolution/2";
+  readonly legacy_fallback: boolean;
+}
+
+export interface NarrationEditionVoiceIdentitiesResource {
+  readonly contract_version: "narration-edition-voice-identities/1";
+  readonly edition_id: string;
+  readonly items: readonly NarrationEditionVoiceIdentity[];
+}
+
 
 export interface NarrationSourceSnapshot {
   readonly revision_id: string;
@@ -281,6 +299,11 @@ const EDITION_KEYS = [
   "rendering_segment_count", "ready_segment_count", "failed_segment_count",
   "current_manifest_revision", "job_ids",
 ] as const;
+const EDITION_VOICE_IDENTITY_KEYS = [
+  "profile_id", "voice_version_id", "display_name", "source_type", "preset_id",
+  "resolution_contract_version", "legacy_fallback",
+] as const;
+const EDITION_VOICE_IDENTITIES_KEYS = ["contract_version", "edition_id", "items"] as const;
 const SOURCE_SNAPSHOT_KEYS = ["revision_id", "content_hash", "matches_working_copy"] as const;
 const CONTEXT_KEYS = [
   "contract_version", "document_id", "novel_id", "pointer_version",
@@ -560,6 +583,65 @@ export function parseNarrationEditionResource(value: unknown): NarrationEditionR
       1,
     ),
     job_ids: uuidArray(item.job_ids, "edition.job_ids"),
+  });
+}
+
+export function parseNarrationEditionVoiceIdentitiesResource(
+  value: unknown,
+): NarrationEditionVoiceIdentitiesResource {
+  const root = exactRecord(value, "edition_voice_identities", EDITION_VOICE_IDENTITIES_KEYS);
+  if (root.contract_version !== "narration-edition-voice-identities/1") {
+    return fail("edition_voice_identities.contract_version", "is unsupported");
+  }
+  if (!Array.isArray(root.items) || root.items.length === 0) {
+    return fail("edition_voice_identities.items", "must be a non-empty array");
+  }
+  const identities = root.items.map((raw, index) => {
+    const path = `edition_voice_identities.items[${index}]`;
+    const identity = exactRecord(raw, path, EDITION_VOICE_IDENTITY_KEYS);
+    const sourceType = identity.source_type === null
+      ? null
+      : oneOf(identity.source_type, ["preset", "uploaded", "generated"] as const, `${path}.source_type`);
+    const presetId = identity.preset_id === null
+      ? null
+      : text(identity.preset_id, `${path}.preset_id`, 1, 160);
+    const resolutionVersion = oneOf(
+      identity.resolution_contract_version,
+      ["narration-edition-resolution/1", "narration-edition-resolution/2"] as const,
+      `${path}.resolution_contract_version`,
+    );
+    const legacyFallback = boolean(identity.legacy_fallback, `${path}.legacy_fallback`);
+    const displayName = text(identity.display_name, `${path}.display_name`, 1, 240);
+    if (legacyFallback) {
+      if (resolutionVersion !== "narration-edition-resolution/1"
+        || displayName !== "旧版未保存名称"
+        || sourceType !== null
+        || presetId !== null) {
+        return fail(path, "legacy voice identity shape is invalid");
+      }
+    } else if (resolutionVersion !== "narration-edition-resolution/2"
+      || sourceType === null
+      || ((sourceType === "preset") !== (presetId !== null))) {
+      return fail(path, "v2 voice identity shape is invalid");
+    }
+    return Object.freeze({
+      profile_id: uuid(identity.profile_id, `${path}.profile_id`),
+      voice_version_id: uuid(identity.voice_version_id, `${path}.voice_version_id`),
+      display_name: displayName,
+      source_type: sourceType,
+      preset_id: presetId,
+      resolution_contract_version: resolutionVersion,
+      legacy_fallback: legacyFallback,
+    });
+  });
+  if (new Set(identities.map((identity) => identity.voice_version_id)).size
+    !== identities.length) {
+    return fail("edition_voice_identities.items", "voice_version_id values must be unique");
+  }
+  return Object.freeze({
+    contract_version: "narration-edition-voice-identities/1",
+    edition_id: uuid(root.edition_id, "edition_voice_identities.edition_id"),
+    items: Object.freeze(identities),
   });
 }
 

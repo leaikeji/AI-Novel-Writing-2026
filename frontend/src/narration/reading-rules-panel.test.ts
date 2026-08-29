@@ -392,6 +392,25 @@ describe("reading rules model", () => {
 
 
 describe("reading rules surface", () => {
+  it("shows a static reason instead of fake cloud authorization controls while held", () => {
+    const harness = createReactHarness();
+    const Panel = createReadingRulesPanel(harness.React, api());
+    const panelProps = props();
+    let tree = harness.render(Panel, panelProps);
+    harness.commitEffects();
+    tree = harness.render(Panel, panelProps);
+    expect(textContent(tree)).toContain("云端辅助识别当前不可用");
+    expect(findAll(tree, (element) => (
+      element.type === "input" && element.props.value === "cloud_assisted"
+    ))).toHaveLength(0);
+    expect(findAll(tree, (element) => (
+      element.type === "input" && element.props.type === "checkbox"
+    ))).toHaveLength(0);
+    expect(findAll(tree, (element) => (
+      element.type === "button" && textContent(element) === "确认作品级授权"
+    ))).toHaveLength(0);
+  });
+
   it("disables all settings fields when the global product gate is held", () => {
     const harness = createReactHarness();
     const Panel = createReadingRulesPanel(harness.React, api());

@@ -462,13 +462,11 @@ describe("reading page accessibility contract", () => {
     const voiceSource = renderVoiceSourcePanel(overview, voiceHarness.React);
     expect(elementById(voiceSource, voiceSource.props["aria-labelledby"])).toBeDefined();
     expect(textContent(voiceSource)).not.toContain("文字描述生成");
-    const sourceButton = findAll(voiceSource, (element) => (
+    const sourceButtons = findAll(voiceSource, (element) => (
       element.type === "button" && textContent(element) === "选择来源"
-    ))[0];
-    expect(sourceButton.props.type).toBe("button");
-    expect(sourceButton.props.disabled).toBe(true);
-    const sourceReason = elementById(voiceSource, sourceButton.props["aria-describedby"]);
-    expect(textContent(sourceReason)).toContain("当前不可用");
+    ));
+    expect(sourceButtons).toHaveLength(0);
+    expect(textContent(voiceSource)).toContain("官方音色请在上方音色库直接使用");
 
     const pronunciationHarness = createReactHarness();
     const PronunciationPanel = createPronunciationPanel(pronunciationHarness.React);

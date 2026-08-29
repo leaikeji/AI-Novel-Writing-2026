@@ -45,11 +45,13 @@ class NarrationSettingsOperation(str, Enum):
     GET_OVERVIEW = "get_overview"
     GET_SETTINGS = "get_settings"
     PUT_SETTINGS = "put_settings"
+    PUT_PLAYBACK_PREFERENCES = "put_playback_preferences"
     LIST_SCOPE_OVERRIDES = "list_scope_overrides"
     PUT_SCOPE_OVERRIDE = "put_scope_override"
     CREATE_CLOUD_CONSENT = "create_cloud_consent"
     REVOKE_CLOUD_CONSENT = "revoke_cloud_consent"
     LIST_OFFICIAL_PRESETS = "list_official_presets"
+    SELECT_OFFICIAL_VOICE = "select_official_voice"
     LIST_VOICE_PROFILES = "list_voice_profiles"
     CREATE_VOICE_PROFILE = "create_voice_profile"
     GET_VOICE_PROFILE = "get_voice_profile"
@@ -421,6 +423,26 @@ def narration_settings_put(
     )
 
 
+@router.patch(
+    "/novels/{novel_id}/narration-settings/playback-preferences",
+    response_model=wire.NarrationSettingsResource,
+)
+def narration_playback_preferences_put(
+    novel_id: UUID,
+    payload: wire.UpdateNarrationPlaybackPreferencesRequest,
+    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
+) -> wire.NarrationSettingsResource:
+    return _run(
+        backend,
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES,
+            novel_id=novel_id,
+            payload=payload,
+        ),
+        wire.NarrationSettingsResource,
+    )
+
+
 @router.get(
     "/novels/{novel_id}/narration-scope-overrides",
     response_model=wire.NarrationScopeOverrideListResponse,
@@ -522,6 +544,34 @@ def official_voice_presets_get(
             operation=NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
         ),
         wire.OfficialPresetCatalogResponse,
+    )
+
+
+@router.post(
+    "/novels/{novel_id}/official-voice-selections",
+    response_model=wire.OfficialVoiceSelectionResponse,
+)
+def official_voice_selection_create(
+    novel_id: UUID,
+    payload: wire.OfficialVoiceSelectionRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_HEADER_PATTERN,
+    ),
+    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
+) -> wire.OfficialVoiceSelectionResponse:
+    return _run(
+        backend,
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
+            novel_id=novel_id,
+            character_id=payload.character_id,
+            payload=payload,
+            idempotency_key=idempotency_key,
+        ),
+        wire.OfficialVoiceSelectionResponse,
     )
 
 

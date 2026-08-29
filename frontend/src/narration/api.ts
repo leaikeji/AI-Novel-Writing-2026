@@ -7,6 +7,7 @@ import {
   parseDocumentNarrationContext,
   parseFailedNarrationSegmentsProjection,
   parseNarrationEditionResource,
+  parseNarrationEditionVoiceIdentitiesResource,
   parseNarrationProductionApiErrorDetail,
   parseNarrationWorkflowResource,
   parseRetryFailedNarrationSegmentsRequest,
@@ -19,6 +20,7 @@ import type {
   DocumentNarrationContext,
   FailedNarrationSegmentsProjection,
   NarrationEditionResource,
+  NarrationEditionVoiceIdentitiesResource,
   NarrationProductionApiErrorDetail,
   NarrationWorkflowResource,
   RetryFailedNarrationSegmentsRequest,
@@ -42,6 +44,7 @@ import {
   parseNarrationScopeOverrideResource,
   parseNarrationSettingsResource,
   parseOfficialPresetCatalogResponse,
+  parseOfficialVoiceSelectionResponse,
   parsePronunciationProfileResource,
   parseVoicePreviewResource,
   parseVoiceProfileListResponse,
@@ -69,6 +72,8 @@ import type {
   NarrationScopeOverrideResource,
   NarrationSettingsResource,
   OfficialPresetCatalogResponse,
+  OfficialVoiceSelectionRequest,
+  OfficialVoiceSelectionResponse,
   PreviewNarrationCacheCleanupRequest,
   PronunciationProfileResource,
   PutCharacterVoiceBindingRequest,
@@ -77,6 +82,7 @@ import type {
   PutVoiceCastingRulesRequest,
   RevokeNarrationCloudConsentRequest,
   UpdateNarrationSettingsRequest,
+  UpdateNarrationPlaybackPreferencesRequest,
   UpdateVoiceProfileRequest,
   UploadedVoiceVersionMetadata,
   VoicePreviewResource,
@@ -117,7 +123,7 @@ function pathSegment(value: string): string {
   return encodeURIComponent(value);
 }
 
-function jsonInit(method: "POST" | "PUT" | "DELETE", payload: object, signal?: AbortSignal): RequestInit {
+function jsonInit(method: "POST" | "PUT" | "PATCH" | "DELETE", payload: object, signal?: AbortSignal): RequestInit {
   return {
     method,
     body: JSON.stringify(payload),
@@ -253,6 +259,18 @@ export function putNarrationSettings(
     `/novels/${pathSegment(novelId)}/narration-settings`,
     parseNarrationSettingsResource,
     jsonInit("PUT", payload, signal),
+  );
+}
+
+export function putNarrationPlaybackPreferences(
+  novelId: string,
+  payload: UpdateNarrationPlaybackPreferencesRequest,
+  signal?: AbortSignal,
+): Promise<NarrationSettingsResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-settings/playback-preferences`,
+    parseNarrationSettingsResource,
+    jsonInit("PATCH", payload, signal),
   );
 }
 
@@ -396,6 +414,22 @@ export function listOfficialVoicePresets(
     "/voice-presets",
     parseOfficialPresetCatalogResponse,
     { signal },
+  );
+}
+
+export function selectOfficialVoice(
+  novelId: string,
+  payload: OfficialVoiceSelectionRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<OfficialVoiceSelectionResponse> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/official-voice-selections`,
+    parseOfficialVoiceSelectionResponse,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
   );
 }
 
@@ -648,6 +682,21 @@ export async function getNarrationEdition(
   const resource = await parsedProductionRequest(
     `/narration-editions/${chapterPathId(normalizedEditionId, "edition_id")}`,
     parseNarrationEditionResource,
+    { signal },
+  );
+  requireChapterIdentity(resource.edition_id, normalizedEditionId, "edition_id");
+  return resource;
+}
+
+
+export async function getNarrationEditionVoiceIdentities(
+  editionId: string,
+  signal?: AbortSignal,
+): Promise<NarrationEditionVoiceIdentitiesResource> {
+  const normalizedEditionId = normalizeChapterUuid(editionId, "edition_id");
+  const resource = await parsedProductionRequest(
+    `/narration-editions/${chapterPathId(normalizedEditionId, "edition_id")}/voice-identities`,
+    parseNarrationEditionVoiceIdentitiesResource,
     { signal },
   );
   requireChapterIdentity(resource.edition_id, normalizedEditionId, "edition_id");

@@ -254,6 +254,8 @@ function voiceVersion(
     language: "zh-CN",
     fingerprint: "a".repeat(64),
     quality_state: "accepted",
+    activation_basis: "preview_confirmed",
+    validation_basis: "human_accepted",
     rights: {
       rights_record_id: "99999999-9999-4999-8999-999999999999",
       state: "active",
@@ -556,7 +558,7 @@ describe("CharacterVoicePanel", () => {
     expect(textContent(tree)).toContain("作者主动更新朗读时重生成受影响句段");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(":focus-visible");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("repeat(4, minmax(0, 1fr))");
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).not.toContain("@media (max-width:");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 640px)");
   });
 
   it("fails closed without read authorization and makes no API request", async () => {

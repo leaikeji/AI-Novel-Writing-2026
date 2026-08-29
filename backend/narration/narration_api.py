@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
+import os
+from pathlib import Path
 from typing import Annotated, Callable, Final, Iterator, Literal, Protocol, TypeVar
 from uuid import RFC_4122, UUID
 
@@ -25,7 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse, Response
 
-from ..database import DatabaseNotConfigured, get_session
+from ..database import DatabaseNotConfigured, get_engine, get_session
 
 from .edition_service import (
     NarrationEditionProjection,
@@ -60,9 +62,19 @@ from .services import (
     SqlAlchemyNarrationStore,
     VoiceRightsUnavailable,
 )
+from .digest_keyring import load_digest_keyring
+from .storage import NarrationStorage
+from .voice_deletion import (
+    VoiceDeletionRequestSnapshot,
+    VoiceDeletionService,
+)
 
 
 NARRATION_PRODUCTION_API_VERSION: Final = "narration-production-api/1"
+MODEL_METADATA_ROOT_ENV: Final = "AI_NOVEL_TTS_MODEL_METADATA_ROOT"
+MEDIA_ROOT_ENV: Final = "AI_NOVEL_TTS_MEDIA_ROOT"
+DIGEST_KEYRING_FILE_ENV: Final = "AI_NOVEL_TTS_DIGEST_KEYRING_FILE"
+PRIVATE_VOICE_DELETION_RELEASED: Final = False
 _IDEMPOTENCY_KEY_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
 _SHA256_PATTERN: Final = r"^[a-f0-9]{64}$"
 
@@ -108,6 +120,46 @@ class NarrationEditionState(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class CreatePrivateVoiceDeletionRequest(_StrictModel):
+    expected_profile_version: int = Field(ge=1, strict=True)
+
+
+class ConfirmPrivateVoiceDeletionRequest(_StrictModel):
+    expected_profile_version: int = Field(ge=1, strict=True)
+    impact_digest: str = Field(pattern=_SHA256_PATTERN)
+
+
+class PrivateVoiceDeletionRequestResource(_StrictModel):
+    contract_version: Literal["private-voice-deletion/1"] = "private-voice-deletion/1"
+    request_id: CanonicalUuid
+    profile_id: CanonicalUuid
+    novel_id: CanonicalUuid
+    command: Literal[
+        "discard_unreferenced_private_voice", "true_delete_private_voice"
+    ]
+    state: Literal[
+        "grace_pending",
+        "requested",
+        "cancelled",
+        "live_deleting",
+        "live_deleted_backup_pending",
+        "completed",
+        "failed",
+    ]
+    expected_profile_version: int = Field(ge=1, strict=True)
+    impact_digest: str = Field(pattern=_SHA256_PATTERN)
+    impact: dict[str, object]
+    execute_after: datetime | None
+    impact_expires_at: datetime | None
+    asset_count: int = Field(ge=0, strict=True)
+    total_bytes: int = Field(ge=0, strict=True)
+    external_backup_status: Literal["unmanaged", "managed_pending", "managed_expired"]
+    confirmed_at: datetime | None
+    cancelled_at: datetime | None
+    completed_at: datetime | None
+    failure_code: str | None
+
+
 class CreateNarrationWorkflowRequest(_StrictModel):
     intent: NarrationRequestIntent
     expected_draft_version: int = Field(ge=1, strict=True)
@@ -147,6 +199,37 @@ class NarrationWorkflowResource(_StrictModel):
             or self.job_ids
         ):
             raise ValueError("analyze_only cannot expose production resources")
+        return self
+
+
+class NarrationEditionVoiceIdentityResource(_StrictModel):
+    profile_id: CanonicalUuid
+    voice_version_id: CanonicalUuid
+    display_name: str = Field(min_length=1, max_length=240)
+    source_type: Literal["preset", "uploaded", "generated"] | None
+    preset_id: str | None = Field(default=None, min_length=1, max_length=160)
+    resolution_contract_version: Literal[
+        "narration-edition-resolution/1",
+        "narration-edition-resolution/2",
+    ]
+    legacy_fallback: bool = Field(strict=True)
+
+    @model_validator(mode="after")
+    def validate_identity_shape(self) -> "NarrationEditionVoiceIdentityResource":
+        if self.legacy_fallback:
+            if (
+                self.resolution_contract_version != "narration-edition-resolution/1"
+                or self.display_name != "旧版未保存名称"
+                or self.source_type is not None
+                or self.preset_id is not None
+            ):
+                raise ValueError("legacy Edition identity must use the stable fallback")
+        elif (
+            self.resolution_contract_version != "narration-edition-resolution/2"
+            or self.source_type is None
+            or ((self.source_type == "preset") != (self.preset_id is not None))
+        ):
+            raise ValueError("Edition v2 identity has an invalid source shape")
         return self
 
 
@@ -442,6 +525,7 @@ class NarrationProductionOperation(str, Enum):
     START = "start"
     GET_REQUEST = "get_request"
     GET_EDITION = "get_edition"
+    GET_EDITION_VOICE_IDENTITIES = "get_edition_voice_identities"
     GET_DOCUMENT_CONTEXT = "get_document_context"
     SWITCH_DOCUMENT_EDITION = "switch_document_edition"
     GET_FAILED_SEGMENTS = "get_failed_segments"
@@ -584,6 +668,19 @@ class SqlAlchemyNarrationProductionBackend:
                 return _edition_payload(
                     self._service.get_edition(command.edition_id)
                 )
+            if command.operation is NarrationProductionOperation.GET_EDITION_VOICE_IDENTITIES:
+                if command.edition_id is None:
+                    raise NarrationServiceError("Edition identity is missing")
+                return {
+                    "contract_version": "narration-edition-voice-identities/1",
+                    "edition_id": command.edition_id,
+                    "items": [
+                        asdict(item)
+                        for item in self._service.get_edition_voice_identities(
+                            command.edition_id
+                        )
+                    ],
+                }
             if command.operation is NarrationProductionOperation.GET_FAILED_SEGMENTS:
                 if command.edition_id is None:
                     raise NarrationServiceError("Edition identity is missing")
@@ -1032,6 +1129,49 @@ def get_narration_edition(
     return resource
 
 
+class NarrationEditionVoiceIdentitiesResource(_StrictModel):
+    contract_version: Literal["narration-edition-voice-identities/1"]
+    edition_id: CanonicalUuid
+    items: list[NarrationEditionVoiceIdentityResource]
+
+    @model_validator(mode="after")
+    def validate_items(self) -> "NarrationEditionVoiceIdentitiesResource":
+        versions = [item.voice_version_id for item in self.items]
+        if not self.items or len(versions) != len(set(versions)):
+            raise ValueError("voice identities must be non-empty and unique by version")
+        return self
+
+
+@router.get(
+    "/narration-editions/{edition_id}/voice-identities",
+    response_model=NarrationEditionVoiceIdentitiesResource,
+)
+def get_narration_edition_voice_identities(
+    edition_id: CanonicalUuid,
+    backend: NarrationProductionApiBackend = Depends(
+        get_narration_production_backend
+    ),
+) -> NarrationEditionVoiceIdentitiesResource:
+    resource = _run(
+        backend,
+        NarrationProductionApiCommand(
+            operation=NarrationProductionOperation.GET_EDITION_VOICE_IDENTITIES,
+            edition_id=edition_id,
+        ),
+        NarrationEditionVoiceIdentitiesResource,
+    )
+    if resource.edition_id != edition_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=NarrationProductionErrorDetail(
+                code=NarrationProductionErrorCode.RESPONSE_CONTRACT_VIOLATION,
+                message="朗读生产服务返回了不兼容的数据。",
+                retryable=False,
+            ).model_dump(mode="json"),
+        )
+    return resource
+
+
 @router.get(
     "/narration-editions/{edition_id}/failed-segments",
     response_model=FailedSegmentsResource,
@@ -1240,8 +1380,205 @@ def switch_document_narration_edition(
     return resource
 
 
+def _private_voice_deletion_service() -> VoiceDeletionService:
+    def required_path(name: str) -> Path:
+        value = os.environ.get(name, "")
+        path = Path(value)
+        if not value or not path.is_absolute():
+            raise RuntimeError(f"private voice deletion requires {name}")
+        return path
+
+    engine = get_engine()
+    return VoiceDeletionService(
+        lambda: Session(engine),
+        storage=NarrationStorage(
+            models_root=required_path(MODEL_METADATA_ROOT_ENV),
+            media_root=required_path(MEDIA_ROOT_ENV),
+        ),
+        digest_keyring=load_digest_keyring(required_path(DIGEST_KEYRING_FILE_ENV)),
+    )
+
+
+def _require_private_voice_deletion_release() -> None:
+    """Keep the destructive API closed until DEL-GATE has fully passed.
+
+    The request state machine and exact asset plan are implemented candidates,
+    but the persistent grace-deadline/restart reconciler is not yet connected to
+    the production worker.  A hidden UI alone is not a server-side release gate.
+    """
+
+    if PRIVATE_VOICE_DELETION_RELEASED:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=NarrationProductionErrorDetail(
+            code=NarrationProductionErrorCode.BACKEND_NOT_INSTALLED,
+            message="私人音色删除尚未完成后台恢复闭环，当前不对外开放。",
+            retryable=False,
+        ).model_dump(mode="json"),
+    )
+
+
+def _private_voice_deletion_resource(
+    operation: Callable[[], VoiceDeletionRequestSnapshot],
+) -> PrivateVoiceDeletionRequestResource:
+    try:
+        return PrivateVoiceDeletionRequestResource.model_validate(asdict(operation()))
+    except NarrationServiceError as error:
+        fault = _fault_from_service(error)
+        raise HTTPException(
+            status_code=NARRATION_PRODUCTION_ERROR_STATUS[fault.code],
+            detail=_error_detail(fault).model_dump(mode="json"),
+        ) from error
+    except (DatabaseNotConfigured, OSError, RuntimeError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=NarrationProductionErrorDetail(
+                code=NarrationProductionErrorCode.STORAGE_UNAVAILABLE,
+                message="私人音色删除存储当前不可用。",
+                retryable=True,
+            ).model_dump(mode="json"),
+        ) from error
+
+
+@router.post(
+    "/voice-profiles/{profile_id}/discard-unreferenced",
+    response_model=PrivateVoiceDeletionRequestResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def discard_unreferenced_private_voice(
+    profile_id: CanonicalUuid,
+    payload: CreatePrivateVoiceDeletionRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_KEY_PATTERN,
+    ),
+) -> PrivateVoiceDeletionRequestResource:
+    _require_private_voice_deletion_release()
+    service = _private_voice_deletion_service()
+    return _private_voice_deletion_resource(
+        lambda: service.create_request(
+            profile_id=profile_id,
+            expected_profile_version=payload.expected_profile_version,
+            discard_unreferenced=True,
+            idempotency_key=idempotency_key,
+            actor="local-owner",
+        )
+    )
+
+
+@router.post(
+    "/voice-profiles/{profile_id}/deletion-requests",
+    response_model=PrivateVoiceDeletionRequestResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_private_voice_deletion_request(
+    profile_id: CanonicalUuid,
+    payload: CreatePrivateVoiceDeletionRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_KEY_PATTERN,
+    ),
+) -> PrivateVoiceDeletionRequestResource:
+    _require_private_voice_deletion_release()
+    service = _private_voice_deletion_service()
+    return _private_voice_deletion_resource(
+        lambda: service.create_request(
+            profile_id=profile_id,
+            expected_profile_version=payload.expected_profile_version,
+            discard_unreferenced=False,
+            idempotency_key=idempotency_key,
+            actor="local-owner",
+        )
+    )
+
+
+@router.get(
+    "/voice-deletion-requests/{request_id}",
+    response_model=PrivateVoiceDeletionRequestResource,
+)
+def get_private_voice_deletion_request(
+    request_id: CanonicalUuid,
+) -> PrivateVoiceDeletionRequestResource:
+    _require_private_voice_deletion_release()
+    service = _private_voice_deletion_service()
+    return _private_voice_deletion_resource(lambda: service.get_request(request_id))
+
+
+@router.post(
+    "/voice-deletion-requests/{request_id}/confirm",
+    response_model=PrivateVoiceDeletionRequestResource,
+)
+def confirm_private_voice_deletion_request(
+    request_id: CanonicalUuid,
+    payload: ConfirmPrivateVoiceDeletionRequest,
+    _idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_KEY_PATTERN,
+    ),
+) -> PrivateVoiceDeletionRequestResource:
+    _require_private_voice_deletion_release()
+    service = _private_voice_deletion_service()
+    return _private_voice_deletion_resource(
+        lambda: service.confirm(
+            request_id,
+            expected_profile_version=payload.expected_profile_version,
+            impact_digest=payload.impact_digest,
+            actor="local-owner",
+        )
+    )
+
+
+@router.post(
+    "/voice-deletion-requests/{request_id}/cancel",
+    response_model=PrivateVoiceDeletionRequestResource,
+)
+def cancel_private_voice_deletion_request(
+    request_id: CanonicalUuid,
+    _idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_KEY_PATTERN,
+    ),
+) -> PrivateVoiceDeletionRequestResource:
+    _require_private_voice_deletion_release()
+    service = _private_voice_deletion_service()
+    return _private_voice_deletion_resource(
+        lambda: service.cancel(request_id, actor="local-owner")
+    )
+
+
+@router.post(
+    "/voice-deletion-requests/{request_id}/retry",
+    response_model=PrivateVoiceDeletionRequestResource,
+)
+def retry_private_voice_deletion_request(
+    request_id: CanonicalUuid,
+    _idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_KEY_PATTERN,
+    ),
+) -> PrivateVoiceDeletionRequestResource:
+    _require_private_voice_deletion_release()
+    service = _private_voice_deletion_service()
+    return _private_voice_deletion_resource(
+        lambda: service.retry(request_id, actor="local-owner")
+    )
+
+
 __all__ = [
     "CreateNarrationWorkflowRequest",
+    "CreatePrivateVoiceDeletionRequest",
+    "ConfirmPrivateVoiceDeletionRequest",
     "DocumentNarrationContextResource",
     "DocumentEditionHistoryResource",
     "EditionHistoryItemResource",
@@ -1258,6 +1595,7 @@ __all__ = [
     "NarrationProductionErrorDetail",
     "NarrationProductionOperation",
     "NarrationWorkflowResource",
+    "PrivateVoiceDeletionRequestResource",
     "RetryFailedSegmentsRequest",
     "RetryFailedSegmentsResource",
     "SqlAlchemyNarrationProductionBackend",

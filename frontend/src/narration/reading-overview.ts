@@ -10,6 +10,9 @@ export const READING_SECTION_KEYS = [
   "overview",
   "narrator",
   "characters",
+  "voice-library",
+  "reading-rules",
+  "storage-privacy",
   "casting-rules",
   "pronunciation",
   "audio-cache",
@@ -27,12 +30,21 @@ export interface ReadingSectionDefinition {
 
 export const READING_SECTIONS: readonly ReadingSectionDefinition[] = [
   { key: "overview", label: "总览" },
-  { key: "narrator", label: "旁白" },
+  { key: "narrator", label: "旁白与朗读" },
   { key: "characters", label: "人物配音" },
-  { key: "casting-rules", label: "选角规则" },
-  { key: "pronunciation", label: "发音与停顿" },
-  { key: "audio-cache", label: "音频与缓存" },
+  { key: "voice-library", label: "音色库" },
+  { key: "reading-rules", label: "识别、发音与停顿" },
+  { key: "storage-privacy", label: "存储与隐私" },
 ] as const;
+
+
+export function canonicalReadingSection(
+  section: ReadingSectionKey | null | undefined,
+): ReadingSectionKey {
+  if (section === "casting-rules" || section === "pronunciation") return "reading-rules";
+  if (section === "audio-cache") return "storage-privacy";
+  return section ?? "overview";
+}
 
 
 const REASON_LABELS: Readonly<Record<string, string>> = {

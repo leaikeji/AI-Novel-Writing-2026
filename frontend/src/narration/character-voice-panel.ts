@@ -16,7 +16,10 @@ import type {
   VoiceProfileVersionResource,
   VoiceSourceType,
 } from "./contracts";
-import { voiceSourceEvidenceIsUsable } from "./contracts";
+import {
+  voiceActivationEvidenceIsUsable,
+  voiceSourceEvidenceIsUsable,
+} from "./contracts";
 
 
 const LANGUAGE_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/;
@@ -227,7 +230,7 @@ export function characterVoiceOptions(
     const version = currentVersion(profile);
     if (!version
       || version.state !== "locked"
-      || version.quality_state !== "accepted"
+      || !voiceActivationEvidenceIsUsable(version)
       || version.rights.state !== "active"
       || !voiceSourceEvidenceIsUsable(version)
       || !isCharacterVoiceCapabilityActionable(

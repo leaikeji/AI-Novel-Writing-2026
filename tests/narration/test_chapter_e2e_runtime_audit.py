@@ -389,6 +389,8 @@ def _voice_authority_rows(
                 source_type="preset",
                 state="locked",
                 quality_state="accepted",
+                activation_basis="preview_confirmed",
+                validation_basis="human_accepted",
                 locked_actor="test-author",
                 locked_at=now,
                 fingerprint="f" * 64,

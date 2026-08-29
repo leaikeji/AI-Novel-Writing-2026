@@ -32,6 +32,7 @@ from backend.narration.edition_service import (
     StartNarrationWorkflow,
     orchestrate_narration_request,
     project_edition,
+    project_edition_voice_identities,
     project_workflow,
 )
 from backend.narration.editions import advance_edition_segment_state
@@ -150,11 +151,43 @@ def test_generation_creates_one_approved_edition_and_fenced_render_candidates() 
     )
     assert segments
     assert all(segment.render_state == "queued" for segment in segments)
+    assert all(
+        segment.resolution_json.get("contract_version")
+        == "narration-edition-resolution/2"
+        for segment in segments
+    )
+    frozen_identities = project_edition_voice_identities(store, editions[0])
+    assert frozen_identities
+    assert all(not item.legacy_fallback for item in frozen_identities)
+    assert all(item.display_name != "旧版未保存名称" for item in frozen_identities)
     assert len(queue.calls) == len(segments)
     assert len(store.find_all(BackgroundJob, request_id=request.id)) == len(segments)
     assert len(store.find_all(NarrationSegmentRender, request_id=request.id)) == len(segments)
     assert len(result.job_ids) == len(segments)
     assert store.rows[MediaAsset] == []
+
+
+def test_legacy_edition_identity_uses_stable_ids_without_joining_mutable_name() -> None:
+    store, _novel, _document, _revision, _seed_request, command = _workflow_seed()
+    result = orchestrate_narration_request(store, MemoryRenderQueue(store), command, POLICY)
+    edition = store.find_one(NarrationEdition, request_id=result.request_id)
+    assert edition is not None
+    segments = store.find_all(
+        NarrationEditionSegment,
+        edition_id=edition.id,
+        order_by=("ordinal",),
+    )
+    for segment in segments:
+        segment.resolution_json = {"contract_version": "narration-edition-resolution/1"}
+
+    identities = project_edition_voice_identities(store, edition)
+
+    assert identities
+    assert all(item.legacy_fallback for item in identities)
+    assert all(item.display_name == "旧版未保存名称" for item in identities)
+    assert {item.voice_version_id for item in identities} == {
+        segment.voice_version_id for segment in segments
+    }
 
 
 def test_projections_resolve_edition_state_by_edition_id_not_missing_id() -> None:

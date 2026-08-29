@@ -1,11 +1,17 @@
 export const T4_CHAPTER_NARRATION_STYLES = String.raw`
   .anw-editor-content.has-chapter-narration {
-    --anw-chapter-player-height: 94px;
     position: relative;
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .anw-editor-content.has-chapter-narration > .anw-editor-scroll {
-    padding-bottom: calc(var(--anw-chapter-player-height) + 34px);
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
+    padding-bottom: 34px;
   }
 
   .anw-chapter-editor-surface {
@@ -103,23 +109,30 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
   }
 
   .anw-chapter-narration-player {
-    position: sticky;
+    position: relative;
     z-index: 35;
-    bottom: 14px;
     display: grid;
     width: min(1440px, calc(100% - 48px));
-    min-height: var(--anw-chapter-player-height, 94px);
-    grid-template-columns: minmax(190px, 0.9fr) auto minmax(260px, 1.35fr) auto;
-    grid-template-rows: auto auto;
-    align-items: center;
-    gap: 6px 18px;
-    margin: calc(-1 * var(--anw-chapter-player-height, 94px) - 20px) auto 14px;
+    min-width: 0;
+    flex: 0 0 auto;
+    gap: 6px;
+    margin: 0 auto 14px;
     border: 1px solid color-mix(in srgb, #5f493c 18%, transparent);
     border-radius: 18px;
-    padding: 12px 16px 10px;
-    background: color-mix(in srgb, #fff 94%, #fff7f0);
-    box-shadow: 0 18px 48px rgba(76, 49, 34, 0.18);
+    padding: 8px 12px 7px;
+    overflow: hidden;
+    background: color-mix(in srgb, #fff 96%, #fff7f0);
+    box-shadow: 0 12px 32px rgba(76, 49, 34, 0.16);
     backdrop-filter: blur(18px);
+  }
+
+  .anw-chapter-narration-player__compact {
+    display: grid;
+    min-width: 0;
+    min-height: 64px;
+    grid-template-columns: minmax(184px, 0.85fr) auto minmax(250px, 1.15fr) minmax(252px, auto) auto;
+    align-items: center;
+    gap: 8px 14px;
   }
 
   .anw-chapter-narration-player__identity {
@@ -127,12 +140,12 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     min-width: 0;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 10px;
+    gap: 9px;
   }
 
   .anw-chapter-narration-source {
     display: inline-flex;
-    min-height: 24px;
+    min-height: 28px;
     align-items: center;
     border-radius: 999px;
     padding: 3px 9px;
@@ -146,12 +159,13 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
   .anw-chapter-narration-source.is-working-copy-diverged,
   .anw-chapter-narration-source.is-historical {
     background: #fff0e2;
-    color: #a34a1e;
+    color: #8d3f19;
   }
 
   .anw-chapter-narration-current-copy {
     display: grid;
     min-width: 0;
+    gap: 1px;
   }
 
   .anw-chapter-narration-current-copy strong,
@@ -168,47 +182,68 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
 
   .anw-chapter-narration-current-copy span {
     color: #82766e;
-    font-size: 12px;
+    font-size: 11px;
   }
 
-  .anw-chapter-narration-player__controls {
+  .anw-chapter-narration-current-copy .anw-chapter-narration-voice-summary {
+    color: #965033;
+    font-weight: 650;
+  }
+
+  .anw-chapter-narration-player__controls,
+  .anw-chapter-narration-player__view-actions,
+  .anw-chapter-narration-player__preferences,
+  .anw-chapter-narration-player__actions {
     display: flex;
+    min-width: 0;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .anw-chapter-narration-player__view-actions,
+  .anw-chapter-narration-player__actions {
+    justify-content: flex-end;
   }
 
   .anw-chapter-narration-icon-button,
   .anw-chapter-narration-play-button,
   .anw-chapter-narration-primary-action,
   .anw-chapter-narration-update,
-  .anw-chapter-narration-link-button {
+  .anw-chapter-narration-link-button,
+  .anw-chapter-narration-more,
+  .anw-chapter-narration-failure-trigger,
+  .anw-chapter-narration-details__close,
+  .anw-chapter-narration-retry-button {
+    min-width: 44px;
+    min-height: 44px;
     border: 0;
     cursor: pointer;
   }
 
-  .anw-chapter-narration-icon-button {
-    width: 32px;
-    height: 32px;
+  .anw-chapter-narration-icon-button,
+  .anw-chapter-narration-play-button {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
     border-radius: 999px;
+  }
+
+  .anw-chapter-narration-icon-button {
     background: transparent;
     color: #5c4b41;
   }
 
   .anw-chapter-narration-play-button {
-    width: 42px;
-    height: 42px;
-    border-radius: 999px;
     background: #d76832;
     color: #fff;
     font-size: 18px;
-    box-shadow: 0 8px 18px rgba(215, 104, 50, 0.26);
+    box-shadow: 0 7px 16px rgba(215, 104, 50, 0.24);
   }
 
   .anw-chapter-narration-primary-action,
   .anw-chapter-narration-update {
-    min-height: 36px;
     border-radius: 10px;
-    padding: 7px 14px;
+    padding: 8px 14px;
     background: #d76832;
     color: #fff;
     font-weight: 700;
@@ -219,6 +254,22 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     color: #6f5547;
   }
 
+  .anw-chapter-narration-more,
+  .anw-chapter-narration-failure-trigger,
+  .anw-chapter-narration-details__close {
+    border-radius: 10px;
+    padding: 7px 10px;
+    background: #f5efea;
+    color: #684b3c;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .anw-chapter-narration-failure-trigger {
+    background: #fff0e9;
+    color: #a12f24;
+  }
+
   .anw-chapter-narration-player button:disabled,
   .anw-chapter-narration-player select:disabled,
   .anw-chapter-narration-player input:disabled {
@@ -226,65 +277,568 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     opacity: 0.48;
   }
 
-  .anw-chapter-narration-player__timeline {
+  .anw-chapter-narration-player__metrics {
     display: grid;
     min-width: 0;
-    grid-template-columns: minmax(180px, 1fr) auto;
+    grid-template-columns: repeat(3, minmax(78px, 1fr));
     align-items: center;
     gap: 10px;
-    color: #786a61;
-    font-size: 12px;
   }
 
-  .anw-chapter-narration-player__timeline input[type="range"] {
+  .anw-chapter-narration-metric,
+  .anw-chapter-narration-generation {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .anw-chapter-narration-metric span,
+  .anw-chapter-narration-generation span {
+    color: #8a7b72;
+    font-size: 10px;
+  }
+
+  .anw-chapter-narration-metric strong,
+  .anw-chapter-narration-generation strong {
+    overflow: hidden;
+    color: #51443d;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .anw-chapter-narration-generation > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .anw-chapter-narration-generation progress {
     width: 100%;
+    height: 5px;
     accent-color: #d76832;
   }
 
-  .anw-chapter-narration-player__actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
+  .anw-chapter-narration-generation.is-failed progress {
+    accent-color: #b3261e;
   }
 
-  .anw-chapter-narration-select {
+  .anw-chapter-narration-player__preferences {
+    justify-content: flex-end;
+  }
+
+  .anw-chapter-narration-select,
+  .anw-chapter-narration-volume {
     display: inline-flex;
+    min-height: 44px;
     align-items: center;
     gap: 5px;
     color: #6d6058;
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .anw-chapter-narration-select select {
-    max-width: 154px;
-    min-height: 32px;
+    max-width: 180px;
+    min-height: 44px;
     border: 1px solid #ded4cc;
-    border-radius: 8px;
+    border-radius: 9px;
+    padding-inline: 6px;
     background: #fff;
     color: #493c35;
   }
 
+  .anw-chapter-narration-volume input[type="range"] {
+    width: 86px;
+    min-height: 44px;
+    accent-color: #d76832;
+  }
+
+  .anw-chapter-narration-volume output {
+    width: 32px;
+    color: #594c44;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .anw-chapter-narration-player__timeline {
+    display: grid;
+    min-width: 0;
+    min-height: 44px;
+    grid-template-columns: minmax(180px, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    color: #786a61;
+    font-size: 11px;
+  }
+
+  .anw-chapter-narration-player__timeline input[type="range"] {
+    width: 100%;
+    min-height: 44px;
+    accent-color: #d76832;
+  }
+
   .anw-chapter-narration-link-button {
+    border-radius: 8px;
+    padding: 7px 9px;
     background: transparent;
-    color: #a34824;
+    color: #8d3d1e;
     font-size: 12px;
     text-decoration: underline;
     text-underline-offset: 3px;
   }
 
+  .anw-chapter-narration-details[hidden],
+  .anw-chapter-narration-details [hidden],
+  .anw-chapter-narration-failures[hidden] {
+    display: none !important;
+  }
+
+  .anw-chapter-narration-details {
+    display: grid;
+    min-width: 0;
+    max-height: min(44vh, 420px);
+    gap: 12px;
+    border-top: 1px solid #e9ddd5;
+    padding: 12px 2px 4px;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .anw-chapter-narration-details__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .anw-chapter-narration-details__header > div {
+    display: grid;
+    gap: 2px;
+  }
+
+  .anw-chapter-narration-details__header strong {
+    color: #4c3c34;
+    font-size: 14px;
+  }
+
+  .anw-chapter-narration-details__header span {
+    color: #81736a;
+    font-size: 11px;
+  }
+
+  .anw-chapter-narration-details__overview {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1.1fr) minmax(240px, 0.9fr);
+    gap: 12px 18px;
+  }
+
+  .anw-chapter-narration-status-grid {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+  }
+
+  .anw-chapter-narration-status-grid > div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #f8f3ef;
+  }
+
+  .anw-chapter-narration-status-grid dt {
+    color: #8a7a70;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .anw-chapter-narration-status-grid dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: #514139;
+    font-size: 12px;
+  }
+
+  .anw-chapter-narration-voices {
+    display: grid;
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .anw-chapter-narration-voices > strong {
+    color: #57463d;
+    font-size: 12px;
+  }
+
+  .anw-chapter-narration-voices ul {
+    display: grid;
+    max-height: 118px;
+    gap: 5px;
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+    list-style: none;
+  }
+
+  .anw-chapter-narration-voices li {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: #fff7f1;
+  }
+
+  .anw-chapter-narration-voices li span,
+  .anw-chapter-narration-voices p {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: #57453c;
+    font-size: 12px;
+  }
+
+  .anw-chapter-narration-voices li small {
+    overflow-wrap: anywhere;
+    color: #806e64;
+    font-size: 10px;
+  }
+
+  .anw-chapter-narration-details__overview > .anw-chapter-narration-player__actions {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+  }
+
+  .anw-chapter-narration-details .anw-chapter-narration-failures {
+    display: grid;
+    min-width: 0;
+    gap: 8px;
+    border: 0;
+    padding: 0;
+  }
+
+  .anw-chapter-narration-details .anw-chapter-narration-failures__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .anw-chapter-narration-details .anw-chapter-narration-failures__header strong {
+    color: #8f2f24;
+    font-size: 13px;
+  }
+
+  .anw-chapter-narration-details .anw-chapter-narration-failures__header span {
+    color: #82766e;
+    font-size: 11px;
+  }
+
+  .anw-chapter-narration-details .anw-chapter-narration-failures__list {
+    display: grid;
+    max-height: min(34vh, 260px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+    list-style: none;
+  }
+
+  .anw-chapter-narration-details .anw-chapter-narration-failure {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid #ead8cf;
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #fffaf7;
+  }
+
+  .anw-chapter-narration-details .anw-chapter-narration-failure.is-busy {
+    border-color: #e2a081;
+    background: #fff4ed;
+  }
+
+  .anw-chapter-narration-failure__copy {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .anw-chapter-narration-failure__copy strong {
+    color: #5d4035;
+    font-size: 12px;
+  }
+
+  .anw-chapter-narration-failure__copy span {
+    overflow: hidden;
+    color: #756861;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .anw-chapter-narration-failure__copy small {
+    color: #8a5747;
+    font-size: 10px;
+    line-height: 1.45;
+  }
+
+  .anw-chapter-narration-retry-button {
+    border: 1px solid #d76832 !important;
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: #943b1c;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .anw-chapter-narration-preference-live,
+  .anw-chapter-narration-retry-live,
   .anw-chapter-narration-live {
     min-width: 0;
-    grid-column: 1 / -1;
     overflow: hidden;
-    color: #7c7068;
+    color: #6f625a;
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
+  .anw-chapter-narration-preference-live.is-conflict,
+  .anw-chapter-narration-preference-live.is-error,
+  .anw-chapter-narration-retry-live.is-error,
   .anw-chapter-narration-live.is-error {
-    color: #b3261e;
+    color: #9f271e;
+    font-weight: 650;
+  }
+
+  @container (max-width: 1024px) {
+    .anw-chapter-narration-player__compact {
+      grid-template-columns: minmax(160px, 1fr) auto minmax(220px, 1fr) auto;
+    }
+
+    .anw-chapter-narration-player__preferences {
+      grid-column: 1 / -1;
+      justify-content: flex-start;
+    }
+
+    .anw-chapter-narration-player__view-actions {
+      grid-column: 4;
+      grid-row: 1;
+    }
+  }
+
+  @media (max-width: 1024px) {
+    .anw-chapter-narration-player {
+      width: calc(100% - 28px);
+    }
+
+    .anw-chapter-narration-player__compact {
+      grid-template-columns: minmax(160px, 1fr) auto minmax(220px, 1fr) auto;
+    }
+
+    .anw-chapter-narration-player__preferences {
+      grid-column: 1 / -1;
+      justify-content: flex-start;
+    }
+
+    .anw-chapter-narration-player__view-actions {
+      grid-column: 4;
+      grid-row: 1;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .anw-editor-content.has-chapter-narration {
+      display: block;
+      height: auto;
+      min-height: 100%;
+      overflow: visible;
+    }
+
+    .anw-editor-content.has-chapter-narration > .anw-editor-scroll {
+      min-height: 0;
+      overflow: visible;
+      padding-bottom: 16px;
+    }
+
+    .anw-chapter-narration-player {
+      position: sticky;
+      bottom: 0;
+      width: 100%;
+      margin: 0;
+      border-right: 0;
+      border-bottom: 0;
+      border-left: 0;
+      border-radius: 16px 16px 0 0;
+      padding: 4px 8px;
+      background: #fffdfb;
+      box-shadow: 0 -10px 28px rgba(76, 49, 34, 0.16);
+      backdrop-filter: none;
+    }
+
+    .anw-chapter-narration-player__compact {
+      min-height: 64px;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 6px;
+    }
+
+    .anw-chapter-narration-player__identity {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-chapter-narration-source,
+    .anw-chapter-narration-current-copy > span:last-child,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-player__metrics,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-player__preferences,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-player__timeline {
+      display: none;
+    }
+
+    .anw-chapter-narration-player.is-layout-compact > .anw-chapter-narration-live:not(.is-error) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+
+    .anw-chapter-narration-current-copy strong,
+    .anw-chapter-narration-current-copy .anw-chapter-narration-voice-summary {
+      display: block;
+    }
+
+    .anw-chapter-narration-player__controls {
+      gap: 2px;
+    }
+
+    .anw-chapter-narration-player__view-actions {
+      grid-column: auto;
+      grid-row: auto;
+    }
+
+    .anw-chapter-narration-failure-trigger {
+      padding-inline: 8px;
+    }
+
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-more,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-failure-trigger {
+      min-width: 44px;
+      padding-inline: 6px;
+    }
+
+    .anw-chapter-narration-player:not(.is-layout-compact) .anw-chapter-narration-player__compact {
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      padding-bottom: 4px;
+    }
+
+    .anw-chapter-narration-player:not(.is-layout-compact) .anw-chapter-narration-player__metrics,
+    .anw-chapter-narration-player:not(.is-layout-compact) .anw-chapter-narration-player__preferences {
+      grid-column: 1 / -1;
+    }
+
+    .anw-chapter-narration-player__metrics {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .anw-chapter-narration-player__preferences {
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+
+    .anw-chapter-narration-volume {
+      min-width: min(250px, 100%);
+      flex: 1 1 210px;
+    }
+
+    .anw-chapter-narration-volume input[type="range"] {
+      min-width: 90px;
+      flex: 1 1 auto;
+    }
+
+    .anw-chapter-narration-player__timeline {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+    }
+
+    .anw-chapter-narration-details {
+      max-height: min(52dvh, 440px);
+      padding: 10px 2px 6px;
+    }
+
+    .anw-chapter-narration-details__overview,
+    .anw-chapter-narration-status-grid,
+    .anw-chapter-narration-details .anw-chapter-narration-failures__list {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-chapter-narration-details .anw-chapter-narration-failures__header,
+    .anw-chapter-narration-details .anw-chapter-narration-failure {
+      align-items: stretch;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-chapter-narration-details .anw-chapter-narration-failures__header {
+      display: grid;
+      gap: 3px;
+    }
+
+    .anw-chapter-narration-player__actions {
+      justify-content: flex-start;
+    }
+  }
+
+  @media (max-width: 390px) {
+    .anw-chapter-narration-player__compact {
+      grid-template-columns: minmax(72px, 1fr) auto auto;
+    }
+
+    .anw-chapter-narration-current-copy .anw-chapter-narration-voice-summary,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-failure-trigger {
+      display: none;
+    }
+
+    .anw-chapter-narration-icon-button,
+    .anw-chapter-narration-play-button {
+      width: 44px;
+      flex-basis: 44px;
+    }
+
+    .anw-chapter-narration-player__metrics {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-chapter-narration-select {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .anw-chapter-narration-select select {
+      max-width: min(230px, 68vw);
+    }
+  }
+
+  @media (forced-colors: active) {
+    .anw-chapter-narration-player,
+    .anw-chapter-narration-status-grid > div,
+    .anw-chapter-narration-details .anw-chapter-narration-failure {
+      border: 1px solid CanvasText;
+    }
+
+    .anw-chapter-narration-source,
+    .anw-chapter-narration-play-button,
+    .anw-chapter-narration-failure-trigger {
+      forced-color-adjust: auto;
+    }
   }
 
   .anw-script-review-shell {

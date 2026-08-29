@@ -51,6 +51,7 @@ export interface NarrationPlayerState {
   readonly offsetMs: number;
   readonly durationMs: number;
   readonly rate: number;
+  readonly volume: number;
   readonly followPaused: boolean;
   readonly backend: SegmentPlaybackBackendKind | null;
   readonly source: NarrationPlaybackSource | null;
@@ -113,6 +114,7 @@ export interface NarrationPlayerController {
   pause(): void;
   resume(): Promise<PlaybackDecision>;
   setRate(rate: number): void;
+  setVolume(volume: number): void;
   updateManifest(manifest: NarrationManifestV2): void;
   subscribe(listener: (state: NarrationPlayerState) => void): () => void;
   dispose(): void;
@@ -147,6 +149,7 @@ export interface CreateNarrationPlayerOptions {
     offsetMs: number;
   }>;
   readonly rate?: number;
+  readonly initialVolume?: number;
   readonly isDocumentLeaseCurrent?: (
     documentId: string,
     documentGeneration: number,
@@ -188,10 +191,18 @@ function assertManifest(manifest: NarrationManifestV2): void {
 
 
 function boundedRate(rate: number): number {
-  if (!Number.isFinite(rate) || rate < 0.25 || rate > 4) {
-    throw new RangeError("playback rate must be between 0.25 and 4");
+  if (!Number.isFinite(rate) || rate < 0.5 || rate > 3) {
+    throw new RangeError("playback rate must be between 0.5 and 3");
   }
   return rate;
+}
+
+
+function boundedVolume(volume: number): number {
+  if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+    throw new RangeError("playback volume must be between 0 and 1");
+  }
+  return volume;
 }
 
 
@@ -397,6 +408,7 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
       throw new RangeError("initialManifestRevision must be a positive safe integer");
     }
     const rate = boundedRate(options.rate ?? 1);
+    const volume = boundedVolume(options.initialVolume ?? 1);
     this.manifest = options.initialManifest ?? null;
     if (this.manifest) {
       assertManifest(this.manifest);
@@ -434,6 +446,7 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
       offsetMs: initialPosition?.offsetMs ?? 0,
       durationMs: initialSegment?.audio?.duration_ms ?? 0,
       rate,
+      volume,
       followPaused: false,
       backend: null,
       source: null,
@@ -553,6 +566,7 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
       startOrdinal: plan.target.ordinal,
       endOrdinalExclusive: plan.readyRange.end_ordinal_exclusive,
       rate: this.state.rate,
+      volume: boundedVolume(this.state.volume),
       startOffsetMs,
       signal,
     });
@@ -617,6 +631,13 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
     const normalized = boundedRate(rate);
     this.queue.setRate(normalized);
     this.publish({ rate: normalized });
+  }
+
+  setVolume(volume: number): void {
+    this.assertUsable();
+    const normalized = boundedVolume(volume);
+    this.queue.setVolume(normalized);
+    this.publish({ volume: normalized });
   }
 
   setFollowPaused(paused: boolean): void {

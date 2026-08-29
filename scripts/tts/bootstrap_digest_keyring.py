@@ -38,7 +38,7 @@ from scripts.tts.manage_digest_keyring import (  # noqa: E402
 )
 
 
-EXPECTED_ALEMBIC_HEAD: Final = "20260829_0029"
+EXPECTED_ALEMBIC_HEAD: Final = "20260829_0032"
 _LOCK_REFERENCES_SQL: Final = (
     "LOCK TABLE narration_edition_segments IN SHARE ROW EXCLUSIVE MODE"
 )

@@ -101,6 +101,7 @@ function manifest(
 class FakeQueue implements SegmentPlaybackQueuePort {
   readonly starts: SegmentPlaybackQueueStartOptions[] = [];
   readonly rates: number[] = [];
+  readonly volumes: number[] = [];
   pauseCount = 0;
   resumeCount = 0;
   stopCount = 0;
@@ -149,6 +150,7 @@ class FakeQueue implements SegmentPlaybackQueuePort {
   pause(): void { this.pauseCount += 1; }
   async resume(): Promise<void> { this.resumeCount += 1; }
   setRate(rate: number): void { this.rates.push(rate); }
+  setVolume(volume: number): void { this.volumes.push(volume); }
   readPosition(): Readonly<{ segmentId: string; ordinal: number; offsetMs: number }> | null {
     return this.position;
   }
@@ -253,6 +255,7 @@ describe("ProductionNarrationPlayerController boundary state", () => {
       initialManifest: currentManifest,
       initialPosition: { segmentId: segmentId(1), ordinal: 1, offsetMs: 1_250 },
       rate: 1.25,
+      initialVolume: 0.65,
       createQueue: (hooks) => {
         queue = new FakeQueue(hooks);
         return queue;
@@ -265,14 +268,50 @@ describe("ProductionNarrationPlayerController boundary state", () => {
       currentOrdinal: 1,
       offsetMs: 1_250,
       rate: 1.25,
+      volume: 0.65,
     });
     await controller.playFromSegment(segmentId(1), "resume", 1_250);
     expect((queue as unknown as FakeQueue).starts[0]).toMatchObject({
       startOrdinal: 1,
       startOffsetMs: 1_250,
       rate: 1.25,
+      volume: 0.65,
     });
     expect(controller.readState()).toMatchObject({ phase: "playing", offsetMs: 1_250 });
+  });
+
+  it("materializes only valid author playback defaults", () => {
+    const currentManifest = manifest(["ready"]);
+    const base = {
+      documentId: DOCUMENT_ID,
+      documentGeneration: 3,
+      editionId: EDITION_ID,
+      initialManifest: currentManifest,
+    } as const;
+
+    expect(() => new ProductionNarrationPlayerController({
+      ...base,
+      rate: 0.49,
+    })).toThrow(/between 0.5 and 3/);
+    expect(() => new ProductionNarrationPlayerController({
+      ...base,
+      initialVolume: Number.NaN,
+    })).toThrow(/between 0 and 1/);
+
+    const lower = new ProductionNarrationPlayerController({
+      ...base,
+      rate: 0.5,
+      initialVolume: 0,
+    });
+    const upper = new ProductionNarrationPlayerController({
+      ...base,
+      rate: 3,
+      initialVolume: 1,
+    });
+    expect(lower.readState()).toMatchObject({ rate: 0.5, volume: 0 });
+    expect(upper.readState()).toMatchObject({ rate: 3, volume: 1 });
+    lower.dispose();
+    upper.dispose();
   });
 
   it("publishes playing and highlight state only from segment boundaries", async () => {
@@ -293,8 +332,10 @@ describe("ProductionNarrationPlayerController boundary state", () => {
       currentOrdinal: 0,
       offsetMs: 0,
       durationMs: 3_000,
+      volume: 1,
       source: "gutter",
     });
+    expect(harness.queue.starts[0].volume).toBe(1);
 
     harness.queue.emit({
       type: "segment-end",
@@ -326,21 +367,24 @@ describe("ProductionNarrationPlayerController boundary state", () => {
     ))).toBe(true);
   });
 
-  it("supports bounded rate, pause and resume without changing the segment", async () => {
+  it("supports bounded rate and volume, pause and resume without changing the segment", async () => {
     const harness = createHarness(manifest(["ready", "ready", "ready"]));
     await harness.controller.playFromSegment(segmentId(0), "default");
     harness.queue.position = { segmentId: segmentId(0), ordinal: 0, offsetMs: 875 };
     harness.controller.pause();
     harness.controller.setRate(1.75);
+    harness.controller.setVolume(0.45);
 
     expect(harness.controller.readState()).toMatchObject({
       phase: "paused",
       currentSegmentId: segmentId(0),
       offsetMs: 875,
       rate: 1.75,
+      volume: 0.45,
     });
     expect(harness.queue.pauseCount).toBe(1);
     expect(harness.queue.rates).toContain(1.75);
+    expect(harness.queue.volumes).toContain(0.45);
 
     await expect(harness.controller.resume()).resolves.toMatchObject({
       kind: "play",
@@ -348,7 +392,10 @@ describe("ProductionNarrationPlayerController boundary state", () => {
     });
     expect(harness.queue.resumeCount).toBe(1);
     expect(harness.controller.readState().phase).toBe("playing");
-    expect(() => harness.controller.setRate(0.2)).toThrow(/between 0.25 and 4/);
+    expect(() => harness.controller.setRate(0.49)).toThrow(/between 0.5 and 3/);
+    expect(() => harness.controller.setRate(3.01)).toThrow(/between 0.5 and 3/);
+    expect(() => harness.controller.setVolume(-0.01)).toThrow(/between 0 and 1/);
+    expect(() => harness.controller.setVolume(1.01)).toThrow(/between 0 and 1/);
   });
 
   it("surfaces a pending queue gap and does not manufacture a later start", async () => {

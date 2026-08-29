@@ -133,6 +133,7 @@ export interface SegmentPlaybackQueueStartOptions {
   readonly startOrdinal: number;
   readonly endOrdinalExclusive?: number;
   readonly rate: number;
+  readonly volume: number;
   readonly startOffsetMs?: number;
   readonly signal?: AbortSignal;
 }
@@ -168,6 +169,7 @@ export interface SegmentPlaybackDriver {
   pause(): void;
   resume(): Promise<void>;
   setRate(rate: number): void;
+  setVolume(volume: number): void;
   stop(): void;
   dispose(): void;
 }
@@ -178,6 +180,8 @@ export interface SegmentPlaybackQueuePort {
   pause(): void;
   resume(): Promise<void>;
   setRate(rate: number): void;
+  /** Optional only while legacy test/session adapters migrate to the P1 contract. */
+  setVolume(volume: number): void;
   readPosition?(): Readonly<{ segmentId: string; ordinal: number; offsetMs: number }> | null;
   stop(): void;
   dispose(): void;
@@ -235,10 +239,18 @@ function throwIfAborted(signal: AbortSignal): void {
 
 
 function boundedRate(rate: number): number {
-  if (!Number.isFinite(rate) || rate < 0.25 || rate > 4) {
-    throw new RangeError("playback rate must be between 0.25 and 4");
+  if (!Number.isFinite(rate) || rate < 0.5 || rate > 3) {
+    throw new RangeError("playback rate must be between 0.5 and 3");
   }
   return rate;
+}
+
+
+function boundedVolume(volume: number): number {
+  if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+    throw new RangeError("playback volume must be between 0 and 1");
+  }
+  return volume;
 }
 
 
@@ -333,6 +345,7 @@ interface ActiveOperation {
   startResolved: boolean;
   driver: SegmentPlaybackDriver | null;
   rate: number;
+  volume: number;
   paused: boolean;
   resumeWaiters: Array<() => void>;
   currentSegment: ManifestSegmentV2 | null;
@@ -346,13 +359,19 @@ interface WebAudioPreparedHandle {
 
 class WebAudioPlaybackDriver implements SegmentPlaybackDriver {
   readonly kind = "web-audio" as const;
+  private readonly gain: GainNode;
   private currentSource: AudioBufferSourceNode | null = null;
   private rate = 1;
+  private volume = 1;
   private currentOffsetMs = 0;
   private currentStartedAt = 0;
   private currentDurationMs = 0;
 
-  constructor(private readonly context: AudioContext) {}
+  constructor(private readonly context: AudioContext) {
+    this.gain = context.createGain();
+    this.gain.gain.value = this.volume;
+    this.gain.connect(context.destination);
+  }
 
   async prepare(
     segment: ManifestSegmentV2,
@@ -397,7 +416,7 @@ class WebAudioPlaybackDriver implements SegmentPlaybackDriver {
       this.currentDurationMs = durationMs;
       source.buffer = handle.buffer;
       source.playbackRate.value = boundedRate(rate);
-      source.connect(this.context.destination);
+      source.connect(this.gain);
       let settled = false;
       const settle = (callback: () => void) => {
         if (settled) return;
@@ -452,6 +471,11 @@ class WebAudioPlaybackDriver implements SegmentPlaybackDriver {
     }
   }
 
+  setVolume(volume: number): void {
+    this.volume = boundedVolume(volume);
+    this.gain.gain.setValueAtTime(this.volume, this.context.currentTime);
+  }
+
   stop(): void {
     const source = this.currentSource;
     if (source) this.currentOffsetMs = this.readOffsetMs();
@@ -463,6 +487,7 @@ class WebAudioPlaybackDriver implements SegmentPlaybackDriver {
 
   dispose(): void {
     this.stop();
+    this.gain.disconnect();
     void this.context.close().catch(() => undefined);
   }
 }
@@ -487,6 +512,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
   private readonly slots: readonly [DualAudioSlot, DualAudioSlot];
   private current: HTMLAudioElement | null = null;
   private rate = 1;
+  private volume = 1;
   private paused = false;
   private playbackStarted = false;
   private readonly resumeWaiters = new Set<() => void>();
@@ -494,6 +520,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
   constructor(elements: readonly [HTMLAudioElement, HTMLAudioElement]) {
     this.slots = elements.map((element) => {
       element.preload = "auto";
+      element.volume = this.volume;
       return { element, prepared: null, objectUrl: null };
     }) as unknown as readonly [DualAudioSlot, DualAudioSlot];
   }
@@ -521,6 +548,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
     slot.prepared = prepared;
     slot.element.pause();
     slot.element.src = objectUrl;
+    slot.element.volume = this.volume;
     slot.element.load();
     return prepared;
   }
@@ -556,6 +584,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
     this.current = element;
     this.playbackStarted = false;
     element.playbackRate = boundedRate(rate);
+    element.volume = this.volume;
     element.currentTime = startOffsetMs / 1_000;
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -703,6 +732,11 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
     for (const slot of this.slots) slot.element.playbackRate = this.rate;
   }
 
+  setVolume(volume: number): void {
+    this.volume = boundedVolume(volume);
+    for (const slot of this.slots) slot.element.volume = this.volume;
+  }
+
   stop(): void {
     this.current?.pause();
     this.current = null;
@@ -787,6 +821,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
       });
     }
     const rate = boundedRate(options.rate);
+    const volume = boundedVolume(options.volume);
     const lease = freezeLease(options.lease);
     const endOrdinalExclusive = options.endOrdinalExclusive ?? options.manifest.segments.length;
     const startOffsetMs = options.startOffsetMs ?? 0;
@@ -840,6 +875,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
       startResolved: false,
       driver: null,
       rate,
+      volume,
       paused: false,
       resumeWaiters: [],
       currentSegment: null,
@@ -869,6 +905,13 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
     if (!this.active) return;
     this.active.rate = normalized;
     this.active.driver?.setRate(normalized);
+  }
+
+  setVolume(volume: number): void {
+    const normalized = boundedVolume(volume);
+    if (!this.active) return;
+    this.active.volume = normalized;
+    this.active.driver?.setVolume(normalized);
   }
 
   readPosition(): Readonly<{ segmentId: string; ordinal: number; offsetMs: number }> | null {
@@ -963,6 +1006,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
     }
     operation.driver = fallback;
     fallback.setRate(operation.rate);
+    fallback.setVolume(operation.volume);
     if (operation.paused) fallback.pause();
   }
 
@@ -1115,6 +1159,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
       this.assertCurrent(operation);
       operation.driver = this.selectInitialDriver();
       operation.driver.setRate(operation.rate);
+      operation.driver.setVolume(operation.volume);
 
       for (
         let ordinal = operation.startOrdinal;

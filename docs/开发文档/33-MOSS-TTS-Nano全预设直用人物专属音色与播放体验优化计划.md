@@ -1,8 +1,8 @@
 # MOSS-TTS-Nano 全预设直用、人物专属音色与播放体验优化计划
 
-状态：**2026-08-29 已完成方案规划、前后端独立只读审计、两轮主代理复查、独立反例审查及第三轮“个人写作工具门禁减负”复查；待用户一次性批准非破坏性施工。尚未修改代码、数据库、模型、运行配置或小说数据。**
+状态：**2026-08-29 源码候选已完成本轮施工与自审。P0 的 18 项官方 preset 直用、`0031` 与 18 项真模型短句已通过；P1 的设置、规则、人物覆盖和播放器已接线，前端 102 文件/920 项、typecheck 与 build 通过。Nano 高级参数的产品闭环未完成，保持隐藏；VoiceGenerator 在 M4/16 GiB 上为 `NO-GO`，人物页降级为一键/批量自动分配官方音色。P2-DEL 的 `0032`、精确资产计划与三崩溃恢复已通过隔离 PostgreSQL，但持久 grace/重启对账 worker 和权威 eligibility 尚缺，故 UI 未接入、HTTP 路由 fail-closed。W6 已删除三组零引用旧 UI/样式，后端全量 3093 项通过、138 项按环境门跳过，打包与契约检查通过。W6 隔离 QwenPaw 安装两次在 Docker Engine 启动新 PostgreSQL 容器前超时，因此 `P0/P1-RELEASE=HOLD_INSTALL`；长期数据库、18088 安装与唯一运行环境均未切换。**
 
-规划授权边界：用户本轮是在修订方案，不等于已经授权实施、迁移长期数据库、下载 VoiceGenerator、生成真实音色或删除媒体。用户后续一次明确批准本文施工，即覆盖 `P0 + P1 + P1.5 + P2-VG + P2-DEL` 的代码与隔离验证，不再在每个非破坏性阶段重复索要批准；任何真实私人媒体的彻底删除仍由产品内针对精确目标的一次确认授权。
+施工授权边界：用户已用“按计划 33 开始实施”一次性批准 `P0 + P1 + P1.5 + P2-VG + P2-DEL` 的代码与隔离验证，不再在每个非破坏性阶段重复索要批准；该授权不包含迁移唯一长期数据库、切换唯一长期运行环境、提交/推送或删除任何真实私人媒体。真实私人媒体的彻底删除仍由产品内针对精确目标的一次确认授权。
 
 本文对 [18-MOSS-TTS-Nano 多角色智能朗读产品与技术设计](./18-MOSS-TTS-Nano多角色智能朗读产品与技术设计.md) 的目标取代原则为“一次批准、分波实施、内部验收自动推进”：
 
@@ -19,6 +19,8 @@
 - [18-MOSS-TTS-Nano 多角色智能朗读产品与技术设计](./18-MOSS-TTS-Nano多角色智能朗读产品与技术设计.md)
 - [30-TTS 按需加载与 Docker CPU 优化计划](./30-TTS按需加载与DockerCPU优化计划.md)
 - [32-创作账本缺口闭环与向量联合复验计划](./32-创作账本缺口闭环与向量联合复验计划.md)
+- [MOSS-VoiceGenerator 官方模型卡](https://github.com/OpenMOSS/MOSS-TTS/blob/main/docs/moss_voice_generator_model_card.md)（2026-08-29 复核）
+- [MOSS-TTS-Nano 官方 ONNX 应用](https://github.com/OpenMOSS/MOSS-TTS-Nano/blob/main/app_onnx.py)（2026-08-29 复核）
 
 ## 1. 目标结果与优先级
 
@@ -99,7 +101,8 @@
 - 从正式人物 revision 生成结构化声音描述；
 - 本地 VoiceGenerator 单命令生成、Nano 技术验证、自动建立不可变版本和稳定绑定；高级入口可生成多个备选；
 - 未使用生成结果一键丢弃、profile 归档、私人音色一次确认式真删除和墓碑；
-- 迁移、任务、模型运行证据、安装/升级/卸载和失败恢复。
+- 迁移、任务、模型运行证据、安装/升级/卸载和失败恢复；
+- 在同一施工范围内识别并删除已被新实现完全替代的旧 TTS 代码、组件、样式、DTO、测试夹具、配置和依赖，不保留双轨实现或无主兼容壳。
 
 ### 3.2 不纳入
 
@@ -111,7 +114,22 @@
 - 由模型直接修改人物卡、正文、正式大纲或故事账本；
 - 另建聊天模型选择器、固定模型白名单或静默回退。人物声音描述提案只能由作者显式触发并复用 `ai-novel-writer` 当时有效模型；
 - 把播放倍速、播放器音量、句间停顿误写成 Nano 音色生成参数；
-- 把 12 个英文/日文 preset 表述为已经完成本项目中文长篇听感验收。
+- 把 12 个英文/日文 preset 表述为已经完成本项目中文长篇听感验收；
+- 以“清理冗余”为名删除已执行迁移、历史验收/审计原始证据、仍有真实调用者的兼容路径、语义独立的负向/恢复测试或用户既有未提交改动。
+
+### 3.3 冗余删除硬规则
+
+本计划采用“替换即收口”，不允许在旧流程旁边长期叠加一套新流程。`MNX-PRUNE-AUDIT` 在代码施工前创建 `docs/开发文档/证据/MOSS-TTS-Nano优化/redundancy-ledger.md`，并在各波汇合时持续记录候选；每条记录至少包含精确文件/符号、现有调用者、替代实现、删除或保留裁决、独立契约/风险覆盖、负责人、验证证据和恢复方式。
+
+删除前必须同时满足：
+
+1. 用 `rg`、前端 import/路由/样式接线、后端注册/API/DTO、Compose/打包清单和依赖图证明没有剩余调用者；
+2. 替代路径已接线并通过相应聚焦测试，旧代码不再承担兼容、回退、负向、并发、恢复或安全边界；
+3. 目标不是已执行迁移、历史验收原始证据、外部公开契约的唯一兼容实现，也不包含未归属本计划的用户改动；
+4. 删除文件、符号、测试或依赖的精确范围已冻结进 ledger，并由主代理在 `MNX-PRUNE` 串行执行与复核；新增候选必须先补证据，不能把该工作包当成开放式大扫除；
+5. 依赖删除通过项目包管理器和锁文件正常更新完成，不手工删改锁文件；删除后运行受影响回归、全量门禁和 `git diff --check`。
+
+例如现有 catalog v1 的 exact-six 响应、旧音色入口、旧播放器布局和旧删除交互都只是待核候选：有真实调用者或独立回退价值就保留并写明退出条件；已被 v2/新组件完全覆盖且无调用者则必须在本计划同一发布版本内由 W6 删除。任何保留的兼容壳都要写明理由、调用方和 sunset 条件，不能以“也许以后有用”为由常驻。
 
 ## 4. 冻结产品与领域规则
 
@@ -127,9 +145,9 @@
    - 英文/日文另显示“跨语言/本项目未专项听检”。
 6. “试听”是完全可选的播放动作；不试听也能直接使用。试听可以按需建立隐藏的本书范围官方版本与临时 preview，但不得把浏览过程变成用户可见的建档向导；不得使用 `novel_id=NULL` 的全局 profile 承载临时媒体。
 7. “设为旁白/用于此人物”必须是单个服务端数据库事务，不在长事务内同步运行 Nano：鉴权与 scope → 保留/读取幂等键 → 已完成则直接重放冻结结果 → 未完成才校验内部 CAS → 建立或复用官方版本 → 写激活证据 → 更新设置或人物绑定 → 完成命令与回执。任一数据库动作失败整体回滚；响应丢失后用原 key 和原请求重放不能被旧 CAS 阻断。
-8. 用户点击“使用”本身就是本次绑定授权。数据库使用 `activation_basis=explicit_official_preset_selection` 表示可用性，不得伪造 preview、`quality_confirmed`、ModelRun 或人工听检 actor；“未专项听检”只作为详情信息，不能阻断使用。generated/实验版本允许 `machine_validated` 后直接使用；上传参考音频仍属于本计划外的独立能力与安全规则。
+8. 用户点击“使用”本身就是本次绑定授权。数据库使用 `activation_basis=explicit_official_preset_selection` 表示官方 preset 可用性，不得伪造 preview、`quality_confirmed`、ModelRun 或人工听检 actor；“未专项听检”只作为详情信息，不能阻断使用。generated/实验的 `machine_validated` 枚举仅作后续契约预留；在 `VG-CONTRACT-GATE` 闭合 description、ModelRun、rights 与技术校验证据前，P0 不允许其 locked/绑定/渲染。上传参考音频仍遵守独立的权利与试听规则。
 9. 服务端从作品设置读取 `target_language`，官方卡片显示来源语言。语言不匹配只给非阻断提示，不增加确认字段、弹窗或服务端拒绝；人物绑定仍由客户端透明携带 settings/binding CAS，避免并发覆盖，但作者无需理解这些版本号。
-10. canonical 官方身份固定为 `(owner_id, workspace_id, novel_id, fixed_model_revision, preset_id)` 的版本化 UUIDv5 输入；只复用同小说、完整 provenance/rights/默认参数完全匹配且仍可用的 canonical profile/version。旧手工 preset 版本不自动改名、迁移、归档或并入；归档 canonical profile 是否恢复复用必须在 `P0-CONTRACT-GATE` 冻结且全程可审计。
+10. canonical 官方身份区分稳定容器与不可变版本：profile UUIDv5 保持 `moss-tts-official-preset-identity/1.0`，输入固定为 `(identity_contract_version, owner_id, workspace_id, novel_id, preset_id)`；直用 version 身份升为 `moss-tts-official-preset-direct-version-identity/2.0`，额外固结 activation/validation、fixed model revision、manifest SHA-256、preset provenance fingerprint、rights policy fingerprint、decode contract 与官方默认参数 digest。隐藏试听版本不得占用直用 version ID。只复用同小说、完整 provenance/rights/默认参数指纹完全匹配且仍可用的 canonical profile/version；模型、manifest、rights policy 或默认参数改变时在原 profile 下生成新版本。
 11. 官方 preset 本身不可被删除；用户只能解除绑定、移出常用列表或归档本地派生档案。
 12. 当前产品模式固定为个人、本地、写作辅助、无下载/导出/分享入口。官方来源与固定 revision 在详情中保留用于维护和复现，但不显示版权、商业用途、主体同意或来源确认框，不参与“使用”按钮的放行。
 
@@ -161,13 +179,15 @@ audio_top_k=25
 audio_repetition_penalty=1.2
 ```
 
-高级实验入口不得修改系统官方版本，只能“复制为实验版本”。允许项分三组：
+高级实验入口不得修改系统官方版本，只能“复制为实验版本”。页面允许查看完整有效配置，但只把会实际影响声音风格或采样稳定性的项目做成作者可编辑控件：
 
-- 生成稳定性：`sample_mode`、`seed`、`max_new_frames`；
+- 生成稳定性：`sample_mode`、`seed`（派生新的 Nano 实验版本时确定性记录）；
 - 文本/音频采样：text/audio temperature、top-p、top-k、audio repetition penalty；
-- 文本与克隆：受运行时支持的规范化策略、`voice_clone_max_text_tokens`（仅私人参考音色）。
+- 文本处理：受运行时支持的规范化策略。
 
-`do_sample` 由 `sample_mode` 统一推导；CPU threads、execution provider 和流式后端属于运行诊断，不是每个音色的作者设置；音高、情绪、语速不得伪装成 Nano 原生精确旋钮，它们进入 VoiceGenerator 描述或播放器层。
+`do_sample` 由 `sample_mode` 统一推导。`max_new_frames=375`、`voice_clone_max_text_tokens`、CPU threads、execution provider、batch/流式后端、输出格式和 normalization 可在“技术详情”查看，默认由运行时与安全上限管理，不伪装成音色调教旋钮。音高、情绪、语速不得伪装成 Nano 原生精确旋钮，它们进入 VoiceGenerator 描述或播放器层。
+
+现有 `onnx.Zhiming` 短归因 `fixed_seed_1` 只是历史诊断/回归分支，当前生产 `ACTIVE_SHORT_ATTRIBUTION_STRATEGY=disabled`，所有新官方渲染继续使用版本默认 seed。P1.5 必须保留该历史分支可读及旧 fingerprint 可重放，但不得因开放 base seed 而静默重新启用它；未来若有新真实听感证据要恢复，必须作为新的版本化 effective policy 进入 render/ModelRun/cache fingerprint。
 
 当前 Sidecar 并未显式接收 text/audio temperature、top-p、top-k 和 repetition penalty，而是依赖固定运行时默认值。因此 `P1.5` 的前置条件不是“给页面加输入框”，而是冻结可双读的 decode contract v2，并将完整参数纳入 Voice Version fingerprint、Sidecar canonical request/HMAC、ModelRun `parameters_digest`、render/cache fingerprint 和 worker 安全校验。既有 v1 Voice Version/Edition 继续按旧隐式默认解释，不回填、不重写历史。
 
@@ -191,11 +211,15 @@ audio_repetition_penalty=1.2
 
 声音描述只读取已明确保存的字段：年龄/年龄感、作者填写的性别或声音表达、身份、性格、说话习惯、口头禅、语速倾向、音高/质感偏好。不得根据姓名、头像、现实民族或其他未填写属性猜测；缺字段使用“中性/待作者补充”，不能制造人物事实。
 
-“自动分析”只在作者点击“生成并使用/换一个并使用”后运行，复用 `ai-novel-writer` 当时的有效模型，冻结 `NovelCharacterRevision.id + content_hash` 并记录 requested/actual 模型与无静默回退证据；不新增第二套聊天模型选择器，也不因人物卡保存而自动调用。声音描述不写回正式人物卡，只作为本次音色生成输入与详情记录；正常路径不要求作者先审核。
+生成链自动创建窄化的本地使用/provenance 证据：`source_kind=voice_generator`、精确模型 revision/hash 与 candidate 标识、`purpose=private_novel_narration`、`commercial_use=false`、`redistribution=false`、`voice_cloning=true`、`subject_consent_reference=NULL`；confirmed event 绑定本次作者点击和 command id。这是生成链所需的内部来源/用途证据，不是要求作者勾选的法律或商用声明。人物卡若含有“模仿可识别现实人士”等指令，描述生成只保留抽象声学特征，忽略具体身份/仿声要求，不增加弹窗。
 
-一次点击即授权该异步命令在成功后自动绑定，但不得覆盖作者在任务运行期间做出的更新选择：若 binding CAS 已变化，结果保留为“已生成、未自动应用”，提供一个“使用这个音色”按钮。人物 revision 在运行中变化不让任务反复重启；结果明确记录所用快照，下一次“换一个”自动使用最新 revision。
+VoiceGenerator 官方可调信号与 Nano 不同：最主要的音色控制是自由文本 `instruction`，可表达年龄感、音色质感、情绪、风格、口音、语速和音高；`text` 是试音内容，不是音色参数。官方推荐解码值为 `audio_temperature=1.5`、`audio_top_p=0.6`、`audio_top_k=50`、`audio_repetition_penalty=1.1`。默认一键路径由 AI 根据人物快照生成 instruction，固定使用官方推荐解码值；折叠详情允许作者事后编辑 instruction 并点“按此描述重新设计并使用”。仅高级人物音色入口可复制本次设计后调整上述四项解码参数与 seed，所有值经服务端 bounds 校验并进入不可变 candidate/ModelRun fingerprint；不在首次生成前摆出一排必填控件。
 
-“换一个并使用”复用同一单命令流程并推进 seed，成功后原子替换当前绑定，旧绑定仍由历史 Edition 冻结。高级入口才提供“生成 3 个备选”；它不影响默认一键路径。VoiceGenerator 样音交给 Nano 的二次克隆属于后台技术验证，不是作者确认步骤，也不等于开放用户上传参考录音；用户上传来源继续受原有独立规则。
+人物 AI 分析只在作者点击“根据人物生成并使用”或“按最新人物重新设计并使用”后运行，复用 `ai-novel-writer` 当时的有效模型，冻结 `NovelCharacterRevision.id + content_hash` 并记录 requested/actual 模型与无静默回退证据；普通“换一个并使用”只复用既有 draft 并推进 seed，不再次调用 AI。不新增第二套聊天模型选择器，也不因人物卡保存而自动调用。声音描述不写回正式人物卡，只作为本次音色生成输入与详情记录；正常路径不要求作者先审核。
+
+一次点击即授权该异步命令在成功后自动绑定，但不得覆盖作者在任务运行期间做出的更新选择：若 binding CAS 已变化，结果保留为“已生成、未自动应用”，提供一个“使用这个音色”按钮。人物 revision 在运行中变化不让任务反复重启；结果明确记录所用快照。若人物卡后来改变，页面只显示非阻断“人物卡已更新”标签和一键“按最新人物重新设计并使用”，不在普通“换一个”中静默替换设计输入。
+
+“换一个并使用”复用上一次不可变 VoiceDesignDraft/instruction 和解码参数，只推进 seed；成功后原子替换当前绑定，旧绑定仍由历史 Edition 冻结。作者编辑 instruction 或选择“按最新人物”时创建新 VoiceDesignDraft，不原地改写旧设计。高级入口才提供“生成 3 个备选”；它不影响默认一键路径。VoiceGenerator 样音交给 Nano 的二次克隆属于后台技术验证，不是作者确认步骤，也不等于开放用户上传参考录音；用户上传来源继续受原有独立规则。
 
 任一模型、音频或数据库步骤失败都不得改变当前绑定；页面只显示失败原因和“一键重试”。如果 VoiceGenerator 在本机工程验收中不可用，按钮应明确显示“专属音色生成当前不可用”，可另提供“根据人物自动匹配官方音色”，但不得静默降级后仍声称生成了新音色。
 
@@ -209,7 +233,7 @@ audio_repetition_penalty=1.2
 | 被历史 Edition 引用 | “删除且让旧朗读不可播放” | 同一个影响弹窗说明受影响 Edition 数量；确认一次后保留文字/审计，删除声音字节并标记旧朗读不可用 |
 | 官方 preset | 解除绑定/归档本地档案 | 不删除官方模型目录和 preset 本身 |
 
-后端真删除状态继续使用 `requested → live_deleting → live_deleted_backup_pending → completed|failed`，但这些内部阶段不要求作者逐步确认。在线资产已删但受管备份尚未核实过期时，UI 显示“在线数据已删除，备份等待到期”，不得写“永久删除完成”。
+候选与 profile 使用两条不混淆的内部生命周期：尚未晋升的 candidate 在自身状态机中使用 `ready|rejected|failed → trash_pending → <prior_state>|deleted`，并保存 `trashed_at/delete_after/trashed_actor/prior_state`；撤销只在 `delete_after` 前回到准确 prior state。物理删除后 candidate 行保留不可反推媒体的 HMAC digest、digest key id 和 delete voice-action-command id 作为最小审计证据，不伪造要求 profile FK 的 AssetTombstone。profile 仍由 `voice_deletion_requests` 管理：未引用 profile 使用 `grace_pending → cancelled|live_deleting → live_deleted_backup_pending|completed|failed`；已使用 profile 使用 `requested → cancelled|live_deleting → live_deleted_backup_pending|completed|failed`，`failed` 只能按原精确计划重试回 `live_deleting`。`grace_pending` 必须有 `execute_after`，撤销必须留下 `cancelled_at/cancelled_actor`（或等价不可变事件）；进入 candidate 物理删除或 profile `live_deleting` 后不再宣称可撤销。这些内部阶段不要求作者逐步确认。在线资产已删但受管备份尚未核实过期时，UI 显示“在线数据已删除，备份等待到期”，不得写“永久删除完成”。
 
 “不保留声音字节”包括上传原件、规范化 reference、生成候选、Nano 克隆参考、试听、以该私人 voice version 合成的 segment master/playback、已有导出及无其他合法引用的派生缓存；只删除参考样音而保留仍可播放的历史 segment 音频不算完成真删除。删除开始前必须 fence 新绑定、生成任务和媒体租约；受影响 Edition 标记 `unavailable_private_voice_deleted`，但正文、revision、script、Edition/Manifest 审计行不级联删除。
 
@@ -393,55 +417,83 @@ GET   /narration-editions/{edition_id}/segment-voices
 
 ### 8.4 高级参数 API
 
-使用独立 `preset-experimental` version 创建接口，不扩张“官方默认直接选择”的请求体。Sidecar/adapter 协议版本、参数 DTO、服务端上下界、fingerprint 和兼容策略必须在 `ADV-CONTRACT-GATE` 先冻结；旧协议继续只能生成官方默认版本，不能忽略新字段后假装成功。
+Nano 使用独立 `preset-experimental` version 创建接口，不扩张“官方默认直接选择”的请求体。Sidecar/adapter 协议版本、参数 DTO、服务端上下界、fingerprint 和兼容策略必须在 `ADV-CONTRACT-GATE` 先冻结；旧协议继续只能生成官方默认版本，不能忽略新字段后假装成功。
+
+VoiceGenerator 高级参数不复用 `preset-experimental`；仅在 `VG1=GO` 后由第 8.5 节同一 voice-generation command 接收版本化 `design_parameters`（可编辑 instruction、seed 和官方四项 audio decode 值）以及可选 `candidate_count=3`。默认人物卡命令不传 `design_parameters`，服务端固定填充官方推荐值；高级请求必须指明 `voice_design_decode_contract_version`，未知字段/越界值直接拒绝，不得静默忽略。
 
 ### 8.5 VoiceGenerator 一键命令与数据
 
-仅在 `VG1-GATE=GO` 后创建下一条线性迁移，并冻结默认单命令 API：
+仅在 `VG1-GATE=GO` 后创建下一条线性迁移。当前 QwenPaw `ai-novel-writer` 调用是 HTTP 请求作用域内的 `ctx.chat`，现有 narration worker 不持有该 Agent context；因此不得在计划中虚构“已有全后台 Agent worker”，也不新建第二套 Agent Runtime。默认交互冻结为“一次用户点击，两段内部 HTTP/任务编排”：
 
 ```text
 POST /novels/{novel_id}/characters/{character_id}/voice-generation-commands
 Idempotency-Key: ...
 
-mode = generate_and_use | regenerate_and_replace
-expected_character_revision_id
-expected_character_content_hash
+mode = generate_and_use | regenerate_and_replace | redesign_and_replace
 expected_binding_version
+
+generate_and_use/redesign_and_replace:
+  expected_character_revision_id
+  expected_character_content_hash
+  design_source = ai_character_revision | author_edited_instruction
+
+regenerate_and_replace:
+  base_voice_design_draft_id
+
+POST /voice-generation-commands/{command_id}/analysis-runs
+Idempotency-Key: <command-key>:analysis
+
+GET  /voice-generation-commands/{command_id}
+POST /voice-generation-commands/{command_id}/cancel
 ```
 
-人物卡按钮负责透明携带 revision 与 binding 版本；作者只点击一次。接口返回 `202` 与 command 投影，后台按 `queued → analyzing → generating → nano_validating → binding → completed` 推进；失败或取消进入明确终态，任一步失败都不改变原绑定。默认一次只创建一个确定性 seed；“换一个并使用”以 `regenerate_and_replace` 推进 seed。高级入口日后可复用同一命令契约请求 `candidate_count=3`，但不得污染默认路径。
+人物卡按钮透明携带所需 revision/draft 与 binding 版本；作者只点击一次。第一个接口只在短事务内创建/重放 command，立即返回 `202 queued`。`generate_and_use` 和 AI 来源的 `redesign_and_replace` 由前端在同一次交互中自动调用 `analysis-runs`，不显示第二个按钮；该路由复用既有 `ai-novel-writer` 依赖和 `CreativeGenerationJob(kind=character_voice_description)`，先事务性领取 command analysis lease，再在数据库事务外调用 `ctx.chat`，严格校验 requested/actual 模型和结构化输出，最后以短事务绑定新 VoiceDesignDraft 并入队 VoiceGenerator。
+
+`regenerate_and_replace` 必须复用服务端验证的同一 `base_voice_design_draft_id`，只推进 seed，因此不调用 AI，创建 command 后可直接进入 `generating`。`design_source=author_edited_instruction` 的 `redesign_and_replace` 将作者编辑文本固化为新的不可变 VoiceDesignDraft，只做本地结构/边界校验后入队，也不调用 AI。三种 mode 使用 discriminated union DTO，不允许同时传“旧 draft”和“新人物/编辑描述”导致优先级不明。
+
+页面刷新、网络断开或请求取消后，同一 command/idempotency key 必须先复用已 `ready` 的 CreativeGenerationJob；只有原 analysis lease 过期且没有可复用结果时才允许新 attempt，原无 owner 的 `running` 记录必须收敛到可诊断失败，不得永久占用。页面重新打开可自动续领 `queued/analyzing` command；这是恢复逻辑，不增加用户确认。
+
+`cancel` 对 command 是单调且幂等的：若 `ctx.chat` 已在运行但宿主不支持物理中断，服务端记录 `cancel_requested`，等调用返回后只完成审计/计费证据而不绑定输出、不入队 VoiceGenerator；若运行时支持取消则使用该公开能力。已取消 command 不能被页面自动续领，重新生成需作者点“重试”并创建有关联的新 attempt，不得复活原终态。
+
+VoiceDesignDraft 就绪后由现有后台任务系统按 `generating → nano_validating → binding → completed` 推进；AI 路径的完整状态为 `queued → analyzing → generating → nano_validating → binding → completed`，复用/编辑 draft 路径合法跳过 `analyzing`。失败或取消进入明确终态，任一步失败都不改变原绑定。默认一次只创建一个确定性 seed；“换一个并使用”以 `regenerate_and_replace` 推进 seed。高级入口可复用同一命令契约请求 `candidate_count=3`，但不得污染默认路径。
 
 最小数据模型为：
 
-- `voice_design_commands`（或语义等价地扩展 draft）：owner/workspace/novel/character scope、点击时的 `source_character_revision_id + source_character_content_hash`、点击时的 `expected_binding_version`、mode、seed progression、`CharacterVoiceBrief/1`、生成描述、requested/actual 模型证据、幂等结果、状态和失败码；
-- `voice_design_candidates`：command/draft、ordinal、seed、job、私有媒体、model/parameter fingerprint、`queued/running/ready/selected/rejected/deleted/failed` 状态、失败码和提升关系；默认命令只生成 ordinal 1，高级三备选才允许 `partial_ready`；
+- `voice_design_drafts`：owner/workspace/novel/character scope、不可变 `design_source=ai_character_revision|author_edited_instruction`、`source_character_revision_id + source_character_content_hash`、`CharacterVoiceBrief/1`、instruction、四项 decode 值、contract/model/parameter fingerprint、requested/actual 模型证据与可空 parent draft；作者编辑或按最新人物重新设计都新建 draft，不原地改写；
+- `voice_design_commands`：owner/workspace/novel/character scope、mode/discriminator、点击时的 `expected_binding_version`、AI/编辑设计的人物快照或换音时的 `base_voice_design_draft_id`、最终 `voice_design_draft_id`、seed progression、可空 CreativeGenerationJob id/attempt、analysis lease/过期、幂等结果、状态和失败码；CreativeGenerationJob 仅允许在 `design_source=ai_character_revision` 时非空；
+- `voice_design_candidates`：command/draft、ordinal、seed、分离的 `voice_generator_job_id/model_run_id` 与 `nano_preview_id/job_id/model_run_id`、私有媒体、model/parameter fingerprint、`queued/running/ready/selected/rejected/trash_pending/deleted/failed` 状态、失败码和提升关系；不得用一个含糊 `job` 字段伪装两次模型运行。默认命令只生成 ordinal 1，高级三备选才允许 `partial_ready`；
 - `voice_generated_reference_links` 或等价专用不可变链接：只允许机器验证通过的 generated candidate 提升为 Nano reference；不得直接放宽既有 uploaded-only reference trigger；
 - 默认单候选经 Nano 技术验证后，在一个事务中冻结 checksum、ModelRun、描述/参数指纹，创建 `VoiceProfileVersion(source_type=generated)`、建立 generated reference link，并在绑定 CAS 仍匹配时自动绑定；
-- 每个 candidate 复用已冻结的 `narration.voice_generate` job kind/attempt，复用 `background_jobs`、`background_job_attempts`、`model_run_records` 和 `background_resource_locks`；不新造 `narration.voice_design`，不建第二套任务表。
+- 每个 candidate 的 VoiceGenerator 阶段复用已冻结的 `narration.voice_generate` job kind/attempt，Nano 技术克隆验证单独复用 `narration.voice_preview` job/preview；两者都复用 `background_jobs`、`background_job_attempts`、`model_run_records` 和共享重模型 residency claim。不新造 `narration.voice_design`，不建第二套任务表，不声称一个 job 跨越两个资源类。
 
-`VG-CONTRACT-GATE` 只冻结后台状态机、CAS、唯一 `(command_id, ordinal)`、单一晋升结果、job/candidate 终态闭合、取消/重试和媒体晋升规则，不转化为作者步骤。人物 revision 以点击瞬间快照为本次生成输入；生成期间人物卡后来变化不阻断本次任务，下一次“换一个”再读取新 revision。绑定 CAS 若已变化，结果保留为“已生成、未自动应用”并提供一次“使用此音色”，绝不覆盖作者较新的选择。
+`VG-CONTRACT-GATE` 必须先冻结 mode discriminated union、draft 不可变与来源优先级、请求态 Agent 桥边界、本地后台状态机、迁移字段、CAS、唯一 `(command_id, ordinal)`、单一晋升结果、CreativeGenerationJob/VoiceGenerator job/Nano job/candidate 终态闭合、取消/重试和媒体晋升规则，迁移不得反向发明产品契约。迁移通过后，`VG-AI-BRIDGE-GATE` 再用真实请求路径验证 CreativeGenerationJob 新 kind、lease/断线重放、模型验证和“不在长事务内调模型”的反例。两个 gate 都不转化为作者步骤。人物 revision 以点击瞬间快照为本次新设计输入；生成期间人物卡后来变化不阻断本次任务，只有显式 `redesign_and_replace` 才读取新 revision。绑定 CAS 若已变化，结果保留为“已生成、未自动应用”并提供一次“使用此音色”，绝不覆盖作者较新的选择。
 
 机器校验至少覆盖可解码、非空、时长边界、明显削波、fingerprint、ModelRun 与 Nano 二次克隆闭包。generated 版本必须新增专用数据库约束，达到与 preset/uploaded 等强但不混淆来源的证据标准；不得伪造人工试听/接受，也不得只修改 Python 分支绕过现有 `0021/0022` trigger。
 
-人物描述正文保存在本地权威 command/draft 中，供作者在折叠详情里查看、编辑后“换一个”；它不是首次生成前的必填确认。日志、幂等、模型运行证据和诊断只保存版本化 HMAC，不打印描述或试听文本。
+人物描述正文保存在本地权威 command/draft 中，供作者在折叠详情里查看、编辑后点“按此描述重新设计并使用”；它不是首次生成前的必填确认。日志、幂等、模型运行证据和诊断只保存版本化 HMAC，不打印描述或试听文本。
 
 ### 8.6 删除 API 与单层交互
 
 后端继续采用持久、可恢复的精确删除计划，但作者界面不展示“创建请求—查看预览—再次确认—执行”多段流程。接口在 FK 尖峰后冻结为：
 
 ```text
+POST /voice-profiles/{profile_id}/discard-unreferenced
 POST /voice-profiles/{profile_id}/deletion-requests
 GET  /voice-deletion-requests/{request_id}
 POST /voice-deletion-requests/{request_id}/confirm
+POST /voice-deletion-requests/{request_id}/cancel
 POST /voice-deletion-requests/{request_id}/retry
 DELETE /voice-design-candidates/{candidate_id}
+POST /voice-design-candidates/{candidate_id}/restore
 ```
 
-未被绑定、未被 Edition 引用且未提升为 Voice Version 的候选，点击删除即调用 `DELETE`，不弹确认框；服务端先进入短期可撤销 trash，窗口结束后才物理删除。已提升但从未使用、无任何引用的独立私人 profile 也应提供语义等价的一键删除命令。
+所有变更接口都要求 `Idempotency-Key`；profile 操作透明携带 `expected_profile_version`，candidate 操作携带候选版本/指纹。未被绑定、未被 Edition 引用且未提升为 Voice Version 的候选，点击删除即调用 `DELETE`，不弹确认框；服务端在同一 voice action command/result 中验证无引用，将 candidate 转为 `trash_pending` 并返回 `undo_deadline`，窗口结束后才物理删除。候选撤销固定调用 `restore`，回放到服务端冻结的 prior state；它不使用强制 `voice_profile_id` 的现有 `voice_deletion_requests`。
 
-当前使用或被历史 Edition 引用的私人 profile，前端在一次弹窗中展示影响摘要并完成唯一一次确认；请求创建、影响指纹和确认调用可由同一界面状态机透明编排。后端创建请求时冻结有时效的影响快照：当前旁白、人物绑定、生成中 job/租约、历史 Edition、在线资产、派生缓存/导出、备份状态和不可逆后果。确认仍携带 request id、profile CAS 与 impact fingerprint，均为防竞态的内部字段；引用变化时返回冲突并刷新同一个弹窗，不把它变成常规多重门禁。`retry` 只接收可重试的 failed request，复用原 request/精确资产计划，不新建无关联删除任务。
+已提升但从未使用、无任何引用的独立私人 profile 固定调用 `discard-unreferenced`，返回 `grace_pending` deletion request 及 `undo_deadline`；这条路径的撤销由 deletion request `cancel` 执行。不再使用“语义等价”留给实现临时发明第三套接口，也不为候选伪造 profile deletion request。
 
-首版 `true_delete_private_voice` 以整个私人 profile 为目标，新生成音色必须建立独立私人 profile。含 official preset 与 private version 的 legacy 混合 profile 一律阻断，并在 `MNX-DEL-AUDIT` 后决定“迁移绑定到 canonical 官方 profile”或另立 version-scope 删除，不得误删官方内容。当前 `voice_deletion_requests` 缺少影响快照、过期、profile CAS、精确资产计划和备份证据；按现有证据，真删除产品化预计必须由唯一 migration Owner 添加最小字段/表与 request-scoped trigger。不得先删字节再补数据库状态，也不得在本计划中预先假定具体 write set 已完整。
+当前使用或被历史 Edition 引用的私人 profile，前端在一次弹窗中展示影响摘要并完成唯一一次确认；请求创建、影响指纹和确认调用可由同一界面状态机透明编排。后端创建请求时冻结有时效的影响快照：当前旁白、人物绑定、生成中 job/租约、历史 Edition、在线资产、派生缓存/导出、备份状态和不可逆后果。确认仍携带 request id、profile CAS 与 impact fingerprint，均为防竞态的内部字段；引用变化时返回冲突并刷新同一个弹窗，不把它变成常规多重门禁。未点击影响确认时可用 `cancel` 收口；`retry` 只接收可重试的 failed request，复用原 request/精确资产计划，不新建无关联删除任务。
+
+首版 `true_delete_private_voice` 以整个私人 profile 为目标，新生成音色必须建立独立私人 profile。含 official preset 与 private version 的 legacy 混合 profile 一律阻断，并在 `MNX-DEL-AUDIT` 后决定“迁移绑定到 canonical 官方 profile”或另立 version-scope 删除，不得误删官方内容。当前 `voice_deletion_requests` 缺少 command `discard_unreferenced_private_voice`、状态 `grace_pending/cancelled`、`execute_after/cancelled_at`、影响快照/过期、profile CAS、精确资产计划和备份证据；候选表若因 `VG1=GO` 存在，DEL migration 另窄化增加 `trash_pending` 形状与时间/原状态字段，不改成多态 deletion request。按现有证据，真删除产品化必须由唯一 migration Owner 添加最小字段/表与 request-scoped trigger。不得先删字节再补数据库状态，也不得在本计划中预先假定具体 write set 已完整。
 
 受影响 Edition 保留审计行并进入 unavailable；若仍是 `DocumentNarrationState.current_edition_id`，指针保留用于解释当前不可播放原因，播放 API 返回 `unavailable_private_voice_deleted`，不得静默切到另一 Edition。所有共享该 voice version render 的 Edition 同步进入影响快照；true-delete tombstone 必须携带非空 `deletion_request_id`。
 
@@ -450,6 +502,7 @@ DELETE /voice-design-candidates/{candidate_id}
 | 波次 | 工作包 | 标记 | 目标与退出条件 |
 | --- | --- | --- | --- |
 | W0 | `MNX-G0` | `SER/GATE/MUTEX` | 计划 32 已释放共享所有权；开工时重取 migration/人物/API 基线，核对源码 tree/PawApp 包/已安装 bundle hash，冻结 catalog/直接选择/播放器 DTO 和功能开关；无代码施工 |
+| W0 | `MNX-PRUNE-AUDIT` | `SER/GATE` | 只读枚举旧 TTS 入口、实现、样式、DTO、测试夹具、配置和依赖，建立 redundancy ledger；没有调用者与替代证据的条目不得标记删除 |
 | W1 | `MNX-P0-CONTRACT` | `SER/GATE/MUTEX` | 用真实 PostgreSQL 约束冻结 activation basis、selection command/result、UUIDv5 scope、幂等顺序、透明设置/绑定 CAS 和 catalog v1/v2；形成 `P0-CONTRACT-GATE` |
 | W1 | `MNX-P0-MIG` | `SER/MUTEX` | 仅按 contract gate 的已证最小 write set 创建当时下一线性 migration；迁移/回退/并发约束通过后才开放实现 |
 | W1 | `MNX-P0-BE`、`MNX-P0-FE` | `PAR-C` | 18 目录、原子直用、音色库卡片和兼容路由；聚焦测试通过 |
@@ -458,16 +511,21 @@ DELETE /voice-design-candidates/{candidate_id}
 | W2 | `MNX-P1-PLAYER-CORE`、`MNX-P1-SETTINGS`、`MNX-P1-CHARACTERS` | `PAR-C` | 播放音量/进度核心、设置/规则、人物覆盖表分开施工；明确默认值恢复优先级，消灭无效播放偏好；不共享文件 |
 | W2 | `MNX-P1-PLAYER-VIEW` | `SER` | 先修固定 94 px/失败列表遮挡，再做正交状态、紧凑/展开/抽屉、窄屏、键盘和无障碍；依赖 player core DTO |
 | W2 | `MNX-P1-INT` | `SER/INT/GATE` | 工作台接线、三桌面+窄屏、IME、旧稿/失败/partial-ready；形成 `P1-GATE` |
-| W3 | `MNX-ADV-SPIKE` | `SER/MUTEX/GATE` | decode contract v2 双读、HMAC/ModelRun/render fingerprint 与质量/缓存回归；不达标则保持隐藏 |
+| W3 | `MNX-ADV-SPIKE` | `SER/MUTEX/GATE` | 冻结 decode contract v2 双读、HMAC/ModelRun/render fingerprint 与质量/缓存回归并形成 `ADV-CONTRACT-GATE`；不达标则保持隐藏 |
 | W3 | `MNX-VG0-A`、`MNX-VG0-B` | `PAR` | 分别只读冻结官方模型/许可证与本机依赖/拓扑候选；汇合后才能进入真实模型测试 |
 | W3 | `MNX-VG1` | `SER/MUTEX/GATE` | 消费 VG0 冻结输入，独占模型/运行资源执行真实 M4 尖峰；形成 `VG1-GATE` |
-| W4 | `MNX-VG-MIG` | `SER/MUTEX` | `VG1=GO` 后沿本文一次性施工授权分配当时下一 Alembic revision；升级/回退/约束测试通过 |
-| W4 | `MNX-VG-RUNTIME`、`MNX-VG-DOMAIN`、`MNX-VG-FE` | `PAR-C` | 冻结契约后的运行时、领域服务、人物卡 UI 独立施工 |
+| W4 | `MNX-VG-CONTRACT` | `SER/GATE/MUTEX` | `VG1=GO` 后先冻结公共 DTO、三种 mode、draft/candidate 状态机、迁移字段、三类 job/ModelRun、AI 桥边界、rights 与资源 claim；形成 `VG-CONTRACT-GATE`，不让 migration 反向定义产品行为 |
+| W4 | `MNX-VG-MIG` | `SER/MUTEX` | `VG-CONTRACT-GATE` 后沿本文一次性施工授权分配当时下一 Alembic revision；升级/回退/约束测试通过 |
+| W4 | `MNX-VG-AI-BRIDGE` | `SER/GATE/MUTEX` | 迁移通过后复用现有 CreativeGenerationJob/`ai-novel-writer` 建立请求态分析桥，验证两段内部编排、lease/重放和模型校验；形成 `VG-AI-BRIDGE-GATE` |
+| W4 | `MNX-VG-RUNTIME`、`MNX-VG-DOMAIN`、`MNX-VG-FE` | `PAR-C` | 迁移与 AI bridge 契约冻结后，运行时、领域服务、人物卡 UI 按不重叠文件独立施工 |
 | W4 | `MNX-VG-INT` | `SER/INT/GATE` | 一键生成并使用、换一个、取消/恢复、Nano 技术校验、CAS 冲突保护与资源卸载；形成 `VG-GATE` |
 | W5 | `MNX-DEL-AUDIT` | `SER/GATE` | 枚举精确 FK、Profile 混源、Edition/Manifest/current pointer/render/media/备份影响，产出并冻结精确 write set 与迁移；审计结论在既定范围内可继续施工，无需再次请示 |
 | W5 | `MNX-DEL-BE`、`MNX-DEL-FE` | `SER → PAR-C` | 审计冻结 schema/API/物理删除计划后，主代理先完成共享契约，再让不触碰共享文件的一键删除/单次影响确认 UI 并行施工 |
 | W5 | `MNX-DEL-INT` | `SER/INT/GATE` | 竞态、失败恢复、历史不可用、墓碑和备份文案验收 |
-| W6 | `MNX-FINAL` | `SER/INT/GATE` | 全量测试、打包、隔离安装/升级/卸载、真实浏览器/听感、资源与文档一致性；不得自动提交/推送 |
+| W6 | `MNX-PRUNE` | `SER/MUTEX/GATE` | 只删除 ledger 中已证明“完全替代且无独立价值”的精确条目，移除对应接线与无用依赖；所有保留项写明调用者/理由/sunset，不把已确认冗余延期为 TODO |
+| W6 | `MNX-FINAL` | `SER/INT/GATE` | `MNX-PRUNE` 通过后执行全量测试、打包、隔离安装/升级/卸载、真实浏览器/听感、资源与文档一致性；不得自动提交/推送 |
+
+`MNX-G0` 与 `MNX-PRUNE-AUDIT` 共同构成 W1–W6 的全局前置；任一未通过都不得开始代码施工。各波汇合时由主代理把新发现的候选及证据追加到 ledger，但实际删除统一留给 W6 的 `MNX-PRUNE`，避免并行包越权删文件或在替代路径尚未接稳时提前清理。
 
 ### 9.1 阶段估算
 
@@ -478,6 +536,7 @@ DELETE /voice-design-candidates/{candidate_id}
 - 高级参数尖峰：12–20 小时；
 - VoiceGenerator 尖峰：12–24 小时，若 GO 则沿一次性施工授权继续实施 36–60 小时；
 - 私人音色删除审计：8–16 小时；审计冻结 write set 后实现与恢复验证 28–48 小时；
+- 冗余调用图审计、精确删除和回归：8–16 小时，随各波记录候选并在 W6 统一收口；
 - 对已启用范围的最终真实验收：12–24 小时。
 
 VoiceGenerator NO-GO 时，总工期不能把未实施的 `P2-VG` 写成失败；P0/P1 独立发布。
@@ -493,34 +552,38 @@ VoiceGenerator NO-GO 时，总工期不能把未实施的 `P2-VG` 写成失败�
 | 工作包 | 前置 | 唯一目标与允许修改 | 禁止范围 | 必测与证据 |
 | --- | --- | --- | --- | --- |
 | `MNX-G0` | 本文一次性施工授权 | 冻结基线；仅本文及新 `docs/开发文档/证据/MOSS-TTS-Nano优化/W0-基线.md` | 不改代码/数据库/安装态 | status、migration head、tree/package/bundle/host hash |
-| `MNX-P0-CONTRACT` | G0、本文一次性施工授权 | 本文、同证据目录 `P0-contract.md`、新 `tests/narration/test_official_voice_selection_contract.py` | 不改历史迁移，不绕 trigger | PostgreSQL 约束反例、幂等重放、UUID scope、v1/v2 冻结 |
+| `MNX-PRUNE-AUDIT` | G0 | 只读扫描本计划全部 TTS 源码、测试、样式、配置、Compose/打包与依赖引用；唯一允许写入新 `docs/开发文档/证据/MOSS-TTS-Nano优化/redundancy-ledger.md` | 不修改/删除源码、测试、迁移、历史证据、依赖或用户 dirty 文件；不因名称相似判定冗余 | 每条候选的精确 path/symbol、调用图、替代物、独立风险覆盖、删留裁决、owner、验证与恢复证据 |
+| `MNX-P0-CONTRACT` | G0、PRUNE-AUDIT、本文一次性施工授权 | 本文、同证据目录 `P0-contract.md`、新 `tests/narration/test_official_voice_selection_contract.py` | 不改历史迁移，不绕 trigger | PostgreSQL 约束反例、幂等重放、UUID scope、v1/v2 冻结 |
 | `MNX-P0-MIG` | P0 contract 判定需迁移 | `backend/models.py`、当时下一条 migration、`backend/narration/production_runtime.py`、`scripts/tts/bootstrap_digest_keyring.py`、`tests/narration/test_migrations.py`、`tests/narration/test_voice_product_schema_postgres.py` | 不改包括 `0025–0029` 在内的旧 migration；不覆盖开工时用户 dirty diff | upgrade/约束/回退兼容、旧版本不改写 |
 | `MNX-P0-INT` | P0 BE/FE、迁移（若需） | `backend/narration/schemas.py`、`backend/narration/settings_api.py`、`backend/narration/narration_api.py`；`frontend/src/narration/contracts.ts`、`contracts.test.ts`、`api.ts`、`api.test.ts`、`reading-overview.ts`、`reading-overview.test.ts`、`reading-page.ts`、`reading-page.test.ts`、`index.ts` | 不改 QwenPaw 核心/正式绑定 | 36 动作矩阵、真实 18 smoke、路由/深链、当前绑定非回归 |
-| `MNX-P1-BE-CONTRACT` | P0 release 或独立冻结 | `backend/narration/contracts.py`、`schemas.py`、`settings_api.py`、`privacy.py`、`playback_api.py`、`narration_api.py`、`edition_service.py`、`editions.py`；`tests/narration/test_settings_api.py`、`test_playback_progress_api.py`、`test_edition_service.py`、新 `test_edition_voice_identity.py` | 不改 Manifest v2 公共隐私边界，不 join 当前名称补历史 | playback CAS/范围、resolution v2 fingerprint、legacy identity |
-| `MNX-P1-INT` | P1 子包完成 | `chapter-narration-session.ts/test.ts`、`reading-overview.ts/test.ts`、`reading-page.ts/test.ts`、integration/accessibility tests、`index.ts`、`narration/styles.ts`、`styles/t2-b.ts`、`workbench-studio.ts`、`frontend/src/styles.ts`、`workbench-route.test.ts` | 不覆盖开工前 dirty diff | 深链、状态矩阵、焦点、IME、全视口真实浏览器 |
+| `MNX-P1-BE-CONTRACT` | P0 release 或独立冻结 | `backend/narration/contracts.py`、`schemas.py`、`settings_api.py`、`privacy.py`、`playback_api.py`、`narration_api.py`、`edition_service.py`、`editions.py`；`tests/narration/test_settings_api.py`、`test_settings_contract.py`、`test_reading_privacy.py`、`test_playback_progress_api.py`、`test_edition_service.py`、`test_narration_requests_api.py`、新 `test_edition_voice_identity.py`；前端读取契约 `frontend/src/narration/chapter-contracts.ts`及 test | 不改 Manifest v2 公共隐私边界，不 join 当前名称补历史 | playback CAS/范围、resolution v2 fingerprint、legacy identity |
+| `MNX-P1-INT` | P1 子包完成 | `frontend/src/narration/chapter-narration-session.ts`及 test、`reading-overview.ts`及 test、`reading-page.ts`及 test、`chapter-narration-workbench.integration.test.ts`、`chapter-narration.integration.test.ts`、`reading-page.integration.test.ts`、`reading-accessibility.test.ts`、`index.ts`、`narration/api.ts`及 test、`narration/styles.ts`、`styles/t2-b.ts`、`frontend/src/workbench-v2.ts`、`frontend/src/workbench-studio.ts`、`frontend/src/workbench-route.ts`及 test、`frontend/src/styles.ts` | 不覆盖开工前 dirty diff | 深链、状态矩阵、焦点、IME、全视口真实浏览器 |
 | `MNX-ADV-SPIKE` | P1 契约稳定、本文一次性施工授权 | `backend/narration/contracts.py`、`fingerprints.py`、`runtime.py`、`sidecar_server.py`、`worker.py`、`voice_product.py`；`tests/narration/test_contracts.py`、`test_runtime.py`、`test_sidecar_server.py`、`test_worker_model_run_postgres.py`、`test_voice_product.py` 及证据 | 不改官方默认历史版本，不吞未知字段 | v1/v2 双读、HMAC/ModelRun/cache、参数 bounds/质量 |
 | `MNX-VG1` | VG0 汇合、本文一次性施工授权 | `scripts/tts/benchmark_voice_generator.py`、新 `validate_voice_generator_clone.py`、VG1 证据目录 | 不改生产 runtime/schema/长期安装 | M4 内存/swap/RTF/取消/卸载/Nano clone 听检 |
-| `MNX-VG-MIG` | VG1=GO | models、新线性 migration、production revision/bootstrap、迁移/PostgreSQL tests | 不改 0010/0021/0022，不放宽 uploaded trigger | 状态机、generated link、共享 residency claim、回退 |
-| `MNX-VG-INT` | VG 子包完成 | `backend/narration/worker.py`、`production_runtime.py`、公共 schema/API、`plugin.py`、`compose.yaml`、前端公共接线 | 不让子代理争用 shared worker/runtime | job/资源/媒体全链、能力关闭、安装升级卸载 |
+| `MNX-VG-CONTRACT` | VG1=GO | `backend/narration/contracts.py`、`backend/narration/schemas.py`、`frontend/src/narration/contracts.ts`、`frontend/src/narration/contracts.test.ts`、新 `tests/narration/test_voice_generation_contract.py`及 `docs/开发文档/证据/MOSS-TTS-Nano优化/VG-contract.md` | 不改 models/migration/routes/worker/UI，不在 DTO 中加入第二套模型选择器或用户确认门禁 | discriminated union、状态转移、字段/约束清单、rights/provenance、三类 job/ModelRun、AI bridge fixture |
+| `MNX-VG-MIG` | VG-CONTRACT-GATE | `backend/models.py`、当时下一线性 migration、`backend/narration/production_runtime.py`、`tests/narration/test_migrations.py`、`tests/narration/test_voice_product_schema_postgres.py`及新 VG schema PostgreSQL tests | 不改 0010/0021/0022，不放宽 uploaded trigger，不偏离冻结 DTO/字段清单 | command/candidate 状态机、generated link、analysis lease、rights provenance、共享 residency claim、回退 |
+| `MNX-VG-AI-BRIDGE` | VG migration、VG-CONTRACT-GATE | `backend/creative_services.py`、`backend/creative_schemas.py`、`backend/creative_api.py`、`backend/model_runtime.py`、新 `backend/narration/voice_design_analysis.py`、新 `tests/test_character_voice_description_api.py`、`tests/test_model_runtime.py`及桥接证据 | 不把 `ctx.chat` 移入 narration worker，不新建 Agent Runtime，不在长事务内调模型，不改变冻结 narration DTO | 新 kind、模型一致性、JSON 校验、lease 过期、断线/幂等重放、ready job 复用 |
+| `MNX-VG-INT` | VG 子包完成 | `backend/narration/worker.py`、`production_runtime.py`、`narration_api.py`、`backend/background/jobs.py`、`plugin.py`、`compose.yaml`；`frontend/src/narration/api.ts`、`character-voice-panel.ts`及 test、`reading-page.ts`及 test、`index.ts`、`frontend/src/workbench-studio.ts`、`frontend/src/workbench-route.test.ts` | 不让子代理争用 shared worker/runtime，不修改冻结 DTO/状态机，不修改 QwenPaw 上游 | CreativeGenerationJob/VoiceGenerator/Nano job、共享资源/媒体全链、能力关闭、安装升级卸载 |
 | `MNX-DEL-AUDIT` | 本文一次性施工授权、前序共享 owner 释放 | 仅新 `docs/开发文档/证据/MOSS-TTS-Nano优化/DEL-audit.md` | 不改 schema/media/数据 | FK/混源/profile scope/current pointer/render/备份 write set |
-| `MNX-DEL-BE` | DEL-AUDIT 冻结 write set | 由审计报告冻结的精确 write set；预计含 models/新 migration、新 `voice_deletion.py`、`media.py`、`storage.py`、Edition/Manifest/播放拒绝路径和专属 tests，全部由主代理单一 owner | 报告未冻结的文件不得修改；不用普通 GC/全局绕过 | 三崩溃边界、fence、对账、tombstone、backup semantics |
-| `MNX-DEL-INT` | DEL BE/FE 完成 | 公共 API/DTO、页面接线、长期隔离媒体验证 | 不操作真实用户媒体 | 影响快照变化、不可用 Edition、重启收敛、文案 |
-| `MNX-FINAL` | 本文授权范围内各内部 gate | 打包/隔离安装/升级/卸载、证据索引与本文状态；不自动提交 | 不把 NO-GO 能力写成失败或已实现，不操作唯一长期环境 | 全量回归、digest 回退、原生 QwenPaw 非回归 |
+| `MNX-DEL-BE` | DEL-AUDIT 冻结 write set | 以下是不可扩张的最大允许集，审计只能缩减：`backend/models.py`、当时下一线性 migration、新 `backend/narration/voice_deletion.py`、`backend/narration/media.py`、`storage.py`、`privacy.py`、`edition_service.py`、`editions.py`、`playback_api.py`、`narration_api.py`、`schemas.py`、`worker.py`、`backend/background/jobs.py`；新 `tests/narration/test_voice_deletion.py`、`test_voice_deletion_api.py`及现有 `test_media.py`、`test_media_postgres.py`、`test_edition_service.py`、`test_playback_recovery.py`、`test_migrations.py`、`test_voice_product_schema_postgres.py` | 报告未冻结的文件不得修改；不用普通 GC/全局绕过；不让 candidate 伪装 profile request | candidate trash/restore、profile grace/cancel、三崩溃边界、fence、对账、tombstone、backup semantics |
+| `MNX-DEL-INT` | DEL BE/FE 完成 | `frontend/src/narration/contracts.ts`、`api.ts`、`reading-overview.ts`及 test、`reading-page.ts`及 test、`reading-page.integration.test.ts`、`reading-accessibility.test.ts`、`index.ts`、`frontend/src/workbench-studio.ts`、`frontend/src/workbench-route.test.ts`；新 DEL 集成证据 | 不操作真实用户媒体，不改候选/profile 后端状态契约 | 影响快照变化、候选撤销、profile 撤销、不可用 Edition、重启收敛、文案 |
+| `MNX-PRUNE` | P0/P1/ADV/VG/DEL 中实际启用范围已汇合、ledger 已冻结 | 仅可修改或删除 `redundancy-ledger.md` 中逐条列出的精确源码/测试/样式/配置/manifest 路径，并正常更新其中明确归因于被删依赖的项目清单及锁文件；该精确列表必须在开包前由主代理冻结，包内不得扩张 | 不删除已执行迁移、历史验收/审计原始证据、仍有调用者的兼容层、独立负向/恢复测试、QwenPaw 上游或用户 dirty 文件；不手改锁文件 | removed-symbol 零引用、替代路径聚焦回归、依赖/Compose/打包检查、保留项理由与 sunset、`git diff --check` |
+| `MNX-FINAL` | 本文授权范围内各内部 gate、PRUNE-GATE | 打包/隔离安装/升级/卸载；仅在实际启用范围冻结后协调更新 `plugin.json`/`pyproject.toml` 版本、根 `README.md`、`docs/README.md`、`docs/开发文档/README.md`、18 号文档当前口径 supersession、ADR-0005、新证据索引及当前 capability matrix；不自动提交 | 不把 NO-GO 能力写成失败或已实现，不操作唯一长期环境，不重写历史证据原文/hash | 全量回归、版本/包一致、文档链接、digest 回退、原生 QwenPaw 非回归 |
 
-可并行包仅在公共契约冻结后派发，且每行文件集合互不重叠：
+以下为可下放工作包；只有标记 `PAR/PAR-C` 且位于同一 ready set 的包才同时施工，`MNX-P1-PLAYER-VIEW` 仍按 W2 依赖串行。公共契约未冻结不派发，任何同时施工的文件集合必须互不重叠：
 
 | 工作包 | 前置 | 唯一目标与允许修改 | 禁止范围 | 必测与证据 |
 | --- | --- | --- | --- | --- |
 | `MNX-P0-BE` | P0 contract/migration | `backend/narration/official_presets.py`、`voice_product.py`、`voices.py`、新 `official_voice_selection.py`；`tests/narration/test_official_presets.py`、`test_voice_product.py`、`test_voices.py`、新 `test_official_voice_selection.py` | 不改 schemas/settings/models/migration/runtime | catalog、事务回滚、receipt replay、并发/CAS |
-| `MNX-P0-FE` | catalog/API fixture 冻结 | 新 `frontend/src/narration/official-voice-library.ts`、`official-voice-library.test.ts`、`official-voice-use-state.ts`、`official-voice-use-state.test.ts`、`styles/voice-library.ts`；`voice-preview-playback.ts`、`voice-preview-playback.test.ts`、`voice-source-panel.ts`、`voice-source-panel.test.ts`、`voice-source-workspace.ts`、`voice-source-workspace.test.ts` | 不改 contracts/api/reading-page/host styles | 键盘、空态、18 名称、非阻断语言提示、一步使用状态 |
+| `MNX-P0-FE` | catalog/API fixture 冻结 | 新 `frontend/src/narration/official-voice-library.ts`、`official-voice-library.test.ts`、`official-voice-use-state.ts`、`official-voice-use-state.test.ts`、`official-voice-selection-panel.ts`、`official-voice-selection-panel.test.ts`、`styles/voice-library.ts`；`voice-preview-playback.ts`、`voice-preview-playback.test.ts`、`voice-source-panel.ts`、`voice-source-panel.test.ts`、`voice-source-workspace.ts`、`voice-source-workspace.test.ts` | 不改 contracts/api/reading-page/host styles | 键盘、空态、18 名称、非阻断语言提示、一步使用状态 |
 | `MNX-P1-PLAYER-CORE` | P1 BE contract | `frontend/src/narration/narration-player.ts`、`narration-player.test.ts`、`segment-playback-queue.ts`、`segment-playback-queue.test.ts`、`chapter-playback.ts`、`chapter-playback.test.ts` | 不改 panel/style/session | 单增益后端、latest-wins、时间/进度、rate authority |
 | `MNX-P1-SETTINGS` | P1 DTO fixture | 新 `frontend/src/narration/reading-preferences-panel.ts`、`reading-preferences-panel.test.ts`、`scope-overrides-panel.ts`、`scope-overrides-panel.test.ts`、`reading-rules-workspace.ts`、`reading-rules-workspace.test.ts`；`reading-rules-panel.ts`、`reading-rules-panel.test.ts`、`pronunciation-panel.ts`、`pronunciation-panel.test.ts`、`styles/t2-f.ts`、`styles/t2-g.ts` | 不改 reading-page/公共 DTO | 继承、语言、自然停顿、规则合并、命中预览 |
 | `MNX-P1-CHARACTERS` | character DTO 冻结 | `frontend/src/narration/character-voice-panel.ts`、`character-voice-panel.test.ts`、`styles/t2-c.ts`、新 `character-voice-roster.ts`、`character-voice-roster.test.ts` | 不改人物 authority/modal/workbench | 缺口、来源、批量逐项结果、窄屏 |
 | `MNX-P1-PLAYER-VIEW` | player core | `frontend/src/narration/chapter-narration-panel.ts`、`chapter-narration-panel.test.ts`、`styles/t4-chapter.ts`、新 `chapter-player-view-state.ts`、`chapter-player-view-state.test.ts` | 不改 core/session/host styles | 正交状态、失败抽屉、44 px、1024/720/390/200% |
 | `MNX-VG0-A` | 允许资料核验 | 仅 `docs/开发文档/证据/MOSS-TTS-Nano优化/VG0-official.md` | 不下载模型、不改代码 | 官方 revision/license/files/deps 可复核来源 |
 | `MNX-VG0-B` | 允许本机只读核验 | 仅 `docs/开发文档/证据/MOSS-TTS-Nano优化/VG0-local-topology.md` | 不加载模型、不改长期环境 | M4/容器/依赖/磁盘/锁候选 |
-| `MNX-VG-RUNTIME` | VG migration/contract | `backend/narration/adapters.py`、新 `voice_generator_runtime.py`、`voice_generator_sidecar.py`、`tests/narration/test_voice_generator_runtime.py` | 不改 worker/models/API/compose | 健康、指纹、取消、加载/卸载/崩溃 |
-| `MNX-VG-DOMAIN` | VG migration/contract | 新 `backend/narration/voice_design.py`、`voice_generated_references.py`、`tests/narration/test_voice_design.py`、`test_voice_generated_references.py` | 不改 worker/schema/API/person authority | scope/CAS、单候选自动晋升/绑定、冲突保留、换一个、高级 partial-ready、隐私 |
+| `MNX-VG-RUNTIME` | VG migration/contract | `backend/narration/adapters.py`、新 `voice_generator_runtime.py`、`voice_generator_sidecar.py`、`tests/narration/test_voice_generator_runtime.py`；新 `docker/voice-generator-sidecar/Dockerfile`、`requirements.lock`、`model-source.lock.json`、`NOTICE`、`THIRD_PARTY_NOTICES.md`、`entrypoint.py`、`verify_runtime.py` | 不改 worker/models/API/compose，不把模型权重或缓存提交进 Git，不混入 Nano Sidecar 依赖 | 依赖/许可锁定、健康、指纹、取消、加载/卸载/崩溃 |
+| `MNX-VG-DOMAIN` | VG migration/contract | 新 `backend/narration/voice_design.py`、`voice_generated_references.py`、`tests/narration/test_voice_design.py`、`test_voice_generated_references.py` | 不改 worker/schema/API/person authority | scope/CAS、draft 不可变、换一个只换 seed、最新人物/编辑描述新建 draft、单候选自动晋升/绑定、冲突保留、高级 partial-ready、隐私 |
 | `MNX-VG-FE` | VG API fixture | 新 `frontend/src/narration/character-voice-designer.ts`、`character-voice-designer.test.ts`、`voice-generator-api.ts`、`voice-generator-api.test.ts`、`styles/voice-generator.ts` | 不改公共 modal/workbench/contracts | 一键生成并使用、进度/失败、换一个、绑定冲突、高级三备选 |
 | `MNX-DEL-FE` | DEL API 冻结 | 新 `frontend/src/narration/voice-lifecycle-panel.ts`、`voice-lifecycle-panel.test.ts`、`voice-lifecycle-state.ts`、`voice-lifecycle-state.test.ts`、`styles/voice-lifecycle.ts` | 不改 reading-page/api/contracts | 未引用一键删除、已引用单次影响确认、undo、backup 文案 |
 
@@ -545,6 +608,9 @@ backend/narration/media.py
 backend/narration/storage.py
 backend/background/jobs.py
 backend/creative_services.py
+backend/creative_schemas.py
+backend/creative_api.py
+backend/model_runtime.py
 scripts/tts/bootstrap_digest_keyring.py
 frontend/src/narration/contracts.ts
 frontend/src/narration/api.ts
@@ -559,11 +625,16 @@ frontend/src/workbench-studio.ts
 frontend/src/styles.ts
 frontend/src/workbench-route.test.ts
 plugin.py
+plugin.json
 compose.yaml
 pyproject.toml / requirements.txt / 锁文件
+README.md
 docs/README.md
 docs/开发文档/README.md
-本文与最终证据索引
+docs/开发文档/18-MOSS-TTS-Nano多角色智能朗读产品与技术设计.md
+docs/开发文档/ADR/ADR-0005-MOSS-TTS本地运行拓扑与资源边界.md
+本文、docs/开发文档/证据/MOSS-TTS-Nano优化/README.md 与 redundancy-ledger.md
+docs/开发文档/证据/MOSS-TTS-Nano施工/README.md 与 capability-matrix.md
 ```
 
 ### 10.3 共享资源锁
@@ -574,12 +645,13 @@ docs/开发文档/README.md
 - `LOCK-TEST-DB`：只用显式隔离测试库，不触碰正式小说；
 - `LOCK-LONG-RUNTIME`：长期 QwenPaw/Compose 安装、重启、迁移、卸载只由主代理操作；
 - `LOCK-MEDIA`：真实候选、缓存清理与删除验证使用隔离媒体根；
+- `LOCK-PRUNE-LEDGER`：redundancy ledger 及其中冻结的删除清单只由主代理串行更新；子代理可以报告候选但不得自行删除，未证明替代路径、零调用者和独立风险覆盖的条目一律保留；
 - `LOCK-USER-DIRTY`：开工时所有目标 dirty 文件都必须逐文件确认来源已集成、owner 已释放或重新分配；所有既有未提交文件默认禁止覆盖；
 - `LOCK-GIT`：子代理和主代理均不暂存、提交或推送，除非用户另行明确要求。
 
 ### 10.4 派发卡模板
 
-每次子代理派发必须写明：稳定工作包 ID、唯一目标、非目标、允许修改的精确文件、冻结 DTO/fixture、前置门禁、共享锁、最小测试、证据路径、禁止触碰的用户改动和给主代理的接线说明。缺一项不得派发。
+每次子代理派发必须写明：稳定工作包 ID、唯一目标、非目标、允许修改的精确文件、冻结 DTO/fixture、前置门禁、共享锁、最小测试、证据路径、禁止触碰的用户改动、发现但不自行删除的冗余候选及给主代理的接线说明。缺一项不得派发。
 
 ## 11. 内部验证与发布验收（非产品使用门禁）
 
@@ -600,12 +672,14 @@ git status --short
 聚焦阶段还必须覆盖：
 
 - 18 项目录 exact 顺序、manifest/provenance/hash、防缺项/重复/客户端覆盖；
-- 原子直用的 scope、CAS、Idempotency-Key 重放、并发、部分失败零残留；
+- 原子直用的 scope、CAS、Idempotency-Key 重放、并发、部分失败零残留；profile UUID 在版本更换时稳定，model revision/manifest/rights policy/default parameter 任一改变都产生新 version UUID；
 - 关闭新能力后既有 12 个非中文/生成/实验版本仍可渲染；
-- 参数进入 version/render fingerprint，旧协议不得吞字段；
+- 参数进入 version/render fingerprint，旧协议不得吞字段；`onnx.Zhiming` 历史 `fixed_seed_1` 分支在 v1/v2 中仍可重放，但新生产渲染的 active strategy 保持 `disabled`；
 - player Web Audio 与 HTMLAudio 双后端、Range/ETag、partial-ready/pending gap、旧稿、Edition 切换、进度恢复；
-- 人物点击快照、描述字段白名单、单候选自动晋升/绑定、绑定 CAS 冲突保留结果、换一个、取消/重试，以及高级三备选 partial-ready；
-- 删除影响变化 CAS、当前绑定阻断、历史 Edition 不级联、墓碑/非空 request、备份 pending，以及 unlink 前、unlink 后/DB finalize 前、finalize 后重放三个崩溃边界；
+- 人物点击快照、描述字段白名单、现实人士仿声指令去身份化、VoiceGenerator 默认 `1.5/0.6/50/1.1` 与高级 bounds/未知字段拒绝、不可变 draft、“换一个”只换 seed、按最新人物/作者编辑新建 draft、自动 generated rights/provenance、请求态 Agent bridge、CreativeGenerationJob ready 复用、analysis lease 过期/断线重放、VoiceGenerator/Nano 两个独立 job/ModelRun、单候选自动晋升/绑定、绑定 CAS 冲突保留结果、取消/重试，以及高级三备选 partial-ready；
+- candidate `trash_pending → prior_state|deleted` 与专用 restore、profile 删除影响变化 CAS/当前绑定阻断/历史 Edition 不级联、`grace_pending → cancelled|live_deleting` 时间边界、超时后撤销拒绝、墓碑/非空 request、备份 pending，以及 unlink 前、unlink 后/DB finalize 前、finalize 后重放三个崩溃边界；
+- VoiceGenerator 独立依赖锁、NOTICE/许可、模型权重 Git 排除、Compose 健康与按需加载/卸载；`plugin.json`、`pyproject.toml`、打包产物与最终能力文档版本一致；
+- redundancy ledger 中每个删除项都要有 removed-symbol/import/route/style/config 零引用复扫；替代路径聚焦测试、全量 Python/前端/打包回归与依赖清单检查通过；删除测试前证明其语义已由等价或更强覆盖承接，独立负向、兼容和恢复测试不得因代码路径合并被误删；
 - PawApp 安装/升级/完整卸载后 QwenPaw 原生聊天、设置、Agent、Skills、MCP、工具和数据卷非回归。
 
 ### 11.2 真实模型与听感
@@ -635,21 +709,23 @@ git status --short
 
 - `P0-GATE`：catalog v2 精确 18 项；18 个 preset × 旁白/人物两类动作共 36 个契约/数据库矩阵全部通过，18 项各至少完成一种真实隔离绑定与技术合成，两类路径均有全量 idempotency/CAS/回滚测试；现有三个正式绑定不变；
 - `P1-GATE`：官方音色从目录到设为旁白/人物的主路径不出现 profile/version 等领域术语，点击“使用”即完成且无语言/版权/质量二次确认；任务式作者验收脚本、键盘/读屏和浏览器矩阵通过；播放器在桌面/窄屏均不遮正文，音量/进度真实生效；
-- `VG-GATE`：人物卡一次点击可完成分析、生成、Nano 校验、建档和绑定，中间无描述/候选/质量/锁定确认；硬件、听感、资源回收、冲突保护和安装生命周期全通过；
-- `DEL-GATE`：未引用私人音色一键删除且可短时撤销；已使用私人音色最多一次可见影响确认。任何终态不得虚报；文件 unlink 与 PostgreSQL finalize 之间的所有中间窗口都有持久精确计划、幂等恢复和对账 worker，三个崩溃边界均能收敛到一致终态；历史影响和受管/外部备份状态准确；
-- `FINAL-GATE`：汇总本文一次性施工授权范围内实际达到 GO 并启用的独立 `P0-RELEASE / P1-RELEASE / ADV-RELEASE / VG-RELEASE / DEL-RELEASE`；NO-GO 能力保持隐藏且不要求通过其产品化测试。全量自动化、真实浏览器、对应真实模型、隔离安装/升级/卸载、文档与当前运行事实一致。
+- `VG-GATE`：人物卡一次点击可完成分析、生成、Nano 校验、建档和绑定，中间无描述/候选/质量/锁定确认；请求态 AI bridge 在刷新、断线、响应丢失和 lease 过期后均能幂等恢复，不留永久 running 记录；硬件、听感、资源回收、冲突保护和安装生命周期全通过；
+- `DEL-GATE`：未引用私人音色一键删除且在 `undo_deadline` 前可一键撤销，candidate 过期/进入物理删除或 profile 进入 `live_deleting` 后准确拒绝撤销；已使用私人音色最多一次可见影响确认。任何终态不得虚报；文件 unlink 与 PostgreSQL finalize 之间的所有中间窗口都有持久精确计划、幂等恢复和对账 worker，三个崩溃边界均能收敛到一致终态；历史影响和受管/外部备份状态准确；
+- `PRUNE-GATE`：ledger 中标记删除的条目已全部删除且零引用，标记保留的条目均有真实调用者/独立风险价值与 sunset；不存在“已确认冗余、以后再删”的待办，迁移历史、原始证据、独立测试和用户改动完整；
+- `FINAL-GATE`：汇总本文一次性施工授权范围内实际达到 GO 并启用的独立 `P0-RELEASE / P1-RELEASE / ADV-RELEASE / VG-RELEASE / DEL-RELEASE`；NO-GO 能力保持隐藏且不要求通过其产品化测试。`PRUNE-GATE`、全量自动化、真实浏览器、对应真实模型、隔离安装/升级/卸载、文档与当前运行事实一致。
 
 ## 12. 回退与恢复
 
 - P0 回退：catalog v2 仍固定返回 18 项，只把受影响项置 `selectable_now=false`，已经绑定的版本继续 `renderable_existing=true`；如保留旧 exact-six 响应，只能由独立兼容 v1 提供，不能让 v2 改长度；
 - 高级参数回退：隐藏新建入口；既有锁定实验版本继续播放，旧 sidecar 协议只处理兼容版本；
 - VoiceGenerator 回退：关闭独立 capability、停止领取新的 `narration.voice_generate` VoiceGenerator job、保留 draft/candidate 和已锁定版本；Nano/官方预设继续工作；
-- 删除回退：未引用音色进入短期 trash 后可一键撤销；已使用音色在唯一一次影响确认前可取消。进入 live delete 后不得假装恢复，按 request 状态继续完成或报告失败；备份恢复只在实际仍存在且用户明确要求时执行；
+- 删除回退：candidate 在 `trash_pending` 且未过 `delete_after` 时用 restore 回到 prior state；未引用 profile 在 `grace_pending` 时用 cancel 撤销；已使用 profile 在唯一一次影响确认前可取消。candidate 已物理删除或 profile 进入 live delete 后不得假装恢复，按各自持久状态继续完成或报告失败；备份恢复只在实际仍存在且用户明确要求时执行；
+- 代码清理回退：只在替代路径已验证且删除清单冻结后删除，并保留在 Git diff/提交历史中可逐条恢复；若回归失败，恢复对应精确文件/符号并回到 ledger 的“保留/待证”状态，不借此倒改迁移历史、验收原始证据或用户数据；
 - 数据库：只追加新 migration，不修改历史。每次长期升级前做仓库外备份和 manifest；恢复时数据库与 media/digest keyring 成对处理；
-- 部署：发布前记录并实际留存上一版 PawApp/Sidecar 的不可变 image digest、安装包 hash 和固定模型 revision；只有可复取/可启动验证通过才写“具备回退能力”，本地 mutable tag/build 不算证据。回退不删除 PostgreSQL、QwenPaw、媒体和模型卷；
+- 部署：发布前记录并实际留存上一版 PawApp/Sidecar 的不可变 image digest、安装包 hash 和固定模型 revision。一旦 `0031` 写入官方直用证据，数据库最低兼容应用版本就是理解 `narration-voice/2` 与 activation evidence 的 P0 兼容版；产品回退只可在该兼容线内关闭 `selectable_now`并 fix-forward，不得声称可直接回到 `0031` 前旧 image。回退不删除 PostgreSQL、QwenPaw、媒体和模型卷；
 - 用户内容：任何测试使用隔离小说/人物/媒体 scope；正式人物卡、正文和既有声音绑定不得作为可回滚测试夹具。
 
-## 13. 风险与待裁决
+## 13. 风险与施工期证据裁决
 
 | 风险 | 当前结论 | 控制措施 |
 | --- | --- | --- |
@@ -660,13 +736,19 @@ git status --short
 | `Trump` 等名称可能被误解为仿声授权 | 官方 manifest 固定项不按名称屏蔽；本计划不提供主动仿真人生成功能 | 显示官方 ID/来源和个人本地提示；公开/商业分发不在本计划结论内 |
 | Raw 参数造成长篇漂移、异常长度或缓存爆炸 | 不能混入默认路径 | 复制为实验版本、服务端 bounds、机器校验、fingerprint、配额和一键恢复默认 |
 | VoiceGenerator 在 M4 16 GB 不可用 | 尚未验证 | runtime-first、UI-later；NO-GO 不影响 P0/P1 |
-| 人物卡信息不足或包含矛盾 | 不允许模型把推测写回人物事实 | 字段白名单、unknown、点击快照、描述详情可改、换一个；不增加生成前确认 |
+| 把人物描述误当成已有后台 Agent 任务 | 已证实当前 `ctx.chat` 为请求态 | 一次点击由 command + analysis-runs 透明编排；复用 CreativeGenerationJob、analysis lease 和幂等恢复，不新建 Agent Runtime |
+| 页面刷新/断线使描述 job 永久 running 或重复扣费 | 必须在施工前冻结 | 先复用 ready result；lease 过期后才新建 attempt；无 owner running 明确收敛失败 |
+| 人物卡信息不足或包含矛盾 | 不允许模型把推测写回人物事实 | 字段白名单、unknown、点击快照、描述可编辑后重新设计；普通换一个只推进 seed，不增加生成前确认 |
+| generated 版本需要 rights 记录却不应增加勾选门禁 | 当前 schema 的真实约束 | 用 command 点击自动生成窄化的私人写作/provenance 证据，不声称商用、再分发或现实主体同意 |
 | 作者不喜欢自动生成结果 | 属于正常创作迭代，不应卡住首次使用 | “换一个并使用”、恢复上一音色、未引用结果一键删除 |
 | 真删除破坏历史播放 | 用户可选择，但必须理解后果 | 一次影响确认、原子解绑/阻止新使用、历史 Edition 标记不可用、最小墓碑 |
+| “一键删除可撤销”没有服务端时间边界 | 当前候选与 profile 状态机都有缺口 | candidate 用 `trash_pending` + restore，profile request 用 `grace_pending/cancelled` + cancel；进入物理/live delete 后不再宣称可恢复 |
 | 外部备份不受项目控制 | 无法证明已过期 | completed 只声明项目管理副本；external backup 显示 unknown/unmanaged |
 | 历史 Edition 没有冻结音色名称 | 当前真实缺口 | 新 resolution v2 冻结 identity；旧 Edition 只显示稳定 ID，不回填当前名称 |
 | Nano/VoiceGenerator 现有锁互不排斥 | 当前真实缺口 | VG 产品化迁移新增跨进程共享 residency claim；尖峰阶段运维串行 |
+| VoiceGenerator 依赖混入 Nano 或缺失许可/版本锁 | 会放大安装与回退风险 | 独立 Sidecar 目录、依赖锁/model source lock/NOTICE、权重 Git 排除、打包与卸载验证 |
 | 后续任务再次占用迁移/人物模型/工作台 | 计划 32 的历史冲突已解除，但开工时仍可能出现新改动 | W0 重取 status/head；只隔离具体冲突文件，迁移、公共 DTO 和长期运行态串行 |
+| 只叠加新实现导致双权威，或清理过早误删兼容/恢复能力 | 两类风险都必须阻断 | W0 建 ledger、逐条调用图与替代证据、主代理独占 `MNX-PRUNE`；确认冗余必须同版删除，仍有调用者/独立风险覆盖则保留并写明 sunset；迁移/历史证据/用户改动列为保护项 |
 | 页面一次塞入全部高级功能 | 会重现当前首次流程过重 | 基础操作优先、渐进展开、音色库独立、技术详情默认折叠 |
 
 ## 14. 规划自审记录
@@ -746,12 +828,42 @@ git status --short
 
 全文反向搜索标准为：默认使用路径不得残留 `language_mismatch_confirmed`、强制 preview、人工 accepted/locked、三候选必选、二次删除确认或“每阶段另批”语义；高级/兼容测试中出现这些术语时必须明确标注非默认路径或内部状态。
 
+### 14.6 第四轮：施工就绪终审
+
+本轮以当前源码、`0029` 迁移 head、现有 CreativeGenerationJob 调用路径、VoiceGenerator/Nano job 注册、rights 约束、删除表和打包拓扑反向推演每个工作包。发现并修正的实际施工缺口为：
+
+1. 人物描述不能直接放入既有 narration worker；现已冻结一次点击下的 command + request-scoped `analysis-runs`、CreativeGenerationJob 新 kind、lease/断线重放和独立 `MNX-VG-AI-BRIDGE`，不引入第二套 Agent Runtime。
+2. VoiceGenerator 生成与 Nano 克隆验证是两个不同资源类；现已分离 job/preview/ModelRun 字段和终态闭合，不再用单一含糊 `job` 表述。
+3. “换一个”原先同时隐含重跑人物分析和推进 seed，差异来源不可解释；现已冻结不可变 VoiceDesignDraft 及三个 discriminated mode：普通换音只换 seed，人物卡更新或作者编辑描述才一键创建新 draft。
+4. “未使用音色一键删除可撤销”原先没有可实现的 API/状态，且尚未晋升的 candidate 不能塞入强制 profile FK 的删除表；现已分开 candidate `trash_pending` + `restore` 与 profile `discard-unreferenced` + `grace_pending/cancel`，两者均有过期后拒绝撤销的时间边界。
+5. 官方 canonical UUID 原先混淆 profile 容器与 version 身份；现已分开两层 UUIDv5，并把 model revision、manifest、provenance、rights policy、decode contract 和默认参数指纹纳入版本身份。
+6. generated Voice Version 必须满足现有 rights 闭包；现已冻结由 command 点击自动建立的窄化私人写作/provenance 证据，既不伪造现实主体同意，也不增加用户勾选门禁。
+7. 高级页原先把运行时安全项与音色调教项混在一起；现已冻结“全部可查看、有效音色参数可编辑、运行安全参数只读”，并明确 `onnx.Zhiming` 历史 `fixed_seed_1` 分支只保留可重放性，新生产 active strategy 继续 `disabled`。
+8. VoiceGenerator 产品化原先未分配容器依赖/许可文件所有权；现已为独立 Sidecar 的 Dockerfile、依赖锁、model-source lock、NOTICE、entrypoint 与验证脚本指定唯一工作包，权重不入 Git。
+9. 最终发布原先未覆盖插件版本和现行文档口径；现已由 `MNX-FINAL` 唯一负责 `plugin.json`/`pyproject.toml`、根 README、18 号文档、ADR-0005、新证据索引和 capability matrix 的一致更新，历史证据只添加 supersession 指向而不重写。
+10. W4 原先引用 `VG-CONTRACT-GATE` 却没有唯一工作包，且 migration 排在契约冻结前；现已增加串行 `MNX-VG-CONTRACT`，先冻结 DTO、状态机、字段清单、AI bridge 边界和三类 job/ModelRun，再允许迁移、桥接和不重叠实现。
+
+终审结论：文档已具备按 W0–W6 开工的产品契约、数据边界、迁移唯一所有权、子代理不重叠文件包、测试证据和回退路径，没有未解决的方案级阻断。`VG1` 对 M4 16 GB 的 GO/NO-GO 和 `MNX-DEL-AUDIT` 的精确 write set 仍是施工中必须以真实证据得出的能力结论，它们已有完整分支/降级路径，不再是需要用户补充产品决策的规划缺口。
+
+### 14.7 冗余清理补充复核
+
+根据作者“发现老旧冗余设计必须删除、尽量减少冗余”的补充要求，本轮再次反查施工组织，避免把新设置页、音色库、播放器和删除流程仅作为旁路叠加。已补充：
+
+1. `MNX-PRUNE-AUDIT` 在 W0 建立可恢复的 redundancy ledger，各波只报告有精确 path/symbol、调用图和替代证据的候选；
+2. `MNX-PRUNE` 在 W6 由主代理串行删除所有已证实冗余，`PRUNE-GATE` 阻止把确认项延期成 TODO；
+3. 旧 catalog v1、旧入口/布局/交互和相关测试只列为候选，不预判删除；仍有真实调用者或独立兼容/负向/恢复价值时必须保留并记录 sunset；
+4. 已执行迁移、历史验收/审计原始证据、QwenPaw 上游、用户 dirty 文件和语义独立测试列为禁止清理范围；
+5. 删除后必须完成零引用复扫、依赖与锁文件正规更新、受影响回归、全量门禁和 Git diff 复核，并能从 Git 精确恢复。
+
+补充复核没有改变产品范围、数据状态或外部行为，只把“替换旧实现”升级为施工硬门禁。终审结论保持不变：本文档层面可以进入施工，尚未因此开始修改代码。
+
 ## 15. 一次性施工授权口径
 
-本文已完成三轮主审、前后端独立只读审计和独立反例审查，可提交用户一次性评审。建议使用一句明确指令，例如“按计划 33 开始实施”，其授权边界为：
+本文已完成四轮主审、冗余清理补充复核、前后端独立只读审计和独立反例审查，可提交用户一次性评审。建议使用一句明确指令，例如“按计划 33 开始实施”，其授权边界为：
 
-1. 一次覆盖 `P0 + P1 + P1.5 + P2-VG + P2-DEL` 的代码、文档、自动化测试、隔离数据库迁移验证、隔离模型下载/尖峰和隔离浏览器/音频验收；
+1. 一次覆盖 `P0 + P1 + P1.5 + P2-VG + P2-DEL` 的代码、文档、自动化测试、隔离数据库迁移验证、隔离模型下载/尖峰、隔离浏览器/音频验收，以及 redundancy ledger 中已证明冗余的项目源码/测试/配置/依赖删除；
 2. 内部按 W0–W6 顺序推进，`VG1=GO` 才继续 VoiceGenerator 产品化，`NO-GO` 则诚实降级为人物自动匹配官方预设；无需作者在 W1/W3/W4/W5 之间反复批准；
 3. `MNX-DEL-AUDIT` 冻结精确 write set 后可继续实现删除能力，但测试只用隔离媒体；不会借施工授权删除任何真实私人音色；
 4. 产品上线后的日常使用遵循本计划的一键/单确认原则；每次真实私人音色彻底删除，仍由作者针对该精确音色在页面中确认一次；
-5. 该授权不自动包含提交、推送、迁移唯一长期数据库、切换唯一长期运行环境或修改用户小说；这些外部/长期状态动作仍按其精确目标另行执行。
+5. 冗余删除只作用于 ledger 冻结的项目文件，不包含用户小说/媒体、已执行迁移、历史验收原始证据、QwenPaw 上游或任务外 dirty 改动；
+6. 该授权不自动包含提交、推送、迁移唯一长期数据库、切换唯一长期运行环境或修改用户小说；这些外部/长期状态动作仍按其精确目标另行执行。

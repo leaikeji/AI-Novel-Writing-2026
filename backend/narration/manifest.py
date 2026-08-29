@@ -1323,10 +1323,15 @@ def resolve_playback_media_asset(
 ) -> MediaAsset:
     """Prove exact Manifest reachability before exposing playback bytes."""
 
+    edition = _require_edition_scope(store, edition_id)
+    if (
+        edition.state == "unavailable"
+        and edition.unavailable_reason == "unavailable_private_voice_deleted"
+    ):
+        raise InvalidNarrationState("unavailable_private_voice_deleted")
     manifest = load_public_manifest(
         store, edition_id=edition_id, manifest_revision=manifest_revision
     )
-    edition = _require_edition_scope(store, edition_id)
     link = require_row(
         store.find_one(NarrationRenderAsset, asset_id=asset_id),
         label="playback render asset",

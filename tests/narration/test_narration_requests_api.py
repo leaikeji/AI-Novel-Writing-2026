@@ -40,6 +40,8 @@ OTHER_DOCUMENT_ID = UUID("d4000000-0000-4000-8000-000000000013")
 FAILED_SEGMENT_ID = UUID("d4000000-0000-4000-8000-000000000014")
 FANOUT_SEGMENT_ID = UUID("d4000000-0000-4000-8000-000000000015")
 RETRY_COMMAND_ID = UUID("d4000000-0000-4000-8000-000000000016")
+PROFILE_ID = UUID("d4000000-0000-4000-8000-000000000017")
+VOICE_VERSION_ID = UUID("d4000000-0000-4000-8000-000000000018")
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
@@ -86,6 +88,26 @@ def _edition(**changes: object) -> dict[str, object]:
         "failed_segment_count": 0,
         "current_manifest_revision": None,
         "job_ids": [str(JOB_ID)],
+    }
+    payload.update(changes)
+    return payload
+
+
+def _voice_identities(**changes: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "contract_version": "narration-edition-voice-identities/1",
+        "edition_id": str(EDITION_ID),
+        "items": [
+            {
+                "profile_id": str(PROFILE_ID),
+                "voice_version_id": str(VOICE_VERSION_ID),
+                "display_name": "小雨",
+                "source_type": "preset",
+                "preset_id": "onnx.Xiaoyu",
+                "resolution_contract_version": "narration-edition-resolution/2",
+                "legacy_fallback": False,
+            }
+        ],
     }
     payload.update(changes)
     return payload
@@ -494,6 +516,17 @@ def test_recovery_routes_enforce_exact_response_identity() -> None:
     assert edition_response.status_code == 200
     assert edition_backend.commands[-1].operation is (
         narration_api.NarrationProductionOperation.GET_EDITION
+    )
+
+    narration_api.uninstall_narration_production_backend_factory()
+    identity_backend = Backend(result=_voice_identities())
+    identity_response = _client(identity_backend).get(
+        f"/narration-editions/{EDITION_ID}/voice-identities"
+    )
+    assert identity_response.status_code == 200
+    assert identity_response.json()["items"][0]["display_name"] == "小雨"
+    assert identity_backend.commands[-1].operation is (
+        narration_api.NarrationProductionOperation.GET_EDITION_VOICE_IDENTITIES
     )
 
     narration_api.uninstall_narration_production_backend_factory()

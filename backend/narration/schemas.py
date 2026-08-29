@@ -18,16 +18,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .official_presets import (
     OFFICIAL_PRESET_PROVENANCE_SCHEMA_VERSION,
+    OFFICIAL_PRESETS,
     OFFICIAL_PRESETS_BY_ID,
-    PRODUCT_OFFICIAL_PRESET_IDS,
     canonical_sha256 as official_preset_canonical_sha256,
+    official_preset_validation_tier,
 )
 
 
 NARRATION_SETTINGS_API_VERSION: Final = "narration-settings-api/1"
 NARRATION_SETTINGS_SCHEMA_VERSION: Final = "narration-settings/1"
 NARRATION_CAPABILITY_SCHEMA_VERSION: Final = "narration-capabilities/1"
-NARRATION_VOICE_SCHEMA_VERSION: Final = "narration-voice/1"
+NARRATION_VOICE_SCHEMA_VERSION: Final = "narration-voice/2"
 NARRATION_CACHE_SCHEMA_VERSION: Final = "narration-cache/1"
 REFERENCE_UPLOAD_MAX_BYTES: Final = 16 * 1024 * 1024
 REFERENCE_UPLOAD_MIME_TYPES: Final[tuple[str, ...]] = (
@@ -515,6 +516,11 @@ class UpdateNarrationSettingsRequest(_StrictModel):
     values: NarrationSettingsValues
 
 
+class UpdateNarrationPlaybackPreferencesRequest(_StrictModel):
+    expected_version: int = Field(ge=0, strict=True)
+    playback: NarrationPlaybackPreferences
+
+
 class NarrationScopeKind(str, Enum):
     VOLUME = "volume"
     CHAPTER = "chapter"
@@ -616,6 +622,20 @@ class VoiceQualityState(str, Enum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+
+
+class VoiceActivationBasis(str, Enum):
+    PREVIEW_CONFIRMED = "preview_confirmed"
+    EXPLICIT_OFFICIAL_PRESET_SELECTION = "explicit_official_preset_selection"
+    CHARACTER_ONE_CLICK_GENERATION = "character_one_click_generation"
+    EXPERIMENTAL_MACHINE_VALIDATED = "experimental_machine_validated"
+
+
+class VoiceValidationBasis(str, Enum):
+    PENDING = "pending"
+    HUMAN_ACCEPTED = "human_accepted"
+    MACHINE_VALIDATED = "machine_validated"
+    NOT_REQUIRED = "not_required"
 
 
 class VoiceRightsState(str, Enum):
@@ -734,6 +754,16 @@ class OfficialPresetCatalogItem(_StrictModel):
     language: str = Field(min_length=2, max_length=40)
     local_use_status: Literal["available"] = "available"
     commercial_distribution_status: Literal["not_evaluated"] = "not_evaluated"
+    validation_tier: Literal[
+        "canonical_chapter_verified", "pinned_catalog_unreviewed"
+    ]
+    language_scope: Literal["zh-CN", "en", "ja-JP"]
+    selectable_now: bool = Field(strict=True)
+    previewable_now: bool = Field(strict=True)
+    renderable_existing: bool = Field(strict=True)
+    usage_notice: Literal["private_local_writing_tool"] = (
+        "private_local_writing_tool"
+    )
     provenance: OfficialPresetProvenance
 
     @model_validator(mode="after")
@@ -743,35 +773,39 @@ class OfficialPresetCatalogItem(_StrictModel):
             self.display_name,
             self.group,
             self.language,
+            self.language_scope,
             self.provenance.preset_id,
         ) != (
             preset.display_name,
             preset.group,
             preset.language,
+            preset.language,
             preset.preset_id,
         ):
             raise ValueError("official preset catalog metadata disagrees with manifest")
+        if self.validation_tier != official_preset_validation_tier(self.preset_id):
+            raise ValueError("official preset validation tier changed")
         return self
 
 
 class OfficialPresetCatalogResponse(_StrictModel):
-    schema_version: Literal["moss-tts-official-preset-catalog/1.0"] = (
-        "moss-tts-official-preset-catalog/1.0"
+    schema_version: Literal["moss-tts-official-preset-catalog/2.0"] = (
+        "moss-tts-official-preset-catalog/2.0"
     )
     items: list[OfficialPresetCatalogItem]
 
     @model_validator(mode="after")
     def validate_complete_catalog(self) -> "OfficialPresetCatalogResponse":
         ids = [item.preset_id for item in self.items]
-        if ids != list(PRODUCT_OFFICIAL_PRESET_IDS):
+        if ids != [item.preset_id for item in OFFICIAL_PRESETS]:
             raise ValueError(
-                "official preset catalog must publish the six product presets in order"
+                "official preset catalog must publish all 18 pinned presets in order"
             )
         return self
 
 
 class VoiceProfileVersionResource(_StrictModel):
-    schema_version: Literal["narration-voice/1"] = NARRATION_VOICE_SCHEMA_VERSION
+    schema_version: Literal["narration-voice/2"] = NARRATION_VOICE_SCHEMA_VERSION
     version_id: UUID
     profile_id: UUID
     version_number: int = Field(ge=1, strict=True)
@@ -784,6 +818,8 @@ class VoiceProfileVersionResource(_StrictModel):
     language: str = Field(min_length=2, max_length=40)
     fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     quality_state: VoiceQualityState
+    activation_basis: VoiceActivationBasis
+    validation_basis: VoiceValidationBasis
     rights: VoiceRightsSummary
     official_preset: OfficialPresetProvenance | None = None
     reference_asset_id: UUID | None = None
@@ -819,10 +855,29 @@ class VoiceProfileVersionResource(_StrictModel):
         if self.source_type is VoiceSourceType.GENERATED and not self.description_available:
             raise ValueError("generated source requires a private description record")
         if self.state is VoiceVersionState.LOCKED:
-            if self.quality_state is not VoiceQualityState.ACCEPTED or self.locked_at is None:
-                raise ValueError("locked version must be accepted with a lock time")
+            human_confirmed = (
+                self.activation_basis is VoiceActivationBasis.PREVIEW_CONFIRMED
+                and self.validation_basis is VoiceValidationBasis.HUMAN_ACCEPTED
+                and self.quality_state is VoiceQualityState.ACCEPTED
+                and self.locked_at is not None
+            )
+            official_direct = (
+                self.source_type is VoiceSourceType.PRESET
+                and self.activation_basis
+                is VoiceActivationBasis.EXPLICIT_OFFICIAL_PRESET_SELECTION
+                and self.validation_basis is VoiceValidationBasis.NOT_REQUIRED
+                and self.quality_state is VoiceQualityState.PENDING
+                and self.locked_at is None
+            )
+            if not (human_confirmed or official_direct):
+                raise ValueError("locked version activation evidence is inconsistent")
         elif self.locked_at is not None:
             raise ValueError("only a locked version can carry locked_at")
+        elif (
+            self.activation_basis is not VoiceActivationBasis.PREVIEW_CONFIRMED
+            or self.validation_basis is not VoiceValidationBasis.PENDING
+        ):
+            raise ValueError("unlocked version cannot carry activation evidence")
         return self
 
 
@@ -830,7 +885,7 @@ class VoiceProfileResource(_StrictModel):
     contract_version: Literal["narration-settings-api/1"] = (
         NARRATION_SETTINGS_API_VERSION
     )
-    schema_version: Literal["narration-voice/1"] = NARRATION_VOICE_SCHEMA_VERSION
+    schema_version: Literal["narration-voice/2"] = NARRATION_VOICE_SCHEMA_VERSION
     profile_id: UUID
     novel_id: UUID | None = None
     name: str = Field(min_length=1, max_length=240)
@@ -1068,6 +1123,121 @@ class PutCharacterVoiceBindingRequest(_StrictModel):
             raise ValueError("unset binding cannot carry a voice")
         if self.binding_policy is not CharacterVoiceBindingPolicy.UNSET and not has_voice:
             raise ValueError("configured binding requires profile_id and version_id")
+        return self
+
+
+class OfficialVoiceSelectionTargetKind(str, Enum):
+    NARRATOR = "narrator"
+    CHARACTER = "character"
+
+
+class OfficialVoiceSelectionRequest(_StrictModel):
+    preset_id: str = Field(pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$")
+    target_kind: OfficialVoiceSelectionTargetKind
+    character_id: UUID | None = None
+    expected_settings_version: int = Field(ge=0, strict=True)
+    expected_binding_version: int | None = Field(default=None, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def validate_selection_target(self) -> "OfficialVoiceSelectionRequest":
+        if self.preset_id not in OFFICIAL_PRESETS_BY_ID:
+            raise ValueError("preset_id is absent from the pinned ONNX manifest")
+        if self.target_kind is OfficialVoiceSelectionTargetKind.NARRATOR:
+            if self.character_id is not None or self.expected_binding_version is not None:
+                raise ValueError("narrator target cannot carry character binding fields")
+        elif self.character_id is None or self.expected_binding_version is None:
+            raise ValueError("character target requires identity and binding version")
+        return self
+
+
+class OfficialVoiceSelectionResult(_StrictModel):
+    command_id: UUID
+    preset_id: str = Field(pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$")
+    target_kind: OfficialVoiceSelectionTargetKind
+    character_id: UUID | None = None
+    profile_id: UUID
+    version_id: UUID
+    settings_version: int = Field(ge=1, strict=True)
+    binding_version: int | None = Field(default=None, ge=1, strict=True)
+    target_language: str = Field(min_length=2, max_length=40)
+    language_mismatch: bool = Field(strict=True)
+    completed_at: datetime
+
+    @model_validator(mode="after")
+    def validate_result_target(self) -> "OfficialVoiceSelectionResult":
+        preset = OFFICIAL_PRESETS_BY_ID.get(self.preset_id)
+        if preset is None:
+            raise ValueError("selection result preset is absent from pinned inventory")
+        character_target = self.target_kind is OfficialVoiceSelectionTargetKind.CHARACTER
+        if character_target != (self.character_id is not None):
+            raise ValueError("selection result character identity is inconsistent")
+        if character_target != (self.binding_version is not None):
+            raise ValueError("selection result binding version is inconsistent")
+        expected_mismatch = (
+            preset.language.split("-", 1)[0].casefold()
+            != self.target_language.split("-", 1)[0].casefold()
+        )
+        if self.language_mismatch is not expected_mismatch:
+            raise ValueError("selection result language mismatch evidence changed")
+        return self
+
+
+class OfficialVoiceSelectionResponse(_StrictModel):
+    contract_version: Literal["official-voice-selection/1.0"] = (
+        "official-voice-selection/1.0"
+    )
+    replayed: bool = Field(strict=True)
+    selection_still_current: bool = Field(strict=True)
+    frozen_result: OfficialVoiceSelectionResult
+    profile: VoiceProfileResource
+    current_settings: NarrationSettingsResource | None = None
+    current_character_binding: CharacterVoiceBindingResource | None = None
+
+    @model_validator(mode="after")
+    def validate_projection(self) -> "OfficialVoiceSelectionResponse":
+        result = self.frozen_result
+        narrator = result.target_kind is OfficialVoiceSelectionTargetKind.NARRATOR
+        if narrator != (self.current_settings is not None):
+            raise ValueError("narrator result requires exactly one settings projection")
+        if narrator == (self.current_character_binding is not None):
+            raise ValueError("character result requires exactly one binding projection")
+        if self.profile.profile_id != result.profile_id:
+            raise ValueError("selection profile projection changed identity")
+        if result.version_id not in {
+            item.version_id for item in self.profile.versions
+        }:
+            raise ValueError("selection version is absent from profile projection")
+        if narrator:
+            assert self.current_settings is not None
+            selection = self.current_settings.values.narrator
+            is_current = (
+                selection is not None
+                and selection.profile_id == result.profile_id
+                and selection.version_id == result.version_id
+            )
+        else:
+            assert self.current_character_binding is not None
+            is_current = (
+                self.current_character_binding.character_id == result.character_id
+                and self.current_character_binding.profile_id == result.profile_id
+                and self.current_character_binding.version_id == result.version_id
+            )
+        if self.selection_still_current is not is_current:
+            raise ValueError("selection current-state evidence changed")
+        if not self.replayed and (
+            not self.selection_still_current
+            or (
+                narrator
+                and self.current_settings is not None
+                and self.current_settings.version != result.settings_version
+            )
+            or (
+                not narrator
+                and self.current_character_binding is not None
+                and self.current_character_binding.version != result.binding_version
+            )
+        ):
+            raise ValueError("new selection must return its exact committed projection")
         return self
 
 

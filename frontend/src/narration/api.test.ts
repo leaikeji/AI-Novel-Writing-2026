@@ -12,12 +12,15 @@ import {
   getDocumentNarrationContext,
   getFailedNarrationSegments,
   getNarrationEdition,
+  getNarrationEditionVoiceIdentities,
   getNarrationSettings,
   getNarrationWorkflow,
   listOfficialVoicePresets,
+  selectOfficialVoice,
   getVoicePreview,
   putCharacterVoiceBinding,
   putNarrationSettings,
+  putNarrationPlaybackPreferences,
   revokeNarrationCloudConsent,
   retryFailedNarrationSegments,
   switchNarrationEdition,
@@ -34,7 +37,6 @@ import {
   NARRATION_VOICE_SCHEMA_VERSION,
   OFFICIAL_PRESET_EVIDENCE,
   OFFICIAL_PRESET_MANIFEST_IDENTITY,
-  PRODUCT_OFFICIAL_PRESET_EVIDENCE,
   NarrationContractError,
 } from "./contracts";
 import { EDITION_HISTORY_CONTRACT_VERSION } from "./edition-history";
@@ -47,18 +49,27 @@ const RIGHTS_ID = "10000000-0000-4000-8000-000000000005";
 const ASSET_ID = "10000000-0000-4000-8000-000000000006";
 const NOW = "2026-08-26T12:00:00Z";
 function officialCatalog(
-  evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = PRODUCT_OFFICIAL_PRESET_EVIDENCE,
+  evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = OFFICIAL_PRESET_EVIDENCE,
 ) {
   return {
-    schema_version: "moss-tts-official-preset-catalog/1.0",
-    items: evidenceRows.map((evidence) => {
+    schema_version: "moss-tts-official-preset-catalog/2.0",
+    items: evidenceRows.map((evidence, index) => {
+      const presetLanguage = index < 6 ? "zh-CN" : index < 11 ? "en" : "ja-JP";
       return {
         preset_id: evidence.presetId,
         display_name: evidence.manifestVoice,
         group: "Official",
-        language: "zh-CN",
+        language: presetLanguage,
         local_use_status: "available",
         commercial_distribution_status: "not_evaluated",
+        validation_tier: ["Junhao", "Zhiming", "Xiaoyu"].includes(evidence.manifestVoice)
+          ? "canonical_chapter_verified"
+          : "pinned_catalog_unreviewed",
+        language_scope: presetLanguage,
+        selectable_now: true,
+        previewable_now: true,
+        renderable_existing: true,
+        usage_notice: "private_local_writing_tool",
         provenance: {
           schema_version: "moss-tts-official-preset-provenance/1.0",
           repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
@@ -161,6 +172,8 @@ function uploadedVersion() {
     language: "zh-CN",
     fingerprint: "a".repeat(64),
     quality_state: "pending",
+    activation_basis: "preview_confirmed",
+    validation_basis: "pending",
     rights: {
       rights_record_id: RIGHTS_ID,
       state: "active",
@@ -217,6 +230,8 @@ const CHAPTER_SEGMENT_ID = "f1000000-0000-4000-8000-000000000009";
 const CHAPTER_PROGRESS_ID = "f1000000-0000-4000-8000-000000000010";
 const CHAPTER_FANOUT_SEGMENT_ID = "f1000000-0000-4000-8000-000000000011";
 const CHAPTER_RETRY_COMMAND_ID = "f1000000-0000-4000-8000-000000000012";
+const CHAPTER_PROFILE_ID = "f1000000-0000-4000-8000-000000000013";
+const CHAPTER_VOICE_VERSION_ID = "f1000000-0000-4000-8000-000000000014";
 const CHAPTER_SHA_A = "1".repeat(64);
 const CHAPTER_SHA_B = "2".repeat(64);
 const CHAPTER_SHA_C = "3".repeat(64);
@@ -403,13 +418,13 @@ afterEach(() => {
 });
 
 describe("narration settings API client", () => {
-  it("loads the exact six-item product preset catalog and sends exact preset_id", async () => {
+  it("loads the exact 18-item pinned preset catalog and sends exact preset_id", async () => {
     const catalog = officialCatalog();
     fetchMock.mockResolvedValueOnce(response(catalog));
 
     const loaded = await listOfficialVoicePresets();
-    expect(loaded.items).toHaveLength(6);
-    expect(loaded.items.map((item) => item.preset_id)).not.toContain("onnx.Trump");
+    expect(loaded.items).toHaveLength(18);
+    expect(loaded.items.map((item) => item.preset_id)).toContain("onnx.Trump");
     expect(loaded.items.map((item) => item.preset_id)).toContain("onnx.Xiaoyu");
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/ai-novel-world-2026/voice-presets",
@@ -448,8 +463,124 @@ describe("narration settings API client", () => {
       preset_id: "onnx.Xiaoyu",
     });
 
-    fetchMock.mockResolvedValueOnce(response(officialCatalog(OFFICIAL_PRESET_EVIDENCE)));
-    await expect(listOfficialVoicePresets()).rejects.toThrow(/exact 6-item/);
+    const incomplete = officialCatalog();
+    incomplete.items.pop();
+    fetchMock.mockResolvedValueOnce(response(incomplete));
+    await expect(listOfficialVoicePresets()).rejects.toThrow(/exact 18-item/);
+  });
+
+  it("sends one official narrator selection command and validates its frozen result", async () => {
+    const preset = officialCatalog().items[0]!;
+    const version = {
+      ...uploadedVersion(),
+      source_type: "preset",
+      state: "locked",
+      provider_id: "local-sidecar",
+      model_id: preset.provenance.repository,
+      model_revision: preset.provenance.revision,
+      preset_key: preset.preset_id,
+      language: preset.language,
+      quality_state: "pending",
+      activation_basis: "explicit_official_preset_selection",
+      validation_basis: "not_required",
+      rights: {
+        ...uploadedVersion().rights,
+        source_kind: "official_preset",
+        voice_cloning: false,
+        subject_consent_recorded: false,
+      },
+      official_preset: preset.provenance,
+      reference_asset_id: null,
+      locked_at: null,
+    };
+    const profile = {
+      ...draftProfile(),
+      status: "active",
+      current_version_id: VERSION_ID,
+      versions: [version],
+    };
+    const settings = {
+      ...settingsResource(),
+      settings_id: ASSET_ID,
+      exists: true,
+      version: 1,
+      values: {
+        ...settingsValues(),
+        narrator: { profile_id: PROFILE_ID, version_id: VERSION_ID },
+      },
+      updated_at: NOW,
+    };
+    fetchMock.mockResolvedValueOnce(response({
+      contract_version: "official-voice-selection/1.0",
+      replayed: false,
+      selection_still_current: true,
+      frozen_result: {
+        command_id: RIGHTS_ID,
+        preset_id: preset.preset_id,
+        target_kind: "narrator",
+        character_id: null,
+        profile_id: PROFILE_ID,
+        version_id: VERSION_ID,
+        settings_version: 1,
+        binding_version: null,
+        target_language: "zh-CN",
+        language_mismatch: false,
+        completed_at: NOW,
+      },
+      profile,
+      current_settings: settings,
+      current_character_binding: null,
+    }));
+
+    const selected = await selectOfficialVoice(
+      NOVEL_ID,
+      {
+        preset_id: "onnx.Junhao",
+        target_kind: "narrator",
+        character_id: null,
+        expected_settings_version: 0,
+        expected_binding_version: null,
+      },
+      "official-select-0001",
+    );
+
+    expect(selected.frozen_result.version_id).toBe(VERSION_ID);
+    const [path, init] = fetchMock.mock.calls[0]!;
+    expect(path).toBe(`/ai-novel-world-2026/novels/${NOVEL_ID}/official-voice-selections`);
+    expect((init?.headers as Record<string, string>)["Idempotency-Key"]).toBe("official-select-0001");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      preset_id: "onnx.Junhao",
+      target_kind: "narrator",
+      expected_settings_version: 0,
+    });
+
+    fetchMock.mockResolvedValueOnce(response({
+      contract_version: "official-voice-selection/1.0",
+      replayed: true,
+      selection_still_current: false,
+      frozen_result: selected.frozen_result,
+      profile,
+      current_settings: {
+        ...settings,
+        version: 2,
+        values: { ...settings.values, narrator: null },
+      },
+      current_character_binding: null,
+    }));
+    const replayed = await selectOfficialVoice(
+      NOVEL_ID,
+      {
+        preset_id: "onnx.Junhao",
+        target_kind: "narrator",
+        character_id: null,
+        expected_settings_version: 0,
+        expected_binding_version: null,
+      },
+      "official-select-0001",
+    );
+    expect(replayed.replayed).toBe(true);
+    expect(replayed.selection_still_current).toBe(false);
+    expect(replayed.current_settings?.version).toBe(2);
   });
 
   it("uses the PawApp namespace and validates every JSON response", async () => {
@@ -515,6 +646,25 @@ describe("narration settings API client", () => {
     });
     expect(String(init?.body)).not.toContain("owner_id");
     expect(String(init?.body)).not.toContain("workspace_id");
+  });
+
+  it("patches only playback preferences with the current settings version", async () => {
+    fetchMock.mockResolvedValue(response(settingsResource()));
+
+    await putNarrationPlaybackPreferences(NOVEL_ID, {
+      expected_version: 4,
+      playback: { playback_rate: 1.5, volume: 0.35 },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      `/ai-novel-world-2026/novels/${NOVEL_ID}/narration-settings/playback-preferences`,
+    );
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      expected_version: 4,
+      playback: { playback_rate: 1.5, volume: 0.35 },
+    });
   });
 
   it("requires a stable idempotency key for profile creation", async () => {
@@ -730,6 +880,29 @@ describe("chapter narration production API client", () => {
       edition_id: CHAPTER_TARGET_EDITION_ID,
     })));
     await expect(getNarrationEdition(CHAPTER_EDITION_ID)).rejects.toThrow(/edition_id/u);
+  });
+
+  it("loads frozen Edition voice identities from the dedicated versioned route", async () => {
+    fetchMock.mockResolvedValue(response({
+      contract_version: "narration-edition-voice-identities/1",
+      edition_id: CHAPTER_EDITION_ID,
+      items: [{
+        profile_id: CHAPTER_PROFILE_ID,
+        voice_version_id: CHAPTER_VOICE_VERSION_ID,
+        display_name: "小雨",
+        source_type: "preset",
+        preset_id: "onnx.Xiaoyu",
+        resolution_contract_version: "narration-edition-resolution/2",
+        legacy_fallback: false,
+      }],
+    }));
+
+    const identities = await getNarrationEditionVoiceIdentities(CHAPTER_EDITION_ID);
+
+    expect(identities.items[0]?.display_name).toBe("小雨");
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `/ai-novel-world-2026/narration-editions/${CHAPTER_EDITION_ID}/voice-identities`,
+    );
   });
 
   it("rejects Context nested drift before the workbench can consume it", async () => {

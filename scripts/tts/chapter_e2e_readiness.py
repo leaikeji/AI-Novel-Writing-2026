@@ -82,7 +82,7 @@ from scripts.tts.validate_chapter_e2e import (  # noqa: E402
 
 ATTESTATION_SCHEMA: Final = "moss-tts-t4k-readiness-attestation/1.1"
 REPORT_SCHEMA: Final = "moss-tts-t4k-readiness-report/1.1"
-EXPECTED_DATABASE_REVISION: Final = "20260829_0029"
+EXPECTED_DATABASE_REVISION: Final = "20260829_0032"
 FIXTURE_PATH: Final = (
     REPOSITORY_ROOT / "tests/fixtures/narration/chapter-e2e-v3.json"
 )

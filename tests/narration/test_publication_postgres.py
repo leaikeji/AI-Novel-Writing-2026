@@ -262,6 +262,8 @@ def _seed_scope_foundation(
         parameters_json={},
         fingerprint=hashlib.sha256(uuid4().bytes).hexdigest(),
         quality_state="accepted",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted",
         locked_actor="owner",
         locked_at=NOW,
     )

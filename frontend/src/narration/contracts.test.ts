@@ -10,8 +10,6 @@ import {
   OFFICIAL_PRESET_EVIDENCE,
   OFFICIAL_PRESET_IDS,
   OFFICIAL_PRESET_MANIFEST_IDENTITY,
-  PRODUCT_OFFICIAL_PRESET_EVIDENCE,
-  PRODUCT_OFFICIAL_PRESET_IDS,
   T4_PRODUCT_CAPABILITY_KEYS,
   NarrationContractError,
   parseOfficialPresetCatalogResponse,
@@ -36,18 +34,27 @@ const CHARACTER_ID = "10000000-0000-4000-8000-000000000005";
 const ASSET_ID = "10000000-0000-4000-8000-000000000006";
 const NOW = "2026-08-26T12:00:00Z";
 function officialCatalog(
-  evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = PRODUCT_OFFICIAL_PRESET_EVIDENCE,
+  evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = OFFICIAL_PRESET_EVIDENCE,
 ) {
   return {
-    schema_version: "moss-tts-official-preset-catalog/1.0",
-    items: evidenceRows.map((evidence) => {
+    schema_version: "moss-tts-official-preset-catalog/2.0",
+    items: evidenceRows.map((evidence, index) => {
+      const presetLanguage = index < 6 ? "zh-CN" : index < 11 ? "en" : "ja-JP";
       return {
         preset_id: evidence.presetId,
         display_name: evidence.manifestVoice,
         group: "Official",
-        language: "zh-CN",
+        language: presetLanguage,
         local_use_status: "available",
         commercial_distribution_status: "not_evaluated",
+        validation_tier: ["Junhao", "Zhiming", "Xiaoyu"].includes(evidence.manifestVoice)
+          ? "canonical_chapter_verified"
+          : "pinned_catalog_unreviewed",
+        language_scope: presetLanguage,
+        selectable_now: true,
+        previewable_now: true,
+        renderable_existing: true,
+        usage_notice: "private_local_writing_tool",
         provenance: {
           schema_version: "moss-tts-official-preset-provenance/1.0",
           repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
@@ -206,6 +213,8 @@ function lockedVersion() {
     language: "zh-CN",
     fingerprint: "c".repeat(64),
     quality_state: "accepted",
+    activation_basis: "preview_confirmed",
+    validation_basis: "human_accepted",
     rights: rights(),
     official_preset: null,
     reference_asset_id: ASSET_ID,
@@ -234,12 +243,12 @@ function profile() {
 }
 
 describe("narration T2 wire contract", () => {
-  it("accepts exactly the six product presets and rejects outer catalog drift", () => {
+  it("accepts exactly all 18 pinned presets and rejects outer catalog drift", () => {
     const parsed = parseOfficialPresetCatalogResponse(officialCatalog());
-    expect(parsed.items).toHaveLength(6);
-    expect(parsed.items.map((item) => item.preset_id)).toEqual(PRODUCT_OFFICIAL_PRESET_IDS);
+    expect(parsed.items).toHaveLength(18);
+    expect(parsed.items.map((item) => item.preset_id)).toEqual(OFFICIAL_PRESET_IDS);
     expect(parsed.items.map((item) => item.preset_id)).toContain("onnx.Xiaoyu");
-    expect(parsed.items.map((item) => item.preset_id)).not.toContain("onnx.Trump");
+    expect(parsed.items.map((item) => item.preset_id)).toContain("onnx.Trump");
     expect(OFFICIAL_PRESET_IDS).toHaveLength(18);
     expect(OFFICIAL_PRESET_IDS).toContain("onnx.Trump");
     expect(parsed.items.every((item) => item.local_use_status === "available")).toBe(true);
@@ -247,11 +256,7 @@ describe("narration T2 wire contract", () => {
 
     const incomplete = officialCatalog();
     incomplete.items.pop();
-    expect(() => parseOfficialPresetCatalogResponse(incomplete)).toThrow(/exact 6-item/);
-
-    expect(() => parseOfficialPresetCatalogResponse(
-      officialCatalog(OFFICIAL_PRESET_EVIDENCE),
-    )).toThrow(/exact 6-item/);
+    expect(() => parseOfficialPresetCatalogResponse(incomplete)).toThrow(/exact 18-item/);
 
     const leakedCodes = officialCatalog();
     Object.assign(leakedCodes.items[0].provenance, { prompt_audio_codes: [[1, 2]] });
@@ -313,6 +318,8 @@ describe("narration T2 wire contract", () => {
         source_type: "preset",
         state: "locked" as const,
         quality_state: "accepted" as const,
+        activation_basis: "preview_confirmed" as const,
+        validation_basis: "human_accepted" as const,
         preset_key: preset.preset_id,
         rights: {
           ...rights(),
@@ -329,6 +336,8 @@ describe("narration T2 wire contract", () => {
       source_type: "preset",
       state: "locked" as const,
       quality_state: "accepted" as const,
+      activation_basis: "preview_confirmed" as const,
+      validation_basis: "human_accepted" as const,
       preset_key: xiaoyu.preset_id,
       rights: {
         ...rights(),

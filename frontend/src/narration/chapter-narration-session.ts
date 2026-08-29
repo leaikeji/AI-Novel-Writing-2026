@@ -1,11 +1,19 @@
 import {
   getDocumentNarrationContext,
   getNarrationEdition,
+  getNarrationEditionVoiceIdentities,
+  getNarrationSettings,
+  NarrationApiError,
+  putNarrationPlaybackPreferences,
 } from "./api";
 import type {
   DocumentNarrationContext,
   NarrationEditionResource,
+  NarrationEditionVoiceIdentitiesResource,
 } from "./chapter-contracts";
+import type {
+  NarrationPlaybackPreferences,
+} from "./contracts";
 import {
   createChapterPlaybackCoordinator,
   type ChapterPlaybackCoordinator,
@@ -105,6 +113,9 @@ export interface ChapterNarrationBundle {
   readonly bridgeSegments: readonly NarrationSourceSegment[];
   readonly paragraphs: readonly NarrationParagraphDescriptor[];
   readonly segmentById: ReadonlyMap<string, ChapterNarrationBundleSegment>;
+  readonly playbackPreferences: NarrationPlaybackPreferences;
+  readonly settingsVersion: number;
+  readonly voiceIdentities: NarrationEditionVoiceIdentitiesResource;
 }
 
 
@@ -138,6 +149,9 @@ interface ChapterNarrationNetworkDependencies {
   readonly prepareNarrationRange: typeof prepareNarrationRange;
   readonly getNarrationPlaybackProgress: typeof getNarrationPlaybackProgress;
   readonly putNarrationPlaybackProgress: typeof putNarrationPlaybackProgress;
+  readonly getNarrationSettings?: typeof getNarrationSettings;
+  readonly putNarrationPlaybackPreferences?: typeof putNarrationPlaybackPreferences;
+  readonly getNarrationEditionVoiceIdentities?: typeof getNarrationEditionVoiceIdentities;
 }
 
 
@@ -159,6 +173,9 @@ const DEFAULT_NETWORK: ChapterNarrationNetworkDependencies = Object.freeze({
   prepareNarrationRange,
   getNarrationPlaybackProgress,
   putNarrationPlaybackProgress,
+  getNarrationSettings,
+  putNarrationPlaybackPreferences,
+  getNarrationEditionVoiceIdentities,
 });
 
 
@@ -588,6 +605,9 @@ function assembleBundle(
   edition: NarrationEditionResource,
   script: ScriptReviewResource,
   manifest: NarrationManifestV2,
+  playbackPreferences: NarrationPlaybackPreferences,
+  settingsVersion: number,
+  voiceIdentities: NarrationEditionVoiceIdentitiesResource,
 ): ChapterNarrationBundle {
   validateScript(context, edition, script);
   validateManifestIdentity(context, edition, script, manifest, { initial: true });
@@ -617,7 +637,16 @@ function assembleBundle(
     "CONTRACT_MISMATCH",
   );
   const mapped = buildSegments(edition, script, manifest);
-  return Object.freeze({ context, edition, script, manifest, ...mapped });
+  return Object.freeze({
+    context,
+    edition,
+    script,
+    manifest,
+    ...mapped,
+    playbackPreferences,
+    settingsVersion,
+    voiceIdentities,
+  });
 }
 
 
@@ -645,6 +674,26 @@ async function loadBundleWithDependencies(
   );
   ensureGenerationCurrent(options);
   validateEdition(context, edition, activeEditionId);
+  let playbackPreferences: NarrationPlaybackPreferences = Object.freeze({
+    playback_rate: 1,
+    volume: 1,
+  });
+  let settingsVersion = 0;
+  if (dependencies.getNarrationSettings) {
+    const settings = await dependencies.getNarrationSettings(options.novelId, options.signal);
+    if (settings.novel_id !== options.novelId) {
+      fail("SCOPE_MISMATCH", "narration settings belong to another novel");
+    }
+    playbackPreferences = settings.values.playback;
+    settingsVersion = settings.version;
+  }
+  const voiceIdentities = dependencies.getNarrationEditionVoiceIdentities
+    ? await dependencies.getNarrationEditionVoiceIdentities(activeEditionId, options.signal)
+    : Object.freeze({
+        contract_version: "narration-edition-voice-identities/1" as const,
+        edition_id: activeEditionId,
+        items: Object.freeze([]),
+      });
   const expectedScope = scriptScope(context);
   const script = await dependencies.getNarrationScriptVersionForEdition(
     edition.script_version_id,
@@ -669,7 +718,15 @@ async function loadBundleWithDependencies(
   );
   return Object.freeze({
     status: "ready",
-    bundle: assembleBundle(context, edition, script, manifestResult.manifest),
+    bundle: assembleBundle(
+      context,
+      edition,
+      script,
+      manifestResult.manifest,
+      playbackPreferences,
+      settingsVersion,
+      voiceIdentities,
+    ),
   });
 }
 
@@ -721,6 +778,10 @@ export interface ChapterNarrationSessionOptions {
   readonly bridge: NarrationEditorBridge;
   readonly isGenerationCurrent: (documentId: string, generation: number) => boolean;
   readonly onState?: (snapshot: ChapterNarrationSessionSnapshot) => void;
+  readonly onPlaybackPreferenceStatus?: (
+    status: "saving" | "saved" | "conflict" | "error",
+    message?: string,
+  ) => void;
   readonly pollScheduleMs?: readonly number[];
   readonly pollTimeoutMs?: number;
   readonly maxPollAttempts?: number;
@@ -743,6 +804,7 @@ export interface ChapterNarrationSession {
   pause(): void;
   resume(): Promise<ChapterNarrationSessionPlayResult>;
   setRate(rate: number): void;
+  setVolume(volume: number): void;
   noteAuthorInteraction(interruption: AuthorFollowInterruption): boolean;
   noteWorkingCopyChanged(): boolean;
   resumeFollow(): boolean;
@@ -821,6 +883,10 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
   private progressSaveInFlight = false;
   private readonly progressCasTokens = new Map<string, string | null>();
   private disposed = false;
+  private settingsVersion = 0;
+  private preferenceSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private preferenceSaveInFlight = false;
+  private pendingPlaybackPreferences: NarrationPlaybackPreferences | null = null;
   private snapshot: ChapterNarrationSessionSnapshot = frozenSnapshot({
     phase: "idle",
     loadResult: null,
@@ -1000,6 +1066,15 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
   setRate(rate: number): void {
     this.assertReady();
     this.currentPlayer?.setRate(rate);
+    this.schedulePlaybackPreferenceSave();
+  }
+
+  setVolume(volume: number): void {
+    this.assertReady();
+    const player = this.currentPlayer;
+    if (!player) fail("SESSION_NOT_READY", "session player volume is unavailable");
+    player.setVolume(volume);
+    this.schedulePlaybackPreferenceSave();
   }
 
   noteAuthorInteraction(interruption: AuthorFollowInterruption): boolean {
@@ -1041,6 +1116,9 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
     this.loadAbort?.abort("disposed");
     this.loadAbort = null;
     this.cancelPolling();
+    if (this.preferenceSaveTimer !== null) clearTimeout(this.preferenceSaveTimer);
+    this.preferenceSaveTimer = null;
+    this.pendingPlaybackPreferences = null;
     this.teardownRuntime();
     this.publish({
       phase: "disposed",
@@ -1095,7 +1173,10 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
       documentGeneration: this.options.generation,
       editionId: bundle.edition.edition_id,
       initialManifest: bundle.manifest,
-      rate: restoredProgress ? restoredProgress.playback_rate_millis / 1_000 : 1,
+      rate: restoredProgress
+        ? restoredProgress.playback_rate_millis / 1_000
+        : bundle.playbackPreferences.playback_rate,
+      initialVolume: bundle.playbackPreferences.volume,
       initialPosition: restoredProgress ? {
         segmentId: restoredProgress.segment_id,
         ordinal: restoredProgress.ordinal,
@@ -1109,6 +1190,7 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
       prepareRange: this.dependencies.prepareNarrationRange,
     });
     this.currentBundle = bundle;
+    this.settingsVersion = bundle.settingsVersion;
     this.currentPlayer = player;
     const fence = (lease: PlaybackLease) => this.isPlaybackFenceCurrent(lease);
     this.currentCoordinator = createChapterPlaybackCoordinator({
@@ -1377,7 +1459,7 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
     ) return;
     const offsetMs = Math.max(0, Math.min(segment.audio.duration_ms, Math.round(state.offsetMs)));
     const playbackRateMillis = Math.round(state.rate * 1_000);
-    if (playbackRateMillis < 250 || playbackRateMillis > 4_000) return;
+    if (playbackRateMillis < 500 || playbackRateMillis > 3_000) return;
     this.pendingProgressSave = Object.freeze({
       runtimeEpoch: this.runtimeEpoch,
       editionId: bundle.edition.edition_id,
@@ -1399,6 +1481,87 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
       this.progressSaveTimer = null;
       void this.pumpProgressSave();
     }, PROGRESS_SAVE_DEBOUNCE_MS);
+  }
+
+  private schedulePlaybackPreferenceSave(): void {
+    const player = this.currentPlayer;
+    if (!player) return;
+    const state = player.readState();
+    this.pendingPlaybackPreferences = Object.freeze({
+      playback_rate: state.rate,
+      volume: state.volume,
+    });
+    this.options.onPlaybackPreferenceStatus?.("saving");
+    if (this.preferenceSaveTimer !== null) clearTimeout(this.preferenceSaveTimer);
+    this.preferenceSaveTimer = setTimeout(() => {
+      this.preferenceSaveTimer = null;
+      void this.pumpPlaybackPreferenceSave();
+    }, PROGRESS_SAVE_DEBOUNCE_MS);
+  }
+
+  private async pumpPlaybackPreferenceSave(): Promise<void> {
+    if (this.preferenceSaveInFlight || this.disposed) return;
+    const preferences = this.pendingPlaybackPreferences;
+    const putPreferences = this.dependencies.putNarrationPlaybackPreferences;
+    if (!preferences || !putPreferences) {
+      this.pendingPlaybackPreferences = null;
+      this.options.onPlaybackPreferenceStatus?.(
+        "error",
+        "播放偏好保存服务尚未接入。",
+      );
+      return;
+    }
+    this.pendingPlaybackPreferences = null;
+    this.preferenceSaveInFlight = true;
+    try {
+      const updated = await putPreferences(this.options.novelId, {
+        expected_version: this.settingsVersion,
+        playback: preferences,
+      });
+      if (updated.novel_id !== this.options.novelId) {
+        fail("SCOPE_MISMATCH", "saved narration settings belong to another novel");
+      }
+      this.settingsVersion = updated.version;
+      if (this.pendingPlaybackPreferences === null) {
+        this.options.onPlaybackPreferenceStatus?.("saved");
+      }
+    } catch (reason) {
+      if (
+        reason instanceof NarrationApiError
+        && reason.detail.code === "VERSION_CONFLICT"
+        && this.dependencies.getNarrationSettings
+      ) {
+        try {
+          const current = await this.dependencies.getNarrationSettings(this.options.novelId);
+          if (current.novel_id !== this.options.novelId) {
+            fail("SCOPE_MISMATCH", "refreshed narration settings belong to another novel");
+          }
+          this.settingsVersion = current.version;
+          this.pendingPlaybackPreferences = null;
+          this.currentPlayer?.setRate(current.values.playback.playback_rate);
+          this.currentPlayer?.setVolume(current.values.playback.volume);
+          this.options.onPlaybackPreferenceStatus?.(
+            "conflict",
+            "播放偏好已被其他操作更新，已重新读取当前值。",
+          );
+        } catch (refreshReason) {
+          this.options.onPlaybackPreferenceStatus?.(
+            "error",
+            refreshReason instanceof Error ? refreshReason.message : String(refreshReason),
+          );
+        }
+      } else {
+        this.options.onPlaybackPreferenceStatus?.(
+          "error",
+          reason instanceof Error ? reason.message : String(reason),
+        );
+      }
+    } finally {
+      this.preferenceSaveInFlight = false;
+      if (this.pendingPlaybackPreferences !== null && !this.disposed) {
+        void this.pumpPlaybackPreferenceSave();
+      }
+    }
   }
 
   private flushProgressSave(): void {

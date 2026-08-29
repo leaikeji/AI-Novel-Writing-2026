@@ -94,6 +94,8 @@ def _voice(
         parameters_json={},
         fingerprint=text_sha256(name),
         quality_state="accepted",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted",
         locked_actor="owner",
         locked_at=NOW,
     )

@@ -252,6 +252,8 @@ def voice_rows() -> tuple[VoiceProfile, VoiceProfileVersion, VoiceRightsRecord]:
         parameters_json={},
         fingerprint="a" * 64,
         quality_state="accepted",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted",
         locked_actor="local-owner",
         locked_at=NOW,
         created_at=NOW,
@@ -606,6 +608,61 @@ def test_settings_cas_noop_and_cloud_requires_active_consent() -> None:
                 operation=NarrationSettingsOperation.PUT_SETTINGS,
                 novel_id=NOVEL_ID,
                 payload=settings_request(expected_version=1),
+            )
+        )
+
+
+def test_playback_preferences_patch_preserves_other_settings_and_uses_cas() -> None:
+    store = MemoryStore(novel())
+    backend = authorized_backend(
+        store,
+        capabilities=enabled_capabilities(
+            wire.CapabilityKey.NARRATION_PRODUCT,
+            wire.CapabilityKey.READING_SETTINGS,
+        ),
+    )
+    created = backend.dispatch(
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.PUT_SETTINGS,
+            novel_id=NOVEL_ID,
+            payload=settings_request(),
+        )
+    )
+    original = created.values
+
+    updated = backend.dispatch(
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES,
+            novel_id=NOVEL_ID,
+            payload=wire.UpdateNarrationPlaybackPreferencesRequest(
+                expected_version=created.version,
+                playback=wire.NarrationPlaybackPreferences(
+                    playback_rate=1.5,
+                    volume=0.35,
+                ),
+            ),
+        )
+    )
+
+    assert updated.version == created.version + 1
+    assert updated.values.playback == wire.NarrationPlaybackPreferences(
+        playback_rate=1.5,
+        volume=0.35,
+    )
+    assert updated.values.model_copy(update={"playback": original.playback}) == original
+
+    with pytest.raises(NarrationCasConflict):
+        backend.dispatch(
+            NarrationSettingsApiCommand(
+                operation=NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES,
+                novel_id=NOVEL_ID,
+                payload=wire.UpdateNarrationPlaybackPreferencesRequest(
+                    expected_version=created.version,
+                    playback=wire.NarrationPlaybackPreferences(
+                        playback_rate=0.75,
+                        volume=0.8,
+                    ),
+                ),
             )
         )
 
@@ -1300,7 +1357,7 @@ def test_runtime_projection_requires_both_release_and_ready_evidence_for_product
     )
 
 
-def test_dispatcher_owns_exact_30_operations_and_preserves_specific_holds() -> None:
+def test_dispatcher_owns_exact_32_operations_and_preserves_specific_holds() -> None:
     owned = (
         READING_PRIVACY_OPERATIONS
         | VoiceSettingsHandler.operations
@@ -1313,7 +1370,7 @@ def test_dispatcher_owns_exact_30_operations_and_preserves_specific_holds() -> N
         }
     )
     assert owned == set(NarrationSettingsOperation)
-    assert len(owned) == 30
+    assert len(owned) == 32
 
     store = MemoryStore(novel())
     blocked = authorized_backend(store)

@@ -244,6 +244,8 @@ def seeded_profile(
         parameters_json={},
         fingerprint=SHA_A,
         quality_state="accepted" if locked else "pending",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted" if locked else "pending",
         locked_actor="local-owner" if locked else None,
         locked_at=NOW if locked else None,
         created_at=NOW,
@@ -810,6 +812,7 @@ def test_lock_rechecks_rights_then_source_gate_without_mutating_version() -> Non
 def test_handler_owns_exact_frozen_voice_operations_only() -> None:
     expected = {
         NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
+        NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
         NarrationSettingsOperation.LIST_VOICE_PROFILES,
         NarrationSettingsOperation.CREATE_VOICE_PROFILE,
         NarrationSettingsOperation.GET_VOICE_PROFILE,
@@ -828,6 +831,47 @@ def test_handler_owns_exact_frozen_voice_operations_only() -> None:
         VoiceSettingsHandler(MemoryStore()).dispatch(NarrationSettingsApiCommand(
             operation=NarrationSettingsOperation.GET_SETTINGS,
         ))
+
+
+def test_handler_dispatches_official_selection_only_through_independent_port() -> None:
+    class RecordingSelectionPort:
+        def __init__(self) -> None:
+            self.calls: list[tuple[UUID, object, str]] = []
+
+        def select_official_voice(
+            self,
+            *,
+            novel_id: UUID,
+            request: wire.OfficialVoiceSelectionRequest,
+            idempotency_key: str,
+        ) -> object:
+            self.calls.append((novel_id, request, idempotency_key))
+            return "selected"
+
+    store = MemoryStore()
+    book = novel()
+    store.add(book)
+    payload = wire.OfficialVoiceSelectionRequest(
+        preset_id="onnx.Trump",
+        target_kind="narrator",
+        expected_settings_version=0,
+    )
+    command = NarrationSettingsApiCommand(
+        operation=NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
+        novel_id=book.id,
+        payload=payload,
+        idempotency_key="official-select-0001",
+    )
+    with pytest.raises(NarrationApiFault) as unavailable:
+        VoiceSettingsHandler(store).dispatch(command)
+    assert unavailable.value.code is wire.NarrationErrorCode.VOICE_SOURCE_UNAVAILABLE
+
+    port = RecordingSelectionPort()
+    assert VoiceSettingsHandler(
+        store,
+        official_voice_selection=port,  # type: ignore[arg-type]
+    ).dispatch(command) == "selected"
+    assert port.calls == [(book.id, payload, "official-select-0001")]
 
 
 def test_handler_fails_closed_without_durable_profile_creation_receipts() -> None:

@@ -37,11 +37,13 @@ from ..models import (
 from . import schemas as wire
 from .contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
 from .official_presets import (
-    PRODUCT_OFFICIAL_PRESETS,
+    OFFICIAL_PRESETS,
     PRODUCT_PRESET_OUT_OF_SCOPE,
     ProductPresetOutOfScope,
+    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    official_preset_validation_tier,
     require_product_official_preset,
-    validate_official_preset_provenance,
+    validate_official_version_evidence,
 )
 from .services import (
     InvalidNarrationState,
@@ -73,6 +75,7 @@ VOICE_SETTINGS_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
     {
         NarrationSettingsOperation.LIST_VOICE_PROFILES,
         NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
+        NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
         NarrationSettingsOperation.CREATE_VOICE_PROFILE,
         NarrationSettingsOperation.GET_VOICE_PROFILE,
         NarrationSettingsOperation.PUT_VOICE_PROFILE,
@@ -193,6 +196,18 @@ class VoiceProductPort(Protocol):
     ) -> wire.VoiceProfileResource: ...
 
 
+class OfficialVoiceSelectionPort(Protocol):
+    """Independent-transaction port for one-click official voice selection."""
+
+    def select_official_voice(
+        self,
+        *,
+        novel_id: UUID,
+        request: wire.OfficialVoiceSelectionRequest,
+        idempotency_key: str,
+    ) -> wire.OfficialVoiceSelectionResponse: ...
+
+
 def _required_idempotency_key(value: str | None) -> str:
     if value is None or not _IDEMPOTENCY_KEY.fullmatch(value):
         raise NarrationServiceError("idempotency key is outside the frozen format")
@@ -309,19 +324,18 @@ def _required_rights(
     ):
         raise InvalidNarrationState("voice source and rights provenance disagree")
     if rights.source_kind == "official_preset":
-        parameters = version.parameters_json
-        if type(parameters) is not dict:
-            raise InvalidNarrationState("official preset version parameters are malformed")
         try:
-            preset = validate_official_preset_provenance(
-                parameters.get("official_preset")
+            validate_official_version_evidence(
+                version,
+                rights,
+                expected_model_fingerprint=(
+                    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
+                ),
             )
         except ValueError as error:
             raise InvalidNarrationState(
-                "official preset provenance disagrees with pinned manifest"
+                "official preset evidence disagrees with pinned policy"
             ) from error
-        if version.preset_key != preset.preset_id:
-            raise InvalidNarrationState("official preset version identity is inconsistent")
     return rights
 
 
@@ -492,6 +506,8 @@ def voice_profile_resource(
                 language=version.language,
                 fingerprint=version.fingerprint,
                 quality_state=version.quality_state,
+                activation_basis=version.activation_basis,
+                validation_basis=version.validation_basis,
                 rights=_rights_resource(store, profile, version, now=now),
                 official_preset=(
                     version.parameters_json.get("official_preset")
@@ -555,11 +571,7 @@ def list_voice_profiles(
 
 
 def list_official_presets() -> wire.OfficialPresetCatalogResponse:
-    """Return the six current product presets without codes or audio.
-
-    The complete 18-row pinned inventory remains available through the
-    low-level official-presets module for runtime verification and provenance.
-    """
+    """Return all 18 pinned presets without prompt codes or audio locators."""
 
     return wire.OfficialPresetCatalogResponse(
         items=[
@@ -570,9 +582,14 @@ def list_official_presets() -> wire.OfficialPresetCatalogResponse:
                 language=preset.language,
                 local_use_status="available",
                 commercial_distribution_status="not_evaluated",
+                validation_tier=official_preset_validation_tier(preset.preset_id),
+                language_scope=preset.language,
+                selectable_now=True,
+                previewable_now=True,
+                renderable_existing=True,
                 provenance=preset.provenance(),
             )
-            for preset in PRODUCT_OFFICIAL_PRESETS
+            for preset in OFFICIAL_PRESETS
         ]
     )
 
@@ -1075,10 +1092,12 @@ class VoiceSettingsHandler:
         *,
         profile_creation_receipts: VoiceProfileCreationReceiptPort | None = None,
         voice_product: VoiceProductPort | None = None,
+        official_voice_selection: OfficialVoiceSelectionPort | None = None,
     ) -> None:
         self.store = store
         self.profile_creation_receipts = profile_creation_receipts
         self.voice_product = voice_product
+        self.official_voice_selection = official_voice_selection
 
     @classmethod
     def handles(cls, operation: NarrationSettingsOperation) -> bool:
@@ -1096,6 +1115,19 @@ class VoiceSettingsHandler:
         operation = command.operation
         if operation is NarrationSettingsOperation.LIST_OFFICIAL_PRESETS:
             return list_official_presets()
+        if operation is NarrationSettingsOperation.SELECT_OFFICIAL_VOICE:
+            if self.official_voice_selection is None:
+                raise NarrationApiFault(
+                    wire.NarrationErrorCode.VOICE_SOURCE_UNAVAILABLE,
+                    "官方音色直接选择服务尚未接线。",
+                    retryable=False,
+                    capability=wire.CapabilityKey.PRESET_VOICE_SOURCE,
+                )
+            return self.official_voice_selection.select_official_voice(
+                novel_id=_required_uuid(command.novel_id, "novel_id"),
+                request=_payload(command, wire.OfficialVoiceSelectionRequest),
+                idempotency_key=_required_idempotency_key(command.idempotency_key),
+            )
         if operation is NarrationSettingsOperation.LIST_VOICE_PROFILES:
             return list_voice_profiles(
                 self.store,
@@ -1270,6 +1302,7 @@ __all__ = [
     "VoiceProfileCreationReceipt",
     "VoiceProfileCreationReceiptPort",
     "VoiceProductPort",
+    "OfficialVoiceSelectionPort",
     "VoiceProfileNotFound",
     "VoiceSettingsHandler",
     "VoiceUploadValidationError",

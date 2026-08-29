@@ -14,9 +14,12 @@ import type {
   PronunciationProfileResource,
   PutPronunciationProfileRequest,
 } from "./contracts";
+import {
+  SUPPORTED_READING_LANGUAGES,
+  type SupportedReadingLanguage,
+} from "./reading-preferences-panel";
 
 
-const LANGUAGE_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/;
 const MUTATION_CAPABILITIES = ["narration_product", "reading_settings"] as const;
 
 
@@ -69,6 +72,9 @@ export interface PronunciationPanelProps {
   readonly onOpenReadingSettings?: () => void;
   readonly onSaved?: (profile: PronunciationProfileResource) => void;
   readonly onReturnFocus?: () => void;
+  readonly initialPreviewText?: string;
+  /** Only rendered when a real host preview action is wired. */
+  readonly onPreviewHits?: (preview: PronunciationHitPreview) => void;
 }
 
 
@@ -87,6 +93,29 @@ export interface PronunciationDraftEntry {
 export interface PronunciationDraftValidation {
   readonly valid: boolean;
   readonly errors: Readonly<Record<string, string>>;
+}
+
+
+export type PronunciationPriorityBand = "high" | "normal" | "low" | "custom";
+
+
+export interface PronunciationHit {
+  readonly clientKey: string;
+  readonly sourceText: string;
+  readonly action: PronunciationAction;
+  readonly spokenText: string | null;
+  readonly scopeKind: PronunciationDraftEntry["scopeKind"];
+  readonly scopeId: string;
+  readonly priority: number;
+}
+
+
+export interface PronunciationHitPreview {
+  readonly sourceText: string;
+  readonly normalizedText: string;
+  readonly scopeKind: PronunciationDraftEntry["scopeKind"];
+  readonly scopeId: string;
+  readonly hits: readonly PronunciationHit[];
 }
 
 
@@ -176,6 +205,74 @@ function scopeKey(kind: string, id: string): string {
 }
 
 
+export function pronunciationPriorityBand(priorityText: string): PronunciationPriorityBand {
+  const priority = Number(priorityText);
+  if (priority === 100) return "high";
+  if (priority === 0) return "normal";
+  if (priority === -100) return "low";
+  return "custom";
+}
+
+
+export function pronunciationPriorityForBand(
+  band: Exclude<PronunciationPriorityBand, "custom">,
+): string {
+  if (band === "high") return "100";
+  if (band === "low") return "-100";
+  return "0";
+}
+
+
+export function buildPronunciationHitPreview(
+  text: string,
+  drafts: readonly PronunciationDraftEntry[],
+  scope: Pick<PronunciationDraftEntry, "scopeKind" | "scopeId">,
+): PronunciationHitPreview {
+  const sourceText = text.slice(0, 500);
+  let normalizedText = sourceText.normalize("NFKC");
+  const hits = drafts
+    .filter((draft) => {
+      const source = draft.sourceText.trim().normalize("NFKC");
+      const priority = Number(draft.priorityText);
+      const inScope = draft.scopeKind === "novel"
+        || (draft.scopeKind === scope.scopeKind && draft.scopeId === scope.scopeId);
+      const actionValid = draft.action === "skip" || Boolean(draft.spokenText.trim());
+      return Boolean(source)
+        && inScope
+        && actionValid
+        && Number.isInteger(priority)
+        && priority >= -10_000
+        && priority <= 10_000
+        && normalizedText.includes(source);
+    })
+    .sort((left, right) => (
+      Number(right.priorityText) - Number(left.priorityText)
+      || right.sourceText.trim().length - left.sourceText.trim().length
+      || left.clientKey.localeCompare(right.clientKey)
+    ))
+    .map((draft): PronunciationHit => ({
+      clientKey: draft.clientKey,
+      sourceText: draft.sourceText.trim(),
+      action: draft.action,
+      spokenText: draft.action === "replace" ? draft.spokenText.trim() : null,
+      scopeKind: draft.scopeKind,
+      scopeId: draft.scopeId,
+      priority: Number(draft.priorityText),
+    }));
+  for (const hit of hits) {
+    const replacement = hit.action === "replace" ? hit.spokenText ?? "" : "";
+    normalizedText = normalizedText.split(hit.sourceText.normalize("NFKC")).join(replacement);
+  }
+  return {
+    sourceText,
+    normalizedText,
+    scopeKind: scope.scopeKind,
+    scopeId: scope.scopeId,
+    hits,
+  };
+}
+
+
 export function pronunciationDraftsFromProfile(
   profile: PronunciationProfileResource,
 ): readonly PronunciationDraftEntry[] {
@@ -209,8 +306,8 @@ export function validatePronunciationDrafts(
     if (!source || source.length > 160 || /[\u0000-\u001f\u007f]/.test(source)) {
       errors[`${prefix}:source`] = "原文必填，最多 160 字且不能含控制字符。";
     }
-    if (!LANGUAGE_PATTERN.test(draft.language.trim())) {
-      errors[`${prefix}:language`] = "请输入语言标签，例如 zh-CN。";
+    if (!SUPPORTED_READING_LANGUAGES.includes(draft.language.trim() as SupportedReadingLanguage)) {
+      errors[`${prefix}:language`] = "语言必须从中文、英语或日语中选择。";
     }
     if (draft.action === "replace") {
       const spoken = draft.spokenText.trim();
@@ -356,6 +453,8 @@ export function createPronunciationPanel(
 
   return function PronunciationPanel(props: PronunciationPanelProps): unknown {
     const [state, setState] = React.useState(() => initialState(props));
+    const [previewText, setPreviewText] = React.useState(props.initialPreviewText ?? "");
+    const [previewScopeKey, setPreviewScopeKey] = React.useState(scopeKey("novel", props.novelId));
     const stateRef = React.useRef(state);
     stateRef.current = state;
     const requestSequenceRef = React.useRef(0);
@@ -432,8 +531,10 @@ export function createPronunciationPanel(
 
     React.useEffect(() => {
       const controller = startLoad(false);
+      setPreviewText(props.initialPreviewText ?? "");
+      setPreviewScopeKey(scopeKey("novel", props.novelId));
       return () => controller?.abort();
-    }, [props.novelId, props.authorization.can_read]);
+    }, [props.novelId, props.authorization.can_read, props.initialPreviewText]);
 
     React.useEffect(() => () => {
       loadAbortRef.current?.abort();
@@ -578,6 +679,14 @@ export function createPronunciationPanel(
         label: `${item.kind === "volume" ? "分卷" : "章节"} · ${item.label}`,
       })),
     ];
+    const parsedPreviewScope = parseScope(previewScopeKey) ?? {
+      kind: "novel" as const,
+      id: props.novelId,
+    };
+    const preview = buildPronunciationHitPreview(previewText, drafts, {
+      scopeKind: parsedPreviewScope.kind,
+      scopeId: parsedPreviewScope.id,
+    });
 
     return h(
       "section",
@@ -719,13 +828,18 @@ export function createPronunciationPanel(
                   ),
                   h("label", null,
                     h("span", null, "语言"),
-                    h("input", {
-                      type: "text",
-                      maxLength: 40,
+                    h("select", {
                       value: draft.language,
                       "aria-invalid": Boolean(validation.errors[`${draft.clientKey}:language`]),
                       onChange: (event: ValueChangeEvent) => updateDraft(index, { language: event.target.value }),
-                    }),
+                    },
+                    !SUPPORTED_READING_LANGUAGES.includes(draft.language as SupportedReadingLanguage)
+                      ? h("option", { value: draft.language, disabled: true }, `旧值 ${draft.language}（请重新选择）`)
+                      : null,
+                    h("option", { value: "zh-CN" }, "中文（简体）"),
+                    h("option", { value: "en" }, "英语"),
+                    h("option", { value: "ja-JP" }, "日语"),
+                    ),
                   ),
                   h("label", null,
                     h("span", null, "作用范围"),
@@ -745,6 +859,31 @@ export function createPronunciationPanel(
                   ),
                   h("label", null,
                     h("span", null, "优先级"),
+                    h("select", {
+                      value: pronunciationPriorityBand(draft.priorityText),
+                      "aria-invalid": Boolean(validation.errors[`${draft.clientKey}:priority`]),
+                      onChange: (event: ValueChangeEvent) => {
+                        if (event.target.value === "custom") return;
+                        updateDraft(index, {
+                          priorityText: pronunciationPriorityForBand(
+                            event.target.value as Exclude<PronunciationPriorityBand, "custom">,
+                          ),
+                        });
+                      },
+                    },
+                    h("option", { value: "high" }, "高"),
+                    h("option", { value: "normal" }, "普通"),
+                    h("option", { value: "low" }, "低"),
+                    pronunciationPriorityBand(draft.priorityText) === "custom"
+                      ? h("option", { value: "custom", disabled: true }, "自定义（见高级）")
+                      : null,
+                    ),
+                  ),
+                ),
+                h("details", { className: "anw-pronunciation-panel__advanced" },
+                  h("summary", null, "高级：精确优先级"),
+                  h("label", null,
+                    h("span", null, "精确数值（-10000 到 10000）"),
                     h("input", {
                       type: "number",
                       min: -10_000,
@@ -768,6 +907,68 @@ export function createPronunciationPanel(
                 }, `移除规则 ${index + 1}`),
                 );
               }),
+            ),
+          ),
+          h("section", {
+            className: "anw-pronunciation-panel__preview",
+            "aria-labelledby": `${prefix}-preview-heading`,
+          },
+          h("div", { className: "anw-pronunciation-panel__section-heading" },
+            h("div", null,
+              h("h4", { id: `${prefix}-preview-heading` }, "发音命中预览"),
+              h("p", null, "在本地检查当前草稿会命中哪些规则；不上传正文，也不修改小说。"),
+            ),
+          ),
+          h("div", { className: "anw-pronunciation-panel__preview-controls" },
+            h("label", null,
+              h("span", null, "预览范围"),
+              h("select", {
+                value: previewScopeKey,
+                disabled: !scoped,
+                onChange: (event: ValueChangeEvent) => setPreviewScopeKey(event.target.value),
+              },
+              ...scopeOptions.map((option) => h("option", {
+                key: option.key,
+                value: option.key,
+              }, option.label)),
+              ),
+            ),
+            h("label", null,
+              h("span", null, "短句"),
+              h("textarea", {
+                rows: 3,
+                maxLength: 500,
+                value: previewText,
+                placeholder: "输入一小段文字，检查发音替换与不朗读规则是否命中",
+                onChange: (event: ValueChangeEvent) => setPreviewText(event.target.value),
+              }),
+            ),
+          ),
+          previewText.trim() === ""
+            ? h("p", { className: "anw-pronunciation-panel__empty" }, "输入短句后显示命中结果。")
+            : preview.hits.length === 0
+              ? h("p", { className: "anw-pronunciation-panel__empty", role: "status" }, "当前范围没有命中发音规则。")
+              : h("div", { className: "anw-pronunciation-panel__preview-result", role: "status" },
+                h("p", null, `命中 ${preview.hits.length} 条规则`),
+                h("ol", null,
+                  ...preview.hits.map((hit) => h("li", { key: hit.clientKey },
+                    h("strong", null, hit.sourceText),
+                    h("span", null, hit.action === "skip"
+                      ? " → 不朗读"
+                      : ` → ${hit.spokenText ?? ""}`),
+                    h("small", null, `优先级 ${hit.priority}`),
+                  )),
+                ),
+                h("p", null, `本地预览结果：${preview.normalizedText || "（全部跳过）"}`),
+              ),
+          props.onPreviewHits
+            ? h("button", {
+              type: "button",
+              disabled: previewText.trim() === "" || !validation.valid,
+              onClick: () => props.onPreviewHits?.(preview),
+            }, "试听命中结果")
+            : h("p", { className: "anw-pronunciation-panel__preview-note" },
+              "当前只提供命中预览；接入真实试听能力后才会显示试听按钮。",
             ),
           ),
           state.phase === "save-error"

@@ -15,9 +15,7 @@ import {
 import {
   buildNarrationSettingsReplacement,
   buildScopeOverrideReplacement,
-  createNarratorSettingsPanel,
   createReadingPage,
-  createScopeOverridesPanel,
   emptyScopeOverrideValues,
   narratorOptionsForNovel,
   readingSectionFromSearch,
@@ -29,6 +27,7 @@ import {
   type ReadingSectionRenderContext,
   type ReadingScopeTarget,
 } from "./reading-page";
+import type { ReadingSectionKey } from "./reading-overview";
 
 
 interface FakeElement {
@@ -432,7 +431,7 @@ describe("reading route and replacement contracts", () => {
 
 
 describe("reading page controller and navigation", () => {
-  it("loads overview and overrides together, then exposes seven semantic navigation items", async () => {
+  it("loads overview and overrides together, then exposes six semantic navigation items", async () => {
     const harness = createReactHarness();
     const api: ReadingPageApi = {
       getOverview: vi.fn(async () => overviewFixture()),
@@ -459,7 +458,7 @@ describe("reading page controller and navigation", () => {
     expect(buttons.filter((button) => button.props["aria-current"] === "page"))
       .toHaveLength(1);
 
-    const narrator = buttons.find((button) => textContent(button) === "旁白");
+    const narrator = buttons.find((button) => textContent(button) === "旁白与朗读");
     expect(narrator).toBeDefined();
     (narrator?.props.onClick as () => void)();
     tree = harness.render(ReadingPage, { novelId: NOVEL_ID, onSectionChange });
@@ -571,7 +570,7 @@ describe("reading page controller and navigation", () => {
     };
     const sharedContexts: ReadingSectionRenderContext[] = [];
     const renderSectionContent = vi.fn((
-      section: "characters" | "casting-rules" | "pronunciation" | "audio-cache",
+      section: Exclude<ReadingSectionKey, "overview" | "narrator">,
       context: ReadingSectionRenderContext,
     ) => {
       sharedContexts.push(context);
@@ -593,251 +592,9 @@ describe("reading page controller and navigation", () => {
     expect(renderSectionContent).toHaveBeenCalledWith("characters", expect.any(Object));
     expect(sharedContexts[0]?.overview).toBe(overview);
 
-    sharedContexts[0]?.onNavigate("audio-cache");
+    sharedContexts[0]?.onNavigate("storage-privacy");
     tree = harness.render(ReadingPage, props);
-    expect(tree.props["data-active-section"]).toBe("audio-cache");
-    expect(textContent(tree)).toContain("已汇合：audio-cache");
-  });
-});
-
-
-describe("narrator and scope panels", () => {
-  it("disables every narrator setting and exposes the stable gate reason", () => {
-    const harness = createReactHarness();
-    const Panel = createNarratorSettingsPanel(harness.React);
-    const onSave = vi.fn();
-    const tree = harness.render(Panel, {
-      novelId: NOVEL_ID,
-      resource: settingsResource(),
-      capability: capability("reading_settings"),
-      canConfigure: true,
-      saving: false,
-      narratorOptions: [],
-      characterOptions: [],
-      onSave,
-    });
-
-    const fieldsets = findAll(tree, (element) => element.type === "fieldset");
-    expect(fieldsets.length).toBeGreaterThan(0);
-    expect(fieldsets.every((item) => item.props.disabled === true)).toBe(true);
-    const save = findAll(tree, (element) => element.type === "button"
-      && textContent(element) === "保存作品旁白")[0];
-    expect(save.props.disabled).toBe(true);
-    expect(String(save.props.title)).toContain("T2_GATE_REQUIRED");
-    expect(onSave).not.toHaveBeenCalled();
-  });
-
-  it("renders a real empty scope state instead of inventing cross-novel targets", () => {
-    const harness = createReactHarness();
-    const Panel = createScopeOverridesPanel(harness.React);
-    const tree = harness.render(Panel, {
-      novelId: NOVEL_ID,
-      settings: settingsResource(),
-      capability: capability("reading_settings"),
-      canConfigure: true,
-      saving: false,
-      targets: [target("chapter", CHAPTER_ID, OTHER_NOVEL_ID)],
-      overrides: [],
-      narratorOptions: [],
-      onSave: vi.fn(),
-    });
-
-    expect(tree.props["data-reading-state"]).toBe("empty");
-    expect(textContent(tree)).toContain("没有可配置的分卷或章节");
-    expect(findAll(tree, (element) => element.type === "button")).toHaveLength(0);
-  });
-
-  it("submits one complete narrator value object only after an approved option is selected", () => {
-    const harness = createReactHarness();
-    const Panel = createNarratorSettingsPanel(harness.React);
-    const onSave = vi.fn();
-    const props = {
-      novelId: NOVEL_ID,
-      resource: settingsResource(),
-      capability: enabledCapability("reading_settings"),
-      canConfigure: true,
-      saving: false,
-      narratorOptions: [{
-        novelId: NOVEL_ID,
-        profileId: PROFILE_ID,
-        versionId: VERSION_ID,
-        label: "已锁定旁白 A",
-        locked: true,
-        rightsActive: true,
-      }] as const,
-      characterOptions: [],
-      onSave,
-    };
-    let tree = harness.render(Panel, props);
-    const voiceSelect = findAll(tree, (element) => element.type === "select")[0];
-    const languageInput = findAll(tree, (element) => element.type === "input"
-      && element.props.type === "text")[0];
-    (voiceSelect.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: `${PROFILE_ID}:${VERSION_ID}` },
-    });
-    (languageInput.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: "zh-Hans" },
-    });
-    tree = harness.render(Panel, props);
-    const save = findAll(tree, (element) => element.type === "button"
-      && textContent(element) === "保存作品旁白")[0];
-    (save.props.onClick as () => void)();
-
-    expect(save.props.disabled).toBe(false);
-    expect(onSave).toHaveBeenCalledOnce();
-    const values = onSave.mock.calls[0][0];
-    expect(values.narrator).toEqual({ profile_id: PROFILE_ID, version_id: VERSION_ID });
-    expect(values.language).toBe("zh-Hans");
-    expect(values.output_format).toBe("m4a_aac_lc");
-    expect(values.casting).toEqual(settingsResource().values.casting);
-  });
-
-  it("does not write a no-op or silently re-approve an unverified current narrator", () => {
-    const harness = createReactHarness();
-    const Panel = createNarratorSettingsPanel(harness.React);
-    const onSave = vi.fn();
-    const base = settingsResource();
-    const resource = {
-      ...base,
-      values: {
-        ...base.values,
-        narrator: { profile_id: PROFILE_ID, version_id: VERSION_ID },
-      },
-    };
-    const props = {
-      novelId: NOVEL_ID,
-      resource,
-      capability: enabledCapability("reading_settings"),
-      canConfigure: true,
-      saving: false,
-      narratorOptions: [],
-      characterOptions: [],
-      onSave,
-    };
-    let tree = harness.render(Panel, props);
-    let save = findAll(tree, (element) => element.type === "button"
-      && textContent(element) === "保存作品旁白")[0];
-
-    expect(save.props.disabled).toBe(true);
-    expect(textContent(tree)).toContain("资格待重新核验");
-    const voiceSelect = findAll(tree, (element) => element.type === "select")[0];
-    (voiceSelect.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: "" },
-    });
-    tree = harness.render(Panel, props);
-    save = findAll(tree, (element) => element.type === "button"
-      && textContent(element) === "保存作品旁白")[0];
-    expect(save.props.disabled).toBe(false);
-  });
-
-  it("disables a no-op scope write and fences old draft values while switching targets", () => {
-    const harness = createReactHarness();
-    const Panel = createScopeOverridesPanel(harness.React);
-    const props = {
-      novelId: NOVEL_ID,
-      settings: settingsResource(),
-      capability: enabledCapability("reading_settings"),
-      canConfigure: true,
-      saving: false,
-      targets: [target(), target("chapter", CHAPTER_ID)],
-      overrides: [overrideFixture()],
-      narratorOptions: [{
-        novelId: NOVEL_ID,
-        profileId: PROFILE_ID,
-        versionId: VERSION_ID,
-        label: "已核验旁白",
-        locked: true,
-        rightsActive: true,
-      }] as const,
-      characterOptions: [],
-      onSave: vi.fn(),
-    };
-    let tree = harness.render(Panel, props);
-    let save = findAll(tree, (element) => element.type === "button"
-      && textContent(element).includes("保存范围覆盖"))[0];
-    expect(save.props.disabled).toBe(true);
-
-    const targetSelect = findAll(tree, (element) => element.type === "select")[0];
-    (targetSelect.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: `chapter:${CHAPTER_ID}` },
-    });
-    tree = harness.render(Panel, props);
-    save = findAll(tree, (element) => element.type === "button")[0];
-    expect(save.props.disabled).toBe(true);
-  });
-
-  it("edits complete scope text rules instead of merely copying a frozen global value", () => {
-    const harness = createReactHarness();
-    const Panel = createScopeOverridesPanel(harness.React);
-    const onSave = vi.fn();
-    const props = {
-      novelId: NOVEL_ID,
-      settings: settingsResource(),
-      capability: enabledCapability("reading_settings"),
-      canConfigure: true,
-      saving: false,
-      targets: [target()],
-      overrides: [overrideFixture()],
-      narratorOptions: [{
-        novelId: NOVEL_ID,
-        profileId: PROFILE_ID,
-        versionId: VERSION_ID,
-        label: "已核验旁白",
-        locked: true,
-        rightsActive: true,
-      }] as const,
-      characterOptions: [{
-        novelId: NOVEL_ID,
-        characterId: CHARACTER_ID,
-        label: "林夏",
-      }],
-      onSave,
-    };
-    let tree = harness.render(Panel, props);
-    const ruleToggle = findAll(tree, (element) => element.type === "input"
-      && element.props.type === "checkbox")[1];
-    (ruleToggle.props.onChange as (event: { target: { checked: boolean } }) => void)({
-      target: { checked: true },
-    });
-    tree = harness.render(Panel, props);
-
-    expect(textContent(tree)).toContain("朗读章节标题");
-    expect(textContent(tree)).toContain("内心独白");
-    const save = findAll(tree, (element) => element.type === "button"
-      && textContent(element) === "保存范围覆盖")[0];
-    expect(save.props.disabled).toBe(false);
-  });
-
-  it("closes an existing scope override with its current CAS version and an empty replacement", () => {
-    const harness = createReactHarness();
-    const Panel = createScopeOverridesPanel(harness.React);
-    const onSave = vi.fn();
-    const props = {
-      novelId: NOVEL_ID,
-      settings: settingsResource(),
-      capability: enabledCapability("reading_settings"),
-      canConfigure: true,
-      saving: false,
-      targets: [target()],
-      overrides: [overrideFixture()],
-      narratorOptions: [],
-      onSave,
-    };
-    let tree = harness.render(Panel, props);
-    const enabledCheckbox = findAll(tree, (element) => element.type === "input"
-      && element.props.type === "checkbox")[0];
-    (enabledCheckbox.props.onChange as (event: { target: { checked: boolean } }) => void)({
-      target: { checked: false },
-    });
-    tree = harness.render(Panel, props);
-    const save = findAll(tree, (element) => element.type === "button"
-      && textContent(element) === "关闭并清空覆盖")[0];
-    (save.props.onClick as () => void)();
-
-    expect(onSave).toHaveBeenCalledWith(target(), {
-      expected_version: 4,
-      enabled: false,
-      overrides: emptyScopeOverrideValues(),
-    });
+    expect(tree.props["data-active-section"]).toBe("storage-privacy");
+    expect(textContent(tree)).toContain("已汇合：storage-privacy");
   });
 });

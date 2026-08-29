@@ -110,6 +110,7 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
 
   .anw-pronunciation-panel__pauses,
   .anw-pronunciation-panel__rules,
+  .anw-pronunciation-panel__preview,
   .anw-cache-panel__preview {
     min-width: 0;
     border: 1px solid var(--anw-line, #e7e9ee);
@@ -200,10 +201,11 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
 
   .anw-pronunciation-panel input,
   .anw-pronunciation-panel select,
+  .anw-pronunciation-panel textarea,
   .anw-pronunciation-panel button,
   .anw-cache-panel button {
     min-width: 0;
-    min-height: 42px;
+    min-height: 44px;
     border: 1px solid #cfd3dc;
     border-radius: 10px;
     padding: 8px 10px;
@@ -212,8 +214,14 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
   }
 
   .anw-pronunciation-panel input,
-  .anw-pronunciation-panel select {
+  .anw-pronunciation-panel select,
+  .anw-pronunciation-panel textarea {
     width: 100%;
+  }
+
+  .anw-pronunciation-panel textarea {
+    resize: vertical;
+    line-height: 1.55;
   }
 
   .anw-pronunciation-panel button,
@@ -232,6 +240,7 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
   .anw-pronunciation-panel button:focus-visible,
   .anw-pronunciation-panel input:focus-visible,
   .anw-pronunciation-panel select:focus-visible,
+  .anw-pronunciation-panel textarea:focus-visible,
   .anw-cache-panel button:focus-visible,
   .anw-cache-panel input:focus-visible {
     outline: 3px solid rgba(255, 93, 42, .28);
@@ -248,6 +257,78 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
   .anw-pronunciation-panel__remove {
     justify-self: start;
     color: #8d2424 !important;
+  }
+
+  .anw-pronunciation-panel__advanced {
+    border-radius: 9px;
+    background: var(--anw-panel-soft, #f6f7f9);
+  }
+
+  .anw-pronunciation-panel__advanced summary {
+    min-height: 44px;
+    padding: 11px 12px;
+    cursor: pointer;
+    color: var(--anw-ink, #17191f);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .anw-pronunciation-panel__advanced > label {
+    display: grid;
+    gap: 5px;
+    padding: 0 12px 12px;
+    color: var(--anw-ink, #17191f);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .anw-pronunciation-panel__preview-controls {
+    display: grid;
+    grid-template-columns: minmax(180px, .42fr) minmax(0, 1fr);
+    gap: 10px;
+    margin-top: 13px;
+  }
+
+  .anw-pronunciation-panel__preview-controls label {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+    color: var(--anw-ink, #17191f);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .anw-pronunciation-panel__preview-result {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+    border-radius: 10px;
+    padding: 11px 12px;
+    background: #f1f7ff;
+  }
+
+  .anw-pronunciation-panel__preview-result p,
+  .anw-pronunciation-panel__preview-result ol,
+  .anw-pronunciation-panel__preview-note {
+    margin: 0;
+    line-height: 1.55;
+  }
+
+  .anw-pronunciation-panel__preview-result ol {
+    display: grid;
+    gap: 6px;
+    padding-left: 22px;
+  }
+
+  .anw-pronunciation-panel__preview-result li small {
+    display: block;
+    color: var(--anw-muted, #737987);
+  }
+
+  .anw-pronunciation-panel__preview-note {
+    margin-top: 10px;
+    color: var(--anw-muted, #737987);
+    font-size: 12px;
   }
 
   .anw-pronunciation-panel__save,
@@ -316,7 +397,8 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
   }
 
   @media (max-width: 720px) {
-    .anw-pronunciation-panel__grid {
+    .anw-pronunciation-panel__grid,
+    .anw-pronunciation-panel__preview-controls {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
@@ -339,6 +421,7 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
     }
 
     .anw-pronunciation-panel__grid,
+    .anw-pronunciation-panel__preview-controls,
     .anw-pronunciation-panel__pauses dl,
     .anw-cache-panel__metrics,
     .anw-cache-panel__preview dl {

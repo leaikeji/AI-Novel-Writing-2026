@@ -30,6 +30,7 @@ from .contracts import (
     CancelDisposition,
     ContractError,
     ModelFingerprint,
+    NanoDecodeParametersV2,
     NarrationRequestScope,
     PRODUCTION_NANO_MAX_NEW_FRAMES,
     PRODUCTION_NANO_MAX_SEED,
@@ -678,6 +679,7 @@ def canonical_sidecar_synthesis_metadata(
     seed: int,
     sample_mode: str,
     max_new_frames: int,
+    decode_parameters: NanoDecodeParametersV2 | None = None,
     reference_content_type: str | None = None,
     reference_actual_sha256: str | None = None,
     reference_size_bytes: int | None = None,
@@ -707,6 +709,13 @@ def canonical_sidecar_synthesis_metadata(
         raise ContractError("synthesis metadata numeric values are invalid")
     if type(sample_mode) is not str or sample_mode not in PRODUCTION_NANO_SAMPLE_MODES:
         raise ContractError("synthesis metadata sample mode is invalid")
+    if decode_parameters is not None:
+        if type(decode_parameters) is not NanoDecodeParametersV2:
+            raise ContractError("synthesis decode parameters are invalid")
+        if sample_mode != "full":
+            raise ContractError(
+                "advanced Nano decode parameters are effective only in full mode"
+            )
     reference_values = (
         reference_content_type,
         reference_actual_sha256,
@@ -726,6 +735,8 @@ def canonical_sidecar_synthesis_metadata(
         "sample_mode": sample_mode,
         "max_new_frames": max_new_frames,
     }
+    if decode_parameters is not None:
+        payload["decode_parameters"] = dict(decode_parameters.wire_payload())
     if reference_content_type is not None:
         if reference_content_type not in {"audio/wav", "audio/flac"}:
             raise ContractError("synthesis reference content type is invalid")
@@ -992,6 +1003,7 @@ def _multipart_body(request: SynthesisRequest, requested_model: str) -> tuple[by
         seed=request.seed,
         sample_mode=request.sample_mode,
         max_new_frames=request.max_new_frames,
+        decode_parameters=request.decode_parameters,
         reference_content_type=reference.content_type,
         reference_actual_sha256=reference.actual_sha256,
         reference_size_bytes=len(reference.audio_bytes),
@@ -2002,6 +2014,7 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
                 seed=request.seed,
                 sample_mode=request.sample_mode,
                 max_new_frames=request.max_new_frames,
+                decode_parameters=request.decode_parameters,
             )
             content_type = "application/json"
         else:

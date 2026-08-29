@@ -81,6 +81,7 @@ export interface ReadingRulesPanelModel {
   readonly canRevokeConsent: boolean;
   readonly cloudVisible: boolean;
   readonly cloudActionable: boolean;
+  readonly cloudUnavailableReasonVisible: boolean;
   readonly productReason: string | null;
   readonly cloudReason: string | null;
   readonly consentState: NarrationCloudConsent["state"];
@@ -204,8 +205,12 @@ export function buildReadingRulesPanelModel(input: {
       && input.authorization.can_configure
       && consentActive
       && !input.busy,
-    cloudVisible: cloud?.visible === true || consentActive || input.draft.analysisMode === "cloud_assisted",
+    cloudVisible: cloudActionable
+      || consentActive
+      || input.saved.analysisMode === "cloud_assisted"
+      || input.draft.analysisMode === "cloud_assisted",
     cloudActionable,
+    cloudUnavailableReasonVisible: cloud?.visible === true && !cloudActionable,
     productReason: !actionable(product)
       ? product?.reason_code ?? "NARRATION_PRODUCT_STATUS_MISSING"
       : !actionable(settings)
@@ -623,7 +628,14 @@ export function createReadingRulesPanel(
           )
           : null,
       ),
-      model.cloudVisible || consent.state === "active"
+      model.cloudUnavailableReasonVisible
+        ? h("p", {
+          className: "anw-reading-rules-panel__notice",
+          role: "note",
+          "data-cloud-unavailable": "true",
+        }, `云端辅助识别当前不可用：${model.cloudReason}`)
+        : null,
+      model.cloudActionable || consent.state === "active"
         ? h(
           "section",
           { className: "anw-reading-rules-panel__consent", "aria-labelledby": "anw-reading-consent-title" },

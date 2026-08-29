@@ -61,6 +61,7 @@ from .narration.narration_api import router as narration_production_router
 from .narration.official_presets import (
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
 )
+from .narration.official_voice_selection import OfficialVoiceSelectionService
 from .narration.playback_api import router as narration_playback_router
 from .narration.production_runtime import (
     PRODUCT_ENABLE_ENV,
@@ -329,6 +330,11 @@ def _build_fixed_local_owner_narration_backend(
         profile_creation_receipts=SqlAlchemyVoiceActionReceiptPort(session),
         cache_runtime=current_narration_cache_runtime(),
         voice_product=(voice_product if official_presets_ready else None),
+        official_voice_selection=(
+            OfficialVoiceSelectionService(lambda: Session(get_engine()))
+            if official_presets_ready
+            else None
+        ),
         capabilities=(
             t4_product_capabilities(
                 reference_clone_released=reference_clone_ready,

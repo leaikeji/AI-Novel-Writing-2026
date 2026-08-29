@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,30 +13,32 @@ from backend.narration.official_presets import (
     OFFICIAL_PRESET_MANIFEST_SHA256,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
     OFFICIAL_PRESETS,
+    CANONICAL_CHAPTER_VERIFIED_PRESET_IDS,
     PRODUCT_OFFICIAL_PRESET_IDS,
     PRODUCT_OFFICIAL_PRESETS,
     PRODUCT_PRESET_OUT_OF_SCOPE,
     official_preset_decode_parameters_fingerprint,
+    official_preset_direct_version_fingerprint,
+    official_preset_validation_tier,
     official_preset_version_fingerprint,
     require_official_preset,
     require_product_official_preset,
     validate_official_preset_provenance,
+    validate_official_version_evidence,
 )
 from backend.narration.privacy import t4_product_capabilities
 from backend.narration.voices import list_official_presets
 
 
-def test_product_catalog_publishes_only_six_chinese_presets_without_codes_or_audio() -> None:
+def test_product_catalog_publishes_all_eighteen_presets_without_codes_or_audio() -> None:
     catalog = list_official_presets()
 
-    assert len(catalog.items) == 6
-    assert tuple(item.preset_id for item in catalog.items) == (
-        PRODUCT_OFFICIAL_PRESET_IDS
+    assert catalog.schema_version == "moss-tts-official-preset-catalog/2.0"
+    assert len(catalog.items) == 18
+    assert tuple(item.preset_id for item in catalog.items) == tuple(
+        item.preset_id for item in OFFICIAL_PRESETS
     )
-    assert tuple(item.preset_id for item in PRODUCT_OFFICIAL_PRESETS) == (
-        PRODUCT_OFFICIAL_PRESET_IDS
-    )
-    assert "onnx.Trump" not in {item.preset_id for item in catalog.items}
+    assert "onnx.Trump" in {item.preset_id for item in catalog.items}
     serialized = json.dumps(catalog.model_dump(mode="json"), ensure_ascii=False)
     assert "prompt_audio_codes" not in serialized
     assert "audio_file" not in serialized
@@ -46,39 +49,44 @@ def test_product_catalog_publishes_only_six_chinese_presets_without_codes_or_aud
         item.commercial_distribution_status == "not_evaluated"
         for item in catalog.items
     )
+    assert {
+        item.preset_id
+        for item in catalog.items
+        if item.validation_tier == "canonical_chapter_verified"
+    } == CANONICAL_CHAPTER_VERIFIED_PRESET_IDS == {
+        "onnx.Junhao",
+        "onnx.Zhiming",
+        "onnx.Xiaoyu",
+    }
+    assert all(
+        item.language_scope == item.language
+        and item.selectable_now
+        and item.previewable_now
+        and item.renderable_existing
+        and item.usage_notice == "private_local_writing_tool"
+        for item in catalog.items
+    )
 
 
-def test_product_catalog_outer_contract_rejects_missing_reordered_or_full_inventory() -> None:
+def test_product_catalog_outer_contract_rejects_missing_or_reordered_inventory() -> None:
     product = list_official_presets().model_dump(mode="python")
 
     missing = {**product, "items": product["items"][:-1]}
-    with pytest.raises(ValidationError, match="six product presets in order"):
+    with pytest.raises(ValidationError, match="all 18 pinned presets in order"):
         wire.OfficialPresetCatalogResponse.model_validate(missing)
 
     reordered_items = list(product["items"])
     reordered_items[0], reordered_items[1] = reordered_items[1], reordered_items[0]
-    with pytest.raises(ValidationError, match="six product presets in order"):
+    with pytest.raises(ValidationError, match="all 18 pinned presets in order"):
         wire.OfficialPresetCatalogResponse.model_validate(
             {**product, "items": reordered_items}
         )
-
-    full_inventory = {
-        **product,
-        "items": [
-            wire.OfficialPresetCatalogItem(
-                preset_id=preset.preset_id,
-                display_name=preset.display_name,
-                group=preset.group,
-                language=preset.language,
-                local_use_status="available",
-                commercial_distribution_status="not_evaluated",
-                provenance=preset.provenance(),
-            ).model_dump(mode="python")
-            for preset in OFFICIAL_PRESETS
-        ],
-    }
-    with pytest.raises(ValidationError, match="six product presets in order"):
-        wire.OfficialPresetCatalogResponse.model_validate(full_inventory)
+    assert official_preset_validation_tier("onnx.Junhao") == (
+        "canonical_chapter_verified"
+    )
+    assert official_preset_validation_tier("onnx.Trump") == (
+        "pinned_catalog_unreviewed"
+    )
 
 
 def test_low_level_inventory_and_get_by_id_still_cover_all_18_presets() -> None:
@@ -161,6 +169,106 @@ def test_official_default_fingerprints_are_stable_and_bind_every_identity() -> N
     assert decode != official_preset_decode_parameters_fingerprint("onnx.Junhao")
 
 
+def test_shared_official_evidence_validator_covers_v1_and_direct_v2() -> None:
+    preset = require_official_preset("onnx.Junhao")
+    profile_id = uuid4()
+    owner_id = uuid4()
+    workspace_id = uuid4()
+    now = datetime.now(UTC)
+
+    def evidence(*, direct: bool) -> tuple[SimpleNamespace, SimpleNamespace]:
+        version_id = uuid4()
+        version = SimpleNamespace(
+            id=version_id,
+            profile_id=profile_id,
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+            source_type="preset",
+            state="locked" if direct else "draft",
+            provider_id="local-sidecar",
+            model_id="OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX",
+            model_revision="f52645cb467506d8e18e746ddd59482685b74e58",
+            preset_key=preset.preset_id,
+            reference_asset_id=None,
+            language=preset.language,
+            seed=1234,
+            parameters_json={
+                "schema_version": "narration-official-preset-version/1.0",
+                "official_preset": preset.provenance(),
+                "sample_mode": "fixed",
+                "max_new_frames": 375,
+            },
+            activation_basis=(
+                "explicit_official_preset_selection"
+                if direct
+                else "preview_confirmed"
+            ),
+            validation_basis="not_required" if direct else "pending",
+            quality_state="pending",
+            locked_actor=None,
+            locked_at=None,
+        )
+        version.fingerprint = (
+            official_preset_direct_version_fingerprint(
+                profile_id=profile_id,
+                version_id=version_id,
+                preset_id=preset.preset_id,
+            )
+            if direct
+            else official_preset_version_fingerprint(
+                profile_id=profile_id,
+                version_id=version_id,
+                preset_id=preset.preset_id,
+            )
+        )
+        rights = SimpleNamespace(
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+            source_kind="official_preset",
+            source_identifier=(
+                "hf://OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX@"
+                "f52645cb467506d8e18e746ddd59482685b74e58/"
+                f"browser_poc_manifest.json#{preset.preset_id}"
+            ),
+            notice_version="moss-tts-official-preset-local-use/1.0",
+            purpose="private_novel_narration",
+            commercial_use=False,
+            redistribution=False,
+            voice_cloning=False,
+            subject_consent_reference=None,
+            confirmed_actor="local-owner",
+            confirmed_at=now,
+            expires_at=None,
+            risk_flags_json=["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"],
+        )
+        return version, rights
+
+    legacy_version, legacy_rights = evidence(direct=False)
+    direct_version, direct_rights = evidence(direct=True)
+    assert validate_official_version_evidence(
+        legacy_version,
+        legacy_rights,
+        expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    ) is preset
+    assert validate_official_version_evidence(
+        direct_version,
+        direct_rights,
+        expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    ) is preset
+    assert direct_version.fingerprint != official_preset_version_fingerprint(
+        profile_id=profile_id,
+        version_id=direct_version.id,
+        preset_id=preset.preset_id,
+    )
+    direct_rights.notice_version = "drifted-policy"
+    with pytest.raises(ValueError, match="rights policy"):
+        validate_official_version_evidence(
+            direct_version,
+            direct_rights,
+            expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+        )
+
+
 def test_official_version_resource_requires_exact_provenance_and_rights_kind() -> None:
     preset = OFFICIAL_PRESETS[5]
     now = datetime.now(UTC)
@@ -177,6 +285,8 @@ def test_official_version_resource_requires_exact_provenance_and_rights_kind() -
         language=preset.language,
         fingerprint="a" * 64,
         quality_state="pending",
+        activation_basis="preview_confirmed",
+        validation_basis="pending",
         rights=wire.VoiceRightsSummary(
             rights_record_id=uuid4(),
             state="active",

@@ -21,15 +21,18 @@ from backend.narration.contracts import (
     CancellationGranularity,
     ContractError,
     ModelFingerprint,
+    NanoDecodeParametersV2,
     NarrationRequestScope,
     ReferenceAudioInput,
     ReviewIssue,
     ReviewIssueSeverity,
+    SynthesisRequest,
     SynthesisResult,
     UnknownTaxonomyCodeError,
     ensure_workflow_failure_code,
     issue_severity,
 )
+from backend.narration.runtime import canonical_sidecar_synthesis_metadata
 from backend.narration.fingerprints import (
     FingerprintContractError,
     canonical_fingerprint,
@@ -61,6 +64,47 @@ def _model_fingerprint() -> ModelFingerprint:
         deployment_topology="linux-arm64-private-sidecar",
         parameters={"threads": 4, "streaming": True},
     )
+
+
+def test_nano_decode_v2_is_fixed_point_bounded_and_full_mode_only() -> None:
+    parameters = NanoDecodeParametersV2(
+        text_temperature_milli=1_100,
+        audio_top_p_milli=900,
+    )
+    request = SynthesisRequest(
+        request_id=uuid4(),
+        scope=NarrationRequestScope.fixed_local(),
+        text="高级参数契约测试。",
+        voice="onnx.Zhiming",
+        seed=1234,
+        sample_mode="full",
+        max_new_frames=375,
+        decode_parameters=parameters,
+    )
+
+    payload = json.loads(
+        canonical_sidecar_synthesis_metadata(
+            request_id=request.request_id,
+            scope=request.scope,
+            requested_model_fingerprint_sha256="0" * 64,
+            text=request.text,
+            voice=request.voice,
+            seed=request.seed,
+            sample_mode=request.sample_mode,
+            max_new_frames=request.max_new_frames,
+            decode_parameters=request.decode_parameters,
+        )
+    )
+
+    assert payload["decode_parameters"] == dict(parameters.wire_payload())
+    assert all(
+        not isinstance(value, float)
+        for value in payload["decode_parameters"].values()
+    )
+    with pytest.raises(ContractError, match="full mode"):
+        replace(request, sample_mode="fixed")
+    with pytest.raises(ContractError, match="text_temperature"):
+        NanoDecodeParametersV2(text_temperature_milli=99)
 
 
 def test_fixed_scope_matches_accepted_uuidv5_values_and_rejects_override() -> None:

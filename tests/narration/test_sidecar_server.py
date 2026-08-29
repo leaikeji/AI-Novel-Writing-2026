@@ -236,6 +236,7 @@ def nano_request(
     reference_audio: ReferenceAudio | None = None,
     seed: int = 42,
     sample_mode: str = "fixed",
+    decode_parameters: dict[str, str | int] | None = None,
 ) -> ParsedSynthesisRequest:
     return ParsedSynthesisRequest(
         request_id=str(uuid4()),
@@ -247,6 +248,7 @@ def nano_request(
         sample_mode=sample_mode,
         max_new_frames=64,
         reference_audio=reference_audio,
+        decode_parameters=decode_parameters,
     )
 
 
@@ -287,6 +289,50 @@ def test_sidecar_metadata_parser_accepts_external_onnx_preset_id() -> None:
     )
 
     assert parsed.voice == "onnx.Xiaoyu"
+
+
+def test_sidecar_metadata_parser_accepts_exact_decode_v2_and_rejects_drift() -> None:
+    payload = {
+        "request_id": str(uuid4()),
+        "scope_fingerprint": sidecar_server.LOCAL_SCOPE_FINGERPRINT,
+        "requested_model_fingerprint_sha256": "0" * 64,
+        "text": "decode v2 parser test",
+        "voice": "onnx.Xiaoyu",
+        "seed": 42,
+        "sample_mode": "full",
+        "max_new_frames": 64,
+        "decode_parameters": {
+            "schema_version": "moss-nano-decode-parameters/2",
+            "text_temperature_milli": 1_000,
+            "text_top_p_milli": 1_000,
+            "text_top_k": 50,
+            "audio_temperature_milli": 800,
+            "audio_top_p_milli": 950,
+            "audio_top_k": 25,
+            "audio_repetition_penalty_milli": 1_200,
+        },
+    }
+
+    parsed = sidecar_server._parse_metadata(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8"), None
+    )
+    assert parsed.decode_parameters is not None
+    assert parsed.decode_parameters["audio_temperature_milli"] == 800
+
+    payload["decode_parameters"]["unknown"] = 1
+    with pytest.raises(SidecarProtocolError) as unknown:
+        sidecar_server._parse_metadata(
+            json.dumps(payload, separators=(",", ":")).encode("utf-8"), None
+        )
+    assert unknown.value.code == "DECODE_PARAMETERS_INVALID"
+
+    payload["decode_parameters"].pop("unknown")
+    payload["sample_mode"] = "fixed"
+    with pytest.raises(SidecarProtocolError) as ineffective:
+        sidecar_server._parse_metadata(
+            json.dumps(payload, separators=(",", ":")).encode("utf-8"), None
+        )
+    assert ineffective.value.code == "DECODE_PARAMETERS_MODE_INVALID"
 
 
 @pytest.mark.parametrize(
@@ -412,9 +458,24 @@ def test_dependency_verifier_projects_only_official_preset_count_and_hashes(
 class RecordingNanoRuntime:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.generation_snapshots: list[dict[str, object]] = []
+        self.manifest = {
+            "generation_defaults": {
+                "text_temperature": 1.0,
+                "text_top_p": 1.0,
+                "text_top_k": 50,
+                "audio_temperature": 0.8,
+                "audio_top_p": 0.95,
+                "audio_top_k": 25,
+                "audio_repetition_penalty": 1.2,
+            }
+        }
 
     def synthesize(self, **kwargs):  # noqa: ANN003, ANN201
         self.calls.append(kwargs)
+        self.generation_snapshots.append(
+            dict(self.manifest["generation_defaults"])
+        )
         output = Path(str(kwargs["output_audio_path"]))
         output.write_bytes(pcm_wav())
         return {"audio_path": output}
@@ -486,6 +547,43 @@ def test_nano_backend_forwards_candidate_decode_strategy_exactly(
         "seed": seed,
         "voice_clone_max_text_tokens": 750,
     }
+
+
+def test_nano_backend_applies_full_decode_v2_for_one_call_and_restores_defaults(
+    tmp_path: Path,
+) -> None:
+    backend, runtime = ready_nano_backend(tmp_path)
+    defaults = dict(runtime.manifest["generation_defaults"])
+    parameters = {
+        "schema_version": "moss-nano-decode-parameters/2",
+        "text_temperature_milli": 1_300,
+        "text_top_p_milli": 750,
+        "text_top_k": 40,
+        "audio_temperature_milli": 1_100,
+        "audio_top_p_milli": 800,
+        "audio_top_k": 35,
+        "audio_repetition_penalty_milli": 1_400,
+    }
+
+    backend.synthesize(
+        nano_request(
+            "onnx.Zhiming",
+            sample_mode="full",
+            decode_parameters=parameters,
+        ),
+        threading.Event(),
+    )
+
+    assert runtime.generation_snapshots[-1] == {
+        "text_temperature": 1.3,
+        "text_top_p": 0.75,
+        "text_top_k": 40,
+        "audio_temperature": 1.1,
+        "audio_top_p": 0.8,
+        "audio_top_k": 35,
+        "audio_repetition_penalty": 1.4,
+    }
+    assert runtime.manifest["generation_defaults"] == defaults
 
 
 @pytest.mark.parametrize(

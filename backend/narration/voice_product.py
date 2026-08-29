@@ -53,6 +53,8 @@ from .audio_pipeline import (
     process_synthesis_wav,
 )
 from .contracts import (
+    ContractError,
+    NanoDecodeParametersV2,
     NarrationRequestScope,
     PRODUCTION_NANO_MAX_NEW_FRAMES,
     PRODUCTION_NANO_MAX_SEED,
@@ -82,16 +84,21 @@ from .official_presets import (
     OFFICIAL_PRESET_DECODE_PARAMETERS_SCHEMA_VERSION,
     OFFICIAL_PRESET_MAX_NEW_FRAMES,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    OFFICIAL_PRESET_MANIFEST_PATH,
     OFFICIAL_PRESET_REPOSITORY,
     OFFICIAL_PRESET_REVISION,
+    OFFICIAL_PRESET_RIGHTS_POLICY_VERSION,
     OFFICIAL_PRESET_RUNTIME_INITIAL_SEED,
     OFFICIAL_PRESET_SAMPLE_MODE,
     OFFICIAL_PRESET_VERSION_SCHEMA_VERSION,
     OfficialPreset,
+    official_preset_canonical_profile_id,
+    official_preset_canonical_version_id,
     official_preset_decode_parameters_fingerprint,
+    official_preset_direct_version_fingerprint,
     official_preset_version_fingerprint,
     require_official_preset,
-    validate_official_preset_provenance,
+    validate_official_version_evidence,
 )
 from .media import release_active_job_assets_in_session
 from .runtime import canonical_sidecar_synthesis_metadata
@@ -245,21 +252,24 @@ class VoicePreviewPolicy:
         version: VoiceProfileVersion,
         voice: str,
     ) -> str:
-        seed, sample_mode, max_new_frames = _version_decode_parameters(version)
-        return canonical_sha256(
-            {
+        seed, sample_mode, max_new_frames, decode_parameters = (
+            _version_decode_parameters(version)
+        )
+        payload: dict[str, object] = {
                 "schema_version": VOICE_PRODUCT_SCHEMA_VERSION,
                 "sample_mode": sample_mode,
                 "max_new_frames": max_new_frames,
                 "seed": seed,
                 "voice_key": voice,
-            }
-        )
+        }
+        if decode_parameters is not None:
+            payload["decode_parameters"] = dict(decode_parameters.wire_payload())
+        return canonical_sha256(payload)
 
 
 def _version_decode_parameters(
     version: VoiceProfileVersion,
-) -> tuple[int, str, int]:
+) -> tuple[int, str, int, NanoDecodeParametersV2 | None]:
     """Resolve the immutable decode inputs shared by preview and chapters.
 
     Legacy uploaded versions predate explicit mode/frame fields.  They were
@@ -287,7 +297,22 @@ def _version_decode_parameters(
         or not 1 <= max_new_frames <= PRODUCTION_NANO_MAX_NEW_FRAMES
     ):
         raise VoiceProductSecurityError("voice decode frame bound is invalid")
-    return seed, sample_mode, max_new_frames
+    raw_decode_parameters = parameters.get("decode_parameters")
+    decode_parameters = None
+    if raw_decode_parameters is not None:
+        try:
+            decode_parameters = NanoDecodeParametersV2.from_wire_payload(
+                raw_decode_parameters
+            )
+        except ContractError as error:
+            raise VoiceProductSecurityError(
+                "voice advanced decode parameters are malformed"
+            ) from error
+        if sample_mode != "full":
+            raise VoiceProductSecurityError(
+                "voice advanced decode parameters require full mode"
+            )
+    return seed, sample_mode, max_new_frames, decode_parameters
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +361,7 @@ class VoicePreviewWorkItem:
     input_digest_key_id: str
     input_digest: str
     reference: VoiceReferenceMedia | None = field(repr=False)
+    decode_parameters: NanoDecodeParametersV2 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,6 +383,24 @@ class PreparedVoicePreview:
     input_digest: str
     output_digest: str
     provider_request_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class OfficialPresetVersionRows:
+    """One immutable official source plus its local-use evidence rows."""
+
+    rights: VoiceRightsRecord
+    event: VoiceRightsEvent
+    version: VoiceProfileVersion
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalOfficialPresetVoice:
+    """Canonical per-novel profile/version selected by an atomic command."""
+
+    preset: OfficialPreset
+    profile: VoiceProfile
+    version: VoiceProfileVersion
 
 
 @dataclass(frozen=True, slots=True)
@@ -829,49 +873,359 @@ def _required_official_preset(
     expected_model_fingerprint: str,
 ) -> OfficialPreset:
     """Verify an official version only by its pinned manifest identity."""
-
-    if (
-        version.source_type != "preset"
-        or rights.source_kind != "official_preset"
-        or version.reference_asset_id is not None
-        or version.provider_id != "local-sidecar"
-        or version.model_id != OFFICIAL_PRESET_REPOSITORY
-        or version.model_revision != OFFICIAL_PRESET_REVISION
-        or version.preset_key is None
-        or expected_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
-    ):
-        raise VoiceProductSecurityError("official preset runtime identity changed")
-    parameters = version.parameters_json
-    if type(parameters) is not dict or parameters.get(
-        "schema_version"
-    ) != OFFICIAL_PRESET_VERSION_SCHEMA_VERSION:
-        raise VoiceProductSecurityError("official preset version parameters are malformed")
-    allowed = {
-        "schema_version",
-        "official_preset",
-        "sample_mode",
-        "max_new_frames",
-    }
-    if set(parameters) - allowed:
-        raise VoiceProductSecurityError("official preset version has unknown parameters")
     try:
-        preset = validate_official_preset_provenance(parameters.get("official_preset"))
+        return validate_official_version_evidence(
+            version,
+            rights,
+            expected_model_fingerprint=expected_model_fingerprint,
+        )
     except ValueError as error:
         raise VoiceProductSecurityError(
-            "official preset provenance disagrees with pinned manifest"
+            "official preset evidence disagrees with the pinned policy"
         ) from error
-    if preset.preset_id != version.preset_key:
-        raise VoiceProductSecurityError("official preset ID mapping changed")
+
+
+def build_official_preset_version_rows(
+    *,
+    profile: VoiceProfile,
+    preset: OfficialPreset,
+    version_id: UUID,
+    version_number: int,
+    actor: str,
+    at: datetime,
+    direct_selection: bool,
+) -> OfficialPresetVersionRows:
+    """Build the one authoritative official provenance/rights/version shape.
+
+    The legacy create-version command and the new atomic selection command use
+    this same constructor.  The latter changes only the truthful activation
+    evidence: it is locked by an explicit selection, without fabricating a
+    preview or a human quality decision.
+    """
+
     if (
-        version.seed != OFFICIAL_PRESET_RUNTIME_INITIAL_SEED
-        or parameters.get("sample_mode") != OFFICIAL_PRESET_SAMPLE_MODE
-        or parameters.get("max_new_frames")
-        != OFFICIAL_PRESET_MAX_NEW_FRAMES
+        type(version_number) is not int
+        or version_number < 1
+        or type(actor) is not str
+        or not actor
+        or actor != actor.strip()
+        or len(actor) > 120
+        or not isinstance(at, datetime)
+    ):
+        raise VoiceProductContractError("official preset row identity is invalid")
+    expected_preset = require_official_preset(preset.preset_id)
+    if preset is not expected_preset:
+        raise VoiceProductSecurityError("official preset object is not canonical")
+
+    rights_id = _child_uuid(version_id, "official-preset-rights")
+    rights = VoiceRightsRecord(
+        id=rights_id,
+        owner_id=profile.owner_id,
+        workspace_id=profile.workspace_id,
+        novel_id=profile.novel_id,
+        source_kind="official_preset",
+        source_identifier=(
+            f"hf://{OFFICIAL_PRESET_REPOSITORY}@{OFFICIAL_PRESET_REVISION}/"
+            f"{OFFICIAL_PRESET_MANIFEST_PATH}#{preset.preset_id}"
+        ),
+        notice_version=OFFICIAL_PRESET_RIGHTS_POLICY_VERSION,
+        purpose="private_novel_narration",
+        commercial_use=False,
+        redistribution=False,
+        voice_cloning=False,
+        subject_consent_reference=None,
+        confirmed_actor=actor,
+        confirmed_at=at,
+        expires_at=None,
+        risk_flags_json=["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"],
+    )
+    event = VoiceRightsEvent(
+        id=_child_uuid(version_id, "official-preset-confirmed-event"),
+        rights_record_id=rights.id,
+        event_key=f"official-preset-confirmed:{version_id.hex}",
+        event_type="confirmed",
+        actor=actor,
+        reason_code=None,
+        occurred_at=at,
+    )
+    parameters = {
+        "schema_version": OFFICIAL_PRESET_VERSION_SCHEMA_VERSION,
+        "official_preset": preset.provenance(),
+        "sample_mode": OFFICIAL_PRESET_SAMPLE_MODE,
+        "max_new_frames": OFFICIAL_PRESET_MAX_NEW_FRAMES,
+    }
+    version = VoiceProfileVersion(
+        id=version_id,
+        profile_id=profile.id,
+        owner_id=profile.owner_id,
+        workspace_id=profile.workspace_id,
+        version_number=version_number,
+        source_type="preset",
+        state="locked" if direct_selection else "draft",
+        provider_id="local-sidecar",
+        model_id=OFFICIAL_PRESET_REPOSITORY,
+        model_revision=OFFICIAL_PRESET_REVISION,
+        preset_key=preset.preset_id,
+        reference_asset_id=None,
+        preview_asset_id=None,
+        rights_record_id=rights.id,
+        description_digest_key_id=None,
+        description_digest=None,
+        language=preset.language,
+        seed=OFFICIAL_PRESET_RUNTIME_INITIAL_SEED,
+        parameters_json=parameters,
+        fingerprint=(
+            official_preset_direct_version_fingerprint(
+                profile_id=profile.id,
+                version_id=version_id,
+                preset_id=preset.preset_id,
+            )
+            if direct_selection
+            else official_preset_version_fingerprint(
+                profile_id=profile.id,
+                version_id=version_id,
+                preset_id=preset.preset_id,
+            )
+        ),
+        quality_state="pending",
+        activation_basis=(
+            "explicit_official_preset_selection"
+            if direct_selection
+            else "preview_confirmed"
+        ),
+        validation_basis="not_required" if direct_selection else "pending",
+        locked_actor=None,
+        locked_at=None,
+        created_at=at,
+    )
+    return OfficialPresetVersionRows(rights=rights, event=event, version=version)
+
+
+def _validate_canonical_official_preset_voice(
+    session: Session,
+    *,
+    profile: VoiceProfile,
+    version: VoiceProfileVersion,
+    preset: OfficialPreset,
+) -> None:
+    expected_version_id = official_preset_canonical_version_id(
+        profile_id=profile.id,
+        preset_id=preset.preset_id,
+    )
+    expected_rights_id = _child_uuid(expected_version_id, "official-preset-rights")
+    rights = session.scalar(
+        select(VoiceRightsRecord)
+        .where(VoiceRightsRecord.id == version.rights_record_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if rights is None:
+        raise VoiceProductSecurityError("canonical official rights record is absent")
+    _required_official_preset(
+        version,
+        rights,
+        expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    )
+    expected_source = (
+        f"hf://{OFFICIAL_PRESET_REPOSITORY}@{OFFICIAL_PRESET_REVISION}/"
+        f"{OFFICIAL_PRESET_MANIFEST_PATH}#{preset.preset_id}"
+    )
+    exact_version = (
+        version.id == expected_version_id
+        and version.profile_id == profile.id
+        and version.owner_id == profile.owner_id
+        and version.workspace_id == profile.workspace_id
+        and version.state == "locked"
+        and version.quality_state == "pending"
+        and version.activation_basis == "explicit_official_preset_selection"
+        and version.validation_basis == "not_required"
+        and version.locked_actor is None
+        and version.locked_at is None
+        and version.language == preset.language
+        and version.fingerprint
+        == official_preset_direct_version_fingerprint(
+            profile_id=profile.id,
+            version_id=expected_version_id,
+            preset_id=preset.preset_id,
+        )
+    )
+    exact_rights = (
+        rights.id == expected_rights_id
+        and rights.owner_id == profile.owner_id
+        and rights.workspace_id == profile.workspace_id
+        and rights.novel_id == profile.novel_id
+        and rights.source_kind == "official_preset"
+        and rights.source_identifier == expected_source
+        and rights.notice_version == OFFICIAL_PRESET_RIGHTS_POLICY_VERSION
+        and rights.purpose == "private_novel_narration"
+        and rights.commercial_use is False
+        and rights.redistribution is False
+        and rights.voice_cloning is False
+        and rights.subject_consent_reference is None
+        and rights.expires_at is None
+        and rights.risk_flags_json
+        == ["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"]
+        and type(rights.confirmed_actor) is str
+        and bool(rights.confirmed_actor)
+        and isinstance(rights.confirmed_at, datetime)
+    )
+    events = list(
+        session.scalars(
+            select(VoiceRightsEvent)
+            .where(VoiceRightsEvent.rights_record_id == rights.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    expected_event_id = _child_uuid(
+        expected_version_id, "official-preset-confirmed-event"
+    )
+    has_expected_confirmation = any(
+        event.id == expected_event_id
+        and event.event_key
+        == f"official-preset-confirmed:{expected_version_id.hex}"
+        and event.event_type == "confirmed"
+        and event.actor == rights.confirmed_actor
+        and event.reason_code is None
+        for event in events
+    )
+    has_negative_history = any(
+        event.event_type in {"revoked", "expired", "review_blocked"}
+        for event in events
+    )
+    if (
+        not exact_version
+        or not exact_rights
+        or not has_expected_confirmation
+        or has_negative_history
     ):
         raise VoiceProductSecurityError(
-            "official preset decode parameters differ from the pinned runtime"
+            "canonical official preset evidence is inconsistent"
         )
-    return preset
+
+
+def ensure_canonical_official_preset_voice(
+    session: Session,
+    *,
+    novel_id: UUID,
+    preset_id: str,
+    actor: str,
+    at: datetime,
+) -> CanonicalOfficialPresetVoice:
+    """Create/reuse one novel-scoped direct-use official Voice Version.
+
+    The caller must already hold the novel aggregate lock.  No inference or
+    media boundary is crossed here; every write belongs to the caller's short
+    database transaction.
+    """
+
+    scope = NarrationRequestScope.fixed_local()
+    preset = require_official_preset(preset_id)
+    profile_id = official_preset_canonical_profile_id(
+        owner_id=scope.owner_id,
+        workspace_id=scope.workspace_id,
+        novel_id=novel_id,
+        preset_id=preset.preset_id,
+    )
+    version_id = official_preset_canonical_version_id(
+        profile_id=profile_id,
+        preset_id=preset.preset_id,
+    )
+    profile = session.scalar(
+        select(VoiceProfile)
+        .where(VoiceProfile.id == profile_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if profile is None:
+        profile = VoiceProfile(
+            id=profile_id,
+            owner_id=scope.owner_id,
+            workspace_id=scope.workspace_id,
+            novel_id=novel_id,
+            name=preset.display_name,
+            current_version_id=None,
+            status="active",
+            version=1,
+            archived_at=None,
+            created_at=at,
+            updated_at=at,
+        )
+        session.add(profile)
+        session.flush()
+    elif (
+        profile.owner_id != scope.owner_id
+        or profile.workspace_id != scope.workspace_id
+        or profile.novel_id != novel_id
+    ):
+        raise NarrationScopeMismatch(
+            "canonical official voice profile is outside the novel scope"
+        )
+    elif profile.status == "unavailable":
+        raise VoiceRightsUnavailable("canonical official voice is unavailable")
+    elif profile.status not in {"draft", "active", "archived"}:
+        raise InvalidNarrationState("canonical official voice status is invalid")
+
+    existing_versions = list(
+        session.scalars(
+            select(VoiceProfileVersion)
+            .where(VoiceProfileVersion.profile_id == profile.id)
+            .order_by(VoiceProfileVersion.version_number)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    if any(
+        item.source_type != "preset" or item.preset_key != preset.preset_id
+        for item in existing_versions
+    ):
+        raise VoiceProductSecurityError(
+            "canonical official profile contains a foreign voice version"
+        )
+    version = next((item for item in existing_versions if item.id == version_id), None)
+    if version is None:
+        rows = build_official_preset_version_rows(
+            profile=profile,
+            preset=preset,
+            version_id=version_id,
+            version_number=(
+                max((item.version_number for item in existing_versions), default=0) + 1
+            ),
+            actor=actor,
+            at=at,
+            direct_selection=True,
+        )
+        session.add(rows.rights)
+        session.flush()
+        session.add_all([rows.event, rows.version])
+        session.flush()
+        version = rows.version
+    _validate_canonical_official_preset_voice(
+        session,
+        profile=profile,
+        version=version,
+        preset=preset,
+    )
+
+    profile_changed = (
+        profile.status != "active"
+        or profile.archived_at is not None
+        or profile.current_version_id != version.id
+    )
+    if profile_changed:
+        profile.status = "active"
+        profile.archived_at = None
+        profile.current_version_id = version.id
+        # The shared CAS trigger requires every UPDATE, including the
+        # post-INSERT current-version attachment, to advance exactly once.
+        profile.version += 1
+        profile.updated_at = at
+        session.flush()
+    return CanonicalOfficialPresetVoice(
+        preset=preset,
+        profile=profile,
+        version=version,
+    )
 
 
 class VoiceProductService:
@@ -991,37 +1345,6 @@ class VoiceProductService:
                     "voice profile cannot accept an official preset"
                 )
             now = _db_now(session)
-            rights_id = _child_uuid(version_id, "official-preset-rights")
-            rights = VoiceRightsRecord(
-                id=rights_id,
-                owner_id=profile.owner_id,
-                workspace_id=profile.workspace_id,
-                novel_id=profile.novel_id,
-                source_kind="official_preset",
-                source_identifier=(
-                    f"hf://{OFFICIAL_PRESET_REPOSITORY}@{OFFICIAL_PRESET_REVISION}/"
-                    f"browser_poc_manifest.json#{preset.preset_id}"
-                ),
-                notice_version="moss-tts-official-preset-local-use/1.0",
-                purpose="private_novel_narration",
-                commercial_use=False,
-                redistribution=False,
-                voice_cloning=False,
-                subject_consent_reference=None,
-                confirmed_actor=self._preview_policy.actor,
-                confirmed_at=now,
-                expires_at=None,
-                risk_flags_json=["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"],
-            )
-            event = VoiceRightsEvent(
-                id=_child_uuid(version_id, "official-preset-confirmed-event"),
-                rights_record_id=rights.id,
-                event_key=f"official-preset-confirmed:{version_id.hex}",
-                event_type="confirmed",
-                actor=self._preview_policy.actor,
-                reason_code=None,
-                occurred_at=now,
-            )
             version_number = (
                 session.scalar(
                     select(func.max(VoiceProfileVersion.version_number)).where(
@@ -1030,49 +1353,22 @@ class VoiceProductService:
                 )
                 or 0
             ) + 1
-            parameters = {
-                "schema_version": OFFICIAL_PRESET_VERSION_SCHEMA_VERSION,
-                "official_preset": preset.provenance(),
-                "sample_mode": self._preview_policy.sample_mode,
-                "max_new_frames": self._preview_policy.max_new_frames,
-            }
-            version = VoiceProfileVersion(
-                id=version_id,
-                profile_id=profile.id,
-                owner_id=profile.owner_id,
-                workspace_id=profile.workspace_id,
+            rows = build_official_preset_version_rows(
+                profile=profile,
+                preset=preset,
+                version_id=version_id,
                 version_number=version_number,
-                source_type="preset",
-                state="draft",
-                provider_id="local-sidecar",
-                model_id=OFFICIAL_PRESET_REPOSITORY,
-                model_revision=OFFICIAL_PRESET_REVISION,
-                preset_key=preset.preset_id,
-                reference_asset_id=None,
-                preview_asset_id=None,
-                rights_record_id=rights.id,
-                description_digest_key_id=None,
-                description_digest=None,
-                language=preset.language,
-                seed=self._preview_policy.seed,
-                parameters_json=parameters,
-                fingerprint=official_preset_version_fingerprint(
-                    profile_id=profile.id,
-                    version_id=version_id,
-                    preset_id=preset.preset_id,
-                ),
-                quality_state="pending",
-                locked_actor=None,
-                locked_at=None,
-                created_at=now,
+                actor=self._preview_policy.actor,
+                at=now,
+                direct_selection=False,
             )
             # PostgreSQL's cross-table scope trigger validates the referenced
             # rights row at version INSERT time.  Persist that parent first;
             # mapper dependency ordering alone is not sufficient because no
             # ORM relationship joins these independently modelled records.
-            session.add(rights)
+            session.add(rows.rights)
             session.flush()
-            session.add_all([event, version])
+            session.add_all([rows.event, rows.version])
             profile.version += 1
             profile.updated_at = now
             _complete_receipt(session, receipt.row_id, at=now)
@@ -1081,7 +1377,9 @@ class VoiceProductService:
                 SqlAlchemyNarrationStore(session), profile, at=now
             )
             return next(
-                item for item in resource.versions if item.version_id == version.id
+                item
+                for item in resource.versions
+                if item.version_id == rows.version.id
             )
 
         return _transaction(self._session_factory, operation)
@@ -2061,6 +2359,7 @@ class VoiceProductService:
             raise VoiceProductSecurityError("voice preview lacks matching model-run evidence")
         version.state = "locked"
         version.quality_state = "accepted"
+        version.validation_basis = "human_accepted"
         version.locked_actor = self._preview_policy.actor
         version.locked_at = now
         profile.current_version_id = version.id
@@ -2211,7 +2510,9 @@ class _SqlAlchemyVoicePreviewRepositoryBase:
                 raise VoiceProductSecurityError(
                     "voice preview source type is unsupported"
                 )
-            seed, sample_mode, max_new_frames = _version_decode_parameters(version)
+            seed, sample_mode, max_new_frames, decode_parameters = (
+                _version_decode_parameters(version)
+            )
             version_parameters_fingerprint = (
                 self._policy.parameters_fingerprint_for_version(version, voice_key)
             )
@@ -2244,6 +2545,7 @@ class _SqlAlchemyVoicePreviewRepositoryBase:
                 seed=seed,
                 sample_mode=sample_mode,
                 max_new_frames=max_new_frames,
+                decode_parameters=decode_parameters,
                 reference_content_type=(
                     reference.mime_type if reference is not None else None
                 ),
@@ -2276,6 +2578,7 @@ class _SqlAlchemyVoicePreviewRepositoryBase:
                 seed=seed,
                 sample_mode=sample_mode,
                 max_new_frames=max_new_frames,
+                decode_parameters=decode_parameters,
                 expected_model_fingerprint=preview.model_fingerprint,
                 reference_fingerprint=preview.reference_fingerprint,
                 parameters_fingerprint=preview.parameters_fingerprint,
@@ -2353,6 +2656,7 @@ class VoicePreviewProcessor:
             seed=work.seed,
             sample_mode=work.sample_mode,
             max_new_frames=work.max_new_frames,
+            decode_parameters=work.decode_parameters,
             reference_audio=reference,
         )
         task = asyncio.create_task(self._adapter.synthesize(request))
@@ -2995,6 +3299,8 @@ def resolve_voice_preview_media(
 
 
 __all__ = [
+    "CanonicalOfficialPresetVoice",
+    "OfficialPresetVersionRows",
     "PreparedVoicePreview",
     "SqlAlchemyVoiceActionReceiptPort",
     "SqlAlchemyVoicePreviewRepository",
@@ -3014,5 +3320,7 @@ __all__ = [
     "VoiceProductSecurityError",
     "VoiceProductService",
     "VoiceReferenceMedia",
+    "build_official_preset_version_rows",
+    "ensure_canonical_official_preset_voice",
     "resolve_voice_preview_media",
 ]

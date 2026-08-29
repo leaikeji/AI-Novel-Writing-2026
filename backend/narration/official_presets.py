@@ -9,10 +9,11 @@ to select and verify a preset against the pinned runtime.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import json
 from typing import Final, Mapping
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 
 OFFICIAL_PRESET_REPOSITORY: Final = "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX"
@@ -39,6 +40,22 @@ OFFICIAL_PRESET_RUNTIME_INITIAL_SEED: Final = 1234
 OFFICIAL_PRESET_DECODE_PARAMETERS_SCHEMA_VERSION: Final = (
     "narration-voice-product/1"
 )
+OFFICIAL_PRESET_IDENTITY_CONTRACT_VERSION: Final = (
+    "moss-tts-official-preset-identity/1.0"
+)
+OFFICIAL_PRESET_DIRECT_VERSION_IDENTITY_CONTRACT_VERSION: Final = (
+    "moss-tts-official-preset-direct-version-identity/2.0"
+)
+OFFICIAL_PRESET_DIRECT_VERSION_FINGERPRINT_SCHEMA_VERSION: Final = (
+    "narration-official-preset-direct-version/2.0"
+)
+OFFICIAL_PRESET_RIGHTS_POLICY_VERSION: Final = (
+    "moss-tts-official-preset-local-use/1.0"
+)
+OFFICIAL_PRESET_IDENTITY_NAMESPACE: Final = uuid5(
+    NAMESPACE_URL,
+    "https://ai-novel-world-2026.local/voice/official-preset",
+)
 PRODUCT_PRESET_OUT_OF_SCOPE: Final = "PRODUCT_PRESET_OUT_OF_SCOPE"
 PRODUCT_OFFICIAL_PRESET_IDS: Final[tuple[str, ...]] = (
     "onnx.Junhao",
@@ -48,6 +65,21 @@ PRODUCT_OFFICIAL_PRESET_IDS: Final[tuple[str, ...]] = (
     "onnx.Yuewen",
     "onnx.Lingyu",
 )
+CANONICAL_CHAPTER_VERIFIED_PRESET_IDS: Final[frozenset[str]] = frozenset(
+    {
+        "onnx.Junhao",
+        "onnx.Zhiming",
+        "onnx.Xiaoyu",
+    }
+)
+_EXPECTED_CANONICAL_CHAPTER_VERIFIED_PRESET_IDS: Final = frozenset(
+    {"onnx.Junhao", "onnx.Zhiming", "onnx.Xiaoyu"}
+)
+if (
+    CANONICAL_CHAPTER_VERIFIED_PRESET_IDS
+    != _EXPECTED_CANONICAL_CHAPTER_VERIFIED_PRESET_IDS
+):
+    raise RuntimeError("official preset verified tier drifted")
 
 
 class ProductPresetOutOfScope(ValueError):
@@ -79,6 +111,102 @@ def official_preset_decode_parameters_fingerprint(preset_id: str) -> str:
             "max_new_frames": OFFICIAL_PRESET_MAX_NEW_FRAMES,
             "seed": OFFICIAL_PRESET_RUNTIME_INITIAL_SEED,
             "voice_key": preset.preset_id,
+        }
+    )
+
+
+def official_preset_rights_policy_fingerprint() -> str:
+    """Fingerprint the narrow local writing-tool rights record we persist."""
+
+    return canonical_sha256(
+        {
+            "notice_version": OFFICIAL_PRESET_RIGHTS_POLICY_VERSION,
+            "purpose": "private_novel_narration",
+            "commercial_use": False,
+            "redistribution": False,
+            "voice_cloning": False,
+            "risk_flags": ["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"],
+        }
+    )
+
+
+def official_preset_canonical_profile_id(
+    *, owner_id: UUID | str, workspace_id: UUID | str, novel_id: UUID | str, preset_id: str
+) -> UUID:
+    """Stable per-novel container identity for one pinned official preset."""
+
+    preset = require_official_preset(preset_id)
+    name = canonical_sha256(
+        {
+            "identity_contract_version": OFFICIAL_PRESET_IDENTITY_CONTRACT_VERSION,
+            "owner_id": str(UUID(str(owner_id))),
+            "workspace_id": str(UUID(str(workspace_id))),
+            "novel_id": str(UUID(str(novel_id))),
+            "preset_id": preset.preset_id,
+        }
+    )
+    return uuid5(OFFICIAL_PRESET_IDENTITY_NAMESPACE, f"profile:{name}")
+
+
+def official_preset_canonical_version_id(
+    *, profile_id: UUID | str, preset_id: str
+) -> UUID:
+    """Stable immutable version identity for the current pinned inputs."""
+
+    preset = require_official_preset(preset_id)
+    name = canonical_sha256(
+        {
+            "identity_contract_version": (
+                OFFICIAL_PRESET_DIRECT_VERSION_IDENTITY_CONTRACT_VERSION
+            ),
+            "profile_id": str(UUID(str(profile_id))),
+            "activation_basis": "explicit_official_preset_selection",
+            "validation_basis": "not_required",
+            "model_revision": OFFICIAL_PRESET_REVISION,
+            "manifest_sha256": OFFICIAL_PRESET_MANIFEST_SHA256,
+            "preset_provenance_fingerprint": preset.provenance()[
+                "provenance_fingerprint_sha256"
+            ],
+            "rights_policy_fingerprint": official_preset_rights_policy_fingerprint(),
+            "decode_contract_version": OFFICIAL_PRESET_DECODE_PARAMETERS_SCHEMA_VERSION,
+            "official_default_parameters_digest": (
+                official_preset_decode_parameters_fingerprint(preset.preset_id)
+            ),
+        }
+    )
+    return uuid5(OFFICIAL_PRESET_IDENTITY_NAMESPACE, f"version:{name}")
+
+
+def official_preset_direct_version_fingerprint(
+    *,
+    profile_id: UUID | str,
+    version_id: UUID | str,
+    preset_id: str,
+) -> str:
+    """Fingerprint a truthful direct-use version without colliding with v1."""
+
+    preset = require_official_preset(preset_id)
+    return canonical_sha256(
+        {
+            "schema_version": (
+                OFFICIAL_PRESET_DIRECT_VERSION_FINGERPRINT_SCHEMA_VERSION
+            ),
+            "profile_id": str(UUID(str(profile_id))),
+            "version_id": str(UUID(str(version_id))),
+            "preset_id": preset.preset_id,
+            "activation_basis": "explicit_official_preset_selection",
+            "validation_basis": "not_required",
+            "quality_state": "pending",
+            "provenance_fingerprint_sha256": preset.provenance()[
+                "provenance_fingerprint_sha256"
+            ],
+            "model_fingerprint_sha256": (
+                OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
+            ),
+            "rights_policy_fingerprint": official_preset_rights_policy_fingerprint(),
+            "decode_parameters_fingerprint": (
+                official_preset_decode_parameters_fingerprint(preset.preset_id)
+            ),
         }
     )
 
@@ -227,6 +355,123 @@ def validate_official_preset_provenance(value: object) -> OfficialPreset:
     return preset
 
 
+def official_preset_validation_tier(
+    preset_id: str,
+) -> str:
+    preset = require_official_preset(preset_id)
+    return (
+        "canonical_chapter_verified"
+        if preset.preset_id in CANONICAL_CHAPTER_VERIFIED_PRESET_IDS
+        else "pinned_catalog_unreviewed"
+    )
+
+
+def validate_official_version_evidence(
+    version: object,
+    rights: object,
+    *,
+    expected_model_fingerprint: str,
+) -> OfficialPreset:
+    """Validate official Voice Version evidence without importing ORM models.
+
+    Duck-typed inputs keep this catalog module below the persistence layer, so
+    resource projection, preview/render checks, and direct selection can share
+    one fail-closed policy without an import cycle.
+    """
+
+    if expected_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256:
+        raise ValueError("official preset model fingerprint changed")
+    preset_id = getattr(version, "preset_key", None)
+    if type(preset_id) is not str:
+        raise ValueError("official preset version has no exact preset ID")
+    preset = require_official_preset(preset_id)
+    parameters = getattr(version, "parameters_json", None)
+    if type(parameters) is not dict or set(parameters) != {
+        "schema_version",
+        "official_preset",
+        "sample_mode",
+        "max_new_frames",
+    }:
+        raise ValueError("official preset version parameters are malformed")
+    if (
+        parameters.get("schema_version") != OFFICIAL_PRESET_VERSION_SCHEMA_VERSION
+        or parameters.get("sample_mode") != OFFICIAL_PRESET_SAMPLE_MODE
+        or parameters.get("max_new_frames") != OFFICIAL_PRESET_MAX_NEW_FRAMES
+        or getattr(version, "seed", None)
+        != OFFICIAL_PRESET_RUNTIME_INITIAL_SEED
+    ):
+        raise ValueError("official preset defaults changed")
+    provenance_preset = validate_official_preset_provenance(
+        parameters.get("official_preset")
+    )
+    if provenance_preset is not preset:
+        raise ValueError("official preset provenance names another preset")
+
+    if (
+        getattr(version, "source_type", None) != "preset"
+        or getattr(version, "provider_id", None) != "local-sidecar"
+        or getattr(version, "model_id", None) != OFFICIAL_PRESET_REPOSITORY
+        or getattr(version, "model_revision", None) != OFFICIAL_PRESET_REVISION
+        or getattr(version, "reference_asset_id", None) is not None
+        or getattr(version, "language", None) != preset.language
+    ):
+        raise ValueError("official preset runtime identity changed")
+
+    expected_source_identifier = (
+        f"hf://{OFFICIAL_PRESET_REPOSITORY}@{OFFICIAL_PRESET_REVISION}/"
+        f"{OFFICIAL_PRESET_MANIFEST_PATH}#{preset.preset_id}"
+    )
+    if (
+        getattr(rights, "source_kind", None) != "official_preset"
+        or getattr(rights, "source_identifier", None)
+        != expected_source_identifier
+        or getattr(rights, "notice_version", None)
+        != OFFICIAL_PRESET_RIGHTS_POLICY_VERSION
+        or getattr(rights, "purpose", None) != "private_novel_narration"
+        or getattr(rights, "commercial_use", None) is not False
+        or getattr(rights, "redistribution", None) is not False
+        or getattr(rights, "voice_cloning", None) is not False
+        or getattr(rights, "subject_consent_reference", None) is not None
+        or getattr(rights, "expires_at", None) is not None
+        or getattr(rights, "risk_flags_json", None)
+        != ["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"]
+        or type(getattr(rights, "confirmed_actor", None)) is not str
+        or not getattr(rights, "confirmed_actor", "")
+        or not isinstance(getattr(rights, "confirmed_at", None), datetime)
+        or getattr(rights, "owner_id", None) != getattr(version, "owner_id", None)
+        or getattr(rights, "workspace_id", None)
+        != getattr(version, "workspace_id", None)
+    ):
+        raise ValueError("official preset rights policy changed")
+
+    activation_basis = getattr(version, "activation_basis", "preview_confirmed")
+    direct_selection = activation_basis == "explicit_official_preset_selection"
+    expected_fingerprint = (
+        official_preset_direct_version_fingerprint(
+            profile_id=getattr(version, "profile_id"),
+            version_id=getattr(version, "id"),
+            preset_id=preset.preset_id,
+        )
+        if direct_selection
+        else official_preset_version_fingerprint(
+            profile_id=getattr(version, "profile_id"),
+            version_id=getattr(version, "id"),
+            preset_id=preset.preset_id,
+        )
+    )
+    if getattr(version, "fingerprint", None) != expected_fingerprint:
+        raise ValueError("official preset version fingerprint changed")
+    if direct_selection and (
+        getattr(version, "state", None) != "locked"
+        or getattr(version, "validation_basis", None) != "not_required"
+        or getattr(version, "quality_state", None) != "pending"
+        or getattr(version, "locked_actor", None) is not None
+        or getattr(version, "locked_at", None) is not None
+    ):
+        raise ValueError("official direct-use activation evidence changed")
+    return preset
+
+
 __all__ = [
     "OFFICIAL_PRESET_MANIFEST_PATH",
     "OFFICIAL_PRESET_MANIFEST_SHA256",
@@ -239,8 +484,13 @@ __all__ = [
     "OFFICIAL_PRESET_RUNTIME_INITIAL_SEED",
     "OFFICIAL_PRESET_SAMPLE_MODE",
     "OFFICIAL_PRESET_VERSION_SCHEMA_VERSION",
+    "OFFICIAL_PRESET_IDENTITY_CONTRACT_VERSION",
+    "OFFICIAL_PRESET_DIRECT_VERSION_IDENTITY_CONTRACT_VERSION",
+    "OFFICIAL_PRESET_DIRECT_VERSION_FINGERPRINT_SCHEMA_VERSION",
+    "OFFICIAL_PRESET_RIGHTS_POLICY_VERSION",
     "OFFICIAL_PRESETS",
     "OFFICIAL_PRESETS_BY_ID",
+    "CANONICAL_CHAPTER_VERIFIED_PRESET_IDS",
     "PRODUCT_OFFICIAL_PRESET_IDS",
     "PRODUCT_OFFICIAL_PRESETS",
     "PRODUCT_PRESET_OUT_OF_SCOPE",
@@ -248,8 +498,14 @@ __all__ = [
     "OfficialPreset",
     "canonical_sha256",
     "official_preset_decode_parameters_fingerprint",
+    "official_preset_direct_version_fingerprint",
+    "official_preset_rights_policy_fingerprint",
+    "official_preset_canonical_profile_id",
+    "official_preset_canonical_version_id",
     "official_preset_version_fingerprint",
+    "official_preset_validation_tier",
     "require_official_preset",
     "require_product_official_preset",
     "validate_official_preset_provenance",
+    "validate_official_version_evidence",
 ]

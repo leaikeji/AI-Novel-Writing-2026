@@ -332,7 +332,9 @@ def _seed_voice(store: MemoryNarrationStore, novel: Novel) -> tuple[VoiceProfile
         id=uuid4(), profile_id=profile.id, owner_id=LOCAL_OWNER_ID,
         workspace_id=LOCAL_WORKSPACE_ID, version_number=1, source_type="uploaded",
         state="locked", rights_record_id=rights.id, language="zh-CN", parameters_json={},
-        fingerprint=SHA_B, quality_state="accepted", locked_actor="owner", locked_at=NOW,
+        fingerprint=SHA_B, quality_state="accepted",
+        activation_basis="preview_confirmed", validation_basis="human_accepted",
+        locked_actor="owner", locked_at=NOW,
         seed=7,
     )
     profile.current_version_id = version.id

@@ -458,9 +458,8 @@ function localSectionContent(overview: NarrationOverviewResponse) {
   const voiceHarness = createReactHarness();
   return {
     characters: [character, renderVoiceSourcePanel(overview, voiceHarness.React)],
-    "casting-rules": [status, rules],
-    pronunciation,
-    "audio-cache": cache,
+    "reading-rules": [status, rules, pronunciation],
+    "storage-privacy": cache,
   } as const;
 }
 
@@ -501,8 +500,8 @@ describe("reading page local-module integration", () => {
     const sourceButtons = findAll(tree, (element) => (
       element.type === "button" && textContent(element) === "选择来源"
     ));
-    expect(sourceButtons).toHaveLength(1);
-    expect(sourceButtons[0].props.disabled).toBe(true);
+    expect(sourceButtons).toHaveLength(0);
+    expect(textContent(tree)).toContain("官方音色请在上方音色库直接使用");
 
     const navButtons = findAll(tree, (element) => element.type === "button"
       && typeof element.props["data-reading-section"] === "string");
@@ -513,24 +512,22 @@ describe("reading page local-module integration", () => {
       tree = harness.render(ReadingPage, props);
     };
 
-    open("pronunciation");
+    open("reading-rules");
     expect(textContent(tree)).toContain("发音与停顿");
     expect(textContent(tree)).toContain("无权查看发音与停顿设置");
-
-    open("audio-cache");
-    expect(textContent(tree)).toContain("音频与缓存");
-    expect(textContent(tree)).toContain("无权查看音频与缓存");
-
-    open("casting-rules");
     expect(textContent(tree)).toContain("朗读运行状态");
     expect(textContent(tree)).toContain("识别、选角与复核规则");
     expect(textContent(tree)).toContain("当前只读：T2_GATE_REQUIRED");
     const ruleFieldsets = findAll(tree, (element) => element.type === "fieldset");
     expect(ruleFieldsets).toHaveLength(2);
     expect(ruleFieldsets.every((fieldset) => fieldset.props.disabled === true)).toBe(true);
+
+    open("storage-privacy");
+    expect(textContent(tree)).toContain("音频与缓存");
+    expect(textContent(tree)).toContain("无权查看音频与缓存");
   });
 
-  it("fails closed on scope drift, preserves CAS, and refreshes after the surfaced error", async () => {
+  it("wires the compact scope editor to the scoped CAS API and refresh action", async () => {
     const harness = createReactHarness();
     const overview = overviewFixture({ enabled: true });
     const putScopeOverride = vi.fn(async () => overrideFixture(OTHER_NOVEL_ID));
@@ -551,42 +548,19 @@ describe("reading page local-module integration", () => {
     await settle();
     let tree = harness.render(ReadingPage, props);
     const scopeElement = findAll(tree, (element) => (
-      typeof element.type === "function" && "targets" in element.props && "onSave" in element.props
+      typeof element.type === "function" && "targets" in element.props && "saveOverride" in element.props
     ))[0];
     expect(scopeElement).toBeDefined();
-    const request = {
-      expected_version: 4,
-      enabled: false,
-      overrides: emptyScopeOverrideValues(),
-    } as const;
-    (scopeElement.props.onSave as (
-      selected: ReadingScopeTarget,
-      payload: typeof request,
-    ) => void)(target(), request);
-    await settle();
-    tree = harness.render(ReadingPage, props);
-
-    expect(putScopeOverride).toHaveBeenCalledWith(
-      NOVEL_ID,
-      "volume",
-      VOLUME_ID,
-      request,
-      expect.any(AbortSignal),
-    );
-    const operation = findAll(tree, (element) => element.props.role === "alert")[0];
-    expect(operation).toBeDefined();
-    expect(textContent(operation)).toContain("保存范围覆盖失败");
-    const refresh = findAll(operation, (element) => (
-      element.type === "button" && textContent(element) === "刷新最新配置"
-    ))[0];
-    (refresh.props.onClick as () => void)();
+    expect(scopeElement.props.saveOverride).toBe(putScopeOverride);
+    expect(scopeElement.props.targets).toEqual([target()]);
+    (scopeElement.props.onRefresh as () => void)();
 
     harness.render(ReadingPage, props);
     harness.flushEffects();
     await settle();
     tree = harness.render(ReadingPage, props);
     expect(api.getOverview).toHaveBeenCalledTimes(2);
-    expect(textContent(tree)).not.toContain("保存范围覆盖失败");
+    expect(textContent(tree)).not.toContain("不匹配的范围配置");
   });
 
   it("retries a real load error and never reuses a response from another novel", async () => {
@@ -645,7 +619,7 @@ describe("reading page local-module integration", () => {
     expect(state.message).toContain("其他作品");
   });
 
-  it("aborts both page loading and a pending scope mutation on unmount", async () => {
+  it("aborts both page loading requests on unmount", async () => {
     const loadHarness = createReactHarness();
     const loadSignals: AbortSignal[] = [];
     const neverOverview = (_novelId: string, signal?: AbortSignal) => {
@@ -669,41 +643,6 @@ describe("reading page local-module integration", () => {
     loadingCleanups.forEach((cleanup) => cleanup());
     expect(loadSignals.every((signal) => signal.aborted)).toBe(true);
 
-    const mutationHarness = createReactHarness();
-    let mutationSignal: AbortSignal | undefined;
-    const mutationApi: ReadingPageApi = {
-      getOverview: vi.fn(async () => overviewFixture({ enabled: true })),
-      listScopeOverrides: vi.fn(async () => scopeList([overrideFixture()])),
-      putSettings: vi.fn(),
-      putScopeOverride: (_novelId, _scopeKind, _scopeId, _request, signal) => {
-        mutationSignal = signal;
-        return new Promise<NarrationScopeOverrideResource>(() => undefined);
-      },
-    };
-    const MutationPage = createReadingPage(mutationHarness.React, mutationApi);
-    const mutationProps = {
-      novelId: NOVEL_ID,
-      initialSection: "narrator" as const,
-      scopeTargets: [target()],
-    };
-    mutationHarness.render(MutationPage, mutationProps);
-    const mutationCleanups = mutationHarness.flushEffects();
-    await settle();
-    const mutationTree = mutationHarness.render(MutationPage, mutationProps);
-    const scopeElement = findAll(mutationTree, (element) => (
-      typeof element.type === "function" && "targets" in element.props && "onSave" in element.props
-    ))[0];
-    (scopeElement.props.onSave as (
-      selected: ReadingScopeTarget,
-      payload: { readonly expected_version: number; readonly enabled: boolean; readonly overrides: ReturnType<typeof emptyScopeOverrideValues> },
-    ) => void)(target(), {
-      expected_version: 4,
-      enabled: false,
-      overrides: emptyScopeOverrideValues(),
-    });
-    expect(mutationSignal?.aborted).toBe(false);
-    mutationCleanups.forEach((cleanup) => cleanup());
-    expect(mutationSignal?.aborted).toBe(true);
   });
 
   it("aborts pending T2-F loads and a pending T2-G rules save on unmount", () => {

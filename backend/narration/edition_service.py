@@ -31,6 +31,7 @@ from ..models import (
     NarrationSegment,
     NarrationSettingsSnapshot,
     PronunciationProfile,
+    VoiceProfile,
     VoiceProfileVersion,
 )
 
@@ -91,7 +92,8 @@ from .snapshots import (
 )
 
 
-NARRATION_EDITION_RESOLUTION_VERSION = "narration-edition-resolution/1"
+NARRATION_EDITION_RESOLUTION_VERSION = "narration-edition-resolution/2"
+LEGACY_NARRATION_EDITION_RESOLUTION_VERSION = "narration-edition-resolution/1"
 T4_REQUEST_INTENTS = frozenset({"create", "update", "analyze_only"})
 
 
@@ -177,6 +179,84 @@ class NarrationEditionProjection:
     failed_segment_count: int
     current_manifest_revision: int | None
     job_ids: tuple[UUID, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class NarrationEditionVoiceIdentityProjection:
+    profile_id: UUID
+    voice_version_id: UUID
+    display_name: str
+    source_type: str | None
+    preset_id: str | None
+    resolution_contract_version: str
+    legacy_fallback: bool
+
+
+def _project_frozen_voice_identity(
+    segment: NarrationEditionSegment,
+) -> NarrationEditionVoiceIdentityProjection:
+    resolution = segment.resolution_json
+    if type(resolution) is dict and resolution.get("contract_version") == NARRATION_EDITION_RESOLUTION_VERSION:
+        identity = resolution.get("voice_identity")
+        if type(identity) is not dict:
+            raise InvalidNarrationState("Edition v2 resolution has no frozen voice identity")
+        if identity.get("profile_id") != str(segment.profile_id) or identity.get(
+            "voice_version_id"
+        ) != str(segment.voice_version_id):
+            raise InvalidNarrationState("Edition frozen voice identity differs from segment identity")
+        display_name = identity.get("display_name")
+        source_type = identity.get("source_type")
+        preset_id = identity.get("preset_id")
+        if type(display_name) is not str or not display_name.strip():
+            raise InvalidNarrationState("Edition frozen voice display name is invalid")
+        if source_type not in {"preset", "uploaded", "generated"}:
+            raise InvalidNarrationState("Edition frozen voice source type is invalid")
+        if preset_id is not None and type(preset_id) is not str:
+            raise InvalidNarrationState("Edition frozen preset identity is invalid")
+        if (source_type == "preset") != (preset_id is not None):
+            raise InvalidNarrationState("Edition frozen preset identity has an invalid shape")
+        return NarrationEditionVoiceIdentityProjection(
+            profile_id=segment.profile_id,
+            voice_version_id=segment.voice_version_id,
+            display_name=display_name,
+            source_type=source_type,
+            preset_id=preset_id,
+            resolution_contract_version=NARRATION_EDITION_RESOLUTION_VERSION,
+            legacy_fallback=False,
+        )
+    return NarrationEditionVoiceIdentityProjection(
+        profile_id=segment.profile_id,
+        voice_version_id=segment.voice_version_id,
+        display_name="旧版未保存名称",
+        source_type=None,
+        preset_id=None,
+        resolution_contract_version=LEGACY_NARRATION_EDITION_RESOLUTION_VERSION,
+        legacy_fallback=True,
+    )
+
+
+def project_edition_voice_identities(
+    store: NarrationStore,
+    edition: NarrationEdition,
+) -> tuple[NarrationEditionVoiceIdentityProjection, ...]:
+    segments = store.find_all(
+        NarrationEditionSegment,
+        edition_id=edition.id,
+        order_by=("ordinal",),
+    )
+    if not segments or [item.ordinal for item in segments] != list(range(len(segments))):
+        raise InvalidNarrationState("Edition has an incomplete voice identity projection")
+    identities_by_version: dict[UUID, NarrationEditionVoiceIdentityProjection] = {}
+    for segment in segments:
+        identity = _project_frozen_voice_identity(segment)
+        existing_identity = identities_by_version.get(identity.voice_version_id)
+        if existing_identity is not None and existing_identity != identity:
+            raise InvalidNarrationState("Edition repeats one voice version with conflicting identity")
+        identities_by_version[identity.voice_version_id] = identity
+    return tuple(
+        identities_by_version[key]
+        for key in sorted(identities_by_version, key=str)
+    )
 
 
 def _validate_start(command: StartNarrationWorkflow) -> None:
@@ -577,6 +657,12 @@ def _voice_resolution(
     )
     if voice.profile_id != profile_id:
         raise NarrationScopeMismatch("resolved profile/version relation changed")
+    profile = require_row(
+        store.get(VoiceProfile, profile_id, for_update=True),
+        label="resolved voice profile",
+    )
+    if profile.novel_id != novel_id:
+        raise NarrationScopeMismatch("resolved voice profile belongs to another novel")
     resolution = {
         "contract_version": NARRATION_EDITION_RESOLUTION_VERSION,
         "casting": canonical_payload(segment.casting_json),
@@ -584,6 +670,13 @@ def _voice_resolution(
         "voice_version_id": str(voice_version_id),
         "slot_id": str(slot_id) if slot_id else None,
         "authority": authority,
+        "voice_identity": {
+            "profile_id": str(profile_id),
+            "voice_version_id": str(voice_version_id),
+            "display_name": profile.name,
+            "source_type": voice.source_type,
+            "preset_id": voice.preset_key if voice.source_type == "preset" else None,
+        },
     }
     return EditionSegmentInput(
         segment_id=segment.id,
@@ -1080,10 +1173,28 @@ class SqlAlchemyNarrationWorkflowService:
             require_local_novel(self.store, edition.novel_id)
             return project_edition(self.store, edition)
 
+    def get_edition_voice_identities(
+        self,
+        edition_id: UUID,
+    ) -> tuple[NarrationEditionVoiceIdentityProjection, ...]:
+        if self.session.in_transaction():
+            raise RuntimeError("narration Edition identity read received a pre-opened transaction")
+        with self.session.begin():
+            edition = require_row(
+                self.store.get(NarrationEdition, edition_id),
+                label="narration Edition",
+            )
+            scope = NarrationRequestScope.fixed_local()
+            if edition.owner_id != scope.owner_id or edition.workspace_id != scope.workspace_id:
+                raise NarrationScopeMismatch("narration Edition is outside fixed scope")
+            require_local_novel(self.store, edition.novel_id)
+            return project_edition_voice_identities(self.store, edition)
+
 
 __all__ = [
     "NARRATION_EDITION_RESOLUTION_VERSION",
     "NarrationEditionProjection",
+    "NarrationEditionVoiceIdentityProjection",
     "NarrationProductionPolicy",
     "NarrationWorkflowProjection",
     "SqlAlchemyNarrationWorkflowService",
@@ -1091,5 +1202,6 @@ __all__ = [
     "orchestrate_narration_request",
     "produce_approved_request",
     "project_edition",
+    "project_edition_voice_identities",
     "project_workflow",
 ]

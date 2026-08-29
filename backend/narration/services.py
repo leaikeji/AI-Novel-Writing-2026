@@ -28,6 +28,10 @@ from ..models import (
 from .contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID, NarrationRequestScope
 from .fingerprints import canonical_json_bytes
 from .jobs import JobFence, PublicationFenceContext
+from .official_presets import (
+    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    validate_official_version_evidence,
+)
 
 
 T = TypeVar("T")
@@ -267,6 +271,44 @@ def require_same_novel(actual: UUID | None, expected: UUID, *, label: str) -> No
         raise NarrationScopeMismatch(f"{label} belongs to another novel")
 
 
+def voice_activation_evidence_is_usable(
+    version: VoiceProfileVersion,
+    rights: VoiceRightsRecord,
+) -> bool:
+    """Apply the one fail-closed activation/evidence policy to a voice pair."""
+
+    human_confirmed = (
+        version.activation_basis == "preview_confirmed"
+        and version.validation_basis == "human_accepted"
+        and version.quality_state == "accepted"
+        and version.locked_actor is not None
+        and version.locked_at is not None
+    )
+    official_direct = (
+        version.source_type == "preset"
+        and rights.source_kind == "official_preset"
+        and version.activation_basis == "explicit_official_preset_selection"
+        and version.validation_basis == "not_required"
+        and version.quality_state == "pending"
+        and version.locked_actor is None
+        and version.locked_at is None
+    )
+    if not (human_confirmed or official_direct):
+        return False
+    if rights.source_kind == "official_preset":
+        try:
+            validate_official_version_evidence(
+                version,
+                rights,
+                expected_model_fingerprint=(
+                    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
+                ),
+            )
+        except ValueError:
+            return False
+    return True
+
+
 def require_usable_voice(
     store: NarrationStore,
     voice_version_id: UUID,
@@ -293,8 +335,8 @@ def require_usable_voice(
         raise NarrationScopeMismatch("private voice profile belongs to another novel")
     if profile.status != "active":
         raise VoiceRightsUnavailable("voice profile is not active")
-    if version.state != "locked" or version.quality_state != "accepted":
-        raise VoiceRightsUnavailable("voice version is not locked and accepted")
+    if version.state != "locked":
+        raise VoiceRightsUnavailable("voice version is not locked")
     rights = require_row(
         store.get(VoiceRightsRecord, version.rights_record_id, for_update=True),
         label="voice rights record",
@@ -303,6 +345,8 @@ def require_usable_voice(
         raise NarrationScopeMismatch("voice rights scope mismatch")
     if rights.novel_id not in {None, novel_id}:
         raise NarrationScopeMismatch("voice rights belong to another novel")
+    if not voice_activation_evidence_is_usable(version, rights):
+        raise VoiceRightsUnavailable("voice version activation evidence is unusable")
     if version.source_type == "uploaded" and not rights.voice_cloning:
         raise VoiceRightsUnavailable("uploaded voice has no cloning permission")
     if rights.expires_at is not None and rights.expires_at <= now:
@@ -343,4 +387,5 @@ __all__ = [
     "require_sha256",
     "require_usable_voice",
     "utc_now",
+    "voice_activation_evidence_is_usable",
 ]

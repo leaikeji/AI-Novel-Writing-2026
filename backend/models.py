@@ -1470,8 +1470,26 @@ class VoiceProfileVersion(Base):
             name="ck_voice_profile_version_quality_state",
         ),
         CheckConstraint(
-            "state <> 'locked' OR (quality_state = 'accepted' AND locked_actor IS NOT NULL AND locked_at IS NOT NULL)",
+            "activation_basis IN ('preview_confirmed','explicit_official_preset_selection',"
+            "'character_one_click_generation','experimental_machine_validated')",
+            name="ck_voice_profile_version_activation_basis",
+        ),
+        CheckConstraint(
+            "validation_basis IN ('pending','human_accepted','machine_validated','not_required')",
+            name="ck_voice_profile_version_validation_basis",
+        ),
+        CheckConstraint(
+            "state <> 'locked' OR ("
+            "(activation_basis='preview_confirmed' AND validation_basis='human_accepted' "
+            "AND quality_state='accepted' AND locked_actor IS NOT NULL AND locked_at IS NOT NULL) OR "
+            "(activation_basis='explicit_official_preset_selection' AND source_type='preset' "
+            "AND validation_basis='not_required' AND quality_state='pending' "
+            "AND locked_actor IS NULL AND locked_at IS NULL))",
             name="ck_voice_profile_version_locked_shape",
+        ),
+        CheckConstraint(
+            "state = 'locked' OR (activation_basis='preview_confirmed' AND validation_basis='pending')",
+            name="ck_voice_profile_version_unlocked_activation",
         ),
         CheckConstraint(
             "source_type <> 'uploaded' OR reference_asset_id IS NOT NULL",
@@ -1499,6 +1517,12 @@ class VoiceProfileVersion(Base):
     parameters_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     quality_state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    activation_basis: Mapped[str] = mapped_column(
+        String(48), nullable=False, default="preview_confirmed"
+    )
+    validation_basis: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending"
+    )
     locked_actor: Mapped[str | None] = mapped_column(String(120))
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -1569,6 +1593,124 @@ class VoiceActionReceipt(Base):
     resource_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="reserved")
     reserved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class VoiceActionCommand(Base):
+    """Immutable request/result evidence for one multi-resource voice action."""
+
+    __tablename__ = "voice_action_commands"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["novel_id", "owner_id", "workspace_id"],
+            ["novels.id", "novels.owner_id", "novels.workspace_id"],
+            name="fk_voice_action_command_novel_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_character_id", "novel_id"],
+            ["novel_characters.id", "novel_characters.novel_id"],
+            name="fk_voice_action_command_character_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["voice_version_id", "profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_voice_action_command_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["owner_id", "workspace_id", "operation", "id"],
+            [
+                "voice_action_receipts.owner_id",
+                "voice_action_receipts.workspace_id",
+                "voice_action_receipts.operation",
+                "voice_action_receipts.resource_id",
+            ],
+            name="fk_voice_action_command_receipt",
+            deferrable=True,
+            initially="DEFERRED",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_voice_action_command_fixed_local_scope",
+        ),
+        CheckConstraint(
+            "operation ~ '^[a-z][a-z0-9_]{2,47}$'",
+            name="ck_voice_action_command_operation",
+        ),
+        CheckConstraint(
+            "operation = 'official_preset_selection'",
+            name="ck_voice_action_command_operation_kind",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_voice_action_command_request_hash",
+        ),
+        CheckConstraint(
+            "preset_key IS NULL OR preset_key ~ '^onnx\\.[A-Za-z][A-Za-z0-9]{0,79}$'",
+            name="ck_voice_action_command_preset_key",
+        ),
+        CheckConstraint(
+            "target_kind IN ('narrator','character')",
+            name="ck_voice_action_command_target_kind",
+        ),
+        CheckConstraint(
+            "(target_kind='narrator' AND target_character_id IS NULL) OR "
+            "(target_kind='character' AND target_character_id IS NOT NULL)",
+            name="ck_voice_action_command_target_shape",
+        ),
+        CheckConstraint(
+            "state IN ('reserved','completed')",
+            name="ck_voice_action_command_state",
+        ),
+        CheckConstraint(
+            "target_language IS NULL OR target_language ~ '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$'",
+            name="ck_voice_action_command_target_language",
+        ),
+        CheckConstraint(
+            "(state='reserved' AND profile_id IS NULL AND voice_version_id IS NULL "
+            "AND settings_version IS NULL AND binding_version IS NULL "
+            "AND target_language IS NULL AND language_mismatch IS NULL "
+            "AND completed_at IS NULL) OR "
+            "(state='completed' AND profile_id IS NOT NULL AND voice_version_id IS NOT NULL "
+            "AND settings_version IS NOT NULL AND settings_version>0 "
+            "AND ((target_kind='narrator' AND binding_version IS NULL) "
+            "OR (target_kind='character' AND binding_version IS NOT NULL AND binding_version>0)) "
+            "AND target_language IS NOT NULL AND language_mismatch IS NOT NULL "
+            "AND completed_at IS NOT NULL AND completed_at>=created_at)",
+            name="ck_voice_action_command_lifecycle",
+        ),
+        Index(
+            "ix_voice_action_commands_scope_created",
+            "owner_id",
+            "workspace_id",
+            "novel_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    operation: Mapped[str] = mapped_column(String(48), nullable=False)
+    target_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_character_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    preset_key: Mapped[str | None] = mapped_column(String(160))
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="reserved")
+    profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    settings_version: Mapped[int | None] = mapped_column(BigInteger)
+    binding_version: Mapped[int | None] = mapped_column(BigInteger)
+    target_language: Mapped[str | None] = mapped_column(String(40))
+    language_mismatch: Mapped[bool | None] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -2929,9 +3071,14 @@ class NarrationPlaybackProgress(Base):
 class VoiceDeletionRequest(Base):
     __tablename__ = "voice_deletion_requests"
     __table_args__ = (
-        CheckConstraint("state IN ('requested','live_deleting','live_deleted_backup_pending','completed','failed')", name="ck_voice_deletion_request_state"),
         CheckConstraint(
-            "command IN ('delete_uploaded_original_only','true_delete_private_voice')",
+            "state IN ('grace_pending','requested','cancelled','live_deleting',"
+            "'live_deleted_backup_pending','completed','failed')",
+            name="ck_voice_deletion_request_state",
+        ),
+        CheckConstraint(
+            "command IN ('delete_uploaded_original_only','discard_unreferenced_private_voice',"
+            "'true_delete_private_voice')",
             name="ck_voice_deletion_request_command",
         ),
         CheckConstraint(
@@ -2939,20 +3086,145 @@ class VoiceDeletionRequest(Base):
             "(confirmed_actor IS NOT NULL AND confirmed_at IS NOT NULL)",
             name="ck_voice_deletion_confirmation_shape",
         ),
+        CheckConstraint(
+            "asset_count >= 0 AND total_bytes >= 0",
+            name="ck_voice_deletion_request_asset_totals",
+        ),
+        CheckConstraint(
+            "external_backup_status IN ('unmanaged','managed_pending','managed_expired')",
+            name="ck_voice_deletion_request_backup_status",
+        ),
+        Index(
+            "ix_voice_deletion_requests_scope_profile_state",
+            "owner_id",
+            "workspace_id",
+            "voice_profile_id",
+            "state",
+        ),
+        Index(
+            "uq_voice_deletion_requests_idempotency",
+            "owner_id",
+            "workspace_id",
+            "command",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
+        Index(
+            "uq_voice_deletion_requests_active_profile",
+            "owner_id",
+            "workspace_id",
+            "voice_profile_id",
+            unique=True,
+            postgresql_where=text(
+                "state IN ('grace_pending','requested','live_deleting',"
+                "'live_deleted_backup_pending','failed')"
+            ),
+        ),
     )
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT")
+    )
     voice_profile_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"), nullable=False)
     command: Mapped[str] = mapped_column(String(48), nullable=False)
     state: Mapped[str] = mapped_column(String(40), nullable=False, default="requested")
+    idempotency_key: Mapped[str | None] = mapped_column(String(160))
+    request_hash: Mapped[str | None] = mapped_column(String(64))
+    expected_profile_version: Mapped[int | None] = mapped_column(BigInteger)
     impact_digest_key_id: Mapped[str] = mapped_column(String(80), nullable=False)
     impact_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    impact_snapshot_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    impact_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    execute_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    asset_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    external_backup_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="unmanaged"
+    )
     requested_actor: Mapped[str] = mapped_column(String(120), nullable=False)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     confirmed_actor: Mapped[str | None] = mapped_column(String(120))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_actor: Mapped[str | None] = mapped_column(String(120))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_code: Mapped[str | None] = mapped_column(String(96))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class VoiceDeletionAssetPlan(Base):
+    __tablename__ = "voice_deletion_asset_plans"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["asset_id", "owner_id", "workspace_id"],
+            ["media_assets.id", "media_assets.owner_id", "media_assets.workspace_id"],
+            name="fk_voice_deletion_asset_plan_media_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "deletion_request_id",
+            "asset_id",
+            name="uq_voice_deletion_asset_plan_request_asset",
+        ),
+        CheckConstraint(
+            "role IN ('reference','preview','render_master','render_playback','export')",
+            name="ck_voice_deletion_asset_plan_role",
+        ),
+        CheckConstraint(
+            "state IN ('planned','unlinking','unlinked','finalized','failed')",
+            name="ck_voice_deletion_asset_plan_state",
+        ),
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$' AND byte_size >= 0 AND gc_generation >= 0",
+            name="ck_voice_deletion_asset_plan_identity",
+        ),
+        CheckConstraint(
+            "(file_present IS TRUE AND device IS NOT NULL AND inode IS NOT NULL) OR "
+            "(file_present IS FALSE AND device IS NULL AND inode IS NULL)",
+            name="ck_voice_deletion_asset_plan_file_identity",
+        ),
+        Index(
+            "ix_voice_deletion_asset_plans_request_state",
+            "deletion_request_id",
+            "state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    deletion_request_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("voice_deletion_requests.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT"), nullable=False
+    )
+    asset_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    role: Mapped[str] = mapped_column(String(24), nullable=False)
+    storage_backend: Mapped[str] = mapped_column(String(40), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gc_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    file_present: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    device: Mapped[int | None] = mapped_column(BigInteger)
+    inode: Mapped[int | None] = mapped_column(BigInteger)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="planned")
+    unlinked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class AssetTombstone(Base):

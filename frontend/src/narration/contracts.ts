@@ -1,9 +1,9 @@
 export const NARRATION_SETTINGS_API_VERSION = "narration-settings-api/1" as const;
 export const NARRATION_SETTINGS_SCHEMA_VERSION = "narration-settings/1" as const;
 export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/1" as const;
-export const NARRATION_VOICE_SCHEMA_VERSION = "narration-voice/1" as const;
+export const NARRATION_VOICE_SCHEMA_VERSION = "narration-voice/2" as const;
 export const NARRATION_CACHE_SCHEMA_VERSION = "narration-cache/1" as const;
-export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "moss-tts-official-preset-catalog/1.0" as const;
+export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "moss-tts-official-preset-catalog/2.0" as const;
 export const OFFICIAL_PRESET_PROVENANCE_SCHEMA_VERSION = "moss-tts-official-preset-provenance/1.0" as const;
 export const OFFICIAL_PRESET_MANIFEST_IDENTITY = Object.freeze({
   repository: "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX",
@@ -259,6 +259,11 @@ export interface UpdateNarrationSettingsRequest {
   readonly values: NarrationSettingsValues;
 }
 
+export interface UpdateNarrationPlaybackPreferencesRequest {
+  readonly expected_version: number;
+  readonly playback: NarrationPlaybackPreferences;
+}
+
 export type NarrationScopeKind = "volume" | "chapter";
 
 export interface NarrationScopeOverrideValues {
@@ -382,6 +387,12 @@ export interface OfficialPresetCatalogItem {
   readonly language: string;
   readonly local_use_status: "available";
   readonly commercial_distribution_status: "not_evaluated";
+  readonly validation_tier: "canonical_chapter_verified" | "pinned_catalog_unreviewed";
+  readonly language_scope: "zh-CN" | "en" | "ja-JP";
+  readonly selectable_now: boolean;
+  readonly previewable_now: boolean;
+  readonly renderable_existing: boolean;
+  readonly usage_notice: "private_local_writing_tool";
   readonly provenance: OfficialPresetProvenance;
 }
 
@@ -404,6 +415,8 @@ export interface VoiceProfileVersionResource {
   readonly language: string;
   readonly fingerprint: string;
   readonly quality_state: VoiceQualityState;
+  readonly activation_basis: "preview_confirmed" | "explicit_official_preset_selection" | "character_one_click_generation" | "experimental_machine_validated";
+  readonly validation_basis: "pending" | "human_accepted" | "machine_validated" | "not_required";
   readonly rights: VoiceRightsSummary;
   readonly official_preset: OfficialPresetProvenance | null;
   readonly reference_asset_id: string | null;
@@ -436,6 +449,26 @@ export function voiceSourceEvidenceIsUsable(
   }
   return version.rights.source_kind === "voice_generator"
     && version.description_available;
+}
+
+
+/** Mirror the P0 backend activation gate without treating “locked” as human acceptance. */
+export function voiceActivationEvidenceIsUsable(
+  version: VoiceProfileVersionResource,
+): boolean {
+  return version.state === "locked" && (
+    (
+      version.activation_basis === "preview_confirmed"
+      && version.validation_basis === "human_accepted"
+      && version.quality_state === "accepted"
+    )
+    || (
+      version.source_type === "preset"
+      && version.activation_basis === "explicit_official_preset_selection"
+      && version.validation_basis === "not_required"
+      && version.quality_state === "pending"
+    )
+  );
 }
 
 export interface VoiceProfileResource {
@@ -542,6 +575,40 @@ export interface PutCharacterVoiceBindingRequest {
   readonly profile_id: string | null;
   readonly version_id: string | null;
   readonly language: string;
+}
+
+export type OfficialVoiceSelectionTargetKind = "narrator" | "character";
+
+export interface OfficialVoiceSelectionRequest {
+  readonly preset_id: OfficialPresetId;
+  readonly target_kind: OfficialVoiceSelectionTargetKind;
+  readonly character_id: string | null;
+  readonly expected_settings_version: number;
+  readonly expected_binding_version: number | null;
+}
+
+export interface OfficialVoiceSelectionResult {
+  readonly command_id: string;
+  readonly preset_id: OfficialPresetId;
+  readonly target_kind: OfficialVoiceSelectionTargetKind;
+  readonly character_id: string | null;
+  readonly profile_id: string;
+  readonly version_id: string;
+  readonly settings_version: number;
+  readonly binding_version: number | null;
+  readonly target_language: string;
+  readonly language_mismatch: boolean;
+  readonly completed_at: string;
+}
+
+export interface OfficialVoiceSelectionResponse {
+  readonly contract_version: "official-voice-selection/1.0";
+  readonly replayed: boolean;
+  readonly selection_still_current: boolean;
+  readonly frozen_result: OfficialVoiceSelectionResult;
+  readonly profile: VoiceProfileResource;
+  readonly current_settings: NarrationSettingsResource | null;
+  readonly current_character_binding: CharacterVoiceBindingResource | null;
 }
 
 export type CastingSpeakerKind = "character" | "anonymous" | "group";
@@ -1096,19 +1163,21 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
   exact(item, ["schema_version", "items"], path);
   literal(item.schema_version, OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION, `${path}.schema_version`);
   const items = array(item.items, `${path}.items`);
-  if (items.length !== PRODUCT_OFFICIAL_PRESET_IDS.length) {
-    fail(`${path}.items`, "expected exact 6-item product catalog");
+  if (items.length !== OFFICIAL_PRESET_IDS.length) {
+    fail(`${path}.items`, "expected exact 18-item pinned catalog");
   }
   items.forEach((entry, index) => {
     const itemPath = `${path}.items[${index}]`;
     const preset = record(entry, itemPath);
     exact(preset, [
       "preset_id", "display_name", "group", "language", "local_use_status",
-      "commercial_distribution_status", "provenance",
+      "commercial_distribution_status", "validation_tier", "language_scope",
+      "selectable_now", "previewable_now", "renderable_existing", "usage_notice",
+      "provenance",
     ], itemPath);
     const presetId = string(preset.preset_id, `${itemPath}.preset_id`, 6, 85);
     if (!OFFICIAL_PRESET_ID_PATTERN.test(presetId)) fail(`${itemPath}.preset_id`, "expected exact ONNX preset id");
-    const expectedPresetId = PRODUCT_OFFICIAL_PRESET_IDS[index]!;
+    const expectedPresetId = OFFICIAL_PRESET_IDS[index]!;
     if (presetId !== expectedPresetId) {
       fail(`${itemPath}.preset_id`, `expected pinned catalog order item ${expectedPresetId}`);
     }
@@ -1117,6 +1186,28 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
     language(preset.language, `${itemPath}.language`);
     literal(preset.local_use_status, "available", `${itemPath}.local_use_status`);
     literal(preset.commercial_distribution_status, "not_evaluated", `${itemPath}.commercial_distribution_status`);
+    const validationTier = oneOf(
+      preset.validation_tier,
+      ["canonical_chapter_verified", "pinned_catalog_unreviewed"] as const,
+      `${itemPath}.validation_tier`,
+    );
+    const expectedValidationTier = (["onnx.Junhao", "onnx.Zhiming", "onnx.Xiaoyu"] as const)
+      .includes(presetId as "onnx.Junhao" | "onnx.Zhiming" | "onnx.Xiaoyu")
+      ? "canonical_chapter_verified"
+      : "pinned_catalog_unreviewed";
+    if (validationTier !== expectedValidationTier) {
+      fail(`${itemPath}.validation_tier`, "official preset validation tier changed");
+    }
+    const languageScope = oneOf(
+      preset.language_scope,
+      ["zh-CN", "en", "ja-JP"] as const,
+      `${itemPath}.language_scope`,
+    );
+    if (languageScope !== preset.language) fail(itemPath, "catalog language scope changed");
+    boolean(preset.selectable_now, `${itemPath}.selectable_now`);
+    boolean(preset.previewable_now, `${itemPath}.previewable_now`);
+    boolean(preset.renderable_existing, `${itemPath}.renderable_existing`);
+    literal(preset.usage_notice, "private_local_writing_tool", `${itemPath}.usage_notice`);
     const provenance = validateOfficialPresetProvenance(preset.provenance, `${itemPath}.provenance`);
     if (provenance.preset_id !== presetId) fail(itemPath, "catalog/provenance preset mismatch");
     if (!officialPresetProvenanceIsExact(provenance, expectedPresetId)) {
@@ -1142,7 +1233,8 @@ function validateVoiceVersion(value: unknown, path: string): void {
   exact(item, [
     "schema_version", "version_id", "profile_id", "version_number", "source_type", "state",
     "provider_id", "model_id", "model_revision", "preset_key", "language", "fingerprint",
-    "quality_state", "rights", "official_preset", "reference_asset_id", "preview_asset", "description_available",
+    "quality_state", "activation_basis", "validation_basis", "rights", "official_preset",
+    "reference_asset_id", "preview_asset", "description_available",
     "locked_at", "created_at",
   ], path);
   literal(item.schema_version, NARRATION_VOICE_SCHEMA_VERSION, `${path}.schema_version`);
@@ -1158,6 +1250,16 @@ function validateVoiceVersion(value: unknown, path: string): void {
   language(item.language, `${path}.language`);
   sha256(item.fingerprint, `${path}.fingerprint`);
   const quality = oneOf(item.quality_state, ["pending", "accepted", "rejected"] as const, `${path}.quality_state`);
+  const activation = oneOf(
+    item.activation_basis,
+    ["preview_confirmed", "explicit_official_preset_selection", "character_one_click_generation", "experimental_machine_validated"] as const,
+    `${path}.activation_basis`,
+  );
+  const validation = oneOf(
+    item.validation_basis,
+    ["pending", "human_accepted", "machine_validated", "not_required"] as const,
+    `${path}.validation_basis`,
+  );
   validateRights(item.rights, `${path}.rights`);
   if (item.official_preset !== null) validateOfficialPresetProvenance(item.official_preset, `${path}.official_preset`);
   const rights = record(item.rights, `${path}.rights`);
@@ -1174,8 +1276,18 @@ function validateVoiceVersion(value: unknown, path: string): void {
   } else if (item.official_preset !== null) fail(path, "non-official source published official provenance");
   if (source === "uploaded" && reference === null) fail(path, "uploaded voice lacks reference asset");
   if (source === "generated" && !description) fail(path, "generated voice lacks description record");
-  if (state === "locked" && (quality !== "accepted" || lockedAt === null)) fail(path, "invalid locked voice");
+  const humanConfirmed = activation === "preview_confirmed"
+    && validation === "human_accepted" && quality === "accepted" && lockedAt !== null;
+  const officialDirect = source === "preset"
+    && activation === "explicit_official_preset_selection"
+    && validation === "not_required" && quality === "pending" && lockedAt === null;
+  if (state === "locked" && !(humanConfirmed || officialDirect)) {
+    fail(path, "invalid locked voice activation evidence");
+  }
   if (state !== "locked" && lockedAt !== null) fail(path, "non-locked voice has locked_at");
+  if (state !== "locked" && (activation !== "preview_confirmed" || validation !== "pending")) {
+    fail(path, "non-locked voice has activation evidence");
+  }
 }
 
 function validateVoiceProfile(value: unknown, path: string): void {
@@ -1270,6 +1382,88 @@ function validateBindingList(value: unknown, path: string): void {
   const records = items.map((entry) => record(entry, path));
   if (new Set(records.map((entry) => entry.character_id)).size !== items.length) fail(path, "duplicate character binding");
   if (records.some((entry) => entry.novel_id !== novelId)) fail(path, "character binding novel mismatch");
+}
+
+function validateOfficialVoiceSelection(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "contract_version", "replayed", "selection_still_current", "frozen_result", "profile",
+    "current_settings", "current_character_binding",
+  ], path);
+  literal(item.contract_version, "official-voice-selection/1.0", `${path}.contract_version`);
+  const replayed = boolean(item.replayed, `${path}.replayed`);
+  const selectionStillCurrent = boolean(item.selection_still_current, `${path}.selection_still_current`);
+  const result = record(item.frozen_result, `${path}.frozen_result`);
+  exact(result, [
+    "command_id", "preset_id", "target_kind", "character_id", "profile_id", "version_id",
+    "settings_version", "binding_version", "target_language", "language_mismatch", "completed_at",
+  ], `${path}.frozen_result`);
+  uuid(result.command_id, `${path}.frozen_result.command_id`);
+  const presetId = string(result.preset_id, `${path}.frozen_result.preset_id`, 6, 85);
+  const presetIndex = OFFICIAL_PRESET_IDS.indexOf(presetId as OfficialPresetId);
+  if (presetIndex < 0) fail(`${path}.frozen_result.preset_id`, "unknown pinned preset");
+  const target = oneOf(result.target_kind, ["narrator", "character"] as const, `${path}.frozen_result.target_kind`);
+  const characterId = nullableUuid(result.character_id, `${path}.frozen_result.character_id`);
+  const profileId = uuid(result.profile_id, `${path}.frozen_result.profile_id`);
+  const versionId = uuid(result.version_id, `${path}.frozen_result.version_id`);
+  const settingsVersion = integer(result.settings_version, `${path}.frozen_result.settings_version`, 1);
+  const bindingVersion = result.binding_version === null
+    ? null
+    : integer(result.binding_version, `${path}.frozen_result.binding_version`, 1);
+  const targetLanguage = language(result.target_language, `${path}.frozen_result.target_language`);
+  const languageMismatch = boolean(result.language_mismatch, `${path}.frozen_result.language_mismatch`);
+  timestamp(result.completed_at, `${path}.frozen_result.completed_at`);
+  if ((target === "character") !== (characterId !== null && bindingVersion !== null)) {
+    fail(`${path}.frozen_result`, "selection target shape mismatch");
+  }
+  const presetLanguage = presetIndex < 6 ? "zh-CN" : presetIndex < 11 ? "en" : "ja-JP";
+  const targetLanguageBase = targetLanguage.split("-", 1)[0]!.toLocaleLowerCase("en-US");
+  const presetLanguageBase = presetLanguage.split("-", 1)[0]!.toLocaleLowerCase("en-US");
+  if (languageMismatch !== (targetLanguageBase !== presetLanguageBase)) {
+    fail(`${path}.frozen_result.language_mismatch`, "selection language mismatch evidence changed");
+  }
+
+  validateVoiceProfile(item.profile, `${path}.profile`);
+  const profile = record(item.profile, `${path}.profile`);
+  if (profile.profile_id !== profileId) fail(`${path}.profile`, "selection profile mismatch");
+  const versions = array(profile.versions, `${path}.profile.versions`).map((entry) => record(entry, `${path}.profile.versions`));
+  if (!versions.some((entry) => entry.version_id === versionId)) fail(`${path}.profile`, "selection version missing");
+
+  let projectionIsCurrent: boolean;
+  if (target === "narrator") {
+    if (item.current_settings === null || item.current_character_binding !== null) {
+      fail(path, "narrator selection projection mismatch");
+    }
+    validateSettings(item.current_settings, `${path}.current_settings`);
+    const settings = record(item.current_settings, `${path}.current_settings`);
+    const values = record(settings.values, `${path}.current_settings.values`);
+    const narrator = values.narrator === null
+      ? null
+      : record(values.narrator, `${path}.current_settings.values.narrator`);
+    projectionIsCurrent = narrator?.profile_id === profileId && narrator?.version_id === versionId;
+    if (!replayed && settings.version !== settingsVersion) {
+      fail(`${path}.current_settings.version`, "new selection settings version mismatch");
+    }
+  } else {
+    if (item.current_settings !== null || item.current_character_binding === null) {
+      fail(path, "character selection projection mismatch");
+    }
+    validateBinding(item.current_character_binding, `${path}.current_character_binding`);
+    const binding = record(item.current_character_binding, `${path}.current_character_binding`);
+    if (binding.character_id !== characterId) {
+      fail(`${path}.current_character_binding`, "selection character projection mismatch");
+    }
+    projectionIsCurrent = binding.profile_id === profileId && binding.version_id === versionId;
+    if (!replayed && binding.version !== bindingVersion) {
+      fail(`${path}.current_character_binding.version`, "new selection binding version mismatch");
+    }
+  }
+  if (selectionStillCurrent !== projectionIsCurrent) {
+    fail(`${path}.selection_still_current`, "current projection truth value changed");
+  }
+  if (!replayed && !selectionStillCurrent) {
+    fail(path, "new selection must be current when returned");
+  }
 }
 
 function validateCastingCondition(value: unknown, path: string): void {
@@ -1506,6 +1700,10 @@ export function parseCharacterVoiceBindingResource(value: unknown): CharacterVoi
 
 export function parseCharacterVoiceBindingListResponse(value: unknown): CharacterVoiceBindingListResponse {
   return validated(value, validateBindingList, "character_voice_bindings");
+}
+
+export function parseOfficialVoiceSelectionResponse(value: unknown): OfficialVoiceSelectionResponse {
+  return validated(value, validateOfficialVoiceSelection, "official_voice_selection");
 }
 
 export function parseVoiceCastingRulesResource(value: unknown): VoiceCastingRulesResource {

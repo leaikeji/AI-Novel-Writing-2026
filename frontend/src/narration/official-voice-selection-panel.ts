@@ -1,0 +1,318 @@
+import {
+  getCharacterVoiceBinding,
+  listOfficialVoicePresets,
+  listVoiceProfiles,
+  selectOfficialVoice,
+} from "./api";
+import type {
+  CharacterVoiceBindingResource,
+  NarrationAuthorizationState,
+  NarrationCapabilities,
+  NarrationSettingsResource,
+  OfficialPresetCatalogResponse,
+  OfficialPresetId,
+  OfficialVoiceSelectionRequest as OfficialVoiceSelectionWireRequest,
+  OfficialVoiceSelectionResponse,
+  VoiceProfileResource,
+} from "./contracts";
+import {
+  voiceActivationEvidenceIsUsable,
+  voiceSourceEvidenceIsUsable,
+} from "./contracts";
+import {
+  createOfficialVoiceLibrary,
+  officialVoiceCatalogFromWire,
+  type OfficialVoiceLibraryReactRuntime,
+  type OfficialVoiceSelectionRequest,
+  type OfficialVoiceSelectionResult,
+} from "./official-voice-library";
+
+
+export interface OfficialVoiceSelectionPanelApi {
+  listOfficialVoicePresets(signal?: AbortSignal): Promise<OfficialPresetCatalogResponse>;
+  listVoiceProfiles(options?: {
+    readonly novelId?: string;
+    readonly includeLibrary?: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<{ readonly items: readonly VoiceProfileResource[] }>;
+  getCharacterVoiceBinding(
+    novelId: string,
+    characterId: string,
+    signal?: AbortSignal,
+  ): Promise<CharacterVoiceBindingResource>;
+  selectOfficialVoice(
+    novelId: string,
+    payload: OfficialVoiceSelectionWireRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<OfficialVoiceSelectionResponse>;
+}
+
+
+export type OfficialVoiceSelectionPanelTarget =
+  | { readonly kind: "narrator" }
+  | {
+    readonly kind: "character";
+    readonly characterId: string;
+    readonly characterName: string;
+  };
+
+
+export interface OfficialVoiceSelectionPanelProps {
+  readonly novelId: string;
+  readonly settings: NarrationSettingsResource;
+  readonly target: OfficialVoiceSelectionPanelTarget;
+  readonly capabilities: NarrationCapabilities;
+  readonly authorization: NarrationAuthorizationState;
+  readonly onChanged?: () => void;
+}
+
+
+interface ReadyState {
+  readonly phase: "ready";
+  readonly catalog: ReturnType<typeof officialVoiceCatalogFromWire>;
+  readonly profiles: readonly VoiceProfileResource[];
+  readonly binding: CharacterVoiceBindingResource | null;
+  readonly activePresetId: string | null;
+  readonly settingsVersion: number;
+  readonly targetLanguage: string;
+  readonly bindingVersion: number | null;
+}
+
+
+type LoadState =
+  | { readonly phase: "loading" }
+  | { readonly phase: "error"; readonly message: string }
+  | ReadyState;
+
+
+const DEFAULT_API: OfficialVoiceSelectionPanelApi = {
+  listOfficialVoicePresets,
+  listVoiceProfiles,
+  getCharacterVoiceBinding,
+  selectOfficialVoice,
+};
+
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error && reason.message.trim()
+    ? reason.message
+    : "无法加载官方音色库，请稍后重试。";
+}
+
+
+function currentSelection(
+  settings: NarrationSettingsResource,
+  binding: CharacterVoiceBindingResource | null,
+  target: OfficialVoiceSelectionPanelTarget,
+): { readonly profileId: string | null; readonly versionId: string | null } {
+  if (target.kind === "narrator") {
+    return {
+      profileId: settings.values.narrator?.profile_id ?? null,
+      versionId: settings.values.narrator?.version_id ?? null,
+    };
+  }
+  return {
+    profileId: binding?.profile_id ?? null,
+    versionId: binding?.version_id ?? null,
+  };
+}
+
+
+export function activeOfficialPresetId(
+  settings: NarrationSettingsResource,
+  binding: CharacterVoiceBindingResource | null,
+  target: OfficialVoiceSelectionPanelTarget,
+  profiles: readonly VoiceProfileResource[],
+): string | null {
+  const selected = currentSelection(settings, binding, target);
+  if (selected.profileId === null || selected.versionId === null) return null;
+  const profile = profiles.find((item) => item.profile_id === selected.profileId);
+  const version = profile?.versions.find((item) => item.version_id === selected.versionId);
+  return version?.source_type === "preset"
+    && voiceActivationEvidenceIsUsable(version)
+    && voiceSourceEvidenceIsUsable(version)
+    ? version.preset_key
+    : null;
+}
+
+
+function capabilityEnabled(capabilities: NarrationCapabilities, key: string): boolean {
+  const capability = capabilities.items.find((item) => item.key === key);
+  return capability?.state === "enabled"
+    && capability.visible
+    && capability.actionable;
+}
+
+
+export function officialVoiceSelectionDisabled(
+  capabilities: NarrationCapabilities,
+  authorization: NarrationAuthorizationState,
+): boolean {
+  return !authorization.can_read
+    || !authorization.can_configure
+    || !authorization.can_manage_voice_assets
+    || !capabilityEnabled(capabilities, "narration_product")
+    || !capabilityEnabled(capabilities, "reading_settings")
+    || !capabilityEnabled(capabilities, "preset_voice_source");
+}
+
+
+export function officialVoiceSelectionWireRequest(
+  request: OfficialVoiceSelectionRequest,
+): OfficialVoiceSelectionWireRequest {
+  return request.targetKind === "narrator"
+    ? {
+      preset_id: request.presetId as OfficialPresetId,
+      target_kind: "narrator",
+      character_id: null,
+      expected_settings_version: request.expectedSettingsVersion,
+      expected_binding_version: null,
+    }
+    : {
+      preset_id: request.presetId as OfficialPresetId,
+      target_kind: "character",
+      character_id: request.characterId,
+      expected_settings_version: request.expectedSettingsVersion,
+      expected_binding_version: request.expectedBindingVersion,
+    };
+}
+
+
+export function officialVoiceSelectionResult(
+  response: OfficialVoiceSelectionResponse,
+): OfficialVoiceSelectionResult {
+  const frozen = response.frozen_result;
+  return Object.freeze({
+    replayed: response.replayed,
+    selectionStillCurrent: response.selection_still_current,
+    presetId: frozen.preset_id,
+    targetKind: frozen.target_kind,
+    characterId: frozen.character_id,
+    settingsVersion: frozen.settings_version,
+    bindingVersion: frozen.binding_version,
+    languageMismatch: frozen.language_mismatch,
+  });
+}
+
+
+export function createOfficialVoiceSelectionPanel(
+  React: OfficialVoiceLibraryReactRuntime,
+  api: OfficialVoiceSelectionPanelApi = DEFAULT_API,
+): (props: OfficialVoiceSelectionPanelProps) => unknown {
+  const h = React.createElement;
+  const Library = createOfficialVoiceLibrary(React);
+
+  return function OfficialVoiceSelectionPanel(
+    props: OfficialVoiceSelectionPanelProps,
+  ): unknown {
+    const [reloadVersion, setReloadVersion] = React.useState(0);
+    const [state, setState] = React.useState<LoadState>({ phase: "loading" });
+    const scope = props.target.kind === "character"
+      ? `${props.novelId}:character:${props.target.characterId}`
+      : `${props.novelId}:narrator`;
+
+    React.useEffect(() => {
+      const controller = new AbortController();
+      setState({ phase: "loading" });
+      const bindingRequest = props.target.kind === "character"
+        ? api.getCharacterVoiceBinding(
+          props.novelId,
+          props.target.characterId,
+          controller.signal,
+        )
+        : Promise.resolve(null);
+      void Promise.all([
+        api.listOfficialVoicePresets(controller.signal),
+        api.listVoiceProfiles({
+          novelId: props.novelId,
+          includeLibrary: false,
+          signal: controller.signal,
+        }),
+        bindingRequest,
+      ]).then(([catalogWire, profileList, binding]) => {
+        if (controller.signal.aborted) return;
+        const catalog = officialVoiceCatalogFromWire(catalogWire);
+        setState({
+          phase: "ready",
+          catalog,
+          profiles: profileList.items,
+          binding,
+          activePresetId: activeOfficialPresetId(
+            props.settings,
+            binding,
+            props.target,
+            profileList.items,
+          ),
+          settingsVersion: props.settings.version,
+          targetLanguage: binding?.language ?? props.settings.values.language,
+          bindingVersion: binding?.version ?? null,
+        });
+      }).catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({ phase: "error", message: errorMessage(reason) });
+      });
+      return () => controller.abort();
+    }, [scope, props.settings.version, reloadVersion]);
+
+    const binding = state.phase === "ready" ? state.binding : null;
+    const settingsVersion = state.phase === "ready"
+      ? state.settingsVersion
+      : props.settings.version;
+    const targetLanguage = state.phase === "ready"
+      ? state.targetLanguage
+      : props.settings.values.language;
+    const target = props.target.kind === "narrator"
+      ? {
+        kind: "narrator" as const,
+        targetLanguage,
+        expectedSettingsVersion: settingsVersion,
+      }
+      : {
+        kind: "character" as const,
+        characterId: props.target.characterId,
+        characterName: props.target.characterName,
+        targetLanguage,
+        expectedSettingsVersion: settingsVersion,
+        expectedBindingVersion: state.phase === "ready"
+          ? state.bindingVersion ?? -1
+          : binding?.version ?? -1,
+      };
+
+    return h(Library, {
+      novelId: props.novelId,
+      catalog: state.phase === "ready" ? state.catalog : null,
+      target,
+      activePresetId: state.phase === "ready" ? state.activePresetId : null,
+      loading: state.phase === "loading",
+      loadError: state.phase === "error" ? state.message : null,
+      disabled: officialVoiceSelectionDisabled(props.capabilities, props.authorization),
+      onUse: async (
+        novelId: string,
+        request: OfficialVoiceSelectionRequest,
+        idempotencyKey: string,
+        signal: AbortSignal,
+      ) => officialVoiceSelectionResult(await api.selectOfficialVoice(
+        novelId,
+        officialVoiceSelectionWireRequest(request),
+        idempotencyKey,
+        signal,
+      )),
+      onApplied: (result: OfficialVoiceSelectionResult) => {
+        setState((current) => current.phase === "ready"
+          ? {
+            ...current,
+            activePresetId: result.presetId,
+            settingsVersion: result.settingsVersion,
+            bindingVersion: result.bindingVersion,
+          }
+          : current);
+        props.onChanged?.();
+      },
+      onConflictRefresh: () => {
+        props.onChanged?.();
+        setReloadVersion((value) => value + 1);
+      },
+    });
+  };
+}

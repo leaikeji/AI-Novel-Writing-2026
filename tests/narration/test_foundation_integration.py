@@ -350,6 +350,8 @@ def _seed_live_domain_foundation(
         parameters_json={},
         fingerprint=SHA_B,
         quality_state="accepted",
+        activation_basis="preview_confirmed",
+        validation_basis="human_accepted",
         locked_actor="owner",
         locked_at=NOW,
     )

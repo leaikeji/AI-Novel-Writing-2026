@@ -21,6 +21,11 @@ from backend.models import (
     VoiceRightsEvent,
     VoiceRightsRecord,
 )
+from backend.narration.official_presets import (
+    official_preset_canonical_profile_id,
+    official_preset_canonical_version_id,
+    official_preset_direct_version_fingerprint,
+)
 from backend.narration.adapters import (
     FakeMossNanoTTSAdapter,
     MOSS_NANO_SIDECAR_CONTRACT_CAPABILITIES,
@@ -939,10 +944,62 @@ def test_version_decode_parameters_override_process_defaults_for_preview() -> No
         max_new_frames=375,
     )
 
-    assert product._version_decode_parameters(version) == (1, "fixed", 300)
+    assert product._version_decode_parameters(version) == (1, "fixed", 300, None)
     assert process_defaults.parameters_fingerprint_for_version(
         version, "onnx.Zhiming"
     ) != process_defaults.parameters_fingerprint_for("onnx.Zhiming")
+
+
+def test_version_decode_v2_changes_preview_fingerprint_and_rejects_ineffective_mode() -> None:
+    parameters = {
+        "schema_version": "moss-nano-decode-parameters/2",
+        "text_temperature_milli": 1_200,
+        "text_top_p_milli": 800,
+        "text_top_k": 40,
+        "audio_temperature_milli": 1_100,
+        "audio_top_p_milli": 850,
+        "audio_top_k": 30,
+        "audio_repetition_penalty_milli": 1_300,
+    }
+    version = VoiceProfileVersion(
+        id=uuid4(),
+        profile_id=uuid4(),
+        owner_id=SCOPE.owner_id,
+        workspace_id=SCOPE.workspace_id,
+        source_type="uploaded",
+        state="draft",
+        seed=7,
+        parameters_json={
+            "schema_version": product.VOICE_PRODUCT_SCHEMA_VERSION,
+            "sample_mode": "full",
+            "max_new_frames": 375,
+            "decode_parameters": parameters,
+        },
+    )
+    policy = VoicePreviewPolicy(expected_model_fingerprint="b" * 64)
+
+    seed, mode, frames, decoded = product._version_decode_parameters(version)
+
+    assert (seed, mode, frames) == (7, "full", 375)
+    assert decoded is not None
+    assert dict(decoded.wire_payload()) == parameters
+    fingerprint = policy.parameters_fingerprint_for_version(
+        version, "uploaded-reference"
+    )
+    version.parameters_json = {
+        **version.parameters_json,
+        "decode_parameters": {**parameters, "audio_top_k": 31},
+    }
+    assert (
+        policy.parameters_fingerprint_for_version(version, "uploaded-reference")
+        != fingerprint
+    )
+    version.parameters_json = {
+        **version.parameters_json,
+        "sample_mode": "fixed",
+    }
+    with pytest.raises(product.VoiceProductSecurityError, match="require full"):
+        product._version_decode_parameters(version)
 
 
 @pytest.mark.parametrize(
@@ -981,6 +1038,109 @@ def test_official_preset_creation_rejects_nondefault_decode_parameters_before_db
                 preset_id="onnx.Zhiming",
             ),
             idempotency_key=f"official-default-reject-{seed}-{sample_mode}-{max_new_frames}",
+        )
+
+
+class _CanonicalOfficialSession:
+    def __init__(self) -> None:
+        self.rows: dict[type[object], list[object]] = {
+            VoiceProfile: [],
+            VoiceProfileVersion: [],
+            VoiceRightsRecord: [],
+            VoiceRightsEvent: [],
+        }
+
+    @staticmethod
+    def _entity(statement) -> type[object]:
+        return statement.column_descriptions[0]["entity"]
+
+    def scalar(self, statement):
+        rows = self.rows[self._entity(statement)]
+        return rows[0] if rows else None
+
+    def scalars(self, statement):
+        return list(self.rows[self._entity(statement)])
+
+    def add(self, row: object) -> None:
+        self.rows[type(row)].append(row)
+
+    def add_all(self, rows: list[object]) -> None:
+        for row in rows:
+            self.add(row)
+
+    def flush(self) -> None:
+        pass
+
+
+def test_canonical_official_voice_uses_direct_v2_and_explicit_restore_only() -> None:
+    session = _CanonicalOfficialSession()
+    novel_id = uuid4()
+    profile_id = official_preset_canonical_profile_id(
+        owner_id=SCOPE.owner_id,
+        workspace_id=SCOPE.workspace_id,
+        novel_id=novel_id,
+        preset_id="onnx.Trump",
+    )
+    version_id = official_preset_canonical_version_id(
+        profile_id=profile_id,
+        preset_id="onnx.Trump",
+    )
+
+    created = product.ensure_canonical_official_preset_voice(
+        session,  # type: ignore[arg-type]
+        novel_id=novel_id,
+        preset_id="onnx.Trump",
+        actor="local-owner",
+        at=NOW,
+    )
+
+    assert created.profile.id == profile_id
+    assert created.profile.novel_id == novel_id
+    assert created.profile.current_version_id == version_id
+    assert created.profile.status == "active"
+    assert created.profile.version == 2
+    assert created.version.state == "locked"
+    assert created.version.quality_state == "pending"
+    assert created.version.activation_basis == (
+        "explicit_official_preset_selection"
+    )
+    assert created.version.validation_basis == "not_required"
+    assert created.version.locked_actor is None
+    assert created.version.locked_at is None
+    assert created.version.fingerprint == official_preset_direct_version_fingerprint(
+        profile_id=profile_id,
+        version_id=version_id,
+        preset_id="onnx.Trump",
+    )
+    assert created.version.fingerprint != product.official_preset_version_fingerprint(
+        profile_id=profile_id,
+        version_id=version_id,
+        preset_id="onnx.Trump",
+    )
+
+    created.profile.status = "archived"
+    created.profile.archived_at = NOW
+    restored = product.ensure_canonical_official_preset_voice(
+        session,  # type: ignore[arg-type]
+        novel_id=novel_id,
+        preset_id="onnx.Trump",
+        actor="local-owner",
+        at=NOW + timedelta(minutes=1),
+    )
+    assert restored.profile is created.profile
+    assert restored.version is created.version
+    assert restored.profile.status == "active"
+    assert restored.profile.archived_at is None
+    assert restored.profile.version == 3
+
+    restored.profile.status = "unavailable"
+    with pytest.raises(VoiceRightsUnavailable, match="unavailable"):
+        product.ensure_canonical_official_preset_voice(
+            session,  # type: ignore[arg-type]
+            novel_id=novel_id,
+            preset_id="onnx.Trump",
+            actor="local-owner",
+            at=NOW + timedelta(minutes=2),
         )
 
 

@@ -32,13 +32,25 @@ MODEL_FINGERPRINT_SHA256 = (
 LOCAL_SCOPE_FINGERPRINT = (
     "8cd0df892dc4c7289e1182087e9ea8ec365c2d54d254d8aee5bd9252f5225095"
 )
-CHINESE_OFFICIAL_PRESETS = (
+OFFICIAL_PRESETS = (
     "onnx.Junhao",
-    "onnx.Lingyu",
+    "onnx.Zhiming",
+    "onnx.Weiguo",
     "onnx.Xiaoyu",
     "onnx.Yuewen",
-    "onnx.Zhiming",
-    "onnx.Zixuan",
+    "onnx.Lingyu",
+    "onnx.Trump",
+    "onnx.Ava",
+    "onnx.Bella",
+    "onnx.Adam",
+    "onnx.Nathan",
+    "onnx.Soyo",
+    "onnx.Saki",
+    "onnx.Mortis",
+    "onnx.Umiri",
+    "onnx.Mei",
+    "onnx.Anon",
+    "onnx.Arisa",
 )
 
 
@@ -155,7 +167,7 @@ def _metrics(audio: bytes) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--voice", choices=CHINESE_OFFICIAL_PRESETS, required=True)
+    parser.add_argument("--voice", choices=OFFICIAL_PRESETS, required=True)
     args = parser.parse_args()
     encoded = "".join(sys.stdin.read().split())
     try:
