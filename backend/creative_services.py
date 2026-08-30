@@ -686,6 +686,26 @@ def _normalize_outline_character_draft(
     return normalized
 
 
+def _validate_outline_character_draft_identities(
+    items: list[dict[str, Any]],
+) -> None:
+    """Reject duplicate stable identities while allowing same-name people."""
+
+    seen_draft_keys: set[str] = set()
+    seen_character_ids: set[UUID] = set()
+    for item in items:
+        draft_key = str(item["draft_key"])
+        if draft_key in seen_draft_keys:
+            raise ValidationError("人物草案 draft_key 不能重复")
+        seen_draft_keys.add(draft_key)
+        if not item.get("character_id"):
+            continue
+        character_id = UUID(str(item["character_id"]))
+        if character_id in seen_character_ids:
+            raise ValidationError("大纲角色 character_id 不能重复")
+        seen_character_ids.add(character_id)
+
+
 def update_outline_draft(
     session: Session,
     novel_id: UUID,
@@ -716,14 +736,12 @@ def update_outline_draft(
     if characters is not None:
         if len(characters) > 200:
             raise ValidationError("人物草案不能超过200条")
-        normalized: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        seen_character_ids: set[UUID] = set()
-        for raw_item in characters:
-            item = _normalize_outline_character_draft(dict(raw_item))
-            name = str(item["name"])
-            if name in seen:
-                raise ValidationError("人物草案姓名不能重复")
+        normalized = [
+            _normalize_outline_character_draft(dict(raw_item))
+            for raw_item in characters
+        ]
+        _validate_outline_character_draft_identities(normalized)
+        for item in normalized:
             character_id = (
                 UUID(str(item["character_id"]))
                 if item.get("character_id")
@@ -738,11 +756,6 @@ def update_outline_draft(
                 )
                 if belongs_to_novel is None:
                     raise ValidationError("大纲角色 character_id 不属于当前小说")
-                if character_id in seen_character_ids:
-                    raise ValidationError("大纲角色 character_id 不能重复")
-                seen_character_ids.add(character_id)
-            seen.add(name)
-            normalized.append(item)
         draft.characters_json = normalized
     if plot_text is not None:
         draft.plot_text = plot_text.strip()
@@ -4514,8 +4527,8 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
     tasks = {
         "novel_template": (
             "根据受众和创作思路自动匹配最适合的长篇小说模板，并填写可编辑的模板设定。"
-            "genre只能从现实、言情、都市、玄幻、悬疑、科幻、历史中选择；现实题材的当代生活、"
-            "久别重逢和治愈故事优先使用genre=现实、template_name=现实生活、template_key=real-life。"
+            "genre只能从现实、言情、都市、玄幻、悬疑、科幻、历史中选择；"
+            "应根据输入的受众、创作思路和核心冲突整体判断，不得依赖单个题材关键词。"
             "其他template_name使用2到6个中文字符，template_key使用稳定英文短横线标识。"
             "template_fields必须严格返回[\"protagonist_identity\",\"background_setting\","
             "\"core_conflict\",\"emotional_mainline\",\"style_features\"]，template_data必须完整填写这5项。"
@@ -4542,13 +4555,17 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
         "outline_characters": (
             "生成4到8个主要角色和配角，至少包含1个main主角和2个supporting配角，"
             "人物动机、缺陷、秘密和成长方向必须彼此咬合。顶层只能有characters数组，"
-            "即使只有一个人物也不得把人物对象直接放在顶层。每个角色的details必须包含"
-            "gender字段，值只能是男、女、其他、未知；只有创作材料确实没有设定时才使用未知，"
-            "不得根据姓名猜测性别。details还必须包含personality字段，使用8到120个中文可见字符"
-            "描述能指导人物选择的行为倾向或内在矛盾，不得只返回聪明、善良、冷酷等标签。返回"
+            "即使只有一个人物也不得把人物对象直接放在顶层。每个人物必须分别返回name、"
+            "role_type、gender、identity_summary、personality_summary、core_goal和bio；"
+            "age_at_story_start_note可以写精确年龄、年龄区间或未知，但不得根据服务器日期计算。"
+            "gender只能是男、女、其他、未知；只有创作材料确实没有设定时才使用未知，"
+            "不得根据姓名猜测。personality_summary使用8到120个中文可见字符描述能指导"
+            "人物选择的行为倾向或内在矛盾，不得只返回聪明、善良、冷酷等标签。"
+            "不要返回character_id、人物实例ID或数据库ID。返回"
             " {\"characters\":[{\"name\":\"...\",\"role_type\":\"main|supporting\","
-            "\"description\":\"...\",\"details\":{\"gender\":\"男|女|其他|未知\","
-            "\"personality\":\"...\"}}]}。"
+            "\"gender\":\"男|女|其他|未知\",\"age_at_story_start_note\":\"...\","
+            "\"identity_summary\":\"...\",\"personality_summary\":\"...\","
+            "\"core_goal\":\"...\",\"bio\":\"...\"}]}。"
         ),
         "outline_plot": (
             "生成覆盖目标章节数的主要情节，控制在1200到1800个中文可见字符。"

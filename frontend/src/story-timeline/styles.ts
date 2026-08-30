@@ -15,10 +15,14 @@ export function ensureStoryTimelineStyles(): void {
     .anw-instance-list { display:grid; gap:8px; }
     .anw-instance-list button { text-align:left; border:1px solid #eee; border-radius:8px; padding:10px; background:#fff; cursor:pointer; }
     .anw-instance-list button[aria-current='true'] { border-color:#1677ff; }
-    .anw-profile-form { display:grid; gap:10px; }
-    .anw-profile-form label { display:grid; gap:5px; font-weight:600; }
-    .anw-profile-form input,.anw-profile-form textarea { width:100%; box-sizing:border-box; border:1px solid #d9d9d9; border-radius:6px; padding:8px; font:inherit; font-weight:400; }
-    .anw-profile-form textarea { min-height:72px; resize:vertical; }
+    .anw-timeline-fork-form { display:grid; gap:10px; }
+    .anw-timeline-fork-form label { display:grid; gap:5px; font-weight:600; }
+    .anw-timeline-fork-form input { width:100%; box-sizing:border-box; border:1px solid #d9d9d9; border-radius:6px; padding:8px; font:inherit; font-weight:400; }
+    .anw-instance-summary { display:grid; gap:14px; }
+    .anw-instance-summary dl { display:grid; gap:10px; margin:0; }
+    .anw-instance-summary dl div { display:grid; grid-template-columns:minmax(72px,auto) 1fr; gap:12px; align-items:start; }
+    .anw-instance-summary dt { color:rgba(0,0,0,.58); }
+    .anw-instance-summary dd { margin:0; overflow-wrap:anywhere; }
     @media (max-width: 760px) { .anw-timeline-grid { grid-template-columns:1fr; } .anw-timeline-header { flex-direction:column; } }
   `;
   document.head.appendChild(style);

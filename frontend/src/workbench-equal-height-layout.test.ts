@@ -56,6 +56,7 @@ describe("workbench equal-height layout styles", () => {
 
   it("keeps the existing mobile stacked layout override", () => {
     expect(styleSource).toMatch(/@media \(max-width: 720px\)[\s\S]*?\.mb-workbench,[\s\S]*?display:block;[\s\S]*?height:auto;/);
+    expect(styleSource).toMatch(/@media \(max-width: 720px\)[\s\S]*?\.anw-workbench-main \{[\s\S]*?overflow-y:auto;/);
     expect(styleSource).toContain(".mb-back-center-wrap { grid-column:1/-1; margin:10px 0 0;");
   });
 });

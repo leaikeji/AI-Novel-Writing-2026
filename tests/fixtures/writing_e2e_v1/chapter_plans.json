@@ -1,0 +1,183 @@
+{
+  "schema_version": "writing-e2e-chapter-plans/1",
+  "fixture_id": "writing-e2e-v1-archive-1988",
+  "rights_basis": "project-synthetic",
+  "global_generation_contract": {
+    "language": "zh-CN",
+    "pov": "第三人称限知，跟随沈砚舟",
+    "target_visible_chars": 2000,
+    "accepted_visible_char_range": {
+      "minimum": 1700,
+      "maximum": 2300
+    },
+    "must_return_manuscript_only": true,
+    "must_not_invent_stable_ids": true,
+    "character_reference_contract": [
+      {
+        "character_id": "37000000-0000-4000-8000-000000000201",
+        "official_name": "沈砚舟",
+        "known_aliases": [
+          "周砚"
+        ]
+      },
+      {
+        "character_id": "37000000-0000-4000-8000-000000000202",
+        "official_name": "陆清禾",
+        "known_aliases": []
+      }
+    ]
+  },
+  "chapters": [
+    {
+      "chapter_key": "chapter:main:01",
+      "chapter_id": "37000000-0000-4000-8000-000000000401",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "narrative_sequence": 1,
+      "story_sequence_cutoff": 1,
+      "title": "蓝票上的针孔",
+      "generation_input": {
+        "chapter_brief": "闭馆前，沈砚舟修复一盒1988年的火灾档案。陆清禾持一张来源不明的蓝色双孔票要求查卷。停电后，旧钟楼机械钟在凌晨两点十七分多响一次；两人在恢复供电前发现票号末位为七，而七号柜背板有新鲜擦痕。",
+        "scene_requirements": [
+          "自然使用沈砚舟的曾用名周砚，但不得把它写成另一个人物",
+          "以公开身份行动，不揭露K-17含义",
+          "准确使用蓝色双孔票与七号柜的required规则",
+          "建立两点十七分多响一次的可召回线索",
+          "结尾让沈砚舟发现七号柜后的冷风"
+        ],
+        "required_asset_keys": [
+          "asset:archive-blue-ticket:v1"
+        ],
+        "optional_retrieval_asset_keys": [
+          "asset:clock-maintenance:v1",
+          "asset:old-city-layout:v1"
+        ],
+        "forbidden_fact_ids": [
+          "fact:main:ch03:k17-reveal",
+          "fact:sibling:white-gull-key"
+        ],
+        "forbidden_asset_keys": [
+          "asset:sealed-ending:v1",
+          "asset:unbound-decoy:v1"
+        ]
+      },
+      "anchors_to_establish": [
+        "fact:main:ch01:clock-0217",
+        "source:main:ch01:current"
+      ],
+      "expected_state_change_candidates": [
+        "陆清禾知道蓝票末位指向七号柜",
+        "沈砚舟察觉七号柜后存在隐藏空间"
+      ]
+    },
+    {
+      "chapter_key": "chapter:main:02",
+      "chapter_id": "37000000-0000-4000-8000-000000000402",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "narrative_sequence": 2,
+      "story_sequence_cutoff": 2,
+      "title": "凌晨两点十七分",
+      "generation_input": {
+        "chapter_brief": "沈砚舟和陆清禾复核停电录音，必须从第一章的两点十七分异常报时推出有人手动释放棘轮。他们检查七号柜背板，进入维修夹道并形成有限合作。有人以周砚称呼沈砚舟，但这仍是同一人物。",
+        "scene_requirements": [
+          "召回第一章两点十七分多响一次的线索",
+          "结合机械钟维护笔记识别月牙划痕",
+          "周砚与沈砚舟必须解析为同一稳定人物",
+          "让两人从互相试探转为有限合作",
+          "不得揭露K-17真实身份或使用兄弟线白鸥钥匙"
+        ],
+        "required_asset_keys": [
+          "asset:archive-blue-ticket:v1"
+        ],
+        "optional_retrieval_asset_keys": [
+          "asset:clock-maintenance:v1",
+          "asset:old-city-layout:v1"
+        ],
+        "required_source_ids": [
+          "source:main:ch01:current"
+        ],
+        "forbidden_source_ids": [
+          "source:main:ch01:retired",
+          "source:main:ch03:future",
+          "source:sibling:ch02:decoy",
+          "source:other-novel:decoy"
+        ],
+        "forbidden_fact_ids": [
+          "fact:main:ch03:k17-reveal",
+          "fact:sibling:white-gull-key"
+        ],
+        "forbidden_asset_keys": [
+          "asset:sealed-ending:v1",
+          "asset:unbound-decoy:v1"
+        ]
+      },
+      "anchors_to_reuse": [
+        "fact:main:ch01:clock-0217"
+      ],
+      "anchors_to_establish": [
+        "fact:main:ch02:service-tunnel",
+        "source:main:ch02:current"
+      ],
+      "expected_state_change_candidates": [
+        "沈砚舟的位置变为七号柜后的维修夹道",
+        "沈砚舟与陆清禾的关系变为有限合作",
+        "陆清禾知道异常报时来自手动释放棘轮"
+      ]
+    },
+    {
+      "chapter_key": "chapter:main:03",
+      "chapter_id": "37000000-0000-4000-8000-000000000403",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "narrative_sequence": 3,
+      "story_sequence_cutoff": 3,
+      "title": "K-17的原件",
+      "generation_input": {
+        "chapter_brief": "两人在维修夹道尽头找到一份证人保护登记原件。第二章已经确认的有限合作使陆清禾选择先让沈砚舟阅读。原件把旧名周砚、现名沈砚舟与编号K-17连成同一个稳定人物；身份揭示后，两人用第一章异常报时和蓝票针孔完成阶段性推理。",
+        "scene_requirements": [
+          "召回第一章两点十七分异常报时",
+          "使用第二章已确认的维修夹道位置和有限合作状态",
+          "在明确阅读登记原件之后才揭示K-17身份",
+          "周砚、沈砚舟与K-17不能被拆成不同人物",
+          "回收蓝票针孔与七号柜线索"
+        ],
+        "required_asset_keys": [
+          "asset:archive-blue-ticket:v1"
+        ],
+        "optional_retrieval_asset_keys": [
+          "asset:clock-maintenance:v1",
+          "asset:old-city-layout:v1"
+        ],
+        "required_source_ids": [
+          "source:main:ch01:current",
+          "source:main:ch02:current"
+        ],
+        "forbidden_source_ids": [
+          "source:main:ch01:retired",
+          "source:sibling:ch02:decoy",
+          "source:other-novel:decoy"
+        ],
+        "allowed_reveal_fact_ids": [
+          "fact:main:ch03:k17-reveal"
+        ],
+        "forbidden_fact_ids": [
+          "fact:sibling:white-gull-key"
+        ],
+        "forbidden_asset_keys": [
+          "asset:sealed-ending:v1",
+          "asset:unbound-decoy:v1"
+        ]
+      },
+      "anchors_to_reuse": [
+        "fact:main:ch01:clock-0217",
+        "fact:main:ch02:service-tunnel"
+      ],
+      "anchors_to_establish": [
+        "fact:main:ch03:k17-reveal",
+        "source:main:ch03:future"
+      ],
+      "expected_state_change_candidates": [
+        "陆清禾在阅读原件后知道沈砚舟就是K-17",
+        "沈砚舟的真实身份从作者秘密变为对陆清禾已揭露"
+      ]
+    }
+  ]
+}

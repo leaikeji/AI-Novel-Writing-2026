@@ -1,11 +1,11 @@
 import {
   apiErrorMessage,
   apiRequest,
-  completedGenerationModelLabel,
   generationModelAuditLabel,
   generationModelLabel,
   generationTaskFromApiError,
   getGenerationModelStatus,
+  verifiedGenerationModelLabel,
 } from "./api";
 import {
   RelationshipGraph,
@@ -142,7 +142,7 @@ export function RelationshipWorkspace({
       setAutoSyncStatus(result.status);
       setAutoSyncModelLabel(
         result.job.state === "ready"
-          ? `实际 ${completedGenerationModelLabel(result.job)}`
+          ? verifiedGenerationModelLabel(result.job)
           : generationModelAuditLabel(result.job),
       );
       onRelationshipsChanged(result.relationships);
@@ -195,7 +195,7 @@ export function RelationshipWorkspace({
       setAutoSyncModelLabel(
         status.job
           ? status.job.state === "ready"
-            ? `实际 ${completedGenerationModelLabel(status.job)}`
+            ? verifiedGenerationModelLabel(status.job)
             : generationModelAuditLabel(status.job)
           : "",
       );

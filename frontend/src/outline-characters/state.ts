@@ -67,13 +67,10 @@ export function validateCharacterDrafts(
 ): readonly OutlineCharacterDraftIssue[] {
   const issues: OutlineCharacterDraftIssue[] = [];
   const keyCounts = new Map<string, number>();
-  const nameCounts = new Map<string, number>();
 
   for (const draft of drafts) {
     const key = cleanSingleLine(draft.draft_key);
     keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
-    const nameKey = characterNameKey(draft.name);
-    if (nameKey) nameCounts.set(nameKey, (nameCounts.get(nameKey) ?? 0) + 1);
 
     if (!key) issues.push(issue(draft, "draft_key", "required", "草案标识不能为空。"));
     if (key.length > FIELD_LIMITS.draft_key) {
@@ -109,10 +106,6 @@ export function validateCharacterDrafts(
     const key = cleanSingleLine(draft.draft_key);
     if (key && (keyCounts.get(key) ?? 0) > 1) {
       issues.push(issue(draft, "draft_key", "duplicate_draft_key", "草案标识不能重复。"));
-    }
-    const nameKey = characterNameKey(draft.name);
-    if (nameKey && (nameCounts.get(nameKey) ?? 0) > 1) {
-      issues.push(issue(draft, "characters", "duplicate_name", "草案中的人物姓名不能重复。"));
     }
   }
   return issues;

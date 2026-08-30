@@ -1,0 +1,209 @@
+{
+  "schema_version": "writing-e2e-novel/1",
+  "fixture_id": "writing-e2e-v1-archive-1988",
+  "rights_basis": "project-synthetic",
+  "novel": {
+    "id": "37000000-0000-4000-8000-000000000001",
+    "title": "回声档案",
+    "genre": "现代悬疑",
+    "story_year": 2026,
+    "default_timeline_id": "37000000-0000-4000-8000-000000000101"
+  },
+  "timelines": [
+    {
+      "id": "37000000-0000-4000-8000-000000000101",
+      "key": "timeline:main",
+      "name": "主时间线",
+      "kind": "main",
+      "parent_timeline_id": null,
+      "fork_after_narrative_sequence": null
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000102",
+      "key": "timeline:sibling-decoy",
+      "name": "未采用的分支诱饵",
+      "kind": "branch",
+      "parent_timeline_id": "37000000-0000-4000-8000-000000000101",
+      "fork_after_narrative_sequence": 1
+    }
+  ],
+  "characters": [
+    {
+      "id": "37000000-0000-4000-8000-000000000201",
+      "key": "character:shen-yanzhou",
+      "official_name": "沈砚舟",
+      "role_type": "protagonist",
+      "public_bio": "市档案馆数字化修复员，习惯用铅笔标注纸张纤维方向。",
+      "aliases": [
+        {
+          "id": "37000000-0000-4000-8000-000000000211",
+          "name": "周砚",
+          "alias_kind": "former_name",
+          "timeline_id": "37000000-0000-4000-8000-000000000101",
+          "valid_through_narrative_sequence": 1
+        }
+      ],
+      "identity_layers": {
+        "public_identity": "市档案馆数字化修复员",
+        "true_identity": "失踪刑警沈绍衡当年秘密登记的证人保护对象K-17",
+        "true_identity_visibility": "author_secret_until_chapter_3"
+      }
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000202",
+      "key": "character:lu-qinghe",
+      "official_name": "陆清禾",
+      "role_type": "supporting",
+      "public_bio": "调查记者，追查一批被改写的旧城拆迁档案。",
+      "aliases": [],
+      "identity_layers": {
+        "public_identity": "《海州晚报》调查记者",
+        "true_identity": null,
+        "true_identity_visibility": "public"
+      }
+    }
+  ],
+  "character_instances": [
+    {
+      "id": "37000000-0000-4000-8000-000000000301",
+      "key": "instance:main:shen-yanzhou",
+      "character_id": "37000000-0000-4000-8000-000000000201",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "public_identity": "市档案馆数字化修复员",
+      "true_identity": "失踪刑警沈绍衡当年秘密登记的证人保护对象K-17",
+      "initial_location": "海州市档案馆修复室"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000302",
+      "key": "instance:main:lu-qinghe",
+      "character_id": "37000000-0000-4000-8000-000000000202",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "public_identity": "《海州晚报》调查记者",
+      "true_identity": null,
+      "initial_location": "海州市档案馆阅览室"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000303",
+      "key": "instance:sibling:shen-yanzhou",
+      "character_id": "37000000-0000-4000-8000-000000000201",
+      "timeline_id": "37000000-0000-4000-8000-000000000102",
+      "public_identity": "市档案馆数字化修复员",
+      "true_identity": "失踪刑警沈绍衡当年秘密登记的证人保护对象K-17",
+      "initial_location": "旧城九号库"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "37000000-0000-4000-8000-000000000401",
+      "key": "chapter:main:01",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "narrative_sequence": 1,
+      "title": "蓝票上的针孔"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000402",
+      "key": "chapter:main:02",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "narrative_sequence": 2,
+      "title": "凌晨两点十七分"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000403",
+      "key": "chapter:main:03",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "narrative_sequence": 3,
+      "title": "K-17的原件"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000404",
+      "key": "chapter:sibling:02",
+      "timeline_id": "37000000-0000-4000-8000-000000000102",
+      "narrative_sequence": 2,
+      "title": "白鸥钥匙"
+    }
+  ],
+  "source_records": [
+    {
+      "id": "source:main:ch01:current",
+      "source_kind": "manuscript_revision",
+      "chapter_key": "chapter:main:01",
+      "revision_state": "current",
+      "available_from_narrative_sequence": 2
+    },
+    {
+      "id": "source:main:ch01:retired",
+      "source_kind": "manuscript_revision",
+      "chapter_key": "chapter:main:01",
+      "revision_state": "retired",
+      "available_from_narrative_sequence": 2,
+      "sentinel_text": "退役版本哨兵"
+    },
+    {
+      "id": "source:main:ch02:current",
+      "source_kind": "manuscript_revision",
+      "chapter_key": "chapter:main:02",
+      "revision_state": "current",
+      "available_from_narrative_sequence": 3
+    },
+    {
+      "id": "source:main:ch03:future",
+      "source_kind": "manuscript_revision",
+      "chapter_key": "chapter:main:03",
+      "revision_state": "future",
+      "available_from_narrative_sequence": 4
+    },
+    {
+      "id": "source:sibling:ch02:decoy",
+      "source_kind": "manuscript_revision",
+      "chapter_key": "chapter:sibling:02",
+      "revision_state": "current",
+      "available_from_narrative_sequence": 2
+    },
+    {
+      "id": "source:other-novel:decoy",
+      "source_kind": "manuscript_revision",
+      "chapter_key": null,
+      "revision_state": "current",
+      "available_from_narrative_sequence": 1,
+      "sentinel_text": "他书来源哨兵"
+    }
+  ],
+  "fact_seeds": [
+    {
+      "id": "fact:main:ch01:clock-0217",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "source_id": "source:main:ch01:current",
+      "status": "confirmed",
+      "available_from_narrative_sequence": 2,
+      "visibility": "author_and_present_characters",
+      "text": "停电录音里，旧城机械钟在凌晨两点十七分多响了一次。"
+    },
+    {
+      "id": "fact:main:ch02:service-tunnel",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "source_id": "source:main:ch02:current",
+      "status": "confirmed_after_chapter_2",
+      "available_from_narrative_sequence": 3,
+      "visibility": "author_and_present_characters",
+      "text": "沈砚舟与陆清禾进入七号柜后的维修夹道，关系从互相试探转为有限合作。"
+    },
+    {
+      "id": "fact:main:ch03:k17-reveal",
+      "timeline_id": "37000000-0000-4000-8000-000000000101",
+      "source_id": "source:main:ch03:future",
+      "status": "future_until_chapter_3",
+      "available_from_narrative_sequence": 3,
+      "visibility": "author_secret_before_reveal",
+      "text": "K-17就是沈砚舟；其旧名周砚来自证人保护登记。"
+    },
+    {
+      "id": "fact:sibling:white-gull-key",
+      "timeline_id": "37000000-0000-4000-8000-000000000102",
+      "source_id": "source:sibling:ch02:decoy",
+      "status": "confirmed",
+      "available_from_narrative_sequence": 2,
+      "visibility": "sibling_timeline_only",
+      "text": "分支线中，陆清禾用白鸥钥匙打开九号柜；主时间线不存在这把钥匙。"
+    }
+  ]
+}

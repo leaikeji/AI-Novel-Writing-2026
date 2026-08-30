@@ -30,30 +30,6 @@ export interface CharacterInstanceRecord {
   readonly version: number;
 }
 
-export interface CharacterInstanceProfileV1 {
-  readonly schema_version: "character-instance-profile/1";
-  readonly public_identity: string | null;
-  readonly true_identity: string | null;
-  readonly cover_identity: string | null;
-  readonly birth_year: number | null;
-  readonly birth_information: string | null;
-  readonly occupation: string | null;
-  readonly personality: string | null;
-  readonly goals: readonly string[];
-  readonly flaws: readonly string[];
-  readonly secrets: readonly string[];
-  readonly growth_direction: string | null;
-}
-
-export interface CharacterInstanceProfileResource {
-  readonly instance: CharacterInstanceRecord;
-  readonly revision: null | {
-    readonly id: string;
-    readonly revision_number: number;
-    readonly profile: CharacterInstanceProfileV1;
-  };
-}
-
 export interface TimelineForkResult {
   readonly timeline: StoryTimelineRecord;
   readonly derived_instances: readonly CharacterInstanceRecord[];
@@ -66,17 +42,13 @@ export interface CharacterRootSummary {
   readonly name: string;
 }
 
-export const EMPTY_INSTANCE_PROFILE: CharacterInstanceProfileV1 = {
-  schema_version: "character-instance-profile/1",
-  public_identity: null,
-  true_identity: null,
-  cover_identity: null,
-  birth_year: null,
-  birth_information: null,
-  occupation: null,
-  personality: null,
-  goals: [],
-  flaws: [],
-  secrets: [],
-  growth_direction: null,
-};
+/**
+ * Minimal hand-off from the timeline workspace to the single formal character
+ * workspace. The receiver must use all three stable IDs and must not resolve an
+ * instance by display name or by the most recently used timeline.
+ */
+export interface StoryTimelineCharacterCardTarget {
+  readonly characterId: string;
+  readonly timelineId: string;
+  readonly instanceId: string;
+}

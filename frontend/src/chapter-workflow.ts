@@ -1,12 +1,11 @@
 import {
-  actualGenerationModelLabel,
   apiErrorMessage,
   apiRequest,
   completedGenerationModelLabel,
   generationModelLabel,
   generationModelAuditLabel,
   getGenerationModelStatus,
-  requestedGenerationModelLabel,
+  isRetryableChapterLengthFailure,
   verifiedGenerationModelLabel,
 } from "./api";
 import {
@@ -967,9 +966,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           break;
         } catch (reason) {
           lastFailure = reason;
-          const message = errorMessage(reason, "生成正文失败");
-          const isLengthFailure = message.includes("字范围") || message.includes("低于") || message.includes("超过");
-          if (!isLengthFailure || attempt === maximumAttempts) throw reason;
+          if (!isRetryableChapterLengthFailure(reason) || attempt === maximumAttempts) {
+            throw reason;
+          }
         }
       }
 
@@ -990,10 +989,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       await confirmSyncProgress(result.document);
     } catch (reason) {
       const message = errorMessage(reason, "生成正文失败");
+      const lengthFailure = isRetryableChapterLengthFailure(reason);
       onError(message);
       const currentTarget = brief?.target_word_count ?? briefFormRef.current.targetWordCount;
       const currentWindow = chapterLengthWindow(currentTarget);
-      onStatus(message.includes("字范围") || message.includes("低于") || message.includes("超过") ? `本次未达 ${currentWindow.label}，必须整章重写` : "正文生成失败");
+      onStatus(lengthFailure ? `本次未达 ${currentWindow.label}，必须整章重写` : "正文生成失败");
       Modal.error({
         className: "anw-modal anw-generation-failure",
         title: "章节正文生成失败",
@@ -1002,7 +1002,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         content: h("div", { className: "anw-generation-confirm-copy" },
           h("p", null, message),
           h("strong", null, "本次没有修改正式正文。"),
-          h("p", null, "请确认“AI小说作家”的当前模型可用后，再点击“生成正文”重新尝试。"),
+          h("p", null, lengthFailure
+            ? `三次完整生成均未进入 ${currentWindow.label}；下次手动重试仍会携带最新字数差额。`
+            : "请确认“AI小说作家”的当前模型可用后，再点击“生成正文”重新尝试。"),
         ),
         okText: "我知道了",
       });
@@ -1031,6 +1033,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         h("strong", null, "⚠️ 请确保当前模型连接可用，并避免重复发起生成"),
         h("p", null, "页面可以留在后台；若模型长时间无响应，系统会安全结束任务并显示失败原因。"),
         h("p", null, "生成开始后请勿重复发起；失败时系统会保留正式正文不变。"),
+        h("p", null, "若完整正文未进入字数硬范围，系统最多自动整章重写两次（本次最多 3 次模型调用）。"),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
         h("p", null, "若多次出现生成失败，请检查当前有效模型连接。"),
         h("b", null, "确定继续生成吗？"),
@@ -1442,8 +1445,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }, jobs.length === 0 ? h(Empty, { description: "还没有正文生成记录" }) : h("div", { className: "anw-generation-history-list" }, ...jobs.map((job: GenerationJobRecord) => {
       const candidate = job.candidate;
       const state = candidate?.state ?? job.state;
-      const requestedModel = requestedGenerationModelLabel(job);
-      const actualModel = actualGenerationModelLabel(job);
       const minimumCount = job.minimum_visible_character_count ?? job.target_visible_character_count;
       const maximumCount = job.maximum_visible_character_count;
       return h("article", { key: job.id, className: `anw-history-card${candidate?.id === featuredCandidateId ? " is-featured" : ""}` },
@@ -1451,9 +1452,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         h("div", { className: "anw-history-meta" },
           h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`),
           h("span", null, maximumCount ? `验收 ${minimumCount}–${maximumCount} 字` : `验收不少于 ${minimumCount} 字`),
-          state === "failed"
-            ? h("span", null, actualModel ? `请求 ${requestedModel} · 实际 ${actualModel}` : `请求 ${requestedModel} · 实际未核验`)
-            : h("span", null, verifiedGenerationModelLabel(job)),
+          h("span", null, verifiedGenerationModelLabel(job)),
         ),
         candidate ? h("p", null, candidate.content_text.slice(0, 230) || "本次生成正文为空") : h("p", { className: "is-error" }, job.failure_message || "本次生成没有可用正文"),
         h("footer", null, job.asset_snapshot?.length ? h("small", null, `采用私有库：${job.asset_snapshot.map((item: GenerationJobRecord["asset_snapshot"][number]) => item.title).join("、")}`) : h("small", null, "未选择私有库配置"), h(Button, { disabled: !candidate || candidate.state === "rejected", loading: busyAction === `restore:${candidate?.id}`, onClick: () => void restoreCandidate(job) }, candidate ? "恢复此版本" : "需要整章重写")),
@@ -1496,7 +1495,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     h(Modal, {
       open: reviewOpen,
       className: "anw-modal anw-review-result-modal",
-      title: h("div", { className: "anw-review-title" }, h(AuditOutlined), h("strong", null, "AI审稿报告"), h(Tag, { color: "processing" }, reviewJob ? `实际 ${completedGenerationModelLabel(reviewJob)}` : "当前任务模型")),
+      title: h("div", { className: "anw-review-title" }, h(AuditOutlined), h("strong", null, "AI审稿报告"), h(Tag, { color: "processing" }, reviewJob ? verifiedGenerationModelLabel(reviewJob) : "当前任务模型")),
       width: 820,
       centered: true,
       footer: [h(Button, { key: "close", type: "primary", onClick: () => setReviewOpen(false) }, "关闭")],

@@ -76,13 +76,16 @@ from backend.models import (
     CandidateRevision,
     ChapterGenerationJob,
     Document,
+    DocumentRevision,
     IntelligenceCommitBatch,
     IntelligenceProposal,
     Novel,
     StoryFact,
 )
+from backend.embedding.writing import resolve_writing_position
 from backend.services import (
     CandidateConflictError,
+    ChapterLengthValidationError,
     ValidationError,
     adopt_candidate,
     commit_intelligence_items,
@@ -132,6 +135,8 @@ def _requested_model_kwargs() -> dict[str, str]:
 def start_chapter_generation(*args, **kwargs):
     for key, value in _requested_model_kwargs().items():
         kwargs.setdefault(key, value)
+    kwargs.setdefault("writing_position", resolve_writing_position(args[0], args[1]))
+    kwargs.setdefault("effective_context_window_tokens", 131_072)
     return _start_chapter_generation(*args, **kwargs)
 
 
@@ -985,6 +990,14 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
     novel = create_novel(session, "pytest-候选闭环")
     novel_id = UUID(novel["id"])
     document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="江述",
+        description="核查雨夜来信来源的人",
+        details={},
+    )
 
     brief = save_chapter_brief(
         session,
@@ -999,6 +1012,9 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
     job = start_chapter_generation(
         session, document_id, expected_brief_version=brief["version"]
     )
+    assert job["generation_context_snapshot"]["schema_version"] == 4
+    assert "context_v3" not in job["generation_context_snapshot"]
+    assert "previous_context" not in job["generation_context_snapshot"]
     completed = complete_chapter_generation(
         session,
         UUID(job["id"]),
@@ -1761,7 +1777,8 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
     assert first_job["minimum_visible_character_count"] == 2125
     assert first_job["maximum_visible_character_count"] == 2875
     assert first_job["requested_visible_character_count"] == 2500
-    with pytest.raises(ValidationError, match="必须整章重写"):
+    assert "length_control" not in first_job["generation_context_snapshot"]
+    with pytest.raises(ChapterLengthValidationError, match="必须整章重写") as below_error:
         complete_chapter_generation(
             session,
             UUID(first_job["id"]),
@@ -1769,6 +1786,9 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
             actual_model_id=TEST_MODEL_ID,
             provider_profile=TEST_PROVIDER_ID,
         )
+    assert below_error.value.validation_state == "below_target"
+    assert below_error.value.minimum_visible_character_count == 2125
+    assert below_error.value.maximum_visible_character_count == 2875
     failed = list_chapter_generation_jobs(session, document_id)[0]
     assert failed["state"] == "failed"
     assert failed["validation_state"] == "below_target"
@@ -1793,7 +1813,16 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
         expected_brief_version=brief["version"],
         force_new=True,
     )
-    with pytest.raises(ValidationError, match="上浮15%"):
+    second_control = second_job["generation_context_snapshot"]["length_control"]
+    assert second_control["schema_version"] == "chapter-length-control/1"
+    assert second_control["root_job_id"] == first_job["id"]
+    assert second_control["previous_job_id"] == first_job["id"]
+    assert second_control["retry_round"] == 2
+    assert second_control["previous_validation_state"] == "below_target"
+    assert second_control["previous_visible_character_count"] == failed["output_visible_character_count"]
+    assert second_control["calibrated_drafting_target_visible_character_count"] == 3594
+    assert second_job["input_hash"] != first_job["input_hash"]
+    with pytest.raises(ChapterLengthValidationError, match="上浮15%") as above_error:
         complete_chapter_generation(
             session,
             UUID(second_job["id"]),
@@ -1801,6 +1830,8 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
             actual_model_id=TEST_MODEL_ID,
             provider_profile=TEST_PROVIDER_ID,
         )
+    assert above_error.value.validation_state == "above_target"
+    assert above_error.value.output_visible_character_count > 2875
     above = list_chapter_generation_jobs(session, document_id)[0]
     assert above["validation_state"] == "above_target"
 
@@ -1810,6 +1841,13 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
         expected_brief_version=brief["version"],
         force_new=True,
     )
+    third_control = third_job["generation_context_snapshot"]["length_control"]
+    assert third_control["previous_job_id"] == second_job["id"]
+    assert third_control["root_job_id"] == first_job["id"]
+    assert third_control["retry_round"] == 3
+    assert third_control["previous_validation_state"] == "above_target"
+    assert third_control["previous_visible_character_count"] == above["output_visible_character_count"]
+    assert 1381 <= third_control["calibrated_drafting_target_visible_character_count"] <= 2875
     completed = complete_chapter_generation(
         session,
         UUID(third_job["id"]),
@@ -1817,7 +1855,7 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
         actual_model_id=TEST_MODEL_ID,
         provider_profile=TEST_PROVIDER_ID,
     )
-    assert completed["attempt"] == 3
+    assert completed["attempt"] == 1
     assert completed["state"] == "ready"
     assert completed["validation_state"] == "meets_target"
     assert 2125 <= completed["output_visible_character_count"] <= 2875
@@ -1829,6 +1867,61 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
     )
     assert still_ready["state"] == "ready"
     assert still_ready["failure_message"] is None
+
+
+def test_candidate_adoption_recomputes_the_frozen_upper_bound(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-候选采用长度防线")
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    brief = save_chapter_brief(
+        session,
+        document_id,
+        expected_version=0,
+        target_word_count=2500,
+        expectation_text="完成一次可采用的调查推进",
+        outline_text="人物核对证据并做出选择。",
+        forbidden_text="",
+        role_constraints={},
+    )
+    job = start_chapter_generation(
+        session,
+        document_id,
+        expected_brief_version=brief["version"],
+    )
+    completed = complete_chapter_generation(
+        session,
+        UUID(job["id"]),
+        content_markdown=_long_chapter("人物开始核对证据。", paragraphs=40),
+        actual_provider_id=TEST_PROVIDER_ID,
+        actual_model_id=TEST_MODEL_ID,
+    )
+    candidate_id = UUID(completed["candidate"]["id"])
+    candidate = session.get(CandidateRevision, candidate_id)
+    assert candidate is not None
+    candidate.content_markdown = _long_chapter("异常超长候选。", paragraphs=60)
+    session.flush()
+    candidate_count = len("".join(candidate.content_markdown.split()))
+    revision_count = session.scalar(
+        select(func.count(DocumentRevision.id)).where(
+            DocumentRevision.document_id == document_id
+        )
+    )
+
+    with pytest.raises(ValidationError, match=f"实际{candidate_count}字"):
+        adopt_candidate(
+            session,
+            candidate_id,
+            expected_draft_version=completed["candidate"]["base_draft_version"],
+        )
+    session.rollback()
+
+    assert get_document(session, document_id)["content_markdown"] == ""
+    assert session.scalar(
+        select(func.count(DocumentRevision.id)).where(
+            DocumentRevision.document_id == document_id
+        )
+    ) == revision_count
 
 
 def test_stale_chapter_generation_is_failed_before_new_attempt(

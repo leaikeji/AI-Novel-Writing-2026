@@ -1,0 +1,42 @@
+{
+  "schema_version": "writing-e2e-manifest/1",
+  "fixture_id": "writing-e2e-v1-archive-1988",
+  "title": "回声档案：三章写作主链合成实验",
+  "rights_basis": "project-synthetic",
+  "contains_real_user_content": false,
+  "external_model_policy": {
+    "default_state": "disabled",
+    "enablement": "explicit_per_run_authorization_required",
+    "authorization_record_location": "separate_run_manifest",
+    "fixture_manifest_is_authorization": false
+  },
+  "content_files": [
+    {
+      "path": "chapter_plans.json",
+      "sha256": "fde7602a84ec605ff5b3f344eb53a79214bc66d81490544615e55b6646af7682"
+    },
+    {
+      "path": "novel.json",
+      "sha256": "4b6e2ea30425b41e3e8b21e777167c89e765a7923d496c2b0908387bd10f7c49"
+    },
+    {
+      "path": "private_assets.json",
+      "sha256": "a27164d9c80879fc65562e0d036749a1a33456ee6324b70e5182067a86a76b46"
+    },
+    {
+      "path": "retrieval_labels.json",
+      "sha256": "4f1a5f38b92c6e0dc49af3ec77d63d9cb3afdc1622a77590354fec0f18a32cc7"
+    }
+  ],
+  "suite_sha256": "2d868dccdfd214b869fada54dd48a76b9e85a900dcb73942973e34e43d86352c",
+  "suite_hash_algorithm": "sha256(sorted(path + ':' + sha256 + '\\n'))",
+  "scope": [
+    "three_chapter_generation_plans",
+    "stable_character_and_alias_identity",
+    "private_asset_policy_isolation",
+    "future_knowledge_isolation",
+    "sibling_timeline_isolation",
+    "retired_revision_isolation",
+    "cross_novel_isolation"
+  ]
+}

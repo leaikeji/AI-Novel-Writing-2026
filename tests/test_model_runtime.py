@@ -40,7 +40,7 @@ def _reply_with_usage(provider_id: str, model_name: str) -> SimpleNamespace:
 
 
 def test_model_matching_uses_exact_provider_and_model_ids() -> None:
-    assert GENERATION_CONTRACT_VERSION == "follow-agent-effective-v5"
+    assert GENERATION_CONTRACT_VERSION == "follow-agent-effective-v6"
     configured = ModelAudit(
         provider_id="provider-a",
         model_id="Model-A.1",
@@ -133,8 +133,7 @@ def test_prompt_limit_is_ephemeral_and_fails_only_when_clearly_over() -> None:
 
 
 def test_chapter_prompt_enforces_current_acceptance_window() -> None:
-    prompt = build_chapter_generation_prompt(
-        {
+    snapshot = {
             "novel": {"title": "长篇小说"},
             "chapter": {
                 "document_id": "chapter-4",
@@ -169,7 +168,7 @@ def test_chapter_prompt_enforces_current_acceptance_window() -> None:
             "story_facts": [],
             "private_assets": [],
         }
-    )
+    prompt = build_chapter_generation_prompt(snapshot)
 
     assert "创作目标：约 2500 个中文可见字符" in prompt
     assert "验收范围：2125—2875 个中文可见字符" in prompt
@@ -179,11 +178,36 @@ def test_chapter_prompt_enforces_current_acceptance_window() -> None:
     assert "不得用“没有……”“不出现……”“不靠……”等作者说明" in prompt
     assert prompt.startswith("【AI小说世界2026 PawApp可信任务封套】")
     assert "kind=chapter_generation" in prompt
-    assert "允许在模型内部充分思考" in prompt
+    assert "只做形成正文所必需的最少内部思考" in prompt
+    assert "必须在本轮返回一次最终正文" in prompt
     assert "不得调用任何工具" in prompt
     assert "它不是本次最终答案" in prompt
     assert "不得原样返回旧稿" in prompt
     assert "本章之前的正文上下文（仅作连续性参考）" in prompt
+    assert "contract=chapter-prose-candidate/v3" in prompt
+    assert "【最终输出收束门】" in prompt
+    assert "这是本轮首次生成" in prompt
+    assert prompt.index("【最终输出收束门】") > prompt.index("来源、冲突和省略说明")
+
+    retry_snapshot = dict(snapshot)
+    retry_snapshot["length_control"] = {
+        "schema_version": "chapter-length-control/1",
+        "mode": "retry_feedback",
+        "root_job_id": "job-first",
+        "previous_job_id": "job-overlong",
+        "retry_round": 2,
+        "previous_validation_state": "above_target",
+        "previous_visible_character_count": 3387,
+        "required_adjustment_visible_character_count": 512,
+        "calibrated_drafting_target_visible_character_count": 1475,
+    }
+    retry_prompt = build_chapter_generation_prompt(retry_snapshot)
+    assert "上一次完整正文实际为 3387 个可见字符" in retry_prompt
+    assert "本次至少减少 512 个可见字符" in retry_prompt
+    assert "本轮先按约 1475 个可见字符的写作体量收束" in retry_prompt
+    assert "最终完整正文仍必须落入 2125—2875 的硬范围" in retry_prompt
+    assert "不要删除必要转折或截断结尾" in retry_prompt
+    assert "job-overlong" not in retry_prompt
 
 
 def test_reply_audit_reads_actual_provider_usage_metadata() -> None:
@@ -256,8 +280,12 @@ def test_reply_final_text_rejects_reasoning_only_structured_reply() -> None:
         text="仍在思考。调用上下文工具。",
     )
 
-    with pytest.raises(ModelVerificationError, match="没有返回独立的最终回答"):
+    with pytest.raises(ModelVerificationError, match="没有返回独立的最终回答") as caught:
         reply_final_text(reply)
+
+    diagnostic = str(caught.value)
+    assert "reasoning/assistant[text:text=1:delta=0]" in diagnostic
+    assert "仍在思考" not in diagnostic
 
 
 def test_reply_final_text_skips_trailing_reasoning_after_final_message() -> None:
@@ -282,6 +310,44 @@ def test_reply_final_text_skips_trailing_reasoning_after_final_message() -> None
     )
 
     assert reply_final_text(reply) == "最终正文。"
+
+
+def test_reply_final_text_uses_last_completed_standalone_message_when_response_empty() -> None:
+    reply = SimpleNamespace(
+        chunks=[
+            SimpleNamespace(
+                type="message",
+                role="assistant",
+                content=[{"type": "output_text", "text": "公开兼容路径正文。"}],
+            ),
+            SimpleNamespace(output=[]),
+        ],
+        text="公开兼容路径正文。",
+    )
+
+    assert reply_final_text(reply) == "公开兼容路径正文。"
+
+
+def test_reply_final_text_does_not_skip_last_standalone_reasoning_message() -> None:
+    reply = SimpleNamespace(
+        chunks=[
+            SimpleNamespace(
+                type="message",
+                role="assistant",
+                content=[{"type": "text", "text": "更早的中间文本。"}],
+            ),
+            SimpleNamespace(
+                type="reasoning",
+                role="assistant",
+                content=[{"type": "text", "text": "最后仍在思考。"}],
+            ),
+            SimpleNamespace(output=[]),
+        ],
+        text="更早的中间文本。最后仍在思考。",
+    )
+
+    with pytest.raises(ModelVerificationError, match="没有返回独立的最终回答"):
+        reply_final_text(reply)
 
 
 def test_reply_final_text_does_not_reuse_message_from_prior_response() -> None:
@@ -543,7 +609,9 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                     "name": "江述",
                     "role_type": "main",
                     "gender": "male",
-                    "description": "刑侦科长。",
+                    "identity_summary": "刑侦科长",
+                    "core_goal": "查清旧案证据被替换的原因",
+                    "bio": "负责复核旧案原始物证。",
                     "details": {
                         "age": 37,
                         "personality": "重事实也重控制，压力下会把求真变成对他人的逼迫。",
@@ -552,7 +620,9 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                 {
                     "name": "林青瓷",
                     "role_type": "supporting",
-                    "description": "省报记者。",
+                    "identity_summary": "省报记者",
+                    "core_goal": "找到失踪证人的下落",
+                    "bio": "长期追踪旧案中的证人保护记录。",
                     "details": {
                         "gender": "女性",
                         "personality": "外表冷静克制，涉及家人时会主动冒险并隐瞒代价。",
@@ -561,7 +631,9 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                 {
                     "name": "未定角色",
                     "role_type": "supporting",
-                    "description": "身份尚未确定。",
+                    "identity_summary": "身份尚未确定",
+                    "core_goal": "确认自己是否应公开掌握的证据",
+                    "bio": "身份和立场都仍待故事推进确认。",
                     "details": {
                         "gender": "unknown",
                         "personality": "习惯观察后行动，但身份未定使其选择仍保留弹性。",
@@ -572,12 +644,16 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
         "",
     )
 
-    assert [item["details"]["gender"] for item in recovered["characters"]] == [
+    assert [item["gender"] for item in recovered["characters"]] == [
         "男",
         "女",
         "未知",
     ]
-    assert "gender" not in recovered["characters"][0]
+    assert all(
+        item["schema_version"] == "outline-character-draft/2"
+        and item["origin"] == "ai_candidate"
+        for item in recovered["characters"]
+    )
 
     for invalid_gender in (None, "", "稍后再想想", 1):
         with pytest.raises(ModelVerificationError, match="性别字段"):
@@ -588,7 +664,9 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                         {
                             "name": "无有效性别",
                             "role_type": "main",
-                            "description": "不能根据姓名猜测。",
+                            "identity_summary": "身份尚未确定",
+                            "core_goal": "确认自己的公开身份",
+                            "bio": "不能根据姓名猜测。",
                             "details": {
                                 "gender": invalid_gender,
                                 "personality": "会根据证据调整行动，不用姓名或身份替代判断。",
@@ -608,6 +686,9 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                         "name": "冲突角色",
                         "role_type": "main",
                         "gender": "男",
+                        "identity_summary": "案件调查员",
+                        "core_goal": "查明证据冲突",
+                        "bio": "负责核对两份互相矛盾的证词。",
                         "details": {
                             "gender": "女",
                             "personality": "面对冲突先保护同伴，再追查事实并承担后果。",
@@ -627,7 +708,9 @@ def test_outline_character_generation_normalizes_gender_without_name_guessing() 
                         {
                             "name": "性格无效角色",
                             "role_type": "supporting",
-                            "description": "性格必须可指导行动。",
+                            "identity_summary": "案件记录员",
+                            "core_goal": "保持记录完整",
+                            "bio": "性格必须可指导行动。",
                             "details": {
                                 "gender": "未知",
                                 "personality": invalid_personality,

@@ -75,6 +75,28 @@ class ValidationError(DomainError):
     pass
 
 
+class ChapterLengthValidationError(ValidationError):
+    """Structured length rejection for a complete, untruncated model reply."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        validation_state: str,
+        output_visible_character_count: int,
+        minimum_visible_character_count: int,
+        maximum_visible_character_count: int,
+        requested_visible_character_count: int,
+    ) -> None:
+        super().__init__(message)
+        self.validation_state = validation_state
+        self.error_code = f"chapter_length_{validation_state.removesuffix('_target')}"
+        self.output_visible_character_count = output_visible_character_count
+        self.minimum_visible_character_count = minimum_visible_character_count
+        self.maximum_visible_character_count = maximum_visible_character_count
+        self.requested_visible_character_count = requested_visible_character_count
+
+
 class DraftConflictError(DomainError):
     def __init__(self, current: dict[str, Any]):
         super().__init__("document draft version conflict")
@@ -108,6 +130,7 @@ class RestorationPlanConflictError(DomainError):
 
 CURRENT_FACT_STATUSES = ("active", "source_restored")
 CHAPTER_LENGTH_TOLERANCE_RATIO = 0.15
+CHAPTER_LENGTH_CONTROL_VERSION = "chapter-length-control/1"
 CHAPTER_GENERATION_STALE_FAILURE_MESSAGE = (
     "上一次章节生成未在规定时间内完成，系统已结束该任务，正式正文未修改；"
     "请检查当前 Agent 模型后重新生成。"
@@ -149,6 +172,101 @@ def _generation_acceptance_window(
         acceptance.get("maximum_visible_character_count") or default_maximum
     )
     return minimum, max(minimum, maximum), requested
+
+
+def _candidate_length_validation_message(
+    job: ChapterGenerationJob,
+    *,
+    actual_count: int | None = None,
+) -> str:
+    minimum, maximum, requested = _generation_acceptance_window(job)
+    actual = int(
+        (job.output_visible_character_count or 0)
+        if actual_count is None
+        else actual_count
+    )
+    return (
+        f"正文候选未通过{minimum}—{maximum}字验收范围"
+        f"（目标{requested}字，实际{actual}字），不能采用"
+    )
+
+
+def _latest_chapter_length_control(
+    session: Session,
+    *,
+    document_id: UUID,
+    brief_version: int,
+    base_revision_id: UUID | None,
+    base_draft_version: int,
+    base_content_hash: str,
+    requested_provider_id: str,
+    requested_model_id: str,
+    minimum_count: int,
+    maximum_count: int,
+    requested_count: int,
+) -> dict[str, Any] | None:
+    """Return feedback only from the same immutable generation baseline."""
+
+    recent_failures = session.scalars(
+        select(ChapterGenerationJob)
+        .where(
+            ChapterGenerationJob.document_id == document_id,
+            ChapterGenerationJob.kind == "body",
+            ChapterGenerationJob.state == "failed",
+            ChapterGenerationJob.validation_state.in_(("above_target", "below_target")),
+            ChapterGenerationJob.brief_version == brief_version,
+            ChapterGenerationJob.base_revision_id == base_revision_id,
+            ChapterGenerationJob.base_draft_version == base_draft_version,
+            ChapterGenerationJob.base_content_hash == base_content_hash,
+            ChapterGenerationJob.requested_provider_id == requested_provider_id,
+            ChapterGenerationJob.requested_model_id == requested_model_id,
+        )
+        .order_by(ChapterGenerationJob.completed_at.desc(), ChapterGenerationJob.created_at.desc())
+        .limit(10)
+    ).all()
+    for previous in recent_failures:
+        if _generation_acceptance_window(previous) != (
+            minimum_count,
+            maximum_count,
+            requested_count,
+        ):
+            continue
+        actual_count = int(previous.output_visible_character_count or 0)
+        delta = (
+            actual_count - maximum_count
+            if previous.validation_state == "above_target"
+            else minimum_count - actual_count
+        )
+        calibrated_target = round(
+            requested_count * requested_count / max(1, actual_count)
+        )
+        calibrated_target = min(
+            math.ceil(maximum_count * 1.25),
+            max(math.floor(minimum_count * 0.65), calibrated_target),
+        )
+        previous_snapshot = (
+            previous.generation_context_snapshot
+            if isinstance(previous.generation_context_snapshot, dict)
+            else {}
+        )
+        previous_control = previous_snapshot.get("length_control")
+        previous_control = (
+            previous_control if isinstance(previous_control, dict) else {}
+        )
+        root_job_id = str(previous_control.get("root_job_id") or previous.id)
+        retry_round = max(1, int(previous_control.get("retry_round") or 1)) + 1
+        return {
+            "schema_version": CHAPTER_LENGTH_CONTROL_VERSION,
+            "mode": "retry_feedback",
+            "root_job_id": root_job_id,
+            "previous_job_id": str(previous.id),
+            "retry_round": retry_round,
+            "previous_validation_state": previous.validation_state,
+            "previous_visible_character_count": actual_count,
+            "required_adjustment_visible_character_count": max(1, delta),
+            "calibrated_drafting_target_visible_character_count": calibrated_target,
+        }
+    return None
 
 
 def content_hash(markdown: str) -> str:
@@ -877,45 +995,18 @@ def _generation_snapshot(
     document: Document,
     working: DocumentWorkingCopy,
     brief: ChapterBrief,
-    asset_snapshot: list[dict[str, Any]],
     writing_retrieval: dict[str, Any] | None,
-    writing_context: dict[str, Any] | None = None,
+    writing_context: dict[str, Any],
 ) -> dict[str, Any]:
-    if writing_context is not None:
-        return {
-            "schema_version": 4,
-            "novel": {
-                "id": str(document.novel_id),
-                "title": str(
-                    session.scalar(select(Novel.title).where(Novel.id == document.novel_id))
-                    or ""
-                ),
-            },
-            "chapter": {
-                "document_id": str(document.id),
-                "title": document.title,
-                "base_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
-                "base_draft_version": working.draft_version,
-                "base_content_hash": working.content_hash,
-                "base_content_markdown": working.content_markdown,
-            },
-            "brief": {
-                "version": brief.version,
-                "target_word_count": brief.target_word_count,
-                "expectation_text": brief.expectation_text,
-                "outline_text": brief.outline_text,
-                "forbidden_text": brief.forbidden_text,
-                "role_constraints": _normalize_role_constraints(brief.role_constraints),
-            },
-            "writing_context": writing_context,
-            "writing_retrieval": writing_retrieval,
-        }
-    context = get_novel_context(
-        session, document.novel_id, document_id=document.id, max_chars=30_000
-    )
     return {
-        "schema_version": 3,
-        "novel": context["novel"],
+        "schema_version": 4,
+        "novel": {
+            "id": str(document.novel_id),
+            "title": str(
+                session.scalar(select(Novel.title).where(Novel.id == document.novel_id))
+                or ""
+            ),
+        },
         "chapter": {
             "document_id": str(document.id),
             "title": document.title,
@@ -932,10 +1023,7 @@ def _generation_snapshot(
             "forbidden_text": brief.forbidden_text,
             "role_constraints": _normalize_role_constraints(brief.role_constraints),
         },
-        "previous_context": context["documents"],
-        "story_facts": context["story_facts"],
-        "context_v3": context.get("context_v3"),
-        "private_assets": asset_snapshot,
+        "writing_context": writing_context,
         "writing_retrieval": writing_retrieval,
     }
 
@@ -977,8 +1065,8 @@ def start_chapter_generation(
     asset_ids: list[UUID] | None = None,
     preset_id: UUID | None = None,
     writing_retrieval: dict[str, Any] | None = None,
-    writing_position: WritingPosition | None = None,
-    effective_context_window_tokens: int | None = None,
+    writing_position: WritingPosition,
+    effective_context_window_tokens: int,
 ) -> dict[str, Any]:
     document = _require_document(session, document_id)
     if document.kind != "chapter":
@@ -1004,26 +1092,24 @@ def start_chapter_generation(
     asset_snapshot = _generation_asset_snapshot(
         session, novel_id=document.novel_id, asset_ids=asset_ids, preset_id=preset_id
     )
-    writing_context = None
-    if writing_position is not None:
-        if effective_context_window_tokens is None or effective_context_window_tokens <= 0:
-            raise ValidationError("当前正文模型没有提供可核验的有效上下文窗口")
-        writing_context = assemble_writing_context_from_db(
-            session,
-            position=writing_position,
-            purpose=ContextRetrievalPurpose.CHAPTER_BODY,
-            requested_provider_id=requested_provider_id,
-            requested_model_id=requested_model_id,
-            budget_provider_id=requested_provider_id,
-            budget_model_id=requested_model_id,
-            effective_context_window_tokens=effective_context_window_tokens,
-            reserved_output_tokens=max(1, int(brief.target_word_count) * 2),
-            chapter_brief=brief,
-            private_assets=asset_snapshot,
-            writing_retrieval=writing_retrieval,
-        )
+    if effective_context_window_tokens <= 0:
+        raise ValidationError("当前正文模型没有提供可核验的有效上下文窗口")
+    writing_context = assemble_writing_context_from_db(
+        session,
+        position=writing_position,
+        purpose=ContextRetrievalPurpose.CHAPTER_BODY,
+        requested_provider_id=requested_provider_id,
+        requested_model_id=requested_model_id,
+        budget_provider_id=requested_provider_id,
+        budget_model_id=requested_model_id,
+        effective_context_window_tokens=effective_context_window_tokens,
+        reserved_output_tokens=max(1, int(brief.target_word_count) * 2),
+        chapter_brief=brief,
+        private_assets=asset_snapshot,
+        writing_retrieval=writing_retrieval,
+    )
     snapshot = _generation_snapshot(
-        session, document, working, brief, asset_snapshot, writing_retrieval, writing_context
+        session, document, working, brief, writing_retrieval, writing_context
     )
     requested_count = int(brief.target_word_count)
     minimum_count, maximum_count = _chapter_length_window(requested_count)
@@ -1034,6 +1120,22 @@ def start_chapter_generation(
         "requested_visible_character_count": requested_count,
         "tolerance_ratio": CHAPTER_LENGTH_TOLERANCE_RATIO,
     }
+    if force_new:
+        length_control = _latest_chapter_length_control(
+            session,
+            document_id=document_id,
+            brief_version=brief.version,
+            base_revision_id=working.base_revision_id,
+            base_draft_version=working.draft_version,
+            base_content_hash=working.content_hash,
+            requested_provider_id=requested_provider_id,
+            requested_model_id=requested_model_id,
+            minimum_count=minimum_count,
+            maximum_count=maximum_count,
+            requested_count=requested_count,
+        )
+        if length_control is not None:
+            snapshot["length_control"] = length_control
     hash_material = {
         "input_snapshot": snapshot,
         "execution_agent_id": execution_agent_id,
@@ -1115,6 +1217,8 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
     current_document_id = str(snapshot["chapter"].get("document_id") or "")
     current_draft_text = str(snapshot["chapter"].get("base_content_markdown") or "")
     current_draft_count = visible_character_count(current_draft_text)
+    length_control = snapshot.get("length_control")
+    length_control = length_control if isinstance(length_control, dict) else {}
     writing_context = snapshot.get("writing_context")
     writing_context = writing_context if isinstance(writing_context, dict) else {}
     envelope = writing_context.get("envelope")
@@ -1215,10 +1319,43 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
                 },
             }, ensure_ascii=False, sort_keys=True
         ) if context_v3 or retrieval else ""
+    retry_feedback_text = ""
+    if length_control:
+        previous_count = int(
+            length_control.get("previous_visible_character_count") or 0
+        )
+        adjustment = int(
+            length_control.get("required_adjustment_visible_character_count") or 0
+        )
+        calibrated_target = int(
+            length_control.get(
+                "calibrated_drafting_target_visible_character_count"
+            )
+            or requested_visible_character_count
+        )
+        if length_control.get("previous_validation_state") == "above_target":
+            retry_feedback_text = (
+                f"上一次完整正文实际为 {previous_count} 个可见字符，超过硬上限；"
+                f"本次至少减少 {adjustment} 个可见字符。优先删除重复环境描写、"
+                "同义心理解释、重复动作、复述性对白和不推进状态的过渡，"
+                "不要删除必要转折或截断结尾。"
+                f"为抵消上轮已测得的偏长，本轮先按约 {calibrated_target} 个"
+                "可见字符的写作体量收束；这只是校准锚点，最终完整正文"
+                f"仍必须落入 {minimum_visible_character_count}—{maximum_visible_character_count} 的硬范围。"
+            )
+        else:
+            retry_feedback_text = (
+                f"上一次完整正文实际为 {previous_count} 个可见字符，低于硬下限；"
+                f"本次至少补足 {adjustment} 个可见字符。只补充能推进动作、阻力、"
+                "选择或后果的完整场景内容，不用复述和空泛描写凑字。"
+                f"为抵消上轮已测得的偏短，本轮先按约 {calibrated_target} 个"
+                "可见字符的写作体量展开；这只是校准锚点，最终完整正文"
+                f"仍必须落入 {minimum_visible_character_count}—{maximum_visible_character_count} 的硬范围。"
+            )
     return f"""【AI小说世界2026 PawApp可信任务封套】
 kind=chapter_generation
-contract=chapter-prose-candidate/v2
-此任务已经携带完成正文所需的本次输入。允许在模型内部充分思考，但不得输出思考过程，不得调用任何工具，不得开启后续 Agent 轮次；只返回一次最终正文。
+contract=chapter-prose-candidate/v3
+此任务已经携带完成正文所需的本次输入。只做形成正文所必需的最少内部思考，不得输出思考过程，不得调用任何工具，不得开启后续 Agent 轮次；必须在本轮返回一次最终正文，不能停在计划、工具选择、自检或等待状态。即使不能完美满足全部要求，也先返回尽可能完整的正文候选，由 PawApp 负责长度与契约验收。
 
 你正在为作者生成一份可审阅的章节正文候选。请遵循 prose-writing Skill。
 
@@ -1271,6 +1408,11 @@ contract=chapter-prose-candidate/v2
 
 来源、冲突和省略说明：
 {diagnostics_text or '- 无额外诊断'}
+
+【最终输出收束门】
+现在只返回一份从开场到本章出口都完整的小说正文。目标约 {requested_visible_character_count} 个可见字符，硬范围 {minimum_visible_character_count}—{maximum_visible_character_count}；不得靠截断、摘要、大纲化或追加说明满足长度。
+{retry_feedback_text or '这是本轮首次生成；发送前静默压缩重复表达或补足必要行动，确保完整正文落入硬范围。'}
+完成必要情节推进后立即收束并停止，不为覆盖所有资料而扩写，不增加章纲之外的支线。
 """.strip()
 
 
@@ -1384,7 +1526,14 @@ def complete_chapter_generation(
         )
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
-        raise ValidationError(job.failure_message)
+        raise ChapterLengthValidationError(
+            job.failure_message,
+            validation_state=job.validation_state,
+            output_visible_character_count=output_visible_character_count,
+            minimum_visible_character_count=minimum_visible_character_count,
+            maximum_visible_character_count=maximum_visible_character_count,
+            requested_visible_character_count=requested_visible_character_count,
+        )
     if output_visible_character_count > maximum_visible_character_count:
         job.state = "failed"
         job.output_visible_character_count = output_visible_character_count
@@ -1396,7 +1545,14 @@ def complete_chapter_generation(
         )
         job.completed_at = datetime.now(timezone.utc)
         session.commit()
-        raise ValidationError(job.failure_message)
+        raise ChapterLengthValidationError(
+            job.failure_message,
+            validation_state=job.validation_state,
+            output_visible_character_count=output_visible_character_count,
+            minimum_visible_character_count=minimum_visible_character_count,
+            maximum_visible_character_count=maximum_visible_character_count,
+            requested_visible_character_count=requested_visible_character_count,
+        )
     base_content = str(job.generation_context_snapshot["chapter"]["base_content_markdown"])
     candidate = CandidateRevision(
         id=uuid4(),
@@ -1510,13 +1666,21 @@ def adopt_candidate(
     if candidate is None:
         raise NotFoundError(f"candidate {candidate_id} not found")
     generation_job = session.get(ChapterGenerationJob, candidate.generation_job_id)
+    if generation_job is None:
+        raise ValidationError("正文候选缺少对应生成任务，不能采用")
+    minimum_count, maximum_count, _ = _generation_acceptance_window(generation_job)
+    candidate_count = visible_character_count(candidate.content_markdown)
     if (
-        generation_job is None
-        or generation_job.validation_state != "meets_target"
-        or generation_job.output_visible_character_count
-        < generation_job.target_visible_character_count
+        generation_job.validation_state != "meets_target"
+        or generation_job.output_visible_character_count != candidate_count
+        or not minimum_count <= candidate_count <= maximum_count
     ):
-        raise ValidationError("正文候选未通过1000—1500字验收范围，不能采用")
+        raise ValidationError(
+            _candidate_length_validation_message(
+                generation_job,
+                actual_count=candidate_count,
+            )
+        )
     document = _require_document(session, candidate.document_id)
     working = session.scalar(
         select(DocumentWorkingCopy)

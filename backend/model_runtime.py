@@ -18,7 +18,7 @@ import httpx
 from .selection_edit_diff import SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS
 
 NOVEL_AGENT_ID = "ai-novel-writer"
-GENERATION_CONTRACT_VERSION = "follow-agent-effective-v5"
+GENERATION_CONTRACT_VERSION = "follow-agent-effective-v6"
 
 
 _CHARACTER_GENDER_ALIASES = {
@@ -343,24 +343,91 @@ def reply_final_text(reply: Any) -> str:
 
     chunks = getattr(reply, "chunks", None)
     if isinstance(chunks, (list, tuple)) and chunks:
+        final_response_seen = False
         for chunk in reversed(chunks):
             output = _field(chunk, "output")
-            if not isinstance(output, (list, tuple)) or not output:
+            if not isinstance(output, (list, tuple)):
                 continue
+            final_response_seen = True
             for message in reversed(output):
                 text = _message_final_text(message)
                 if text:
                     return text
             break
+
+        # QwenPaw's public ChatReply contract falls back to completed Message
+        # chunks when the closing AgentResponse has an empty output list. Keep
+        # that compatibility, but only inspect the last standalone assistant
+        # message and continue filtering reasoning, deltas and tool blocks.
+        if final_response_seen:
+            for chunk in reversed(chunks):
+                if isinstance(_field(chunk, "output"), (list, tuple)):
+                    continue
+                content = _field(chunk, "content")
+                if not isinstance(content, (list, tuple)):
+                    continue
+                text = _message_final_text(chunk)
+                if text:
+                    return text
+                break
         raise ModelVerificationError(
             "模型完成了思考或工具过程，但没有返回独立的最终回答；"
-            "生成结果已安全作废"
+            "生成结果已安全作废。公开结构诊断："
+            f"{_reply_structure_summary(chunks)}"
         )
 
     fallback = _field(reply, "text")
     if isinstance(fallback, str) and fallback.strip():
         return fallback.strip()
     raise ModelVerificationError("模型没有返回可用的最终回答")
+
+
+def _reply_structure_summary(chunks: object) -> str:
+    """Return bounded public reply-shape evidence without any model text.
+
+    The summary is safe to persist in a failed job: it records only response,
+    message and content-block discriminators plus whether text was present.
+    It never serializes text, tool arguments, tool results or reasoning.
+    """
+
+    if not isinstance(chunks, (list, tuple)):
+        return "chunks=invalid"
+    response_summaries: list[str] = []
+    standalone_summaries: list[str] = []
+    for chunk in chunks:
+        output = _field(chunk, "output")
+        if not isinstance(output, (list, tuple)):
+            content = _field(chunk, "content")
+            if isinstance(content, (list, tuple)):
+                standalone_summaries.append(_message_structure_summary(chunk))
+            continue
+        response_summaries.append(
+            "{" + ";".join(
+                _message_structure_summary(message) for message in output[-4:]
+            ) + "}"
+        )
+    return (
+        f"chunks={len(chunks)},responses="
+        f"{'|'.join(response_summaries[-3:]) or 'none'},standalone="
+        f"{'|'.join(standalone_summaries[-3:]) or 'none'}"
+    )
+
+
+def _message_structure_summary(message: object) -> str:
+    role = _normalized_discriminator(_field(message, "role")) or "unknown"
+    message_type = _normalized_discriminator(_field(message, "type")) or "unspecified"
+    content = _field(message, "content")
+    parts = content if isinstance(content, (list, tuple)) else [content]
+    part_summaries: list[str] = []
+    for part in parts[-6:]:
+        part_type = _normalized_discriminator(_field(part, "type")) or "unspecified"
+        raw_text = _field(part, "text")
+        has_text = isinstance(raw_text, str) and bool(raw_text.strip())
+        is_delta = bool(_field(part, "is_delta")) or bool(_field(part, "delta"))
+        part_summaries.append(
+            f"{part_type}:text={int(has_text)}:delta={int(is_delta)}"
+        )
+    return f"{message_type}/{role}[{','.join(part_summaries) or 'empty'}]"
 
 
 def _message_final_text(message: Any) -> str:
@@ -708,7 +775,7 @@ def normalize_creative_generation_json(
         if not isinstance(raw_characters, list) and payload.get("name"):
             raw_characters = [payload]
         characters: list[dict[str, Any]] = []
-        for item in raw_characters or []:
+        for index, item in enumerate(raw_characters or [], start=1):
             if not isinstance(item, dict):
                 continue
             name = str(item.get("name") or "").strip()
@@ -727,13 +794,51 @@ def normalize_creative_generation_json(
             details["gender"] = _normalize_generated_character_gender(
                 nested_gender if nested_gender is not None else top_level_gender
             )
-            details["personality"] = _normalize_generated_character_personality(
-                details.get("personality")
+            personality = _normalize_generated_character_personality(
+                item.get("personality_summary", details.get("personality"))
             )
-            normalized = dict(item)
-            normalized["name"] = name
-            normalized["details"] = details
-            normalized.pop("gender", None)
+            identity = str(
+                item.get("identity_summary", details.get("identity")) or ""
+            ).strip()
+            core_goal = str(
+                item.get("core_goal", details.get("core_goal")) or ""
+            ).strip()
+            bio = str(item.get("bio", item.get("description")) or "").strip()
+            age_note = str(
+                item.get("age_at_story_start_note", details.get("age")) or ""
+            ).strip()
+            if not identity or len(identity) > 2_000:
+                raise ModelVerificationError("模型角色身份摘要缺失或过长，请重新生成")
+            if not core_goal or len(core_goal) > 2_000:
+                raise ModelVerificationError("模型角色核心目标缺失或过长，请重新生成")
+            if not bio or len(bio) > 20_000:
+                raise ModelVerificationError("模型角色小传缺失或过长，请重新生成")
+            if len(age_note) > 2_000:
+                raise ModelVerificationError("模型角色开篇年龄备注过长，请重新生成")
+            normalized = {
+                "schema_version": "outline-character-draft/2",
+                "draft_key": f"ai-character-{index}",
+                "role_type": str(item.get("role_type") or "supporting").strip(),
+                "name": name,
+                "gender": details["gender"],
+                "identity_summary": identity,
+                "personality_summary": personality,
+                "core_goal": core_goal,
+                "bio": bio,
+                "origin": "ai_candidate",
+                # Compatibility projection for installed readers. Formalization
+                # consumes the typed fields above and never guesses from these.
+                "description": bio,
+                "details": {
+                    "gender": details["gender"],
+                    "identity": identity,
+                    "personality": personality,
+                    "core_goal": core_goal,
+                },
+            }
+            if age_note:
+                normalized["age_at_story_start_note"] = age_note
+                normalized["details"]["age"] = age_note
             characters.append(normalized)
         if not characters:
             raise ModelVerificationError("模型角色结果结构不完整，请重新生成")

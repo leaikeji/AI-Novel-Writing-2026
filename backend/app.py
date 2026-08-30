@@ -123,6 +123,7 @@ from .schemas import (
 )
 from .services import (
     BriefConflictError,
+    ChapterLengthValidationError,
     CandidateConflictError,
     DraftConflictError,
     NotFoundError,
@@ -506,11 +507,38 @@ def _raise_domain(error: Exception) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail={"type": "restoration_plan_conflict", "current": error.current},
         ) from error
+    if isinstance(error, ChapterLengthValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_chapter_length_error_detail(error),
+        ) from error
     if isinstance(error, NotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     if isinstance(error, ValidationError):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
     raise error
+
+
+def _chapter_length_error_detail(
+    error: ChapterLengthValidationError,
+    *,
+    job: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    detail: dict[str, Any] = {
+        "type": "chapter_length_out_of_range",
+        "reason_code": error.error_code,
+        "message": str(error),
+        "direction": error.validation_state,
+        "validation_state": error.validation_state,
+        "retryable": True,
+        "output_visible_character_count": error.output_visible_character_count,
+        "minimum_visible_character_count": error.minimum_visible_character_count,
+        "maximum_visible_character_count": error.maximum_visible_character_count,
+        "requested_visible_character_count": error.requested_visible_character_count,
+    }
+    if job is not None:
+        detail["job"] = job
+    return detail
 
 
 @router.get("/health")
@@ -876,6 +904,11 @@ async def generation_jobs_create_body(
             except Exception:
                 session.rollback()
                 failed = job
+            if isinstance(error, ChapterLengthValidationError):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=_chapter_length_error_detail(error, job=failed),
+                ) from error
             if not isinstance(
                 error,
                 (

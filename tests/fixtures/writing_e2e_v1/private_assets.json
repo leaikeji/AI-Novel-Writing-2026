@@ -1,0 +1,57 @@
+{
+  "schema_version": "writing-e2e-private-assets/1",
+  "fixture_id": "writing-e2e-v1-archive-1988",
+  "rights_basis": "project-synthetic",
+  "assets": [
+    {
+      "id": "37000000-0000-4000-8000-000000000501",
+      "version_id": "37000000-0000-4000-8000-000000000511",
+      "key": "asset:archive-blue-ticket:v1",
+      "title": "海州档案离库登记规程（合成）",
+      "policy": "required",
+      "bound_to_fixture_novel": true,
+      "index_eligible": true,
+      "content": "旧城纸质档案离库必须附蓝色双孔票。票号末位对应保管柜号；末位为七时，只能由七号柜后的登记孔验票，不得改用其他柜。"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000502",
+      "version_id": "37000000-0000-4000-8000-000000000512",
+      "key": "asset:clock-maintenance:v1",
+      "title": "旧城机械钟维护笔记（合成）",
+      "policy": "preferred",
+      "bound_to_fixture_novel": true,
+      "index_eligible": true,
+      "content": "机械钟若在整点之外多响一次，常见原因不是走时误差，而是检修员手动释放了报时棘轮。释放动作会在铜片上留下向左的月牙划痕。"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000503",
+      "version_id": "37000000-0000-4000-8000-000000000513",
+      "key": "asset:old-city-layout:v1",
+      "title": "1988年旧城档案馆平面说明（合成）",
+      "policy": "context_only",
+      "bound_to_fixture_novel": true,
+      "index_eligible": true,
+      "content": "七号保管柜后方留有仅供维修的狭窄夹道，夹道通向旧钟楼机房；常规访客地图不会标注这条通路。"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000504",
+      "version_id": "37000000-0000-4000-8000-000000000514",
+      "key": "asset:sealed-ending:v1",
+      "title": "封存结局备忘（合成）",
+      "policy": "prohibited",
+      "bound_to_fixture_novel": true,
+      "index_eligible": false,
+      "content": "禁用哨兵词：黑曜雨燕。最终幕后人并非陆清禾；任何写作上下文和检索结果都不得出现本素材。"
+    },
+    {
+      "id": "37000000-0000-4000-8000-000000000505",
+      "version_id": "37000000-0000-4000-8000-000000000515",
+      "key": "asset:unbound-decoy:v1",
+      "title": "未绑定港口笔记（合成）",
+      "policy": "preferred",
+      "bound_to_fixture_novel": false,
+      "index_eligible": false,
+      "content": "未绑定哨兵词：朱砂鲸。该笔记属于另一本实验小说，不得进入《回声档案》。"
+    }
+  ]
+}

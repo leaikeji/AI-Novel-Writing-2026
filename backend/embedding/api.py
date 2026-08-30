@@ -50,6 +50,12 @@ from .contracts import (
 from .indexing import prepare_v1_novel_index, request_active_novel_refresh
 from .evaluation_v2 import evaluate_frozen_vectors, load_frozen_evaluation_fixture
 from .lifecycle import EmbeddingLifecycleError
+from .local_lexical import (
+    LocalLexicalScopeError,
+    LocalLexicalSearchRequest,
+    LocalTimelineLimit,
+    search_local_authority,
+)
 from .persistence import (
     activate_candidate_generation,
     apply_credential_reference,
@@ -1400,6 +1406,69 @@ def _source_state(source_type: str) -> str:
     return "current_entity_revision"
 
 
+def _local_authority_search_payload(
+    session: Session,
+    *,
+    novel_id: UUID,
+    request: SemanticSearchRequest,
+    timeline_limits: tuple[tuple[UUID, int | None], ...],
+    narrative_cutoff: int | None,
+    index_status: str,
+) -> dict[str, object]:
+    perspective_map = {
+        PerspectiveKind.AUTHOR: RetrievalPerspective.AUTHOR,
+        PerspectiveKind.READER: RetrievalPerspective.READER,
+        PerspectiveKind.CHARACTER_INSTANCE: RetrievalPerspective.CHARACTER_INSTANCE,
+    }
+    try:
+        local_result = search_local_authority(
+            session,
+            LocalLexicalSearchRequest(
+                owner_id=LOCAL_OWNER_ID,
+                workspace_id=LOCAL_WORKSPACE_ID,
+                novel_id=novel_id,
+                query=request.query,
+                corpora=frozenset(request.corpora),
+                top_k=request.top_k,
+                target_timeline_id=(timeline_limits[-1][0] if timeline_limits else None),
+                narrative_sequence_cutoff=narrative_cutoff,
+                story_sequence_cutoff=request.story_sequence_cutoff,
+                timeline_limits=tuple(
+                    LocalTimelineLimit(
+                        timeline_id=timeline_id,
+                        story_sequence_cutoff=cutoff,
+                    )
+                    for timeline_id, cutoff in timeline_limits
+                ),
+                perspective=perspective_map[request.perspective.kind],
+            ),
+        )
+    except LocalLexicalScopeError as error:
+        raise EmbeddingLifecycleError(error.code, error.message) from error
+    public_hits = local_result.as_semantic_search_hits()
+    omission_summary = list(local_result.diagnostics.omission_summary)
+    return {
+        "schema_version": request.schema_version,
+        "request_id": f"semantic:{datetime.now(UTC).timestamp()}",
+        # Authority-local chunks are not members of an embedding generation.
+        "generation_id": None,
+        "index_version": None,
+        # Keep the public query/fusion policy stable.  The authority fallback's
+        # renderer/chunker identity is encoded in deterministic chunk IDs.
+        "retrieval_policy_version": "writing-retrieval/2",
+        "mode": "lexical_only",
+        "index_status": index_status,
+        "hits": [item.model_dump(mode="json") for item in public_hits],
+        "omitted_count": sum(int(item["count"]) for item in omission_summary),
+        "warnings": ["dense_unavailable"],
+        "provider_request_id": None,
+        "token_count": None,
+        "latency_ms": None,
+        "degraded_reason": "dense_unavailable",
+        "omission_summary": omission_summary,
+    }
+
+
 @router.post("/novels/{novel_id}/semantic-search")
 async def semantic_search(
     novel_id: UUID, request: SemanticSearchRequest, session: Session = Depends(get_session)
@@ -1435,26 +1504,6 @@ async def semantic_search(
             requested=request.timeline_id,
             story_cutoff=request.story_sequence_cutoff,
         )
-        generation_id = generation.id if generation is not None else None
-        if generation_id is None or build is None:
-            return {
-                "schema_version": request.schema_version,
-                "request_id": f"semantic:{datetime.now(UTC).timestamp()}",
-                "generation_id": None,
-                "index_version": None,
-                "retrieval_policy_version": "writing-retrieval/2",
-                "mode": "lexical_only",
-                "index_status": "not_built",
-                "hits": [],
-                "omitted_count": 0,
-                "warnings": ["local_index_unavailable"],
-                "provider_request_id": None,
-                "token_count": None,
-                "latency_ms": None,
-                "degraded_reason": "dense_unavailable",
-                "omission_summary": ["当前小说尚无可用的本地语义分块索引"],
-            }
-
         narrative_cutoff = request.narrative_sequence
         if (
             narrative_cutoff is not None
@@ -1462,6 +1511,21 @@ async def semantic_search(
             in {ApiRetrievalPurpose.CHAPTER_BODY, ApiRetrievalPurpose.CHAPTER_OUTLINE}
         ):
             narrative_cutoff = max(0, narrative_cutoff - 1)
+        perspective_map = {
+            PerspectiveKind.AUTHOR: RetrievalPerspective.AUTHOR,
+            PerspectiveKind.READER: RetrievalPerspective.READER,
+            PerspectiveKind.CHARACTER_INSTANCE: RetrievalPerspective.CHARACTER_INSTANCE,
+        }
+        generation_id = generation.id if generation is not None else None
+        if generation_id is None or build is None:
+            return _local_authority_search_payload(
+                session,
+                novel_id=novel_id,
+                request=request,
+                timeline_limits=timeline_limits,
+                narrative_cutoff=narrative_cutoff,
+                index_status="not_built",
+            )
         eligible_conditions: list[object] = []
         eligible_conditions.extend(
             (
@@ -1622,6 +1686,17 @@ async def semantic_search(
             .where(*eligible_conditions)
             .order_by(SemanticSource.id, SemanticChunk.chunk_index)
         ).all()
+        if not candidate_rows:
+            return _local_authority_search_payload(
+                session,
+                novel_id=novel_id,
+                request=request,
+                timeline_limits=timeline_limits,
+                narrative_cutoff=narrative_cutoff,
+                index_status=(
+                    "ready" if build.sync_state == "current" else build.sync_state
+                ),
+            )
         candidates = tuple(
             _candidate(
                 session,
@@ -1638,11 +1713,6 @@ async def semantic_search(
             if float(score_value) > 0.01
         )
 
-        perspective_map = {
-            PerspectiveKind.AUTHOR: RetrievalPerspective.AUTHOR,
-            PerspectiveKind.READER: RetrievalPerspective.READER,
-            PerspectiveKind.CHARACTER_INSTANCE: RetrievalPerspective.CHARACTER_INSTANCE,
-        }
         purpose_map = {
             ApiRetrievalPurpose.MANUAL_SEARCH: CoreRetrievalPurpose.REVIEW,
             ApiRetrievalPurpose.CHAPTER_BODY: CoreRetrievalPurpose.CHAPTER_BODY,

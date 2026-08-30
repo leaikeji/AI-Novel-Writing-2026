@@ -48,6 +48,15 @@ export function generationTaskFromApiError(
   return null;
 }
 
+export function isRetryableChapterLengthFailure(reason: unknown): boolean {
+  if (!(reason instanceof ApiError) || reason.status !== 422) return false;
+  const detail = objectRecord(reason.detail);
+  return detail?.type === "chapter_length_out_of_range"
+    && detail.retryable === true
+    && (detail.direction === "above_target" || detail.direction === "below_target")
+    && (detail.validation_state === "above_target" || detail.validation_state === "below_target");
+}
+
 export function apiErrorMessage(reason: unknown, fallback: string): string {
   if (!(reason instanceof ApiError)) {
     return reason instanceof Error ? reason.message : fallback;

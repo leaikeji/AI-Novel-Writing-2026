@@ -1811,6 +1811,12 @@ export function ensureNovelStyles(): void {
     }
 
     @media (max-width: 720px) {
+      .anw-workbench-main {
+        overflow-x:hidden;
+        overflow-y:auto;
+        overscroll-behavior-y:contain;
+        -webkit-overflow-scrolling:touch;
+      }
       .anw-page { padding:18px 14px 90px; }
       .anw-page-header { align-items:center; }
       .anw-page-title { font-size:23px; }

@@ -114,13 +114,13 @@ describe("OutlineCharacterDraftV2 state", () => {
     }));
   });
 
-  it("reports duplicate draft identity and name instead of silently dropping rows", () => {
+  it("rejects duplicate draft identity while allowing distinct same-name people", () => {
     const issues = validateCharacterDrafts([
       draft("same", "manual", "阿澄"),
       draft("same", "ai_candidate", " 阿澄 "),
     ]);
     expect(issues.filter((issue) => issue.code === "duplicate_draft_key")).toHaveLength(2);
-    expect(issues.filter((issue) => issue.code === "duplicate_name")).toHaveLength(2);
+    expect(issues.filter((issue) => issue.code === "duplicate_name")).toHaveLength(0);
   });
 
   it("defaults regeneration to AI drafts and protects manual drafts with a second acknowledgement", () => {

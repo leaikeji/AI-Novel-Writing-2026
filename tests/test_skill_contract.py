@@ -126,7 +126,8 @@ def test_direct_selection_edit_skills_separate_chat_and_strict_json_modes() -> N
 def test_prose_writing_supports_thinking_models_without_accepting_reasoning_as_prose() -> None:
     text = (SKILLS_ROOT / "prose-writing" / "SKILL.md").read_text(encoding="utf-8")
     assert "PawApp `chapter_generation` 任务模式" in text
-    assert "可以在模型内部充分思考" in text
+    assert "只做形成正文所必需的最少内部思考" in text
+    assert "必须在本轮形成最终正文" in text
     assert "不得把 thinking/reasoning" in text
     assert "`chapter_generation` 不调用任何工具" in text
 

@@ -2,16 +2,13 @@ import { apiErrorMessage } from "../api";
 import type { EmbeddingAntdRuntime, EmbeddingReactRuntime, InputChangeEvent } from "../embedding/ui-runtime";
 import {
   forkStoryTimeline,
-  getCharacterInstanceProfile,
   listCharacterInstances,
   listStoryTimelines,
-  saveCharacterInstanceProfile,
 } from "./api";
 import {
-  EMPTY_INSTANCE_PROFILE,
-  type CharacterInstanceProfileV1,
   type CharacterInstanceRecord,
   type CharacterRootSummary,
+  type StoryTimelineCharacterCardTarget,
   type StoryTimelineRecord,
 } from "./contracts";
 import { ensureStoryTimelineStyles } from "./styles";
@@ -22,28 +19,8 @@ export interface StoryTimelineWorkspaceProps {
   readonly novelId: string;
   readonly initialStoryLedgerVersion: number;
   readonly characters: readonly CharacterRootSummary[];
+  readonly onOpenCharacterCard?: (target: StoryTimelineCharacterCardTarget) => void;
 }
-
-type EditableProfile = Omit<CharacterInstanceProfileV1, "schema_version">;
-
-const editable = (profile: CharacterInstanceProfileV1): EditableProfile => ({
-  public_identity: profile.public_identity,
-  true_identity: profile.true_identity,
-  cover_identity: profile.cover_identity,
-  birth_year: profile.birth_year,
-  birth_information: profile.birth_information,
-  occupation: profile.occupation,
-  personality: profile.personality,
-  goals: [...profile.goals],
-  flaws: [...profile.flaws],
-  secrets: [...profile.secrets],
-  growth_direction: profile.growth_direction,
-});
-
-const lines = (value: string): readonly string[] => value
-  .split(/[,\n，]/)
-  .map((item) => item.trim())
-  .filter((item, index, all) => Boolean(item) && all.indexOf(item) === index);
 
 export function createStoryTimelineWorkspace(
   React: EmbeddingReactRuntime,
@@ -58,7 +35,6 @@ export function createStoryTimelineWorkspace(
     const [ledgerVersion, setLedgerVersion] = React.useState(props.initialStoryLedgerVersion);
     const [selectedTimelineId, setSelectedTimelineId] = React.useState<string | null>(null);
     const [selectedInstanceId, setSelectedInstanceId] = React.useState<string | null>(null);
-    const [profile, setProfile] = React.useState<EditableProfile>(editable(EMPTY_INSTANCE_PROFILE));
     const [branchName, setBranchName] = React.useState("");
     const [showFork, setShowFork] = React.useState(false);
     const [busy, setBusy] = React.useState(false);
@@ -87,27 +63,13 @@ export function createStoryTimelineWorkspace(
       return () => controller.abort();
     }, [props.novelId]);
 
-    React.useEffect(() => {
-      if (!selectedInstanceId) {
-        setProfile(editable(EMPTY_INSTANCE_PROFILE));
-        return;
-      }
-      const controller = new AbortController();
-      setBusy(true);
-      void getCharacterInstanceProfile(props.novelId, selectedInstanceId, controller.signal)
-        .then((resource) => setProfile(editable(resource.revision?.profile ?? EMPTY_INSTANCE_PROFILE)))
-        .catch((reason) => setError(apiErrorMessage(reason, "加载人物实例档案失败")))
-        .finally(() => setBusy(false));
-      return () => controller.abort();
-    }, [props.novelId, selectedInstanceId]);
-
     const selectedTimeline = timelines.find((item) => item.id === selectedTimelineId)
       ?? timelines[0]
       ?? null;
     const visibleInstances = instances.filter(
       (item) => item.origin_timeline_id === selectedTimeline?.id && item.lifecycle_state === "active",
     );
-    const selectedInstance = instances.find((item) => item.id === selectedInstanceId) ?? null;
+    const selectedInstance = visibleInstances.find((item) => item.id === selectedInstanceId) ?? null;
     const characterNames = new Map(props.characters.map((item) => [item.id, item.name]));
     const advanced = timelines.filter((item) => item.lifecycle_state === "active").length > 1;
 
@@ -136,44 +98,6 @@ export function createStoryTimelineWorkspace(
       }
     };
 
-    const saveProfile = async (): Promise<void> => {
-      if (!selectedInstance) return;
-      setBusy(true);
-      setError(null);
-      try {
-        const result = await saveCharacterInstanceProfile(
-          props.novelId,
-          selectedInstance.id,
-          {
-            expected_story_ledger_version: ledgerVersion,
-            expected_instance_version: selectedInstance.version,
-            operation_key: `profile.web.${Date.now().toString(36)}`,
-            source_kind: "manual",
-            profile: { schema_version: "character-instance-profile/1", ...profile },
-          },
-        );
-        setLedgerVersion(result.story_ledger_version);
-        await refresh();
-      } catch (reason) {
-        setError(apiErrorMessage(reason, "保存人物实例档案失败"));
-      } finally {
-        setBusy(false);
-      }
-    };
-
-    const textField = (key: keyof EditableProfile, label: string, multiline = false): unknown => h(
-      "label",
-      { key },
-      label,
-      h(multiline ? "textarea" : "input", {
-        value: String(profile[key] ?? ""),
-        onChange: (event: InputChangeEvent) => setProfile((current) => ({
-          ...current,
-          [key]: event.target.value || null,
-        })),
-      }),
-    );
-
     return h(
       Spin,
       { spinning: busy },
@@ -190,7 +114,7 @@ export function createStoryTimelineWorkspace(
             ),
             h(Button, { onClick: () => setShowFork(true) }, advanced ? "新建分支" : "创建第二条时间线"),
           ),
-          showFork && selectedTimeline ? h("div", { className: "anw-profile-form" },
+          showFork && selectedTimeline ? h("div", { className: "anw-timeline-fork-form" },
             h("label", null, "从当前时间线分叉", h("strong", null, selectedTimeline.name)),
             h("label", null, "新时间线名称", h("input", {
               value: branchName,
@@ -231,33 +155,25 @@ export function createStoryTimelineWorkspace(
               )),
             ) : h(Empty, { description: "当前时间线没有人物实例" }),
           ),
-          h(Card, { title: "人物实例档案" },
-            selectedInstance ? h("div", { className: "anw-profile-form" },
-              textField("public_identity", "公开身份"),
-              textField("true_identity", "真实身份"),
-              textField("cover_identity", "掩护身份"),
-              h("label", null, "出生年", h("input", {
-                type: "number",
-                value: profile.birth_year ?? "",
-                onChange: (event: InputChangeEvent) => setProfile((current) => ({
-                  ...current,
-                  birth_year: event.target.value ? Number(event.target.value) : null,
-                })),
-              })),
-              textField("birth_information", "出生信息"),
-              textField("occupation", "初始职业"),
-              textField("personality", "初始性格", true),
-              textField("growth_direction", "成长方向", true),
-              ...(["goals", "flaws", "secrets"] as const).map((key) => h("label", { key },
-                key === "goals" ? "目标（逐行）" : key === "flaws" ? "缺陷（逐行）" : "秘密（逐行）",
-                h("textarea", {
-                  value: profile[key].join("\n"),
-                  onChange: (event: InputChangeEvent) => setProfile((current) => ({ ...current, [key]: lines(event.target.value) })),
+          h(Card, { title: "本线人物摘要" },
+            selectedInstance ? h("div", { className: "anw-instance-summary" },
+              h("dl", null,
+                h("div", null, h("dt", null, "人物"), h("dd", null, characterNames.get(selectedInstance.character_id) || "未命名人物")),
+                h("div", null, h("dt", null, "本线标识"), h("dd", null, selectedInstance.display_label || "未设置区分标签")),
+                h("div", null, h("dt", null, "连续性"), h("dd", null, selectedInstance.continuity_kind === "derived" ? "分支派生" : selectedInstance.continuity_kind === "traveler" ? "穿越者" : "本线原生")),
+                h("div", null, h("dt", null, "档案状态"), h("dd", null, selectedInstance.current_revision_id ? "已有正式档案" : "尚未建立正式档案")),
+              ),
+              h(Button, {
+                type: "primary",
+                disabled: !props.onOpenCharacterCard,
+                onClick: () => props.onOpenCharacterCard?.({
+                  characterId: selectedInstance.character_id,
+                  timelineId: selectedTimeline!.id,
+                  instanceId: selectedInstance.id,
                 }),
-              )),
-              h(Button, { type: "primary", onClick: () => void saveProfile() }, "保存为新 revision"),
-              h("p", { className: "anw-timeline-muted" }, "故事中发生的年龄、身份、性格、位置与知识变化会进入 StoryFact，不覆盖这份初始档案。"),
-            ) : h(Empty, { description: "选择一个人物实例查看档案" }),
+              }, "打开正式人物卡"),
+              h("p", { className: "anw-timeline-muted" }, "身份、出生资料、目标、秘密与成长方向统一在正式人物卡中维护。"),
+            ) : h(Empty, { description: "选择一个人物实例查看摘要" }),
           ),
         ) : null,
       ),

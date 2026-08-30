@@ -3303,6 +3303,17 @@ export function StudioProjectView({
           novelId: novel.id,
           initialStoryLedgerVersion: novel.story_ledger_version,
           characters: characters.map((item: NovelCharacterRecord) => ({ id: item.id, name: item.name })),
+          onOpenCharacterCard: ({ characterId, timelineId, instanceId }: {
+            characterId: string;
+            timelineId: string;
+            instanceId: string;
+          }) => {
+            setBusy(true);
+            void loadCharacterWorkspace(characterId, { timelineId, instanceId })
+              .then((workspace) => setCharacterWorkspace(workspace))
+              .catch((reason) => onError(readableError(reason, "加载人物卡失败")))
+              .finally(() => setBusy(false));
+          },
         })
       : h(NovelSemanticIndexCard, { novelId: novel.id, novelTitle: novel.title });
 

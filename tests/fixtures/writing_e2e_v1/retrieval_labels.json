@@ -1,0 +1,155 @@
+{
+  "schema_version": "writing-e2e-retrieval-labels/1",
+  "fixture_id": "writing-e2e-v1-archive-1988",
+  "rights_basis": "project-synthetic",
+  "label_policy": {
+    "positive_match": "all_required_sources_must_be_present",
+    "negative_match": "all_forbidden_sources_and_sentinels_must_be_absent",
+    "empty_result_is_valid_for_negative_cases": true
+  },
+  "positive_labels": [
+    {
+      "id": "positive:ch02:clock-clue",
+      "target_chapter_key": "chapter:main:02",
+      "query": "停电录音里的异常报时为什么不是普通走时误差？",
+      "expected_source_ids": [
+        "source:main:ch01:current"
+      ],
+      "expected_fact_ids": [
+        "fact:main:ch01:clock-0217"
+      ]
+    },
+    {
+      "id": "positive:ch02:clock-maintenance",
+      "target_chapter_key": "chapter:main:02",
+      "query": "手动释放机械钟报时棘轮会留下什么痕迹？",
+      "expected_asset_keys": [
+        "asset:clock-maintenance:v1"
+      ]
+    },
+    {
+      "id": "positive:ch02:alias-continuity",
+      "target_chapter_key": "chapter:main:02",
+      "query": "周砚现在使用什么正式姓名？",
+      "expected_character_ids": [
+        "37000000-0000-4000-8000-000000000201"
+      ],
+      "expected_alias_ids": [
+        "37000000-0000-4000-8000-000000000211"
+      ]
+    },
+    {
+      "id": "positive:ch03:service-tunnel-state",
+      "target_chapter_key": "chapter:main:03",
+      "query": "两人在上一章进入了哪里，彼此关系发生了什么变化？",
+      "expected_source_ids": [
+        "source:main:ch02:current"
+      ],
+      "expected_fact_ids": [
+        "fact:main:ch02:service-tunnel"
+      ]
+    },
+    {
+      "id": "positive:ch03:blue-ticket-rule",
+      "target_chapter_key": "chapter:main:03",
+      "query": "票号末位为七的蓝色双孔票应该在哪里验票？",
+      "expected_asset_keys": [
+        "asset:archive-blue-ticket:v1"
+      ]
+    },
+    {
+      "id": "positive:ch03:old-city-layout",
+      "target_chapter_key": "chapter:main:03",
+      "query": "七号柜后面的隐藏通道通向哪里？",
+      "expected_asset_keys": [
+        "asset:old-city-layout:v1"
+      ]
+    }
+  ],
+  "negative_labels": [
+    {
+      "id": "negative:ch01:future-secret",
+      "target_chapter_key": "chapter:main:01",
+      "boundary_kind": "future_knowledge",
+      "forbidden_fact_ids": [
+        "fact:main:ch03:k17-reveal"
+      ],
+      "forbidden_text_sentinels": [
+        "证人保护对象K-17",
+        "K-17就是沈砚舟"
+      ]
+    },
+    {
+      "id": "negative:ch02:future-secret",
+      "target_chapter_key": "chapter:main:02",
+      "boundary_kind": "future_knowledge",
+      "forbidden_source_ids": [
+        "source:main:ch03:future"
+      ],
+      "forbidden_fact_ids": [
+        "fact:main:ch03:k17-reveal"
+      ],
+      "forbidden_text_sentinels": [
+        "K-17就是沈砚舟"
+      ]
+    },
+    {
+      "id": "negative:ch02:sibling-timeline",
+      "target_chapter_key": "chapter:main:02",
+      "boundary_kind": "sibling_timeline",
+      "forbidden_source_ids": [
+        "source:sibling:ch02:decoy"
+      ],
+      "forbidden_fact_ids": [
+        "fact:sibling:white-gull-key"
+      ],
+      "forbidden_text_sentinels": [
+        "白鸥钥匙"
+      ]
+    },
+    {
+      "id": "negative:ch02:retired-revision",
+      "target_chapter_key": "chapter:main:02",
+      "boundary_kind": "retired_revision",
+      "forbidden_source_ids": [
+        "source:main:ch01:retired"
+      ],
+      "forbidden_text_sentinels": [
+        "退役版本哨兵"
+      ]
+    },
+    {
+      "id": "negative:all:prohibited-asset",
+      "target_chapter_key": "chapter:main:03",
+      "boundary_kind": "prohibited_private_asset",
+      "forbidden_asset_keys": [
+        "asset:sealed-ending:v1"
+      ],
+      "forbidden_text_sentinels": [
+        "黑曜雨燕"
+      ]
+    },
+    {
+      "id": "negative:all:unbound-asset",
+      "target_chapter_key": "chapter:main:03",
+      "boundary_kind": "unbound_private_asset",
+      "forbidden_asset_keys": [
+        "asset:unbound-decoy:v1"
+      ],
+      "forbidden_text_sentinels": [
+        "朱砂鲸"
+      ]
+    },
+    {
+      "id": "negative:all:cross-novel",
+      "target_chapter_key": "chapter:main:03",
+      "boundary_kind": "cross_novel",
+      "forbidden_source_ids": [
+        "source:other-novel:decoy"
+      ],
+      "forbidden_text_sentinels": [
+        "他书来源哨兵"
+      ]
+    }
+  ]
+}

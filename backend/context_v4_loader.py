@@ -36,6 +36,9 @@ from .creative_data_models import (
     NovelSettingHead,
     NovelSettingRevision,
     PrivateAssetVersion,
+    RevisionTimelineMapping,
+    RevisionTimelineMappingHead,
+    RevisionTimelineMappingSegment,
     StoryEventLink,
     StoryTimeline,
 )
@@ -85,11 +88,20 @@ def _block(
     timeline_id: UUID | None = None,
     narrative_sequence: int | None = None,
     story_sequence: int | None = None,
+    block_discriminator: str | None = None,
 ) -> ContextBlockV2 | None:
     if not content.strip():
         return None
+    block_id = _block_id(source_kind, source_id, source_revision_id or "head")
+    if block_discriminator is not None:
+        block_id = _block_id(
+            source_kind,
+            source_id,
+            source_revision_id or "head",
+            block_discriminator,
+        )
     return ContextBlockV2(
-        block_id=_block_id(source_kind, source_id, source_revision_id or "head"),
+        block_id=block_id,
         novel_id=novel_id,
         section=section,
         source_kind=source_kind,
@@ -146,7 +158,12 @@ def _planning_blocks(session: Session, novel_id: UUID) -> list[ContextBlockV2]:
     return result
 
 
-def _character_blocks(session: Session, novel_id: UUID) -> list[ContextBlockV2]:
+def _character_blocks(
+    session: Session,
+    novel_id: UUID,
+    *,
+    timeline_id: UUID,
+) -> list[ContextBlockV2]:
     latest_roots: dict[UUID, NovelCharacterRevision] = {}
     for revision in session.scalars(
         select(NovelCharacterRevision)
@@ -158,12 +175,18 @@ def _character_blocks(session: Session, novel_id: UUID) -> list[ContextBlockV2]:
         session.scalars(
             select(CharacterInstance).where(
                 CharacterInstance.novel_id == novel_id,
+                CharacterInstance.origin_timeline_id == timeline_id,
                 CharacterInstance.lifecycle_state == "active",
             )
         )
     )
     result: list[ContextBlockV2] = []
     for instance in instances:
+        # Forks create an explicit derived instance on the target timeline.  A
+        # sibling (or the parent instance it was derived from) must never be
+        # selected by name, insertion order, or recent use.
+        if instance.origin_timeline_id != timeline_id:
+            continue
         root = latest_roots.get(instance.character_id)
         instance_revision = (
             session.get(CharacterInstanceRevision, instance.current_revision_id)
@@ -187,6 +210,7 @@ def _character_blocks(session: Session, novel_id: UUID) -> list[ContextBlockV2]:
             source_revision_id=(instance_revision.id if instance_revision else None),
             title=instance.display_label or (root.name if root else "人物实例"),
             content=json.dumps(payload, ensure_ascii=False, sort_keys=True), priority=30,
+            timeline_id=instance.origin_timeline_id,
         )
         if item is not None:
             result.append(item)
@@ -194,8 +218,36 @@ def _character_blocks(session: Session, novel_id: UUID) -> list[ContextBlockV2]:
 
 
 def _manuscript_blocks(
-    session: Session, novel_id: UUID, timeline_id: UUID
+    session: Session,
+    novel_id: UUID,
+    timeline_id: UUID,
+    *,
+    timelines: Sequence[StoryTimeline],
 ) -> list[ContextBlockV2]:
+    active_timelines = tuple(
+        item
+        for item in timelines
+        if item.novel_id == novel_id and item.lifecycle_state == "active"
+    )
+    single_timeline_identity = len(active_timelines) == 1
+    inherited_story_limits: dict[UUID, int] = {}
+    if not single_timeline_identity:
+        timeline_by_id = {item.id: item for item in active_timelines}
+        current = timeline_by_id.get(timeline_id)
+        inherited_limit: int | None = None
+        visited: set[UUID] = set()
+        while current is not None and current.parent_timeline_id is not None:
+            if current.id in visited or current.fork_story_sequence is None:
+                inherited_story_limits.clear()
+                break
+            visited.add(current.id)
+            inherited_limit = (
+                current.fork_story_sequence
+                if inherited_limit is None
+                else min(inherited_limit, current.fork_story_sequence)
+            )
+            inherited_story_limits[current.parent_timeline_id] = inherited_limit
+            current = timeline_by_id.get(current.parent_timeline_id)
     documents = tuple(
         session.scalars(
             select(Document).where(
@@ -213,16 +265,87 @@ def _manuscript_blocks(
         )
         if revision is None:
             continue
-        item = _block(
-            novel_id=novel_id, section=ContextSection.MANUSCRIPT,
-            source_kind="chapter_revision", source_id=document.id,
-            source_revision_id=revision.id, title=document.title,
-            content=revision.content_markdown, priority=100 + sequence,
-            position_domain=PositionDomain.NARRATIVE,
-            timeline_id=timeline_id, narrative_sequence=sequence,
+        if single_timeline_identity:
+            item = _block(
+                novel_id=novel_id, section=ContextSection.MANUSCRIPT,
+                source_kind="chapter_revision", source_id=document.id,
+                source_revision_id=revision.id, title=document.title,
+                content=revision.content_markdown, priority=100 + sequence,
+                position_domain=PositionDomain.NARRATIVE,
+                timeline_id=timeline_id, narrative_sequence=sequence,
+            )
+            if item is not None:
+                result.append(item)
+            continue
+
+        # A multi-timeline chapter has no safe implicit line.  Only the current
+        # immutable revision mapping may assign its text to timelines; missing,
+        # stale, or inconsistent mappings fail closed by contributing no block.
+        head = session.get(RevisionTimelineMappingHead, revision.id)
+        if (
+            head is None
+            or head.novel_id != novel_id
+            or head.document_id != document.id
+            or head.source_content_hash != revision.content_hash
+        ):
+            continue
+        mapping = session.get(
+            RevisionTimelineMapping, head.current_mapping_revision_id
         )
-        if item is not None:
-            result.append(item)
+        if (
+            mapping is None
+            or mapping.id != head.current_mapping_revision_id
+            or mapping.novel_id != novel_id
+            or mapping.document_id != document.id
+            or mapping.revision_id != revision.id
+            or mapping.source_content_hash != revision.content_hash
+        ):
+            continue
+        segments = tuple(
+            session.scalars(
+                select(RevisionTimelineMappingSegment)
+                .where(
+                    RevisionTimelineMappingSegment.mapping_revision_id == mapping.id,
+                    RevisionTimelineMappingSegment.novel_id == novel_id,
+                )
+                .order_by(RevisionTimelineMappingSegment.ordinal)
+            )
+        )
+        content = revision.content_text
+        for segment in segments:
+            inherited_limit = inherited_story_limits.get(segment.timeline_id)
+            if inherited_limit is not None and (
+                segment.story_sequence is None
+                or segment.story_sequence > inherited_limit
+            ):
+                # A branch inherits parent manuscript only when the immutable
+                # segment mapping proves that the text occurs before its fork.
+                continue
+            if (
+                segment.source_start < 0
+                or segment.source_end <= segment.source_start
+                or segment.source_end > len(content)
+            ):
+                continue
+            item = _block(
+                novel_id=novel_id,
+                section=ContextSection.MANUSCRIPT,
+                source_kind="chapter_revision",
+                source_id=document.id,
+                source_revision_id=revision.id,
+                title=f"{document.title} · 片段 {segment.ordinal + 1}",
+                content=content[segment.source_start:segment.source_end],
+                priority=100 + sequence,
+                position_domain=PositionDomain.NARRATIVE,
+                timeline_id=segment.timeline_id,
+                narrative_sequence=sequence,
+                block_discriminator=(
+                    f"mapping:{mapping.id}:segment:{segment.ordinal}:"
+                    f"{segment.source_start}:{segment.source_end}"
+                ),
+            )
+            if item is not None:
+                result.append(item)
     return result
 
 
@@ -320,12 +443,12 @@ def assemble_writing_context_from_db(
     novel = session.get(Novel, position.novel_id)
     if novel is None:
         raise ValueError("novel not found")
-    timelines = tuple(
-        StoryTimelineRecord.model_validate(item)
-        for item in session.scalars(
+    timeline_rows = tuple(
+        session.scalars(
             select(StoryTimeline).where(StoryTimeline.novel_id == position.novel_id)
         )
     )
+    timelines = tuple(StoryTimelineRecord.model_validate(item) for item in timeline_rows)
     facts: list[StoryFactV2] = []
     for row in session.scalars(
         select(StoryFact).where(
@@ -375,8 +498,21 @@ def assemble_writing_context_from_db(
         if item is not None:
             blocks.append(item)
     blocks.extend(_planning_blocks(session, position.novel_id))
-    blocks.extend(_character_blocks(session, position.novel_id))
-    blocks.extend(_manuscript_blocks(session, position.novel_id, position.timeline_id))
+    blocks.extend(
+        _character_blocks(
+            session,
+            position.novel_id,
+            timeline_id=position.timeline_id,
+        )
+    )
+    blocks.extend(
+        _manuscript_blocks(
+            session,
+            position.novel_id,
+            position.timeline_id,
+            timelines=timeline_rows,
+        )
+    )
     effective_assets = (
         list(private_assets)
         if private_assets is not None

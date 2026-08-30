@@ -6,6 +6,7 @@ import {
   apiErrorMessage,
   completedGenerationModelLabel,
   generationModelAuditLabel,
+  isRetryableChapterLengthFailure,
   requestedGenerationModelLabel,
   verifiedGenerationModelLabel,
 } from "./api";
@@ -47,6 +48,18 @@ describe("generation model presentation", () => {
     expect(verifiedGenerationModelLabel(record)).toBe(
       "宿主未公开实际模型；任务前后有效模型一致（provider-a / model-a）",
     );
+  });
+
+  it("labels provider-reported evidence as the actual model", () => {
+    const record = task({
+      actual_provider_id: "provider-b",
+      actual_model_id: "model-b",
+      model_evidence: {
+        schema_version: "model-execution-evidence/2",
+        status: "verified_from_provider_usage",
+      },
+    });
+    expect(verifiedGenerationModelLabel(record)).toBe("实际 provider-b / model-b");
   });
 
   it("keeps a historical model label independent of the current effective model", () => {
@@ -91,5 +104,27 @@ describe("generation model presentation", () => {
       message: "AI 小说作家当前没有可用的有效模型",
     });
     expect(apiErrorMessage(reason, "读取失败")).toBe("AI 小说作家当前没有可用的有效模型");
+  });
+
+  it("retries only a structured chapter-length failure", () => {
+    const structured = new ApiError(422, "HTTP 422", {
+      type: "chapter_length_out_of_range",
+      direction: "above_target",
+      validation_state: "above_target",
+      retryable: true,
+      job: task(),
+    });
+    expect(isRetryableChapterLengthFailure(structured)).toBe(true);
+    expect(isRetryableChapterLengthFailure(
+      new ApiError(422, "正文超过字范围", "正文超过字范围"),
+    )).toBe(false);
+    expect(isRetryableChapterLengthFailure(
+      new ApiError(422, "HTTP 422", {
+        type: "chapter_length_out_of_range",
+        direction: "above_target",
+        validation_state: "above_target",
+        retryable: false,
+      }),
+    )).toBe(false);
   });
 });

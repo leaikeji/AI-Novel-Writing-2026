@@ -165,6 +165,7 @@ def test_selection_edit_persists_result_model_evidence_failure_and_recovery(
     )
     other_novel_id = UUID(other_novel["id"])
     snapshot = _selection_snapshot(novel_id)
+    normalized_snapshot = {**snapshot, "use_novel_context": False}
 
     first = _start_selection_job(database_session, novel_id, snapshot)
     assert first["attempt"] == 1
@@ -208,7 +209,7 @@ def test_selection_edit_persists_result_model_evidence_failure_and_recovery(
     assert persisted.kind == "selection_edit"
     assert persisted.state == "ready"
     assert persisted.attempt == 1
-    assert persisted.input_snapshot == snapshot
+    assert persisted.input_snapshot == normalized_snapshot
     assert persisted.execution_agent_id == TEST_AGENT_ID
     assert persisted.requested_provider_id == TEST_PROVIDER_ID
     assert persisted.requested_model_id == TEST_MODEL_ID
@@ -277,8 +278,11 @@ def test_selection_edit_persists_result_model_evidence_failure_and_recovery(
     assert persisted_failure.attempt == 2
     assert persisted_failure.requested_provider_id == TEST_PROVIDER_ID
     assert persisted_failure.requested_model_id == TEST_MODEL_ID
-    assert persisted_failure.actual_provider_id == "provider-unexpected"
-    assert persisted_failure.actual_model_id == "model-unexpected"
+    # A rejected legacy mismatch is not verified actual-model evidence.  Keep
+    # the attempted identity in the immutable failure diagnostic, not in the
+    # authoritative actual_* columns.
+    assert persisted_failure.actual_provider_id is None
+    assert persisted_failure.actual_model_id is None
     assert persisted_failure.output_json == {}
     assert persisted_failure.output_text == ""
     assert "requested=" in str(persisted_failure.failure_message)

@@ -32,6 +32,17 @@ from .contracts import (
 
 WRITING_RETRIEVAL_POLICY_VERSION = "writing-retrieval/2"
 
+_NON_DEGRADABLE_RETRIEVAL_CODES = frozenset(
+    {
+        "scope_violation",
+        "novel_scope_not_found",
+        "timeline_conflict",
+        "timeline_not_found",
+        "timeline_required",
+        "timeline_scope_invalid",
+    }
+)
+
 
 class WritingTimelineMappingRequired(ValueError):
     code = "timeline_mapping_required"
@@ -182,6 +193,18 @@ def _degraded_snapshot(reason: str) -> dict[str, Any]:
     }
 
 
+def _retrieval_error_code(error: Exception) -> str | None:
+    code = getattr(error, "code", None)
+    if isinstance(code, str):
+        return code
+    detail = getattr(error, "detail", None)
+    if isinstance(detail, dict):
+        detail_code = detail.get("code") or detail.get("type")
+        if isinstance(detail_code, str):
+            return detail_code
+    return None
+
+
 async def retrieve_for_writing(
     session: Session,
     *,
@@ -195,9 +218,10 @@ async def retrieve_for_writing(
 ) -> dict[str, Any]:
     """Run scope-first retrieval and return an immutable, prompt-safe snapshot.
 
-    Any retrieval failure is represented as a local degradation and never
-    blocks writing.  ``context_overflow`` remains the responsibility of the
-    Context V4 assembler because required author inputs may not be dropped.
+    Provider, network and derived-index failures degrade locally and never
+    block writing.  Deterministic scope, ownership and timeline errors remain
+    structured failures; ``context_overflow`` stays with the Context V4
+    assembler because required author inputs may not be dropped.
     """
 
     try:
@@ -220,7 +244,9 @@ async def retrieve_for_writing(
             session,
         )
     except Exception as error:
-        code = getattr(error, "code", None)
+        code = _retrieval_error_code(error)
+        if code in _NON_DEGRADABLE_RETRIEVAL_CODES:
+            raise
         if not isinstance(code, str):
             code = "semantic_retrieval_unavailable"
         return _degraded_snapshot(code)
