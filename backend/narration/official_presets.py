@@ -46,6 +46,9 @@ OFFICIAL_PRESET_IDENTITY_CONTRACT_VERSION: Final = (
 OFFICIAL_PRESET_DIRECT_VERSION_IDENTITY_CONTRACT_VERSION: Final = (
     "moss-tts-official-preset-direct-version-identity/2.0"
 )
+OFFICIAL_PRESET_PREVIEW_VERSION_IDENTITY_CONTRACT_VERSION: Final = (
+    "moss-tts-official-preset-preview-version-identity/1.0"
+)
 OFFICIAL_PRESET_DIRECT_VERSION_FINGERPRINT_SCHEMA_VERSION: Final = (
     "narration-official-preset-direct-version/2.0"
 )
@@ -55,15 +58,6 @@ OFFICIAL_PRESET_RIGHTS_POLICY_VERSION: Final = (
 OFFICIAL_PRESET_IDENTITY_NAMESPACE: Final = uuid5(
     NAMESPACE_URL,
     "https://ai-novel-world-2026.local/voice/official-preset",
-)
-PRODUCT_PRESET_OUT_OF_SCOPE: Final = "PRODUCT_PRESET_OUT_OF_SCOPE"
-PRODUCT_OFFICIAL_PRESET_IDS: Final[tuple[str, ...]] = (
-    "onnx.Junhao",
-    "onnx.Zhiming",
-    "onnx.Weiguo",
-    "onnx.Xiaoyu",
-    "onnx.Yuewen",
-    "onnx.Lingyu",
 )
 CANONICAL_CHAPTER_VERIFIED_PRESET_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -80,12 +74,6 @@ if (
     != _EXPECTED_CANONICAL_CHAPTER_VERIFIED_PRESET_IDS
 ):
     raise RuntimeError("official preset verified tier drifted")
-
-
-class ProductPresetOutOfScope(ValueError):
-    """A pinned runtime preset is not selectable in the current product."""
-
-    code: Final = PRODUCT_PRESET_OUT_OF_SCOPE
 
 
 def canonical_sha256(value: object) -> str:
@@ -175,6 +163,35 @@ def official_preset_canonical_version_id(
         }
     )
     return uuid5(OFFICIAL_PRESET_IDENTITY_NAMESPACE, f"version:{name}")
+
+
+def official_preset_preview_version_id(
+    *, profile_id: UUID | str, preset_id: str
+) -> UUID:
+    """Stable draft identity used only for optional, non-binding previews."""
+
+    preset = require_official_preset(preset_id)
+    name = canonical_sha256(
+        {
+            "identity_contract_version": (
+                OFFICIAL_PRESET_PREVIEW_VERSION_IDENTITY_CONTRACT_VERSION
+            ),
+            "profile_id": str(UUID(str(profile_id))),
+            "activation_basis": "preview_confirmed",
+            "validation_basis": "pending",
+            "model_revision": OFFICIAL_PRESET_REVISION,
+            "manifest_sha256": OFFICIAL_PRESET_MANIFEST_SHA256,
+            "preset_provenance_fingerprint": preset.provenance()[
+                "provenance_fingerprint_sha256"
+            ],
+            "rights_policy_fingerprint": official_preset_rights_policy_fingerprint(),
+            "decode_contract_version": OFFICIAL_PRESET_DECODE_PARAMETERS_SCHEMA_VERSION,
+            "official_default_parameters_digest": (
+                official_preset_decode_parameters_fingerprint(preset.preset_id)
+            ),
+        }
+    )
+    return uuid5(OFFICIAL_PRESET_IDENTITY_NAMESPACE, f"preview-version:{name}")
 
 
 def official_preset_direct_version_fingerprint(
@@ -316,9 +333,8 @@ OFFICIAL_PRESETS: Final[tuple[OfficialPreset, ...]] = tuple(
 OFFICIAL_PRESETS_BY_ID: Final[Mapping[str, OfficialPreset]] = {
     item.preset_id: item for item in OFFICIAL_PRESETS
 }
-PRODUCT_OFFICIAL_PRESETS: Final[tuple[OfficialPreset, ...]] = tuple(
-    OFFICIAL_PRESETS_BY_ID[preset_id]
-    for preset_id in PRODUCT_OFFICIAL_PRESET_IDS
+OFFICIAL_PRESET_IDS: Final[tuple[str, ...]] = tuple(
+    item.preset_id for item in OFFICIAL_PRESETS
 )
 
 
@@ -327,20 +343,6 @@ def require_official_preset(preset_id: str) -> OfficialPreset:
         return OFFICIAL_PRESETS_BY_ID[preset_id]
     except KeyError as error:
         raise ValueError("unknown official ONNX preset_id") from error
-
-
-def require_product_official_preset(preset_id: str) -> OfficialPreset:
-    """Resolve one currently actionable preset without narrowing inventory.
-
-    The pinned runtime catalog remains authoritative for all 18 manifest rows.
-    This separate product gate limits only current user-facing selection and
-    creation to the six approved Chinese presets.
-    """
-
-    preset = require_official_preset(preset_id)
-    if preset.preset_id not in PRODUCT_OFFICIAL_PRESET_IDS:
-        raise ProductPresetOutOfScope(PRODUCT_PRESET_OUT_OF_SCOPE)
-    return preset
 
 
 def validate_official_preset_provenance(value: object) -> OfficialPreset:
@@ -486,15 +488,13 @@ __all__ = [
     "OFFICIAL_PRESET_VERSION_SCHEMA_VERSION",
     "OFFICIAL_PRESET_IDENTITY_CONTRACT_VERSION",
     "OFFICIAL_PRESET_DIRECT_VERSION_IDENTITY_CONTRACT_VERSION",
+    "OFFICIAL_PRESET_PREVIEW_VERSION_IDENTITY_CONTRACT_VERSION",
     "OFFICIAL_PRESET_DIRECT_VERSION_FINGERPRINT_SCHEMA_VERSION",
     "OFFICIAL_PRESET_RIGHTS_POLICY_VERSION",
     "OFFICIAL_PRESETS",
     "OFFICIAL_PRESETS_BY_ID",
+    "OFFICIAL_PRESET_IDS",
     "CANONICAL_CHAPTER_VERIFIED_PRESET_IDS",
-    "PRODUCT_OFFICIAL_PRESET_IDS",
-    "PRODUCT_OFFICIAL_PRESETS",
-    "PRODUCT_PRESET_OUT_OF_SCOPE",
-    "ProductPresetOutOfScope",
     "OfficialPreset",
     "canonical_sha256",
     "official_preset_decode_parameters_fingerprint",
@@ -502,10 +502,10 @@ __all__ = [
     "official_preset_rights_policy_fingerprint",
     "official_preset_canonical_profile_id",
     "official_preset_canonical_version_id",
+    "official_preset_preview_version_id",
     "official_preset_version_fingerprint",
     "official_preset_validation_tier",
     "require_official_preset",
-    "require_product_official_preset",
     "validate_official_preset_provenance",
     "validate_official_version_evidence",
 ]

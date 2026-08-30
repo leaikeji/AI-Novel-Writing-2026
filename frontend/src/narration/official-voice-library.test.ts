@@ -5,6 +5,7 @@ import {
   OFFICIAL_VOICE_PRESET_IDS,
   createOfficialVoiceLibrary,
   createOfficialVoiceLibraryModel,
+  filterOfficialVoiceLibraryGroups,
   officialVoiceCatalogFromWire,
   officialVoiceLanguageMatches,
   type OfficialVoiceCatalog,
@@ -311,6 +312,20 @@ describe("official voice library model", () => {
     expect(createOfficialVoiceLibraryModel(falseTier, "zh-CN").status).toBe("invalid");
   });
 
+  it("searches display metadata and filters the fixed language groups", () => {
+    const model = createOfficialVoiceLibraryModel(catalog(), "zh-CN");
+    if (model.status !== "ready") throw new Error("expected a ready model");
+
+    expect(filterOfficialVoiceLibraryGroups(model.groups, "Ava", "all")
+      .flatMap((group) => group.items.map((item) => item.item.presetId)))
+      .toEqual(["onnx.Ava"]);
+    expect(filterOfficialVoiceLibraryGroups(model.groups, "female", "en")
+      .flatMap((group) => group.items.map((item) => item.item.presetId)))
+      .toEqual(["onnx.Ava", "onnx.Bella"]);
+    expect(filterOfficialVoiceLibraryGroups(model.groups, "不存在", "ja-JP"))
+      .toEqual([]);
+  });
+
   it("adapts the frozen shared snake_case wire contract", () => {
     const source = catalog();
     const wire: OfficialVoiceCatalogWireLike = {
@@ -373,7 +388,12 @@ describe("official voice library component", () => {
     expect(details).toHaveLength(18);
     expect(summaries).toHaveLength(18);
     expect(details.every((item) => item.props.open === undefined)).toBe(true);
-    expect(findAll(tree, (element) => element.type === "input")).toHaveLength(0);
+    const inputs = findAll(tree, (element) => element.type === "input");
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]?.props.type).toBe("search");
+    expect(findAll(tree, (element) => element.type === "select")).toHaveLength(1);
+    expect(findAll(tree, (element) => element.type === "input"
+      && ["checkbox", "radio"].includes(String(element.props.type)))).toHaveLength(0);
     for (const [, displayName] of ROWS) expect(textContent(tree)).toContain(displayName);
     expect(textContent(tree)).toContain("Preset ID");
     expect(textContent(tree)).toContain("商业发布/再分发未评估");
@@ -558,6 +578,7 @@ describe("official voice library component", () => {
   it("ships 44px touch targets, narrow-screen stacking, focus, and reduced-motion rules", () => {
     expect(OFFICIAL_VOICE_LIBRARY_STYLE_ID).toBe("anw-official-voice-library-styles");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toMatch(/min-height:\s*44px/u);
+    expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("repeat(auto-fit");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("button:focus-visible");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("@media (max-width: 680px)");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("@media (max-width: 390px)");

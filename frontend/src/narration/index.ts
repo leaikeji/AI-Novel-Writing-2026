@@ -1,7 +1,13 @@
+import { apiErrorMessage } from "../api";
 import {
+  createOfficialVoicePreview,
+  getCharacterVoiceBinding,
+  getVoicePreview,
   getNarrationOverview,
   listCharacterVoiceBindings,
   listVoiceProfiles,
+  listNanoVoiceExperiments,
+  matchCharacterOfficialVoice,
   selectOfficialVoice,
 } from "./api";
 import {
@@ -25,9 +31,11 @@ import type {
 import type { PronunciationPanelReactRuntime } from "./pronunciation-panel";
 import {
   createOfficialVoiceSelectionPanel,
+  createAndPlayOfficialVoicePreview,
   type OfficialVoiceSelectionPanelApi,
 } from "./official-voice-selection-panel";
 import { createOfficialVoiceUseIdempotencyKey } from "./official-voice-use-state";
+import { playReadyVoicePreview } from "./voice-preview-playback";
 import {
   createReadingPage,
   type ReadingPageProps,
@@ -46,6 +54,10 @@ import {
   type VoiceSourceWorkspaceApi,
   type VoiceSourceWorkspaceReactRuntime,
 } from "./voice-source-workspace";
+import {
+  createNanoAdvancedWorkspace,
+  createPrivateVoiceLifecycleWorkspace,
+} from "./voice-feature-workspaces";
 
 
 export interface NarrationCharacterSummary {
@@ -81,6 +93,8 @@ export interface NarrationReadingPageDependencies {
     listBindings: typeof listCharacterVoiceBindings;
     listProfiles: typeof listVoiceProfiles;
   }>;
+  readonly matchCharacterOfficialVoice?: typeof matchCharacterOfficialVoice;
+  readonly listNanoVoiceExperiments?: typeof listNanoVoiceExperiments;
 }
 
 
@@ -114,59 +128,7 @@ type OverviewLoadState =
 
 
 function overviewErrorMessage(reason: unknown): string {
-  return reason instanceof Error && reason.message.trim()
-    ? reason.message
-    : "无法加载人物声音权限，请稍后重试。";
-}
-
-
-const OFFICIAL_PRESETS_BY_LANGUAGE = Object.freeze({
-  zh: Object.freeze([
-    { presetId: "onnx.Junhao", voiceName: "Junhao" },
-    { presetId: "onnx.Zhiming", voiceName: "Zhiming" },
-    { presetId: "onnx.Weiguo", voiceName: "Weiguo" },
-    { presetId: "onnx.Xiaoyu", voiceName: "Xiaoyu" },
-    { presetId: "onnx.Yuewen", voiceName: "Yuewen" },
-    { presetId: "onnx.Lingyu", voiceName: "Lingyu" },
-  ]),
-  en: Object.freeze([
-    { presetId: "onnx.Trump", voiceName: "Trump" },
-    { presetId: "onnx.Ava", voiceName: "Ava" },
-    { presetId: "onnx.Bella", voiceName: "Bella" },
-    { presetId: "onnx.Adam", voiceName: "Adam" },
-    { presetId: "onnx.Nathan", voiceName: "Nathan" },
-  ]),
-  ja: Object.freeze([
-    { presetId: "onnx.Soyo", voiceName: "Soyo" },
-    { presetId: "onnx.Saki", voiceName: "Saki" },
-    { presetId: "onnx.Mortis", voiceName: "Mortis" },
-    { presetId: "onnx.Umiri", voiceName: "Umiri" },
-    { presetId: "onnx.Mei", voiceName: "Mei" },
-    { presetId: "onnx.Anon", voiceName: "Anon" },
-    { presetId: "onnx.Arisa", voiceName: "Arisa" },
-  ]),
-});
-
-
-export function stableOfficialVoiceAssignment(
-  characterId: string,
-  targetLanguage: string,
-): { readonly presetId: OfficialPresetId; readonly voiceName: string } {
-  const language = targetLanguage.toLowerCase();
-  const candidates = language.startsWith("ja")
-    ? OFFICIAL_PRESETS_BY_LANGUAGE.ja
-    : language.startsWith("en")
-      ? OFFICIAL_PRESETS_BY_LANGUAGE.en
-      : OFFICIAL_PRESETS_BY_LANGUAGE.zh;
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < characterId.length; index += 1) {
-    hash ^= characterId.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return candidates[(hash >>> 0) % candidates.length] as {
-    readonly presetId: OfficialPresetId;
-    readonly voiceName: string;
-  };
+  return apiErrorMessage(reason, "无法加载人物声音权限，请稍后重试。");
 }
 
 
@@ -189,12 +151,23 @@ export function createNarrationReadingPage(
   const CachePanel = createCachePanel(React);
   const ReadingRulesWorkspace = createReadingRulesWorkspace(React);
   const ReadingStatus = createReadingStatus(React);
+  const NanoAdvancedWorkspace = createNanoAdvancedWorkspace(React);
+  const PrivateVoiceLifecycleWorkspace = createPrivateVoiceLifecycleWorkspace(React);
   const characterRosterApi = dependencies.characterRosterApi ?? {
     listBindings: listCharacterVoiceBindings,
     listProfiles: listVoiceProfiles,
   };
   const selectOfficialVoiceApi = dependencies.officialVoiceApi?.selectOfficialVoice
     ?? selectOfficialVoice;
+  const matchCharacterOfficialVoiceApi = dependencies.matchCharacterOfficialVoice
+    ?? matchCharacterOfficialVoice;
+  const listNanoVoiceExperimentsApi = dependencies.listNanoVoiceExperiments
+    ?? listNanoVoiceExperiments;
+  const officialPreviewApi = {
+    createOfficialVoicePreview: dependencies.officialVoiceApi?.createOfficialVoicePreview
+      ?? createOfficialVoicePreview,
+    getVoicePreview: dependencies.officialVoiceApi?.getVoicePreview ?? getVoicePreview,
+  };
 
   function CharacterVoiceSection(props: CharacterVoiceSectionProps): unknown {
     const scopedCharacters = props.characters.filter(
@@ -277,6 +250,38 @@ export function createNarrationReadingPage(
             capabilities: overview.capabilities,
             authorization: overview.authorization,
             onConfigureCharacter: setSelectedCharacterId,
+            onPreviewVoice: async (
+              _character: { readonly characterId: string; readonly characterName: string },
+              _profile: VoiceProfileResource,
+              version: VoiceProfileResource["versions"][number],
+            ) => {
+              if (version.source_type === "preset" && version.preset_key) {
+                await createAndPlayOfficialVoicePreview(
+                  officialPreviewApi,
+                  { play: playReadyVoicePreview },
+                  props.novelId,
+                  version.preset_key as OfficialPresetId,
+                  new AbortController().signal,
+                );
+                return;
+              }
+              if (version.source_type === "generated") {
+                const experiments = await listNanoVoiceExperimentsApi(props.novelId);
+                const ready = experiments.items.find((item) => (
+                  item.version_id === version.version_id
+                  && item.preview?.status === "ready"
+                ));
+                if (ready?.preview === null || ready?.preview === undefined) {
+                  throw new Error("当前高级调音试听已过期，请重新创建并使用。");
+                }
+                await playReadyVoicePreview(
+                  ready.preview,
+                  new AbortController().signal,
+                );
+                return;
+              }
+              throw new Error("当前人物音色没有可播放的临时试听。");
+            },
             onMatchOfficialVoice: async (character: {
               readonly characterId: string;
               readonly characterName: string;
@@ -284,25 +289,47 @@ export function createNarrationReadingPage(
               const bindingVersion = rosterState.bindings.find((binding) => (
                 binding.character_id === character.characterId
               ))?.version ?? 0;
-              const assigned = stableOfficialVoiceAssignment(
-                character.characterId,
-                overview.settings.values.language,
-              );
-              const response = await selectOfficialVoiceApi(
+              const response = await matchCharacterOfficialVoiceApi(
                 props.novelId,
+                character.characterId,
                 {
-                  preset_id: assigned.presetId,
-                  target_kind: "character",
-                  character_id: character.characterId,
-                  expected_settings_version: overview.settings.version,
+                  contract_version: "character-voice-match-request/1",
+                  timeline_id: null,
+                  character_instance_id: null,
                   expected_binding_version: bindingVersion,
                 },
                 createOfficialVoiceUseIdempotencyKey(),
               );
-              if (!response.selection_still_current) {
-                throw new Error("人物声音已被其他操作更新，请刷新后重试。");
-              }
-              return { voiceName: response.profile.name || assigned.voiceName };
+              return {
+                voiceName: response.selected_preset_id.replace(/^onnx\./, ""),
+                presetId: response.selected_preset_id,
+                selectionStillCurrent: response.selection_still_current,
+              };
+            },
+            onUseMatchedOfficialVoice: async (
+              character: { readonly characterId: string; readonly characterName: string },
+              presetId: string,
+            ) => {
+              const [latestOverview, latestBinding] = await Promise.all([
+                getNarrationOverview(props.novelId),
+                getCharacterVoiceBinding(props.novelId, character.characterId),
+              ]);
+              const response = await selectOfficialVoiceApi(
+                props.novelId,
+                {
+                  preset_id: presetId as OfficialPresetId,
+                  target_kind: "character",
+                  character_id: character.characterId,
+                  expected_settings_version: latestOverview.settings.version,
+                  expected_binding_version: latestBinding.version,
+                },
+                createOfficialVoiceUseIdempotencyKey(),
+              );
+              return {
+                voiceName: response.profile.name || presetId.replace(/^onnx\./, ""),
+                presetId,
+                selectionStillCurrent: response.selection_still_current,
+              };
             },
             onBatchCompleted: () => {
               setProfileRefreshVersion((value) => value + 1);
@@ -324,18 +351,6 @@ export function createNarrationReadingPage(
           capabilities: overview.capabilities,
           authorization: overview.authorization,
           onChanged: () => {
-            setProfileRefreshVersion((value) => value + 1);
-            props.context.onRefresh();
-          },
-        }),
-        h(VoiceSourceWorkspace, {
-          key: selected.characterId,
-          novelId: props.novelId,
-          capabilities: overview.capabilities,
-          authorization: overview.authorization,
-          voiceSources: overview.voice_sources,
-          suggestedProfileName: `${selected.characterName}专属声音`,
-          onProfileLocked: () => {
             setProfileRefreshVersion((value) => value + 1);
             props.context.onRefresh();
           },
@@ -401,14 +416,6 @@ export function createNarrationReadingPage(
         authorization: props.context.overview.authorization,
         onChanged: props.context.onRefresh,
       }),
-      h(VoiceSourceWorkspace, {
-        novelId: props.novelId,
-        capabilities: props.context.overview.capabilities,
-        authorization: props.context.overview.authorization,
-        voiceSources: props.context.overview.voice_sources,
-        suggestedProfileName: "我的朗读音色",
-        onProfileLocked: props.context.onRefresh,
-      }),
     );
   }
 
@@ -431,6 +438,45 @@ export function createNarrationReadingPage(
           characters: props.characters,
           context,
         });
+      }
+      if (section === "advanced-tuning") {
+        return h(NanoAdvancedWorkspace, {
+          novelId: props.novelId,
+          overview,
+          characters: props.characters
+            .filter((character) => character.novelId === props.novelId),
+          onChanged: context.onRefresh,
+        });
+      }
+      if (section === "private-voices") {
+        const privateSourceCreationAvailable = overview.voice_sources.some((source) => (
+          source.available && source.source_type === "uploaded"
+        ));
+        return h(
+          "div",
+          { className: "anw-narration-private-stack" },
+          privateSourceCreationAvailable
+            ? h(VoiceSourceWorkspace, {
+              novelId: props.novelId,
+              capabilities: overview.capabilities,
+              authorization: overview.authorization,
+              voiceSources: overview.voice_sources,
+              suggestedProfileName: "我的朗读音色",
+              onProfileLocked: context.onRefresh,
+            })
+            : null,
+          h(PrivateVoiceLifecycleWorkspace, {
+            novelId: props.novelId,
+            overview,
+            onChanged: context.onRefresh,
+          }),
+          h(CachePanel, {
+            novelId: props.novelId,
+            capabilities: overview.capabilities,
+            authorization: overview.authorization,
+            onCleaned: context.onRefresh,
+          }),
+        );
       }
       if (section === "reading-rules" || section === "casting-rules" || section === "pronunciation") {
         return h(
@@ -484,21 +530,28 @@ export function createNarrationReadingPage(
       renderNarratorVoiceWorkspace: (context) => h(
         "div",
         { className: "anw-narration-narrator-voice-stack" },
-        h(OfficialVoiceSelectionPanel, {
+        h(ReadingStatus, {
+          overview: context.overview,
+          onOpenSection: context.onNavigate,
+        }),
+        h(ReadingRulesWorkspace, {
           novelId: props.novelId,
           settings: context.overview.settings,
-          target: { kind: "narrator" },
           capabilities: context.overview.capabilities,
           authorization: context.overview.authorization,
-          onChanged: context.onRefresh,
-        }),
-        h(VoiceSourceWorkspace, {
-          novelId: props.novelId,
-          capabilities: context.overview.capabilities,
-          authorization: context.overview.authorization,
-          voiceSources: context.overview.voice_sources,
-          suggestedProfileName: "作品旁白声音",
-          onProfileLocked: context.onRefresh,
+          pronunciationScopeOptions: props.scopeTargets
+            .filter((target) => target.novelId === props.novelId)
+            .map((target) => ({
+              kind: target.scopeKind,
+              id: target.scopeId,
+              label: target.label,
+            })),
+          initialSection: "recognition",
+          onSettingsSaved: context.onRefresh,
+          onConsentChanged: context.onRefresh,
+          onPronunciationSaved: context.onRefresh,
+          onRefresh: context.onRefresh,
+          onOpenReadingPreferences: () => undefined,
         }),
       ),
       renderSectionContent,
@@ -524,6 +577,10 @@ export function createCharacterVoiceCardPanel(
     const [reloadVersion, setReloadVersion] = React.useState(0);
     const [profileRefreshVersion, setProfileRefreshVersion] = React.useState(0);
     const [state, setState] = React.useState<OverviewLoadState>({ phase: "loading" });
+    const [matchBusy, setMatchBusy] = React.useState(false);
+    const [matchMessage, setMatchMessage] = React.useState<string | null>(null);
+    const [matchFailed, setMatchFailed] = React.useState(false);
+    const [unappliedPresetId, setUnappliedPresetId] = React.useState<OfficialPresetId | null>(null);
 
     React.useEffect(() => {
       const controller = new AbortController();
@@ -562,9 +619,103 @@ export function createCharacterVoiceCardPanel(
         ),
       );
     }
+    const matchCapability = capabilityFor(state.overview, "character_voice_matching");
+    const matchEnabled = matchCapability.state === "enabled"
+      && matchCapability.visible
+      && matchCapability.actionable
+      && state.overview.authorization.can_configure;
+    const matchAndUse = async (): Promise<void> => {
+      if (!matchEnabled || matchBusy) return;
+      setMatchBusy(true);
+      setMatchFailed(false);
+      setMatchMessage("正在分析已保存的人物卡并匹配官方音色…");
+      try {
+        const binding = await getCharacterVoiceBinding(props.novelId, props.characterId);
+        const matched = await matchCharacterOfficialVoice(
+          props.novelId,
+          props.characterId,
+          {
+            contract_version: "character-voice-match-request/1",
+            timeline_id: null,
+            character_instance_id: null,
+            expected_binding_version: binding.version,
+          },
+          createOfficialVoiceUseIdempotencyKey(),
+        );
+        setUnappliedPresetId(
+          matched.selection_still_current ? null : matched.selected_preset_id,
+        );
+        setMatchMessage(matched.selection_still_current
+          ? `已匹配并使用 ${matched.selected_preset_id.replace(/^onnx\./, "")}。`
+          : `已匹配 ${matched.selected_preset_id.replace(/^onnx\./, "")}，但没有覆盖你刚修改的音色。`);
+        setProfileRefreshVersion((value) => value + 1);
+        setReloadVersion((value) => value + 1);
+      } catch (reason: unknown) {
+        setMatchFailed(true);
+        setMatchMessage(overviewErrorMessage(reason));
+      } finally {
+        setMatchBusy(false);
+      }
+    };
+    const useMatched = async (): Promise<void> => {
+      if (unappliedPresetId === null || matchBusy) return;
+      setMatchBusy(true);
+      setMatchMessage("正在使用已匹配的官方音色…");
+      try {
+        const [latestOverview, latestBinding] = await Promise.all([
+          loadOverview(props.novelId),
+          getCharacterVoiceBinding(props.novelId, props.characterId),
+        ]);
+        const selected = await selectOfficialVoice(
+          props.novelId,
+          {
+            preset_id: unappliedPresetId,
+            target_kind: "character",
+            character_id: props.characterId,
+            expected_settings_version: latestOverview.settings.version,
+            expected_binding_version: latestBinding.version,
+          },
+          createOfficialVoiceUseIdempotencyKey(),
+        );
+        if (!selected.selection_still_current) throw new Error("人物声音又发生了变化，请刷新后重试。");
+        setMatchMessage(`已使用 ${unappliedPresetId.replace(/^onnx\./, "")}。`);
+        setUnappliedPresetId(null);
+        setProfileRefreshVersion((value) => value + 1);
+        setReloadVersion((value) => value + 1);
+      } catch (reason: unknown) {
+        setMatchMessage(overviewErrorMessage(reason));
+      } finally {
+        setMatchBusy(false);
+      }
+    };
     return h(
       "div",
       { className: "anw-narration-character-card-panel" },
+      matchEnabled
+        ? h(
+          "section",
+          { className: "anw-character-card-voice-match", "aria-label": "人物卡一键配音" },
+          h("button", {
+            type: "button",
+            disabled: matchBusy,
+            onClick: () => { void matchAndUse(); },
+          }, matchBusy
+            ? "正在匹配…"
+            : matchFailed
+              ? "一键重试"
+              : "根据人物卡匹配并使用官方音色"),
+          unappliedPresetId !== null
+            ? h("button", {
+              type: "button",
+              disabled: matchBusy,
+              onClick: () => { void useMatched(); },
+            }, "使用此音色")
+            : null,
+          matchMessage
+            ? h("p", { role: "status", "aria-live": "polite" }, matchMessage)
+            : null,
+        )
+        : null,
       h(OfficialVoiceSelectionPanel, {
         novelId: props.novelId,
         settings: state.overview.settings,

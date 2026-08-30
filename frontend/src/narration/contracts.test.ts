@@ -24,6 +24,7 @@ import {
   parseVoiceCastingRulesResource,
   parseVoiceProfileResource,
   voiceSourceEvidenceIsUsable,
+  voiceActivationEvidenceIsUsable,
 } from "./contracts";
 
 const NOVEL_ID = "10000000-0000-4000-8000-000000000001";
@@ -348,6 +349,31 @@ describe("narration T2 wire contract", () => {
       official_preset: { ...xiaoyu.provenance, prompt_frame_count: 999 },
       reference_asset_id: null,
     })).toBe(false);
+
+    const experimental = {
+      ...lockedVersion(),
+      source_type: "generated" as const,
+      state: "locked" as const,
+      quality_state: "accepted" as const,
+      activation_basis: "experimental_machine_validated" as const,
+      validation_basis: "machine_validated" as const,
+      preset_key: xiaoyu.preset_id,
+      rights: {
+        ...rights(),
+        state: "active" as const,
+        source_kind: "official_preset" as const,
+        purpose: "private_novel_narration" as const,
+      },
+      official_preset: xiaoyu.provenance,
+      reference_asset_id: null,
+      description_available: false,
+    };
+    expect(voiceSourceEvidenceIsUsable(experimental)).toBe(true);
+    expect(voiceActivationEvidenceIsUsable(experimental)).toBe(true);
+    expect(voiceSourceEvidenceIsUsable({
+      ...experimental,
+      official_preset: { ...xiaoyu.provenance, prompt_frame_count: 999 },
+    })).toBe(false);
   });
   it("accepts exact default settings and rejects response drift", () => {
     expect(parseNarrationSettingsResource(settingsResource()).version).toBe(0);
@@ -599,6 +625,39 @@ describe("narration T2 wire contract", () => {
       content_path: `/media-assets/${CHARACTER_ID}/content`,
     };
     expect(() => parseVoiceProfileResource(crossed)).toThrow(/asset path\/id mismatch/);
+  });
+
+  it("accepts machine-validated Nano versions backed by an official preset", () => {
+    const preset = officialCatalog().items[1]!;
+    const experimentalVersion = {
+      ...lockedVersion(),
+      source_type: "generated",
+      preset_key: preset.preset_id,
+      quality_state: "accepted",
+      activation_basis: "experimental_machine_validated",
+      validation_basis: "machine_validated",
+      rights: {
+        ...rights(),
+        source_kind: "official_preset",
+        voice_cloning: false,
+        subject_consent_recorded: false,
+      },
+      official_preset: preset.provenance,
+      reference_asset_id: null,
+      description_available: false,
+      locked_at: null,
+    };
+    const experimentalProfile = {
+      ...profile(),
+      versions: [experimentalVersion],
+    };
+    expect(
+      parseVoiceProfileResource(experimentalProfile).versions[0]!.activation_basis,
+    ).toBe("experimental_machine_validated");
+    expect(() => parseVoiceProfileResource({
+      ...experimentalProfile,
+      versions: [{ ...experimentalVersion, validation_basis: "pending" }],
+    })).toThrow(/preset_key source mismatch/);
   });
 
   it("publishes preview audio only in ready state", () => {

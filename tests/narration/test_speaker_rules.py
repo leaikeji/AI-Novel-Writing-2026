@@ -441,6 +441,10 @@ def test_adjacent_cue_context_resolves_without_copying_or_changing_source_text()
         ("“你终于来了。”", "林晚说道：", "", CHARACTER_LIN),
         ("“你终于来了。”", "", "林晚轻声说道。", CHARACTER_LIN),
         ("“我没有骗你。”", "沈川皱眉。", "", CHARACTER_SHEN),
+        ("“日志已经保存。”", "沈川低声回应：", "", CHARACTER_SHEN),
+        ("“先别动盒子。”", "林晚望向窗外：", "", CHARACTER_LIN),
+        ("“线路被切换了。”", "沈川把电脑转向两人，说道：", "", CHARACTER_SHEN),
+        ("“给我十分钟。”", "林晚笑了一下：", "", CHARACTER_LIN),
     ],
 )
 def test_split_adjacent_cues_match_t3b_materialized_segment_shape(

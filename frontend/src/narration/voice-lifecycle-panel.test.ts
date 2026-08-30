@@ -17,28 +17,21 @@ import {
   VOICE_LIFECYCLE_STYLES,
 } from "./styles/voice-lifecycle";
 
-
 interface FakeElement {
   readonly type: unknown;
   readonly props: Record<string, unknown>;
   readonly children: readonly unknown[];
 }
 
-
 interface EffectRecord {
   readonly dependencies: readonly unknown[];
   readonly cleanup?: () => void;
 }
 
-
 function isElement(value: unknown): value is FakeElement {
-  return value !== null
-    && typeof value === "object"
-    && "type" in value
-    && "props" in value
-    && "children" in value;
+  return value !== null && typeof value === "object"
+    && "type" in value && "props" in value && "children" in value;
 }
-
 
 function findAll(root: unknown, predicate: (element: FakeElement) => boolean): FakeElement[] {
   if (Array.isArray(root)) return root.flatMap((child) => findAll(child, predicate));
@@ -49,7 +42,6 @@ function findAll(root: unknown, predicate: (element: FakeElement) => boolean): F
   ];
 }
 
-
 function textContent(root: unknown): string {
   if (typeof root === "string" || typeof root === "number") return String(root);
   if (Array.isArray(root)) return root.map(textContent).join("");
@@ -57,25 +49,19 @@ function textContent(root: unknown): string {
   return root.children.map(textContent).join("");
 }
 
-
 function findButton(root: unknown, label: string): FakeElement {
-  const button = findAll(root, (element) => (
-    element.type === "button" && textContent(element) === label
-  ))[0];
+  const button = findAll(root, (element) => element.type === "button" && textContent(element) === label)[0];
   if (!button) throw new Error(`button not found: ${label}`);
   return button;
 }
-
 
 function sameDependencies(
   left: readonly unknown[] | undefined,
   right: readonly unknown[],
 ): boolean {
-  return Boolean(left
-    && left.length === right.length
+  return Boolean(left && left.length === right.length
     && left.every((item, index) => Object.is(item, right[index])));
 }
-
 
 function createHarness() {
   const states: unknown[] = [];
@@ -93,9 +79,7 @@ function createHarness() {
     },
     useState<T>(initial: T | (() => T)) {
       const index = stateIndex++;
-      if (!(index in states)) {
-        states[index] = typeof initial === "function" ? (initial as () => T)() : initial;
-      }
+      if (!(index in states)) states[index] = typeof initial === "function" ? (initial as () => T)() : initial;
       return [states[index] as T, (next: T | ((current: T) => T)) => {
         states[index] = typeof next === "function"
           ? (next as (current: T) => T)(states[index] as T)
@@ -131,12 +115,10 @@ function createHarness() {
   };
 }
 
-
 const PROFILE_ID = "10000000-0000-4000-8000-000000000001";
 const NOVEL_ID = "20000000-0000-4000-8000-000000000001";
 const REQUEST_ID = "30000000-0000-4000-8000-000000000001";
-const NOW = Date.parse("2026-08-29T10:00:00.000Z");
-
+const LOCAL_OBSERVED_AT = Date.parse("2032-01-02T03:04:05.000Z");
 
 function profile(eligibility: VoiceLifecycleProfile["eligibility"]): VoiceLifecycleProfile {
   return {
@@ -148,11 +130,11 @@ function profile(eligibility: VoiceLifecycleProfile["eligibility"]): VoiceLifecy
   };
 }
 
-
 function request(
   state: PrivateVoiceDeletionRequestState,
   patch: Partial<VoiceDeletionRequestSnapshot> = {},
 ): VoiceDeletionRequestSnapshot {
+  const terminal = ["cancelled", "completed", "superseded"].includes(state);
   return {
     contractVersion: PRIVATE_VOICE_DELETION_CONTRACT_VERSION,
     requestId: REQUEST_ID,
@@ -169,7 +151,10 @@ function request(
       profileId: PROFILE_ID,
       novelId: NOVEL_ID,
       profileVersion: 4,
-      voiceVersionCount: 2,
+      voiceVersionIds: [
+        "40000000-0000-4000-8000-000000000001",
+        "40000000-0000-4000-8000-000000000002",
+      ],
       currentNarratorCount: 1,
       characterBindingCount: 2,
       anonymousSpeakerCount: 1,
@@ -177,63 +162,70 @@ function request(
       historicalEditionCount: 3,
       renderCount: 8,
       exportCount: 1,
+      currentReferenceCount: 5,
+      historicalReferenceCount: 12,
+      referenceCount: 17,
       assetCount: 5,
       totalBytes: 2_097_152,
       activeJobCount: 0,
       externalBackupStatus: "unmanaged",
       historicalAudioConsequence: "unavailable_private_voice_deleted",
+      impactSummary: "将移除 2 个音色版本及 5 个媒体资产。",
     },
+    eligibility: "referenced",
+    referenceCount: 17,
+    serverNow: "2026-08-29T10:00:00.000Z",
     executeAfter: state === "grace_pending" ? "2026-08-29T10:00:30.000Z" : null,
-    impactExpiresAt: "2026-08-29T10:15:00.000Z",
+    impactExpiresAt: state === "requested" ? "2026-08-29T10:15:00.000Z" : null,
     assetCount: 5,
     totalBytes: 2_097_152,
     externalBackupStatus: "unmanaged",
+    cancellable: state === "grace_pending" || state === "requested",
+    retryable: state === "failed",
+    terminal,
     confirmedAt: ["live_deleting", "live_deleted_backup_pending", "completed", "failed"]
       .includes(state) ? "2026-08-29T10:00:31.000Z" : null,
     cancelledAt: state === "cancelled" ? "2026-08-29T10:00:05.000Z" : null,
     completedAt: state === "completed" ? "2026-08-29T10:00:35.000Z" : null,
-    failureCode: state === "failed" ? "VOICE_DELETE_IO_FAILED" : null,
+    supersededAt: state === "superseded" ? "2026-08-29T10:00:20.000Z" : null,
+    jobDrainStartedAt: null,
+    jobDrainDeadline: null,
+    failureCode: state === "failed" ? "VOICE_DELETE_UNLINK_FAILED" : null,
     ...patch,
   };
 }
 
-
-function baseProps(
-  overrides: Partial<VoiceLifecyclePanelProps> = {},
-): VoiceLifecyclePanelProps {
+function baseProps(overrides: Partial<VoiceLifecyclePanelProps> = {}): VoiceLifecyclePanelProps {
   return {
     capabilityEnabled: true,
     profile: profile("unreferenced"),
-    nowEpochMs: NOW,
-    onDiscardUnreferenced: vi.fn(),
-    onRequestReferencedDeletion: vi.fn(),
+    nowEpochMs: LOCAL_OBSERVED_AT,
+    serverNowObservedAtEpochMs: LOCAL_OBSERVED_AT,
+    onCreateDeletionRequest: vi.fn(),
     onConfirmDeletion: vi.fn(),
     onCancelDeletion: vi.fn(),
     onRetryDeletion: vi.fn(),
+    onReloadLifecycle: vi.fn(),
     ...overrides,
   };
 }
 
-
-describe("voice lifecycle panel", () => {
-  it("renders nothing and exposes no real deletion action when capability is omitted", () => {
+describe("voice lifecycle panel v2", () => {
+  it("renders nothing when the readiness capability is omitted", () => {
     const harness = createHarness();
     const Panel = createVoiceLifecyclePanel(harness.React);
     const props = baseProps({ capabilityEnabled: undefined });
-    const tree = harness.render(Panel, props);
-    expect(tree).toBeNull();
-    expect(props.onDiscardUnreferenced).not.toHaveBeenCalled();
-    expect(props.onRequestReferencedDeletion).not.toHaveBeenCalled();
-    expect(props.onConfirmDeletion).not.toHaveBeenCalled();
+    expect(harness.render(Panel, props)).toBeNull();
+    expect(props.onCreateDeletionRequest).not.toHaveBeenCalled();
   });
 
-  it("separates one-click unreferenced deletion from referenced impact creation", () => {
+  it("uses the same create command with zero popup for unreferenced voices", () => {
     const unreferencedHarness = createHarness();
     const UnreferencedPanel = createVoiceLifecyclePanel(unreferencedHarness.React);
     const unreferencedProps = baseProps();
     const unreferencedTree = unreferencedHarness.render(UnreferencedPanel, unreferencedProps);
     (findButton(unreferencedTree, "删除音色").props.onClick as () => void)();
-    expect(unreferencedProps.onDiscardUnreferenced).toHaveBeenCalledWith({
+    expect(unreferencedProps.onCreateDeletionRequest).toHaveBeenCalledWith({
       profileId: PROFILE_ID,
       expectedProfileVersion: 4,
     });
@@ -244,53 +236,39 @@ describe("voice lifecycle panel", () => {
     const referencedProps = baseProps({ profile: profile("referenced") });
     const referencedTree = referencedHarness.render(ReferencedPanel, referencedProps);
     (findButton(referencedTree, "查看删除影响").props.onClick as () => void)();
-    expect(referencedProps.onRequestReferencedDeletion).toHaveBeenCalledWith({
+    expect(referencedProps.onCreateDeletionRequest).toHaveBeenCalledWith({
       profileId: PROFILE_ID,
       expectedProfileVersion: 4,
     });
-    expect(textContent(referencedTree)).toContain("必须先查看冻结的影响摘要");
   });
 
-  it("shows the server-based 30-second undo countdown and removes cancel at expiry", () => {
+  it("uses local elapsed time against server_now for the undo countdown", () => {
     const harness = createHarness();
     const Panel = createVoiceLifecyclePanel(harness.React);
-    const props = baseProps({
-      profile: profile("unreferenced"),
-      request: request("grace_pending"),
-    });
+    const props = baseProps({ request: request("grace_pending") });
     let tree = harness.render(Panel, props);
     expect(textContent(tree)).toContain("剩余 30 秒可撤销");
     (findButton(tree, "撤销删除").props.onClick as () => void)();
     expect(props.onCancelDeletion).toHaveBeenCalledWith(REQUEST_ID);
 
-    tree = harness.render(Panel, { ...props, nowEpochMs: NOW + 30_000 });
+    tree = harness.render(Panel, { ...props, nowEpochMs: LOCAL_OBSERVED_AT + 30_000 });
     expect(textContent(tree)).toContain("撤销窗口已关闭");
-    expect(findAll(tree, (element) => (
-      element.type === "button" && textContent(element).includes("撤销")
-    ))).toHaveLength(0);
+    expect(findAll(tree, (element) => element.type === "button")).toHaveLength(0);
   });
 
-  it("requires an exact name before sending the frozen impact CAS confirmation", () => {
+  it("shows one frozen summary confirmation without requiring a name input", () => {
     const harness = createHarness();
     const Panel = createVoiceLifecyclePanel(harness.React);
     const props = baseProps({
       profile: profile("referenced"),
       request: request("requested"),
     });
-    let tree = harness.render(Panel, props);
+    const tree = harness.render(Panel, props);
     expect(textContent(tree)).toContain("冻结的删除影响");
     expect(textContent(tree)).toContain("人物绑定2");
     expect(textContent(tree)).toContain("历史朗读版本3");
     expect(textContent(tree)).toContain("5 个 · 2.0 MiB");
-    expect(textContent(tree)).toContain("外部备份不受本项目管理");
-    expect(findButton(tree, "确认删除音色").props.disabled).toBe(true);
-
-    const input = findAll(tree, (element) => element.type === "input")[0];
-    if (!input) throw new Error("missing name confirmation input");
-    (input.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: "林晚的雨夜声线" },
-    });
-    tree = harness.render(Panel, props);
+    expect(findAll(tree, (element) => element.type === "input")).toHaveLength(0);
     const confirm = findButton(tree, "确认删除音色");
     expect(confirm.props.disabled).toBe(false);
     (confirm.props.onClick as () => void)();
@@ -299,54 +277,61 @@ describe("voice lifecycle panel", () => {
       expectedProfileVersion: 4,
       impactDigest: "a".repeat(64),
     });
-    (findButton(tree, "取消删除计划").props.onClick as () => void)();
-    expect(props.onCancelDeletion).toHaveBeenCalledWith(REQUEST_ID);
   });
 
-  it("never offers cancel after physical deletion starts and exposes only valid retry", () => {
+  it("shows both safe pre-fence actions while jobs drain, but only retry after fencing", () => {
     const harness = createHarness();
     const Panel = createVoiceLifecyclePanel(harness.React);
-    const callbacks = baseProps({
+    const waitingProps = baseProps({
       profile: profile("referenced"),
-      request: request("live_deleting"),
+      request: request("failed", {
+        failureCode: "VOICE_DELETE_WAITING_FOR_JOBS",
+        confirmedAt: null,
+        cancellable: true,
+        retryable: true,
+        jobDrainStartedAt: "2026-08-29T10:00:00.000Z",
+        jobDrainDeadline: "2026-08-29T10:01:00.000Z",
+      }),
     });
-    let tree = harness.render(Panel, callbacks);
-    expect(textContent(tree)).toContain("此阶段不能撤销");
-    expect(findAll(tree, (element) => element.type === "button")).toHaveLength(0);
-
-    tree = harness.render(Panel, { ...callbacks, request: request("failed") });
+    let tree = harness.render(Panel, waitingProps);
+    expect(textContent(tree)).toContain("任务排空窗口剩余 60 秒");
+    (findButton(tree, "撤销删除").props.onClick as () => void)();
     (findButton(tree, "重试删除").props.onClick as () => void)();
-    expect(callbacks.onRetryDeletion).toHaveBeenCalledWith(REQUEST_ID);
+    expect(waitingProps.onCancelDeletion).toHaveBeenCalledWith(REQUEST_ID);
+    expect(waitingProps.onRetryDeletion).toHaveBeenCalledWith(REQUEST_ID);
 
-    tree = harness.render(Panel, {
-      ...callbacks,
-      request: request("failed", { confirmedAt: null }),
+    const fencedProps = baseProps({
+      profile: profile("referenced"),
+      request: request("failed", { cancellable: false, retryable: true }),
     });
-    expect(findAll(tree, (element) => element.type === "button")).toHaveLength(0);
+    tree = harness.render(Panel, fencedProps);
+    expect(findAll(tree, (element) => textContent(element) === "撤销删除")).toHaveLength(0);
+    (findButton(tree, "重试删除").props.onClick as () => void)();
+    expect(fencedProps.onRetryDeletion).toHaveBeenCalledWith(REQUEST_ID);
   });
 
-  it("reports completed project-managed deletion without claiming external permanence", () => {
+  it("presents superseded as terminal and asks for a fresh impact", () => {
     const harness = createHarness();
     const Panel = createVoiceLifecyclePanel(harness.React);
-    const tree = harness.render(Panel, baseProps({
+    const props = baseProps({
       profile: { ...profile("referenced"), expectedProfileVersion: 5 },
-      request: request("completed"),
-    }));
-    expect(textContent(tree)).toContain("项目管理的在线音色数据已删除");
-    expect(textContent(tree)).toContain("Time Machine");
-    expect(textContent(tree)).not.toContain("永久删除");
+      request: request("superseded", { failureCode: "VOICE_DELETE_PROFILE_CHANGED" }),
+    });
+    const tree = harness.render(Panel, props);
+    expect(textContent(tree)).toContain("删除计划因音色或影响发生变化而失效");
     expect(findAll(tree, (element) => element.type === "button")).toHaveLength(0);
+    expect(props.onReloadLifecycle).toHaveBeenCalledOnce();
   });
 });
 
-
 describe("voice lifecycle styles", () => {
-  it("keeps controls touch-safe and supplies narrow-screen and forced-color layouts", () => {
+  it("keeps controls touch-safe and removes obsolete name-confirmation styles", () => {
     expect(VOICE_LIFECYCLE_STYLE_ID).toBe("anw-voice-lifecycle-styles");
     expect(VOICE_LIFECYCLE_STYLES).toContain("min-height: 44px");
     expect(VOICE_LIFECYCLE_STYLES).toContain("@media (max-width: 720px)");
     expect(VOICE_LIFECYCLE_STYLES).toContain("@media (max-width: 390px)");
     expect(VOICE_LIFECYCLE_STYLES).toContain("@media (forced-colors: active)");
+    expect(VOICE_LIFECYCLE_STYLES).not.toContain("confirmation input");
     expect(VOICE_LIFECYCLE_STYLES).not.toContain("min-width: 390px");
   });
 });

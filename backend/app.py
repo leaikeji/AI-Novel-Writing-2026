@@ -62,8 +62,11 @@ from .narration.pawapp_runtime import (
     stop_narration_runtime,
 )
 from .narration.health_api import router as narration_health_router
+from .narration import schemas as narration_wire
 from .narration.disk_guard import DISK_SPACE_INSUFFICIENT
 from .narration.narration_api import router as narration_production_router
+from .narration.voice_features_api import router as narration_voice_features_router
+from .narration.feature_readiness import NARRATION_FEATURE_READINESS_PROVIDER
 from .narration.official_presets import (
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
 )
@@ -79,6 +82,7 @@ from .narration.production_runtime import (
     current_validation_runtime_scope,
     current_voice_product_port,
     launch_narration_production_runtime,
+    narration_feature_readiness_status,
     narration_production_runtime_status,
     stop_narration_production_runtime,
     validation_route_token_authorized,
@@ -187,6 +191,7 @@ router.include_router(narration_health_router)
 router.include_router(narration_script_router)
 router.include_router(narration_production_router)
 router.include_router(narration_playback_router)
+router.include_router(narration_voice_features_router)
 router.include_router(writing_eval_router)
 router.include_router(embedding_router)
 router.include_router(story_state_router)
@@ -345,6 +350,24 @@ def _build_fixed_local_owner_narration_backend(
     )
     if product_ready and not official_presets_ready:
         product_ready = False
+    base_capabilities = (
+        t4_product_capabilities(
+            reference_clone_released=reference_clone_ready,
+            official_presets_released=official_presets_ready,
+        )
+        if product_ready
+        else t2_settings_capabilities()
+    )
+    managed = {
+        item.key: item
+        for item in NARRATION_FEATURE_READINESS_PROVIDER.snapshot().capabilities
+    }
+    capabilities = narration_wire.NarrationCapabilities(
+        items=[
+            managed.get(item.key, item).model_copy(deep=True)
+            for item in base_capabilities.items
+        ]
+    )
     return build_narration_settings_backend(
         session,
         authorization=FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION,
@@ -356,14 +379,7 @@ def _build_fixed_local_owner_narration_backend(
             if official_presets_ready
             else None
         ),
-        capabilities=(
-            t4_product_capabilities(
-                reference_clone_released=reference_clone_ready,
-                official_presets_released=official_presets_ready,
-            )
-            if product_ready
-            else t2_settings_capabilities()
-        ),
+        capabilities=capabilities,
     )
 
 
@@ -532,6 +548,7 @@ def health() -> dict[str, object]:
         "embedding_runtime": embedding_runtime_status(),
         "narration": narration_runtime_status(),
         "narration_production": narration_production_runtime_status(),
+        "narration_features": narration_feature_readiness_status(),
     }
 
 

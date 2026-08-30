@@ -31,7 +31,6 @@ export const VOICE_LIFECYCLE_STYLES = `
 .anw-voice-lifecycle__countdown,
 .anw-voice-lifecycle__impact h4,
 .anw-voice-lifecycle__consequence,
-.anw-voice-lifecycle__confirmation p,
 .anw-voice-lifecycle__backup {
   margin: 0;
 }
@@ -120,33 +119,10 @@ export const VOICE_LIFECYCLE_STYLES = `
   overflow-wrap: anywhere;
 }
 .anw-voice-lifecycle__consequence,
-.anw-voice-lifecycle__confirmation p,
 .anw-voice-lifecycle__backup {
   color: var(--ant-color-text-secondary, #5f6670);
   font-size: 13px;
   line-height: 1.55;
-}
-.anw-voice-lifecycle__confirmation {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-}
-.anw-voice-lifecycle__confirmation label {
-  font-weight: 650;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-.anw-voice-lifecycle__confirmation input {
-  width: 100%;
-  min-width: 0;
-  min-height: 44px;
-  box-sizing: border-box;
-  border: 1px solid var(--ant-color-border, #d9dadd);
-  border-radius: 9px;
-  padding: 9px 11px;
-  color: inherit;
-  background: var(--ant-color-bg-container, #fff);
-  font: inherit;
 }
 .anw-voice-lifecycle__backup {
   border: 1px solid var(--ant-color-border-secondary, #e5e6e8);
@@ -182,13 +158,11 @@ export const VOICE_LIFECYCLE_STYLES = `
   background: var(--ant-color-error-bg, #fff2ed);
   font-weight: 650;
 }
-.anw-voice-lifecycle__button:disabled,
-.anw-voice-lifecycle__confirmation input:disabled {
+.anw-voice-lifecycle__button:disabled {
   cursor: not-allowed;
   opacity: .62;
 }
-.anw-voice-lifecycle__button:focus-visible,
-.anw-voice-lifecycle__confirmation input:focus-visible {
+.anw-voice-lifecycle__button:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--ant-color-primary, #d95d36) 42%, transparent);
   outline-offset: 2px;
 }
@@ -231,12 +205,10 @@ export const VOICE_LIFECYCLE_STYLES = `
   .anw-voice-lifecycle,
   .anw-voice-lifecycle__impact-row,
   .anw-voice-lifecycle__backup,
-  .anw-voice-lifecycle__button,
-  .anw-voice-lifecycle__confirmation input {
+  .anw-voice-lifecycle__button {
     border-color: CanvasText;
   }
-  .anw-voice-lifecycle__button:focus-visible,
-  .anw-voice-lifecycle__confirmation input:focus-visible {
+  .anw-voice-lifecycle__button:focus-visible {
     outline-color: Highlight;
   }
 }

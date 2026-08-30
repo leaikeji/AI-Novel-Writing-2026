@@ -32,6 +32,7 @@ from .official_presets import (
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
     validate_official_version_evidence,
 )
+from .nano_experiments import validate_nano_experiment_version_evidence
 
 
 T = TypeVar("T")
@@ -293,16 +294,29 @@ def voice_activation_evidence_is_usable(
         and version.locked_actor is None
         and version.locked_at is None
     )
-    if not (human_confirmed or official_direct):
+    machine_validated = (
+        version.source_type == "generated"
+        and rights.source_kind == "official_preset"
+        and version.activation_basis == "experimental_machine_validated"
+        and version.validation_basis == "machine_validated"
+        and version.quality_state == "accepted"
+        and version.model_run_id is not None
+        and version.locked_actor is None
+        and version.locked_at is None
+    )
+    if not (human_confirmed or official_direct or machine_validated):
         return False
     if rights.source_kind == "official_preset":
         try:
-            validate_official_version_evidence(
+            validator = (
+                validate_nano_experiment_version_evidence
+                if machine_validated
+                else validate_official_version_evidence
+            )
+            validator(
                 version,
                 rights,
-                expected_model_fingerprint=(
-                    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
-                ),
+                expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
             )
         except ValueError:
             return False

@@ -22,7 +22,7 @@ from .contracts import (
 )
 
 ADAPTER_CAPABILITIES_FINGERPRINT_SCHEMA_VERSION: Final = (
-    "narration-adapter-capabilities-fingerprint/1"
+    "narration-adapter-capabilities-fingerprint/2"
 )
 
 SUPPORTED_FINGERPRINT_SCHEMA_VERSIONS: Final = frozenset(

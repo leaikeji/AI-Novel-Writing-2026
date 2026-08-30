@@ -33,7 +33,7 @@ from urllib.parse import quote
 
 APP_ID = "ai-novel-world-2026"
 APP_VERSION = "0.4.0"
-EXPECTED_MIGRATION_HEAD = "20260829_0032"
+EXPECTED_MIGRATION_HEAD = "20260829_0034"
 TTS_PROTOCOL_VERSION = "moss-tts-sidecar/1.1"
 
 QWENPAW_IMAGE = "ai-novel-2026-qwenpaw-runtime:2.1.0-mvp0"
@@ -473,7 +473,7 @@ def build_dry_run_plan(config: GateConfig, names: ResourceNames) -> dict[str, ob
             "start-qwenpaw-with-tts-disabled",
             "docker-cp-candidate-and-verify-tree-hash",
             "public-install",
-            "migrate-to-20260829_0032",
+            "migrate-to-20260829_0034",
             "verify-disabled-narration-production-t4-routes-and-registries",
             "create-db-and-volume-sentinels",
             "public-force-reinstall",

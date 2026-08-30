@@ -56,6 +56,8 @@ export interface CharacterVoiceRosterRow {
 
 export interface CharacterVoiceOfficialMatchResult {
   readonly voiceName: string;
+  readonly presetId: string;
+  readonly selectionStillCurrent: boolean;
 }
 
 
@@ -78,6 +80,10 @@ export interface CharacterVoiceRosterProps {
   readonly onMatchOfficialVoice?: (
     character: CharacterVoiceRosterCharacter,
   ) => Promise<CharacterVoiceOfficialMatchResult>;
+  readonly onUseMatchedOfficialVoice?: (
+    character: CharacterVoiceRosterCharacter,
+    presetId: string,
+  ) => Promise<CharacterVoiceOfficialMatchResult>;
   /** Reserved for the separately gated VoiceGenerator package. */
   readonly onGenerateAndUse?: (
     character: CharacterVoiceRosterCharacter,
@@ -92,6 +98,8 @@ type RowActionPhase = "idle" | "running" | "success" | "error";
 interface RowActionState {
   readonly phase: RowActionPhase;
   readonly message: string;
+  readonly matchedPresetId?: string;
+  readonly needsApply?: boolean;
 }
 
 
@@ -106,6 +114,7 @@ const REQUIRED_BATCH_CAPABILITIES = [
   "narration_product",
   "reading_settings",
   "preset_voice_source",
+  "character_voice_matching",
 ] as const satisfies readonly CapabilityKey[];
 
 
@@ -188,7 +197,13 @@ export function buildCharacterVoiceRosterRows(
       voiceName: configured ? profile?.name ?? "绑定音色不可用" : null,
       sourceGroup: configured ? sourceGroup(version) : "unresolved",
       sourceType: version?.source_type ?? null,
-      previewAvailable: Boolean(version?.preview_asset),
+      previewAvailable: Boolean(
+        version
+        && (
+          sourceGroup(version) === "official"
+          || (version.source_type === "generated" && version.preview_asset)
+        ),
+      ),
     };
   });
 }
@@ -217,7 +232,7 @@ export function characterVoiceBatchAvailability(
     return { enabled: false, reason: "官方音色批量分配服务尚未接入。" };
   }
   if (unconfiguredCount === 0) return { enabled: false, reason: "所有人物均已配置声音。" };
-  return { enabled: true, reason: `将为 ${unconfiguredCount} 位未配置人物稳定分配并直接使用官方音色；这不是新音色生成。` };
+  return { enabled: true, reason: `将分析 ${unconfiguredCount} 位未配置人物的已保存人物卡，匹配并直接使用官方音色；这不是新音色生成。` };
 }
 
 
@@ -294,21 +309,49 @@ export function createCharacterVoiceRoster(
         row.characterId,
         { phase: "running", message: "正在分配官方音色…" } satisfies RowActionState,
       ])));
-      await Promise.all(unconfigured.map(async (row) => {
+      for (const row of unconfigured) {
         const character = { characterId: row.characterId, characterName: row.characterName };
         try {
           const result = await props.onMatchOfficialVoice?.(character);
           updateResult(row.characterId, {
             phase: "success",
-            message: result ? `已使用 ${result.voiceName}` : "已分配并使用官方音色",
+            message: result?.selectionStillCurrent === false
+              ? `已匹配 ${result.voiceName}，但没有覆盖你刚修改的音色。`
+              : result ? `已使用 ${result.voiceName}` : "已匹配并使用官方音色",
+            matchedPresetId: result?.presetId,
+            needsApply: result?.selectionStillCurrent === false,
           });
         } catch (reason: unknown) {
           updateResult(row.characterId, { phase: "error", message: actionError(reason) });
         }
-      }));
+      }
       if (!mountedRef.current) return;
       setBatchRunning(false);
       props.onBatchCompleted?.();
+    };
+
+    const runPreview = async (
+      character: CharacterVoiceRosterCharacter,
+      profile: VoiceProfileResource,
+      version: VoiceProfileVersionResource,
+    ) => {
+      if (!props.onPreviewVoice) return;
+      updateResult(character.characterId, {
+        phase: "running",
+        message: "正在准备当前人物音色试听…",
+      });
+      try {
+        await props.onPreviewVoice(character, profile, version);
+        updateResult(character.characterId, {
+          phase: "success",
+          message: "试听已开始；不会改变当前人物声音。",
+        });
+      } catch (reason: unknown) {
+        updateResult(character.characterId, {
+          phase: "error",
+          message: actionError(reason),
+        });
+      }
     };
 
     const rootClassName = ["anw-character-voice-roster", props.className ?? ""]
@@ -335,21 +378,21 @@ export function createCharacterVoiceRoster(
           h("h2", { id: `${statusId}-heading` }, "人物配音"),
           h("p", null, `${rows.length} 位人物 · ${unconfigured.length} 位未配置`),
         ),
-        h("button", {
-          type: "button",
-          className: "anw-character-voice-roster__batch",
-          disabled: batchRunning || !batchAvailability.enabled,
-          onClick: () => { void runBatch(); },
-          "aria-describedby": statusId,
-        }, batchRunning ? "正在批量分配…" : "为未配置人物自动分配官方音色"),
+        batchAvailability.enabled || batchRunning
+          ? h("button", {
+            type: "button",
+            className: "anw-character-voice-roster__batch",
+            disabled: batchRunning,
+            onClick: () => { void runBatch(); },
+            "aria-describedby": statusId,
+          }, batchRunning ? "正在逐一匹配…" : "为未配置人物一键匹配并使用")
+          : null,
       ),
       h("p", { id: statusId, className: "anw-character-voice-roster__status", role: "status", "aria-live": "polite" },
         batchRunning ? "正在逐一处理；成功人物将直接使用匹配结果，失败人物不会影响其他人物。" : batchAvailability.reason,
       ),
-      !generateAvailability.enabled
-        ? h("p", { className: "anw-character-voice-roster__generator-note" },
-          `根据人物生成专属音色：${generateAvailability.reason} 可改用下方“自动分配官方音色”，该操作不会冒充生成新音色。`,
-        )
+      !generateAvailability.enabled && !batchAvailability.enabled
+        ? h("p", { className: "anw-character-voice-roster__generator-note" }, batchAvailability.reason)
         : null,
       rows.length === 0
         ? h("p", { className: "anw-character-voice-roster__empty", role: "status" },
@@ -362,9 +405,14 @@ export function createCharacterVoiceRoster(
             const fallbackEnabled = configureEnabled
               && Boolean(props.onMatchOfficialVoice)
               && capabilityIsActionable(props.capabilities, "preset_voice_source")
+              && capabilityIsActionable(props.capabilities, "character_voice_matching")
               && result?.phase !== "running";
             const previewEnabled = Boolean(
-              row.profile && row.version && row.previewAvailable && props.onPreviewVoice,
+              row.profile
+              && row.version
+              && row.previewAvailable
+              && props.onPreviewVoice
+              && result?.phase !== "running",
             );
             return h("li", {
               key: row.characterId,
@@ -399,10 +447,10 @@ export function createCharacterVoiceRoster(
                 title: previewEnabled ? "试听当前绑定音色" : "当前绑定暂无可试听音频",
                 onClick: () => {
                   if (row.profile && row.version && previewEnabled) {
-                    void props.onPreviewVoice?.(character, row.profile, row.version);
+                    void runPreview(character, row.profile, row.version);
                   }
                 },
-              }, "试听"),
+              }, result?.phase === "running" ? "处理中…" : "试听"),
               h("button", {
                 type: "button",
                 disabled: !configureEnabled,
@@ -413,39 +461,77 @@ export function createCharacterVoiceRoster(
               },
                 row.configured ? "更换音色" : "选择官方音色",
               ),
-              h("button", {
-                type: "button",
-                className: "anw-character-voice-roster__generate",
-                disabled: generateAvailability.enabled ? false : !fallbackEnabled,
-                title: generateAvailability.enabled
-                  ? generateAvailability.reason
-                  : fallbackEnabled
-                    ? "稳定分配一个官方音色并直接使用；不会声称生成了专属新音色。"
-                    : generateAvailability.reason,
-                onClick: () => {
-                  if (generateAvailability.enabled) {
-                    void props.onGenerateAndUse?.(character);
-                    return;
-                  }
-                  if (!fallbackEnabled || !props.onMatchOfficialVoice) return;
-                  updateResult(row.characterId, {
-                    phase: "running",
-                    message: "正在分配官方音色…",
-                  });
-                  void props.onMatchOfficialVoice(character).then((matched) => {
+              generateAvailability.enabled || fallbackEnabled
+                ? h("button", {
+                  type: "button",
+                  className: "anw-character-voice-roster__generate",
+                  title: generateAvailability.enabled
+                    ? generateAvailability.reason
+                    : "只分析已保存的人物卡，匹配一个官方音色并直接使用。",
+                  onClick: () => {
+                    if (generateAvailability.enabled) {
+                      void props.onGenerateAndUse?.(character);
+                      return;
+                    }
+                    if (!props.onMatchOfficialVoice) return;
                     updateResult(row.characterId, {
-                      phase: "success",
-                      message: `已使用 ${matched.voiceName}`,
+                      phase: "running",
+                      message: "正在分析人物卡并匹配官方音色…",
                     });
-                    props.onBatchCompleted?.();
-                  }).catch((reason: unknown) => {
+                    void props.onMatchOfficialVoice(character).then((matched) => {
+                      updateResult(row.characterId, {
+                        phase: "success",
+                        message: matched.selectionStillCurrent
+                          ? `已匹配并使用 ${matched.voiceName}`
+                          : `已匹配 ${matched.voiceName}，但没有覆盖你刚修改的音色。`,
+                        matchedPresetId: matched.presetId,
+                        needsApply: !matched.selectionStillCurrent,
+                      });
+                      props.onBatchCompleted?.();
+                    }).catch((reason: unknown) => {
+                      updateResult(row.characterId, {
+                        phase: "error",
+                        message: actionError(reason),
+                      });
+                    });
+                  },
+                }, generateAvailability.enabled
+                  ? "根据人物生成并使用"
+                  : result?.phase === "error"
+                    ? "一键重试"
+                    : "根据人物卡匹配并使用")
+                : null,
+              result?.needsApply && result.matchedPresetId && props.onUseMatchedOfficialVoice
+                ? h("button", {
+                  type: "button",
+                  className: "anw-character-voice-roster__generate",
+                  onClick: () => {
                     updateResult(row.characterId, {
-                      phase: "error",
-                      message: actionError(reason),
+                      phase: "running",
+                      message: "正在使用已匹配音色…",
                     });
-                  });
-                },
-              }, generateAvailability.enabled ? "根据人物生成并使用" : "自动分配官方音色"),
+                    void props.onUseMatchedOfficialVoice?.(
+                      character,
+                      result.matchedPresetId as string,
+                    ).then((applied) => {
+                      updateResult(row.characterId, {
+                        phase: "success",
+                        message: `已使用 ${applied.voiceName}`,
+                        matchedPresetId: applied.presetId,
+                        needsApply: !applied.selectionStillCurrent,
+                      });
+                      props.onBatchCompleted?.();
+                    }).catch((reason: unknown) => {
+                      updateResult(row.characterId, {
+                        phase: "error",
+                        message: actionError(reason),
+                        matchedPresetId: result.matchedPresetId,
+                        needsApply: true,
+                      });
+                    });
+                  },
+                }, "使用此音色")
+                : null,
             ));
           }),
         ),

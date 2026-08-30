@@ -458,8 +458,8 @@ function localSectionContent(overview: NarrationOverviewResponse) {
   const voiceHarness = createReactHarness();
   return {
     characters: [character, renderVoiceSourcePanel(overview, voiceHarness.React)],
-    "reading-rules": [status, rules, pronunciation],
-    "storage-privacy": cache,
+    narrator: [status, rules, pronunciation],
+    "private-voices": cache,
   } as const;
 }
 
@@ -486,6 +486,7 @@ describe("reading page local-module integration", () => {
       novelId: NOVEL_ID,
       initialSection: "characters" as const,
       sectionContent,
+      renderNarratorVoiceWorkspace: () => sectionContent.narrator,
     };
     let tree = harness.render(ReadingPage, props);
 
@@ -512,7 +513,7 @@ describe("reading page local-module integration", () => {
       tree = harness.render(ReadingPage, props);
     };
 
-    open("reading-rules");
+    open("narrator");
     expect(textContent(tree)).toContain("发音与停顿");
     expect(textContent(tree)).toContain("无权查看发音与停顿设置");
     expect(textContent(tree)).toContain("朗读运行状态");
@@ -522,7 +523,7 @@ describe("reading page local-module integration", () => {
     expect(ruleFieldsets).toHaveLength(2);
     expect(ruleFieldsets.every((fieldset) => fieldset.props.disabled === true)).toBe(true);
 
-    open("storage-privacy");
+    open("private-voices");
     expect(textContent(tree)).toContain("音频与缓存");
     expect(textContent(tree)).toContain("无权查看音频与缓存");
   });

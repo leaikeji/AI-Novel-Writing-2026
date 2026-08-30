@@ -1,3 +1,6 @@
+import { createNarrationIdempotencyKey } from "./idempotency-key";
+
+
 export type OfficialVoiceUsePhase =
   | "idle"
   | "applying"
@@ -287,8 +290,5 @@ export function nextOfficialVoiceUseIdempotencyKey(
 
 
 export function createOfficialVoiceUseIdempotencyKey(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  if (uuid) return `official-voice-selection-${uuid}`;
-  const entropy = Math.random().toString(36).slice(2).padEnd(12, "0");
-  return `official-voice-selection-${Date.now().toString(36)}-${entropy}`;
+  return createNarrationIdempotencyKey("official-voice-selection");
 }

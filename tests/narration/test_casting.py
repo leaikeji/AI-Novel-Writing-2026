@@ -62,7 +62,13 @@ def voice(
     rights_record: bool = True,
     source_type: wire.VoiceSourceType = wire.VoiceSourceType.PRESET,
     cloning: bool = True,
+    activation_evidence_usable: bool | None = None,
 ) -> VoiceVersionSnapshot:
+    if activation_evidence_usable is None:
+        activation_evidence_usable = (
+            version_state is wire.VoiceVersionState.LOCKED
+            and quality_state is wire.VoiceQualityState.ACCEPTED
+        )
     return VoiceVersionSnapshot(
         profile_id=uid(f"profile-{label}"),
         version_id=uid(f"version-{label}"),
@@ -73,6 +79,7 @@ def voice(
         source_type=source_type,
         version_state=version_state,
         quality_state=quality_state,
+        activation_evidence_usable=activation_evidence_usable,
         rights_record_id=uid(f"rights-{label}") if rights_record else None,
         rights_state=rights_state,
         voice_cloning_permitted=cloning,
@@ -295,6 +302,33 @@ def test_narrator_inherits_volume_then_novel_when_narrower_scope_is_absent() -> 
 
     assert volume_result.source is CastingResolutionSource.VOLUME_NARRATOR
     assert novel_result.source is CastingResolutionSource.NOVEL_NARRATOR
+
+
+def test_direct_official_voice_uses_activation_evidence_without_fake_quality_acceptance() -> None:
+    direct_official = voice(
+        "official-direct",
+        quality_state=wire.VoiceQualityState.PENDING,
+        activation_evidence_usable=True,
+    )
+    selected = narrator_selection(
+        CastingScopeKind.NOVEL,
+        NOVEL_ID,
+        "official-direct",
+        selected_voice=direct_official,
+    )
+
+    result = resolve_casting(
+        request(
+            speaker=SpeakerRef(kind=SpeakerKind.NARRATOR),
+            kind=SegmentKind.NARRATION,
+        ),
+        CastingInventory(narrator_selections=(selected,)),
+    )
+
+    assert result.decision.origin is CastingDecisionOrigin.NARRATOR_SETTING
+    assert result.blocker_codes == ()
+    assert result.resolved_voice is not None
+    assert result.resolved_voice.version_id == direct_official.version_id
 
 
 def test_unusable_chapter_narrator_blocks_without_silent_volume_fallback() -> None:

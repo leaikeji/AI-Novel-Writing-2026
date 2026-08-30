@@ -356,11 +356,11 @@ function target(
 describe("reading route and replacement contracts", () => {
   it("keeps the stable workbench section and one bounded reading panel query", () => {
     expect(readingSectionFromSearch("?reading_panel=narrator")).toBe("narrator");
-    expect(readingSectionFromSearch("?reading_panel=voice-generator")).toBe("overview");
+    expect(readingSectionFromSearch("?reading_panel=voice-generator")).toBe("narrator");
     expect(readingSectionSearch("?novel_id=novel-1&section=roles&x=1", "audio-cache"))
-      .toBe("?novel_id=novel-1&section=reading&x=1&reading_panel=audio-cache");
+      .toBe("?novel_id=novel-1&section=reading&x=1&reading_panel=private-voices");
     expect(readingSectionSearch("?novel_id=novel-1&reading_panel=narrator", "overview"))
-      .toBe("?novel_id=novel-1&section=reading");
+      .toBe("?novel_id=novel-1&reading_panel=narrator&section=reading");
   });
 
   it("drops cross-novel and duplicate scope targets before they can reach a PUT path", () => {
@@ -431,7 +431,7 @@ describe("reading route and replacement contracts", () => {
 
 
 describe("reading page controller and navigation", () => {
-  it("loads overview and overrides together, then exposes six semantic navigation items", async () => {
+  it("loads overview and overrides together, then exposes five task-oriented navigation items", async () => {
     const harness = createReactHarness();
     const api: ReadingPageApi = {
       getOverview: vi.fn(async () => overviewFixture()),
@@ -451,14 +451,14 @@ describe("reading page controller and navigation", () => {
 
     expect(api.getOverview).toHaveBeenCalledWith(NOVEL_ID, expect.any(AbortSignal));
     expect(api.listScopeOverrides).toHaveBeenCalledWith(NOVEL_ID, expect.any(AbortSignal));
-    expect(tree.props["data-active-section"]).toBe("overview");
+    expect(tree.props["data-active-section"]).toBe("narrator");
     const nav = findAll(tree, (element) => element.type === "nav")[0];
     const buttons = findAll(nav, (element) => element.type === "button");
-    expect(buttons).toHaveLength(6);
+    expect(buttons).toHaveLength(5);
     expect(buttons.filter((button) => button.props["aria-current"] === "page"))
       .toHaveLength(1);
 
-    const narrator = buttons.find((button) => textContent(button) === "旁白与朗读");
+    const narrator = buttons.find((button) => textContent(button) === "基础朗读");
     expect(narrator).toBeDefined();
     (narrator?.props.onClick as () => void)();
     tree = harness.render(ReadingPage, { novelId: NOVEL_ID, onSectionChange });

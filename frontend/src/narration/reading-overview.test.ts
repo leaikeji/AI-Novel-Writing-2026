@@ -304,7 +304,7 @@ describe("reading overview surface", () => {
     expect(buttons).toHaveLength(3);
     expect(buttons.every((button) => button.props.disabled === true)).toBe(true);
     expect(textContent(tree)).toContain("等待声音设置阶段门禁通过（T2_GATE_REQUIRED）");
-    expect(textContent(tree)).toContain("6 个中文官方预设");
+    expect(textContent(tree)).toContain("18 个官方音色");
     expect(textContent(tree)).not.toContain("有明确授权且已锁定");
     expect(textContent(tree)).not.toContain("文字生成音色");
     expect(onNavigate).not.toHaveBeenCalled();

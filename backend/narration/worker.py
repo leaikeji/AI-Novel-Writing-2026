@@ -68,6 +68,10 @@ from .manifest import (
     append_manifest_revision,
     publish_manifest,
 )
+from .nano_experiments import (
+    NanoDecodeParametersV3,
+    validate_nano_experiment_version_evidence,
+)
 from .official_presets import (
     OFFICIAL_PRESET_MAX_NEW_FRAMES,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
@@ -235,6 +239,34 @@ class WorkerOutcome:
     job_id: UUID | None = None
     render_id: UUID | None = None
     error_code: str | None = None
+
+
+def _validated_nano_experiment_decode_parameters(
+    *,
+    voice: VoiceProfileVersion,
+    rights: object,
+    render_model_fingerprint: str,
+) -> NanoDecodeParametersV2:
+    """Project validated experiment evidence into the Sidecar v2 contract."""
+
+    if render_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256:
+        raise WorkerSecurityError("Nano experiment render model identity changed")
+    try:
+        validate_nano_experiment_version_evidence(
+            voice,
+            rights,
+            expected_model_fingerprint=render_model_fingerprint,
+        )
+        parameters = voice.parameters_json
+        assert type(parameters) is dict
+        complete_parameters = NanoDecodeParametersV3.from_payload(
+            parameters.get("decode_parameters")
+        )
+    except (AssertionError, TypeError, ValueError) as error:
+        raise WorkerSecurityError(
+            "Nano experiment version evidence changed"
+        ) from error
+    return complete_parameters.sidecar_decode_parameters()
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,6 +567,7 @@ class SqlAlchemyNarrationWorkerRepository:
             parameters = voice.parameters_json
             if type(parameters) is not dict:
                 raise WorkerContractError("voice parameters must be an object")
+            decode_parameters: NanoDecodeParametersV2 | None = None
             if voice.source_type == "preset":
                 if (
                     rights.source_kind != "official_preset"
@@ -580,6 +613,12 @@ class SqlAlchemyNarrationWorkerRepository:
             elif voice.source_type == "uploaded":
                 if rights.source_kind != "user_upload":
                     raise WorkerSecurityError("uploaded voice provenance changed")
+            elif voice.source_type == "generated":
+                decode_parameters = _validated_nano_experiment_decode_parameters(
+                    voice=voice,
+                    rights=rights,
+                    render_model_fingerprint=render.model_fingerprint,
+                )
             else:
                 raise WorkerContractError("voice source is not renderable")
             configured_frames = parameters.get("max_new_frames", default_max_new_frames)
@@ -595,8 +634,7 @@ class SqlAlchemyNarrationWorkerRepository:
             ):
                 raise WorkerContractError("voice sample_mode is invalid")
             raw_decode_parameters = parameters.get("decode_parameters")
-            decode_parameters = None
-            if raw_decode_parameters is not None:
+            if raw_decode_parameters is not None and decode_parameters is None:
                 try:
                     decode_parameters = NanoDecodeParametersV2.from_wire_payload(
                         raw_decode_parameters
@@ -1281,14 +1319,23 @@ class SqlAlchemyNarrationWorkerRepository:
         """Fence a claim that failed before a safe domain work item was loaded."""
 
         def operation(session: Session) -> FailureResult:
-            self._job(session, lease, for_update=True)
-            return fail_attempt(
+            job = self._job(session, lease, for_update=True)
+            result = fail_attempt(
                 session,
                 scope=self._scope,
                 fence=lease.fence,
                 classification=classification,
                 error_code=error_code,
             )
+            if result.state in {"failed", "dead_letter"}:
+                self._terminalize_render_job_in_session(
+                    session,
+                    job=job,
+                    target_state="failed",
+                    error_code=error_code,
+                    actor="narration-worker-load-failure",
+                )
+            return result
 
         result = self._transaction(operation)
         if type(result) is not FailureResult:

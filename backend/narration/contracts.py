@@ -195,6 +195,7 @@ class AdapterCapabilities:
     product_visible: bool = False
     production_ready: bool = False
     is_test_double: bool = False
+    supports_nano_decode_parameters: bool = False
 
     def __post_init__(self) -> None:
         if type(self.adapter_kind) is not AdapterKind:
@@ -210,6 +211,7 @@ class AdapterCapabilities:
             "supports_reference_audio",
             "supports_streaming_response_bytes",
             "supports_voice_design",
+            "supports_nano_decode_parameters",
             "product_visible",
             "production_ready",
             "is_test_double",
@@ -226,6 +228,13 @@ class AdapterCapabilities:
             raise ContractError("supported cancellation requires an explicit granularity")
         if self.adapter_kind is AdapterKind.MOSS_NANO_TTS and self.supports_voice_design:
             raise ContractError("Nano TTS adapter cannot claim voice design")
+        if self.supports_nano_decode_parameters and (
+            self.adapter_kind is not AdapterKind.MOSS_NANO_TTS
+            or not self.supports_synthesis
+        ):
+            raise ContractError(
+                "Nano decode parameters require a synthesizing Nano TTS adapter"
+            )
         if self.adapter_kind is AdapterKind.VOICE_DESIGN and self.supports_synthesis:
             raise ContractError("Voice design adapter cannot claim narration synthesis")
         if self.is_test_double and (self.product_visible or self.production_ready):

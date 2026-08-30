@@ -1,5 +1,7 @@
 import {
+  createOfficialVoicePreview,
   getCharacterVoiceBinding,
+  getVoicePreview,
   listOfficialVoicePresets,
   listVoiceProfiles,
   selectOfficialVoice,
@@ -11,9 +13,11 @@ import type {
   NarrationSettingsResource,
   OfficialPresetCatalogResponse,
   OfficialPresetId,
+  OfficialVoicePreviewRequest,
   OfficialVoiceSelectionRequest as OfficialVoiceSelectionWireRequest,
   OfficialVoiceSelectionResponse,
   VoiceProfileResource,
+  VoicePreviewResource,
 } from "./contracts";
 import {
   voiceActivationEvidenceIsUsable,
@@ -26,6 +30,9 @@ import {
   type OfficialVoiceSelectionRequest,
   type OfficialVoiceSelectionResult,
 } from "./official-voice-library";
+import { createNarrationIdempotencyKey } from "./idempotency-key";
+import { pollVoicePreview } from "./voice-source-panel";
+import { playReadyVoicePreview } from "./voice-preview-playback";
 
 
 export interface OfficialVoiceSelectionPanelApi {
@@ -46,6 +53,21 @@ export interface OfficialVoiceSelectionPanelApi {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<OfficialVoiceSelectionResponse>;
+  createOfficialVoicePreview(
+    novelId: string,
+    payload: OfficialVoicePreviewRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<VoicePreviewResource>;
+  getVoicePreview(
+    previewId: string,
+    signal?: AbortSignal,
+  ): Promise<VoicePreviewResource>;
+}
+
+
+export interface OfficialVoicePreviewPlayer {
+  play(preview: VoicePreviewResource, signal: AbortSignal): Promise<void>;
 }
 
 
@@ -87,11 +109,47 @@ type LoadState =
 
 
 const DEFAULT_API: OfficialVoiceSelectionPanelApi = {
+  createOfficialVoicePreview,
   listOfficialVoicePresets,
   listVoiceProfiles,
   getCharacterVoiceBinding,
   selectOfficialVoice,
+  getVoicePreview,
 };
+
+
+const DEFAULT_PREVIEW_PLAYER: OfficialVoicePreviewPlayer = {
+  play: playReadyVoicePreview,
+};
+
+
+export async function createAndPlayOfficialVoicePreview(
+  api: Pick<
+    OfficialVoiceSelectionPanelApi,
+    "createOfficialVoicePreview" | "getVoicePreview"
+  >,
+  player: OfficialVoicePreviewPlayer,
+  novelId: string,
+  presetId: OfficialPresetId,
+  signal: AbortSignal,
+): Promise<void> {
+  const initial = await api.createOfficialVoicePreview(
+    novelId,
+    { preset_id: presetId },
+    createNarrationIdempotencyKey("official-voice-preview"),
+    signal,
+  );
+  const final = await pollVoicePreview(initial, {
+    api: { getVoicePreview: api.getVoicePreview },
+    signal,
+    delayMs: 800,
+    maximumPolls: 120,
+  });
+  if (final.status !== "preview_ready" || final.preview === null) {
+    throw new Error(final.failure?.message ?? "官方音色试听未能完成。");
+  }
+  await player.play(final.preview, signal);
+}
 
 
 function errorMessage(reason: unknown): string {
@@ -199,6 +257,7 @@ export function officialVoiceSelectionResult(
 export function createOfficialVoiceSelectionPanel(
   React: OfficialVoiceLibraryReactRuntime,
   api: OfficialVoiceSelectionPanelApi = DEFAULT_API,
+  previewPlayer: OfficialVoicePreviewPlayer = DEFAULT_PREVIEW_PLAYER,
 ): (props: OfficialVoiceSelectionPanelProps) => unknown {
   const h = React.createElement;
   const Library = createOfficialVoiceLibrary(React);
@@ -298,6 +357,17 @@ export function createOfficialVoiceSelectionPanel(
         idempotencyKey,
         signal,
       )),
+      onPreview: async (
+        novelId: string,
+        item: { readonly presetId: string },
+        signal: AbortSignal,
+      ) => createAndPlayOfficialVoicePreview(
+        api,
+        previewPlayer,
+        novelId,
+        item.presetId as OfficialPresetId,
+        signal,
+      ),
       onApplied: (result: OfficialVoiceSelectionResult) => {
         setState((current) => current.phase === "ready"
           ? {

@@ -24,7 +24,9 @@ from backend.narration.contracts import (
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260829_0032"
+HEAD_REVISION = "20260829_0034"
+NARRATION_VOICE_LIFECYCLE_REVISION = "20260829_0034"
+MODEL_EXECUTION_EVIDENCE_REVISION = "20260829_0033"
 PRIVATE_VOICE_DELETION_REVISION = "20260829_0032"
 OFFICIAL_VOICE_SELECTION_REVISION = "20260829_0031"
 WRITING_RETRIEVAL_REVISION = "20260829_0030"
@@ -84,6 +86,10 @@ FAILED_SEGMENT_RETRY_MIGRATION = (
     ROOT
     / "backend/migrations/versions/20260828_0024_failed_segment_manual_retry.py"
 )
+NARRATION_VOICE_LIFECYCLE_MIGRATION = (
+    ROOT
+    / "backend/migrations/versions/20260829_0034_narration_voice_lifecycle_and_experiments.py"
+)
 EXPECTED_NEW_TABLES = {
     "narration_requests", "narration_request_sources", "novel_narration_settings",
     "narration_settings_snapshots", "narration_scope_overrides", "narration_cloud_consents",
@@ -98,6 +104,7 @@ EXPECTED_NEW_TABLES = {
     "document_narration_state", "narration_playback_progress", "voice_deletion_requests",
     "asset_tombstones", "narration_script_review_actions",
     "voice_action_receipts", "voice_reference_asset_links", "voice_previews",
+    "nano_voice_experiment_commands",
 }
 FOUNDATION_TABLES = EXPECTED_NEW_TABLES - {"narration_script_review_actions"}
 
@@ -109,6 +116,14 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
+    assert (
+        scripts.get_revision(NARRATION_VOICE_LIFECYCLE_REVISION).down_revision
+        == MODEL_EXECUTION_EVIDENCE_REVISION
+    )
+    assert (
+        scripts.get_revision(MODEL_EXECUTION_EVIDENCE_REVISION).down_revision
+        == PRIVATE_VOICE_DELETION_REVISION
+    )
     assert (
         scripts.get_revision(PRIVATE_VOICE_DELETION_REVISION).down_revision
         == OFFICIAL_VOICE_SELECTION_REVISION
@@ -226,6 +241,32 @@ def test_failed_segment_retry_migration_is_narrow_fix_forward_and_io_free() -> N
         "OLD.render_state='failed' AND NEW.render_state='queued'",
         "NEW.failure_code IS NULL",
         "DROP FUNCTION narration_failed_segment_retry_authorized_v1",
+    ):
+        assert marker in source
+
+
+def test_narration_voice_lifecycle_migration_freezes_real_nano_identity_and_reuse() -> None:
+    source = NARRATION_VOICE_LIFECYCLE_MIGRATION.read_text(encoding="utf-8")
+    for forbidden in (
+        "from backend.models",
+        "create_engine",
+        "requests.",
+        "subprocess",
+    ):
+        assert forbidden not in source
+    for marker in (
+        'revision = "20260829_0034"',
+        'down_revision = "20260829_0033"',
+        "nano_voice_experiment_commands",
+        "experimental_machine_validated",
+        "narration_guard_voice_preview_job_closure_v1",
+        "_install_voice_preview_job_closure(allow_nano_reuse=True)",
+        "source_preview.job_id<>job_row.id",
+        "command.reused_version IS TRUE",
+        "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX+MOSS-Audio-Tokenizer-Nano-ONNX",
+        "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+        "superseded",
+        "TTS35 experiment downgrade refused",
     ):
         assert marker in source
 
@@ -362,7 +403,7 @@ def test_script_review_action_migration_is_fix_forward_and_io_free() -> None:
 
 def test_metadata_contains_the_complete_foundation_without_native_enums() -> None:
     assert EXPECTED_NEW_TABLES <= set(Base.metadata.tables)
-    assert len(EXPECTED_NEW_TABLES) == 43
+    assert len(EXPECTED_NEW_TABLES) == 44
     for table_name in EXPECTED_NEW_TABLES:
         for column in Base.metadata.tables[table_name].columns:
             assert column.type.__class__.__name__ not in {"ENUM", "Enum"}

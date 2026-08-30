@@ -406,7 +406,10 @@ def test_media_fk_catalog_matches_the_explicit_root_and_guard_inventory(engine: 
                 "WHERE p.proname='narration_media_has_live_reference'"
             )
         )
-    internal_non_root = {("media_gc_deletion_plans", "asset_id")}
+    internal_non_root = {
+        ("media_gc_deletion_plans", "asset_id"),
+        ("voice_deletion_asset_plans", "asset_id"),
+    }
     expected_roots = {
         ("novels", "cover_asset_id"),
         ("voice_profile_versions", "reference_asset_id"),
@@ -792,8 +795,8 @@ def test_active_job_assets_are_persistent_roots_and_release_before_terminal(engi
                    job_kind,input_hash,idempotency_key,resource_class,base_priority,state,
                    max_attempts,attempt_count,progress_current)
                 VALUES
-                  (:id,:owner,:workspace,:novel,NULL,NULL,'t1e.media-root',:hash,:key,
-                   'cpu-transcode',0,'queued',3,0,0)
+                  (:id,:owner,:workspace,:novel,NULL,NULL,'embedding.index_batch',:hash,:key,
+                   'dashscope-embedding',0,'queued',3,0,0)
                 """
             ),
             {

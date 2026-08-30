@@ -24,21 +24,22 @@ describe("character modal tab keyboard navigation", () => {
   });
 
   it("keeps the real character modal tabs and 390px host reflow wired", () => {
-    const studioSource = readFileSync(
-      new URL("../workbench-studio.ts", import.meta.url),
+    const workspaceSource = readFileSync(
+      new URL("../characters/character-workspace.ts", import.meta.url),
       "utf8",
     );
     for (const token of [
-      '"aria-controls": "anw-character-profile-panel"',
-      '"aria-controls": "anw-character-voice-panel"',
+      '"aria-controls": `${baseId}-panel-${tab}`',
       'role: "tabpanel"',
-      "tabIndex: characterModalTab === \"profile\" ? 0 : -1",
-      "selectCharacterModalTabFromKey",
-      "onReturnFocus:",
-      '"aria-current": section === item ? "page" : undefined',
+      '"aria-labelledby": `${baseId}-tab-basic`',
+      "characterWorkspaceTabFromKey",
+      "props.voiceSlot({",
     ]) {
-      expect(studioSource).toContain(token);
+      expect(workspaceSource).toContain(token);
     }
+
+    const studioSource = readFileSync(new URL("../workbench-studio.ts", import.meta.url), "utf8");
+    expect(studioSource).toContain('"aria-current": section === item ? "page" : undefined');
 
     const styleSource = readFileSync(new URL("../styles.ts", import.meta.url), "utf8");
     expect(styleSource).toContain("@media (max-width: 720px)");

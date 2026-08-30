@@ -18,6 +18,7 @@ import type {
   VoiceSourceType,
 } from "./contracts";
 import { voiceSourceEvidenceIsUsable } from "./contracts";
+import { createNarrationIdempotencyKey } from "./idempotency-key";
 import {
   IDLE_VOICE_SOURCE_WORKFLOW,
   VoiceSourcePanel,
@@ -133,10 +134,7 @@ const DEFAULT_API: VoiceSourceWorkspaceApi = {
 
 
 export function createVoiceWorkspaceIdempotencyKey(kind: string): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  if (uuid) return `voice-${kind}-${uuid}`;
-  const entropy = Math.random().toString(36).slice(2).padEnd(12, "0");
-  return `voice-${kind}-${Date.now().toString(36)}-${entropy}`;
+  return createNarrationIdempotencyKey(`voice-${kind}`);
 }
 
 

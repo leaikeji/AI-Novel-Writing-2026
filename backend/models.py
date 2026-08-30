@@ -1487,7 +1487,10 @@ class VoiceProfileVersion(Base):
             "AND quality_state='accepted' AND locked_actor IS NOT NULL AND locked_at IS NOT NULL) OR "
             "(activation_basis='explicit_official_preset_selection' AND source_type='preset' "
             "AND validation_basis='not_required' AND quality_state='pending' "
-            "AND locked_actor IS NULL AND locked_at IS NULL))",
+            "AND locked_actor IS NULL AND locked_at IS NULL) OR "
+            "(activation_basis='experimental_machine_validated' AND source_type='generated' "
+            "AND validation_basis='machine_validated' AND quality_state='accepted' "
+            "AND model_run_id IS NOT NULL AND locked_actor IS NULL AND locked_at IS NULL))",
             name="ck_voice_profile_version_locked_shape",
         ),
         CheckConstraint(
@@ -1497,6 +1500,12 @@ class VoiceProfileVersion(Base):
         CheckConstraint(
             "source_type <> 'uploaded' OR reference_asset_id IS NOT NULL",
             name="ck_voice_profile_version_uploaded_reference",
+        ),
+        CheckConstraint(
+            "model_run_id IS NULL OR (state='locked' AND source_type='generated' "
+            "AND activation_basis='experimental_machine_validated' "
+            "AND validation_basis='machine_validated' AND quality_state='accepted')",
+            name="ck_voice_profile_version_model_run_shape",
         ),
     )
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -1512,6 +1521,9 @@ class VoiceProfileVersion(Base):
     preset_key: Mapped[str | None] = mapped_column(String(160))
     reference_asset_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"))
     preview_asset_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="SET NULL"))
+    model_run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("model_run_records.id", ondelete="RESTRICT")
+    )
     rights_record_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_rights_records.id", ondelete="RESTRICT"), nullable=False)
     description_digest_key_id: Mapped[str | None] = mapped_column(String(80))
     description_digest: Mapped[str | None] = mapped_column(String(64))
@@ -1895,6 +1907,187 @@ class VoicePreview(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NanoVoiceExperimentCommand(Base):
+    """Durable asynchronous Nano tuning request and CAS application evidence."""
+
+    __tablename__ = "nano_voice_experiment_commands"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["novel_id", "owner_id", "workspace_id"],
+            ["novels.id", "novels.owner_id", "novels.workspace_id"],
+            name="fk_nano_voice_experiment_novel_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["profile_id"],
+            ["voice_profiles.id"],
+            name="fk_nano_voice_experiment_profile",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_character_id", "novel_id"],
+            ["novel_characters.id", "novel_characters.novel_id"],
+            name="fk_nano_voice_experiment_character_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_nano_voice_experiment_version_profile",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["background_job_id", "owner_id", "workspace_id", "novel_id"],
+            ["background_jobs.id", "background_jobs.owner_id", "background_jobs.workspace_id", "background_jobs.novel_id"],
+            name="fk_nano_voice_experiment_job_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "workspace_id",
+            "idempotency_key",
+            name="uq_nano_voice_experiment_idempotency",
+        ),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_nano_voice_experiment_fixed_local_scope",
+        ),
+        CheckConstraint(
+            "target_kind IN ('narrator','character')",
+            name="ck_nano_voice_experiment_target_kind",
+        ),
+        CheckConstraint(
+            "(target_kind='narrator' AND target_character_id IS NULL "
+            "AND expected_binding_version IS NULL) OR "
+            "(target_kind='character' AND target_character_id IS NOT NULL "
+            "AND expected_binding_version IS NOT NULL AND expected_binding_version>=0)",
+            name="ck_nano_voice_experiment_target_shape",
+        ),
+        CheckConstraint(
+            "expected_settings_version>=0",
+            name="ck_nano_voice_experiment_expected_settings_version",
+        ),
+        CheckConstraint(
+            "base_preset_id ~ '^onnx\\.[A-Za-z][A-Za-z0-9]{0,79}$'",
+            name="ck_nano_voice_experiment_preset_id",
+        ),
+        CheckConstraint(
+            "idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$'",
+            name="ck_nano_voice_experiment_idempotency_key",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$' "
+            "AND parameters_digest ~ '^[0-9a-f]{64}$' "
+            "AND input_digest ~ '^[0-9a-f]{64}$' "
+            "AND fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_nano_voice_experiment_digests",
+        ),
+        CheckConstraint(
+            "input_digest_key_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$'",
+            name="ck_nano_voice_experiment_digest_key",
+        ),
+        CheckConstraint(
+            "parameters_json ?& ARRAY['schema_version','seed',"
+            "'text_temperature_milli','text_top_p_milli','text_top_k',"
+            "'audio_temperature_milli','audio_top_p_milli','audio_top_k',"
+            "'audio_repetition_penalty_milli','sample_mode','max_new_frames'] "
+            "AND parameters_json->>'schema_version'='nano-decode-parameters/3' "
+            "AND parameters_json->>'sample_mode'='full' "
+            "AND parameters_json->>'max_new_frames'='375'",
+            name="ck_nano_voice_experiment_parameters_shape",
+        ),
+        CheckConstraint(
+            "state IN ('pending','running','ready_applied','ready_unapplied','failed')",
+            name="ck_nano_voice_experiment_state",
+        ),
+        CheckConstraint(
+            "(state='pending' AND started_at IS NULL AND completed_at IS NULL "
+            "AND applied_at IS NULL AND failure_code IS NULL "
+            "AND created_at<=updated_at) OR "
+            "(state='running' AND started_at IS NOT NULL AND started_at>=created_at "
+            "AND completed_at IS NULL AND applied_at IS NULL AND failure_code IS NULL "
+            "AND updated_at>=started_at) OR "
+            "(state='ready_applied' AND started_at IS NOT NULL AND completed_at IS NOT NULL "
+            "AND completed_at>=started_at AND applied_at IS NOT NULL "
+            "AND applied_at>=completed_at AND updated_at>=applied_at "
+            "AND failure_code IS NULL) OR "
+            "(state='ready_unapplied' AND started_at IS NOT NULL AND completed_at IS NOT NULL "
+            "AND completed_at>=started_at AND applied_at IS NULL "
+            "AND updated_at>=completed_at AND failure_code IS NULL) OR "
+            "(state='failed' AND started_at IS NOT NULL AND completed_at IS NOT NULL "
+            "AND completed_at>=started_at AND applied_at IS NULL "
+            "AND updated_at>=completed_at AND failure_code IN ("
+            "'NANO_EXPERIMENT_MODEL_UNAVAILABLE','NANO_EXPERIMENT_SYNTHESIS_FAILED',"
+            "'NANO_EXPERIMENT_AUDIO_INVALID','NANO_EXPERIMENT_MODEL_IDENTITY_MISMATCH',"
+            "'NANO_EXPERIMENT_PARAMETERS_MISMATCH','NANO_EXPERIMENT_OUTPUT_HASH_MISMATCH',"
+            "'NANO_EXPERIMENT_DATABASE_FAILED'))",
+            name="ck_nano_voice_experiment_lifecycle",
+        ),
+        CheckConstraint(
+            "(state<>'ready_applied' AND applied_settings_version IS NULL "
+            "AND applied_binding_version IS NULL) OR "
+            "(state='ready_applied' AND applied_settings_version IS NOT NULL "
+            "AND applied_settings_version>0 AND "
+            "((target_kind='narrator' AND applied_binding_version IS NULL) OR "
+            "(target_kind='character' AND applied_binding_version IS NOT NULL "
+            "AND applied_binding_version>0)))",
+            name="ck_nano_voice_experiment_applied_versions",
+        ),
+        Index(
+            "ix_nano_voice_experiments_scope_created",
+            "owner_id",
+            "workspace_id",
+            "novel_id",
+            "created_at",
+        ),
+        Index(
+            "ix_nano_voice_experiments_state",
+            "state",
+            "updated_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), nullable=False
+    )
+    version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    preview_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("voice_previews.id", ondelete="RESTRICT"), nullable=False
+    )
+    background_job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    base_preset_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    target_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_character_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    expected_settings_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expected_binding_version: Mapped[int | None] = mapped_column(BigInteger)
+    applied_settings_version: Mapped[int | None] = mapped_column(BigInteger)
+    applied_binding_version: Mapped[int | None] = mapped_column(BigInteger)
+    parameters_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    parameters_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_digest_key_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    reused_version: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -3076,7 +3269,7 @@ class VoiceDeletionRequest(Base):
     __table_args__ = (
         CheckConstraint(
             "state IN ('grace_pending','requested','cancelled','live_deleting',"
-            "'live_deleted_backup_pending','completed','failed')",
+            "'live_deleted_backup_pending','completed','failed','superseded')",
             name="ck_voice_deletion_request_state",
         ),
         CheckConstraint(
@@ -3097,6 +3290,32 @@ class VoiceDeletionRequest(Base):
             "external_backup_status IN ('unmanaged','managed_pending','managed_expired')",
             name="ck_voice_deletion_request_backup_status",
         ),
+        CheckConstraint(
+            "(state='superseded' AND superseded_at IS NOT NULL "
+            "AND failure_code IN ('VOICE_DELETE_PROFILE_CHANGED',"
+            "'VOICE_DELETE_IMPACT_CHANGED','VOICE_DELETE_IMPACT_EXPIRED',"
+            "'VOICE_DELETE_JOB_DRAIN_TIMEOUT')) OR "
+            "(state<>'superseded' AND superseded_at IS NULL)",
+            name="ck_voice_deletion_request_superseded_shape",
+        ),
+        CheckConstraint(
+            "(job_drain_started_at IS NULL AND job_drain_deadline IS NULL) OR "
+            "(job_drain_started_at IS NOT NULL AND job_drain_deadline IS NOT NULL "
+            "AND job_drain_deadline>job_drain_started_at)",
+            name="ck_voice_deletion_request_job_drain_shape",
+        ),
+        CheckConstraint(
+            "(state='failed' AND failure_code IN ("
+            "'VOICE_DELETE_WAITING_FOR_JOBS','VOICE_DELETE_UNLINK_FAILED',"
+            "'VOICE_DELETE_STORAGE_TEMPORARY','VOICE_DELETE_FINALIZE_FAILED',"
+            "'VOICE_DELETE_SCOPE_INVALID','VOICE_DELETE_FILE_IDENTITY_INVALID',"
+            "'VOICE_DELETE_ASSET_PLAN_INVALID')) OR "
+            "(state='superseded' AND failure_code IN ("
+            "'VOICE_DELETE_PROFILE_CHANGED','VOICE_DELETE_IMPACT_CHANGED',"
+            "'VOICE_DELETE_IMPACT_EXPIRED','VOICE_DELETE_JOB_DRAIN_TIMEOUT')) OR "
+            "(state NOT IN ('failed','superseded') AND failure_code IS NULL)",
+            name="ck_voice_deletion_request_failure_shape",
+        ),
         Index(
             "ix_voice_deletion_requests_scope_profile_state",
             "owner_id",
@@ -3108,7 +3327,6 @@ class VoiceDeletionRequest(Base):
             "uq_voice_deletion_requests_idempotency",
             "owner_id",
             "workspace_id",
-            "command",
             "idempotency_key",
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
@@ -3157,6 +3375,9 @@ class VoiceDeletionRequest(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_code: Mapped[str | None] = mapped_column(String(96))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    job_drain_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    job_drain_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

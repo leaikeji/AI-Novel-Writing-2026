@@ -5,6 +5,7 @@ import {
   NarrationApiError,
   buildUploadedVoiceVersionFormData,
   createNarrationCloudConsent,
+  createOfficialVoicePreview,
   createPresetVoiceVersion,
   createNarrationWorkflow,
   createUploadedVoiceVersion,
@@ -788,6 +789,38 @@ describe("narration settings API client", () => {
     expect(result.status).toBe("running");
     expect(result.asset).toBeNull();
     expect(fetchMock.mock.calls[0][0]).toContain(`/voice-previews/${previewId}`);
+  });
+
+  it("creates an optional official preview without sending binding state", async () => {
+    const previewId = "10000000-0000-4000-8000-000000000007";
+    fetchMock.mockResolvedValue(response({
+      contract_version: NARRATION_SETTINGS_API_VERSION,
+      preview_id: previewId,
+      profile_id: PROFILE_ID,
+      version_id: VERSION_ID,
+      status: "queued",
+      job_id: "10000000-0000-4000-8000-000000000008",
+      asset: null,
+      temporary: true,
+      expires_at: null,
+      failure_code: null,
+    }, 202));
+
+    const result = await createOfficialVoicePreview(
+      NOVEL_ID,
+      { preset_id: OFFICIAL_PRESET_EVIDENCE[0].presetId },
+      "official-preview-0001",
+    );
+
+    expect(result.status).toBe("queued");
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/ai-novel-world-2026/novels/${NOVEL_ID}/official-voice-previews`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ preset_id: OFFICIAL_PRESET_EVIDENCE[0].presetId }),
+        headers: expect.objectContaining({ "Idempotency-Key": "official-preview-0001" }),
+      }),
+    );
   });
 
   it("rejects unsupported or empty reference audio before network I/O", async () => {

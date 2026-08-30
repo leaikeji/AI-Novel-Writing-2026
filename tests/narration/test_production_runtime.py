@@ -114,7 +114,7 @@ async def production_owner():
 
 
 @pytest.mark.asyncio
-async def test_database_probe_requires_exact_frozen_alembic_head(
+async def test_database_probe_accepts_minimum_and_known_linear_descendant(
     production_owner,
 ) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -124,7 +124,13 @@ async def test_database_probe_requires_exact_frozen_alembic_head(
         )
         connection.execute(
             text("insert into alembic_version(version_num) values (:revision)"),
-            {"revision": production_owner.EXPECTED_DATABASE_REVISION},
+            {"revision": production_owner.MINIMUM_DATABASE_REVISION},
+        )
+    production_owner._verify_database(engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("update alembic_version set version_num = '20260829_0033'")
         )
     production_owner._verify_database(engine)
 
