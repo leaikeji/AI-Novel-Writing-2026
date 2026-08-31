@@ -1533,13 +1533,13 @@ export function ensureNovelStyles(): void {
     .mb-role-section .mb-subtitle-row .qwenpaw-btn { color:#fff!important; border:0!important; border-radius:7px!important; background:#ff7548!important; box-shadow:0 5px 12px rgba(255,117,72,.2)!important; }
     .mb-role-section.is-supporting .mb-subtitle-row .qwenpaw-btn { background:#5c7cea!important; box-shadow:0 5px 12px rgba(92,124,234,.2)!important; }
     .mb-role-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
-    .mb-role-card { position:relative; display:flex; min-width:0; min-height:156px; align-items:stretch; border:1px solid #eee7e3; border-radius:12px; padding:14px 15px; background:#fff; box-shadow:0 4px 13px rgba(31,41,55,.04); transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease; }
+    .mb-role-card { position:relative; display:flex; min-width:0; min-height:144px; align-items:stretch; border:1px solid #eee7e3; border-radius:12px; padding:14px; background:#fff; box-shadow:0 4px 13px rgba(31,41,55,.04); transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease; }
     .mb-role-section.is-supporting .mb-role-card { border-color:#e3e6fa; }
-    .mb-role-card:hover,.mb-role-card:focus-within { border-color:#ffc7b5; box-shadow:0 10px 25px rgba(31,41,55,.09); transform:translateY(-2px); }
-    .mb-role-section.is-supporting .mb-role-card:hover,.mb-role-section.is-supporting .mb-role-card:focus-within { border-color:#bfc8f5; }
+    .mb-role-card:hover { border-color:#ffc7b5; box-shadow:0 10px 25px rgba(31,41,55,.09); transform:translateY(-2px); }
+    .mb-role-section.is-supporting .mb-role-card:hover { border-color:#bfc8f5; }
     .mb-role-card:has(.mb-role-card-main:focus-visible) { border-color:#ff9f7d; box-shadow:0 0 0 3px rgba(255,117,72,.13),0 10px 25px rgba(31,41,55,.08); }
     .mb-role-section.is-supporting .mb-role-card:has(.mb-role-card-main:focus-visible) { border-color:#9eacef; box-shadow:0 0 0 3px rgba(92,124,234,.12),0 10px 25px rgba(31,41,55,.08); }
-    .mb-role-card-main { display:flex; min-width:0; flex:1; align-items:stretch; gap:13px; border:0; border-radius:9px; padding:0; outline:0; color:inherit; background:transparent; cursor:pointer; text-align:left; }
+    .mb-role-card-main { display:flex; min-width:0; flex:1; align-items:stretch; gap:12px; border:0; border-radius:9px; padding:0; outline:0; color:inherit; background:transparent; cursor:pointer; text-align:left; }
     .mb-role-card-main:focus { outline:0; }
     .mb-role-avatar { display:grid; width:48px; height:48px; flex:0 0 48px; place-items:center; border-radius:14px; color:#fff; background:linear-gradient(145deg,#ff8a61,#ef6b40); box-shadow:0 7px 16px rgba(239,107,64,.18); font-size:17px; font-weight:750; }
     .is-supporting .mb-role-avatar { background:linear-gradient(145deg,#7d8ded,#5d70d7); box-shadow:0 7px 16px rgba(93,112,215,.18); }
@@ -1553,9 +1553,9 @@ export function ensureNovelStyles(): void {
     .mb-role-open-hint { display:flex; align-items:center; justify-content:space-between; margin-top:auto; padding-top:5px; color:#ee7048; font-size:11px; font-weight:650; }
     .is-supporting .mb-role-open-hint { color:#6074dc; }
     .mb-role-open-hint>span { transition:transform .18s ease; }
-    .mb-role-card:hover .mb-role-open-hint>span,.mb-role-card:focus-within .mb-role-open-hint>span { transform:translateX(3px); }
+    .mb-role-card:hover .mb-role-open-hint>span,.mb-role-card:has(.mb-role-card-main:focus-visible) .mb-role-open-hint>span { transform:translateX(3px); }
     .mb-role-card > .qwenpaw-btn { position:absolute; top:8px; right:8px; width:28px; min-width:28px; border-radius:8px!important; padding:0!important; color:#c4c6cb!important; opacity:0; transition:opacity .16s ease,color .16s ease,background .16s ease; }
-    .mb-role-card:hover > .qwenpaw-btn,.mb-role-card:focus-within > .qwenpaw-btn { opacity:1; }
+    .mb-role-card:hover > .qwenpaw-btn,.mb-role-card:has(.mb-role-card-main:focus-visible) > .qwenpaw-btn,.mb-role-card > .qwenpaw-btn:focus-visible { opacity:1; }
     .mb-role-card > .qwenpaw-btn:hover { color:#e95d5d!important; background:#fff1f0!important; }
     .mb-inline-empty { display:grid; min-height:86px; place-items:center; border:1px dashed rgba(145,149,158,.3); border-radius:7px; color:#a0a4ab; }
     .mb-relationship-panel,.mb-relationship-workspace { display:grid; gap:16px; min-width:0; }

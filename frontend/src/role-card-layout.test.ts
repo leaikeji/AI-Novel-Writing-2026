@@ -12,10 +12,11 @@ describe("character role card layout", () => {
     expect(styleSource).toContain(".mb-role-card-main:focus { outline:0;");
     expect(styleSource).toContain(".mb-role-card:has(.mb-role-card-main:focus-visible)");
     expect(styleSource).toContain(".mb-role-section.is-supporting .mb-role-card:has(.mb-role-card-main:focus-visible)");
+    expect(styleSource).not.toContain(".mb-role-card:hover,.mb-role-card:focus-within");
   });
 
   it("stretches the copy to the card height and keeps compact symmetric gutters", () => {
-    expect(styleSource).toMatch(/\.mb-role-card \{[^}]*min-height:156px;[^}]*padding:14px 15px;/);
+    expect(styleSource).toMatch(/\.mb-role-card \{[^}]*min-height:144px;[^}]*padding:14px;/);
     expect(styleSource).toMatch(/\.mb-role-card-main \{[^}]*align-items:stretch;/);
     expect(styleSource).toMatch(/\.mb-role-copy \{[^}]*min-height:100%;/);
     expect(styleSource).not.toMatch(/\.mb-role-card-main \{[^}]*align-items:flex-start;/);

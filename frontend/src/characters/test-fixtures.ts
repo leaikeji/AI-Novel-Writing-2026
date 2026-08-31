@@ -1,8 +1,8 @@
-import type { CharacterWorkspaceV1 } from "./contracts";
+import type { CharacterWorkspaceV2 } from "./contracts";
 
 export function characterWorkspace(
-  overrides: Partial<CharacterWorkspaceV1> = {},
-): CharacterWorkspaceV1 {
+  overrides: Partial<CharacterWorkspaceV2> = {},
+): CharacterWorkspaceV2 {
   const primaryTimeline = {
     id: "timeline-main",
     name: "主时间线",
@@ -26,12 +26,11 @@ export function characterWorkspace(
       public_identity: "书店店员",
       true_identity: "守门人",
       goals: ["寻找失踪的姐姐"],
-      custom_extension: "必须保留",
     },
     profile_schema_version: 2,
   } as const;
   return {
-    schema_version: "character-workspace/1",
+    schema_version: "character-workspace/2",
     novel_id: "novel-1",
     character_catalog_version: 11,
     story_ledger_version: 19,
@@ -93,16 +92,82 @@ export function characterWorkspace(
           details: {},
           story_sequence: 12,
           source_revision_id: "chapter-revision-12",
+          source_document_id: "chapter-12",
+          story_time: null,
+          created_at: "2026-08-31T12:00:00Z",
+          effective_state: "current",
+          health: "ok",
+          source: null,
         },
       ],
       conflicts: [],
       ambiguous_fact_ids: [],
     },
+    writing_state: {
+      as_of: {
+        timeline_id: primaryTimeline.id,
+        narrative_cutoff: 12,
+        story_time: null,
+      },
+      slots: [
+        {
+          key: "goal",
+          label: "当前目标",
+          mode: "multiple",
+          values: [
+            {
+              fact_id: "fact-1",
+              object_text: "开始主动承担风险",
+              story_sequence: 12,
+              story_time: null,
+              source: null,
+            },
+          ],
+          health: "ok",
+        },
+      ],
+      recent_changes: [
+        {
+          id: "fact-1",
+          fact_type: "character_state",
+          timeline_id: primaryTimeline.id,
+          character_id: "character-1",
+          character_instance_id: "instance-main",
+          relationship_id: null,
+          dimension: "勇气",
+          event_kind: "changed",
+          predicate: "勇气变化",
+          object_text: "开始主动承担风险",
+          details: {},
+          story_sequence: 12,
+          source_revision_id: "chapter-revision-12",
+          source_document_id: "chapter-12",
+          story_time: null,
+          created_at: "2026-08-31T12:00:00Z",
+          effective_state: "current",
+          health: "ok",
+          source: null,
+        },
+      ],
+      risk_summary: {
+        conflict_count: 0,
+        ambiguous_count: 0,
+        invalid_source_count: 0,
+      },
+      history_summary: {
+        total: 1,
+        current: 1,
+        historical: 0,
+        superseded: 0,
+        source_invalid: 0,
+        batch_reverted: 0,
+      },
+    },
     ...overrides,
   };
 }
 
-export function multiTimelineWorkspace(): CharacterWorkspaceV1 {
+export function multiTimelineWorkspace(): CharacterWorkspaceV2 {
   const base = characterWorkspace();
   const branch = {
     id: "timeline-branch",

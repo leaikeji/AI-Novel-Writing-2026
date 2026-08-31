@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 from uuid import UUID
@@ -21,6 +22,7 @@ class CharacterWorkspaceErrorCode(str, Enum):
     CHARACTER_INSTANCE_NOT_FOUND = "character_instance_not_found"
     CHARACTER_INSTANCE_REQUIRED = "character_instance_required"
     CHARACTER_INSTANCE_CONFLICT = "character_instance_conflict"
+    INVALID_CURSOR = "invalid_cursor"
 
 
 class CharacterWorkspaceError(ValueError):
@@ -140,6 +142,105 @@ class ProjectionConflictView(_ReadModel):
     reason: str
 
 
+FactEffectiveState = Literal[
+    "current",
+    "historical",
+    "superseded",
+    "source_invalid",
+    "batch_reverted",
+]
+FactHealth = Literal["ok", "conflict", "ambiguous"]
+
+
+class FactSourceView(_ReadModel):
+    document_id: UUID
+    document_title: str
+    document_position: int
+    revision_id: UUID
+    revision_is_current: bool
+    source_content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_coordinate: Literal["unicode-codepoint-v1"] = "unicode-codepoint-v1"
+    source_start: int | None = Field(default=None, ge=0)
+    source_end: int | None = Field(default=None, gt=0)
+    source_range_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_excerpt: str = Field(default="", max_length=500)
+    source_excerpt_truncated: bool = False
+    binding_state: str | None = None
+    proposal_item_id: UUID | None = None
+    commit_batch_id: UUID | None = None
+
+
+class ProjectedFactViewV2(ProjectedFactView):
+    source_document_id: UUID | None = None
+    story_time: dict[str, JsonValue] | None = None
+    created_at: datetime
+    effective_state: FactEffectiveState
+    health: FactHealth
+    source: FactSourceView | None = None
+
+
+class CharacterProjectedStateV2(_ReadModel):
+    timeline_id: UUID
+    narrative_cutoff: int | None = None
+    current_facts: tuple[ProjectedFactViewV2, ...] = ()
+    conflicts: tuple[ProjectionConflictView, ...] = ()
+    ambiguous_fact_ids: tuple[UUID, ...] = ()
+
+
+class WritingStateAsOf(_ReadModel):
+    timeline_id: UUID
+    narrative_cutoff: int | None = None
+    story_time: dict[str, JsonValue] | None = None
+
+
+class WritingStateValue(_ReadModel):
+    fact_id: UUID
+    object_text: str
+    story_sequence: int | None = None
+    story_time: dict[str, JsonValue] | None = None
+    source: FactSourceView | None = None
+
+
+class WritingStateSlot(_ReadModel):
+    key: Literal[
+        "location",
+        "goal",
+        "health",
+        "emotion",
+        "identity",
+        "knowledge",
+        "possession",
+        "relationship",
+    ]
+    label: str
+    mode: Literal["single", "multiple"]
+    values: tuple[WritingStateValue, ...] = ()
+    health: Literal["ok", "conflicted", "ambiguous", "missing"]
+
+
+class WritingStateRiskSummary(_ReadModel):
+    conflict_count: int = Field(ge=0)
+    ambiguous_count: int = Field(ge=0)
+    invalid_source_count: int = Field(ge=0)
+
+
+class FactHistorySummary(_ReadModel):
+    total: int = Field(ge=0)
+    current: int = Field(ge=0)
+    historical: int = Field(ge=0)
+    superseded: int = Field(ge=0)
+    source_invalid: int = Field(ge=0)
+    batch_reverted: int = Field(ge=0)
+
+
+class CharacterWritingState(_ReadModel):
+    as_of: WritingStateAsOf
+    slots: tuple[WritingStateSlot, ...]
+    recent_changes: tuple[ProjectedFactViewV2, ...] = ()
+    risk_summary: WritingStateRiskSummary
+    history_summary: FactHistorySummary
+
+
 class CharacterProjectedState(_ReadModel):
     timeline_id: UUID
     narrative_cutoff: int | None = None
@@ -164,6 +265,34 @@ class CharacterWorkspaceV1(_ReadModel):
     chapter_references: tuple[ChapterCharacterReference, ...]
     voice_binding: CharacterVoiceBindingView | None = None
     projected_state: CharacterProjectedState
+
+
+class CharacterWorkspaceV2(_ReadModel):
+    schema_version: Literal["character-workspace/2"] = "character-workspace/2"
+    novel_id: UUID
+    character_catalog_version: int
+    story_ledger_version: int
+    timeline_mode: Literal["single", "multiple"]
+    character: CharacterRootView
+    selected_timeline: TimelineView
+    selected_instance: CharacterInstanceView
+    timelines: tuple[TimelineView, ...]
+    instances: tuple[CharacterInstanceView, ...]
+    aliases: tuple[CharacterAliasView, ...]
+    relationships: tuple[CharacterRelationshipView, ...]
+    chapter_references: tuple[ChapterCharacterReference, ...]
+    voice_binding: CharacterVoiceBindingView | None = None
+    projected_state: CharacterProjectedStateV2
+    writing_state: CharacterWritingState
+
+
+class CharacterFactHistoryPage(_ReadModel):
+    schema_version: Literal["character-fact-history/1"] = (
+        "character-fact-history/1"
+    )
+    items: tuple[ProjectedFactViewV2, ...]
+    next_cursor: str | None = None
+    total_summary: FactHistorySummary
 
 
 class ArchiveImpactReference(_ReadModel):

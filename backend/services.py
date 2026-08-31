@@ -2123,12 +2123,29 @@ def _reconcile_story_facts_for_revision(
     restored: bool = False,
 ) -> None:
     now = datetime.now(timezone.utc)
-    for binding, fact in _document_fact_binding_rows(session, document_id, lock=True):
+    rows = _document_fact_binding_rows(session, document_id, lock=True)
+    batch_ids = {
+        binding.commit_batch_id
+        for binding, _fact in rows
+        if binding.commit_batch_id is not None
+    }
+    reverted_batch_ids = set(
+        session.scalars(
+            select(IntelligenceCommitBatch.id).where(
+                IntelligenceCommitBatch.id.in_(batch_ids),
+                IntelligenceCommitBatch.state == "reverted",
+            )
+        )
+    ) if batch_ids else set()
+    for binding, fact in rows:
         if binding.source_content_hash == target_revision.content_hash:
             binding.validity_state = "source_restored" if restored else "current"
             binding.invalidated_at = None
             binding.restored_at = now if restored else None
-            fact.status = "source_restored" if restored else "active"
+            if binding.commit_batch_id in reverted_batch_ids:
+                fact.status = "superseded"
+            else:
+                fact.status = "source_restored" if restored else "active"
         else:
             binding.validity_state = "source_superseded"
             binding.invalidated_at = now

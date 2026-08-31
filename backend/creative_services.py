@@ -1206,6 +1206,11 @@ def update_novel_character(
     description: str,
     details: dict[str, Any],
 ) -> dict[str, Any]:
+    novel = session.scalar(
+        select(Novel).where(Novel.id == novel_id).with_for_update()
+    )
+    if novel is None:
+        raise NotFoundError(f"novel {novel_id} not found")
     character = session.scalar(
         select(NovelCharacter)
         .where(NovelCharacter.id == character_id, NovelCharacter.novel_id == novel_id)
@@ -1215,27 +1220,14 @@ def update_novel_character(
         raise NotFoundError(f"character {character_id} not found")
     if character.version != expected_version:
         raise EntityConflictError(_character_payload(character))
-    if character.lifecycle_state != "active":
-        raise ValidationError("已归档角色不能直接编辑")
-    if role_type not in ROLE_TYPES:
-        raise ValidationError("角色类型无效")
-    clean_name = _clean_title(name, "角色姓名")
-    duplicate = session.scalar(
-        select(NovelCharacter.id).where(
-            NovelCharacter.novel_id == novel_id,
-            NovelCharacter.name == clean_name,
-            NovelCharacter.id != character_id,
-        )
+    validated = validate_character_root_update(
+        session,
+        character,
+        role_type=role_type,
+        name=name,
+        description=description,
+        details_patch=details,
     )
-    if duplicate:
-        raise ValidationError("当前小说已存在同名角色")
-    novel = session.get(Novel, novel_id)
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
-    # Character forms expose only a subset of the extensible details object.
-    # Treat incoming details as a patch so editing one visible field never
-    # erases hidden author or generation metadata.
-    merged_details = {**dict(character.details or {}), **dict(details or {})}
     result = save_character_root(
         session,
         novel_id,
@@ -1244,16 +1236,56 @@ def update_novel_character(
         expected_character_version=expected_version,
         operation_key=f"character-update:{character_id}:{uuid4()}",
         source_kind="manual",
-        role_type=role_type,
-        name=clean_name,
-        description=description.strip(),
-        details=merged_details,
+        role_type=validated["role_type"],
+        name=validated["name"],
+        description=validated["description"],
+        details=validated["details"],
         lifecycle_state=character.lifecycle_state,
         position=character.position,
         change_set={"edited_fields": ["role_type", "name", "description", "details"]},
     )
     session.commit()
     return _character_payload(result.character)
+
+
+def validate_character_root_update(
+    session: Session,
+    character: NovelCharacter,
+    *,
+    role_type: str,
+    name: str,
+    description: str,
+    details_patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate and normalize the shared editable character-root fields.
+
+    Both the legacy character PUT and the atomic workspace command use this
+    boundary so the latter cannot bypass lifecycle, duplicate-name, or
+    extensible-details semantics.
+    """
+
+    if character.lifecycle_state != "active":
+        raise ValidationError("已归档角色不能直接编辑")
+    if role_type not in ROLE_TYPES:
+        raise ValidationError("角色类型无效")
+    clean_name = _clean_title(name, "角色姓名")
+    duplicate = session.scalar(
+        select(NovelCharacter.id).where(
+            NovelCharacter.novel_id == character.novel_id,
+            NovelCharacter.name == clean_name,
+            NovelCharacter.id != character.id,
+        )
+    )
+    if duplicate:
+        raise ValidationError("当前小说已存在同名角色")
+    if not isinstance(details_patch, dict):
+        raise ValidationError("人物扩展资料必须是对象")
+    return {
+        "role_type": role_type,
+        "name": clean_name,
+        "description": description.strip(),
+        "details": {**dict(character.details or {}), **dict(details_patch)},
+    }
 
 
 def delete_novel_character(

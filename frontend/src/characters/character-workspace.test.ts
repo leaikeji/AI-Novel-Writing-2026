@@ -30,7 +30,7 @@ describe("formal character workspace", () => {
     const root = harness.render(Component, { workspace: characterWorkspace() });
     const tabs = findAll(root, (element) => element.props.role === "tab");
 
-    expect(tabs.map((tab) => textContent(tab.children[0]))).toEqual(["基础资料", "本线档案", "成长与状态", "声音"]);
+    expect(tabs.map((tab) => textContent(tab.children[0]))).toEqual(["基础资料", "当前线设定", "状态与经历", "声音"]);
     expect(tabs.map((tab) => tab.props["aria-controls"])).toHaveLength(4);
     expect(findAll(root, (element) => element.type === "select")).toHaveLength(1);
     expect(textContent(root)).not.toContain("instance-main");
@@ -64,18 +64,85 @@ describe("formal character workspace", () => {
     const Component = createCharacterWorkspaceDialog(harness.React);
     let root = harness.render(Component, { workspace: characterWorkspace() });
     const growthTab = findAll(root, (element) =>
-      element.props.role === "tab" && textContent(element).startsWith("成长与状态"),
+      element.props.role === "tab" && textContent(element).startsWith("状态与经历"),
     )[0];
     (growthTab.props.onClick as () => void)();
     root = harness.render(Component, { workspace: characterWorkspace() });
     const growthPanel = findAll(root, (element) => element.props.id === "character-workspace-character-1-panel-growth")[0];
 
     expect(growthPanel.props["aria-label"]).toContain("只读");
-    expect(textContent(growthPanel)).toContain("勇气变化");
-    expect(textContent(growthPanel)).toContain("事实维度：勇气");
+    expect(textContent(growthPanel)).toContain("当前写作状态");
+    expect(textContent(growthPanel)).toContain("勇气");
     expect(textContent(growthPanel)).toContain("开始主动承担风险");
-    expect(textContent(growthPanel)).toContain("1 条 · 只读");
+    expect(textContent(growthPanel)).toContain("查看全部事实（1）");
     expect(findAll(growthPanel, (element) => ["input", "textarea", "select"].includes(String(element.type)))).toHaveLength(0);
+  });
+
+  it("loads the auditable fact history only after the author expands it", async () => {
+    const workspace = characterWorkspace();
+    const onLoadFacts = vi.fn().mockResolvedValue({
+      schema_version: "character-fact-history/1",
+      items: workspace.projected_state.current_facts,
+      next_cursor: null,
+      total_summary: workspace.writing_state.history_summary,
+    });
+    const harness = createReactHarness();
+    const Component = createCharacterWorkspaceDialog(harness.React);
+    let root = harness.render(Component, { workspace, onLoadFacts });
+    (findButton(root, "状态与经历").props.onClick as () => void)();
+    root = harness.render(Component, { workspace, onLoadFacts });
+
+    expect(onLoadFacts).not.toHaveBeenCalled();
+    (findButton(root, "查看全部事实（1）").props.onClick as () => void)();
+    root = harness.render(Component, { workspace, onLoadFacts });
+    harness.commitEffects();
+    await settle();
+    root = harness.render(Component, { workspace, onLoadFacts });
+
+    expect(onLoadFacts).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 20,
+      effective_state: "all",
+      health: "all",
+    }));
+    expect(textContent(root)).toContain("历史、失效与已撤销事实保留用于审计");
+    expect(textContent(root)).toContain("开始主动承担风险");
+  });
+
+  it("creates a replacement fact instead of editing the old fact", async () => {
+    const workspace = characterWorkspace();
+    const onCorrectFact = vi.fn().mockResolvedValue({
+      ...workspace,
+      story_ledger_version: 20,
+    });
+    const harness = createReactHarness();
+    const Component = createCharacterWorkspaceDialog(harness.React);
+    let root = harness.render(Component, { workspace, onCorrectFact });
+    (findButton(root, "状态与经历").props.onClick as () => void)();
+    root = harness.render(Component, { workspace, onCorrectFact });
+    (findButton(root, "修正").props.onClick as () => void)();
+    root = harness.render(Component, { workspace, onCorrectFact });
+    let drawer = findAll(root, (element) => element.props.className === "anw-character-drawer anw-character-correction")[0];
+    const textareas = findAll(drawer, (element) => element.type === "textarea");
+    (textareas[0].props.onChange as (event: { target: { value: string } }) => void)({
+      target: { value: "开始主动保护同伴" },
+    });
+    (textareas[1].props.onChange as (event: { target: { value: string } }) => void)({
+      target: { value: "章节明确写出新的选择" },
+    });
+    root = harness.render(Component, { workspace, onCorrectFact });
+    drawer = findAll(root, (element) => element.props.className === "anw-character-drawer anw-character-correction")[0];
+    (findButton(drawer, "创建替代事实").props.onClick as () => void)();
+    await settle();
+
+    expect(onCorrectFact).toHaveBeenCalledWith(
+      "fact-1",
+      expect.objectContaining({
+        schema_version: "story-fact-correction/1",
+        expected_story_ledger_version: 19,
+        reason: "章节明确写出新的选择",
+        replacement: { object_text: "开始主动保护同伴" },
+      }),
+    );
   });
 
   it("renders voice UI only through the injected slot", () => {
@@ -88,6 +155,46 @@ describe("formal character workspace", () => {
 
     expect(voiceSlot).toHaveBeenCalledWith(expect.objectContaining({ characterId: "character-1" }));
     expect(textContent(root)).toContain("共用声音设置");
+  });
+
+  it("shows only close on a clean voice tab and preserves draft actions when other fields are dirty", () => {
+    const voiceSlot = vi.fn(() => ({ type: "voice-owner", props: {}, children: ["共用声音设置"] }));
+    const onRequestClose = vi.fn();
+    const onSave = vi.fn();
+    const props: CharacterWorkspaceDialogProps = {
+      workspace: characterWorkspace(),
+      voiceSlot,
+      onRequestClose,
+      onSave,
+    };
+    const harness = createReactHarness();
+    const Component = createCharacterWorkspaceDialog(harness.React);
+    let root = harness.render(Component, props);
+    (findButton(root, "声音").props.onClick as () => void)();
+    root = harness.render(Component, props);
+    let footer = findAll(root, (element) => (
+      element.type === "footer" && element.props.className === "anw-character-workspace-footer"
+    ))[0];
+    expect(findAll(footer, (element) => element.type === "button").map(textContent))
+      .toEqual(["关闭"]);
+    expect(textContent(footer)).toContain("声音设置由共用声音组件独立保存");
+
+    (findButton(root, "基础资料").props.onClick as () => void)();
+    root = harness.render(Component, props);
+    const nameInput = findAll(root, (element) => String(element.props.id).endsWith("field-character-name"))[0];
+    (nameInput.props.onChange as (event: { target: { value: string } }) => void)({
+      target: { value: "林舟的新名字" },
+    });
+    root = harness.render(Component, props);
+    (findButton(root, "声音").props.onClick as () => void)();
+    root = harness.render(Component, props);
+    footer = findAll(root, (element) => (
+      element.type === "footer" && element.props.className === "anw-character-workspace-footer"
+    ))[0];
+    expect(findAll(footer, (element) => element.type === "button").map(textContent))
+      .toEqual(["撤销修改", "关闭", "保存人物卡"]);
+    expect(textContent(footer)).toContain("其他栏目还有未保存修改");
+    expect(textContent(footer)).toContain("只处理人物卡字段");
   });
 
   it("offers an explicit header close action", () => {

@@ -1,7 +1,7 @@
 import type {
   CharacterWorkspaceActionError,
-  CharacterWorkspaceSaveCommandV1,
-  CharacterWorkspaceV1,
+  CharacterWorkspaceSaveCommandV2,
+  CharacterWorkspaceV2,
   JsonValue,
 } from "./contracts";
 
@@ -36,7 +36,7 @@ export interface CharacterRootDraft {
 
 export type CharacterProfileDraft = Record<string, JsonValue>;
 
-export function isMultiTimeline(workspace: CharacterWorkspaceV1): boolean {
+export function isMultiTimeline(workspace: CharacterWorkspaceV2): boolean {
   return workspace.timeline_mode === "multiple";
 }
 
@@ -71,7 +71,7 @@ export function characterFactDimensionLabel(dimension: string): string {
   }[dimension] ?? dimension) || "未分类状态";
 }
 
-export function rootDraftFromWorkspace(workspace: CharacterWorkspaceV1): CharacterRootDraft {
+export function rootDraftFromWorkspace(workspace: CharacterWorkspaceV2): CharacterRootDraft {
   return {
     name: workspace.character.name,
     role_type: workspace.character.role_type,
@@ -81,8 +81,12 @@ export function rootDraftFromWorkspace(workspace: CharacterWorkspaceV1): Charact
   };
 }
 
-export function profileDraftFromWorkspace(workspace: CharacterWorkspaceV1): CharacterProfileDraft {
-  return { ...workspace.selected_instance.profile };
+export function profileDraftFromWorkspace(workspace: CharacterWorkspaceV2): CharacterProfileDraft {
+  const schemaVersion = workspace.selected_instance.profile_schema_version === 1 ? 1 : 2;
+  return {
+    schema_version: `character-instance-profile/${schemaVersion}`,
+    ...workspace.selected_instance.profile,
+  };
 }
 
 export function valueAsText(value: JsonValue | undefined): string {
@@ -116,35 +120,41 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function hasRootChanges(workspace: CharacterWorkspaceV1, draft: CharacterRootDraft): boolean {
+export function hasRootChanges(workspace: CharacterWorkspaceV2, draft: CharacterRootDraft): boolean {
   return !jsonEqual(rootDraftFromWorkspace(workspace), draft);
 }
 
 export function hasProfileChanges(
-  workspace: CharacterWorkspaceV1,
+  workspace: CharacterWorkspaceV2,
   draft: CharacterProfileDraft,
 ): boolean {
   return !jsonEqual(profileDraftFromWorkspace(workspace), draft);
 }
 
 export function buildSaveCommand(
-  workspace: CharacterWorkspaceV1,
+  workspace: CharacterWorkspaceV2,
   root: CharacterRootDraft,
   profile: CharacterProfileDraft,
-): CharacterWorkspaceSaveCommandV1 {
+  operationKey = createCharacterWorkspaceOperationKey(),
+): CharacterWorkspaceSaveCommandV2 {
   return {
-    schema_version: "character-workspace-save/1",
-    novel_id: workspace.novel_id,
-    character_id: workspace.character.id,
+    schema_version: "character-workspace-save/2",
+    operation_key: operationKey,
     selected_timeline_id: workspace.selected_timeline.id,
     selected_instance_id: workspace.selected_instance.id,
     expected_character_catalog_version: workspace.character_catalog_version,
     expected_story_ledger_version: workspace.story_ledger_version,
     expected_character_version: workspace.character.version,
     expected_instance_version: workspace.selected_instance.version,
-    root: hasRootChanges(workspace, root) ? root : null,
+    root_patch: hasRootChanges(workspace, root) ? root : null,
     profile: hasProfileChanges(workspace, profile) ? profile : null,
   };
+}
+
+export function createCharacterWorkspaceOperationKey(): string {
+  const random = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `character-workspace:${random}`;
 }
 
 export function characterWorkspaceTabFromKey(
@@ -173,7 +183,10 @@ export function tabForField(field: string): CharacterWorkspaceTab {
 
 export function normalizeActionError(reason: unknown): CharacterWorkspaceActionError {
   if (typeof reason === "object" && reason !== null) {
-    const source = reason as Record<string, unknown>;
+    const outer = reason as Record<string, unknown>;
+    const source = typeof outer.detail === "object" && outer.detail !== null
+      ? outer.detail as Record<string, unknown>
+      : outer;
     const message = typeof source.message === "string" ? source.message : "保存失败，请稍后重试。";
     const code = typeof source.code === "string" ? source.code : "character_workspace_failed";
     const rawFields = source.field_errors;
@@ -187,6 +200,9 @@ export function normalizeActionError(reason: unknown): CharacterWorkspaceActionE
       code,
       message,
       ...(Object.keys(fieldErrors).length > 0 ? { field_errors: fieldErrors } : {}),
+      ...(typeof source.current_workspace === "object" && source.current_workspace !== null
+        ? { current_workspace: source.current_workspace as CharacterWorkspaceV2 }
+        : {}),
     };
   }
   return { code: "character_workspace_failed", message: "保存失败，请稍后重试。" };

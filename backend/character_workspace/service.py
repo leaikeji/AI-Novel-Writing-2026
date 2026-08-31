@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from datetime import UTC, datetime
+from typing import Any, Literal, Protocol, Sequence
 from uuid import UUID
 
 from sqlalchemy import and_, case, or_, select
@@ -13,6 +17,7 @@ from ..creative_data_models import (
     CharacterInstance,
     CharacterInstanceRevision,
     NovelCharacterRevision,
+    StoryEventLink,
     StoryTimeline,
 )
 from ..models import (
@@ -20,7 +25,11 @@ from ..models import (
     CharacterAlias,
     CharacterRelationship,
     CharacterVoiceBinding,
+    DerivedSourceBinding,
     Document,
+    DocumentRevision,
+    DocumentWorkingCopy,
+    IntelligenceCommitBatch,
     Novel,
     NovelCharacter,
     StoryFact,
@@ -41,18 +50,61 @@ from .contracts import (
     ChapterCharacterReference,
     CharacterAliasView,
     CharacterArchiveImpactV1,
+    CharacterFactHistoryPage,
     CharacterInstanceView,
     CharacterProjectedState,
+    CharacterProjectedStateV2,
     CharacterRelationshipView,
     CharacterRootView,
     CharacterVoiceBindingView,
     CharacterWorkspaceError,
     CharacterWorkspaceErrorCode,
     CharacterWorkspaceV1,
+    CharacterWorkspaceV2,
+    FactEffectiveState,
+    FactHealth,
+    FactHistorySummary,
+    FactSourceView,
     ProjectedFactView,
+    ProjectedFactViewV2,
     ProjectionConflictView,
     TimelineView,
 )
+from .writing_state import (
+    build_writing_state,
+    fact_history_summary,
+    fact_sort_key,
+    is_state_fact,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterFactReadSet:
+    facts: tuple[StoryFact, ...]
+    bindings_by_fact_id: dict[UUID, tuple[DerivedSourceBinding, ...]]
+    documents_by_id: dict[UUID, Document]
+    revisions_by_id: dict[UUID, DocumentRevision]
+    current_revision_by_document_id: dict[UUID, UUID | None]
+    batch_state_by_id: dict[UUID, str]
+    superseded_fact_ids: frozenset[UUID]
+
+
+@dataclass(frozen=True, slots=True)
+class _ClassifiedFact:
+    row: StoryFact
+    effective_state: FactEffectiveState
+    health: FactHealth
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedScope:
+    novel: Novel
+    root: NovelCharacter
+    timelines: tuple[StoryTimeline, ...]
+    instances: tuple[CharacterInstance, ...]
+    active_timelines: tuple[StoryTimeline, ...]
+    timeline: StoryTimelineRecord
+    instance: CharacterInstanceRecord
 
 
 class CharacterWorkspaceStore(Protocol):
@@ -94,6 +146,13 @@ class CharacterWorkspaceStore(Protocol):
         character_id: UUID,
         relationship_ids: Sequence[UUID] = (),
     ) -> Sequence[StoryFact]: ...
+
+    def fact_read_set(
+        self,
+        novel_id: UUID,
+        character_id: UUID,
+        relationship_ids: Sequence[UUID] = (),
+    ) -> CharacterFactReadSet: ...
 
 
 class SqlAlchemyCharacterWorkspaceStore:
@@ -276,20 +335,125 @@ class SqlAlchemyCharacterWorkspaceStore:
             .order_by(StoryFact.created_at, StoryFact.id)
         )
 
+    def fact_read_set(
+        self,
+        novel_id: UUID,
+        character_id: UUID,
+        relationship_ids: Sequence[UUID] = (),
+    ) -> CharacterFactReadSet:
+        facts = tuple(self.story_facts(novel_id, character_id, relationship_ids))
+        fact_ids = tuple(fact.id for fact in facts)
+        if not fact_ids:
+            return CharacterFactReadSet(
+                facts=(),
+                bindings_by_fact_id={},
+                documents_by_id={},
+                revisions_by_id={},
+                current_revision_by_document_id={},
+                batch_state_by_id={},
+                superseded_fact_ids=frozenset(),
+            )
+
+        bindings = self._scalars(
+            select(DerivedSourceBinding)
+            .where(
+                DerivedSourceBinding.derived_entity_type == "story_fact",
+                DerivedSourceBinding.derived_entity_id.in_(fact_ids),
+            )
+            .order_by(DerivedSourceBinding.created_at, DerivedSourceBinding.id)
+        )
+        bindings_by_fact_id: dict[UUID, list[DerivedSourceBinding]] = {}
+        for binding in bindings:
+            bindings_by_fact_id.setdefault(binding.derived_entity_id, []).append(binding)
+
+        revision_ids = tuple(
+            {
+                fact.source_revision_id
+                for fact in facts
+                if fact.source_revision_id is not None
+            }
+        )
+        revisions = (
+            self._scalars(
+                select(DocumentRevision).where(DocumentRevision.id.in_(revision_ids))
+            )
+            if revision_ids
+            else ()
+        )
+        document_ids = tuple(
+            {
+                fact.source_document_id
+                for fact in facts
+                if fact.source_document_id is not None
+            }
+        )
+        document_rows = (
+            self._rows(
+                select(Document, DocumentWorkingCopy)
+                .outerjoin(
+                    DocumentWorkingCopy,
+                    DocumentWorkingCopy.document_id == Document.id,
+                )
+                .where(
+                    Document.novel_id == novel_id,
+                    Document.id.in_(document_ids),
+                )
+            )
+            if document_ids
+            else ()
+        )
+
+        batch_ids = tuple(
+            {
+                binding.commit_batch_id
+                for binding in bindings
+                if binding.commit_batch_id is not None
+            }
+        )
+        batches = (
+            self._scalars(
+                select(IntelligenceCommitBatch).where(
+                    IntelligenceCommitBatch.id.in_(batch_ids)
+                )
+            )
+            if batch_ids
+            else ()
+        )
+        supersedes = self._scalars(
+            select(StoryEventLink).where(
+                StoryEventLink.novel_id == novel_id,
+                StoryEventLink.link_type == "supersedes",
+                StoryEventLink.target_fact_id.in_(fact_ids),
+            )
+        )
+        return CharacterFactReadSet(
+            facts=facts,
+            bindings_by_fact_id={
+                fact_id: tuple(rows) for fact_id, rows in bindings_by_fact_id.items()
+            },
+            documents_by_id={document.id: document for document, _working in document_rows},
+            revisions_by_id={revision.id: revision for revision in revisions},
+            current_revision_by_document_id={
+                document.id: working.base_revision_id if working is not None else None
+                for document, working in document_rows
+            },
+            batch_state_by_id={batch.id: batch.state for batch in batches},
+            superseded_fact_ids=frozenset(link.target_fact_id for link in supersedes),
+        )
+
 
 @dataclass(slots=True)
 class CharacterWorkspaceService:
     store: CharacterWorkspaceStore
 
-    def get_workspace(
+    def _resolve_scope(
         self,
         novel_id: UUID,
         character_id: UUID,
         *,
-        timeline_id: UUID | None = None,
-        character_instance_id: UUID | None = None,
-        narrative_cutoff: int | None = None,
-    ) -> CharacterWorkspaceV1:
+        timeline_id: UUID | None,
+        character_instance_id: UUID | None,
+    ) -> _ResolvedScope:
         novel = self.store.novel(novel_id)
         if novel is None:
             raise CharacterWorkspaceError(
@@ -299,14 +463,14 @@ class CharacterWorkspaceService:
         root = self._require_character(novel_id, character_id)
         timelines = tuple(self.store.timelines(novel_id))
         instances = tuple(self.store.instances(novel_id, character_id))
+        active_timelines = tuple(
+            item for item in timelines if item.lifecycle_state == "active"
+        )
         try:
             resolved_timeline = resolve_timeline(
                 tuple(StoryTimelineRecord.model_validate(item) for item in timelines),
                 novel_id,
                 timeline_id,
-            )
-            active_timelines = tuple(
-                item for item in timelines if item.lifecycle_state == "active"
             )
             if len(active_timelines) > 1 and character_instance_id is None:
                 candidates = tuple(
@@ -331,81 +495,138 @@ class CharacterWorkspaceService:
             )
         except StoryStateError as error:
             raise self._workspace_error(error) from error
+        return _ResolvedScope(
+            novel=novel,
+            root=root,
+            timelines=timelines,
+            instances=instances,
+            active_timelines=active_timelines,
+            timeline=resolved_timeline,
+            instance=resolved_instance,
+        )
 
-        try:
-            projection = self.store.projection(
-                novel_id, resolved_timeline.id, narrative_cutoff
-            )
-        except StoryStateError as error:
-            raise self._workspace_error(error) from error
-        root_revision = self.store.character_revision(root)
-        relationship_rows = tuple(
+    def _relationships_for_scope(
+        self, scope: _ResolvedScope
+    ) -> tuple[CharacterRelationship, ...]:
+        return tuple(
             row
-            for row in self.store.relationships(novel_id, character_id)
+            for row in self.store.relationships(scope.novel.id, scope.root.id)
             if row.archived_at is None
-            and (row.timeline_id is None or row.timeline_id == resolved_timeline.id)
+            and (row.timeline_id is None or row.timeline_id == scope.timeline.id)
             and (
                 (
-                    row.source_character_id == character_id
-                    and row.source_character_instance_id in {None, resolved_instance.id}
+                    row.source_character_id == scope.root.id
+                    and row.source_character_instance_id in {None, scope.instance.id}
                 )
                 or (
-                    row.target_character_id == character_id
-                    and row.target_character_instance_id in {None, resolved_instance.id}
+                    row.target_character_id == scope.root.id
+                    and row.target_character_instance_id in {None, scope.instance.id}
                 )
             )
         )
+
+    def _fact_read_set(
+        self,
+        novel_id: UUID,
+        character_id: UUID,
+        relationship_ids: Sequence[UUID],
+    ) -> CharacterFactReadSet:
+        reader = getattr(self.store, "fact_read_set", None)
+        if callable(reader):
+            return reader(novel_id, character_id, relationship_ids)
+        return CharacterFactReadSet(
+            facts=tuple(self.store.story_facts(novel_id, character_id, relationship_ids)),
+            bindings_by_fact_id={},
+            documents_by_id={},
+            revisions_by_id={},
+            current_revision_by_document_id={},
+            batch_state_by_id={},
+            superseded_fact_ids=frozenset(),
+        )
+
+    def get_workspace(
+        self,
+        novel_id: UUID,
+        character_id: UUID,
+        *,
+        timeline_id: UUID | None = None,
+        character_instance_id: UUID | None = None,
+        narrative_cutoff: int | None = None,
+        view_version: Literal[1, 2] = 1,
+    ) -> CharacterWorkspaceV1 | CharacterWorkspaceV2:
+        scope = self._resolve_scope(
+            novel_id,
+            character_id,
+            timeline_id=timeline_id,
+            character_instance_id=character_instance_id,
+        )
+        try:
+            projection = self.store.projection(
+                novel_id, scope.timeline.id, narrative_cutoff
+            )
+        except StoryStateError as error:
+            raise self._workspace_error(error) from error
+        root_revision = self.store.character_revision(scope.root)
+        relationship_rows = self._relationships_for_scope(scope)
         relationship_ids = {row.id for row in relationship_rows}
-        workspace_facts = self.store.story_facts(
-            novel_id, character_id, tuple(relationship_ids)
+        read_set = (
+            self._fact_read_set(novel_id, character_id, tuple(relationship_ids))
+            if view_version == 2
+            else None
+        )
+        workspace_facts = (
+            read_set.facts
+            if read_set is not None
+            else self.store.story_facts(novel_id, character_id, tuple(relationship_ids))
         )
         character_fact_ids = {
             row.id
             for row in workspace_facts
             if row.relationship_id in relationship_ids
-            or row.character_instance_id in {None, resolved_instance.id}
+            or row.character_instance_id in {None, scope.instance.id}
         }
-        return CharacterWorkspaceV1(
+        ordinals = _store_chapter_ordinals(self.store, novel_id)
+        workspace = CharacterWorkspaceV1(
             novel_id=novel_id,
-            character_catalog_version=novel.character_catalog_version,
-            story_ledger_version=novel.story_ledger_version,
-            timeline_mode="multiple" if len(active_timelines) > 1 else "single",
+            character_catalog_version=scope.novel.character_catalog_version,
+            story_ledger_version=scope.novel.story_ledger_version,
+            timeline_mode="multiple" if len(scope.active_timelines) > 1 else "single",
             character=CharacterRootView(
-                id=root.id,
-                novel_id=root.novel_id,
-                name=root.name,
-                role_type=root.role_type,
-                description=root.description,
-                details=dict(root.details or {}),
-                lifecycle_state=root.lifecycle_state,
-                position=root.position,
-                version=root.version,
+                id=scope.root.id,
+                novel_id=scope.root.novel_id,
+                name=scope.root.name,
+                role_type=scope.root.role_type,
+                description=scope.root.description,
+                details=dict(scope.root.details or {}),
+                lifecycle_state=scope.root.lifecycle_state,
+                position=scope.root.position,
+                version=scope.root.version,
                 current_revision_id=root_revision.id if root_revision else None,
             ),
-            selected_timeline=_timeline_view(resolved_timeline),
+            selected_timeline=_timeline_view(scope.timeline),
             selected_instance=self._instance_view(
-                next(item for item in instances if item.id == resolved_instance.id)
+                next(item for item in scope.instances if item.id == scope.instance.id)
             ),
             timelines=tuple(
                 _timeline_view(StoryTimelineRecord.model_validate(item))
-                for item in timelines
+                for item in scope.timelines
                 if item.lifecycle_state == "active"
             ),
-            instances=tuple(self._instance_view(item) for item in instances),
+            instances=tuple(self._instance_view(item) for item in scope.instances),
             aliases=tuple(
                 _alias_view(item)
                 for item in self.store.aliases(novel_id, character_id)
                 if item.lifecycle_state != "archived"
-                and item.timeline_id in {None, resolved_timeline.id}
-                and item.character_instance_id in {None, resolved_instance.id}
+                and item.timeline_id in {None, scope.timeline.id}
+                and item.character_instance_id in {None, scope.instance.id}
             ),
             relationships=tuple(_relationship_view(item) for item in relationship_rows),
             chapter_references=_chapter_references(
                 self.store.chapter_briefs(novel_id),
                 character_id=character_id,
-                instance_id=resolved_instance.id,
-                timeline_id=resolved_timeline.id,
-                ordinals=_store_chapter_ordinals(self.store, novel_id),
+                instance_id=scope.instance.id,
+                timeline_id=scope.timeline.id,
+                ordinals=ordinals,
             ),
             voice_binding=_voice_binding_view(
                 self.store.voice_binding(novel_id, character_id)
@@ -413,10 +634,128 @@ class CharacterWorkspaceService:
             projected_state=_projected_state(
                 projection,
                 character_id=character_id,
-                instance_id=resolved_instance.id,
+                instance_id=scope.instance.id,
                 character_fact_ids=character_fact_ids,
                 relationship_ids=relationship_ids,
             ),
+        )
+        if view_version == 1:
+            return workspace
+
+        assert read_set is not None
+        fact_views = _fact_views(
+            read_set,
+            projection=projection,
+            instance_id=scope.instance.id,
+            relationship_ids=relationship_ids,
+            document_ordinals=ordinals,
+        )
+        facts_by_id = {fact.id: fact for fact in fact_views}
+        current_v2 = tuple(
+            facts_by_id[fact.id]
+            for fact in workspace.projected_state.current_facts
+            if fact.id in facts_by_id
+            and facts_by_id[fact.id].effective_state == "current"
+        )
+        projected_state_v2 = CharacterProjectedStateV2(
+            timeline_id=workspace.projected_state.timeline_id,
+            narrative_cutoff=workspace.projected_state.narrative_cutoff,
+            current_facts=current_v2,
+            conflicts=workspace.projected_state.conflicts,
+            ambiguous_fact_ids=workspace.projected_state.ambiguous_fact_ids,
+        )
+        payload = workspace.model_dump(exclude={"schema_version", "projected_state"})
+        return CharacterWorkspaceV2(
+            **payload,
+            projected_state=projected_state_v2,
+            writing_state=build_writing_state(
+                timeline_id=scope.timeline.id,
+                narrative_cutoff=narrative_cutoff,
+                facts=fact_views,
+            ),
+        )
+
+    def list_facts(
+        self,
+        novel_id: UUID,
+        character_id: UUID,
+        *,
+        timeline_id: UUID | None = None,
+        character_instance_id: UUID | None = None,
+        narrative_cutoff: int | None = None,
+        effective_state: Literal[
+            "all",
+            "current",
+            "historical",
+            "superseded",
+            "source_invalid",
+            "batch_reverted",
+        ] = "all",
+        health: Literal["all", "ok", "conflict", "ambiguous"] = "all",
+        dimension: str | None = None,
+        source_document_id: UUID | None = None,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> CharacterFactHistoryPage:
+        scope = self._resolve_scope(
+            novel_id,
+            character_id,
+            timeline_id=timeline_id,
+            character_instance_id=character_instance_id,
+        )
+        relationship_rows = self._relationships_for_scope(scope)
+        relationship_ids = {row.id for row in relationship_rows}
+        try:
+            projection = self.store.projection(
+                novel_id, scope.timeline.id, narrative_cutoff
+            )
+        except StoryStateError as error:
+            raise self._workspace_error(error) from error
+        read_set = self._fact_read_set(
+            novel_id, character_id, tuple(relationship_ids)
+        )
+        facts = list(
+            _classify_facts(
+                read_set,
+                projection=projection,
+                instance_id=scope.instance.id,
+                relationship_ids=relationship_ids,
+            )
+        )
+        if effective_state != "all":
+            facts = [fact for fact in facts if fact.effective_state == effective_state]
+        if health != "all":
+            facts = [fact for fact in facts if fact.health == health]
+        if dimension is not None:
+            facts = [
+                fact
+                for fact in facts
+                if (fact.row.dimension or fact.row.predicate) == dimension
+            ]
+        if source_document_id is not None:
+            facts = [
+                fact
+                for fact in facts
+                if fact.row.source_document_id == source_document_id
+            ]
+        facts.sort(key=_story_fact_sort_key, reverse=True)
+        summary = _classified_fact_history_summary(facts)
+        if cursor is not None:
+            cursor_key = _decode_cursor(cursor)
+            facts = [fact for fact in facts if _story_fact_sort_key(fact) < cursor_key]
+        page = facts[:limit]
+        next_cursor = (
+            _encode_cursor(_story_fact_sort_key(page[-1]))
+            if len(facts) > limit
+            else None
+        )
+        ordinals = _store_chapter_ordinals(self.store, novel_id) or {}
+        return CharacterFactHistoryPage(
+            items=tuple(
+                _classified_fact_view(fact, read_set, ordinals) for fact in page
+            ),
+            next_cursor=next_cursor,
+            total_summary=summary,
         )
 
     def archive_impact(
@@ -768,6 +1107,327 @@ def _projected_state(
         conflicts=conflicts,
         ambiguous_fact_ids=ambiguous,
     )
+
+
+def _fact_views(
+    read_set: CharacterFactReadSet,
+    *,
+    projection: dict[str, Any],
+    instance_id: UUID,
+    relationship_ids: set[UUID],
+    document_ordinals: dict[UUID, int] | None,
+) -> tuple[ProjectedFactViewV2, ...]:
+    ordinals = document_ordinals or {}
+    return tuple(
+        sorted(
+            (
+                _classified_fact_view(fact, read_set, ordinals)
+                for fact in _classify_facts(
+                    read_set,
+                    projection=projection,
+                    instance_id=instance_id,
+                    relationship_ids=relationship_ids,
+                )
+            ),
+            key=fact_sort_key,
+            reverse=True,
+        )
+    )
+
+
+def _classify_facts(
+    read_set: CharacterFactReadSet,
+    *,
+    projection: dict[str, Any],
+    instance_id: UUID,
+    relationship_ids: set[UUID],
+) -> tuple[_ClassifiedFact, ...]:
+    visible_ids = {
+        UUID(str(item["id"])) for item in projection.get("visible_facts", [])
+    }
+    current_ids = {
+        UUID(str(item["id"])) for item in projection.get("current_facts", [])
+    }
+    ambiguous_ids = {
+        UUID(str(item)) for item in projection.get("ambiguous_fact_ids", [])
+    }
+    suppressed_ids = {
+        UUID(str(item)) for item in projection.get("suppressed_fact_ids", [])
+    }
+    eligible_ids = visible_ids | ambiguous_ids | suppressed_ids
+    conflict_ids = {
+        UUID(str(fact_id))
+        for conflict in projection.get("conflicts", [])
+        for fact_id in conflict.get("fact_ids", [])
+    }
+    results: list[_ClassifiedFact] = []
+    for row in read_set.facts:
+        if row.id not in eligible_ids:
+            continue
+        if (
+            row.relationship_id not in relationship_ids
+            and row.character_instance_id not in {None, instance_id}
+        ):
+            continue
+        source_ambiguous = _fact_source_is_ambiguous(row, read_set)
+        bindings = read_set.bindings_by_fact_id.get(row.id, ())
+        has_reverted_batch = any(
+            binding.commit_batch_id is not None
+            and read_set.batch_state_by_id.get(binding.commit_batch_id) == "reverted"
+            for binding in bindings
+        )
+        has_invalid_binding = bool(bindings) and not any(
+            binding.validity_state in {"current", "source_restored"}
+            for binding in bindings
+        )
+        if has_reverted_batch:
+            effective_state: FactEffectiveState = "batch_reverted"
+        elif row.id in read_set.superseded_fact_ids or row.status == "superseded":
+            effective_state = "superseded"
+        elif row.status in {"invalid", "source_superseded"} or has_invalid_binding:
+            effective_state = "source_invalid"
+        elif row.id in current_ids and _is_state_row(row):
+            effective_state = "current"
+        else:
+            effective_state = "historical"
+
+        health: FactHealth
+        if row.id in conflict_ids:
+            health = "conflict"
+        elif row.id in ambiguous_ids or source_ambiguous:
+            health = "ambiguous"
+        else:
+            health = "ok"
+        results.append(
+            _ClassifiedFact(
+                row=row,
+                effective_state=effective_state,
+                health=health,
+            )
+        )
+    return tuple(results)
+
+
+def _classified_fact_view(
+    fact: _ClassifiedFact,
+    read_set: CharacterFactReadSet,
+    document_ordinals: dict[UUID, int],
+) -> ProjectedFactViewV2:
+    row = fact.row
+    source, _source_ambiguous = _fact_source_view(
+        row, read_set, document_ordinals
+    )
+    return ProjectedFactViewV2(
+        id=row.id,
+        fact_type=row.fact_type,
+        timeline_id=row.timeline_id,
+        character_id=row.character_id,
+        character_instance_id=row.character_instance_id,
+        relationship_id=row.relationship_id,
+        dimension=row.dimension or row.predicate,
+        event_kind=row.event_kind or "unknown",
+        predicate=row.predicate,
+        object_text=row.object_text,
+        details=dict(row.details or {}),
+        story_sequence=row.story_sequence,
+        source_revision_id=row.source_revision_id,
+        source_document_id=row.source_document_id,
+        story_time=(
+            dict(row.story_time_json)
+            if isinstance(row.story_time_json, dict)
+            else None
+        ),
+        created_at=row.created_at or datetime(1970, 1, 1, tzinfo=UTC),
+        effective_state=fact.effective_state,
+        health=fact.health,
+        source=source,
+    )
+
+
+def _story_fact_sort_key(fact: _ClassifiedFact) -> tuple[int, int, str, str]:
+    row = fact.row
+    created_at = row.created_at or datetime(1970, 1, 1, tzinfo=UTC)
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    else:
+        created_at = created_at.astimezone(UTC)
+    return (
+        int(row.story_sequence is not None),
+        row.story_sequence if row.story_sequence is not None else -1,
+        created_at.isoformat(timespec="microseconds"),
+        str(row.id),
+    )
+
+
+def _classified_fact_history_summary(
+    facts: Sequence[_ClassifiedFact],
+) -> FactHistorySummary:
+    counts = {
+        state: sum(fact.effective_state == state for fact in facts)
+        for state in (
+            "current",
+            "historical",
+            "superseded",
+            "source_invalid",
+            "batch_reverted",
+        )
+    }
+    return FactHistorySummary(total=len(facts), **counts)
+
+
+def _is_state_row(row: StoryFact) -> bool:
+    if row.dimension in {"action", "presence"}:
+        return False
+    if row.fact_type in {"relationship_state", "knowledge_event"}:
+        return True
+    return row.dimension in {
+        "location",
+        "goal",
+        "health",
+        "emotion",
+        "identity",
+        "knowledge",
+        "possession",
+        "relationship",
+    }
+
+
+def _matching_source_binding(
+    row: StoryFact,
+    read_set: CharacterFactReadSet,
+) -> DerivedSourceBinding | None:
+    bindings = read_set.bindings_by_fact_id.get(row.id, ())
+    return next(
+        (
+            binding
+            for binding in bindings
+            if binding.source_chapter_revision_id == row.source_revision_id
+        ),
+        bindings[-1] if bindings else None,
+    )
+
+
+def _fact_source_is_ambiguous(
+    row: StoryFact,
+    read_set: CharacterFactReadSet,
+) -> bool:
+    if row.source_document_id is None and row.source_revision_id is None:
+        return False
+    if row.source_document_id is None or row.source_revision_id is None:
+        return True
+    document = read_set.documents_by_id.get(row.source_document_id)
+    revision = read_set.revisions_by_id.get(row.source_revision_id)
+    binding = _matching_source_binding(row, read_set)
+    if document is None or revision is None or revision.document_id != document.id:
+        return True
+    if binding is None or binding.source_content_hash != revision.content_hash:
+        return True
+    if row.source_start is None and row.source_end is None:
+        return False
+    return not (
+        row.source_start is not None
+        and row.source_end is not None
+        and 0 <= row.source_start < row.source_end <= len(revision.content_text)
+    )
+
+
+def _fact_source_view(
+    row: StoryFact,
+    read_set: CharacterFactReadSet,
+    document_ordinals: dict[UUID, int],
+) -> tuple[FactSourceView | None, bool]:
+    if row.source_document_id is None or row.source_revision_id is None:
+        return None, False
+    document = read_set.documents_by_id.get(row.source_document_id)
+    revision = read_set.revisions_by_id.get(row.source_revision_id)
+    matching_binding = _matching_source_binding(row, read_set)
+    if document is None or revision is None or revision.document_id != document.id:
+        return None, True
+
+    source_content_hash = revision.content_hash
+    source_ambiguous = matching_binding is None
+    if (
+        matching_binding is not None
+        and matching_binding.source_content_hash != revision.content_hash
+    ):
+        source_ambiguous = True
+
+    source_range_hash: str | None = None
+    source_excerpt = ""
+    source_excerpt_truncated = False
+    if row.source_start is not None and row.source_end is not None:
+        if 0 <= row.source_start < row.source_end <= len(revision.content_text):
+            evidence = revision.content_text[row.source_start : row.source_end]
+            source_range_hash = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+            source_excerpt = evidence[:500]
+            source_excerpt_truncated = len(evidence) > 500
+        else:
+            source_ambiguous = True
+    elif row.source_start is not None or row.source_end is not None:
+        source_ambiguous = True
+
+    document_position = document_ordinals.get(document.id, document.position)
+    document_title = (
+        context_chapter_title(document.title, document_position)
+        if document.kind == "chapter"
+        else document.title
+    )
+    return (
+        FactSourceView(
+            document_id=document.id,
+            document_title=document_title,
+            document_position=document_position,
+            revision_id=revision.id,
+            revision_is_current=(
+                read_set.current_revision_by_document_id.get(document.id) == revision.id
+            ),
+            source_content_hash=source_content_hash,
+            source_start=row.source_start,
+            source_end=row.source_end,
+            source_range_hash=source_range_hash,
+            source_excerpt=source_excerpt,
+            source_excerpt_truncated=source_excerpt_truncated,
+            binding_state=(
+                matching_binding.validity_state if matching_binding is not None else None
+            ),
+            proposal_item_id=(
+                matching_binding.proposal_item_id if matching_binding is not None else None
+            ),
+            commit_batch_id=(
+                matching_binding.commit_batch_id if matching_binding is not None else None
+            ),
+        ),
+        source_ambiguous,
+    )
+
+
+def _encode_cursor(key: tuple[int, int, str, str]) -> str:
+    payload = json.dumps(
+        {"v": 1, "sequence_known": key[0], "sequence": key[1], "created": key[2], "id": key[3]},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(value: str) -> tuple[int, int, str, str]:
+    try:
+        padding = "=" * (-len(value) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(value + padding))
+        if set(payload) != {"v", "sequence_known", "sequence", "created", "id"}:
+            raise ValueError
+        if payload["v"] != 1 or payload["sequence_known"] not in {0, 1}:
+            raise ValueError
+        sequence = int(payload["sequence"])
+        created = str(payload["created"])
+        datetime.fromisoformat(created)
+        fact_id = str(UUID(str(payload["id"])))
+    except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CharacterWorkspaceError(
+            CharacterWorkspaceErrorCode.INVALID_CURSOR,
+            "fact history cursor is invalid",
+        ) from error
+    return int(payload["sequence_known"]), sequence, created, fact_id
 
 
 def service_for_session(session: Session) -> CharacterWorkspaceService:

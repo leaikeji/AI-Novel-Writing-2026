@@ -104,10 +104,16 @@ import {
 import {
   createCharacterWorkspaceDialog,
   getCharacterWorkspacePortalContainer,
-  type CharacterWorkspaceSaveCommandV1,
+  type CharacterFactHistoryPageV2,
+  type CharacterFactHistoryQueryV2,
+  type CharacterSourceRevisionV1,
+  type CharacterWorkspaceSaveCommandV2,
   type CharacterWorkspaceSelectionV1,
-  type CharacterWorkspaceV1,
+  type CharacterWorkspaceV2,
   type CharacterWorkspaceVoiceSlotProps,
+  type IntelligenceBatchRevertCommandV1,
+  type IntelligenceBatchRevertImpactV1,
+  type StoryFactCorrectionCommandV1,
 } from "./characters";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
@@ -2362,7 +2368,7 @@ export function StudioProjectView({
   const [volumeTitle, setVolumeTitle] = React.useState("");
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterEditing, setCharacterEditing] = React.useState(null as NovelCharacterRecord | null);
-  const [characterWorkspace, setCharacterWorkspace] = React.useState(null as CharacterWorkspaceV1 | null);
+  const [characterWorkspace, setCharacterWorkspace] = React.useState(null as CharacterWorkspaceV2 | null);
   const [characterWorkspacePicker, setCharacterWorkspacePicker] = React.useState(
     null as CharacterWorkspacePickerState | null,
   );
@@ -3192,13 +3198,14 @@ export function StudioProjectView({
   const loadCharacterWorkspace = (
     characterId: string,
     selection?: CharacterWorkspaceSelectionV1,
-  ): Promise<CharacterWorkspaceV1> => {
+  ): Promise<CharacterWorkspaceV2> => {
     const query = new URLSearchParams();
+    query.set("view_version", "2");
     if (selection) {
       query.set("timeline_id", selection.timelineId);
       query.set("character_instance_id", selection.instanceId);
     }
-    return apiRequest<CharacterWorkspaceV1>(
+    return apiRequest<CharacterWorkspaceV2>(
       `/novels/${novel.id}/characters/${characterId}/workspace${query.size ? `?${query}` : ""}`,
     );
   };
@@ -3265,47 +3272,86 @@ export function StudioProjectView({
   };
 
   const saveCharacterWorkspace = async (
-    command: CharacterWorkspaceSaveCommandV1,
-  ): Promise<CharacterWorkspaceV1> => {
-    if (command.root) {
-      await apiRequest(`/novels/${novel.id}/characters/${command.character_id}`, {
+    characterId: string,
+    command: CharacterWorkspaceSaveCommandV2,
+  ): Promise<CharacterWorkspaceV2> => {
+    const next = await apiRequest<CharacterWorkspaceV2>(
+      `/novels/${novel.id}/characters/${characterId}/workspace`,
+      {
         method: "PUT",
-        body: JSON.stringify({
-          expected_version: command.expected_character_version,
-          role_type: command.root.role_type,
-          name: command.root.name,
-          description: command.root.description,
-          details_patch: {
-            gender: command.root.gender,
-            core_theme: command.root.core_theme,
-          },
-        }),
-      });
-    }
-    if (command.profile) {
-      await apiRequest(
-        `/novels/${novel.id}/character-instances/${command.selected_instance_id}/profile`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            expected_story_ledger_version: command.expected_story_ledger_version,
-            expected_instance_version: command.expected_instance_version,
-            operation_key: `character-workspace:${crypto.randomUUID()}`,
-            source_kind: "manual",
-            profile: {
-              ...command.profile,
-              schema_version: "character-instance-profile/2",
-            },
-          }),
-        },
-      );
-    }
+        body: JSON.stringify(command),
+      },
+    );
     await loadDomains();
-    return loadCharacterWorkspace(command.character_id, {
-      timelineId: command.selected_timeline_id,
-      instanceId: command.selected_instance_id,
+    return next;
+  };
+
+  const loadCharacterFacts = (
+    workspace: CharacterWorkspaceV2,
+    query: CharacterFactHistoryQueryV2,
+  ): Promise<CharacterFactHistoryPageV2> => {
+    const params = new URLSearchParams({
+      timeline_id: workspace.selected_timeline.id,
+      character_instance_id: workspace.selected_instance.id,
+      limit: String(query.limit ?? 20),
+      effective_state: query.effective_state ?? "all",
+      health: query.health ?? "all",
+    });
+    if (workspace.projected_state.narrative_cutoff !== null) {
+      params.set("narrative_cutoff", String(workspace.projected_state.narrative_cutoff));
+    }
+    if (query.cursor) params.set("cursor", query.cursor);
+    if (query.dimension) params.set("dimension", query.dimension);
+    if (query.source_document_id) params.set("source_document_id", query.source_document_id);
+    return apiRequest<CharacterFactHistoryPageV2>(
+      `/novels/${novel.id}/characters/${workspace.character.id}/facts?${params}`,
+    );
+  };
+
+  const correctCharacterFact = async (
+    workspace: CharacterWorkspaceV2,
+    factId: string,
+    command: StoryFactCorrectionCommandV1,
+  ): Promise<CharacterWorkspaceV2> => {
+    await apiRequest(`/novels/${novel.id}/story-facts/${factId}/corrections`, {
+      method: "POST",
+      body: JSON.stringify(command),
+    });
+    await loadDomains();
+    return loadCharacterWorkspace(workspace.character.id, {
+      timelineId: workspace.selected_timeline.id,
+      instanceId: workspace.selected_instance.id,
     });
   };
+
+  const previewCharacterBatchRevert = (
+    batchId: string,
+  ): Promise<IntelligenceBatchRevertImpactV1> => apiRequest<IntelligenceBatchRevertImpactV1>(
+    `/novels/${novel.id}/intelligence-commit-batches/${batchId}/revert-impact`,
+  );
+
+  const revertCharacterBatch = async (
+    workspace: CharacterWorkspaceV2,
+    batchId: string,
+    command: IntelligenceBatchRevertCommandV1,
+  ): Promise<CharacterWorkspaceV2> => {
+    await apiRequest(`/novels/${novel.id}/intelligence-commit-batches/${batchId}/revert`, {
+      method: "POST",
+      body: JSON.stringify(command),
+    });
+    await loadDomains();
+    return loadCharacterWorkspace(workspace.character.id, {
+      timelineId: workspace.selected_timeline.id,
+      instanceId: workspace.selected_instance.id,
+    });
+  };
+
+  const loadCharacterSourceRevision = (
+    documentId: string,
+    revisionId: string,
+  ): Promise<CharacterSourceRevisionV1> => apiRequest<CharacterSourceRevisionV1>(
+    `/documents/${documentId}/revisions/${revisionId}`,
+  );
 
   const saveCharacter = () => perform(async () => {
     const current = characterFormRef.current;
@@ -3696,7 +3742,7 @@ export function StudioProjectView({
             null,
             h("span", { className: "mb-role-overview-eyebrow" }, "正式人物档案"),
             h("h2", null, "人物卡"),
-            h("p", null, "统一维护人物基线、当前故事线档案、成长事实与声音；大纲仅引用这里的正式人物。"),
+            h("p", null, "统一维护基础资料、当前线设定、状态与经历及声音；大纲只引用这里的正式人物。"),
           ),
           h(
             "div",
@@ -3732,6 +3778,14 @@ export function StudioProjectView({
                     className: "mb-role-card-main",
                     "aria-label": `打开${item.name}的正式人物卡`,
                     "aria-describedby": descriptionId,
+                    onPointerDown: (event: any) => {
+                      event.currentTarget.dataset.characterOpenModality = "pointer";
+                    },
+                    onKeyDown: (event: any) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.currentTarget.dataset.characterOpenModality = "keyboard";
+                      }
+                    },
                     onClick: () => openCharacterForm(group.type, item),
                   },
                   h("span", { className: "mb-role-avatar", "aria-hidden": true }, item.name.slice(0, 1)),
@@ -4152,17 +4206,45 @@ export function StudioProjectView({
     ),
     characterWorkspace ? h(CharacterWorkspaceDialog, {
       workspace: characterWorkspace,
-      onSave: saveCharacterWorkspace,
-      onSelectionChange: (selection: CharacterWorkspaceSelectionV1) => loadCharacterWorkspace(
-        characterWorkspace.character.id,
-        selection,
+      onSave: async (command: CharacterWorkspaceSaveCommandV2) => {
+        const next = await saveCharacterWorkspace(characterWorkspace.character.id, command);
+        setCharacterWorkspace(next);
+        return next;
+      },
+      onSelectionChange: async (selection: CharacterWorkspaceSelectionV1) => {
+        const next = await loadCharacterWorkspace(characterWorkspace.character.id, selection);
+        setCharacterWorkspace(next);
+        return next;
+      },
+      onLoadFacts: (query: CharacterFactHistoryQueryV2) => loadCharacterFacts(
+        characterWorkspace,
+        query,
       ),
-      voiceSlot: ({ novelId, characterId, characterName }: CharacterWorkspaceVoiceSlotProps) => h(
+      onCorrectFact: async (factId: string, command: StoryFactCorrectionCommandV1) => {
+        const next = await correctCharacterFact(characterWorkspace, factId, command);
+        setCharacterWorkspace(next);
+        return next;
+      },
+      onPreviewBatchRevert: previewCharacterBatchRevert,
+      onRevertBatch: async (batchId: string, command: IntelligenceBatchRevertCommandV1) => {
+        const next = await revertCharacterBatch(characterWorkspace, batchId, command);
+        setCharacterWorkspace(next);
+        return next;
+      },
+      onLoadSource: loadCharacterSourceRevision,
+      voiceSlot: ({
+        novelId,
+        characterId,
+        characterName,
+        binding,
+      }: CharacterWorkspaceVoiceSlotProps) => h(
         CharacterVoiceCardPanel,
         {
+          key: `character-voice-card:${novelId}:${characterId}`,
           novelId,
           characterId,
           characterName,
+          initialBinding: binding,
         },
       ),
       onRequestClose: () => {

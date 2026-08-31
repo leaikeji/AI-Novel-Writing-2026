@@ -32,6 +32,7 @@ from .embedding.runtime import (
     stop_embedding_runtime,
 )
 from .story_state.api import router as story_state_router
+from .story_state.corrections_api import router as story_corrections_router
 from .volume_chapter_titles import VolumeChapterContractError, contract_error_detail
 from .database import database_status, get_engine, get_session
 from .generation_dependencies import (
@@ -197,6 +198,7 @@ router.include_router(narration_voice_features_router)
 router.include_router(writing_eval_router)
 router.include_router(embedding_router)
 router.include_router(story_state_router)
+router.include_router(story_corrections_router)
 router.include_router(character_workspace_router)
 
 

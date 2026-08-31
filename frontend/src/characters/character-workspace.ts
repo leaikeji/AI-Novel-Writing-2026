@@ -1,14 +1,20 @@
 import type {
   CharacterWorkspaceActionError,
-  CharacterWorkspaceSaveCommandV1,
+  CharacterFactHistoryPageV2,
+  CharacterFactHistoryQueryV2,
+  CharacterFactHealth,
+  CharacterFactEffectiveState,
+  CharacterWorkspaceSaveCommandV2,
   CharacterWorkspaceSelectionV1,
-  CharacterWorkspaceV1,
+  CharacterWorkspaceV2,
   CharacterWorkspaceVoiceSlotProps,
-  JsonValue,
+  IntelligenceBatchRevertCommandV1,
+  IntelligenceBatchRevertImpactV1,
+  ProjectedFactViewV2,
+  StoryFactCorrectionCommandV1,
 } from "./contracts";
 import {
   buildSaveCommand,
-  characterFactDimensionLabel,
   characterRoleLabel,
   characterWorkspaceTabFromKey,
   continuityLabel,
@@ -28,6 +34,18 @@ import {
   type ProfileFieldKey,
 } from "./model";
 import { ensureCharacterWorkspaceStyles } from "./styles";
+import { renderCharacterStatePanel } from "./character-state-panel";
+import { renderCharacterFactHistory } from "./character-fact-history";
+import {
+  renderCharacterBatchRevertDrawer,
+  renderCharacterFactCorrectionDrawer,
+} from "./character-fact-correction";
+import { resolveCharacterSourceRange, type SourceRangeResolution } from "./source-coordinate";
+import { characterProfileGroupCompletion, validateCharacterProfile } from "./state-model";
+import {
+  renderCharacterSourceViewer,
+  type CharacterSourceRevisionV1,
+} from "./workbench-character-source";
 
 type StateSetter<T> = (value: T | ((previous: T) => T)) => void;
 type ElementNode = unknown;
@@ -58,12 +76,30 @@ export function getCharacterWorkspacePortalContainer(): Element | null {
 }
 
 export interface CharacterWorkspaceDialogProps {
-  readonly workspace: CharacterWorkspaceV1;
-  readonly onSave?: (command: CharacterWorkspaceSaveCommandV1) => Promise<CharacterWorkspaceV1>;
+  readonly workspace: CharacterWorkspaceV2;
+  readonly onSave?: (command: CharacterWorkspaceSaveCommandV2) => Promise<CharacterWorkspaceV2>;
   readonly onSelectionChange?: (
     selection: CharacterWorkspaceSelectionV1,
-  ) => Promise<CharacterWorkspaceV1>;
+  ) => Promise<CharacterWorkspaceV2>;
   readonly voiceSlot?: (props: CharacterWorkspaceVoiceSlotProps) => ElementNode;
+  readonly onLoadFacts?: (
+    query: CharacterFactHistoryQueryV2,
+  ) => Promise<CharacterFactHistoryPageV2>;
+  readonly onCorrectFact?: (
+    factId: string,
+    command: StoryFactCorrectionCommandV1,
+  ) => Promise<CharacterWorkspaceV2>;
+  readonly onPreviewBatchRevert?: (
+    batchId: string,
+  ) => Promise<IntelligenceBatchRevertImpactV1>;
+  readonly onRevertBatch?: (
+    batchId: string,
+    command: IntelligenceBatchRevertCommandV1,
+  ) => Promise<CharacterWorkspaceV2>;
+  readonly onLoadSource?: (
+    documentId: string,
+    revisionId: string,
+  ) => Promise<CharacterSourceRevisionV1>;
   readonly onRequestClose?: () => void;
   readonly titleId?: string;
   readonly className?: string;
@@ -84,10 +120,14 @@ interface PointerEventLike {
   readonly currentTarget: unknown;
 }
 
+interface ToggleEventLike {
+  readonly currentTarget: { readonly open: boolean };
+}
+
 const TAB_LABELS: Readonly<Record<CharacterWorkspaceTab, string>> = {
   basic: "基础资料",
-  "line-profile": "本线档案",
-  growth: "成长与状态",
+  "line-profile": "当前线设定",
+  growth: "状态与经历",
   voice: "声音",
 };
 
@@ -113,15 +153,15 @@ const PROFILE_FIELDS: readonly {
   { key: "growth_direction", label: "成长方向", multiline: true },
 ];
 
-function displayJson(value: JsonValue): string {
-  if (value === null) return "未记录";
-  if (typeof value === "string") return value || "未记录";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map((item) => displayJson(item)).join("、") || "未记录";
-  return Object.entries(value)
-    .map(([key, item]) => `${key}：${displayJson(item)}`)
-    .join("；");
-}
+const WRITING_PROFILE_KEYS = new Set<ProfileFieldKey>([
+  "occupation", "personality", "goals", "flaws", "secrets", "growth_direction",
+]);
+const IDENTITY_PROFILE_KEYS = new Set<ProfileFieldKey>([
+  "public_identity", "true_identity", "cover_identity",
+]);
+const BIRTH_PROFILE_KEYS = new Set<ProfileFieldKey>([
+  "birth_year", "birth_calendar_id", "birth_information", "age_at_story_start_note",
+]);
 
 function errorFieldId(baseId: string, field: string): string {
   const normalized = field
@@ -132,6 +172,12 @@ function errorFieldId(baseId: string, field: string): string {
   return `${baseId}-field-${scope}-${normalized.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
+function workspaceOperationKey(scope: "correction" | "revert"): string {
+  const random = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `character-${scope}:${random}`;
+}
+
 export function createCharacterWorkspaceDialog(
   React: CharacterReactRuntime,
   portal?: CharacterWorkspacePortalRuntime,
@@ -140,20 +186,60 @@ export function createCharacterWorkspaceDialog(
 
   return function CharacterWorkspaceDialog(props: CharacterWorkspaceDialogProps): ElementNode {
     const initial = props.workspace;
-    const [workspace, setWorkspace] = React.useState<CharacterWorkspaceV1>(initial);
+    const [workspace, setWorkspace] = React.useState<CharacterWorkspaceV2>(initial);
     const [rootDraft, setRootDraft] = React.useState<CharacterRootDraft>(() => rootDraftFromWorkspace(initial));
     const [profileDraft, setProfileDraft] = React.useState<CharacterProfileDraft>(() => profileDraftFromWorkspace(initial));
     const [activeTab, setActiveTab] = React.useState<CharacterWorkspaceTab>("basic");
     const [saving, setSaving] = React.useState(false);
     const [selecting, setSelecting] = React.useState(false);
     const [error, setError] = React.useState<CharacterWorkspaceActionError | null>(null);
+    const [historyOpen, setHistoryOpen] = React.useState(false);
+    const [historyPage, setHistoryPage] = React.useState<CharacterFactHistoryPageV2 | null>(null);
+    const [historyLoading, setHistoryLoading] = React.useState(false);
+    const [historyLoadingMore, setHistoryLoadingMore] = React.useState(false);
+    const [historyError, setHistoryError] = React.useState<string | null>(null);
+    const [historyEffectiveState, setHistoryEffectiveState] = React.useState<CharacterFactEffectiveState | "all">("all");
+    const [historyHealth, setHistoryHealth] = React.useState<CharacterFactHealth | "all">("all");
+    const [historyRefresh, setHistoryRefresh] = React.useState(0);
+    const [correctionFact, setCorrectionFact] = React.useState<ProjectedFactViewV2 | null>(null);
+    const [correctionObjectText, setCorrectionObjectText] = React.useState("");
+    const [correctionReason, setCorrectionReason] = React.useState("");
+    const [correctionSaving, setCorrectionSaving] = React.useState(false);
+    const [correctionError, setCorrectionError] = React.useState<string | null>(null);
+    const [batchImpact, setBatchImpact] = React.useState<IntelligenceBatchRevertImpactV1 | null>(null);
+    const [batchReason, setBatchReason] = React.useState("");
+    const [batchSaving, setBatchSaving] = React.useState(false);
+    const [batchError, setBatchError] = React.useState<string | null>(null);
+    const [sourceFact, setSourceFact] = React.useState<ProjectedFactViewV2 | null>(null);
+    const [sourceRevision, setSourceRevision] = React.useState<CharacterSourceRevisionV1 | null>(null);
+    const [sourceResolution, setSourceResolution] = React.useState<SourceRangeResolution | null>(null);
+    const [sourceLoading, setSourceLoading] = React.useState(false);
+    const [sourceError, setSourceError] = React.useState<string | null>(null);
+    const [identityOpen, setIdentityOpen] = React.useState(true);
+    const [birthOpen, setBirthOpen] = React.useState(() => [
+      "birth_year",
+      "birth_calendar_id",
+      "birth_information",
+      "age_at_story_start_note",
+    ].some((key) => Boolean(initial.selected_instance.profile[key])));
     const baseIdRef = React.useRef(
       `character-workspace-${workspace.character.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
     );
+    const bodyRef = React.useRef<HTMLElement | null>(null);
+    const tabScrollRef = React.useRef<Record<CharacterWorkspaceTab, number>>({
+      basic: 0,
+      "line-profile": 0,
+      growth: 0,
+      voice: 0,
+    });
     const lastPropWorkspaceRef = React.useRef(initial);
     const baseId = baseIdRef.current;
     const dialogId = `${baseId}-dialog`;
     const dirty = hasRootChanges(workspace, rootDraft) || hasProfileChanges(workspace, profileDraft);
+    const factRiskCount = workspace.writing_state.risk_summary.conflict_count
+      + workspace.writing_state.risk_summary.ambiguous_count
+      + workspace.writing_state.risk_summary.invalid_source_count;
+    const showCharacterDraftActions = activeTab !== "voice" || dirty;
     const multiTimeline = isMultiTimeline(workspace);
     const requestClose = (): void => {
       if (!props.onRequestClose) return;
@@ -162,10 +248,12 @@ export function createCharacterWorkspaceDialog(
       props.onRequestClose();
     };
 
-    const applyWorkspace = (next: CharacterWorkspaceV1): void => {
+    const applyWorkspace = (next: CharacterWorkspaceV2): void => {
       setWorkspace(next);
       setRootDraft(rootDraftFromWorkspace(next));
       setProfileDraft(profileDraftFromWorkspace(next));
+      setHistoryPage(null);
+      setHistoryRefresh((value) => value + 1);
       setError(null);
     };
 
@@ -181,7 +269,13 @@ export function createCharacterWorkspaceDialog(
       const focusDialog = (): void => document.getElementById(dialogId)?.focus();
       if (typeof queueMicrotask === "function") queueMicrotask(focusDialog);
       else focusDialog();
-      return () => previouslyFocused?.focus();
+      return () => {
+        if (!previouslyFocused) return;
+        const modality = previouslyFocused.dataset.characterOpenModality;
+        previouslyFocused.focus({ preventScroll: true });
+        if (modality === "pointer") previouslyFocused.blur();
+        delete previouslyFocused.dataset.characterOpenModality;
+      };
     }, []);
 
     React.useEffect(() => {
@@ -197,6 +291,12 @@ export function createCharacterWorkspaceDialog(
       if (!error?.field_errors) return;
       const firstField = Object.keys(error.field_errors)[0];
       if (!firstField) return;
+      if (["public_identity", "true_identity", "cover_identity"].some((key) => firstField.endsWith(key))) {
+        setIdentityOpen(true);
+      }
+      if (["birth_year", "birth_calendar_id", "birth_information", "age_at_story_start_note"].some((key) => firstField.endsWith(key))) {
+        setBirthOpen(true);
+      }
       const focusTarget = (): void => {
         if (typeof document === "undefined") return;
         document.getElementById(errorFieldId(baseId, firstField))?.focus();
@@ -205,10 +305,182 @@ export function createCharacterWorkspaceDialog(
       else focusTarget();
     }, [error]);
 
+    React.useEffect(() => {
+      if (!historyOpen || !props.onLoadFacts) return;
+      let cancelled = false;
+      setHistoryLoading(true);
+      setHistoryError(null);
+      void props.onLoadFacts({
+        limit: 20,
+        effective_state: historyEffectiveState,
+        health: historyHealth,
+      }).then((page) => {
+        if (!cancelled) setHistoryPage(page);
+      }).catch((reason) => {
+        if (!cancelled) setHistoryError(normalizeActionError(reason).message);
+      }).finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+      return () => { cancelled = true; };
+    }, [
+      historyOpen,
+      historyEffectiveState,
+      historyHealth,
+      historyRefresh,
+      workspace.selected_timeline.id,
+      workspace.selected_instance.id,
+    ]);
+
+    const loadMoreFacts = async (): Promise<void> => {
+      if (!props.onLoadFacts || !historyPage?.next_cursor || historyLoadingMore) return;
+      setHistoryLoadingMore(true);
+      setHistoryError(null);
+      try {
+        const next = await props.onLoadFacts({
+          cursor: historyPage.next_cursor,
+          limit: 20,
+          effective_state: historyEffectiveState,
+          health: historyHealth,
+        });
+        setHistoryPage({
+          ...next,
+          items: [...historyPage.items, ...next.items],
+        });
+      } catch (reason) {
+        setHistoryError(normalizeActionError(reason).message);
+      } finally {
+        setHistoryLoadingMore(false);
+      }
+    };
+
+    const openCorrection = (fact: ProjectedFactViewV2): void => {
+      setBatchImpact(null);
+      setSourceFact(null);
+      setCorrectionFact(fact);
+      setCorrectionObjectText(fact.object_text);
+      setCorrectionReason("");
+      setCorrectionError(null);
+    };
+
+    const closeCorrection = (): void => {
+      if (!correctionFact || correctionSaving) return;
+      const changed = correctionObjectText.trim() !== correctionFact.object_text.trim()
+        || Boolean(correctionReason.trim());
+      if (changed && typeof window !== "undefined"
+        && !window.confirm("事实修正尚未提交，确定放弃吗？")) return;
+      setCorrectionFact(null);
+    };
+
+    const submitCorrection = async (): Promise<void> => {
+      if (!correctionFact || !props.onCorrectFact || correctionSaving) return;
+      setCorrectionSaving(true);
+      setCorrectionError(null);
+      try {
+        const next = await props.onCorrectFact(correctionFact.id, {
+          schema_version: "story-fact-correction/1",
+          operation_key: workspaceOperationKey("correction"),
+          expected_story_ledger_version: workspace.story_ledger_version,
+          reason: correctionReason.trim(),
+          replacement: { object_text: correctionObjectText.trim() },
+        });
+        applyWorkspace(next);
+        setCorrectionFact(null);
+      } catch (reason) {
+        setCorrectionError(normalizeActionError(reason).message);
+      } finally {
+        setCorrectionSaving(false);
+      }
+    };
+
+    const previewBatchRevert = async (fact: ProjectedFactViewV2): Promise<void> => {
+      const batchId = fact.source?.commit_batch_id;
+      if (!batchId || !props.onPreviewBatchRevert) return;
+      setCorrectionFact(null);
+      setSourceFact(null);
+      setBatchError(null);
+      try {
+        setBatchImpact(await props.onPreviewBatchRevert(batchId));
+        setBatchReason("");
+      } catch (reason) {
+        setHistoryError(normalizeActionError(reason).message);
+      }
+    };
+
+    const submitBatchRevert = async (): Promise<void> => {
+      if (!batchImpact || !props.onRevertBatch || batchSaving) return;
+      setBatchSaving(true);
+      setBatchError(null);
+      try {
+        const next = await props.onRevertBatch(batchImpact.batch_id, {
+          operation_key: workspaceOperationKey("revert"),
+          expected_story_ledger_version: workspace.story_ledger_version,
+          reason: batchReason.trim() || null,
+        });
+        applyWorkspace(next);
+        setBatchImpact(null);
+      } catch (reason) {
+        setBatchError(normalizeActionError(reason).message);
+      } finally {
+        setBatchSaving(false);
+      }
+    };
+
+    const openSource = async (fact: ProjectedFactViewV2): Promise<void> => {
+      if (!fact.source || !props.onLoadSource) return;
+      setCorrectionFact(null);
+      setBatchImpact(null);
+      setSourceFact(fact);
+      setSourceRevision(null);
+      setSourceResolution(null);
+      setSourceError(null);
+      setSourceLoading(true);
+      try {
+        const revision = await props.onLoadSource(
+          fact.source.document_id,
+          fact.source.revision_id,
+        );
+        setSourceRevision(revision);
+        if (
+          fact.source.source_start === null
+          || fact.source.source_end === null
+          || fact.source.source_range_hash === null
+        ) {
+          setSourceResolution({
+            status: "fallback",
+            reason: "invalid_range",
+            excerpt: [...fact.source.source_excerpt].slice(0, 500).join(""),
+            excerptTruncated: fact.source.source_excerpt_truncated,
+          });
+        } else {
+          setSourceResolution(await resolveCharacterSourceRange(
+            revision.content_text,
+            revision.content_hash,
+            {
+              source_content_hash: fact.source.source_content_hash,
+              source_coordinate: fact.source.source_coordinate,
+              source_start: fact.source.source_start,
+              source_end: fact.source.source_end,
+              source_range_hash: fact.source.source_range_hash,
+              source_excerpt: fact.source.source_excerpt,
+              source_excerpt_truncated: fact.source.source_excerpt_truncated,
+            },
+          ));
+        }
+      } catch (reason) {
+        setSourceError(normalizeActionError(reason).message);
+      } finally {
+        setSourceLoading(false);
+      }
+    };
+
     const activateTab = (tab: CharacterWorkspaceTab): void => {
+      if (bodyRef.current) tabScrollRef.current[activeTab] = bodyRef.current.scrollTop;
       setActiveTab(tab);
       if (typeof document !== "undefined") {
-        const focus = (): void => document.getElementById(`${baseId}-tab-${tab}`)?.focus();
+        const focus = (): void => {
+          if (bodyRef.current) bodyRef.current.scrollTop = tabScrollRef.current[tab];
+          document.getElementById(`${baseId}-tab-${tab}`)?.focus();
+        };
         if (typeof queueMicrotask === "function") queueMicrotask(focus);
         else focus();
       }
@@ -222,6 +494,21 @@ export function createCharacterWorkspaceDialog(
     };
 
     const onDialogKeyDown = (event: KeyboardEventLike): void => {
+      if (event.key === "Escape" && correctionFact) {
+        event.preventDefault();
+        closeCorrection();
+        return;
+      }
+      if (event.key === "Escape" && batchImpact) {
+        event.preventDefault();
+        if (!batchSaving) setBatchImpact(null);
+        return;
+      }
+      if (event.key === "Escape" && sourceFact) {
+        event.preventDefault();
+        if (!sourceLoading) setSourceFact(null);
+        return;
+      }
       if (event.key === "Escape" && !saving && props.onRequestClose) {
         event.preventDefault();
         requestClose();
@@ -232,7 +519,7 @@ export function createCharacterWorkspaceDialog(
       if (!dialog) return;
       const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
         'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      )).filter((element) => element.offsetParent !== null);
+      )).filter((element) => element.offsetParent !== null && !element.closest("[inert]"));
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -259,19 +546,37 @@ export function createCharacterWorkspaceDialog(
           message: "请修正人物卡中的必填项。",
           field_errors: { "character.name": "人物姓名不能为空。" },
         };
-        setActiveTab("basic");
+        activateTab("basic");
         setError(nextError);
+        return;
+      }
+      const profileValidation = validateCharacterProfile(
+        profileDraft,
+        workspace.selected_instance.profile_schema_version === 1 ? 1 : 2,
+      );
+      if (hasProfileChanges(workspace, profileDraft) && !profileValidation.ok) {
+        activateTab("line-profile");
+        setError({
+          code: "validation_failed",
+          message: "请核对当前线设定中的字段后再保存。",
+          field_errors: Object.fromEntries(
+            Object.entries(profileValidation.fieldErrors).map(([key, value]) => [`profile.${key}`, value]),
+          ),
+        });
         return;
       }
       setSaving(true);
       setError(null);
       try {
-        const next = await props.onSave(buildSaveCommand(workspace, rootDraft, profileDraft));
+        const normalizedProfile = profileValidation.ok
+          ? { ...profileValidation.profile }
+          : profileDraft;
+        const next = await props.onSave(buildSaveCommand(workspace, rootDraft, normalizedProfile));
         applyWorkspace(next);
       } catch (reason) {
         const nextError = normalizeActionError(reason);
         const firstField = Object.keys(nextError.field_errors ?? {})[0];
-        if (firstField) setActiveTab(tabForField(firstField));
+        if (firstField) activateTab(tabForField(firstField));
         // Deliberately keep both drafts unchanged on validation and CAS conflicts.
         setError(nextError);
       } finally {
@@ -315,7 +620,7 @@ export function createCharacterWorkspaceDialog(
       label: string,
       value: string,
       onChange: (value: string) => void,
-      options: { readonly wide?: boolean; readonly multiline?: boolean; readonly required?: boolean; readonly placeholder?: string } = {},
+      options: { readonly wide?: boolean; readonly span?: 3 | 6 | 12; readonly multiline?: boolean; readonly required?: boolean; readonly placeholder?: string } = {},
     ): ElementNode => {
       const message = fieldError(error, id);
       const inputId = errorFieldId(baseId, id);
@@ -331,7 +636,7 @@ export function createCharacterWorkspaceDialog(
       };
       return h(
         "label",
-        { className: `anw-character-workspace-field${options.wide ? " anw-character-workspace-field--wide" : ""}` },
+        { className: `anw-character-workspace-field${options.wide ? " anw-character-workspace-field--wide" : ""}${options.span ? ` anw-character-workspace-field--span-${options.span}` : ""}` },
         h("span", null, label, options.required ? " *" : ""),
         options.multiline ? h("textarea", controlProps) : h("input", { ...controlProps, type: "text" }),
         message ? h("span", { id: describedBy, className: "anw-character-workspace-error" }, message) : null,
@@ -344,7 +649,7 @@ export function createCharacterWorkspaceDialog(
       const describedBy = message ? `${inputId}-error` : undefined;
       return h(
         "label",
-        { className: "anw-character-workspace-field" },
+        { className: "anw-character-workspace-field anw-character-workspace-field--span-3" },
         h("span", null, "角色定位"),
         h(
           "select",
@@ -382,20 +687,23 @@ export function createCharacterWorkspaceDialog(
         { className: "anw-character-workspace-form-grid anw-character-workspace-form-grid--basic" },
         renderField("character.name", "人物姓名", rootDraft.name, (name) => setRootDraft({ ...rootDraft, name }), {
           required: true,
+          span: 6,
         }),
         renderRoleField(),
         renderField("character.gender", "性别", rootDraft.gender, (gender) =>
           setRootDraft({ ...rootDraft, gender }),
+          { span: 3 },
         ),
         renderField("character.core_theme", "核心主题", rootDraft.core_theme, (core_theme) =>
           setRootDraft({ ...rootDraft, core_theme }),
+          { span: 12 },
         ),
         renderField(
           "character.description",
           "公共小传",
           rootDraft.description,
           (description) => setRootDraft({ ...rootDraft, description }),
-          { multiline: true, wide: true },
+          { multiline: true, wide: true, span: 12 },
         ),
       ),
       h(
@@ -423,6 +731,22 @@ export function createCharacterWorkspaceDialog(
       ),
     );
 
+    const profileSchemaVersion = workspace.selected_instance.profile_schema_version === 1 ? 1 : 2;
+    const writingCompletion = characterProfileGroupCompletion(profileDraft, profileSchemaVersion, "writing");
+    const identityCompletion = characterProfileGroupCompletion(profileDraft, profileSchemaVersion, "identity");
+    const birthCompletion = characterProfileGroupCompletion(profileDraft, profileSchemaVersion, "birth");
+    const renderProfileField = (field: (typeof PROFILE_FIELDS)[number]): ElementNode => renderField(
+      `profile.${field.key}`,
+      field.label,
+      valueAsText(profileDraft[field.key]),
+      (value) => setProfileDraft(updateProfileText(profileDraft, field.key, value, Boolean(field.list))),
+      {
+        multiline: field.multiline,
+        wide: field.multiline,
+        placeholder: field.placeholder,
+      },
+    );
+
     const profilePanel = h(
       "section",
       {
@@ -435,7 +759,7 @@ export function createCharacterWorkspaceDialog(
       h(
         "div",
         { className: "anw-character-workspace-section-heading" },
-        h("div", null, h("h3", null, "当前故事线档案"), h("p", null, "记录身份、目标、缺陷与作者掌握的秘密。")),
+        h("div", null, h("h3", null, "当前线设定"), h("p", null, "记录身份、目标、缺陷与作者掌握的秘密。")),
         h("span", { className: "anw-character-workspace-editable-badge" }, "可编辑"),
       ),
       multiTimeline
@@ -448,19 +772,31 @@ export function createCharacterWorkspaceDialog(
         : null,
       h(
         "div",
-        { className: "anw-character-workspace-form-grid anw-character-workspace-form-grid--profile" },
-        ...PROFILE_FIELDS.map((field) =>
-          renderField(
-            `profile.${field.key}`,
-            field.label,
-            valueAsText(profileDraft[field.key]),
-            (value) =>
-              setProfileDraft(updateProfileText(profileDraft, field.key, value, Boolean(field.list))),
-            {
-              multiline: field.multiline,
-              wide: field.multiline,
-              placeholder: field.placeholder,
-            },
+        { className: "anw-character-profile-layout" },
+        h(
+          "section",
+          { className: "anw-character-profile-main" },
+          h("div", { className: "anw-character-profile-group-title" }, h("h4", null, "写作核心"), h("span", null, `已填写 ${writingCompletion.filled}/${writingCompletion.total}`)),
+          h(
+            "div",
+            { className: "anw-character-workspace-form-grid anw-character-workspace-form-grid--writing" },
+            ...PROFILE_FIELDS.filter((field) => WRITING_PROFILE_KEYS.has(field.key)).map(renderProfileField),
+          ),
+        ),
+        h(
+          "aside",
+          { className: "anw-character-profile-side" },
+          h(
+            "details",
+            { open: identityOpen, onToggle: (event: ToggleEventLike) => setIdentityOpen(event.currentTarget.open) },
+            h("summary", null, h("span", null, "身份层"), h("small", null, `已填写 ${identityCompletion.filled}/${identityCompletion.total}`)),
+            h("div", { className: "anw-character-profile-detail-fields" }, ...PROFILE_FIELDS.filter((field) => IDENTITY_PROFILE_KEYS.has(field.key)).map(renderProfileField)),
+          ),
+          h(
+            "details",
+            { open: birthOpen, onToggle: (event: ToggleEventLike) => setBirthOpen(event.currentTarget.open) },
+            h("summary", null, h("span", null, "出生与年龄"), h("small", null, `已填写 ${birthCompletion.filled}/${birthCompletion.total}`)),
+            h("div", { className: "anw-character-profile-detail-fields" }, ...PROFILE_FIELDS.filter((field) => BIRTH_PROFILE_KEYS.has(field.key) && (profileSchemaVersion === 2 || field.key !== "age_at_story_start_note")).map(renderProfileField)),
           ),
         ),
       ),
@@ -474,54 +810,43 @@ export function createCharacterWorkspaceDialog(
         "aria-labelledby": `${baseId}-tab-growth`,
         hidden: activeTab !== "growth",
         className: "anw-character-workspace-panel",
-        "aria-label": "成长与状态，只读",
+        "aria-label": "状态与经历，只读",
       },
       h(
         "div",
         { className: "anw-character-workspace-section-heading" },
-        h("div", null, h("h3", null, "成长与当前状态"), h("p", null, "由已确认故事事实投影生成，需要回到事实账本修正来源。")),
-        h("span", { className: "anw-character-workspace-readonly-badge" }, `${workspace.projected_state.current_facts.length} 条 · 只读`),
+        h("div", null, h("h3", null, "状态与经历"), h("p", null, "先看续写所需当前状态，需要时再展开可审计事实历史。")),
+        h("span", { className: "anw-character-workspace-readonly-badge" }, "事实投影 · 只读"),
       ),
-      workspace.projected_state.conflicts.length > 0
-        ? h(
-            "div",
-            { className: "anw-character-workspace-alert", role: "status" },
-            "当前状态存在冲突，请回到事实账本处理。",
-            ...workspace.projected_state.conflicts.map((conflict) =>
-              h("p", { key: conflict.conflict_key }, `${conflict.conflict_key}：${conflict.reason}`),
-            ),
-          )
+      renderCharacterStatePanel(React, {
+        workspace,
+        historyOpen,
+        onToggleHistory: () => setHistoryOpen((value) => !value),
+        onOpenSource: (fact) => void openSource(fact),
+        onCorrectFact: openCorrection,
+      }),
+      historyOpen
+        ? renderCharacterFactHistory(React, {
+            page: historyPage,
+            loading: historyLoading,
+            loadingMore: historyLoadingMore,
+            error: historyError,
+            effectiveState: historyEffectiveState,
+            health: historyHealth,
+            onEffectiveStateChange: (value) => {
+              setHistoryEffectiveState(value);
+              setHistoryPage(null);
+            },
+            onHealthChange: (value) => {
+              setHistoryHealth(value);
+              setHistoryPage(null);
+            },
+            onLoadMore: () => void loadMoreFacts(),
+            onOpenSource: (fact) => void openSource(fact),
+            onCorrectFact: openCorrection,
+            onPreviewBatchRevert: (fact) => void previewBatchRevert(fact),
+          })
         : null,
-      workspace.projected_state.ambiguous_fact_ids.length > 0
-        ? h("p", { className: "anw-character-workspace-readonly-card" }, "部分故事时间或状态依据不足，当前结果为不确定状态。")
-        : null,
-      workspace.projected_state.current_facts.length === 0
-        ? h("div", { className: "anw-character-workspace-empty" }, "截至当前叙事位置，尚无已确认的成长状态。")
-        : h(
-            "div",
-            { className: "anw-character-workspace-fact-grid" },
-            ...workspace.projected_state.current_facts.map((fact) =>
-              h(
-                "article",
-                { key: fact.id, className: "anw-character-workspace-readonly-card anw-character-workspace-fact-card" },
-                h(
-                  "header",
-                  null,
-                  h("h3", null, fact.predicate || characterFactDimensionLabel(fact.dimension)),
-                  h(
-                    "span",
-                    null,
-                    h("span", { className: "anw-character-workspace-sr-only" }, "事实维度："),
-                    characterFactDimensionLabel(fact.dimension),
-                  ),
-                ),
-                h("p", null, fact.object_text || displayJson(fact.details)),
-                fact.story_sequence === null
-                  ? null
-                  : h("p", { className: "anw-character-workspace-meta" }, `故事序位 ${fact.story_sequence}`),
-              ),
-            ),
-          ),
     );
 
     const voicePanel = h(
@@ -544,6 +869,8 @@ export function createCharacterWorkspaceDialog(
     );
 
     const firstErrorField = Object.keys(error?.field_errors ?? {})[0];
+    const activeSource = sourceFact?.source ?? null;
+    const drawerOpen = Boolean(correctionFact || batchImpact || activeSource);
     const instancesForSelectedTimeline = workspace.instances.filter(
       (instance) => instance.origin_timeline_id === workspace.selected_timeline.id,
     );
@@ -570,7 +897,7 @@ export function createCharacterWorkspaceDialog(
         },
         h(
           "header",
-          { className: "anw-character-workspace-summary" },
+          { className: "anw-character-workspace-summary", inert: drawerOpen ? "" : undefined, "aria-hidden": drawerOpen || undefined },
           h(
             "div",
             { className: "anw-character-workspace-heading" },
@@ -662,7 +989,7 @@ export function createCharacterWorkspaceDialog(
         ),
         h(
           "nav",
-          { className: "anw-character-workspace-tabs", role: "tablist", "aria-label": "人物卡栏目" },
+          { className: "anw-character-workspace-tabs", role: "tablist", "aria-label": "人物卡栏目", inert: drawerOpen ? "" : undefined, "aria-hidden": drawerOpen || undefined },
           ...(["basic", "line-profile", "growth", "voice"] as const).map((tab) =>
             h(
               "button",
@@ -675,12 +1002,12 @@ export function createCharacterWorkspaceDialog(
                 "aria-selected": activeTab === tab,
                 "aria-controls": `${baseId}-panel-${tab}`,
                 tabIndex: activeTab === tab ? 0 : -1,
-                onClick: () => setActiveTab(tab),
+                onClick: () => activateTab(tab),
                 onKeyDown: (event: KeyboardEventLike) => onTabKeyDown(tab, event),
               },
               h("span", null, TAB_LABELS[tab]),
-              tab === "growth" && workspace.projected_state.current_facts.length > 0
-                ? h("span", { className: "anw-character-workspace-tab-count", "aria-hidden": true }, workspace.projected_state.current_facts.length)
+              tab === "growth" && factRiskCount > 0
+                ? h("span", { className: "anw-character-workspace-tab-count", "aria-label": `${factRiskCount} 项待核对` }, factRiskCount)
                 : null,
             ),
           ),
@@ -697,7 +1024,7 @@ export function createCharacterWorkspaceDialog(
                     {
                       type: "button",
                       onClick: () => {
-                        setActiveTab(tabForField(firstErrorField));
+                        activateTab(tabForField(firstErrorField));
                         if (typeof document !== "undefined") {
                           document.getElementById(errorFieldId(baseId, firstErrorField))?.focus();
                         }
@@ -708,17 +1035,19 @@ export function createCharacterWorkspaceDialog(
                 : null,
             )
           : null,
-        h("main", { className: "anw-character-workspace-body" }, basicPanel, profilePanel, growthPanel, voicePanel),
+        h("main", { ref: (element: HTMLElement | null) => { bodyRef.current = element; }, className: "anw-character-workspace-body", inert: drawerOpen ? "" : undefined, "aria-hidden": drawerOpen || undefined }, basicPanel, profilePanel, growthPanel, voicePanel),
         h(
           "footer",
-          { className: "anw-character-workspace-footer" },
+          { className: "anw-character-workspace-footer", inert: drawerOpen ? "" : undefined, "aria-hidden": drawerOpen || undefined },
           h(
             "span",
             { className: "anw-character-workspace-meta" },
             activeTab === "growth"
-              ? "成长状态来自事实账本，仅供查看。"
+              ? "状态与经历来自故事账本，仅供查看。"
               : activeTab === "voice"
-                ? "声音设置由共用声音组件独立保存。"
+                ? dirty
+                  ? "其他栏目还有未保存修改；下方撤销和保存只处理人物卡字段。"
+                  : "声音设置由共用声音组件独立保存。"
                 : dirty
                   ? "修改尚未保存。"
                   : "人物卡已是最新状态。按 Esc 可关闭。",
@@ -726,16 +1055,18 @@ export function createCharacterWorkspaceDialog(
           h(
             "div",
             { className: "anw-character-workspace-actions" },
-            h(
-              "button",
-              {
-                type: "button",
-                className: "anw-character-workspace-button",
-                disabled: saving || !dirty,
-                onClick: resetDrafts,
-              },
-              "撤销修改",
-            ),
+            showCharacterDraftActions
+              ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-character-workspace-button",
+                  disabled: saving || !dirty,
+                  onClick: resetDrafts,
+                },
+                "撤销修改",
+              )
+              : null,
             props.onRequestClose
               ? h(
                   "button",
@@ -748,18 +1079,60 @@ export function createCharacterWorkspaceDialog(
                   "关闭",
                 )
               : null,
-            h(
-              "button",
-              {
-                type: "button",
-                className: "anw-character-workspace-button anw-character-workspace-button--primary",
-                disabled: saving || !dirty || !props.onSave,
-                onClick: () => void save(),
-              },
-              saving ? "正在保存…" : "保存人物卡",
-            ),
+            showCharacterDraftActions
+              ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-character-workspace-button anw-character-workspace-button--primary",
+                  disabled: saving || !dirty || !props.onSave,
+                  onClick: () => void save(),
+                },
+                saving ? "正在保存…" : "保存人物卡",
+              )
+              : null,
           ),
         ),
+        correctionFact
+          ? renderCharacterFactCorrectionDrawer(React, {
+              fact: correctionFact,
+              objectText: correctionObjectText,
+              reason: correctionReason,
+              saving: correctionSaving,
+              error: correctionError,
+              onObjectTextChange: setCorrectionObjectText,
+              onReasonChange: setCorrectionReason,
+              onSubmit: () => void submitCorrection(),
+              onClose: () => {
+                closeCorrection();
+              },
+            })
+          : null,
+        batchImpact
+          ? renderCharacterBatchRevertDrawer(React, {
+              impact: batchImpact,
+              reason: batchReason,
+              saving: batchSaving,
+              error: batchError,
+              onReasonChange: setBatchReason,
+              onSubmit: () => void submitBatchRevert(),
+              onClose: () => {
+                if (!batchSaving) setBatchImpact(null);
+              },
+            })
+          : null,
+        activeSource
+          ? renderCharacterSourceViewer(React, {
+              source: activeSource,
+              revision: sourceRevision,
+              resolution: sourceResolution,
+              loading: sourceLoading,
+              error: sourceError,
+              onClose: () => {
+                if (!sourceLoading) setSourceFact(null);
+              },
+            })
+          : null,
       ),
     );
     const portalContainer = portal?.getContainer();

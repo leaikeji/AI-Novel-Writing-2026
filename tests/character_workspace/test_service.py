@@ -283,6 +283,91 @@ def test_single_timeline_resolves_without_extra_arguments() -> None:
     assert store.projection_calls == [(store.root.novel_id, line.id, 8)]
 
 
+def test_workspace_v2_requires_explicit_view_version_and_keeps_v1_default() -> None:
+    store, line, person = single_line_store()
+    raw = store.projection_payload["current_facts"][0]  # type: ignore[index]
+    store.fact_rows.append(
+        StoryFact(
+            id=UUID(str(raw["id"])),
+            novel_id=store.root.novel_id,
+            fact_type="character_state",
+            subject=store.root.name,
+            predicate="location",
+            object_text="旧港",
+            details={"schema_version": "character-state/1", "value": "旧港"},
+            schema_version="story-fact/2",
+            timeline_id=line.id,
+            character_id=store.root.id,
+            character_instance_id=person.id,
+            dimension="location",
+            event_kind="moved",
+            story_sequence=3,
+            visibility_json={"schema_version": "story-visibility/1", "scope": "author"},
+            event_fingerprint="9" * 64,
+            status="active",
+            created_at=NOW,
+        )
+    )
+    action_id = uuid4()
+    action_payload = {
+        **raw,
+        "id": str(action_id),
+        "predicate": "opened_door",
+        "object_text": "打开暗门",
+        "details": {
+            "schema_version": "character-state/1",
+            "value": "打开暗门",
+        },
+        "dimension": "action",
+        "story_sequence": 4,
+        "event_fingerprint": "8" * 64,
+    }
+    store.projection_payload["visible_facts"].append(action_payload)  # type: ignore[union-attr]
+    store.projection_payload["current_facts"].append(action_payload)  # type: ignore[union-attr]
+    store.fact_rows.append(
+        StoryFact(
+            id=action_id,
+            novel_id=store.root.novel_id,
+            fact_type="character_state",
+            subject=store.root.name,
+            predicate="opened_door",
+            object_text="打开暗门",
+            details={"schema_version": "character-state/1", "value": "打开暗门"},
+            schema_version="story-fact/2",
+            timeline_id=line.id,
+            character_id=store.root.id,
+            character_instance_id=person.id,
+            dimension="action",
+            event_kind="acted",
+            story_sequence=4,
+            visibility_json={"schema_version": "story-visibility/1", "scope": "author"},
+            event_fingerprint="8" * 64,
+            status="active",
+            created_at=NOW,
+        )
+    )
+    service = CharacterWorkspaceService(store)
+
+    default_workspace = service.get_workspace(store.root.novel_id, store.root.id)
+    v2_workspace = service.get_workspace(
+        store.root.novel_id,
+        store.root.id,
+        view_version=2,
+    )
+
+    assert default_workspace.schema_version == "character-workspace/1"
+    assert v2_workspace.schema_version == "character-workspace/2"
+    assert [fact.object_text for fact in v2_workspace.projected_state.current_facts] == [
+        "旧港"
+    ]
+    location = next(
+        slot for slot in v2_workspace.writing_state.slots if slot.key == "location"
+    )
+    assert [value.object_text for value in location.values] == ["旧港"]
+    assert v2_workspace.writing_state.history_summary.current == 1
+    assert v2_workspace.writing_state.history_summary.historical == 1
+
+
 def test_multiline_requires_explicit_timeline_before_projection() -> None:
     store, _, _ = single_line_store()
     branch = timeline(store.root, name="支线", position=1)
