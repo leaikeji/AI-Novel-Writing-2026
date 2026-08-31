@@ -189,6 +189,11 @@ export interface ChapterCreationDraftRecord {
   outline_text: string;
   data: Record<string, any>;
   completed_document_id: string | null;
+  recovery?: {
+    kind: "volume_rebound";
+    from_volume_id: string | null;
+    to_volume_id: string;
+  };
   created_at: string | null;
   updated_at: string | null;
 }

@@ -11,7 +11,8 @@ from typing import Any, Iterable
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
 from .character_profile_services import (
@@ -81,6 +82,7 @@ from .services import (
     NotFoundError,
     ValidationError,
     _document_payload,
+    _refresh_active_novel_index_after_commit,
     _lock_generation_attempt,
     _new_document,
     _normalize_role_constraints,
@@ -92,6 +94,14 @@ from .services import (
     get_novel,
     markdown_to_text,
     visible_character_count,
+)
+from .volume_chapter_titles import (
+    VolumeChapterContractError,
+    canonical_tree,
+    context_chapter_title,
+    display_chapter_title,
+    display_volume_title,
+    semantic_title,
 )
 from .selection_edit_diff import (
     SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS,
@@ -183,6 +193,29 @@ def _clean_title(value: str, label: str = "标题") -> str:
 def _next_position(session: Session, model: Any, novel_id: UUID) -> int:
     current = session.scalar(select(func.max(model.position)).where(model.novel_id == novel_id))
     return int(current or 0) + 1000
+
+
+def _lock_novel(session: Session, novel_id: UUID) -> Novel:
+    novel = session.scalar(
+        select(Novel).where(Novel.id == novel_id).with_for_update()
+    )
+    if novel is None:
+        raise NotFoundError(f"novel {novel_id} not found")
+    return novel
+
+
+def _lock_volume(session: Session, novel_id: UUID, volume_id: UUID) -> Volume:
+    volume = session.scalar(
+        select(Volume)
+        .where(Volume.id == volume_id, Volume.novel_id == novel_id)
+        .with_for_update()
+    )
+    if volume is None:
+        raise VolumeChapterContractError(
+            "chapter_volume_invalid",
+            "所选分卷不存在或不属于当前小说，请刷新后重试",
+        )
+    return volume
 
 
 def _require_volume(session: Session, novel_id: UUID, volume_id: UUID) -> Volume:
@@ -2008,6 +2041,19 @@ def _relationship_snapshot_text(value: Any, limit: int) -> str:
     return text_value[:limit].rstrip() + "…"
 
 
+def _canonical_chapter_tree(session: Session, novel_id: UUID):
+    volumes = session.scalars(
+        select(Volume).where(Volume.novel_id == novel_id)
+    ).all()
+    chapters = session.scalars(
+        select(Document).where(
+            Document.novel_id == novel_id,
+            Document.kind == "chapter",
+        )
+    ).all()
+    return canonical_tree(volumes, chapters)
+
+
 def build_relationship_graph_snapshot(
     session: Session,
     novel_id: UUID,
@@ -2039,8 +2085,16 @@ def build_relationship_graph_snapshot(
         select(Document, DocumentWorkingCopy)
         .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
         .where(Document.novel_id == novel_id, Document.kind == "chapter")
-        .order_by(Document.position, Document.id)
     ).all()
+    chapter_tree = _canonical_chapter_tree(session, novel_id)
+    document_row_by_id = {
+        document.id: (document, working) for document, working in document_rows
+    }
+    document_rows = [
+        document_row_by_id[document.id]
+        for document in chapter_tree.chapters
+        if document.id in document_row_by_id
+    ]
     current_revision_ids = {
         working.base_revision_id
         for _, working in document_rows
@@ -2112,8 +2166,11 @@ def build_relationship_graph_snapshot(
     chapter_index = [
         {
             "id": str(document.id),
-            "title": document.title,
-            "position": document.position,
+            "title": context_chapter_title(
+                document.title,
+                chapter_tree.chapter_ordinals[document.id],
+            ),
+            "position": chapter_tree.chapter_ordinals[document.id],
             "content_hash": working.content_hash,
         }
         for document, working, _ in relevant_chapters
@@ -2124,8 +2181,11 @@ def build_relationship_graph_snapshot(
             text_value = text_value[:800].rstrip() + "\n…\n" + text_value[-1600:].lstrip()
         recent_excerpts.append(
             {
-                "title": document.title,
-                "position": document.position,
+                "title": context_chapter_title(
+                    document.title,
+                    chapter_tree.chapter_ordinals[document.id],
+                ),
+                "position": chapter_tree.chapter_ordinals[document.id],
                 "excerpt": text_value,
             }
         )
@@ -2273,9 +2333,18 @@ def build_character_profile_completion_snapshot(
             DocumentRevision.id == DocumentWorkingCopy.base_revision_id,
         )
         .where(Document.novel_id == novel_id, Document.kind == "chapter")
-        .order_by(Document.position, Document.id)
         .limit(1000)
     ).all()
+    chapter_tree = _canonical_chapter_tree(session, novel_id)
+    formal_revision_row_by_id = {
+        document.id: (document, revision)
+        for document, revision in formal_revision_rows
+    }
+    formal_revision_rows = [
+        formal_revision_row_by_id[document.id]
+        for document in chapter_tree.chapters
+        if document.id in formal_revision_row_by_id
+    ]
     current_revision_ids = [revision.id for _, revision in formal_revision_rows]
     fact_query = select(StoryFact).where(
         StoryFact.novel_id == novel_id,
@@ -2338,8 +2407,11 @@ def build_character_profile_completion_snapshot(
             {
                 "id": str(revision.id),
                 "document_id": str(document.id),
-                "title": document.title,
-                "position": document.position,
+                "title": context_chapter_title(
+                    document.title,
+                    chapter_tree.chapter_ordinals[document.id],
+                ),
+                "position": chapter_tree.chapter_ordinals[document.id],
                 "content_text": revision.content_text,
             }
             for document, revision in formal_revision_rows
@@ -3603,34 +3675,117 @@ def _chapter_draft_payload(draft: ChapterCreationDraft) -> dict[str, Any]:
 def get_or_create_chapter_creation_draft(
     session: Session, *, novel_id: UUID, volume_id: UUID | None, draft_key: str
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
-    if volume_id:
-        _require_volume(session, novel_id, volume_id)
-    else:
-        volume_id = session.scalar(
-            select(Volume.id)
-            .where(Volume.novel_id == novel_id)
-            .order_by(Volume.position)
-            .limit(1)
+    _lock_novel(session, novel_id)
+    if volume_id is None:
+        raise VolumeChapterContractError(
+            "chapter_volume_required", "请先创建分卷，再新建章节"
         )
-        if volume_id is None:
-            raise ValidationError("请先为小说创建分卷")
+    requested_volume = _lock_volume(session, novel_id, volume_id)
     key = draft_key.strip()
     if not key or len(key) > 120:
         raise ValidationError("章节草稿键无效")
+    draft_scope = session.execute(
+        select(
+            ChapterCreationDraft.novel_id,
+            ChapterCreationDraft.volume_id,
+        ).where(ChapterCreationDraft.draft_key == key)
+    ).one_or_none()
+    original_volume = None
+    if (
+        draft_scope is not None
+        and draft_scope.novel_id == novel_id
+        and draft_scope.volume_id is not None
+    ):
+        if draft_scope.volume_id == requested_volume.id:
+            original_volume = requested_volume
+        else:
+            original_volume = session.scalar(
+                select(Volume)
+                .where(
+                    Volume.id == draft_scope.volume_id,
+                    Volume.novel_id == novel_id,
+                )
+                .with_for_update()
+            )
     draft = session.scalar(
-        select(ChapterCreationDraft).where(ChapterCreationDraft.draft_key == key)
+        select(ChapterCreationDraft)
+        .where(ChapterCreationDraft.draft_key == key)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if draft is not None:
         if draft.novel_id != novel_id:
-            raise ValidationError("章节草稿键已属于其他小说")
+            raise VolumeChapterContractError(
+                "chapter_draft_key_conflict",
+                "章节草稿键已属于其他小说或当前状态不可恢复",
+                status_code=409,
+            )
+        if draft.state == "completed" and draft.completed_document_id is not None:
+            completed = session.scalar(
+                select(Document.id).where(
+                    Document.id == draft.completed_document_id,
+                    Document.novel_id == novel_id,
+                )
+            )
+            if completed is not None:
+                return _chapter_draft_payload(draft)
+        if draft.state != "draft":
+            raise VolumeChapterContractError(
+                "chapter_draft_key_conflict",
+                "章节草稿键已属于其他小说或当前状态不可恢复",
+                status_code=409,
+            )
+        if original_volume is None:
+            previous_volume_id = draft.volume_id
+            draft.volume_id = requested_volume.id
+            draft.version += 1
+            session.commit()
+            payload = _chapter_draft_payload(draft)
+            payload["recovery"] = {
+                "kind": "volume_rebound",
+                "from_volume_id": str(previous_volume_id) if previous_volume_id else None,
+                "to_volume_id": str(requested_volume.id),
+            }
+            return payload
         return _chapter_draft_payload(draft)
-    draft = ChapterCreationDraft(
-        id=uuid4(), draft_key=key, novel_id=novel_id, volume_id=volume_id,
-        target_character_count=2500, data_json={}
-    )
-    session.add(draft)
+
+    draft_id = uuid4()
+    values = {
+        "id": draft_id,
+        "draft_key": key,
+        "novel_id": novel_id,
+        "volume_id": requested_volume.id,
+        "target_character_count": 2500,
+        "data_json": {},
+    }
+    if session.get_bind().dialect.name == "postgresql":
+        inserted_id = session.scalar(
+            postgresql_insert(ChapterCreationDraft)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=(ChapterCreationDraft.draft_key,))
+            .returning(ChapterCreationDraft.id)
+        )
+        if inserted_id is None:
+            draft = session.scalar(
+                select(ChapterCreationDraft)
+                .where(ChapterCreationDraft.draft_key == key)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if draft is None or draft.novel_id != novel_id:
+                raise VolumeChapterContractError(
+                    "chapter_draft_key_conflict",
+                    "章节草稿键已属于其他小说或当前状态不可恢复",
+                    status_code=409,
+                )
+        else:
+            draft = session.get(ChapterCreationDraft, inserted_id)
+    else:
+        draft = ChapterCreationDraft(**values)
+        session.add(draft)
     session.commit()
+    if draft is None:
+        raise RuntimeError("chapter draft insert did not return a record")
     return _chapter_draft_payload(draft)
 
 
@@ -3646,10 +3801,26 @@ def update_chapter_creation_draft(
     outline_text: str | None = None,
     data_patch: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    draft_hint = session.get(ChapterCreationDraft, draft_id)
+    if draft_hint is None:
+        raise NotFoundError(f"chapter creation draft {draft_id} not found")
+    _lock_novel(session, draft_hint.novel_id)
+    current_volume_id = session.scalar(
+        select(ChapterCreationDraft.volume_id).where(
+            ChapterCreationDraft.id == draft_id
+        )
+    )
+    if current_volume_id is not None:
+        session.scalar(
+            select(Volume)
+            .where(Volume.id == current_volume_id)
+            .with_for_update()
+        )
     draft = session.scalar(
         select(ChapterCreationDraft)
         .where(ChapterCreationDraft.id == draft_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if draft is None:
         raise NotFoundError(f"chapter creation draft {draft_id} not found")
@@ -3660,7 +3831,7 @@ def update_chapter_creation_draft(
     if not 1 <= step <= 6:
         raise ValidationError("章节创建步骤必须在1到6之间")
     if title is not None:
-        draft.title = title.strip()
+        draft.title = semantic_title(title, "chapter")
     if target_character_count is not None:
         if not 2000 <= target_character_count <= 5000:
             raise ValidationError("目标字数必须在2000到5000之间")
@@ -3816,10 +3987,32 @@ def _validate_chapter_references(
 def complete_chapter_creation_draft(
     session: Session, draft_id: UUID, *, expected_version: int
 ) -> dict[str, Any]:
+    draft_hint = session.get(ChapterCreationDraft, draft_id)
+    if draft_hint is None:
+        raise NotFoundError(f"chapter creation draft {draft_id} not found")
+    _lock_novel(session, draft_hint.novel_id)
+    current_volume_id = session.scalar(
+        select(ChapterCreationDraft.volume_id).where(
+            ChapterCreationDraft.id == draft_id
+        )
+    )
+    locked_volume = (
+        session.scalar(
+            select(Volume)
+            .where(
+                Volume.id == current_volume_id,
+                Volume.novel_id == draft_hint.novel_id,
+            )
+            .with_for_update()
+        )
+        if current_volume_id is not None
+        else None
+    )
     draft = session.scalar(
         select(ChapterCreationDraft)
         .where(ChapterCreationDraft.id == draft_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if draft is None:
         raise NotFoundError(f"chapter creation draft {draft_id} not found")
@@ -3827,11 +4020,16 @@ def complete_chapter_creation_draft(
         return {"draft": _chapter_draft_payload(draft), "document": get_document(session, draft.completed_document_id)}
     if draft.version != expected_version:
         raise EntityConflictError(_chapter_draft_payload(draft))
-    title = _clean_title(draft.title, "章节标题")
+    title = semantic_title(draft.title, "chapter")
+    if locked_volume is None or draft.volume_id != locked_volume.id:
+        raise VolumeChapterContractError(
+            "chapter_draft_volume_stale",
+            "章节草稿的目标分卷已失效，请重新选择分卷",
+            status_code=409,
+            current=_chapter_draft_payload(draft),
+        )
     if not draft.outline_text:
         raise ValidationError("请先生成或填写章节大纲")
-    if draft.volume_id:
-        _require_volume(session, draft.novel_id, draft.volume_id)
     required, optional = _validate_chapter_references(session, draft)
     role_constraints_v3 = _chapter_role_constraints_v3(session, draft, required)
     position = _next_position(session, Document, draft.novel_id)
@@ -3841,7 +4039,7 @@ def complete_chapter_creation_draft(
         title=title,
         kind="chapter",
         position=position,
-        volume_id=draft.volume_id,
+        volume_id=locked_volume.id,
     )
     session.flush()
     session.add(
@@ -3867,7 +4065,9 @@ def complete_chapter_creation_draft(
     draft.step = 6
     draft.completed_document_id = document.id
     draft.version += 1
+    novel_id = draft.novel_id
     session.commit()
+    _refresh_active_novel_index_after_commit(session, novel_id)
     return {"draft": _chapter_draft_payload(draft), "document": get_document(session, document.id)}
 
 
@@ -4844,6 +5044,7 @@ def update_volume(
     expected_version: int,
     title: str,
 ) -> dict[str, Any]:
+    _lock_novel(session, novel_id)
     volume = session.scalar(
         select(Volume)
         .where(Volume.id == volume_id, Volume.novel_id == novel_id)
@@ -4857,7 +5058,7 @@ def update_volume(
     }
     if volume.version != expected_version:
         raise EntityConflictError(current)
-    volume.title = _clean_title(title, "分卷名称")
+    volume.title = semantic_title(title, "volume")
     volume.version += 1
     session.commit()
     current.update({"title": volume.title, "version": volume.version})
@@ -4926,6 +5127,7 @@ def delete_volume(
     expected_version: int,
     move_documents_to: UUID | None = None,
 ) -> None:
+    _lock_novel(session, novel_id)
     volume = session.scalar(
         select(Volume)
         .where(Volume.id == volume_id, Volume.novel_id == novel_id)
@@ -4954,25 +5156,31 @@ def delete_volume(
             document.version += 1
     session.delete(volume)
     session.commit()
+    _refresh_active_novel_index_after_commit(session, novel_id)
 
 
 def reorder_volumes(
     session: Session, novel_id: UUID, *, ordered_volume_ids: list[UUID]
 ) -> list[dict[str, Any]]:
+    _lock_novel(session, novel_id)
     volumes = session.scalars(
         select(Volume).where(Volume.novel_id == novel_id).with_for_update()
     ).all()
     by_id = {item.id: item for item in volumes}
     if len(ordered_volume_ids) != len(set(ordered_volume_ids)) or set(ordered_volume_ids) != set(by_id):
         raise ValidationError("分卷排序必须包含当前小说的全部分卷且不能重复")
+    temporary_base = min((item.position for item in volumes), default=0) - (
+        len(volumes) + 1
+    ) * 1000
     for index, volume_id in enumerate(ordered_volume_ids, start=1):
-        by_id[volume_id].position = -(index * 1000)
+        by_id[volume_id].position = temporary_base + index
     session.flush()
     for index, volume_id in enumerate(ordered_volume_ids, start=1):
         volume = by_id[volume_id]
         volume.position = index * 1000
         volume.version += 1
     session.commit()
+    _refresh_active_novel_index_after_commit(session, novel_id)
     return [
         {"id": str(by_id[item_id].id), "novel_id": str(novel_id), "title": by_id[item_id].title,
          "position": by_id[item_id].position, "version": by_id[item_id].version}
@@ -4988,6 +5196,7 @@ def update_document_metadata(
     expected_version: int,
     title: str,
 ) -> dict[str, Any]:
+    _lock_novel(session, novel_id)
     document = session.scalar(
         select(Document)
         .where(Document.id == document_id, Document.novel_id == novel_id)
@@ -5000,15 +5209,27 @@ def update_document_metadata(
         raise NotFoundError(f"working copy for document {document_id} not found")
     if document.version != expected_version:
         raise EntityConflictError(_document_payload(document, working))
-    document.title = _clean_title(title, "章节标题")
+    if document.kind == "chapter":
+        document.title = semantic_title(title, "chapter")
+    else:
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise VolumeChapterContractError(
+                "document_title_required", "文档标题不能为空"
+            )
+        document.title = normalized_title
     document.version += 1
+    was_chapter = document.kind == "chapter"
     session.commit()
+    if was_chapter:
+        _refresh_active_novel_index_after_commit(session, novel_id)
     return get_document(session, document.id)
 
 
 def delete_document(
     session: Session, novel_id: UUID, document_id: UUID, *, expected_version: int
 ) -> None:
+    _lock_novel(session, novel_id)
     document = session.scalar(
         select(Document)
         .where(Document.id == document_id, Document.novel_id == novel_id)
@@ -5021,8 +5242,11 @@ def delete_document(
         raise NotFoundError(f"working copy for document {document_id} not found")
     if document.version != expected_version:
         raise EntityConflictError(_document_payload(document, working))
+    was_chapter = document.kind == "chapter"
     session.delete(document)
     session.commit()
+    if was_chapter:
+        _refresh_active_novel_index_after_commit(session, novel_id)
 
 
 def reorder_chapters(
@@ -5032,6 +5256,13 @@ def reorder_chapters(
     ordered_document_ids: list[UUID],
     volume_by_document: dict[str, UUID | None],
 ) -> list[dict[str, Any]]:
+    _lock_novel(session, novel_id)
+    volumes = session.scalars(
+        select(Volume)
+        .where(Volume.novel_id == novel_id)
+        .order_by(Volume.position, Volume.id)
+        .with_for_update()
+    ).all()
     chapters = session.scalars(
         select(Document)
         .where(Document.novel_id == novel_id, Document.kind == "chapter")
@@ -5039,36 +5270,93 @@ def reorder_chapters(
     ).all()
     by_id = {item.id: item for item in chapters}
     if len(ordered_document_ids) != len(set(ordered_document_ids)) or set(ordered_document_ids) != set(by_id):
-        raise ValidationError("章节排序必须包含当前小说的全部章节且不能重复")
-    valid_volume_ids = set(
-        session.scalars(select(Volume.id).where(Volume.novel_id == novel_id)).all()
-    )
+        raise VolumeChapterContractError(
+            "chapter_order_inconsistent",
+            "章节排序与当前规范卷章树不一致",
+        )
+    try:
+        normalized_volume_mapping = {
+            UUID(raw_id): target_volume_id
+            for raw_id, target_volume_id in volume_by_document.items()
+        }
+    except (TypeError, ValueError):
+        raise VolumeChapterContractError(
+            "chapter_order_inconsistent", "章节排序包含无效的文档映射"
+        ) from None
+    if len(normalized_volume_mapping) != len(volume_by_document):
+        raise VolumeChapterContractError(
+            "chapter_order_inconsistent", "章节排序包含重复的文档映射"
+        )
+    if not set(normalized_volume_mapping).issubset(by_id):
+        raise VolumeChapterContractError(
+            "chapter_order_inconsistent", "章节排序包含不属于当前小说的文档映射"
+        )
+    valid_volume_ids = {item.id for item in volumes}
     for raw_id in volume_by_document.values():
         if raw_id is not None and raw_id not in valid_volume_ids:
-            raise ValidationError("章节移动目标分卷不属于当前小说")
+            raise VolumeChapterContractError(
+                "chapter_order_inconsistent", "章节移动目标分卷不属于当前小说"
+            )
+    target_volume_by_document = {
+        document_id: normalized_volume_mapping.get(document_id, document.volume_id)
+        for document_id, document in by_id.items()
+    }
+    group_rank = {volume.id: index for index, volume in enumerate(volumes)}
+    unassigned_rank = len(volumes)
+    target_ranks = [
+        group_rank.get(target_volume_by_document[document_id], unassigned_rank)
+        for document_id in ordered_document_ids
+    ]
+    if target_ranks != sorted(target_ranks):
+        raise VolumeChapterContractError(
+            "chapter_order_inconsistent",
+            "章节排序必须按分卷顺序连续排列，未分卷章节必须位于最后",
+        )
+    temporary_base = min((item.position for item in chapters), default=0) - (
+        len(chapters) + 1
+    ) * 1000
     for index, document_id in enumerate(ordered_document_ids, start=1):
-        by_id[document_id].position = -(index * 1000)
+        by_id[document_id].position = temporary_base + index
     session.flush()
     for index, document_id in enumerate(ordered_document_ids, start=1):
         document = by_id[document_id]
         document.position = index * 1000
-        raw_key = str(document_id)
-        if raw_key in volume_by_document:
-            document.volume_id = volume_by_document[raw_key]
+        if document_id in normalized_volume_mapping:
+            document.volume_id = normalized_volume_mapping[document_id]
         document.version += 1
     session.commit()
+    _refresh_active_novel_index_after_commit(session, novel_id)
     return [get_document(session, item_id) for item_id in ordered_document_ids]
 
 
 def build_novel_export(
     session: Session, novel_id: UUID, *, export_format: str = "markdown"
 ) -> dict[str, Any]:
+    if session.get_bind().dialect.name == "postgresql":
+        if session.in_transaction():
+            if session.new or session.dirty or session.deleted:
+                raise ValidationError("导出前存在未提交修改，请先保存后重试")
+            # A prior read can leave SQLAlchemy's autobegin transaction open.
+            # Close that read-only scope before selecting this export's
+            # isolation level; PostgreSQL rejects SET/connection isolation
+            # changes after the first statement in a transaction.
+            session.rollback()
+        session.connection(
+            execution_options={"isolation_level": "REPEATABLE READ"}
+        )
     novel = _require_novel(session, novel_id)
     if export_format not in {"markdown", "text"}:
         raise ValidationError("当前只支持 Markdown 或纯文本导出")
     volumes = session.scalars(
         select(Volume).where(Volume.novel_id == novel_id).order_by(Volume.position)
     ).all()
+    document_rows = session.execute(
+        select(Document, DocumentWorkingCopy)
+        .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
+        .where(Document.novel_id == novel_id, Document.kind == "chapter")
+    ).all()
+    working_by_document = {document.id: working for document, working in document_rows}
+    tree = canonical_tree(volumes, (document for document, _ in document_rows))
     chunks: list[str] = [f"# {novel.title}" if export_format == "markdown" else novel.title]
     chapter_count = 0
     visible_count = 0
@@ -5076,7 +5364,7 @@ def build_novel_export(
 
     def append_document(document: Document) -> None:
         nonlocal chapter_count, visible_count
-        working = session.get(DocumentWorkingCopy, document.id)
+        working = working_by_document.get(document.id)
         if working is None:
             return
         body = (
@@ -5084,11 +5372,8 @@ def build_novel_export(
             if export_format == "markdown"
             else markdown_to_text(working.content_markdown)
         )
-        chunks.append(
-            f"### {document.title}"
-            if export_format == "markdown"
-            else f"\n{document.title}"
-        )
+        title = display_chapter_title(document.title, tree.chapter_ordinals[document.id])
+        chunks.append(f"### {title}" if export_format == "markdown" else f"\n{title}")
         chunks.append(body)
         count = visible_character_count(working.content_markdown)
         visible_count += count
@@ -5096,33 +5381,24 @@ def build_novel_export(
         chapter_stats.append(
             {
                 "document_id": str(document.id),
-                "title": document.title,
+                "title": title,
                 "visible_character_count": count,
             }
         )
 
-    for volume in volumes:
-        chunks.append(f"## {volume.title}" if export_format == "markdown" else f"\n{volume.title}")
-        documents = session.scalars(
-            select(Document)
-            .where(
-                Document.novel_id == novel_id,
-                Document.volume_id == volume.id,
-                Document.kind == "chapter",
-            )
-            .order_by(Document.position)
-        ).all()
-        for document in documents:
+    chapters_by_volume: dict[UUID | None, list[Document]] = {
+        volume.id: [] for volume in tree.volumes
+    }
+    chapters_by_volume[None] = []
+    for document in tree.chapters:
+        group_id = document.volume_id if document.volume_id in chapters_by_volume else None
+        chapters_by_volume[group_id].append(document)
+    for volume in tree.volumes:
+        title = display_volume_title(volume.title, tree.volume_ordinals[volume.id])
+        chunks.append(f"## {title}" if export_format == "markdown" else f"\n{title}")
+        for document in chapters_by_volume.get(volume.id, ()):
             append_document(document)
-    ungrouped_documents = session.scalars(
-        select(Document)
-        .where(
-            Document.novel_id == novel_id,
-            Document.volume_id.is_(None),
-            Document.kind == "chapter",
-        )
-        .order_by(Document.position)
-    ).all()
+    ungrouped_documents = chapters_by_volume.get(None, [])
     if ungrouped_documents:
         chunks.append("## 未分卷" if export_format == "markdown" else "\n未分卷")
         for document in ungrouped_documents:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -69,6 +70,16 @@ from .relationship_contracts import (
     relationship_pair_key,
 )
 from .story_state.persistence import ensure_default_story_state
+from .volume_chapter_titles import (
+    VolumeChapterContractError,
+    canonical_tree,
+    context_chapter_title,
+    display_chapter_title,
+    semantic_title,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class DomainError(RuntimeError):
@@ -134,6 +145,74 @@ class RestorationPlanConflictError(DomainError):
     def __init__(self, current: dict[str, Any]):
         super().__init__("restoration fact plan is no longer current")
         self.current = current
+
+
+def _mark_active_novel_index_outdated(session: Session, novel_id: UUID) -> None:
+    """Record a recoverable semantic-index gap after authority already committed."""
+
+    from .creative_data_models import (
+        EmbeddingConfiguration,
+        EmbeddingGenerationNovel,
+    )
+
+    novel = session.get(Novel, novel_id)
+    if novel is None:
+        session.commit()
+        return
+    configuration = session.scalar(
+        select(EmbeddingConfiguration).where(
+            EmbeddingConfiguration.owner_id == novel.owner_id,
+            EmbeddingConfiguration.workspace_id == novel.workspace_id,
+        )
+    )
+    if configuration is None or configuration.active_generation_id is None:
+        session.commit()
+        return
+    build = session.scalar(
+        select(EmbeddingGenerationNovel)
+        .where(
+            EmbeddingGenerationNovel.generation_id
+            == configuration.active_generation_id,
+            EmbeddingGenerationNovel.novel_id == novel_id,
+        )
+        .with_for_update()
+    )
+    if build is not None and build.sync_state != "revoked":
+        build.sync_state = "outdated"
+        if build.state not in {"cancelled", "stale"}:
+            build.state = "outdated"
+    session.commit()
+
+
+def _refresh_active_novel_index_after_commit(
+    session: Session,
+    novel_id: UUID,
+) -> bool:
+    """Refresh after an authority commit without changing that action's outcome."""
+
+    try:
+        from .embedding.indexing import request_active_novel_refresh
+
+        requested = request_active_novel_refresh(session, novel_id)
+        session.commit()
+        return requested
+    except Exception:
+        session.rollback()
+        logger.warning(
+            "semantic index refresh failed after authority commit for novel %s",
+            novel_id,
+            exc_info=True,
+        )
+        try:
+            _mark_active_novel_index_outdated(session, novel_id)
+        except Exception:
+            session.rollback()
+            logger.warning(
+                "failed to mark semantic index outdated for novel %s",
+                novel_id,
+                exc_info=True,
+            )
+        return False
 
 
 CURRENT_FACT_STATUSES = ("active", "source_restored")
@@ -602,6 +681,15 @@ def _require_novel(session: Session, novel_id: UUID) -> Novel:
     return novel
 
 
+def _lock_novel(session: Session, novel_id: UUID) -> Novel:
+    novel = session.scalar(
+        select(Novel).where(Novel.id == novel_id).with_for_update()
+    )
+    if novel is None:
+        raise NotFoundError(f"novel {novel_id} not found")
+    return novel
+
+
 def _require_document(session: Session, document_id: UUID) -> Document:
     document = session.get(Document, document_id)
     if document is None:
@@ -612,6 +700,30 @@ def _require_document(session: Session, document_id: UUID) -> Document:
 def _next_position(session: Session, model: type[Volume] | type[Document], novel_id: UUID) -> int:
     current = session.scalar(select(func.max(model.position)).where(model.novel_id == novel_id))
     return int(current or 0) + 1000
+
+
+def _runtime_chapter_title(
+    session: Session,
+    document: Document,
+    *,
+    suffix: str = "",
+) -> str:
+    """Project one chapter through the current canonical tree for model contracts."""
+
+    volumes = session.scalars(
+        select(Volume).where(Volume.novel_id == document.novel_id)
+    ).all()
+    chapters = session.scalars(
+        select(Document).where(
+            Document.novel_id == document.novel_id,
+            Document.kind == "chapter",
+        )
+    ).all()
+    tree = canonical_tree(volumes, chapters)
+    ordinal = tree.chapter_ordinals.get(document.id)
+    if ordinal is None:
+        raise ValidationError("chapter is missing from the canonical novel tree")
+    return context_chapter_title(document.title, ordinal, suffix=suffix)
 
 
 def _new_document(
@@ -657,12 +769,12 @@ def create_novel(session: Session, title: str, description: str = "") -> dict[st
     if not title:
         raise ValidationError("novel title cannot be empty")
     novel = Novel(id=uuid4(), title=title, description=description.strip())
-    volume = Volume(id=uuid4(), novel_id=novel.id, title="第一卷", position=1000)
+    volume = Volume(id=uuid4(), novel_id=novel.id, title="", position=1000)
     session.add_all((novel, volume))
     _new_document(
         session,
         novel_id=novel.id,
-        title="第一章",
+        title="",
         kind="chapter",
         position=1000,
         volume_id=volume.id,
@@ -762,10 +874,10 @@ def get_novel(session: Session, novel_id: UUID) -> dict[str, Any]:
 
 
 def create_volume(session: Session, novel_id: UUID, title: str) -> dict[str, Any]:
-    _require_novel(session, novel_id)
-    title = title.strip()
-    if not title:
-        raise ValidationError("volume title cannot be empty")
+    _lock_novel(session, novel_id)
+    title = semantic_title(title, "volume")
+    if len(title) > 240:
+        raise ValidationError("分卷名称不能超过240个字符")
     volume = Volume(
         id=uuid4(), novel_id=novel_id, title=title, position=_next_position(session, Volume, novel_id)
     )
@@ -788,16 +900,31 @@ def create_document(
     kind: str = "chapter",
     volume_id: UUID | None = None,
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    _lock_novel(session, novel_id)
     if kind not in {"chapter", "outline", "setting"}:
         raise ValidationError(f"unsupported document kind: {kind}")
-    title = title.strip()
-    if not title:
-        raise ValidationError("document title cannot be empty")
+    if kind == "chapter" and volume_id is None:
+        raise VolumeChapterContractError(
+            "chapter_volume_required", "请先创建分卷，再新建章节"
+        )
+    title = semantic_title(title, "chapter") if kind == "chapter" else title.strip()
+    if kind != "chapter" and not title:
+        raise VolumeChapterContractError(
+            "document_title_required", "文档标题不能为空"
+        )
+    if len(title) > 240:
+        raise ValidationError("文档标题不能超过240个字符")
     if volume_id is not None:
-        volume = session.get(Volume, volume_id)
+        volume = session.scalar(
+            select(Volume)
+            .where(Volume.id == volume_id, Volume.novel_id == novel_id)
+            .with_for_update()
+        )
         if volume is None or volume.novel_id != novel_id:
-            raise ValidationError("volume does not belong to this novel")
+            raise VolumeChapterContractError(
+                "chapter_volume_invalid",
+                "所选分卷不存在或不属于当前小说，请刷新后重试",
+            )
     document = _new_document(
         session,
         novel_id=novel_id,
@@ -807,6 +934,8 @@ def create_document(
         volume_id=volume_id,
     )
     session.commit()
+    if kind == "chapter":
+        _refresh_active_novel_index_after_commit(session, novel_id)
     return get_document(session, document.id)
 
 
@@ -824,7 +953,8 @@ def get_novel_tree(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
         working = session.get(DocumentWorkingCopy, document.id)
         if working is None:
             continue
-        grouped.setdefault(document.volume_id, []).append(_document_payload(document, working))
+        group_id = document.volume_id if document.volume_id in grouped else None
+        grouped[group_id].append(_document_payload(document, working))
     result = [
         {
             "id": str(volume.id),
@@ -1018,7 +1148,7 @@ def _generation_snapshot(
         },
         "chapter": {
             "document_id": str(document.id),
-            "title": document.title,
+            "title": _runtime_chapter_title(session, document),
             "base_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
             "base_draft_version": working.draft_version,
             "base_content_hash": working.content_hash,
@@ -2281,7 +2411,7 @@ JSON 结构：
 12. visibility 默认 author；只有正文已经向读者或所有在场视角明确揭露时才能填写 reader 或 all。
 13. details 只填写类型所需结构：knowledge_event 使用 operation/knowledge_key；story_time 使用 transition/from_time/to_time，其中时间值必须是 {{"schema_version":"story-time/1","label":"正文原有时间表述","precision":"unknown"}} 结构；foreshadow_event 使用 event/note。其他类型可留空对象，由服务器按类型补成版本化结构。
 
-章节：{document.title}
+章节：{_runtime_chapter_title(session, document)}
 服务器实体短键目录：
 {json.dumps({key: extraction_context.get(key, {}) for key in ('character_catalog', 'relationship_catalog', 'storyline_catalog', 'foreshadow_catalog')}, ensure_ascii=False, sort_keys=True)}
 
@@ -3561,31 +3691,65 @@ def search_novel(session: Session, novel_id: UUID, query: str, limit: int = 20) 
     query = query.strip()
     if not query:
         return []
+    documents = session.scalars(
+        select(Document).where(Document.novel_id == novel_id)
+    ).all()
+    volumes = session.scalars(
+        select(Volume).where(Volume.novel_id == novel_id).order_by(Volume.position)
+    ).all()
+    tree = canonical_tree(volumes, documents)
+    chapter_ordinals = tree.chapter_ordinals
+    title_by_document_id = {
+        document.id: (
+            display_chapter_title(document.title, chapter_ordinals[document.id])
+            if document.kind == "chapter" and document.id in chapter_ordinals
+            else document.title
+        )
+        for document in documents
+    }
+    title_match_ids = [
+        document_id
+        for document_id, title in title_by_document_id.items()
+        if query.casefold() in title.casefold()
+    ]
     pattern = f"%{query}%"
     rows = session.execute(
         select(Document, DocumentWorkingCopy)
         .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
         .where(
             Document.novel_id == novel_id,
-            DocumentWorkingCopy.content_markdown.ilike(pattern) | Document.title.ilike(pattern),
+            or_(
+                DocumentWorkingCopy.content_markdown.ilike(pattern),
+                Document.id.in_(title_match_ids),
+            ),
         )
         .order_by(Document.position)
-        .limit(max(1, min(limit, 50)))
     ).all()
+    rows.sort(
+        key=lambda row: (
+            0,
+            chapter_ordinals[row[0].id],
+        )
+        if row[0].id in chapter_ordinals
+        else (1, row[0].position)
+    )
     results: list[dict[str, Any]] = []
     for document, working in rows:
         plain = markdown_to_text(working.content_markdown)
+        title = title_by_document_id[document.id]
         index = plain.lower().find(query.lower())
         start = max(0, index - 120) if index >= 0 else 0
         results.append(
             {
                 "document_id": str(document.id),
-                "title": document.title,
+                "title": title,
                 "kind": document.kind,
                 "base_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
                 "snippet": plain[start : start + 360],
             }
         )
+        if len(results) >= max(1, min(limit, 50)):
+            break
     return results
 
 
@@ -3603,6 +3767,10 @@ def get_novel_context(
         .where(Document.novel_id == novel_id)
         .order_by(Document.position)
     ).all()
+    volumes = session.scalars(
+        select(Volume).where(Volume.novel_id == novel_id)
+    ).all()
+    tree = canonical_tree(volumes, documents)
     current_index = len(documents) - 1
     if document_id is not None:
         matches = [index for index, item in enumerate(documents) if item.id == document_id]
@@ -3625,7 +3793,15 @@ def get_novel_context(
         selected.append(
             {
                 "document_id": str(document.id),
-                "title": document.title,
+                "title": (
+                    context_chapter_title(
+                        document.title,
+                        tree.chapter_ordinals[document.id],
+                    )
+                    if document.kind == "chapter"
+                    and document.id in tree.chapter_ordinals
+                    else document.title
+                ),
                 "kind": document.kind,
                 "base_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
                 "content_markdown": text,

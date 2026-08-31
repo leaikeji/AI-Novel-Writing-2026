@@ -57,6 +57,7 @@ from ..models import (
     DocumentWorkingCopy,
     ModelRunRecord,
 )
+from ..volume_chapter_titles import embedding_chapter_title
 
 
 SessionFactory = Callable[[], Session]
@@ -221,7 +222,7 @@ def _current_rendered_content_hash(
         start = pending.source_locator_json.get("source_start")
         end = pending.source_locator_json.get("source_end")
         content = revision.content_text
-        title = document.title
+        title = embedding_chapter_title(document.title)
         if isinstance(start, int) and isinstance(end, int):
             if start < 0 or end <= start or end > len(content):
                 return None
@@ -247,7 +248,10 @@ def _current_rendered_content_hash(
             )
             if segment is None:
                 return None
-            title = f"{document.title}·片段{segment.ordinal + 1}"
+            title = (
+                f"{embedding_chapter_title(document.title)}"
+                f"·片段{segment.ordinal + 1}"
+            )
         source_input = V1SourceInput(
             corpus="manuscript",
             source_type="chapter_revision",

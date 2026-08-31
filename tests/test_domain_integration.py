@@ -3,11 +3,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import os
-from threading import Barrier
+from threading import Barrier, Event
 from uuid import UUID
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.orm import Session
 
 from backend.creative_data_models import (
@@ -65,6 +65,7 @@ from backend.creative_services import (
     sync_relationships_from_intelligence_proposal,
     update_chapter_creation_draft,
     update_foreshadow,
+    update_document_metadata,
     update_novel_settings,
     update_novel_creation_draft,
     update_outline_draft,
@@ -74,18 +75,22 @@ from backend.creative_services import (
 )
 from backend.models import (
     CandidateRevision,
+    ChapterCreationDraft,
     ChapterGenerationJob,
     CharacterRelationship,
     CharacterRelationshipRevision,
     Document,
     DocumentRevision,
+    DocumentWorkingCopy,
     IntelligenceCommitBatch,
     IntelligenceProposal,
     IntelligenceProposalItem,
     Novel,
     StoryFact,
+    Volume,
 )
 from backend.embedding.writing import resolve_writing_position
+from backend.volume_chapter_titles import VolumeChapterContractError
 from backend.services import (
     CandidateConflictError,
     ChapterLengthValidationError,
@@ -1246,6 +1251,8 @@ def test_relationship_graph_status_matches_snapshot_and_prevents_parallel_force_
         details={"gender": "男"},
     )
     snapshot = build_relationship_graph_snapshot(session, novel_id)
+    assert snapshot["chapter_index"][0]["title"] == "第1章"
+    assert snapshot["chapter_index"][0]["position"] == 1
     keys = {item["name"]: item["entity_key"] for item in snapshot["characters"]}
     first = start_creative_generation(
         session,
@@ -1526,12 +1533,252 @@ def test_create_novel_is_ready_to_write(session: Session) -> None:
     document_id = UUID(novel["tree"][0]["documents"][0]["id"])
     document = get_document(session, document_id)
 
-    assert novel["tree"][0]["title"] == "第一卷"
-    assert document["title"] == "第一章"
+    assert novel["tree"][0]["title"] == ""
+    assert document["title"] == ""
     assert document["draft_version"] == 1
     assert document["revisions"][0]["revision_number"] == 1
     assert session.scalar(select(Novel).where(Novel.id == UUID(novel["id"]))) is not None
     assert session.scalar(select(Document).where(Document.id == document_id)) is not None
+
+
+def test_chapter_creation_without_valid_volume_is_structured_and_zero_write(
+    session: Session,
+) -> None:
+    created = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-无卷零写入建书",
+        title="pytest-无卷零写入",
+    )
+    novel_id = UUID(created["novel"]["id"])
+    other = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-无卷零写入他书",
+        title="pytest-无卷零写入他书",
+    )
+    other_id = UUID(other["novel"]["id"])
+    other_volume = create_volume(session, other_id, "")
+
+    def counts() -> tuple[int, int, int, int]:
+        return (
+            int(session.scalar(select(func.count(Document.id)).where(Document.novel_id == novel_id)) or 0),
+            int(
+                session.scalar(
+                    select(func.count(DocumentRevision.id))
+                    .join(Document, Document.id == DocumentRevision.document_id)
+                    .where(Document.novel_id == novel_id)
+                )
+                or 0
+            ),
+            int(
+                session.scalar(
+                    select(func.count(DocumentWorkingCopy.document_id))
+                    .join(Document, Document.id == DocumentWorkingCopy.document_id)
+                    .where(Document.novel_id == novel_id)
+                )
+                or 0
+            ),
+            int(
+                session.scalar(
+                    select(func.count(ChapterCreationDraft.id)).where(
+                        ChapterCreationDraft.novel_id == novel_id
+                    )
+                )
+                or 0
+            ),
+        )
+
+    before = counts()
+    with pytest.raises(VolumeChapterContractError) as missing:
+        create_document(session, novel_id, "", volume_id=None)
+    assert missing.value.code == "chapter_volume_required"
+    session.rollback()
+
+    with pytest.raises(VolumeChapterContractError) as missing_draft:
+        get_or_create_chapter_creation_draft(
+            session,
+            novel_id=novel_id,
+            volume_id=None,
+            draft_key="pytest-无卷零写入-草稿",
+        )
+    assert missing_draft.value.code == "chapter_volume_required"
+    session.rollback()
+
+    with pytest.raises(VolumeChapterContractError) as cross_book:
+        create_document(
+            session,
+            novel_id,
+            "",
+            volume_id=UUID(other_volume["id"]),
+        )
+    assert cross_book.value.code == "chapter_volume_invalid"
+    session.rollback()
+    assert counts() == before
+
+
+def test_stale_chapter_draft_rebinds_without_losing_author_input(
+    session: Session,
+) -> None:
+    created = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-草稿失效恢复建书",
+        title="pytest-草稿失效恢复",
+    )
+    novel_id = UUID(created["novel"]["id"])
+    old_volume = create_volume(session, novel_id, "第 8 卷：旧卷")
+    draft = get_or_create_chapter_creation_draft(
+        session,
+        novel_id=novel_id,
+        volume_id=UUID(old_volume["id"]),
+        draft_key="pytest-草稿失效恢复-章节",
+    )
+    draft = update_chapter_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+        step=6,
+        title="第十二章 · 海边来信",
+        expectation_text="保留作者已填期待",
+        outline_text="保留作者已填章纲",
+        data_patch={"storyline_ids": [], "marker": "keep-me"},
+    )
+    delete_volume(
+        session,
+        novel_id,
+        UUID(old_volume["id"]),
+        expected_version=old_volume["version"],
+    )
+
+    with pytest.raises(VolumeChapterContractError) as stale:
+        complete_chapter_creation_draft(
+            session,
+            UUID(draft["id"]),
+            expected_version=draft["version"],
+        )
+    assert stale.value.code == "chapter_draft_volume_stale"
+    assert stale.value.status_code == 409
+    assert stale.value.current["id"] == draft["id"]
+    assert stale.value.current["data"]["marker"] == "keep-me"
+    session.rollback()
+    assert session.scalar(
+        select(func.count(Document.id)).where(Document.novel_id == novel_id)
+    ) == 0
+
+    new_volume = create_volume(session, novel_id, "")
+    rebound = get_or_create_chapter_creation_draft(
+        session,
+        novel_id=novel_id,
+        volume_id=UUID(new_volume["id"]),
+        draft_key="pytest-草稿失效恢复-章节",
+    )
+    assert rebound["id"] == draft["id"]
+    assert rebound["version"] == draft["version"] + 1
+    assert rebound["title"] == "海边来信"
+    assert rebound["expectation_text"] == "保留作者已填期待"
+    assert rebound["outline_text"] == "保留作者已填章纲"
+    assert rebound["data"]["marker"] == "keep-me"
+    assert rebound["recovery"] == {
+        "kind": "volume_rebound",
+        "from_volume_id": None,
+        "to_volume_id": str(new_volume["id"]),
+    }
+    completed = complete_chapter_creation_draft(
+        session,
+        UUID(rebound["id"]),
+        expected_version=rebound["version"],
+    )
+    assert completed["document"]["title"] == "海边来信"
+    assert completed["document"]["volume_id"] == new_volume["id"]
+
+
+def test_concurrent_chapter_writes_converge_draft_key_and_allocate_unique_positions(
+    session: Session,
+) -> None:
+    created = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-并发卷章建书",
+        title="pytest-并发卷章",
+    )
+    novel_id = UUID(created["novel"]["id"])
+    volume = create_volume(session, novel_id, "")
+    volume_id = UUID(volume["id"])
+    worker_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+    draft_barrier = Barrier(2)
+
+    def prepare_same_draft() -> dict[str, object]:
+        with Session(worker_engine, expire_on_commit=False) as worker_session:
+            draft_barrier.wait(timeout=5)
+            return get_or_create_chapter_creation_draft(
+                worker_session,
+                novel_id=novel_id,
+                volume_id=volume_id,
+                draft_key="pytest-并发卷章-同-key",
+            )
+
+    chapter_barrier = Barrier(2)
+
+    def create_chapter() -> dict[str, object]:
+        with Session(worker_engine, expire_on_commit=False) as worker_session:
+            chapter_barrier.wait(timeout=5)
+            return create_document(
+                worker_session,
+                novel_id,
+                "",
+                volume_id=volume_id,
+            )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            drafts = list(executor.map(lambda _: prepare_same_draft(), range(2)))
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            chapters = list(executor.map(lambda _: create_chapter(), range(2)))
+    finally:
+        worker_engine.dispose()
+
+    assert len({str(item["id"]) for item in drafts}) == 1
+    assert len({str(item["id"]) for item in chapters}) == 2
+    session.expire_all()
+    positions = session.scalars(
+        select(Document.position)
+        .where(Document.novel_id == novel_id, Document.kind == "chapter")
+        .order_by(Document.position)
+    ).all()
+    assert positions == [1000, 2000]
+    assert session.scalar(
+        select(func.count(ChapterCreationDraft.id)).where(
+            ChapterCreationDraft.novel_id == novel_id
+        )
+    ) == 1
+
+
+def test_chapter_name_commit_survives_post_commit_index_refresh_failure(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    novel = create_novel(session, "pytest-章名刷新失败隔离")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+
+    def fail_refresh(*_args: object, **_kwargs: object) -> bool:
+        raise RuntimeError("synthetic post-commit refresh failure")
+
+    monkeypatch.setattr(
+        "backend.embedding.indexing.request_active_novel_refresh",
+        fail_refresh,
+    )
+
+    updated = update_document_metadata(
+        session,
+        novel_id,
+        document_id,
+        expected_version=1,
+        title="第十二章 · 海边来信",
+    )
+
+    assert updated["title"] == "海边来信"
+    session.expire_all()
+    stored = session.get(Document, document_id)
+    assert stored is not None
+    assert stored.title == "海边来信"
 
 
 def test_novel_scoped_queries_and_commands_never_cross_books(session: Session) -> None:
@@ -1565,13 +1812,14 @@ def test_novel_scoped_queries_and_commands_never_cross_books(session: Session) -
     with pytest.raises(ValidationError, match="does not belong"):
         get_novel_context(session, first_id, document_id=second_document_id)
 
-    with pytest.raises(ValidationError, match="does not belong"):
+    with pytest.raises(VolumeChapterContractError) as cross_book_volume:
         create_document(
             session,
             first_id,
             "不应跨书创建",
             volume_id=second_volume_id,
         )
+    assert cross_book_volume.value.code == "chapter_volume_invalid"
     session.rollback()
 
     created_volume = create_volume(session, first_id, "甲书第二卷")
@@ -2241,8 +2489,8 @@ def test_six_step_chapter_creation_rejects_cross_book_references(
     )
     first_id = UUID(first["novel"]["id"])
     second_id = UUID(second["novel"]["id"])
-    create_volume(session, first_id, "第一卷")
-    create_volume(session, second_id, "第一卷")
+    first_volume = create_volume(session, first_id, "第一卷")
+    second_volume = create_volume(session, second_id, "第一卷")
     first_role = create_novel_character(
         session,
         first_id,
@@ -2284,7 +2532,7 @@ def test_six_step_chapter_creation_rejects_cross_book_references(
     draft = get_or_create_chapter_creation_draft(
         session,
         novel_id=first_id,
-        volume_id=None,
+        volume_id=UUID(first_volume["id"]),
         draft_key="pytest-章节甲-第一章",
     )
     draft = update_chapter_creation_draft(
@@ -2338,11 +2586,11 @@ def test_six_step_chapter_creation_rejects_cross_book_references(
     )
     assert replayed["document"]["id"] == completed["document"]["id"]
 
-    with pytest.raises(ValidationError, match="已属于其他小说"):
+    with pytest.raises(VolumeChapterContractError, match="已属于其他小说"):
         get_or_create_chapter_creation_draft(
             session,
             novel_id=second_id,
-            volume_id=None,
+            volume_id=UUID(second_volume["id"]),
             draft_key="pytest-章节甲-第一章",
         )
     session.rollback()
@@ -2782,6 +3030,107 @@ def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
     assert short_target["input_hash"] != long_target["input_hash"]
 
 
+def test_export_repeatable_read_never_mixes_concurrent_volume_and_chapter_order(
+    session: Session,
+) -> None:
+    created = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-导出快照建书",
+        title="pytest-导出快照",
+    )
+    novel_id = UUID(created["novel"]["id"])
+    volume_one = create_volume(session, novel_id, "甲卷")
+    volume_two = create_volume(session, novel_id, "乙卷")
+    chapter_one = create_document(
+        session,
+        novel_id,
+        "甲章",
+        volume_id=UUID(volume_one["id"]),
+    )
+    chapter_two = create_document(
+        session,
+        novel_id,
+        "乙章",
+        volume_id=UUID(volume_two["id"]),
+    )
+
+    export_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+    worker_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+    volumes_loaded = Event()
+    reorder_committed = Event()
+
+    def pause_after_volume_snapshot(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if "FROM volumes" not in statement or volumes_loaded.is_set():
+            return
+        volumes_loaded.set()
+        if not reorder_committed.wait(timeout=10):
+            raise RuntimeError("concurrent reorder did not finish")
+
+    event.listen(export_engine, "after_cursor_execute", pause_after_volume_snapshot)
+
+    def export_snapshot() -> dict[str, object]:
+        with Session(export_engine, expire_on_commit=False) as export_session:
+            return build_novel_export(
+                export_session,
+                novel_id,
+                export_format="markdown",
+            )
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(export_snapshot)
+            assert volumes_loaded.wait(timeout=10)
+            with Session(worker_engine, expire_on_commit=False) as worker_session:
+                worker_session.scalar(
+                    select(Novel).where(Novel.id == novel_id).with_for_update()
+                )
+                volumes = worker_session.scalars(
+                    select(Volume)
+                    .where(Volume.novel_id == novel_id)
+                    .with_for_update()
+                ).all()
+                chapters = worker_session.scalars(
+                    select(Document)
+                    .where(Document.novel_id == novel_id, Document.kind == "chapter")
+                    .with_for_update()
+                ).all()
+                volume_by_id = {item.id: item for item in volumes}
+                chapter_by_id = {item.id: item for item in chapters}
+                volume_by_id[UUID(volume_one["id"])].position = -1000
+                volume_by_id[UUID(volume_two["id"])].position = -2000
+                chapter_by_id[UUID(chapter_one["id"])].position = -1000
+                chapter_by_id[UUID(chapter_two["id"])].position = -2000
+                worker_session.flush()
+                volume_by_id[UUID(volume_one["id"])].position = 2000
+                volume_by_id[UUID(volume_two["id"])].position = 1000
+                chapter_by_id[UUID(chapter_one["id"])].volume_id = UUID(volume_two["id"])
+                chapter_by_id[UUID(chapter_one["id"])].position = 1000
+                chapter_by_id[UUID(chapter_two["id"])].volume_id = UUID(volume_one["id"])
+                chapter_by_id[UUID(chapter_two["id"])].position = 2000
+                worker_session.commit()
+            reorder_committed.set()
+            exported = future.result(timeout=10)
+    finally:
+        reorder_committed.set()
+        event.remove(export_engine, "after_cursor_execute", pause_after_volume_snapshot)
+        export_engine.dispose()
+        worker_engine.dispose()
+
+    content = str(exported["content"])
+    assert content.index("### 第1章 甲章") < content.index("### 第2章 乙章")
+    assert [item["title"] for item in exported["metadata"]["chapters"]] == [
+        "第1章 甲章",
+        "第2章 乙章",
+    ]
+
+
 def test_volume_chapter_reorder_delete_guard_and_export_structure(
     session: Session,
 ) -> None:
@@ -2797,7 +3146,38 @@ def test_volume_chapter_reorder_delete_guard_and_export_structure(
         "第二章",
         volume_id=second_volume_id,
     )
-    ungrouped = create_document(session, novel_id, "卷外章")
+    ungrouped = create_document(
+        session,
+        novel_id,
+        "卷外章",
+        volume_id=first_volume_id,
+    )
+    with pytest.raises(VolumeChapterContractError) as duplicate_mapping:
+        reorder_chapters(
+            session,
+            novel_id,
+            ordered_document_ids=[
+                first_document_id,
+                UUID(second_document["id"]),
+                UUID(ungrouped["id"]),
+            ],
+            volume_by_document={
+                str(ungrouped["id"]): first_volume_id,
+                f"{{{ungrouped['id']}}}": second_volume_id,
+            },
+        )
+    assert duplicate_mapping.value.code == "chapter_order_inconsistent"
+    session.rollback()
+    reorder_chapters(
+        session,
+        novel_id,
+        ordered_document_ids=[
+            first_document_id,
+            UUID(second_document["id"]),
+            UUID(ungrouped["id"]),
+        ],
+        volume_by_document={str(ungrouped["id"]): None},
+    )
     for document_id, opening in (
         (first_document_id, "第一章正文。"),
         (UUID(second_document["id"]), "第二章正文。"),
@@ -2811,8 +3191,8 @@ def test_volume_chapter_reorder_delete_guard_and_export_structure(
         )
 
     initial_export = build_novel_export(session, novel_id, export_format="markdown")
-    assert "## 第一卷" in initial_export["content"]
-    assert "## 第二卷" in initial_export["content"]
+    assert "## 第1卷" in initial_export["content"]
+    assert "## 第2卷" in initial_export["content"]
     assert "## 未分卷" in initial_export["content"]
     assert initial_export["metadata"]["chapter_count"] == 3
 
@@ -2821,21 +3201,21 @@ def test_volume_chapter_reorder_delete_guard_and_export_structure(
         novel_id,
         ordered_volume_ids=[second_volume_id, first_volume_id],
     )
-    assert [item["title"] for item in reordered_volumes] == ["第二卷", "第一卷"]
+    assert [item["title"] for item in reordered_volumes] == ["", ""]
     reordered_chapters = reorder_chapters(
         session,
         novel_id,
         ordered_document_ids=[
-            UUID(ungrouped["id"]),
             UUID(second_document["id"]),
+            UUID(ungrouped["id"]),
             first_document_id,
         ],
         volume_by_document={str(ungrouped["id"]): first_volume_id},
     )
     assert [item["title"] for item in reordered_chapters] == [
+        "",
         "卷外章",
-        "第二章",
-        "第一章",
+        "",
     ]
     moved_export = build_novel_export(session, novel_id, export_format="text")
     assert moved_export["metadata"]["ungrouped_chapter_count"] == 0

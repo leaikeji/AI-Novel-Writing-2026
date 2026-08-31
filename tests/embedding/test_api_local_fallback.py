@@ -15,7 +15,20 @@ from backend.embedding.local_lexical import (
     LocalLexicalDiagnostics,
     LocalLexicalHit,
     LocalLexicalResult,
+    author_visible_v1_snippet,
 )
+
+
+def test_author_visible_snippet_removes_v1_header_and_internal_empty_title_label() -> None:
+    rendered = (
+        "语料: manuscript\n"
+        "标题: 章节正文\n"
+        "分块版本: semantic-char-chunker/5b\n\n"
+        "潮声穿过窗户。"
+    )
+
+    assert author_visible_v1_snippet(rendered) == "潮声穿过窗户。"
+    assert api._author_visible_snippet((SimpleNamespace(text=rendered),)) == "潮声穿过窗户。"
 
 
 class _ReadOnlySession:

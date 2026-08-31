@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import Session
 
 from ..creative_data_models import (
@@ -24,6 +24,7 @@ from ..models import (
     Novel,
     NovelCharacter,
     StoryFact,
+    Volume,
 )
 from ..story_state import (
     CharacterInstanceRecord,
@@ -34,6 +35,7 @@ from ..story_state import (
     resolve_timeline,
 )
 from ..story_state.persistence import get_story_projection_payload
+from ..volume_chapter_titles import context_chapter_title
 from .contracts import (
     ArchiveImpactReference,
     ChapterCharacterReference,
@@ -75,6 +77,8 @@ class CharacterWorkspaceStore(Protocol):
     ) -> Sequence[CharacterRelationship]: ...
 
     def chapter_briefs(self, novel_id: UUID) -> Sequence[tuple[ChapterBrief, Document]]: ...
+
+    def chapter_ordinals(self, novel_id: UUID) -> dict[UUID, int]: ...
 
     def voice_binding(
         self, novel_id: UUID, character_id: UUID
@@ -191,9 +195,44 @@ class SqlAlchemyCharacterWorkspaceStore:
         return self._rows(
             select(ChapterBrief, Document)
             .join(Document, Document.id == ChapterBrief.document_id)
+            .outerjoin(
+                Volume,
+                and_(
+                    Volume.id == Document.volume_id,
+                    Volume.novel_id == Document.novel_id,
+                ),
+            )
             .where(Document.novel_id == novel_id, Document.kind == "chapter")
-            .order_by(Document.position, Document.id)
+            .order_by(
+                case((Document.volume_id.is_(None), 1), else_=0),
+                Volume.position,
+                Document.position,
+                Document.id,
+            )
         )
+
+    def chapter_ordinals(self, novel_id: UUID) -> dict[UUID, int]:
+        document_ids = self._scalars(
+            select(Document.id)
+            .outerjoin(
+                Volume,
+                and_(
+                    Volume.id == Document.volume_id,
+                    Volume.novel_id == Document.novel_id,
+                ),
+            )
+            .where(Document.novel_id == novel_id, Document.kind == "chapter")
+            .order_by(
+                case((Document.volume_id.is_(None), 1), else_=0),
+                Volume.position,
+                Document.position,
+                Document.id,
+            )
+        )
+        return {
+            document_id: ordinal
+            for ordinal, document_id in enumerate(document_ids, start=1)
+        }
 
     def voice_binding(
         self, novel_id: UUID, character_id: UUID
@@ -366,6 +405,7 @@ class CharacterWorkspaceService:
                 character_id=character_id,
                 instance_id=resolved_instance.id,
                 timeline_id=resolved_timeline.id,
+                ordinals=_store_chapter_ordinals(self.store, novel_id),
             ),
             voice_binding=_voice_binding_view(
                 self.store.voice_binding(novel_id, character_id)
@@ -423,6 +463,7 @@ class CharacterWorkspaceService:
             character_id=character_id,
             instance_id=None,
             timeline_id=None,
+            ordinals=_store_chapter_ordinals(self.store, novel_id),
         ):
             references.append(
                 ArchiveImpactReference(
@@ -575,8 +616,14 @@ def _chapter_references(
     character_id: UUID,
     instance_id: UUID | None,
     timeline_id: UUID | None,
+    ordinals: dict[UUID, int] | None = None,
 ) -> tuple[ChapterCharacterReference, ...]:
     results: list[ChapterCharacterReference] = []
+    fallback_ordinals = {
+        document.id: ordinal
+        for ordinal, (_brief, document) in enumerate(rows, start=1)
+    }
+    effective_ordinals = ordinals or fallback_ordinals
     for brief, document in rows:
         raw = brief.role_constraints if isinstance(brief.role_constraints, dict) else {}
         v3 = raw.get("_v3")
@@ -620,7 +667,10 @@ def _chapter_references(
         results.append(
             ChapterCharacterReference(
                 document_id=document.id,
-                document_title=document.title,
+                document_title=context_chapter_title(
+                    document.title,
+                    effective_ordinals.get(document.id, fallback_ordinals[document.id]),
+                ),
                 document_position=document.position,
                 reference_kinds=tuple(dict.fromkeys(kind for kind, _ in matches)),
                 character_instance_id=matches[0][1],
@@ -628,6 +678,16 @@ def _chapter_references(
             )
         )
     return tuple(results)
+
+
+def _store_chapter_ordinals(
+    store: CharacterWorkspaceStore,
+    novel_id: UUID,
+) -> dict[UUID, int] | None:
+    resolver = getattr(store, "chapter_ordinals", None)
+    if resolver is None or not callable(resolver):
+        return None
+    return dict(resolver(novel_id))
 
 
 def _projected_state(

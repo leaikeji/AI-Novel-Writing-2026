@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID, NAMESPACE_URL, uuid5
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, select
 from sqlalchemy.orm import Session
 
 from .context_v4 import (
@@ -52,9 +52,11 @@ from .models import (
     DocumentWorkingCopy,
     Novel,
     StoryFact,
+    Volume,
 )
 from .story_state import StoryEventLinkRecord, StoryFactV2, StoryTimelineRecord
 from .story_state.contracts import StoryVisibilityV1, VisibilityScope
+from .volume_chapter_titles import context_chapter_title
 
 
 CONTEXT_POLICY_VERSION = "context-v4-production/1"
@@ -250,10 +252,24 @@ def _manuscript_blocks(
             current = timeline_by_id.get(current.parent_timeline_id)
     documents = tuple(
         session.scalars(
-            select(Document).where(
+            select(Document)
+            .outerjoin(
+                Volume,
+                and_(
+                    Volume.id == Document.volume_id,
+                    Volume.novel_id == Document.novel_id,
+                ),
+            )
+            .where(
                 Document.novel_id == novel_id,
                 Document.kind == "chapter",
-            ).order_by(Document.position, Document.id)
+            )
+            .order_by(
+                case((Document.volume_id.is_(None), 1), else_=0),
+                Volume.position,
+                Document.position,
+                Document.id,
+            )
         )
     )
     result: list[ContextBlockV2] = []
@@ -269,7 +285,8 @@ def _manuscript_blocks(
             item = _block(
                 novel_id=novel_id, section=ContextSection.MANUSCRIPT,
                 source_kind="chapter_revision", source_id=document.id,
-                source_revision_id=revision.id, title=document.title,
+                source_revision_id=revision.id,
+                title=context_chapter_title(document.title, sequence),
                 content=revision.content_markdown, priority=100 + sequence,
                 position_domain=PositionDomain.NARRATIVE,
                 timeline_id=timeline_id, narrative_sequence=sequence,
@@ -333,7 +350,11 @@ def _manuscript_blocks(
                 source_kind="chapter_revision",
                 source_id=document.id,
                 source_revision_id=revision.id,
-                title=f"{document.title} · 片段 {segment.ordinal + 1}",
+                title=context_chapter_title(
+                    document.title,
+                    sequence,
+                    suffix=f" · 片段 {segment.ordinal + 1}",
+                ),
                 content=content[segment.source_start:segment.source_end],
                 priority=100 + sequence,
                 position_domain=PositionDomain.NARRATIVE,

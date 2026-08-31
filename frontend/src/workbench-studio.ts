@@ -59,7 +59,27 @@ import {
   outlineGenerationTarget,
   type OutlineGenerationKind,
 } from "./outline-workflow";
-import { chapterDisplayTitle } from "./presenters";
+import {
+  chapterDisplayTitle,
+  chapterTitleForStorage,
+  chapterTitleName,
+  volumeDisplayTitle,
+  volumeTitleForStorage,
+  volumeTitleName,
+} from "./presenters";
+import {
+  CHAPTER_CREATION_REQUIRES_VOLUME_MESSAGE,
+  type ChapterPreparationRequestScope,
+  type ChapterWizardRequestPhase,
+  chapterCreationBlockedReason,
+  chapterPreparationResponseIsCurrent,
+  chapterWizardPreparationTransition,
+  startChapterPreparationRequest,
+} from "./chapter-creation-policy";
+import {
+  canonicalChapterDocuments,
+  nextChapterOrdinalForVolume,
+} from "./chapter-tree";
 import { RelationshipEditor } from "./relationship-editor";
 import { RelationshipWorkspace } from "./relationship-workspace";
 import { CharacterProfileCompletionPanel } from "./character-profile-completion-panel";
@@ -1415,6 +1435,36 @@ interface ChapterCreationWizardProps {
 }
 
 
+function chapterDraftVolumeStaleCurrent(
+  reason: unknown,
+  novelId: string,
+): ChapterCreationDraftRecord | null {
+  if (!(reason instanceof ApiError) || reason.status !== 409) return null;
+  if (!reason.detail || typeof reason.detail !== "object") return null;
+  const detail = reason.detail as Record<string, unknown>;
+  if (detail.type !== "chapter_draft_volume_stale") return null;
+  if (!detail.current || typeof detail.current !== "object") return null;
+  const current = detail.current as Record<string, unknown>;
+  if (
+    typeof current.id !== "string"
+    || typeof current.draft_key !== "string"
+    || current.novel_id !== novelId
+    || (current.state !== "draft" && current.state !== "completed")
+    || typeof current.version !== "number"
+  ) return null;
+  return current as unknown as ChapterCreationDraftRecord;
+}
+
+
+function structuredApiErrorType(reason: unknown): string | null {
+  if (!(reason instanceof ApiError) || !reason.detail || typeof reason.detail !== "object") {
+    return null;
+  }
+  const type = (reason.detail as Record<string, unknown>).type;
+  return typeof type === "string" ? type : null;
+}
+
+
 function ChapterCreationWizard({
   novel,
   open,
@@ -1428,7 +1478,8 @@ function ChapterCreationWizard({
   onError,
 }: ChapterCreationWizardProps) {
   const [draft, setDraft] = React.useState(null as ChapterCreationDraftRecord | null);
-  const [creating, setCreating] = React.useState(false);
+  const [requestPhase, setRequestPhase] = React.useState("not_started" as ChapterWizardRequestPhase);
+  const [preparationAttempt, setPreparationAttempt] = React.useState(0);
   const [saving, setSaving] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [recommending, setRecommending] = React.useState(false);
@@ -1439,6 +1490,7 @@ function ChapterCreationWizard({
   const [outlineTaskModelLabel, setOutlineTaskModelLabel] = React.useState("");
   const [recommendationTaskModelLabel, setRecommendationTaskModelLabel] = React.useState("");
   const [innerError, setInnerError] = React.useState("");
+  const [reboundNotice, setReboundNotice] = React.useState("");
   const [expandedGroups, setExpandedGroups] = React.useState(["main"] as StorylineType[]);
   const [selectedStorylineIds, setSelectedStorylineIds] = React.useState([] as string[]);
   const [requiredRoleIds, setRequiredRoleIds] = React.useState([] as string[]);
@@ -1452,11 +1504,22 @@ function ChapterCreationWizard({
   const [chapterTitle, setChapterTitle] = React.useState("");
   const [outlineText, setOutlineText] = React.useState("");
   const draftKeyRef = React.useRef("");
+  const requestGenerationRef = React.useRef(0);
+  const activePreparationScopeRef = React.useRef(null as ChapterPreparationRequestScope | null);
+  const preparationAbortRef = React.useRef(null as AbortController | null);
 
-  const chapterDocuments = novel.tree
-    .flatMap((volume: VolumeRecord) => volume.documents)
-    .filter((item: DocumentRecord) => item.kind === "chapter")
-    .sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position);
+  const chapterDocuments = canonicalChapterDocuments(novel);
+  const volumeScopeKey = [...volumes]
+    .sort((left: VolumeRecord, right: VolumeRecord) => left.position - right.position)
+    .map((volume: VolumeRecord) => `${volume.id}:${volume.position}`)
+    .join("|");
+  const targetVolume = [...volumes]
+    .sort((left: VolumeRecord, right: VolumeRecord) => right.position - left.position)[0];
+  const targetVolumeId = draft?.volume_id ?? targetVolume?.id ?? null;
+  const chapterNumber = targetVolumeId
+    ? nextChapterOrdinalForVolume(novel, targetVolumeId) ?? chapterDocuments.length + 1
+    : chapterDocuments.length + 1;
+  const previousChapter = chapterNumber > 1 ? chapterDocuments[chapterNumber - 2] : undefined;
   const selectableForeshadows = foreshadows.filter(
     (item: ForeshadowRecord) => item.status === "active" || item.status === "planned",
   );
@@ -1481,36 +1544,118 @@ function ChapterCreationWizard({
     setAutoSelectForeshadows(Boolean(data.auto_select_foreshadows));
     setExpectationText(next.expectation_text || "");
     setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(next.target_character_count || 2500))));
-    setChapterTitle(next.title || "");
+    setChapterTitle(chapterTitleName(next.title || ""));
     setOutlineText(next.outline_text || "");
   };
 
   React.useEffect(() => {
+    preparationAbortRef.current?.abort();
+    preparationAbortRef.current = null;
+    activePreparationScopeRef.current = null;
     setDraft(null);
+    setRequestPhase("not_started");
+    setInnerError("");
+    setReboundNotice("");
     draftKeyRef.current = window.sessionStorage.getItem(`anw-chapter-draft:${novel.id}`) || "";
   }, [novel.id]);
 
   React.useEffect(() => {
-    if (!open || creating || (draft && draft.state === "draft")) return;
-    const create = async () => {
-      setCreating(true);
-      setInnerError("");
+    if (open) return;
+    preparationAbortRef.current?.abort();
+    preparationAbortRef.current = null;
+    activePreparationScopeRef.current = null;
+    setRequestPhase("not_started");
+    setDraft(null);
+    setInnerError("");
+    setReboundNotice("");
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (!targetVolume?.id) {
+      preparationAbortRef.current?.abort();
+      preparationAbortRef.current = null;
+      activePreparationScopeRef.current = null;
+      setDraft(null);
+      setRequestPhase("failed");
+      setInnerError(CHAPTER_CREATION_REQUIRES_VOLUME_MESSAGE);
+      onError(CHAPTER_CREATION_REQUIRES_VOLUME_MESSAGE);
+      return;
+    }
+
+    if (!draftKeyRef.current) {
+      draftKeyRef.current = `chapter-${novel.id}-${crypto.randomUUID()}`;
+      window.sessionStorage.setItem(`anw-chapter-draft:${novel.id}`, draftKeyRef.current);
+    }
+    const started = startChapterPreparationRequest(
+      requestGenerationRef.current,
+      novel.id,
+      draftKeyRef.current,
+    );
+    requestGenerationRef.current = started.scope.requestGeneration;
+    preparationAbortRef.current?.abort();
+    const controller = new AbortController();
+    preparationAbortRef.current = controller;
+    activePreparationScopeRef.current = started.scope;
+    setRequestPhase(started.requestPhase);
+    setInnerError("");
+    setReboundNotice("");
+
+    const prepare = async () => {
       try {
-        if (!draftKeyRef.current) {
-          draftKeyRef.current = `chapter-${novel.id}-${crypto.randomUUID()}`;
-          window.sessionStorage.setItem(`anw-chapter-draft:${novel.id}`, draftKeyRef.current);
-        }
-        const targetVolume = [...volumes].sort((left: VolumeRecord, right: VolumeRecord) => right.position - left.position)[0];
         const next = await apiRequest<ChapterCreationDraftRecord>(`/novels/${novel.id}/chapter-drafts`, {
           method: "POST",
-          body: JSON.stringify({ draft_key: draftKeyRef.current, volume_id: targetVolume?.id ?? null }),
+          body: JSON.stringify({ draft_key: started.scope.draftKey, volume_id: targetVolume.id }),
+          signal: controller.signal,
         });
+        if (!chapterPreparationResponseIsCurrent(
+          activePreparationScopeRef.current,
+          started.scope,
+          controller.signal.aborted,
+        )) return;
         setDraft(next);
-        hydrateDraft(next);
+        if (next.state === "draft") hydrateDraft(next);
+        if (next.recovery?.kind === "volume_rebound") {
+          setReboundNotice("原章节草稿已恢复，并已重新绑定到当前有效分卷；已填写内容均已保留。");
+        }
+        setRequestPhase("succeeded");
+
+        const transition = chapterWizardPreparationTransition({
+          open: true,
+          requestPhase: "succeeded",
+          draftState: next.state,
+          scopeValid: next.state === "completed"
+            ? Boolean(next.completed_document_id)
+            : volumes.some((volume: VolumeRecord) => volume.id === next.volume_id),
+          completedDocumentId: next.completed_document_id,
+        });
+        if (transition.effect === "restore_completed_document" && next.completed_document_id) {
+          const completed = await apiRequest<DocumentRecord>(`/documents/${next.completed_document_id}`, {
+            signal: controller.signal,
+          });
+          if (!chapterPreparationResponseIsCurrent(
+            activePreparationScopeRef.current,
+            started.scope,
+            controller.signal.aborted,
+          )) return;
+          draftKeyRef.current = "";
+          window.sessionStorage.removeItem(`anw-chapter-draft:${novel.id}`);
+          activePreparationScopeRef.current = null;
+          onClose();
+          onCompleted(completed);
+          return;
+        }
+
         try {
           const jobs = await apiRequest<CreativeGenerationRecord[]>(
             `/creative-generations?scope_type=chapter_creation&scope_id=${encodeURIComponent(next.id)}`,
+            { signal: controller.signal },
           );
+          if (!chapterPreparationResponseIsCurrent(
+            activePreparationScopeRef.current,
+            started.scope,
+            controller.signal.aborted,
+          )) return;
           const recommendation = jobs.find(
             (job) => job.kind === "chapter_storyline_recommendation",
           );
@@ -1520,19 +1665,64 @@ function ChapterCreationWizard({
           );
           setOutlineTaskModelLabel(outline ? creativeTaskModelLabel(outline) : "");
         } catch {
-          setRecommendationTaskModelLabel("");
-          setOutlineTaskModelLabel("");
+          if (chapterPreparationResponseIsCurrent(
+            activePreparationScopeRef.current,
+            started.scope,
+            controller.signal.aborted,
+          )) {
+            setRecommendationTaskModelLabel("");
+            setOutlineTaskModelLabel("");
+          }
         }
       } catch (reason) {
+        if (!chapterPreparationResponseIsCurrent(
+          activePreparationScopeRef.current,
+          started.scope,
+          controller.signal.aborted,
+        )) return;
+        const current = chapterDraftVolumeStaleCurrent(reason, novel.id);
+        if (current) {
+          setDraft(current);
+          hydrateDraft(current);
+        }
+        if (structuredApiErrorType(reason) === "chapter_draft_key_conflict") {
+          draftKeyRef.current = "";
+          window.sessionStorage.removeItem(`anw-chapter-draft:${novel.id}`);
+        }
         const message = readableError(reason, "创建章节草稿失败");
         setInnerError(message);
+        setRequestPhase("failed");
         onError(message);
-      } finally {
-        setCreating(false);
       }
     };
-    void create();
-  }, [open, novel.id, draft?.state]);
+    void prepare();
+    return () => {
+      controller.abort();
+      if (preparationAbortRef.current === controller) preparationAbortRef.current = null;
+    };
+  }, [open, novel.id, preparationAttempt, volumeScopeKey]);
+
+  const closeWizard = () => {
+    preparationAbortRef.current?.abort();
+    preparationAbortRef.current = null;
+    activePreparationScopeRef.current = null;
+    onClose();
+  };
+
+  const retryPreparation = () => {
+    if (!targetVolume?.id) {
+      setRequestPhase("failed");
+      setInnerError(CHAPTER_CREATION_REQUIRES_VOLUME_MESSAGE);
+      onError(CHAPTER_CREATION_REQUIRES_VOLUME_MESSAGE);
+      return;
+    }
+    preparationAbortRef.current?.abort();
+    preparationAbortRef.current = null;
+    activePreparationScopeRef.current = null;
+    setRequestPhase("loading");
+    setInnerError("");
+    setPreparationAttempt((current: number) => current + 1);
+  };
 
   const dataPatch = (overrides: Record<string, unknown> = {}) => ({
     storyline_ids: selectedStorylineIds,
@@ -1561,7 +1751,7 @@ function ChapterCreationWizard({
       body: JSON.stringify({
         expected_version: base.version,
         step: nextStep,
-        title: overrides.title ?? chapterTitle,
+        title: chapterTitleForStorage(chapterNumber, overrides.title ?? chapterTitle),
         target_character_count: overrides.target_character_count ?? targetCharacterCount,
         expectation_text: overrides.expectation_text ?? expectationText,
         outline_text: overrides.outline_text ?? outlineText,
@@ -1605,9 +1795,11 @@ function ChapterCreationWizard({
           force_new: true,
           input_snapshot: {
             novel: { title: novel.title, genre: novel.genre, subgenre: novel.subgenre, main_plot: novel.main_plot },
-            chapter_number: chapterDocuments.length + 1,
+            chapter_number: chapterNumber,
             storylines: storylines.map((item: StorylineRecord) => ({ id: item.id, type: item.storyline_type, title: item.title, description: item.description, status: item.status, progress: item.progress })),
-            previous_chapter: chapterDocuments.length ? { title: chapterDocuments[chapterDocuments.length - 1].title, ending: chapterDocuments[chapterDocuments.length - 1].content_markdown.slice(-1800) } : null,
+            previous_chapter: previousChapter
+              ? { title: chapterDisplayTitle(chapterNumber - 1, previousChapter.title), ending: previousChapter.content_markdown.slice(-1800) }
+              : null,
           },
         }),
       });
@@ -1642,7 +1834,7 @@ function ChapterCreationWizard({
       const requiredRoles = characters.filter((item: NovelCharacterRecord) => requiredRoleIds.includes(item.id));
       const optionalRoles = characters.filter((item: NovelCharacterRecord) => optionalRoleIds.includes(item.id));
       const selectedForeshadows = selectableForeshadows.filter((item: ForeshadowRecord) => selectedForeshadowIds.includes(item.id));
-      const previous = chapterDocuments[chapterDocuments.length - 1];
+      const previous = previousChapter;
       let generatedOutline = "";
       let generatedTitle = "";
       let lastFailure: unknown = new Error("模型章纲生成失败");
@@ -1667,7 +1859,7 @@ function ChapterCreationWizard({
                   background: novel.background,
                   main_plot: novel.main_plot,
                 },
-                chapter_number: chapterDocuments.length + 1,
+                chapter_number: chapterNumber,
                 target_character_count: targetCharacterCount,
                 expectation_text: expectationText,
                 storylines: selectedStorylines,
@@ -1678,7 +1870,9 @@ function ChapterCreationWizard({
                 auto_select_foreshadows: autoSelectForeshadows,
                 foreshadows: selectedForeshadows,
                 available_foreshadows: autoSelectForeshadows ? selectableForeshadows : [],
-                previous_chapter: previous ? { title: previous.title, ending: previous.content_markdown.slice(-3000) } : null,
+                previous_chapter: previous
+                  ? { title: chapterDisplayTitle(chapterNumber - 1, previous.title), ending: previous.content_markdown.slice(-3000) }
+                  : null,
                 rewrite_attempt: attempt,
                 rewrite_requirement: attempt > 1 ? "上次章纲未达到260—500字或内容被截断，请完整重写，不能续写残句。" : "",
               },
@@ -1694,7 +1888,7 @@ function ChapterCreationWizard({
             throw new Error(`第 ${attempt} 次章纲为 ${outlineCharacterCount} 字，未通过260—500字验收`);
           }
           generatedOutline = nextOutline;
-          generatedTitle = String(job.output_json?.title || job.output_json?.chapter_title || `第${chapterDocuments.length + 1}章`).trim();
+          generatedTitle = chapterTitleName(String(job.output_json?.title || job.output_json?.chapter_title || ""));
           break;
         } catch (reason) {
           lastFailure = reason;
@@ -1726,9 +1920,15 @@ function ChapterCreationWizard({
       setDraft(result.draft);
       draftKeyRef.current = "";
       window.sessionStorage.removeItem(`anw-chapter-draft:${novel.id}`);
-      onClose();
+      closeWizard();
       onCompleted(result.document);
     } catch (reason) {
+      const current = chapterDraftVolumeStaleCurrent(reason, novel.id);
+      if (current) {
+        setDraft(current);
+        hydrateDraft(current);
+        setRequestPhase("failed");
+      }
       const message = readableError(reason, "创建章节失败");
       setInnerError(message);
       onError(message);
@@ -1909,13 +2109,22 @@ function ChapterCreationWizard({
       { className: "mb-chapter-step-body is-outline-result" },
       h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有±500-1500字的浮动，请合理设置目标字数"), h("small", null, "字数限制：2000-5000字")),
       h("div", { className: "mb-chapter-result-heading" }, h("h3", null, "章节大纲已生成"), h("p", null, outlineTaskModelLabel ? `任务模型：${outlineTaskModelLabel}` : "请查看并确认生成的章节大纲")),
-      field("章节标题", h(Input, { maxLength: 20, value: chapterTitle, onChange: (event: any) => setChapterTitle(event.target.value) }), `最多20字，当前：${visibleCount(chapterTitle)}/20`),
+      field(
+        "章节名称",
+        h(
+          "div",
+          { className: "anw-numbered-title-control" },
+          h("span", { className: "anw-numbered-title-prefix", "aria-hidden": "true" }, `第${chapterNumber}章`),
+          h(Input, { maxLength: 20, value: chapterTitle, placeholder: "请输入章节名称（可选）", onChange: (event: any) => setChapterTitle(chapterTitleName(event.target.value)) }),
+        ),
+        `序号由系统按全书顺序生成；名称最多20字，当前：${visibleCount(chapterTitle)}/20`,
+      ),
       field("章节大纲", h(Input.TextArea, { rows: 10, maxLength: 5000, value: outlineText, onChange: (event: any) => setOutlineText(event.target.value) }), `最多5000字，当前：${visibleCount(outlineText)}/5000`),
       h("div", { className: "mb-chapter-summary-card" }, h("strong", null, "角色配置摘要"), h("p", null, `实际选择：${requiredRoleIds.length + optionalRoleIds.length} 人`), h("p", null, `${allowNewRole ? "允许AI新增角色" : "不允许AI新增角色"}，${allowExitRole ? "允许AI退场角色" : "不允许AI退场角色"}`)),
       h("div", { className: "mb-chapter-summary-card" }, h("strong", null, "伏笔配置摘要"), h("p", null, autoSelectForeshadows ? "由AI自动选择伏笔" : `手动选择 ${selectedForeshadowCount} 个伏笔`)),
       h("div", { className: "mb-chapter-triple-actions" },
         h(Button, { size: "large", disabled: saving, onClick: () => void changeStep(4) }, "返回修改"),
-        h(Button, { size: "large", className: "anw-primary-button", disabled: !chapterTitle.trim() || !outlineText.trim(), loading: saving, onClick: () => void changeStep(6) }, "下一步"),
+        h(Button, { size: "large", className: "anw-primary-button", disabled: !outlineText.trim(), loading: saving, onClick: () => void changeStep(6) }, "下一步"),
         h(Button, { size: "large", onClick: () => void openOutlineGenerationConfirm() }, "重新生成"),
       ),
     );
@@ -1933,7 +2142,7 @@ function ChapterCreationWizard({
     h("div", { className: "mb-chapter-result-heading" }, h("h3", null, "确认章节信息"), h("p", null, "请确认以下信息无误后创建章节")),
     h("article", { className: "mb-chapter-final-card" },
       h("dl", null,
-        h("div", null, h("dt", null, "章节标题"), h("dd", null, chapterTitle)),
+        h("div", null, h("dt", null, "章节标题"), h("dd", null, chapterDisplayTitle(chapterNumber, chapterTitle))),
         h("div", null, h("dt", null, "目标字数"), h("dd", null, `${targetCharacterCount} 字`)),
         h("div", null, h("dt", null, "角色配置"), h("dd", null, `已选 ${requiredRoleIds.length + optionalRoleIds.length} 人，${allowNewRole ? "允许AI新增" : "不允许AI新增"}，${allowExitRole ? "允许AI退场" : "不允许AI退场"}`)),
         h("div", null, h("dt", null, "伏笔配置"), h("dd", null, autoSelectForeshadows ? "由AI自动选择伏笔" : `已选 ${selectedForeshadowCount} 个伏笔`)),
@@ -1945,6 +2154,19 @@ function ChapterCreationWizard({
   );
 
   const stepBody = step === 1 ? renderStepOne() : step === 2 ? renderStepTwo() : step === 3 ? renderStepThree() : step === 4 ? renderStepFour() : step === 5 ? renderStepFive() : renderStepSix();
+  const preparationScopeValid = requestPhase === "not_started" || requestPhase === "loading"
+    ? volumes.length > 0
+    : draft?.state === "completed"
+      ? Boolean(draft.completed_document_id)
+      : Boolean(draft?.volume_id && volumes.some((volume: VolumeRecord) => volume.id === draft.volume_id));
+  const preparationTransition = chapterWizardPreparationTransition({
+    open,
+    requestPhase,
+    draftState: draft?.state ?? null,
+    scopeValid: preparationScopeValid,
+    completedDocumentId: draft?.completed_document_id,
+  });
+  const preparationState = preparationTransition.state;
 
   return h(
     React.Fragment,
@@ -1959,11 +2181,20 @@ function ChapterCreationWizard({
         maskClosable: false,
         className: "anw-modal mb-chapter-wizard-modal",
         title: "创建新章节",
-        onCancel: saving || generating || recommending ? undefined : onClose,
+        onCancel: saving || generating || recommending ? undefined : closeWizard,
       },
-      creating || !draft ? h("div", { className: "mb-chapter-loading" }, h(Spin, { size: "large" }), h("span", null, "正在准备章节创作流程...")) : h(
+      preparationState === "loading" ? h("div", { className: "mb-chapter-loading" }, h(Spin, { size: "large" }), h("span", null, "正在准备章节创作流程...")) : preparationState === "failure" ? h(
+        "div",
+        { className: "mb-chapter-load-failure" },
+        h(Alert, { type: "error", showIcon: true, message: innerError || "章节创作流程准备失败，请关闭后重试" }),
+        h("div", { className: "mb-chapter-confirm-actions" },
+          h(Button, { size: "large", onClick: closeWizard }, "关闭"),
+          h(Button, { size: "large", className: "anw-primary-button", onClick: retryPreparation }, "重试"),
+        ),
+      ) : h(
         "div",
         { className: "mb-chapter-wizard" },
+        reboundNotice ? h(Alert, { type: "info", showIcon: true, closable: true, message: reboundNotice, onClose: () => setReboundNotice("") }) : null,
         innerError ? h(Alert, { type: "error", showIcon: true, closable: true, message: innerError, onClose: () => setInnerError("") }) : null,
         wizardSteps,
         stepBody,
@@ -2113,6 +2344,7 @@ export function StudioProjectView({
   const [outlineEditing, setOutlineEditing] = React.useState(false);
   const [outlineStep, setOutlineStep] = React.useState(0);
   const [chapterWizardOpen, setChapterWizardOpen] = React.useState(false);
+  const handledOpenChapterWizardSignalRef = React.useRef(0);
   const [volumeOpen, setVolumeOpen] = React.useState(false);
   const [volumeEditing, setVolumeEditing] = React.useState(null as VolumeRecord | null);
   const [volumeTitle, setVolumeTitle] = React.useState("");
@@ -2649,13 +2881,24 @@ export function StudioProjectView({
   }, [novel.id, novel.title, section, settingsOpen, settingsTab]);
 
   const volumes = novel.tree.filter((item: VolumeRecord) => item.id !== null);
-  const orderedVolumes = volumeDescending ? [...volumes].reverse() : volumes;
+  const volumesByPosition = [...volumes]
+    .sort((left: VolumeRecord, right: VolumeRecord) => left.position - right.position);
+  const volumeNumberById = new Map(
+    volumesByPosition
+      .map((volume: VolumeRecord, index: number) => [String(volume.id), index + 1]),
+  );
+  const displayVolumeTitle = (volume: VolumeRecord): string => volumeDisplayTitle(
+    volumeNumberById.get(String(volume.id)) ?? 1,
+    volume.title,
+  );
+  const volumeFormNumber = volumeEditing?.id
+    ? volumeNumberById.get(String(volumeEditing.id)) ?? 1
+    : volumes.length + 1;
+  const orderedVolumes = volumeDescending ? [...volumesByPosition].reverse() : volumesByPosition;
   const ungrouped = novel.tree.find((item: VolumeRecord) => item.id === null);
-  const chapterDocuments = novel.tree.flatMap((volume: VolumeRecord) => volume.documents).filter((item: DocumentRecord) => item.kind === "chapter");
+  const chapterDocuments = canonicalChapterDocuments(novel);
   const chapterNumberById = new Map(
-    [...chapterDocuments]
-      .sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position)
-      .map((document: DocumentRecord, index: number) => [document.id, index + 1]),
+    chapterDocuments.map((document: DocumentRecord, index: number) => [document.id, index + 1]),
   );
 
   const setRoleSubview = (next: "list" | "graph") => {
@@ -2688,10 +2931,23 @@ export function StudioProjectView({
 
   React.useEffect(() => { void loadDomains(); }, [loadDomains]);
   React.useEffect(() => {
-    if (openChapterWizardSignal > 0) setChapterWizardOpen(true);
-  }, [openChapterWizardSignal]);
+    if (
+      openChapterWizardSignal <= 0
+      || handledOpenChapterWizardSignalRef.current === openChapterWizardSignal
+    ) return;
+    handledOpenChapterWizardSignalRef.current = openChapterWizardSignal;
+    const blockedReason = chapterCreationBlockedReason(volumes.length);
+    if (blockedReason) {
+      setChapterWizardOpen(false);
+      onError(blockedReason);
+      return;
+    }
+    setChapterWizardOpen(true);
+  }, [openChapterWizardSignal, novel.id, volumes.length]);
   React.useEffect(() => {
-    const initial = volumeDescending ? volumes[volumes.length - 1] : volumes[0];
+    const initial = volumeDescending
+      ? volumesByPosition[volumesByPosition.length - 1]
+      : volumesByPosition[0];
     if (expandedVolumes.length === 0 && initial?.id) setExpandedVolumes([String(initial.id)]);
   }, [novel.id, volumes.length, volumeDescending]);
 
@@ -2717,23 +2973,36 @@ export function StudioProjectView({
     setOutlineEditing(true);
   };
 
+  const openChapterWizard = () => {
+    const blockedReason = chapterCreationBlockedReason(volumes.length);
+    if (blockedReason) {
+      setChapterWizardOpen(false);
+      onError(blockedReason);
+      return;
+    }
+    setChapterWizardOpen(true);
+  };
+
   const openVolume = (volume: VolumeRecord | null = null) => {
     setVolumeEditing(volume);
-    setVolumeTitle(volume?.title ?? "");
+    setVolumeTitle(volumeTitleName(volume?.title ?? ""));
     setVolumeOpen(true);
   };
 
   const saveVolume = () => perform(async () => {
-    if (!volumeTitle.trim()) return;
+    const volumeNumber = volumeEditing?.id
+      ? volumeNumberById.get(String(volumeEditing.id)) ?? 1
+      : volumes.length + 1;
+    const storedTitle = volumeTitleForStorage(volumeNumber, volumeTitle);
     if (volumeEditing?.id) {
       await apiRequest(`/novels/${novel.id}/volumes/${volumeEditing.id}`, {
         method: "PUT",
-        body: JSON.stringify({ expected_version: volumeEditing.version, title: volumeTitle.trim() }),
+        body: JSON.stringify({ expected_version: volumeEditing.version, title: storedTitle }),
       });
     } else {
       const created = await apiRequest<{ id: string }>(`/novels/${novel.id}/volumes`, {
         method: "POST",
-        body: JSON.stringify({ title: volumeTitle.trim() }),
+        body: JSON.stringify({ title: storedTitle }),
       });
       setExpandedVolumes((current: string[]) => current.includes(created.id) ? current : [...current, created.id]);
     }
@@ -2747,14 +3016,14 @@ export function StudioProjectView({
     let destination = otherVolumes[0]?.id ?? null;
     Modal.confirm({
       className: "anw-modal",
-      title: `删除“${volume.title}”？`,
+      title: `删除“${displayVolumeTitle(volume)}”？`,
       content: h(
         "div",
         { className: "mb-form-stack" },
         h("p", null, chapters.length ? `本卷有 ${chapters.length} 章，删除时必须移动到其他分卷。` : "删除后无法恢复。"),
         chapters.length ? field("章节移动到", h(Select, {
           defaultValue: destination,
-          options: otherVolumes.map((item: VolumeRecord) => ({ label: item.title, value: item.id })),
+          options: otherVolumes.map((item: VolumeRecord) => ({ label: displayVolumeTitle(item), value: item.id })),
           onChange: (value: string) => { destination = value; },
         })) : null,
       ),
@@ -2816,7 +3085,7 @@ export function StudioProjectView({
   const searchLocation = (result: NovelSearchResultRecord): string => {
     const volume = novel.tree.find((item: VolumeRecord) => item.documents.some((document: DocumentRecord) => document.id === result.document_id));
     const kind = result.kind === "chapter" ? "章节" : result.kind === "outline" ? "大纲" : "设定";
-    return [volume?.id ? volume.title : "未分卷", kind].join(" · ");
+    return [volume?.id ? displayVolumeTitle(volume) : "未分卷", kind].join(" · ");
   };
 
   const downloadCover = () => {
@@ -3143,7 +3412,7 @@ export function StudioProjectView({
         ? h(Button, { type: "link", size: "small", onClick: () => void moveChapter(document, null) }, "移出")
         : h(Select, {
             size: "small", className: "mb-move-select", placeholder: "移入分卷",
-            options: volumes.map((volume: VolumeRecord) => ({ label: volume.title, value: volume.id })),
+            options: volumes.map((volume: VolumeRecord) => ({ label: displayVolumeTitle(volume), value: volume.id })),
             onChange: (value: string) => void moveChapter(document, value),
           }),
     ),
@@ -3161,7 +3430,7 @@ export function StudioProjectView({
     h(
       "div",
       { className: "mb-volume-grid" },
-      orderedVolumes.length === 0 ? h("div", { className: "mb-volume-zero" }, "暂无分卷，点击上方按钮创建") : null,
+      orderedVolumes.length === 0 ? h("div", { className: "mb-volume-zero" }, "暂无分卷，请先创建分卷；创建后才可新建章节") : null,
       ...orderedVolumes.map((volume: VolumeRecord) => {
         const id = String(volume.id);
         const expanded = expandedVolumes.includes(id);
@@ -3174,7 +3443,7 @@ export function StudioProjectView({
             { className: "mb-volume-header" },
             h("button", { type: "button", className: "mb-volume-toggle", onClick: () => toggleVolume(id) },
               h(expanded ? CaretDownOutlined : CaretRightOutlined),
-              h("strong", null, volume.title),
+              h("strong", null, displayVolumeTitle(volume)),
               h("span", null, `${chapters.length}章`),
             ),
             h("div", { className: "mb-volume-actions" },
@@ -3397,7 +3666,7 @@ export function StudioProjectView({
             novelId: novel.id,
             scopeKind: "volume",
             scopeId: volume.id,
-            label: `${volume.title}（分卷）`,
+            label: `${displayVolumeTitle(volume)}（分卷）`,
           }]
         : [];
       const chapterTargets: ReadingScopeTarget[] = volume.documents
@@ -3406,7 +3675,7 @@ export function StudioProjectView({
           novelId: novel.id,
           scopeKind: "chapter",
           scopeId: document.id,
-          label: `${document.title}（章节）`,
+          label: `${chapterDisplayTitle(chapterNumberById.get(document.id) ?? 1, document.title)}（章节）`,
         }));
       return [...volumeTarget, ...chapterTargets];
     },
@@ -3432,7 +3701,13 @@ export function StudioProjectView({
         h(Button, { icon: h(volumeDescending ? ArrowDownOutlined : ArrowUpOutlined), title: volumeDescending ? "按分卷倒序显示" : "按分卷正序显示", "aria-label": volumeDescending ? "按分卷倒序显示" : "按分卷正序显示", onClick: () => setVolumeDescending((current: boolean) => !current) }),
         h(Button, { icon: h(SearchOutlined), title: "搜索全书", "aria-label": "搜索全书", onClick: () => setSearchOpen(true) }),
         h(Button, { icon: h(DownloadOutlined), title: "下载全书", "aria-label": "下载全书", onClick: () => void exportNovel("text") }),
-        h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: () => setChapterWizardOpen(true) }, "新建章节"),
+        h(Button, {
+          className: "anw-primary-button",
+          icon: h(PlusOutlined),
+          disabled: Boolean(chapterCreationBlockedReason(volumes.length)),
+          title: chapterCreationBlockedReason(volumes.length) ?? "新建章节",
+          onClick: openChapterWizard,
+        }, "新建章节"),
       )
     : section === "outline"
       ? hasOutline && !outlineEditing
@@ -3567,7 +3842,7 @@ export function StudioProjectView({
               ? h(React.Fragment, null, ...searchResults.map((result: NovelSearchResultRecord) => h(
                   "button",
                   { key: result.document_id, type: "button", className: "mb-search-result", onClick: () => openSearchResult(result) },
-                  h("span", { className: "mb-search-result-heading" }, h("strong", null, result.title), h("small", null, searchLocation(result))),
+                  h("span", { className: "mb-search-result-heading" }, h("strong", null, result.kind === "chapter" ? chapterDisplayTitle(chapterNumberById.get(result.document_id) ?? 1, result.title) : result.title), h("small", null, searchLocation(result))),
                   h("span", { className: "mb-search-result-snippet" }, result.snippet || "命中标题"),
                 )))
               : h("div", { className: "mb-search-empty" }, h(SearchOutlined), h("span", null, searchQuery.trim() ? "没有找到匹配内容" : "输入关键词后按回车搜索")),
@@ -3580,7 +3855,22 @@ export function StudioProjectView({
       h(
         "div",
         { className: "mb-volume-form" },
-        field("分卷名称", h(Input, { autoFocus: true, value: volumeTitle, placeholder: "请输入分卷名称", onChange: (event: any) => setVolumeTitle(event.target.value), onPressEnter: () => void saveVolume() })),
+        field(
+          "分卷名称",
+          h(
+            "div",
+            { className: "anw-numbered-title-control" },
+            h("span", { className: "anw-numbered-title-prefix", "aria-hidden": "true" }, `第${volumeFormNumber}卷`),
+            h(Input, {
+              autoFocus: true,
+              value: volumeTitle,
+              placeholder: "请输入分卷名称（可选）",
+              onChange: (event: any) => setVolumeTitle(volumeTitleName(event.target.value)),
+              onPressEnter: () => void saveVolume(),
+            }),
+          ),
+          "序号由系统按分卷顺序生成",
+        ),
         h(
           "div",
           { className: "mb-volume-form-actions" },

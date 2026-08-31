@@ -13,11 +13,11 @@ class CreateNovelRequest(BaseModel):
 
 
 class CreateVolumeRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=240)
+    title: str = Field(default="", max_length=240)
 
 
 class CreateDocumentRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=240)
+    title: str = Field(default="", max_length=240)
     kind: str = Field(default="chapter", pattern="^(chapter|outline|setting)$")
     volume_id: UUID | None = None
 

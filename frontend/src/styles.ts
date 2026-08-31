@@ -530,8 +530,15 @@ export function ensureNovelStyles(): void {
     html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .qwenpaw-modal-body { padding:0 28px 28px!important; }
     .anw-title-edit-form { display:grid; gap:0; }
     .anw-title-edit-form > label { margin-bottom:11px; color:#34363a; font-size:16px; font-weight:720; line-height:1.4; }
-    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-title-edit-form > .qwenpaw-input { height:48px; border:2px solid #dedfe1!important; border-radius:10px!important; padding:0 16px!important; color:#25272b!important; background:#fff!important; box-shadow:none!important; font-size:17px; }
-    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-title-edit-form > .qwenpaw-input:focus { border-color:#ff8258!important; box-shadow:0 0 0 3px rgba(255,112,67,.1)!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-title-edit-form > .qwenpaw-input,
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-numbered-title-control > .qwenpaw-input { height:48px; border:2px solid #dedfe1!important; border-radius:10px!important; padding:0 16px!important; color:#25272b!important; background:#fff!important; box-shadow:none!important; font-size:17px; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-title-edit-form > .qwenpaw-input:focus,
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-numbered-title-control > .qwenpaw-input:focus { border-color:#ff8258!important; box-shadow:0 0 0 3px rgba(255,112,67,.1)!important; }
+    .anw-numbered-title-control { display:flex; width:100%; min-width:0; align-items:stretch; }
+    .anw-numbered-title-prefix { display:inline-flex; min-width:72px; flex:0 0 auto; align-items:center; justify-content:center; border:1px solid #dedfe1; border-right:0; border-radius:9px 0 0 9px; padding:0 12px; color:#5e6269; background:#f6f7f8; font-size:14px; font-weight:700; white-space:nowrap; }
+    .anw-numbered-title-control > .qwenpaw-input { min-width:0; flex:1; border-radius:0 9px 9px 0!important; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-numbered-title-prefix { min-width:82px; border-width:2px; font-size:16px; }
+    html .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-numbered-title-control > .qwenpaw-input { border-radius:0 10px 10px 0!important; }
     .anw-title-edit-count { margin:8px 0 0; color:#a1a3a7; font-size:13px; font-weight:600; line-height:1.5; }
     .anw-title-edit-actions { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:27px; }
     html body .qwenpaw-modal-root .qwenpaw-modal.anw-title-edit-modal .anw-title-edit-actions > .qwenpaw-btn { width:100%; height:52px; margin:0!important; border-radius:10px!important; font-size:16px; font-weight:720; }
@@ -1405,6 +1412,7 @@ export function ensureNovelStyles(): void {
     .mb-chapter-result-heading h3,.mb-chapter-result-heading p { margin:0; }
     .mb-chapter-result-heading h3 { color:#24272d; font-size:20px; }
     .mb-chapter-result-heading p { color:#999da4; font-size:12px; }
+    .mb-chapter-load-failure { display:grid; gap:18px; padding:8px 0 2px; }
     .mb-chapter-step-body.is-outline-result textarea.qwenpaw-input { min-height:220px; line-height:1.8; }
     .mb-chapter-summary-card { display:grid; gap:6px; border-radius:9px; padding:16px; background:#fafafa; }
     .mb-chapter-summary-card > strong { color:#3d4148; }

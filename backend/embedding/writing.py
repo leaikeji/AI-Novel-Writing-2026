@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, select
 from sqlalchemy.orm import Session
 
 from ..creative_data_models import (
@@ -19,7 +19,8 @@ from ..creative_data_models import (
     RevisionTimelineMappingSegment,
     StoryTimeline,
 )
-from ..models import Document, DocumentWorkingCopy
+from ..models import Document, DocumentWorkingCopy, Volume
+from ..volume_chapter_titles import context_chapter_title
 
 from .api import semantic_search
 from .contracts import (
@@ -65,16 +66,33 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
     document = session.get(Document, document_id)
     if document is None or document.kind != "chapter":
         raise ValueError("chapter document is required")
-    narrative_sequence = int(
-        session.scalar(
-            select(func.count()).select_from(Document).where(
+    ordered_document_ids = tuple(
+        session.scalars(
+            select(Document.id)
+            .outerjoin(
+                Volume,
+                and_(
+                    Volume.id == Document.volume_id,
+                    Volume.novel_id == Document.novel_id,
+                ),
+            )
+            .where(
                 Document.novel_id == document.novel_id,
                 Document.kind == "chapter",
-                Document.position <= document.position,
+            )
+            .order_by(
+                case((Document.volume_id.is_(None), 1), else_=0),
+                Volume.position,
+                Document.position,
+                Document.id,
             )
         )
-        or 0
     )
+    try:
+        narrative_sequence = ordered_document_ids.index(document.id) + 1
+    except ValueError as error:
+        raise ValueError("chapter document is outside its canonical novel tree") from error
+    display_title = context_chapter_title(document.title, narrative_sequence)
     timelines = tuple(
         session.scalars(
             select(StoryTimeline).where(
@@ -87,7 +105,7 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
         return WritingPosition(
             novel_id=document.novel_id,
             document_id=document.id,
-            title=document.title,
+            title=display_title,
             narrative_sequence=narrative_sequence,
             timeline_id=timelines[0].id,
             story_sequence_cutoff=narrative_sequence,
@@ -124,7 +142,7 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
     return WritingPosition(
         novel_id=document.novel_id,
         document_id=document.id,
-        title=document.title,
+        title=display_title,
         narrative_sequence=narrative_sequence,
         timeline_id=next(iter(timeline_ids)),
         story_sequence_cutoff=max(story_sequences),

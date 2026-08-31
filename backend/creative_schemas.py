@@ -562,7 +562,7 @@ class ApplyOutlineGenerationRequest(BaseModel):
 
 class UpdateVolumeRequest(BaseModel):
     expected_version: int = Field(ge=1)
-    title: str = Field(min_length=1, max_length=240)
+    title: str = Field(max_length=240)
 
 
 class UpdateNovelSettingsRequest(BaseModel):
@@ -587,7 +587,7 @@ class ReorderVolumesRequest(BaseModel):
 
 class UpdateDocumentMetadataRequest(BaseModel):
     expected_version: int = Field(ge=1)
-    title: str = Field(min_length=1, max_length=240)
+    title: str = Field(max_length=240)
 
 
 class ReorderChaptersRequest(BaseModel):

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from time import monotonic
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -54,6 +56,7 @@ from .local_lexical import (
     LocalLexicalScopeError,
     LocalLexicalSearchRequest,
     LocalTimelineLimit,
+    author_visible_v1_snippet,
     search_local_authority,
 )
 from .persistence import (
@@ -1406,6 +1409,13 @@ def _source_state(source_type: str) -> str:
     return "current_entity_revision"
 
 
+def _author_visible_snippet(chunks: Iterable[Any]) -> str:
+    return "\n".join(
+        author_visible_v1_snippet(chunk.text)
+        for chunk in chunks
+    )[:4000]
+
+
 def _local_authority_search_payload(
     session: Session,
     *,
@@ -1809,7 +1819,7 @@ async def semantic_search(
                     "narrative_sequence_end": candidate_by_id[item.anchor_chunk_id].narrative_sequence_end,
                     "story_sequence_start": candidate_by_id[item.anchor_chunk_id].story_sequence_start,
                     "story_sequence_end": candidate_by_id[item.anchor_chunk_id].story_sequence_end,
-                    "snippet": "\n".join(chunk.text for chunk in item.chunks)[:4000],
+                    "snippet": _author_visible_snippet(item.chunks),
                     "channels": [channel.value for channel in item.channels],
                     "lexical_score": item.lexical_raw_score,
                     "dense_distance": (

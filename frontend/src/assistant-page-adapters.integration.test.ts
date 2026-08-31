@@ -139,10 +139,12 @@ describe("real chapter page assistant adapters", () => {
     expect(capture?.context).toMatchObject({
       novel: NOVEL,
       page: { section: "chapters", view: "chapter-editor" },
+      entity: { type: "document", id: "document-1", title: "第4章 退回的旧木盒" },
       document: {
         id: "document-1",
         volumeId: "volume-1",
         chapterNumber: 4,
+        title: "第4章 退回的旧木盒",
         draftVersion: 9,
         savedContentHash: "a".repeat(64),
         dirty: false,

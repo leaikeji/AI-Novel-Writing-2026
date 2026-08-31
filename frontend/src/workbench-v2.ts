@@ -13,7 +13,14 @@ import {
 } from "./chapter-workflow";
 import type { AssistantFormFieldAdapter } from "./assistant-form-field";
 import { assistantContextRuntime } from "./assistant-context-runtime";
-import { buildChapterTreeVolumes, ChapterTreeChapter, ChapterTreeVolume } from "./chapter-tree";
+import {
+  buildChapterTreeVolumes,
+  canonicalChapterDocuments,
+  canonicalVolumeRecords,
+  chapterOrdinalFor,
+  ChapterTreeChapter,
+  ChapterTreeVolume,
+} from "./chapter-tree";
 import { CREATIVE_CENTER_CHAT_PATH } from "./contracts";
 import {
   clearRecoveryDraft,
@@ -29,6 +36,7 @@ import {
   isClueFactType,
   revisionSourceLabel,
   selectFactView,
+  volumeDisplayTitle,
 } from "./presenters";
 import { workbenchStore } from "./store";
 import {
@@ -216,19 +224,24 @@ function replaceWorkbenchUrl(url: string): void {
 
 
 function firstDocument(novel: NovelRecord): DocumentRecord | undefined {
-  return novel.tree.flatMap((volume) => volume.documents)
+  return canonicalChapterDocuments(novel)[0]
+    ?? canonicalVolumeRecords(novel).flatMap((volume) => volume.documents)
     .find((document) => document.kind === "chapter")
-    ?? novel.tree.flatMap((volume) => volume.documents)[0];
+    ?? canonicalVolumeRecords(novel).flatMap((volume) => volume.documents)[0];
 }
 
 
 function chapterNumberFor(novel: NovelRecord, documentId: string): number | undefined {
-  const index = [...novel.tree]
-    .sort((left, right) => left.position - right.position)
-    .flatMap((volume) => [...volume.documents].sort((left, right) => left.position - right.position))
-    .filter((document) => document.kind === "chapter")
-    .findIndex((document) => document.id === documentId);
-  return index >= 0 ? index + 1 : undefined;
+  return chapterOrdinalFor(novel, documentId);
+}
+
+
+function documentDisplayTitle(novel: NovelRecord, document: DocumentRecord): string {
+  if (document.kind !== "chapter") return document.title;
+  const chapterNumber = chapterOrdinalFor(novel, document.id);
+  return chapterNumber === undefined
+    ? document.title
+    : formatChapterDisplayTitle(chapterNumber, document.title);
 }
 
 
@@ -964,12 +977,15 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     const parent = editorSurfaceParentRef.current;
     if (!active || !parent || !editorShouldMount) return;
     const generation = documentGenerationRef.current;
+    const activeDisplayTitle = novel && novel.id === active.novel_id
+      ? documentDisplayTitle(novel, active)
+      : active.title;
     const handle = createChapterEditorSurface({
       parent,
       lease: { documentId: active.id, generation },
       initialValue: contentRef.current,
       currentContentHash: active.content_hash,
-      ariaLabel: `${active.title}正文编辑器`,
+      ariaLabel: `${activeDisplayTitle}正文编辑器`,
       onDocChanged: (event) => {
         if (
           event.lease.documentId !== documentRef.current?.id
@@ -1028,7 +1044,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       if (editorControlRef.current === handle.assistantControl) editorControlRef.current = null;
       handle.dispose();
     };
-  }, [applyContentChange, document?.id, editorShouldMount]);
+  }, [applyContentChange, document?.id, document?.title, editorShouldMount, novel]);
 
   React.useEffect(() => {
     const surface = editorSurfaceRef.current;
@@ -1952,28 +1968,50 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
 
   const createChapter = async () => {
     if (!novel) return;
-    const documents = novel.tree.flatMap((volume: VolumeRecord) => volume.documents)
-      .filter((item: DocumentRecord) => item.kind === "chapter");
-    const targetVolume = novel.tree.find((volume: VolumeRecord) => volume.id !== null);
-    const created = await apiRequest<DocumentRecord>(`/novels/${novel.id}/documents`, {
-      method: "POST",
-      body: JSON.stringify({
-        title: `第${documents.length + 1}章`,
-        kind: "chapter",
-        volume_id: targetVolume?.id ?? null,
-      }),
-    });
-    await refreshNovel();
-    await loadDocument(created.id);
+    const realVolumes = canonicalVolumeRecords(novel)
+      .filter((volume: VolumeRecord) => volume.id !== null);
+    const targetVolumeId = realVolumes[realVolumes.length - 1]?.id;
+    if (!targetVolumeId) {
+      const message = "请先新建分卷，再新建章节。";
+      setError(message);
+      Modal.warning({ title: "暂时不能新建章节", content: message, okText: "知道了" });
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await apiRequest<DocumentRecord>(`/novels/${novel.id}/documents`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: "",
+          kind: "chapter",
+          volume_id: targetVolumeId,
+        }),
+      });
+      await refreshNovel();
+      await loadDocument(created.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "新建章节失败");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const createVolume = async () => {
     if (!novel) return;
-    await apiRequest(`/novels/${novel.id}/volumes`, {
-      method: "POST",
-      body: JSON.stringify({ title: `第${novel.tree.filter((item: VolumeRecord) => item.id).length + 1}卷` }),
-    });
-    await refreshNovel();
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`/novels/${novel.id}/volumes`, {
+        method: "POST",
+        body: JSON.stringify({ title: "" }),
+      });
+      await refreshNovel();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "新增分卷失败");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const createStructuredDocument = async (kind: "outline" | "setting") => {
@@ -2010,9 +2048,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     if (!saved) return;
     setBusy(true);
     try {
-      const chapterIds = novel.tree
-        .flatMap((volume: VolumeRecord) => volume.documents)
-        .filter((item: DocumentRecord) => item.kind === "chapter")
+      const chapterIds = canonicalChapterDocuments(novel)
         .map((item: DocumentRecord) => item.id);
       await apiRequest(`/novels/${novel.id}/chapters/reorder`, {
         method: "POST",
@@ -2046,6 +2082,21 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   };
 
   const confirmSaveChapterToVolume = (volumeId: string | null, continueWriting = false) => {
+    if (continueWriting) {
+      const hasValidVolume = Boolean(
+        volumeId
+        && novel
+        && canonicalVolumeRecords(novel).some((volume) => volume.id === volumeId),
+      );
+      if (!hasValidVolume) {
+        const message = novel && canonicalVolumeRecords(novel).some((volume) => volume.id !== null)
+          ? "当前章节尚未分卷，请先选择一个分卷保存，再新建下一章。"
+          : "请先新建分卷，再新建下一章。";
+        setError(message);
+        Modal.warning({ title: "暂时不能新建下一章", content: message, okText: "知道了" });
+        return;
+      }
+    }
     setSaveVolumeOpen(false);
     Modal.confirm({
       className: "anw-modal anw-save-confirm",
@@ -2166,10 +2217,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
 
   const copyContext = async () => {
     if (!novel || !document) return;
+    const currentDocumentTitle = documentDisplayTitle(novel, document);
     await navigator.clipboard.writeText([
       `当前小说：${novel.title}`,
       `novel_id: ${novel.id}`,
-      `当前文档：${document.title}`,
+      `当前文档：${currentDocumentTitle}`,
       `document_id: ${document.id}`,
       "请按需调用 novel_get_context、novel_get_document 或 novel_search；不要修改正文。",
     ].join("\n"));
@@ -2219,7 +2271,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   };
 
   const updateTitleDraft = (value: string) => {
-    const nextTitle = value.slice(0, 20);
+    const nextTitle = (
+      documentRef.current?.kind === "chapter" ? chapterTitleName(value) : value
+    ).slice(0, 20);
     titleDraftRef.current = nextTitle;
     setTitleDraft(nextTitle);
     assistantTitleBindingRef.current?.notifyFieldChanged(CHAPTER_TITLE_FIELD_ID);
@@ -2228,7 +2282,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const renameDocument = async () => {
     const active = documentRef.current;
     const nextTitle = titleDraftRef.current.trim();
-    if (!novel || !active || !nextTitle) return;
+    if (!novel || !active || (active.kind !== "chapter" && !nextTitle)) return;
+    const storedTitle = active.kind === "chapter" ? chapterTitleName(nextTitle) : nextTitle;
     setTitleSaving(true);
     setError("");
     try {
@@ -2240,7 +2295,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       }
       const updated = await apiRequest<DocumentRecord>(`/novels/${novel.id}/documents/${current.id}`, {
         method: "PUT",
-        body: JSON.stringify({ expected_version: current.version, title: nextTitle }),
+        body: JSON.stringify({ expected_version: current.version, title: storedTitle }),
       });
       const merged = {
         ...updated,
@@ -2359,9 +2414,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       getDirty: () => titleDraftRef.current !== titleBaselineRef.current,
       getSelection: () => readAssistantTextSelection(currentControl(), titleDraftRef.current),
       applyDraftValue: (nextValue) => {
-        if (nextValue.length > 20) throw new Error("章节标题不能超过 20 字");
-        titleDraftRef.current = nextValue;
-        setTitleDraft(nextValue);
+        const semanticTitle = chapterTitleName(nextValue);
+        if (semanticTitle.length > 20) throw new Error("章节名称不能超过 20 字");
+        titleDraftRef.current = semanticTitle;
+        setTitleDraft(semanticTitle);
       },
       restoreSelection: (_fieldId, range) => restoreAssistantTextSelection(currentControl(), range),
       focus: () => {
@@ -2420,10 +2476,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
 
   const confirmDeleteDocument = () => {
     if (!novel || !document) return;
+    const currentDocumentTitle = documentDisplayTitle(novel, document);
     Modal.confirm({
       className: "anw-modal anw-delete-document-confirm",
       title: "删除章节",
-      content: `确认删除《${document.title}》吗？删除后将返回章节列表。`,
+      content: `确认删除《${currentDocumentTitle}》吗？删除后将返回章节列表。`,
       okText: "删除",
       cancelText: "取消",
       okButtonProps: { danger: true },
@@ -2455,13 +2512,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   }
 
   if (editorOpen && document) {
-    const orderedChapters = novel
-      ? [...novel.tree]
-          .sort((left: VolumeRecord, right: VolumeRecord) => left.position - right.position)
-          .flatMap((volume: VolumeRecord) => [...volume.documents].sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position))
-          .filter((item: DocumentRecord) => item.kind === "chapter")
-      : [];
+    const orderedChapters = novel ? canonicalChapterDocuments(novel) : [];
     const currentChapterIndex = orderedChapters.findIndex((item: DocumentRecord) => item.id === document.id);
+    const orderedDisplayVolumes = novel
+      ? canonicalVolumeRecords(novel).filter((volume: VolumeRecord) => volume.id !== null)
+      : [];
     const chapterDisplayTitle = document.kind === "chapter" && currentChapterIndex >= 0
       ? formatChapterDisplayTitle(currentChapterIndex + 1, document.title)
       : document.title;
@@ -2552,7 +2607,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
               chapterTreeVolumes.length
                 ? chapterTreeVolumes.map((item: ChapterTreeVolume) => {
                     const expanded = Boolean(chapterTreeQuery.trim()) || expandedVolumeKeys.includes(item.key);
-                    const volumeLabel = item.volume.id ? item.volume.title : "未分卷";
+                    const volumeLabel = item.displayTitle;
                     const treeId = `anw-chapter-tree-volume-${item.key}`;
                     return h(
                       "section",
@@ -2854,33 +2909,47 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       className: "anw-chapter-editor-surface",
       "data-editor-generation": documentGenerationRef.current,
     });
+    const titleInputControl = h(Input, {
+      ref: (node: AssistantTitleInputRef | null) => {
+        titleInputRef.current = node;
+        titleInputNativeRef.current = node?.input ?? null;
+      },
+      id: "anw-document-title-input",
+      autoFocus: true,
+      size: "large",
+      value: titleDraft,
+      maxLength: 20,
+      placeholder: document.kind === "chapter" ? "请输入章节名称" : "请输入文档标题",
+      onChange: (event: any) => updateTitleDraft(event.target.value as string),
+      onFocus: (event: { currentTarget: AssistantTextControl }) => {
+        titleInputNativeRef.current = event.currentTarget;
+        assistantTitleBindingRef.current?.setFocusedField(CHAPTER_TITLE_FIELD_ID);
+      },
+      onSelect: (event: { currentTarget: AssistantTextControl }) => {
+        titleInputNativeRef.current = event.currentTarget;
+      },
+      onBlur: () => assistantTitleBindingRef.current?.setFocusedField(undefined),
+      onPressEnter: () => {
+        if ((document.kind === "chapter" || titleDraftRef.current.trim()) && !titleSaving) {
+          void renameDocument();
+        }
+      },
+    });
     const titleEditorForm = h(
       "div",
       { className: "anw-title-edit-form" },
-      h("label", { htmlFor: "anw-document-title-input" }, document.kind === "chapter" ? "章节标题" : "文档标题"),
-      h(Input, {
-        ref: (node: AssistantTitleInputRef | null) => {
-          titleInputRef.current = node;
-          titleInputNativeRef.current = node?.input ?? null;
-        },
-        id: "anw-document-title-input",
-        autoFocus: true,
-        size: "large",
-        value: titleDraft,
-        maxLength: 20,
-        placeholder: document.kind === "chapter" ? "请输入章节标题" : "请输入文档标题",
-        onChange: (event: any) => updateTitleDraft(event.target.value as string),
-        onFocus: (event: { currentTarget: AssistantTextControl }) => {
-          titleInputNativeRef.current = event.currentTarget;
-          assistantTitleBindingRef.current?.setFocusedField(CHAPTER_TITLE_FIELD_ID);
-        },
-        onSelect: (event: { currentTarget: AssistantTextControl }) => {
-          titleInputNativeRef.current = event.currentTarget;
-        },
-        onBlur: () => assistantTitleBindingRef.current?.setFocusedField(undefined),
-        onPressEnter: () => { if (titleDraftRef.current.trim() && !titleSaving) void renameDocument(); },
-      }),
-      h("p", { className: "anw-title-edit-count" }, `最多20字，当前：${titleDraft.length}/20`),
+      h("label", { htmlFor: "anw-document-title-input" }, document.kind === "chapter" ? "章节名称" : "文档标题"),
+      document.kind === "chapter" && currentChapterIndex >= 0
+        ? h(
+            "div",
+            { className: "anw-numbered-title-control" },
+            h("span", { className: "anw-numbered-title-prefix", "aria-hidden": "true" }, `第${currentChapterIndex + 1}章`),
+            titleInputControl,
+          )
+        : titleInputControl,
+      h("p", { className: "anw-title-edit-count" }, document.kind === "chapter"
+        ? `序号由系统按全书顺序生成；名称最多20字，当前：${titleDraft.length}/20`
+        : `最多20字，当前：${titleDraft.length}/20`),
       h(
         "div",
         { className: "anw-title-edit-actions" },
@@ -2892,7 +2961,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         h(Button, {
           className: "anw-primary-button anw-title-edit-save",
           loading: titleSaving,
-          disabled: !titleDraft.trim(),
+          disabled: document.kind !== "chapter" && !titleDraft.trim(),
           onClick: () => void renameDocument(),
         }, "保存"),
       ),
@@ -3068,7 +3137,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
             h(
               "div",
               { className: "anw-save-volume-list" },
-              ...novel.tree.filter((volume: VolumeRecord) => volume.id).map((volume: VolumeRecord, index: number) => h(
+              ...orderedDisplayVolumes.map((volume: VolumeRecord, index: number) => h(
                 "button",
                 {
                   key: volume.id,
@@ -3076,7 +3145,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                   disabled: busy,
                   onClick: () => confirmSaveChapterToVolume(volume.id),
                 },
-                h("strong", null, /^第[^卷]*卷(?:\s|$)/.test(volume.title.trim()) ? volume.title.trim() : `第${index + 1}卷 ${volume.title.replace(/^第[^卷]*卷\s*/, "").trim()}`),
+                h("strong", null, volumeDisplayTitle(index + 1, volume.title)),
                 h("span", null, `${volume.documents.filter((item: DocumentRecord) => item.kind === "chapter").length} 章`),
               )),
               h(Button, { block: true, disabled: busy, onClick: () => confirmSaveChapterToVolume(null) }, "不选分卷"),
@@ -3133,8 +3202,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     selectionEditReviewHost: props.selectionEditReviewHost,
   });
 
-  const chapterDocuments = (novel?.tree ?? []).flatMap((volume: VolumeRecord) => volume.documents)
-    .filter((item: DocumentRecord) => item.kind === "chapter");
+  const chapterDocuments = novel ? canonicalChapterDocuments(novel) : [];
   const structuredDocuments = (novel?.tree ?? []).flatMap((volume: VolumeRecord) => volume.documents)
     .filter((item: DocumentRecord) => item.kind === (section === "settings" ? "setting" : "outline"));
   const chapterOrder = new Map(
@@ -3157,7 +3225,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
 
   const renderPanelBody = (): unknown => {
     if (section === "chapters") {
-      const volumeTiles = (novel?.tree ?? []).filter(
+      const volumeTiles = canonicalVolumeRecords(novel).filter(
         (volume: VolumeRecord) => volume.id !== null
           || volume.documents.some((item: DocumentRecord) => item.kind === "chapter"),
       );
@@ -3171,11 +3239,14 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
               { className: "anw-volume-overview" },
               ...volumeTiles.map((volume: VolumeRecord, volumeIndex: number) => {
                 const count = volume.documents.filter((item: DocumentRecord) => item.kind === "chapter").length;
+                const volumeTitle = volume.id
+                  ? volumeDisplayTitle(volumeIndex + 1, volume.title)
+                  : "未分卷";
                 return h(
                   "article",
                   { key: volume.id ?? "ungrouped", className: "anw-volume-tile" },
                   h("div", { className: "anw-volume-index" }, volume.id ? String(volumeIndex + 1).padStart(2, "0") : "—"),
-                  h("div", { className: "anw-volume-name" }, volume.title),
+                  h("div", { className: "anw-volume-name" }, volumeTitle),
                   h("div", { className: "anw-volume-count" }, `${count} 章`),
                   volume.id
                     ? h(
@@ -3199,15 +3270,18 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           ? h(
               "div",
               { className: "anw-chapter-volume-list" },
-              ...volumeTiles.map((volume: VolumeRecord) => {
+              ...volumeTiles.map((volume: VolumeRecord, volumeIndex: number) => {
                 const volumeChapters = volume.documents.filter((item: DocumentRecord) => item.kind === "chapter");
+                const volumeTitle = volume.id
+                  ? volumeDisplayTitle(volumeIndex + 1, volume.title)
+                  : "未分卷";
                 return h(
                   "section",
                   { key: `chapters:${volume.id ?? "ungrouped"}`, className: "anw-chapter-volume-section" },
                   h(
                     "div",
                     { className: "anw-chapter-group-header" },
-                    h("strong", null, volume.title),
+                    h("strong", null, volumeTitle),
                     h("span", null, `${volumeChapters.length} 章`),
                   ),
                   volumeChapters.length
@@ -3218,7 +3292,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                           "button",
                           { key: item.id, type: "button", className: "anw-chapter-row", onClick: () => selectDocument(item.id) },
                           h("span", { className: "anw-chapter-number" }, String(chapterOrder.get(item.id) ?? 0).padStart(2, "0")),
-                          h("span", { className: "anw-chapter-row-title" }, item.title),
+                          h("span", { className: "anw-chapter-row-title" }, formatChapterDisplayTitle(chapterOrder.get(item.id) ?? 0, item.title)),
                           h("span", { className: "anw-chapter-row-meta" }, `${item.visible_character_count} 字`),
                           h("span", { className: "anw-chapter-row-meta is-ready" }, "已保存"),
                         )),

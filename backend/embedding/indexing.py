@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from ..background.contracts import LocalWorkspaceScope
@@ -27,6 +28,7 @@ from ..creative_data_models import (
     RevisionTimelineMappingHead,
     RevisionTimelineMappingSegment,
     SemanticChunk,
+    SemanticEmbedding,
     SemanticSource,
     StoryTimeline,
 )
@@ -35,6 +37,7 @@ from .chunking import (
     V1_RENDERER_VERSION,
     V1SourceInput,
     TOKEN_ESTIMATOR_VERSION,
+    RenderedSource,
     chunk_rendered_source,
     estimate_token_count,
     render_structured_setting,
@@ -43,11 +46,13 @@ from .chunking import (
 from .lifecycle import EmbeddingLifecycleError
 from .refresh import (
     PendingSourceSpec,
+    PublicationAuthority,
     RefreshRequest,
     service_for_session,
 )
-from ..models import Document, DocumentRevision, DocumentWorkingCopy
+from ..models import Document, DocumentRevision, DocumentWorkingCopy, Volume
 from ..models import Novel
+from ..volume_chapter_titles import embedding_chapter_title
 
 
 V1_CORPORA = frozenset({"manuscript", "planning", "private_asset"})
@@ -131,12 +136,20 @@ def _persist_source(
         source_input,
         renderer_version=build_generation_renderer(session, build.generation_id),
     )
+    logical_key = _logical_source_key(
+        source_type=source_input.source_type,
+        source_entity_id=source_input.source_entity_id,
+        timeline_id=timeline_id,
+        locator=locator,
+    )
+    stored_locator = dict(locator)
+    stored_locator["_refresh_logical_key"] = logical_key
     source = SemanticSource(
         id=uuid4(), generation_id=build.generation_id, novel_id=build.novel_id,
         corpus=rendered.corpus, source_type=rendered.source_type,
         source_entity_id=rendered.source_entity_id,
         source_revision_id=rendered.source_revision_id,
-        source_locator_json=locator, content_hash=rendered.content_hash,
+        source_locator_json=stored_locator, content_hash=rendered.content_hash,
         renderer_version=rendered.renderer_version, timeline_id=timeline_id,
         character_instance_id=None,
         narrative_sequence_start=narrative_start,
@@ -183,7 +196,7 @@ def _persist_chunks_for_rendered(
     *,
     generation_id: UUID,
     source_id: UUID,
-    rendered: object,
+    rendered: RenderedSource,
     chunker_version: str,
 ) -> tuple[SemanticChunk, ...]:
     records: list[SemanticChunk] = []
@@ -240,6 +253,172 @@ def _enqueue_chunk_batches(
     return len(_batch_chunks(list(chunks)))
 
 
+def _locator_without_refresh_key(value: dict[str, object]) -> dict[str, object]:
+    return {
+        key: item
+        for key, item in value.items()
+        if key not in {
+            "_refresh_logical_key",
+            "_metadata_projection_base_index_version",
+        }
+    }
+
+
+def _same_source_projection(
+    current: SemanticSource,
+    *,
+    rendered: RenderedSource,
+    source_input: V1SourceInput,
+    timeline_id: UUID | None,
+    narrative_start: int | None,
+    narrative_end: int | None,
+    story_start: int | None,
+    story_end: int | None,
+    locator: dict[str, object],
+    visibility: dict[str, object],
+) -> bool:
+    return (
+        current.corpus == rendered.corpus
+        and current.source_type == rendered.source_type
+        and current.source_entity_id == source_input.source_entity_id
+        and current.source_revision_id == source_input.source_revision_id
+        and current.content_hash == rendered.content_hash
+        and current.renderer_version == rendered.renderer_version
+        and current.timeline_id == timeline_id
+        and current.character_instance_id is None
+        and current.narrative_sequence_start == narrative_start
+        and current.narrative_sequence_end == narrative_end
+        and current.story_sequence_start == story_start
+        and current.story_sequence_end == story_end
+        and _locator_without_refresh_key(dict(current.source_locator_json or {}))
+        == locator
+        and dict(current.visibility_json or {}) == visibility
+    )
+
+
+def _metadata_only_reprojection_source(
+    candidates: tuple[SemanticSource, ...],
+    *,
+    rendered: RenderedSource,
+    source_input: V1SourceInput,
+    timeline_id: UUID | None,
+    locator: dict[str, object],
+    visibility: dict[str, object],
+) -> SemanticSource | None:
+    """Return a source whose immutable text is identical and only position moved."""
+
+    for current in candidates:
+        if (
+            current.corpus == rendered.corpus
+            and current.source_type == rendered.source_type
+            and current.source_entity_id == source_input.source_entity_id
+            and current.source_revision_id == source_input.source_revision_id
+            and current.content_hash == rendered.content_hash
+            and current.renderer_version == rendered.renderer_version
+            and current.timeline_id == timeline_id
+            and current.character_instance_id is None
+            and _locator_without_refresh_key(dict(current.source_locator_json or {}))
+            == locator
+            and dict(current.visibility_json or {}) == visibility
+        ):
+            return current
+    return None
+
+
+def _copy_reprojection_embeddings(
+    session: Session,
+    *,
+    generation_id: UUID,
+    novel_id: UUID,
+    refresh_id: UUID,
+    source: SemanticSource,
+    chunks: tuple[SemanticChunk, ...],
+    batch_number_start: int,
+) -> int:
+    """Create ready local batch evidence by copying existing vectors, with no job."""
+
+    previous = tuple(
+        session.execute(
+            select(SemanticChunk, SemanticEmbedding)
+            .join(
+                SemanticEmbedding,
+                and_(
+                    SemanticEmbedding.chunk_id == SemanticChunk.id,
+                    SemanticEmbedding.generation_id == SemanticChunk.generation_id,
+                ),
+            )
+            .where(
+                SemanticChunk.generation_id == generation_id,
+                SemanticChunk.source_id == source.id,
+            )
+            .order_by(SemanticChunk.chunk_index)
+        ).all()
+    )
+    previous_by_index = {
+        old_chunk.chunk_index: (old_chunk, old_embedding)
+        for old_chunk, old_embedding in previous
+    }
+    if len(previous_by_index) != len(chunks):
+        raise EmbeddingLifecycleError(
+            "metadata_reprojection_unavailable",
+            "current source has no complete reusable embedding set",
+        )
+    for chunk in chunks:
+        pair = previous_by_index.get(chunk.chunk_index)
+        if pair is None or (
+            pair[0].content_hash != chunk.content_hash
+            or pair[0].content_text != chunk.content_text
+        ):
+            raise EmbeddingLifecycleError(
+                "metadata_reprojection_unavailable",
+                "current source chunks do not match the new metadata projection",
+            )
+
+    completed_at = datetime.now(UTC)
+    for offset, chunk in enumerate(chunks):
+        old_chunk, old_embedding = previous_by_index[chunk.chunk_index]
+        batch = EmbeddingIndexBatch(
+            id=uuid4(),
+            generation_id=generation_id,
+            novel_id=novel_id,
+            refresh_id=refresh_id,
+            batch_number=batch_number_start + offset,
+            background_job_id=None,
+            input_hash=_digest([str(chunk.id) + ":" + chunk.content_hash]),
+            item_count=1,
+            state="ready",
+            attempt_count=0,
+            result_count=1,
+            completed_at=completed_at,
+        )
+        session.add(batch)
+        session.flush()
+        session.add(
+            EmbeddingIndexBatchItem(
+                id=uuid4(),
+                batch_id=batch.id,
+                generation_id=generation_id,
+                chunk_id=chunk.id,
+                ordinal=0,
+            )
+        )
+        session.add(
+            SemanticEmbedding(
+                id=uuid4(),
+                generation_id=generation_id,
+                chunk_id=chunk.id,
+                batch_id=batch.id,
+                dimension=old_embedding.dimension,
+                embedding=list(old_embedding.embedding),
+                embedding_hash=old_embedding.embedding_hash,
+                model_run_id=old_embedding.model_run_id,
+                response_ordinal=0,
+            )
+        )
+    session.flush()
+    return len(chunks)
+
+
 def build_generation_chunker(session: Session, generation_id: UUID) -> str:
     generation = session.get(EmbeddingGeneration, generation_id)
     if generation is None:
@@ -272,16 +451,70 @@ def _manuscript_sources(
         )
     )
     single_timeline_id = timelines[0].id if len(timelines) == 1 else None
+    canonical_documents = tuple(
+        session.scalars(
+            select(Document)
+            .outerjoin(
+                Volume,
+                and_(
+                    Volume.id == Document.volume_id,
+                    Volume.novel_id == Document.novel_id,
+                ),
+            )
+            .where(
+                Document.novel_id == build.novel_id,
+                Document.kind == "chapter",
+            )
+            .order_by(
+                case((Document.volume_id.is_(None), 1), else_=0),
+                Volume.position,
+                Document.position,
+                Document.id,
+            )
+        )
+    )
+    narrative_by_document_id = {
+        document.id: ordinal
+        for ordinal, document in enumerate(canonical_documents, start=1)
+    }
     rows = session.execute(
         select(Document, DocumentRevision)
         .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
         .join(DocumentRevision, DocumentRevision.id == DocumentWorkingCopy.base_revision_id)
+        .outerjoin(
+            Volume,
+            and_(
+                Volume.id == Document.volume_id,
+                Volume.novel_id == Document.novel_id,
+            ),
+        )
         .where(Document.novel_id == build.novel_id, Document.kind == "chapter")
-        .order_by(Document.position, Document.id)
+        .order_by(
+            case((Document.volume_id.is_(None), 1), else_=0),
+            Volume.position,
+            Document.position,
+            Document.id,
+        )
     ).all()
-    results: list[tuple[V1SourceInput, UUID | None, int | None, int | None, dict[str, object]]] = []
+    results: list[
+        tuple[
+            V1SourceInput,
+            UUID | None,
+            int | None,
+            int | None,
+            int | None,
+            int | None,
+            dict[str, object],
+        ]
+    ] = []
     unmapped = 0
-    for narrative_sequence, (document, revision) in enumerate(rows, start=1):
+    for document, revision in sorted(
+        rows,
+        key=lambda item: narrative_by_document_id.get(item[0].id, 2**63 - 1),
+    ):
+        narrative_sequence = narrative_by_document_id.get(document.id)
+        if narrative_sequence is None:
+            continue
         if not revision.content_text.strip():
             continue
         if len(timelines) <= 1:
@@ -290,7 +523,8 @@ def _manuscript_sources(
                     V1SourceInput(
                         corpus="manuscript", source_type="chapter_revision",
                         source_entity_id=document.id, source_revision_id=revision.id,
-                        title=document.title, content=revision.content_text,
+                        title=embedding_chapter_title(document.title),
+                        content=revision.content_text,
                     ),
                     single_timeline_id,
                     narrative_sequence,
@@ -325,7 +559,11 @@ def _manuscript_sources(
                     V1SourceInput(
                         corpus="manuscript", source_type="chapter_revision",
                         source_entity_id=document.id, source_revision_id=revision.id,
-                        title=f"{document.title}·片段{segment.ordinal + 1}", content=excerpt,
+                        title=(
+                            f"{embedding_chapter_title(document.title)}"
+                            f"·片段{segment.ordinal + 1}"
+                        ),
+                        content=excerpt,
                     ),
                     segment.timeline_id,
                     narrative_sequence,
@@ -447,6 +685,7 @@ def prepare_v1_novel_index(
                 "source_type": item[0].source_type,
                 "source_entity_id": str(item[0].source_entity_id),
                 "source_revision_id": str(item[0].source_revision_id) if item[0].source_revision_id else None,
+                "title": item[0].title,
                 "content": item[0].content,
                 "timeline_id": str(item[1]) if item[1] else None,
                 "narrative": [item[2], item[3]],
@@ -461,17 +700,42 @@ def prepare_v1_novel_index(
             build.state = "outdated"
             build.sync_state = "outdated"
         refresh_service = service_for_session(session)
-        next_batch_number = int(
-            session.scalar(
-                select(func.coalesce(func.max(EmbeddingIndexBatch.batch_number), -1)).where(
-                    EmbeddingIndexBatch.generation_id == generation_id,
-                    EmbeddingIndexBatch.novel_id == novel_id,
-                )
+        current_max_batch_number = session.scalar(
+            select(func.coalesce(func.max(EmbeddingIndexBatch.batch_number), -1)).where(
+                EmbeddingIndexBatch.generation_id == generation_id,
+                EmbeddingIndexBatch.novel_id == novel_id,
             )
-            or -1
+        )
+        next_batch_number = int(
+            current_max_batch_number
+            if current_max_batch_number is not None
+            else -1
         ) + 1
         created_refreshes = 0
         desired_logical_keys: set[str] = set()
+        current_sources = tuple(
+            session.scalars(
+                select(SemanticSource)
+                .where(
+                    SemanticSource.generation_id == generation_id,
+                    SemanticSource.novel_id == novel_id,
+                    SemanticSource.status == "current",
+                )
+                .with_for_update()
+            )
+        )
+        current_by_logical_key: dict[str, list[SemanticSource]] = {}
+        for current_source in current_sources:
+            current_key = str(
+                current_source.source_locator_json.get("_refresh_logical_key")
+                or _logical_source_key(
+                    source_type=current_source.source_type,
+                    source_entity_id=current_source.source_entity_id,
+                    timeline_id=current_source.timeline_id,
+                    locator=current_source.source_locator_json,
+                )
+            )
+            current_by_logical_key.setdefault(current_key, []).append(current_source)
         for (
             source_input, timeline_id, narrative_start, narrative_end,
             story_start, story_end, locator, visibility,
@@ -487,6 +751,40 @@ def prepare_v1_novel_index(
                 locator=locator,
             )
             desired_logical_keys.add(logical_key)
+            candidates = tuple(current_by_logical_key.get(logical_key, ()))
+            if any(
+                _same_source_projection(
+                    current,
+                    rendered=rendered,
+                    source_input=source_input,
+                    timeline_id=timeline_id,
+                    narrative_start=narrative_start,
+                    narrative_end=narrative_end,
+                    story_start=story_start,
+                    story_end=story_end,
+                    locator=locator,
+                    visibility=visibility,
+                )
+                for current in candidates
+            ):
+                continue
+            reusable_source = _metadata_only_reprojection_source(
+                candidates,
+                rendered=rendered,
+                source_input=source_input,
+                timeline_id=timeline_id,
+                locator=locator,
+                visibility=visibility,
+            )
+            request_locator = dict(locator)
+            if reusable_source is not None:
+                # A canonical order may move A → B → A.  Include the
+                # publication base version so a later immutable A projection
+                # does not collide with a historical, already-published refresh
+                # digest, while retries in the same transaction stay idempotent.
+                request_locator["_metadata_projection_base_index_version"] = (
+                    build.index_version
+                )
             requested = refresh_service.request(RefreshRequest(
                 generation_id=generation_id,
                 novel_id=novel_id,
@@ -499,7 +797,7 @@ def prepare_v1_novel_index(
                     content_hash=rendered.content_hash,
                     renderer_version=rendered.renderer_version,
                     logical_key=logical_key,
-                    source_locator=locator,
+                    source_locator=request_locator,
                     visibility=visibility,
                     timeline_id=timeline_id,
                     narrative_sequence_start=narrative_start,
@@ -517,6 +815,51 @@ def prepare_v1_novel_index(
                 rendered=rendered,
                 chunker_version=generation.chunker_version,
             )
+            if reusable_source is not None:
+                added = _copy_reprojection_embeddings(
+                    session,
+                    generation_id=generation_id,
+                    novel_id=novel_id,
+                    refresh_id=requested.refresh_id,
+                    source=reusable_source,
+                    chunks=chunks,
+                    batch_number_start=next_batch_number,
+                )
+                next_batch_number += added
+                refresh_service.mark_queued(requested.refresh_id)
+                refresh_service.mark_building(requested.refresh_id)
+                refresh_service.mark_ready(requested.refresh_id)
+                for current in candidates:
+                    current.status = "retired"
+                consent_active = bool(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(NovelEmbeddingConsent)
+                        .where(
+                            NovelEmbeddingConsent.id == build.consent_id,
+                            NovelEmbeddingConsent.novel_id == novel_id,
+                            NovelEmbeddingConsent.revoked_at.is_(None),
+                        )
+                    )
+                )
+                published = refresh_service.publish(
+                    requested.refresh_id,
+                    PublicationAuthority(
+                        novel_authority_digest=authority_digest,
+                        source_revision_id=rendered.source_revision_id,
+                        content_hash=rendered.content_hash,
+                        consent_active=consent_active,
+                        source_in_scope=True,
+                    ),
+                )
+                if not published.published:
+                    for current in candidates:
+                        current.status = "current"
+                    raise EmbeddingLifecycleError(
+                        published.code or "metadata_reprojection_failed",
+                        "metadata-only semantic projection could not be published",
+                    )
+                continue
             added = _enqueue_chunk_batches(
                 session,
                 generation_id=generation_id,
@@ -573,16 +916,26 @@ def prepare_v1_novel_index(
             )
             build.source_count = len(current_source_ids)
             if current_source_ids:
-                build.chunk_count = int(
-                    session.scalar(
-                        select(func.count()).select_from(SemanticChunk).where(
+                current_chunk_ids = tuple(
+                    session.scalars(
+                        select(SemanticChunk.id).where(
                             SemanticChunk.source_id.in_(current_source_ids)
                         )
                     )
-                    or 0
                 )
+                build.chunk_count = len(current_chunk_ids)
+                build.embedded_count = int(
+                    session.scalar(
+                        select(func.count()).select_from(SemanticEmbedding).where(
+                            SemanticEmbedding.generation_id == generation_id,
+                            SemanticEmbedding.chunk_id.in_(current_chunk_ids),
+                        )
+                    )
+                    or 0
+                ) if current_chunk_ids else 0
             else:
                 build.chunk_count = 0
+                build.embedded_count = 0
         session.flush()
         return build
 

@@ -388,7 +388,8 @@ def test_explicit_chapter_naming_returns_current_body_and_book_title_index() -> 
         "SECRET CHAPTER BODY"
     )
     assert naming["current_chapter"]["content_truncated"] is False
-    assert naming["chapter_titles_in_book_order"] == ["第一章", "第二章"]
+    assert naming["current_chapter"]["title"] == "第1章"
+    assert naming["chapter_titles_in_book_order"] == ["第1章", "第2章"]
     assert naming["title_index_truncated"] is False
     assert payload["provenance"]["chapter_naming"] == [
         {"source_type": "database_table", "table": "documents", "record_count": 2},
@@ -400,7 +401,31 @@ def test_explicit_chapter_naming_returns_current_body_and_book_title_index() -> 
     ]
     assert payload["truncated"] is False
     assert payload["warnings"] == []
-    assert session.query_count == 3
+    assert session.query_count == 4
+
+
+def test_empty_semantic_chapter_names_never_enter_assistant_context() -> None:
+    session, fixture = _workspace_session()
+    fixture["chapter"].title = ""
+    fixture["sibling_chapter"].title = "第十二章 · 潮声"
+    novel = fixture["novel"]
+
+    payload = get_assistant_workspace_context(
+        session,
+        owner_scope=_scope(novel),
+        novel_id=novel.id,
+        section="chapters",
+        document_id=fixture["chapter"].id,
+        include=["chapter_naming"],
+        max_chars=WORKSPACE_CONTEXT_MAX_CHARS,
+        clock=lambda: NOW,
+    )
+
+    assert payload["document"]["title"] == "第1章"
+    assert payload["data"]["chapter_naming"]["chapter_titles_in_book_order"] == [
+        "第1章",
+        "第2章 潮声",
+    ]
 
 
 def test_rejects_novel_outside_server_resolved_owner_without_querying() -> None:

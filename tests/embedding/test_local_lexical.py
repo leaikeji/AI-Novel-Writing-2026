@@ -113,6 +113,8 @@ class _FakeAuthoritySession:
             return self.segments
         if "story_timelines" in sql:
             return self.timelines
+        if "documents" in sql:
+            return tuple(document for document, _revision in self.chapters)
         raise AssertionError(f"unexpected scalars statement: {sql}")
 
     def execute(self, statement: object) -> SimpleNamespace:
@@ -179,9 +181,45 @@ def test_single_timeline_uses_current_authority_and_narrative_cutoff() -> None:
         ),
     )
     assert [hit.chunk_id for hit in rebuilt.hits] == [hit.chunk_id for hit in result.hits]
-    chapter_sql = next(sql for sql in session.statements if "documents" in sql)
+    chapter_sql = next(
+        sql
+        for sql in session.statements
+        if "documents" in sql and "document_working_copies" in sql
+    )
     assert "document_working_copies" in chapter_sql
     assert "base_revision_id" in chapter_sql
+
+
+def test_empty_chapter_name_uses_internal_stable_title_without_public_leak() -> None:
+    owner_id, workspace_id, novel_id = uuid4(), uuid4(), uuid4()
+    timeline = _timeline(novel_id=novel_id, name="main", primary=True)
+    chapter = _chapter(
+        novel_id=novel_id,
+        position=1,
+        title="",
+        text="潮声穿过窗户。",
+    )
+    session = _FakeAuthoritySession(
+        novel=_novel(novel_id=novel_id, owner_id=owner_id, workspace_id=workspace_id),
+        timelines=(timeline,),
+        chapters=(chapter,),
+    )
+
+    result = search_local_authority(
+        session,
+        LocalLexicalSearchRequest(
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+            novel_id=novel_id,
+            query="潮声",
+            corpora=frozenset({EmbeddingCorpus.MANUSCRIPT}),
+        ),
+    )
+
+    assert "标题: 章节正文" in result.hits[0].text
+    public_hit = result.as_semantic_search_hits()[0]
+    assert public_hit.snippet == "潮声穿过窗户。"
+    assert "章节正文" not in public_hit.snippet
 
 
 def test_multi_timeline_accepts_only_current_mapping_for_explicit_scope() -> None:

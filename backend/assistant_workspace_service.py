@@ -14,7 +14,7 @@ import json
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, select
 from sqlalchemy.orm import Session
 
 from .creative_services import (
@@ -36,6 +36,11 @@ from .models import (
     Volume,
 )
 from .services import NotFoundError, ValidationError, _document_payload
+from .volume_chapter_titles import (
+    bound_contract_title,
+    context_chapter_title,
+    display_volume_title,
+)
 
 
 WORKSPACE_CONTEXT_SCHEMA_VERSION = 2
@@ -233,13 +238,24 @@ def _novel_settings_payload(novel: Novel) -> dict[str, Any]:
     }
 
 
-def _document_envelope(document: Document) -> dict[str, Any]:
+def _document_envelope(
+    document: Document,
+    *,
+    projected_title: str | None = None,
+) -> dict[str, Any]:
+    runtime_title = (
+        projected_title
+        if projected_title is not None
+        else context_chapter_title(document.title, 1)
+        if document.kind == "chapter"
+        else document.title
+    )
     return {
         "id": str(document.id),
         "novel_id": str(document.novel_id),
         "volume_id": str(document.volume_id) if document.volume_id else None,
         "kind": document.kind,
-        "title": document.title,
+        "title": runtime_title,
         "position": document.position,
         "status": document.status,
         "version": document.version,
@@ -253,14 +269,73 @@ def _load_working_documents(
     novel_id: UUID,
     kind: str,
 ) -> list[tuple[Document, DocumentWorkingCopy]]:
-    return list(
-        session.execute(
-            select(Document, DocumentWorkingCopy)
-            .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
-            .where(Document.novel_id == novel_id, Document.kind == kind)
-            .order_by(Document.position, Document.id)
-        ).all()
+    statement = (
+        select(Document, DocumentWorkingCopy)
+        .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
+        .where(Document.novel_id == novel_id, Document.kind == kind)
     )
+    if kind == "chapter":
+        statement = statement.outerjoin(
+            Volume,
+            and_(
+                Volume.id == Document.volume_id,
+                Volume.novel_id == Document.novel_id,
+            ),
+        ).order_by(
+            case((Document.volume_id.is_(None), 1), else_=0),
+            Volume.position,
+            Document.position,
+            Document.id,
+        )
+    else:
+        statement = statement.order_by(Document.position, Document.id)
+    return list(
+        session.execute(statement).all()
+    )
+
+
+def _chapter_title_projection(session: Session, novel_id: UUID) -> dict[UUID, str]:
+    documents = tuple(
+        item
+        for item in session.scalars(
+            select(Document)
+            .outerjoin(
+                Volume,
+                and_(
+                    Volume.id == Document.volume_id,
+                    Volume.novel_id == Document.novel_id,
+                ),
+            )
+            .where(Document.novel_id == novel_id, Document.kind == "chapter")
+            .order_by(
+                case((Document.volume_id.is_(None), 1), else_=0),
+                Volume.position,
+                Document.position,
+                Document.id,
+            )
+        ).all()
+        if item.novel_id == novel_id and item.kind == "chapter"
+    )
+    return {
+        document.id: context_chapter_title(document.title, ordinal)
+        for ordinal, document in enumerate(documents, start=1)
+    }
+
+
+def _volume_title_projection(session: Session, novel_id: UUID) -> dict[UUID, str]:
+    volumes = tuple(
+        item
+        for item in session.scalars(
+            select(Volume)
+            .where(Volume.novel_id == novel_id)
+            .order_by(Volume.position, Volume.id)
+        ).all()
+        if item.novel_id == novel_id
+    )
+    return {
+        volume.id: bound_contract_title(display_volume_title(volume.title, ordinal))
+        for ordinal, volume in enumerate(volumes, start=1)
+    }
 
 
 def _scope_entity(
@@ -268,6 +343,9 @@ def _scope_entity(
     novel: Novel,
     entity_type: str | None,
     entity_id: UUID | None,
+    *,
+    chapter_titles: dict[UUID, str] | None = None,
+    volume_titles: dict[UUID, str] | None = None,
 ) -> dict[str, Any] | None:
     if (entity_type is None) != (entity_id is None):
         raise ValidationError("entity_type and entity_id must be provided together")
@@ -324,11 +402,15 @@ def _scope_entity(
         return {
             "type": "volume",
             "id": str(entity.id),
-            "title": entity.title,
+            "title": (volume_titles or {}).get(entity.id)
+            or bound_contract_title(display_volume_title(entity.title, 1)),
             "provenance": _provenance("database_table", "volumes", 1),
         }
     if entity_type in {"document", "setting"}:
-        payload = _document_envelope(entity)
+        payload = _document_envelope(
+            entity,
+            projected_title=(chapter_titles or {}).get(entity.id),
+        )
         payload["type"] = entity_type
         return payload
     if entity_type == "outline":
@@ -419,6 +501,8 @@ def _truncate_middle(value: str, maximum: int) -> tuple[str, bool]:
 def _chapter_naming_context(
     rows: list[tuple[Document, DocumentWorkingCopy]],
     current_document: Document,
+    *,
+    projected_titles: dict[UUID, str] | None = None,
 ) -> tuple[dict[str, Any], list[str], bool]:
     current_pair = next(
         ((row, working) for row, working in rows if row.id == current_document.id),
@@ -427,7 +511,10 @@ def _chapter_naming_context(
     if current_pair is None:
         return (
             {
-                "current_chapter": _document_envelope(current_document),
+                "current_chapter": _document_envelope(
+                    current_document,
+                    projected_title=(projected_titles or {}).get(current_document.id),
+                ),
                 "chapter_titles_in_book_order": [],
                 "title_index_truncated": False,
             },
@@ -441,11 +528,19 @@ def _chapter_naming_context(
         CHAPTER_NAMING_BODY_MAX_CHARS,
     )
     chapter_payload = _document_payload(chapter, working)
+    title_by_id = {
+        row.id: (projected_titles or {}).get(
+            row.id,
+            context_chapter_title(row.title, ordinal),
+        )
+        for ordinal, (row, _working) in enumerate(rows, start=1)
+    }
+    chapter_payload["title"] = title_by_id[chapter.id]
     chapter_payload["content_markdown"] = content
     chapter_payload["content_truncated"] = content_truncated
     chapter_payload["returned_character_count"] = len(content)
 
-    ordered_titles = [row.title for row, _working in rows]
+    ordered_titles = [title_by_id[row.id] for row, _working in rows]
     title_index_truncated = len(ordered_titles) > CHAPTER_NAMING_TITLE_LIMIT
     if title_index_truncated:
         current_index = next(
@@ -530,7 +625,25 @@ def get_assistant_workspace_context(
         document = session.get(Document, document_id)
         if document is None or document.novel_id != novel_id:
             raise WorkspaceScopeError()
-    entity = _scope_entity(session, novel, entity_type, entity_id)
+    chapter_titles = (
+        _chapter_title_projection(session, novel_id)
+        if (
+            (document is not None and document.kind == "chapter")
+            or entity_type == "document"
+        )
+        else {}
+    )
+    volume_titles = (
+        _volume_title_projection(session, novel_id) if entity_type == "volume" else {}
+    )
+    entity = _scope_entity(
+        session,
+        novel,
+        entity_type,
+        entity_id,
+        chapter_titles=chapter_titles,
+        volume_titles=volume_titles,
+    )
     if (
         document is not None
         and entity_type == "document"
@@ -559,6 +672,7 @@ def get_assistant_workspace_context(
             payload, naming_warnings, incomplete = _chapter_naming_context(
                 rows,
                 document,
+                projected_titles=chapter_titles,
             )
             section_data["chapter_naming"] = payload
             section_provenance["chapter_naming"] = [
@@ -727,7 +841,14 @@ def get_assistant_workspace_context(
         "novel_id": str(novel_id),
         "section": section,
         "document_id": str(document.id) if document is not None else None,
-        "document": _document_envelope(document) if document is not None else None,
+        "document": (
+            _document_envelope(
+                document,
+                projected_title=chapter_titles.get(document.id),
+            )
+            if document is not None
+            else None
+        ),
         "entity": entity,
         "provenance": provenance,
         "truncated": bool(omitted_sections),

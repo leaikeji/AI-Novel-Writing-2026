@@ -61,7 +61,10 @@ export function revisionSourceLabel(value: string): string {
 export function chapterTitleName(title: string): string {
   return title
     .trim()
-    .replace(/^第\s*(?:\d+|[零〇一二三四五六七八九十百千两]+)\s*章(?:[\s:：·—-]+)?/, "")
+    .replace(
+      /^第\s*(?:\d+|[零〇一二三四五六七八九十百千万两]+)\s*章(?=$|[\s:：·—-])(?:[\s:：·—-]+)?/,
+      "",
+    )
     .trim();
 }
 
@@ -69,6 +72,35 @@ export function chapterTitleName(title: string): string {
 export function chapterDisplayTitle(chapterNumber: number, title: string): string {
   const cleanTitle = chapterTitleName(title);
   return `第${chapterNumber}章${cleanTitle ? ` ${cleanTitle}` : ""}`;
+}
+
+
+export function chapterTitleForStorage(chapterNumber: number, title: string): string {
+  void chapterNumber;
+  return chapterTitleName(title);
+}
+
+
+export function volumeTitleName(title: string): string {
+  return title
+    .trim()
+    .replace(
+      /^第\s*(?:\d+|[零〇一二三四五六七八九十百千万两]+)\s*卷(?=$|[\s:：·—-])(?:[\s:：·—-]+)?/,
+      "",
+    )
+    .trim();
+}
+
+
+export function volumeDisplayTitle(volumeNumber: number, title: string): string {
+  const cleanTitle = volumeTitleName(title);
+  return `第${volumeNumber}卷${cleanTitle ? ` ${cleanTitle}` : ""}`;
+}
+
+
+export function volumeTitleForStorage(volumeNumber: number, title: string): string {
+  void volumeNumber;
+  return volumeTitleName(title);
 }
 
 

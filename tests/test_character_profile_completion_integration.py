@@ -257,6 +257,8 @@ def test_snapshot_reads_formal_revision_and_never_uncheckpointed_working_draft(
     assert {item["source_id"] for item in snapshot["chapter_evidence"]} == {
         checkpoint["revision"]["id"]
     }
+    assert {item["title"] for item in snapshot["chapter_evidence"]} == {"第1章"}
+    assert {item["position"] for item in snapshot["chapter_evidence"]} == {1}
 
 
 def test_apply_is_atomic_preserves_hidden_details_and_is_idempotent(

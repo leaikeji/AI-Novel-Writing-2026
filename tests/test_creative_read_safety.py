@@ -16,6 +16,7 @@ from backend.models import (
     NovelCharacter,
     StoryFact,
     Storyline,
+    Volume,
 )
 from backend.services import build_intelligence_prompt
 
@@ -245,6 +246,7 @@ def test_production_backend_contains_no_sample_novel_tokens() -> None:
 def test_intelligence_prompt_explicitly_allows_empty_items() -> None:
     novel_id = uuid4()
     document_id = uuid4()
+    volume_id = uuid4()
     revision_id = uuid4()
     proposal_id = uuid4()
     proposal = IntelligenceProposal(
@@ -259,6 +261,7 @@ def test_intelligence_prompt_explicitly_allows_empty_items() -> None:
     document = Document(
         id=document_id,
         novel_id=novel_id,
+        volume_id=volume_id,
         kind="chapter",
         title="无新事发生的一章",
         position=1000,
@@ -274,12 +277,20 @@ def test_intelligence_prompt_explicitly_allows_empty_items() -> None:
         content_hash="b" * 64,
         source="manual",
     )
+    volume = Volume(
+        id=volume_id,
+        novel_id=novel_id,
+        title="",
+        position=1000,
+        version=1,
+    )
     session = _ReadOnlySession(
         objects=[proposal, document, revision],
-        rows={StoryFact: [], NovelCharacter: []},
+        rows={StoryFact: [], NovelCharacter: [], Volume: [volume], Document: [document]},
     )
 
     prompt = build_intelligence_prompt(session, proposal_id)  # type: ignore[arg-type]
 
     assert "正文没有新增或变化事实时，必须返回空 items" in prompt
     assert "正文不为空时至少返回 1 条情报" not in prompt
+    assert "章节：第1章 无新事发生的一章" in prompt

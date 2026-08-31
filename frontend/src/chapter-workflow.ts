@@ -61,6 +61,8 @@ import {
   relationshipKindLabel,
   toggleIntelligenceItemSelection,
 } from "./chapter-intelligence";
+import { chapterOrdinalFor } from "./chapter-tree";
+import { chapterDisplayTitle } from "./presenters";
 const host = window.QwenPaw.host;
 const React = host.React;
 const ReactDOM = host.ReactDOM;
@@ -293,6 +295,9 @@ function chapterAssistantEnvelope(
   location: ChapterAssistantLocation,
   modal?: Extract<NovelPageView, "title-editor" | "chapter-outline-editor">,
 ) {
+  const title = location.chapterNumber === undefined
+    ? location.document.title
+    : chapterDisplayTitle(location.chapterNumber, location.document.title);
   return {
     agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
     novel: { id: location.novel.id, title: location.novel.title },
@@ -304,14 +309,14 @@ function chapterAssistantEnvelope(
     entity: {
       type: "document" as const,
       id: location.document.id,
-      title: location.document.title,
+      title,
     },
     document: {
       id: location.document.id,
       ...(location.document.volume_id ? { volumeId: location.document.volume_id } : {}),
       kind: location.document.kind,
       ...(location.chapterNumber === undefined ? {} : { chapterNumber: location.chapterNumber }),
-      title: location.document.title,
+      title,
       draftVersion: location.document.draft_version,
       savedContentHash: location.document.content_hash,
       dirty: location.dirty,
@@ -641,6 +646,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     onAssistantModalStateChange,
     selectionEditReviewHost: SelectionEditReviewHost,
   } = props;
+  const resolvedChapterNumber = chapterNumber ?? chapterOrdinalFor(novel, document.id);
   const [brief, setBrief] = React.useState(null as ChapterBriefRecord | null);
   const [briefForm, setBriefForm] = React.useState(EMPTY_BRIEF_FORM);
   const [briefOpen, setBriefOpen] = React.useState(false);
@@ -734,7 +740,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       location: {
         novel,
         document,
-        chapterNumber,
+        chapterNumber: resolvedChapterNumber,
         dirty: assistantBriefFormIsDirty(briefFormRef.current, briefBaselineRef.current),
       },
       getPersistenceVersion: () => {
@@ -777,7 +783,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       }
       binding.dispose();
     };
-  }, [brief?.version, briefOpen, chapterNumber, document.id, novel.id, onStatus]);
+  }, [brief?.version, briefOpen, document.id, novel.id, onStatus, resolvedChapterNumber]);
 
   const getAssistantBriefControl = (fieldId: ChapterOutlineFieldId): AssistantControlRefs => {
     const current = assistantBriefControlRefs.current[fieldId];
@@ -1265,7 +1271,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           kind: "review",
           input_snapshot: {
             novel_title: novel.title,
-            chapter_title: prepared.title,
+            chapter_title: resolvedChapterNumber === undefined
+              ? prepared.title
+              : chapterDisplayTitle(resolvedChapterNumber, prepared.title),
             visible_character_count: prepared.visible_character_count,
             outline_text: currentBrief.outline_text,
             expectation_text: currentBrief.expectation_text,
@@ -1316,7 +1324,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const allPendingIntelligenceSelected = intelligencePendingItemIds.length > 0
     && intelligencePendingItemIds.every((id) => selectedIntelligenceItemIds.includes(id));
   const reviewIssues = Array.isArray(reviewJob?.output_json?.issues) ? reviewJob?.output_json.issues as ReviewIssue[] : [];
-  const outlineChapterNumber = chapterNumber ?? Math.max(1, Math.round(document.position / 1000));
+  const outlineChapterNumber = resolvedChapterNumber ?? 1;
   const briefSaveDisabled = !briefForm.outlineText.trim()
     || briefForm.targetWordCount < 500
     || briefForm.targetWordCount > 10000;

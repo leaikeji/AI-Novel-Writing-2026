@@ -16,7 +16,7 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, select
 from sqlalchemy.orm import Session
 
 from ..creative_data_models import (
@@ -30,7 +30,8 @@ from ..creative_data_models import (
     RevisionTimelineMappingSegment,
     StoryTimeline,
 )
-from ..models import Document, DocumentRevision, DocumentWorkingCopy, Novel
+from ..models import Document, DocumentRevision, DocumentWorkingCopy, Novel, Volume
+from ..volume_chapter_titles import embedding_chapter_title
 from .chunking import (
     V1_CHUNKER_VERSION,
     V1_RENDERER_VERSION,
@@ -67,6 +68,35 @@ _SEARCHABLE_CORPORA = frozenset(
 _INDEXABLE_ASSET_POLICIES = frozenset({"required", "preferred", "context_only"})
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
 _NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
+_V1_RENDERER_HEADER_LABELS = frozenset(
+    {
+        "语料",
+        "标题",
+        "使用策略",
+        "分块版本",
+    }
+)
+
+
+def author_visible_v1_snippet(value: str) -> str:
+    """Remove only a proven V1 renderer header from an author-facing snippet."""
+
+    header, separator, body = value.partition("\n\n")
+    if not separator:
+        return value
+    lines = tuple(line.strip() for line in header.splitlines() if line.strip())
+    labels: list[str] = []
+    for line in lines:
+        delimiter = "：" if "：" in line else ":" if ":" in line else None
+        if delimiter is None:
+            return value
+        label = line.split(delimiter, 1)[0].strip()
+        if label not in _V1_RENDERER_HEADER_LABELS:
+            return value
+        labels.append(label)
+    if "语料" not in labels or "标题" not in labels:
+        return value
+    return body.lstrip("\n")
 
 
 class LocalLexicalScopeError(ValueError):
@@ -210,7 +240,7 @@ class LocalLexicalResult:
                 narrative_sequence_end=item.narrative_sequence_end,
                 story_sequence_start=item.story_sequence_start,
                 story_sequence_end=item.story_sequence_end,
-                snippet=item.text,
+                snippet=author_visible_v1_snippet(item.text),
                 channels=(SemanticMatchChannel.LEXICAL,),
                 lexical_score=item.lexical_raw_score,
                 fused_score=item.lexical_raw_score,
@@ -344,6 +374,32 @@ def _load_manuscript(
     timeline_limits: Mapping[UUID, int | None],
     diagnostics: _MutableDiagnostics,
 ) -> list[_AuthoritySource]:
+    canonical_documents = tuple(
+        session.scalars(
+            select(Document)
+            .outerjoin(
+                Volume,
+                and_(
+                    Volume.id == Document.volume_id,
+                    Volume.novel_id == Document.novel_id,
+                ),
+            )
+            .where(
+                Document.novel_id == request.novel_id,
+                Document.kind == "chapter",
+            )
+            .order_by(
+                case((Document.volume_id.is_(None), 1), else_=0),
+                Volume.position,
+                Document.position,
+                Document.id,
+            )
+        )
+    )
+    narrative_by_document_id = {
+        document.id: ordinal
+        for ordinal, document in enumerate(canonical_documents, start=1)
+    }
     rows = session.execute(
         select(Document, DocumentRevision)
         .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
@@ -351,15 +407,33 @@ def _load_manuscript(
             DocumentRevision,
             DocumentRevision.id == DocumentWorkingCopy.base_revision_id,
         )
+        .outerjoin(
+            Volume,
+            and_(
+                Volume.id == Document.volume_id,
+                Volume.novel_id == Document.novel_id,
+            ),
+        )
         .where(
             Document.novel_id == request.novel_id,
             Document.kind == "chapter",
         )
-        .order_by(Document.position, Document.id)
+        .order_by(
+            case((Document.volume_id.is_(None), 1), else_=0),
+            Volume.position,
+            Document.position,
+            Document.id,
+        )
     ).all()
     single_timeline = len(timelines) == 1
     sources: list[_AuthoritySource] = []
-    for narrative_sequence, (document, revision) in enumerate(rows, start=1):
+    for document, revision in sorted(
+        rows,
+        key=lambda item: narrative_by_document_id.get(item[0].id, 2**63 - 1),
+    ):
+        narrative_sequence = narrative_by_document_id.get(document.id)
+        if narrative_sequence is None:
+            continue
         if document.novel_id != request.novel_id or revision.document_id != document.id:
             continue
         if not revision.content_text.strip():
@@ -381,7 +455,7 @@ def _load_manuscript(
                     source_type="chapter_revision",
                     source_id=document.id,
                     source_revision_id=revision.id,
-                    title=document.title,
+                    title=embedding_chapter_title(document.title),
                     content=revision.content_text,
                     timeline_id=target_timeline_id,
                     narrative_sequence=narrative_sequence,
@@ -439,7 +513,10 @@ def _load_manuscript(
                     source_type="chapter_revision",
                     source_id=document.id,
                     source_revision_id=revision.id,
-                    title=f"{document.title}·片段{segment.ordinal + 1}",
+                    title=(
+                        f"{embedding_chapter_title(document.title)}"
+                        f"·片段{segment.ordinal + 1}"
+                    ),
                     content=excerpt,
                     timeline_id=segment.timeline_id,
                     narrative_sequence=narrative_sequence,

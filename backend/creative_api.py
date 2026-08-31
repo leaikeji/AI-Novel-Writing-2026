@@ -150,6 +150,7 @@ from .model_runtime import (
 from .services import NotFoundError, ValidationError, delete_novel
 from .models import ChapterBrief
 from .story_state import StoryStateError
+from .volume_chapter_titles import VolumeChapterContractError, contract_error_detail
 from .selection_edit_diff import (
     SelectionEditDiffError,
     build_selection_edit_result,
@@ -231,6 +232,10 @@ async def _creative_writing_retrieval(
 
 
 def _raise(error: Exception) -> None:
+    if isinstance(error, VolumeChapterContractError):
+        raise HTTPException(
+            status_code=error.status_code, detail=contract_error_detail(error)
+        ) from error
     if isinstance(error, WritingTimelineMappingRequired):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

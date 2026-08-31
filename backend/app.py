@@ -32,6 +32,7 @@ from .embedding.runtime import (
     stop_embedding_runtime,
 )
 from .story_state.api import router as story_state_router
+from .volume_chapter_titles import VolumeChapterContractError, contract_error_detail
 from .database import database_status, get_engine, get_session
 from .generation_dependencies import (
     EffectiveModelProbe,
@@ -489,6 +490,10 @@ async def _uninstall_narration_runtime() -> None:
 
 
 def _raise_domain(error: Exception) -> None:
+    if isinstance(error, VolumeChapterContractError):
+        raise HTTPException(
+            status_code=error.status_code, detail=contract_error_detail(error)
+        ) from error
     if isinstance(error, WritingTimelineMappingRequired):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
