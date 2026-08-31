@@ -38,13 +38,12 @@ from . import schemas as wire
 from .contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
 from .official_presets import (
     OFFICIAL_PRESETS,
-    PRODUCT_PRESET_OUT_OF_SCOPE,
-    ProductPresetOutOfScope,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
     official_preset_validation_tier,
-    require_product_official_preset,
+    require_official_preset,
     validate_official_version_evidence,
 )
+from .nano_experiments import validate_nano_experiment_version_evidence
 from .services import (
     InvalidNarrationState,
     NarrationCasConflict,
@@ -75,6 +74,7 @@ VOICE_SETTINGS_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
     {
         NarrationSettingsOperation.LIST_VOICE_PROFILES,
         NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
+        NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
         NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
         NarrationSettingsOperation.CREATE_VOICE_PROFILE,
         NarrationSettingsOperation.GET_VOICE_PROFILE,
@@ -183,6 +183,14 @@ class VoiceProductPort(Protocol):
         *,
         profile_id: UUID,
         request: wire.CreateVoicePreviewRequest,
+        idempotency_key: str,
+    ) -> wire.VoicePreviewResource: ...
+
+    def create_official_preset_preview(
+        self,
+        *,
+        novel_id: UUID,
+        request: wire.OfficialVoicePreviewRequest,
         idempotency_key: str,
     ) -> wire.VoicePreviewResource: ...
 
@@ -317,7 +325,11 @@ def _required_rights(
     expected_kinds = {
         "preset": {"official_preset", "preset_catalog"},
         "uploaded": "user_upload",
-        "generated": "voice_generator",
+        "generated": (
+            {"official_preset"}
+            if version.activation_basis == "experimental_machine_validated"
+            else {"voice_generator"}
+        ),
     }.get(version.source_type)
     if expected_kinds is None or rights.source_kind not in (
         expected_kinds if isinstance(expected_kinds, set) else {expected_kinds}
@@ -325,7 +337,12 @@ def _required_rights(
         raise InvalidNarrationState("voice source and rights provenance disagree")
     if rights.source_kind == "official_preset":
         try:
-            validate_official_version_evidence(
+            validator = (
+                validate_nano_experiment_version_evidence
+                if version.source_type == "generated"
+                else validate_official_version_evidence
+            )
+            validator(
                 version,
                 rights,
                 expected_model_fingerprint=(
@@ -458,6 +475,25 @@ def _latest_preview_asset_id(
             and preview.expires_at is not None
             and preview.expires_at > at
         ):
+            asset = store.get(MediaAsset, preview.result_asset_id)
+            if asset is None:
+                raise InvalidNarrationState(
+                    "voice preview asset metadata is absent"
+                )
+            if (
+                asset.owner_id != profile.owner_id
+                or asset.workspace_id != profile.workspace_id
+                or asset.novel_id != profile.novel_id
+            ):
+                raise NarrationScopeMismatch(
+                    "voice preview asset/profile scope mismatch"
+                )
+            # Completed private-voice deletion retains immutable Preview rows
+            # whose media asset is a tombstone.  A later experiment can safely
+            # reactivate the unique Profile, so historical non-ready assets
+            # must be ignored rather than poisoning the whole profile list.
+            if asset.state != "ready":
+                continue
             candidate_key = (preview.completed_at, preview.id)
             if selected_key is None or candidate_key > selected_key:
                 selected = preview
@@ -559,6 +595,10 @@ def list_voice_profiles(
         owner_id=LOCAL_OWNER_ID,
         workspace_id=LOCAL_WORKSPACE_ID,
     )
+    # A completed private-voice deletion keeps an unavailable tombstone for
+    # audit and historical Edition evidence.  Its media rows are deliberately
+    # no longer publishable, so it must not poison the active selection list.
+    scoped = [row for row in scoped if row.status != "unavailable"]
     if novel_id is None:
         selected = [row for row in scoped if include_library and row.novel_id is None]
     else:
@@ -1115,6 +1155,19 @@ class VoiceSettingsHandler:
         operation = command.operation
         if operation is NarrationSettingsOperation.LIST_OFFICIAL_PRESETS:
             return list_official_presets()
+        if operation is NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW:
+            if self.voice_product is None:
+                raise NarrationApiFault(
+                    wire.NarrationErrorCode.PREVIEW_UNAVAILABLE,
+                    "官方音色试听服务尚未接线。",
+                    retryable=False,
+                    capability=wire.CapabilityKey.VOICE_PREVIEW,
+                )
+            return self.voice_product.create_official_preset_preview(
+                novel_id=_required_uuid(command.novel_id, "novel_id"),
+                request=_payload(command, wire.OfficialVoicePreviewRequest),
+                idempotency_key=_required_idempotency_key(command.idempotency_key),
+            )
         if operation is NarrationSettingsOperation.SELECT_OFFICIAL_VOICE:
             if self.official_voice_selection is None:
                 raise NarrationApiFault(
@@ -1171,15 +1224,7 @@ class VoiceSettingsHandler:
             payload = _payload(command, wire.CreatePresetVoiceVersionRequest)
             profile_id = _required_uuid(command.profile_id, "profile_id")
             key = _required_idempotency_key(command.idempotency_key)
-            try:
-                require_product_official_preset(payload.preset_id)
-            except ProductPresetOutOfScope as error:
-                raise NarrationApiFault(
-                    wire.NarrationErrorCode.VOICE_SOURCE_UNAVAILABLE,
-                    PRODUCT_PRESET_OUT_OF_SCOPE,
-                    field="preset_id",
-                    capability=wire.CapabilityKey.PRESET_VOICE_SOURCE,
-                ) from error
+            require_official_preset(payload.preset_id)
             if self.voice_product is not None:
                 return self.voice_product.create_preset_version(
                     profile_id=profile_id,

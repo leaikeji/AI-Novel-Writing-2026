@@ -129,7 +129,7 @@ describe("startChapterNarrationWorkflow", () => {
           force_review: false,
         });
         expect(key).toBe(`chapter-tts:${ACTION_ID}`);
-        return workflow("queued", EDITION_ID);
+        return workflow("partial_ready", EDITION_ID);
       }),
     });
     const input = options(deps);
@@ -196,6 +196,32 @@ describe("startChapterNarrationWorkflow", () => {
       workflow_state: "partial_ready",
       edition_id: EDITION_ID,
       current_manifest_revision: 1,
+    });
+    expect(deps.getWorkflow).toHaveBeenCalledTimes(2);
+    expect(deps.delay).toHaveBeenCalledTimes(2);
+  });
+
+  it("已有 Manifest 但仍在 queued/rendering 时等待首个可播放句段", async () => {
+    const deps = dependencies({
+      createWorkflow: vi.fn(async () => workflow("queued", EDITION_ID, 1)),
+      getWorkflow: vi.fn()
+        .mockResolvedValueOnce(workflow("rendering", EDITION_ID, 2))
+        .mockResolvedValueOnce(workflow("partial_ready", EDITION_ID, 3)),
+      now: (() => {
+        let value = 0;
+        return () => value++;
+      })(),
+    });
+
+    const result = await startChapterNarrationWorkflow({
+      ...options(deps),
+      pollScheduleMs: [1],
+      pollTimeoutMs: 100,
+    });
+
+    expect(result.workflow).toMatchObject({
+      workflow_state: "partial_ready",
+      current_manifest_revision: 3,
     });
     expect(deps.getWorkflow).toHaveBeenCalledTimes(2);
     expect(deps.delay).toHaveBeenCalledTimes(2);

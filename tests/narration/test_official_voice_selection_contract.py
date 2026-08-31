@@ -261,7 +261,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
             try:
                 assert connection.scalar(
                     text("SELECT version_num FROM alembic_version")
-                ) == "20260829_0032"
+                ) == "20260829_0034"
                 session = Session(bind=connection, join_transaction_mode="create_savepoint")
                 novel_id = uuid4()
                 profile_id = official_preset_canonical_profile_id(

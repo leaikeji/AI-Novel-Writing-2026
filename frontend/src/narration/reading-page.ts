@@ -194,7 +194,7 @@ function narratorSelectionKey(selection: NarratorVoiceSelection): string {
 
 export function readingSectionFromSearch(search: string): ReadingSectionKey {
   const value = new URLSearchParams(search).get(READING_PANEL_QUERY_KEY);
-  return canonicalReadingSection(isReadingSectionKey(value) ? value : "overview");
+  return canonicalReadingSection(isReadingSectionKey(value) ? value : "narrator");
 }
 
 
@@ -204,8 +204,7 @@ export function readingSectionSearch(
 ): string {
   const query = new URLSearchParams(search);
   query.set("section", READING_WORKBENCH_SECTION);
-  if (section === "overview") query.delete(READING_PANEL_QUERY_KEY);
-  else query.set(READING_PANEL_QUERY_KEY, section);
+  query.set(READING_PANEL_QUERY_KEY, canonicalReadingSection(section));
   const encoded = query.toString();
   return encoded ? `?${encoded}` : "";
 }

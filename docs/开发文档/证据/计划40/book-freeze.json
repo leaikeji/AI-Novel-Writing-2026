@@ -1,0 +1,70 @@
+{
+  "schema_version": "vg40-formal-book-freeze/1",
+  "captured_at": "2026-08-31T00:01:00+08:00",
+  "capture_note": "四章正式 revision 完成后记录；官方音色绑定已发生，但该动作未改变下列小说权威内容。VoiceGenerator 与 Narration Edition 尚未执行。",
+  "novel": {
+    "id": "b9983b07-f3aa-44e5-9433-d367563f48e4",
+    "title": "潮汐盲区",
+    "version": 1
+  },
+  "volumes": [
+    {
+      "id": "793ea2fd-8a66-49f9-808b-929c1e7621ba",
+      "title": "第一卷 失声的午夜",
+      "position": 2000,
+      "version": 1
+    },
+    {
+      "id": "7ac56204-aace-42f1-9808-b3b3ed5a99a4",
+      "title": "第二卷 防波堤后的回声",
+      "position": 3000,
+      "version": 1
+    }
+  ],
+  "documents": [
+    {
+      "id": "7a2eae6a-dee6-4329-939c-b0d99de5ba2f",
+      "title": "空播室里的来电",
+      "position": 2000,
+      "version": 1,
+      "revision_id": "a2f66c14-a74d-4e4f-ae5e-b569fc0acf74",
+      "content_hash": "5c621cc8f3bb3a531795126096ec678b787f6253d67aa9e3a720ec0f1feea636",
+      "visible_character_count": 2040
+    },
+    {
+      "id": "db131405-12e9-4850-80c9-627d60be5807",
+      "title": "第四条声轨",
+      "position": 3000,
+      "version": 1,
+      "revision_id": "75ffde57-ac27-41d7-b12e-4052f21ae152",
+      "content_hash": "15c421c6def65143b3255d052c71b6094d84aba24bacf9adc702f2e046e531a7",
+      "visible_character_count": 1907
+    },
+    {
+      "id": "9f3cfdeb-5734-4929-8a19-4beeb5d0b5af",
+      "title": "退潮名单",
+      "position": 4000,
+      "version": 1,
+      "revision_id": "fd3c8114-7528-4867-a3d4-19b97d64f1f3",
+      "content_hash": "a0f5ae0b5790aec40dfa063e58fbfa005ed3f9aa66bfc158b46ed0250120db76",
+      "visible_character_count": 2279
+    },
+    {
+      "id": "3068d686-d372-4d25-9e88-5488974279f0",
+      "title": "零点之前",
+      "position": 5000,
+      "version": 1,
+      "revision_id": "0e76f65a-0b49-41fa-99c1-cfca1cc578f4",
+      "content_hash": "8c3f547292a8806995c4188b1b525f634e557d8bd75c29b6eea4d9aa1787d5cb",
+      "visible_character_count": 2293
+    }
+  ],
+  "characters": [
+    {"id": "c2c023f2-f4a5-4944-824f-473f3d4f0915", "name": "沈砚", "role_type": "main", "workspace_version": 1},
+    {"id": "4838ce2a-19d8-4e3c-ad71-51e8a4335f84", "name": "许棠", "role_type": "main", "workspace_version": 1},
+    {"id": "ad874c2c-a989-46f1-90ad-1e5e7fccb4a5", "name": "罗岑", "role_type": "supporting", "workspace_version": 1},
+    {"id": "73275f3c-174e-483d-88b8-b28797067299", "name": "乔榆", "role_type": "supporting", "workspace_version": 1},
+    {"id": "8a128fd6-b4e1-4698-9797-8b3e441ac6ef", "name": "杜文山", "role_type": "supporting", "workspace_version": 1},
+    {"id": "8c21d0df-29e8-4e0a-8829-dee319e658c0", "name": "梁策", "role_type": "supporting", "workspace_version": 1}
+  ]
+}

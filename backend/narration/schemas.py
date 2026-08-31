@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 import re
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -24,10 +24,13 @@ from .official_presets import (
     official_preset_validation_tier,
 )
 
+if TYPE_CHECKING:
+    from .nano_experiments import NanoDecodeParametersV3
+
 
 NARRATION_SETTINGS_API_VERSION: Final = "narration-settings-api/1"
 NARRATION_SETTINGS_SCHEMA_VERSION: Final = "narration-settings/1"
-NARRATION_CAPABILITY_SCHEMA_VERSION: Final = "narration-capabilities/1"
+NARRATION_CAPABILITY_SCHEMA_VERSION: Final = "narration-capabilities/2"
 NARRATION_VOICE_SCHEMA_VERSION: Final = "narration-voice/2"
 NARRATION_CACHE_SCHEMA_VERSION: Final = "narration-cache/1"
 REFERENCE_UPLOAD_MAX_BYTES: Final = 16 * 1024 * 1024
@@ -61,6 +64,9 @@ class CapabilityKey(str, Enum):
     CLOUD_ASSISTED_ANALYSIS = "cloud_assisted_analysis"
     VOICE_GENERATOR = "voice_generator"
     CACHE_CLEANUP = "cache_cleanup"
+    CHARACTER_VOICE_MATCHING = "character_voice_matching"
+    NANO_ADVANCED_TUNING = "nano_advanced_tuning"
+    PRIVATE_VOICE_DELETION = "private_voice_deletion"
 
 
 T4_PRODUCT_CAPABILITY_KEYS: Final[frozenset[CapabilityKey]] = frozenset(
@@ -116,7 +122,7 @@ class FeatureCapability(_StrictModel):
 
 
 class NarrationCapabilities(_StrictModel):
-    schema_version: Literal["narration-capabilities/1"] = (
+    schema_version: Literal["narration-capabilities/2"] = (
         NARRATION_CAPABILITY_SCHEMA_VERSION
     )
     items: list[FeatureCapability]
@@ -191,6 +197,24 @@ def t2_hold_capabilities() -> NarrationCapabilities:
             "T5-GATE",
         ),
         (CapabilityKey.CACHE_CLEANUP, True, "T2_GATE_REQUIRED", "T2-F"),
+        (
+            CapabilityKey.CHARACTER_VOICE_MATCHING,
+            True,
+            "TTS_FEATURE_STARTING",
+            "TTS35-CORE",
+        ),
+        (
+            CapabilityKey.NANO_ADVANCED_TUNING,
+            True,
+            "TTS_FEATURE_STARTING",
+            "TTS35-CORE",
+        ),
+        (
+            CapabilityKey.PRIVATE_VOICE_DELETION,
+            True,
+            "TTS_FEATURE_STARTING",
+            "TTS35-CORE",
+        ),
     )
     return NarrationCapabilities(
         items=[
@@ -837,22 +861,47 @@ class VoiceProfileVersionResource(_StrictModel):
 
     @model_validator(mode="after")
     def validate_version_shape(self) -> "VoiceProfileVersionResource":
+        experimental = (
+            self.source_type is VoiceSourceType.GENERATED
+            and self.activation_basis
+            is VoiceActivationBasis.EXPERIMENTAL_MACHINE_VALIDATED
+            and self.validation_basis is VoiceValidationBasis.MACHINE_VALIDATED
+        )
+        character_generated = (
+            self.source_type is VoiceSourceType.GENERATED
+            and self.activation_basis
+            is VoiceActivationBasis.CHARACTER_ONE_CLICK_GENERATION
+            and self.validation_basis is VoiceValidationBasis.MACHINE_VALIDATED
+        )
         if self.source_type is VoiceSourceType.PRESET and self.preset_key is None:
             raise ValueError("preset source requires preset_key")
-        if self.source_type is not VoiceSourceType.PRESET and self.preset_key is not None:
+        if (
+            self.source_type is not VoiceSourceType.PRESET
+            and not experimental
+            and self.preset_key is not None
+        ):
             raise ValueError("non-preset source cannot carry preset_key")
+        if experimental and self.preset_key is None:
+            raise ValueError("experimental Nano source requires its base preset")
         if self.source_type is VoiceSourceType.UPLOADED and self.reference_asset_id is None:
             raise ValueError("uploaded source requires a reference asset")
         if self.rights.source_kind == "official_preset":
             if (
-                self.source_type is not VoiceSourceType.PRESET
+                self.source_type not in {
+                    VoiceSourceType.PRESET,
+                    VoiceSourceType.GENERATED,
+                }
                 or self.official_preset is None
                 or self.official_preset.preset_id != self.preset_key
             ):
                 raise ValueError("official preset rights require exact pinned provenance")
         elif self.official_preset is not None:
             raise ValueError("only official preset rights can publish preset provenance")
-        if self.source_type is VoiceSourceType.GENERATED and not self.description_available:
+        if (
+            self.source_type is VoiceSourceType.GENERATED
+            and not experimental
+            and not self.description_available
+        ):
             raise ValueError("generated source requires a private description record")
         if self.state is VoiceVersionState.LOCKED:
             human_confirmed = (
@@ -869,7 +918,12 @@ class VoiceProfileVersionResource(_StrictModel):
                 and self.quality_state is VoiceQualityState.PENDING
                 and self.locked_at is None
             )
-            if not (human_confirmed or official_direct):
+            machine_validated = (
+                (experimental or character_generated)
+                and self.quality_state is VoiceQualityState.ACCEPTED
+                and self.locked_at is None
+            )
+            if not (human_confirmed or official_direct or machine_validated):
                 raise ValueError("locked version activation evidence is inconsistent")
         elif self.locked_at is not None:
             raise ValueError("only a locked version can carry locked_at")
@@ -1131,6 +1185,17 @@ class OfficialVoiceSelectionTargetKind(str, Enum):
     CHARACTER = "character"
 
 
+class OfficialVoicePreviewRequest(_StrictModel):
+    preset_id: str = Field(pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$")
+
+    @field_validator("preset_id")
+    @classmethod
+    def validate_preset_id(cls, value: str) -> str:
+        if value not in OFFICIAL_PRESETS_BY_ID:
+            raise ValueError("preset_id is absent from the pinned ONNX manifest")
+        return value
+
+
 class OfficialVoiceSelectionRequest(_StrictModel):
     preset_id: str = Field(pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$")
     target_kind: OfficialVoiceSelectionTargetKind
@@ -1238,6 +1303,549 @@ class OfficialVoiceSelectionResponse(_StrictModel):
             )
         ):
             raise ValueError("new selection must return its exact committed projection")
+        return self
+
+
+class NanoDecodeParametersResource(_StrictModel):
+    """Lossless HTTP form of the Nano advanced decode contract."""
+
+    schema_version: Literal["nano-decode-parameters/3"] = (
+        "nano-decode-parameters/3"
+    )
+    seed: str = Field(pattern=r"^(0|[1-9][0-9]{0,18})$")
+    text_temperature_milli: int = Field(ge=100, le=2_000, strict=True)
+    text_top_p_milli: int = Field(ge=1, le=1_000, strict=True)
+    text_top_k: int = Field(ge=1, le=100, strict=True)
+    audio_temperature_milli: int = Field(ge=100, le=2_000, strict=True)
+    audio_top_p_milli: int = Field(ge=1, le=1_000, strict=True)
+    audio_top_k: int = Field(ge=1, le=100, strict=True)
+    audio_repetition_penalty_milli: int = Field(
+        ge=1_000, le=2_000, strict=True
+    )
+    sample_mode: Literal["full"] = "full"
+    max_new_frames: Literal[375] = 375
+
+    @field_validator("seed")
+    @classmethod
+    def validate_seed_bound(cls, value: str) -> str:
+        if int(value) > 9_223_372_036_854_775_807:
+            raise ValueError("seed exceeds the signed 64-bit Nano bound")
+        return value
+
+    def domain(self) -> "NanoDecodeParametersV3":
+        from .nano_experiments import NanoDecodeParametersV3
+
+        payload = self.model_dump()
+        payload["seed"] = int(self.seed)
+        return NanoDecodeParametersV3(**payload)
+
+    @classmethod
+    def from_domain(
+        cls,
+        value: "NanoDecodeParametersV3",
+    ) -> "NanoDecodeParametersResource":
+        payload = dict(value.canonical_payload())
+        payload["seed"] = str(payload["seed"])
+        return cls.model_validate(payload)
+
+
+class CreateNanoVoiceExperimentRequest(_StrictModel):
+    contract_version: Literal["nano-voice-experiment-request/1"] = (
+        "nano-voice-experiment-request/1"
+    )
+    base_preset_id: str = Field(
+        pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$"
+    )
+    target_kind: Literal["narrator", "character"]
+    character_id: UUID | None = None
+    expected_settings_version: int = Field(ge=0, strict=True)
+    expected_binding_version: int | None = Field(default=None, ge=0, strict=True)
+    parameters: NanoDecodeParametersResource
+
+    @model_validator(mode="after")
+    def validate_target_shape(self) -> "CreateNanoVoiceExperimentRequest":
+        if self.base_preset_id not in OFFICIAL_PRESETS_BY_ID:
+            raise ValueError("base_preset_id is absent from the pinned catalog")
+        if self.target_kind == "narrator":
+            if self.character_id is not None or self.expected_binding_version is not None:
+                raise ValueError("narrator target cannot carry character fields")
+        elif self.character_id is None or self.expected_binding_version is None:
+            raise ValueError("character target requires identity and binding version")
+        return self
+
+
+class ApplyNanoVoiceExperimentRequest(_StrictModel):
+    expected_settings_version: int = Field(ge=0, strict=True)
+    expected_binding_version: int | None = Field(default=None, ge=0, strict=True)
+
+
+class NanoVoiceExperimentResource(_StrictModel):
+    contract_version: Literal["nano-voice-experiment/1"] = (
+        "nano-voice-experiment/1"
+    )
+    command_id: UUID
+    novel_id: UUID
+    profile_id: UUID
+    version_id: UUID
+    background_job_id: UUID
+    base_preset_id: str = Field(
+        pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$"
+    )
+    target_kind: Literal["narrator", "character"]
+    character_id: UUID | None = None
+    expected_settings_version: int = Field(ge=0, strict=True)
+    expected_binding_version: int | None = Field(default=None, ge=0, strict=True)
+    parameters: NanoDecodeParametersResource
+    parameters_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    state: Literal[
+        "pending", "running", "ready_applied", "ready_unapplied", "failed"
+    ]
+    reused_version: bool = Field(strict=True)
+    preview: VoicePreviewResource | None = None
+    current_settings: NarrationSettingsResource | None = None
+    current_character_binding: CharacterVoiceBindingResource | None = None
+    failure_code: str | None = Field(default=None, max_length=96)
+    retryable: bool = Field(strict=True)
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_experiment_resource(self) -> "NanoVoiceExperimentResource":
+        narrator = self.target_kind == "narrator"
+        if narrator != (self.current_settings is not None):
+            raise ValueError("Nano narrator projection requires current_settings")
+        if narrator == (self.current_character_binding is not None):
+            raise ValueError("Nano character projection requires current binding")
+        if self.state in {"ready_applied", "ready_unapplied"} and self.preview is None:
+            raise ValueError("ready Nano experiment requires its validated preview")
+        if self.state == "failed":
+            if self.failure_code is None or self.preview is not None:
+                raise ValueError("failed Nano experiment has invalid evidence")
+        elif self.failure_code is not None or self.retryable:
+            raise ValueError("non-failed Nano experiment cannot carry failure evidence")
+        return self
+
+
+class NanoVoiceExperimentListResource(_StrictModel):
+    contract_version: Literal["nano-voice-experiment-list/1"] = (
+        "nano-voice-experiment-list/1"
+    )
+    novel_id: UUID
+    items: list[NanoVoiceExperimentResource]
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "NanoVoiceExperimentListResource":
+        if any(item.novel_id != self.novel_id for item in self.items):
+            raise ValueError("experiment list contains another novel")
+        command_ids = [item.command_id for item in self.items]
+        if len(command_ids) != len(set(command_ids)):
+            raise ValueError("experiment command IDs must be unique")
+        return self
+
+
+class CharacterVoiceMatchRequest(_StrictModel):
+    contract_version: Literal["character-voice-match-request/1"] = (
+        "character-voice-match-request/1"
+    )
+    timeline_id: UUID | None = None
+    character_instance_id: UUID | None = None
+    expected_binding_version: int = Field(ge=0, strict=True)
+
+
+class CharacterVoiceBriefResource(_StrictModel):
+    schema_version: Literal["character-voice-brief/1"] = "character-voice-brief/1"
+    language: Literal["zh-CN", "en", "ja-JP"] | None = None
+    presentation: Literal["masculine", "feminine", "androgynous"] | None = None
+    pitch: int | None = Field(default=None, ge=-2, le=2, strict=True)
+    pace: int | None = Field(default=None, ge=-2, le=2, strict=True)
+    energy: int | None = Field(default=None, ge=-2, le=2, strict=True)
+    texture: Literal[
+        "clear", "warm", "airy", "husky", "firm", "soft", "bright", "dark"
+    ] | None = None
+    evidence_fields: list[str] = Field(max_length=48)
+
+
+class CharacterVoiceMatchResource(_StrictModel):
+    contract_version: Literal["character-voice-match/1"] = (
+        "character-voice-match/1"
+    )
+    character_id: UUID
+    brief: CharacterVoiceBriefResource
+    selected_preset_id: str = Field(
+        pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$"
+    )
+    score_milli: int = Field(ge=0, le=1_000, strict=True)
+    state: Literal["ready_applied", "ready_unapplied"]
+    selection_still_current: bool = Field(strict=True)
+    current_character_binding: CharacterVoiceBindingResource
+    model_evidence: dict[str, object]
+
+    @model_validator(mode="after")
+    def validate_match_projection(self) -> "CharacterVoiceMatchResource":
+        if self.current_character_binding.character_id != self.character_id:
+            raise ValueError("character match binding scope drifted")
+        if (self.state == "ready_applied") != self.selection_still_current:
+            raise ValueError("character match state/current evidence drifted")
+        return self
+
+
+class CreateCharacterVoiceGeneratorCommandRequest(_StrictModel):
+    contract_version: Literal["character-voice-generation-request/1"] = (
+        "character-voice-generation-request/1"
+    )
+    timeline_id: UUID | None = None
+    character_instance_id: UUID | None = None
+    expected_binding_version: int = Field(ge=0, strict=True)
+    seed: str | None = Field(default=None, pattern=r"^(0|[1-9][0-9]{0,18})$")
+
+    @field_validator("seed")
+    @classmethod
+    def validate_seed_bound(cls, value: str | None) -> str | None:
+        if value is not None and int(value) > 9_223_372_036_854_775_807:
+            raise ValueError("seed exceeds the signed 64-bit VoiceGenerator bound")
+        return value
+
+
+class RetryCharacterVoiceGeneratorCommandRequest(_StrictModel):
+    expected_binding_version: int = Field(ge=0, strict=True)
+
+
+class ApplyCharacterVoiceGeneratorCommandRequest(_StrictModel):
+    expected_binding_version: int = Field(ge=0, strict=True)
+
+
+CharacterVoiceGeneratorState = Literal[
+    "queued",
+    "analyzing_character",
+    "waiting_for_heavy_runtime",
+    "generating_voice",
+    "unloading_voice_generator",
+    "validating_with_nano",
+    "ready_applied",
+    "ready_unapplied",
+    "failed_character_analysis",
+    "failed_runtime_unavailable",
+    "failed_memory_safety",
+    "failed_generation",
+    "failed_audio_validation",
+    "failed_nano_validation",
+    "failed_storage",
+    "cancelled",
+    "superseded",
+]
+
+
+class CharacterVoiceGeneratorCommandResource(_StrictModel):
+    contract_version: Literal["character-voice-generation/1"] = (
+        "character-voice-generation/1"
+    )
+    command_id: UUID
+    novel_id: UUID
+    character_id: UUID
+    draft_id: UUID | None = None
+    background_job_id: UUID | None = None
+    state: CharacterVoiceGeneratorState
+    progress_current: int = Field(ge=0, le=6, strict=True)
+    progress_total: Literal[6] = 6
+    expected_binding_version: int = Field(ge=0, strict=True)
+    applied_binding_version: int | None = Field(default=None, ge=1, strict=True)
+    brief: CharacterVoiceBriefResource | None = None
+    voice_profile_id: UUID | None = None
+    voice_version_id: UUID | None = None
+    result_version: VoiceProfileVersionResource | None = None
+    current_character_binding: CharacterVoiceBindingResource
+    selection_still_current: bool = Field(strict=True)
+    cancellable: bool = Field(strict=True)
+    retryable: bool = Field(strict=True)
+    terminal: bool = Field(strict=True)
+    failure_code: str | None = Field(default=None, max_length=96)
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    applied_at: datetime | None = None
+    updated_at: datetime
+
+    @field_validator("failure_code")
+    @classmethod
+    def validate_failure_code(cls, value: str | None) -> str | None:
+        if value is not None and _SAFE_CODE.fullmatch(value) is None:
+            raise ValueError("VoiceGenerator failure code must be stable")
+        return value
+
+    @model_validator(mode="after")
+    def validate_command_projection(self) -> "CharacterVoiceGeneratorCommandResource":
+        if (
+            self.current_character_binding.character_id != self.character_id
+            or self.current_character_binding.novel_id != self.novel_id
+        ):
+            raise ValueError("VoiceGenerator binding scope drifted")
+        if (self.voice_profile_id is None) != (self.voice_version_id is None):
+            raise ValueError("VoiceGenerator result voice identity is incomplete")
+        if self.result_version is not None and (
+            self.result_version.profile_id != self.voice_profile_id
+            or self.result_version.version_id != self.voice_version_id
+        ):
+            raise ValueError("VoiceGenerator result version identity drifted")
+        active = self.state in {
+            "queued",
+            "analyzing_character",
+            "waiting_for_heavy_runtime",
+            "generating_voice",
+            "unloading_voice_generator",
+            "validating_with_nano",
+        }
+        failed = self.state.startswith("failed_")
+        ready = self.state in {"ready_applied", "ready_unapplied"}
+        if self.draft_id is None and self.state not in {
+            "queued",
+            "analyzing_character",
+            "failed_character_analysis",
+            "cancelled",
+            "superseded",
+        }:
+            raise ValueError("VoiceGenerator state requires a design draft")
+        if self.terminal == active:
+            raise ValueError("VoiceGenerator terminal flag drifted")
+        if failed != (self.failure_code is not None):
+            raise ValueError("VoiceGenerator failure evidence drifted")
+        if ready and (
+            self.voice_version_id is None
+            or self.result_version is None
+            or self.completed_at is None
+        ):
+            raise ValueError("ready VoiceGenerator command lacks its result")
+        if self.state == "ready_applied":
+            if (
+                self.applied_binding_version is None
+                or self.applied_at is None
+            ):
+                raise ValueError("applied VoiceGenerator command lacks CAS evidence")
+        elif self.applied_binding_version is not None or self.applied_at is not None:
+            raise ValueError("non-applied VoiceGenerator command carries CAS evidence")
+        if self.state == "ready_unapplied" and self.selection_still_current:
+            raise ValueError("unapplied VoiceGenerator command cannot be current")
+        if self.terminal and self.cancellable:
+            raise ValueError("terminal VoiceGenerator command cannot be cancelled")
+        if self.retryable and not (failed or self.state == "superseded"):
+            raise ValueError("only failed or superseded VoiceGenerator commands retry")
+        return self
+
+
+class CharacterVoiceGeneratorCommandListResource(_StrictModel):
+    contract_version: Literal["character-voice-generation-list/1"] = (
+        "character-voice-generation-list/1"
+    )
+    novel_id: UUID
+    character_id: UUID
+    items: list[CharacterVoiceGeneratorCommandResource]
+
+    @model_validator(mode="after")
+    def validate_list_scope(self) -> "CharacterVoiceGeneratorCommandListResource":
+        if any(
+            item.novel_id != self.novel_id or item.character_id != self.character_id
+            for item in self.items
+        ):
+            raise ValueError("VoiceGenerator command list contains another target")
+        command_ids = [item.command_id for item in self.items]
+        if len(command_ids) != len(set(command_ids)):
+            raise ValueError("VoiceGenerator command IDs must be unique")
+        return self
+
+
+class CreatePrivateVoiceDeletionRequest(_StrictModel):
+    expected_profile_version: int = Field(ge=1, strict=True)
+
+
+class ConfirmPrivateVoiceDeletionRequest(_StrictModel):
+    expected_profile_version: int = Field(ge=1, strict=True)
+    impact_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class PrivateVoiceDeletionImpactResource(_StrictModel):
+    schema_version: Literal["private-voice-deletion-impact/2"] = (
+        "private-voice-deletion-impact/2"
+    )
+    profile_id: UUID
+    novel_id: UUID
+    profile_version: int = Field(ge=1, strict=True)
+    voice_version_ids: list[UUID]
+    current_narrator_count: int = Field(ge=0, strict=True)
+    character_binding_count: int = Field(ge=0, strict=True)
+    anonymous_speaker_count: int = Field(ge=0, strict=True)
+    generic_slot_count: int = Field(ge=0, strict=True)
+    historical_edition_count: int = Field(ge=0, strict=True)
+    render_count: int = Field(ge=0, strict=True)
+    export_count: int = Field(ge=0, strict=True)
+    current_reference_count: int = Field(ge=0, strict=True)
+    historical_reference_count: int = Field(ge=0, strict=True)
+    reference_count: int = Field(ge=0, strict=True)
+    asset_count: int = Field(ge=0, strict=True)
+    total_bytes: int = Field(ge=0, strict=True)
+    active_job_count: int = Field(ge=0, strict=True)
+    external_backup_status: Literal[
+        "unmanaged", "managed_pending", "managed_expired"
+    ]
+    historical_audio_consequence: Literal[
+        "unavailable_private_voice_deleted"
+    ] | None = None
+    impact_summary: str = Field(min_length=1, max_length=800)
+
+    @model_validator(mode="after")
+    def validate_totals(self) -> "PrivateVoiceDeletionImpactResource":
+        if self.current_reference_count != (
+            self.current_narrator_count
+            + self.character_binding_count
+            + self.anonymous_speaker_count
+            + self.generic_slot_count
+        ):
+            raise ValueError("private voice current-reference total drifted")
+        if self.historical_reference_count != (
+            self.historical_edition_count + self.render_count + self.export_count
+        ):
+            raise ValueError("private voice historical-reference total drifted")
+        if self.reference_count != (
+            self.current_reference_count + self.historical_reference_count
+        ):
+            raise ValueError("private voice reference total drifted")
+        expected_consequence = (
+            "unavailable_private_voice_deleted"
+            if self.historical_edition_count > 0
+            else None
+        )
+        if self.historical_audio_consequence != expected_consequence:
+            raise ValueError("private voice historical consequence drifted")
+        if len(set(self.voice_version_ids)) != len(self.voice_version_ids):
+            raise ValueError("private voice version ids must be unique")
+        return self
+
+
+class PrivateVoiceDeletionRequestResource(_StrictModel):
+    contract_version: Literal["private-voice-deletion/2"] = (
+        "private-voice-deletion/2"
+    )
+    request_id: UUID
+    profile_id: UUID
+    novel_id: UUID
+    command: Literal[
+        "discard_unreferenced_private_voice", "true_delete_private_voice"
+    ]
+    state: Literal[
+        "grace_pending",
+        "requested",
+        "cancelled",
+        "live_deleting",
+        "live_deleted_backup_pending",
+        "completed",
+        "failed",
+        "superseded",
+    ]
+    server_now: datetime
+    expected_profile_version: int = Field(ge=1, strict=True)
+    impact_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    impact: PrivateVoiceDeletionImpactResource
+    eligibility: Literal["unreferenced", "referenced", "blocked"]
+    reference_count: int = Field(ge=0, strict=True)
+    execute_after: datetime | None = None
+    impact_expires_at: datetime | None = None
+    asset_count: int = Field(ge=0, strict=True)
+    total_bytes: int = Field(ge=0, strict=True)
+    external_backup_status: Literal[
+        "unmanaged", "managed_pending", "managed_expired"
+    ]
+    confirmed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    completed_at: datetime | None = None
+    superseded_at: datetime | None = None
+    job_drain_started_at: datetime | None = None
+    job_drain_deadline: datetime | None = None
+    failure_code: str | None = Field(default=None, max_length=96)
+    cancellable: bool = Field(strict=True)
+    retryable: bool = Field(strict=True)
+    terminal: bool = Field(strict=True)
+
+    @model_validator(mode="after")
+    def validate_projection(self) -> "PrivateVoiceDeletionRequestResource":
+        if (
+            self.impact.profile_id != self.profile_id
+            or self.impact.novel_id != self.novel_id
+            or self.impact.profile_version != self.expected_profile_version
+            or self.impact.reference_count != self.reference_count
+            or self.impact.asset_count != self.asset_count
+            or self.impact.total_bytes != self.total_bytes
+            or self.impact.external_backup_status != self.external_backup_status
+        ):
+            raise ValueError("private voice deletion projection drifted")
+        if self.eligibility == "unreferenced" and self.reference_count != 0:
+            raise ValueError("unreferenced private voice has references")
+        if self.eligibility == "referenced" and self.reference_count == 0:
+            raise ValueError("referenced private voice has no references")
+        fixed_terminal = self.state in {"cancelled", "completed", "superseded"}
+        if fixed_terminal and not self.terminal:
+            raise ValueError("private voice deletion terminal flag drifted")
+        if self.state != "failed" and not fixed_terminal and self.terminal:
+            raise ValueError("active private voice deletion cannot be terminal")
+        if self.terminal and (self.cancellable or self.retryable):
+            raise ValueError("terminal private voice deletion exposes actions")
+        return self
+
+
+class PrivateVoiceLifecycleProfileResource(_StrictModel):
+    profile_id: UUID
+    novel_id: UUID
+    current_version_id: UUID | None = None
+    display_name: str = Field(min_length=1, max_length=240)
+    source_type: Literal["uploaded", "generated"]
+    profile_version: int = Field(ge=1, strict=True)
+    eligibility: Literal["unreferenced", "referenced", "blocked"]
+    blocked_reason: str | None = Field(default=None, max_length=160)
+    reference_count: int = Field(ge=0, strict=True)
+    asset_count: int = Field(ge=0, strict=True)
+    total_bytes: int = Field(ge=0, strict=True)
+    impact: PrivateVoiceDeletionImpactResource
+    impact_summary: str = Field(min_length=1, max_length=800)
+    active_request: PrivateVoiceDeletionRequestResource | None = None
+
+    @model_validator(mode="after")
+    def validate_projection(self) -> "PrivateVoiceLifecycleProfileResource":
+        if (
+            self.impact.profile_id != self.profile_id
+            or self.impact.novel_id != self.novel_id
+            or self.impact.profile_version != self.profile_version
+            or self.impact.reference_count != self.reference_count
+            or self.impact.asset_count != self.asset_count
+            or self.impact.total_bytes != self.total_bytes
+            or self.impact.impact_summary != self.impact_summary
+        ):
+            raise ValueError("private voice lifecycle projection drifted")
+        if self.eligibility == "unreferenced" and self.reference_count != 0:
+            raise ValueError("unreferenced private voice has references")
+        if self.eligibility == "referenced" and self.reference_count == 0:
+            raise ValueError("referenced private voice has no references")
+        if self.active_request is not None and (
+            self.active_request.profile_id != self.profile_id
+            or self.active_request.novel_id != self.novel_id
+        ):
+            raise ValueError("private voice active request scope drifted")
+        return self
+
+
+class PrivateVoiceLifecycleResource(_StrictModel):
+    schema_version: Literal["private-voice-lifecycle/1"] = (
+        "private-voice-lifecycle/1"
+    )
+    novel_id: UUID
+    server_now: datetime
+    items: list[PrivateVoiceLifecycleProfileResource]
+
+    @model_validator(mode="after")
+    def validate_lifecycle_scope(self) -> "PrivateVoiceLifecycleResource":
+        if any(item.novel_id != self.novel_id for item in self.items):
+            raise ValueError("private voice lifecycle contains another novel")
+        profile_ids = [item.profile_id for item in self.items]
+        if len(profile_ids) != len(set(profile_ids)):
+            raise ValueError("private voice lifecycle profiles must be unique")
         return self
 
 

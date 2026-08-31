@@ -17,6 +17,7 @@ import type {
   ScriptReviewPolicy,
   UpdateNarrationSettingsRequest,
 } from "./contracts";
+import { createNarrationIdempotencyKey } from "./idempotency-key";
 
 
 export const NARRATION_CLOUD_CONSENT_NOTICE_VERSION = "narration-cloud-consent/1";
@@ -320,9 +321,7 @@ function scopeMismatchFailure(): ReadingRulesFailure {
 
 
 function defaultIdempotencyKey(): string {
-  const value = globalThis.crypto?.randomUUID?.();
-  if (!value) throw new Error("secure random UUID is unavailable");
-  return `cloud:${value}`;
+  return createNarrationIdempotencyKey("cloud", ":");
 }
 
 

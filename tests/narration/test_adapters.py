@@ -61,6 +61,7 @@ async def test_fake_nano_exposes_technical_contract_but_never_product_readiness(
     assert adapter.capabilities.adapter_kind is AdapterKind.MOSS_NANO_TTS
     assert adapter.capabilities.supports_synthesis is True
     assert adapter.capabilities.supports_reference_audio is True
+    assert adapter.capabilities.supports_nano_decode_parameters is True
     assert adapter.capabilities.is_test_double is True
     assert adapter.capabilities.product_visible is False
     assert adapter.capabilities.production_ready is False

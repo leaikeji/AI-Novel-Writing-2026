@@ -24,6 +24,7 @@ class AliasContractError(ValueError):
 class AliasSource(str, Enum):
     CANONICAL_NAME = "canonical_name"
     AUTHOR_DEFINED = "author_defined"
+    CHARACTER_AUTHORITY = "character_authority"
     IMPORTED = "imported"
 
 

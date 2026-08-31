@@ -81,7 +81,7 @@ from tests.narration.test_publication_postgres import _seed_scope_foundation
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_REVISION = "20260829_0032"
+EXPECTED_REVISION = "20260829_0034"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 SCOPE = NarrationRequestScope.fixed_local()
 FAILURE_CODE = "NANO_AUDIO_INVALID"

@@ -32,6 +32,7 @@ from backend.narration.audio_pipeline import (
 )
 from backend.narration.contracts import (
     ContractError,
+    NanoDecodeParametersV2,
     NarrationRequestScope,
     ReferenceAudioInput,
     SynthesisRequest,
@@ -47,9 +48,27 @@ from backend.narration.manifest import (
     PublishManifest,
     publish_manifest,
 )
+from backend.narration.nano_experiments import (
+    NANO_EXPERIMENT_MAX_NEW_FRAMES,
+    NANO_EXPERIMENT_SAMPLE_MODE,
+    NanoDecodeParametersV3,
+)
+from backend.narration.official_presets import (
+    OFFICIAL_PRESET_MANIFEST_PATH,
+    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    OFFICIAL_PRESET_REPOSITORY,
+    OFFICIAL_PRESET_REVISION,
+    OFFICIAL_PRESET_RIGHTS_POLICY_VERSION,
+    require_official_preset,
+)
 from backend.narration.progress import initialize_initial_document_edition
 from backend.narration.resource_locks import ResourceFence
 from backend.narration.runtime import canonical_sidecar_synthesis_metadata
+from backend.narration.voice_generator_runtime import (
+    EXPECTED_AUDIO_PARAMETERS as VOICE_GENERATOR_AUDIO_PARAMETERS,
+    EXPECTED_RUNTIME_IDENTITY as VOICE_GENERATOR_RUNTIME_IDENTITY,
+    VOICE_GENERATOR_REVISION,
+)
 from backend.narration.scheduler import (
     NarrationJobScheduler,
     SchedulerConfig,
@@ -77,6 +96,200 @@ from tests.narration.test_domain_services import (
 
 
 NOW = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+
+
+def _nano_experiment_voice_evidence() -> tuple[SimpleNamespace, SimpleNamespace]:
+    preset = require_official_preset("onnx.Zhiming")
+    owner_id = uuid4()
+    workspace_id = uuid4()
+    complete_parameters = NanoDecodeParametersV3(
+        seed=9_876,
+        text_temperature_milli=1_250,
+        text_top_p_milli=875,
+        text_top_k=41,
+        audio_temperature_milli=925,
+        audio_top_p_milli=825,
+        audio_top_k=19,
+        audio_repetition_penalty_milli=1_350,
+    )
+    voice = SimpleNamespace(
+        id=uuid4(),
+        profile_id=uuid4(),
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        source_type="generated",
+        provider_id="local-sidecar",
+        model_id=OFFICIAL_PRESET_REPOSITORY,
+        model_revision=OFFICIAL_PRESET_REVISION,
+        preset_key=preset.preset_id,
+        reference_asset_id=None,
+        language=preset.language,
+        seed=complete_parameters.seed,
+        state="locked",
+        quality_state="accepted",
+        activation_basis="experimental_machine_validated",
+        validation_basis="machine_validated",
+        model_run_id=uuid4(),
+        locked_actor=None,
+        locked_at=None,
+        fingerprint="a" * 64,
+        parameters_json={
+            "schema_version": "narration-nano-experiment-version/1",
+            "official_preset": preset.provenance(),
+            "sample_mode": NANO_EXPERIMENT_SAMPLE_MODE,
+            "max_new_frames": NANO_EXPERIMENT_MAX_NEW_FRAMES,
+            "decode_parameters": dict(complete_parameters.canonical_payload()),
+        },
+    )
+    rights = SimpleNamespace(
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        source_kind="official_preset",
+        source_identifier=(
+            f"hf://{OFFICIAL_PRESET_REPOSITORY}@{OFFICIAL_PRESET_REVISION}/"
+            f"{OFFICIAL_PRESET_MANIFEST_PATH}#{preset.preset_id}"
+        ),
+        notice_version=OFFICIAL_PRESET_RIGHTS_POLICY_VERSION,
+        purpose="private_novel_narration",
+        commercial_use=False,
+        redistribution=False,
+        voice_cloning=False,
+        subject_consent_reference=None,
+        expires_at=None,
+        risk_flags_json=["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"],
+        confirmed_actor="owner",
+        confirmed_at=NOW,
+    )
+    return voice, rights
+
+
+def test_worker_projects_validated_nano_experiment_into_sidecar_parameters() -> None:
+    voice, rights = _nano_experiment_voice_evidence()
+
+    decoded = worker_module._validated_nano_experiment_decode_parameters(  # noqa: SLF001
+        voice=voice,
+        rights=rights,
+        render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    )
+
+    assert dict(decoded.wire_payload()) == {
+        "schema_version": "moss-nano-decode-parameters/2",
+        "text_temperature_milli": 1_250,
+        "text_top_p_milli": 875,
+        "text_top_k": 41,
+        "audio_temperature_milli": 925,
+        "audio_top_p_milli": 825,
+        "audio_top_k": 19,
+        "audio_repetition_penalty_milli": 1_350,
+    }
+
+
+def test_worker_rejects_nano_experiment_evidence_drift() -> None:
+    voice, rights = _nano_experiment_voice_evidence()
+    voice.seed += 1
+
+    with pytest.raises(
+        worker_module.WorkerSecurityError,
+        match="version evidence changed",
+    ):
+        worker_module._validated_nano_experiment_decode_parameters(  # noqa: SLF001
+            voice=voice,
+            rights=rights,
+            render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+        )
+
+    voice.seed -= 1
+    with pytest.raises(
+        worker_module.WorkerSecurityError,
+        match="render model identity changed",
+    ):
+        worker_module._validated_nano_experiment_decode_parameters(  # noqa: SLF001
+            voice=voice,
+            rights=rights,
+            render_model_fingerprint="b" * 64,
+        )
+
+
+def _voice_generator_voice_evidence() -> tuple[SimpleNamespace, SimpleNamespace]:
+    owner_id = uuid4()
+    workspace_id = uuid4()
+    voice = SimpleNamespace(
+        id=uuid4(),
+        profile_id=uuid4(),
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        source_type="generated",
+        provider_id="local-native-host",
+        model_id="OpenMOSS-Team/MOSS-VoiceGenerator",
+        model_revision=VOICE_GENERATOR_REVISION,
+        preset_key=None,
+        reference_asset_id=uuid4(),
+        language="zh-CN",
+        seed=104_729,
+        state="locked",
+        quality_state="accepted",
+        activation_basis="character_one_click_generation",
+        validation_basis="machine_validated",
+        model_run_id=uuid4(),
+        locked_actor=None,
+        locked_at=None,
+        fingerprint="a" * 64,
+        description_digest_key_id="vg40-test-key",
+        description_digest="b" * 64,
+        parameters_json={
+            "schema_version": "voice-generator-version/1",
+            "draft_fingerprint": "c" * 64,
+            "runtime_identity": dict(
+                VOICE_GENERATOR_RUNTIME_IDENTITY.wire_payload()
+            ),
+            "generator_parameters": dict(
+                VOICE_GENERATOR_AUDIO_PARAMETERS.wire_payload()
+            ),
+            "nano_parameters_digest": "d" * 64,
+        },
+    )
+    rights = SimpleNamespace(
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        source_kind="voice_generator",
+        source_identifier=f"local://voice-generator/{uuid4()}",
+        notice_version="voice-generator-private-use/1",
+        purpose="private_novel_narration",
+        commercial_use=False,
+        redistribution=False,
+        voice_cloning=False,
+        subject_consent_reference=None,
+        expires_at=None,
+        risk_flags_json=[],
+    )
+    return voice, rights
+
+
+def test_worker_projects_validated_voice_generator_reference_to_nano() -> None:
+    voice, rights = _voice_generator_voice_evidence()
+
+    decoded = worker_module._validated_voice_generator_decode_parameters(  # noqa: SLF001
+        voice=voice,
+        rights=rights,
+        render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    )
+
+    assert decoded == NanoDecodeParametersV2()
+
+
+def test_worker_rejects_voice_generator_evidence_drift() -> None:
+    voice, rights = _voice_generator_voice_evidence()
+    voice.parameters_json["runtime_identity"] = {"schema_version": "changed"}
+
+    with pytest.raises(
+        worker_module.WorkerSecurityError,
+        match="version evidence changed",
+    ):
+        worker_module._validated_voice_generator_decode_parameters(  # noqa: SLF001
+            voice=voice,
+            rights=rights,
+            render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+        )
 
 
 def test_worker_resolves_one_source_job_and_all_identical_segment_targets(
@@ -1064,6 +1277,55 @@ def test_repository_rejects_audio_evidence_for_non_audio_failure_before_transact
                 "reason_code": "WAV_SILENT",
             },
         )
+
+
+def test_repository_terminalizes_a_load_failure_in_the_same_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = object.__new__(SqlAlchemyNarrationWorkerRepository)
+    repository._scope = NarrationRequestScope.fixed_local()  # noqa: SLF001
+    lease = _lease()
+    job = SimpleNamespace(id=lease.fence.job_id)
+    session = SimpleNamespace()
+    terminalized: list[tuple[object, str, str]] = []
+
+    repository._job = (  # type: ignore[method-assign]
+        lambda observed_session, observed_lease, *, for_update: (
+            job
+            if observed_session is session
+            and observed_lease is lease
+            and for_update
+            else (_ for _ in ()).throw(AssertionError("unexpected job lookup"))
+        )
+    )
+    repository._terminalize_render_job_in_session = (  # type: ignore[method-assign]
+        lambda observed_session, *, job, target_state, error_code, actor: (
+            terminalized.append((job, target_state, actor)) or True
+        )
+    )
+    repository._transaction = (  # type: ignore[method-assign]
+        lambda operation: operation(session)
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "fail_attempt",
+        lambda *_args, **_kwargs: FailureResult(
+            job_id=lease.fence.job_id,
+            state="failed",
+            next_retry_at=None,
+        ),
+    )
+
+    result = repository.fail_claim(
+        lease,
+        classification="non_retryable",
+        error_code="RENDER_INPUT_INVALID",
+    )
+
+    assert result.state == "failed"
+    assert terminalized == [
+        (job, "failed", "narration-worker-load-failure"),
+    ]
 
 
 @pytest.mark.asyncio

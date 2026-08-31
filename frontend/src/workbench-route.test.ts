@@ -300,6 +300,28 @@ describe("RouteSessionStateMachine", () => {
     expect(refreshed.ownerToken).toBe(explicit.ownerToken);
   });
 
+  it.each(["advanced-tuning", "private-voices"] as const)(
+    "keeps the %s TTS workspace addressable across refresh",
+    (readingPanel) => {
+      const harness = createHarness(
+        `/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=${readingPanel}`,
+      );
+
+      const explicit = harness.machine.resolve();
+      expect(explicit.route).toMatchObject({
+        novelId: "novel-1",
+        section: "reading",
+        readingPanel,
+      });
+
+      harness.navigate("/chat/session-1");
+      expect(harness.machine.resolve().route).toMatchObject({
+        section: "reading",
+        readingPanel,
+      });
+    },
+  );
+
   it("lets an explicit URL replace a stale panel and rejects unknown panels", () => {
     const harness = createHarness(
       "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=reading&reading_panel=characters",

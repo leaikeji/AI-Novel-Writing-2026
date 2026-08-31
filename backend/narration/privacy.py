@@ -113,6 +113,7 @@ READING_PRIVACY_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = froze
 
 _MUTATION_CAPABILITY: Final[dict[NarrationSettingsOperation, wire.CapabilityKey]] = {
     NarrationSettingsOperation.LIST_OFFICIAL_PRESETS: wire.CapabilityKey.PRESET_VOICE_SOURCE,
+    NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW: wire.CapabilityKey.VOICE_PREVIEW,
     NarrationSettingsOperation.SELECT_OFFICIAL_VOICE: wire.CapabilityKey.PRESET_VOICE_SOURCE,
     NarrationSettingsOperation.PUT_SETTINGS: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES: wire.CapabilityKey.READING_SETTINGS,
@@ -145,6 +146,7 @@ _TRANSACTIONAL_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
         # request-scoped settings transaction is open.
         NarrationSettingsOperation.CREATE_UPLOADED_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
+        NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
         NarrationSettingsOperation.LOCK_VOICE_PROFILE,
         NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
@@ -304,6 +306,7 @@ _VOICE_ASSET_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozense
         NarrationSettingsOperation.PUT_VOICE_PROFILE,
         NarrationSettingsOperation.ARCHIVE_VOICE_PROFILE,
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
+        NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
     }
 )

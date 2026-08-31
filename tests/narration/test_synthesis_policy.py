@@ -60,7 +60,7 @@ def test_confirmed_bad_attributions_select_fixed_seed_one(text: str) -> None:
         "sample_mode": "fixed",
         "seed": 1,
         "max_new_frames": 375,
-        "duration_gate_version": "nano-short-chinese-duration/1",
+        "duration_gate_version": "nano-short-chinese-duration/2",
     }
 
 
@@ -77,7 +77,7 @@ def test_confirmed_period_variant_selects_fixed_seed_one(text: str) -> None:
         "sample_mode": "fixed",
         "seed": 1,
         "max_new_frames": 375,
-        "duration_gate_version": "nano-short-chinese-duration/1",
+        "duration_gate_version": "nano-short-chinese-duration/2",
     }
 
 

@@ -32,13 +32,16 @@ from backend.narration.digest_keyring import (  # noqa: E402
     DigestKeyringError,
     load_digest_keyring,
 )
+from backend.narration.schema_readiness import (  # noqa: E402
+    database_revision_satisfies,
+)
 from scripts.tts.manage_digest_keyring import (  # noqa: E402
     DigestKeyringOperationError,
     initialize_digest_keyring,
 )
 
 
-EXPECTED_ALEMBIC_HEAD: Final = "20260829_0032"
+MINIMUM_ALEMBIC_REVISION: Final = "20260829_0032"
 _LOCK_REFERENCES_SQL: Final = (
     "LOCK TABLE narration_edition_segments IN SHARE ROW EXCLUSIVE MODE"
 )
@@ -86,10 +89,13 @@ def database_reference_guard() -> Iterator[bool]:
                     text("SELECT version_num FROM alembic_version")
                 )
             )
-            if revisions != (EXPECTED_ALEMBIC_HEAD,):
+            if not database_revision_satisfies(
+                revisions,
+                minimum_revision=MINIMUM_ALEMBIC_REVISION,
+            ):
                 raise _error(
                     "DIGEST_KEYRING_SCHEMA_NOT_READY",
-                    "narration digest keyring bootstrap requires the exact schema head",
+                    "narration digest keyring bootstrap requires its minimum migration",
                 )
             connection.execute(text(_LOCK_REFERENCES_SQL))
             reference_count = connection.scalar(text(_COUNT_REFERENCES_SQL))

@@ -45,6 +45,7 @@ MOSS_NANO_SIDECAR_CONTRACT_CAPABILITIES: Final = AdapterCapabilities(
     product_visible=False,
     production_ready=False,
     is_test_double=False,
+    supports_nano_decode_parameters=True,
 )
 
 VOICE_DESIGN_NO_GO_CAPABILITIES: Final = AdapterCapabilities(

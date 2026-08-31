@@ -160,6 +160,7 @@ class VoiceVersionSnapshot:
     source_type: wire.VoiceSourceType
     version_state: wire.VoiceVersionState
     quality_state: wire.VoiceQualityState
+    activation_evidence_usable: bool
     rights_record_id: UUID | None
     rights_state: wire.VoiceRightsState | None
     voice_cloning_permitted: bool
@@ -180,6 +181,10 @@ class VoiceVersionSnapshot:
             raise CastingInputError("voice version_state is unsupported")
         if type(self.quality_state) is not wire.VoiceQualityState:
             raise CastingInputError("voice quality_state is unsupported")
+        _require_exact_bool(
+            self.activation_evidence_usable,
+            field_name="activation_evidence_usable",
+        )
         _require_optional_uuid(
             self.rights_record_id, field_name="voice rights_record_id"
         )
@@ -199,7 +204,7 @@ class VoiceVersionSnapshot:
             self.profile_novel_id not in {None, novel_id}
             or self.profile_status is not wire.VoiceProfileStatus.ACTIVE
             or self.version_state is not wire.VoiceVersionState.LOCKED
-            or self.quality_state is not wire.VoiceQualityState.ACCEPTED
+            or not self.activation_evidence_usable
         ):
             blockers.add("B_VOICE_VERSION_UNAVAILABLE")
         if (

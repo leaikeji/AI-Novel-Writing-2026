@@ -629,12 +629,15 @@ def test_verifier_hidden_validation_gate_fails_closed_on_response_drift(
         )
 
 
-def test_verifier_checks_product_chinese_official_catalog() -> None:
-    from backend.narration.official_presets import PRODUCT_OFFICIAL_PRESETS
+def test_verifier_checks_complete_official_catalog() -> None:
+    from backend.narration.official_presets import (
+        OFFICIAL_PRESETS,
+        official_preset_validation_tier,
+    )
 
     verifier = load_script("verify_qwenpaw_lab")
     payload = {
-        "schema_version": "moss-tts-official-preset-catalog/1.0",
+        "schema_version": "moss-tts-official-preset-catalog/2.0",
         "items": [
             {
                 "preset_id": preset.preset_id,
@@ -643,9 +646,15 @@ def test_verifier_checks_product_chinese_official_catalog() -> None:
                 "language": preset.language,
                 "local_use_status": "available",
                 "commercial_distribution_status": "not_evaluated",
+                "validation_tier": official_preset_validation_tier(preset.preset_id),
+                "language_scope": preset.language,
+                "selectable_now": True,
+                "previewable_now": True,
+                "renderable_existing": True,
+                "usage_notice": "private_local_writing_tool",
                 "provenance": preset.provenance(),
             }
-            for preset in PRODUCT_OFFICIAL_PRESETS
+            for preset in OFFICIAL_PRESETS
         ],
     }
     verifier.request_json = lambda _path: verifier.JsonHttpResponse(
@@ -657,8 +666,8 @@ def test_verifier_checks_product_chinese_official_catalog() -> None:
     result = verifier.verify_official_preset_catalog()
 
     assert result["metadata_only"] is True
-    assert result["preset_count"] == 6
-    assert "onnx.Trump" not in result["preset_ids"]
+    assert result["preset_count"] == 18
+    assert "onnx.Trump" in result["preset_ids"]
     assert "onnx.Xiaoyu" in result["preset_ids"]
 
     payload["items"][0]["audio_file"] = "must-not-leak.wav"

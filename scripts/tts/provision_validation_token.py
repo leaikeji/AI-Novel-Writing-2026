@@ -252,11 +252,30 @@ def destroy_token(host_path: Path, port: ContainerTokenPort) -> dict[str, object
 class DockerContainerTokenPort:
     """Fixed-container adapter; command output is bounded to safe status/digests."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        container: str = QWENPAW_CONTAINER,
+        token_directory: str = CONTAINER_TOKEN_DIRECTORY,
+        token_file: str = CONTAINER_TOKEN_FILE,
+    ) -> None:
+        allowed_targets = {
+            (QWENPAW_CONTAINER, CONTAINER_TOKEN_DIRECTORY, CONTAINER_TOKEN_FILE),
+            (
+                QWENPAW_CONTAINER,
+                "/app/working.secret/ai-novel-world-2026/voice-generator",
+                "/app/working.secret/ai-novel-world-2026/voice-generator/token",
+            ),
+        }
+        if (container, token_directory, token_file) not in allowed_targets:
+            raise TokenProvisionError("CONTAINER_TOKEN_TARGET_INVALID")
         docker = shutil.which("docker")
         if docker is None:
             raise TokenProvisionError("DOCKER_UNAVAILABLE")
         self._docker = docker
+        self._container = container
+        self._token_directory = token_directory
+        self._token_file = token_file
         self._validate_container()
 
     def _run(self, *args: str, timeout: float = 30) -> str:
@@ -312,7 +331,7 @@ class DockerContainerTokenPort:
             "inspect",
             "--format",
             '{{ index .Config.Labels "com.docker.compose.service" }}|{{.State.Running}}',
-            QWENPAW_CONTAINER,
+            self._container,
         )
         if value != "qwenpaw|true":
             raise TokenProvisionError("QWENPAW_CONTAINER_INVALID")
@@ -327,11 +346,11 @@ class DockerContainerTokenPort:
         )
         self._run(
             "exec",
-            QWENPAW_CONTAINER,
+            self._container,
             "/app/venv/bin/python",
             "-c",
             code,
-            CONTAINER_TOKEN_DIRECTORY,
+            self._token_directory,
         )
 
     def current_digest(self) -> str | None:
@@ -351,11 +370,11 @@ class DockerContainerTokenPort:
         )
         value = self._run(
             "exec",
-            QWENPAW_CONTAINER,
+            self._container,
             "/app/venv/bin/python",
             "-c",
             code,
-            CONTAINER_TOKEN_FILE,
+            self._token_file,
         )
         if value == "MISSING":
             return None
@@ -366,7 +385,7 @@ class DockerContainerTokenPort:
     def install_from_host_file(self, path: Path) -> None:
         self._prepare_directory()
         token = read_private_host_token(path).encode("ascii", errors="strict")
-        stage = f"{CONTAINER_TOKEN_DIRECTORY}/.staging-{uuid4().hex}"
+        stage = f"{self._token_directory}/.staging-{uuid4().hex}"
         try:
             code = (
                 "import os,re,sys; src,dst=sys.argv[1:3]; "
@@ -383,12 +402,12 @@ class DockerContainerTokenPort:
                 token,
                 "exec",
                 "-i",
-                QWENPAW_CONTAINER,
+                self._container,
                 "/app/venv/bin/python",
                 "-c",
                 code,
                 stage,
-                CONTAINER_TOKEN_FILE,
+                self._token_file,
             )
         finally:
             cleanup = (
@@ -398,7 +417,7 @@ class DockerContainerTokenPort:
             try:
                 self._run(
                     "exec",
-                    QWENPAW_CONTAINER,
+                    self._container,
                     "/app/venv/bin/python",
                     "-c",
                     cleanup,
@@ -423,11 +442,11 @@ class DockerContainerTokenPort:
         )
         self._run(
             "exec",
-            QWENPAW_CONTAINER,
+            self._container,
             "/app/venv/bin/python",
             "-c",
             code,
-            CONTAINER_TOKEN_FILE,
+            self._token_file,
         )
 
 

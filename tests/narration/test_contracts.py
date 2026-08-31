@@ -204,6 +204,7 @@ def test_capabilities_reject_inconsistent_or_visible_fake_claims() -> None:
     [
         ("supports_warmup", 1),
         ("supports_synthesis", "false"),
+        ("supports_nano_decode_parameters", 1),
         ("product_visible", "false"),
         ("production_ready", 1),
         ("max_inference_concurrency", True),
@@ -228,6 +229,27 @@ def test_capabilities_reject_non_exact_runtime_types(
     )
     with pytest.raises(ContractError):
         replace(valid, **{field_name: invalid_value})
+
+
+def test_nano_decode_capability_cannot_be_claimed_by_an_incompatible_adapter() -> None:
+    valid = AdapterCapabilities(
+        adapter_kind=AdapterKind.MOSS_NANO_TTS,
+        supports_warmup=True,
+        supports_synthesis=True,
+        supports_cancel=True,
+        cancellation_granularity=CancellationGranularity.SEGMENT_BOUNDARY,
+        supports_reference_audio=True,
+        supports_streaming_response_bytes=True,
+        supports_voice_design=False,
+        max_inference_concurrency=1,
+    )
+    with pytest.raises(ContractError, match="Nano decode parameters"):
+        replace(
+            valid,
+            adapter_kind=AdapterKind.VOICE_DESIGN,
+            supports_synthesis=False,
+            supports_nano_decode_parameters=True,
+        )
 
 
 def test_model_fingerprint_parameters_are_scalar_and_cannot_drift() -> None:

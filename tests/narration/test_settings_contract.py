@@ -774,6 +774,7 @@ def test_router_freezes_all_t2_paths_and_methods() -> None:
         ("POST", "/novels/{novel_id}/narration-cloud-consents"),
         ("DELETE", "/novels/{novel_id}/narration-cloud-consents/current"),
         ("GET", "/voice-presets"),
+        ("POST", "/novels/{novel_id}/official-voice-previews"),
         ("POST", "/novels/{novel_id}/official-voice-selections"),
         ("GET", "/voice-profiles"),
         ("POST", "/voice-profiles"),

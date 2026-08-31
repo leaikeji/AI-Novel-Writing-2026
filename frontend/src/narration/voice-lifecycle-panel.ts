@@ -12,22 +12,15 @@ import {
   type VoiceLifecycleProfileCommand,
 } from "./voice-lifecycle-state";
 
-
 export interface VoiceLifecycleReactRuntime {
   createElement(
     type: unknown,
     props?: Record<string, unknown> | null,
     ...children: unknown[]
   ): unknown;
-  useState<T>(
-    initial: T | (() => T),
-  ): [T, (next: T | ((current: T) => T)) => void];
-  useEffect(
-    effect: () => void | (() => void),
-    dependencies: readonly unknown[],
-  ): void;
+  useState<T>(initial: T | (() => T)): [T, (next: T | ((current: T) => T)) => void];
+  useEffect(effect: () => void | (() => void), dependencies: readonly unknown[]): void;
 }
-
 
 export interface VoiceLifecyclePanelProps {
   /** Fail-closed feature gate. Omitting this prop renders no deletion UI. */
@@ -36,61 +29,50 @@ export interface VoiceLifecyclePanelProps {
   readonly request?: VoiceDeletionRequestSnapshot | null;
   readonly busyAction?: VoiceLifecycleBusyAction | null;
   readonly errorMessage?: string | null;
-  /** A server-aligned time can be supplied to avoid relying on the browser clock. */
+  /** Injectable browser time for tests. It is never treated as server wall time. */
   readonly nowEpochMs?: number;
+  /** Browser time at which request.serverNow was observed. */
+  readonly serverNowObservedAtEpochMs?: number;
   readonly className?: string;
-  readonly onDiscardUnreferenced: (command: VoiceLifecycleProfileCommand) => void;
-  readonly onRequestReferencedDeletion: (command: VoiceLifecycleProfileCommand) => void;
+  readonly onCreateDeletionRequest: (command: VoiceLifecycleProfileCommand) => void;
   readonly onConfirmDeletion: (command: VoiceLifecycleConfirmCommand) => void;
   readonly onCancelDeletion: (requestId: string) => void;
   readonly onRetryDeletion: (requestId: string) => void;
+  /** Reloads the authoritative list after a superseded request releases its slot. */
+  readonly onReloadLifecycle: () => void;
 }
 
-
-interface ConfirmationDraft {
+interface ClockSnapshot {
   readonly scope: string;
-  readonly value: string;
+  readonly observedAtEpochMs: number;
+  readonly nowEpochMs: number;
 }
-
-
-interface ValueChangeEvent {
-  readonly target: { readonly value: string };
-}
-
 
 const SOURCE_LABELS: Readonly<Record<VoiceLifecycleProfile["sourceType"], string>> = {
   uploaded: "参考录音音色",
-  generated: "描述生成音色",
+  generated: "生成音色",
 };
 
-
 const BUSY_LABELS: Readonly<Record<VoiceLifecycleBusyAction, string>> = {
-  discard: "正在创建可撤销删除…",
-  request: "正在冻结删除影响…",
+  create: "正在创建删除计划…",
   confirm: "正在确认删除…",
   cancel: "正在撤销删除…",
   retry: "正在重试删除…",
 };
 
-
 function classNames(...values: readonly (string | false | null | undefined)[]): string {
   return values.filter(Boolean).join(" ");
 }
 
-
-function confirmationScope(
-  profile: VoiceLifecycleProfile,
-  request: VoiceDeletionRequestSnapshot | null,
-): string {
-  return `${profile.profileId}:${request?.requestId ?? "idle"}`;
+function requestClockScope(request: VoiceDeletionRequestSnapshot | null): string {
+  return request ? `${request.requestId}:${request.serverNow}` : "idle";
 }
-
 
 function impactRows(
   impact: VoiceDeletionImpactSnapshot,
 ): readonly Readonly<{ label: string; value: string }>[] {
   return Object.freeze([
-    { label: "音色版本", value: `${impact.voiceVersionCount}` },
+    { label: "音色版本", value: `${impact.voiceVersionIds.length}` },
     { label: "当前旁白", value: `${impact.currentNarratorCount}` },
     { label: "人物绑定", value: `${impact.characterBindingCount}` },
     { label: "匿名说话人", value: `${impact.anonymousSpeakerCount}` },
@@ -106,7 +88,6 @@ function impactRows(
   ]);
 }
 
-
 function createImpactSummary(
   React: VoiceLifecycleReactRuntime,
   impact: VoiceDeletionImpactSnapshot,
@@ -118,10 +99,7 @@ function createImpactSummary(
     : "请核对以下冻结影响后再确认删除。";
   return h(
     "section",
-    {
-      className: "anw-voice-lifecycle__impact",
-      "aria-labelledby": headingId,
-    },
+    { className: "anw-voice-lifecycle__impact", "aria-labelledby": headingId },
     h("h4", { id: headingId }, "冻结的删除影响"),
     h(
       "dl",
@@ -136,7 +114,6 @@ function createImpactSummary(
     h("p", { className: "anw-voice-lifecycle__consequence" }, consequence),
   );
 }
-
 
 function createRequestNotice(
   React: VoiceLifecycleReactRuntime,
@@ -156,7 +133,6 @@ function createRequestNotice(
   );
 }
 
-
 export function createVoiceLifecyclePanel(
   React: VoiceLifecycleReactRuntime,
 ): (props: VoiceLifecyclePanelProps) => unknown {
@@ -164,125 +140,121 @@ export function createVoiceLifecyclePanel(
 
   return function VoiceLifecyclePanel(props: VoiceLifecyclePanelProps): unknown {
     const request = props.request ?? null;
-    const scope = confirmationScope(props.profile, request);
-    const [confirmationDraft, setConfirmationDraft] = React.useState<ConfirmationDraft>({
-      scope,
-      value: "",
-    });
-    const [clockEpochMs, setClockEpochMs] = React.useState(() => Date.now());
-    const confirmationText = confirmationDraft.scope === scope
-      ? confirmationDraft.value
-      : "";
+    const clockScope = requestClockScope(request);
+    const initialNow = props.nowEpochMs ?? Date.now();
+    const [clock, setClock] = React.useState<ClockSnapshot>(() => ({
+      scope: clockScope,
+      observedAtEpochMs: props.serverNowObservedAtEpochMs ?? initialNow,
+      nowEpochMs: initialNow,
+    }));
+    const currentClock = clock.scope === clockScope
+      ? clock
+      : {
+        scope: clockScope,
+        observedAtEpochMs: props.serverNowObservedAtEpochMs ?? initialNow,
+        nowEpochMs: initialNow,
+      };
 
     React.useEffect(() => {
+      const now = props.nowEpochMs ?? Date.now();
+      setClock({
+        scope: clockScope,
+        observedAtEpochMs: props.serverNowObservedAtEpochMs ?? now,
+        nowEpochMs: now,
+      });
       if (
         props.capabilityEnabled !== true
         || props.nowEpochMs !== undefined
-        || request?.state !== "grace_pending"
+        || request === null
+        || !["grace_pending", "requested", "failed"].includes(request.state)
       ) return;
-      setClockEpochMs(Date.now());
-      const interval = globalThis.setInterval(() => setClockEpochMs(Date.now()), 250);
+      const interval = globalThis.setInterval(() => {
+        setClock((current) => ({ ...current, nowEpochMs: Date.now() }));
+      }, 250);
       return () => globalThis.clearInterval(interval);
-    }, [props.capabilityEnabled, props.nowEpochMs, request?.requestId, request?.state]);
+    }, [
+      props.capabilityEnabled,
+      props.nowEpochMs,
+      props.serverNowObservedAtEpochMs,
+      clockScope,
+      request?.state,
+    ]);
 
+    React.useEffect(() => {
+      if (props.capabilityEnabled === true && request?.state === "superseded") {
+        props.onReloadLifecycle();
+      }
+    }, [props.capabilityEnabled, request?.requestId, request?.state]);
+
+    const elapsedSinceServerNowMs = Math.max(
+      0,
+      (props.nowEpochMs ?? currentClock.nowEpochMs)
+        - (props.serverNowObservedAtEpochMs ?? currentClock.observedAtEpochMs),
+    );
     const view = deriveVoiceLifecycleState({
       capabilityEnabled: props.capabilityEnabled,
       profile: props.profile,
       request,
-      nowEpochMs: props.nowEpochMs ?? clockEpochMs,
-      confirmationText,
+      elapsedSinceServerNowMs,
       busyAction: props.busyAction,
     });
 
     if (!view.visible) return null;
 
-    const inputId = `anw-voice-lifecycle-confirm-${props.profile.profileId}`;
-    const descriptionId = `${inputId}-description`;
-    const impactHeadingId = (
-      `anw-voice-lifecycle-impact-${request?.requestId ?? props.profile.profileId}`
-    );
+    const impactHeadingId = `anw-voice-lifecycle-impact-${request?.requestId ?? props.profile.profileId}`;
     const actions: unknown[] = [];
 
-    if (view.canDiscardUnreferenced || view.phase === "idle-unreferenced") {
+    if (view.canCreateDeletionRequest || view.phase === "idle-unreferenced" || view.phase === "idle-referenced") {
+      const referenced = view.phase === "idle-referenced";
       actions.push(h(
         "button",
         {
           type: "button",
           className: "anw-voice-lifecycle__button is-danger",
-          disabled: !view.canDiscardUnreferenced,
-          onClick: () => props.onDiscardUnreferenced(
-            voiceLifecycleProfileCommand(props.profile),
-          ),
+          disabled: !view.canCreateDeletionRequest,
+          onClick: () => props.onCreateDeletionRequest(voiceLifecycleProfileCommand(props.profile)),
         },
-        props.busyAction === "discard" ? BUSY_LABELS.discard : "删除音色",
+        props.busyAction === "create"
+          ? BUSY_LABELS.create
+          : referenced ? "查看删除影响" : "删除音色",
       ));
     }
 
-    if (view.canRequestReferencedDeletion || view.phase === "idle-referenced") {
-      actions.push(h(
-        "button",
-        {
-          type: "button",
-          className: "anw-voice-lifecycle__button is-danger",
-          disabled: !view.canRequestReferencedDeletion,
-          onClick: () => props.onRequestReferencedDeletion(
-            voiceLifecycleProfileCommand(props.profile),
-          ),
-        },
-        props.busyAction === "request" ? BUSY_LABELS.request : "查看删除影响",
-      ));
-    }
-
-    if (
-      request
-      && view.phase === "grace_pending"
-      && view.undoRemainingSeconds !== null
-      && view.undoRemainingSeconds > 0
-    ) {
+    if (request && view.canCancel) {
       actions.push(h(
         "button",
         {
           type: "button",
           className: "anw-voice-lifecycle__button",
-          disabled: !view.canCancel,
+          disabled: view.busy,
           onClick: () => props.onCancelDeletion(request.requestId),
         },
-        props.busyAction === "cancel" ? BUSY_LABELS.cancel : "撤销删除",
+        props.busyAction === "cancel"
+          ? BUSY_LABELS.cancel
+          : view.phase === "requested" ? "取消删除计划" : "撤销删除",
       ));
     }
 
     if (request && view.phase === "requested") {
-      actions.push(
-        h(
-          "button",
-          {
-            type: "button",
-            className: "anw-voice-lifecycle__button",
-            disabled: !view.canCancel,
-            onClick: () => props.onCancelDeletion(request.requestId),
-          },
-          props.busyAction === "cancel" ? BUSY_LABELS.cancel : "取消删除计划",
-        ),
-        h(
-          "button",
-          {
-            type: "button",
-            className: "anw-voice-lifecycle__button is-danger",
-            disabled: !view.canConfirm,
-            onClick: () => props.onConfirmDeletion(voiceLifecycleConfirmCommand(request)),
-          },
-          props.busyAction === "confirm" ? BUSY_LABELS.confirm : "确认删除音色",
-        ),
-      );
-    }
-
-    if (request && view.phase === "failed" && request.confirmedAt !== null) {
       actions.push(h(
         "button",
         {
           type: "button",
           className: "anw-voice-lifecycle__button is-danger",
-          disabled: !view.canRetry,
+          disabled: !view.canConfirm,
+          onClick: () => props.onConfirmDeletion(voiceLifecycleConfirmCommand(request)),
+        },
+        props.busyAction === "confirm" ? BUSY_LABELS.confirm : "确认删除音色",
+      ));
+    }
+
+    if (request && view.canRetry) {
+      actions.push(h(
+        "button",
+        {
+          type: "button",
+          className: "anw-voice-lifecycle__button is-danger",
+          disabled: view.busy,
           onClick: () => props.onRetryDeletion(request.requestId),
         },
         props.busyAction === "retry" ? BUSY_LABELS.retry : "重试删除",
@@ -332,31 +304,6 @@ export function createVoiceLifecyclePanel(
         : null,
       request && view.phase === "requested"
         ? createImpactSummary(React, request.impact, impactHeadingId)
-        : null,
-      request && view.phase === "requested"
-        ? h(
-          "div",
-          { className: "anw-voice-lifecycle__confirmation" },
-          h("label", { htmlFor: inputId }, `输入音色名称“${props.profile.displayName}”以确认`),
-          h(
-            "p",
-            { id: descriptionId },
-            "名称必须完全一致。确认后将进入不可撤销的物理删除阶段。",
-          ),
-          h("input", {
-            id: inputId,
-            type: "text",
-            value: confirmationText,
-            autoComplete: "off",
-            spellCheck: false,
-            "aria-describedby": descriptionId,
-            disabled: view.busy,
-            onChange: (event: ValueChangeEvent) => setConfirmationDraft({
-              scope,
-              value: event.target.value,
-            }),
-          }),
-        )
         : null,
       request ? createRequestNotice(React, request) : null,
       actions.length > 0

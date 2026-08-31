@@ -128,6 +128,7 @@ function capabilities(overrides: Partial<Record<FeatureCapability["key"], boolea
     "narration_product",
     "reading_settings",
     "preset_voice_source",
+    "character_voice_matching",
     "reference_clone",
     "voice_generator",
   ] as const;
@@ -353,7 +354,13 @@ describe("CharacterVoiceRoster", () => {
 
   it("reports every result when batch official assignment partially succeeds", async () => {
     const onMatchOfficialVoice = vi.fn(async (character: { characterId: string }) => {
-      if (character.characterId === CHARACTER_B) return { voiceName: "Xiaoyu" };
+      if (character.characterId === CHARACTER_B) {
+        return {
+          voiceName: "Xiaoyu",
+          presetId: "onnx.Xiaoyu",
+          selectionStillCurrent: true,
+        };
+      }
       throw new Error("模型暂时不可用");
     });
     const harness = createHarness();
@@ -363,7 +370,7 @@ describe("CharacterVoiceRoster", () => {
       onMatchOfficialVoice,
     });
     let tree = harness.render(Roster, batchProps);
-    (findButton(tree, "为未配置人物自动分配官方音色").props.onClick as () => void)();
+    (findButton(tree, "为未配置人物一键匹配并使用").props.onClick as () => void)();
     await settle();
     tree = harness.render(Roster, batchProps);
 
@@ -374,20 +381,24 @@ describe("CharacterVoiceRoster", () => {
   });
 
   it("falls back to one-click official assignment without pretending to generate a voice", async () => {
-    const onMatchOfficialVoice = vi.fn(async () => ({ voiceName: "Xiaoyu" }));
+    const onMatchOfficialVoice = vi.fn(async () => ({
+      voiceName: "Xiaoyu",
+      presetId: "onnx.Xiaoyu",
+      selectionStillCurrent: true,
+    }));
     const onGenerateAndUse = vi.fn();
     const harness = createHarness();
     const Roster = createCharacterVoiceRoster(harness.React);
     let tree = harness.render(Roster, props({ onMatchOfficialVoice, onGenerateAndUse }));
 
-    (findButton(tree, "自动分配官方音色").props.onClick as () => void)();
+    (findButton(tree, "根据人物卡匹配并使用").props.onClick as () => void)();
     await settle();
     tree = harness.render(Roster, props({ onMatchOfficialVoice, onGenerateAndUse }));
 
     expect(onMatchOfficialVoice).toHaveBeenCalledTimes(1);
     expect(onGenerateAndUse).not.toHaveBeenCalled();
-    expect(textContent(tree)).toContain("已使用 Xiaoyu");
-    expect(textContent(tree)).toContain("该操作不会冒充生成新音色");
+    expect(textContent(tree)).toContain("已匹配并使用 Xiaoyu");
+    expect(textContent(tree)).toContain("这不是新音色生成");
   });
 
   it("fails closed for permission/capability gaps and never pretends VoiceGenerator ran", () => {
@@ -401,13 +412,10 @@ describe("CharacterVoiceRoster", () => {
     const Roster = createCharacterVoiceRoster(harness.React);
     const tree = harness.render(Roster, props({ onGenerateAndUse }));
     const generateButtons = findAll(tree, (element) => (
-      element.type === "button" && textContent(element) === "自动分配官方音色"
+      element.type === "button" && textContent(element).includes("根据人物")
     ));
-    expect(generateButtons).toHaveLength(2);
-    expect(generateButtons.every((button) => button.props.disabled === true)).toBe(true);
-    expect(generateButtons[0].props.title).toContain("FEATURE_NOT_RELEASED");
-    expect(textContent(tree)).toContain("根据人物生成专属音色：人物专属音色生成暂不可用（FEATURE_NOT_RELEASED）");
-    (generateButtons[0].props.onClick as () => void)();
+    expect(generateButtons).toHaveLength(0);
+    expect(textContent(tree)).toContain("官方音色批量分配服务尚未接入");
     expect(onGenerateAndUse).not.toHaveBeenCalled();
   });
 

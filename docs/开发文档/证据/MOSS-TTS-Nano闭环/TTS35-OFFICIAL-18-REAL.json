@@ -1,0 +1,67 @@
+{
+  "schema_version": "tts35-official-18-real-evidence/1",
+  "captured_on": "2026-08-30",
+  "environment": "isolated-qwenpaw-18089-and-disposable-postgresql",
+  "model": {
+    "requested_model_id": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX+MOSS-Audio-Tokenizer-Nano-ONNX",
+    "actual_model_id": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX+MOSS-Audio-Tokenizer-Nano-ONNX",
+    "requested_revision": "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+    "actual_revision": "f52645cb467506d8e18e746ddd59482685b74e58+ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+    "model_fingerprint_sha256": "3c76f3e9e1381699c5555287cf66eeb023632d0c3ee94adc6d8ae1b1d455fd7d"
+  },
+  "preview_validation": {
+    "count": 18,
+    "successful_model_runs": 18,
+    "distinct_presets": 18,
+    "distinct_output_hashes": 18,
+    "media_attempt_model_run_hashes_closed": true,
+    "ephemeral_database_reset_after_capture": true,
+    "items": [
+      {"preset_id":"onnx.Junhao","preview_id":"f9612ff0-6470-5135-b02a-547e9189515c","asset_id":"6115a82d-38bd-5841-8fc5-570257b6e666","bytes":614444,"duration_ms":3200,"sha256":"23d53737f6d27d69025322fa3d00399df1b7c35e65cf60a4c0cf024a46c54e23"},
+      {"preset_id":"onnx.Zhiming","preview_id":"7a6c765a-ce1e-5677-941f-b45d9579c468","asset_id":"dd9915f0-765a-558c-9b31-28828c2029a8","bytes":660524,"duration_ms":3440,"sha256":"93c5447f7eb21ca68084826c7b08cfa9498428dfea2f23c19773d57313892a07"},
+      {"preset_id":"onnx.Weiguo","preview_id":"f94342ef-37a1-50d6-977a-0c9669424102","asset_id":"c89997e5-62e1-5aa5-beae-898169a9928a","bytes":752684,"duration_ms":3920,"sha256":"478fde28b335c45f18e66099baebf0d6b7cbe093b3bd6cfe0855d71ca10f1c0d"},
+      {"preset_id":"onnx.Xiaoyu","preview_id":"9fdfc269-48ae-5523-9780-ca683d056134","asset_id":"deb90cf1-e452-576d-83f1-2801672d5699","bytes":645164,"duration_ms":3360,"sha256":"b97e3f5d3d74f7b3985c2951c0d1cd6247915b308b43f33f7f70098f2c7645e6"},
+      {"preset_id":"onnx.Yuewen","preview_id":"c92b1c4a-d7cc-5cd2-835f-77aa1efcc093","asset_id":"75c05441-ba76-5c6d-b969-38983f081234","bytes":599084,"duration_ms":3120,"sha256":"fa2f62a78f59728b646a2ce8f0b85279ee0a28be93216f66ead53c4f930bfd7e"},
+      {"preset_id":"onnx.Lingyu","preview_id":"c5c1e3bd-76c2-5452-80c7-4658b338d17f","asset_id":"3b42707b-ee2d-563b-a102-db57b137a711","bytes":706604,"duration_ms":3680,"sha256":"aa8b3f6f971ca1e274d1e99b77b10c51f7e64576c0fb7eabb80145947750ad26"},
+      {"preset_id":"onnx.Trump","preview_id":"d9a034d2-0655-58c6-9757-687db9f0f668","asset_id":"a3fe30d3-a0dc-5db6-a0cb-b5319c47510e","bytes":783404,"duration_ms":4080,"sha256":"f701696a4be3997cc9cb1ff78d97db2fd7718fc0e5b7d181acb4fe533278ff12"},
+      {"preset_id":"onnx.Ava","preview_id":"d748a809-4385-513c-ac6b-f8a409eb2259","asset_id":"815ed879-29ab-56df-972b-f89b71672b22","bytes":768044,"duration_ms":4000,"sha256":"acb1fae34c6faf6bd4178a7666f7ee8f099948cc9f5c4e339284f1c1f0a9ceab"},
+      {"preset_id":"onnx.Bella","preview_id":"929a972d-2547-5d7b-9218-3677bab36646","asset_id":"69b41e42-80a1-5f24-9ac6-e5f6b76141dd","bytes":721964,"duration_ms":3760,"sha256":"ba6027494a7be9a9efdc65da955cb759b61d8f1b09438d7c19b88400302fb80c"},
+      {"preset_id":"onnx.Adam","preview_id":"f542b012-68db-5c9a-be19-5e7752462791","asset_id":"68c88e29-b0c7-5c2d-b029-0cfa2ab275bf","bytes":645164,"duration_ms":3360,"sha256":"fdd50ef80f87d4137c5e5be0b0197a56acfbf8e79db896deebcbc10b5dfa909a"},
+      {"preset_id":"onnx.Nathan","preview_id":"a2a60ad0-7963-5e04-acc5-07282e3d490b","asset_id":"eb0ca223-d450-5879-82da-017c670f64b0","bytes":906284,"duration_ms":4720,"sha256":"c2f4b91192a3e06901e9f6f931e4d1ebfa6ad0f03d29749f16795cf7e76b604b"},
+      {"preset_id":"onnx.Soyo","preview_id":"bbe089ea-00bd-54f2-814d-14e8842e418c","asset_id":"7163645e-6e72-571c-b0af-2f39deabf368","bytes":1367084,"duration_ms":7120,"sha256":"911c224d0c3b7399b47c133abe94b636dad015959ce0280560ee35cc2c698622"},
+      {"preset_id":"onnx.Saki","preview_id":"1527db7b-0d5e-50ab-a019-57082e4dee20","asset_id":"1d1bcf8b-da02-5b8d-b75c-90a01b591bb3","bytes":752684,"duration_ms":3920,"sha256":"1d3608a0d4bd93a6d85ae2bf5ee60cabf614660ead9221e8621696a5cd3b94ba"},
+      {"preset_id":"onnx.Mortis","preview_id":"12641e43-1c67-5195-b88e-5ea5b29500ff","asset_id":"2acc581d-5add-579b-a5e8-c0862dc28e92","bytes":752684,"duration_ms":3920,"sha256":"1fb7807aacc7fe4ebd4432f5930af872bab3716b9c0cc8c98f902c89cfae49d2"},
+      {"preset_id":"onnx.Umiri","preview_id":"96289bb3-0e2f-55c2-ac06-122fbce8c449","asset_id":"f5620a4c-4712-5cb0-8fb9-93ac4a9e796e","bytes":691244,"duration_ms":3600,"sha256":"378247c5790f2cec2ba33a8e1ed5159d274b30ba9de98ebab707ba0cf87fe9ef"},
+      {"preset_id":"onnx.Mei","preview_id":"658fda3c-6993-597d-8e2e-2e920bd1b345","asset_id":"4b45e7bd-ed6d-58ad-ae5e-1716a8c1bd3f","bytes":829484,"duration_ms":4320,"sha256":"1b69387cb15272656cfe907eb50fcd521658d77a3997434693e24ca7fbfd3260"},
+      {"preset_id":"onnx.Anon","preview_id":"950820af-5575-51f4-b27d-638dc13d77ca","asset_id":"d3332fa8-4533-5553-9e5e-242779fded06","bytes":1612844,"duration_ms":8400,"sha256":"3c7ad977c4991dc423d5abb246a46b75606beea6c23cfdc217b3ffd507156ac5"},
+      {"preset_id":"onnx.Arisa","preview_id":"80f750a3-a03d-5364-87d3-58e21aeac55c","asset_id":"8e2adfab-5981-5a98-8244-d4c35bc5eb8e","bytes":921644,"duration_ms":4800,"sha256":"9818748c638451bdbc7ad40559423461fe181c85bf8ed59547a952b672f1a1a6"}
+    ]
+  },
+  "direct_binding_validation": {
+    "fresh_database_head": "20260829_0034",
+    "novel_id": "57c5cdd2-e40e-566e-8dd8-624ed848dc56",
+    "count": 18,
+    "all_selection_still_current": true,
+    "final_settings_version": 18,
+    "items": [
+      {"preset_id":"onnx.Junhao","settings_version":1,"profile_id":"29d4801d-ead1-5648-8ad3-d0ccd75b18bc","version_id":"e9ce4aa5-23ee-5e57-a252-5b6602854517","language_mismatch":false},
+      {"preset_id":"onnx.Zhiming","settings_version":2,"profile_id":"8fdbf239-13bd-5642-92cf-91b5148be808","version_id":"8f806d95-57dc-5177-9b62-6f535acb28ef","language_mismatch":false},
+      {"preset_id":"onnx.Weiguo","settings_version":3,"profile_id":"89ba6429-7a72-5f10-8bd6-2b8f6f5abaf7","version_id":"821aace8-27b3-5b50-ab32-ea857d3f8ae4","language_mismatch":false},
+      {"preset_id":"onnx.Xiaoyu","settings_version":4,"profile_id":"4e6891e6-d3f1-5b6e-9f07-19ff20f4349a","version_id":"38870ac8-b839-5d39-8d84-57234b071912","language_mismatch":false},
+      {"preset_id":"onnx.Yuewen","settings_version":5,"profile_id":"b41fc884-f694-5186-99e8-edb1f76f319a","version_id":"df723b38-e4a5-51da-bf42-664ca90fa6ef","language_mismatch":false},
+      {"preset_id":"onnx.Lingyu","settings_version":6,"profile_id":"b827e91d-e674-52a6-a4f2-e38e8dd32f7c","version_id":"5b9781d2-8956-5874-b7a7-da7afb20ac4c","language_mismatch":false},
+      {"preset_id":"onnx.Trump","settings_version":7,"profile_id":"1f1f44a5-748a-5f4b-ac46-d6af770b6fce","version_id":"29bbb52f-7138-59c4-89c4-a01996cfbd0e","language_mismatch":true},
+      {"preset_id":"onnx.Ava","settings_version":8,"profile_id":"f1a56966-681c-5c4a-ad81-88e3dc67d313","version_id":"70b56434-35d0-573d-841c-673a843c48f8","language_mismatch":true},
+      {"preset_id":"onnx.Bella","settings_version":9,"profile_id":"ac807d0d-c28c-55da-a21c-dc8b9bab46b2","version_id":"847592ed-40f1-57e1-b9d2-bc685ca41b97","language_mismatch":true},
+      {"preset_id":"onnx.Adam","settings_version":10,"profile_id":"d1b848cb-df87-5d7a-bb03-f87575dba215","version_id":"9ea90bb5-ba6a-5478-9cb1-0aa6c85810c3","language_mismatch":true},
+      {"preset_id":"onnx.Nathan","settings_version":11,"profile_id":"6e166eef-a03c-598c-a7f6-ec2ffc84d3d6","version_id":"a627ab4e-7062-5210-8520-059b1d0ba00e","language_mismatch":true},
+      {"preset_id":"onnx.Soyo","settings_version":12,"profile_id":"505e04e6-d7e4-5de5-992b-be8e07be2baa","version_id":"9b07e1c9-fe93-5e02-9546-83c3cecdbae1","language_mismatch":true},
+      {"preset_id":"onnx.Saki","settings_version":13,"profile_id":"571e2325-a823-5732-81a8-2864ad0d4b0f","version_id":"6e05ef7f-6ddc-55e7-a25a-ccf4eee13db8","language_mismatch":true},
+      {"preset_id":"onnx.Mortis","settings_version":14,"profile_id":"ca16b00e-5581-53d9-839e-1e47ab981511","version_id":"56b22787-d0b6-5ada-ae50-0ae523089723","language_mismatch":true},
+      {"preset_id":"onnx.Umiri","settings_version":15,"profile_id":"b17e5c0f-aeaf-508f-b158-2ac3fc0ec7e3","version_id":"6d8df5e3-fc26-5f9d-96f9-be81b07bc106","language_mismatch":true},
+      {"preset_id":"onnx.Mei","settings_version":16,"profile_id":"0f13db36-a145-5888-8feb-e83ed244f0e7","version_id":"99be18b5-7b59-5e67-b2ad-f0c7b4562c62","language_mismatch":true},
+      {"preset_id":"onnx.Anon","settings_version":17,"profile_id":"f58d9d66-0518-5935-b940-7fdf16ab725e","version_id":"7a00cf97-5853-58c0-9e49-16638c4e7cdc","language_mismatch":true},
+      {"preset_id":"onnx.Arisa","settings_version":18,"profile_id":"a8540539-49c8-517c-8b58-e627d1b99c34","version_id":"b3af3b70-866b-5177-9a7f-6fc0ce62d99a","language_mismatch":true}
+    ]
+  }
+}

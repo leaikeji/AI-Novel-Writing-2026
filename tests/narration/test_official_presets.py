@@ -12,17 +12,14 @@ from backend.narration import schemas as wire
 from backend.narration.official_presets import (
     OFFICIAL_PRESET_MANIFEST_SHA256,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    OFFICIAL_PRESET_IDS,
     OFFICIAL_PRESETS,
     CANONICAL_CHAPTER_VERIFIED_PRESET_IDS,
-    PRODUCT_OFFICIAL_PRESET_IDS,
-    PRODUCT_OFFICIAL_PRESETS,
-    PRODUCT_PRESET_OUT_OF_SCOPE,
     official_preset_decode_parameters_fingerprint,
     official_preset_direct_version_fingerprint,
     official_preset_validation_tier,
     official_preset_version_fingerprint,
     require_official_preset,
-    require_product_official_preset,
     validate_official_preset_provenance,
     validate_official_version_evidence,
 )
@@ -95,21 +92,11 @@ def test_low_level_inventory_and_get_by_id_still_cover_all_18_presets() -> None:
     assert trump.manifest_voice == "Trump"
     assert validate_official_preset_provenance(trump.provenance()) is trump
 
+    assert OFFICIAL_PRESET_IDS == tuple(preset.preset_id for preset in OFFICIAL_PRESETS)
     assert tuple(
-        require_product_official_preset(preset_id).preset_id
-        for preset_id in PRODUCT_OFFICIAL_PRESET_IDS
-    ) == PRODUCT_OFFICIAL_PRESET_IDS
-    assert all(
-        require_product_official_preset(preset_id).language == "zh-CN"
-        for preset_id in PRODUCT_OFFICIAL_PRESET_IDS
-    )
-    non_product_ids = {
-        preset.preset_id for preset in OFFICIAL_PRESETS
-    } - set(PRODUCT_OFFICIAL_PRESET_IDS)
-    assert len(non_product_ids) == 12
-    for preset_id in non_product_ids:
-        with pytest.raises(ValueError, match=PRODUCT_PRESET_OUT_OF_SCOPE):
-            require_product_official_preset(preset_id)
+        require_official_preset(preset_id).preset_id for preset_id in OFFICIAL_PRESET_IDS
+    ) == OFFICIAL_PRESET_IDS
+    assert {preset.language for preset in OFFICIAL_PRESETS} == {"zh-CN", "en", "ja-JP"}
 
 
 def test_provenance_tampering_and_name_guessing_fail_closed() -> None:

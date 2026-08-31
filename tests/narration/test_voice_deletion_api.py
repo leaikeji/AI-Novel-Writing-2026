@@ -3,14 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-import pytest
-from fastapi import HTTPException
 from fastapi.routing import APIRoute
 
-from backend.narration.narration_api import (
-    PRIVATE_VOICE_DELETION_RELEASED,
+from backend.narration.voice_features_api import (
     PrivateVoiceDeletionRequestResource,
-    _require_private_voice_deletion_release,
     router,
 )
 from backend.narration.playback_api import (
@@ -25,73 +21,86 @@ def test_private_voice_deletion_routes_are_single_layer_commands() -> None:
         route.path: route.methods
         for route in router.routes
         if isinstance(route, APIRoute)
-        and ("voice-deletion" in route.path or "discard-unreferenced" in route.path)
+        and ("voice-deletion" in route.path or "private-voice-lifecycle" in route.path)
     }
 
     assert methods_by_path == {
-        "/voice-profiles/{profile_id}/discard-unreferenced": {"POST"},
-        "/voice-deletion-requests/{request_id}": {"GET"},
-        "/voice-deletion-requests/{request_id}/confirm": {"POST"},
-        "/voice-deletion-requests/{request_id}/cancel": {"POST"},
-        "/voice-deletion-requests/{request_id}/retry": {"POST"},
+        "/novels/{novel_id}/private-voice-lifecycle": {"GET"},
+        "/novels/{novel_id}/voice-deletion-requests/{request_id}": {"GET"},
+        "/novels/{novel_id}/voice-deletion-requests/{request_id}/confirm": {"POST"},
+        "/novels/{novel_id}/voice-deletion-requests/{request_id}/cancel": {"POST"},
+        "/novels/{novel_id}/voice-deletion-requests/{request_id}/retry": {"POST"},
     }
     create_route = next(
         route
         for route in router.routes
         if isinstance(route, APIRoute)
-        and route.path == "/voice-profiles/{profile_id}/deletion-requests"
+        and route.path
+        == "/novels/{novel_id}/voice-profiles/{profile_id}/deletion-requests"
     )
     assert create_route.methods == {"POST"}
 
 
-def test_private_voice_deletion_routes_fail_closed_until_reconciler_is_released() -> None:
-    assert PRIVATE_VOICE_DELETION_RELEASED is False
-
-    with pytest.raises(HTTPException) as caught:
-        _require_private_voice_deletion_release()
-
-    assert caught.value.status_code == 503
-    assert caught.value.detail == {
-        "contract_version": "narration-production-api/1",
-        "code": "NARRATION_PRODUCTION_BACKEND_NOT_INSTALLED",
-        "message": "私人音色删除尚未完成后台恢复闭环，当前不对外开放。",
-        "retryable": False,
-        "field": None,
-        "current_version": None,
-    }
-
-
 def test_private_voice_deletion_resource_keeps_backup_and_impact_truthful() -> None:
     now = datetime.now(timezone.utc)
+    profile_id = uuid4()
+    novel_id = uuid4()
     resource = PrivateVoiceDeletionRequestResource.model_validate(
         {
             "request_id": uuid4(),
-            "profile_id": uuid4(),
-            "novel_id": uuid4(),
+            "profile_id": profile_id,
+            "novel_id": novel_id,
             "command": "true_delete_private_voice",
             "state": "requested",
+            "server_now": now,
             "expected_profile_version": 3,
             "impact_digest": "a" * 64,
             "impact": {
+                "schema_version": "private-voice-deletion-impact/2",
+                "profile_id": profile_id,
+                "novel_id": novel_id,
+                "profile_version": 3,
+                "voice_version_ids": [uuid4()],
+                "current_narrator_count": 0,
+                "character_binding_count": 0,
+                "anonymous_speaker_count": 0,
+                "generic_slot_count": 0,
                 "historical_edition_count": 2,
+                "render_count": 0,
+                "export_count": 0,
+                "current_reference_count": 0,
+                "historical_reference_count": 2,
+                "reference_count": 2,
+                "asset_count": 4,
+                "total_bytes": 1024,
+                "active_job_count": 0,
                 "historical_audio_consequence": "unavailable_private_voice_deleted",
                 "external_backup_status": "unmanaged",
+                "impact_summary": "将使 2 项历史朗读证据不可播放，并删除 4 个资产。",
             },
             "execute_after": None,
             "impact_expires_at": now,
+            "eligibility": "referenced",
+            "reference_count": 2,
             "asset_count": 4,
             "total_bytes": 1024,
             "external_backup_status": "unmanaged",
             "confirmed_at": None,
             "cancelled_at": None,
             "completed_at": None,
+            "superseded_at": None,
+            "job_drain_started_at": None,
+            "job_drain_deadline": None,
             "failure_code": None,
+            "cancellable": True,
+            "retryable": False,
+            "terminal": False,
         }
     )
 
-    assert resource.contract_version == "private-voice-deletion/1"
+    assert resource.contract_version == "private-voice-deletion/2"
     assert resource.external_backup_status == "unmanaged"
-    assert resource.impact["historical_audio_consequence"] == (
+    assert resource.impact.historical_audio_consequence == (
         "unavailable_private_voice_deleted"
     )
 

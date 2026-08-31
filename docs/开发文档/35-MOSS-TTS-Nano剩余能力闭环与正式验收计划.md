@@ -1,10 +1,10 @@
 # 开发计划 35（修订定稿）：MOSS-TTS-Nano 全功能闭环
 
-状态：**2026-08-29 已获用户批准进入施工。** 当前源码施工受计划 36 的稳定提交与迁移 `20260829_0033` 前置门禁约束；门禁满足前只允许开展只读事实冻结与审计，不得修改计划 36 所有权文件。本文中的 `TTS35-*` 工作包 ID 只属于本计划。
+状态：**2026-08-30 已完成源码候选、`0034`、隔离 PostgreSQL／真实 Nano／四视口复验与最终自查，并以提交 `8046b9958c14a05d62b292ae4fa4fd91763a7efe` 推送至 `codex/tts35-core`；随后已与计划 36/37 主线集成并部署至长期 `18088`。** `CORE-CANDIDATE=PASS`、`CORE-DEPLOY=PASS`，长期数据库为 `0034`，PawApp、Sidecar 与 PostgreSQL 均 healthy，朗读 technical／production readiness 均为 ready；人物匹配真实成功点击仍需在存在 active `ai-novel-writer` 的正式浏览器流程补验，因此 `CORE-FINAL=HOLD_RUNTIME_ACCEPTANCE`。原始 VoiceGenerator 组合路径的 `VG-FINAL=BLOCKED_HARDWARE` 保留，16 GiB 优化拓扑由[计划 40](./40-MOSS-VoiceGenerator-16GiB安全运行与正式人物音色闭环计划.md)独立重新验证。完整裁决见 [TTS35-FINAL](./证据/MOSS-TTS-Nano闭环/TTS35-FINAL-RECHECK.md)与[计划 40 部署记录](./证据/计划40/VG40-CORE-DEPLOY.md)。本文中的 `TTS35-*` 工作包 ID 只属于本计划。
 
 ## 一、目标与完成口径
 
-当前事实：
+立项时事实：
 
 - 计划 33 已提交并推送，长期服务健康，固定目录的 18 个官方音色均可查询、试听和直接绑定。
 - 新朗读设置页、人物配音表和播放器已有实现，但仍需真实浏览器与章节朗读正式验收。
@@ -268,3 +268,22 @@ PostgreSQL 专项必须使用明确的 `TTS_TEST_DATABASE_URL`／`TTS_VOICE_DELE
 - 所有子代理路径、测试、共享锁和汇合顺序均已冻结。
 
 终审裁决：`CORE` 方案已具备可施工条件，但源码施工必须等待计划 36 的 `0033` 稳定提交；`VG` 仍受硬件和模型下载授权约束。Git 提交与推送仍需用户在施工完成后单独明确授权。
+
+## 八、实施结果与二次自查（2026-08-30）
+
+计划 36 已以稳定提交 `94f6b6644df363234969f0e6882e1b8c3fb1229e` 满足前置门禁；计划 35 在独立 `codex/tts35-core` worktree 施工，没有覆盖计划 36 或主工作区改动。
+
+实施结果：
+
+- `0034` 线性顺接 `0033`，只变更 schema／约束／trigger／sentinel；未执行模型、网络或文件删除。
+- 三项能力由唯一 readiness provider 统一投影，`0032` 改为 TTS 最低祖先迁移语义，合法后续 head 不再误报过期。
+- 18 官方音色全部完成真实合成和逐项直接绑定；跨语言只有提示，没有版权、试听、语言或质量确认门禁。
+- 人物卡匹配、高级调音、私人音色删除、五区设置页和响应式播放器均已接线；老六音色限制、UUID 哈希分配、旧删除路由、常量门禁和重复 DTO 已删除。
+- 全量 Python 3383 项、前端 965 项、typecheck、build、打包、契约、Compose、迁移往返和 `git diff --check` 通过；真实证据、命令身份、音频 hash 与截图见 [TTS35-FINAL](./证据/MOSS-TTS-Nano闭环/TTS35-FINAL-RECHECK.md)及 [18 音色机器证据](./证据/MOSS-TTS-Nano闭环/TTS35-OFFICIAL-18-REAL.json)。
+
+二次自查保留两个不得掩盖的边界：
+
+1. 隔离 QwenPaw 没有 active `ai-novel-writer`，因此浏览器只真实验证了人物匹配失败后的“一键重试＋手动音色库”；成功分析、确定性选择、CAS 应用和漂移由后端自动化覆盖，长期部署后仍需补一次真实成功点击。
+2. 当前浏览器控制接口无法可靠向 React range 注入一次真实音量变化；播放器音量控件、可见值和前端处理器通过，真实浏览器 mutation 保持未冒充通过。
+
+因此本轮只裁决 `CORE-CANDIDATE=PASS`。候选已提交并推送，但在完成当前主线集成、长期备份、`0034` 迁移、同包 hash 安装、健康检查和人物匹配成功补验前，`CORE-FINAL` 保持 `HOLD_DEPLOY`；原始 VoiceGenerator 组合路径的 `VG-FINAL=BLOCKED_HARDWARE` 保留，16 GiB 优化拓扑只按计划 40 的真实测量重新裁决。

@@ -36,13 +36,14 @@ from .script_contracts import (
 )
 
 
-LOCAL_SPEAKER_RULESET_VERSION: Final = "local-speaker-rules/1"
+LOCAL_SPEAKER_RULESET_VERSION: Final = "local-speaker-rules/2"
 
 _SPEECH_VERBS = (
     "开口说道",
     "开口说",
     "喃喃道",
     "回答道",
+    "回应道",
     "说道",
     "问道",
     "喊道",
@@ -52,6 +53,7 @@ _SPEECH_VERBS = (
     "吼道",
     "喝道",
     "回答",
+    "回应",
     "低语",
     "耳语",
     "嘀咕",
@@ -84,6 +86,7 @@ _DELIVERY_MODIFIERS = (
     "齐声",
 )
 _ACTION_VERBS = (
+    "笑了一下",
     "皱眉",
     "点头",
     "摇头",
@@ -95,6 +98,9 @@ _ACTION_VERBS = (
     "闭眼",
     "看向",
     "看着",
+    "望向",
+    "笑了",
+    "把",
 )
 
 _LABEL = r"(?P<label>[^\r\n，。！？!?；;：:“”「」『』\"'（）()<>《》]{1,32}?)"
@@ -108,7 +114,7 @@ _SUFFIX_CUE = re.compile(
     rf"[”」』\"']\s*[，,。.!?！？]?\s*{_LABEL}\s*{_MODIFIER}\s*地?\s*{_VERB}\s*[。.!?！？]?\s*$"
 )
 _ACTION_BEFORE_DIALOGUE = re.compile(
-    rf"^\s*{_LABEL}\s*{_ACTION}[^\n。！？]{{0,16}}[。！？]\s*[“「『\"']"
+    rf"^\s*{_LABEL}\s*{_ACTION}[^\n。！？：:]{{0,24}}[。！？：:]\s*[“「『\"']"
 )
 
 _ANONYMOUS_MARKERS = (

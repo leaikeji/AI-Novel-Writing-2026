@@ -34,9 +34,9 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from backend.narration.official_presets import (  # noqa: E402
     OFFICIAL_PRESET_MAX_NEW_FRAMES,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    OFFICIAL_PRESET_IDS,
     OFFICIAL_PRESET_RUNTIME_INITIAL_SEED,
     OFFICIAL_PRESET_SAMPLE_MODE,
-    PRODUCT_OFFICIAL_PRESET_IDS,
     official_preset_version_fingerprint,
 )
 from scripts.tts.provision_validation_token import (  # noqa: E402
@@ -394,6 +394,8 @@ class T4KDataClient:
     def _catalog(self, selected: Sequence[str]) -> None:
         payload = self._request("GET", self._voice_path("/voice-presets"))
         assert isinstance(payload, dict)
+        if payload.get("schema_version") != "moss-tts-official-preset-catalog/2.0":
+            raise T4KDataError("OFFICIAL_PRESET_CATALOG_INVALID")
         items = payload.get("items")
         if type(items) is not list:
             raise T4KDataError("OFFICIAL_PRESET_CATALOG_INVALID")
@@ -405,7 +407,7 @@ class T4KDataClient:
             if type(preset_id) is not str or preset_id in catalog:
                 raise T4KDataError("OFFICIAL_PRESET_CATALOG_INVALID")
             catalog[preset_id] = raw
-        if tuple(catalog) != PRODUCT_OFFICIAL_PRESET_IDS:
+        if tuple(catalog) != OFFICIAL_PRESET_IDS:
             raise T4KDataError("OFFICIAL_PRESET_CATALOG_INVALID")
         for preset_id in selected:
             item = catalog.get(preset_id)
@@ -827,7 +829,7 @@ class T4KDataClient:
         if (
             len(presets) != 3
             or len(set(presets)) != 3
-            or any(preset not in PRODUCT_OFFICIAL_PRESET_IDS for preset in presets)
+            or any(preset not in OFFICIAL_PRESET_IDS for preset in presets)
         ):
             raise T4KDataError("OFFICIAL_PRESETS_INVALID")
         if type(timeout_seconds) is not int or not 30 <= timeout_seconds <= 3600:
@@ -964,7 +966,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--document-id", required=True)
     parser.add_argument("--lin-wan-character-id", required=True)
     parser.add_argument("--shen-chuan-character-id", required=True)
-    choices = PRODUCT_OFFICIAL_PRESET_IDS
+    choices = OFFICIAL_PRESET_IDS
     parser.add_argument("--narrator-preset", choices=choices, default=DEFAULT_PRESETS[0])
     parser.add_argument("--lin-wan-preset", choices=choices, default=DEFAULT_PRESETS[1])
     parser.add_argument("--shen-chuan-preset", choices=choices, default=DEFAULT_PRESETS[2])

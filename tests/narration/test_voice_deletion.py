@@ -10,6 +10,7 @@ import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -23,18 +24,23 @@ from backend.models import (
     AssetTombstone,
     MediaAsset,
     Novel,
+    NovelNarrationSettings,
     VoiceDeletionAssetPlan,
     VoiceProfile,
     VoiceProfileVersion,
     VoiceRightsRecord,
 )
 from backend.narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
+from backend.narration.services import NarrationScopeMismatch
 from backend.narration.storage import NarrationStorage
 from backend.narration.voice_deletion import (
+    WAITING_FOR_JOBS,
     VoiceDeletionConflict,
     VoiceDeletionImpact,
     VoiceDeletionService,
+    _request_snapshot,
 )
+from backend.narration.voice_lifecycle import PrivateVoiceLifecycleService
 from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
 
 
@@ -68,7 +74,71 @@ def test_impact_payload_exposes_consequences_without_private_text() -> None:
     )
     assert payload["external_backup_status"] == "unmanaged"
     assert payload["asset_count"] == 1
+    assert payload["reference_count"] == 6
+    assert payload["schema_version"] == "private-voice-deletion-impact/2"
     assert "description" not in payload
+
+
+def _request_row(*, now: datetime, state: str, failure_code: str | None = None):  # type: ignore[no-untyped-def]
+    return SimpleNamespace(
+        id=uuid4(),
+        voice_profile_id=uuid4(),
+        novel_id=uuid4(),
+        command="true_delete_private_voice",
+        state=state,
+        expected_profile_version=2,
+        impact_digest="a" * 64,
+        impact_snapshot_json={
+            "schema_version": "private-voice-deletion-impact/2",
+            "reference_count": 2,
+            "asset_count": 1,
+            "total_bytes": 42,
+        },
+        execute_after=now + timedelta(seconds=30),
+        impact_expires_at=now + timedelta(minutes=15),
+        asset_count=1,
+        total_bytes=42,
+        external_backup_status="unmanaged",
+        confirmed_at=None,
+        cancelled_at=None,
+        completed_at=None,
+        superseded_at=None,
+        job_drain_started_at=None,
+        job_drain_deadline=None,
+        failure_code=failure_code,
+    )
+
+
+def test_request_projection_uses_server_time_and_monotonic_operation_flags() -> None:
+    now = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
+    grace = _request_snapshot(_request_row(now=now, state="grace_pending"), now=now)
+    assert grace.server_now == now
+    assert grace.cancellable is True
+    assert grace.retryable is False
+    assert grace.terminal is False
+    assert grace.eligibility == "referenced"
+
+    waiting_row = _request_row(now=now, state="failed", failure_code=WAITING_FOR_JOBS)
+    waiting_row.confirmed_at = now
+    waiting_row.job_drain_started_at = now
+    waiting_row.job_drain_deadline = now + timedelta(minutes=5)
+    waiting = _request_snapshot(waiting_row, now=now)
+    assert waiting.cancellable is True
+    assert waiting.retryable is True
+    assert waiting.terminal is False
+
+    safety = _request_snapshot(
+        _request_row(
+            now=now,
+            state="failed",
+            failure_code="VOICE_DELETE_FILE_IDENTITY_INVALID",
+        ),
+        now=now,
+    )
+    assert safety.cancellable is False
+    assert safety.retryable is False
+    assert safety.terminal is True
+    assert safety.eligibility == "blocked"
 
 
 def test_service_rejects_bad_idempotency_key_before_opening_database() -> None:
@@ -80,9 +150,9 @@ def test_service_rejects_bad_idempotency_key_before_opening_database() -> None:
 
     with pytest.raises(ValueError, match="idempotency"):
         service.create_request(
+            novel_id=uuid4(),
             profile_id=uuid4(),
             expected_profile_version=1,
-            discard_unreferenced=False,
             idempotency_key="short",
             actor="local-owner",
         )
@@ -101,13 +171,14 @@ def test_service_rejects_invalid_execution_actor_before_opening_database(
     with pytest.raises(ValueError, match="actor"):
         if operation == "confirm":
             service.confirm(
-                uuid4(),
+                novel_id=uuid4(),
+                request_id=uuid4(),
                 expected_profile_version=1,
                 impact_digest="a" * 64,
                 actor="   ",
             )
         else:
-            service.retry(uuid4(), actor="   ")
+            service.retry(novel_id=uuid4(), request_id=uuid4(), actor="   ")
 
 
 def _postgres_url() -> str:
@@ -164,7 +235,8 @@ def _seed_profile(
     *,
     source_type: str,
     with_preview: bool,
-) -> tuple[UUID, UUID | None, str | None]:
+    with_current_reference: bool = False,
+) -> tuple[UUID, UUID, UUID | None, str | None]:
     now = datetime.now(timezone.utc)
     asset_id: UUID | None = None
     storage_path: str | None = None
@@ -267,7 +339,18 @@ def _seed_profile(
         session.flush()
         profile.current_version_id = version.id
         profile.version = 2
-        return profile.id, asset_id, storage_path
+        if with_current_reference:
+            session.add(
+                NovelNarrationSettings(
+                    id=uuid4(),
+                    novel_id=novel.id,
+                    narrator_profile_id=profile.id,
+                    narrator_version_id=version.id,
+                    settings_json={},
+                    version=1,
+                )
+            )
+        return novel.id, profile.id, asset_id, storage_path
 
 
 def test_postgres_private_voice_delete_unlinks_and_tombstones_exact_asset(
@@ -275,8 +358,12 @@ def test_postgres_private_voice_delete_unlinks_and_tombstones_exact_asset(
     tmp_path: Path,
 ) -> None:
     storage = _storage(tmp_path)
-    profile_id, asset_id, storage_path = _seed_profile(
-        deletion_engine, storage, source_type="generated", with_preview=True
+    novel_id, profile_id, asset_id, storage_path = _seed_profile(
+        deletion_engine,
+        storage,
+        source_type="generated",
+        with_preview=True,
+        with_current_reference=True,
     )
     assert asset_id is not None and storage_path is not None
     service = VoiceDeletionService(
@@ -286,14 +373,17 @@ def test_postgres_private_voice_delete_unlinks_and_tombstones_exact_asset(
     )
 
     request = service.create_request(
+        novel_id=novel_id,
         profile_id=profile_id,
         expected_profile_version=2,
-        discard_unreferenced=False,
         idempotency_key=f"delete-{uuid4()}",
         actor="local-owner",
     )
+    assert request.command == "true_delete_private_voice"
+    assert request.state == "requested"
     completed = service.confirm(
-        request.request_id,
+        novel_id=novel_id,
+        request_id=request.request_id,
         expected_profile_version=2,
         impact_digest=request.impact_digest,
         actor="local-owner",
@@ -317,6 +407,9 @@ def test_postgres_private_voice_delete_unlinks_and_tombstones_exact_asset(
         assert asset is not None and asset.state == "deleted"
         assert plan is not None and plan.state == "finalized"
         assert tombstone is not None and tombstone.original_asset_id == asset_id
+    assert PrivateVoiceLifecycleService(
+        sessionmaker(deletion_engine, expire_on_commit=False)
+    ).list_profiles(novel_id=novel_id).items == ()
     assert not storage.media_path_exists(storage_path)
 
 
@@ -329,29 +422,34 @@ def test_postgres_grace_cancel_and_official_profile_rejection(
     service = VoiceDeletionService(
         factory, storage=storage, digest_keyring=TEST_DIGEST_KEYRING
     )
-    private_id, _asset_id, _path = _seed_profile(
+    private_novel_id, private_id, _asset_id, _path = _seed_profile(
         deletion_engine, storage, source_type="generated", with_preview=False
     )
     request = service.create_request(
+        novel_id=private_novel_id,
         profile_id=private_id,
         expected_profile_version=2,
-        discard_unreferenced=True,
         idempotency_key=f"discard-{uuid4()}",
         actor="local-owner",
     )
     assert request.state == "grace_pending"
+    assert request.command == "discard_unreferenced_private_voice"
     assert request.execute_after is not None
     assert request.execute_after > datetime.now(timezone.utc) + timedelta(seconds=20)
-    assert service.cancel(request.request_id, actor="local-owner").state == "cancelled"
+    assert service.cancel(
+        novel_id=private_novel_id,
+        request_id=request.request_id,
+        actor="local-owner",
+    ).state == "cancelled"
 
-    official_id, _asset_id, _path = _seed_profile(
+    official_novel_id, official_id, _asset_id, _path = _seed_profile(
         deletion_engine, storage, source_type="preset", with_preview=False
     )
     with pytest.raises(VoiceDeletionConflict, match="official or mixed-source"):
         service.create_request(
+            novel_id=official_novel_id,
             profile_id=official_id,
             expected_profile_version=2,
-            discard_unreferenced=True,
             idempotency_key=f"official-{uuid4()}",
             actor="local-owner",
         )
@@ -370,25 +468,119 @@ def test_postgres_expired_grace_cannot_be_undone_and_can_complete(
     service = VoiceDeletionService(
         factory, storage=storage, digest_keyring=TEST_DIGEST_KEYRING
     )
-    profile_id, _asset_id, _path = _seed_profile(
+    novel_id, profile_id, _asset_id, _path = _seed_profile(
         deletion_engine, storage, source_type="generated", with_preview=False
     )
     request = service.create_request(
+        novel_id=novel_id,
         profile_id=profile_id,
         expected_profile_version=2,
-        discard_unreferenced=True,
         idempotency_key=f"expire-{uuid4()}",
         actor="local-owner",
     )
     with pytest.raises(VoiceDeletionConflict, match="undo window has expired"):
-        service.cancel(request.request_id, actor="local-owner")
+        service.cancel(
+            novel_id=novel_id,
+            request_id=request.request_id,
+            actor="local-owner",
+        )
     completed = service.confirm(
-        request.request_id,
+        novel_id=novel_id,
+        request_id=request.request_id,
         expected_profile_version=2,
         impact_digest=request.impact_digest,
         actor="local-owner",
     )
     assert completed.state == "completed"
+
+
+def test_postgres_profile_drift_supersedes_and_releases_the_active_slot(
+    deletion_engine: Engine,
+    tmp_path: Path,
+) -> None:
+    storage = _storage(tmp_path)
+    factory = sessionmaker(deletion_engine, expire_on_commit=False)
+    service = VoiceDeletionService(
+        factory,
+        storage=storage,
+        digest_keyring=TEST_DIGEST_KEYRING,
+    )
+    novel_id, profile_id, _asset_id, _path = _seed_profile(
+        deletion_engine,
+        storage,
+        source_type="generated",
+        with_preview=False,
+        with_current_reference=True,
+    )
+    request = service.create_request(
+        novel_id=novel_id,
+        profile_id=profile_id,
+        expected_profile_version=2,
+        idempotency_key=f"drift-{uuid4()}",
+        actor="local-owner",
+    )
+    with Session(deletion_engine, expire_on_commit=False) as session, session.begin():
+        profile = session.get(VoiceProfile, profile_id)
+        assert profile is not None
+        profile.version = 3
+
+    superseded = service.confirm(
+        novel_id=novel_id,
+        request_id=request.request_id,
+        expected_profile_version=2,
+        impact_digest=request.impact_digest,
+        actor="local-owner",
+    )
+    assert superseded.state == "superseded"
+    assert superseded.failure_code == "VOICE_DELETE_PROFILE_CHANGED"
+    assert superseded.terminal is True
+    assert superseded.superseded_at is not None
+
+    replacement = service.create_request(
+        novel_id=novel_id,
+        profile_id=profile_id,
+        expected_profile_version=3,
+        idempotency_key=f"replacement-{uuid4()}",
+        actor="local-owner",
+    )
+    assert replacement.request_id != request.request_id
+    assert replacement.state == "requested"
+
+
+def test_postgres_request_scope_is_checked_against_the_url_novel(
+    deletion_engine: Engine,
+    tmp_path: Path,
+) -> None:
+    storage = _storage(tmp_path)
+    service = VoiceDeletionService(
+        sessionmaker(deletion_engine, expire_on_commit=False),
+        storage=storage,
+        digest_keyring=TEST_DIGEST_KEYRING,
+    )
+    novel_id, profile_id, _asset_id, _path = _seed_profile(
+        deletion_engine,
+        storage,
+        source_type="generated",
+        with_preview=False,
+    )
+    other_novel_id, _other_profile, _other_asset, _other_path = _seed_profile(
+        deletion_engine,
+        storage,
+        source_type="generated",
+        with_preview=False,
+    )
+    request = service.create_request(
+        novel_id=novel_id,
+        profile_id=profile_id,
+        expected_profile_version=2,
+        idempotency_key=f"scope-{uuid4()}",
+        actor="local-owner",
+    )
+    with pytest.raises(NarrationScopeMismatch, match="requested novel"):
+        service.get_request(
+            novel_id=other_novel_id,
+            request_id=request.request_id,
+        )
 
 
 @pytest.mark.parametrize(
@@ -404,8 +596,12 @@ def test_postgres_crash_boundaries_resume_the_same_frozen_plan(
     from backend.narration import voice_deletion as module
 
     storage = _storage(tmp_path)
-    profile_id, asset_id, storage_path = _seed_profile(
-        deletion_engine, storage, source_type="generated", with_preview=True
+    novel_id, profile_id, asset_id, storage_path = _seed_profile(
+        deletion_engine,
+        storage,
+        source_type="generated",
+        with_preview=True,
+        with_current_reference=True,
     )
     assert asset_id is not None and storage_path is not None
     service = VoiceDeletionService(
@@ -414,9 +610,9 @@ def test_postgres_crash_boundaries_resume_the_same_frozen_plan(
         digest_keyring=TEST_DIGEST_KEYRING,
     )
     request = service.create_request(
+        novel_id=novel_id,
         profile_id=profile_id,
         expected_profile_version=2,
-        discard_unreferenced=False,
         idempotency_key=f"crash-{uuid4()}",
         actor="local-owner",
     )
@@ -451,7 +647,8 @@ def test_postgres_crash_boundaries_resume_the_same_frozen_plan(
 
     with pytest.raises(OSError, match="injected"):
         service.confirm(
-            request.request_id,
+            novel_id=novel_id,
+            request_id=request.request_id,
             expected_profile_version=2,
             impact_digest=request.impact_digest,
             actor="local-owner",
@@ -460,20 +657,27 @@ def test_postgres_crash_boundaries_resume_the_same_frozen_plan(
     if crash_boundary == "before_unlink":
         assert storage.media_path_exists(storage_path)
         monkeypatch.setattr(storage, "delete_media_verified", original)
-        completed = service.retry(request.request_id, actor="local-owner")
+        completed = service.retry(
+            novel_id=novel_id,
+            request_id=request.request_id,
+            actor="local-owner",
+        )
     elif crash_boundary == "after_unlink_before_finalize":
         assert not storage.media_path_exists(storage_path)
         monkeypatch.setattr(
             module, "finalize_voice_deletion_asset_in_session", original
         )
-        completed = service.retry(request.request_id, actor="local-owner")
+        completed = service.retry(
+            novel_id=novel_id,
+            request_id=request.request_id,
+            actor="local-owner",
+        )
     else:
         assert not storage.media_path_exists(storage_path)
         monkeypatch.setattr(VoiceDeletionService, "_complete_request", original)
-        completed = service.confirm(
-            request.request_id,
-            expected_profile_version=2,
-            impact_digest=request.impact_digest,
+        completed = service.retry(
+            novel_id=novel_id,
+            request_id=request.request_id,
             actor="local-owner",
         )
 

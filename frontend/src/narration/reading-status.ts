@@ -206,7 +206,7 @@ export function createReadingStatus(
       ["隐私模式", model.privacyLabel, model.reviewLabel],
       ["磁盘", model.diskLabel, `可用 ${model.diskPercentFree}%`],
       ["派生缓存", model.cacheLabel, `待处理任务 ${props.overview.cache.pending_job_count}`],
-      ["人物专属音色", model.characterCoverageLabel, "已锁定 / 全部人物"],
+      ["人物配音", model.characterCoverageLabel, "已锁定 / 全部人物"],
       ["制作状态", model.productionLabel, `失败任务 ${props.overview.coverage.failed_job_count}`],
     ] as const;
     return h(
