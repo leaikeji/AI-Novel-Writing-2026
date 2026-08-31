@@ -9,6 +9,13 @@ services:
     container_name: ai-novel-2026-qwenpaw-lab
     platform: linux/arm64
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+      tts-sidecar:
+        condition: service_healthy
+        restart: true
     environment:
       TZ: Asia/Shanghai
       AI_NOVEL_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_novel}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ai_novel_world_2026}
@@ -63,7 +70,6 @@ services:
 
   postgres:
     image: pgvector/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
-    profiles: ["data"]
     container_name: ai-novel-2026-postgres
     restart: unless-stopped
     environment:
@@ -82,7 +88,6 @@ services:
       start_period: 10s
 
   tts-runtime-init:
-    profiles: ["tts"]
     build:
       context: .
       dockerfile: docker/tts-sidecar/Dockerfile
@@ -116,7 +121,6 @@ services:
     cpus: 0.5
 
   tts-model-installer:
-    profiles: ["tts"]
     image: ${MOSS_TTS_SIDECAR_IMAGE:-ai-novel-world/moss-tts-sidecar:t1-b-linux-arm64}
     container_name: ai-novel-2026-moss-tts-model-installer
     platform: linux/arm64
@@ -155,7 +159,6 @@ services:
     cpus: 2.0
 
   tts-sidecar:
-    profiles: ["tts"]
     build:
       context: .
       dockerfile: docker/tts-sidecar/Dockerfile
@@ -216,19 +219,13 @@ services:
 volumes:
   qwenpaw-data:
     name: ai-novel-2026-qwenpaw-data
-    labels:
-      ai.novel.world.project: AI小说世界2026
-      ai.novel.world.purpose: qwenpaw-data
+    external: true
   qwenpaw-secrets:
     name: ai-novel-2026-qwenpaw-secrets
-    labels:
-      ai.novel.world.project: AI小说世界2026
-      ai.novel.world.purpose: qwenpaw-secrets
+    external: true
   qwenpaw-backups:
     name: ai-novel-2026-qwenpaw-backups
-    labels:
-      ai.novel.world.project: AI小说世界2026
-      ai.novel.world.purpose: qwenpaw-backups
+    external: true
   postgres-data:
     name: ai-novel-2026-postgres-data
     labels:

@@ -1,8 +1,8 @@
 # QwenPaw Docker 验证环境
 
-验证日期：2026-08-23（Asia/Shanghai）。
+验证日期：2026-08-23（Asia/Shanghai）；统一编排复核更新于 2026-08-31。
 
-状态：**已部署并通过基础运行、回环监听、重启持久性、PawApp 0.3.0、PostgreSQL/pgvector 与阶段 3–7 首个纵向闭环验证**。QwenPaw 当前 Agent 已完成真实正文候选和结构化情报提案调用。
+状态：**已部署并通过基础运行、回环监听、重启持久性、PawApp、PostgreSQL/pgvector、MOSS-TTS-Nano 与阶段 3–7 首个纵向闭环验证；2026-08-31 已将三个长期容器收敛到默认 Compose 启动链。** QwenPaw 当前 Agent 已完成真实正文候选和结构化情报提案调用。
 
 ## 1. 当前可用入口
 
@@ -41,6 +41,8 @@
 
 三个卷带有 `ai.novel.world.project=AI小说世界2026` 和各自用途标签。停止或重启容器不会删除这些卷。
 
+这三个 QwenPaw 核心卷由插件安装流程创建，Compose 以 `external` 方式复用；即使误用 `docker compose down --volumes`，Compose 也不会删除它们。PostgreSQL、小说媒体与 TTS 模型等项目卷仍由本项目 Compose 管理，长期环境依然禁止执行带 `--volumes` 的清理命令。
+
 ## 4. 已执行验证
 
 | 检查 | 结果 | 证据摘要 |
@@ -60,26 +62,34 @@
 - 当前已安装小说 PawApp 0.3.0，并创建独立“AI小说作家” Agent；六个小说 Skills 和三个只读小说工具只在该 Agent 中启用，Default 与 QA 中保持关闭。AI 只生成候选与情报提案，正式写入仍由 PawApp 作者确认命令完成。
 - “AI小说作家”额外启用项目管理的 `AI_NOVEL_WORLD.md` 系统提示文件，用于自主 Skill 路由；QwenPaw 原生 `AGENTS.md`、`SOUL.md`、`PROFILE.md` 保留。默认首次引导文件已改名归档，避免继续污染小说对话。
 - 本机 Docker Desktop 偶发在 QwenPaw 停止后立即复用命名卷时卡住。安装脚本现使用 30 秒优雅停止、确认容器完全退出并等待卷释放，再启动临时安装容器；修改后重复安装已正常完成。
-- PostgreSQL 18.6 + pgvector 0.8.6 已启动并健康；Portkey、Ollama、TEI、TTS 和图片服务均未启动。
+- PostgreSQL 18.6 + pgvector 0.8.6、MOSS-TTS-Nano Sidecar 已启动并健康；VoiceGenerator 由 macOS 原生服务管理；Portkey、Ollama、TEI 和图片服务未启动。
 - 后续录入 Provider 密钥时，必须验证浏览器存储、API 响应和日志不回显密钥；密钥目录继续与普通工作卷隔离。
 
-## 6. 日常管理
+## 6. 当前编排拓扑与日常管理
+
+- 普通 `docker compose up -d` 会启动 PostgreSQL、TTS 初始化器、固定模型安装器、Nano Sidecar 和 QwenPaw，不再需要 `data`／`tts` profile。
+- QwenPaw 仅在 PostgreSQL 与 Nano Sidecar 通过健康检查后启动；初始化器和安装器是幂等的一次性服务，成功完成后保持退出状态属于正常现象。
+- PostgreSQL 与 QwenPaw 位于默认业务网络；Nano Sidecar 只与 QwenPaw 共享内部 `tts-private` 网络，模型安装器只使用下载网络。
+- VoiceGenerator 需要 Apple MPS，继续作为 macOS 原生 launchd 服务运行，不进入 Docker Linux VM；PawApp 通过固定宿主地址和私有 token 调用。
+- 停止服务使用 `docker compose stop`；不得使用带 `--volumes` 的 `down` 操作长期环境。
 
 ```bash
 # 查看状态
-docker inspect ai-novel-2026-qwenpaw-lab --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}'
+docker compose ps -a
 
 # 查看日志
 docker logs --tail 200 ai-novel-2026-qwenpaw-lab
 
-# 停止、启动或重启；命名卷都会保留
-docker stop ai-novel-2026-qwenpaw-lab
-docker start ai-novel-2026-qwenpaw-lab
-docker restart ai-novel-2026-qwenpaw-lab
+# 启动完整容器栈；命名卷都会保留
+docker compose up -d
+
+# 停止或重新启动完整容器栈；不要附加 --volumes
+docker compose stop
+docker compose restart
 ```
 
 本文不提供自动删除容器或命名卷的命令。若以后需要清理，必须先确认目标并备份必要数据。
 
 ## 7. 下一步验证
 
-项目初始化和阶段二尖峰见[新项目初始化与兼容性验证](./13-新项目初始化与兼容性验证.md)；阶段 3–6 基线见[阶段 3–6 实现与验收记录](./14-阶段3至6实现与验收.md)；0.3.0 结果见[阶段 7：章节候选与情报提案闭环](./15-阶段7章节候选与情报提案闭环.md)。Portkey、向量、TTS 和图片服务仍未自动启用。
+项目初始化和阶段二尖峰见[新项目初始化与兼容性验证](./13-新项目初始化与兼容性验证.md)；阶段 3–6 基线见[阶段 3–6 实现与验收记录](./14-阶段3至6实现与验收.md)；0.3.0 结果见[阶段 7：章节候选与情报提案闭环](./15-阶段7章节候选与情报提案闭环.md)。Portkey、Ollama、TEI 和图片服务仍未自动启用。

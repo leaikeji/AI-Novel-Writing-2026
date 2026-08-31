@@ -104,3 +104,11 @@ PawApp 启动
 - **项目侧空闲唤醒已降低**：三个 Compose 健康检查均为 `30s`，TTS worker 空闲轮询为 `1s`；最终容器采样为 QwenPaw `1.43% / 720.8 MiB`、TTS `0.12% / 25.04 MiB`、PostgreSQL `0.11% / 39.44 MiB`。
 - **验证结果**：TTS Sidecar 镜像契约、PawApp 生命周期、Sidecar server 和生产运行时聚焦测试全部通过；插件打包、Sidecar 镜像构建、`docker compose config`、真实健康检查和数据连接均通过。全量测试为 `2822 passed, 126 skipped, 8 failed`；8 个失败均来自任务开始前用户正在修改的 `skills/prose-writing/SKILL.md` 与冻结哈希不一致，不属于本次 TTS／Docker 改动，且本次未覆盖该文件。
 - **数据安全**：未删除或重建 PostgreSQL、QwenPaw、媒体及 TTS 模型持久卷；没有修改 QwenPaw 上游核心。
+
+## 9. 2026-08-31 统一编排优化
+
+- `data` 与 `tts` profile 已完成历史隔离使命并从现行 Compose 删除；普通 `docker compose up -d` 现在统一启动 PostgreSQL、TTS 初始化／安装链、Nano Sidecar 和 QwenPaw。
+- QwenPaw 增加对 PostgreSQL、Nano Sidecar 的健康依赖，避免服务仅因容器已创建就提前启动；两个依赖由 Compose 主动更新时，QwenPaw 会随之重建以重新取得一致运行态。
+- VoiceGenerator 保持 macOS 原生 launchd 编排，以继续使用 Apple MPS 并避免占用 Docker Linux VM 的有限内存；它由产品能力门禁和宿主管理器核验，不伪装成 Compose 容器。
+- 插件安装流程拥有的三个 QwenPaw 核心卷在 Compose 中显式标记为 `external`，消除所有权警告，并阻止 Compose 卷清理误删工作区、密钥或备份。
+- 运行清理只删除已确认的 TTS35 隔离 PostgreSQL 测试容器及其匿名测试卷；所有正式命名卷、正式容器、其他项目容器和可复用镜像均保留。BuildKit 只清理未被当前镜像／构建引用的缓存。
