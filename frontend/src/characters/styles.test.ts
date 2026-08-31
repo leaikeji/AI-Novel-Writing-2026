@@ -11,6 +11,7 @@ describe("character workspace responsive contract", () => {
     expect(CHARACTER_WORKSPACE_CSS).toContain("position: fixed; inset: 0");
     expect(CHARACTER_WORKSPACE_CSS).toContain("height: 100dvh");
     expect(CHARACTER_WORKSPACE_CSS).toContain("position: sticky");
+    expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-workspace-tabs { display: flex; flex: 0 0 auto");
     expect(CHARACTER_WORKSPACE_CSS).toContain(":focus-visible");
     expect(CHARACTER_WORKSPACE_CSS).toContain("grid-column:1 / -1");
   });

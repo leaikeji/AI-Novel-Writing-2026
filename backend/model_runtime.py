@@ -1157,6 +1157,24 @@ def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:
         "reasoning_summary": str(value.get("reasoning_summary") or "").strip(),
         "confidence": max(0, min(confidence, 100)),
     }
+    if item_type == "relationship_state":
+        normalized.update(
+            {
+                "source_character_key": str(
+                    value.get("source_character_key") or ""
+                ).strip(),
+                "target_character_key": str(
+                    value.get("target_character_key") or ""
+                ).strip(),
+                "directionality": str(
+                    value.get("directionality") or ""
+                ).strip(),
+                "relation_kind": str(value.get("relation_kind") or "").strip(),
+                "relationship_label": str(
+                    value.get("relationship_label") or value.get("label") or ""
+                ).strip(),
+            }
+        )
     return normalized
 
 

@@ -48,8 +48,19 @@ import type {
   SelectionSnapshot,
 } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
-import { resolveSyncProgressDocument } from "./chapter-sync";
-import { groupIntelligenceItems } from "./chapter-intelligence";
+import {
+  resolveSyncProgressDocument,
+  reusableSyncProgressProposal,
+  reusableSyncProgressRevisionId,
+} from "./chapter-sync";
+import {
+  groupIntelligenceItems,
+  intelligenceCommitSummary,
+  pendingIntelligenceItemIds,
+  relationshipCandidateActionLabel,
+  relationshipKindLabel,
+  toggleIntelligenceItemSelection,
+} from "./chapter-intelligence";
 const host = window.QwenPaw.host;
 const React = host.React;
 const ReactDOM = host.ReactDOM;
@@ -657,6 +668,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [featuredCandidateId, setFeaturedCandidateId] = React.useState("");
   const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
   const [selectedProposal, setSelectedProposal] = React.useState(null as IntelligenceProposalRecord | null);
+  const [selectedIntelligenceItemIds, setSelectedIntelligenceItemIds] = React.useState([] as string[]);
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [titleToolsTarget, setTitleToolsTarget] = React.useState(null as HTMLElement | null);
   const [reviewJob, setReviewJob] = React.useState(null as CreativeGenerationRecord | null);
@@ -686,6 +698,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setFeaturedCandidateId("");
     setIntelligenceOpen(false);
     setSelectedProposal(null);
+    setSelectedIntelligenceItemIds([]);
     setReviewOpen(false);
     setReviewJob(null);
   }, [document.id]);
@@ -1105,6 +1118,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     const loaded = await apiRequest<IntelligenceProposalRecord[]>(`/documents/${document.id}/intelligence-proposals`);
     const current = loaded.find((proposal) => proposal.source_current) ?? loaded[0] ?? null;
     setSelectedProposal(current);
+    setSelectedIntelligenceItemIds([]);
     return current;
   };
 
@@ -1130,36 +1144,41 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         ? resolveSyncProgressDocument(document, preparedOverride)
         : (onPrepareGeneration ? await onPrepareGeneration() : document);
       if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
-      const checkpoint = await apiRequest<{ document: DocumentRecord }>(`/documents/${prepared.id}/checkpoints`, {
-        method: "POST",
-        body: JSON.stringify({ expected_draft_version: prepared.draft_version }),
-      });
-      const source = checkpoint.document;
-      if (!source.base_revision_id) throw new Error("本章正文尚未形成可同步版本");
+      const reusableRevisionId = reusableSyncProgressRevisionId(prepared);
+      const source = reusableRevisionId
+        ? prepared
+        : (await apiRequest<{ document: DocumentRecord }>(`/documents/${prepared.id}/checkpoints`, {
+            method: "POST",
+            body: JSON.stringify({ expected_draft_version: prepared.draft_version }),
+          })).document;
+      const sourceRevisionId = reusableRevisionId || source.base_revision_id;
+      if (!sourceRevisionId) throw new Error("本章正文尚未形成可同步版本");
       onDocumentChanged(source, `${generationModelLabel(currentModel)} 正在同步进展…`);
-      let proposal = await apiRequest<IntelligenceProposalRecord>(
-        `/documents/${source.id}/intelligence-proposals`,
-        { method: "POST", body: JSON.stringify({ revision_id: source.base_revision_id }) },
-      );
-      const syncableIds = proposal.items
-        .filter((item) => item.review_state === "pending" || item.review_state === "accepted")
-        .map((item) => item.id);
-      let relationshipChanges = { created: 0, updated: 0, skipped: 0 };
-      if (syncableIds.length > 0) {
-        const committed = await apiRequest<IntelligenceProposalRecord & {
-          relationship_sync?: { created: number; updated: number; skipped: number };
-        }>(`/intelligence-proposals/${proposal.id}/commit`, {
-          method: "POST",
-          body: JSON.stringify({ accepted_item_ids: syncableIds, item_overrides: {} }),
-        });
-        proposal = committed;
-        relationshipChanges = committed.relationship_sync || relationshipChanges;
+      if (reusableRevisionId) {
+        const previousProposals = await apiRequest<IntelligenceProposalRecord[]>(
+          `/documents/${source.id}/intelligence-proposals`,
+        );
+        const reusableProposal = reusableSyncProgressProposal(
+          previousProposals,
+          sourceRevisionId,
+        );
+        if (reusableProposal) {
+          setSelectedProposal(reusableProposal);
+          setSelectedIntelligenceItemIds([]);
+          setIntelligenceOpen(true);
+          onStatus("正文没有变化，已打开本章现有同步记录；未重复调用模型或写入关系网");
+          return;
+        }
       }
+      const proposal = await apiRequest<IntelligenceProposalRecord>(
+        `/documents/${source.id}/intelligence-proposals`,
+        { method: "POST", body: JSON.stringify({ revision_id: sourceRevisionId }) },
+      );
       setSelectedProposal(proposal);
+      setSelectedIntelligenceItemIds([]);
       setIntelligenceOpen(true);
-      const relationshipTotal = relationshipChanges.created + relationshipChanges.updated;
       onStatus(
-        `${completedGenerationModelLabel(proposal)} 同步进展完成 · ${proposal.items.length} 条本章情报 · ${relationshipTotal ? `关系网新增/更新 ${relationshipTotal} 条` : "关系网已同步"}`,
+        `${completedGenerationModelLabel(proposal)} 已生成 ${proposal.items.length} 条同步候选 · 请选择后应用，尚未写入故事账本或关系网`,
       );
     } catch (reason) {
       onError(errorMessage(reason, "同步进展失败"));
@@ -1169,6 +1188,37 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       setBusyAction("");
     }
   }
+
+  const applySelectedIntelligence = async () => {
+    if (!selectedProposal || selectedIntelligenceItemIds.length === 0) return;
+    const selectedIds = [...selectedIntelligenceItemIds];
+    setBusyAction("intelligence-commit");
+    try {
+      const committed = await apiRequest<IntelligenceProposalRecord>(
+        `/intelligence-proposals/${selectedProposal.id}/commit`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            accepted_item_ids: selectedIds,
+            item_overrides: {},
+          }),
+        },
+      );
+      setSelectedProposal(committed);
+      setSelectedIntelligenceItemIds([]);
+      const { writtenCount, rejectedCount, relationshipTotal } = intelligenceCommitSummary(
+        selectedIds,
+        committed,
+      );
+      onStatus(
+        `${writtenCount} 条进展已写入${rejectedCount > 0 ? ` · ${rejectedCount} 条校验未通过、未写入` : ""} · ${relationshipTotal > 0 ? `关系网新增/更新 ${relationshipTotal} 条` : "本次没有关系网变更"}`,
+      );
+    } catch (reason) {
+      onError(errorMessage(reason, "应用同步进展失败"));
+    } finally {
+      setBusyAction("");
+    }
+  };
 
   const confirmSyncProgress = async (preparedOverride?: unknown) => {
     const source = resolveSyncProgressDocument(document, preparedOverride);
@@ -1181,15 +1231,16 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
     Modal.confirm({
       className: "anw-modal anw-sync-confirm",
-      title: "确认",
+      title: "同步进展",
       width: 520,
       content: h("div", { className: "anw-sync-copy" },
         h("p", null, `本次同步进展将分析 ${source.visible_character_count} 字正文。`),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
-        h("p", null, "AI 将根据当前章节内容提取情报信息（角色、伏笔、剧情线等），并更新到作品创作资料中。"),
-        h("strong", null, "确认同步并继续吗？"),
+        h("p", null, "正文没有变化时会直接打开现有同步记录；有新正文时，AI 才会提取角色状态、关系网、故事线和伏笔候选。"),
+        h("p", null, "新候选生成后先供你勾选，不会立即写入。"),
+        h("strong", null, "确认继续同步吗？"),
       ),
-      okText: "确定",
+      okText: "继续同步",
       cancelText: "取消",
       onOk: () => { void runSyncProgress(source); },
     });
@@ -1259,6 +1310,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const intelligenceGroups = groupIntelligenceItems<IntelligenceItemRecord>(
     selectedProposal?.items ?? [],
   );
+  const intelligencePendingItemIds = pendingIntelligenceItemIds(
+    selectedProposal?.items ?? [],
+  );
+  const allPendingIntelligenceSelected = intelligencePendingItemIds.length > 0
+    && intelligencePendingItemIds.every((id) => selectedIntelligenceItemIds.includes(id));
   const reviewIssues = Array.isArray(reviewJob?.output_json?.issues) ? reviewJob?.output_json.issues as ReviewIssue[] : [];
   const outlineChapterNumber = chapterNumber ?? Math.max(1, Math.round(document.position / 1000));
   const briefSaveDisabled = !briefForm.outlineText.trim()
@@ -1452,14 +1508,35 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       {
         open: intelligenceOpen,
         className: "anw-modal anw-intelligence-modal",
-        title: h("div", { className: "anw-intelligence-title" }, h("strong", null, "本章章节情报"), h("span", null, selectedProposal ? `（${selectedProposal.state === "failed" ? generationModelAuditLabel(selectedProposal) : verifiedGenerationModelLabel(selectedProposal)}）` : "（本内容由AI生成）")),
-        width: 800,
+        title: h("div", { className: "anw-intelligence-title" }, h("strong", null, "本章同步进展"), h("span", null, selectedProposal ? `（${selectedProposal.state === "failed" ? generationModelAuditLabel(selectedProposal) : verifiedGenerationModelLabel(selectedProposal)}）` : "（本内容由AI生成）")),
+        width: 880,
         centered: true,
         onCancel: () => setIntelligenceOpen(false),
-        footer: [h(Button, { key: "close", type: "primary", onClick: () => setIntelligenceOpen(false) }, "关闭")],
+        footer: [
+          intelligencePendingItemIds.length > 0
+            ? h(Button, {
+                key: "select-all",
+                onClick: () => setSelectedIntelligenceItemIds(
+                  allPendingIntelligenceSelected ? [] : intelligencePendingItemIds,
+                ),
+              }, allPendingIntelligenceSelected ? "取消全选" : "选择全部候选")
+            : null,
+          h(Button, { key: "close", type: intelligencePendingItemIds.length > 0 ? "default" : "primary", onClick: () => setIntelligenceOpen(false) }, "关闭"),
+          intelligencePendingItemIds.length > 0
+            ? h(Button, {
+                key: "apply",
+                type: "primary",
+                disabled: selectedIntelligenceItemIds.length === 0,
+                loading: busyAction === "intelligence-commit",
+                onClick: () => { void applySelectedIntelligence(); },
+              }, `应用所选（${selectedIntelligenceItemIds.length}）`)
+            : null,
+        ],
       },
-      !selectedProposal || intelligenceGroups.length === 0
-        ? h(Empty, { description: "本章还没有情报；完成正文后点击“同步进展”生成" })
+      !selectedProposal
+        ? h(Empty, { description: "本章还没有同步记录；完成正文后点击“同步进展”生成候选" })
+        : intelligenceGroups.length === 0
+        ? h(Empty, { description: "本章未发现需要同步的新进展；故事账本和关系网没有被修改" })
         : h(
             "div",
             { className: "anw-intelligence-groups" },
@@ -1469,14 +1546,41 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
               h("h3", null, `${group.label}（${group.items.length}）`),
               ...group.items.map((item) => h(
                 "article",
-                { key: item.id },
-                h("strong", null, item.suggested_payload.subject),
-                h(
-                  "div",
-                  null,
+                {
+                  key: item.id,
+                  className: `is-${item.review_state}${selectedIntelligenceItemIds.includes(item.id) ? " is-selected" : ""}`,
+                },
+                h("label", { className: "anw-intelligence-choice" },
+                  h(Checkbox, {
+                    checked: item.review_state === "accepted" || selectedIntelligenceItemIds.includes(item.id),
+                    disabled: item.review_state !== "pending" || busyAction === "intelligence-commit",
+                    onChange: (event: any) => setSelectedIntelligenceItemIds((current: string[]) => (
+                      toggleIntelligenceItemSelection(current, item.id, event.target.checked)
+                    )),
+                    "aria-label": `${item.review_state === "accepted" ? "已写入" : item.review_state === "rejected" ? "未写入" : "选择"}${item.suggested_payload.subject}`,
+                  }),
+                  h("span", null,
+                    h("strong", null, item.suggested_payload.subject),
+                    h(
+                      Tag,
+                      { color: item.review_state === "accepted" ? "success" : item.review_state === "rejected" ? "error" : "default" },
+                      item.review_state === "accepted" ? "已写入" : item.review_state === "rejected" ? "未写入" : "待确认",
+                    ),
+                  ),
+                ),
+                item.item_type === "relationship_state" && item.suggested_payload.entity
+                  ? h("div", { className: "anw-intelligence-relationship" },
+                      h("span", null, h("small", null, "关系网动作："), relationshipCandidateActionLabel(Boolean(item.suggested_payload.entity.is_new), item.review_state)),
+                      h("span", null, h("small", null, "关系两端："), `${item.suggested_payload.entity.source_label || "角色一"} ↔ ${item.suggested_payload.entity.target_label || "角色二"}`),
+                      h("span", null, h("small", null, "关系名称："), item.suggested_payload.entity.label || "正文关系"),
+                      h("span", null, h("small", null, "分类与置信度："), `${relationshipKindLabel(item.suggested_payload.entity.relation_kind)} · ${item.confidence}%`),
+                    )
+                  : null,
+                h("div", { className: "anw-intelligence-change" },
                   h("span", null, h("small", null, "变化类型："), item.suggested_payload.predicate),
                   h("span", null, h("small", null, "最新进展："), item.suggested_payload.object),
                 ),
+                h("blockquote", null, h("small", null, "正文证据"), item.source_text),
               )),
             )),
           ),

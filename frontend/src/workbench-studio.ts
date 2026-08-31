@@ -79,6 +79,7 @@ import {
 } from "./story-timeline";
 import {
   createCharacterWorkspaceDialog,
+  getCharacterWorkspacePortalContainer,
   type CharacterWorkspaceSaveCommandV1,
   type CharacterWorkspaceSelectionV1,
   type CharacterWorkspaceV1,
@@ -89,9 +90,18 @@ import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 const host = window.QwenPaw.host;
 const React = host.React;
+const ReactDOM = host.ReactDOM;
 const h = React.createElement;
 const NovelCoverView = createNovelCoverView(React);
-const CharacterWorkspaceDialog = createCharacterWorkspaceDialog(React);
+const CharacterWorkspaceDialog = createCharacterWorkspaceDialog(
+  React,
+  typeof ReactDOM?.createPortal === "function"
+    ? {
+        createPortal: ReactDOM.createPortal.bind(ReactDOM),
+        getContainer: getCharacterWorkspacePortalContainer,
+      }
+    : undefined,
+);
 const {
   Alert,
   Button,

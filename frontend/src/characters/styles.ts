@@ -47,7 +47,7 @@ export const CHARACTER_WORKSPACE_CSS = `
 .anw-character-workspace-meta { margin-top: 4px; color: var(--ant-color-text-secondary, #64748b); }
 .anw-character-workspace-unsaved { border-radius:999px; padding:5px 10px; color: var(--ant-color-warning-text, #ad6800); background:var(--ant-color-warning-bg, #fffbe6); font-size:12px; font-weight: 650; }
 .anw-character-workspace-selectors { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
-.anw-character-workspace-tabs { display: flex; gap: 6px; padding: 8px 24px 0; overflow-x: auto; border-bottom: 1px solid var(--ant-color-border-secondary, #e5e7eb); background:var(--ant-color-bg-container, #fff); }
+.anw-character-workspace-tabs { display: flex; flex: 0 0 auto; gap: 6px; padding: 8px 24px 0; overflow-x: auto; border-bottom: 1px solid var(--ant-color-border-secondary, #e5e7eb); background:var(--ant-color-bg-container, #fff); }
 .anw-character-workspace-tab { display:inline-flex; min-height: 46px; align-items:center; gap:7px; padding: 8px 15px; border: 0; border-bottom: 3px solid transparent; background: transparent; color:var(--ant-color-text-secondary, #64748b); cursor: pointer; white-space: nowrap; }
 .anw-character-workspace-tab[aria-selected="true"] { border-bottom-color: var(--ant-color-primary, #1677ff); color: var(--ant-color-primary, #1677ff); font-weight: 600; }
 .anw-character-workspace-tab-count { display:grid; min-width:21px; height:21px; place-items:center; border-radius:999px; padding-inline:5px; color:inherit; background:var(--ant-color-fill-secondary, #f1f5f9); font-size:11px; }

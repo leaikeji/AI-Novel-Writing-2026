@@ -265,6 +265,19 @@ export interface IntelligenceItemRecord {
     subject: string;
     predicate: string;
     object: string;
+    entity_key?: string | null;
+    entity?: {
+      relationship_id?: string | null;
+      source_character_key?: string | null;
+      target_character_key?: string | null;
+      source_label?: string;
+      target_label?: string;
+      directionality?: "directed" | "undirected";
+      relation_kind?: string;
+      label?: string;
+      manual_override?: boolean;
+      is_new?: boolean;
+    };
   };
   confidence: number;
   source_text: string;
@@ -303,6 +316,12 @@ export interface IntelligenceProposalRecord {
   items: IntelligenceItemRecord[];
   created_at: string | null;
   reviewed_at: string | null;
+  relationship_sync?: {
+    created: number;
+    updated: number;
+    skipped: number;
+  };
+  rejected_invalid_item_ids?: string[];
 }
 
 export interface GenerationModelStatus {

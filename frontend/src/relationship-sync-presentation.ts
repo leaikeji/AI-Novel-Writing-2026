@@ -103,10 +103,13 @@ export function relationshipSyncPresentation(
   }
 
   if (!status.last_synced_at) {
+    const incrementallyCreated = status.ai_relationship_count > 0;
     return {
-      title: `关系网尚未生成 · 当前 ${status.ai_relationship_count} 条 AI 关系`,
-      description: `${summary}；点击生成后才会调用模型，${safety}`,
-      actionLabel: "生成关系网",
+      title: incrementallyCreated
+        ? `关系网已由章节同步建立 · 当前 ${status.ai_relationship_count} 条 AI 关系`
+        : "尚无全书关系快照 · 可从章节同步逐步建立",
+      description: `${summary}；章节“同步进展”确认后会自动增量完善关系网。这里的整书分析仅用于快速初始化或重建，点击后才会另行调用模型，${safety}`,
+      actionLabel: "生成全书关系快照",
       action: "generate",
       actionDisabled: confirming,
       forceNew: false,
@@ -115,9 +118,9 @@ export function relationshipSyncPresentation(
 
   if (status.stale) {
     return {
-      title: `关系资料有更新 · 当前 ${status.ai_relationship_count} 条 AI 关系`,
-      description: `${summary}；可增量更新关系网，${safety}${modelSuffix}`,
-      actionLabel: "更新关系网",
+      title: `全书关系快照可更新 · 当前 ${status.ai_relationship_count} 条 AI 关系`,
+      description: `${summary}；章节关系已随“同步进展”增量写入，这里只重算整书快照，${safety}${modelSuffix}`,
+      actionLabel: "更新全书关系快照",
       action: "generate",
       actionDisabled: confirming,
       forceNew: false,
@@ -125,9 +128,9 @@ export function relationshipSyncPresentation(
   }
 
   return {
-    title: `关系网已同步 · ${status.ai_relationship_count} 条 AI 关系`,
-    description: `${summary}；当前资料已分析完成，${safety}${modelSuffix}`,
-    actionLabel: "重新分析",
+    title: `全书关系快照已生成 · ${status.ai_relationship_count} 条 AI 关系`,
+    description: `${summary}；整书资料已分析完成，日常关系变化继续由章节“同步进展”增量写入，${safety}${modelSuffix}`,
+    actionLabel: "重新分析全书快照",
     action: "generate",
     actionDisabled: confirming,
     forceNew: true,

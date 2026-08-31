@@ -11,7 +11,7 @@ from typing import Any, Iterable
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from .character_profile_services import (
@@ -69,6 +69,13 @@ from .models import (
 )
 from .model_execution import ModelEvidencePolicyError, candidate_actual_identity
 from .private_library import UsagePolicy, create_asset, get_asset, update_asset
+from .relationship_contracts import (
+    RELATIONSHIP_DIRECTIONALITIES,
+    RELATIONSHIP_KINDS,
+    canonical_relationship_endpoints,
+    normalize_relationship_label,
+    relationship_pair_key,
+)
 from .services import (
     DomainError,
     NotFoundError,
@@ -100,16 +107,6 @@ from .story_state.revisions import (
 
 PRIVATE_ASSET_TYPES = {"plot", "writing_style", "vocabulary", "idea"}
 ROLE_TYPES = {"main", "supporting"}
-RELATIONSHIP_DIRECTIONALITIES = {"directed", "undirected"}
-RELATIONSHIP_KINDS = {
-    "family",
-    "colleague",
-    "mentor",
-    "ally",
-    "enemy",
-    "romance",
-    "other",
-}
 RELATIONSHIP_STATUSES = {"active", "resolved", "archived"}
 STORYLINE_TYPES = {"main", "support", "romance", "faction"}
 STORYLINE_STATUSES = {"active", "paused", "completed", "archived"}
@@ -1261,12 +1258,11 @@ def delete_novel_character(
 
 
 def _normalize_relationship_label(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip()).casefold()
+    return normalize_relationship_label(value)
 
 
 def _relationship_pair_key(source_character_id: UUID, target_character_id: UUID) -> str:
-    left, right = sorted((str(source_character_id), str(target_character_id)))
-    return f"{left}:{right}"
+    return relationship_pair_key(source_character_id, target_character_id)
 
 
 def _canonical_relationship_endpoints(
@@ -1274,13 +1270,13 @@ def _canonical_relationship_endpoints(
     target_character_id: UUID,
     directionality: str,
 ) -> tuple[UUID, UUID]:
-    if source_character_id == target_character_id:
-        raise ValidationError("角色不能与自己建立关系")
-    if directionality not in RELATIONSHIP_DIRECTIONALITIES:
-        raise ValidationError("关系方向无效")
-    if directionality == "undirected" and str(source_character_id) > str(target_character_id):
-        return target_character_id, source_character_id
-    return source_character_id, target_character_id
+    try:
+        return canonical_relationship_endpoints(
+            source_character_id, target_character_id, directionality
+        )
+    except ValueError as error:
+        message = "角色不能与自己建立关系" if source_character_id == target_character_id else "关系方向无效"
+        raise ValidationError(message) from error
 
 
 def _require_relationship_characters(
@@ -1945,6 +1941,33 @@ def list_character_relationships(
     relations = session.scalars(
         query.order_by(CharacterRelationship.created_at, CharacterRelationship.id)
     ).all()
+    if not include_archived:
+        incremental_relationship_ids = {
+            relation.id
+            for relation in relations
+            if not relation.manual_override and relation.proposal_item_id is not None
+        }
+        current_incremental_ids = (
+            set(
+                session.scalars(
+                    select(StoryFact.relationship_id).where(
+                        StoryFact.novel_id == novel_id,
+                        StoryFact.fact_type == "relationship_state",
+                        StoryFact.relationship_id.in_(incremental_relationship_ids),
+                        StoryFact.status.in_(("active", "source_restored")),
+                    )
+                ).all()
+            )
+            if incremental_relationship_ids
+            else set()
+        )
+        relations = [
+            relation
+            for relation in relations
+            if relation.manual_override
+            or relation.proposal_item_id is None
+            or relation.id in current_incremental_ids
+        ]
     projection = get_story_projection_payload(
         session,
         novel_id,
@@ -2057,8 +2080,13 @@ def build_relationship_graph_snapshot(
             StoryFact.schema_version == "story-fact/2",
             StoryFact.fact_type == "relationship_state",
             StoryFact.relationship_id.is_not(None),
-            StoryFact.status.in_(("active", "source_restored")),
-            StoryFact.source_revision_id.in_(current_revision_ids),
+            or_(
+                StoryFact.status == "source_restored",
+                and_(
+                    StoryFact.status == "active",
+                    StoryFact.source_revision_id.in_(current_revision_ids),
+                ),
+            ),
         )
         .order_by(StoryFact.created_at.desc(), StoryFact.id.desc())
         .limit(300)
@@ -2166,12 +2194,7 @@ def get_relationship_auto_sync_status(
         )
         .order_by(CreativeGenerationJob.completed_at.desc(), CreativeGenerationJob.created_at.desc())
     )
-    active_rows = session.scalars(
-        select(CharacterRelationship).where(
-            CharacterRelationship.novel_id == novel_id,
-            CharacterRelationship.archived_at.is_(None),
-        )
-    ).all()
+    active_rows = list_character_relationships(session, novel_id)
     timeline_count = int(
         session.scalar(
             select(func.count()).select_from(StoryTimeline).where(
@@ -2189,10 +2212,10 @@ def get_relationship_auto_sync_status(
         "input_hash": input_digest,
         "last_synced_at": _iso(latest_ready.completed_at) if latest_ready else None,
         "ai_relationship_count": sum(
-            1 for relation in active_rows if not relation.manual_override
+            1 for relation in active_rows if not relation["manual_override"]
         ),
         "manual_relationship_count": sum(
-            1 for relation in active_rows if relation.manual_override
+            1 for relation in active_rows if relation["manual_override"]
         ),
         "source_summary": {
             "characters": len(snapshot["characters"]),

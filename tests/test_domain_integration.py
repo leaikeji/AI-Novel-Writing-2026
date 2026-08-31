@@ -75,10 +75,13 @@ from backend.creative_services import (
 from backend.models import (
     CandidateRevision,
     ChapterGenerationJob,
+    CharacterRelationship,
+    CharacterRelationshipRevision,
     Document,
     DocumentRevision,
     IntelligenceCommitBatch,
     IntelligenceProposal,
+    IntelligenceProposalItem,
     Novel,
     StoryFact,
 )
@@ -485,11 +488,16 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
         actual_model_id=TEST_MODEL_ID,
         provider_profile=TEST_PROVIDER_ID,
     )
-    commit_intelligence_items(
+    committed = commit_intelligence_items(
         session,
         UUID(proposal["id"]),
         accepted_item_ids=[UUID(item["id"]) for item in proposal["items"]],
     )
+    assert committed["relationship_sync"] == {"created": 0, "updated": 1, "skipped": 0}
+    projected_existing = list_character_relationships(session, novel_id)[0]
+    assert projected_existing["label"] == planned["label"]
+    assert projected_existing["version"] == planned["version"]
+    assert projected_existing["manual_override"] is True
 
     first_sync = sync_relationships_from_intelligence_proposal(
         session,
@@ -524,6 +532,594 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
     assert second_sync["changes"] == {"created": 0, "updated": 0, "skipped": 0}
     assert second_sync["relationships"][0]["label"] == "作者确认的同盟"
 
+
+def test_sync_progress_can_create_the_first_relationship_atomically_and_idempotently(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-同步进展首条关系")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    source = create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="旧电台修复师",
+        details={},
+    )
+    target = create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="陆沉舟",
+        description="灯塔维护工程师",
+        details={},
+    )
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="苏晚与陆沉舟约定共同调查旧电台档案。陆沉舟说：『我们一起查到底。』",
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+    proposal_row = session.get(IntelligenceProposal, UUID(proposal["id"]))
+    assert proposal_row is not None
+    assert proposal_row.extraction_context_json["relationship_catalog"] == {}
+    character_key_by_id = {
+        value["character_id"]: key
+        for key, value in proposal_row.extraction_context_json["character_catalog"].items()
+    }
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                "fact_type": "relationship_state",
+                "source_character_key": character_key_by_id[source["id"]],
+                "target_character_key": character_key_by_id[target["id"]],
+                "directionality": "undirected",
+                "relation_kind": "ally",
+                "relationship_label": "调查同盟",
+                "dimension": "alliance",
+                "event_kind": "formed",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "结成同盟",
+                "object": "共同调查旧电台档案",
+                "source_text": "我们一起查到底",
+                "reasoning_summary": "形成稳定协作关系",
+                "confidence": 93,
+                "details": {},
+            }
+        ],
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
+    )
+    assert proposal["items"][0]["suggested_payload"]["entity"]["is_new"] is True
+    assert list_character_relationships(session, novel_id) == []
+    ledger_before = session.get(Novel, novel_id).story_ledger_version
+
+    selected = [UUID(proposal["items"][0]["id"])]
+    committed = commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=selected,
+    )
+
+    assert committed["relationship_sync"] == {"created": 1, "updated": 0, "skipped": 0}
+    relationships = list_character_relationships(session, novel_id)
+    assert len(relationships) == 1
+    relationship = relationships[0]
+    assert relationship["label"] == "调查同盟"
+    assert relationship["manual_override"] is False
+    assert relationship["created_by"] == "ai_auto"
+    facts = list_story_facts(session, novel_id)
+    assert len(facts) == 1
+    assert facts[0]["relationship_id"] == relationship["id"]
+    assert session.scalar(
+        select(func.count(CharacterRelationshipRevision.id)).where(
+            CharacterRelationshipRevision.relationship_id == UUID(relationship["id"])
+        )
+    ) == 1
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before + 1
+
+    replayed = commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=selected,
+    )
+    assert replayed["commit_batch"]["id"] == committed["commit_batch"]["id"]
+    assert replayed["relationship_sync"] == committed["relationship_sync"]
+    assert session.scalar(
+        select(func.count(CharacterRelationship.id)).where(
+            CharacterRelationship.novel_id == novel_id
+        )
+    ) == 1
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 1
+    assert session.scalar(
+        select(func.count(CharacterRelationshipRevision.id)).where(
+            CharacterRelationshipRevision.relationship_id == UUID(relationship["id"])
+        )
+    ) == 1
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before + 1
+
+
+def test_incremental_relationship_visibility_tracks_source_revision_and_manual_override(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-同步关系来源有效性")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    source = create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="旧电台修复师",
+        details={},
+    )
+    target = create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="陆沉舟",
+        description="灯塔维护工程师",
+        details={},
+    )
+    relationship_text = "苏晚与陆沉舟约定共同调查旧电台档案。"
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown=relationship_text,
+    )
+    relationship_revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(relationship_revision["id"]),
+    )
+    proposal_row = session.get(IntelligenceProposal, UUID(proposal["id"]))
+    assert proposal_row is not None
+    character_key_by_id = {
+        value["character_id"]: key
+        for key, value in proposal_row.extraction_context_json["character_catalog"].items()
+    }
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                "fact_type": "relationship_state",
+                "source_character_key": character_key_by_id[source["id"]],
+                "target_character_key": character_key_by_id[target["id"]],
+                "directionality": "undirected",
+                "relation_kind": "ally",
+                "relationship_label": "调查同盟",
+                "dimension": "alliance",
+                "event_kind": "formed",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "结成同盟",
+                "object": "共同调查旧电台档案",
+                "source_text": relationship_text,
+                "reasoning_summary": "形成稳定协作关系",
+                "confidence": 93,
+                "details": {},
+            }
+        ],
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
+    )
+    commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=[UUID(proposal["items"][0]["id"])],
+    )
+
+    current = list_character_relationships(session, novel_id)
+    assert len(current) == 1
+    relationship_id = UUID(current[0]["id"])
+    assert get_relationship_auto_sync_status(session, novel_id)["ai_relationship_count"] == 1
+
+    rewritten = save_draft(
+        session,
+        document_id,
+        expected_draft_version=3,
+        content_markdown="苏晚独自整理旧电台档案。",
+    )
+    assert rewritten["draft_version"] == 4
+    assert len(list_character_relationships(session, novel_id)) == 1
+    rewritten_revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=rewritten["draft_version"],
+    )["revision"]
+    assert rewritten_revision["content_markdown"] == "苏晚独自整理旧电台档案。"
+    assert list_character_relationships(session, novel_id) == []
+    assert len(list_character_relationships(session, novel_id, include_archived=True)) == 1
+    assert get_relationship_auto_sync_status(session, novel_id)["ai_relationship_count"] == 0
+
+    restored = restore_revision(
+        session,
+        document_id,
+        UUID(relationship_revision["id"]),
+        expected_draft_version=5,
+    )
+    assert restored["document"]["content_markdown"] == relationship_text
+    assert [relation["id"] for relation in list_character_relationships(session, novel_id)] == [
+        str(relationship_id)
+    ]
+    restored_status = get_relationship_auto_sync_status(session, novel_id)
+    assert restored_status["source_summary"]["relationship_facts"] == 1
+    assert restored_status["ai_relationship_count"] == 1
+
+    manual = update_character_relationship(
+        session,
+        novel_id,
+        relationship_id,
+        expected_version=current[0]["version"],
+        source_character_id=UUID(source["id"]),
+        target_character_id=UUID(target["id"]),
+        directionality="undirected",
+        relation_kind="ally",
+        label="作者确认的调查同盟",
+        description="作者确认后不再随来源章节失效而隐藏。",
+    )
+    rewritten_again = save_draft(
+        session,
+        document_id,
+        expected_draft_version=restored["document"]["draft_version"],
+        content_markdown="苏晚再次独自整理档案。",
+    )
+    assert rewritten_again["draft_version"] > rewritten["draft_version"]
+    assert list_character_relationships(session, novel_id)[0]["id"] == manual["id"]
+    assert get_relationship_auto_sync_status(session, novel_id)["manual_relationship_count"] == 1
+
+
+def test_sync_progress_rejects_an_unknown_new_relationship_character_key_without_writes(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-同步进展关系越权")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="旧电台修复师",
+        details={},
+    )
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="陆沉舟",
+        description="灯塔维护工程师",
+        details={},
+    )
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="苏晚与陆沉舟约定共同调查旧电台档案。",
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+
+    with pytest.raises(ValidationError, match="关系候选包含无效或越权"):
+        complete_intelligence_proposal(
+            session,
+            UUID(proposal["id"]),
+            items=[
+                {
+                    "fact_type": "relationship_state",
+                    "source_character_key": "character_1",
+                    "target_character_key": "character_999",
+                    "directionality": "undirected",
+                    "relation_kind": "ally",
+                    "relationship_label": "调查同盟",
+                    "subject": "苏晚与陆沉舟",
+                    "predicate": "结成同盟",
+                    "object": "共同调查旧电台档案",
+                    "source_text": "苏晚与陆沉舟约定共同调查旧电台档案",
+                    "reasoning_summary": "形成协作关系",
+                    "confidence": 93,
+                }
+            ],
+            actual_model_id=TEST_MODEL_ID,
+            provider_profile=TEST_PROVIDER_ID,
+        )
+    session.rollback()
+
+    assert session.scalar(
+        select(func.count(CharacterRelationship.id)).where(
+            CharacterRelationship.novel_id == novel_id
+        )
+    ) == 0
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 0
+
+
+def test_sync_progress_counts_a_new_relationship_once_when_two_events_share_it(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-同步进展关系计数")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    source = create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="旧电台修复师",
+        details={},
+    )
+    target = create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="陆沉舟",
+        description="灯塔维护工程师",
+        details={},
+    )
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown=(
+            "苏晚与陆沉舟约定共同调查旧电台档案。"
+            "档案核对结束后，两人又约定共同保护原始母带。"
+        ),
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+    proposal_row = session.get(IntelligenceProposal, UUID(proposal["id"]))
+    assert proposal_row is not None
+    character_key_by_id = {
+        value["character_id"]: key
+        for key, value in proposal_row.extraction_context_json["character_catalog"].items()
+    }
+    relation_scope = {
+        "fact_type": "relationship_state",
+        "source_character_key": character_key_by_id[source["id"]],
+        "target_character_key": character_key_by_id[target["id"]],
+        "directionality": "undirected",
+        "relation_kind": "ally",
+        "relationship_label": "调查同盟",
+        "dimension": "alliance",
+        "confidence": 93,
+        "details": {},
+    }
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                **relation_scope,
+                "event_kind": "formed",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "结成同盟",
+                "object": "共同调查旧电台档案",
+                "source_text": "约定共同调查旧电台档案",
+                "reasoning_summary": "形成稳定协作关系",
+            },
+            {
+                **relation_scope,
+                "event_kind": "reinforced",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "加深互信",
+                "object": "共同保护原始母带",
+                "source_text": "约定共同保护原始母带",
+                "reasoning_summary": "同一关系在本章继续发展",
+            },
+        ],
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
+    )
+
+    committed = commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=[UUID(item["id"]) for item in proposal["items"]],
+    )
+
+    assert committed["relationship_sync"] == {"created": 1, "updated": 0, "skipped": 0}
+    assert session.scalar(
+        select(func.count(CharacterRelationship.id)).where(
+            CharacterRelationship.novel_id == novel_id
+        )
+    ) == 1
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 2
+
+
+def test_sync_progress_revalidates_relationship_instances_against_the_timeline(
+    session: Session,
+) -> None:
+    novel_payload = create_novel(session, "pytest-同步进展时间线重验")
+    novel_id = UUID(novel_payload["id"])
+    document_id = UUID(novel_payload["tree"][0]["documents"][0]["id"])
+    source = create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="苏晚",
+        description="旧电台修复师",
+        details={},
+    )
+    target = create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="陆沉舟",
+        description="灯塔维护工程师",
+        details={},
+    )
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="苏晚与陆沉舟约定共同调查旧电台档案。",
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+    proposal_row = session.get(IntelligenceProposal, UUID(proposal["id"]))
+    assert proposal_row is not None
+    character_key_by_id = {
+        value["character_id"]: key
+        for key, value in proposal_row.extraction_context_json["character_catalog"].items()
+    }
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                "fact_type": "relationship_state",
+                "source_character_key": character_key_by_id[source["id"]],
+                "target_character_key": character_key_by_id[target["id"]],
+                "directionality": "undirected",
+                "relation_kind": "ally",
+                "relationship_label": "调查同盟",
+                "dimension": "alliance",
+                "event_kind": "formed",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "结成同盟",
+                "object": "共同调查旧电台档案",
+                "source_text": "约定共同调查旧电台档案",
+                "reasoning_summary": "形成稳定协作关系",
+                "confidence": 93,
+                "details": {},
+            }
+        ],
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
+    )
+    novel = session.get(Novel, novel_id)
+    primary = session.scalar(
+        select(StoryTimeline).where(
+            StoryTimeline.novel_id == novel_id,
+            StoryTimeline.is_primary.is_(True),
+        )
+    )
+    assert novel is not None and primary is not None
+    branch = fork_timeline(
+        session,
+        novel_id,
+        primary.id,
+        expected_story_ledger_version=novel.story_ledger_version,
+        expected_source_timeline_version=primary.version,
+        timeline_key="branch-sync-audit",
+        name="同步审计分支",
+        fork_story_sequence=2,
+    )
+    proposal_item = session.get(
+        IntelligenceProposalItem,
+        UUID(proposal["items"][0]["id"]),
+    )
+    assert proposal_item is not None
+    tampered_payload = dict(proposal_item.suggested_payload)
+    tampered_entity = dict(tampered_payload["entity"])
+    tampered_entity["timeline_id"] = branch["timeline"]["id"]
+    tampered_payload["entity"] = tampered_entity
+    proposal_item.suggested_payload = tampered_payload
+    session.flush()
+
+    with pytest.raises(ValidationError, match="人物实例或时间线已失效"):
+        commit_intelligence_items(
+            session,
+            UUID(proposal["id"]),
+            accepted_item_ids=[UUID(proposal["items"][0]["id"])],
+        )
+    session.rollback()
+
+    assert session.scalar(
+        select(func.count(CharacterRelationship.id)).where(
+            CharacterRelationship.novel_id == novel_id
+        )
+    ) == 0
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 0
+
+
+def test_sync_progress_retries_a_stale_running_proposal(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-同步进展超时恢复")
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="苏晚在旧电台核对母带编号。",
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    first = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+    first_row = session.get(IntelligenceProposal, UUID(first["id"]))
+    assert first_row is not None
+    first_row.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    session.commit()
+
+    retried = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+
+    assert retried["id"] != first["id"]
+    assert retried["attempt"] == 2
+    assert retried["state"] == "running"
+    assert retried["should_execute"] is True
+    assert session.get(IntelligenceProposal, UUID(first["id"])).state == "failed"
 
 def test_explicit_merge_inherits_one_parent_and_event_links_do_not_copy_facts(
     session: Session,

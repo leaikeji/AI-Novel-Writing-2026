@@ -8,6 +8,22 @@ import { characterWorkspace, multiTimelineWorkspace } from "./test-fixtures";
 import { createReactHarness, findAll, findButton, settle, textContent } from "./test-harness";
 
 describe("formal character workspace", () => {
+  it("portals the modal outside the isolated workbench stacking context", () => {
+    const harness = createReactHarness();
+    const container = {} as Element;
+    const createPortal = vi.fn((node: unknown) => node);
+    const getContainer = vi.fn(() => container);
+    const Component = createCharacterWorkspaceDialog(harness.React, {
+      createPortal,
+      getContainer,
+    });
+    const root = harness.render(Component, { workspace: characterWorkspace() });
+
+    expect(getContainer).toHaveBeenCalledOnce();
+    expect(createPortal).toHaveBeenCalledWith(root, container);
+    expect(root.props.className).toBe("anw-character-workspace-backdrop");
+  });
+
   it("renders four accessible tabs and hides timeline mechanics in single-line mode", () => {
     const harness = createReactHarness();
     const Component = createCharacterWorkspaceDialog(harness.React);

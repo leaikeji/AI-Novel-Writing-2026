@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from .context_v3_loader import assemble_context_from_db
@@ -43,6 +43,7 @@ from .models import (
     ChapterBrief,
     ChapterGenerationJob,
     CharacterRelationship,
+    CharacterRelationshipRevision,
     DerivedSourceBinding,
     Document,
     DocumentRevision,
@@ -59,6 +60,13 @@ from .models import (
     StoryFact,
     Storyline,
     Volume,
+)
+from .relationship_contracts import (
+    RELATIONSHIP_DIRECTIONALITIES,
+    RELATIONSHIP_KINDS,
+    canonical_relationship_endpoints,
+    normalize_relationship_label,
+    relationship_pair_key,
 )
 from .story_state.persistence import ensure_default_story_state
 
@@ -129,6 +137,7 @@ class RestorationPlanConflictError(DomainError):
 
 
 CURRENT_FACT_STATUSES = ("active", "source_restored")
+INTELLIGENCE_STALE_FAILURE_MESSAGE = "上一次章节同步已超时失去执行上下文，请重新生成同步候选"
 CHAPTER_LENGTH_TOLERANCE_RATIO = 0.15
 CHAPTER_LENGTH_CONTROL_VERSION = "chapter-length-control/1"
 CHAPTER_GENERATION_STALE_FAILURE_MESSAGE = (
@@ -2031,6 +2040,10 @@ def _intelligence_extraction_context(
         for index, instance in enumerate(instances, start=1)
         if instance.character_id in roots
     }
+    character_key_by_instance_id = {
+        UUID(str(metadata["character_instance_id"])): key
+        for key, metadata in character_catalog.items()
+    }
     relationship_scope = CharacterRelationship.timeline_id.in_(reachable)
     if len(timelines) == 1:
         # Legacy single-line rows remain readable until the experimental test
@@ -2043,7 +2056,34 @@ def _intelligence_extraction_context(
         f"relationship_{index}": {
             "relationship_id": str(item.id),
             "timeline_id": str(item.timeline_id) if item.timeline_id else None,
+            "source_character_id": str(item.source_character_id),
+            "target_character_id": str(item.target_character_id),
+            "source_character_instance_id": (
+                str(item.source_character_instance_id)
+                if item.source_character_instance_id
+                else None
+            ),
+            "target_character_instance_id": (
+                str(item.target_character_instance_id)
+                if item.target_character_instance_id
+                else None
+            ),
+            "source_character_key": character_key_by_instance_id.get(
+                item.source_character_instance_id
+            ),
+            "target_character_key": character_key_by_instance_id.get(
+                item.target_character_instance_id
+            ),
+            "source_label": roots.get(item.source_character_id).name
+            if roots.get(item.source_character_id)
+            else "",
+            "target_label": roots.get(item.target_character_id).name
+            if roots.get(item.target_character_id)
+            else "",
+            "directionality": item.directionality,
+            "relation_kind": item.relation_kind,
             "label": item.label,
+            "manual_override": item.manual_override,
         }
         for index, item in enumerate(
             session.scalars(
@@ -2135,6 +2175,7 @@ def start_intelligence_proposal(
         )
     ):
         raise ValidationError("章节情报生成缺少可核验的 Agent 或 requested 模型证据")
+    expire_stale_intelligence_proposals(session, document_id)
     extraction_context = _intelligence_extraction_context(session, document, revision)
     extractor_contract = "story-ledger-extractor-v5"
     input_hash = content_hash(
@@ -2223,7 +2264,7 @@ def build_intelligence_prompt(session: Session, proposal_id: UUID) -> str:
     return f"""请从下面这章正式正文中提取“候选情报”。只返回严格 JSON，不要代码围栏或解释。
 
 JSON 结构：
-{{"no_changes":false,"items":[{{"fact_type":"character_state|relationship_state|storyline_event|foreshadow_event|story_time|knowledge_event|world_state|general_fact","entity_key":"下方目录短键；general_fact/world_state/story_time可为空","dimension":"状态维度短键","event_kind":"事件动作短键","subject":"主体显示文字","predicate":"变化描述","object":"客体或内容","source_text":"正文中的逐字短证据","visibility":"author|reader|all","details":{{}},"reasoning_summary":"为何值得进入故事账本","confidence":0到100}}]}}
+{{"no_changes":false,"items":[{{"fact_type":"character_state|relationship_state|storyline_event|foreshadow_event|story_time|knowledge_event|world_state|general_fact","entity_key":"已有实体目录短键；新关系及general_fact/world_state/story_time可为空","source_character_key":"仅新关系填写人物短键","target_character_key":"仅新关系填写人物短键","directionality":"新关系填写directed或undirected","relation_kind":"新关系分类","relationship_label":"新关系名称","dimension":"状态维度短键","event_kind":"事件动作短键","subject":"主体显示文字","predicate":"变化描述","object":"客体或内容","source_text":"正文中的逐字短证据","visibility":"author|reader|all","details":{{}},"reasoning_summary":"为何值得进入故事账本","confidence":0到100}}]}}
 
 规则：
 1. 只提取正文明确发生或明确揭示的内容，不把猜测写成事实。
@@ -2234,10 +2275,11 @@ JSON 结构：
 6. 不要为了满足数量制造情报。
 7. 小说时间线与现实系统日期无关。严禁用当前现实年份补全「今年」「去年」「本月」等相对日期；必须以正文最近的明确场景日期为锚点推断。无法可靠推断时保留正文原有相对表述，不得擅自补全年份。
 8. source_text 与 object 中的日期必须彼此一致；正文写明发生在 1992 年的场景，不得改写成 2026 年或其他现实年份。
-9. character_state 和 knowledge_event 必须使用 character_catalog 的短键；relationship_state、storyline_event、foreshadow_event 必须分别使用对应目录短键。
-10. 不得在提取阶段创建人物、关系、故事线或伏笔根对象；目录没有对应对象时省略并交给作者另行规划。
-11. visibility 默认 author；只有正文已经向读者或所有在场视角明确揭露时才能填写 reader 或 all。
-12. details 只填写类型所需结构：knowledge_event 使用 operation/knowledge_key；story_time 使用 transition/from_time/to_time，其中时间值必须是 {{"schema_version":"story-time/1","label":"正文原有时间表述","precision":"unknown"}} 结构；foreshadow_event 使用 event/note。其他类型可留空对象，由服务器按类型补成版本化结构。
+9. character_state 和 knowledge_event 必须使用 character_catalog 的短键；storyline_event、foreshadow_event 必须分别使用对应目录短键。
+10. relationship_state 若发展已有关系，必须使用 relationship_catalog 的 entity_key，不得改写关系定义；若正文明确形成了目录中不存在的新关系，entity_key 留空，并填写 source_character_key、target_character_key、directionality、relation_kind、relationship_label。两个人物键必须来自 character_catalog，禁止按姓名定位或自造 UUID。
+11. 不得在提取阶段创建人物、故事线或伏笔根对象；目录没有对应对象时省略并交给作者另行规划。新关系也只是候选，只有作者看到结果并明确应用后才会建立。
+12. visibility 默认 author；只有正文已经向读者或所有在场视角明确揭露时才能填写 reader 或 all。
+13. details 只填写类型所需结构：knowledge_event 使用 operation/knowledge_key；story_time 使用 transition/from_time/to_time，其中时间值必须是 {{"schema_version":"story-time/1","label":"正文原有时间表述","precision":"unknown"}} 结构；foreshadow_event 使用 event/note。其他类型可留空对象，由服务器按类型补成版本化结构。
 
 章节：{document.title}
 服务器实体短键目录：
@@ -2387,6 +2429,8 @@ def complete_intelligence_proposal(
         return _intelligence_proposal_payload(session, proposal)
     normalized: list[IntelligenceProposalItem] = []
     extraction_context = dict(proposal.extraction_context_json or {})
+    character_catalog = extraction_context.get("character_catalog", {})
+    relationship_catalog = extraction_context.get("relationship_catalog", {})
     catalog_by_type = {
         "character_state": extraction_context.get("character_catalog", {}),
         "knowledge_event": extraction_context.get("character_catalog", {}),
@@ -2429,12 +2473,83 @@ def complete_intelligence_proposal(
         segment = matching_segments[0]
         entity_key = str(raw.get("entity_key", "")).strip()
         entity_metadata: dict[str, Any] = {}
-        catalog = catalog_by_type.get(item_type)
-        if isinstance(catalog, dict):
-            candidate = catalog.get(entity_key)
-            if not isinstance(candidate, dict):
-                continue
-            entity_metadata = dict(candidate)
+        if item_type == "relationship_state":
+            existing_relationship = (
+                relationship_catalog.get(entity_key)
+                if isinstance(relationship_catalog, dict) and entity_key
+                else None
+            )
+            if isinstance(existing_relationship, dict):
+                entity_metadata = {**existing_relationship, "is_new": False}
+            else:
+                source_key = str(raw.get("source_character_key") or "").strip()
+                target_key = str(raw.get("target_character_key") or "").strip()
+                source_metadata = (
+                    character_catalog.get(source_key)
+                    if isinstance(character_catalog, dict)
+                    else None
+                )
+                target_metadata = (
+                    character_catalog.get(target_key)
+                    if isinstance(character_catalog, dict)
+                    else None
+                )
+                directionality = str(raw.get("directionality") or "").strip()
+                relation_kind = str(raw.get("relation_kind") or "").strip()
+                relationship_label = str(
+                    raw.get("relationship_label") or ""
+                ).strip()
+                if (
+                    entity_key
+                    or not isinstance(source_metadata, dict)
+                    or not isinstance(target_metadata, dict)
+                    or directionality not in RELATIONSHIP_DIRECTIONALITIES
+                    or relation_kind not in RELATIONSHIP_KINDS
+                    or not relationship_label
+                    or len(relationship_label) > 80
+                ):
+                    continue
+                try:
+                    source_id = UUID(str(source_metadata["character_id"]))
+                    target_id = UUID(str(target_metadata["character_id"]))
+                    canonical_source, _ = canonical_relationship_endpoints(
+                        source_id, target_id, directionality
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if canonical_source != source_id:
+                    source_key, target_key = target_key, source_key
+                    source_metadata, target_metadata = target_metadata, source_metadata
+                entity_metadata = {
+                    "relationship_id": None,
+                    "timeline_id": str(segment["timeline_id"]),
+                    "source_character_id": str(source_metadata["character_id"]),
+                    "target_character_id": str(target_metadata["character_id"]),
+                    "source_character_instance_id": str(
+                        source_metadata["character_instance_id"]
+                    ),
+                    "target_character_instance_id": str(
+                        target_metadata["character_instance_id"]
+                    ),
+                    "source_character_key": source_key,
+                    "target_character_key": target_key,
+                    "source_label": str(source_metadata.get("label") or ""),
+                    "target_label": str(target_metadata.get("label") or ""),
+                    "directionality": directionality,
+                    "relation_kind": relation_kind,
+                    "label": relationship_label,
+                    "manual_override": False,
+                    "is_new": True,
+                }
+        else:
+            catalog = catalog_by_type.get(item_type)
+            if isinstance(catalog, dict):
+                candidate = catalog.get(entity_key)
+                if not isinstance(candidate, dict):
+                    continue
+                entity_metadata = dict(candidate)
+        if item_type == "relationship_state" and not entity_metadata:
+            continue
         try:
             confidence = int(raw.get("confidence", 50))
         except (TypeError, ValueError):
@@ -2472,6 +2587,17 @@ def complete_intelligence_proposal(
                 review_state="pending",
             )
         )
+    relationship_item_count = sum(
+        1
+        for raw in items[:200]
+        if str(raw.get("fact_type", raw.get("item_type", ""))).strip()
+        == "relationship_state"
+    )
+    normalized_relationship_count = sum(
+        1 for item in normalized if item.item_type == "relationship_state"
+    )
+    if normalized_relationship_count != relationship_item_count:
+        raise ValidationError("关系候选包含无效或越权的人物、关系、时间线或正文证据")
     if not normalized:
         character_catalog = extraction_context.get("character_catalog", {})
         if isinstance(character_catalog, dict):
@@ -2540,12 +2666,43 @@ def list_intelligence_proposals(
     session: Session, document_id: UUID
 ) -> list[dict[str, Any]]:
     _require_document(session, document_id)
+    expire_stale_intelligence_proposals(session, document_id)
     proposals = session.scalars(
         select(IntelligenceProposal)
         .where(IntelligenceProposal.document_id == document_id)
         .order_by(IntelligenceProposal.created_at.desc())
     ).all()
     return [_intelligence_proposal_payload(session, proposal) for proposal in proposals]
+
+
+def expire_stale_intelligence_proposals(
+    session: Session,
+    document_id: UUID,
+    *,
+    now: datetime | None = None,
+) -> int:
+    current_time = now or datetime.now(timezone.utc)
+    cutoff = current_time - timedelta(
+        seconds=(
+            CHAPTER_GENERATION_TIMEOUT_SECONDS
+            + CHAPTER_GENERATION_STALE_GRACE_SECONDS
+        )
+    )
+    stale_proposals = session.scalars(
+        select(IntelligenceProposal)
+        .where(
+            IntelligenceProposal.document_id == document_id,
+            IntelligenceProposal.state == "running",
+            IntelligenceProposal.created_at <= cutoff,
+        )
+        .with_for_update()
+    ).all()
+    for proposal in stale_proposals:
+        proposal.state = "failed"
+        proposal.failure_message = INTELLIGENCE_STALE_FAILURE_MESSAGE
+    if stale_proposals:
+        session.commit()
+    return len(stale_proposals)
 
 
 def review_intelligence_item(
@@ -2725,6 +2882,238 @@ def _typed_story_fact_candidate(
         raise ValidationError("候选情报不符合 StoryFact v2 类型契约") from error
 
 
+def _record_incremental_relationship_revision(
+    session: Session,
+    relation: CharacterRelationship,
+) -> CharacterRelationshipRevision:
+    current_number = session.scalar(
+        select(func.max(CharacterRelationshipRevision.revision_number)).where(
+            CharacterRelationshipRevision.relationship_id == relation.id
+        )
+    )
+    relationship_revision = CharacterRelationshipRevision(
+        id=uuid4(),
+        relationship_id=relation.id,
+        revision_number=int(current_number or 0) + 1,
+        source_character_id=relation.source_character_id,
+        target_character_id=relation.target_character_id,
+        timeline_id=relation.timeline_id,
+        source_character_instance_id=relation.source_character_instance_id,
+        target_character_instance_id=relation.target_character_instance_id,
+        directionality=relation.directionality,
+        relation_kind=relation.relation_kind,
+        label=relation.label,
+        description=relation.description,
+        status=relation.status,
+        change_reason="chapter_sync",
+        changed_by="ai_auto",
+        manual_override=False,
+        confidence=relation.confidence,
+        evidence_json=list(relation.evidence_json or []),
+        source_generation_job_id=None,
+        source_chapter_revision_id=relation.source_chapter_revision_id,
+        proposal_item_id=relation.proposal_item_id,
+    )
+    session.add(relationship_revision)
+    session.flush()
+    relation.current_revision_id = relationship_revision.id
+    return relationship_revision
+
+
+def _materialize_relationship_candidate(
+    session: Session,
+    *,
+    proposal: IntelligenceProposal,
+    item: IntelligenceProposalItem,
+    payload: dict[str, object],
+) -> tuple[CharacterRelationship, bool]:
+    raw_entity = payload.get("entity")
+    if not isinstance(raw_entity, dict):
+        raise ValidationError("关系候选缺少服务端解析的关系范围")
+    entity = dict(raw_entity)
+    relationship_id = entity.get("relationship_id")
+    if relationship_id:
+        try:
+            stable_relationship_id = UUID(str(relationship_id))
+        except (TypeError, ValueError) as error:
+            raise ValidationError("关系候选引用的关系 ID 无效") from error
+        relation = session.scalar(
+            select(CharacterRelationship)
+            .where(
+                CharacterRelationship.id == stable_relationship_id,
+                CharacterRelationship.novel_id == proposal.novel_id,
+                CharacterRelationship.archived_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if relation is None:
+            raise ValidationError("关系候选引用的关系已失效，请重新同步")
+        entity.update(
+            {
+                "relationship_id": str(relation.id),
+                "timeline_id": str(relation.timeline_id) if relation.timeline_id else None,
+                "source_character_id": str(relation.source_character_id),
+                "target_character_id": str(relation.target_character_id),
+                "source_character_instance_id": (
+                    str(relation.source_character_instance_id)
+                    if relation.source_character_instance_id
+                    else None
+                ),
+                "target_character_instance_id": (
+                    str(relation.target_character_instance_id)
+                    if relation.target_character_instance_id
+                    else None
+                ),
+                "directionality": relation.directionality,
+                "relation_kind": relation.relation_kind,
+                "label": relation.label,
+                "manual_override": relation.manual_override,
+                "is_new": False,
+            }
+        )
+        payload["entity"] = entity
+        return relation, False
+
+    try:
+        source_id = UUID(str(entity["source_character_id"]))
+        target_id = UUID(str(entity["target_character_id"]))
+        source_instance_id = UUID(str(entity["source_character_instance_id"]))
+        target_instance_id = UUID(str(entity["target_character_instance_id"]))
+        timeline_id = UUID(str(entity["timeline_id"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValidationError("新关系候选的人物或时间线范围无效") from error
+    directionality = str(entity.get("directionality") or "")
+    relation_kind = str(entity.get("relation_kind") or "")
+    label = str(entity.get("label") or "").strip()
+    if (
+        directionality not in RELATIONSHIP_DIRECTIONALITIES
+        or relation_kind not in RELATIONSHIP_KINDS
+        or not label
+        or len(label) > 80
+    ):
+        raise ValidationError("新关系候选的方向、分类或名称无效")
+    original_source_id = source_id
+    try:
+        source_id, target_id = canonical_relationship_endpoints(
+            source_id, target_id, directionality
+        )
+    except ValueError as error:
+        raise ValidationError("新关系候选的两端人物无效") from error
+    if source_id != original_source_id:
+        source_instance_id, target_instance_id = target_instance_id, source_instance_id
+
+    characters = tuple(
+        session.scalars(
+            select(NovelCharacter).where(
+                NovelCharacter.id.in_((source_id, target_id)),
+                NovelCharacter.novel_id == proposal.novel_id,
+                NovelCharacter.lifecycle_state == "active",
+            )
+        )
+    )
+    if len(characters) != 2:
+        raise ValidationError("新关系候选的人物已失效或不属于当前小说")
+    timeline = session.scalar(
+        select(StoryTimeline).where(
+            StoryTimeline.id == timeline_id,
+            StoryTimeline.novel_id == proposal.novel_id,
+            StoryTimeline.lifecycle_state == "active",
+        )
+    )
+    instances = tuple(
+        session.scalars(
+            select(CharacterInstance).where(
+                CharacterInstance.id.in_((source_instance_id, target_instance_id)),
+                CharacterInstance.novel_id == proposal.novel_id,
+                CharacterInstance.lifecycle_state == "active",
+            )
+        )
+    )
+    instance_by_id = {record.id: record for record in instances}
+    if (
+        timeline is None
+        or len(instances) != 2
+        or instance_by_id[source_instance_id].character_id != source_id
+        or instance_by_id[target_instance_id].character_id != target_id
+        or instance_by_id[source_instance_id].origin_timeline_id != timeline_id
+        or instance_by_id[target_instance_id].origin_timeline_id != timeline_id
+    ):
+        raise ValidationError("新关系候选的人物实例或时间线已失效")
+
+    matches = tuple(
+        session.scalars(
+            select(CharacterRelationship)
+            .where(
+                CharacterRelationship.novel_id == proposal.novel_id,
+                CharacterRelationship.timeline_id == timeline_id,
+                CharacterRelationship.source_character_id == source_id,
+                CharacterRelationship.target_character_id == target_id,
+                CharacterRelationship.source_character_instance_id == source_instance_id,
+                CharacterRelationship.target_character_instance_id == target_instance_id,
+                CharacterRelationship.directionality == directionality,
+                CharacterRelationship.relation_kind == relation_kind,
+                CharacterRelationship.archived_at.is_(None),
+            )
+            .with_for_update()
+        )
+    )
+    normalized_label = normalize_relationship_label(label)
+    exact_matches = tuple(
+        relation for relation in matches if relation.normalized_label == normalized_label
+    )
+    if len(exact_matches) == 1:
+        relation = exact_matches[0]
+    elif len(matches) == 1:
+        relation = matches[0]
+    elif matches:
+        raise ValidationError("同一人物对存在多个相近关系，请重新同步并选择已有关系")
+    else:
+        relation = CharacterRelationship(
+            id=uuid4(),
+            novel_id=proposal.novel_id,
+            source_character_id=source_id,
+            target_character_id=target_id,
+            timeline_id=timeline_id,
+            source_character_instance_id=source_instance_id,
+            target_character_instance_id=target_instance_id,
+            directionality=directionality,
+            relation_kind=relation_kind,
+            label=label,
+            normalized_label=normalized_label,
+            relation_pair_key=relationship_pair_key(source_id, target_id),
+            relation_type=label,
+            description=str(payload.get("object") or "").strip(),
+            status="active",
+            created_by="ai_auto",
+            manual_override=False,
+            confidence=item.confidence,
+            evidence_json=[item.source_text],
+            source_chapter_revision_id=proposal.chapter_revision_id,
+            proposal_item_id=item.id,
+            version=1,
+        )
+        session.add(relation)
+        session.flush()
+        _record_incremental_relationship_revision(session, relation)
+        created = True
+        entity["is_new"] = True
+        entity["manual_override"] = False
+        entity["relationship_id"] = str(relation.id)
+        payload["entity"] = entity
+        return relation, created
+
+    entity.update(
+        {
+            "relationship_id": str(relation.id),
+            "label": relation.label,
+            "manual_override": relation.manual_override,
+            "is_new": False,
+        }
+    )
+    payload["entity"] = entity
+    return relation, False
+
+
 def commit_intelligence_items(
     session: Session,
     proposal_id: UUID,
@@ -2788,6 +3177,12 @@ def commit_intelligence_items(
     if existing_batch is not None and existing_batch.state == "committed":
         payload = _intelligence_proposal_payload(session, proposal)
         payload["commit_batch"] = _intelligence_commit_batch_payload(existing_batch)
+        inverse = dict(existing_batch.inverse_operations or {})
+        payload["relationship_sync"] = {
+            "created": len(inverse.get("created_relationship_ids") or []),
+            "updated": len(inverse.get("updated_relationship_ids") or []),
+            "skipped": int(inverse.get("skipped_relationship_count") or 0),
+        }
         session.commit()
         return payload
 
@@ -2798,7 +3193,12 @@ def commit_intelligence_items(
         commit_key=commit_key,
         state="committing",
         accepted_item_ids=sorted(str(item_id) for item_id in selected),
-        inverse_operations={"created_story_fact_ids": []},
+        inverse_operations={
+            "created_story_fact_ids": [],
+            "created_relationship_ids": [],
+            "updated_relationship_ids": [],
+            "skipped_relationship_count": 0,
+        },
         expected_story_ledger_version=novel.story_ledger_version,
     )
     if existing_batch is None:
@@ -2807,8 +3207,16 @@ def commit_intelligence_items(
     else:
         batch.state = "committing"
         batch.accepted_item_ids = sorted(str(item_id) for item_id in selected)
-        batch.inverse_operations = {"created_story_fact_ids": []}
+        batch.inverse_operations = {
+            "created_story_fact_ids": [],
+            "created_relationship_ids": [],
+            "updated_relationship_ids": [],
+            "skipped_relationship_count": 0,
+        }
     created_fact_ids: list[str] = []
+    created_relationship_ids: set[str] = set()
+    updated_relationship_ids: set[str] = set()
+    skipped_relationship_count = 0
     rejected_invalid_item_ids: list[str] = []
     for item in items:
         if item.id not in selected:
@@ -2835,6 +3243,15 @@ def commit_intelligence_items(
         object_text = str(payload.get("object", "")).strip()
         if not subject or not predicate or not object_text:
             raise ValidationError("accepted intelligence item requires subject, predicate and object")
+        relationship: CharacterRelationship | None = None
+        relationship_created = False
+        if item.item_type == "relationship_state":
+            relationship, relationship_created = _materialize_relationship_candidate(
+                session,
+                proposal=proposal,
+                item=item,
+                payload=payload,
+            )
         candidate = _typed_story_fact_candidate(
             proposal=proposal, revision=revision, item=item, payload=payload
         )
@@ -2872,6 +3289,13 @@ def commit_intelligence_items(
                 )
             )
             created_fact_ids.append(str(fact.id))
+            if relationship is not None:
+                if relationship_created:
+                    created_relationship_ids.add(str(relationship.id))
+                elif str(relationship.id) not in created_relationship_ids:
+                    updated_relationship_ids.add(str(relationship.id))
+        elif relationship is not None:
+            skipped_relationship_count += 1
         item.review_state = "accepted"
         item.suggested_payload = payload
         item.committed_story_fact_id = fact.id
@@ -2883,13 +3307,23 @@ def commit_intelligence_items(
         proposal.state = "accepted" if accepted else "rejected"
     proposal.reviewed_at = datetime.now(timezone.utc)
     batch.state = "committed"
-    batch.inverse_operations = {"created_story_fact_ids": created_fact_ids}
+    batch.inverse_operations = {
+        "created_story_fact_ids": created_fact_ids,
+        "created_relationship_ids": sorted(created_relationship_ids),
+        "updated_relationship_ids": sorted(updated_relationship_ids),
+        "skipped_relationship_count": skipped_relationship_count,
+    }
     batch.committed_at = proposal.reviewed_at
     if created_fact_ids:
         novel.story_ledger_version += 1
     session.commit()
     result = _intelligence_proposal_payload(session, proposal)
     result["commit_batch"] = _intelligence_commit_batch_payload(batch)
+    result["relationship_sync"] = {
+        "created": len(created_relationship_ids),
+        "updated": len(updated_relationship_ids),
+        "skipped": skipped_relationship_count,
+    }
     result["rejected_invalid_item_ids"] = rejected_invalid_item_ids
     return result
 

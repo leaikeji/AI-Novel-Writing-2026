@@ -809,6 +809,37 @@ def test_intelligence_relationship_preserves_stable_entity_key() -> None:
     assert items[0]["entity_key"] == "relationship_1"
 
 
+def test_intelligence_relationship_preserves_new_relationship_character_keys() -> None:
+    payload = {
+        "items": [
+            {
+                "fact_type": "relationship_state",
+                "source_character_key": "character_1",
+                "target_character_key": "character_2",
+                "directionality": "undirected",
+                "relation_kind": "ally",
+                "relationship_label": "调查同盟",
+                "subject": "苏晚与陆沉舟",
+                "predicate": "结成同盟",
+                "object": "共同调查旧电台档案",
+                "source_text": "我们一起把这件事查到底",
+                "reasoning_summary": "形成稳定协作关系",
+                "confidence": 92,
+                "details": {},
+            }
+        ]
+    }
+
+    items = normalize_intelligence_generation_json(payload, "")
+
+    assert items[0]["entity_key"] == ""
+    assert items[0]["source_character_key"] == "character_1"
+    assert items[0]["target_character_key"] == "character_2"
+    assert items[0]["directionality"] == "undirected"
+    assert items[0]["relation_kind"] == "ally"
+    assert items[0]["relationship_label"] == "调查同盟"
+
+
 def test_intelligence_story_time_rejects_a_calendar_year_absent_from_evidence() -> None:
     payload = {
         "items": [

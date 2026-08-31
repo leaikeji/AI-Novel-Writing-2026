@@ -166,8 +166,8 @@ export function RelationshipWorkspace({
       setPreparingAutoSync(false);
       setConfirmingAutoSync(true);
       Modal.confirm({
-        title: forceNew ? "确认重新分析关系网" : "确认生成关系网",
-        content: `本次将使用 ${modelLabel} 分析当前角色设定、大纲和章节正文；成功后会写入 AI 关系，并可能归档已不符合当前资料的旧 AI 关系。人工关系和正文不会被覆盖，任务会保留 requested/actual 模型证据。`,
+        title: forceNew ? "确认重新分析全书关系快照" : "确认生成全书关系快照",
+        content: `章节写作后的“同步进展”会在你确认候选后自动增量完善关系网，无需每次来这里生成。本次整书分析是可选的初始化/重建操作，将使用 ${modelLabel} 分析当前角色设定、大纲和章节正文；成功后会写入 AI 关系，并可能归档已不符合当前资料的旧 AI 关系。人工关系和正文不会被覆盖，任务会保留 requested/actual 模型证据。`,
         okText: forceNew ? "重新分析" : "开始生成",
         cancelText: "取消",
         onOk: async () => {

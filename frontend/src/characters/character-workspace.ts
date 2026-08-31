@@ -32,11 +32,29 @@ import { ensureCharacterWorkspaceStyles } from "./styles";
 type StateSetter<T> = (value: T | ((previous: T) => T)) => void;
 type ElementNode = unknown;
 
+const CHARACTER_WORKSPACE_PORTAL_ROOT_ID = "anw-character-workspace-portal-root";
+
 export interface CharacterReactRuntime {
   createElement(type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]): ElementNode;
   useState<T>(initial: T | (() => T)): [T, StateSetter<T>];
   useEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]): void;
   useRef<T>(initial: T): { current: T };
+}
+
+export interface CharacterWorkspacePortalRuntime {
+  createPortal(node: ElementNode, container: Element): ElementNode;
+  getContainer(): Element | null;
+}
+
+export function getCharacterWorkspacePortalContainer(): Element | null {
+  if (typeof document === "undefined") return null;
+  const existing = document.getElementById(CHARACTER_WORKSPACE_PORTAL_ROOT_ID);
+  if (existing) return existing;
+  const container = document.createElement("div");
+  container.id = CHARACTER_WORKSPACE_PORTAL_ROOT_ID;
+  container.dataset.aiNovelCharacterWorkspacePortal = "true";
+  document.body.appendChild(container);
+  return container;
 }
 
 export interface CharacterWorkspaceDialogProps {
@@ -114,7 +132,10 @@ function errorFieldId(baseId: string, field: string): string {
   return `${baseId}-field-${scope}-${normalized.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
+export function createCharacterWorkspaceDialog(
+  React: CharacterReactRuntime,
+  portal?: CharacterWorkspacePortalRuntime,
+) {
   const h = React.createElement;
 
   return function CharacterWorkspaceDialog(props: CharacterWorkspaceDialogProps): ElementNode {
@@ -527,7 +548,7 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
       (instance) => instance.origin_timeline_id === workspace.selected_timeline.id,
     );
 
-    return h(
+    const overlay = h(
       "div",
       {
         className: "anw-character-workspace-backdrop",
@@ -741,5 +762,9 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
         ),
       ),
     );
+    const portalContainer = portal?.getContainer();
+    return portal && portalContainer
+      ? portal.createPortal(overlay, portalContainer)
+      : overlay;
   };
 }
