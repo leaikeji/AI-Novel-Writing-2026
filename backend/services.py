@@ -394,7 +394,39 @@ def visible_character_count(markdown: str) -> int:
     return sum(1 for character in markdown_to_text(markdown) if not character.isspace())
 
 
-def _document_payload(document: Document, working: DocumentWorkingCopy) -> dict[str, Any]:
+def document_version_state(
+    *,
+    content_hash_value: str,
+    visible_count: int,
+    base_content_hash: str | None,
+    base_source: str | None,
+) -> str:
+    """Derive the author-facing working-copy state without inventing publication."""
+
+    if base_content_hash != content_hash_value:
+        return "saved_working_copy"
+    if base_source == "initial" and visible_count == 0:
+        return "empty_draft"
+    return "checkpointed"
+
+
+def _document_base_revision(
+    session: Session,
+    working: DocumentWorkingCopy,
+) -> DocumentRevision | None:
+    if working.base_revision_id is None:
+        return None
+    revision = session.get(DocumentRevision, working.base_revision_id)
+    if revision is None or revision.document_id != working.document_id:
+        return None
+    return revision
+
+
+def _document_payload(
+    document: Document,
+    working: DocumentWorkingCopy,
+) -> dict[str, Any]:
+    character_count = visible_character_count(working.content_markdown)
     return {
         "id": str(document.id),
         "novel_id": str(document.novel_id),
@@ -408,9 +440,24 @@ def _document_payload(document: Document, working: DocumentWorkingCopy) -> dict[
         "base_revision_id": str(working.base_revision_id) if working.base_revision_id else None,
         "content_markdown": working.content_markdown,
         "content_hash": working.content_hash,
-        "visible_character_count": visible_character_count(working.content_markdown),
+        "visible_character_count": character_count,
         "updated_at": working.updated_at.isoformat() if working.updated_at else None,
     }
+
+
+def _versioned_document_payload(
+    document: Document,
+    working: DocumentWorkingCopy,
+    base_revision: DocumentRevision | None,
+) -> dict[str, Any]:
+    payload = _document_payload(document, working)
+    payload["version_state"] = document_version_state(
+        content_hash_value=working.content_hash,
+        visible_count=payload["visible_character_count"],
+        base_content_hash=base_revision.content_hash if base_revision else None,
+        base_source=base_revision.source if base_revision else None,
+    )
+    return payload
 
 
 def _revision_payload(revision: DocumentRevision, *, include_content: bool = False) -> dict[str, Any]:
@@ -947,14 +994,47 @@ def get_novel_tree(session: Session, novel_id: UUID) -> list[dict[str, Any]]:
     documents = session.scalars(
         select(Document).where(Document.novel_id == novel_id).order_by(Document.position)
     ).all()
+    document_ids = [document.id for document in documents]
+    working_copies = (
+        session.scalars(
+            select(DocumentWorkingCopy).where(
+                DocumentWorkingCopy.document_id.in_(document_ids)
+            )
+        ).all()
+        if document_ids
+        else []
+    )
+    working_by_document_id = {
+        working.document_id: working for working in working_copies
+    }
+    base_revision_ids = [
+        working.base_revision_id
+        for working in working_copies
+        if working.base_revision_id is not None
+    ]
+    base_revisions = (
+        session.scalars(
+            select(DocumentRevision).where(DocumentRevision.id.in_(base_revision_ids))
+        ).all()
+        if base_revision_ids
+        else []
+    )
+    base_revision_by_id = {revision.id: revision for revision in base_revisions}
     grouped: dict[UUID | None, list[dict[str, Any]]] = {volume.id: [] for volume in volumes}
     grouped[None] = []
     for document in documents:
-        working = session.get(DocumentWorkingCopy, document.id)
+        working = working_by_document_id.get(document.id)
         if working is None:
             continue
         group_id = document.volume_id if document.volume_id in grouped else None
-        grouped[group_id].append(_document_payload(document, working))
+        base_revision = (
+            base_revision_by_id.get(working.base_revision_id)
+            if working.base_revision_id is not None
+            else None
+        )
+        grouped[group_id].append(
+            _versioned_document_payload(document, working, base_revision)
+        )
     result = [
         {
             "id": str(volume.id),
@@ -983,7 +1063,11 @@ def get_document(session: Session, document_id: UUID) -> dict[str, Any]:
     working = session.get(DocumentWorkingCopy, document.id)
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
-    payload = _document_payload(document, working)
+    payload = _versioned_document_payload(
+        document,
+        working,
+        _document_base_revision(session, working),
+    )
     revisions = session.scalars(
         select(DocumentRevision)
         .where(
@@ -1844,7 +1928,12 @@ def adopt_candidate(
         or working.content_hash != candidate.base_content_hash
     ):
         raise CandidateConflictError(
-            _document_payload(document, working), _candidate_payload(candidate)
+            _versioned_document_payload(
+                document,
+                working,
+                _document_base_revision(session, working),
+            ),
+            _candidate_payload(candidate),
         )
     latest_number = session.scalar(
         select(func.max(DocumentRevision.revision_number)).where(
@@ -3524,13 +3613,16 @@ def save_draft(
     )
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
+    base_revision = _document_base_revision(session, working)
     if working.draft_version != expected_draft_version:
-        raise DraftConflictError(_document_payload(document, working))
+        raise DraftConflictError(
+            _versioned_document_payload(document, working, base_revision)
+        )
     server_hash = content_hash(content_markdown)
     if client_hash is not None and client_hash != server_hash:
         raise ValidationError("content_hash does not match content_markdown")
     if working.content_hash == server_hash:
-        return _document_payload(document, working)
+        return _versioned_document_payload(document, working, base_revision)
     _supersede_intelligence_for_document(
         session, document_id, invalidate_committed_facts=False
     )
@@ -3539,7 +3631,7 @@ def save_draft(
     working.draft_version += 1
     document.novel.updated_at = func.now()
     session.commit()
-    return _document_payload(document, working)
+    return _versioned_document_payload(document, working, base_revision)
 
 
 def create_checkpoint(
@@ -3554,7 +3646,13 @@ def create_checkpoint(
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
     if working.draft_version != expected_draft_version:
-        raise DraftConflictError(_document_payload(document, working))
+        raise DraftConflictError(
+            _versioned_document_payload(
+                document,
+                working,
+                _document_base_revision(session, working),
+            )
+        )
     latest_number = session.scalar(
         select(func.max(DocumentRevision.revision_number)).where(
             DocumentRevision.document_id == document_id
@@ -3604,7 +3702,13 @@ def restore_revision(
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
     if working.draft_version != expected_draft_version:
-        raise DraftConflictError(_document_payload(document, working))
+        raise DraftConflictError(
+            _versioned_document_payload(
+                document,
+                working,
+                _document_base_revision(session, working),
+            )
+        )
     fact_plan = _restore_fact_plan(
         session, document, working, source_revision, lock=True
     )

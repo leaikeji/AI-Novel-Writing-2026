@@ -10,6 +10,11 @@ export interface RevisionSummary {
   created_at: string | null;
 }
 
+export type DocumentVersionState =
+  | "empty_draft"
+  | "saved_working_copy"
+  | "checkpointed";
+
 export interface DocumentRecord {
   id: string;
   novel_id: string;
@@ -23,6 +28,7 @@ export interface DocumentRecord {
   content_markdown: string;
   content_hash: string;
   visible_character_count: number;
+  version_state?: DocumentVersionState;
   updated_at: string | null;
   revisions: RevisionSummary[];
 }

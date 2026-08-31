@@ -11,6 +11,7 @@ from backend.services import (
     ValidationError,
     _clean_model_candidate,
     content_hash,
+    document_version_state,
     markdown_to_text,
     visible_character_count,
 )
@@ -26,6 +27,30 @@ def test_markdown_snapshots_are_separate_and_deterministic() -> None:
 
 def test_content_hash_changes_with_author_text() -> None:
     assert content_hash("第一稿") != content_hash("第二稿")
+
+
+def test_document_version_state_distinguishes_draft_and_checkpoint_without_publication() -> None:
+    initial_hash = content_hash("")
+    saved_hash = content_hash("已保存工作稿")
+
+    assert document_version_state(
+        content_hash_value=initial_hash,
+        visible_count=0,
+        base_content_hash=initial_hash,
+        base_source="initial",
+    ) == "empty_draft"
+    assert document_version_state(
+        content_hash_value=saved_hash,
+        visible_count=6,
+        base_content_hash=initial_hash,
+        base_source="initial",
+    ) == "saved_working_copy"
+    assert document_version_state(
+        content_hash_value=saved_hash,
+        visible_count=6,
+        base_content_hash=saved_hash,
+        base_source="manual_checkpoint",
+    ) == "checkpointed"
 
 
 def test_undirected_relationships_have_canonical_endpoints_and_pair_keys() -> None:

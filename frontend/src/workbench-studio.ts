@@ -80,6 +80,10 @@ import {
   canonicalChapterDocuments,
   nextChapterOrdinalForVolume,
 } from "./chapter-tree";
+import {
+  chapterVersionPresentation,
+  formatChapterUpdatedAt,
+} from "./chapter-list";
 import { RelationshipEditor } from "./relationship-editor";
 import { RelationshipWorkspace } from "./relationship-workspace";
 import { CharacterProfileCompletionPanel } from "./character-profile-completion-panel";
@@ -126,6 +130,7 @@ const {
   Alert,
   Button,
   Checkbox,
+  Dropdown,
   Empty,
   Input,
   InputNumber,
@@ -148,10 +153,12 @@ const {
   DownloadOutlined,
   EditOutlined,
   FileTextOutlined,
+  MoreOutlined,
   PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
+  RightOutlined,
   SearchOutlined,
   SettingOutlined,
   SoundOutlined,
@@ -159,6 +166,9 @@ const {
   UnorderedListOutlined,
   UploadOutlined,
 } = host.antdIcons;
+
+
+const UNGROUPED_CHAPTER_VOLUME_KEY = "unassigned";
 
 
 const NarrationReadingPage = createNarrationReadingPage(React);
@@ -2339,7 +2349,9 @@ export function StudioProjectView({
   );
   const [clueTab, setClueTab] = React.useState("main" as StorylineType);
   const [settingsTab, setSettingsTab] = React.useState("template" as "template" | "foreshadow" | "timeline" | "semantic-index");
-  const [expandedVolumes, setExpandedVolumes] = React.useState([] as string[]);
+  const [selectedChapterVolumeKey, setSelectedChapterVolumeKey] = React.useState(
+    null as string | null,
+  );
   const [volumeDescending, setVolumeDescending] = React.useState(true);
   const [outlineEditing, setOutlineEditing] = React.useState(false);
   const [outlineStep, setOutlineStep] = React.useState(0);
@@ -2900,6 +2912,31 @@ export function StudioProjectView({
   const chapterNumberById = new Map(
     chapterDocuments.map((document: DocumentRecord, index: number) => [document.id, index + 1]),
   );
+  const ungroupedChapters = (ungrouped?.documents ?? [])
+    .filter((document: DocumentRecord) => document.kind === "chapter")
+    .sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position);
+  const fallbackChapterVolumeKey = orderedVolumes[0]?.id
+    ? String(orderedVolumes[0].id)
+    : UNGROUPED_CHAPTER_VOLUME_KEY;
+  const selectedChapterVolume = orderedVolumes.find(
+    (volume: VolumeRecord) => String(volume.id) === selectedChapterVolumeKey,
+  ) ?? (
+    selectedChapterVolumeKey === UNGROUPED_CHAPTER_VOLUME_KEY
+      ? null
+      : orderedVolumes.find(
+          (volume: VolumeRecord) => String(volume.id) === fallbackChapterVolumeKey,
+        ) ?? null
+  );
+  const activeChapterVolumeKey = selectedChapterVolume
+    ? String(selectedChapterVolume.id)
+    : selectedChapterVolumeKey === UNGROUPED_CHAPTER_VOLUME_KEY || orderedVolumes.length === 0
+      ? UNGROUPED_CHAPTER_VOLUME_KEY
+      : fallbackChapterVolumeKey;
+  const selectedVolumeChapters = selectedChapterVolume
+    ? [...selectedChapterVolume.documents]
+        .filter((document: DocumentRecord) => document.kind === "chapter")
+        .sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position)
+    : ungroupedChapters;
 
   const setRoleSubview = (next: "list" | "graph") => {
     setRoleTab(next);
@@ -2931,6 +2968,9 @@ export function StudioProjectView({
 
   React.useEffect(() => { void loadDomains(); }, [loadDomains]);
   React.useEffect(() => {
+    setSelectedChapterVolumeKey(null);
+  }, [novel.id]);
+  React.useEffect(() => {
     if (
       openChapterWizardSignal <= 0
       || handledOpenChapterWizardSignalRef.current === openChapterWizardSignal
@@ -2944,12 +2984,6 @@ export function StudioProjectView({
     }
     setChapterWizardOpen(true);
   }, [openChapterWizardSignal, novel.id, volumes.length]);
-  React.useEffect(() => {
-    const initial = volumeDescending
-      ? volumesByPosition[volumesByPosition.length - 1]
-      : volumesByPosition[0];
-    if (expandedVolumes.length === 0 && initial?.id) setExpandedVolumes([String(initial.id)]);
-  }, [novel.id, volumes.length, volumeDescending]);
 
   const perform = async (action: () => Promise<void>, fallback: string) => {
     setBusy(true);
@@ -3004,7 +3038,7 @@ export function StudioProjectView({
         method: "POST",
         body: JSON.stringify({ title: storedTitle }),
       });
-      setExpandedVolumes((current: string[]) => current.includes(created.id) ? current : [...current, created.id]);
+      setSelectedChapterVolumeKey(created.id);
     }
     setVolumeOpen(false);
     await refreshAll();
@@ -3396,73 +3430,218 @@ export function StudioProjectView({
     setSettingsOpen(false);
   }, "保存模板设定失败");
 
-  const toggleVolume = (id: string) => setExpandedVolumes((current: string[]) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const renderChapterTableRow = (document: DocumentRecord) => {
+    const version = chapterVersionPresentation(document.version_state);
+    const moveItems = [
+      ...volumesByPosition
+        .filter((volume: VolumeRecord) => volume.id !== document.volume_id)
+        .map((volume: VolumeRecord) => ({
+          key: String(volume.id),
+          label: `移入${displayVolumeTitle(volume)}`,
+        })),
+      ...(document.volume_id
+        ? [{ key: UNGROUPED_CHAPTER_VOLUME_KEY, label: "移出到未分卷" }]
+        : []),
+    ];
+    return h(
+      "div",
+      { key: document.id, className: "mb-chapter-table-row" },
+      h(
+        "button",
+        {
+          type: "button",
+          className: "mb-chapter-table-open",
+          onClick: () => onSelectDocument(document.id),
+        },
+        h("strong", null, chapterDisplayTitle(
+          chapterNumberById.get(document.id) ?? 1,
+          document.title,
+        )),
+        h("span", null, `${document.visible_character_count} 字`),
+      ),
+      h(
+        "span",
+        {
+          className: `mb-chapter-version is-${version.tone}`,
+          title: version.description,
+        },
+        version.label,
+      ),
+      h(
+        "time",
+        {
+          className: "mb-chapter-updated",
+          dateTime: document.updated_at ?? undefined,
+          title: document.updated_at ?? undefined,
+        },
+        formatChapterUpdatedAt(document.updated_at),
+      ),
+      moveItems.length
+        ? h(
+            Dropdown,
+            {
+              trigger: ["click"],
+              placement: "bottomRight",
+              menu: {
+                items: moveItems,
+                onClick: ({ key }: { key: string }) => void moveChapter(
+                  document,
+                  key === UNGROUPED_CHAPTER_VOLUME_KEY ? null : key,
+                ),
+              },
+            },
+            h(Button, {
+              type: "text",
+              className: "mb-chapter-more",
+              icon: h(MoreOutlined),
+              title: "移动章节",
+              "aria-label": `移动${chapterDisplayTitle(
+                chapterNumberById.get(document.id) ?? 1,
+                document.title,
+              )}`,
+            }),
+          )
+        : h("span", { className: "mb-chapter-more-placeholder" }),
+      h(Button, {
+        type: "text",
+        className: "mb-chapter-enter",
+        icon: h(RightOutlined),
+        title: "打开章节",
+        "aria-label": `打开${chapterDisplayTitle(
+          chapterNumberById.get(document.id) ?? 1,
+          document.title,
+        )}`,
+        onClick: () => onSelectDocument(document.id),
+      }),
+    );
+  };
 
-  const renderChapterCard = (document: DocumentRecord, volumeId: string | null) => h(
-    "article",
-    { key: document.id, className: "mb-chapter-card" },
-    h("button", { type: "button", className: "mb-chapter-open", onClick: () => onSelectDocument(document.id) },
-      h("strong", null, chapterDisplayTitle(chapterNumberById.get(document.id) ?? 1, document.title)),
-      h("span", null, `${document.visible_character_count} 字`),
-    ),
-    h(
+  const renderChapters = () => {
+    const selectedVolumeTitle = selectedChapterVolume
+      ? displayVolumeTitle(selectedChapterVolume)
+      : "未分卷";
+    const selectedVolumeMenu = selectedChapterVolume
+      ? {
+          items: [
+            { key: "edit", label: "编辑分卷" },
+            { key: "delete", label: "删除分卷", danger: true },
+          ],
+          onClick: ({ key }: { key: string }) => {
+            if (key === "edit") openVolume(selectedChapterVolume);
+            if (key === "delete") deleteVolume(selectedChapterVolume);
+          },
+        }
+      : null;
+    return h(
       "div",
-      { className: "mb-chapter-actions" },
-      volumeId
-        ? h(Button, { type: "link", size: "small", onClick: () => void moveChapter(document, null) }, "移出")
-        : h(Select, {
-            size: "small", className: "mb-move-select", placeholder: "移入分卷",
-            options: volumes.map((volume: VolumeRecord) => ({ label: displayVolumeTitle(volume), value: volume.id })),
-            onChange: (value: string) => void moveChapter(document, value),
-          }),
-    ),
-  );
-
-  const renderChapters = () => h(
-    "div",
-    { className: "mb-chapter-dashboard" },
-    h(
-      "div",
-      { className: "mb-subtitle-row" },
-      h("h3", null, "分卷管理"),
-      h(Button, { type: "text", className: "mb-inline-add", icon: h(PlusOutlined), onClick: () => openVolume() }, "新增分卷"),
-    ),
-    h(
-      "div",
-      { className: "mb-volume-grid" },
-      orderedVolumes.length === 0 ? h("div", { className: "mb-volume-zero" }, "暂无分卷，请先创建分卷；创建后才可新建章节") : null,
-      ...orderedVolumes.map((volume: VolumeRecord) => {
-        const id = String(volume.id);
-        const expanded = expandedVolumes.includes(id);
-        const chapters = volume.documents.filter((item: DocumentRecord) => item.kind === "chapter");
-        return h(
-          "section",
-          { key: id, className: `mb-volume-card ${expanded ? "is-expanded" : ""}` },
+      { className: "mb-chapter-dashboard" },
+      h(
+        "div",
+        { className: "mb-chapter-master-detail" },
+        h(
+          "aside",
+          { className: "mb-chapter-volume-pane", "aria-label": "分卷列表" },
           h(
-            "header",
-            { className: "mb-volume-header" },
-            h("button", { type: "button", className: "mb-volume-toggle", onClick: () => toggleVolume(id) },
-              h(expanded ? CaretDownOutlined : CaretRightOutlined),
-              h("strong", null, displayVolumeTitle(volume)),
-              h("span", null, `${chapters.length}章`),
-            ),
-            h("div", { className: "mb-volume-actions" },
-              h(Button, { type: "text", size: "small", onClick: () => openVolume(volume) }, "编辑"),
-              h(Button, { type: "text", size: "small", danger: true, onClick: () => deleteVolume(volume) }, "删除"),
+            "div",
+            { className: "mb-chapter-volume-heading" },
+            h("h3", null, "分卷"),
+            h(Button, {
+              type: "text",
+              className: "mb-inline-add",
+              icon: h(PlusOutlined),
+              onClick: () => openVolume(),
+            }, "新增分卷"),
+          ),
+          h(
+            "div",
+            { className: "mb-chapter-volume-list" },
+            orderedVolumes.length === 0
+              ? h("div", { className: "mb-volume-zero" }, "暂无分卷，请先创建分卷")
+              : null,
+            ...orderedVolumes.map((volume: VolumeRecord) => {
+              const key = String(volume.id);
+              const chapterCount = volume.documents.filter(
+                (document: DocumentRecord) => document.kind === "chapter",
+              ).length;
+              return h(
+                "button",
+                {
+                  key,
+                  type: "button",
+                  className: `mb-chapter-volume-item ${activeChapterVolumeKey === key ? "is-active" : ""}`,
+                  "aria-current": activeChapterVolumeKey === key ? "true" : undefined,
+                  onClick: () => setSelectedChapterVolumeKey(key),
+                },
+                h("strong", null, displayVolumeTitle(volume)),
+                h("span", null, `${chapterCount} 章`),
+              );
+            }),
+            h(
+              "button",
+              {
+                key: UNGROUPED_CHAPTER_VOLUME_KEY,
+                type: "button",
+                className: `mb-chapter-volume-item is-ungrouped ${activeChapterVolumeKey === UNGROUPED_CHAPTER_VOLUME_KEY ? "is-active" : ""}`,
+                "aria-current": activeChapterVolumeKey === UNGROUPED_CHAPTER_VOLUME_KEY ? "true" : undefined,
+                onClick: () => setSelectedChapterVolumeKey(UNGROUPED_CHAPTER_VOLUME_KEY),
+              },
+              h("strong", null, "未分卷"),
+              h("span", null, `${ungroupedChapters.length} 章`),
             ),
           ),
-          expanded ? h("div", { className: "mb-volume-chapters" }, chapters.length ? chapters.map((item: DocumentRecord) => renderChapterCard(item, id)) : h("div", { className: "mb-volume-empty" }, "该分卷暂无章节")) : null,
-        );
-      }),
-    ),
-    h(
-      "section",
-      { className: "mb-ungrouped" },
-      ungrouped?.documents.filter((item: DocumentRecord) => item.kind === "chapter").length
-        ? h("div", { className: "mb-ungrouped-list" }, ...ungrouped.documents.filter((item: DocumentRecord) => item.kind === "chapter").map((item: DocumentRecord) => renderChapterCard(item, null)))
-        : h("div", { className: "mb-ungrouped-empty" }, h("strong", null, "暂无未分卷章节"), h("span", null, "当前所有章节均已归入分卷")),
-    ),
-  );
+        ),
+        h(
+          "section",
+          { className: "mb-chapter-detail-pane", "aria-label": `${selectedVolumeTitle}章节` },
+          h(
+            "header",
+            { className: "mb-chapter-detail-header" },
+            h(
+              "div",
+              null,
+              h("h3", null, selectedVolumeTitle),
+              h("span", null, `${selectedVolumeChapters.length} 章`),
+            ),
+            selectedVolumeMenu
+              ? h(
+                  Dropdown,
+                  { trigger: ["click"], placement: "bottomRight", menu: selectedVolumeMenu },
+                  h(Button, {
+                    type: "text",
+                    className: "mb-chapter-volume-more",
+                    icon: h(MoreOutlined),
+                    title: "分卷操作",
+                    "aria-label": `${selectedVolumeTitle}操作`,
+                  }),
+                )
+              : null,
+          ),
+          h(
+            "div",
+            { className: "mb-chapter-table" },
+            h(
+              "div",
+              { className: "mb-chapter-table-head", "aria-hidden": "true" },
+              h("span", null, "章节"),
+              h("span", null, "版本状态"),
+              h("span", null, "更新时间"),
+              h("span", null),
+              h("span", null),
+            ),
+            selectedVolumeChapters.length
+              ? selectedVolumeChapters.map((document: DocumentRecord) => renderChapterTableRow(document))
+              : h(
+                  "div",
+                  { className: "mb-chapter-detail-empty" },
+                  h(FileTextOutlined),
+                  h("strong", null, selectedChapterVolume ? "本卷还没有章节" : "暂无未分卷章节"),
+                  h("span", null, selectedChapterVolume ? "可从右上角新建章节开始写作" : "当前所有章节都已归入分卷"),
+                ),
+          ),
+        ),
+      ),
+    );
+  };
 
   const outlineCards = [
     { label: "亮点&简介", value: novel.highlight, step: 5 },
@@ -3698,8 +3877,30 @@ export function StudioProjectView({
 
   const panelActions = section === "chapters"
     ? h(React.Fragment, null,
-        h(Button, { icon: h(volumeDescending ? ArrowDownOutlined : ArrowUpOutlined), title: volumeDescending ? "按分卷倒序显示" : "按分卷正序显示", "aria-label": volumeDescending ? "按分卷倒序显示" : "按分卷正序显示", onClick: () => setVolumeDescending((current: boolean) => !current) }),
-        h(Button, { icon: h(SearchOutlined), title: "搜索全书", "aria-label": "搜索全书", onClick: () => setSearchOpen(true) }),
+        h(Button, {
+          className: "mb-chapter-sort",
+          icon: h(volumeDescending ? ArrowDownOutlined : ArrowUpOutlined),
+          title: volumeDescending ? "切换为正序显示" : "切换为倒序显示",
+          "aria-label": volumeDescending ? "分卷当前倒序，切换为正序" : "分卷当前正序，切换为倒序",
+          onClick: () => setVolumeDescending((current: boolean) => !current),
+        }, volumeDescending ? "倒序" : "正序"),
+        h(
+          "div",
+          { className: "mb-chapter-header-search" },
+          h(Input, {
+            value: searchQuery,
+            prefix: h(SearchOutlined),
+            allowClear: true,
+            placeholder: "搜索全书",
+            "aria-label": "搜索全书",
+            onChange: (event: { target: { value: string } }) => setSearchQuery(event.target.value),
+            onPressEnter: () => {
+              if (!searchQuery.trim()) return;
+              setSearchOpen(true);
+              void runSearch();
+            },
+          }),
+        ),
         h(Button, { icon: h(DownloadOutlined), title: "下载全书", "aria-label": "下载全书", onClick: () => void exportNovel("text") }),
         h(Button, {
           className: "anw-primary-button",
@@ -3786,7 +3987,7 @@ export function StudioProjectView({
           section === "reading"
             ? null
             : h("header", { className: `mb-panel-header ${section === "roles" || section === "clues" || section === "settings" ? "is-tabs-only" : ""}` }, h("h2", null, section === "chapters" ? "章节列表" : sectionLabel(section)), h("div", { className: "mb-panel-actions" }, panelActions)),
-          h("div", { className: `mb-panel-body${section === "reading" ? " is-reading" : ""}${section === "outline" ? " is-outline" : ""}` }, panelBody),
+          h("div", { className: `mb-panel-body${section === "reading" ? " is-reading" : ""}${section === "outline" ? " is-outline" : ""}${section === "chapters" ? " is-chapters" : ""}` }, panelBody),
         ),
       ),
     ),

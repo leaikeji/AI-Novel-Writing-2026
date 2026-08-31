@@ -1476,6 +1476,7 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
     novel = create_novel(session, "pytest-CAS小说")
     novel_id = UUID(novel["id"])
     document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    assert novel["tree"][0]["documents"][0]["version_state"] == "empty_draft"
 
     first_save = save_draft(
         session,
@@ -1484,6 +1485,7 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
         content_markdown="# 第一章\n\n雨夜里，江述发现一封信。",
     )
     assert first_save["draft_version"] == 2
+    assert first_save["version_state"] == "saved_working_copy"
 
     with pytest.raises(DraftConflictError) as conflict:
         save_draft(
@@ -1498,6 +1500,7 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
     checkpoint = create_checkpoint(session, document_id, expected_draft_version=2)
     assert checkpoint["revision"]["revision_number"] == 2
     assert checkpoint["document"]["draft_version"] == 3
+    assert checkpoint["document"]["version_state"] == "checkpointed"
 
     second_save = save_draft(
         session,
@@ -1506,6 +1509,7 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
         content_markdown="# 第一章\n\n江述烧掉了那封信。",
     )
     assert second_save["draft_version"] == 4
+    assert second_save["version_state"] == "saved_working_copy"
     assert search_novel(session, novel_id, "烧掉")[0]["document_id"] == str(document_id)
 
     restored = restore_revision(
@@ -1521,6 +1525,7 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
     assert restored["revision"]["parent_revision_id"] == restored["preserved_revision"]["id"]
     assert restored["revision"]["source"] == "manual_restore"
     assert restored["document"]["content_markdown"].endswith("一封信。")
+    assert restored["document"]["version_state"] == "checkpointed"
 
     context = get_novel_context(session, novel_id, document_id=document_id)
     assert context["novel"]["title"] == "pytest-CAS小说"
