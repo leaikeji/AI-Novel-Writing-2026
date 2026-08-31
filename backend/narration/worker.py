@@ -68,6 +68,10 @@ from .manifest import (
     append_manifest_revision,
     publish_manifest,
 )
+from .nano_experiments import (
+    NanoDecodeParametersV3,
+    validate_nano_experiment_version_evidence,
+)
 from .official_presets import (
     OFFICIAL_PRESET_MAX_NEW_FRAMES,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
@@ -117,6 +121,11 @@ from .transcoding import (
     TranscodingUnavailable,
     TranscodingValidationError,
     transcode_segment,
+)
+from .voice_generator_runtime import (
+    EXPECTED_AUDIO_PARAMETERS as VOICE_GENERATOR_AUDIO_PARAMETERS,
+    EXPECTED_RUNTIME_IDENTITY as VOICE_GENERATOR_RUNTIME_IDENTITY,
+    VOICE_GENERATOR_REVISION,
 )
 
 
@@ -235,6 +244,112 @@ class WorkerOutcome:
     job_id: UUID | None = None
     render_id: UUID | None = None
     error_code: str | None = None
+
+
+def _validated_nano_experiment_decode_parameters(
+    *,
+    voice: VoiceProfileVersion,
+    rights: object,
+    render_model_fingerprint: str,
+) -> NanoDecodeParametersV2:
+    """Project validated experiment evidence into the Sidecar v2 contract."""
+
+    if render_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256:
+        raise WorkerSecurityError("Nano experiment render model identity changed")
+    try:
+        validate_nano_experiment_version_evidence(
+            voice,
+            rights,
+            expected_model_fingerprint=render_model_fingerprint,
+        )
+        parameters = voice.parameters_json
+        assert type(parameters) is dict
+        complete_parameters = NanoDecodeParametersV3.from_payload(
+            parameters.get("decode_parameters")
+        )
+    except (AssertionError, TypeError, ValueError) as error:
+        raise WorkerSecurityError(
+            "Nano experiment version evidence changed"
+        ) from error
+    return complete_parameters.sidecar_decode_parameters()
+
+
+def _validated_voice_generator_decode_parameters(
+    *,
+    voice: VoiceProfileVersion,
+    rights: object,
+    render_model_fingerprint: str,
+) -> NanoDecodeParametersV2:
+    """Validate a VoiceGenerator reference before Nano voice cloning.
+
+    VoiceGenerator versions and Nano parameter experiments deliberately share
+    ``source_type=generated`` but have disjoint provenance. Do not project a
+    private generated reference through the official-preset experiment
+    validator: its model identity belongs to VoiceGenerator and its Nano
+    rendering authority is the immutable reference asset.
+    """
+
+    if render_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256:
+        raise WorkerSecurityError("VoiceGenerator render model identity changed")
+    parameters = voice.parameters_json
+    expected_parameter_keys = {
+        "schema_version",
+        "draft_fingerprint",
+        "runtime_identity",
+        "generator_parameters",
+        "nano_parameters_digest",
+    }
+    if (
+        type(parameters) is not dict
+        or set(parameters) != expected_parameter_keys
+        or parameters.get("schema_version") != "voice-generator-version/1"
+        or parameters.get("runtime_identity")
+        != dict(VOICE_GENERATOR_RUNTIME_IDENTITY.wire_payload())
+        or parameters.get("generator_parameters")
+        != dict(VOICE_GENERATOR_AUDIO_PARAMETERS.wire_payload())
+        or type(parameters.get("draft_fingerprint")) is not str
+        or len(parameters["draft_fingerprint"]) != 64
+        or type(parameters.get("nano_parameters_digest")) is not str
+        or len(parameters["nano_parameters_digest"]) != 64
+        or voice.source_type != "generated"
+        or voice.provider_id != "local-native-host"
+        or voice.model_id != "OpenMOSS-Team/MOSS-VoiceGenerator"
+        or voice.model_revision != VOICE_GENERATOR_REVISION
+        or voice.preset_key is not None
+        or voice.reference_asset_id is None
+        or voice.language not in {"zh-CN", "en", "ja-JP"}
+        or type(voice.seed) is not int
+        or not 0 <= voice.seed <= 2**63 - 1
+        or voice.state != "locked"
+        or voice.quality_state != "accepted"
+        or voice.activation_basis != "character_one_click_generation"
+        or voice.validation_basis != "machine_validated"
+        or voice.model_run_id is None
+        or voice.locked_actor is not None
+        or voice.locked_at is not None
+        or type(voice.fingerprint) is not str
+        or len(voice.fingerprint) != 64
+        or type(voice.description_digest_key_id) is not str
+        or not voice.description_digest_key_id
+        or type(voice.description_digest) is not str
+        or len(voice.description_digest) != 64
+        or getattr(rights, "source_kind", None) != "voice_generator"
+        or type(getattr(rights, "source_identifier", None)) is not str
+        or not rights.source_identifier.startswith("local://voice-generator/")
+        or getattr(rights, "notice_version", None)
+        != "voice-generator-private-use/1"
+        or getattr(rights, "purpose", None) != "private_novel_narration"
+        or getattr(rights, "commercial_use", None) is not False
+        or getattr(rights, "redistribution", None) is not False
+        or getattr(rights, "voice_cloning", None) is not False
+        or getattr(rights, "subject_consent_reference", None) is not None
+        or getattr(rights, "expires_at", None) is not None
+        or getattr(rights, "risk_flags_json", None) != []
+        or getattr(rights, "owner_id", None) != voice.owner_id
+        or getattr(rights, "workspace_id", None) != voice.workspace_id
+    ):
+        raise WorkerSecurityError("VoiceGenerator version evidence changed")
+    return NanoDecodeParametersV2()
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,6 +650,8 @@ class SqlAlchemyNarrationWorkerRepository:
             parameters = voice.parameters_json
             if type(parameters) is not dict:
                 raise WorkerContractError("voice parameters must be an object")
+            decode_parameters: NanoDecodeParametersV2 | None = None
+            voice_generator_reference = False
             if voice.source_type == "preset":
                 if (
                     rights.source_kind != "official_preset"
@@ -580,6 +697,20 @@ class SqlAlchemyNarrationWorkerRepository:
             elif voice.source_type == "uploaded":
                 if rights.source_kind != "user_upload":
                     raise WorkerSecurityError("uploaded voice provenance changed")
+            elif voice.source_type == "generated":
+                if parameters.get("schema_version") == "voice-generator-version/1":
+                    decode_parameters = _validated_voice_generator_decode_parameters(
+                        voice=voice,
+                        rights=rights,
+                        render_model_fingerprint=render.model_fingerprint,
+                    )
+                    voice_generator_reference = True
+                else:
+                    decode_parameters = _validated_nano_experiment_decode_parameters(
+                        voice=voice,
+                        rights=rights,
+                        render_model_fingerprint=render.model_fingerprint,
+                    )
             else:
                 raise WorkerContractError("voice source is not renderable")
             configured_frames = parameters.get("max_new_frames", default_max_new_frames)
@@ -589,14 +720,16 @@ class SqlAlchemyNarrationWorkerRepository:
             ):
                 raise WorkerContractError("voice max_new_frames is outside the worker bound")
             sample_mode = parameters.get("sample_mode", "fixed")
+            if voice_generator_reference:
+                configured_frames = PRODUCTION_NANO_MAX_NEW_FRAMES
+                sample_mode = "full"
             if (
                 type(sample_mode) is not str
                 or sample_mode not in PRODUCTION_NANO_SAMPLE_MODES
             ):
                 raise WorkerContractError("voice sample_mode is invalid")
             raw_decode_parameters = parameters.get("decode_parameters")
-            decode_parameters = None
-            if raw_decode_parameters is not None:
+            if raw_decode_parameters is not None and decode_parameters is None:
                 try:
                     decode_parameters = NanoDecodeParametersV2.from_wire_payload(
                         raw_decode_parameters
@@ -675,6 +808,28 @@ class SqlAlchemyNarrationWorkerRepository:
                     byte_size=asset.byte_size,
                     content_type=asset.mime_type,
                 )
+                if voice_generator_reference:
+                    expected_validation_parameters_digest = canonical_sha256(
+                        {
+                            "schema_version": (
+                                "voice-generator-nano-validation-parameters/1"
+                            ),
+                            "seed": voice.seed,
+                            "sample_mode": "full",
+                            "max_new_frames": PRODUCTION_NANO_MAX_NEW_FRAMES,
+                            "decode_parameters": dict(
+                                NanoDecodeParametersV2().wire_payload()
+                            ),
+                            "reference_sha256": asset.content_hash,
+                        }
+                    )
+                    if (
+                        parameters.get("nano_parameters_digest")
+                        != expected_validation_parameters_digest
+                    ):
+                        raise WorkerSecurityError(
+                            "VoiceGenerator Nano validation evidence changed"
+                        )
             request_parameters = {
                 "schema_version": "narration-worker-synthesis/1",
                 "render_fingerprint": render.render_fingerprint,
@@ -1281,14 +1436,23 @@ class SqlAlchemyNarrationWorkerRepository:
         """Fence a claim that failed before a safe domain work item was loaded."""
 
         def operation(session: Session) -> FailureResult:
-            self._job(session, lease, for_update=True)
-            return fail_attempt(
+            job = self._job(session, lease, for_update=True)
+            result = fail_attempt(
                 session,
                 scope=self._scope,
                 fence=lease.fence,
                 classification=classification,
                 error_code=error_code,
             )
+            if result.state in {"failed", "dead_letter"}:
+                self._terminalize_render_job_in_session(
+                    session,
+                    job=job,
+                    target_state="failed",
+                    error_code=error_code,
+                    actor="narration-worker-load-failure",
+                )
+            return result
 
         result = self._transaction(operation)
         if type(result) is not FailureResult:

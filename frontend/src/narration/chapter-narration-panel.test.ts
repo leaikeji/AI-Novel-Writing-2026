@@ -342,7 +342,18 @@ describe("chapter narration panel", () => {
     expect(T4_CHAPTER_NARRATION_STYLES).not.toContain("--anw-chapter-player-height");
     expect(T4_CHAPTER_NARRATION_STYLES).not.toContain("94px");
     expect(T4_CHAPTER_NARRATION_STYLES).toContain("min-height: 44px");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@container (max-width: 720px)");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain(
+      "grid-template-columns: minmax(0, 1fr) auto auto",
+    );
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain(
+      ".anw-chapter-narration-details__overview,",
+    );
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain(
+      "grid-template-columns: minmax(0, 1fr);",
+    );
     expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 720px)");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("z-index: 0;");
     expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 390px)");
   });
 

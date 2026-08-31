@@ -1,6 +1,6 @@
 export const NARRATION_SETTINGS_API_VERSION = "narration-settings-api/1" as const;
 export const NARRATION_SETTINGS_SCHEMA_VERSION = "narration-settings/1" as const;
-export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/1" as const;
+export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/2" as const;
 export const NARRATION_VOICE_SCHEMA_VERSION = "narration-voice/2" as const;
 export const NARRATION_CACHE_SCHEMA_VERSION = "narration-cache/1" as const;
 export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "moss-tts-official-preset-catalog/2.0" as const;
@@ -36,18 +36,6 @@ export type OfficialPresetId = typeof OFFICIAL_PRESET_EVIDENCE[number]["presetId
 export const OFFICIAL_PRESET_IDS: readonly OfficialPresetId[] = Object.freeze(
   OFFICIAL_PRESET_EVIDENCE.map((item) => item.presetId),
 );
-export const PRODUCT_OFFICIAL_PRESET_EVIDENCE = Object.freeze([
-  OFFICIAL_PRESET_EVIDENCE[0],
-  OFFICIAL_PRESET_EVIDENCE[1],
-  OFFICIAL_PRESET_EVIDENCE[2],
-  OFFICIAL_PRESET_EVIDENCE[3],
-  OFFICIAL_PRESET_EVIDENCE[4],
-  OFFICIAL_PRESET_EVIDENCE[5],
-] as const);
-export type ProductOfficialPresetId = typeof PRODUCT_OFFICIAL_PRESET_EVIDENCE[number]["presetId"];
-export const PRODUCT_OFFICIAL_PRESET_IDS: readonly ProductOfficialPresetId[] = Object.freeze(
-  PRODUCT_OFFICIAL_PRESET_EVIDENCE.map((item) => item.presetId),
-);
 export const REFERENCE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 export const REFERENCE_UPLOAD_MIME_TYPES = ["audio/wav", "audio/flac"] as const;
 
@@ -66,6 +54,9 @@ export const CAPABILITY_KEYS = [
   "cloud_assisted_analysis",
   "voice_generator",
   "cache_cleanup",
+  "character_voice_matching",
+  "nano_advanced_tuning",
+  "private_voice_deletion",
 ] as const;
 
 export type CapabilityKey = typeof CAPABILITY_KEYS[number];
@@ -447,6 +438,14 @@ export function voiceSourceEvidenceIsUsable(
     return version.rights.source_kind === "user_upload"
       && version.reference_asset_id !== null;
   }
+  if (version.activation_basis === "experimental_machine_validated") {
+    const provenance = version.official_preset;
+    return version.rights.source_kind === "official_preset"
+      && provenance !== null
+      && version.preset_key !== null
+      && provenance.preset_id === version.preset_key
+      && officialPresetProvenanceIsExact(provenance, version.preset_key);
+  }
   return version.rights.source_kind === "voice_generator"
     && version.description_available;
 }
@@ -467,6 +466,22 @@ export function voiceActivationEvidenceIsUsable(
       && version.activation_basis === "explicit_official_preset_selection"
       && version.validation_basis === "not_required"
       && version.quality_state === "pending"
+    )
+    || (
+      version.source_type === "generated"
+      && version.rights.source_kind === "official_preset"
+      && version.activation_basis === "experimental_machine_validated"
+      && version.validation_basis === "machine_validated"
+      && version.quality_state === "accepted"
+    )
+    || (
+      version.source_type === "generated"
+      && version.rights.source_kind === "voice_generator"
+      && version.activation_basis === "character_one_click_generation"
+      && version.validation_basis === "machine_validated"
+      && version.quality_state === "accepted"
+      && version.reference_asset_id !== null
+      && version.description_available
     )
   );
 }
@@ -578,6 +593,10 @@ export interface PutCharacterVoiceBindingRequest {
 }
 
 export type OfficialVoiceSelectionTargetKind = "narrator" | "character";
+
+export interface OfficialVoicePreviewRequest {
+  readonly preset_id: OfficialPresetId;
+}
 
 export interface OfficialVoiceSelectionRequest {
   readonly preset_id: OfficialPresetId;
@@ -765,6 +784,288 @@ export interface NarrationOverviewResponse {
   readonly coverage: NarrationCoverageSummary;
   readonly voice_sources: readonly VoiceSourceAvailability[];
   readonly cache: NarrationCacheStatus;
+}
+
+export const NANO_DECODE_PARAMETERS_SCHEMA_VERSION = "nano-decode-parameters/3" as const;
+export const NANO_VOICE_EXPERIMENT_REQUEST_VERSION = "nano-voice-experiment-request/1" as const;
+export const NANO_VOICE_EXPERIMENT_VERSION = "nano-voice-experiment/1" as const;
+export const NANO_VOICE_EXPERIMENT_LIST_VERSION = "nano-voice-experiment-list/1" as const;
+export const CHARACTER_VOICE_MATCH_REQUEST_VERSION = "character-voice-match-request/1" as const;
+export const CHARACTER_VOICE_MATCH_VERSION = "character-voice-match/1" as const;
+export const CHARACTER_VOICE_BRIEF_VERSION = "character-voice-brief/1" as const;
+export const CHARACTER_VOICE_GENERATION_REQUEST_VERSION = "character-voice-generation-request/1" as const;
+export const CHARACTER_VOICE_GENERATION_VERSION = "character-voice-generation/1" as const;
+export const CHARACTER_VOICE_GENERATION_LIST_VERSION = "character-voice-generation-list/1" as const;
+export const PRIVATE_VOICE_LIFECYCLE_VERSION = "private-voice-lifecycle/1" as const;
+export const PRIVATE_VOICE_DELETION_VERSION = "private-voice-deletion/2" as const;
+export const PRIVATE_VOICE_DELETION_IMPACT_VERSION = "private-voice-deletion-impact/2" as const;
+
+export interface NanoDecodeParametersResource {
+  readonly schema_version: typeof NANO_DECODE_PARAMETERS_SCHEMA_VERSION;
+  /** Canonical decimal int64 string; JSON numbers cannot preserve this range. */
+  readonly seed: string;
+  readonly text_temperature_milli: number;
+  readonly text_top_p_milli: number;
+  readonly text_top_k: number;
+  readonly audio_temperature_milli: number;
+  readonly audio_top_p_milli: number;
+  readonly audio_top_k: number;
+  readonly audio_repetition_penalty_milli: number;
+  readonly sample_mode: "full";
+  readonly max_new_frames: 375;
+}
+
+export interface CreateNanoVoiceExperimentRequest {
+  readonly contract_version: typeof NANO_VOICE_EXPERIMENT_REQUEST_VERSION;
+  readonly base_preset_id: OfficialPresetId;
+  readonly target_kind: "narrator" | "character";
+  readonly character_id: string | null;
+  readonly expected_settings_version: number;
+  readonly expected_binding_version: number | null;
+  readonly parameters: NanoDecodeParametersResource;
+}
+
+export interface ApplyNanoVoiceExperimentRequest {
+  readonly expected_settings_version: number;
+  readonly expected_binding_version: number | null;
+}
+
+export type NanoVoiceExperimentState =
+  | "pending"
+  | "running"
+  | "ready_applied"
+  | "ready_unapplied"
+  | "failed";
+
+export interface NanoVoiceExperimentResource {
+  readonly contract_version: typeof NANO_VOICE_EXPERIMENT_VERSION;
+  readonly command_id: string;
+  readonly novel_id: string;
+  readonly profile_id: string;
+  readonly version_id: string;
+  readonly background_job_id: string;
+  readonly base_preset_id: OfficialPresetId;
+  readonly target_kind: "narrator" | "character";
+  readonly character_id: string | null;
+  readonly expected_settings_version: number;
+  readonly expected_binding_version: number | null;
+  readonly parameters: NanoDecodeParametersResource;
+  readonly parameters_digest: string;
+  readonly fingerprint: string;
+  readonly state: NanoVoiceExperimentState;
+  readonly reused_version: boolean;
+  readonly preview: VoicePreviewResource | null;
+  readonly current_settings: NarrationSettingsResource | null;
+  readonly current_character_binding: CharacterVoiceBindingResource | null;
+  readonly failure_code: string | null;
+  readonly retryable: boolean;
+  readonly created_at: string;
+  readonly started_at: string | null;
+  readonly completed_at: string | null;
+}
+
+export interface NanoVoiceExperimentListResource {
+  readonly contract_version: typeof NANO_VOICE_EXPERIMENT_LIST_VERSION;
+  readonly novel_id: string;
+  readonly items: readonly NanoVoiceExperimentResource[];
+}
+
+export interface CharacterVoiceMatchRequest {
+  readonly contract_version: typeof CHARACTER_VOICE_MATCH_REQUEST_VERSION;
+  readonly timeline_id: string | null;
+  readonly character_instance_id: string | null;
+  readonly expected_binding_version: number;
+}
+
+export interface CharacterVoiceBriefResource {
+  readonly schema_version: typeof CHARACTER_VOICE_BRIEF_VERSION;
+  readonly language: "zh-CN" | "en" | "ja-JP" | null;
+  readonly presentation: "masculine" | "feminine" | "androgynous" | null;
+  readonly pitch: -2 | -1 | 0 | 1 | 2 | null;
+  readonly pace: -2 | -1 | 0 | 1 | 2 | null;
+  readonly energy: -2 | -1 | 0 | 1 | 2 | null;
+  readonly texture: "clear" | "warm" | "airy" | "husky" | "firm" | "soft" | "bright" | "dark" | null;
+  readonly evidence_fields: readonly string[];
+}
+
+export interface CharacterVoiceMatchResource {
+  readonly contract_version: typeof CHARACTER_VOICE_MATCH_VERSION;
+  readonly character_id: string;
+  readonly brief: CharacterVoiceBriefResource;
+  readonly selected_preset_id: OfficialPresetId;
+  readonly score_milli: number;
+  readonly state: "ready_applied" | "ready_unapplied";
+  readonly selection_still_current: boolean;
+  readonly current_character_binding: CharacterVoiceBindingResource;
+  readonly model_evidence: Readonly<Record<string, unknown>>;
+}
+
+export interface CreateCharacterVoiceGeneratorCommandRequest {
+  readonly contract_version: typeof CHARACTER_VOICE_GENERATION_REQUEST_VERSION;
+  readonly timeline_id: string | null;
+  readonly character_instance_id: string | null;
+  readonly expected_binding_version: number;
+  readonly seed: string | null;
+}
+
+export interface RetryCharacterVoiceGeneratorCommandRequest {
+  readonly expected_binding_version: number;
+}
+
+export interface ApplyCharacterVoiceGeneratorCommandRequest {
+  readonly expected_binding_version: number;
+}
+
+export type CharacterVoiceGeneratorState =
+  | "queued"
+  | "analyzing_character"
+  | "waiting_for_heavy_runtime"
+  | "generating_voice"
+  | "unloading_voice_generator"
+  | "validating_with_nano"
+  | "ready_applied"
+  | "ready_unapplied"
+  | "failed_character_analysis"
+  | "failed_runtime_unavailable"
+  | "failed_memory_safety"
+  | "failed_generation"
+  | "failed_audio_validation"
+  | "failed_nano_validation"
+  | "failed_storage"
+  | "cancelled"
+  | "superseded";
+
+export interface CharacterVoiceGeneratorCommandResource {
+  readonly contract_version: typeof CHARACTER_VOICE_GENERATION_VERSION;
+  readonly command_id: string;
+  readonly novel_id: string;
+  readonly character_id: string;
+  readonly draft_id: string | null;
+  readonly background_job_id: string | null;
+  readonly state: CharacterVoiceGeneratorState;
+  readonly progress_current: number;
+  readonly progress_total: 6;
+  readonly expected_binding_version: number;
+  readonly applied_binding_version: number | null;
+  readonly brief: CharacterVoiceBriefResource | null;
+  readonly voice_profile_id: string | null;
+  readonly voice_version_id: string | null;
+  readonly result_version: VoiceProfileVersionResource | null;
+  readonly current_character_binding: CharacterVoiceBindingResource;
+  readonly selection_still_current: boolean;
+  readonly cancellable: boolean;
+  readonly retryable: boolean;
+  readonly terminal: boolean;
+  readonly failure_code: string | null;
+  readonly created_at: string;
+  readonly started_at: string | null;
+  readonly completed_at: string | null;
+  readonly applied_at: string | null;
+  readonly updated_at: string;
+}
+
+export interface CharacterVoiceGeneratorCommandListResource {
+  readonly contract_version: typeof CHARACTER_VOICE_GENERATION_LIST_VERSION;
+  readonly novel_id: string;
+  readonly character_id: string;
+  readonly items: readonly CharacterVoiceGeneratorCommandResource[];
+}
+
+export type PrivateVoiceDeletionState =
+  | "grace_pending"
+  | "requested"
+  | "cancelled"
+  | "live_deleting"
+  | "live_deleted_backup_pending"
+  | "completed"
+  | "failed"
+  | "superseded";
+
+export interface PrivateVoiceDeletionImpactResource {
+  readonly schema_version: typeof PRIVATE_VOICE_DELETION_IMPACT_VERSION;
+  readonly profile_id: string;
+  readonly novel_id: string;
+  readonly profile_version: number;
+  readonly voice_version_ids: readonly string[];
+  readonly current_narrator_count: number;
+  readonly character_binding_count: number;
+  readonly anonymous_speaker_count: number;
+  readonly generic_slot_count: number;
+  readonly historical_edition_count: number;
+  readonly render_count: number;
+  readonly export_count: number;
+  readonly current_reference_count: number;
+  readonly historical_reference_count: number;
+  readonly reference_count: number;
+  readonly asset_count: number;
+  readonly total_bytes: number;
+  readonly active_job_count: number;
+  readonly external_backup_status: "unmanaged" | "managed_pending" | "managed_expired";
+  readonly historical_audio_consequence: "unavailable_private_voice_deleted" | null;
+  readonly impact_summary: string;
+}
+
+export interface PrivateVoiceDeletionRequestResource {
+  readonly contract_version: typeof PRIVATE_VOICE_DELETION_VERSION;
+  readonly request_id: string;
+  readonly profile_id: string;
+  readonly novel_id: string;
+  readonly command: "discard_unreferenced_private_voice" | "true_delete_private_voice";
+  readonly state: PrivateVoiceDeletionState;
+  readonly server_now: string;
+  readonly expected_profile_version: number;
+  readonly impact_digest: string;
+  readonly impact: PrivateVoiceDeletionImpactResource;
+  readonly eligibility: "unreferenced" | "referenced" | "blocked";
+  readonly reference_count: number;
+  readonly execute_after: string | null;
+  readonly impact_expires_at: string | null;
+  readonly asset_count: number;
+  readonly total_bytes: number;
+  readonly external_backup_status: "unmanaged" | "managed_pending" | "managed_expired";
+  readonly confirmed_at: string | null;
+  readonly cancelled_at: string | null;
+  readonly completed_at: string | null;
+  readonly superseded_at: string | null;
+  readonly job_drain_started_at: string | null;
+  readonly job_drain_deadline: string | null;
+  readonly failure_code: string | null;
+  readonly cancellable: boolean;
+  readonly retryable: boolean;
+  readonly terminal: boolean;
+}
+
+export interface PrivateVoiceLifecycleProfileResource {
+  readonly profile_id: string;
+  readonly novel_id: string;
+  readonly current_version_id: string | null;
+  readonly display_name: string;
+  readonly source_type: "uploaded" | "generated";
+  readonly profile_version: number;
+  readonly eligibility: "unreferenced" | "referenced" | "blocked";
+  readonly blocked_reason: string | null;
+  readonly reference_count: number;
+  readonly asset_count: number;
+  readonly total_bytes: number;
+  readonly impact: PrivateVoiceDeletionImpactResource;
+  readonly impact_summary: string;
+  readonly active_request: PrivateVoiceDeletionRequestResource | null;
+}
+
+export interface PrivateVoiceLifecycleResource {
+  readonly schema_version: typeof PRIVATE_VOICE_LIFECYCLE_VERSION;
+  readonly novel_id: string;
+  readonly server_now: string;
+  readonly items: readonly PrivateVoiceLifecycleProfileResource[];
+}
+
+export interface CreatePrivateVoiceDeletionRequest {
+  readonly expected_profile_version: number;
+}
+
+export interface ConfirmPrivateVoiceDeletionRequest {
+  readonly expected_profile_version: number;
+  readonly impact_digest: string;
 }
 
 export class NarrationContractError extends Error {
@@ -1268,20 +1569,38 @@ function validateVoiceVersion(value: unknown, path: string): void {
   const description = boolean(item.description_available, `${path}.description_available`);
   const lockedAt = nullableTimestamp(item.locked_at, `${path}.locked_at`);
   timestamp(item.created_at, `${path}.created_at`);
-  if ((source === "preset") !== (preset !== null)) fail(path, "preset_key source mismatch");
+  const machineExperimental = source === "generated"
+    && activation === "experimental_machine_validated"
+    && validation === "machine_validated"
+    && quality === "accepted"
+    && lockedAt === null;
+  const machineCharacter = source === "generated"
+    && activation === "character_one_click_generation"
+    && validation === "machine_validated"
+    && quality === "accepted"
+    && lockedAt === null
+    && rights.source_kind === "voice_generator"
+    && reference !== null
+    && description;
+  const carriesOfficialPreset = source === "preset" || machineExperimental;
+  if (carriesOfficialPreset !== (preset !== null)) fail(path, "preset_key source mismatch");
   if (rights.source_kind === "official_preset") {
-    if (source !== "preset" || item.official_preset === null) fail(path, "official preset lacks pinned provenance");
+    if (!carriesOfficialPreset || item.official_preset === null) fail(path, "official preset lacks pinned provenance");
     const provenance = record(item.official_preset, `${path}.official_preset`);
     if (provenance.preset_id !== preset) fail(path, "official preset identity mismatch");
   } else if (item.official_preset !== null) fail(path, "non-official source published official provenance");
   if (source === "uploaded" && reference === null) fail(path, "uploaded voice lacks reference asset");
-  if (source === "generated" && !description) fail(path, "generated voice lacks description record");
+  if (source === "generated" && !machineExperimental && !description) {
+    fail(path, "generated voice lacks description record");
+  }
   const humanConfirmed = activation === "preview_confirmed"
     && validation === "human_accepted" && quality === "accepted" && lockedAt !== null;
   const officialDirect = source === "preset"
     && activation === "explicit_official_preset_selection"
     && validation === "not_required" && quality === "pending" && lockedAt === null;
-  if (state === "locked" && !(humanConfirmed || officialDirect)) {
+  if (state === "locked" && !(
+    humanConfirmed || officialDirect || machineExperimental || machineCharacter
+  )) {
     fail(path, "invalid locked voice activation evidence");
   }
   if (state !== "locked" && lockedAt !== null) fail(path, "non-locked voice has locked_at");
@@ -1625,6 +1944,345 @@ function validateCoverage(value: unknown, path: string): void {
   if (configured > characters || locked > configured) fail(path, "invalid character coverage totals");
 }
 
+function validateNanoDecodeParameters(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "schema_version", "seed", "text_temperature_milli", "text_top_p_milli",
+    "text_top_k", "audio_temperature_milli", "audio_top_p_milli", "audio_top_k",
+    "audio_repetition_penalty_milli", "sample_mode", "max_new_frames",
+  ], path);
+  literal(item.schema_version, NANO_DECODE_PARAMETERS_SCHEMA_VERSION, `${path}.schema_version`);
+  const seed = string(item.seed, `${path}.seed`, 1, 19);
+  if (!/^(0|[1-9]\d*)$/.test(seed) || BigInt(seed) > 9_223_372_036_854_775_807n) {
+    fail(`${path}.seed`, "expected canonical signed-int64 decimal string");
+  }
+  integer(item.text_temperature_milli, `${path}.text_temperature_milli`, 100, 2_000);
+  integer(item.text_top_p_milli, `${path}.text_top_p_milli`, 1, 1_000);
+  integer(item.text_top_k, `${path}.text_top_k`, 1, 100);
+  integer(item.audio_temperature_milli, `${path}.audio_temperature_milli`, 100, 2_000);
+  integer(item.audio_top_p_milli, `${path}.audio_top_p_milli`, 1, 1_000);
+  integer(item.audio_top_k, `${path}.audio_top_k`, 1, 100);
+  integer(item.audio_repetition_penalty_milli, `${path}.audio_repetition_penalty_milli`, 1_000, 2_000);
+  literal(item.sample_mode, "full", `${path}.sample_mode`);
+  literal(item.max_new_frames, 375, `${path}.max_new_frames`);
+}
+
+function validateNanoVoiceExperiment(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "contract_version", "command_id", "novel_id", "profile_id", "version_id",
+    "background_job_id", "base_preset_id", "target_kind", "character_id",
+    "expected_settings_version", "expected_binding_version", "parameters",
+    "parameters_digest", "fingerprint", "state", "reused_version", "preview",
+    "current_settings", "current_character_binding", "failure_code", "retryable",
+    "created_at", "started_at", "completed_at",
+  ], path);
+  literal(item.contract_version, NANO_VOICE_EXPERIMENT_VERSION, `${path}.contract_version`);
+  uuid(item.command_id, `${path}.command_id`);
+  uuid(item.novel_id, `${path}.novel_id`);
+  uuid(item.profile_id, `${path}.profile_id`);
+  uuid(item.version_id, `${path}.version_id`);
+  uuid(item.background_job_id, `${path}.background_job_id`);
+  const presetId = string(item.base_preset_id, `${path}.base_preset_id`, 6, 85);
+  if (!OFFICIAL_PRESET_IDS.includes(presetId as OfficialPresetId)) {
+    fail(`${path}.base_preset_id`, "unknown pinned official preset");
+  }
+  const target = oneOf(item.target_kind, ["narrator", "character"] as const, `${path}.target_kind`);
+  const characterId = nullableUuid(item.character_id, `${path}.character_id`);
+  integer(item.expected_settings_version, `${path}.expected_settings_version`);
+  const bindingVersion = item.expected_binding_version === null
+    ? null
+    : integer(item.expected_binding_version, `${path}.expected_binding_version`);
+  validateNanoDecodeParameters(item.parameters, `${path}.parameters`);
+  sha256(item.parameters_digest, `${path}.parameters_digest`);
+  sha256(item.fingerprint, `${path}.fingerprint`);
+  const state = oneOf(item.state, ["pending", "running", "ready_applied", "ready_unapplied", "failed"] as const, `${path}.state`);
+  boolean(item.reused_version, `${path}.reused_version`);
+  if (item.preview !== null) validatePreview(item.preview, `${path}.preview`);
+  if (item.current_settings !== null) validateSettings(item.current_settings, `${path}.current_settings`);
+  if (item.current_character_binding !== null) validateBinding(item.current_character_binding, `${path}.current_character_binding`);
+  const failure = nullableString(item.failure_code, `${path}.failure_code`, 96);
+  const retryable = boolean(item.retryable, `${path}.retryable`);
+  timestamp(item.created_at, `${path}.created_at`);
+  nullableTimestamp(item.started_at, `${path}.started_at`);
+  nullableTimestamp(item.completed_at, `${path}.completed_at`);
+  if (target === "narrator") {
+    if (characterId !== null || bindingVersion !== null || item.current_settings === null || item.current_character_binding !== null) {
+      fail(path, "invalid narrator target projection");
+    }
+  } else if (characterId === null || bindingVersion === null || item.current_settings !== null || item.current_character_binding === null) {
+    fail(path, "invalid character target projection");
+  }
+  if (["ready_applied", "ready_unapplied"].includes(state) && item.preview === null) {
+    fail(path, "ready experiment requires validated preview");
+  }
+  if ((state === "failed") !== (failure !== null) || (retryable && state !== "failed")) {
+    fail(path, "invalid experiment failure projection");
+  }
+}
+
+function validateCharacterVoiceBrief(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "schema_version", "language", "presentation", "pitch", "pace", "energy",
+    "texture", "evidence_fields",
+  ], path);
+  literal(item.schema_version, CHARACTER_VOICE_BRIEF_VERSION, `${path}.schema_version`);
+  if (item.language !== null) oneOf(item.language, ["zh-CN", "en", "ja-JP"] as const, `${path}.language`);
+  if (item.presentation !== null) oneOf(item.presentation, ["masculine", "feminine", "androgynous"] as const, `${path}.presentation`);
+  for (const key of ["pitch", "pace", "energy"] as const) {
+    if (item[key] !== null) integer(item[key], `${path}.${key}`, -2, 2);
+  }
+  if (item.texture !== null) {
+    oneOf(item.texture, ["clear", "warm", "airy", "husky", "firm", "soft", "bright", "dark"] as const, `${path}.texture`);
+  }
+  stringArray(item.evidence_fields, `${path}.evidence_fields`, 64);
+}
+
+function validateCharacterVoiceMatch(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "contract_version", "character_id", "brief", "selected_preset_id", "score_milli",
+    "state", "selection_still_current", "current_character_binding", "model_evidence",
+  ], path);
+  literal(item.contract_version, CHARACTER_VOICE_MATCH_VERSION, `${path}.contract_version`);
+  const characterId = uuid(item.character_id, `${path}.character_id`);
+  validateCharacterVoiceBrief(item.brief, `${path}.brief`);
+  const presetId = string(item.selected_preset_id, `${path}.selected_preset_id`, 6, 85);
+  if (!OFFICIAL_PRESET_IDS.includes(presetId as OfficialPresetId)) {
+    fail(`${path}.selected_preset_id`, "unknown pinned official preset");
+  }
+  integer(item.score_milli, `${path}.score_milli`, 0, 1_000);
+  const state = oneOf(item.state, ["ready_applied", "ready_unapplied"] as const, `${path}.state`);
+  const stillCurrent = boolean(item.selection_still_current, `${path}.selection_still_current`);
+  validateBinding(item.current_character_binding, `${path}.current_character_binding`);
+  if (record(item.current_character_binding, path).character_id !== characterId) {
+    fail(`${path}.current_character_binding`, "character scope mismatch");
+  }
+  const evidence = record(item.model_evidence, `${path}.model_evidence`);
+  literal(evidence.schema_version, "model-execution-evidence/2", `${path}.model_evidence.schema_version`);
+  if ((state === "ready_applied") !== stillCurrent) fail(path, "match state/current flag mismatch");
+}
+
+const CHARACTER_VOICE_GENERATOR_STATES = [
+  "queued", "analyzing_character", "waiting_for_heavy_runtime",
+  "generating_voice", "unloading_voice_generator", "validating_with_nano",
+  "ready_applied", "ready_unapplied", "failed_character_analysis",
+  "failed_runtime_unavailable", "failed_memory_safety", "failed_generation",
+  "failed_audio_validation", "failed_nano_validation", "failed_storage",
+  "cancelled", "superseded",
+] as const;
+
+function validateCharacterVoiceGeneratorCommand(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "contract_version", "command_id", "novel_id", "character_id", "draft_id",
+    "background_job_id", "state", "progress_current", "progress_total",
+    "expected_binding_version", "applied_binding_version", "brief",
+    "voice_profile_id", "voice_version_id", "result_version",
+    "current_character_binding", "selection_still_current", "cancellable",
+    "retryable", "terminal", "failure_code", "created_at", "started_at",
+    "completed_at", "applied_at", "updated_at",
+  ], path);
+  literal(item.contract_version, CHARACTER_VOICE_GENERATION_VERSION, `${path}.contract_version`);
+  uuid(item.command_id, `${path}.command_id`);
+  const novelId = uuid(item.novel_id, `${path}.novel_id`);
+  const characterId = uuid(item.character_id, `${path}.character_id`);
+  const draftId = nullableUuid(item.draft_id, `${path}.draft_id`);
+  nullableUuid(item.background_job_id, `${path}.background_job_id`);
+  const state = oneOf(item.state, CHARACTER_VOICE_GENERATOR_STATES, `${path}.state`);
+  integer(item.progress_current, `${path}.progress_current`, 0, 6);
+  literal(item.progress_total, 6, `${path}.progress_total`);
+  integer(item.expected_binding_version, `${path}.expected_binding_version`);
+  const appliedBinding = item.applied_binding_version === null
+    ? null
+    : integer(item.applied_binding_version, `${path}.applied_binding_version`, 1);
+  if (item.brief !== null) validateCharacterVoiceBrief(item.brief, `${path}.brief`);
+  const profileId = nullableUuid(item.voice_profile_id, `${path}.voice_profile_id`);
+  const versionId = nullableUuid(item.voice_version_id, `${path}.voice_version_id`);
+  if ((profileId === null) !== (versionId === null)) fail(path, "incomplete result voice identity");
+  if (item.result_version !== null) {
+    validateVoiceVersion(item.result_version, `${path}.result_version`);
+    const result = record(item.result_version, `${path}.result_version`);
+    if (result.profile_id !== profileId || result.version_id !== versionId) {
+      fail(`${path}.result_version`, "result voice identity mismatch");
+    }
+  }
+  validateBinding(item.current_character_binding, `${path}.current_character_binding`);
+  const binding = record(item.current_character_binding, `${path}.current_character_binding`);
+  if (binding.character_id !== characterId || binding.novel_id !== novelId) {
+    fail(`${path}.current_character_binding`, "character scope mismatch");
+  }
+  const stillCurrent = boolean(item.selection_still_current, `${path}.selection_still_current`);
+  const cancellable = boolean(item.cancellable, `${path}.cancellable`);
+  const retryable = boolean(item.retryable, `${path}.retryable`);
+  const terminal = boolean(item.terminal, `${path}.terminal`);
+  const failure = nullableString(item.failure_code, `${path}.failure_code`, 96);
+  if (failure !== null && !SAFE_CODE_PATTERN.test(failure)) fail(`${path}.failure_code`, "unsafe failure code");
+  timestamp(item.created_at, `${path}.created_at`);
+  nullableTimestamp(item.started_at, `${path}.started_at`);
+  const completedAt = nullableTimestamp(item.completed_at, `${path}.completed_at`);
+  const appliedAt = nullableTimestamp(item.applied_at, `${path}.applied_at`);
+  timestamp(item.updated_at, `${path}.updated_at`);
+  const active = [
+    "queued", "analyzing_character", "waiting_for_heavy_runtime",
+    "generating_voice", "unloading_voice_generator", "validating_with_nano",
+  ].includes(state);
+  const failed = state.startsWith("failed_");
+  const ready = state === "ready_applied" || state === "ready_unapplied";
+  if (terminal === active) fail(path, "terminal flag mismatch");
+  if (failed !== (failure !== null)) fail(path, "failure evidence mismatch");
+  if (draftId === null && !["queued", "analyzing_character", "failed_character_analysis", "cancelled", "superseded"].includes(state)) {
+    fail(path, "state requires a design draft");
+  }
+  if (ready && (versionId === null || item.result_version === null || completedAt === null)) {
+    fail(path, "ready command lacks result evidence");
+  }
+  if (state === "ready_applied") {
+    if (appliedBinding === null || appliedAt === null) fail(path, "applied command lacks CAS evidence");
+  } else if (appliedBinding !== null || appliedAt !== null) {
+    fail(path, "non-applied command carries CAS evidence");
+  }
+  if (state === "ready_unapplied" && stillCurrent) fail(path, "unapplied command cannot be current");
+  if (terminal && cancellable) fail(path, "terminal command cannot be cancelled");
+  if (retryable && !(failed || state === "superseded")) fail(path, "invalid retry projection");
+}
+
+function validatePrivateVoiceDeletionImpact(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "schema_version", "profile_id", "novel_id", "profile_version", "voice_version_ids",
+    "current_narrator_count", "character_binding_count", "anonymous_speaker_count",
+    "generic_slot_count", "historical_edition_count", "render_count", "export_count",
+    "current_reference_count", "historical_reference_count", "reference_count",
+    "asset_count", "total_bytes", "active_job_count", "external_backup_status",
+    "historical_audio_consequence", "impact_summary",
+  ], path);
+  literal(item.schema_version, PRIVATE_VOICE_DELETION_IMPACT_VERSION, `${path}.schema_version`);
+  uuid(item.profile_id, `${path}.profile_id`);
+  uuid(item.novel_id, `${path}.novel_id`);
+  integer(item.profile_version, `${path}.profile_version`, 1);
+  const versionIds = array(item.voice_version_ids, `${path}.voice_version_ids`);
+  versionIds.forEach((entry, index) => uuid(entry, `${path}.voice_version_ids[${index}]`));
+  const currentNarrator = integer(item.current_narrator_count, `${path}.current_narrator_count`);
+  const characterBindings = integer(item.character_binding_count, `${path}.character_binding_count`);
+  const anonymous = integer(item.anonymous_speaker_count, `${path}.anonymous_speaker_count`);
+  const generic = integer(item.generic_slot_count, `${path}.generic_slot_count`);
+  const editions = integer(item.historical_edition_count, `${path}.historical_edition_count`);
+  const renders = integer(item.render_count, `${path}.render_count`);
+  const exports = integer(item.export_count, `${path}.export_count`);
+  const currentReferences = integer(item.current_reference_count, `${path}.current_reference_count`);
+  const historicalReferences = integer(item.historical_reference_count, `${path}.historical_reference_count`);
+  const references = integer(item.reference_count, `${path}.reference_count`);
+  integer(item.asset_count, `${path}.asset_count`);
+  integer(item.total_bytes, `${path}.total_bytes`);
+  integer(item.active_job_count, `${path}.active_job_count`);
+  oneOf(item.external_backup_status, ["unmanaged", "managed_pending", "managed_expired"] as const, `${path}.external_backup_status`);
+  if (item.historical_audio_consequence !== null) {
+    literal(item.historical_audio_consequence, "unavailable_private_voice_deleted", `${path}.historical_audio_consequence`);
+  }
+  string(item.impact_summary, `${path}.impact_summary`, 1, 800);
+  if (
+    currentReferences !== currentNarrator + characterBindings + anonymous + generic
+    || historicalReferences !== editions + renders + exports
+    || references !== currentReferences + historicalReferences
+  ) fail(path, "deletion impact reference totals mismatch");
+}
+
+function validatePrivateVoiceDeletionRequest(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "contract_version", "request_id", "profile_id", "novel_id", "command", "state",
+    "server_now", "expected_profile_version", "impact_digest", "impact", "eligibility",
+    "reference_count", "execute_after", "impact_expires_at", "asset_count", "total_bytes",
+    "external_backup_status", "confirmed_at", "cancelled_at", "completed_at", "superseded_at",
+    "job_drain_started_at", "job_drain_deadline", "failure_code", "cancellable", "retryable", "terminal",
+  ], path);
+  literal(item.contract_version, PRIVATE_VOICE_DELETION_VERSION, `${path}.contract_version`);
+  uuid(item.request_id, `${path}.request_id`);
+  const profileId = uuid(item.profile_id, `${path}.profile_id`);
+  const novelId = uuid(item.novel_id, `${path}.novel_id`);
+  oneOf(item.command, ["discard_unreferenced_private_voice", "true_delete_private_voice"] as const, `${path}.command`);
+  const state = oneOf(item.state, ["grace_pending", "requested", "cancelled", "live_deleting", "live_deleted_backup_pending", "completed", "failed", "superseded"] as const, `${path}.state`);
+  timestamp(item.server_now, `${path}.server_now`);
+  const profileVersion = integer(item.expected_profile_version, `${path}.expected_profile_version`, 1);
+  sha256(item.impact_digest, `${path}.impact_digest`);
+  validatePrivateVoiceDeletionImpact(item.impact, `${path}.impact`);
+  const impact = record(item.impact, `${path}.impact`);
+  oneOf(item.eligibility, ["unreferenced", "referenced", "blocked"] as const, `${path}.eligibility`);
+  const references = integer(item.reference_count, `${path}.reference_count`);
+  nullableTimestamp(item.execute_after, `${path}.execute_after`);
+  nullableTimestamp(item.impact_expires_at, `${path}.impact_expires_at`);
+  const assets = integer(item.asset_count, `${path}.asset_count`);
+  const bytes = integer(item.total_bytes, `${path}.total_bytes`);
+  const backup = oneOf(item.external_backup_status, ["unmanaged", "managed_pending", "managed_expired"] as const, `${path}.external_backup_status`);
+  nullableTimestamp(item.confirmed_at, `${path}.confirmed_at`);
+  nullableTimestamp(item.cancelled_at, `${path}.cancelled_at`);
+  nullableTimestamp(item.completed_at, `${path}.completed_at`);
+  nullableTimestamp(item.superseded_at, `${path}.superseded_at`);
+  nullableTimestamp(item.job_drain_started_at, `${path}.job_drain_started_at`);
+  nullableTimestamp(item.job_drain_deadline, `${path}.job_drain_deadline`);
+  const failure = nullableString(item.failure_code, `${path}.failure_code`, 96);
+  if (failure !== null && !SAFE_CODE_PATTERN.test(failure)) fail(`${path}.failure_code`, "unsafe reason code");
+  const cancellable = boolean(item.cancellable, `${path}.cancellable`);
+  const retryable = boolean(item.retryable, `${path}.retryable`);
+  const terminal = boolean(item.terminal, `${path}.terminal`);
+  if (
+    impact.profile_id !== profileId || impact.novel_id !== novelId
+    || impact.profile_version !== profileVersion || impact.reference_count !== references
+    || impact.asset_count !== assets || impact.total_bytes !== bytes
+    || impact.external_backup_status !== backup
+  ) fail(path, "deletion request/impact projection mismatch");
+  if (["completed", "cancelled", "superseded"].includes(state) !== terminal) {
+    if (!(state === "failed" && terminal)) fail(path, "invalid terminal deletion state");
+  }
+  if (terminal && (cancellable || retryable)) fail(path, "terminal request exposes actions");
+}
+
+function validatePrivateVoiceLifecycle(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, ["schema_version", "novel_id", "server_now", "items"], path);
+  literal(item.schema_version, PRIVATE_VOICE_LIFECYCLE_VERSION, `${path}.schema_version`);
+  const novelId = uuid(item.novel_id, `${path}.novel_id`);
+  timestamp(item.server_now, `${path}.server_now`);
+  const items = array(item.items, `${path}.items`);
+  const seen = new Set<string>();
+  items.forEach((value, index) => {
+    const itemPath = `${path}.items[${index}]`;
+    const profile = record(value, itemPath);
+    exact(profile, [
+      "profile_id", "novel_id", "current_version_id", "display_name", "source_type",
+      "profile_version", "eligibility", "blocked_reason", "reference_count", "asset_count",
+      "total_bytes", "impact", "impact_summary", "active_request",
+    ], itemPath);
+    const profileId = uuid(profile.profile_id, `${itemPath}.profile_id`);
+    if (seen.has(profileId)) fail(`${path}.items`, "duplicate private voice profile");
+    seen.add(profileId);
+    if (uuid(profile.novel_id, `${itemPath}.novel_id`) !== novelId) fail(itemPath, "novel scope mismatch");
+    nullableUuid(profile.current_version_id, `${itemPath}.current_version_id`);
+    string(profile.display_name, `${itemPath}.display_name`, 1, 200);
+    oneOf(profile.source_type, ["uploaded", "generated"] as const, `${itemPath}.source_type`);
+    const profileVersion = integer(profile.profile_version, `${itemPath}.profile_version`, 1);
+    oneOf(profile.eligibility, ["unreferenced", "referenced", "blocked"] as const, `${itemPath}.eligibility`);
+    nullableString(profile.blocked_reason, `${itemPath}.blocked_reason`, 160);
+    const references = integer(profile.reference_count, `${itemPath}.reference_count`);
+    const assets = integer(profile.asset_count, `${itemPath}.asset_count`);
+    const bytes = integer(profile.total_bytes, `${itemPath}.total_bytes`);
+    validatePrivateVoiceDeletionImpact(profile.impact, `${itemPath}.impact`);
+    const impact = record(profile.impact, `${itemPath}.impact`);
+    string(profile.impact_summary, `${itemPath}.impact_summary`, 1, 800);
+    if (
+      impact.profile_id !== profileId || impact.novel_id !== novelId
+      || impact.profile_version !== profileVersion || impact.reference_count !== references
+      || impact.asset_count !== assets || impact.total_bytes !== bytes
+    ) fail(itemPath, "lifecycle/impact projection mismatch");
+    if (profile.active_request !== null) {
+      validatePrivateVoiceDeletionRequest(profile.active_request, `${itemPath}.active_request`);
+      if (record(profile.active_request, itemPath).profile_id !== profileId) fail(itemPath, "active request profile mismatch");
+    }
+  });
+}
+
 function validated<T>(value: unknown, validator: (value: unknown, path: string) => void, path: string): T {
   validator(value, path);
   return value as T;
@@ -1704,6 +2362,85 @@ export function parseCharacterVoiceBindingListResponse(value: unknown): Characte
 
 export function parseOfficialVoiceSelectionResponse(value: unknown): OfficialVoiceSelectionResponse {
   return validated(value, validateOfficialVoiceSelection, "official_voice_selection");
+}
+
+export function parseNanoVoiceExperimentResource(value: unknown): NanoVoiceExperimentResource {
+  return validated(value, validateNanoVoiceExperiment, "nano_voice_experiment");
+}
+
+export function parseNanoVoiceExperimentListResource(value: unknown): NanoVoiceExperimentListResource {
+  const item = record(value, "nano_voice_experiments");
+  exact(item, ["contract_version", "novel_id", "items"], "nano_voice_experiments");
+  literal(item.contract_version, NANO_VOICE_EXPERIMENT_LIST_VERSION, "nano_voice_experiments.contract_version");
+  const novelId = uuid(item.novel_id, "nano_voice_experiments.novel_id");
+  const items = array(item.items, "nano_voice_experiments.items");
+  items.forEach((entry, index) => {
+    validateNanoVoiceExperiment(entry, `nano_voice_experiments.items[${index}]`);
+    if (record(entry, "nano_voice_experiments.items").novel_id !== novelId) {
+      fail(`nano_voice_experiments.items[${index}]`, "novel scope mismatch");
+    }
+  });
+  return item as unknown as NanoVoiceExperimentListResource;
+}
+
+export function parseCharacterVoiceMatchResource(value: unknown): CharacterVoiceMatchResource {
+  return validated(value, validateCharacterVoiceMatch, "character_voice_match");
+}
+
+export function parseCharacterVoiceGeneratorCommandResource(
+  value: unknown,
+): CharacterVoiceGeneratorCommandResource {
+  return validated(
+    value,
+    validateCharacterVoiceGeneratorCommand,
+    "character_voice_generation",
+  );
+}
+
+export function parseCharacterVoiceGeneratorCommandListResource(
+  value: unknown,
+): CharacterVoiceGeneratorCommandListResource {
+  const item = record(value, "character_voice_generations");
+  exact(
+    item,
+    ["contract_version", "novel_id", "character_id", "items"],
+    "character_voice_generations",
+  );
+  literal(
+    item.contract_version,
+    CHARACTER_VOICE_GENERATION_LIST_VERSION,
+    "character_voice_generations.contract_version",
+  );
+  const novelId = uuid(item.novel_id, "character_voice_generations.novel_id");
+  const characterId = uuid(
+    item.character_id,
+    "character_voice_generations.character_id",
+  );
+  const items = array(item.items, "character_voice_generations.items");
+  const commandIds: string[] = [];
+  items.forEach((entry, index) => {
+    const path = `character_voice_generations.items[${index}]`;
+    validateCharacterVoiceGeneratorCommand(entry, path);
+    const command = record(entry, path);
+    if (command.novel_id !== novelId || command.character_id !== characterId) {
+      fail(path, "target scope mismatch");
+    }
+    commandIds.push(uuid(command.command_id, `${path}.command_id`));
+  });
+  if (new Set(commandIds).size !== commandIds.length) {
+    fail("character_voice_generations.items", "command IDs must be unique");
+  }
+  return item as unknown as CharacterVoiceGeneratorCommandListResource;
+}
+
+export function parsePrivateVoiceDeletionRequestResource(
+  value: unknown,
+): PrivateVoiceDeletionRequestResource {
+  return validated(value, validatePrivateVoiceDeletionRequest, "private_voice_deletion");
+}
+
+export function parsePrivateVoiceLifecycleResource(value: unknown): PrivateVoiceLifecycleResource {
+  return validated(value, validatePrivateVoiceLifecycle, "private_voice_lifecycle");
 }
 
 export function parseVoiceCastingRulesResource(value: unknown): VoiceCastingRulesResource {

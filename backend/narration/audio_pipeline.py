@@ -19,7 +19,7 @@ import wave
 
 
 AUDIO_PIPELINE_VERSION = "narration-audio-pipeline/1"
-SHORT_CHINESE_DURATION_POLICY_VERSION = "nano-short-chinese-duration/1"
+SHORT_CHINESE_DURATION_POLICY_VERSION = "nano-short-chinese-duration/2"
 
 _HAN_CODEPOINT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _SHORT_CHINESE_PUNCTUATION = frozenset(
@@ -53,12 +53,16 @@ class ShortChineseDurationPolicy:
     maximum_codepoints: int = 32
     onset_allowance_ms: int = 1_200
     per_codepoint_allowance_ms: int = 400
+    ultrashort_maximum_codepoints: int = 4
+    ultrashort_onset_allowance_ms: int = 4_000
 
     def validate(self) -> None:
         values = (
             self.maximum_codepoints,
             self.onset_allowance_ms,
             self.per_codepoint_allowance_ms,
+            self.ultrashort_maximum_codepoints,
+            self.ultrashort_onset_allowance_ms,
         )
         if any(type(value) is not int or value <= 0 for value in values):
             raise AudioPipelineError(
@@ -156,11 +160,20 @@ class ProcessedPcmWav:
 
 def audio_processing_fingerprint(
     policy: AudioPipelinePolicy = DEFAULT_AUDIO_PIPELINE_POLICY,
+    *,
+    short_chinese_policy: ShortChineseDurationPolicy = (
+        DEFAULT_SHORT_CHINESE_DURATION_POLICY
+    ),
 ) -> str:
     policy.validate()
+    short_chinese_policy.validate()
     payload = {
         "schema_version": AUDIO_PIPELINE_VERSION,
         "policy": asdict(policy),
+        "short_chinese_duration_policy_version": (
+            SHORT_CHINESE_DURATION_POLICY_VERSION
+        ),
+        "short_chinese_duration_policy": asdict(short_chinese_policy),
     }
     canonical = json.dumps(
         payload,
@@ -297,10 +310,12 @@ def short_chinese_duration_limit_ms(
         for character in compact
     ):
         return None
-    return (
-        policy.onset_allowance_ms
-        + len(compact) * policy.per_codepoint_allowance_ms
+    onset_allowance_ms = (
+        policy.ultrashort_onset_allowance_ms
+        if len(compact) <= policy.ultrashort_maximum_codepoints
+        else policy.onset_allowance_ms
     )
+    return onset_allowance_ms + len(compact) * policy.per_codepoint_allowance_ms
 
 
 def validate_synthesis_duration_for_text(

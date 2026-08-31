@@ -96,6 +96,7 @@ from .official_presets import (
     official_preset_canonical_version_id,
     official_preset_decode_parameters_fingerprint,
     official_preset_direct_version_fingerprint,
+    official_preset_preview_version_id,
     official_preset_version_fingerprint,
     require_official_preset,
     validate_official_version_evidence,
@@ -112,6 +113,7 @@ from .services import (
     SqlAlchemyNarrationStore,
     VoiceRightsUnavailable,
     canonical_sha256,
+    require_local_novel,
 )
 from .storage import (
     NarrationStorage,
@@ -141,6 +143,11 @@ from .voices import (
 VOICE_UPLOAD_OPERATION: Final = "create_uploaded_voice_version"
 VOICE_PRESET_OPERATION: Final = "create_official_preset_voice_version"
 VOICE_PREVIEW_OPERATION: Final = "create_voice_preview"
+OFFICIAL_PRESET_PREVIEW_TEXT: Final[dict[str, str]] = {
+    "zh-CN": "晨光越过窗沿，故事从这一刻开始。",
+    "en": "Morning light crosses the window, and the story begins.",
+    "ja-JP": "朝の光が窓辺を越え、物語が始まります。",
+}
 VOICE_PROFILE_CREATE_OPERATION: Final = "create_voice_profile"
 VOICE_LOCK_OPERATION: Final = "lock_voice_profile"
 VOICE_PREVIEW_JOB_KIND: Final = "narration.voice_preview"
@@ -1383,6 +1390,217 @@ class VoiceProductService:
             )
 
         return _transaction(self._session_factory, operation)
+
+    def _ensure_official_preset_preview_version(
+        self,
+        *,
+        novel_id: UUID,
+        preset: OfficialPreset,
+    ) -> tuple[UUID, UUID]:
+        """Create/reuse a draft-only official version for optional previews.
+
+        This path deliberately does not bind the voice, set a current version,
+        or claim explicit selection/quality acceptance.  It shares the
+        canonical per-novel profile with a later direct-use version while
+        keeping a distinct immutable version identity.
+        """
+
+        scope = NarrationRequestScope.fixed_local()
+        profile_id = official_preset_canonical_profile_id(
+            owner_id=scope.owner_id,
+            workspace_id=scope.workspace_id,
+            novel_id=novel_id,
+            preset_id=preset.preset_id,
+        )
+        version_id = official_preset_preview_version_id(
+            profile_id=profile_id,
+            preset_id=preset.preset_id,
+        )
+
+        def operation(session: Session) -> tuple[UUID, UUID]:
+            store = SqlAlchemyNarrationStore(session)
+            require_local_novel(store, novel_id, for_update=True)
+            now = _db_now(session)
+            profile = session.scalar(
+                select(VoiceProfile)
+                .where(VoiceProfile.id == profile_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if profile is None:
+                profile = VoiceProfile(
+                    id=profile_id,
+                    owner_id=scope.owner_id,
+                    workspace_id=scope.workspace_id,
+                    novel_id=novel_id,
+                    name=preset.display_name,
+                    current_version_id=None,
+                    status="draft",
+                    version=1,
+                    archived_at=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(profile)
+                session.flush()
+            elif (
+                profile.owner_id != scope.owner_id
+                or profile.workspace_id != scope.workspace_id
+                or profile.novel_id != novel_id
+            ):
+                raise NarrationScopeMismatch(
+                    "official preview profile is outside the novel scope"
+                )
+            elif profile.status == "unavailable":
+                raise VoiceRightsUnavailable(
+                    "official preview profile is unavailable"
+                )
+            elif profile.status not in {"draft", "active", "archived"}:
+                raise InvalidNarrationState(
+                    "official preview profile status is invalid"
+                )
+
+            versions = list(
+                session.scalars(
+                    select(VoiceProfileVersion)
+                    .where(VoiceProfileVersion.profile_id == profile.id)
+                    .order_by(VoiceProfileVersion.version_number)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            )
+            if any(
+                item.source_type != "preset"
+                or item.preset_key != preset.preset_id
+                for item in versions
+            ):
+                raise VoiceProductSecurityError(
+                    "official preview profile contains a foreign voice version"
+                )
+            version = next((item for item in versions if item.id == version_id), None)
+            if version is None:
+                rows = build_official_preset_version_rows(
+                    profile=profile,
+                    preset=preset,
+                    version_id=version_id,
+                    version_number=(
+                        max((item.version_number for item in versions), default=0) + 1
+                    ),
+                    actor=self._preview_policy.actor,
+                    at=now,
+                    direct_selection=False,
+                )
+                session.add(rows.rights)
+                session.flush()
+                session.add_all([rows.event, rows.version])
+                profile.version += 1
+                profile.updated_at = now
+                session.flush()
+                version = rows.version
+            rights = session.scalar(
+                select(VoiceRightsRecord)
+                .where(VoiceRightsRecord.id == version.rights_record_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if rights is None:
+                raise VoiceProductSecurityError(
+                    "official preview rights record is absent"
+                )
+            try:
+                validated = validate_official_version_evidence(
+                    version,
+                    rights,
+                    expected_model_fingerprint=(
+                        self._preview_policy.expected_model_fingerprint
+                    ),
+                )
+            except ValueError as error:
+                raise VoiceProductSecurityError(
+                    "official preview evidence is inconsistent"
+                ) from error
+            if (
+                validated is not preset
+                or version.activation_basis != "preview_confirmed"
+                or version.id != version_id
+                or version.state not in {"draft", "preview_ready", "locked"}
+                or (
+                    version.state in {"draft", "preview_ready"}
+                    and (
+                        version.quality_state != "pending"
+                        or version.validation_basis != "pending"
+                        or version.locked_actor is not None
+                        or version.locked_at is not None
+                    )
+                )
+                or (
+                    version.state == "locked"
+                    and (
+                        version.quality_state != "accepted"
+                        or version.validation_basis != "human_accepted"
+                        or version.locked_actor is None
+                        or version.locked_at is None
+                    )
+                )
+            ):
+                raise VoiceProductSecurityError(
+                    "official preview version identity is inconsistent"
+                )
+            return profile.id, version.id
+
+        return _transaction(self._session_factory, operation)
+
+    def create_official_preset_preview(
+        self,
+        *,
+        novel_id: UUID,
+        request: wire.OfficialVoicePreviewRequest,
+        idempotency_key: str,
+    ) -> wire.VoicePreviewResource:
+        """Queue one fixed short preview without changing any voice binding."""
+
+        if (
+            self._preview_policy.expected_model_fingerprint
+            != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
+        ):
+            raise VoiceProductSecurityError(
+                "official preset catalog does not match the active Nano model"
+            )
+        try:
+            preset = require_official_preset(request.preset_id)
+        except ValueError as error:
+            raise VoiceProductContractError(
+                "unknown official ONNX preset_id"
+            ) from error
+        if (
+            self._preview_policy.seed,
+            self._preview_policy.sample_mode,
+            self._preview_policy.max_new_frames,
+        ) != (
+            OFFICIAL_PRESET_RUNTIME_INITIAL_SEED,
+            OFFICIAL_PRESET_SAMPLE_MODE,
+            OFFICIAL_PRESET_MAX_NEW_FRAMES,
+        ):
+            raise VoiceProductSecurityError(
+                "official preset decode parameters differ from the pinned runtime"
+            )
+        profile_id, version_id = self._ensure_official_preset_preview_version(
+            novel_id=novel_id,
+            preset=preset,
+        )
+        preview_text = OFFICIAL_PRESET_PREVIEW_TEXT.get(preset.language)
+        if preview_text is None:
+            raise VoiceProductSecurityError(
+                "official preset preview language has no fixed sample"
+            )
+        return self.create_preview(
+            profile_id=profile_id,
+            request=wire.CreateVoicePreviewRequest(
+                version_id=version_id,
+                preview_text=preview_text,
+            ),
+            idempotency_key=idempotency_key,
+        )
 
     def _upload_request_hash(
         self,
@@ -3299,6 +3517,7 @@ def resolve_voice_preview_media(
 
 
 __all__ = [
+    "OFFICIAL_PRESET_PREVIEW_TEXT",
     "CanonicalOfficialPresetVoice",
     "OfficialPresetVersionRows",
     "PreparedVoicePreview",

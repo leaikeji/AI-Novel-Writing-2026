@@ -211,6 +211,21 @@ def _api_cases() -> list[ApiCase]:
             wire.OfficialVoiceSelectionRequest,
         ),
         ApiCase(
+            "official-voice-preview",
+            settings_api.NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
+            "POST",
+            f"/novels/{NOVEL_ID}/official-voice-previews",
+            {
+                "headers": idempotency,
+                "json": {"preset_id": "onnx.Junhao"},
+            },
+            {
+                "novel_id": NOVEL_ID,
+                "idempotency_key": "tts-api-case-0001",
+            },
+            wire.OfficialVoicePreviewRequest,
+        ),
+        ApiCase(
             "voice-profile-list",
             settings_api.NarrationSettingsOperation.LIST_VOICE_PROFILES,
             "GET",
@@ -454,7 +469,7 @@ def _api_cases() -> list[ApiCase]:
             wire.ExecuteNarrationCacheCleanupRequest,
         ),
     ]
-    assert len(cases) == 32
+    assert len(cases) == 33
     assert {case.operation for case in cases} == set(
         settings_api.NarrationSettingsOperation
     )
@@ -529,11 +544,11 @@ def test_voice_presets_http_surface_uses_shared_response_contract() -> None:
     assert "_run_product_preset_catalog" not in source
 
 
-def test_out_of_scope_preset_reason_is_stable_on_http_surface() -> None:
+def test_voice_source_unavailable_reason_is_stable_on_http_surface() -> None:
     backend = RecordingNoGoBackend(
         settings_api.NarrationApiFault(
             wire.NarrationErrorCode.VOICE_SOURCE_UNAVAILABLE,
-            "PRODUCT_PRESET_OUT_OF_SCOPE",
+            "VOICE_PRODUCT_UNAVAILABLE",
             field="preset_id",
             capability=wire.CapabilityKey.PRESET_VOICE_SOURCE,
         )
@@ -544,7 +559,7 @@ def test_out_of_scope_preset_reason_is_stable_on_http_surface() -> None:
             headers={"Idempotency-Key": "preset-scope-0001"},
             json={
                 "expected_profile_version": 1,
-                "preset_id": "onnx.Trump",
+                "preset_id": "onnx.Junhao",
             },
         )
 
@@ -553,7 +568,7 @@ def test_out_of_scope_preset_reason_is_stable_on_http_surface() -> None:
     assert response.json()["detail"] == {
         "contract_version": "narration-settings-api/1",
         "code": "VOICE_SOURCE_UNAVAILABLE",
-        "message": "PRODUCT_PRESET_OUT_OF_SCOPE",
+        "message": "VOICE_PRODUCT_UNAVAILABLE",
         "retryable": False,
         "field": "preset_id",
         "current_version": None,
@@ -723,7 +738,7 @@ def test_no_go_surface_has_no_synthesis_player_or_voice_generator_route() -> Non
     }
     paths = {path for _, path in operations}
 
-    assert len(operations) == 32
+    assert len(operations) == 33
     assert all("synthesis" not in path for path in paths)
     assert all("player" not in path for path in paths)
     assert all("voice-generator" not in path for path in paths)
@@ -854,6 +869,28 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
         capabilities = captured["capabilities"]
         assert isinstance(capabilities, wire.NarrationCapabilities)
         baseline = wire.t2_hold_capabilities()
+        managed_keys = {
+            wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
+            wire.CapabilityKey.NANO_ADVANCED_TUNING,
+            wire.CapabilityKey.PRIVATE_VOICE_DELETION,
+            wire.CapabilityKey.VOICE_GENERATOR,
+        }
+
+        def with_managed_readiness(
+            source: wire.NarrationCapabilities,
+        ) -> wire.NarrationCapabilities:
+            readiness = backend_app.NARRATION_FEATURE_READINESS_PROVIDER.snapshot()
+            return wire.NarrationCapabilities(
+                items=[
+                    (
+                        readiness.item(item.key)
+                        if item.key in managed_keys
+                        else item.model_copy(deep=True)
+                    )
+                    for item in source.items
+                ]
+            )
+
         for key in wire.CapabilityKey:
             item = capabilities.item(key)
             if key in {
@@ -863,6 +900,17 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
                 assert item.state is wire.CapabilityState.ENABLED
                 assert item.visible and item.actionable
                 assert item.reason_code is None and item.required_gate is None
+            elif key in {
+                wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
+                wire.CapabilityKey.NANO_ADVANCED_TUNING,
+                wire.CapabilityKey.PRIVATE_VOICE_DELETION,
+                wire.CapabilityKey.VOICE_GENERATOR,
+            }:
+                assert item == (
+                    backend_app.NARRATION_FEATURE_READINESS_PROVIDER
+                    .snapshot()
+                    .item(key)
+                )
             else:
                 assert item == baseline.item(key)
 
@@ -916,7 +964,16 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
         )
         captured.clear()
         assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        assert captured["capabilities"] == backend_app.t2_settings_capabilities()
+        hidden_capabilities = captured["capabilities"]
+        assert isinstance(hidden_capabilities, wire.NarrationCapabilities)
+        hidden_baseline = backend_app.t2_settings_capabilities()
+        for key in wire.CapabilityKey:
+            expected_item = (
+                backend_app.NARRATION_FEATURE_READINESS_PROVIDER.snapshot().item(key)
+                if key in managed_keys
+                else hidden_baseline.item(key)
+            )
+            assert hidden_capabilities.item(key) == expected_item
         assert captured["voice_product"] is None
         assert backend_app._narration_t4_http_access_allowed(
             backend_app.Request(
@@ -1010,7 +1067,9 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
         production_status["worker_running"] = False
         captured.clear()
         assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        assert captured["capabilities"] == backend_app.t2_settings_capabilities()
+        assert captured["capabilities"] == with_managed_readiness(
+            backend_app.t2_settings_capabilities()
+        )
         production_status["worker_running"] = True
         monkeypatch.setattr(
             backend_app,
@@ -1021,7 +1080,9 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
         assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
         released = captured["capabilities"]
         assert isinstance(released, wire.NarrationCapabilities)
-        assert released == backend_app.t2_settings_capabilities()
+        assert released == with_managed_readiness(
+            backend_app.t2_settings_capabilities()
+        )
         assert captured["voice_product"] is None
 
         expected_voice_product = object()
@@ -1040,17 +1101,23 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
             wire.CapabilityKey.NARRATION_SYNTHESIS,
             wire.CapabilityKey.PRODUCT_PLAYER,
             wire.CapabilityKey.EDITOR_PRODUCTION,
-                wire.CapabilityKey.AUTOMATIC_SPEAKER_DETECTION,
-                wire.CapabilityKey.PRESET_VOICE_SOURCE,
-                wire.CapabilityKey.VOICE_PREVIEW,
-                wire.CapabilityKey.CACHE_CLEANUP,
-            }
+            wire.CapabilityKey.AUTOMATIC_SPEAKER_DETECTION,
+            wire.CapabilityKey.PRESET_VOICE_SOURCE,
+            wire.CapabilityKey.VOICE_PREVIEW,
+            wire.CapabilityKey.CACHE_CLEANUP,
+        }
         for key in wire.CapabilityKey:
             item = released.item(key)
             if key in product_keys:
                 assert item.state is wire.CapabilityState.ENABLED
                 assert item.visible and item.actionable
                 assert item.reason_code is None and item.required_gate is None
+            elif key in managed_keys:
+                assert item == (
+                    backend_app.NARRATION_FEATURE_READINESS_PROVIDER
+                    .snapshot()
+                    .item(key)
+                )
             else:
                 assert item == baseline.item(key)
 
@@ -1083,7 +1150,7 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
         assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
         invalid_flag = captured["capabilities"]
         assert isinstance(invalid_flag, wire.NarrationCapabilities)
-        assert invalid_flag == wire.NarrationCapabilities(
+        assert invalid_flag == with_managed_readiness(wire.NarrationCapabilities(
             items=[
                 (
                     wire.FeatureCapability(
@@ -1103,7 +1170,7 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
                 )
                 for item in baseline.items
             ]
-        )
+        ))
 
         lifecycle_calls: list[tuple[str, object]] = []
 

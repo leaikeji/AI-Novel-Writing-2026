@@ -10,6 +10,7 @@ import type {
   NarrationWorkflowIntent,
   NarrationWorkflowResource,
 } from "./chapter-contracts";
+import { createNarrationActionUuid } from "./idempotency-key";
 
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -106,14 +107,7 @@ function defaultDelay(milliseconds: number, signal: AbortSignal): Promise<void> 
 
 
 function defaultActionId(): string {
-  const value = globalThis.crypto?.randomUUID?.();
-  if (!value) {
-    throw new ChapterNarrationWorkflowError(
-      "INVALID_INPUT",
-      "当前浏览器无法建立安全的朗读操作标识。",
-    );
-  }
-  return value;
+  return createNarrationActionUuid();
 }
 
 
@@ -200,7 +194,7 @@ function actionable(workflow: NarrationWorkflowResource): boolean {
     if (!Number.isSafeInteger(manifestRevision) || manifestRevision < 1) {
       fail("INVALID_INPUT", "生产状态返回了无效的 Manifest revision。");
     }
-    return true;
+    return state === "partial_ready" || state === "ready";
   }
   if (workflow.edition_id !== null || workflow.current_manifest_revision !== null) {
     fail("INVALID_INPUT", "生产等待态不得提前暴露 Edition 或 Manifest。");
@@ -299,7 +293,10 @@ export async function startChapterNarrationWorkflow(
     let attempt = 0;
     while (!actionable(workflow)) {
       if (dependencies.now() - startedAt >= timeout) {
-        fail("WORKFLOW_TIMEOUT", "人物识别尚未完成，可稍后重试；已保存正文不会丢失。");
+        fail(
+          "WORKFLOW_TIMEOUT",
+          "首个可播放句段尚未准备完成，可稍后重试；已保存正文不会丢失。",
+        );
       }
       await dependencies.delay(
         schedule[Math.min(attempt, schedule.length - 1)],

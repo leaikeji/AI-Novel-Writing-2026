@@ -34,6 +34,11 @@ import {
   REFERENCE_UPLOAD_MIME_TYPES,
   parseCharacterVoiceBindingListResponse,
   parseCharacterVoiceBindingResource,
+  parseCharacterVoiceMatchResource,
+  parseCharacterVoiceGeneratorCommandListResource,
+  parseCharacterVoiceGeneratorCommandResource,
+  parseNanoVoiceExperimentListResource,
+  parseNanoVoiceExperimentResource,
   parseNarrationApiErrorDetail,
   parseNarrationCacheCleanupPreview,
   parseNarrationCacheCleanupResult,
@@ -45,6 +50,8 @@ import {
   parseNarrationSettingsResource,
   parseOfficialPresetCatalogResponse,
   parseOfficialVoiceSelectionResponse,
+  parsePrivateVoiceDeletionRequestResource,
+  parsePrivateVoiceLifecycleResource,
   parsePronunciationProfileResource,
   parseVoicePreviewResource,
   parseVoiceProfileListResponse,
@@ -55,6 +62,17 @@ import {
 import type {
   CharacterVoiceBindingListResponse,
   CharacterVoiceBindingResource,
+  CharacterVoiceMatchRequest,
+  CharacterVoiceMatchResource,
+  ApplyCharacterVoiceGeneratorCommandRequest,
+  CharacterVoiceGeneratorCommandListResource,
+  CharacterVoiceGeneratorCommandResource,
+  CreateCharacterVoiceGeneratorCommandRequest,
+  RetryCharacterVoiceGeneratorCommandRequest,
+  ApplyNanoVoiceExperimentRequest,
+  CreateNanoVoiceExperimentRequest,
+  NanoVoiceExperimentListResource,
+  NanoVoiceExperimentResource,
   CreateNarrationCloudConsentRequest,
   CreatePresetVoiceVersionRequest,
   CreateVoicePreviewRequest,
@@ -72,8 +90,13 @@ import type {
   NarrationScopeOverrideResource,
   NarrationSettingsResource,
   OfficialPresetCatalogResponse,
+  OfficialVoicePreviewRequest,
   OfficialVoiceSelectionRequest,
   OfficialVoiceSelectionResponse,
+  ConfirmPrivateVoiceDeletionRequest,
+  CreatePrivateVoiceDeletionRequest,
+  PrivateVoiceDeletionRequestResource,
+  PrivateVoiceLifecycleResource,
   PreviewNarrationCacheCleanupRequest,
   PronunciationProfileResource,
   PutCharacterVoiceBindingRequest,
@@ -431,6 +454,322 @@ export function selectOfficialVoice(
       headers: idempotencyHeaders(idempotencyKey),
     },
   );
+}
+
+export function createOfficialVoicePreview(
+  novelId: string,
+  payload: OfficialVoicePreviewRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<VoicePreviewResource> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/official-voice-previews`,
+    parseVoicePreviewResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export async function listNanoVoiceExperiments(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<NanoVoiceExperimentListResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/nano-voice-experiments`,
+    parseNanoVoiceExperimentListResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId) {
+    throw new NarrationContractError("nano_voice_experiments.novel_id", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function createNanoVoiceExperiment(
+  novelId: string,
+  payload: CreateNanoVoiceExperimentRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<NanoVoiceExperimentResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/nano-voice-experiments`,
+    parseNanoVoiceExperimentResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+  if (result.novel_id !== novelId) {
+    throw new NarrationContractError("nano_voice_experiment.novel_id", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function getNanoVoiceExperiment(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<NanoVoiceExperimentResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/nano-voice-experiments/${pathSegment(commandId)}`,
+    parseNanoVoiceExperimentResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("nano_voice_experiment", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function applyNanoVoiceExperiment(
+  novelId: string,
+  commandId: string,
+  payload: ApplyNanoVoiceExperimentRequest,
+  signal?: AbortSignal,
+): Promise<NanoVoiceExperimentResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/nano-voice-experiments/${pathSegment(commandId)}/binding`,
+    parseNanoVoiceExperimentResource,
+    jsonInit("PUT", payload, signal),
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("nano_voice_experiment", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function matchCharacterOfficialVoice(
+  novelId: string,
+  characterId: string,
+  payload: CharacterVoiceMatchRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceMatchResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/official-voice-match`,
+    parseCharacterVoiceMatchResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+  if (
+    result.character_id !== characterId
+    || result.current_character_binding.character_id !== characterId
+    || result.current_character_binding.novel_id !== novelId
+  ) {
+    throw new NarrationContractError("character_voice_match.character_id", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function listCharacterVoiceGeneratorCommands(
+  novelId: string,
+  characterId: string,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceGeneratorCommandListResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/voice-generator-commands`,
+    parseCharacterVoiceGeneratorCommandListResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId || result.character_id !== characterId) {
+    throw new NarrationContractError("character_voice_generations", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function createCharacterVoiceGeneratorCommand(
+  novelId: string,
+  characterId: string,
+  payload: CreateCharacterVoiceGeneratorCommandRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceGeneratorCommandResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/voice-generator-commands`,
+    parseCharacterVoiceGeneratorCommandResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+  if (result.novel_id !== novelId || result.character_id !== characterId) {
+    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function getCharacterVoiceGeneratorCommand(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceGeneratorCommandResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}`,
+    parseCharacterVoiceGeneratorCommandResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function cancelCharacterVoiceGeneratorCommand(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceGeneratorCommandResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}/cancel`,
+    parseCharacterVoiceGeneratorCommandResource,
+    { method: "POST", signal },
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function retryCharacterVoiceGeneratorCommand(
+  novelId: string,
+  commandId: string,
+  payload: RetryCharacterVoiceGeneratorCommandRequest,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceGeneratorCommandResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}/retry`,
+    parseCharacterVoiceGeneratorCommandResource,
+    jsonInit("POST", payload, signal),
+  );
+  // Retry creates a new durable command with a fresh command ID. The source
+  // command remains the path authority; only the novel scope is stable across
+  // the response.
+  if (result.novel_id !== novelId) {
+    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function applyCharacterVoiceGeneratorCommand(
+  novelId: string,
+  commandId: string,
+  payload: ApplyCharacterVoiceGeneratorCommandRequest,
+  signal?: AbortSignal,
+): Promise<CharacterVoiceGeneratorCommandResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}/binding`,
+    parseCharacterVoiceGeneratorCommandResource,
+    jsonInit("PUT", payload, signal),
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function getPrivateVoiceLifecycle(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<PrivateVoiceLifecycleResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/private-voice-lifecycle`,
+    parsePrivateVoiceLifecycleResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId) {
+    throw new NarrationContractError("private_voice_lifecycle.novel_id", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function createPrivateVoiceDeletionRequest(
+  novelId: string,
+  profileId: string,
+  payload: CreatePrivateVoiceDeletionRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<PrivateVoiceDeletionRequestResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-profiles/${pathSegment(profileId)}/deletion-requests`,
+    parsePrivateVoiceDeletionRequestResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+  if (result.novel_id !== novelId || result.profile_id !== profileId) {
+    throw new NarrationContractError("private_voice_deletion", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function getPrivateVoiceDeletionRequest(
+  novelId: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<PrivateVoiceDeletionRequestResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-deletion-requests/${pathSegment(requestId)}`,
+    parsePrivateVoiceDeletionRequestResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId || result.request_id !== requestId) {
+    throw new NarrationContractError("private_voice_deletion", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function confirmPrivateVoiceDeletionRequest(
+  novelId: string,
+  requestId: string,
+  payload: ConfirmPrivateVoiceDeletionRequest,
+  signal?: AbortSignal,
+): Promise<PrivateVoiceDeletionRequestResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-deletion-requests/${pathSegment(requestId)}/confirm`,
+    parsePrivateVoiceDeletionRequestResource,
+    jsonInit("POST", payload, signal),
+  );
+  if (result.novel_id !== novelId || result.request_id !== requestId) {
+    throw new NarrationContractError("private_voice_deletion", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function cancelPrivateVoiceDeletionRequest(
+  novelId: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<PrivateVoiceDeletionRequestResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-deletion-requests/${pathSegment(requestId)}/cancel`,
+    parsePrivateVoiceDeletionRequestResource,
+    { method: "POST", signal },
+  );
+  if (result.novel_id !== novelId || result.request_id !== requestId) {
+    throw new NarrationContractError("private_voice_deletion", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function retryPrivateVoiceDeletionRequest(
+  novelId: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<PrivateVoiceDeletionRequestResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-deletion-requests/${pathSegment(requestId)}/retry`,
+    parsePrivateVoiceDeletionRequestResource,
+    { method: "POST", signal },
+  );
+  if (result.novel_id !== novelId || result.request_id !== requestId) {
+    throw new NarrationContractError("private_voice_deletion", "response scope mismatch");
+  }
+  return result;
 }
 
 export function buildUploadedVoiceVersionFormData(

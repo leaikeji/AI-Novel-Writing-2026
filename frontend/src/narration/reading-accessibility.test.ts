@@ -418,7 +418,7 @@ describe("reading page accessibility contract", () => {
     expect(nav.props.className).toBe("anw-reading-nav");
     expect(nav.props["aria-label"]).toBe("朗读设置");
     const buttons = findAll(nav, (element) => element.type === "button");
-    expect(buttons).toHaveLength(6);
+    expect(buttons).toHaveLength(5);
     expect(buttons.every((button) => button.props.type === "button")).toBe(true);
     expect(buttons.every((button) => button.props.role === undefined)).toBe(true);
     expect(buttons.every((button) => button.props.tabIndex !== -1)).toBe(true);
@@ -426,9 +426,12 @@ describe("reading page accessibility contract", () => {
     expect(findAll(tree, (element) => element.props.role === "button")).toHaveLength(0);
 
     expect(T2_B_READING_STYLES).toContain("@media (max-width: 760px)");
+    expect(T2_B_READING_STYLES).toContain("@container (max-width: 900px)");
     expect(T2_B_READING_STYLES).toContain(".anw-reading-layout");
     expect(T2_B_READING_STYLES).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(T2_B_READING_STYLES).toContain(".anw-reading-nav");
+    expect(T2_B_READING_STYLES).toContain("@container (max-width: 520px)");
+    expect(T2_B_READING_STYLES).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(T2_B_READING_STYLES).toContain("overflow-x: auto");
     expect(T2_B_READING_STYLES).toContain(":focus-visible");
     expect(T2_B_READING_STYLES).toContain("prefers-reduced-motion");

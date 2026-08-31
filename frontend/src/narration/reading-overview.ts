@@ -11,6 +11,8 @@ export const READING_SECTION_KEYS = [
   "narrator",
   "characters",
   "voice-library",
+  "advanced-tuning",
+  "private-voices",
   "reading-rules",
   "storage-privacy",
   "casting-rules",
@@ -29,21 +31,27 @@ export interface ReadingSectionDefinition {
 
 
 export const READING_SECTIONS: readonly ReadingSectionDefinition[] = [
-  { key: "overview", label: "总览" },
-  { key: "narrator", label: "旁白与朗读" },
+  { key: "narrator", label: "基础朗读" },
+  { key: "voice-library", label: "官方音色" },
   { key: "characters", label: "人物配音" },
-  { key: "voice-library", label: "音色库" },
-  { key: "reading-rules", label: "识别、发音与停顿" },
-  { key: "storage-privacy", label: "存储与隐私" },
+  { key: "advanced-tuning", label: "高级调音" },
+  { key: "private-voices", label: "私人音色" },
 ] as const;
 
 
 export function canonicalReadingSection(
   section: ReadingSectionKey | null | undefined,
 ): ReadingSectionKey {
-  if (section === "casting-rules" || section === "pronunciation") return "reading-rules";
-  if (section === "audio-cache") return "storage-privacy";
-  return section ?? "overview";
+  if (
+    section === null
+    || section === undefined
+    || section === "overview"
+    || section === "reading-rules"
+    || section === "casting-rules"
+    || section === "pronunciation"
+  ) return "narrator";
+  if (section === "storage-privacy" || section === "audio-cache") return "private-voices";
+  return section;
 }
 
 
@@ -307,7 +315,7 @@ export function createReadingOverview(
           "div",
           { className: "anw-reading-empty", "data-reading-empty": "true" },
           h("h3", null, "还没有朗读配置"),
-          h("p", null, "先从当前产品的 6 个中文官方预设中选择并锁定旁白音色，再为正式人物配置声音。"),
+          h("p", null, "可从 18 个官方音色中直接选择旁白，再为正式人物一键匹配或手动配置声音。"),
           h(
             "button",
             {

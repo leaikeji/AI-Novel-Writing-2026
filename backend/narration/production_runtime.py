@@ -33,6 +33,23 @@ from .digest_keyring import DigestKeyringError, load_digest_keyring
 from .disk_guard import NarrationDiskGuard
 from .edition_service import NarrationProductionPolicy
 from .fingerprints import model_fingerprint_sha256
+from .feature_readiness import (
+    NARRATION_FEATURE_READINESS_PROVIDER,
+    NarrationFeatureDependencies,
+)
+from .character_voice_matching import load_official_voice_casting_baseline
+from .nano_experiment_runtime import (
+    NanoVoicePreviewTerminalizer,
+    SidecarNanoExperimentSynthesizer,
+    SqlAlchemyNanoExperimentStore,
+    build_nano_experiment_validation_input,
+)
+from .nano_experiments import (
+    NanoExperimentProcessor,
+    NanoExperimentService,
+    StrictNanoExperimentValidator,
+    production_nano_experiment_identity,
+)
 from .narration_api import (
     NarrationProductionBackendFactory,
     build_narration_production_backend_factory,
@@ -80,6 +97,25 @@ from .voice_product import (
     VoiceProductService,
     resolve_voice_preview_media,
 )
+from .schema_readiness import (
+    database_revision_satisfies,
+    narration_feature_schema_ready,
+    voice_generator_schema_ready,
+)
+from .voice_deletion import VoiceDeletionService
+from .voice_generator_service import SqlAlchemyVoiceGeneratorService
+from .voice_generator_runtime import (
+    NativeVoiceGeneratorHostClient,
+    VoiceGeneratorHostConfig,
+)
+from .voice_generator_processor import (
+    SqlAlchemyVoiceGeneratorRepository,
+    VoiceGeneratorProcessor,
+)
+from .voice_lifecycle import (
+    PrivateVoiceLifecycleService,
+    VoiceDeletionReconciler,
+)
 from .voices import ParsedUploadedVoice
 from .worker import (
     FixedFfmpegTranscoder,
@@ -102,13 +138,14 @@ VALIDATION_NOVEL_ID_ENV = "AI_NOVEL_TTS_VALIDATION_NOVEL_ID"
 VALIDATION_DOCUMENT_ID_ENV = "AI_NOVEL_TTS_VALIDATION_DOCUMENT_ID"
 VALIDATION_EXPIRES_AT_ENV = "AI_NOVEL_TTS_VALIDATION_EXPIRES_AT"
 REFERENCE_CLONE_ENABLE_ENV = "AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED"
+VOICE_GENERATOR_TOKEN_FILE_ENV = "AI_NOVEL_TTS_VOICE_GENERATOR_TOKEN_FILE"
 
 TOKENIZER_FINGERPRINT_VERSION = "narration-moss-tokenizer-fingerprint/1"
 NORMALIZER_FINGERPRINT_VERSION = "narration-spoken-text-normalizer/1"
 WORKER_TASK_NAME = "ai-novel-moss-tts-production-worker"
 WORKER_CYCLE_TASK_NAME = "ai-novel-moss-tts-worker-cycle"
 SIDECAR_RETRY_SECONDS = 1.0
-EXPECTED_DATABASE_REVISION = "20260829_0032"
+MINIMUM_DATABASE_REVISION = "20260829_0032"
 PRODUCTION_TRANSCODING_POLICY = replace(
     DEFAULT_TRANSCODING_POLICY,
     allow_wav_fallback=False,
@@ -472,6 +509,12 @@ _playback_factory: PlaybackApiBackendFactory | None = None
 _production_factory: NarrationProductionBackendFactory | None = None
 _production_policy: NarrationProductionPolicy | None = None
 _voice_product_port: VoiceProductService | None = None
+_nano_experiment_service: NanoExperimentService | None = None
+_nano_experiment_store: SqlAlchemyNanoExperimentStore | None = None
+_voice_generator_service: SqlAlchemyVoiceGeneratorService | None = None
+_private_voice_deletion_service: VoiceDeletionService | None = None
+_private_voice_lifecycle_service: PrivateVoiceLifecycleService | None = None
+_voice_deletion_reconciler: VoiceDeletionReconciler | None = None
 _disk_guard: NarrationDiskGuard | None = None
 _cache_runtime: NarrationCacheRuntime | None = None
 _validation_token_digest: bytes | None = None
@@ -793,10 +836,13 @@ def _verify_database(engine: Engine) -> None:
                 text("select version_num from alembic_version")
             )
         )
-    if revisions != (EXPECTED_DATABASE_REVISION,):
+    if not database_revision_satisfies(
+        revisions,
+        minimum_revision=MINIMUM_DATABASE_REVISION,
+    ):
         raise NarrationProductionRuntimeError(
             "TTS_DATABASE_SCHEMA_OUTDATED",
-            "narration production database schema is not at the frozen head",
+            "narration production database schema lacks the required migration",
         )
 
 
@@ -958,6 +1004,14 @@ async def _run_worker_cycle(
     *,
     scheduler: NarrationJobScheduler | None = None,
     voice_preview_processor: VoicePreviewProcessor | None = None,
+    nano_experiment_processor: NanoExperimentProcessor | None = None,
+    nano_experiment_store: SqlAlchemyNanoExperimentStore | None = None,
+    voice_generator_processor: VoiceGeneratorProcessor | None = None,
+    voice_generator_repository: SqlAlchemyVoiceGeneratorRepository | None = None,
+    voice_generator_host: NativeVoiceGeneratorHostClient | None = None,
+    feature_schema_ready: bool = False,
+    feature_voice_generator_schema_ready: bool = False,
+    deletion_reconciler_ready: bool = False,
 ) -> str:
     """Run one worker only while its exact leased adapter remains authoritative."""
 
@@ -977,6 +1031,14 @@ async def _run_worker_cycle(
             scheduler,
             worker,
             voice_preview_processor,
+            nano_experiment_processor,
+            nano_experiment_store,
+            voice_generator_processor,
+            voice_generator_repository,
+            voice_generator_host,
+            feature_schema_ready,
+            feature_voice_generator_schema_ready,
+            deletion_reconciler_ready,
             cycle_stop,
         )
     worker_task = asyncio.create_task(worker_coroutine, name=WORKER_CYCLE_TASK_NAME)
@@ -1007,6 +1069,14 @@ async def _run_shared_nano_worker(
     scheduler: NarrationJobScheduler,
     segment_worker: NarrationSegmentWorker,
     voice_preview_processor: VoicePreviewProcessor,
+    nano_experiment_processor: NanoExperimentProcessor | None,
+    nano_experiment_store: SqlAlchemyNanoExperimentStore | None,
+    voice_generator_processor: VoiceGeneratorProcessor | None,
+    voice_generator_repository: SqlAlchemyVoiceGeneratorRepository | None,
+    voice_generator_host: NativeVoiceGeneratorHostClient | None,
+    feature_schema_ready: bool,
+    feature_voice_generator_schema_ready: bool,
+    deletion_reconciler_ready: bool,
     stop_event: asyncio.Event,
     *,
     idle_poll_seconds: float = 1.0,
@@ -1016,9 +1086,43 @@ async def _run_shared_nano_worker(
 
     loop = asyncio.get_running_loop()
     next_maintenance = 0.0
+    next_voice_generator_probe = 0.0
+    last_voice_generator_ready: bool | None = None
     while not stop_event.is_set():
         try:
             current = loop.time()
+            if current >= next_voice_generator_probe:
+                host_ready = False
+                if (
+                    voice_generator_host is not None
+                    and voice_generator_processor is not None
+                ):
+                    try:
+                        health = await voice_generator_host.health()
+                    except Exception:
+                        host_ready = False
+                    else:
+                        host_ready = health.ready
+                if host_ready is not last_voice_generator_ready:
+                    _publish_feature_dependencies(
+                        schema_ready=feature_schema_ready,
+                        deletion_reconciler_ready=deletion_reconciler_ready,
+                        sidecar_ready=True,
+                        nano_processor_ready=nano_experiment_processor is not None,
+                        scheduler_ready=True,
+                        voice_generator_schema_is_ready=(
+                            feature_voice_generator_schema_ready
+                        ),
+                        voice_generator_host_ready=host_ready,
+                        voice_generator_processor_ready=(
+                            voice_generator_processor is not None
+                        ),
+                        voice_generator_reconciler_ready=(
+                            voice_generator_repository is not None
+                        ),
+                    )
+                    last_voice_generator_ready = host_ready
+                next_voice_generator_probe = current + 2.0
             if current >= next_maintenance:
                 await asyncio.to_thread(scheduler.maintain_once)
                 next_maintenance = current + maintenance_interval_seconds
@@ -1029,7 +1133,32 @@ async def _run_shared_nano_worker(
                 await segment_worker.process(scheduled.lease)
                 wait_seconds = 0.0
             elif scheduled.job_kind == VOICE_PREVIEW_JOB_KIND:
-                await voice_preview_processor.process(scheduled.lease)
+                if (
+                    nano_experiment_processor is not None
+                    and nano_experiment_store is not None
+                    and await asyncio.to_thread(
+                        nano_experiment_store.owns_job,
+                        scheduled.lease.fence.job_id,
+                    )
+                ):
+                    await nano_experiment_processor.process(scheduled.lease)
+                else:
+                    await voice_preview_processor.process(scheduled.lease)
+                wait_seconds = 0.0
+            elif scheduled.job_kind == "narration.voice_generate":
+                if (
+                    voice_generator_processor is None
+                    or voice_generator_repository is None
+                    or not await asyncio.to_thread(
+                        voice_generator_repository.owns_job,
+                        scheduled.lease.fence.job_id,
+                    )
+                ):
+                    raise NarrationProductionRuntimeError(
+                        "TTS_WORKER_DISPATCH_INVALID",
+                        "VoiceGenerator job has no authoritative processor",
+                    )
+                await voice_generator_processor.process(scheduled.lease)
                 wait_seconds = 0.0
             else:
                 raise NarrationProductionRuntimeError(
@@ -1058,6 +1187,7 @@ def _detach_production_factory(
     voice_product: VoiceProductService | None = None,
 ) -> None:
     global _production_factory, _production_policy, _voice_product_port
+    global _nano_experiment_service, _nano_experiment_store, _voice_generator_service
     global _validation_token_digest, _validation_runtime_scope
     _validation_segment_claim_gate.clear()
     if factory is None:
@@ -1073,6 +1203,9 @@ def _detach_production_factory(
         _validation_runtime_scope = None
     if voice_product is not None and _voice_product_port is voice_product:
         _voice_product_port = None
+    _nano_experiment_service = None
+    _nano_experiment_store = None
+    _voice_generator_service = None
 
 
 def current_narration_production_policy() -> NarrationProductionPolicy | None:
@@ -1087,10 +1220,87 @@ def current_voice_product_port() -> VoiceProductService | None:
     return _voice_product_port
 
 
+def current_nano_experiment_service() -> NanoExperimentService | None:
+    """Return the installed advanced-tuning service for the current lease."""
+
+    return _nano_experiment_service
+
+
+def current_voice_generator_service() -> SqlAlchemyVoiceGeneratorService | None:
+    """Return the durable VoiceGenerator command authority for this runtime."""
+
+    return _voice_generator_service
+
+
+def current_private_voice_deletion_service() -> VoiceDeletionService | None:
+    """Return the deletion service owned by the production runtime."""
+
+    return _private_voice_deletion_service
+
+
+def current_private_voice_lifecycle_service() -> PrivateVoiceLifecycleService | None:
+    """Return the novel-scoped private-voice projection service."""
+
+    return _private_voice_lifecycle_service
+
+
 def current_narration_cache_runtime() -> NarrationCacheRuntime | None:
     """Return the installed read/status runtime; mutation remains capability-gated."""
 
     return _cache_runtime
+
+
+def narration_feature_readiness_status() -> dict[str, object]:
+    """Return the same immutable decision used by routes and settings UI."""
+
+    return NARRATION_FEATURE_READINESS_PROVIDER.snapshot().public_dict()
+
+
+def _official_casting_baseline_ready() -> bool:
+    try:
+        load_official_voice_casting_baseline()
+    except Exception:
+        return False
+    return True
+
+
+def _publish_feature_dependencies(
+    *,
+    schema_ready: bool,
+    deletion_reconciler_ready: bool,
+    sidecar_ready: bool,
+    nano_processor_ready: bool,
+    scheduler_ready: bool,
+    voice_generator_schema_is_ready: bool = False,
+    voice_generator_host_ready: bool = False,
+    voice_generator_processor_ready: bool = False,
+    voice_generator_reconciler_ready: bool = False,
+) -> None:
+    NARRATION_FEATURE_READINESS_PROVIDER.publish_dependencies(
+        NarrationFeatureDependencies(
+            schema_ready=schema_ready,
+            character_workspace_ready=True,
+            novel_agent_ready=True,
+            official_preset_catalog_ready=True,
+            official_casting_baseline_ready=_official_casting_baseline_ready(),
+            official_binding_service_ready=True,
+            storage_ready=True,
+            digest_keyring_ready=True,
+            sidecar_protocol_ready=sidecar_ready,
+            sidecar_model_fingerprint_ready=sidecar_ready,
+            nano_experiment_processor_ready=nano_processor_ready,
+            background_scheduler_ready=scheduler_ready,
+            exact_asset_plan_service_ready=schema_ready,
+            deletion_reconciler_ready=deletion_reconciler_ready,
+            voice_generator_schema_ready=voice_generator_schema_is_ready,
+            voice_generator_host_protocol_ready=voice_generator_host_ready,
+            voice_generator_model_identity_ready=voice_generator_host_ready,
+            voice_generator_codec_identity_ready=voice_generator_host_ready,
+            voice_generator_heavy_lock_ready=voice_generator_processor_ready,
+            voice_generator_processor_ready=voice_generator_processor_ready,
+            voice_generator_reconciler_ready=voice_generator_reconciler_ready,
+        )
+    )
 
 
 def _resolve_current_voice_preview_media(
@@ -1113,13 +1323,19 @@ async def _run_production(
 ) -> None:
     global _production_factory, _production_policy, _runtime_task, _snapshot
     global _voice_product_port, _disk_guard, _cache_runtime
+    global _nano_experiment_service, _nano_experiment_store, _voice_generator_service
+    global _private_voice_deletion_service, _private_voice_lifecycle_service
+    global _voice_deletion_reconciler
     global _validation_token_digest, _validation_runtime_scope
     current_task = asyncio.current_task()
     if current_task is None:
         return
     installed_factory: NarrationProductionBackendFactory | None = None
     installed_voice_product: VoiceProductService | None = None
+    installed_reconciler: VoiceDeletionReconciler | None = None
     keyring_loaded = False
+    feature_schema_ready = False
+    feature_voice_generator_schema_ready = False
     try:
         validation_token_digest = (
             await asyncio.to_thread(
@@ -1137,6 +1353,14 @@ async def _run_production(
         keyring_loaded = True
         engine = get_engine()
         await asyncio.to_thread(_verify_database, engine)
+        feature_schema_ready = await asyncio.to_thread(
+            narration_feature_schema_ready,
+            engine,
+        )
+        feature_voice_generator_schema_ready = await asyncio.to_thread(
+            voice_generator_schema_ready,
+            engine,
+        )
         if validation_scope is not None:
             await asyncio.to_thread(
                 _verify_validation_runtime_scope,
@@ -1156,6 +1380,34 @@ async def _run_production(
             bind=engine,
             expire_on_commit=False,
         )
+        voice_generator_service = (
+            SqlAlchemyVoiceGeneratorService(
+                session_factory,
+                digest_keyring=keyring,
+            )
+            if feature_voice_generator_schema_ready
+            else None
+        )
+        voice_generator_host: NativeVoiceGeneratorHostClient | None = None
+        voice_generator_token_value = values.get(VOICE_GENERATOR_TOKEN_FILE_ENV, "")
+        if feature_voice_generator_schema_ready and voice_generator_token_value:
+            try:
+                voice_generator_host = NativeVoiceGeneratorHostClient(
+                    VoiceGeneratorHostConfig(
+                        host="host.docker.internal",
+                        port=18_765,
+                        token_file=_absolute_path(
+                            values,
+                            VOICE_GENERATOR_TOKEN_FILE_ENV,
+                        ),
+                        timeout_seconds=5.0,
+                    )
+                )
+            except (OSError, RuntimeError, ValueError):
+                # VoiceGenerator is an additive capability.  Invalid or absent
+                # native-host authentication must fail that capability closed
+                # without taking the already released Nano CORE offline.
+                voice_generator_host = None
         disk_guard = NarrationDiskGuard(storage)
         await asyncio.to_thread(disk_guard.refresh)
         active_digest_key = keyring.active
@@ -1187,6 +1439,41 @@ async def _run_production(
                 return
             _disk_guard = disk_guard
             _cache_runtime = cache_runtime
+            _voice_generator_service = voice_generator_service
+        if feature_schema_ready:
+            deletion_service = VoiceDeletionService(
+                session_factory,
+                storage=storage,
+                digest_keyring=keyring,
+            )
+
+            def deletion_reconciler_crashed(_error: BaseException) -> None:
+                NARRATION_FEATURE_READINESS_PROVIDER.mark_crashed(
+                    [wire.CapabilityKey.PRIVATE_VOICE_DELETION]
+                )
+
+            installed_reconciler = VoiceDeletionReconciler(
+                deletion_service,
+                on_crash=deletion_reconciler_crashed,
+            )
+            await installed_reconciler.start()
+            lifecycle_service = PrivateVoiceLifecycleService(session_factory)
+            async with _lifecycle_lock:
+                if _runtime_task is not current_task:
+                    await installed_reconciler.stop()
+                    return
+                _private_voice_deletion_service = deletion_service
+                _private_voice_lifecycle_service = lifecycle_service
+                _voice_deletion_reconciler = installed_reconciler
+        _publish_feature_dependencies(
+            schema_ready=feature_schema_ready,
+            deletion_reconciler_ready=(
+                installed_reconciler is not None and installed_reconciler.healthy
+            ),
+            sidecar_ready=False,
+            nano_processor_ready=False,
+            scheduler_ready=False,
+        )
         repository = SqlAlchemyNarrationWorkerRepository(
             session_factory,
             digest_keyring=keyring,
@@ -1241,6 +1528,73 @@ async def _run_production(
                 digest_keyring=keyring,
                 policy=preview_policy,
             )
+            experiment_store: SqlAlchemyNanoExperimentStore | None = None
+            experiment_service: NanoExperimentService | None = None
+            experiment_processor: NanoExperimentProcessor | None = None
+            voice_generator_repository: SqlAlchemyVoiceGeneratorRepository | None = None
+            voice_generator_processor: VoiceGeneratorProcessor | None = None
+            if (
+                feature_schema_ready
+                and tts_fingerprint
+                == production_nano_experiment_identity().model_fingerprint_sha256
+            ):
+                experiment_store = SqlAlchemyNanoExperimentStore(
+                    session_factory,
+                    digest_keyring=keyring,
+                    preview_policy=preview_policy,
+                )
+                experiment_service = NanoExperimentService(
+                    repository=experiment_store,
+                    binder=experiment_store,
+                    validation_input=build_nano_experiment_validation_input(keyring),
+                    model_identity=production_nano_experiment_identity(),
+                )
+                experiment_processor = NanoExperimentProcessor(
+                    repository=experiment_store,
+                    synthesizer=SidecarNanoExperimentSynthesizer(
+                        adapter=adapter,
+                        storage=storage,
+                    ),
+                    validator=StrictNanoExperimentValidator(),
+                    binder=experiment_store,
+                )
+            if (
+                feature_voice_generator_schema_ready
+                and voice_generator_host is not None
+                and experiment_processor is not None
+            ):
+                voice_generator_repository = SqlAlchemyVoiceGeneratorRepository(
+                    session_factory,
+                    digest_keyring=keyring,
+                )
+                voice_generator_processor = VoiceGeneratorProcessor(
+                    repository=voice_generator_repository,
+                    host=voice_generator_host,
+                    nano_adapter=adapter,
+                    storage=storage,
+                    digest_keyring=keyring,
+                )
+            preview_terminalizer = (
+                NanoVoicePreviewTerminalizer(
+                    experiment_store,
+                    preview_repository,
+                )
+                if experiment_store is not None
+                else preview_repository.terminalize_job_in_session
+            )
+            configured_job_kinds = [
+                "narration.segment_render",
+                VOICE_PREVIEW_JOB_KIND,
+            ]
+            terminalizers = {
+                "narration.segment_render": repository.terminalize_job_in_session,
+                VOICE_PREVIEW_JOB_KIND: preview_terminalizer,
+            }
+            if voice_generator_repository is not None:
+                configured_job_kinds.append("narration.voice_generate")
+                terminalizers["narration.voice_generate"] = (
+                    voice_generator_repository.terminalize_job_in_session
+                )
             scheduler = NarrationJobScheduler(
                 session_factory,
                 config=SchedulerConfig(
@@ -1260,12 +1614,9 @@ async def _run_production(
                         if validation_scope is not None
                         else None
                     ),
-                    job_kinds=("narration.segment_render", VOICE_PREVIEW_JOB_KIND),
+                    job_kinds=tuple(configured_job_kinds),
                 ),
-                terminalizers={
-                    "narration.segment_render": repository.terminalize_job_in_session,
-                    VOICE_PREVIEW_JOB_KIND: preview_repository.terminalize_job_in_session,
-                },
+                terminalizers=terminalizers,
                 claim_guard=disk_guard.claim_allowed,
                 job_kind_claim_gate=(
                     _validation_segment_claim_gate.reserve
@@ -1307,8 +1658,25 @@ async def _run_production(
                 _production_factory = installed_factory
                 _production_policy = policy
                 _voice_product_port = installed_voice_product
+                _nano_experiment_service = experiment_service
+                _nano_experiment_store = experiment_store
+                _voice_generator_service = voice_generator_service
                 _validation_token_digest = validation_token_digest
                 _validation_runtime_scope = validation_scope
+            _publish_feature_dependencies(
+                schema_ready=feature_schema_ready,
+                deletion_reconciler_ready=(
+                    installed_reconciler is not None
+                    and installed_reconciler.healthy
+                ),
+                sidecar_ready=True,
+                nano_processor_ready=experiment_processor is not None,
+                scheduler_ready=True,
+                voice_generator_schema_is_ready=feature_voice_generator_schema_ready,
+                voice_generator_host_ready=False,
+                voice_generator_processor_ready=voice_generator_processor is not None,
+                voice_generator_reconciler_ready=voice_generator_repository is not None,
+            )
             ready = NarrationProductionRuntimeSnapshot(
                 product_requested=True,
                 lifecycle_status="ready",
@@ -1329,9 +1697,33 @@ async def _run_production(
                     stop_event,
                     scheduler=scheduler,
                     voice_preview_processor=voice_preview_processor,
+                    nano_experiment_processor=experiment_processor,
+                    nano_experiment_store=experiment_store,
+                    voice_generator_processor=voice_generator_processor,
+                    voice_generator_repository=voice_generator_repository,
+                    voice_generator_host=voice_generator_host,
+                    feature_schema_ready=feature_schema_ready,
+                    feature_voice_generator_schema_ready=(
+                        feature_voice_generator_schema_ready
+                    ),
+                    deletion_reconciler_ready=(
+                        installed_reconciler is not None
+                        and installed_reconciler.healthy
+                    ),
                 )
             except Exception as error:
                 cycle_reason = _safe_reason(error, "TTS_WORKER_CYCLE_FAILED")
+            if not stop_event.is_set():
+                _publish_feature_dependencies(
+                    schema_ready=feature_schema_ready,
+                    deletion_reconciler_ready=(
+                        installed_reconciler is not None
+                        and installed_reconciler.healthy
+                    ),
+                    sidecar_ready=False,
+                    nano_processor_ready=False,
+                    scheduler_ready=False,
+                )
             _detach_production_factory(installed_factory, installed_voice_product)
             installed_factory = None
             installed_voice_product = None
@@ -1371,11 +1763,21 @@ async def _run_production(
             ),
         )
     finally:
+        if not stop_event.is_set():
+            try:
+                NARRATION_FEATURE_READINESS_PROVIDER.mark_crashed()
+            except RuntimeError:
+                pass
         _detach_production_factory(installed_factory, installed_voice_product)
+        if installed_reconciler is not None:
+            await installed_reconciler.stop()
         async with _lifecycle_lock:
             if _runtime_task is current_task:
                 _disk_guard = None
                 _cache_runtime = None
+                _private_voice_deletion_service = None
+                _private_voice_lifecycle_service = None
+                _voice_deletion_reconciler = None
                 _runtime_task = None
                 if _snapshot.lifecycle_status == "ready":
                     _snapshot = NarrationProductionRuntimeSnapshot(
@@ -1393,6 +1795,7 @@ async def launch_narration_production_runtime(
 
     global _playback_factory, _runtime_task, _stop_event, _snapshot
     values = dict(os.environ if environ is None else environ)
+    readiness_started = False
     async with _lifecycle_lock:
         if _runtime_task is not None or _playback_factory is not None:
             return
@@ -1405,6 +1808,9 @@ async def launch_narration_production_runtime(
                     "product release and hidden validation modes are mutually exclusive",
                 )
             requested = product_requested or validation_requested
+            if requested:
+                NARRATION_FEATURE_READINESS_PROVIDER.begin_startup()
+                readiness_started = True
             reference_clone_requested = _exact_flag(
                 values,
                 REFERENCE_CLONE_ENABLE_ENV,
@@ -1468,6 +1874,11 @@ async def launch_narration_production_runtime(
             RuntimeError,
             ValueError,
         ) as error:
+            if readiness_started:
+                try:
+                    NARRATION_FEATURE_READINESS_PROVIDER.mark_crashed()
+                except RuntimeError:
+                    pass
             _snapshot = NarrationProductionRuntimeSnapshot(
                 product_requested=(
                     values.get(PRODUCT_ENABLE_ENV) == "true"
@@ -1484,8 +1895,12 @@ async def stop_narration_production_runtime() -> None:
 
     global _playback_factory, _production_factory, _production_policy
     global _voice_product_port, _disk_guard, _cache_runtime
+    global _nano_experiment_service, _nano_experiment_store, _voice_generator_service
+    global _private_voice_deletion_service, _private_voice_lifecycle_service
+    global _voice_deletion_reconciler
     global _validation_token_digest, _validation_runtime_scope
     global _runtime_task, _stop_event, _snapshot
+    stopping_readiness = NARRATION_FEATURE_READINESS_PROVIDER.begin_shutdown()
     _validation_segment_claim_gate.clear()
     async with _lifecycle_lock:
         task = _runtime_task
@@ -1498,6 +1913,12 @@ async def stop_narration_production_runtime() -> None:
         _production_factory = None
         _production_policy = None
         _voice_product_port = None
+        _nano_experiment_service = None
+        _nano_experiment_store = None
+        _voice_generator_service = None
+        _private_voice_deletion_service = None
+        _private_voice_lifecycle_service = None
+        _voice_deletion_reconciler = None
         _disk_guard = None
         _cache_runtime = None
         _validation_token_digest = None
@@ -1528,6 +1949,9 @@ async def stop_narration_production_runtime() -> None:
             pass
     async with _lifecycle_lock:
         _snapshot = NarrationProductionRuntimeSnapshot()
+    NARRATION_FEATURE_READINESS_PROVIDER.finish_shutdown(
+        expected_generation=stopping_readiness.generation
+    )
 
 
 __all__ = [
@@ -1535,7 +1959,7 @@ __all__ = [
     "FFMPEG_PATH_ENV",
     "FFPROBE_PATH_ENV",
     "FFMPEG_BUILD_ID_ENV",
-    "EXPECTED_DATABASE_REVISION",
+    "MINIMUM_DATABASE_REVISION",
     "MEDIA_ROOT_ENV",
     "MODEL_METADATA_ROOT_ENV",
     "NarrationProductionRuntimeSnapshot",
@@ -1545,6 +1969,7 @@ __all__ = [
     "VALIDATION_EXPIRES_AT_ENV",
     "VALIDATION_NOVEL_ID_ENV",
     "VALIDATION_TOKEN_FILE_ENV",
+    "VOICE_GENERATOR_TOKEN_FILE_ENV",
     "ValidationRuntimeScope",
     "ValidationSegmentClaimGate",
     "ValidationSegmentClaimGateSnapshot",
@@ -1555,10 +1980,15 @@ __all__ = [
     "WORKER_TASK_NAME",
     "WORKER_CYCLE_TASK_NAME",
     "current_voice_product_port",
+    "current_nano_experiment_service",
+    "current_voice_generator_service",
+    "current_private_voice_deletion_service",
+    "current_private_voice_lifecycle_service",
     "current_narration_cache_runtime",
     "current_narration_production_policy",
     "launch_narration_production_runtime",
     "narration_production_runtime_status",
+    "narration_feature_readiness_status",
     "read_validation_segment_claim_gate",
     "release_validation_segment_claim_gate",
     "stop_narration_production_runtime",

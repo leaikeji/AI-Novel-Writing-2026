@@ -123,6 +123,43 @@ export async function fetchVoicePreviewObjectUrl(
 }
 
 
+/** Play one already-validated temporary preview and release its object URL. */
+export async function playReadyVoicePreview(
+  preview: VoicePreviewResource,
+  signal: AbortSignal,
+): Promise<void> {
+  const objectUrl = await fetchVoicePreviewObjectUrl(preview, { signal });
+  if (signal.aborted) {
+    URL.revokeObjectURL(objectUrl);
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const audio = new Audio(objectUrl);
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    signal.removeEventListener("abort", onAbort);
+    audio.removeEventListener("ended", cleanup);
+    audio.removeEventListener("error", cleanup);
+    URL.revokeObjectURL(objectUrl);
+  };
+  const onAbort = () => {
+    audio.pause();
+    audio.removeAttribute("src");
+    cleanup();
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  audio.addEventListener("ended", cleanup, { once: true });
+  audio.addEventListener("error", cleanup, { once: true });
+  try {
+    await audio.play();
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+
 function playbackErrorMessage(reason: unknown): string {
   if (reason instanceof VoicePreviewPlaybackError) return reason.message;
   if (

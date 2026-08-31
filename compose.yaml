@@ -24,6 +24,7 @@ services:
       AI_NOVEL_TTS_VALIDATION_EXPIRES_AT: ${AI_NOVEL_TTS_VALIDATION_EXPIRES_AT:-}
       AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED: ${AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED:-false}
       AI_NOVEL_TTS_DIGEST_KEYRING_FILE: /app/working.secret/ai-novel-world-2026/narration-hmac-keyring.json
+      AI_NOVEL_TTS_VOICE_GENERATOR_TOKEN_FILE: /app/working.secret/ai-novel-world-2026/voice-generator/token
       MOSS_TTS_SIDECAR_HOST: tts-sidecar
       MOSS_TTS_SIDECAR_PORT: "8765"
       MOSS_TTS_SIDECAR_TOKEN_FILE: /run/moss-tts-secrets/moss_tts_sidecar_token
@@ -162,7 +163,12 @@ services:
     image: ${MOSS_TTS_SIDECAR_IMAGE:-ai-novel-world/moss-tts-sidecar:t1-b-linux-arm64}
     container_name: ai-novel-2026-moss-tts-sidecar
     platform: linux/arm64
-    restart: "on-failure:5"
+    # Intentional model-release exits are part of the Nano/VoiceGenerator
+    # handoff, not crash retries.  A finite retry counter is eventually
+    # exhausted by normal use and leaves Nano permanently stopped.  Docker's
+    # unbounded on-failure policy retains backoff for genuine crash loops while
+    # allowing every authenticated release to obtain a fresh process.
+    restart: "on-failure"
     depends_on:
       tts-runtime-init:
         condition: service_completed_successfully

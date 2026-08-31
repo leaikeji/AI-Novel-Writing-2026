@@ -493,49 +493,66 @@ def classify_parent_review(
     script_id: UUID,
     parent_version_id: UUID | None,
 ) -> ParentReviewClassification:
-    """Classify every parent from persisted state and blocker evidence."""
+    """Classify a parent from persisted state and its active review lineage.
+
+    A corrected ``review_required`` version may receive more than one owner
+    patch after its last blocker is removed.  Those zero-blocker intermediate
+    versions still belong to the same manual-review continuation.  Follow that
+    unapproved lineage until blocker evidence is found, while stopping at an
+    approved/analyzed version so an unrelated clean script cannot acquire
+    manual approval authority from historical ancestry.
+    """
 
     if parent_version_id is None:
         return ParentReviewClassification(None, False, False)
-    parent = require_row(
-        store.get(NarrationScriptVersion, parent_version_id),
-        label="parent script version",
-    )
-    if parent.script_id != script_id:
-        raise NarrationScopeMismatch(
-            "parent script version belongs to another script"
-        )
-    if parent.state not in {"analyzed", "review_required", "approved"}:
-        raise InvalidNarrationState(
-            "parent script version is not a verified materialized version"
-        )
     script = require_row(store.get(NarrationScript, script_id), label="script")
-    if _is_typed_script_version(store, parent.id):
-        typed_parent = load_script_contract(store, parent.id)
-        blockers = typed_parent.blocker_count
-        warnings = typed_parent.warning_count
-        parent_state = typed_parent.state.value
-    else:
-        persisted_hash, issues = _persisted_version_hash(
-            store, parent, script, for_update=False
+    current_id: UUID | None = parent_version_id
+    visited: set[UUID] = set()
+    while current_id is not None:
+        if current_id in visited:
+            raise InvalidNarrationState("script parent lineage contains a cycle")
+        visited.add(current_id)
+        parent = require_row(
+            store.get(NarrationScriptVersion, current_id),
+            label="parent script version",
         )
-        if persisted_hash != parent.immutable_hash:
-            raise StaleNarrationInput(
-                "parent script children differ from the immutable hash"
+        if parent.script_id != script_id:
+            raise NarrationScopeMismatch(
+                "parent script version belongs to another script"
             )
-        blockers = sum(issue.severity == "blocker" for issue in issues)
-        warnings = sum(issue.severity == "warning" for issue in issues)
-        parent_state = parent.state
-    if (warnings, blockers) != (parent.warning_count, parent.blocker_count):
-        raise StaleNarrationInput(
-            "parent script issue counts differ from persisted evidence"
-        )
-    if blockers:
-        if parent_state != "review_required":
+        if parent.state not in {"analyzed", "review_required", "approved"}:
             raise InvalidNarrationState(
-                "blocker-bearing parent must remain review_required"
+                "parent script version is not a verified materialized version"
             )
-        return ParentReviewClassification(parent_version_id, True, False)
+        if _is_typed_script_version(store, parent.id):
+            typed_parent = load_script_contract(store, parent.id)
+            blockers = typed_parent.blocker_count
+            warnings = typed_parent.warning_count
+            parent_state = typed_parent.state.value
+        else:
+            persisted_hash, issues = _persisted_version_hash(
+                store, parent, script, for_update=False
+            )
+            if persisted_hash != parent.immutable_hash:
+                raise StaleNarrationInput(
+                    "parent script children differ from the immutable hash"
+                )
+            blockers = sum(issue.severity == "blocker" for issue in issues)
+            warnings = sum(issue.severity == "warning" for issue in issues)
+            parent_state = parent.state
+        if (warnings, blockers) != (parent.warning_count, parent.blocker_count):
+            raise StaleNarrationInput(
+                "parent script issue counts differ from persisted evidence"
+            )
+        if blockers:
+            if parent_state != "review_required":
+                raise InvalidNarrationState(
+                    "blocker-bearing parent must remain review_required"
+                )
+            return ParentReviewClassification(parent_version_id, True, False)
+        if parent_state != "review_required":
+            break
+        current_id = parent.parent_version_id
     return ParentReviewClassification(parent_version_id, False, True)
 
 

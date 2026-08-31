@@ -12,7 +12,8 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 import pytest
 
 from backend.narration.official_presets import (
-    PRODUCT_OFFICIAL_PRESETS,
+    OFFICIAL_PRESETS,
+    official_preset_validation_tier,
     official_preset_version_fingerprint,
 )
 from scripts.tts import prepare_chapter_e2e_data as target
@@ -104,7 +105,7 @@ class FakeTransport:
         if split.path == "/voice-presets":
             return self._json(
                 {
-                    "schema_version": "moss-tts-official-preset-catalog/1.0",
+                    "schema_version": "moss-tts-official-preset-catalog/2.0",
                     "items": [
                         {
                             "preset_id": preset.preset_id,
@@ -113,9 +114,17 @@ class FakeTransport:
                             "language": preset.language,
                             "local_use_status": "available",
                             "commercial_distribution_status": "not_evaluated",
+                            "validation_tier": official_preset_validation_tier(
+                                preset.preset_id
+                            ),
+                            "language_scope": preset.language,
+                            "selectable_now": True,
+                            "previewable_now": True,
+                            "renderable_existing": True,
+                            "usage_notice": "private_local_writing_tool",
                             "provenance": preset.provenance(),
                         }
-                        for preset in PRODUCT_OFFICIAL_PRESETS
+                        for preset in OFFICIAL_PRESETS
                     ],
                 }
             )
@@ -150,7 +159,7 @@ class FakeTransport:
                 )
                 preset = next(
                     item
-                    for item in PRODUCT_OFFICIAL_PRESETS
+                    for item in OFFICIAL_PRESETS
                     if item.preset_id == payload["preset_id"]
                 )
                 version = {
@@ -407,7 +416,7 @@ def test_nondefault_same_preset_is_preserved_while_default_is_appended_and_reuse
         profile_id = _identifier(f"profile:{name}")
         version_id = _identifier(f"legacy-seed-zero:{profile_id}:{preset_id}")
         preset = next(
-            item for item in PRODUCT_OFFICIAL_PRESETS if item.preset_id == preset_id
+            item for item in OFFICIAL_PRESETS if item.preset_id == preset_id
         )
         old = {
             "version_id": version_id,

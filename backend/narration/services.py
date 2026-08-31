@@ -32,6 +32,7 @@ from .official_presets import (
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
     validate_official_version_evidence,
 )
+from .nano_experiments import validate_nano_experiment_version_evidence
 
 
 T = TypeVar("T")
@@ -293,16 +294,56 @@ def voice_activation_evidence_is_usable(
         and version.locked_actor is None
         and version.locked_at is None
     )
-    if not (human_confirmed or official_direct):
+    machine_validated = (
+        version.source_type == "generated"
+        and rights.source_kind == "official_preset"
+        and version.activation_basis == "experimental_machine_validated"
+        and version.validation_basis == "machine_validated"
+        and version.quality_state == "accepted"
+        and version.model_run_id is not None
+        and version.locked_actor is None
+        and version.locked_at is None
+    )
+    character_generated = (
+        version.source_type == "generated"
+        and rights.source_kind == "voice_generator"
+        and version.activation_basis == "character_one_click_generation"
+        and version.validation_basis == "machine_validated"
+        and version.quality_state == "accepted"
+        and version.model_run_id is not None
+        and version.reference_asset_id is not None
+        and version.description_digest_key_id is not None
+        and version.description_digest is not None
+        and version.preset_key is None
+        and version.model_id == "OpenMOSS-Team/MOSS-VoiceGenerator"
+        and version.model_revision
+        == "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4"
+        and version.locked_actor is None
+        and version.locked_at is None
+        and rights.purpose == "private_novel_narration"
+        and not rights.commercial_use
+        and not rights.redistribution
+        and not rights.voice_cloning
+        and rights.subject_consent_reference is None
+    )
+    if not (
+        human_confirmed
+        or official_direct
+        or machine_validated
+        or character_generated
+    ):
         return False
     if rights.source_kind == "official_preset":
         try:
-            validate_official_version_evidence(
+            validator = (
+                validate_nano_experiment_version_evidence
+                if machine_validated
+                else validate_official_version_evidence
+            )
+            validator(
                 version,
                 rights,
-                expected_model_fingerprint=(
-                    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
-                ),
+                expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
             )
         except ValueError:
             return False

@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from backend.models import (
+    CharacterAlias,
     CharacterVoiceBinding,
     Document,
     DocumentRevision,
@@ -236,6 +237,50 @@ def test_local_analysis_recognizes_character_and_uses_configured_voices() -> Non
     assert script.blocker_count == 0
     assert request.state == "analyzed"
     assert store.rows[NarrationEdition] == []
+
+
+def test_local_analysis_accepts_plan36_character_authority_aliases() -> None:
+    store, novel, _document, _revision, character, request, command = _seed(
+        "林队说道：“按人物卡里的正式别名识别我。”"
+    )
+    store.add(
+        CharacterAlias(
+            id=uuid4(),
+            novel_id=novel.id,
+            character_id=character.id,
+            alias="林队",
+            normalized_alias="林队",
+            alias_kind="former_name",
+            identity_layer="public",
+            source="character_authority",
+            lifecycle_state="active",
+        )
+    )
+
+    script = analyze_narration_script(store, command)
+
+    dialogue = next(
+        segment for segment in script.segments if segment.speaker.kind is SpeakerKind.CHARACTER
+    )
+    assert dialogue.speaker.character_id == character.id
+    assert dialogue.casting.origin is CastingDecisionOrigin.CHARACTER_BINDING
+    assert script.blocker_count == 0
+    assert request.state == "analyzed"
+
+
+def test_local_analysis_never_uses_next_paragraph_cue_for_previous_dialogue() -> None:
+    store, _novel_row, _document, _revision, character, _request, command = _seed(
+        "“这句没有说话提示。”\n\n林晚说道：“这句才属于林晚。”"
+    )
+
+    script = analyze_narration_script(store, command)
+
+    dialogues = [
+        segment for segment in script.segments if segment.segment_kind.value == "dialogue"
+    ]
+    assert len(dialogues) == 2
+    assert dialogues[0].speaker.kind is SpeakerKind.UNKNOWN
+    assert dialogues[1].speaker.character_id == character.id
 
 
 def test_unknown_speaker_keeps_both_speaker_blockers_and_casting_blocker() -> None:

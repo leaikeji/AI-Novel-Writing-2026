@@ -147,6 +147,7 @@ def _voice_snapshot(character_id: UUID) -> VoiceVersionSnapshot:
         source_type=wire.VoiceSourceType.PRESET,
         version_state=wire.VoiceVersionState.LOCKED,
         quality_state=wire.VoiceQualityState.ACCEPTED,
+        activation_evidence_usable=True,
         rights_record_id=_uuid(f"rights-{character_id}"),
         rights_state=wire.VoiceRightsState.ACTIVE,
         voice_cloning_permitted=True,

@@ -635,6 +635,67 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     }
   }
 
+  /*
+   * The chapter editor can be narrow while the browser viewport is still wide
+   * (chapter tree + editor + assistant).  A viewport-only breakpoint leaves the
+   * control and action columns at zero width, so their 44px buttons overflow
+   * underneath the metrics column and become impossible to click.  Collapse the
+   * compact player from the actual workspace width as well.
+   */
+  @container (max-width: 720px) {
+    .anw-chapter-narration-player__compact {
+      min-height: 64px;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 6px;
+    }
+
+    .anw-chapter-narration-player__identity {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-chapter-narration-source,
+    .anw-chapter-narration-current-copy > span:last-child,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-player__metrics,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-player__preferences,
+    .anw-chapter-narration-player.is-layout-compact .anw-chapter-narration-player__timeline {
+      display: none;
+    }
+
+    .anw-chapter-narration-player.is-layout-compact > .anw-chapter-narration-live:not(.is-error) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+
+    .anw-chapter-narration-player__controls {
+      gap: 2px;
+    }
+
+    .anw-chapter-narration-player__view-actions {
+      grid-column: auto;
+      grid-row: auto;
+    }
+
+    .anw-chapter-narration-player:not(.is-layout-compact) .anw-chapter-narration-player__compact {
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      padding-bottom: 4px;
+    }
+
+    .anw-chapter-narration-player:not(.is-layout-compact) .anw-chapter-narration-player__metrics,
+    .anw-chapter-narration-player:not(.is-layout-compact) .anw-chapter-narration-player__preferences {
+      grid-column: 1 / -1;
+    }
+
+    .anw-chapter-narration-details__overview,
+    .anw-chapter-narration-details .anw-chapter-narration-failures__list {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
   @media (max-width: 1024px) {
     .anw-chapter-narration-player {
       width: calc(100% - 28px);
@@ -671,6 +732,7 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
 
     .anw-chapter-narration-player {
       position: sticky;
+      z-index: 0;
       bottom: 0;
       width: 100%;
       margin: 0;

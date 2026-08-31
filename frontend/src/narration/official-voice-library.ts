@@ -234,6 +234,9 @@ export interface OfficialVoiceLibraryGroupModel {
 }
 
 
+export type OfficialVoiceLanguageFilter = "all" | OfficialVoiceLanguageScope;
+
+
 export type OfficialVoiceLibraryModel =
   | {
     readonly status: "ready";
@@ -247,6 +250,28 @@ export type OfficialVoiceLibraryModel =
     readonly itemCount: 0;
     readonly message: string;
   };
+
+
+export function filterOfficialVoiceLibraryGroups(
+  groups: readonly OfficialVoiceLibraryGroupModel[],
+  query: string,
+  languageFilter: OfficialVoiceLanguageFilter,
+): readonly OfficialVoiceLibraryGroupModel[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase("en-US");
+  return groups
+    .filter((group) => (
+      languageFilter === "all" || group.languageScope === languageFilter
+    ))
+    .map((group) => Object.freeze({
+      ...group,
+      items: Object.freeze(group.items.filter(({ item, languageLabel }) => (
+        normalizedQuery === ""
+        || [item.displayName, item.presetId, item.group, languageLabel]
+          .some((value) => value.toLocaleLowerCase("en-US").includes(normalizedQuery))
+      ))),
+    }))
+    .filter((group) => group.items.length > 0);
+}
 
 
 interface PreviewState {
@@ -533,6 +558,8 @@ export function createOfficialVoiceLibrary(
       IDLE_OFFICIAL_VOICE_USE_STATE,
     );
     const [previewState, setPreviewState] = React.useState<PreviewState>(IDLE_PREVIEW_STATE);
+    const [searchQuery, setSearchQuery] = React.useState("");
+    const [languageFilter, setLanguageFilter] = React.useState<OfficialVoiceLanguageFilter>("all");
     const useStateRef = React.useRef(useState);
     useStateRef.current = useState;
     const previewStateRef = React.useRef(previewState);
@@ -543,16 +570,27 @@ export function createOfficialVoiceLibrary(
     const previewAbortRef = React.useRef<AbortController | null>(null);
     const scopeIdentity = targetIdentity(props.novelId, props.target);
     const model = createOfficialVoiceLibraryModel(props.catalog, props.target.targetLanguage);
+    const filteredGroups = model.status === "ready"
+      ? filterOfficialVoiceLibraryGroups(model.groups, searchQuery, languageFilter)
+      : [];
+    const filteredCount = filteredGroups.reduce(
+      (total, group) => total + group.items.length,
+      0,
+    );
     const targetReady = targetIsReady(props.novelId, props.target);
     const prefix = `anw-official-voice-${safeDomToken(props.novelId)}-${
       props.target.kind === "character" ? safeDomToken(props.target.characterId) : "narrator"
     }`;
 
-    const transition = (action: OfficialVoiceUseAction): OfficialVoiceUseState => {
-      const next = reduceOfficialVoiceUseState(useStateRef.current, action);
+    const commitUse = (next: OfficialVoiceUseState): OfficialVoiceUseState => {
       useStateRef.current = next;
       setUseState(next);
       return next;
+    };
+
+    const transition = (action: OfficialVoiceUseAction): OfficialVoiceUseState => {
+      const next = reduceOfficialVoiceUseState(useStateRef.current, action);
+      return commitUse(next);
     };
 
     const commitPreview = (next: PreviewState): void => {
@@ -586,13 +624,38 @@ export function createOfficialVoiceLibrary(
         || alreadyApplied
         || !canStartOfficialVoiceUse(current)
       ) return;
-      const idempotencyKey = nextOfficialVoiceUseIdempotencyKey(
-        current,
-        item.presetId,
-        props.createIdempotencyKey,
-      );
-      const requestId = ++useRequestSequenceRef.current;
-      const controller = new AbortController();
+      let idempotencyKey: string;
+      let controller: AbortController;
+      let requestId: number;
+      try {
+        idempotencyKey = nextOfficialVoiceUseIdempotencyKey(
+          current,
+          item.presetId,
+          props.createIdempotencyKey,
+        );
+        requestId = Math.max(
+          useRequestSequenceRef.current + 1,
+          current.requestId + 1,
+        );
+        useRequestSequenceRef.current = requestId;
+        controller = new AbortController();
+      } catch (reason: unknown) {
+        const failure = classifyOfficialVoiceUseFailure(reason);
+        requestId = Math.max(
+          useRequestSequenceRef.current + 1,
+          current.requestId + 1,
+        );
+        useRequestSequenceRef.current = requestId;
+        commitUse(Object.freeze({
+          phase: failure.kind,
+          presetId: item.presetId,
+          requestId,
+          idempotencyKey: "official-voice-selection-init-failed",
+          message: failure.message,
+          failure,
+        }));
+        return;
+      }
       useAbortRef.current?.abort();
       useAbortRef.current = controller;
       const request = createOfficialVoiceSelectionRequest(item.presetId, props.target);
@@ -603,7 +666,20 @@ export function createOfficialVoiceLibrary(
         idempotencyKey,
         message: `正在${targetActionLabel(props.target)}：${item.displayName}…`,
       });
-      if (started.phase !== "applying" || started.requestId !== requestId) return;
+      if (started.phase !== "applying" || started.requestId !== requestId) {
+        const failure = classifyOfficialVoiceUseFailure(
+          new OfficialVoiceUseResponseError("official voice selection did not start"),
+        );
+        commitUse(Object.freeze({
+          phase: failure.kind,
+          presetId: item.presetId,
+          requestId,
+          idempotencyKey,
+          message: failure.message,
+          failure,
+        }));
+        return;
+      }
       void (async () => {
         let result: OfficialVoiceSelectionResult;
         try {
@@ -852,7 +928,13 @@ export function createOfficialVoiceLibrary(
         ? h("p", { className: "anw-official-voice-library__empty is-error", role: "status" }, props.loadError)
         : model.status !== "ready"
           ? h("p", { className: "anw-official-voice-library__empty", role: "status" }, model.message)
-          : model.groups.map((group) => {
+          : filteredCount === 0
+            ? h(
+              "p",
+              { className: "anw-official-voice-library__empty", role: "status" },
+              "没有匹配的官方音色；可清空搜索或切换语言。",
+            )
+            : filteredGroups.map((group) => {
             const groupId = `${prefix}-${safeDomToken(group.languageScope)}-heading`;
             return h(
               "section",
@@ -905,6 +987,51 @@ export function createOfficialVoiceLibrary(
           { className: "anw-official-voice-library__scope-error", role: "status" },
           "当前作品或人物设置尚未就绪，暂不能更改音色。",
         ),
+      model.status === "ready"
+        ? h(
+          "div",
+          { className: "anw-official-voice-library__filters", role: "search" },
+          h(
+            "label",
+            null,
+            h("span", null, "搜索官方音色"),
+            h("input", {
+              type: "search",
+              value: searchQuery,
+              placeholder: "名称、Preset ID 或分组",
+              onChange: (event: { target: { value: string } }) => {
+                setSearchQuery(event.target.value);
+              },
+            }),
+          ),
+          h(
+            "label",
+            null,
+            h("span", null, "语言"),
+            h(
+              "select",
+              {
+                value: languageFilter,
+                onChange: (event: { target: { value: string } }) => {
+                  const value = event.target.value;
+                  if (value === "all" || LANGUAGE_ORDER.includes(value as OfficialVoiceLanguageScope)) {
+                    setLanguageFilter(value as OfficialVoiceLanguageFilter);
+                  }
+                },
+              },
+              h("option", { value: "all" }, "全部语言"),
+              h("option", { value: "zh-CN" }, "中文（6）"),
+              h("option", { value: "en" }, "English（5）"),
+              h("option", { value: "ja-JP" }, "日本語（7）"),
+            ),
+          ),
+          h(
+            "span",
+            { className: "anw-official-voice-library__filter-count", role: "status" },
+            `显示 ${filteredCount} / 18 项`,
+          ),
+        )
+        : null,
       h(
         "p",
         {

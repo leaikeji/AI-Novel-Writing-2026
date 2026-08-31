@@ -90,7 +90,7 @@ from tests.narration.test_domain_services import _novel
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_HEAD = "20260829_0032"
+EXPECTED_HEAD = "20260829_0034"
 NOW = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
 POLICY = NarrationProductionPolicy(
     tts_fingerprint="a" * 64,

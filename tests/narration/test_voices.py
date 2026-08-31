@@ -368,6 +368,15 @@ def test_profile_listing_never_leaks_another_novel() -> None:
     library = create_profile(store, None, key="profile-library", name="私人音色库")
     local = create_profile(store, book_a, key="profile-book-a", name="甲作品")
     create_profile(store, book_b, key="profile-book-b", name="乙作品")
+    deleted = create_profile(
+        store,
+        book_a,
+        key="profile-book-a-deleted",
+        name="已删除私人音色",
+    )
+    deleted_row = store.get(VoiceProfile, deleted.profile_id)
+    assert deleted_row is not None
+    deleted_row.status = "unavailable"
     assert {item.profile_id for item in list_voice_profiles(
         store, novel_id=book_a.id, include_library=True
     ).items} == {library.profile_id, local.profile_id}
@@ -461,6 +470,7 @@ def test_profile_projection_uses_latest_unexpired_preview_record_not_legacy_vers
     profile, version, _ = seeded_profile(store, book)
     legacy_asset_id = uuid4()
     selected_asset_id = uuid4()
+    deleted_asset_id = uuid4()
     version.preview_asset_id = legacy_asset_id
 
     def preview_asset(asset_id: UUID, digest: str) -> MediaAsset:
@@ -498,6 +508,10 @@ def test_profile_projection_uses_latest_unexpired_preview_record_not_legacy_vers
 
     store.add(preview_asset(legacy_asset_id, "b" * 64))
     store.add(preview_asset(selected_asset_id, "c" * 64))
+    deleted_asset = preview_asset(deleted_asset_id, "9" * 64)
+    deleted_asset.state = "deleted"
+    deleted_asset.deleted_at = NOW + timedelta(seconds=30)
+    store.add(deleted_asset)
     store.add(
         VoicePreview(
             id=uuid4(),
@@ -524,6 +538,34 @@ def test_profile_projection_uses_latest_unexpired_preview_record_not_legacy_vers
             failure_code=None,
             created_at=NOW,
             updated_at=NOW,
+        )
+    )
+    store.add(
+        VoicePreview(
+            id=uuid4(),
+            owner_id=LOCAL_OWNER_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            novel_id=book.id,
+            profile_id=profile.id,
+            version_id=version.id,
+            rights_record_id=version.rights_record_id,
+            job_id=uuid4(),
+            reference_asset_id=uuid4(),
+            result_asset_id=deleted_asset_id,
+            preview_text=None,
+            preview_text_digest_key_id="key-1",
+            preview_text_digest="d" * 64,
+            model_fingerprint="e" * 64,
+            reference_fingerprint="f" * 64,
+            parameters_fingerprint="1" * 64,
+            request_fingerprint="2" * 64,
+            status="ready",
+            started_at=NOW,
+            completed_at=NOW + timedelta(seconds=30),
+            expires_at=NOW + timedelta(hours=1),
+            failure_code=None,
+            created_at=NOW + timedelta(seconds=30),
+            updated_at=NOW + timedelta(seconds=30),
         )
     )
 
@@ -689,7 +731,7 @@ def test_preset_and_authorized_upload_remain_fail_closed_without_persisting_rows
     assert store.rows[VoiceRightsRecord] == []
 
 
-def test_non_product_preset_is_rejected_before_product_service_dispatch() -> None:
+def test_every_official_preset_reaches_product_service_dispatch() -> None:
     class RecordingProduct:
         def __init__(self) -> None:
             self.preset_calls: list[str] = []
@@ -719,22 +761,18 @@ def test_non_product_preset_is_rejected_before_product_service_dispatch() -> Non
         VoiceRightsRecord: tuple(store.rows[VoiceRightsRecord]),
     }
 
-    with pytest.raises(NarrationApiFault) as rejected:
-        handler.dispatch(NarrationSettingsApiCommand(
-            operation=NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
-            profile_id=profile.profile_id,
-            payload=wire.CreatePresetVoiceVersionRequest(
-                expected_profile_version=1,
-                preset_id="onnx.Trump",
-            ),
-            idempotency_key="preset-scope-0001",
-        ))
+    result = handler.dispatch(NarrationSettingsApiCommand(
+        operation=NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
+        profile_id=profile.profile_id,
+        payload=wire.CreatePresetVoiceVersionRequest(
+            expected_profile_version=1,
+            preset_id="onnx.Trump",
+        ),
+        idempotency_key="preset-scope-0001",
+    ))
 
-    assert rejected.value.code is wire.NarrationErrorCode.VOICE_SOURCE_UNAVAILABLE
-    assert rejected.value.message == "PRODUCT_PRESET_OUT_OF_SCOPE"
-    assert rejected.value.field == "preset_id"
-    assert rejected.value.capability is wire.CapabilityKey.PRESET_VOICE_SOURCE
-    assert product.preset_calls == []
+    assert result is not None
+    assert product.preset_calls == ["onnx.Trump"]
     assert tuple(store.rows[VoiceProfileVersion]) == before_rows[VoiceProfileVersion]
     assert tuple(store.rows[VoiceRightsRecord]) == before_rows[VoiceRightsRecord]
 
@@ -812,6 +850,7 @@ def test_lock_rechecks_rights_then_source_gate_without_mutating_version() -> Non
 def test_handler_owns_exact_frozen_voice_operations_only() -> None:
     expected = {
         NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
+        NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
         NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
         NarrationSettingsOperation.LIST_VOICE_PROFILES,
         NarrationSettingsOperation.CREATE_VOICE_PROFILE,

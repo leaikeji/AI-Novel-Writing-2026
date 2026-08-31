@@ -673,6 +673,60 @@ def test_blocker_parent_is_manual_only_and_parent_classification_is_exhaustive()
     )
 
 
+def test_zero_blocker_owner_patches_preserve_manual_review_lineage() -> None:
+    store, novel, document, revision = _seed_source("")
+    blocked_allocation = _reserve(
+        store, novel, document, revision, key="typed-lineage-blocked-v1"
+    )
+    blocked = persist_script_contract(
+        store,
+        blocked_allocation,
+        _contract(blocked_allocation, "", extra_blocker=True),
+    )
+    corrected_allocation = _reserve(
+        store,
+        novel,
+        document,
+        revision,
+        key="typed-lineage-corrected-v2",
+        parent_version_id=blocked.id,
+    )
+    corrected = persist_script_contract(
+        store,
+        corrected_allocation,
+        _contract(corrected_allocation, "", force_review_required=True),
+    )
+    refined_allocation = _reserve(
+        store,
+        novel,
+        document,
+        revision,
+        key="typed-lineage-refined-v3",
+        parent_version_id=corrected.id,
+    )
+    refined = persist_script_contract(
+        store,
+        refined_allocation,
+        _contract(refined_allocation, "", force_review_required=True),
+    )
+
+    assert classify_parent_review(
+        store, refined.script_id, refined.parent_version_id
+    ) == ParentReviewClassification(corrected.id, True, False)
+    request = _generation_request(
+        store, novel, document, revision, key="typed-lineage-request"
+    )
+    approved = freeze_script_version(
+        store,
+        refined.id,
+        request_id=request.id,
+        actor_type="owner",
+        actor_id=str(LOCAL_OWNER_ID),
+        approved_at=NOW,
+    )
+    assert approved.approval_kind == "manual_after_review"
+
+
 def test_same_key_different_immutable_contract_is_rejected() -> None:
     store, novel, document, revision = _seed_source("")
     allocation = _reserve(

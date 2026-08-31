@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   NARRATION_VOICE_SCHEMA_VERSION,
@@ -12,6 +12,7 @@ import {
 } from "./contracts";
 import {
   activeOfficialPresetId,
+  createAndPlayOfficialVoicePreview,
   officialVoiceSelectionDisabled,
   officialVoiceSelectionResult,
   officialVoiceSelectionWireRequest,
@@ -84,6 +85,62 @@ function officialProfile(
 
 
 describe("official voice selection panel adapters", () => {
+  it("queues, polls, and plays an official preview without applying a binding", async () => {
+    const previewId = "66666666-6666-4666-8666-666666666666";
+    const queued = {
+      contract_version: "narration-settings-api/1",
+      preview_id: previewId,
+      profile_id: PROFILE_ID,
+      version_id: VERSION_ID,
+      status: "queued",
+      job_id: "77777777-7777-4777-8777-777777777777",
+      asset: null,
+      temporary: true,
+      expires_at: null,
+      failure_code: null,
+    } as const;
+    const ready = {
+      ...queued,
+      status: "ready",
+      asset: {
+        asset_id: "88888888-8888-4888-8888-888888888888",
+        mime_type: "audio/wav",
+        byte_size: 128,
+        duration_ms: 800,
+        checksum_algorithm: "sha256",
+        checksum_sha256: "a".repeat(64),
+        content_path: "/media-assets/88888888-8888-4888-8888-888888888888/content",
+      },
+      expires_at: "2026-08-29T00:05:00Z",
+    } as const;
+    const create = vi.fn(async () => queued);
+    const get = vi.fn(async () => ready);
+    const play = vi.fn(async () => undefined);
+    vi.useFakeTimers();
+    try {
+      const promise = createAndPlayOfficialVoicePreview(
+        { createOfficialVoicePreview: create, getVoicePreview: get },
+        { play },
+        NOVEL_ID,
+        EVIDENCE.presetId,
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(800);
+      await promise;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(create).toHaveBeenCalledWith(
+      NOVEL_ID,
+      { preset_id: EVIDENCE.presetId },
+      expect.stringMatching(/^official-voice-preview-/),
+      expect.any(AbortSignal),
+    );
+    expect(get).toHaveBeenCalledWith(previewId, expect.any(AbortSignal));
+    expect(play).toHaveBeenCalledWith(ready, expect.any(AbortSignal));
+  });
+
   it("maps narrator and character commands to the exact snake-case CAS request", () => {
     expect(officialVoiceSelectionWireRequest({
       presetId: EVIDENCE.presetId,

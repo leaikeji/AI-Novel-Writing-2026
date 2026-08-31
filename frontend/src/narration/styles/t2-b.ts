@@ -10,6 +10,7 @@ export const T2_B_READING_STYLES = String.raw`
     padding: 24px;
     color: inherit;
     overflow: auto;
+    container-type: inline-size;
   }
 
   .anw-reading-page *,
@@ -397,6 +398,46 @@ export const T2_B_READING_STYLES = String.raw`
   @media (max-width: 1040px) {
     .anw-reading-status-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @container (max-width: 900px) {
+    .anw-reading-page-header,
+    .anw-reading-section-heading {
+      flex-direction: column;
+    }
+
+    .anw-reading-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anw-reading-nav {
+      position: static;
+      flex-direction: row;
+      overflow-x: auto;
+      scroll-snap-type: x proximity;
+    }
+
+    .anw-reading-nav button {
+      flex: 0 0 auto;
+      min-width: max-content;
+      scroll-snap-align: start;
+    }
+  }
+
+  @container (max-width: 520px) {
+    .anw-reading-nav {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      overflow: visible;
+      scroll-snap-type: none;
+    }
+
+    .anw-reading-nav button {
+      min-width: 0;
+      min-height: 44px;
+      text-align: center;
+      white-space: normal;
     }
   }
 

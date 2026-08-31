@@ -2278,6 +2278,31 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
             self._on_demand_warmup_enabled = True
             return True
 
+    async def release_model_for_heavy_runtime(self) -> None:
+        """Prove Nano is unloaded before the shared slot starts VoiceGenerator.
+
+        This entry point is intentionally separate from the idle policy.  Its
+        caller must already own the single ``moss-nano`` scheduler resource
+        lease, which prevents a second inference job from being claimed while
+        the adapter's synthesis lock fences any in-flight call.
+        """
+
+        async with self._synthesis_lock:
+            previous_generation = self._generation
+            await self.deactivate()
+            await self._lifecycle.restart_after_poison(
+                "HEAVY_RUNTIME_MODEL_RELEASE",
+                previous_generation=previous_generation,
+            )
+            await self.activate()
+            health = await self.health()
+            if self.model_loaded or health.status is AdapterHealthStatus.UNAVAILABLE:
+                raise SidecarRuntimeError(
+                    health.reason_code or "HEAVY_RUNTIME_MODEL_RELEASE_FAILED",
+                    "Sidecar did not remain unloaded for the heavy runtime",
+                )
+            self._on_demand_warmup_enabled = True
+
     async def cancel(self, request_id: UUID) -> CancelDisposition:
         generation = self._generation
         fingerprint_sha256 = self._fingerprint_sha256

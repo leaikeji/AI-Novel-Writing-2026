@@ -157,6 +157,40 @@ def test_pcm_pipeline_accepts_observed_normal_chinese_narration(
     assert processed.duration_ms == duration_ms
 
 
+@pytest.mark.parametrize(
+    ("spoken_text", "duration_ms", "expected_limit_ms"),
+    [
+        ("嗯。", 4_200, 4_800),
+        ("耳后？", 4_900, 5_200),
+        ("罗岑问。", 5_400, 5_600),
+        ("方若岚？", 5_400, 5_600),
+        ("许棠说，", 5_400, 5_600),
+    ],
+)
+def test_pcm_pipeline_accepts_bounded_ultrashort_chinese_narration(
+    spoken_text: str,
+    duration_ms: int,
+    expected_limit_ms: int,
+) -> None:
+    assert short_chinese_duration_limit_ms(spoken_text) == expected_limit_ms
+
+    processed = process_synthesis_wav(
+        _wav_bytes(duration_ms=duration_ms),
+        spoken_text=spoken_text,
+    )
+
+    assert processed.duration_ms == duration_ms
+
+
+def test_pcm_pipeline_still_rejects_ultrashort_chinese_runaway() -> None:
+    assert short_chinese_duration_limit_ms("嗯。") == 4_800
+    with pytest.raises(AudioQualityError, match="short Chinese text"):
+        process_synthesis_wav(
+            _wav_bytes(duration_ms=4_801),
+            spoken_text="嗯。",
+        )
+
+
 def test_short_chinese_duration_gate_is_narrow_calibratable_and_boundary_exact() -> None:
     policy = ShortChineseDurationPolicy(
         maximum_codepoints=5,

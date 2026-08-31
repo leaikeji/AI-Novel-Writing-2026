@@ -21,7 +21,7 @@ function capabilities(
   const enabledKeys = new Set(enabled);
   const visibleHeldKeys = new Set(visibleHeld);
   return Object.freeze({
-    schema_version: "narration-capabilities/1",
+    schema_version: "narration-capabilities/2",
     items: Object.freeze(CAPABILITY_KEYS.map((key): FeatureCapability => {
       if (enabledKeys.has(key)) {
         return Object.freeze({

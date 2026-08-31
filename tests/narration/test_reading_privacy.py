@@ -1357,7 +1357,7 @@ def test_runtime_projection_requires_both_release_and_ready_evidence_for_product
     )
 
 
-def test_dispatcher_owns_exact_32_operations_and_preserves_specific_holds() -> None:
+def test_dispatcher_owns_exact_33_operations_and_preserves_specific_holds() -> None:
     owned = (
         READING_PRIVACY_OPERATIONS
         | VoiceSettingsHandler.operations
@@ -1370,7 +1370,7 @@ def test_dispatcher_owns_exact_32_operations_and_preserves_specific_holds() -> N
         }
     )
     assert owned == set(NarrationSettingsOperation)
-    assert len(owned) == 32
+    assert len(owned) == 33
 
     store = MemoryStore(novel())
     blocked = authorized_backend(store)

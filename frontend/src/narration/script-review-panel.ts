@@ -16,6 +16,7 @@ import type {
 } from "./script-contracts";
 import type { ScriptReviewVersionScope } from "./script-api";
 import type { CompactNarrationPlayerView } from "./chapter-narration-state";
+import { createNarrationIdempotencyKey } from "./idempotency-key";
 
 
 export type ScriptReviewReactRuntime = Pick<
@@ -317,9 +318,7 @@ function scopeMismatchFailure(): ScriptReviewPanelFailure {
 
 
 function defaultIdempotencyKey(): string {
-  const value = globalThis.crypto?.randomUUID?.();
-  if (!value) throw new Error("secure random UUID is unavailable");
-  return `script:${value}`;
+  return createNarrationIdempotencyKey("script", ":");
 }
 
 

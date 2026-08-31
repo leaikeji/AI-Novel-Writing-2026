@@ -80,13 +80,28 @@ HIDDEN_TTS_NOT_FOUND = {
         "message": "找不到请求的朗读资源。",
     }
 }
-PRODUCT_OFFICIAL_PRESET_IDS = (
+OFFICIAL_PRESET_IDS = (
     "onnx.Junhao",
     "onnx.Zhiming",
     "onnx.Weiguo",
     "onnx.Xiaoyu",
     "onnx.Yuewen",
     "onnx.Lingyu",
+    "onnx.Trump",
+    "onnx.Ava",
+    "onnx.Bella",
+    "onnx.Adam",
+    "onnx.Nathan",
+    "onnx.Soyo",
+    "onnx.Saki",
+    "onnx.Mortis",
+    "onnx.Umiri",
+    "onnx.Mei",
+    "onnx.Anon",
+    "onnx.Arisa",
+)
+CANONICAL_CHAPTER_VERIFIED_PRESET_IDS = frozenset(
+    {"onnx.Junhao", "onnx.Zhiming", "onnx.Xiaoyu"}
 )
 OFFICIAL_PRESET_REPOSITORY = "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX"
 OFFICIAL_PRESET_REVISION = "f52645cb467506d8e18e746ddd59482685b74e58"
@@ -181,9 +196,33 @@ _T2_CAPABILITY_ROWS = (
         "T5-GATE",
     ),
     ("cache_cleanup", "hold", True, False, "T2_GATE_REQUIRED", "T2-F"),
+    (
+        "character_voice_matching",
+        "unavailable",
+        True,
+        False,
+        "TTS_FEATURE_STARTING",
+        "TTS35-CORE",
+    ),
+    (
+        "nano_advanced_tuning",
+        "unavailable",
+        True,
+        False,
+        "TTS_FEATURE_STARTING",
+        "TTS35-CORE",
+    ),
+    (
+        "private_voice_deletion",
+        "unavailable",
+        True,
+        False,
+        "TTS_FEATURE_STARTING",
+        "TTS35-CORE",
+    ),
 )
 T2_CAPABILITY_MATRIX = {
-    "schema_version": "narration-capabilities/1",
+    "schema_version": "narration-capabilities/2",
     "items": [
         {
             "key": key,
@@ -316,15 +355,17 @@ def verify_official_preset_catalog() -> dict[str, object]:
     assert isinstance(response.payload, dict)
     assert set(response.payload) == {"schema_version", "items"}
     assert response.payload.get("schema_version") == (
-        "moss-tts-official-preset-catalog/1.0"
+        "moss-tts-official-preset-catalog/2.0"
     )
     items = response.payload.get("items")
     assert isinstance(items, list)
     assert [item.get("preset_id") for item in items if isinstance(item, dict)] == list(
-        PRODUCT_OFFICIAL_PRESET_IDS
+        OFFICIAL_PRESET_IDS
     )
-    assert len(items) == len(PRODUCT_OFFICIAL_PRESET_IDS)
-    assert "onnx.Xiaoyu" in PRODUCT_OFFICIAL_PRESET_IDS
+    assert len(items) == len(OFFICIAL_PRESET_IDS) == 18
+    assert {"onnx.Xiaoyu", "onnx.Trump", "onnx.Arisa"}.issubset(
+        OFFICIAL_PRESET_IDS
+    )
 
     item_keys = {
         "preset_id",
@@ -333,6 +374,12 @@ def verify_official_preset_catalog() -> dict[str, object]:
         "language",
         "local_use_status",
         "commercial_distribution_status",
+        "validation_tier",
+        "language_scope",
+        "selectable_now",
+        "previewable_now",
+        "renderable_existing",
+        "usage_notice",
         "provenance",
     }
     provenance_keys = {
@@ -353,6 +400,16 @@ def verify_official_preset_catalog() -> dict[str, object]:
         assert isinstance(item, dict) and set(item) == item_keys
         assert item.get("local_use_status") == "available"
         assert item.get("commercial_distribution_status") == "not_evaluated"
+        assert item.get("validation_tier") == (
+            "canonical_chapter_verified"
+            if item.get("preset_id") in CANONICAL_CHAPTER_VERIFIED_PRESET_IDS
+            else "pinned_catalog_unreviewed"
+        )
+        assert item.get("language_scope") == item.get("language")
+        assert item.get("selectable_now") is True
+        assert item.get("previewable_now") is True
+        assert item.get("renderable_existing") is True
+        assert item.get("usage_notice") == "private_local_writing_tool"
         assert all(
             isinstance(item.get(key), str) and bool(item[key])
             for key in ("display_name", "group", "language")
@@ -387,7 +444,7 @@ def verify_official_preset_catalog() -> dict[str, object]:
         "schema_version": response.payload["schema_version"],
         "metadata_only": True,
         "preset_count": len(items),
-        "preset_ids": list(PRODUCT_OFFICIAL_PRESET_IDS),
+        "preset_ids": list(OFFICIAL_PRESET_IDS),
     }
 
 

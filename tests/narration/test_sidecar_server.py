@@ -1844,6 +1844,29 @@ def test_frozen_production_model_digest_is_the_reviewed_identity() -> None:
     )
 
 
+def test_ready_rejects_sidecar_without_nano_decode_parameter_capability(
+    tmp_path: Path,
+) -> None:
+    adapter = SidecarMossNanoTTSAdapter(
+        SidecarRuntimeConfig(
+            host="127.0.0.1",
+            port=1,
+            token_file=token_file(tmp_path),
+            allow_test_backend=True,
+        )
+    )
+    row, headers = _ready_response(dict(FakeBackend().warmup()))
+    row["capabilities_sha256"] = (
+        "767153dce32afeb09b75c7b80fd653d9b112825820b505a733b8506d621375f8"
+    )
+
+    with pytest.raises(SidecarRuntimeError) as caught:
+        adapter._consume_ready(row, headers)
+
+    assert caught.value.code == "SIDECAR_NOT_READY"
+    assert caught.value.poison is True
+
+
 @pytest.mark.asyncio
 async def test_new_generation_unloaded_health_clears_cached_identity(
     tmp_path: Path,

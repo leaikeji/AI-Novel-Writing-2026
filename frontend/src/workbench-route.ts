@@ -22,6 +22,8 @@ export const WORKBENCH_READING_PANELS = [
   "narrator",
   "characters",
   "voice-library",
+  "advanced-tuning",
+  "private-voices",
   "reading-rules",
   "storage-privacy",
   "casting-rules",

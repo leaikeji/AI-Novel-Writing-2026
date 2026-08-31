@@ -16,7 +16,6 @@ import {
 import {
   createCharacterVoiceCardPanel,
   createNarrationReadingPage,
-  stableOfficialVoiceAssignment,
 } from "./index";
 import type { ReadingPageApi } from "./reading-page";
 import { narratorOptionsFromVoiceProfiles } from "./reading-page";
@@ -121,20 +120,6 @@ const CREATED_AT = "2026-08-26T09:00:00.000Z";
 const XIAOYU_EVIDENCE = OFFICIAL_PRESET_EVIDENCE.find(
   (item) => item.presetId === "onnx.Xiaoyu",
 )!;
-
-
-describe("stableOfficialVoiceAssignment", () => {
-  it("is deterministic and stays inside the requested official language group", () => {
-    const first = stableOfficialVoiceAssignment(CHARACTER_ID, "zh-CN");
-    const second = stableOfficialVoiceAssignment(CHARACTER_ID, "zh-CN");
-    const japanese = stableOfficialVoiceAssignment(CHARACTER_ID, "ja-JP");
-
-    expect(second).toEqual(first);
-    expect(["Xiaoyu", "Vivian", "Lingyu"]).toContain(first.voiceName);
-    expect(["Soyo", "Saki", "Mortis", "Umiri", "Mei", "Anon", "Arisa"])
-      .toContain(japanese.voiceName);
-  });
-});
 
 
 function capability(key: typeof CAPABILITY_KEYS[number]): FeatureCapability {
@@ -453,17 +438,16 @@ describe("T2-GATE narration composition", () => {
       onRefresh: vi.fn(),
       onNavigate: vi.fn(),
     });
-    const narratorOfficial = findAll(
+    const narratorStatus = findAll(
       narratorWorkspace,
-      (element) => componentName(element) === "OfficialVoiceSelectionPanel",
+      (element) => componentName(element) === "ReadingStatus",
     )[0];
-    const narratorPrivate = findAll(
+    const narratorRules = findAll(
       narratorWorkspace,
-      (element) => componentName(element) === "VoiceSourceWorkspace",
+      (element) => componentName(element) === "ReadingRulesWorkspace",
     )[0];
-    expect(narratorOfficial.props.target).toEqual({ kind: "narrator" });
-    expect(narratorOfficial.props.settings).toBe(overview.settings);
-    expect(narratorPrivate.props.suggestedProfileName).toBe("作品旁白声音");
+    expect(narratorStatus.props.overview).toBe(overview);
+    expect(narratorRules.props.settings).toBe(overview.settings);
     tree = harness.render(
       pageHost.type as (props: typeof pageHost.props) => unknown,
       pageHost.props,
@@ -490,9 +474,7 @@ describe("T2-GATE narration composition", () => {
       characterTree,
       (element) => componentName(element) === "VoiceSourceWorkspace",
     )[0];
-    expect(characterWorkspace.props.novelId).toBe(NOVEL_ID);
-    expect(characterWorkspace.props.capabilities).toBe(overview.capabilities);
-    expect(characterWorkspace.props.voiceSources).toBe(overview.voice_sources);
+    expect(characterWorkspace).toBeUndefined();
     const characterOfficial = findAll(
       characterTree,
       (element) => componentName(element) === "OfficialVoiceSelectionPanel",
@@ -534,7 +516,7 @@ describe("T2-GATE narration composition", () => {
     )[0];
     expect(rulesWorkspace.props.capabilities).toBe(overview.capabilities);
     expect(rulesWorkspace.props.settings).toBe(overview.settings);
-    expect(rulesWorkspace.props.initialSection).toBe("pronunciation");
+    expect(rulesWorkspace.props.initialSection).toBe("recognition");
     expect(rulesWorkspace.props.pronunciationScopeOptions).toEqual([
       { kind: "volume", id: VOLUME_ID, label: "第一卷" },
     ]);

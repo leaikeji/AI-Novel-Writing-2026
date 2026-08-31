@@ -191,13 +191,29 @@ class _FakeEngine:
         yield self.connection
 
 
-def test_database_guard_checks_exact_head_then_locks_before_counting(
+def test_database_guard_accepts_minimum_then_locks_before_counting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connection = _FakeConnection(
-        revision=bootstrap.EXPECTED_ALEMBIC_HEAD,
+        revision=bootstrap.MINIMUM_ALEMBIC_REVISION,
         reference_count=0,
     )
+    monkeypatch.setattr(bootstrap, "get_engine", lambda: _FakeEngine(connection))
+
+    with bootstrap.database_reference_guard() as no_references:
+        assert no_references is True
+
+    assert connection.events == [
+        "SELECT version_num FROM alembic_version",
+        bootstrap._LOCK_REFERENCES_SQL,
+        bootstrap._COUNT_REFERENCES_SQL,
+    ]
+
+
+def test_database_guard_accepts_known_linear_descendant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _FakeConnection(revision="20260829_0033", reference_count=0)
     monkeypatch.setattr(bootstrap, "get_engine", lambda: _FakeEngine(connection))
 
     with bootstrap.database_reference_guard() as no_references:

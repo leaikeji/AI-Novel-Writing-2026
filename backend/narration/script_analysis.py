@@ -95,6 +95,7 @@ from .services import (
     require_same_novel,
     require_sha256,
     utc_now,
+    voice_activation_evidence_is_usable,
 )
 from .snapshots import SETTINGS_SNAPSHOT_SCHEMA_VERSION
 from .speaker_rules import (
@@ -338,6 +339,7 @@ def _voice_snapshot(
     rights = store.get(VoiceRightsRecord, version.rights_record_id)
     rights_state = None
     voice_cloning_permitted = False
+    activation_evidence_usable = False
     rights_record_id = version.rights_record_id
     if rights is not None:
         if (
@@ -348,6 +350,10 @@ def _voice_snapshot(
             raise NarrationScopeMismatch("voice rights are outside fixed local scope")
         rights_state = _rights_state(store, rights, at=utc_now())
         voice_cloning_permitted = bool(rights.voice_cloning)
+        activation_evidence_usable = voice_activation_evidence_is_usable(
+            version,
+            rights,
+        )
     try:
         return VoiceVersionSnapshot(
             profile_id=profile.id,
@@ -359,6 +365,7 @@ def _voice_snapshot(
             source_type=wire.VoiceSourceType(version.source_type),
             version_state=wire.VoiceVersionState(version.state),
             quality_state=wire.VoiceQualityState(version.quality_state),
+            activation_evidence_usable=activation_evidence_usable,
             rights_record_id=rights_record_id,
             rights_state=rights_state,
             voice_cloning_permitted=voice_cloning_permitted,
@@ -554,15 +561,25 @@ def _materialize_contract(
         same_scene_as_previous = bool(
             index and scene_ids[index - 1] == scene_id
         )
+        same_paragraph_as_previous = bool(
+            same_scene_as_previous
+            and materialized[index - 1].paragraph_ordinal
+            == source_segment.paragraph_ordinal
+        )
         before = (
             materialized[index - 1].source_text[-1000:]
-            if same_scene_as_previous
+            if same_paragraph_as_previous
             else ""
+        )
+        same_paragraph_as_next = bool(
+            index + 1 < len(materialized)
+            and scene_ids[index + 1] == scene_id
+            and materialized[index + 1].paragraph_ordinal
+            == source_segment.paragraph_ordinal
         )
         after = (
             materialized[index + 1].source_text[:1000]
-            if index + 1 < len(materialized)
-            and scene_ids[index + 1] == scene_id
+            if same_paragraph_as_next
             else ""
         )
         if not same_scene_as_previous:

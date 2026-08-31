@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
-import os
-from pathlib import Path
 from typing import Annotated, Callable, Final, Iterator, Literal, Protocol, TypeVar
 from uuid import RFC_4122, UUID
 
@@ -62,19 +60,7 @@ from .services import (
     SqlAlchemyNarrationStore,
     VoiceRightsUnavailable,
 )
-from .digest_keyring import load_digest_keyring
-from .storage import NarrationStorage
-from .voice_deletion import (
-    VoiceDeletionRequestSnapshot,
-    VoiceDeletionService,
-)
-
-
 NARRATION_PRODUCTION_API_VERSION: Final = "narration-production-api/1"
-MODEL_METADATA_ROOT_ENV: Final = "AI_NOVEL_TTS_MODEL_METADATA_ROOT"
-MEDIA_ROOT_ENV: Final = "AI_NOVEL_TTS_MEDIA_ROOT"
-DIGEST_KEYRING_FILE_ENV: Final = "AI_NOVEL_TTS_DIGEST_KEYRING_FILE"
-PRIVATE_VOICE_DELETION_RELEASED: Final = False
 _IDEMPOTENCY_KEY_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
 _SHA256_PATTERN: Final = r"^[a-f0-9]{64}$"
 
@@ -118,46 +104,6 @@ class NarrationEditionState(str, Enum):
     PARTIAL_READY = "partial_ready"
     READY = "ready"
     UNAVAILABLE = "unavailable"
-
-
-class CreatePrivateVoiceDeletionRequest(_StrictModel):
-    expected_profile_version: int = Field(ge=1, strict=True)
-
-
-class ConfirmPrivateVoiceDeletionRequest(_StrictModel):
-    expected_profile_version: int = Field(ge=1, strict=True)
-    impact_digest: str = Field(pattern=_SHA256_PATTERN)
-
-
-class PrivateVoiceDeletionRequestResource(_StrictModel):
-    contract_version: Literal["private-voice-deletion/1"] = "private-voice-deletion/1"
-    request_id: CanonicalUuid
-    profile_id: CanonicalUuid
-    novel_id: CanonicalUuid
-    command: Literal[
-        "discard_unreferenced_private_voice", "true_delete_private_voice"
-    ]
-    state: Literal[
-        "grace_pending",
-        "requested",
-        "cancelled",
-        "live_deleting",
-        "live_deleted_backup_pending",
-        "completed",
-        "failed",
-    ]
-    expected_profile_version: int = Field(ge=1, strict=True)
-    impact_digest: str = Field(pattern=_SHA256_PATTERN)
-    impact: dict[str, object]
-    execute_after: datetime | None
-    impact_expires_at: datetime | None
-    asset_count: int = Field(ge=0, strict=True)
-    total_bytes: int = Field(ge=0, strict=True)
-    external_backup_status: Literal["unmanaged", "managed_pending", "managed_expired"]
-    confirmed_at: datetime | None
-    cancelled_at: datetime | None
-    completed_at: datetime | None
-    failure_code: str | None
 
 
 class CreateNarrationWorkflowRequest(_StrictModel):
@@ -1380,205 +1326,8 @@ def switch_document_narration_edition(
     return resource
 
 
-def _private_voice_deletion_service() -> VoiceDeletionService:
-    def required_path(name: str) -> Path:
-        value = os.environ.get(name, "")
-        path = Path(value)
-        if not value or not path.is_absolute():
-            raise RuntimeError(f"private voice deletion requires {name}")
-        return path
-
-    engine = get_engine()
-    return VoiceDeletionService(
-        lambda: Session(engine),
-        storage=NarrationStorage(
-            models_root=required_path(MODEL_METADATA_ROOT_ENV),
-            media_root=required_path(MEDIA_ROOT_ENV),
-        ),
-        digest_keyring=load_digest_keyring(required_path(DIGEST_KEYRING_FILE_ENV)),
-    )
-
-
-def _require_private_voice_deletion_release() -> None:
-    """Keep the destructive API closed until DEL-GATE has fully passed.
-
-    The request state machine and exact asset plan are implemented candidates,
-    but the persistent grace-deadline/restart reconciler is not yet connected to
-    the production worker.  A hidden UI alone is not a server-side release gate.
-    """
-
-    if PRIVATE_VOICE_DELETION_RELEASED:
-        return
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail=NarrationProductionErrorDetail(
-            code=NarrationProductionErrorCode.BACKEND_NOT_INSTALLED,
-            message="私人音色删除尚未完成后台恢复闭环，当前不对外开放。",
-            retryable=False,
-        ).model_dump(mode="json"),
-    )
-
-
-def _private_voice_deletion_resource(
-    operation: Callable[[], VoiceDeletionRequestSnapshot],
-) -> PrivateVoiceDeletionRequestResource:
-    try:
-        return PrivateVoiceDeletionRequestResource.model_validate(asdict(operation()))
-    except NarrationServiceError as error:
-        fault = _fault_from_service(error)
-        raise HTTPException(
-            status_code=NARRATION_PRODUCTION_ERROR_STATUS[fault.code],
-            detail=_error_detail(fault).model_dump(mode="json"),
-        ) from error
-    except (DatabaseNotConfigured, OSError, RuntimeError) as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=NarrationProductionErrorDetail(
-                code=NarrationProductionErrorCode.STORAGE_UNAVAILABLE,
-                message="私人音色删除存储当前不可用。",
-                retryable=True,
-            ).model_dump(mode="json"),
-        ) from error
-
-
-@router.post(
-    "/voice-profiles/{profile_id}/discard-unreferenced",
-    response_model=PrivateVoiceDeletionRequestResource,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-def discard_unreferenced_private_voice(
-    profile_id: CanonicalUuid,
-    payload: CreatePrivateVoiceDeletionRequest,
-    idempotency_key: str = Header(
-        alias="Idempotency-Key",
-        min_length=8,
-        max_length=128,
-        pattern=_IDEMPOTENCY_KEY_PATTERN,
-    ),
-) -> PrivateVoiceDeletionRequestResource:
-    _require_private_voice_deletion_release()
-    service = _private_voice_deletion_service()
-    return _private_voice_deletion_resource(
-        lambda: service.create_request(
-            profile_id=profile_id,
-            expected_profile_version=payload.expected_profile_version,
-            discard_unreferenced=True,
-            idempotency_key=idempotency_key,
-            actor="local-owner",
-        )
-    )
-
-
-@router.post(
-    "/voice-profiles/{profile_id}/deletion-requests",
-    response_model=PrivateVoiceDeletionRequestResource,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-def create_private_voice_deletion_request(
-    profile_id: CanonicalUuid,
-    payload: CreatePrivateVoiceDeletionRequest,
-    idempotency_key: str = Header(
-        alias="Idempotency-Key",
-        min_length=8,
-        max_length=128,
-        pattern=_IDEMPOTENCY_KEY_PATTERN,
-    ),
-) -> PrivateVoiceDeletionRequestResource:
-    _require_private_voice_deletion_release()
-    service = _private_voice_deletion_service()
-    return _private_voice_deletion_resource(
-        lambda: service.create_request(
-            profile_id=profile_id,
-            expected_profile_version=payload.expected_profile_version,
-            discard_unreferenced=False,
-            idempotency_key=idempotency_key,
-            actor="local-owner",
-        )
-    )
-
-
-@router.get(
-    "/voice-deletion-requests/{request_id}",
-    response_model=PrivateVoiceDeletionRequestResource,
-)
-def get_private_voice_deletion_request(
-    request_id: CanonicalUuid,
-) -> PrivateVoiceDeletionRequestResource:
-    _require_private_voice_deletion_release()
-    service = _private_voice_deletion_service()
-    return _private_voice_deletion_resource(lambda: service.get_request(request_id))
-
-
-@router.post(
-    "/voice-deletion-requests/{request_id}/confirm",
-    response_model=PrivateVoiceDeletionRequestResource,
-)
-def confirm_private_voice_deletion_request(
-    request_id: CanonicalUuid,
-    payload: ConfirmPrivateVoiceDeletionRequest,
-    _idempotency_key: str = Header(
-        alias="Idempotency-Key",
-        min_length=8,
-        max_length=128,
-        pattern=_IDEMPOTENCY_KEY_PATTERN,
-    ),
-) -> PrivateVoiceDeletionRequestResource:
-    _require_private_voice_deletion_release()
-    service = _private_voice_deletion_service()
-    return _private_voice_deletion_resource(
-        lambda: service.confirm(
-            request_id,
-            expected_profile_version=payload.expected_profile_version,
-            impact_digest=payload.impact_digest,
-            actor="local-owner",
-        )
-    )
-
-
-@router.post(
-    "/voice-deletion-requests/{request_id}/cancel",
-    response_model=PrivateVoiceDeletionRequestResource,
-)
-def cancel_private_voice_deletion_request(
-    request_id: CanonicalUuid,
-    _idempotency_key: str = Header(
-        alias="Idempotency-Key",
-        min_length=8,
-        max_length=128,
-        pattern=_IDEMPOTENCY_KEY_PATTERN,
-    ),
-) -> PrivateVoiceDeletionRequestResource:
-    _require_private_voice_deletion_release()
-    service = _private_voice_deletion_service()
-    return _private_voice_deletion_resource(
-        lambda: service.cancel(request_id, actor="local-owner")
-    )
-
-
-@router.post(
-    "/voice-deletion-requests/{request_id}/retry",
-    response_model=PrivateVoiceDeletionRequestResource,
-)
-def retry_private_voice_deletion_request(
-    request_id: CanonicalUuid,
-    _idempotency_key: str = Header(
-        alias="Idempotency-Key",
-        min_length=8,
-        max_length=128,
-        pattern=_IDEMPOTENCY_KEY_PATTERN,
-    ),
-) -> PrivateVoiceDeletionRequestResource:
-    _require_private_voice_deletion_release()
-    service = _private_voice_deletion_service()
-    return _private_voice_deletion_resource(
-        lambda: service.retry(request_id, actor="local-owner")
-    )
-
-
 __all__ = [
     "CreateNarrationWorkflowRequest",
-    "CreatePrivateVoiceDeletionRequest",
-    "ConfirmPrivateVoiceDeletionRequest",
     "DocumentNarrationContextResource",
     "DocumentEditionHistoryResource",
     "EditionHistoryItemResource",
@@ -1595,7 +1344,6 @@ __all__ = [
     "NarrationProductionErrorDetail",
     "NarrationProductionOperation",
     "NarrationWorkflowResource",
-    "PrivateVoiceDeletionRequestResource",
     "RetryFailedSegmentsRequest",
     "RetryFailedSegmentsResource",
     "SqlAlchemyNarrationProductionBackend",
