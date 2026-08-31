@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSaveCommand,
+  characterFactDimensionLabel,
   characterWorkspaceTabFromKey,
   isMultiTimeline,
   profileDraftFromWorkspace,
@@ -12,6 +13,13 @@ import {
 import { characterWorkspace, multiTimelineWorkspace } from "./test-fixtures";
 
 describe("character workspace model", () => {
+  it("localizes common fact dimensions", () => {
+    expect(characterFactDimensionLabel("action")).toBe("行动");
+    expect(characterFactDimensionLabel("presence")).toBe("出场");
+    expect(characterFactDimensionLabel("knowledge_event")).toBe("认知变化");
+    expect(characterFactDimensionLabel("勇气")).toBe("勇气");
+  });
+
   it("supports wrapping keyboard navigation without consuming unrelated keys", () => {
     expect(characterWorkspaceTabFromKey("basic", "ArrowLeft")).toBe("voice");
     expect(characterWorkspaceTabFromKey("voice", "ArrowRight")).toBe("basic");

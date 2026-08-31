@@ -48,6 +48,8 @@ import type {
   SelectionSnapshot,
 } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
+import { resolveSyncProgressDocument } from "./chapter-sync";
+import { groupIntelligenceItems } from "./chapter-intelligence";
 const host = window.QwenPaw.host;
 const React = host.React;
 const ReactDOM = host.ReactDOM;
@@ -527,15 +529,6 @@ const ASSET_TABS: Array<{ key: PrivateAssetType; label: string; empty: string }>
 ];
 
 
-const INTELLIGENCE_GROUPS: Array<{ key: string; label: string; types: string[] }> = [
-  { key: "character", label: "角色状态更新", types: ["character_state"] },
-  { key: "relationship", label: "角色关系变化", types: ["relationship"] },
-  { key: "storyline", label: "故事线进展", types: ["storyline_event"] },
-  { key: "foreshadow", label: "伏笔进展", types: ["foreshadow_progress", "foreshadow_new"] },
-  { key: "other", label: "其他情报", types: ["fact"] },
-];
-
-
 function splitNames(value: string): string[] {
   return Array.from(
     new Set(value.split(/[，,、\n]+/).map((item) => item.trim()).filter(Boolean)),
@@ -619,14 +612,6 @@ function field(label: string, control: unknown, help?: string): unknown {
     help ? h("span", null, help) : null,
     control,
   );
-}
-
-
-function groupedIntelligence(items: IntelligenceItemRecord[]) {
-  return INTELLIGENCE_GROUPS.map((group) => ({
-    ...group,
-    items: items.filter((item) => group.types.includes(item.item_type)),
-  })).filter((group) => group.items.length > 0);
 }
 
 
@@ -1135,13 +1120,15 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
-  async function runSyncProgress(preparedOverride?: DocumentRecord) {
+  async function runSyncProgress(preparedOverride?: unknown) {
     setBusyAction("sync");
     setGenerationStage("正在从本章正文提取角色、关系、故事线与伏笔进展");
     setGeneratingOpen(true);
     try {
       const currentModel = await loadGenerationModel();
-      const prepared = preparedOverride ?? (onPrepareGeneration ? await onPrepareGeneration() : document);
+      const prepared = preparedOverride
+        ? resolveSyncProgressDocument(document, preparedOverride)
+        : (onPrepareGeneration ? await onPrepareGeneration() : document);
       if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       const checkpoint = await apiRequest<{ document: DocumentRecord }>(`/documents/${prepared.id}/checkpoints`, {
         method: "POST",
@@ -1183,8 +1170,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   }
 
-  const confirmSyncProgress = async (preparedOverride?: DocumentRecord) => {
-    const source = preparedOverride ?? document;
+  const confirmSyncProgress = async (preparedOverride?: unknown) => {
+    const source = resolveSyncProgressDocument(document, preparedOverride);
     let currentModel: GenerationModelStatus;
     try {
       currentModel = await loadGenerationModel();
@@ -1204,7 +1191,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       ),
       okText: "确定",
       cancelText: "取消",
-      onOk: () => { void runSyncProgress(preparedOverride); },
+      onOk: () => { void runSyncProgress(source); },
     });
   };
 
@@ -1269,7 +1256,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
 
   const filteredAssets = assets.filter((item: PrivateAssetRecord) => item.asset_type === assetTab && (!assetSearch.trim() || `${item.title}\n${item.content}`.includes(assetSearch.trim())));
   const currentAssetLabel = ASSET_TABS.find((item) => item.key === assetTab)?.label || "私有库配置";
-  const intelligenceGroups = groupedIntelligence(selectedProposal?.items ?? []);
+  const intelligenceGroups = groupIntelligenceItems<IntelligenceItemRecord>(
+    selectedProposal?.items ?? [],
+  );
   const reviewIssues = Array.isArray(reviewJob?.output_json?.issues) ? reviewJob?.output_json.issues as ReviewIssue[] : [];
   const outlineChapterNumber = chapterNumber ?? Math.max(1, Math.round(document.position / 1000));
   const briefSaveDisabled = !briefForm.outlineText.trim()
@@ -1369,7 +1358,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     h("div", { className: "anw-workflow-panel" },
       h(Button, { className: "anw-generate-button", icon: h(BookOutlined), onClick: openGenerationOptions, loading: busyAction === "generate" || busyAction === "assets-load" }, document.visible_character_count > 0 ? "重新生成" : "生成正文"),
       h(Button, { ref: briefTriggerRef, className: "anw-outline-button", icon: h(EditOutlined), onClick: openBrief, loading: busyAction === "brief-load" }, "修改章纲"),
-      h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: confirmSyncProgress, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
+      h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: () => { void confirmSyncProgress(); }, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
       h(Button, { className: "anw-history-button", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load" }, "历史"),
     ),
     mountedTitleTools,

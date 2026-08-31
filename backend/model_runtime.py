@@ -1129,6 +1129,16 @@ def _normalized_intelligence_item(value: Any) -> dict[str, Any] | None:
         return None
     if not subject or not predicate or not object_text or not source_text:
         return None
+    if item_type == "story_time":
+        source_years = set(re.findall(r"(?<!\d)[12]\d{3}(?!\d)", source_text))
+        proposed_time_text = json.dumps(
+            {"object": object_text, "details": value.get("details")},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        proposed_years = set(re.findall(r"(?<!\d)[12]\d{3}(?!\d)", proposed_time_text))
+        if proposed_years - source_years:
+            return None
     try:
         confidence = int(value.get("confidence", 50))
     except (TypeError, ValueError):

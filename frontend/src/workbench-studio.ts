@@ -47,6 +47,11 @@ import {
 } from "./chapter-workflow";
 import type { SelectionRange, SelectionSnapshot } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
+import { outlineCompletionPatch } from "./outline-completion";
+import {
+  isLinkedOutlineCharacter,
+  outlineCharacterReferenceLabel,
+} from "./outline-character-reference";
 import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
 import {
@@ -462,7 +467,7 @@ function requireStudioMaxLength(
 }
 
 
-const OUTLINE_STEPS = ["章节", "背景", "人物草案", "情节", "亮点"];
+const OUTLINE_STEPS = ["章节", "背景", "人物引用", "情节", "亮点"];
 
 
 function readableError(reason: unknown, fallback: string): string {
@@ -738,7 +743,7 @@ function OutlineWizard({
     if (targetStep === 3 && draft.characters.length > 0) {
       Modal.confirm({
         className: "anw-modal",
-        title: "重新生成人物草案？",
+        title: "重新生成人物规划？",
         content: "新候选会替换当前草案，已正式化的人物卡不会被覆盖。",
         okText: "确认重新生成",
         cancelText: "保留当前草案",
@@ -823,7 +828,7 @@ function OutlineWizard({
     setActivityText("正在保存...");
     setGenerating(true);
     try {
-      const saved = await saveDraft(draft, 5, { highlight_text: draft.highlight_text });
+      const saved = await saveDraft(draft, 5, outlineCompletionPatch(draft));
       const result = await apiRequest<{ outline: OutlineDraftRecord; novel: NovelRecord }>(
         `/novels/${novel.id}/outline-draft/complete`,
         { method: "POST", body: JSON.stringify({ expected_version: saved.version }) },
@@ -1141,12 +1146,12 @@ function OutlineWizard({
             h(
               "div",
               { className: "mb-outline-heading-row" },
-              h("div", null, h("h3", null, "人物草案"), h("span", null, "这里只做创作规划；完成大纲后统一进入正式人物卡")),
+              h("div", null, h("h3", null, "人物规划引用"), h("span", null, "已关联人物复用“角色”中的正式人物卡；未关联草案在完成大纲时才会新建正式卡")),
               h(Button, {
                 icon: h(ReloadOutlined),
                 disabled: generating,
                 onClick: () => void requestGeneration(3),
-              }, currentStepHasContent ? "重新生成" : "生成人物草案"),
+              }, currentStepHasContent ? "重新生成" : "生成人物规划"),
             ),
             ...(["main", "supporting"] as const).map((roleType) => h(
               "section",
@@ -1159,7 +1164,7 @@ function OutlineWizard({
                   ? h(
                       "span",
                       { key: `${character.name}:${index}`, className: `mb-role-pill is-${roleType}` },
-                      h("button", { type: "button", onClick: () => openCharacter(roleType, index) }, character.name),
+                      h("button", { type: "button", onClick: () => openCharacter(roleType, index) }, outlineCharacterReferenceLabel(character)),
                       h("button", { type: "button", className: "mb-role-remove", onClick: () => removeCharacter(index), "aria-label": `删除${character.name}` }, "×"),
                     )
                   : null),
@@ -1309,7 +1314,7 @@ function OutlineWizard({
         wrapClassName: "anw-assistant-aware-modal-wrap",
         mask: false,
         width: 520,
-        title: characterIndex >= 0 ? "修改人物草案" : "新增人物草案",
+        title: characterIndex >= 0 ? "修改人物规划" : "新增人物规划",
         footer: null,
         onCancel: () => { setCharacterOpen(false); setCharacterLinkConflict(null); },
       },
@@ -1338,14 +1343,25 @@ function OutlineWizard({
                   updateLocal({ characters: rows });
                   setOutlineCharacterField("name", characterLinkConflict.existingCharacterName);
                   setCharacterLinkConflict(null);
-                } }, "关联现有人物"),
+                  setCharacterOpen(false);
+                } }, "关联并返回大纲"),
                 h(Button, { onClick: () => {
                   setCharacterLinkConflict(null);
                   setOutlineCharacterField("name", "");
                 } }, "改名后新建"),
               ),
             ),
-          }) : null,
+          }) : isLinkedOutlineCharacter(draftRef.current?.characters[characterIndex]) ? h(Alert, {
+            type: "info",
+            showIcon: true,
+            message: "已关联“角色”中的正式人物卡",
+            description: "这里仅保存大纲规划，不覆盖正式人物资料；章节同步进展只会回填到已关联的正式人物卡。",
+          }) : h(Alert, {
+            type: "info",
+            showIcon: true,
+            message: "尚未关联正式人物卡",
+            description: "完成大纲时可关联同名正式人物；没有匹配项的人物草案会新建为正式人物卡。",
+          }),
           h(
             "div",
             { className: "mb-form-grid mb-form-grid-three" },
@@ -3165,7 +3181,7 @@ export function StudioProjectView({
       { className: "mb-ungrouped" },
       ungrouped?.documents.filter((item: DocumentRecord) => item.kind === "chapter").length
         ? h("div", { className: "mb-ungrouped-list" }, ...ungrouped.documents.filter((item: DocumentRecord) => item.kind === "chapter").map((item: DocumentRecord) => renderChapterCard(item, null)))
-        : h("div", { className: "mb-ungrouped-empty" }, h("strong", null, "暂无章节"), h("span", null, "点击上方按钮创建新章节")),
+        : h("div", { className: "mb-ungrouped-empty" }, h("strong", null, "暂无未分卷章节"), h("span", null, "当前所有章节均已归入分卷")),
     ),
   );
 
@@ -3206,14 +3222,32 @@ export function StudioProjectView({
       );
 
   const characterGroups = [
-    { type: "main" as const, label: "主角", className: "is-main" },
-    { type: "supporting" as const, label: "配角", className: "is-supporting" },
+    { type: "main" as const, label: "主角", description: "承载核心视角与主要人物弧光", className: "is-main" },
+    { type: "supporting" as const, label: "配角", description: "推动事件、关系与世界信息展开", className: "is-supporting" },
   ];
 
   const renderRoles = () => roleTab === "list"
     ? h(
         "div",
         { className: "mb-role-list" },
+        h(
+          "section",
+          { className: "mb-role-overview", "aria-label": "正式人物档案概览" },
+          h(
+            "div",
+            null,
+            h("span", { className: "mb-role-overview-eyebrow" }, "正式人物档案"),
+            h("h2", null, "人物卡"),
+            h("p", null, "统一维护人物基线、当前故事线档案、成长事实与声音；大纲仅引用这里的正式人物。"),
+          ),
+          h(
+            "div",
+            { className: "mb-role-overview-metrics" },
+            h("span", null, h("strong", null, characters.length), "人物"),
+            h("span", null, h("strong", null, characters.filter((item: NovelCharacterRecord) => item.role_type === "main").length), "主角"),
+            h("span", null, h("strong", null, relationships.length), "关系"),
+          ),
+        ),
         h(CharacterProfileCompletionPanel, { novelId: novel.id, onApplied: loadDomains }),
         ...characterGroups.map((group) => {
           const rows = characters.filter((item: NovelCharacterRecord) => item.role_type === group.type);
@@ -3223,17 +3257,46 @@ export function StudioProjectView({
             h(
               "div",
               { className: "mb-subtitle-row" },
-              h("h3", null, group.label, h("span", null, `(${rows.length})`)),
+              h("div", { className: "mb-role-section-heading" }, h("h3", null, group.label, h("span", null, rows.length)), h("p", null, group.description)),
               h(Button, { type: "text", icon: h(PlusOutlined), onClick: () => openCharacterForm(group.type) }, `新增${group.label}`),
             ),
-            rows.length ? h("div", { className: "mb-role-grid" }, ...rows.map((item: NovelCharacterRecord) => h(
-              "article", { key: item.id, className: "mb-role-card" },
-              h("button", { type: "button", className: "mb-role-card-main", onClick: () => openCharacterForm(group.type, item) },
-                h("span", { className: "mb-role-avatar" }, item.name.slice(0, 1)),
-                h("span", { className: "mb-role-copy" }, h("strong", null, item.name), h("small", null, String(item.details?.identity || item.description || "未填写身份"))),
-              ),
-              h(Button, { type: "text", size: "small", danger: true, icon: h(DeleteOutlined), onClick: () => deleteCharacter(item), "aria-label": `删除${item.name}` }),
-            ))) : h("div", { className: "mb-inline-empty" }, `暂无${group.label}`),
+            rows.length ? h("div", { className: "mb-role-grid" }, ...rows.map((item: NovelCharacterRecord) => {
+              const identity = String(item.details?.identity || "身份待补充");
+              const description = item.description || "尚未填写公共小传";
+              const descriptionId = `mb-role-card-${item.id}-description`;
+              return h(
+                "article",
+                { key: item.id, className: "mb-role-card" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "mb-role-card-main",
+                    "aria-label": `打开${item.name}的正式人物卡`,
+                    "aria-describedby": descriptionId,
+                    onClick: () => openCharacterForm(group.type, item),
+                  },
+                  h("span", { className: "mb-role-avatar", "aria-hidden": true }, item.name.slice(0, 1)),
+                  h(
+                    "span",
+                    { className: "mb-role-copy" },
+                    h("span", { className: "mb-role-title-line" }, h("strong", null, item.name), h("span", null, group.label)),
+                    h("small", null, identity),
+                    h("span", { id: descriptionId, className: "mb-role-description" }, description),
+                    h("span", { className: "mb-role-open-hint", "aria-hidden": true }, "查看完整人物卡", h("span", null, "→")),
+                  ),
+                ),
+                h(Button, {
+                  type: "text",
+                  size: "small",
+                  danger: true,
+                  icon: h(DeleteOutlined),
+                  title: `删除${item.name}`,
+                  onClick: () => deleteCharacter(item),
+                  "aria-label": `删除${item.name}`,
+                }),
+              );
+            })) : h("div", { className: "mb-inline-empty" }, `暂无${group.label}，可从右上角新建。`),
           );
         }),
       )

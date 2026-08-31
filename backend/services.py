@@ -2136,7 +2136,7 @@ def start_intelligence_proposal(
     ):
         raise ValidationError("章节情报生成缺少可核验的 Agent 或 requested 模型证据")
     extraction_context = _intelligence_extraction_context(session, document, revision)
-    extractor_contract = "story-ledger-extractor-v4"
+    extractor_contract = "story-ledger-extractor-v5"
     input_hash = content_hash(
         json.dumps(
             {
@@ -2237,7 +2237,7 @@ JSON 结构：
 9. character_state 和 knowledge_event 必须使用 character_catalog 的短键；relationship_state、storyline_event、foreshadow_event 必须分别使用对应目录短键。
 10. 不得在提取阶段创建人物、关系、故事线或伏笔根对象；目录没有对应对象时省略并交给作者另行规划。
 11. visibility 默认 author；只有正文已经向读者或所有在场视角明确揭露时才能填写 reader 或 all。
-12. details 只填写类型所需结构：knowledge_event 使用 operation/knowledge_key；story_time 使用 transition/from_time/to_time；foreshadow_event 使用 event/note。其他类型可留空对象，由服务器按类型补成版本化结构。
+12. details 只填写类型所需结构：knowledge_event 使用 operation/knowledge_key；story_time 使用 transition/from_time/to_time，其中时间值必须是 {{"schema_version":"story-time/1","label":"正文原有时间表述","precision":"unknown"}} 结构；foreshadow_event 使用 event/note。其他类型可留空对象，由服务器按类型补成版本化结构。
 
 章节：{document.title}
 服务器实体短键目录：
@@ -2252,6 +2252,68 @@ JSON 结构：
 正式正文：
 {revision.content_text}
 """.strip()
+
+
+def _fallback_character_presence_candidates(
+    content_text: str,
+    character_catalog: dict[str, Any],
+    segments: list[dict[str, Any]],
+    chapter_sequence: object,
+) -> list[dict[str, Any]]:
+    """Return exact, conservative presence facts when model output normalizes to empty."""
+
+    candidates: list[dict[str, Any]] = []
+    for entity_key, raw_metadata in sorted(character_catalog.items()):
+        if not isinstance(raw_metadata, dict):
+            continue
+        label = str(raw_metadata.get("label") or "").strip()
+        if not label:
+            continue
+        evidence: tuple[str, int, int, dict[str, Any]] | None = None
+        for match in re.finditer(re.escape(label), content_text):
+            for window_size in (80, 120, 180):
+                source_start = match.start()
+                source_end = min(len(content_text), match.end() + window_size)
+                source_text = content_text[source_start:source_end]
+                if not source_text or content_text.count(source_text) != 1:
+                    continue
+                matching_segments = [
+                    segment
+                    for segment in segments
+                    if int(segment.get("source_start", -1)) <= source_start
+                    and int(segment.get("source_end", -1)) >= source_end
+                ]
+                if len(matching_segments) == 1:
+                    evidence = source_text, source_start, source_end, matching_segments[0]
+                    break
+            if evidence is not None:
+                break
+        if evidence is None:
+            continue
+        source_text, source_start, source_end, segment = evidence
+        candidates.append(
+            {
+                "subject": label,
+                "predicate": "在本章正文中出现",
+                "object": "参与本章事件",
+                "entity_key": entity_key,
+                "entity": dict(raw_metadata),
+                "timeline_id": str(segment["timeline_id"]),
+                "story_sequence": (
+                    segment.get("story_sequence")
+                    if segment.get("story_sequence") is not None
+                    else chapter_sequence
+                ),
+                "source_start": source_start,
+                "source_end": source_end,
+                "source_text": source_text,
+                "dimension": "presence",
+                "event_kind": "observed",
+                "visibility": "author",
+                "details": {},
+            }
+        )
+    return candidates
 
 
 def complete_intelligence_proposal(
@@ -2410,6 +2472,34 @@ def complete_intelligence_proposal(
                 review_state="pending",
             )
         )
+    if not normalized:
+        character_catalog = extraction_context.get("character_catalog", {})
+        if isinstance(character_catalog, dict):
+            for position, fallback in enumerate(
+                _fallback_character_presence_candidates(
+                    revision.content_text,
+                    character_catalog,
+                    segments,
+                    extraction_context.get("chapter_sequence"),
+                ),
+                start=1,
+            ):
+                source_text = str(fallback.get("source_text") or "")
+                suggested_payload = dict(fallback)
+                suggested_payload.pop("source_text", None)
+                normalized.append(
+                    IntelligenceProposalItem(
+                        id=uuid4(),
+                        proposal_id=proposal.id,
+                        position=position,
+                        item_type="character_state",
+                        suggested_payload=suggested_payload,
+                        confidence=100,
+                        source_text=source_text,
+                        reasoning_summary="正文含可唯一定位的人物姓名证据；模型未产出可提交条目，服务器生成保守的出场事实。",
+                        review_state="pending",
+                    )
+                )
     session.add_all(normalized)
     proposal.state = "ready"
     proposal.failure_message = None
@@ -2488,6 +2578,36 @@ def review_intelligence_item(
     return _intelligence_proposal_payload(session, proposal)
 
 
+def _normalize_story_time_value(value: object) -> dict[str, object] | None:
+    if isinstance(value, dict):
+        normalized = dict(value)
+        normalized.setdefault("schema_version", "story-time/1")
+        normalized.setdefault("precision", "unknown")
+        return normalized
+    label = str(value or "").strip()
+    if not label:
+        return None
+    return {
+        "schema_version": "story-time/1",
+        "label": label[:300],
+        "precision": "unknown",
+    }
+
+
+def _story_time_invents_calendar_year(
+    source_text: str,
+    payload: dict[str, object],
+) -> bool:
+    source_years = set(re.findall(r"(?<!\d)[12]\d{3}(?!\d)", source_text))
+    proposed_text = json.dumps(
+        {"object": payload.get("object"), "details": payload.get("details")},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    proposed_years = set(re.findall(r"(?<!\d)[12]\d{3}(?!\d)", proposed_text))
+    return bool(proposed_years - source_years)
+
+
 def _typed_story_fact_candidate(
     *,
     proposal: IntelligenceProposal,
@@ -2527,11 +2647,13 @@ def _typed_story_fact_candidate(
         transition = str(raw_details.get("transition") or "unknown")
         if transition not in {"advance", "flashback", "flashforward", "anchor", "unknown"}:
             transition = "unknown"
+        from_time = _normalize_story_time_value(raw_details.get("from_time"))
+        to_time = _normalize_story_time_value(raw_details.get("to_time") or object_text)
         details = {
             "schema_version": "story-time-event/1",
             "transition": transition,
-            "from_time": raw_details.get("from_time"),
-            "to_time": raw_details.get("to_time"),
+            "from_time": from_time,
+            "to_time": to_time,
         }
     elif fact_type == "knowledge_event":
         operation = str(raw_details.get("operation") or "learn")
@@ -2590,7 +2712,7 @@ def _typed_story_fact_candidate(
             "dimension": payload.get("dimension"),
             "event_kind": payload.get("event_kind"),
             "story_sequence": payload.get("story_sequence"),
-            "story_time_json": raw_details.get("to_time") if fact_type == "story_time" else None,
+            "story_time_json": to_time if fact_type == "story_time" else None,
             "visibility_json": {"scope": visibility},
             "source_start": payload.get("source_start"),
             "source_end": payload.get("source_end"),
@@ -2687,6 +2809,7 @@ def commit_intelligence_items(
         batch.accepted_item_ids = sorted(str(item_id) for item_id in selected)
         batch.inverse_operations = {"created_story_fact_ids": []}
     created_fact_ids: list[str] = []
+    rejected_invalid_item_ids: list[str] = []
     for item in items:
         if item.id not in selected:
             continue
@@ -2700,6 +2823,13 @@ def commit_intelligence_items(
             **item.suggested_payload,
             **{key: value for key, value in override.items() if key in allowed_override_keys},
         }
+        if item.item_type == "story_time" and _story_time_invents_calendar_year(
+            item.source_text,
+            payload,
+        ):
+            item.review_state = "rejected"
+            rejected_invalid_item_ids.append(str(item.id))
+            continue
         subject = str(payload.get("subject", "")).strip()
         predicate = str(payload.get("predicate", "")).strip()
         object_text = str(payload.get("object", "")).strip()
@@ -2760,6 +2890,7 @@ def commit_intelligence_items(
     session.commit()
     result = _intelligence_proposal_payload(session, proposal)
     result["commit_batch"] = _intelligence_commit_batch_payload(batch)
+    result["rejected_invalid_item_ids"] = rejected_invalid_item_ids
     return result
 
 

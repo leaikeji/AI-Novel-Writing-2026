@@ -14,12 +14,21 @@ describe("formal character workspace", () => {
     const root = harness.render(Component, { workspace: characterWorkspace() });
     const tabs = findAll(root, (element) => element.props.role === "tab");
 
-    expect(tabs.map(textContent)).toEqual(["基础资料", "本线档案", "成长与状态", "声音"]);
+    expect(tabs.map((tab) => textContent(tab.children[0]))).toEqual(["基础资料", "本线档案", "成长与状态", "声音"]);
     expect(tabs.map((tab) => tab.props["aria-controls"])).toHaveLength(4);
-    expect(findAll(root, (element) => element.type === "select")).toHaveLength(0);
+    expect(findAll(root, (element) => element.type === "select")).toHaveLength(1);
     expect(textContent(root)).not.toContain("instance-main");
     expect(textContent(root)).not.toContain("主线版本");
     expect(textContent(root)).not.toContain("本线人物");
+    expect(textContent(root)).toContain("主角");
+    expect(textContent(root)).not.toContain("main");
+    const roleSelect = findAll(root, (element) =>
+      String(element.props.id).endsWith("field-character-role_type"),
+    )[0];
+    expect(roleSelect.type).toBe("select");
+    expect(roleSelect.props.value).toBe("main");
+    expect(textContent(root)).toContain("正式人物卡 · v4");
+    expect(textContent(root)).toContain("人物基础信息");
   });
 
   it("shows explicit timeline and instance selectors after entering multi-line mode", () => {
@@ -28,7 +37,7 @@ describe("formal character workspace", () => {
     const root = harness.render(Component, { workspace: multiTimelineWorkspace() });
     const selects = findAll(root, (element) => element.type === "select");
 
-    expect(selects).toHaveLength(2);
+    expect(selects).toHaveLength(3);
     expect(textContent(root)).toContain("雨夜分支");
     expect(textContent(root)).toContain("雨夜后的林舟");
     expect(textContent(root)).not.toContain("instance-branch");
@@ -38,12 +47,18 @@ describe("formal character workspace", () => {
     const harness = createReactHarness();
     const Component = createCharacterWorkspaceDialog(harness.React);
     let root = harness.render(Component, { workspace: characterWorkspace() });
-    (findButton(root, "成长与状态").props.onClick as () => void)();
+    const growthTab = findAll(root, (element) =>
+      element.props.role === "tab" && textContent(element).startsWith("成长与状态"),
+    )[0];
+    (growthTab.props.onClick as () => void)();
     root = harness.render(Component, { workspace: characterWorkspace() });
     const growthPanel = findAll(root, (element) => element.props.id === "character-workspace-character-1-panel-growth")[0];
 
     expect(growthPanel.props["aria-label"]).toContain("只读");
+    expect(textContent(growthPanel)).toContain("勇气变化");
+    expect(textContent(growthPanel)).toContain("事实维度：勇气");
     expect(textContent(growthPanel)).toContain("开始主动承担风险");
+    expect(textContent(growthPanel)).toContain("1 条 · 只读");
     expect(findAll(growthPanel, (element) => ["input", "textarea", "select"].includes(String(element.type)))).toHaveLength(0);
   });
 
@@ -57,6 +72,17 @@ describe("formal character workspace", () => {
 
     expect(voiceSlot).toHaveBeenCalledWith(expect.objectContaining({ characterId: "character-1" }));
     expect(textContent(root)).toContain("共用声音设置");
+  });
+
+  it("offers an explicit header close action", () => {
+    const onRequestClose = vi.fn();
+    const harness = createReactHarness();
+    const Component = createCharacterWorkspaceDialog(harness.React);
+    const root = harness.render(Component, { workspace: characterWorkspace(), onRequestClose });
+
+    (findButton(root, "×").props.onClick as () => void)();
+
+    expect(onRequestClose).toHaveBeenCalledOnce();
   });
 
   it("preserves the draft and locates the field after a CAS conflict", async () => {

@@ -40,6 +40,37 @@ export function isMultiTimeline(workspace: CharacterWorkspaceV1): boolean {
   return workspace.timeline_mode === "multiple";
 }
 
+export function characterRoleLabel(roleType: string): string {
+  return ({
+    main: "主角",
+    supporting: "配角",
+  }[roleType] ?? roleType) || "未设置角色定位";
+}
+
+export function characterFactDimensionLabel(dimension: string): string {
+  return ({
+    action: "行动",
+    presence: "出场",
+    knowledge: "认知",
+    knowledge_event: "认知变化",
+    character_state: "人物状态",
+    relationship_state: "关系状态",
+    storyline_event: "故事线进展",
+    foreshadow_event: "伏笔进展",
+    story_time: "故事时间",
+    world_state: "世界状态",
+    general_fact: "其他事实",
+    location: "位置",
+    health: "健康",
+    emotion: "情绪",
+    attitude: "态度",
+    relationship: "关系",
+    goal: "目标",
+    possession: "持有物",
+    identity: "身份",
+  }[dimension] ?? dimension) || "未分类状态";
+}
+
 export function rootDraftFromWorkspace(workspace: CharacterWorkspaceV1): CharacterRootDraft {
   return {
     name: workspace.character.name,

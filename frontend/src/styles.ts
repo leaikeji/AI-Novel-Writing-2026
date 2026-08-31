@@ -1466,25 +1466,49 @@ export function ensureNovelStyles(): void {
     .mb-top-tabs.is-settings > button.is-active { border-color:#ff7548; background:#fff; box-shadow:0 2px 8px rgba(26,32,42,.06); }
     .mb-top-tabs.is-settings > button.is-active::after { display:none; }
     .mb-role-list { display:grid; gap:18px; }
-    .mb-role-section { border-radius:8px; padding:18px 18px 24px; background:#fafafa; }
-    .mb-role-section.is-supporting { background:#fafafa; }
-    .mb-role-section .mb-subtitle-row h3 { display:flex; align-items:center; gap:7px; }
-    .mb-role-section .mb-subtitle-row h3::before { width:4px; height:20px; border-radius:3px; background:#ff7548; content:""; }
-    .mb-role-section.is-supporting .mb-subtitle-row h3::before { background:#5c7cea; }
-    .mb-role-section .mb-subtitle-row h3 span { color:#969aa1; font-size:12px; font-weight:500; }
+    .mb-role-overview { display:flex; align-items:center; justify-content:space-between; gap:28px; border:1px solid #eee7e3; border-radius:14px; padding:22px 24px; background:linear-gradient(135deg,#fffaf7 0%,#fff 58%,#f7f9ff 100%); box-shadow:0 8px 26px rgba(31,41,55,.045); }
+    .mb-role-overview h2,.mb-role-overview p { margin:0; }
+    .mb-role-overview h2 { margin-top:3px; color:#30343b; font-size:23px; }
+    .mb-role-overview p { max-width:680px; margin-top:7px; color:#747983; font-size:13px; line-height:1.7; }
+    .mb-role-overview-eyebrow { color:#f06e43; font-size:11px; font-weight:750; letter-spacing:.12em; }
+    .mb-role-overview-metrics { display:flex; flex:0 0 auto; align-items:center; gap:10px; }
+    .mb-role-overview-metrics>span { display:grid; min-width:72px; gap:2px; border:1px solid rgba(224,226,231,.86); border-radius:10px; padding:9px 12px; color:#8c9098; background:rgba(255,255,255,.82); text-align:center; font-size:11px; }
+    .mb-role-overview-metrics strong { color:#343840; font-size:19px; line-height:1.15; }
+    .mb-role-section { border:1px solid #efefef; border-radius:12px; padding:20px 20px 24px; background:#fafafa; }
+    .mb-role-section.is-supporting { border-color:#eaebf5; background:#fafbff; }
+    .mb-role-section .mb-subtitle-row { margin-bottom:16px; }
+    .mb-role-section-heading { display:grid; gap:4px; }
+    .mb-role-section-heading h3,.mb-role-section-heading p { margin:0; }
+    .mb-role-section-heading h3 { display:flex; align-items:center; gap:8px; }
+    .mb-role-section-heading h3::before { width:4px; height:20px; border-radius:3px; background:#ff7548; content:""; }
+    .mb-role-section.is-supporting .mb-role-section-heading h3::before { background:#5c7cea; }
+    .mb-role-section-heading h3 span { display:grid; min-width:22px; height:22px; place-items:center; border-radius:999px; color:#d9633e; background:#fff0ea; font-size:11px; font-weight:700; }
+    .mb-role-section.is-supporting .mb-role-section-heading h3 span { color:#526ed2; background:#edf0ff; }
+    .mb-role-section-heading p { padding-left:12px; color:#92969e; font-size:11px; }
     .mb-role-section .mb-subtitle-row .qwenpaw-btn { color:#fff!important; border:0!important; border-radius:7px!important; background:#ff7548!important; box-shadow:0 5px 12px rgba(255,117,72,.2)!important; }
     .mb-role-section.is-supporting .mb-subtitle-row .qwenpaw-btn { background:#5c7cea!important; box-shadow:0 5px 12px rgba(92,124,234,.2)!important; }
-    .mb-role-grid { display:flex; flex-wrap:wrap; gap:14px; }
-    .mb-role-card { position:relative; display:flex; width:116px; min-height:124px; flex:0 0 116px; align-items:stretch; border:1px solid #eee7e3; border-radius:9px; padding:13px 10px 10px; background:#fff; box-shadow:0 3px 10px rgba(31,41,55,.04); }
+    .mb-role-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
+    .mb-role-card { position:relative; display:flex; min-width:0; min-height:168px; align-items:stretch; border:1px solid #eee7e3; border-radius:12px; padding:16px; background:#fff; box-shadow:0 4px 13px rgba(31,41,55,.04); transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease; }
     .mb-role-section.is-supporting .mb-role-card { border-color:#e3e6fa; }
-    .mb-role-card-main { display:flex; min-width:0; flex:1; flex-direction:column; align-items:center; gap:8px; border:0; padding:0; background:transparent; cursor:pointer; text-align:center; }
-    .mb-role-avatar { display:grid; width:46px; height:46px; flex:0 0 auto; place-items:center; border-radius:50%; color:#fff; background:#ff7548; font-weight:750; }
-    .is-supporting .mb-role-avatar { background:#6b7ce7; }
-    .mb-role-copy { display:grid; width:100%; min-width:0; gap:5px; }
-    .mb-role-copy strong,.mb-role-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .mb-role-copy strong { color:#343840; font-size:14px; }
-    .mb-role-copy small { color:#969aa1; }
-    .mb-role-card > .qwenpaw-btn { position:absolute; top:5px; right:5px; width:24px; min-width:24px; padding:0!important; color:#ff9b7b!important; }
+    .mb-role-card:hover,.mb-role-card:focus-within { border-color:#ffc7b5; box-shadow:0 10px 25px rgba(31,41,55,.09); transform:translateY(-2px); }
+    .mb-role-section.is-supporting .mb-role-card:hover,.mb-role-section.is-supporting .mb-role-card:focus-within { border-color:#bfc8f5; }
+    .mb-role-card-main { display:flex; min-width:0; flex:1; align-items:flex-start; gap:13px; border:0; padding:0; color:inherit; background:transparent; cursor:pointer; text-align:left; }
+    .mb-role-avatar { display:grid; width:48px; height:48px; flex:0 0 48px; place-items:center; border-radius:14px; color:#fff; background:linear-gradient(145deg,#ff8a61,#ef6b40); box-shadow:0 7px 16px rgba(239,107,64,.18); font-size:17px; font-weight:750; }
+    .is-supporting .mb-role-avatar { background:linear-gradient(145deg,#7d8ded,#5d70d7); box-shadow:0 7px 16px rgba(93,112,215,.18); }
+    .mb-role-copy { display:flex; width:100%; min-width:0; flex:1; flex-direction:column; gap:6px; }
+    .mb-role-title-line { display:flex; min-width:0; align-items:center; gap:8px; padding-right:24px; }
+    .mb-role-title-line strong { overflow:hidden; color:#343840; text-overflow:ellipsis; white-space:nowrap; font-size:16px; }
+    .mb-role-title-line>span { flex:0 0 auto; border-radius:999px; padding:2px 7px; color:#dc6842; background:#fff1eb; font-size:10px; font-weight:700; }
+    .is-supporting .mb-role-title-line>span { color:#526ed2; background:#eef1ff; }
+    .mb-role-copy small { overflow:hidden; color:#747983; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+    .mb-role-description { display:-webkit-box; min-height:36px; overflow:hidden; color:#989ca4; -webkit-box-orient:vertical; -webkit-line-clamp:2; font-size:11px; line-height:1.65; }
+    .mb-role-open-hint { display:flex; align-items:center; justify-content:space-between; margin-top:auto; padding-top:5px; color:#ee7048; font-size:11px; font-weight:650; }
+    .is-supporting .mb-role-open-hint { color:#6074dc; }
+    .mb-role-open-hint>span { transition:transform .18s ease; }
+    .mb-role-card:hover .mb-role-open-hint>span,.mb-role-card:focus-within .mb-role-open-hint>span { transform:translateX(3px); }
+    .mb-role-card > .qwenpaw-btn { position:absolute; top:8px; right:8px; width:28px; min-width:28px; border-radius:8px!important; padding:0!important; color:#c4c6cb!important; opacity:0; transition:opacity .16s ease,color .16s ease,background .16s ease; }
+    .mb-role-card:hover > .qwenpaw-btn,.mb-role-card:focus-within > .qwenpaw-btn { opacity:1; }
+    .mb-role-card > .qwenpaw-btn:hover { color:#e95d5d!important; background:#fff1f0!important; }
     .mb-inline-empty { display:grid; min-height:86px; place-items:center; border:1px dashed rgba(145,149,158,.3); border-radius:7px; color:#a0a4ab; }
     .mb-relationship-panel,.mb-relationship-workspace { display:grid; gap:16px; min-width:0; }
     .mb-relationship-workspace { position:relative; gap:12px; }
@@ -1808,6 +1832,9 @@ export function ensureNovelStyles(): void {
       .mb-relation-toolbar-spacer { display:none; }
       .mb-relation-accessible-list ul { grid-template-columns:repeat(2,minmax(0,1fr)); }
       .mb-relationship-draft-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .mb-role-overview { align-items:flex-start; }
+      .mb-role-overview-metrics { display:grid; grid-template-columns:repeat(3,1fr); }
+      .mb-role-overview-metrics>span { min-width:58px; }
     }
 
     @media (max-width: 720px) {
@@ -1817,6 +1844,17 @@ export function ensureNovelStyles(): void {
         overscroll-behavior-y:contain;
         -webkit-overflow-scrolling:touch;
       }
+      .mb-role-overview { align-items:stretch; flex-direction:column; gap:16px; border-radius:10px; padding:18px 16px; }
+      .mb-role-overview h2 { font-size:21px; }
+      .mb-role-overview p { font-size:12px; }
+      .mb-role-overview-metrics { width:100%; }
+      .mb-role-overview-metrics>span { min-width:0; padding:8px 6px; }
+      .mb-role-section { padding:16px 14px 18px; }
+      .mb-role-section .mb-subtitle-row { align-items:flex-start; }
+      .mb-role-section-heading p { display:none; }
+      .mb-role-grid { grid-template-columns:1fr; }
+      .mb-role-card { min-height:154px; padding:14px; }
+      .mb-role-card > .qwenpaw-btn { opacity:1; }
       .anw-page { padding:18px 14px 90px; }
       .anw-page-header { align-items:center; }
       .anw-page-title { font-size:23px; }

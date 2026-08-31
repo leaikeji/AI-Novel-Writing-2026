@@ -8,6 +8,8 @@ import type {
 } from "./contracts";
 import {
   buildSaveCommand,
+  characterFactDimensionLabel,
+  characterRoleLabel,
   characterWorkspaceTabFromKey,
   continuityLabel,
   fieldError,
@@ -55,7 +57,13 @@ interface InputChangeEvent {
 
 interface KeyboardEventLike {
   readonly key: string;
+  readonly shiftKey?: boolean;
   preventDefault(): void;
+}
+
+interface PointerEventLike {
+  readonly target: unknown;
+  readonly currentTarget: unknown;
 }
 
 const TAB_LABELS: Readonly<Record<CharacterWorkspaceTab, string>> = {
@@ -123,6 +131,7 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
     );
     const lastPropWorkspaceRef = React.useRef(initial);
     const baseId = baseIdRef.current;
+    const dialogId = `${baseId}-dialog`;
     const dirty = hasRootChanges(workspace, rootDraft) || hasProfileChanges(workspace, profileDraft);
     const multiTimeline = isMultiTimeline(workspace);
     const requestClose = (): void => {
@@ -141,6 +150,17 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
 
     React.useEffect(() => {
       ensureCharacterWorkspaceStyles();
+    }, []);
+
+    React.useEffect(() => {
+      if (typeof document === "undefined") return;
+      const previouslyFocused = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      const focusDialog = (): void => document.getElementById(dialogId)?.focus();
+      if (typeof queueMicrotask === "function") queueMicrotask(focusDialog);
+      else focusDialog();
+      return () => previouslyFocused?.focus();
     }, []);
 
     React.useEffect(() => {
@@ -178,6 +198,30 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
       if (!next) return;
       event.preventDefault();
       activateTab(next);
+    };
+
+    const onDialogKeyDown = (event: KeyboardEventLike): void => {
+      if (event.key === "Escape" && !saving && props.onRequestClose) {
+        event.preventDefault();
+        requestClose();
+        return;
+      }
+      if (event.key !== "Tab" || typeof document === "undefined") return;
+      const dialog = document.getElementById(dialogId);
+      if (!dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
     };
 
     const resetDrafts = (): void => {
@@ -273,6 +317,30 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
       );
     };
 
+    const renderRoleField = (): ElementNode => {
+      const inputId = errorFieldId(baseId, "character.role_type");
+      const message = fieldError(error, "character.role_type");
+      const describedBy = message ? `${inputId}-error` : undefined;
+      return h(
+        "label",
+        { className: "anw-character-workspace-field" },
+        h("span", null, "角色定位"),
+        h(
+          "select",
+          {
+            id: inputId,
+            value: rootDraft.role_type,
+            "aria-invalid": Boolean(message),
+            "aria-describedby": describedBy,
+            onChange: (event: InputChangeEvent) => setRootDraft({ ...rootDraft, role_type: event.target.value }),
+          },
+          h("option", { value: "main" }, "主角"),
+          h("option", { value: "supporting" }, "配角"),
+        ),
+        message ? h("span", { id: describedBy, className: "anw-character-workspace-error" }, message) : null,
+      );
+    };
+
     const basicPanel = h(
       "section",
       {
@@ -284,13 +352,17 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
       },
       h(
         "div",
-        { className: "anw-character-workspace-form-grid" },
+        { className: "anw-character-workspace-section-heading" },
+        h("div", null, h("h3", null, "人物基础信息"), h("p", null, "跨时间线共用的姓名、定位与公共介绍。")),
+        h("span", { className: "anw-character-workspace-editable-badge" }, "可编辑"),
+      ),
+      h(
+        "div",
+        { className: "anw-character-workspace-form-grid anw-character-workspace-form-grid--basic" },
         renderField("character.name", "人物姓名", rootDraft.name, (name) => setRootDraft({ ...rootDraft, name }), {
           required: true,
         }),
-        renderField("character.role_type", "角色定位", rootDraft.role_type, (role_type) =>
-          setRootDraft({ ...rootDraft, role_type }),
-        ),
+        renderRoleField(),
         renderField("character.gender", "性别", rootDraft.gender, (gender) =>
           setRootDraft({ ...rootDraft, gender }),
         ),
@@ -307,17 +379,26 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
       ),
       h(
         "div",
-        { className: "anw-character-workspace-readonly-card" },
-        h("h3", null, "称谓与别名"),
-        workspace.aliases.length === 0
-          ? h("p", null, "尚未记录别名。")
-          : h("p", null, workspace.aliases.map((alias) => alias.alias).join("、")),
-      ),
-      h(
-        "div",
-        { className: "anw-character-workspace-readonly-card" },
-        h("h3", null, "引用概览"),
-        h("p", null, `关系 ${workspace.relationships.length} 条 · 章节引用 ${workspace.chapter_references.length} 处`),
+        { className: "anw-character-workspace-overview-grid" },
+        h(
+          "div",
+          { className: "anw-character-workspace-readonly-card" },
+          h("h3", null, "称谓与别名"),
+          workspace.aliases.length === 0
+            ? h("p", { className: "anw-character-workspace-muted-value" }, "尚未记录别名")
+            : h("p", null, workspace.aliases.map((alias) => alias.alias).join("、")),
+        ),
+        h(
+          "div",
+          { className: "anw-character-workspace-readonly-card" },
+          h("h3", null, "引用概览"),
+          h(
+            "div",
+            { className: "anw-character-workspace-metrics", "aria-label": "人物引用统计" },
+            h("span", null, h("strong", null, workspace.relationships.length), "关系"),
+            h("span", null, h("strong", null, workspace.chapter_references.length), "章节引用"),
+          ),
+        ),
       ),
     );
 
@@ -330,6 +411,12 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
         hidden: activeTab !== "line-profile",
         className: "anw-character-workspace-panel",
       },
+      h(
+        "div",
+        { className: "anw-character-workspace-section-heading" },
+        h("div", null, h("h3", null, "当前故事线档案"), h("p", null, "记录身份、目标、缺陷与作者掌握的秘密。")),
+        h("span", { className: "anw-character-workspace-editable-badge" }, "可编辑"),
+      ),
       multiTimeline
         ? h(
             "div",
@@ -340,7 +427,7 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
         : null,
       h(
         "div",
-        { className: "anw-character-workspace-form-grid" },
+        { className: "anw-character-workspace-form-grid anw-character-workspace-form-grid--profile" },
         ...PROFILE_FIELDS.map((field) =>
           renderField(
             `profile.${field.key}`,
@@ -368,7 +455,12 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
         className: "anw-character-workspace-panel",
         "aria-label": "成长与状态，只读",
       },
-      h("p", { className: "anw-character-workspace-meta" }, "以下内容由已确认故事事实投影生成，不能在人物卡中直接改写。"),
+      h(
+        "div",
+        { className: "anw-character-workspace-section-heading" },
+        h("div", null, h("h3", null, "成长与当前状态"), h("p", null, "由已确认故事事实投影生成，需要回到事实账本修正来源。")),
+        h("span", { className: "anw-character-workspace-readonly-badge" }, `${workspace.projected_state.current_facts.length} 条 · 只读`),
+      ),
       workspace.projected_state.conflicts.length > 0
         ? h(
             "div",
@@ -384,13 +476,29 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
         : null,
       workspace.projected_state.current_facts.length === 0
         ? h("div", { className: "anw-character-workspace-empty" }, "截至当前叙事位置，尚无已确认的成长状态。")
-        : workspace.projected_state.current_facts.map((fact) =>
-            h(
-              "article",
-              { key: fact.id, className: "anw-character-workspace-readonly-card" },
-              h("h3", null, fact.dimension || fact.fact_type),
-              h("p", null, fact.object_text || displayJson(fact.details)),
-              fact.story_sequence === null ? null : h("p", { className: "anw-character-workspace-meta" }, `故事序位：${fact.story_sequence}`),
+        : h(
+            "div",
+            { className: "anw-character-workspace-fact-grid" },
+            ...workspace.projected_state.current_facts.map((fact) =>
+              h(
+                "article",
+                { key: fact.id, className: "anw-character-workspace-readonly-card anw-character-workspace-fact-card" },
+                h(
+                  "header",
+                  null,
+                  h("h3", null, fact.predicate || characterFactDimensionLabel(fact.dimension)),
+                  h(
+                    "span",
+                    null,
+                    h("span", { className: "anw-character-workspace-sr-only" }, "事实维度："),
+                    characterFactDimensionLabel(fact.dimension),
+                  ),
+                ),
+                h("p", null, fact.object_text || displayJson(fact.details)),
+                fact.story_sequence === null
+                  ? null
+                  : h("p", { className: "anw-character-workspace-meta" }, `故事序位 ${fact.story_sequence}`),
+              ),
             ),
           ),
     );
@@ -421,15 +529,22 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
 
     return h(
       "div",
-      { className: "anw-character-workspace-backdrop", onKeyDown: (event: KeyboardEventLike) => {
-        if (event.key === "Escape" && !saving && props.onRequestClose) requestClose();
-      } },
+      {
+        className: "anw-character-workspace-backdrop",
+        onMouseDown: (event: PointerEventLike) => {
+          if (event.target === event.currentTarget && !saving && props.onRequestClose) requestClose();
+        },
+      },
       h(
         "div",
         {
+          id: dialogId,
           role: "dialog",
           "aria-modal": true,
           "aria-labelledby": props.titleId ?? `${baseId}-title`,
+          "aria-describedby": `${baseId}-summary-description`,
+          tabIndex: -1,
+          onKeyDown: onDialogKeyDown,
           className: `anw-character-workspace-dialog${props.className ? ` ${props.className}` : ""}`,
         },
         h(
@@ -440,16 +555,40 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
             { className: "anw-character-workspace-heading" },
             h(
               "div",
-              null,
-              h("h2", { id: props.titleId ?? `${baseId}-title` }, rootDraft.name || "未命名人物"),
+              { className: "anw-character-workspace-identity" },
+              h("span", { className: "anw-character-workspace-avatar", "aria-hidden": true }, (rootDraft.name || "人").slice(0, 1)),
               h(
                 "div",
-                { className: "anw-character-workspace-meta" },
-                rootDraft.role_type || "未设置角色定位",
-                multiTimeline ? ` · ${workspace.selected_timeline.name}` : "",
+                null,
+                h("h2", { id: props.titleId ?? `${baseId}-title` }, rootDraft.name || "未命名人物"),
+                h(
+                  "div",
+                  { className: "anw-character-workspace-heading-meta", id: `${baseId}-summary-description` },
+                  h("span", { className: `anw-character-workspace-role-badge is-${rootDraft.role_type}` }, characterRoleLabel(rootDraft.role_type)),
+                  h("span", null, `正式人物卡 · v${workspace.character.version}`),
+                  multiTimeline ? h("span", null, workspace.selected_timeline.name) : null,
+                ),
               ),
             ),
-            dirty ? h("span", { className: "anw-character-workspace-unsaved", role: "status" }, "有未保存修改") : null,
+            h(
+              "div",
+              { className: "anw-character-workspace-heading-actions" },
+              dirty ? h("span", { className: "anw-character-workspace-unsaved", role: "status" }, "有未保存修改") : null,
+              props.onRequestClose
+                ? h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "anw-character-workspace-close",
+                      disabled: saving,
+                      "aria-label": "关闭人物卡",
+                      title: "关闭人物卡（Esc）",
+                      onClick: requestClose,
+                    },
+                    "×",
+                  )
+                : null,
+            ),
           ),
           multiTimeline
             ? h(
@@ -518,7 +657,10 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
                 onClick: () => setActiveTab(tab),
                 onKeyDown: (event: KeyboardEventLike) => onTabKeyDown(tab, event),
               },
-              TAB_LABELS[tab],
+              h("span", null, TAB_LABELS[tab]),
+              tab === "growth" && workspace.projected_state.current_facts.length > 0
+                ? h("span", { className: "anw-character-workspace-tab-count", "aria-hidden": true }, workspace.projected_state.current_facts.length)
+                : null,
             ),
           ),
         ),
@@ -558,7 +700,7 @@ export function createCharacterWorkspaceDialog(React: CharacterReactRuntime) {
                 ? "声音设置由共用声音组件独立保存。"
                 : dirty
                   ? "修改尚未保存。"
-                  : "人物卡已是最新状态。",
+                  : "人物卡已是最新状态。按 Esc 可关闭。",
           ),
           h(
             "div",

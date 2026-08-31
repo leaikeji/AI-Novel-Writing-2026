@@ -40,7 +40,7 @@ export function characterWorkspace(
       id: "character-1",
       novel_id: "novel-1",
       name: "林舟",
-      role_type: "主角",
+      role_type: "main",
       description: "沉静而敏锐。",
       details: {},
       lifecycle_state: "active",

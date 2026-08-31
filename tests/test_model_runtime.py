@@ -809,6 +809,39 @@ def test_intelligence_relationship_preserves_stable_entity_key() -> None:
     assert items[0]["entity_key"] == "relationship_1"
 
 
+def test_intelligence_story_time_rejects_a_calendar_year_absent_from_evidence() -> None:
+    payload = {
+        "items": [
+            {
+                "fact_type": "story_time",
+                "subject": "空播室案发",
+                "predicate": "场景锚定在午夜零点",
+                "object": "2000-01-01T00:00:00",
+                "source_text": "零点零分，旧广播电台的频率忽然亮了一下。",
+                "details": {
+                    "transition": "anchor",
+                    "to_time": "2000-01-01T00:00:00",
+                },
+                "reasoning_summary": "场景时间锚点",
+                "confidence": 95,
+            },
+            {
+                "fact_type": "general_fact",
+                "subject": "空播室",
+                "predicate": "频率异常激活",
+                "object": "午夜零点出现旧节目女声",
+                "source_text": "零点零分，旧广播电台的频率忽然亮了一下。",
+                "reasoning_summary": "案件开端",
+                "confidence": 90,
+            },
+        ]
+    }
+
+    items = normalize_intelligence_generation_json(payload, "")
+
+    assert [item["fact_type"] for item in items] == ["general_fact"]
+
+
 def test_relationship_graph_generation_keeps_highest_confidence_per_semantic_slot() -> None:
     payload = {
         "complete_snapshot": True,
