@@ -119,7 +119,10 @@ describe("formal character workspace", () => {
     let root = harness.render(Component, { workspace, onCorrectFact });
     (findButton(root, "状态与经历").props.onClick as () => void)();
     root = harness.render(Component, { workspace, onCorrectFact });
-    (findButton(root, "修正").props.onClick as () => void)();
+    const correctionTrigger = {} as HTMLElement;
+    (findButton(root, "修正").props.onClick as (
+      event: { currentTarget: HTMLElement },
+    ) => void)({ currentTarget: correctionTrigger });
     root = harness.render(Component, { workspace, onCorrectFact });
     let drawer = findAll(root, (element) => element.props.className === "anw-character-drawer anw-character-correction")[0];
     const textareas = findAll(drawer, (element) => element.type === "textarea");
