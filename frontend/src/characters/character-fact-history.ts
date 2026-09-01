@@ -14,6 +14,7 @@ import { characterFactDimensionLabel } from "./model";
 type ElementNode = unknown;
 
 export interface CharacterFactHistoryViewProps {
+  readonly titleId: string;
   readonly page: CharacterFactHistoryPageV2 | null;
   readonly loading: boolean;
   readonly loadingMore: boolean;
@@ -23,12 +24,13 @@ export interface CharacterFactHistoryViewProps {
   readonly onEffectiveStateChange: (value: CharacterFactEffectiveState | "all") => void;
   readonly onHealthChange: (value: CharacterFactHealth | "all") => void;
   readonly onLoadMore: () => void;
-  readonly onOpenSource: (fact: ProjectedFactViewV2) => void;
-  readonly onCorrectFact: (fact: ProjectedFactViewV2) => void;
-  readonly onPreviewBatchRevert: (fact: ProjectedFactViewV2) => void;
+  readonly onOpenSource: (fact: ProjectedFactViewV2, trigger: HTMLElement) => void;
+  readonly onCorrectFact: (fact: ProjectedFactViewV2, trigger: HTMLElement) => void;
+  readonly onPreviewBatchRevert: (fact: ProjectedFactViewV2, trigger: HTMLElement) => void;
 }
 
 interface SelectEvent { readonly target: { readonly value: string } }
+interface ButtonEvent { readonly currentTarget: HTMLElement }
 
 export function renderCharacterFactHistory(
   React: CharacterReactRuntime,
@@ -38,11 +40,11 @@ export function renderCharacterFactHistory(
   const items = props.page?.items ?? [];
   return h(
     "section",
-    { className: "anw-character-fact-history", "aria-labelledby": "anw-character-fact-history-title" },
+    { className: "anw-character-fact-history", "aria-labelledby": props.titleId },
     h(
       "div",
       { className: "anw-character-subsection-heading" },
-      h("div", null, h("h4", { id: "anw-character-fact-history-title" }, "全部事实"), h("p", null, "历史、失效与已撤销事实保留用于审计，不会混入当前状态。")),
+      h("div", null, h("h4", { id: props.titleId, tabIndex: -1 }, "全部事实"), h("p", null, "历史、失效与已撤销事实保留用于审计，不会混入当前状态。")),
       h(
         "div",
         { className: "anw-character-fact-filters" },
@@ -89,10 +91,10 @@ export function renderCharacterFactHistory(
               h(
                 "div",
                 { className: "anw-character-row-actions" },
-                fact.source ? h("button", { type: "button", onClick: () => props.onOpenSource(fact) }, "来源") : null,
-                fact.effective_state === "current" ? h("button", { type: "button", onClick: () => props.onCorrectFact(fact) }, "修正") : null,
+                fact.source ? h("button", { type: "button", onClick: (event: ButtonEvent) => props.onOpenSource(fact, event.currentTarget) }, "来源") : null,
+                fact.effective_state === "current" ? h("button", { type: "button", onClick: (event: ButtonEvent) => props.onCorrectFact(fact, event.currentTarget) }, "修正") : null,
                 fact.source?.commit_batch_id && fact.effective_state !== "batch_reverted"
-                  ? h("button", { type: "button", onClick: () => props.onPreviewBatchRevert(fact) }, "撤销同步")
+                  ? h("button", { type: "button", onClick: (event: ButtonEvent) => props.onPreviewBatchRevert(fact, event.currentTarget) }, "撤销同步")
                   : null,
               ),
             )),
