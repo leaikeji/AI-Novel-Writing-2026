@@ -1565,6 +1565,23 @@ def test_product_reload_force_recreates_qwenpaw_then_waits_for_health(
     ]
 
 
+def test_compose_default_topology_orders_database_tts_and_qwenpaw() -> None:
+    source = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "profiles:" not in source
+    qwenpaw = source.split("  qwenpaw:\n", 1)[1].split("\n  postgres:\n", 1)[0]
+    assert "    depends_on:\n" in qwenpaw
+    assert "      postgres:\n        condition: service_healthy\n" in qwenpaw
+    assert "      tts-sidecar:\n        condition: service_healthy\n" in qwenpaw
+    assert qwenpaw.count("        restart: true\n") == 2
+    for volume_name in ("qwenpaw-data", "qwenpaw-secrets", "qwenpaw-backups"):
+        assert (
+            f"  {volume_name}:\n"
+            f"    name: ai-novel-2026-{volume_name}\n"
+            "    external: true\n"
+        ) in source
+
+
 def test_technical_only_reload_recreates_with_product_still_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
