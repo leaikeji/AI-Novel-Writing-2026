@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 import re
 from types import MappingProxyType
-from typing import Final, Mapping
+from typing import Final, Mapping, Protocol
 
 from .official_presets import (
     OFFICIAL_PRESET_MANIFEST_PATH,
@@ -371,6 +371,32 @@ class CharacterVoiceMatch:
     baseline_sha256: str
 
 
+class VoiceBriefAxes(Protocol):
+    """Structural voice axes shared by character and narrator briefs.
+
+    Parsers remain responsible for their own evidence allowlists.  The scorer
+    deliberately consumes only the frozen acoustic axes so the whole-book
+    solver can reuse the official baseline without weakening either parser.
+    """
+
+    language: CharacterVoiceLanguage | None
+    presentation: CharacterVoicePresentation | None
+    pitch: int | None
+    pace: int | None
+    energy: int | None
+    texture: CharacterVoiceTexture | None
+
+
+@dataclass(frozen=True, slots=True)
+class OfficialVoiceCandidateScore:
+    """One manifest-ordered candidate score for a validated voice brief."""
+
+    preset_id: str
+    score_milli: int
+    compared_dimensions: tuple[str, ...]
+    baseline_sha256: str
+
+
 def _exact_keys(value: object, expected: frozenset[str], *, field_name: str) -> dict:
     if type(value) is not dict or set(value) != expected:
         raise _invalid_baseline(f"{field_name} fields changed")
@@ -594,15 +620,9 @@ def _axis_similarity(requested: int, actual: int) -> int:
     return max(0, 1000 - 250 * abs(requested - actual))
 
 
-def match_official_voice(
-    brief: CharacterVoiceBrief,
-    *,
-    baseline: OfficialVoiceCastingBaseline | None = None,
-) -> CharacterVoiceMatch:
-    """Choose one preset with fixed weights and manifest-order tie breaking."""
-
-    if type(brief) is not CharacterVoiceBrief:
-        raise _invalid_brief("brief must be a validated CharacterVoiceBrief")
+def _validated_scoring_baseline(
+    baseline: OfficialVoiceCastingBaseline | None,
+) -> OfficialVoiceCastingBaseline:
     catalog = baseline or load_official_voice_casting_baseline()
     if type(catalog) is not OfficialVoiceCastingBaseline:
         raise _invalid_baseline("baseline must be validated before scoring")
@@ -611,11 +631,62 @@ def match_official_voice(
     ):
         raise _invalid_baseline("scoring baseline must retain all 18 manifest rows")
     _sha(catalog.file_sha256, field_name="baseline file")
+    return catalog
 
+
+def _validate_voice_brief_axes(brief: VoiceBriefAxes) -> None:
+    if any(
+        not hasattr(brief, field_name)
+        for field_name in (
+            "language",
+            "presentation",
+            "pitch",
+            "pace",
+            "energy",
+            "texture",
+        )
+    ):
+        raise _invalid_brief("voice brief acoustic axes changed")
+    language = getattr(brief, "language", None)
+    presentation = getattr(brief, "presentation", None)
+    texture = getattr(brief, "texture", None)
+    if language is not None and type(language) is not CharacterVoiceLanguage:
+        raise _invalid_brief("language must use the frozen enum")
+    if presentation is not None and type(
+        presentation
+    ) is not CharacterVoicePresentation:
+        raise _invalid_brief("presentation must use the frozen enum")
+    if texture is not None and type(texture) is not CharacterVoiceTexture:
+        raise _invalid_brief("texture must use the frozen enum")
+    for field_name in ("pitch", "pace", "energy"):
+        _brief_axis(getattr(brief, field_name), field_name=field_name)
+
+
+def score_official_voice_candidates(
+    brief: VoiceBriefAxes,
+    *,
+    effective_language: CharacterVoiceLanguage | None = None,
+    baseline: OfficialVoiceCastingBaseline | None = None,
+) -> tuple[OfficialVoiceCandidateScore, ...]:
+    """Score every same-language official preset in manifest order.
+
+    ``effective_language`` is only a fallback for an unknown brief language;
+    it cannot override explicit model evidence.  The existing one-character
+    matcher calls this without a fallback and therefore retains its historical
+    all-language behavior when ``brief.language`` is unknown.
+    """
+
+    _validate_voice_brief_axes(brief)
+    if effective_language is not None and type(
+        effective_language
+    ) is not CharacterVoiceLanguage:
+        raise _invalid_brief("effective language must use the frozen enum")
+    catalog = _validated_scoring_baseline(baseline)
+    language = brief.language if brief.language is not None else effective_language
     candidates = tuple(
         item
         for item in catalog.items
-        if brief.language is None or item.language is brief.language
+        if language is None or item.language is language
     )
     if not candidates:
         raise CharacterVoiceMatchingError(
@@ -631,12 +702,11 @@ def match_official_voice(
     if not compared:
         raise CharacterVoiceMatchingError(
             CHARACTER_VOICE_NO_CANDIDATE,
-            "character voice brief has no scoreable dimension",
+            "voice brief has no scoreable dimension",
         )
 
-    best: OfficialVoiceAcousticProfile | None = None
-    best_score = -1
     weight_total = sum(_DIMENSION_WEIGHTS[field_name] for field_name in compared)
+    scored: list[OfficialVoiceCandidateScore] = []
     for candidate in candidates:
         weighted = 0
         for field_name in compared:
@@ -651,19 +721,62 @@ def match_official_voice(
                 similarity = 1000 if requested is actual else 0
             weighted += weight * similarity
         score = (weighted + weight_total // 2) // weight_total
-        if score > best_score:
-            best = candidate
-            best_score = score
+        scored.append(
+            OfficialVoiceCandidateScore(
+                preset_id=candidate.preset_id,
+                score_milli=score,
+                compared_dimensions=compared,
+                baseline_sha256=catalog.file_sha256,
+            )
+        )
+    return tuple(scored)
 
-    if best is None:
+
+def official_voice_acoustic_distance_milli(
+    first: OfficialVoiceAcousticProfile,
+    second: OfficialVoiceAcousticProfile,
+) -> int:
+    """Return a deterministic 0..1000 distance over the frozen voice axes."""
+
+    if type(first) is not OfficialVoiceAcousticProfile or type(
+        second
+    ) is not OfficialVoiceAcousticProfile:
+        raise _invalid_baseline("acoustic distance requires validated profiles")
+    similarities = (
+        _DIMENSION_WEIGHTS["presentation"]
+        * _presentation_similarity(first.presentation, second.presentation),
+        _DIMENSION_WEIGHTS["pitch"] * _axis_similarity(first.pitch, second.pitch),
+        _DIMENSION_WEIGHTS["pace"] * _axis_similarity(first.pace, second.pace),
+        _DIMENSION_WEIGHTS["energy"]
+        * _axis_similarity(first.energy, second.energy),
+        _DIMENSION_WEIGHTS["texture"]
+        * (1000 if first.texture is second.texture else 0),
+    )
+    weight_total = sum(_DIMENSION_WEIGHTS.values())
+    similarity = (sum(similarities) + weight_total // 2) // weight_total
+    return 1000 - similarity
+
+
+def match_official_voice(
+    brief: CharacterVoiceBrief,
+    *,
+    baseline: OfficialVoiceCastingBaseline | None = None,
+) -> CharacterVoiceMatch:
+    """Choose one preset with fixed weights and manifest-order tie breaking."""
+
+    if type(brief) is not CharacterVoiceBrief:
+        raise _invalid_brief("brief must be a validated CharacterVoiceBrief")
+    scored = score_official_voice_candidates(brief, baseline=baseline)
+    if not scored:
         raise CharacterVoiceMatchingError(
             CHARACTER_VOICE_NO_CANDIDATE, "no official voice candidate was scored"
         )
+    best = max(scored, key=lambda candidate: candidate.score_milli)
     return CharacterVoiceMatch(
         selected_preset_id=best.preset_id,
-        score_milli=best_score,
-        compared_dimensions=compared,
-        baseline_sha256=catalog.file_sha256,
+        score_milli=best.score_milli,
+        compared_dimensions=best.compared_dimensions,
+        baseline_sha256=best.baseline_sha256,
     )
 
 
@@ -682,10 +795,14 @@ __all__ = [
     "CharacterVoiceMatchingError",
     "CharacterVoicePresentation",
     "CharacterVoiceTexture",
+    "VoiceBriefAxes",
+    "OfficialVoiceCandidateScore",
     "OfficialVoiceAcousticProfile",
     "OfficialVoiceCastingBaseline",
     "canonical_sha256",
     "load_official_voice_casting_baseline",
     "match_official_voice",
+    "official_voice_acoustic_distance_milli",
     "parse_character_voice_brief",
+    "score_official_voice_candidates",
 ]

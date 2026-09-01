@@ -829,6 +829,17 @@ function isAbort(reason: unknown): boolean {
 }
 
 
+function isTransientEditionProjectionMismatch(reason: unknown): boolean {
+  if (
+    !(reason instanceof ChapterNarrationSessionError)
+    || reason.code !== "CONTRACT_MISMATCH"
+  ) return false;
+  return /^(?:edition\.(?:state|current_manifest_revision|pending_segment_count|queued_segment_count|rendering_segment_count|ready_segment_count|failed_segment_count)|edition_history\.ready_segment_count) does not match/u.test(
+    reason.message,
+  );
+}
+
+
 function validatePollOptions(options: ChapterNarrationSessionOptions): {
   schedule: readonly number[];
   timeout: number;
@@ -953,14 +964,52 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
       mappedSegmentIds: Object.freeze([]),
     });
     try {
-      const result = await loadBundleWithDependencies({
-        novelId: this.options.novelId,
-        documentId: this.options.documentId,
-        generation: this.options.generation,
-        activeEditionId,
-        signal: controller.signal,
-        isGenerationCurrent: this.options.isGenerationCurrent,
-      }, this.dependencies);
+      const consistencyStartedAt = this.dependencies.now();
+      let consistencyAttempts = 0;
+      let result: ChapterNarrationBundleLoadResult;
+      while (true) {
+        if (
+          consistencyAttempts > 0
+          && this.dependencies.now() - consistencyStartedAt >= this.pollTimeoutMs
+        ) {
+          throw new ChapterNarrationSessionError(
+            "CONTRACT_MISMATCH",
+            "edition projection did not converge before the load deadline",
+          );
+        }
+        consistencyAttempts += 1;
+        try {
+          result = await loadBundleWithDependencies({
+            novelId: this.options.novelId,
+            documentId: this.options.documentId,
+            generation: this.options.generation,
+            activeEditionId,
+            signal: controller.signal,
+            isGenerationCurrent: this.options.isGenerationCurrent,
+          }, this.dependencies);
+          break;
+        } catch (reason) {
+          if (
+            !isTransientEditionProjectionMismatch(reason)
+            || consistencyAttempts >= this.maxPollAttempts
+          ) {
+            throw reason;
+          }
+          const delayMs = this.pollSchedule[
+            Math.min(consistencyAttempts - 1, this.pollSchedule.length - 1)
+          ];
+          if (
+            this.dependencies.now() - consistencyStartedAt + delayMs
+            >= this.pollTimeoutMs
+          ) {
+            throw reason;
+          }
+          await awaitWithAbort(
+            this.dependencies.delay(delayMs, controller.signal),
+            controller.signal,
+          );
+        }
+      }
       if (!this.isLoadCurrent(sequence, controller)) throw abortError("load superseded");
       if (result.status === "no-edition") {
         this.loadAbort = null;

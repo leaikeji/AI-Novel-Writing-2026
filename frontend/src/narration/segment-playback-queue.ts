@@ -26,7 +26,7 @@ export function playbackLeasesEqual(
 }
 
 
-export type SegmentPlaybackBackendKind = "web-audio" | "dual-audio";
+export type SegmentPlaybackBackendKind = "media-element";
 
 
 export type SegmentPlaybackFailureCode =
@@ -194,8 +194,7 @@ type MediaFetcher = typeof fetchPlaybackMedia;
 export interface SegmentPlaybackQueueOptions {
   readonly prefetchSegments?: number;
   readonly fetchMedia?: MediaFetcher;
-  readonly createWebAudioDriver?: () => SegmentPlaybackDriver | null;
-  readonly createDualAudioDriver?: () => SegmentPlaybackDriver | null;
+  readonly createMediaElementDriver?: () => SegmentPlaybackDriver | null;
   readonly isLeaseCurrent?: (lease: PlaybackLease) => boolean;
   readonly onEvent?: (event: SegmentPlaybackQueueEvent) => void;
 }
@@ -352,164 +351,38 @@ interface ActiveOperation {
 }
 
 
-interface WebAudioPreparedHandle {
-  readonly buffer: AudioBuffer;
-}
-
-
-class WebAudioPlaybackDriver implements SegmentPlaybackDriver {
-  readonly kind = "web-audio" as const;
-  private readonly gain: GainNode;
-  private currentSource: AudioBufferSourceNode | null = null;
-  private rate = 1;
-  private volume = 1;
-  private currentOffsetMs = 0;
-  private currentStartedAt = 0;
-  private currentDurationMs = 0;
-
-  constructor(private readonly context: AudioContext) {
-    this.gain = context.createGain();
-    this.gain.gain.value = this.volume;
-    this.gain.connect(context.destination);
-  }
-
-  async prepare(
-    segment: ManifestSegmentV2,
-    bytes: ArrayBuffer,
-    _slot: 0 | 1,
-    signal: AbortSignal,
-  ): Promise<PreparedPlaybackSegment> {
-    throwIfAborted(signal);
-    try {
-      const buffer = await this.context.decodeAudioData(bytes.slice(0));
-      throwIfAborted(signal);
-      return Object.freeze({
-        segmentId: segment.segment_id,
-        ordinal: segment.ordinal,
-        handle: Object.freeze({ buffer } satisfies WebAudioPreparedHandle),
-      });
-    } catch (reason) {
-      if (isAbortError(reason) || signal.aborted) throw abortError();
-      throw new PlaybackBackendCompatibilityError("Web Audio could not decode the playback asset");
-    }
-  }
-
-  async play(
-    prepared: PreparedPlaybackSegment,
-    rate: number,
-    startOffsetMs: number,
-    signal: AbortSignal,
-  ): Promise<void> {
-    throwIfAborted(signal);
-    const handle = prepared.handle as WebAudioPreparedHandle;
-    const durationMs = Math.round(handle.buffer.duration * 1_000);
-    if (!Number.isSafeInteger(startOffsetMs) || startOffsetMs < 0 || startOffsetMs > durationMs) {
-      throw new PlaybackQueueError(failure("INVALID_PLAYBACK_RANGE", "恢复位置超出句段音频边界。", false));
-    }
-    await this.context.resume();
-    throwIfAborted(signal);
-    await new Promise<void>((resolve, reject) => {
-      const source = this.context.createBufferSource();
-      this.currentSource = source;
-      this.currentOffsetMs = startOffsetMs;
-      this.currentStartedAt = this.context.currentTime;
-      this.currentDurationMs = durationMs;
-      source.buffer = handle.buffer;
-      source.playbackRate.value = boundedRate(rate);
-      source.connect(this.gain);
-      let settled = false;
-      const settle = (callback: () => void) => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener("abort", onAbort);
-        if (this.currentSource === source) {
-          this.currentOffsetMs = Math.min(this.currentDurationMs, this.readOffsetMs());
-          this.currentSource = null;
-        }
-        callback();
-      };
-      const onAbort = () => {
-        try { source.stop(); } catch { /* already stopped */ }
-        settle(() => reject(abortError()));
-      };
-      source.onended = () => settle(resolve);
-      signal.addEventListener("abort", onAbort, { once: true });
-      try {
-        source.start(this.context.currentTime, startOffsetMs / 1_000);
-      } catch {
-        settle(() => reject(new PlaybackQueueError(
-          failure("PLAYBACK_FAILED", "Web Audio 无法启动句段播放。", true),
-        )));
-      }
-    });
-  }
-
-  release(_prepared: PreparedPlaybackSegment): void {}
-
-  readOffsetMs(): number {
-    if (!this.currentSource) return this.currentOffsetMs;
-    const elapsedMs = (this.context.currentTime - this.currentStartedAt) * 1_000 * this.rate;
-    return Math.max(0, Math.min(this.currentDurationMs, Math.round(this.currentOffsetMs + elapsedMs)));
-  }
-
-  pause(): void {
-    void this.context.suspend().catch(() => undefined);
-  }
-
-  async resume(): Promise<void> {
-    await this.context.resume();
-  }
-
-  setRate(rate: number): void {
-    if (this.currentSource) {
-      this.currentOffsetMs = this.readOffsetMs();
-      this.currentStartedAt = this.context.currentTime;
-    }
-    this.rate = boundedRate(rate);
-    if (this.currentSource) {
-      this.currentSource.playbackRate.setValueAtTime(this.rate, this.context.currentTime);
-    }
-  }
-
-  setVolume(volume: number): void {
-    this.volume = boundedVolume(volume);
-    this.gain.gain.setValueAtTime(this.volume, this.context.currentTime);
-  }
-
-  stop(): void {
-    const source = this.currentSource;
-    if (source) this.currentOffsetMs = this.readOffsetMs();
-    this.currentSource = null;
-    if (source) {
-      try { source.stop(); } catch { /* already stopped */ }
-    }
-  }
-
-  dispose(): void {
-    this.stop();
-    this.gain.disconnect();
-    void this.context.close().catch(() => undefined);
-  }
-}
-
-
-interface DualAudioSlot {
+interface MediaElementSlot {
   readonly element: HTMLAudioElement;
   prepared: PreparedPlaybackSegment | null;
   objectUrl: string | null;
 }
 
 
-interface DualAudioPreparedHandle {
+interface MediaElementPreparedHandle {
   readonly slot: 0 | 1;
   readonly element: HTMLAudioElement;
   readonly objectUrl: string;
 }
 
 
-class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
-  readonly kind = "dual-audio" as const;
-  private readonly slots: readonly [DualAudioSlot, DualAudioSlot];
+function requirePitchPreservation(element: HTMLAudioElement): void {
+  if (!("preservesPitch" in element)) {
+    throw new PlaybackBackendCompatibilityError("standard preservesPitch is unavailable");
+  }
+  try {
+    element.preservesPitch = true;
+  } catch {
+    throw new PlaybackBackendCompatibilityError("standard preservesPitch cannot be enabled");
+  }
+  if (element.preservesPitch !== true) {
+    throw new PlaybackBackendCompatibilityError("standard preservesPitch did not remain enabled");
+  }
+}
+
+
+class MediaElementPlaybackDriver implements SegmentPlaybackDriver {
+  readonly kind = "media-element" as const;
+  private readonly slots: readonly [MediaElementSlot, MediaElementSlot];
   private current: HTMLAudioElement | null = null;
   private rate = 1;
   private volume = 1;
@@ -519,10 +392,11 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
 
   constructor(elements: readonly [HTMLAudioElement, HTMLAudioElement]) {
     this.slots = elements.map((element) => {
+      requirePitchPreservation(element);
       element.preload = "auto";
       element.volume = this.volume;
       return { element, prepared: null, objectUrl: null };
-    }) as unknown as readonly [DualAudioSlot, DualAudioSlot];
+    }) as unknown as readonly [MediaElementSlot, MediaElementSlot];
   }
 
   async prepare(
@@ -542,14 +416,17 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
         slot: slotIndex,
         element: slot.element,
         objectUrl,
-      } satisfies DualAudioPreparedHandle),
+      } satisfies MediaElementPreparedHandle),
     });
     slot.objectUrl = objectUrl;
     slot.prepared = prepared;
     slot.element.pause();
     slot.element.src = objectUrl;
+    requirePitchPreservation(slot.element);
+    slot.element.playbackRate = this.rate;
     slot.element.volume = this.volume;
     slot.element.load();
+    requirePitchPreservation(slot.element);
     return prepared;
   }
 
@@ -560,10 +437,10 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
     signal: AbortSignal,
   ): Promise<void> {
     throwIfAborted(signal);
-    const handle = prepared.handle as DualAudioPreparedHandle;
+    const handle = prepared.handle as MediaElementPreparedHandle;
     const element = handle.element;
     if (element.src !== handle.objectUrl && !element.src.endsWith(handle.objectUrl)) {
-      throw new PlaybackQueueError(failure("PLAYBACK_FAILED", "双 audio 预加载槽位已失效。", true));
+      throw new PlaybackQueueError(failure("PLAYBACK_FAILED", "媒体元素预加载槽位已失效。", true));
     }
     await this.waitForMetadata(element, signal);
     throwIfAborted(signal);
@@ -577,12 +454,13 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
     ) {
       throw new PlaybackQueueError(failure(
         "INVALID_PLAYBACK_RANGE",
-        "恢复位置超出双 audio 的实际音频边界。",
+        "恢复位置超出媒体元素的实际音频边界。",
         false,
       ));
     }
     this.current = element;
     this.playbackStarted = false;
+    requirePitchPreservation(element);
     element.playbackRate = boundedRate(rate);
     element.volume = this.volume;
     element.currentTime = startOffsetMs / 1_000;
@@ -605,7 +483,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
       };
       const onEnded = () => settle(resolve);
       const onError = () => settle(() => reject(new PlaybackQueueError(
-        failure("PLAYBACK_FAILED", "双 audio 回退无法播放句段音频。", true),
+        failure("PLAYBACK_FAILED", "媒体元素无法播放句段音频。", true),
       )));
       const onAbort = () => {
         element.pause();
@@ -654,10 +532,10 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
       return Number.isFinite(element.duration)
         ? Promise.resolve()
         : Promise.reject(new PlaybackQueueError(failure(
-            "MEDIA_DECODE_FAILED",
-            "双 audio 未提供有效的音频时长。",
-            false,
-          )));
+          "MEDIA_DECODE_FAILED",
+          "媒体元素未提供有效的音频时长。",
+          false,
+        )));
     }
     return new Promise<void>((resolve, reject) => {
       const cleanup = () => {
@@ -670,7 +548,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
         if (!Number.isFinite(element.duration)) {
           reject(new PlaybackQueueError(failure(
             "MEDIA_DECODE_FAILED",
-            "双 audio 未提供有效的音频时长。",
+            "媒体元素未提供有效的音频时长。",
             false,
           )));
           return;
@@ -681,7 +559,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
         cleanup();
         reject(new PlaybackQueueError(failure(
           "MEDIA_DECODE_FAILED",
-          "双 audio 无法读取音频元数据。",
+          "媒体元素无法读取音频元数据。",
           true,
         )));
       };
@@ -700,7 +578,7 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
   }
 
   release(prepared: PreparedPlaybackSegment): void {
-    const handle = prepared.handle as DualAudioPreparedHandle;
+    const handle = prepared.handle as MediaElementPreparedHandle;
     const slot = this.slots[handle.slot];
     if (slot.prepared !== prepared) return;
     slot.prepared = null;
@@ -724,12 +602,18 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
     if (!this.paused) return;
     this.paused = false;
     for (const resolve of [...this.resumeWaiters]) resolve();
-    if (this.current && this.playbackStarted) await this.current.play();
+    if (this.current && this.playbackStarted) {
+      requirePitchPreservation(this.current);
+      await this.current.play();
+    }
   }
 
   setRate(rate: number): void {
     this.rate = boundedRate(rate);
-    for (const slot of this.slots) slot.element.playbackRate = this.rate;
+    for (const slot of this.slots) {
+      requirePitchPreservation(slot.element);
+      slot.element.playbackRate = this.rate;
+    }
   }
 
   setVolume(volume: number): void {
@@ -758,41 +642,31 @@ class DualAudioPlaybackDriver implements SegmentPlaybackDriver {
 }
 
 
-export function createWebAudioPlaybackDriver(): SegmentPlaybackDriver | null {
-  const scope = globalThis as unknown as {
-    AudioContext?: new () => AudioContext;
-    webkitAudioContext?: new () => AudioContext;
-  };
-  const Context = scope.AudioContext ?? scope.webkitAudioContext;
-  if (!Context) return null;
+export function createMediaElementPlaybackDriver(): SegmentPlaybackDriver | null {
+  if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
+  const elements = [
+    document.createElement("audio"),
+    document.createElement("audio"),
+  ] as const;
   try {
-    return new WebAudioPlaybackDriver(new Context());
+    return new MediaElementPlaybackDriver(elements);
   } catch {
+    for (const element of elements) element.pause();
     return null;
   }
 }
 
 
-export function createDualAudioPlaybackDriver(): SegmentPlaybackDriver | null {
-  if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
-  return new DualAudioPlaybackDriver([
-    document.createElement("audio"),
-    document.createElement("audio"),
-  ]);
-}
-
-
 /**
- * Fetches 3-5 contiguous ready segment assets, prefers one Web Audio clock,
- * and uses exactly two HTMLAudioElements as the only compatibility fallback.
+ * Fetches 3-5 contiguous ready segment assets and uses exactly two
+ * pitch-preserving HTMLAudioElements as the sole product playback backend.
  * It deliberately stops at the first non-ready segment instead of searching
  * for a later ready island.
  */
 export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
   private readonly prefetchSegments: number;
   private readonly fetchMedia: MediaFetcher;
-  private readonly createWebAudioDriver: () => SegmentPlaybackDriver | null;
-  private readonly createDualAudioDriver: () => SegmentPlaybackDriver | null;
+  private readonly createMediaElementDriver: () => SegmentPlaybackDriver | null;
   private readonly isLeaseCurrent: (lease: PlaybackLease) => boolean;
   private readonly onEvent: (event: SegmentPlaybackQueueEvent) => void;
   private active: ActiveOperation | null = null;
@@ -805,8 +679,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
     }
     this.prefetchSegments = prefetchSegments;
     this.fetchMedia = options.fetchMedia ?? fetchPlaybackMedia;
-    this.createWebAudioDriver = options.createWebAudioDriver ?? createWebAudioPlaybackDriver;
-    this.createDualAudioDriver = options.createDualAudioDriver ?? createDualAudioPlaybackDriver;
+    this.createMediaElementDriver = options.createMediaElementDriver ?? createMediaElementPlaybackDriver;
     this.isLeaseCurrent = options.isLeaseCurrent ?? (() => true);
     this.onEvent = options.onEvent ?? (() => undefined);
   }
@@ -976,38 +849,12 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
   }
 
   private selectInitialDriver(): SegmentPlaybackDriver {
-    const preferred = this.createWebAudioDriver();
-    if (preferred) {
-      if (preferred.kind !== "web-audio") {
-        preferred.dispose();
-        throw new PlaybackBackendCompatibilityError("preferred driver must be Web Audio");
-      }
-      return preferred;
+    const driver = this.createMediaElementDriver();
+    if (!driver || driver.kind !== "media-element") {
+      driver?.dispose();
+      throw new PlaybackBackendCompatibilityError("pitch-preserving media elements are unavailable");
     }
-    const fallback = this.createDualAudioDriver();
-    if (!fallback || fallback.kind !== "dual-audio") {
-      fallback?.dispose();
-      throw new PlaybackBackendCompatibilityError("neither Web Audio nor dual audio is available");
-    }
-    return fallback;
-  }
-
-  private switchToDualAudio(operation: ActiveOperation): void {
-    const previous = operation.driver;
-    if (previous?.kind === "dual-audio") throw new PlaybackBackendCompatibilityError("dual audio is unavailable");
-    for (const prepared of operation.prepared.values()) previous?.release(prepared);
-    operation.prepared.clear();
-    previous?.dispose();
-    const fallback = this.createDualAudioDriver();
-    if (!fallback || fallback.kind !== "dual-audio") {
-      fallback?.dispose();
-      operation.driver = null;
-      throw new PlaybackBackendCompatibilityError("dual audio is unavailable");
-    }
-    operation.driver = fallback;
-    fallback.setRate(operation.rate);
-    fallback.setVolume(operation.volume);
-    if (operation.paused) fallback.pause();
+    return driver;
   }
 
   private kickMediaPrefetch(operation: ActiveOperation, fromOrdinal: number): void {
@@ -1082,8 +929,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
     this.kickMediaPrefetch(operation, fromOrdinal);
     const driver = operation.driver;
     if (!driver) throw new PlaybackBackendCompatibilityError("playback driver is unavailable");
-    const prepareCount = driver.kind === "web-audio" ? this.prefetchSegments : 2;
-    const limit = Math.min(operation.endOrdinalExclusive, fromOrdinal + prepareCount);
+    const limit = Math.min(operation.endOrdinalExclusive, fromOrdinal + 2);
     for (let ordinal = fromOrdinal; ordinal < limit; ordinal += 1) {
       const segment = operation.manifest.segments[ordinal];
       if (segment.render_status !== "ready" || !segment.audio) break;
@@ -1092,23 +938,14 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
       this.assertCurrent(operation);
       if (!media) throw new PlaybackQueueError(failure("MEDIA_FETCH_FAILED", "句段预取未启动。", true, segment));
       if (!media.ok) throw media.error;
-      try {
-        const prepared = await driver.prepare(
-          segment,
-          media.bytes,
-          (ordinal % 2) as 0 | 1,
-          operation.controller.signal,
-        );
-        this.assertCurrent(operation);
-        operation.prepared.set(ordinal, prepared);
-      } catch (reason) {
-        if (reason instanceof PlaybackBackendCompatibilityError && driver.kind === "web-audio") {
-          this.switchToDualAudio(operation);
-          await this.prepareWindow(operation, fromOrdinal);
-          return;
-        }
-        throw reason;
-      }
+      const prepared = await driver.prepare(
+        segment,
+        media.bytes,
+        (ordinal % 2) as 0 | 1,
+        operation.controller.signal,
+      );
+      this.assertCurrent(operation);
+      operation.prepared.set(ordinal, prepared);
     }
   }
 
@@ -1134,7 +971,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
     segment: ManifestSegmentV2,
   ): SegmentPlaybackQueueStartResult {
     const currentFailure = blockingFailure(segment);
-    const backend = operation.driver?.kind ?? "dual-audio";
+    const backend = operation.driver?.kind ?? "media-element";
     const event: SegmentPlaybackQueueEvent = {
       type: "blocked",
       lease: operation.lease,

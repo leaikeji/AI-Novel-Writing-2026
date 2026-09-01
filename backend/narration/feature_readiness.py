@@ -78,6 +78,7 @@ STABLE_REASON_CODES: Final[frozenset[str]] = frozenset(
 
 MANAGED_CAPABILITY_KEYS: Final[tuple[wire.CapabilityKey, ...]] = (
     wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
+    wire.CapabilityKey.CHARACTER_CAST_PLANNING,
     wire.CapabilityKey.NANO_ADVANCED_TUNING,
     wire.CapabilityKey.PRIVATE_VOICE_DELETION,
     wire.CapabilityKey.VOICE_GENERATOR,
@@ -110,12 +111,14 @@ class NarrationFeatureDependencies:
     """
 
     schema_ready: bool = False
+    character_cast_schema_ready: bool = False
     voice_generator_schema_ready: bool = False
     character_workspace_ready: bool = False
     novel_agent_ready: bool = False
     official_preset_catalog_ready: bool = False
     official_casting_baseline_ready: bool = False
     official_binding_service_ready: bool = False
+    official_batch_binding_service_ready: bool = False
     storage_ready: bool = False
     digest_keyring_ready: bool = False
     sidecar_protocol_ready: bool = False
@@ -233,6 +236,14 @@ _DEPENDENCY_MATRIX: Final[
         ("official_preset_catalog_ready", TTS_PROCESSOR_UNAVAILABLE),
         ("official_casting_baseline_ready", TTS_PROCESSOR_UNAVAILABLE),
         ("official_binding_service_ready", TTS_PROCESSOR_UNAVAILABLE),
+    ),
+    wire.CapabilityKey.CHARACTER_CAST_PLANNING: (
+        ("character_cast_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
+        ("character_workspace_ready", TTS_CHARACTER_WORKSPACE_UNAVAILABLE),
+        ("novel_agent_ready", TTS_NOVEL_AGENT_UNAVAILABLE),
+        ("official_preset_catalog_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("official_casting_baseline_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("official_batch_binding_service_ready", TTS_PROCESSOR_UNAVAILABLE),
     ),
     wire.CapabilityKey.NANO_ADVANCED_TUNING: (
         ("schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),

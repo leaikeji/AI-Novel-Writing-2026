@@ -357,6 +357,32 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
     background: #f1fbf4;
   }
 
+  .anw-cache-panel__exact-capacity {
+    border: 1px solid var(--anw-line, #e7e9ee);
+    border-radius: 10px;
+    padding: 9px 11px;
+    color: var(--anw-muted, #737987);
+    font-size: 12px;
+  }
+
+  .anw-cache-panel__exact-capacity > summary {
+    cursor: pointer;
+    font-weight: 650;
+  }
+
+  .anw-cache-panel__exact-capacity dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px 14px;
+    margin: 10px 0 0;
+  }
+
+  .anw-cache-panel__exact-capacity dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
   .anw-cache-panel__preview {
     border-color: #f0c9b8;
     background: #fff9f5;
@@ -424,6 +450,7 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
     .anw-pronunciation-panel__preview-controls,
     .anw-pronunciation-panel__pauses dl,
     .anw-cache-panel__metrics,
+    .anw-cache-panel__exact-capacity dl,
     .anw-cache-panel__preview dl {
       grid-template-columns: minmax(0, 1fr);
     }

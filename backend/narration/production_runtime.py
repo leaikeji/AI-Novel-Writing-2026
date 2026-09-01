@@ -98,6 +98,7 @@ from .voice_product import (
     resolve_voice_preview_media,
 )
 from .schema_readiness import (
+    character_cast_schema_ready,
     database_revision_satisfies,
     narration_feature_schema_ready,
     voice_generator_schema_ready,
@@ -1010,6 +1011,7 @@ async def _run_worker_cycle(
     voice_generator_repository: SqlAlchemyVoiceGeneratorRepository | None = None,
     voice_generator_host: NativeVoiceGeneratorHostClient | None = None,
     feature_schema_ready: bool = False,
+    feature_character_cast_schema_ready: bool = False,
     feature_voice_generator_schema_ready: bool = False,
     deletion_reconciler_ready: bool = False,
 ) -> str:
@@ -1037,6 +1039,7 @@ async def _run_worker_cycle(
             voice_generator_repository,
             voice_generator_host,
             feature_schema_ready,
+            feature_character_cast_schema_ready,
             feature_voice_generator_schema_ready,
             deletion_reconciler_ready,
             cycle_stop,
@@ -1075,6 +1078,7 @@ async def _run_shared_nano_worker(
     voice_generator_repository: SqlAlchemyVoiceGeneratorRepository | None,
     voice_generator_host: NativeVoiceGeneratorHostClient | None,
     feature_schema_ready: bool,
+    feature_character_cast_schema_ready: bool,
     feature_voice_generator_schema_ready: bool,
     deletion_reconciler_ready: bool,
     stop_event: asyncio.Event,
@@ -1106,6 +1110,9 @@ async def _run_shared_nano_worker(
                 if host_ready is not last_voice_generator_ready:
                     _publish_feature_dependencies(
                         schema_ready=feature_schema_ready,
+                        character_cast_schema_is_ready=(
+                            feature_character_cast_schema_ready
+                        ),
                         deletion_reconciler_ready=deletion_reconciler_ready,
                         sidecar_ready=True,
                         nano_processor_ready=nano_experiment_processor is not None,
@@ -1267,6 +1274,7 @@ def _official_casting_baseline_ready() -> bool:
 def _publish_feature_dependencies(
     *,
     schema_ready: bool,
+    character_cast_schema_is_ready: bool = False,
     deletion_reconciler_ready: bool,
     sidecar_ready: bool,
     nano_processor_ready: bool,
@@ -1279,11 +1287,13 @@ def _publish_feature_dependencies(
     NARRATION_FEATURE_READINESS_PROVIDER.publish_dependencies(
         NarrationFeatureDependencies(
             schema_ready=schema_ready,
+            character_cast_schema_ready=character_cast_schema_is_ready,
             character_workspace_ready=True,
             novel_agent_ready=True,
             official_preset_catalog_ready=True,
             official_casting_baseline_ready=_official_casting_baseline_ready(),
             official_binding_service_ready=True,
+            official_batch_binding_service_ready=True,
             storage_ready=True,
             digest_keyring_ready=True,
             sidecar_protocol_ready=sidecar_ready,
@@ -1335,6 +1345,7 @@ async def _run_production(
     installed_reconciler: VoiceDeletionReconciler | None = None
     keyring_loaded = False
     feature_schema_ready = False
+    feature_character_cast_schema_ready = False
     feature_voice_generator_schema_ready = False
     try:
         validation_token_digest = (
@@ -1355,6 +1366,10 @@ async def _run_production(
         await asyncio.to_thread(_verify_database, engine)
         feature_schema_ready = await asyncio.to_thread(
             narration_feature_schema_ready,
+            engine,
+        )
+        feature_character_cast_schema_ready = await asyncio.to_thread(
+            character_cast_schema_ready,
             engine,
         )
         feature_voice_generator_schema_ready = await asyncio.to_thread(
@@ -1467,6 +1482,7 @@ async def _run_production(
                 _voice_deletion_reconciler = installed_reconciler
         _publish_feature_dependencies(
             schema_ready=feature_schema_ready,
+            character_cast_schema_is_ready=feature_character_cast_schema_ready,
             deletion_reconciler_ready=(
                 installed_reconciler is not None and installed_reconciler.healthy
             ),
@@ -1665,6 +1681,7 @@ async def _run_production(
                 _validation_runtime_scope = validation_scope
             _publish_feature_dependencies(
                 schema_ready=feature_schema_ready,
+                character_cast_schema_is_ready=feature_character_cast_schema_ready,
                 deletion_reconciler_ready=(
                     installed_reconciler is not None
                     and installed_reconciler.healthy
@@ -1703,6 +1720,9 @@ async def _run_production(
                     voice_generator_repository=voice_generator_repository,
                     voice_generator_host=voice_generator_host,
                     feature_schema_ready=feature_schema_ready,
+                    feature_character_cast_schema_ready=(
+                        feature_character_cast_schema_ready
+                    ),
                     feature_voice_generator_schema_ready=(
                         feature_voice_generator_schema_ready
                     ),
@@ -1716,6 +1736,9 @@ async def _run_production(
             if not stop_event.is_set():
                 _publish_feature_dependencies(
                     schema_ready=feature_schema_ready,
+                    character_cast_schema_is_ready=(
+                        feature_character_cast_schema_ready
+                    ),
                     deletion_reconciler_ready=(
                         installed_reconciler is not None
                         and installed_reconciler.healthy

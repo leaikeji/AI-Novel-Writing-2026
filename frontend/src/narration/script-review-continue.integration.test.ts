@@ -157,7 +157,7 @@ describe("continueApprovedScriptProduction", () => {
     expect(observed).toHaveBeenCalledTimes(4);
   });
 
-  it.each(["queued", "rendering", "partial_ready", "ready"] as const)(
+  it.each(["partial_ready", "ready"] as const)(
     "accepts %s only with a non-empty Edition from the same request",
     async (state) => {
       const deps = dependencies(async () => workflow(state, EDITION_ID));
@@ -168,6 +168,27 @@ describe("continueApprovedScriptProduction", () => {
         workflow: { workflow_state: state },
       });
       expect(deps.delay).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["queued", "rendering"] as const)(
+    "does not expose a transient %s Manifest as a playable Edition",
+    async (state) => {
+      const getWorkflow = vi.fn()
+        .mockResolvedValueOnce(workflow(state, EDITION_ID, {
+          current_manifest_revision: 1,
+        }))
+        .mockResolvedValueOnce(workflow("partial_ready", EDITION_ID, {
+          request_version: 4,
+          current_manifest_revision: 2,
+        }));
+      const deps = dependencies(getWorkflow);
+
+      await expect(continueApprovedScriptProduction(options(deps))).resolves.toMatchObject({
+        attempts: 2,
+        workflow: { workflow_state: "partial_ready", current_manifest_revision: 2 },
+      });
+      expect(deps.delay).toHaveBeenCalledOnce();
     },
   );
 

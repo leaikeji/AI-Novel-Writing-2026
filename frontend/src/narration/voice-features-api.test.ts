@@ -3,15 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyCharacterVoiceGeneratorCommand,
   applyNanoVoiceExperiment,
+  advanceCharacterCastPlan,
   cancelCharacterVoiceGeneratorCommand,
   cancelPrivateVoiceDeletionRequest,
   confirmPrivateVoiceDeletionRequest,
+  createCharacterCastPlan,
   createCharacterVoiceGeneratorCommand,
   createNanoVoiceExperiment,
   createPrivateVoiceDeletionRequest,
+  getCharacterCastPlan,
   getCharacterVoiceGeneratorCommand,
+  listCharacterCastPlans,
   listCharacterVoiceGeneratorCommands,
   matchCharacterOfficialVoice,
+  retryCharacterCastPlan,
   retryCharacterVoiceGeneratorCommand,
   retryPrivateVoiceDeletionRequest,
 } from "./api";
@@ -30,6 +35,8 @@ const COMMAND_ID = "10000000-0000-4000-8000-000000000006";
 const JOB_ID = "10000000-0000-4000-8000-000000000007";
 const REQUEST_ID = "10000000-0000-4000-8000-000000000008";
 const BINDING_ID = "10000000-0000-4000-8000-000000000009";
+const TIMELINE_ID = "10000000-0000-4000-8000-000000000010";
+const ITEM_ID = "10000000-0000-4000-8000-000000000011";
 const NOW = "2026-08-30T00:00:00Z";
 const SHA = "a".repeat(64);
 
@@ -160,6 +167,57 @@ function matchResource(novelId = NOVEL_ID) {
     selection_still_current: true,
     current_character_binding: binding(novelId),
     model_evidence: { schema_version: "model-execution-evidence/2" },
+  };
+}
+
+function castPlan(
+  novelId = NOVEL_ID,
+  commandId = COMMAND_ID,
+  timelineId = TIMELINE_ID,
+) {
+  return {
+    contract_version: "character-cast-plan/1",
+    command_id: commandId,
+    novel_id: novelId,
+    timeline_id: timelineId,
+    mode: "fill_and_deduplicate",
+    state: "reserved",
+    server_now: NOW,
+    progress_current: 0,
+    progress_total: 1,
+    terminal: false,
+    retryable: false,
+    current_target_key: null,
+    lease_expires_at: null,
+    assignments: [],
+    preserved: [],
+    warnings: [],
+    items: [{
+      item_id: ITEM_ID,
+      target: {
+        target_key: "narrator",
+        target_kind: "narrator",
+        character_id: null,
+        character_name: null,
+        role_type: null,
+      },
+      state: "pending",
+      attempt: 0,
+      workspace_digest: SHA,
+      lease_expires_at: null,
+      brief: null,
+      selected_preset_id: null,
+      score_milli: null,
+      profile_id: null,
+      version_id: null,
+      voice_action_command_id: null,
+      warning_code: null,
+      failure_code: null,
+    }],
+    failure_code: null,
+    created_at: NOW,
+    updated_at: NOW,
+    completed_at: null,
   };
 }
 
@@ -334,6 +392,73 @@ describe("Plan35 narration feature API", () => {
       },
       "character-match-0002",
     )).rejects.toThrow(/response scope mismatch/);
+  });
+
+  it("recovers one durable whole-book cast command and reserves idempotency for creation", async () => {
+    fetchMock.mockResolvedValueOnce(response({
+      contract_version: "character-cast-plan-list/1",
+      novel_id: NOVEL_ID,
+      server_now: NOW,
+      items: [castPlan()],
+    }));
+    await expect(listCharacterCastPlans(NOVEL_ID)).resolves.toMatchObject({
+      items: [{ command_id: COMMAND_ID }],
+    });
+
+    fetchMock.mockResolvedValueOnce(response(castPlan(), 202));
+    await createCharacterCastPlan(
+      NOVEL_ID,
+      {
+        contract_version: "character-cast-plan-request/1",
+        timeline_id: TIMELINE_ID,
+        mode: "fill_and_deduplicate",
+      },
+      "character-cast-plan-0001",
+    );
+    let [path, init] = fetchMock.mock.calls[1]!;
+    expect(path).toBe(`/ai-novel-world-2026/novels/${NOVEL_ID}/character-cast-plans`);
+    expect((init?.headers as Record<string, string>)["Idempotency-Key"])
+      .toBe("character-cast-plan-0001");
+
+    for (const operation of [
+      () => getCharacterCastPlan(NOVEL_ID, COMMAND_ID),
+      () => advanceCharacterCastPlan(NOVEL_ID, COMMAND_ID),
+      () => retryCharacterCastPlan(NOVEL_ID, COMMAND_ID),
+    ]) {
+      fetchMock.mockResolvedValueOnce(response(castPlan()));
+      await expect(operation()).resolves.toMatchObject({ command_id: COMMAND_ID });
+    }
+    for (const [, request] of fetchMock.mock.calls.slice(2)) {
+      expect((request?.headers as Record<string, string> | undefined)?.["Idempotency-Key"])
+        .toBeUndefined();
+    }
+    expect(fetchMock.mock.calls[2]![1]?.method).toBeUndefined();
+    expect(fetchMock.mock.calls[3]![1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[4]![1]?.method).toBe("POST");
+  });
+
+  it("rejects cast-list, command, and timeline scope drift", async () => {
+    fetchMock.mockResolvedValueOnce(response({
+      contract_version: "character-cast-plan-list/1",
+      novel_id: OTHER_NOVEL_ID,
+      server_now: NOW,
+      items: [],
+    }));
+    await expect(listCharacterCastPlans(NOVEL_ID)).rejects.toThrow(/scope mismatch/);
+
+    fetchMock.mockResolvedValueOnce(response(castPlan(OTHER_NOVEL_ID)));
+    await expect(getCharacterCastPlan(NOVEL_ID, COMMAND_ID)).rejects.toThrow(/scope mismatch/);
+
+    fetchMock.mockResolvedValueOnce(response(castPlan(NOVEL_ID, COMMAND_ID, CHARACTER_ID)));
+    await expect(createCharacterCastPlan(
+      NOVEL_ID,
+      {
+        contract_version: "character-cast-plan-request/1",
+        timeline_id: TIMELINE_ID,
+        mode: "fill_and_deduplicate",
+      },
+      "character-cast-plan-0002",
+    )).rejects.toThrow(/scope mismatch/);
   });
 
   it("closes every VoiceGenerator response to the requested public scope", async () => {

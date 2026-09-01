@@ -3,11 +3,12 @@ export const CHARACTER_VOICE_GENERATOR_STYLE_ID = "anw-character-voice-generator
 export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
 .anw-character-voice-generator {
   display: grid;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--ant-color-border-secondary, #e5e7eb);
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 18px;
+  padding: 17px 18px;
+  border: 1px solid color-mix(in srgb, #d76832 34%, transparent);
   border-radius: 14px;
-  background: var(--ant-color-bg-container, #fff);
+  background: linear-gradient(135deg, #fff8f3, #fffdfb);
   color: var(--ant-color-text, #111827);
 }
 
@@ -30,6 +31,7 @@ export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
 
 .anw-character-voice-generator__heading {
   display: flex;
+  grid-column: 1 / -1;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
@@ -66,12 +68,14 @@ export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
 }
 
 .anw-character-voice-generator__status {
+  grid-column: 1;
   font-weight: 650;
   line-height: 1.55;
 }
 
 .anw-character-voice-generator__detail,
 .anw-character-voice-generator__error {
+  grid-column: 1;
   color: var(--ant-color-text-secondary, #6b7280);
   font-size: 13px;
   line-height: 1.6;
@@ -83,6 +87,7 @@ export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
 
 .anw-character-voice-generator__progress {
   display: grid;
+  grid-column: 1;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
@@ -97,12 +102,15 @@ export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
 }
 
 .anw-character-voice-generator__primary {
-  min-height: 40px;
-  justify-self: start;
-  padding: 8px 16px;
-  border: 1px solid var(--ant-color-primary, #1677ff);
+  min-height: 44px;
+  grid-column: 2;
+  grid-row: 2 / span 2;
+  align-self: center;
+  justify-self: end;
+  padding: 9px 16px;
+  border: 1px solid #d76832;
   border-radius: 9px;
-  background: var(--ant-color-primary, #1677ff);
+  background: linear-gradient(135deg, #e26f3d, #cf5328);
   color: #fff;
   font: inherit;
   font-weight: 650;
@@ -114,7 +122,7 @@ export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
 }
 
 .anw-character-voice-generator__primary:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--ant-color-primary, #1677ff) 28%, transparent);
+  outline: 3px solid color-mix(in srgb, #d76832 34%, transparent);
   outline-offset: 2px;
 }
 
@@ -131,6 +139,7 @@ export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
 
 @media (max-width: 640px) {
   .anw-character-voice-generator {
+    grid-template-columns: minmax(0, 1fr);
     padding: 14px;
   }
 
@@ -143,6 +152,8 @@ export const CHARACTER_VOICE_GENERATOR_STYLES = String.raw`
   }
 
   .anw-character-voice-generator__primary {
+    grid-column: 1;
+    grid-row: auto;
     width: 100%;
     justify-self: stretch;
   }

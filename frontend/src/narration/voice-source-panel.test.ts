@@ -688,6 +688,18 @@ describe("T2-D voice source panel", () => {
       expect(serialized).not.toContain("上传参考录音");
       expect(serialized).not.toContain("文字描述生成");
       expect(serialized).toContain("aria-live");
+
+      const embeddedTree = VoiceSourcePanel({
+        embedded: true,
+        ariaLabelledBy: "outer-private-source-heading",
+        model,
+        selectedSource: null,
+        workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+        uploadRights: uploadInput().rights,
+      }) as FakeElement;
+      expect(embeddedTree.props["aria-labelledby"]).toBe("outer-private-source-heading");
+      expect(JSON.stringify(embeddedTree)).not.toContain("anw-narration-voice-source-title");
+      expect(JSON.stringify(embeddedTree)).not.toContain("官方音色请在上方音色库直接使用");
     } finally {
       if (descriptor === undefined) delete (globalThis as { window?: unknown }).window;
       else Object.defineProperty(globalThis, "window", descriptor);

@@ -308,7 +308,7 @@ function voiceSourceLabel(identity: NarrationEditionVoiceIdentity): string {
   // must not be presented as a VoiceGenerator-created character voice before
   // the separately gated VG pipeline exists and freezes a distinct identity.
   if (identity.source_type === "generated") return "高级调音";
-  return "Edition 冻结音色";
+  return "冻结声音";
 }
 
 
@@ -345,19 +345,23 @@ export function deriveChapterPlayerView(
     ? currentOrdinal + 1
     : null;
   const identities = voiceIdentityProjection(input.voiceIdentities);
+  const playbackPhase = input.playerState?.phase ?? "idle";
+  const playbackLabel = playbackPhase === "idle" && currentSentence !== null
+    ? `上次停在第 ${currentSentence} 段`
+    : PLAYBACK_LABELS[playbackPhase];
   const voiceSummary = input.voiceIdentities === undefined
     ? "音色身份待加载"
     : identities.length === 0
     ? "音色身份不可用"
     : identities.length === 1
     ? `${identities[0].displayName} · ${identities[0].sourceLabel}`
-    : `${identities.length} 个 Edition 冻结音色`;
+    : `${identities.length} 个冻结声音`;
 
   return Object.freeze({
     contentPhase: input.contentPhase,
     contentLabel: CONTENT_LABELS[input.contentPhase],
-    playbackPhase: input.playerState?.phase ?? "idle",
-    playbackLabel: PLAYBACK_LABELS[input.playerState?.phase ?? "idle"],
+    playbackPhase,
+    playbackLabel,
     sourceKind: input.sourceKind,
     sourceLabel: SOURCE_LABELS[input.sourceKind],
     generation,

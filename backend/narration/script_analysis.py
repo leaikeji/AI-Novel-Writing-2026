@@ -8,7 +8,7 @@ reimplement any of those components' decision rules.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -26,6 +26,7 @@ from ..models import (
     VoiceProfile,
     VoiceProfileVersion,
     VoiceRightsRecord,
+    NarrationScriptVersion,
 )
 
 from . import schemas as wire
@@ -49,7 +50,18 @@ from .contracts import (
     LOCAL_OWNER_ID,
     LOCAL_WORKSPACE_ID,
     NARRATION_REVIEW_TAXONOMY_VERSION,
+    SPEAKER_CORRECTION_ISSUE_CODES,
+    ConfidenceLevel,
     ReviewIssueSeverity,
+)
+from .confidence import (
+    InheritanceAuditStamp,
+    OverrideInheritanceAuthority,
+    OverrideInheritanceTarget,
+    decide_override_inheritance,
+    manual_override_source,
+    segment_anchor_uniqueness,
+    segment_inheritance_anchors,
 )
 from .expression import (
     ExpressionContext,
@@ -62,10 +74,16 @@ from .scenes import (
 )
 from .script_contracts import (
     NARRATION_SCRIPT_CONTRACT_VERSION,
+    AttributionEvidence,
+    AttributionOrigin,
+    CastingDecisionOrigin,
     NarrationScriptContract,
+    OverrideProvenance,
     ScriptIssueContract,
     ScriptReviewPolicy,
+    ScriptVersionState,
     SegmentContract,
+    SpeakerKind,
     initial_materialized_state,
     script_immutable_payload,
 )
@@ -74,10 +92,15 @@ from .script_versions import (
     SCRIPT_ANALYZER_VERSION,
     SCRIPT_RULES_FINGERPRINT,
     ReserveScriptIdentity,
+    ScriptVersionAllocation,
     freeze_script_version,
     load_script_contract,
     persist_script_contract,
     reserve_script_identity,
+)
+from .review_actions import (
+    inherited_analysis_action_identity,
+    persist_inherited_analysis_result,
 )
 from .segmentation import SourceFormat, segment_source
 from .services import (
@@ -507,6 +530,213 @@ def _canonical_issues(
     )
 
 
+def _latest_approved_manual_contract(
+    store: NarrationStore,
+    *,
+    script_id: UUID,
+    actor_id: str,
+) -> NarrationScriptContract | None:
+    approved = store.find_all(
+        NarrationScriptVersion,
+        script_id=script_id,
+        state="approved",
+        order_by=("version_number",),
+    )
+    if not approved:
+        return None
+    candidate = load_script_contract(store, approved[-1].id)
+    manual_segments = tuple(
+        segment
+        for segment in candidate.segments
+        if segment.manual_override
+        and segment.attribution.override_provenance is not None
+    )
+    if not manual_segments or any(
+        segment.attribution.override_provenance.owner_actor_id != actor_id
+        for segment in manual_segments
+        if segment.attribution.override_provenance is not None
+    ):
+        return None
+    return candidate
+
+
+def _inherit_manual_overrides(
+    store: NarrationStore,
+    *,
+    context: _AnalysisContext,
+    allocation: ScriptVersionAllocation,
+    contract: NarrationScriptContract,
+    source: NarrationScriptContract,
+    action_id: UUID,
+    actor_id: str,
+) -> tuple[NarrationScriptContract, frozenset[OverrideProvenance]] | None:
+    """Apply only v1-authorized exact overrides to a fresh local analysis."""
+
+    recorded_at = utc_now()
+    audit = InheritanceAuditStamp(
+        action_id=action_id,
+        owner_actor_id=actor_id,
+        recorded_at=recorded_at,
+    )
+    source_segments = tuple(
+        segment
+        for segment in source.segments
+        if segment.manual_override
+        and segment.attribution.override_provenance is not None
+    )
+    source_snapshots = tuple(
+        manual_override_source(source, segment) for segment in source_segments
+    )
+    authority = OverrideInheritanceAuthority(
+        novel_id=context.request.novel_id,
+        owner_actor_id=actor_id,
+        authorized_sources=frozenset(source_snapshots),
+    )
+    source_by_ordinal = {
+        segment.ordinal: (segment, snapshot)
+        for segment, snapshot in zip(
+            source_segments,
+            source_snapshots,
+            strict=True,
+        )
+    }
+    inventory = _casting_inventory(
+        store,
+        novel_id=context.request.novel_id,
+        settings=context.settings,
+    )
+    segments = list(contract.segments)
+    issues = list(contract.issues)
+    provenances = set()
+    for target_index, target_segment in enumerate(contract.segments):
+        source_pair = source_by_ordinal.get(target_segment.ordinal)
+        if source_pair is None:
+            continue
+        source_segment, source_snapshot = source_pair
+        if (
+            source_segment.local_hash != target_segment.local_hash
+            or source_segment.source_text != target_segment.source_text
+            or source_segment.speaker.kind
+            not in {SpeakerKind.NARRATOR, SpeakerKind.CHARACTER}
+            or source_segment.casting.origin
+            not in {
+                CastingDecisionOrigin.NARRATOR_SETTING,
+                CastingDecisionOrigin.CHARACTER_BINDING,
+            }
+        ):
+            continue
+        resolution = resolve_casting(
+            CastingRequest(
+                novel_id=context.request.novel_id,
+                segment_id=target_segment.segment_id,
+                source_local_hash=target_segment.local_hash,
+                segment_kind=target_segment.segment_kind,
+                speaker=source_segment.speaker,
+                chapter_id=context.document.id,
+                volume_id=context.document.volume_id,
+                scene_id=target_segment.scene_id,
+                attributes=CastingAttributes(),
+                same_scene_voice_deduplication=(
+                    context.settings.casting.same_scene_voice_deduplication
+                ),
+                used_voice_version_ids=frozenset(),
+                used_slot_ids=frozenset(),
+            ),
+            inventory,
+        )
+        if resolution.blocker_codes or resolution.decision.final_target is None:
+            continue
+        before_hash, after_hash = segment_inheritance_anchors(
+            contract.segments,
+            target_index,
+        )
+        decision = decide_override_inheritance(
+            source=source_snapshot,
+            target=OverrideInheritanceTarget(
+                novel_id=context.request.novel_id,
+                script_version_id=contract.script_version_id,
+                segment_id=target_segment.segment_id,
+                local_hash=target_segment.local_hash,
+                anchor_before_hash=before_hash,
+                anchor_after_hash=after_hash,
+                speaker=source_segment.speaker,
+                casting=resolution.decision,
+                uniqueness=segment_anchor_uniqueness(
+                    contract.segments,
+                    target_index,
+                ),
+            ),
+            authority=authority,
+            audit=audit,
+        )
+        if not decision.eligible or decision.provenance is None:
+            continue
+        attribution = AttributionEvidence(
+            origin=AttributionOrigin.INHERITED_OVERRIDE,
+            candidate_character_ids=(
+                source_segment.attribution.candidate_character_ids
+            ),
+            override_provenance=decision.provenance,
+        )
+        segments[target_index] = replace(
+            target_segment,
+            spoken_text=source_segment.spoken_text,
+            inheritance_anchor_before_hash=before_hash,
+            inheritance_anchor_after_hash=after_hash,
+            speaker=source_segment.speaker,
+            casting=resolution.decision,
+            confidence=ConfidenceLevel.HIGH,
+            attribution=attribution,
+            manual_override=True,
+        )
+        issues = [
+            issue
+            for issue in issues
+            if not (
+                issue.segment_id == target_segment.segment_id
+                and issue.code in SPEAKER_CORRECTION_ISSUE_CODES
+            )
+        ]
+        issues.extend(
+            decision.to_script_issues(segment_id=target_segment.segment_id)
+        )
+        provenances.add(decision.provenance)
+
+    if not provenances:
+        return None
+    canonical_issues = _canonical_issues(issues)
+    values = {
+        field.name: getattr(contract, field.name)
+        for field in fields(NarrationScriptContract)
+    }
+    values.update(
+        {
+            "parent_version_id": source.script_version_id,
+            "state": ScriptVersionState.REVIEW_REQUIRED,
+            "segments": tuple(segments),
+            "issues": canonical_issues,
+            "warning_count": sum(
+                issue.severity is ReviewIssueSeverity.WARNING
+                for issue in canonical_issues
+            ),
+            "blocker_count": sum(
+                issue.severity is ReviewIssueSeverity.BLOCKER
+                for issue in canonical_issues
+            ),
+            "approval": None,
+        }
+    )
+    values["immutable_hash"] = canonical_sha256(
+        script_immutable_payload(SimpleNamespace(**values))
+    )
+    inherited = NarrationScriptContract(**values)
+    if inherited.script_version_id != allocation.script_version_id:
+        raise InvalidNarrationState(
+            "inherited script identity differs from its allocation"
+        )
+    return inherited, frozenset(provenances)
+
+
 def _materialize_contract(
     store: NarrationStore,
     *,
@@ -855,6 +1085,53 @@ def analyze_narration_script(
         context=context,
         allocation=allocation,
     )
+    actor_id = context.request.explicit_generation_actor
+    if context.request.intent != "analyze_only" and actor_id is not None:
+        source = _latest_approved_manual_contract(
+            store,
+            script_id=allocation.script_id,
+            actor_id=actor_id,
+        )
+        if source is not None:
+            action_key, action_id = inherited_analysis_action_identity(
+                request_id=context.request.id,
+                analysis_idempotency_key=command.idempotency_key,
+            )
+            inherited_result = _inherit_manual_overrides(
+                store,
+                context=context,
+                allocation=allocation,
+                contract=contract,
+                source=source,
+                action_id=action_id,
+                actor_id=actor_id,
+            )
+            if inherited_result is not None:
+                contract, pending_provenances = inherited_result
+                allocation = replace(
+                    allocation,
+                    parent_version_id=source.script_version_id,
+                )
+                persist_inherited_analysis_result(
+                    store,
+                    request=context.request,
+                    allocation=allocation,
+                    contract=contract,
+                    source_version_id=source.script_version_id,
+                    action_key=action_key,
+                    actor_id=actor_id,
+                    pending_provenances=pending_provenances,
+                )
+                contract = load_script_contract(
+                    store,
+                    contract.script_version_id,
+                )
+                _finish_request(
+                    store,
+                    request=context.request,
+                    contract=contract,
+                )
+                return contract
     persisted = persist_script_contract(store, allocation, contract)
     if (
         context.request.intent != "analyze_only"

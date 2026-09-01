@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 NARRATION_SETTINGS_API_VERSION: Final = "narration-settings-api/1"
 NARRATION_SETTINGS_SCHEMA_VERSION: Final = "narration-settings/1"
-NARRATION_CAPABILITY_SCHEMA_VERSION: Final = "narration-capabilities/2"
+NARRATION_CAPABILITY_SCHEMA_VERSION: Final = "narration-capabilities/3"
 NARRATION_VOICE_SCHEMA_VERSION: Final = "narration-voice/2"
 NARRATION_CACHE_SCHEMA_VERSION: Final = "narration-cache/1"
 REFERENCE_UPLOAD_MAX_BYTES: Final = 16 * 1024 * 1024
@@ -65,6 +65,7 @@ class CapabilityKey(str, Enum):
     VOICE_GENERATOR = "voice_generator"
     CACHE_CLEANUP = "cache_cleanup"
     CHARACTER_VOICE_MATCHING = "character_voice_matching"
+    CHARACTER_CAST_PLANNING = "character_cast_planning"
     NANO_ADVANCED_TUNING = "nano_advanced_tuning"
     PRIVATE_VOICE_DELETION = "private_voice_deletion"
 
@@ -122,7 +123,7 @@ class FeatureCapability(_StrictModel):
 
 
 class NarrationCapabilities(_StrictModel):
-    schema_version: Literal["narration-capabilities/2"] = (
+    schema_version: Literal["narration-capabilities/3"] = (
         NARRATION_CAPABILITY_SCHEMA_VERSION
     )
     items: list[FeatureCapability]
@@ -202,6 +203,12 @@ def t2_hold_capabilities() -> NarrationCapabilities:
             True,
             "TTS_FEATURE_STARTING",
             "TTS35-CORE",
+        ),
+        (
+            CapabilityKey.CHARACTER_CAST_PLANNING,
+            True,
+            "TTS_FEATURE_STARTING",
+            "TTS47-CAST",
         ),
         (
             CapabilityKey.NANO_ADVANCED_TUNING,
@@ -1465,6 +1472,258 @@ class CharacterVoiceBriefResource(_StrictModel):
         "clear", "warm", "airy", "husky", "firm", "soft", "bright", "dark"
     ] | None = None
     evidence_fields: list[str] = Field(max_length=48)
+
+
+class NarratorVoiceBriefResource(_StrictModel):
+    """Saved-novel-only narrator evidence; never a free-form preset choice."""
+
+    schema_version: Literal["narrator-voice-brief/1"] = "narrator-voice-brief/1"
+    language: Literal["zh-CN", "en", "ja-JP"] | None = None
+    presentation: Literal["masculine", "feminine", "androgynous"] | None = None
+    pitch: int | None = Field(default=None, ge=-2, le=2, strict=True)
+    pace: int | None = Field(default=None, ge=-2, le=2, strict=True)
+    energy: int | None = Field(default=None, ge=-2, le=2, strict=True)
+    texture: Literal[
+        "clear", "warm", "airy", "husky", "firm", "soft", "bright", "dark"
+    ] | None = None
+    evidence_fields: list[str] = Field(max_length=48)
+
+    @field_validator("evidence_fields")
+    @classmethod
+    def validate_narrator_evidence_fields(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError("narrator evidence fields must be unique")
+        pattern = re.compile(
+            r"^(language|presentation|pitch|pace|energy|texture):"
+            r"(?:narration_settings\.language|novel\."
+            r"(?:title|genre|subgenre|description|idea|highlight|background|main_plot))$"
+        )
+        if any(pattern.fullmatch(value) is None for value in values):
+            raise ValueError("narrator evidence escaped the saved novel allowlist")
+        return values
+
+    @model_validator(mode="after")
+    def validate_narrator_dimension_evidence(self) -> "NarratorVoiceBriefResource":
+        evidenced = {value.split(":", 1)[0] for value in self.evidence_fields}
+        populated = {
+            field_name
+            for field_name in (
+                "language",
+                "presentation",
+                "pitch",
+                "pace",
+                "energy",
+                "texture",
+            )
+            if getattr(self, field_name) is not None
+        }
+        if evidenced != populated:
+            raise ValueError("narrator evidence must exactly cover populated dimensions")
+        return self
+
+
+CharacterCastPlanState = Literal[
+    "reserved",
+    "analyzing",
+    "ready_applied",
+    "ready_applied_with_warnings",
+    "ready_unapplied",
+    "failed",
+    "superseded",
+]
+CharacterCastPlanItemState = Literal[
+    "pending",
+    "analyzing",
+    "preserved",
+    "scored",
+    "assigned",
+    "blocked",
+]
+
+
+class CreateCharacterCastPlanRequest(_StrictModel):
+    contract_version: Literal["character-cast-plan-request/1"] = (
+        "character-cast-plan-request/1"
+    )
+    timeline_id: UUID
+    mode: Literal["fill_and_deduplicate"] = "fill_and_deduplicate"
+
+
+class CharacterCastTargetResource(_StrictModel):
+    target_key: str = Field(pattern=r"^(narrator|character:[0-9a-f-]{36})$")
+    target_kind: Literal["narrator", "character"]
+    character_id: UUID | None = None
+    character_name: str | None = Field(default=None, min_length=1, max_length=240)
+    role_type: str | None = Field(default=None, min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_target_identity(self) -> "CharacterCastTargetResource":
+        narrator = self.target_kind == "narrator"
+        if narrator:
+            if (
+                self.target_key != "narrator"
+                or self.character_id is not None
+                or self.character_name is not None
+                or self.role_type is not None
+            ):
+                raise ValueError("narrator target cannot carry character identity")
+        elif (
+            self.character_id is None
+            or self.character_name is None
+            or self.role_type is None
+            or self.target_key != f"character:{self.character_id}"
+        ):
+            raise ValueError("character cast target identity is incomplete")
+        return self
+
+
+class CharacterCastPlanItemResource(_StrictModel):
+    item_id: UUID
+    target: CharacterCastTargetResource
+    state: CharacterCastPlanItemState
+    attempt: int = Field(ge=0, strict=True)
+    workspace_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    lease_expires_at: datetime | None = None
+    brief: CharacterVoiceBriefResource | NarratorVoiceBriefResource | None = None
+    selected_preset_id: str | None = Field(
+        default=None,
+        pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$",
+    )
+    score_milli: int | None = Field(default=None, ge=0, le=1_000, strict=True)
+    profile_id: UUID | None = None
+    version_id: UUID | None = None
+    voice_action_command_id: UUID | None = None
+    warning_code: str | None = Field(default=None, max_length=96)
+    failure_code: str | None = Field(default=None, max_length=96)
+
+    @field_validator("warning_code", "failure_code")
+    @classmethod
+    def validate_cast_item_code(cls, value: str | None) -> str | None:
+        if value is not None and _SAFE_CODE.fullmatch(value) is None:
+            raise ValueError("cast item codes must be stable")
+        return value
+
+    @model_validator(mode="after")
+    def validate_cast_item_shape(self) -> "CharacterCastPlanItemResource":
+        if (self.profile_id is None) != (self.version_id is None):
+            raise ValueError("preserved cast voice identity is incomplete")
+        if self.state == "analyzing" and self.lease_expires_at is None:
+            raise ValueError("analyzing cast item requires a lease")
+        if self.state != "analyzing" and self.lease_expires_at is not None:
+            raise ValueError("only an analyzing cast item carries a lease")
+        if self.state in {"scored", "assigned"} and (
+            self.brief is None
+            or self.selected_preset_id is None
+            or self.score_milli is None
+        ):
+            raise ValueError("scored cast item requires brief, preset and score")
+        if self.state == "preserved" and self.version_id is None:
+            raise ValueError("preserved cast item requires its voice identity")
+        return self
+
+
+class CharacterCastAssignmentResource(_StrictModel):
+    target: CharacterCastTargetResource
+    preset_id: str = Field(pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$")
+    score_milli: int = Field(ge=0, le=1_000, strict=True)
+    voice_action_command_id: UUID | None = None
+
+
+class CharacterCastPreservedResource(_StrictModel):
+    target: CharacterCastTargetResource
+    profile_id: UUID
+    version_id: UUID
+    preset_id: str | None = Field(
+        default=None,
+        pattern=r"^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$",
+    )
+    source_type: Literal["preset", "uploaded", "generated"]
+
+
+class CharacterCastWarningResource(_StrictModel):
+    code: str = Field(pattern=r"^[A-Z][A-Z0-9_]{0,95}$")
+    target_key: str | None = Field(
+        default=None,
+        pattern=r"^(narrator|character:[0-9a-f-]{36})$",
+    )
+    message: str = Field(min_length=1, max_length=400)
+
+
+class CharacterCastPlanResource(_StrictModel):
+    contract_version: Literal["character-cast-plan/1"] = "character-cast-plan/1"
+    command_id: UUID
+    novel_id: UUID
+    timeline_id: UUID
+    mode: Literal["fill_and_deduplicate"] = "fill_and_deduplicate"
+    state: CharacterCastPlanState
+    server_now: datetime
+    progress_current: int = Field(ge=0, strict=True)
+    progress_total: int = Field(ge=1, strict=True)
+    terminal: bool = Field(strict=True)
+    retryable: bool = Field(strict=True)
+    current_target_key: str | None = Field(
+        default=None,
+        pattern=r"^(narrator|character:[0-9a-f-]{36})$",
+    )
+    lease_expires_at: datetime | None = None
+    assignments: list[CharacterCastAssignmentResource]
+    preserved: list[CharacterCastPreservedResource]
+    warnings: list[CharacterCastWarningResource]
+    items: list[CharacterCastPlanItemResource]
+    failure_code: str | None = Field(default=None, max_length=96)
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+    @field_validator("failure_code")
+    @classmethod
+    def validate_cast_failure_code(cls, value: str | None) -> str | None:
+        if value is not None and _SAFE_CODE.fullmatch(value) is None:
+            raise ValueError("cast failure code must be stable")
+        return value
+
+    @model_validator(mode="after")
+    def validate_cast_plan_shape(self) -> "CharacterCastPlanResource":
+        terminal_states = {
+            "ready_applied",
+            "ready_applied_with_warnings",
+            "ready_unapplied",
+            "failed",
+            "superseded",
+        }
+        if self.terminal != (self.state in terminal_states):
+            raise ValueError("cast terminal flag drifted from command state")
+        if self.progress_current > self.progress_total:
+            raise ValueError("cast progress exceeds its target count")
+        if self.state == "analyzing" and self.current_target_key is not None:
+            if self.lease_expires_at is None:
+                raise ValueError("active cast target requires a lease")
+        elif self.lease_expires_at is not None:
+            raise ValueError("inactive cast plan cannot publish a lease")
+        if (self.state == "failed") != (self.failure_code is not None):
+            raise ValueError("cast failure evidence drifted from command state")
+        if self.terminal and self.completed_at is None:
+            raise ValueError("terminal cast plan requires completed_at")
+        if not self.terminal and self.completed_at is not None:
+            raise ValueError("active cast plan cannot be completed")
+        return self
+
+
+class CharacterCastPlanListResource(_StrictModel):
+    contract_version: Literal["character-cast-plan-list/1"] = (
+        "character-cast-plan-list/1"
+    )
+    novel_id: UUID
+    server_now: datetime
+    items: list[CharacterCastPlanResource]
+
+    @model_validator(mode="after")
+    def validate_cast_plan_list_scope(self) -> "CharacterCastPlanListResource":
+        if any(item.novel_id != self.novel_id for item in self.items):
+            raise ValueError("cast plan list contains another novel")
+        if len({item.command_id for item in self.items}) != len(self.items):
+            raise ValueError("cast plan list command IDs must be unique")
+        return self
 
 
 class CharacterVoiceMatchResource(_StrictModel):

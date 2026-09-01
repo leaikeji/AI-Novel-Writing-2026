@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import hashlib
+import logging
 import time
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Mapping
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -19,8 +20,10 @@ from ..character_workspace.contracts import (
 from ..character_workspace.service import service_for_session
 from ..database import get_engine, get_session
 from ..model_runtime import (
+    NOVEL_AGENT_ID,
     ModelAudit,
     ModelVerificationError,
+    effective_model_audit,
     ensure_prompt_within_effective_limit,
     parse_model_json,
     reply_final_text,
@@ -62,6 +65,15 @@ from .character_voice_matching import (
     build_character_voice_prompt,
     match_official_voice,
     parse_character_voice_brief,
+)
+from .character_cast_plan_service import (
+    CharacterCastTargetAnalysis,
+    SqlAlchemyCharacterCastPlanService,
+    character_cast_plan_request_hash,
+)
+from .narrator_voice_brief import (
+    build_narrator_voice_prompt,
+    parse_narrator_voice_brief,
 )
 from .voice_design import build_voice_design_instruction
 from .feature_readiness import NARRATION_FEATURE_READINESS_PROVIDER
@@ -105,6 +117,7 @@ from .voice_generator_service import (
 # provide an explicit seed through the frozen API, but one-click generation
 # must not derive an unqualified seed from an idempotency hash.
 DEFAULT_VOICE_GENERATOR_SEED = 104_729
+logger = logging.getLogger(__name__)
 
 
 def _resolved_voice_generator_seed(requested_seed: str | None) -> int:
@@ -115,8 +128,12 @@ def _resolved_voice_generator_seed(requested_seed: str | None) -> int:
     )
 
 
-router = APIRouter(tags=["narration-features-v2"])
+router = APIRouter(tags=["narration-features-v3"])
 _IDEMPOTENCY_HEADER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+
+
+def _character_cast_plan_service() -> SqlAlchemyCharacterCastPlanService:
+    return SqlAlchemyCharacterCastPlanService(lambda: Session(get_engine()))
 
 
 class _StrictModel(BaseModel):
@@ -550,6 +567,9 @@ def private_voice_deletion_retry(
 
 CharacterVoiceMatchRequest = wire.CharacterVoiceMatchRequest
 CharacterVoiceMatchResource = wire.CharacterVoiceMatchResource
+CreateCharacterCastPlanRequest = wire.CreateCharacterCastPlanRequest
+CharacterCastPlanResource = wire.CharacterCastPlanResource
+CharacterCastPlanListResource = wire.CharacterCastPlanListResource
 CreateCharacterVoiceGeneratorCommandRequest = (
     wire.CreateCharacterVoiceGeneratorCommandRequest
 )
@@ -877,6 +897,253 @@ def character_voice_generator_command_apply(
         raise
 
 
+@router.get(
+    "/novels/{novel_id}/character-cast-plans",
+    response_model=wire.CharacterCastPlanListResource,
+)
+def character_cast_plans_index(
+    novel_id: UUID,
+) -> wire.CharacterCastPlanListResource:
+    _require_capability(wire.CapabilityKey.CHARACTER_CAST_PLANNING)
+    try:
+        return _character_cast_plan_service().list_resources(novel_id=novel_id)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/character-cast-plans",
+    response_model=wire.CharacterCastPlanResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def character_cast_plan_create(
+    novel_id: UUID,
+    payload: wire.CreateCharacterCastPlanRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_HEADER_PATTERN,
+    ),
+) -> wire.CharacterCastPlanResource:
+    _require_capability(wire.CapabilityKey.CHARACTER_CAST_PLANNING)
+    try:
+        service = _character_cast_plan_service()
+        reservation = service.reserve(
+            novel_id=novel_id,
+            timeline_id=payload.timeline_id,
+            idempotency_key=idempotency_key,
+            request_hash=character_cast_plan_request_hash(
+                novel_id=novel_id,
+                timeline_id=payload.timeline_id,
+                mode=payload.mode,
+            ),
+        )
+        # A command containing only already-valid protected/official voices can
+        # complete without an AI call.  Finalization is still transactional.
+        return service.finalize_if_ready(
+            novel_id=novel_id,
+            command_id=reservation.command_id,
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.get(
+    "/novels/{novel_id}/character-cast-plans/{command_id}",
+    response_model=wire.CharacterCastPlanResource,
+)
+def character_cast_plan_get(
+    novel_id: UUID,
+    command_id: UUID,
+) -> wire.CharacterCastPlanResource:
+    _require_capability(wire.CapabilityKey.CHARACTER_CAST_PLANNING)
+    try:
+        return _character_cast_plan_service().get_resource(
+            novel_id=novel_id,
+            command_id=command_id,
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/character-cast-plans/{command_id}/advance",
+    response_model=wire.CharacterCastPlanResource,
+)
+async def character_cast_plan_advance(
+    novel_id: UUID,
+    command_id: UUID,
+    request: Request,
+    ctx=Depends(get_novel_generation_ctx),
+) -> wire.CharacterCastPlanResource:
+    """Advance at most one target; the browser may safely call this repeatedly."""
+
+    _require_capability(wire.CapabilityKey.CHARACTER_CAST_PLANNING)
+    service = _character_cast_plan_service()
+    try:
+        lease = service.claim_next(novel_id=novel_id, command_id=command_id)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+    if lease is None:
+        try:
+            return service.finalize_if_ready(
+                novel_id=novel_id, command_id=command_id
+            )
+        except Exception as error:
+            _raise_service_error(error)
+            raise
+
+    try:
+        # Resolve the model only after the target lease is durable.  A missing
+        # or changing Agent model must become a recoverable target failure;
+        # rejecting the request before ``claim_next`` would strand the active
+        # command without progress or evidence.
+        configured_model = await effective_model_audit(
+            request.app,
+            agent_id=NOVEL_AGENT_ID,
+        )
+
+        async def model_probe() -> ModelAudit:
+            return await effective_model_audit(
+                request.app,
+                agent_id=NOVEL_AGENT_ID,
+            )
+
+        if lease.target_kind == "narrator":
+            novel_payload = lease.prompt_payload.get("novel")
+            if not isinstance(novel_payload, Mapping):
+                raise ValueError("narrator cast evidence is malformed")
+            prompt = build_narrator_voice_prompt(
+                novel_payload,
+                narration_language=lease.narration_language,
+            )
+        else:
+            prompt = build_character_voice_prompt(dict(lease.prompt_payload))
+        ensure_prompt_within_effective_limit(prompt, configured_model)
+        started_monotonic = time.monotonic()
+        reply = await ctx.chat(
+            prompt,
+            skill="character-craft",
+            session_id=(
+                f"novel-character-cast:{command_id}:{lease.target_key}:"
+                f"{lease.attempt}"
+            ),
+        )
+        evidence = await verify_novel_model_reply(
+            reply,
+            configured=configured_model,
+            probe=model_probe,
+            started_monotonic=started_monotonic,
+        )
+        parsed = parse_model_json(reply_final_text(reply))
+        brief = (
+            parse_narrator_voice_brief(parsed)
+            if lease.target_kind == "narrator"
+            else parse_character_voice_brief(parsed)
+        )
+        service.finish_analysis(
+            novel_id=novel_id,
+            command_id=command_id,
+            item_id=lease.item_id,
+            attempt=lease.attempt,
+            fence_token=lease.fence_token,
+            analysis=CharacterCastTargetAnalysis(
+                workspace_digest=lease.workspace_digest,
+                brief=brief,
+                model_evidence=evidence.as_dict(),
+            ),
+        )
+    except NovelModelEvidenceRejected:
+        service.fail_analysis(
+            novel_id=novel_id,
+            command_id=command_id,
+            item_id=lease.item_id,
+            attempt=lease.attempt,
+            fence_token=lease.fence_token,
+            failure_code="CAST_PLAN_MODEL_REJECTED",
+        )
+    except ModelVerificationError:
+        service.fail_analysis(
+            novel_id=novel_id,
+            command_id=command_id,
+            item_id=lease.item_id,
+            attempt=lease.attempt,
+            fence_token=lease.fence_token,
+            failure_code="CAST_PLAN_MODEL_UNAVAILABLE",
+        )
+    except CharacterVoiceMatchingError as error:
+        service.fail_analysis(
+            novel_id=novel_id,
+            command_id=command_id,
+            item_id=lease.item_id,
+            attempt=lease.attempt,
+            fence_token=lease.fence_token,
+            failure_code=error.code,
+        )
+    except ValueError:
+        service.fail_analysis(
+            novel_id=novel_id,
+            command_id=command_id,
+            item_id=lease.item_id,
+            attempt=lease.attempt,
+            fence_token=lease.fence_token,
+            failure_code="CAST_PLAN_ANALYSIS_INVALID",
+        )
+    except Exception as error:
+        # Provider/network errors are target-local warnings.  Persist the
+        # failure before returning so refresh never loses command progress.
+        logger.warning(
+            "character cast target analysis failed",
+            exc_info=error,
+            extra={"command_id": str(command_id)},
+        )
+        try:
+            service.fail_analysis(
+                novel_id=novel_id,
+                command_id=command_id,
+                item_id=lease.item_id,
+                attempt=lease.attempt,
+                fence_token=lease.fence_token,
+                failure_code="CAST_PLAN_MODEL_UNAVAILABLE",
+            )
+        except Exception as persistence_error:
+            _raise_service_error(persistence_error)
+            raise
+
+    try:
+        return service.finalize_if_ready(
+            novel_id=novel_id,
+            command_id=command_id,
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/character-cast-plans/{command_id}/retry",
+    response_model=wire.CharacterCastPlanResource,
+)
+def character_cast_plan_retry(
+    novel_id: UUID,
+    command_id: UUID,
+) -> wire.CharacterCastPlanResource:
+    _require_capability(wire.CapabilityKey.CHARACTER_CAST_PLANNING)
+    try:
+        return _character_cast_plan_service().retry(
+            novel_id=novel_id,
+            command_id=command_id,
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
 @router.post(
     "/novels/{novel_id}/characters/{character_id}/official-voice-match",
     response_model=CharacterVoiceMatchResource,
@@ -1040,6 +1307,9 @@ __all__ = [
     "CharacterVoiceGeneratorCommandResource",
     "CharacterVoiceMatchRequest",
     "CharacterVoiceMatchResource",
+    "CreateCharacterCastPlanRequest",
+    "CharacterCastPlanResource",
+    "CharacterCastPlanListResource",
     "ConfirmPrivateVoiceDeletionRequest",
     "CreateCharacterVoiceGeneratorCommandRequest",
     "CreateNanoVoiceExperimentRequest",

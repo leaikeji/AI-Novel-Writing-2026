@@ -205,6 +205,14 @@ _T2_CAPABILITY_ROWS = (
         "TTS35-CORE",
     ),
     (
+        "character_cast_planning",
+        "unavailable",
+        True,
+        False,
+        "TTS_FEATURE_STARTING",
+        "TTS47-CAST",
+    ),
+    (
         "nano_advanced_tuning",
         "unavailable",
         True,
@@ -222,7 +230,7 @@ _T2_CAPABILITY_ROWS = (
     ),
 )
 T2_CAPABILITY_MATRIX = {
-    "schema_version": "narration-capabilities/2",
+    "schema_version": "narration-capabilities/3",
     "items": [
         {
             "key": key,

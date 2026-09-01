@@ -7,15 +7,18 @@ import {
   type NarrationAuthorizationState,
   type NarrationCapabilities,
   type NarrationSettingsResource,
+  type CharacterVoiceBindingResource,
   type OfficialVoiceSelectionResponse,
   type VoiceProfileResource,
 } from "./contracts";
 import {
   activeOfficialPresetId,
   createAndPlayOfficialVoicePreview,
+  createOfficialVoiceSelectionPanel,
   officialVoiceSelectionDisabled,
   officialVoiceSelectionResult,
   officialVoiceSelectionWireRequest,
+  type OfficialVoiceSelectionPanelApi,
 } from "./official-voice-selection-panel";
 
 
@@ -26,6 +29,64 @@ const CHARACTER_ID = "44444444-4444-4444-8444-444444444444";
 const COMMAND_ID = "55555555-5555-4555-8555-555555555555";
 const AT = "2026-08-29T00:00:00Z";
 const EVIDENCE = OFFICIAL_PRESET_EVIDENCE[0];
+
+
+interface FakeElement {
+  readonly type: unknown;
+  readonly props: Record<string, unknown>;
+  readonly children: readonly unknown[];
+}
+
+
+function createEffectHarness() {
+  const states: Array<{ value: unknown }> = [];
+  const refs: Array<{ current: unknown }> = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  let effects: Array<() => void | (() => void)> = [];
+  const React = {
+    createElement(type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]): FakeElement {
+      return { type, props: props ?? {}, children };
+    },
+    useState<T>(initial: T | (() => T)): [T, (next: T | ((current: T) => T)) => void] {
+      const index = stateIndex++;
+      if (!states[index]) {
+        states[index] = { value: typeof initial === "function" ? (initial as () => T)() : initial };
+      }
+      return [
+        states[index].value as T,
+        (next) => {
+          const current = states[index].value as T;
+          states[index].value = typeof next === "function"
+            ? (next as (value: T) => T)(current)
+            : next;
+        },
+      ];
+    },
+    useEffect(effect: () => void | (() => void), _dependencies: readonly unknown[]): void {
+      effects.push(effect);
+    },
+    useRef<T>(initial: T): { current: T } {
+      const index = refIndex++;
+      if (!refs[index]) refs[index] = { current: initial };
+      return refs[index] as { current: T };
+    },
+  };
+  return {
+    React,
+    render<Props>(Component: (props: Props) => unknown, props: Props): FakeElement {
+      stateIndex = 0;
+      refIndex = 0;
+      effects = [];
+      return Component(props) as FakeElement;
+    },
+    flushEffects(): void {
+      const pending = effects;
+      effects = [];
+      for (const effect of pending) effect();
+    },
+  };
+}
 
 
 function settings(): NarrationSettingsResource {
@@ -233,5 +294,45 @@ describe("official voice selection panel adapters", () => {
       ...authorization,
       can_configure: false,
     })).toBe(true);
+  });
+
+  it("uses a controlled character projection without duplicate binding or profile reads", () => {
+    const harness = createEffectHarness();
+    const api = {
+      listOfficialVoicePresets: vi.fn(async () => ({ items: [] })),
+      listVoiceProfiles: vi.fn(),
+      getCharacterVoiceBinding: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const binding = {
+      novel_id: NOVEL_ID,
+      character_id: CHARACTER_ID,
+      binding_policy: "dedicated",
+      profile_id: PROFILE_ID,
+      version_id: VERSION_ID,
+      language: "zh-CN",
+      version: 7,
+    } as unknown as CharacterVoiceBindingResource;
+    const Panel = createOfficialVoiceSelectionPanel(harness.React, api);
+
+    harness.render(Panel, {
+      novelId: NOVEL_ID,
+      settings: settings(),
+      target: { kind: "character", characterId: CHARACTER_ID, characterName: "林岚" },
+      capabilities: { items: [] } as unknown as NarrationCapabilities,
+      authorization: {} as unknown as NarrationAuthorizationState,
+      projection: {
+        phase: "ready",
+        binding,
+        profiles: [officialProfile("explicit_official_preset_selection")],
+      },
+    });
+    harness.flushEffects();
+
+    expect(api.listOfficialVoicePresets).toHaveBeenCalledTimes(1);
+    expect(api.listVoiceProfiles).not.toHaveBeenCalled();
+    expect(api.getCharacterVoiceBinding).not.toHaveBeenCalled();
   });
 });

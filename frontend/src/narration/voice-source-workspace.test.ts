@@ -485,10 +485,20 @@ describe("voice source workspace", () => {
     await settle();
     tree = harness.render(Workspace, props);
     const panel = sourcePanel(tree);
+    const sourceHeading = findAll(tree, (element) => (
+      element.type === "h3" && textContent(element) === "2. 选择音色来源"
+    ))[0];
+    expect(sourceHeading.props.id).toBe(`anw-voice-workspace-${NOVEL_ID}-source-heading`);
+    expect(panel.props).toMatchObject({
+      embedded: true,
+      ariaLabelledBy: sourceHeading.props.id,
+    });
     (panel.props.onSelectSource as (source: string) => void)("preset");
     tree = harness.render(Workspace, props);
     expect(textContent(tree)).toContain("我的音色 · 私人来源");
     expect(textContent(tree)).toContain("官方音色请在上方直接使用");
+    expect(textContent(tree)).toContain("私人音色档案已加载。");
+    expect(textContent(tree)).not.toContain("私人音色档案已加载。官方音色");
     expect(textContent(tree)).not.toContain("官方中文预设（6 项）");
     expect(findAll(tree, (element) => element.props["data-voice-source"] === "preset"))
       .toHaveLength(0);

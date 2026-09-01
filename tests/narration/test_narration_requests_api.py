@@ -423,7 +423,7 @@ def test_update_http_adapter_derives_explicit_author_action_server_side() -> Non
     command = captured[0]
     assert command.intent == "update"
     assert command.explicitly_requested is True
-    assert command.actor == "local-owner"
+    assert command.actor == "owner"
 
 
 @pytest.mark.parametrize(

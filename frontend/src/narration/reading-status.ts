@@ -154,14 +154,6 @@ export function buildReadingStatusModel(
       section: "audio-cache",
     });
   }
-  if (overview.coverage.failed_job_count > 0) {
-    issues.push({
-      code: "NARRATION_JOBS_FAILED",
-      severity: "warning",
-      message: `${overview.coverage.failed_job_count} 个朗读任务失败，未改写正式正文。`,
-      section: "audio-cache",
-    });
-  }
   return {
     novelId: overview.novel_id,
     runtimeLabel: RUNTIME_LABELS[overview.runtime.lifecycle_status],
@@ -207,7 +199,7 @@ export function createReadingStatus(
       ["磁盘", model.diskLabel, `可用 ${model.diskPercentFree}%`],
       ["派生缓存", model.cacheLabel, `待处理任务 ${props.overview.cache.pending_job_count}`],
       ["人物配音", model.characterCoverageLabel, "已锁定 / 全部人物"],
-      ["制作状态", model.productionLabel, `失败任务 ${props.overview.coverage.failed_job_count}`],
+      ["制作状态", model.productionLabel, `待复核 ${props.overview.coverage.pending_review_script_count} 份`],
     ] as const;
     return h(
       "section",
@@ -254,6 +246,24 @@ export function createReadingStatus(
             )),
           ),
         ),
+      props.overview.coverage.failed_job_count > 0
+        ? h(
+          "details",
+          { className: "anw-reading-status__diagnostics" },
+          h("summary", null, `历史与诊断（${props.overview.coverage.failed_job_count}）`),
+          h(
+            "p",
+            null,
+            `${props.overview.coverage.failed_job_count} 个历史朗读任务记录为失败；这些记录不会改写正文，也不代表当前 Edition 无法播放。`,
+          ),
+          props.onOpenSection === undefined
+            ? null
+            : h("button", {
+              type: "button",
+              onClick: () => props.onOpenSection?.("audio-cache"),
+            }, "查看音频与缓存"),
+        )
+        : null,
     );
   };
 }

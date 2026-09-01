@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { NanoVoiceExperimentResource } from "./contracts";
-import { selectNanoExperimentForTarget } from "./voice-feature-workspaces";
+import type { VoiceProfileResource } from "./contracts";
+import {
+  officialPresetDisplayName,
+  selectNanoExperimentForTarget,
+} from "./voice-feature-workspaces";
 
 
 const ADVANCED_VERSION_ID = "10000000-0000-4000-8000-000000000001";
@@ -51,5 +55,18 @@ describe("Nano advanced workspace history selection", () => {
         currentVoiceVersionId: OFFICIAL_VERSION_ID,
       })).toBe(current);
     }
+  });
+});
+
+
+describe("Nano advanced workspace display names", () => {
+  it("uses the official directory name instead of exposing the internal manifest voice", () => {
+    const profiles = [{
+      name: "CN 机车",
+      versions: [{ source_type: "preset", preset_key: "onnx.Yuewen" }],
+    }] as unknown as readonly VoiceProfileResource[];
+
+    expect(officialPresetDisplayName(profiles, "onnx.Yuewen")).toBe("CN 机车");
+    expect(officialPresetDisplayName([], "onnx.Yuewen")).toBe("官方音色");
   });
 });

@@ -5,11 +5,17 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from backend.narration.contracts import ReviewIssueSeverity
 from backend.narration.script_contracts import (
     ApprovalActorType,
+    AttributionEvidence,
+    AttributionOrigin,
+    OverrideKind,
+    OverrideProvenance,
     ScriptIssueContract,
     ScriptReviewPolicy,
     ScriptVersionState,
+    speaker_target_hash,
 )
 from backend.narration.script_review import (
     ReviewDisposition,
@@ -115,6 +121,55 @@ def test_default_zero_blocker_generation_is_eligible_for_automatic_freeze() -> N
     assert decision.disposition is ReviewDisposition.AUTO_FREEZE
     assert decision.state is ScriptVersionState.APPROVED
     assert decision.blocker_count == 0
+
+
+def test_inherited_manual_override_requires_and_accepts_owner_freeze() -> None:
+    base = _make_contract()
+    segment = base.segments[0]
+    inherited = AttributionEvidence(
+        AttributionOrigin.INHERITED_OVERRIDE,
+        override_provenance=OverrideProvenance(
+            kind=OverrideKind.INHERITED,
+            action_id=uuid4(),
+            owner_actor_id="owner",
+            recorded_at=NOW,
+            source_script_version_id=PARENT_ID,
+            source_segment_id=uuid4(),
+            source_immutable_hash="d" * 64,
+            source_local_hash=segment.local_hash,
+            source_anchor_before_hash=None,
+            source_anchor_after_hash=None,
+            speaker_target_hash=speaker_target_hash(
+                segment.speaker,
+                segment.casting,
+            ),
+        ),
+    )
+    warning = ScriptIssueContract(
+        "W_MANUAL_OVERRIDE_INHERITED",
+        ReviewIssueSeverity.WARNING,
+        segment_id=segment.segment_id,
+    )
+    script = _make_contract(
+        state=ScriptVersionState.REVIEW_REQUIRED,
+        attribution=inherited,
+        issues=(warning,),
+        parent_version_id=PARENT_ID,
+    )
+    context = _context(non_review_parent=True)
+
+    decision = decide_script_review(script, context)
+    assert decision.disposition is ReviewDisposition.REVIEW_REQUIRED
+    assert decision.reason_code == "MANUAL_OVERRIDE_REQUIRES_OWNER_REVIEW"
+    frozen = manual_freeze_script(
+        script,
+        context,
+        owner_actor_id="owner",
+        approved_at=NOW,
+    )
+    assert frozen.state is ScriptVersionState.APPROVED
+    assert frozen.approval is not None
+    assert frozen.approval.kind.value == "manual_after_review"
 
 
 def test_automatic_freeze_records_server_actor_without_changing_immutable_hash() -> None:
@@ -274,7 +329,10 @@ def test_issue_count_tampering_fails_closed_before_any_freeze() -> None:
 
 def test_manual_freeze_is_not_a_general_override_for_blockers_only() -> None:
     script = _make_contract()
-    with pytest.raises(ReviewStateError, match="always_review or a verified corrected parent"):
+    with pytest.raises(
+        ReviewStateError,
+        match="explicit review policy or manual-derived override",
+    ):
         manual_freeze_script(
             script,
             _context(),

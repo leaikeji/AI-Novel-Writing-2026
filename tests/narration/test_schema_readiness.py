@@ -7,6 +7,8 @@ from backend.narration.schema_readiness import (
     _function_definitions_satisfy,
     _linear_repository_chain,
     ALEMBIC_CONFIG_PATH,
+    CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
+    character_cast_schema_ready,
     database_revision_satisfies,
     narration_feature_schema_ready,
     voice_generator_schema_ready,
@@ -26,6 +28,20 @@ def test_minimum_and_known_linear_descendants_are_accepted() -> None:
     )
     assert database_revision_satisfies(
         ("20260830_0035",), minimum_revision=MINIMUM
+    )
+    assert database_revision_satisfies(
+        ("20260901_0036",), minimum_revision=MINIMUM
+    )
+
+
+def test_character_cast_requires_0036_or_a_known_linear_descendant() -> None:
+    assert database_revision_satisfies(
+        ("20260901_0036",),
+        minimum_revision=CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
+    )
+    assert not database_revision_satisfies(
+        ("20260830_0035",),
+        minimum_revision=CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
     )
 
 
@@ -64,6 +80,9 @@ def test_repository_chain_is_resolved_from_the_config_not_process_cwd(
     assert "20260830_0035" in _linear_repository_chain(
         str(ALEMBIC_CONFIG_PATH.resolve())
     )
+    assert "20260901_0036" in _linear_repository_chain(
+        str(ALEMBIC_CONFIG_PATH.resolve())
+    )
     assert database_revision_satisfies(
         ("20260829_0034",),
         minimum_revision=MINIMUM,
@@ -74,6 +93,7 @@ def test_repository_chain_is_resolved_from_the_config_not_process_cwd(
 def test_feature_schema_sentinel_rejects_non_engine_values() -> None:
     assert narration_feature_schema_ready(None) is False  # type: ignore[arg-type]
     assert voice_generator_schema_ready(None) is False  # type: ignore[arg-type]
+    assert character_cast_schema_ready(None) is False  # type: ignore[arg-type]
 
 
 def test_feature_schema_sentinel_requires_current_function_bodies() -> None:

@@ -4,6 +4,7 @@ import { NarrationApiError } from "./api";
 import {
   createCachePanel,
   formatExactBytes,
+  formatReadableBytes,
   isCacheCleanupActionable,
   type CachePanelApi,
   type CachePanelProps,
@@ -283,7 +284,8 @@ function apiError(code: NarrationApiErrorDetail["code"]): NarrationApiError {
 describe("cache panel helpers", () => {
   it("formats exact bytes and combines global, nested and authorization gates", () => {
     expect(formatExactBytes(0)).toBe("0 B");
-    expect(formatExactBytes(2048)).toBe("2,048 B（2.00 KiB）");
+    expect(formatExactBytes(2048)).toBe("2,048 B");
+    expect(formatReadableBytes(2048)).toBe("2.00 KiB");
     expect(isCacheCleanupActionable(capabilities(), authorization, status())).toBe(true);
     expect(isCacheCleanupActionable(capabilities(false), authorization, status())).toBe(false);
     expect(isCacheCleanupActionable(
@@ -319,7 +321,9 @@ describe("cache panel", () => {
     let tree = Panel(panelProps);
     harness.commitEffects();
     expect(textContent(tree)).toContain("源资产（不可清理）100 B");
-    expect(textContent(tree)).toContain("当前可回收2,048 B（2.00 KiB）");
+    expect(textContent(tree)).toContain("当前可回收2.00 KiB");
+    expect(textContent(tree)).toContain("查看精确容量");
+    expect(textContent(tree)).toContain("当前可回收2,048 B");
 
     (findButton(tree, "预览可清理项").props.onClick as () => void)();
     expect(api.executeNarrationCacheCleanup).not.toHaveBeenCalled();
@@ -360,7 +364,8 @@ describe("cache panel", () => {
     harness.beginRender();
     tree = Panel(panelProps);
     harness.commitEffects();
-    expect(textContent(tree)).toContain("实际回收 1,536 B（1.50 KiB）");
+    expect(textContent(tree)).toContain("实际回收 1.50 KiB");
+    expect(textContent(tree)).toContain("精确回收：1,536 B");
     expect(textContent(tree)).toContain("源资产 0 个、锁定音色 0 个");
   });
 

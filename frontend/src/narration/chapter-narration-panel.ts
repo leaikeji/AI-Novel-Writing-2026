@@ -483,7 +483,7 @@ export function createChapterNarrationPanel(
                   disabled: !model.canGenerate,
                   onClick: props.onGenerate,
                 },
-                props.busy ? "正在分析人物与选角…" : "智能朗读",
+                props.busy ? "正在准备朗读…" : "智能朗读",
               ),
           model.hasEdition
             ? h(
@@ -652,7 +652,7 @@ export function createChapterNarrationPanel(
             h("strong", null, detailsHeading(layoutMode)),
             h("span", null, layoutMode === "failure-details"
               ? "失败详情不会改变正文、选角或历史版本。"
-              : "状态、冻结音色和次要操作"),
+              : "状态、冻结声音与其他操作"),
           ),
           h(
             "button",
@@ -681,8 +681,8 @@ export function createChapterNarrationPanel(
           ),
           h(
             "section",
-            { className: "anw-chapter-narration-voices", "aria-label": "本朗读版本冻结音色" },
-            h("strong", null, "本 Edition 冻结音色"),
+            { className: "anw-chapter-narration-voices", "aria-label": "本朗读版本的冻结声音" },
+            h("strong", null, "本版本的声音"),
             view.voiceIdentities.length > 0
               ? h(
                   "ul",

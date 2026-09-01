@@ -34,6 +34,8 @@ import {
   REFERENCE_UPLOAD_MIME_TYPES,
   parseCharacterVoiceBindingListResponse,
   parseCharacterVoiceBindingResource,
+  parseCharacterCastPlanListResource,
+  parseCharacterCastPlanResource,
   parseCharacterVoiceMatchResource,
   parseCharacterVoiceGeneratorCommandListResource,
   parseCharacterVoiceGeneratorCommandResource,
@@ -62,12 +64,15 @@ import {
 import type {
   CharacterVoiceBindingListResponse,
   CharacterVoiceBindingResource,
+  CharacterCastPlanListResource,
+  CharacterCastPlanResource,
   CharacterVoiceMatchRequest,
   CharacterVoiceMatchResource,
   ApplyCharacterVoiceGeneratorCommandRequest,
   CharacterVoiceGeneratorCommandListResource,
   CharacterVoiceGeneratorCommandResource,
   CreateCharacterVoiceGeneratorCommandRequest,
+  CreateCharacterCastPlanRequest,
   RetryCharacterVoiceGeneratorCommandRequest,
   ApplyNanoVoiceExperimentRequest,
   CreateNanoVoiceExperimentRequest,
@@ -561,6 +566,89 @@ export async function matchCharacterOfficialVoice(
     || result.current_character_binding.novel_id !== novelId
   ) {
     throw new NarrationContractError("character_voice_match.character_id", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function listCharacterCastPlans(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<CharacterCastPlanListResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/character-cast-plans`,
+    parseCharacterCastPlanListResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId) {
+    throw new NarrationContractError("character_cast_plans.novel_id", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function createCharacterCastPlan(
+  novelId: string,
+  payload: CreateCharacterCastPlanRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<CharacterCastPlanResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/character-cast-plans`,
+    parseCharacterCastPlanResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+  if (result.novel_id !== novelId || result.timeline_id !== payload.timeline_id) {
+    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function getCharacterCastPlan(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<CharacterCastPlanResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/character-cast-plans/${pathSegment(commandId)}`,
+    parseCharacterCastPlanResource,
+    { signal },
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function advanceCharacterCastPlan(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<CharacterCastPlanResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/character-cast-plans/${pathSegment(commandId)}/advance`,
+    parseCharacterCastPlanResource,
+    { method: "POST", signal },
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
+  }
+  return result;
+}
+
+export async function retryCharacterCastPlan(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<CharacterCastPlanResource> {
+  const result = await parsedRequest(
+    `/novels/${pathSegment(novelId)}/character-cast-plans/${pathSegment(commandId)}/retry`,
+    parseCharacterCastPlanResource,
+    { method: "POST", signal },
+  );
+  if (result.novel_id !== novelId || result.command_id !== commandId) {
+    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
   }
   return result;
 }

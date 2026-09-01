@@ -90,6 +90,8 @@ export interface ScriptReviewPanelModel {
   readonly canApprove: boolean;
   readonly canEdit: boolean;
   readonly canReanalyze: boolean;
+  readonly showEdit: boolean;
+  readonly showReanalyze: boolean;
   readonly needsSnapshotChoice: boolean;
   readonly primaryLabel: string;
   readonly summary: string;
@@ -170,10 +172,14 @@ export function buildScriptReviewPanelModel(input: {
       .map((issue) => issue.segment_id)
       .filter((segmentId): segmentId is string => segmentId !== null),
   );
-  const visibleSegments = visibleIssues.length === 0 && review.blocker_count === 0
-    ? [...review.segments]
+  const visibleSegments = visibleIssues.length === 0
+    ? review.issues.length === 0
+      ? [...review.segments]
+      : []
     : review.segments.filter((segment) => visibleSegmentIds.has(segment.segment_id));
   const actionSet = new Set(review.allowed_actions);
+  const showEdit = actionSet.has("edit_segment");
+  const showReanalyze = actionSet.has("reanalyze_segments");
   const needsSnapshotChoice = review.source_status === "working_copy_diverged"
     && !input.snapshotConfirmed;
   const canApprove = actionSet.has("approve")
@@ -188,8 +194,10 @@ export function buildScriptReviewPanelModel(input: {
     visibleIssues: Object.freeze(visibleIssues),
     visibleSegments: Object.freeze(visibleSegments),
     canApprove,
-    canEdit: actionSet.has("edit_segment") && !input.busy,
-    canReanalyze: actionSet.has("reanalyze_segments") && !input.busy,
+    canEdit: showEdit && !input.busy,
+    canReanalyze: showReanalyze && !input.busy,
+    showEdit,
+    showReanalyze,
     needsSnapshotChoice,
     primaryLabel,
     summary: `${review.blocker_count} 个阻塞 · ${review.warning_count} 个提醒 · ${review.segments.length} 个句段`,
@@ -417,7 +425,9 @@ export function createScriptReviewPanel(
 ): (props: ScriptReviewPanelProps) => unknown {
   const h = React.createElement;
   return function ScriptReviewPanel(props: ScriptReviewPanelProps): unknown {
-    const [showAllIssues, setShowAllIssues] = React.useState(false);
+    const [showAllIssues, setShowAllIssues] = React.useState(
+      props.review.blocker_count === 0,
+    );
     const [snapshotConfirmed, setSnapshotConfirmed] = React.useState(
       props.review.source_status !== "working_copy_diverged",
     );
@@ -448,7 +458,7 @@ export function createScriptReviewPanel(
       versionRef.current = props.review.script_version_id;
       requestVersionRef.current = props.requestVersion;
       restoredRef.current = false;
-      setShowAllIssues(false);
+      setShowAllIssues(props.review.blocker_count === 0);
       setSnapshotConfirmed(props.review.source_status !== "working_copy_diverged");
       setOperation(IDLE_OPERATION);
       actionKeys.current.clear();
@@ -696,20 +706,22 @@ export function createScriptReviewPanel(
             }, "重新分析最新正文")
             : null,
         ),
-      h(
-        "nav",
-        { className: "anw-script-review__filters", "aria-label": "复核问题筛选" },
-        h("button", {
-          type: "button",
-          "aria-pressed": !showAllIssues,
-          onClick: () => setShowAllIssues(false),
-        }, `仅看阻塞 (${props.review.blocker_count})`),
-        h("button", {
-          type: "button",
-          "aria-pressed": showAllIssues,
-          onClick: () => setShowAllIssues(true),
-        }, `全部问题 (${props.review.blocker_count + props.review.warning_count})`),
-      ),
+      props.review.blocker_count === 0 || props.review.warning_count === 0
+        ? null
+        : h(
+          "nav",
+          { className: "anw-script-review__filters", "aria-label": "复核问题筛选" },
+          h("button", {
+            type: "button",
+            "aria-pressed": !showAllIssues,
+            onClick: () => setShowAllIssues(false),
+          }, `仅看阻塞 (${props.review.blocker_count})`),
+          h("button", {
+            type: "button",
+            "aria-pressed": showAllIssues,
+            onClick: () => setShowAllIssues(true),
+          }, `全部问题 (${props.review.blocker_count + props.review.warning_count})`),
+        ),
       operationNode,
       globalIssues.length === 0
         ? null
@@ -761,22 +773,26 @@ export function createScriptReviewPanel(
                   scriptReviewIssueLabel(issue.code),
                   issue.evidence_summary ? `；${issue.evidence_summary}` : "",
                 ))),
-              h(
-                "div",
-                { className: "anw-script-review__segment-actions" },
-                props.onEditSegment === undefined
-                  ? null
-                  : h("button", {
-                    type: "button",
-                    disabled: !model.canEdit || !segment.editable,
-                    onClick: () => props.onEditSegment?.(segment),
-                  }, "修正说话人或朗读文本"),
-                h("button", {
-                  type: "button",
-                  disabled: !model.canReanalyze,
-                  onClick: () => reanalyze(segment),
-                }, "重新分析此句"),
-              ),
+              !model.showEdit && !model.showReanalyze
+                ? null
+                : h(
+                  "div",
+                  { className: "anw-script-review__segment-actions" },
+                  !model.showEdit || props.onEditSegment === undefined
+                    ? null
+                    : h("button", {
+                      type: "button",
+                      disabled: !model.canEdit || !segment.editable,
+                      onClick: () => props.onEditSegment?.(segment),
+                    }, "修正说话人或朗读文本"),
+                  !model.showReanalyze
+                    ? null
+                    : h("button", {
+                      type: "button",
+                      disabled: !model.canReanalyze,
+                      onClick: () => reanalyze(segment),
+                    }, "重新分析此句"),
+                ),
             );
           }),
         ),

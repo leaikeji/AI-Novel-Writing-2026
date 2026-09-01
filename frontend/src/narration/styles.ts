@@ -35,16 +35,14 @@ export const NARRATION_STYLES = [
       min-width: 0;
     }
 
-    .anw-narration-feature-target,
-    .anw-narration-voice-library-target {
+    .anw-narration-feature-target {
       display: grid;
       gap: 6px;
       max-width: 420px;
       font-weight: 650;
     }
 
-    .anw-narration-feature-target select,
-    .anw-narration-voice-library-target select {
+    .anw-narration-feature-target select {
       width: 100%;
       min-height: 44px;
       box-sizing: border-box;
@@ -56,38 +54,136 @@ export const NARRATION_STYLES = [
       font: inherit;
     }
 
-    .anw-character-card-voice-match {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
+    .anw-character-current-voice {
+      display: grid;
       gap: 10px;
-      border: 1px solid color-mix(in srgb, #d76832 22%, transparent);
-      border-radius: 12px;
-      padding: 14px;
-      background: color-mix(in srgb, #fff3eb 72%, transparent);
+      border: 1px solid var(--ant-color-border-secondary, #e5e6e8);
+      border-radius: 13px;
+      padding: 14px 16px;
+      background: var(--ant-color-bg-container, #fff);
     }
 
-    .anw-character-card-voice-match button {
-      min-height: 44px;
-      border: 1px solid #d76832;
+    .anw-character-current-voice header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .anw-character-current-voice h3,
+    .anw-character-current-voice p {
+      margin: 0;
+    }
+
+    .anw-character-current-voice h3 {
+      margin-top: 2px;
+      font-size: 16px;
+    }
+
+    .anw-character-current-voice__badge {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: #176b32;
+      background: #f0faf2;
+      font-size: 11px;
+    }
+
+    .anw-character-current-voice__badge.is-muted {
+      color: var(--ant-color-text-secondary, #5f6670);
+      background: var(--ant-color-fill-tertiary, #f5f5f6);
+    }
+
+    .anw-character-current-voice__badge.is-error {
+      color: var(--ant-color-error, #b42318);
+      background: #fff2ed;
+    }
+
+    .anw-character-current-voice__identity {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px 12px;
+    }
+
+    .anw-character-current-voice__identity strong {
+      font-size: 15px;
+    }
+
+    .anw-character-current-voice__identity span,
+    .anw-character-current-voice__status {
+      color: var(--ant-color-text-secondary, #5f6670);
+      font-size: 12px;
+    }
+
+    .anw-character-current-voice__status.is-error {
+      color: var(--ant-color-error, #b42318);
+    }
+
+    .anw-character-voice-advanced-stack {
+      display: grid;
+      min-width: 0;
+      gap: 16px;
+    }
+
+    .anw-narrator-current-voice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border: 1px solid var(--ant-color-border-secondary, #e5e6e8);
+      border-radius: 13px;
+      padding: 14px 16px;
+      background: var(--ant-color-bg-container, #fff);
+    }
+
+    .anw-narrator-current-voice__copy {
+      display: grid;
+      min-width: 0;
+      gap: 3px;
+    }
+
+    .anw-narrator-current-voice__copy > span,
+    .anw-narrator-current-voice__copy > small {
+      color: var(--ant-color-text-secondary, #5f6670);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .anw-narrator-current-voice__copy > strong {
+      font-size: 16px;
+    }
+
+    .anw-narrator-current-voice__actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 8px;
+    }
+
+    .anw-narrator-current-voice__actions button {
+      min-height: 42px;
+      border: 1px solid var(--ant-color-border, #d9dadd);
       border-radius: 9px;
-      padding: 9px 13px;
-      color: #a8441f;
+      padding: 8px 13px;
+      color: inherit;
       background: #fff;
       font: inherit;
       font-weight: 650;
       cursor: pointer;
     }
 
-    .anw-character-card-voice-match p {
-      flex-basis: 100%;
-      margin: 0;
-      overflow-wrap: anywhere;
+    .anw-narrator-current-voice__actions .anw-narration-primary-action {
+      border-color: transparent;
+      color: #fff;
+      background: linear-gradient(135deg, #ff7043, #ff5d2a);
     }
 
-    .anw-character-card-voice-match button:focus-visible,
+    .anw-narrator-voice-library-editor {
+      min-width: 0;
+    }
+
     .anw-narration-feature-target select:focus-visible,
-    .anw-narration-voice-library-target select:focus-visible {
+    .anw-narrator-current-voice__actions button:focus-visible {
       outline: 3px solid color-mix(in srgb, #d76832 38%, transparent);
       outline-offset: 2px;
     }
@@ -123,11 +219,6 @@ export const NARRATION_STYLES = [
       outline-offset: 2px;
     }
 
-    .anw-narration-source-summary {
-      border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-      padding-top: 16px;
-    }
-
     .anw-character-modal-tabs {
       display: flex;
       gap: 8px;
@@ -147,11 +238,16 @@ export const NARRATION_STYLES = [
         padding-inline: 12px;
       }
 
-      .anw-character-card-voice-match {
+      .anw-narrator-current-voice {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .anw-narrator-current-voice__actions {
         display: grid;
       }
 
-      .anw-character-card-voice-match button {
+      .anw-narrator-current-voice__actions button {
         width: 100%;
       }
 

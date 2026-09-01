@@ -640,7 +640,7 @@ export const IDLE_VOICE_SOURCE_WORKFLOW: VoiceSourceWorkflowState = Object.freez
   failure: null,
 });
 
-export interface VoiceSourcePanelProps {
+interface VoiceSourcePanelBaseProps {
   readonly model: VoiceSourcePanelModel;
   readonly selectedSource: VoiceSourceType | null;
   readonly workflow: VoiceSourceWorkflowState;
@@ -660,6 +660,18 @@ export interface VoiceSourcePanelProps {
   readonly onLock?: () => void;
   readonly onCancel?: () => void;
 }
+
+
+export type VoiceSourcePanelProps = VoiceSourcePanelBaseProps & (
+  | {
+    readonly embedded: true;
+    readonly ariaLabelledBy: string;
+  }
+  | {
+    readonly embedded?: false;
+    readonly ariaLabelledBy?: never;
+  }
+);
 
 interface VoiceInputEvent {
   readonly target: {
@@ -750,22 +762,27 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
     && rights.sourceIdentifier.trim().length > 0
     && !busy,
   );
+  const labelledBy = props.embedded
+    ? props.ariaLabelledBy
+    : "anw-narration-voice-source-title";
   return h(
     "section",
     {
       className: "anw-narration-voice-source-panel",
-      "aria-labelledby": "anw-narration-voice-source-title",
+      "aria-labelledby": labelledBy,
     },
-    h(
-      "header",
-      { className: "anw-narration-voice-source-heading" },
-      h(
-        "div",
-        null,
-        h("h2", { id: "anw-narration-voice-source-title" }, "音色来源"),
-        h("p", null, "官方音色请在上方音色库直接使用；这里仅管理私人音色来源。"),
+    props.embedded
+      ? null
+      : h(
+        "header",
+        { className: "anw-narration-voice-source-heading" },
+        h(
+          "div",
+          null,
+          h("h2", { id: "anw-narration-voice-source-title" }, "音色来源"),
+          h("p", null, "官方音色请在上方音色库直接使用；这里仅管理私人音色来源。"),
+        ),
       ),
-    ),
     props.model.permissionNotice === null
       ? null
       : h("p", { role: "note" }, props.model.permissionNotice),

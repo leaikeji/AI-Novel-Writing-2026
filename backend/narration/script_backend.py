@@ -28,6 +28,7 @@ from ..models import (
 )
 
 from .contracts import (
+    LOCAL_OWNER_ACTOR_ID,
     LOCAL_OWNER_ID,
     LOCAL_WORKSPACE_ID,
     NARRATION_REVIEW_TAXONOMY_VERSION,
@@ -114,7 +115,6 @@ _HOLD_OPERATIONS = frozenset(
     }
 )
 
-_OWNER_ACTOR_ID: Final = "owner"
 _REVIEW_ACTION_UNIQUE_CONSTRAINTS: Final = frozenset(
     {
         "narration_script_review_actions_pkey",
@@ -301,7 +301,7 @@ class SqlAlchemyScriptApiBackend:
                 expected_immutable_hash=payload.expected_immutable_hash,
                 expected_local_hash=payload.expected_local_hash,
                 idempotency_key=command.idempotency_key,
-                actor_id=_OWNER_ACTOR_ID,
+                actor_id=LOCAL_OWNER_ACTOR_ID,
                 speaker=speaker,
                 casting=casting,
                 spoken_text=payload.spoken_text,
@@ -887,7 +887,7 @@ class SqlAlchemyScriptApiBackend:
             or approved.approval.kind.value != "manual_after_review"
             or approved.approval.request_id != request.id
             or approved.approval.actor_type.value != "owner"
-            or approved.approval.actor_id != _OWNER_ACTOR_ID
+            or approved.approval.actor_id != LOCAL_OWNER_ACTOR_ID
             or approved.approval.approved_at != approved_at
         ):
             raise InvalidNarrationState(
@@ -947,7 +947,7 @@ class SqlAlchemyScriptApiBackend:
             request_version_before=payload.expected_request_version,
             request_version_after=payload.expected_request_version + 1,
             actor_type="owner",
-            actor_id=_OWNER_ACTOR_ID,
+            actor_id=LOCAL_OWNER_ACTOR_ID,
             created_at=approved_at,
         )
         self.store.add(action)
@@ -982,7 +982,7 @@ class SqlAlchemyScriptApiBackend:
             version_id,
             request_id=request.id,
             actor_type="owner",
-            actor_id=_OWNER_ACTOR_ID,
+            actor_id=LOCAL_OWNER_ACTOR_ID,
             approved_at=approved_at,
         )
 
@@ -1009,7 +1009,7 @@ class SqlAlchemyScriptApiBackend:
                 "expected_immutable_hash": payload.expected_immutable_hash,
                 "source_revision_id": str(payload.source_revision_id),
                 "confirmed": payload.confirmed,
-                "actor_id": _OWNER_ACTOR_ID,
+                "actor_id": LOCAL_OWNER_ACTOR_ID,
             }
         )
 
@@ -1116,7 +1116,7 @@ class SqlAlchemyScriptApiBackend:
             or action.request_version_before != payload.expected_request_version
             or action.request_version_after != payload.expected_request_version + 1
             or action.actor_type != "owner"
-            or action.actor_id != _OWNER_ACTOR_ID
+            or action.actor_id != LOCAL_OWNER_ACTOR_ID
         ):
             raise IdempotencyConflict(
                 "review action idempotency key has another canonical input"
@@ -1152,7 +1152,7 @@ class SqlAlchemyScriptApiBackend:
             or contract.approval.kind.value != "manual_after_review"
             or contract.approval.request_id != request.id
             or contract.approval.actor_type.value != "owner"
-            or contract.approval.actor_id != _OWNER_ACTOR_ID
+            or contract.approval.actor_id != LOCAL_OWNER_ACTOR_ID
             or contract.approval.approved_at != action.created_at
             or contract.script_id != action.script_id
             or contract.novel_id != request.novel_id

@@ -58,6 +58,8 @@ export interface NanoAdvancedWorkspaceProps {
   readonly overview: NarrationOverviewResponse;
   readonly characters: readonly VoiceFeatureCharacter[];
   readonly onChanged: () => void;
+  readonly fixedCharacter?: VoiceFeatureCharacter;
+  readonly presentation?: "standalone" | "embedded";
 }
 
 
@@ -165,6 +167,16 @@ function officialBasePreset(
 }
 
 
+export function officialPresetDisplayName(
+  profiles: readonly VoiceProfileResource[],
+  presetId: OfficialPresetId,
+): string {
+  return profiles.find((profile) => profile.versions.some((version) => (
+    version.source_type === "preset" && version.preset_key === presetId
+  )))?.name ?? "官方音色";
+}
+
+
 function experimentSnapshot(
   resource: NanoVoiceExperimentResource | null,
 ): NanoExperimentSnapshot | null {
@@ -231,7 +243,7 @@ export function createNanoAdvancedWorkspace(
 
   return function NanoAdvancedWorkspace(props: NanoAdvancedWorkspaceProps): unknown {
     const enabled = capabilityEnabled(props.overview, "nano_advanced_tuning");
-    const [targetKey, setTargetKey] = React.useState("narrator");
+    const [selectedTargetKey, setTargetKey] = React.useState("narrator");
     const [reloadVersion, setReloadVersion] = React.useState(0);
     const [state, setState] = React.useState<NanoLoadState>({ phase: "loading" });
     const [experiment, setExperiment] = React.useState<NanoVoiceExperimentResource | null>(null);
@@ -266,11 +278,20 @@ export function createNanoAdvancedWorkspace(
         }
       });
       return () => controller.abort();
-    }, [enabled, props.novelId, props.overview.settings.version, reloadVersion]);
+    }, [
+      enabled,
+      props.novelId,
+      props.overview.settings.version,
+      props.fixedCharacter?.characterId ?? null,
+      reloadVersion,
+    ]);
 
-    const selectedCharacter = targetKey === "narrator"
-      ? null
-      : props.characters.find((character) => character.characterId === targetKey) ?? null;
+    const targetKey = props.fixedCharacter?.characterId ?? selectedTargetKey;
+    const selectedCharacter = props.fixedCharacter ?? (
+      targetKey === "narrator"
+        ? null
+        : props.characters.find((character) => character.characterId === targetKey) ?? null
+    );
     const selectedBinding = state.phase === "ready" && selectedCharacter !== null
       ? state.bindings.find((binding) => binding.character_id === selectedCharacter.characterId) ?? null
       : null;
@@ -416,18 +437,28 @@ export function createNanoAdvancedWorkspace(
       });
     };
 
+    const headingId = `anw-nano-workspace-${(props.fixedCharacter?.characterId ?? "global")
+      .replace(/[^A-Za-z0-9_-]/gu, "-")}-heading`;
+    const embedded = props.presentation === "embedded";
     return h(
       "section",
-      { className: "anw-narration-feature-workspace", "aria-labelledby": "anw-nano-workspace-heading" },
-      h("header", { className: "anw-reading-section-heading" },
-        h("div", null,
-          h("h2", { id: "anw-nano-workspace-heading" }, "高级调音"),
-          h("p", null, "选择当前旁白或人物的官方基础音色，后台验证成功后自动使用。"),
+      {
+        className: "anw-narration-feature-workspace",
+        "aria-labelledby": embedded ? undefined : headingId,
+        "aria-label": embedded ? `${selectedCharacter?.characterName ?? "旁白"}的 Nano 高级调音` : undefined,
+      },
+      embedded
+        ? null
+        : h("header", { className: "anw-reading-section-heading" },
+          h("div", null,
+            h("h2", { id: headingId }, "高级调音"),
+            h("p", null, "选择当前旁白或人物的官方基础音色，后台验证成功后自动使用。"),
+          ),
         ),
-      ),
       !enabled
         ? h("p", { className: "anw-reading-gate-notice", role: "status" }, capabilityMessage(props.overview, "nano_advanced_tuning"))
-        : h(
+        : props.fixedCharacter === undefined
+          ? h(
           "label",
           { className: "anw-narration-feature-target" },
           h("span", null, "调音目标"),
@@ -446,7 +477,8 @@ export function createNanoAdvancedWorkspace(
             `人物 · ${character.characterName}`,
           )),
           ),
-        ),
+          )
+          : null,
       enabled && state.phase === "loading"
         ? h("p", { role: "status" }, "正在加载当前音色和实验记录…")
         : null,
@@ -465,7 +497,7 @@ export function createNanoAdvancedWorkspace(
         ? h(Panel, {
           capabilityEnabled: true,
           basePresetId,
-          basePresetDisplayName: basePresetId.replace(/^onnx\./, ""),
+          basePresetDisplayName: officialPresetDisplayName(state.profiles, basePresetId),
           target,
           experiment: experimentSnapshot(matchingExperiment),
           busyAction,

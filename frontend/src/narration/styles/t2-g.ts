@@ -128,6 +128,26 @@ export const T2_G_NARRATION_READING_RULES_STYLES = `
     background: #edf9f2;
   }
 
+  .anw-reading-status__diagnostics {
+    margin-top: 12px;
+    border: 1px solid var(--anw-line, #e7e9ee);
+    border-radius: 11px;
+    padding: 10px 12px;
+    color: var(--anw-muted, #737987);
+    font-size: 12px;
+  }
+
+  .anw-reading-status__diagnostics > summary {
+    cursor: pointer;
+    color: var(--anw-text, #343844);
+    font-weight: 700;
+  }
+
+  .anw-reading-status__diagnostics p {
+    margin: 9px 0;
+    line-height: 1.55;
+  }
+
   .anw-reading-rules-panel__consent {
     background: #f5f8ff;
   }

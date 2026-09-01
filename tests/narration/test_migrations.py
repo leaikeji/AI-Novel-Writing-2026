@@ -12,19 +12,21 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from backend.models import Base
+from backend.models import Base, CharacterCastPlanCommand, CharacterCastPlanItem
 from backend.narration.contracts import (
     BLOCKER_CODES,
     LOCAL_OWNER_ID,
     LOCAL_WORKSPACE_ID,
     WARNING_CODES,
 )
+from backend.narration.schema_readiness import character_cast_schema_ready
 
 
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260830_0035"
+HEAD_REVISION = "20260901_0036"
+CHARACTER_CAST_REVISION = "20260901_0036"
 VOICE_GENERATOR_REVISION = "20260830_0035"
 NARRATION_VOICE_LIFECYCLE_REVISION = "20260829_0034"
 MODEL_EXECUTION_EVIDENCE_REVISION = "20260829_0033"
@@ -95,6 +97,10 @@ VOICE_GENERATOR_MIGRATION = (
     ROOT
     / "backend/migrations/versions/20260830_0035_voice_generator_design.py"
 )
+CHARACTER_CAST_MIGRATION = (
+    ROOT
+    / "backend/migrations/versions/20260901_0036_character_cast_plans.py"
+)
 EXPECTED_NEW_TABLES = {
     "narration_requests", "narration_request_sources", "novel_narration_settings",
     "narration_settings_snapshots", "narration_scope_overrides", "narration_cloud_consents",
@@ -111,6 +117,7 @@ EXPECTED_NEW_TABLES = {
     "voice_action_receipts", "voice_reference_asset_links", "voice_previews",
     "nano_voice_experiment_commands",
     "voice_design_drafts", "voice_generator_commands", "voice_generator_run_evidence",
+    "character_cast_plan_commands", "character_cast_plan_items",
 }
 FOUNDATION_TABLES = EXPECTED_NEW_TABLES - {"narration_script_review_actions"}
 
@@ -122,6 +129,10 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
+    assert (
+        scripts.get_revision(CHARACTER_CAST_REVISION).down_revision
+        == VOICE_GENERATOR_REVISION
+    )
     assert (
         scripts.get_revision(VOICE_GENERATOR_REVISION).down_revision
         == NARRATION_VOICE_LIFECYCLE_REVISION
@@ -315,6 +326,65 @@ def test_voice_generator_migration_is_linear_io_free_and_closes_two_model_runs()
         assert marker in source
 
 
+def test_character_cast_migration_is_linear_io_free_and_fail_closed() -> None:
+    source = CHARACTER_CAST_MIGRATION.read_text(encoding="utf-8")
+    for forbidden in (
+        "from backend.models",
+        "create_engine",
+        "requests.",
+        "subprocess",
+        "ctx.chat",
+    ):
+        assert forbidden not in source
+    for marker in (
+        'revision = "20260901_0036"',
+        'down_revision = "20260830_0035"',
+        "character_cast_plan_commands",
+        "character_cast_plan_items",
+        "uq_character_cast_plan_active",
+        "lease_fence",
+        "voice_action_command_id",
+        "character cast plan downgrade refused: 0036 evidence exists",
+    ):
+        assert marker in source
+
+
+def test_character_cast_orm_matches_the_frozen_0036_authority() -> None:
+    assert CharacterCastPlanCommand.__tablename__ == "character_cast_plan_commands"
+    assert CharacterCastPlanItem.__tablename__ == "character_cast_plan_items"
+    assert {column.name for column in CharacterCastPlanCommand.__table__.columns} == {
+        "id", "owner_id", "workspace_id", "novel_id", "timeline_id", "mode",
+        "idempotency_key", "request_hash", "state", "character_catalog_version",
+        "settings_version", "catalog_fingerprint", "workspace_digest",
+        "settings_digest", "bindings_digest", "progress_current", "progress_total",
+        "warnings_json", "failure_code", "created_at", "updated_at", "completed_at",
+    }
+    assert {column.name for column in CharacterCastPlanItem.__table__.columns} == {
+        "id", "command_id", "novel_id", "position", "priority_rank", "target_key",
+        "target_kind", "character_id", "character_name", "role_type",
+        "expected_binding_version", "workspace_digest", "state", "attempt",
+        "lease_fence", "lease_expires_at", "brief_schema_version", "brief_json",
+        "model_evidence_json", "model_evidence_digest", "language",
+        "selected_preset_key", "score_milli", "profile_id", "voice_version_id",
+        "voice_source_type", "current_preset_key", "voice_action_command_id",
+        "warning_code", "failure_code", "created_at", "updated_at",
+    }
+    item_foreign_keys = {
+        constraint.name for constraint in CharacterCastPlanItem.__table__.foreign_key_constraints
+    }
+    assert {
+        "fk_character_cast_plan_item_command_scope",
+        "fk_character_cast_plan_item_character_scope",
+        "fk_character_cast_plan_item_voice_version",
+        "fk_character_cast_plan_item_action_command",
+    } <= item_foreign_keys
+    command_indexes = {index.name for index in CharacterCastPlanCommand.__table__.indexes}
+    assert {
+        "ix_character_cast_plan_scope_created",
+        "uq_character_cast_plan_active",
+    } <= command_indexes
+
+
 def test_failed_segment_retry_downgrade_restores_guards_without_retry_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -447,7 +517,7 @@ def test_script_review_action_migration_is_fix_forward_and_io_free() -> None:
 
 def test_metadata_contains_the_complete_foundation_without_native_enums() -> None:
     assert EXPECTED_NEW_TABLES <= set(Base.metadata.tables)
-    assert len(EXPECTED_NEW_TABLES) == 47
+    assert len(EXPECTED_NEW_TABLES) == 49
     for table_name in EXPECTED_NEW_TABLES:
         for column in Base.metadata.tables[table_name].columns:
             assert column.type.__class__.__name__ not in {"ENUM", "Enum"}
@@ -1846,3 +1916,62 @@ def test_live_postgresql_upgrade_guards_and_conditional_rollback() -> None:
         else:
             os.environ["AI_NOVEL_DATABASE_URL"] = old_database_url
         engine.dispose()
+
+
+def test_live_character_cast_migration_round_trip_in_isolated_schema() -> None:
+    """Exercise 0035→0036→0035→0036 without touching another schema."""
+
+    url = _live_url()
+    base = create_engine(url, pool_pre_ping=True)
+    schema = f"cast_migration_{uuid4().hex[:12]}"
+    if not schema.replace("cast_migration_", "").isalnum():
+        raise RuntimeError("invalid isolated migration schema")
+    with base.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(
+            text(
+                f'CREATE TABLE "{schema}".alembic_version '
+                "(version_num VARCHAR(32) PRIMARY KEY)"
+            )
+        )
+    # The empty, schema-local version table above keeps Alembic isolated while
+    # ``public`` remains visible for extension-owned types such as pgvector.
+    scoped_url = make_url(url).update_query_dict(
+        {"options": f"-csearch_path={schema},public"}
+    ).render_as_string(hide_password=False)
+    # Alembic's ConfigParser treats URL percent escapes as interpolation.
+    # Doubling them preserves the exact decoded URL for the migration engine.
+    escaped_scoped_url = scoped_url.replace("%", "%%")
+    config = _alembic_config(escaped_scoped_url)
+    old_database_url = os.environ.get("AI_NOVEL_DATABASE_URL")
+    os.environ["AI_NOVEL_DATABASE_URL"] = escaped_scoped_url
+    engine = create_engine(scoped_url, pool_pre_ping=True)
+    try:
+        command.upgrade(config, VOICE_GENERATOR_REVISION)
+        assert "character_cast_plan_commands" not in inspect(engine).get_table_names(
+            schema=schema
+        )
+
+        command.upgrade(config, CHARACTER_CAST_REVISION)
+        assert {
+            "character_cast_plan_commands",
+            "character_cast_plan_items",
+        } <= set(inspect(engine).get_table_names(schema=schema))
+        assert character_cast_schema_ready(engine)
+
+        command.downgrade(config, VOICE_GENERATOR_REVISION)
+        assert "character_cast_plan_commands" not in inspect(engine).get_table_names(
+            schema=schema
+        )
+
+        command.upgrade(config, CHARACTER_CAST_REVISION)
+        assert character_cast_schema_ready(engine)
+    finally:
+        engine.dispose()
+        if old_database_url is None:
+            os.environ.pop("AI_NOVEL_DATABASE_URL", None)
+        else:
+            os.environ["AI_NOVEL_DATABASE_URL"] = old_database_url
+        with base.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        base.dispose()

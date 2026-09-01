@@ -22,7 +22,11 @@ from backend.narration.review_actions import (
     correct_review_segment,
     reanalyze_review_segments,
 )
-from backend.narration.script_analysis import analyze_narration_script
+from backend.narration.requests import CreateNarrationRequest, create_request
+from backend.narration.script_analysis import (
+    AnalyzeNarrationScript,
+    analyze_narration_script,
+)
 from backend.narration.script_contracts import (
     AttributionOrigin,
     CastingDecision,
@@ -544,6 +548,16 @@ def test_two_sequential_corrections_use_same_request_and_manual_parent_chain() -
     }.isdisjoint({segment.segment_id for segment in first.contract.segments})
     inherited_manual = second.contract.segments[0].attribution.override_provenance
     assert inherited_manual == first_override
+    assert second.contract.segments[0].inheritance_anchor_before_hash is None
+    assert (
+        second.contract.segments[0].inheritance_anchor_after_hash
+        == second.contract.segments[1].local_hash
+    )
+    assert (
+        second.contract.segments[1].inheritance_anchor_before_hash
+        == second.contract.segments[0].local_hash
+    )
+    assert second.contract.segments[1].inheritance_anchor_after_hash is None
     assert second.contract.segments[0].spoken_text == "第一句已修正。"
     assert second.contract.segments[1].spoken_text == "第二句已修正。"
     assert len(store.rows[NarrationScriptReviewActionRecord]) == 2
@@ -553,6 +567,112 @@ def test_two_sequential_corrections_use_same_request_and_manual_parent_chain() -
     assert replay_first.result_version_id == first.result_version_id
     assert request.current_review_version_id == second.result_version_id
     assert request.version == second.request_version_after
+
+
+def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger() -> None:
+    (
+        store,
+        _novel,
+        document,
+        revision,
+        _character,
+        request,
+        parent,
+        casting,
+    ) = _review_seed("“第一句。”\n\n“第二句。”")
+    first = correct_review_segment(
+        store,
+        _command(
+            request,
+            parent,
+            casting,
+            segment_index=0,
+            key="inherit-source-first",
+            spoken_text="第一句人工修正。",
+        ),
+    )
+    second = correct_review_segment(
+        store,
+        _command(
+            request,
+            first.contract,
+            casting,
+            segment_index=1,
+            key="inherit-source-second",
+            spoken_text="第二句人工修正。",
+        ),
+    )
+    freeze_script_version(
+        store,
+        second.result_version_id,
+        request_id=request.id,
+        actor_type="owner",
+        actor_id="owner",
+    )
+    approved = load_script_contract(store, second.result_version_id)
+    assert approved.state is ScriptVersionState.APPROVED
+
+    next_request = create_request(
+        store,
+        CreateNarrationRequest(
+            novel_id=request.novel_id,
+            document_id=document.id,
+            source_revision_id=revision.id,
+            source_content_hash=revision.content_hash,
+            intent="update",
+            idempotency_key="inherit-next-generation-request",
+            settings_fingerprint=request.settings_fingerprint,
+            effective_policy=request.effective_policy,
+            explicit_generation_intent_at=request.explicit_generation_intent_at,
+            explicit_generation_actor="owner",
+        ),
+    )
+    inherited = analyze_narration_script(
+        store,
+        AnalyzeNarrationScript(
+            request_id=next_request.id,
+            document_id=document.id,
+            revision_id=revision.id,
+            content_hash=revision.content_hash,
+            idempotency_key="inherit-next-generation-analysis",
+        ),
+    )
+
+    assert inherited.parent_version_id == approved.script_version_id
+    assert inherited.state is ScriptVersionState.REVIEW_REQUIRED
+    assert inherited.blocker_count == 0
+    assert inherited.warning_count == 2
+    assert [segment.spoken_text for segment in inherited.segments] == [
+        "第一句人工修正。",
+        "第二句人工修正。",
+    ]
+    assert all(
+        segment.attribution.origin is AttributionOrigin.INHERITED_OVERRIDE
+        and segment.manual_override
+        for segment in inherited.segments
+    )
+    assert {
+        issue.code for issue in inherited.issues
+    } == {"W_MANUAL_OVERRIDE_INHERITED"}
+    inheritance_actions = [
+        action
+        for action in store.rows[NarrationScriptReviewActionRecord]
+        if action.action_kind == "reanalyze_segments"
+    ]
+    assert len(inheritance_actions) == 1
+    assert inheritance_actions[0].parent_version_id == approved.script_version_id
+    assert inheritance_actions[0].result_version_id == inherited.script_version_id
+    assert inheritance_actions[0].request_version_before == 3
+    assert inheritance_actions[0].request_version_after == 4
+    assert next_request.current_review_version_id == inherited.script_version_id
+    assert next_request.state == "review_required"
+    assert next_request.version == 4
+    assert script_contract_to_dict(
+        load_script_contract(store, inherited.script_version_id)
+    ) == script_contract_to_dict(inherited)
+    inheritance_actions[0].request_hash = "f" * 64
+    with pytest.raises(InvalidNarrationState, match="action ledger"):
+        load_script_contract(store, inherited.script_version_id)
 
 
 def test_partial_reanalysis_interface_is_explicitly_fail_closed_without_writes() -> None:

@@ -113,7 +113,7 @@ function playerState(phase: NarrationPlayerState["phase"] = "idle"): NarrationPl
     rate: 1,
     volume: 0.8,
     followPaused: false,
-    backend: phase === "idle" ? null : "web-audio",
+    backend: phase === "idle" ? null : "media-element",
     source: phase === "idle" ? null : "default",
     failure: null,
   });
@@ -261,6 +261,22 @@ describe("chapter narration panel", () => {
     (generate.props.onClick as () => void)();
     expect(onGenerate).toHaveBeenCalledTimes(1);
     expect(findAll(root, (item) => item.type === "input" && item.props.type === "range")).toHaveLength(0);
+  });
+
+  it("uses a phase-neutral busy label while preparing a real narration", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({
+      phase: "no-edition",
+      playerState: null,
+      segments: [],
+      editions: [],
+      activeEditionId: null,
+      currentEditionId: null,
+      busy: true,
+    }));
+
+    expect(textContent(root)).toContain("正在准备朗读…");
+    expect(textContent(root)).not.toContain("正在分析人物与选角…");
   });
 
   it("dispatches sentence seek and applies volume immediately in normalized units", () => {

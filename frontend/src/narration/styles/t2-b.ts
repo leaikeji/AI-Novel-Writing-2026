@@ -255,6 +255,26 @@ export const T2_B_READING_STYLES = String.raw`
     gap: 12px;
   }
 
+  .anw-reading-history-diagnostics {
+    margin-top: 12px;
+    border: 1px solid var(--anw-line, #e7e9ee);
+    border-radius: 11px;
+    padding: 10px 12px;
+    color: var(--anw-muted, #737987);
+    font-size: 12px;
+  }
+
+  .anw-reading-history-diagnostics > summary {
+    cursor: pointer;
+    color: var(--anw-text, #343844);
+    font-weight: 700;
+  }
+
+  .anw-reading-history-diagnostics p {
+    margin: 9px 0 0;
+    line-height: 1.55;
+  }
+
   .anw-reading-status-card {
     min-width: 0;
     min-height: 132px;

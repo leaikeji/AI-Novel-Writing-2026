@@ -1736,6 +1736,263 @@ class VoiceActionCommand(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CharacterCastPlanCommand(Base):
+    """Durable, novel-scoped authority for one whole-book casting run."""
+
+    __tablename__ = "character_cast_plan_commands"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["novel_id", "owner_id", "workspace_id"],
+            ["novels.id", "novels.owner_id", "novels.workspace_id"],
+            name="fk_character_cast_plan_novel_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["timeline_id", "novel_id"],
+            ["story_timelines.id", "story_timelines.novel_id"],
+            name="fk_character_cast_plan_timeline_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "workspace_id",
+            "novel_id",
+            "idempotency_key",
+            name="uq_character_cast_plan_idempotency",
+        ),
+        UniqueConstraint(
+            "id", "novel_id", name="uq_character_cast_plan_novel_guard"
+        ),
+        Index(
+            "ix_character_cast_plan_scope_created",
+            "owner_id",
+            "workspace_id",
+            "novel_id",
+            "created_at",
+        ),
+        Index(
+            "uq_character_cast_plan_active",
+            "novel_id",
+            "timeline_id",
+            unique=True,
+            postgresql_where=text("state IN ('reserved','analyzing')"),
+        ),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_character_cast_plan_fixed_local_scope",
+        ),
+        CheckConstraint(
+            "mode='fill_and_deduplicate'",
+            name="ck_character_cast_plan_mode",
+        ),
+        CheckConstraint(
+            "state IN ('reserved','analyzing','ready_applied',"
+            "'ready_applied_with_warnings','ready_unapplied','failed','superseded')",
+            name="ck_character_cast_plan_state",
+        ),
+        CheckConstraint(
+            "idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$' "
+            "AND request_hash ~ '^[0-9a-f]{64}$' "
+            "AND catalog_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND workspace_digest ~ '^[0-9a-f]{64}$' "
+            "AND settings_digest ~ '^[0-9a-f]{64}$' "
+            "AND bindings_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_character_cast_plan_digests",
+        ),
+        CheckConstraint(
+            "character_catalog_version >= 0 AND settings_version >= 0 "
+            "AND progress_total > 0 AND progress_current >= 0 "
+            "AND progress_current <= progress_total",
+            name="ck_character_cast_plan_versions_progress",
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code ~ '^[A-Z][A-Z0-9_]{0,95}$'",
+            name="ck_character_cast_plan_failure_code",
+        ),
+        CheckConstraint(
+            "(state IN ('reserved','analyzing') AND completed_at IS NULL "
+            "AND failure_code IS NULL) OR "
+            "(state='failed' AND completed_at IS NOT NULL AND failure_code IS NOT NULL) OR "
+            "(state IN ('ready_applied','ready_applied_with_warnings',"
+            "'ready_unapplied','superseded') AND completed_at IS NOT NULL "
+            "AND failure_code IS NULL)",
+            name="ck_character_cast_plan_terminal_shape",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    timeline_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="reserved")
+    character_catalog_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    settings_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    catalog_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    workspace_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    settings_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    bindings_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    progress_current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CharacterCastPlanItem(Base):
+    """One recoverable analysis target inside a whole-book casting run."""
+
+    __tablename__ = "character_cast_plan_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["command_id", "novel_id"],
+            ["character_cast_plan_commands.id", "character_cast_plan_commands.novel_id"],
+            name="fk_character_cast_plan_item_command_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["character_id", "novel_id"],
+            ["novel_characters.id", "novel_characters.novel_id"],
+            name="fk_character_cast_plan_item_character_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["voice_version_id", "profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_character_cast_plan_item_voice_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["voice_action_command_id"],
+            ["voice_action_commands.id"],
+            name="fk_character_cast_plan_item_action_command",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "command_id", "position", name="uq_character_cast_plan_item_position"
+        ),
+        UniqueConstraint(
+            "command_id", "target_key", name="uq_character_cast_plan_item_target"
+        ),
+        Index(
+            "ix_character_cast_plan_items_command_state",
+            "command_id",
+            "state",
+            "position",
+        ),
+        CheckConstraint(
+            "target_kind IN ('narrator','character') AND "
+            "((target_kind='narrator' AND target_key='narrator' "
+            "AND character_id IS NULL AND character_name IS NULL AND role_type IS NULL) OR "
+            "(target_kind='character' AND character_id IS NOT NULL "
+            "AND target_key=('character:'||character_id::text) "
+            "AND character_name IS NOT NULL AND role_type IS NOT NULL))",
+            name="ck_character_cast_plan_item_target",
+        ),
+        CheckConstraint(
+            "state IN ('pending','analyzing','preserved','scored','assigned','blocked')",
+            name="ck_character_cast_plan_item_state",
+        ),
+        CheckConstraint(
+            "position >= 0 AND priority_rank >= 0 AND attempt >= 0 "
+            "AND expected_binding_version >= 0",
+            name="ck_character_cast_plan_item_counters",
+        ),
+        CheckConstraint(
+            "workspace_digest ~ '^[0-9a-f]{64}$' "
+            "AND (model_evidence_digest IS NULL "
+            "OR model_evidence_digest ~ '^[0-9a-f]{64}$')",
+            name="ck_character_cast_plan_item_digests",
+        ),
+        CheckConstraint(
+            "(state='analyzing' AND lease_fence IS NOT NULL "
+            "AND lease_expires_at IS NOT NULL) OR "
+            "(state<>'analyzing' AND lease_fence IS NULL AND lease_expires_at IS NULL)",
+            name="ck_character_cast_plan_item_lease",
+        ),
+        CheckConstraint(
+            "(profile_id IS NULL AND voice_version_id IS NULL) OR "
+            "(profile_id IS NOT NULL AND voice_version_id IS NOT NULL)",
+            name="ck_character_cast_plan_item_voice_shape",
+        ),
+        CheckConstraint(
+            "voice_source_type IS NULL OR voice_source_type IN ('preset','uploaded','generated')",
+            name="ck_character_cast_plan_item_voice_source",
+        ),
+        CheckConstraint(
+            "brief_schema_version IS NULL OR brief_schema_version IN "
+            "('character-voice-brief/1','narrator-voice-brief/1')",
+            name="ck_character_cast_plan_item_brief_schema",
+        ),
+        CheckConstraint(
+            "selected_preset_key IS NULL OR "
+            "selected_preset_key ~ '^onnx\\.[A-Za-z][A-Za-z0-9]{0,79}$'",
+            name="ck_character_cast_plan_item_preset",
+        ),
+        CheckConstraint(
+            "score_milli IS NULL OR (score_milli >= 0 AND score_milli <= 1000)",
+            name="ck_character_cast_plan_item_score",
+        ),
+        CheckConstraint(
+            "warning_code IS NULL OR warning_code ~ '^[A-Z][A-Z0-9_]{0,95}$'",
+            name="ck_character_cast_plan_item_warning_code",
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code ~ '^[A-Z][A-Z0-9_]{0,95}$'",
+            name="ck_character_cast_plan_item_failure_code",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    command_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    priority_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    character_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    character_name: Mapped[str | None] = mapped_column(String(240))
+    role_type: Mapped[str | None] = mapped_column(String(30))
+    expected_binding_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    workspace_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_fence: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    brief_schema_version: Mapped[str | None] = mapped_column(String(80))
+    brief_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    model_evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    model_evidence_digest: Mapped[str | None] = mapped_column(String(64))
+    language: Mapped[str | None] = mapped_column(String(40))
+    selected_preset_key: Mapped[str | None] = mapped_column(String(160))
+    score_milli: Mapped[int | None] = mapped_column(Integer)
+    profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    voice_source_type: Mapped[str | None] = mapped_column(String(20))
+    current_preset_key: Mapped[str | None] = mapped_column(String(160))
+    voice_action_command_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    warning_code: Mapped[str | None] = mapped_column(String(96))
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class VoiceReferenceAssetLink(Base):
     """Immutable provenance from an uploaded original to a normalized reference."""
 

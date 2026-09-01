@@ -871,6 +871,7 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
         baseline = wire.t2_hold_capabilities()
         managed_keys = {
             wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
+            wire.CapabilityKey.CHARACTER_CAST_PLANNING,
             wire.CapabilityKey.NANO_ADVANCED_TUNING,
             wire.CapabilityKey.PRIVATE_VOICE_DELETION,
             wire.CapabilityKey.VOICE_GENERATOR,
@@ -902,6 +903,7 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
                 assert item.reason_code is None and item.required_gate is None
             elif key in {
                 wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
+                wire.CapabilityKey.CHARACTER_CAST_PLANNING,
                 wire.CapabilityKey.NANO_ADVANCED_TUNING,
                 wire.CapabilityKey.PRIVATE_VOICE_DELETION,
                 wire.CapabilityKey.VOICE_GENERATOR,

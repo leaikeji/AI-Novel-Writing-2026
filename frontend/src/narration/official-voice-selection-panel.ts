@@ -86,15 +86,41 @@ export interface OfficialVoiceSelectionPanelProps {
   readonly target: OfficialVoiceSelectionPanelTarget;
   readonly capabilities: NarrationCapabilities;
   readonly authorization: NarrationAuthorizationState;
+  readonly projection?: OfficialVoiceSelectionPanelProjection;
+  readonly headerAction?: unknown;
+  readonly presentation?: "standalone" | "embedded";
   readonly onChanged?: () => void;
 }
+
+
+export type CharacterVoiceBindingProjection = Pick<
+  CharacterVoiceBindingResource,
+  | "binding_id"
+  | "novel_id"
+  | "character_id"
+  | "binding_policy"
+  | "profile_id"
+  | "version_id"
+  | "language"
+  | "version"
+>;
+
+
+export type OfficialVoiceSelectionPanelProjection =
+  | { readonly phase: "loading" }
+  | { readonly phase: "error"; readonly message: string }
+  | {
+    readonly phase: "ready";
+    readonly binding: CharacterVoiceBindingProjection | null;
+    readonly profiles: readonly VoiceProfileResource[];
+  };
 
 
 interface ReadyState {
   readonly phase: "ready";
   readonly catalog: ReturnType<typeof officialVoiceCatalogFromWire>;
   readonly profiles: readonly VoiceProfileResource[];
-  readonly binding: CharacterVoiceBindingResource | null;
+  readonly binding: CharacterVoiceBindingProjection | null;
   readonly activePresetId: string | null;
   readonly settingsVersion: number;
   readonly targetLanguage: string;
@@ -161,7 +187,7 @@ function errorMessage(reason: unknown): string {
 
 function currentSelection(
   settings: NarrationSettingsResource,
-  binding: CharacterVoiceBindingResource | null,
+  binding: CharacterVoiceBindingProjection | null,
   target: OfficialVoiceSelectionPanelTarget,
 ): { readonly profileId: string | null; readonly versionId: string | null } {
   if (target.kind === "narrator") {
@@ -179,7 +205,7 @@ function currentSelection(
 
 export function activeOfficialPresetId(
   settings: NarrationSettingsResource,
-  binding: CharacterVoiceBindingResource | null,
+  binding: CharacterVoiceBindingProjection | null,
   target: OfficialVoiceSelectionPanelTarget,
   profiles: readonly VoiceProfileResource[],
 ): string | null {
@@ -270,24 +296,45 @@ export function createOfficialVoiceSelectionPanel(
     const scope = props.target.kind === "character"
       ? `${props.novelId}:character:${props.target.characterId}`
       : `${props.novelId}:narrator`;
+    const projectionBindingVersion = props.projection?.phase === "ready"
+      ? props.projection.binding?.version ?? null
+      : null;
+    const projectionProfiles = props.projection?.phase === "ready"
+      ? props.projection.profiles
+      : null;
+    const projectionErrorMessage = props.projection?.phase === "error"
+      ? props.projection.message
+      : null;
 
     React.useEffect(() => {
       const controller = new AbortController();
       setState({ phase: "loading" });
-      const bindingRequest = props.target.kind === "character"
-        ? api.getCharacterVoiceBinding(
-          props.novelId,
-          props.target.characterId,
-          controller.signal,
-        )
-        : Promise.resolve(null);
-      void Promise.all([
-        api.listOfficialVoicePresets(controller.signal),
-        api.listVoiceProfiles({
+      if (props.projection?.phase === "loading") {
+        return () => controller.abort();
+      }
+      if (props.projection?.phase === "error") {
+        setState({ phase: "error", message: props.projection.message });
+        return () => controller.abort();
+      }
+      const bindingRequest = props.projection?.phase === "ready"
+        ? Promise.resolve(props.projection.binding)
+        : props.target.kind === "character"
+          ? api.getCharacterVoiceBinding(
+            props.novelId,
+            props.target.characterId,
+            controller.signal,
+          )
+          : Promise.resolve(null);
+      const profilesRequest = props.projection?.phase === "ready"
+        ? Promise.resolve({ items: props.projection.profiles })
+        : api.listVoiceProfiles({
           novelId: props.novelId,
           includeLibrary: false,
           signal: controller.signal,
-        }),
+        });
+      void Promise.all([
+        api.listOfficialVoicePresets(controller.signal),
+        profilesRequest,
         bindingRequest,
       ]).then(([catalogWire, profileList, binding]) => {
         if (controller.signal.aborted) return;
@@ -312,7 +359,15 @@ export function createOfficialVoiceSelectionPanel(
         setState({ phase: "error", message: errorMessage(reason) });
       });
       return () => controller.abort();
-    }, [scope, props.settings.version, reloadVersion]);
+    }, [
+      scope,
+      props.settings.version,
+      reloadVersion,
+      props.projection?.phase,
+      projectionBindingVersion,
+      projectionProfiles,
+      projectionErrorMessage,
+    ]);
 
     const binding = state.phase === "ready" ? state.binding : null;
     const settingsVersion = state.phase === "ready"
@@ -346,6 +401,8 @@ export function createOfficialVoiceSelectionPanel(
       loading: state.phase === "loading",
       loadError: state.phase === "error" ? state.message : null,
       disabled: officialVoiceSelectionDisabled(props.capabilities, props.authorization),
+      headerAction: props.headerAction,
+      presentation: props.presentation,
       onUse: async (
         novelId: string,
         request: OfficialVoiceSelectionRequest,

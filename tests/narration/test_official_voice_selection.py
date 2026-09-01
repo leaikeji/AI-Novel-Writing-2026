@@ -23,7 +23,10 @@ from backend.models import (
 from backend.narration import schemas as wire
 from backend.narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
 from backend.narration.official_presets import OFFICIAL_PRESETS
-from backend.narration.official_voice_selection import OfficialVoiceSelectionService
+from backend.narration.official_voice_selection import (
+    OfficialVoiceBatchSelection,
+    OfficialVoiceSelectionService,
+)
 from backend.narration.services import IdempotencyConflict, NarrationCasConflict
 
 
@@ -351,6 +354,137 @@ def test_new_cas_failure_rolls_back_receipt_command_and_canonical_rows(
         assert session.scalar(
             select(func.count()).select_from(VoiceActionCommand).where(
                 VoiceActionCommand.novel_id == novel_id
+            )
+        ) == 0
+
+
+def test_atomic_batch_writes_one_audit_chain_per_sorted_target_and_replays(
+    selection_engine: Engine,
+) -> None:
+    factory = _factory(selection_engine)
+    novel_id, character_id = _seed_novel(factory, with_character=True)
+    assert character_id is not None
+    service = OfficialVoiceSelectionService(factory)
+    selections = (
+        OfficialVoiceBatchSelection(
+            target_key=f"character:{character_id}",
+            idempotency_key="cast-batch-character-0001",
+            request=wire.OfficialVoiceSelectionRequest(
+                preset_id="onnx.Zhiming",
+                target_kind="character",
+                character_id=character_id,
+                expected_settings_version=0,
+                expected_binding_version=0,
+            ),
+        ),
+        OfficialVoiceBatchSelection(
+            target_key="narrator",
+            idempotency_key="cast-batch-narrator-0001",
+            request=wire.OfficialVoiceSelectionRequest(
+                preset_id="onnx.Junhao",
+                target_kind="narrator",
+                expected_settings_version=0,
+            ),
+        ),
+    )
+
+    responses = service.select_official_voices_atomically(
+        novel_id=novel_id,
+        selections=selections,
+    )
+
+    assert [item.frozen_result.target_kind.value for item in responses] == [
+        "character",
+        "narrator",
+    ]
+    assert all(item.selection_still_current and not item.replayed for item in responses)
+    assert responses[0].frozen_result.settings_version == 1
+    assert responses[0].frozen_result.binding_version == 1
+    assert responses[1].frozen_result.settings_version == 1
+    replayed = service.select_official_voices_atomically(
+        novel_id=novel_id,
+        selections=selections,
+    )
+    assert all(item.replayed and item.selection_still_current for item in replayed)
+
+    with factory() as session:
+        assert session.scalar(
+            select(func.count()).select_from(VoiceActionCommand).where(
+                VoiceActionCommand.novel_id == novel_id
+            )
+        ) == 2
+        assert session.scalar(
+            select(func.count()).select_from(VoiceActionReceipt).join(
+                VoiceActionCommand,
+                VoiceActionReceipt.resource_id == VoiceActionCommand.id,
+            ).where(VoiceActionCommand.novel_id == novel_id)
+        ) == 2
+
+
+def test_atomic_batch_cas_failure_rolls_back_every_target(
+    selection_engine: Engine,
+) -> None:
+    factory = _factory(selection_engine)
+    novel_id, character_id = _seed_novel(factory, with_character=True)
+    assert character_id is not None
+    service = OfficialVoiceSelectionService(factory)
+
+    with pytest.raises(NarrationCasConflict):
+        service.select_official_voices_atomically(
+            novel_id=novel_id,
+            selections=(
+                OfficialVoiceBatchSelection(
+                    target_key="narrator",
+                    idempotency_key="cast-batch-rollback-narrator-0001",
+                    request=wire.OfficialVoiceSelectionRequest(
+                        preset_id="onnx.Junhao",
+                        target_kind="narrator",
+                        expected_settings_version=0,
+                    ),
+                ),
+                OfficialVoiceBatchSelection(
+                    target_key=f"character:{character_id}",
+                    idempotency_key="cast-batch-rollback-character-0001",
+                    request=wire.OfficialVoiceSelectionRequest(
+                        preset_id="onnx.Zhiming",
+                        target_kind="character",
+                        character_id=character_id,
+                        expected_settings_version=0,
+                        expected_binding_version=1,
+                    ),
+                ),
+            ),
+        )
+
+    with factory() as session:
+        assert session.scalar(
+            select(func.count()).select_from(VoiceActionCommand).where(
+                VoiceActionCommand.novel_id == novel_id
+            )
+        ) == 0
+        assert session.scalar(
+            select(func.count()).select_from(VoiceActionReceipt).where(
+                VoiceActionReceipt.idempotency_key.in_(
+                    (
+                        "cast-batch-rollback-narrator-0001",
+                        "cast-batch-rollback-character-0001",
+                    )
+                )
+            )
+        ) == 0
+        assert session.scalar(
+            select(func.count()).select_from(VoiceProfile).where(
+                VoiceProfile.novel_id == novel_id
+            )
+        ) == 0
+        assert session.scalar(
+            select(func.count()).select_from(NovelNarrationSettings).where(
+                NovelNarrationSettings.novel_id == novel_id
+            )
+        ) == 0
+        assert session.scalar(
+            select(func.count()).select_from(CharacterVoiceBinding).where(
+                CharacterVoiceBinding.novel_id == novel_id
             )
         ) == 0
         assert session.scalar(

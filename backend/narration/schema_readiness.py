@@ -22,6 +22,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_CONFIG_PATH = REPOSITORY_ROOT / "alembic.ini"
 NARRATION_FEATURE_MINIMUM_DATABASE_REVISION = "20260829_0034"
 VOICE_GENERATOR_MINIMUM_DATABASE_REVISION = "20260830_0035"
+CHARACTER_CAST_MINIMUM_DATABASE_REVISION = "20260901_0036"
 
 _FEATURE_REQUIRED_COLUMNS = {
     "voice_profile_versions": {"model_run_id"},
@@ -175,6 +176,64 @@ _VOICE_GENERATOR_REQUIRED_FUNCTION_MARKERS = {
         "voice_deletion_asset_plans",
         "referenced media identity is immutable",
     ),
+}
+
+_CHARACTER_CAST_REQUIRED_COLUMNS = {
+    "character_cast_plan_commands": {
+        "id",
+        "novel_id",
+        "timeline_id",
+        "idempotency_key",
+        "request_hash",
+        "character_catalog_version",
+        "settings_version",
+        "catalog_fingerprint",
+        "workspace_digest",
+        "bindings_digest",
+        "state",
+        "progress_current",
+        "progress_total",
+    },
+    "character_cast_plan_items": {
+        "id",
+        "command_id",
+        "target_key",
+        "target_kind",
+        "expected_binding_version",
+        "workspace_digest",
+        "attempt",
+        "lease_fence",
+        "lease_expires_at",
+        "brief_json",
+        "model_evidence_json",
+        "selected_preset_key",
+        "voice_action_command_id",
+        "voice_source_type",
+        "current_preset_key",
+        "state",
+    },
+}
+_CHARACTER_CAST_REQUIRED_CHECKS = {
+    "character_cast_plan_commands": {
+        "ck_character_cast_plan_state",
+        "ck_character_cast_plan_digests",
+        "ck_character_cast_plan_terminal_shape",
+    },
+    "character_cast_plan_items": {
+        "ck_character_cast_plan_item_target",
+        "ck_character_cast_plan_item_state",
+        "ck_character_cast_plan_item_lease",
+        "ck_character_cast_plan_item_brief_schema",
+    },
+}
+_CHARACTER_CAST_REQUIRED_INDEXES = {
+    "character_cast_plan_commands": {
+        "uq_character_cast_plan_active",
+        "ix_character_cast_plan_scope_created",
+    },
+    "character_cast_plan_items": {
+        "ix_character_cast_plan_items_command_state",
+    },
 }
 
 
@@ -415,11 +474,63 @@ def voice_generator_schema_ready(engine: Engine) -> bool:
     return True
 
 
+def character_cast_schema_ready(engine: Engine) -> bool:
+    """Verify the complete 0036 cast-command authority without writes."""
+
+    if not isinstance(engine, Engine):
+        return False
+    try:
+        with engine.connect() as connection:
+            if connection.dialect.name != "postgresql":
+                return False
+            revisions = tuple(
+                str(value)
+                for value in connection.scalars(
+                    text("SELECT version_num FROM alembic_version")
+                )
+            )
+            if not database_revision_satisfies(
+                revisions,
+                minimum_revision=CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
+            ):
+                return False
+            inspector = inspect(connection)
+            table_names = set(inspector.get_table_names())
+            if not set(_CHARACTER_CAST_REQUIRED_COLUMNS).issubset(table_names):
+                return False
+            for table_name, required in _CHARACTER_CAST_REQUIRED_COLUMNS.items():
+                columns = {
+                    str(column.get("name"))
+                    for column in inspector.get_columns(table_name)
+                }
+                if not required.issubset(columns):
+                    return False
+            for table_name, required in _CHARACTER_CAST_REQUIRED_CHECKS.items():
+                checks = {
+                    str(constraint.get("name"))
+                    for constraint in inspector.get_check_constraints(table_name)
+                }
+                if not required.issubset(checks):
+                    return False
+            for table_name, required in _CHARACTER_CAST_REQUIRED_INDEXES.items():
+                indexes = {
+                    str(index.get("name"))
+                    for index in inspector.get_indexes(table_name)
+                }
+                if not required.issubset(indexes):
+                    return False
+    except Exception:
+        return False
+    return True
+
+
 __all__ = [
     "ALEMBIC_CONFIG_PATH",
+    "CHARACTER_CAST_MINIMUM_DATABASE_REVISION",
     "NARRATION_FEATURE_MINIMUM_DATABASE_REVISION",
     "VOICE_GENERATOR_MINIMUM_DATABASE_REVISION",
     "database_revision_satisfies",
+    "character_cast_schema_ready",
     "narration_feature_schema_ready",
     "voice_generator_schema_ready",
 ]

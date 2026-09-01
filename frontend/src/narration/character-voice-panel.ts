@@ -70,6 +70,9 @@ export interface CharacterVoicePanelProps {
   readonly capabilities: NarrationCapabilities;
   readonly authorization: NarrationAuthorizationState;
   readonly className?: string;
+  readonly presentation?: "standalone" | "embedded";
+  /** Limit the manual selector when official presets already have a dedicated picker. */
+  readonly allowedSourceTypes?: readonly VoiceSourceType[];
   /** Reload locked voice choices after the shared source workspace changes a profile. */
   readonly profileRefreshVersion?: number;
   readonly onSaved?: (binding: CharacterVoiceBindingResource) => void;
@@ -222,6 +225,7 @@ export function characterVoiceOptions(
   profiles: readonly VoiceProfileResource[],
   novelId: string,
   capabilities: NarrationCapabilities,
+  allowedSourceTypes?: readonly VoiceSourceType[],
 ): readonly CharacterVoiceOption[] {
   const options: CharacterVoiceOption[] = [];
   for (const profile of profiles) {
@@ -229,6 +233,7 @@ export function characterVoiceOptions(
     if (profile.status !== "active") continue;
     const version = currentVersion(profile);
     if (!version
+      || (allowedSourceTypes !== undefined && !allowedSourceTypes.includes(version.source_type))
       || version.state !== "locked"
       || !voiceActivationEvidenceIsUsable(version)
       || version.rights.state !== "active"
@@ -489,7 +494,12 @@ export function createCharacterVoicePanel(
       && state.binding.character_id === props.characterId
       ? state.binding
       : null;
-    const options = characterVoiceOptions(state.profiles, props.novelId, props.capabilities);
+    const options = characterVoiceOptions(
+      state.profiles,
+      props.novelId,
+      props.capabilities,
+      props.allowedSourceTypes,
+    );
     const selectedKey = state.draft.profileId && state.draft.versionId
       ? voiceOptionKey(state.draft.profileId, state.draft.versionId)
       : "";
@@ -564,6 +574,7 @@ export function createCharacterVoicePanel(
         current.profiles,
         props.novelId,
         props.capabilities,
+        props.allowedSourceTypes,
       );
       const request = current.binding
         ? buildCharacterVoiceBindingRequest(current.binding, current.draft, currentOptions)
@@ -635,21 +646,26 @@ export function createCharacterVoicePanel(
       {
         className: rootClassName,
         role: "region",
-        "aria-labelledby": headingId,
+        "aria-labelledby": props.presentation === "embedded" ? undefined : headingId,
+        "aria-label": props.presentation === "embedded"
+          ? `${props.characterName}的私人音色手动设置`
+          : undefined,
         "aria-describedby": statusId,
         "aria-busy": state.phase === "loading" || state.phase === "saving",
         "data-character-id": props.characterId,
         "data-voice-panel-phase": state.phase,
       },
-      h("header", { className: "anw-character-voice-panel__header" },
-        h("div", null,
-          h("span", { className: "anw-character-voice-panel__eyebrow" }, "人物卡 · 声音"),
-          h("h3", { id: headingId, tabIndex: -1 }, `${props.characterName}的声音`),
+      props.presentation === "embedded"
+        ? null
+        : h("header", { className: "anw-character-voice-panel__header" },
+          h("div", null,
+            h("span", { className: "anw-character-voice-panel__eyebrow" }, "人物卡 · 声音"),
+            h("h3", { id: headingId, tabIndex: -1 }, `${props.characterName}的声音`),
+          ),
+          binding
+            ? h("span", { className: "anw-character-voice-panel__version" }, `绑定版本 ${binding.version}`)
+            : null,
         ),
-        binding
-          ? h("span", { className: "anw-character-voice-panel__version" }, `绑定版本 ${binding.version}`)
-          : null,
-      ),
       h(
         "div",
         {

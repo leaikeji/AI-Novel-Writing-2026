@@ -330,6 +330,27 @@ describe("script review panel model", () => {
     expect(model.canApprove).toBe(true);
     expect(model.primaryLabel).toBe("确认并冻结脚本");
     expect(model.visibleSegments).toHaveLength(1);
+    expect(model.showEdit).toBe(true);
+    expect(model.showReanalyze).toBe(true);
+  });
+
+  it("removes immutable segment actions after the script is frozen", () => {
+    const model = buildScriptReviewPanelModel({
+      review: approvedReview(),
+      showAllIssues: false,
+      snapshotConfirmed: true,
+      busy: false,
+    });
+    expect(model.showEdit).toBe(false);
+    expect(model.showReanalyze).toBe(false);
+
+    const harness = createReactHarness();
+    const Panel = createScriptReviewPanel(harness.React, api());
+    const tree = harness.render(Panel, props(approvedReview(), {
+      onEditSegment: vi.fn(),
+    }));
+    expect(textContent(tree)).not.toContain("修正说话人或朗读文本");
+    expect(textContent(tree)).not.toContain("重新分析此句");
   });
 
   it("requires a deliberate old-snapshot choice after working copy divergence", () => {
@@ -462,6 +483,9 @@ describe("script review panel component", () => {
     (title.props.ref as { current: unknown }).current = { focus: titleFocus };
     harness.commitEffects();
     expect(titleFocus).toHaveBeenCalledTimes(1);
+    expect(findAll(tree, (element) => (
+      element.props["aria-label"] === "复核问题筛选"
+    ))).toHaveLength(0);
   });
 
   it("calls the real approval operation with immutable guards and no actor field", async () => {
@@ -638,7 +662,7 @@ describe("script review panel component", () => {
     expect(changed).toHaveBeenCalledWith(latestReview());
   });
 
-  it("lets the author switch from blocker-only to all issues without losing state", () => {
+  it("shows warning-only reviews directly without a redundant issue filter", () => {
     const warning = resource({
       warning_count: 1,
       segments: [segment({
@@ -657,12 +681,11 @@ describe("script review panel component", () => {
     const harness = createReactHarness();
     const Panel = createScriptReviewPanel(harness.React, api());
     const componentProps = props(warning);
-    let tree = harness.render(Panel, componentProps);
-    expect(textContent(tree)).not.toContain("说话人判断为中等置信度");
-
-    (findButton(tree, "全部问题 (1)").props.onClick as () => void)();
-    tree = harness.render(Panel, componentProps);
+    const tree = harness.render(Panel, componentProps);
     expect(textContent(tree)).toContain("说话人判断为中等置信度");
+    expect(findAll(tree, (element) => (
+      element.props["aria-label"] === "复核问题筛选"
+    ))).toHaveLength(0);
   });
 });
 

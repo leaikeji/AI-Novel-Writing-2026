@@ -127,7 +127,7 @@ class FakePlayer implements NarrationPlayerController {
       lease,
       segmentId,
       ordinal: segmentId === SEGMENT_1 ? 0 : 1,
-      backend: "web-audio",
+      backend: "media-element",
     });
   }
 

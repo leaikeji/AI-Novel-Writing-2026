@@ -172,8 +172,13 @@ function cleanupBlockMessage(
 
 export function formatExactBytes(value: number): string {
   if (!Number.isSafeInteger(value) || value < 0) return "无效字节数";
-  const exact = `${value.toLocaleString("zh-CN")} B`;
-  if (value < 1024) return exact;
+  return `${value.toLocaleString("zh-CN")} B`;
+}
+
+
+export function formatReadableBytes(value: number): string {
+  if (!Number.isSafeInteger(value) || value < 0) return "无效容量";
+  if (value < 1024) return `${value} B`;
   const units = ["KiB", "MiB", "GiB", "TiB"] as const;
   let scaled = value;
   let unit: typeof units[number] = units[0];
@@ -182,7 +187,7 @@ export function formatExactBytes(value: number): string {
     unit = candidate;
     if (scaled < 1024) break;
   }
-  return `${exact}（${scaled.toFixed(2)} ${unit}）`;
+  return `${scaled.toFixed(2)} ${unit}`;
 }
 
 
@@ -482,7 +487,7 @@ export function createCachePanel(
           preview: null,
           result: nextResult,
           confirmed: false,
-          message: `清理完成：服务端确认删除 ${nextResult.deleted_asset_count} 个派生资产，实际回收 ${formatExactBytes(nextResult.reclaimed_bytes)}。`,
+          message: `清理完成：服务端确认删除 ${nextResult.deleted_asset_count} 个派生资产，实际回收 ${formatReadableBytes(nextResult.reclaimed_bytes)}。`,
         });
         props.onCleaned?.(nextResult);
       }).catch((reason: unknown) => {
@@ -507,6 +512,11 @@ export function createCachePanel(
     const prefix = `anw-cache-${props.novelId}`;
     const headingId = `${prefix}-heading`;
     const statusId = `${prefix}-status`;
+    const capacity = (value: number): unknown => h(
+      "span",
+      { title: `精确值：${formatExactBytes(value)}` },
+      formatReadableBytes(value),
+    );
 
     return h(
       "section",
@@ -567,15 +577,29 @@ export function createCachePanel(
             )
             : null,
           h("dl", { className: "anw-cache-panel__metrics" },
-            h("div", null, h("dt", null, "源资产（不可清理）"), h("dd", null, formatExactBytes(status.source_asset_bytes))),
-            h("div", null, h("dt", null, "锁定音色（不可清理）"), h("dd", null, formatExactBytes(status.locked_voice_bytes))),
-            h("div", null, h("dt", null, "历史 Edition 引用（不可清理）"), h("dd", null, formatExactBytes(status.referenced_edition_bytes))),
-            h("div", null, h("dt", null, "派生缓存"), h("dd", null, formatExactBytes(status.derived_cache_bytes))),
-            h("div", { className: "is-reclaimable" }, h("dt", null, "当前可回收"), h("dd", null, formatExactBytes(status.reclaimable_bytes))),
+            h("div", null, h("dt", null, "源资产（不可清理）"), h("dd", null, capacity(status.source_asset_bytes))),
+            h("div", null, h("dt", null, "锁定音色（不可清理）"), h("dd", null, capacity(status.locked_voice_bytes))),
+            h("div", null, h("dt", null, "历史 Edition 引用（不可清理）"), h("dd", null, capacity(status.referenced_edition_bytes))),
+            h("div", null, h("dt", null, "派生缓存"), h("dd", null, capacity(status.derived_cache_bytes))),
+            h("div", { className: "is-reclaimable" }, h("dt", null, "当前可回收"), h("dd", null, capacity(status.reclaimable_bytes))),
             h("div", null, h("dt", null, "待处理任务"), h("dd", null, status.pending_job_count)),
             h("div", null, h("dt", null, "媒体盘可用 / 总量"), h("dd", null,
-              `${formatExactBytes(status.disk_free_bytes)} / ${formatExactBytes(status.disk_total_bytes)}`,
+              capacity(status.disk_free_bytes),
+              " / ",
+              capacity(status.disk_total_bytes),
             )),
+          ),
+          h("details", { className: "anw-cache-panel__exact-capacity" },
+            h("summary", null, "查看精确容量"),
+            h("dl", null,
+              h("div", null, h("dt", null, "源资产"), h("dd", null, formatExactBytes(status.source_asset_bytes))),
+              h("div", null, h("dt", null, "锁定音色"), h("dd", null, formatExactBytes(status.locked_voice_bytes))),
+              h("div", null, h("dt", null, "历史 Edition 引用"), h("dd", null, formatExactBytes(status.referenced_edition_bytes))),
+              h("div", null, h("dt", null, "派生缓存"), h("dd", null, formatExactBytes(status.derived_cache_bytes))),
+              h("div", null, h("dt", null, "当前可回收"), h("dd", null, formatExactBytes(status.reclaimable_bytes))),
+              h("div", null, h("dt", null, "媒体盘可用"), h("dd", null, formatExactBytes(status.disk_free_bytes))),
+              h("div", null, h("dt", null, "媒体盘总量"), h("dd", null, formatExactBytes(status.disk_total_bytes))),
+            ),
           ),
           h("aside", { className: "anw-cache-panel__guard" },
             h("strong", null, "清理保护线"),
@@ -591,7 +615,7 @@ export function createCachePanel(
             h("h4", { id: `${prefix}-preview-heading` }, "二阶段清理确认"),
             h("p", null, "以下是服务端对当前快照的预览；尚未删除任何数据。"),
             h("dl", null,
-              h("div", null, h("dt", null, "精确可回收"), h("dd", null, formatExactBytes(preview.reclaimable_bytes))),
+              h("div", null, h("dt", null, "预计可回收"), h("dd", null, capacity(preview.reclaimable_bytes))),
               h("div", null, h("dt", null, "候选资产"), h("dd", null, preview.candidate_asset_count)),
               h("div", null, h("dt", null, "受保护资产"), h("dd", null, preview.protected_asset_count)),
               h("div", null, h("dt", null, "确认过期时间"), h("dd", null, new Date(preview.expires_at).toLocaleString("zh-CN"))),
@@ -610,7 +634,7 @@ export function createCachePanel(
                       : "已取消本地确认，不会执行删除。",
                   })),
                 }),
-                h("span", null, `我确认只清理预览快照中的 ${formatExactBytes(preview.reclaimable_bytes)} 未引用派生缓存`),
+                h("span", null, `我确认只清理预览快照中的 ${formatReadableBytes(preview.reclaimable_bytes)} 未引用派生缓存`),
               ),
             h("div", { className: "anw-cache-panel__preview-actions" },
               h("button", {
@@ -644,7 +668,8 @@ export function createCachePanel(
           result && state.phase === "success"
             ? h("div", { className: "anw-cache-panel__success", role: "status" },
               h("strong", null, "清理结果（服务端实际值）"),
-              h("p", null, `删除 ${result.deleted_asset_count} 个派生资产，回收 ${formatExactBytes(result.reclaimed_bytes)}。`),
+              h("p", null, `删除 ${result.deleted_asset_count} 个派生资产，回收 ${formatReadableBytes(result.reclaimed_bytes)}。`),
+              h("small", null, `精确回收：${formatExactBytes(result.reclaimed_bytes)}`),
               h("p", null, "源资产 0 个、锁定音色 0 个、历史 Edition 引用资产 0 个。上方快照已过期，请刷新状态。"),
             )
             : null,

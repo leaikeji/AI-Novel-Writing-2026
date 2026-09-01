@@ -35,6 +35,7 @@ NANO_AUDIO_REPETITION_PENALTY_MILLI_RANGE: Final = (1_000, 2_000)
 
 LOCAL_OWNER_ID: Final = UUID("29cf94d9-a5c9-54ec-912c-5dfff8738c4c")
 LOCAL_WORKSPACE_ID: Final = UUID("f0e2e632-bc99-52d2-9916-bb906aa4da6e")
+LOCAL_OWNER_ACTOR_ID: Final = "owner"
 
 _SAFE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
@@ -106,6 +107,21 @@ BLOCKER_CODES: Final[tuple[str, ...]] = (
     "B_VOICE_RIGHTS_UNAVAILABLE",
     "B_PRONUNCIATION_HARD_CONFLICT",
     "B_CLOUD_DECISION_UNAVAILABLE",
+)
+
+# These findings are wholly replaced when the owner supplies (or the service
+# safely inherits) an exact speaker plus resolved casting target.  Keep the
+# set shared so manual correction and inheritance cannot drift apart.
+SPEAKER_CORRECTION_ISSUE_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "B_SPEAKER_UNKNOWN",
+        "B_SPEAKER_LOW_CONFIDENCE",
+        "B_CHARACTER_ALIAS_CONFLICT",
+        "B_CHARACTER_REFERENCE_INVALID",
+        "B_ANONYMOUS_IDENTITY_CONFLICT",
+        "B_CASTING_TARGET_UNRESOLVED",
+        "W_SPEAKER_MEDIUM_CONFIDENCE",
+    }
 )
 
 WORKFLOW_FAILURE_CODES: Final[tuple[str, ...]] = (

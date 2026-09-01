@@ -129,6 +129,7 @@ function capabilities(overrides: Partial<Record<FeatureCapability["key"], boolea
     "reading_settings",
     "preset_voice_source",
     "character_voice_matching",
+    "character_cast_planning",
     "reference_clone",
     "voice_generator",
   ] as const;
@@ -266,8 +267,8 @@ function binding(characterId: string, configured = true): CharacterVoiceBindingR
 
 
 const characters = [
-  { characterId: CHARACTER_A, characterName: "林夏" },
-  { characterId: CHARACTER_B, characterName: "周野" },
+  { characterId: CHARACTER_A, characterName: "林夏", roleType: "main" },
+  { characterId: CHARACTER_B, characterName: "周野", roleType: "supporting" },
 ] as const;
 
 
@@ -280,6 +281,7 @@ function props(changes: Partial<CharacterVoiceRosterProps> = {}): CharacterVoice
     capabilities: capabilities(),
     authorization,
     onConfigureCharacter: vi.fn(),
+    onSmartCast: vi.fn(),
     ...changes,
   };
 }
@@ -324,22 +326,44 @@ describe("character voice roster projection", () => {
 
   it("keeps unresolved historical bindings visible instead of calling them unconfigured", () => {
     const rows = buildCharacterVoiceRosterRows(NOVEL_ID, characters, [binding(CHARACTER_A)], []);
-    expect(rows[0]).toMatchObject({ configured: true, voiceName: "绑定音色不可用", sourceGroup: "unresolved" });
-    expect(rows[1]).toMatchObject({ configured: false, voiceName: null });
+    expect(rows[0]).toMatchObject({
+      configured: true,
+      voiceName: "绑定音色不可用",
+      sourceGroup: "unresolved",
+      sourceLabel: "来源待恢复",
+      statusLabel: "需要处理",
+    });
+    expect(rows[1]).toMatchObject({
+      configured: false,
+      voiceName: "尚未配置",
+      sourceLabel: null,
+      statusLabel: null,
+    });
   });
 });
 
 
 describe("CharacterVoiceRoster", () => {
-  it("renders coverage, source labels, inline preview and native keyboard actions", () => {
+  it("renders the compact roster with one global action and two row actions", () => {
     const onPreviewVoice = vi.fn();
     const harness = createHarness();
     const Roster = createCharacterVoiceRoster(harness.React);
     const tree = harness.render(Roster, props({ onPreviewVoice }));
 
-    expect(textContent(tree)).toContain("2 位人物 · 1 位未配置");
+    expect(textContent(tree)).toContain("2 位人物 · 1 位待配置");
+    expect(textContent(tree)).toContain("主角");
+    expect(textContent(tree)).toContain("配角");
     expect(textContent(tree)).toContain("官方音色");
-    expect(textContent(tree)).toContain("尚未绑定声音");
+    expect(textContent(tree).match(/尚未配置/g)).toHaveLength(1);
+    expect(textContent(tree)).not.toContain("尚未绑定声音");
+    expect(findAll(tree, (element) => textContent(element) === "未配置")).toHaveLength(0);
+    expect(findAll(tree, (element) => textContent(element) === "已配置")).toHaveLength(0);
+    expect(findButton(tree, "智能配音全书")).toBeDefined();
+    expect(findAll(tree, (element) => (
+      element.type === "button" && textContent(element) === "更换"
+    ))).toHaveLength(2);
+    expect(textContent(tree)).not.toContain("根据人物生成并使用");
+    expect(textContent(tree)).not.toContain("根据人物卡匹配并使用");
     const preview = findButton(tree, "试听");
     expect(preview.props.disabled).toBe(false);
     (preview.props.onClick as () => void)();
@@ -352,71 +376,83 @@ describe("CharacterVoiceRoster", () => {
       .every((button) => button.props.type === "button")).toBe(true);
   });
 
-  it("reports every result when batch official assignment partially succeeds", async () => {
-    const onMatchOfficialVoice = vi.fn(async (character: { characterId: string }) => {
-      if (character.characterId === CHARACTER_B) {
-        return {
-          voiceName: "Xiaoyu",
-          presetId: "onnx.Xiaoyu",
-          selectionStillCurrent: true,
-        };
-      }
-      throw new Error("模型暂时不可用");
-    });
+  it("starts one persistent whole-book command instead of looping character writes", async () => {
+    const onSmartCast = vi.fn(async () => undefined);
     const harness = createHarness();
     const Roster = createCharacterVoiceRoster(harness.React);
-    const batchProps = props({
-      bindings: [binding(CHARACTER_A, false), binding(CHARACTER_B, false)],
-      onMatchOfficialVoice,
-    });
-    let tree = harness.render(Roster, batchProps);
-    (findButton(tree, "为未配置人物一键匹配并使用").props.onClick as () => void)();
-    await settle();
-    tree = harness.render(Roster, batchProps);
+    const tree = harness.render(Roster, props({ onSmartCast }));
 
-    expect(onMatchOfficialVoice).toHaveBeenCalledTimes(2);
-    expect(textContent(tree)).toContain("模型暂时不可用");
-    expect(textContent(tree)).toContain("已使用 Xiaoyu");
-    expect(findAll(tree, (element) => element.props.role === "alert")).toHaveLength(1);
+    const start = findButton(tree, "智能配音全书").props.onClick as () => void;
+    start();
+    start();
+    await settle();
+
+    expect(onSmartCast).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to one-click official assignment without pretending to generate a voice", async () => {
-    const onMatchOfficialVoice = vi.fn(async () => ({
-      voiceName: "Xiaoyu",
-      presetId: "onnx.Xiaoyu",
-      selectionStillCurrent: true,
+  it("shows durable cast progress and disables duplicate starts", () => {
+    const onSmartCast = vi.fn();
+    const harness = createHarness();
+    const Roster = createCharacterVoiceRoster(harness.React);
+    const tree = harness.render(Roster, props({
+      onSmartCast,
+      castStatus: {
+        phase: "analyzing",
+        progressCurrent: 2,
+        progressTotal: 7,
+        message: "正在分析第 3 位目标",
+      },
     }));
-    const onGenerateAndUse = vi.fn();
-    const harness = createHarness();
-    const Roster = createCharacterVoiceRoster(harness.React);
-    let tree = harness.render(Roster, props({ onMatchOfficialVoice, onGenerateAndUse }));
 
-    (findButton(tree, "根据人物卡匹配并使用").props.onClick as () => void)();
-    await settle();
-    tree = harness.render(Roster, props({ onMatchOfficialVoice, onGenerateAndUse }));
-
-    expect(onMatchOfficialVoice).toHaveBeenCalledTimes(1);
-    expect(onGenerateAndUse).not.toHaveBeenCalled();
-    expect(textContent(tree)).toContain("已匹配并使用 Xiaoyu");
-    expect(textContent(tree)).toContain("这不是新音色生成");
+    const action = findButton(tree, "智能配音 2/7");
+    expect(action.props.disabled).toBe(true);
+    expect(textContent(tree)).toContain("正在分析第 3 位目标");
   });
 
-  it("fails closed for permission/capability gaps and never pretends VoiceGenerator ran", () => {
+  it("fails closed for permission/capability gaps", () => {
     expect(characterVoiceBatchAvailability(props({
       authorization: { ...authorization, can_configure: false },
-      onMatchOfficialVoice: vi.fn(),
-    }), 1)).toEqual({ enabled: false, reason: "当前身份只能查看，不能批量修改人物配音。" });
+    }), 1)).toEqual({ enabled: false, reason: "当前身份只能查看，不能修改人物配音。" });
 
-    const onGenerateAndUse = vi.fn();
     const harness = createHarness();
     const Roster = createCharacterVoiceRoster(harness.React);
-    const tree = harness.render(Roster, props({ onGenerateAndUse }));
-    const generateButtons = findAll(tree, (element) => (
-      element.type === "button" && textContent(element).includes("根据人物")
-    ));
-    expect(generateButtons).toHaveLength(0);
-    expect(textContent(tree)).toContain("官方音色批量分配服务尚未接入");
-    expect(onGenerateAndUse).not.toHaveBeenCalled();
+    const tree = harness.render(Roster, props({
+      capabilities: capabilities({ character_cast_planning: false }),
+    }));
+
+    expect(findButton(tree, "智能配音全书").props.disabled).toBe(true);
+    expect(textContent(tree)).toContain("智能配音当前不可用（FEATURE_NOT_RELEASED）");
+  });
+
+  it("opens an accessible drawer, keeps it mounted when closed and restores focus", async () => {
+    const onConfigureCharacter = vi.fn();
+    const trigger = { focus: vi.fn() };
+    const harness = createHarness();
+    const Roster = createCharacterVoiceRoster(harness.React);
+    const drawerProps = props({
+      onConfigureCharacter,
+      renderConfigurator: (character) => `配置：${character.characterName}`,
+    });
+    let tree = harness.render(Roster, drawerProps);
+    const change = findButton(tree, "更换");
+    (change.props.onClick as (event: { currentTarget: typeof trigger }) => void)({ currentTarget: trigger });
+    tree = harness.render(Roster, drawerProps);
+
+    const dialog = findAll(tree, (element) => element.props.role === "dialog")[0];
+    expect(dialog).toBeDefined();
+    expect(textContent(dialog)).toContain("配置：林夏");
+    expect(onConfigureCharacter).toHaveBeenCalledWith(CHARACTER_A);
+    (findButton(dialog, "关闭").props.onClick as () => void)();
+    tree = harness.render(Roster, drawerProps);
+
+    const layer = findAll(tree, (element) => (
+      typeof element.props.className === "string"
+      && element.props.className.includes("anw-character-voice-drawer-layer")
+    ))[0];
+    expect(layer?.props.hidden).toBe(true);
+    expect(layer?.props.inert).toBe(true);
+    await settle();
+    expect(trigger.focus).toHaveBeenCalled();
   });
 
   it("does not reveal roster data or call configuration when read access is absent", () => {
@@ -436,8 +472,12 @@ describe("CharacterVoiceRoster", () => {
   });
 
   it("has narrow-screen wrapping, 44px targets and visible keyboard focus", () => {
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 640px)");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 768px)");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-workbench-frame:has(");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("z-index: 1200");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("min-height: 44px");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-roster button:focus-visible");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-drawer");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("width: 100vw");
   });
 });

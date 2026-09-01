@@ -27,7 +27,7 @@ function playerState(): NarrationPlayerState {
     rate: 1,
     volume: 0.8,
     followPaused: false,
-    backend: "web-audio",
+    backend: "media-element",
     source: "default",
     failure: null,
   });
@@ -138,6 +138,29 @@ describe("chapter player view state", () => {
     });
   });
 
+  it("shows a persisted idle position as resumable progress instead of claiming it was never played", () => {
+    const restored: NarrationPlayerState = Object.freeze({
+      ...playerState(),
+      phase: "idle",
+      currentSegmentId: SEGMENT_2,
+      currentOrdinal: 1,
+      offsetMs: 450,
+      backend: null,
+      source: null,
+    });
+    const view = deriveChapterPlayerView({
+      contentPhase: "ready",
+      sourceKind: "current",
+      playerState: restored,
+      segmentIds: [SEGMENT_1, SEGMENT_2, SEGMENT_3],
+      segmentStates: ["ready", "ready", "ready"],
+    });
+
+    expect(view.playbackPhase).toBe("idle");
+    expect(view.playbackLabel).toBe("上次停在第 2 段");
+    expect(view.playbackLabel).not.toBe("尚未播放");
+  });
+
   it("fails timing closed on a misaligned manifest while retaining exact segment generation states", () => {
     const view = deriveChapterPlayerView({
       contentPhase: "ready",
@@ -178,6 +201,26 @@ describe("chapter player view state", () => {
       stableIdentifier: identity.voice_version_id,
       legacy: true,
     });
+  });
+
+  it("summarizes multiple frozen voices without exposing Edition jargon", () => {
+    const first = voiceIdentity();
+    const second = Object.freeze({
+      ...voiceIdentity(),
+      voice_version_id: "30000000-0000-4000-8000-000000000003",
+      display_name: "沈砥的案发现场声线",
+    });
+    const view = deriveChapterPlayerView({
+      contentPhase: "ready",
+      sourceKind: "current",
+      playerState: null,
+      segmentIds: [SEGMENT_1],
+      segmentStates: ["ready"],
+      voiceIdentities: [first, second],
+    });
+
+    expect(view.voiceSummary).toBe("2 个冻结声音");
+    expect(view.voiceSummary).not.toContain("Edition");
   });
 
   it("formats long chapter time without locale-dependent output", () => {

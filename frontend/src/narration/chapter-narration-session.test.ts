@@ -354,7 +354,7 @@ class TestQueue implements SegmentPlaybackQueuePort {
     this.hooks.onEvent({
       type: "segment-start",
       lease: options.lease,
-      backend: "web-audio",
+      backend: "media-element",
       segmentId: target.segment_id,
       ordinal: target.ordinal,
       offsetMs: options.startOffsetMs ?? 0,
@@ -363,7 +363,7 @@ class TestQueue implements SegmentPlaybackQueuePort {
     return Object.freeze({
       kind: "started",
       lease: options.lease,
-      backend: "web-audio",
+      backend: "media-element",
       segmentId: target.segment_id,
       ordinal: target.ordinal,
     });
@@ -398,6 +398,7 @@ interface FixtureResources {
 
 interface HarnessOptions {
   resources?: FixtureResources;
+  getEdition?: ChapterNarrationSessionDependencies["getNarrationEdition"];
   getManifest?: ChapterNarrationSessionDependencies["getNarrationManifest"];
   delay?: ChapterNarrationSessionDependencies["delay"];
   now?: ChapterNarrationSessionDependencies["now"];
@@ -492,7 +493,7 @@ function createHarness(options: HarnessOptions = {}) {
     async () => resources.context,
   );
   const getEdition = vi.fn<ChapterNarrationSessionDependencies["getNarrationEdition"]>(
-    async () => resources.edition,
+    options.getEdition ?? (async () => resources.edition),
   );
   const getScript = vi.fn<ChapterNarrationSessionDependencies["getNarrationScriptVersionForEdition"]>(
     async () => resources.script,
@@ -613,6 +614,31 @@ function createHarness(options: HarnessOptions = {}) {
 
 
 describe("chapter narration bundle gates", () => {
+  it("retries a transient Edition aggregate read skew before constructing playback", async () => {
+    const resources = fixture();
+    const staleEdition = Object.freeze({
+      ...resources.edition,
+      state: "rendering" as const,
+      queued_segment_count: 2,
+      ready_segment_count: 0,
+    });
+    const getEdition = vi.fn<ChapterNarrationSessionDependencies["getNarrationEdition"]>()
+      .mockResolvedValueOnce(staleEdition)
+      .mockResolvedValue(resources.edition);
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>(
+      async (_milliseconds, signal) => {
+        if (signal.aborted) throw new DOMException("aborted", "AbortError");
+      },
+    );
+    const harness = createHarness({ getEdition, delay });
+
+    await expect(harness.session.load()).resolves.toMatchObject({ status: "ready" });
+    expect(getEdition).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledOnce();
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "ready", error: null });
+    expect(harness.session.player).not.toBeNull();
+  });
+
   it("returns an explicit no-edition result without constructing playback runtime", async () => {
     const initial = fixture();
     const resources = { ...initial, context: noEditionContext() };

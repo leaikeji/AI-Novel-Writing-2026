@@ -304,11 +304,30 @@ describe("character voice generator panel", () => {
     const tree = harness.render(Panel, props);
     const buttons = findAll(tree, (element) => element.type === "button");
     expect(buttons).toHaveLength(1);
-    expect(textContent(buttons[0])).toBe("生成专属音色并使用");
+    expect(textContent(buttons[0])).toBe("为顾临舟生成并使用专属音色");
+    expect(textContent(tree)).toContain("原声音会保持到生成和 Nano 验证全部完成");
     expect(findAll(tree, (element) => element.type === "input")).toHaveLength(0);
     expect(textContent(tree)).not.toContain("版权");
     expect(textContent(tree)).not.toContain("试听");
     expect(textContent(tree)).not.toContain("名称");
+  });
+
+  it("owns the embedded section heading only while the generator is visible", () => {
+    const harness = createHarness();
+    const Panel = createCharacterVoiceGenerator(harness.React);
+    const tree = harness.render(Panel, baseProps({ presentation: "embedded" }));
+
+    expect(textContent(tree)).toContain("生成专属音色");
+    expect(findAll(tree, (element) => (
+      element.type === "h3" && textContent(element) === "生成专属音色"
+    ))).toHaveLength(1);
+
+    const hiddenHarness = createHarness();
+    const HiddenPanel = createCharacterVoiceGenerator(hiddenHarness.React);
+    expect(hiddenHarness.render(HiddenPanel, baseProps({
+      presentation: "embedded",
+      capabilityEnabled: false,
+    }))).toBeNull();
   });
 
   it("restores the latest durable command after a page refresh", async () => {
@@ -324,7 +343,7 @@ describe("character voice generator panel", () => {
     await Promise.resolve();
     const restored = harness.render(Panel, props);
     expect(onLoadLatest).toHaveBeenCalledWith(CHARACTER_ID, expect.any(AbortSignal));
-    expect(textContent(restored)).toContain("正在用 MOSS-TTS-Nano 验证音色");
+    expect(textContent(restored)).toContain("正在验证生成结果");
     expect(textContent(restored)).toContain("84%");
   });
 

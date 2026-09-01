@@ -243,7 +243,6 @@ describe("reading status model", () => {
       "T2_GATE_REQUIRED",
       "TTS_RUNTIME_DISABLED",
       "T2_GATE_REQUIRED",
-      "NARRATION_JOBS_FAILED",
     ]);
   });
 
@@ -300,6 +299,8 @@ describe("reading status surface", () => {
     expect(tree.props["aria-labelledby"]).toBe("anw-reading-status-title");
     expect(tree.props["data-runtime-ready"]).toBe("false");
     expect(textContent(tree)).toContain("状态只反映真实后端证据");
+    expect(textContent(tree)).toContain("历史与诊断（1）");
+    expect(textContent(tree)).not.toContain("失败任务 1");
     expect(textContent(tree)).not.toContain("通用音色");
     const buttons = findAll(tree, (element) => element.type === "button");
     expect(buttons.length).toBeGreaterThan(0);

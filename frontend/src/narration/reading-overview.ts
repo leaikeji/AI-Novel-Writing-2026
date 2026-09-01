@@ -207,7 +207,7 @@ export function buildReadingOverviewModel(
       coverage.character_count,
     ),
     reviewLabel: `${coverage.pending_review_script_count} 待复核 · ${coverage.blocker_count} 阻塞 · ${coverage.warning_count} 提醒`,
-    generationLabel: `${coverage.generated_chapter_count} 章已生成 · ${coverage.failed_job_count} 个失败任务`,
+    generationLabel: `${coverage.generated_chapter_count} 章已生成 · ${coverage.pending_review_script_count} 份待复核`,
     cacheLabel: `${formatNarrationBytes(cache.derived_cache_bytes)} 派生缓存 · ${formatNarrationBytes(cache.reclaimable_bytes)} 可回收`,
     diskLabel: `${formatNarrationBytes(cache.disk_free_bytes)} 可用 / ${formatNarrationBytes(cache.disk_total_bytes)} 总空间`,
   };
@@ -339,6 +339,14 @@ export function createReadingOverview(
         statusCard(h, "章节与任务", model.generationLabel),
         statusCard(h, "音频与缓存", model.cacheLabel, model.diskLabel),
       ),
+      state.overview.coverage.failed_job_count > 0
+        ? h(
+          "details",
+          { className: "anw-reading-history-diagnostics" },
+          h("summary", null, `历史与诊断（${state.overview.coverage.failed_job_count}）`),
+          h("p", null, "这里保留历史失败任务数量供排查；它不会被显示为当前 Edition 的播放故障。"),
+        )
+        : null,
       h(
         "div",
         { className: "anw-reading-overview-actions", role: "group", "aria-label": "朗读配置快捷入口" },

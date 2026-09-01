@@ -12,7 +12,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Final
+from typing import Final, Sequence
 from uuid import RFC_4122, UUID
 
 from .contracts import ConfidenceLevel, issue_severity
@@ -20,10 +20,12 @@ from .script_contracts import (
     AttributionEvidence,
     AttributionOrigin,
     CastingDecision,
+    NarrationScriptContract,
     OverrideKind,
     OverrideProvenance,
     ScriptIssueContract,
     ScriptVersionState,
+    SegmentContract,
     SpeakerKind,
     SpeakerRef,
     speaker_target_hash,
@@ -353,6 +355,56 @@ class ManualOverrideSource:
             )
 
 
+def manual_override_source(
+    script: NarrationScriptContract,
+    segment: SegmentContract,
+) -> ManualOverrideSource:
+    """Build the exact immutable source snapshot used by inheritance policy v1."""
+
+    if type(script) is not NarrationScriptContract:
+        raise ConfidenceRuleError("script must be NarrationScriptContract")
+    if type(segment) is not SegmentContract or segment not in script.segments:
+        raise ConfidenceRuleError("segment must belong to the supplied script")
+    return ManualOverrideSource(
+        novel_id=script.novel_id,
+        script_version_id=script.script_version_id,
+        segment_id=segment.segment_id,
+        script_immutable_hash=script.immutable_hash,
+        script_state=script.state,
+        local_hash=segment.local_hash,
+        anchor_before_hash=segment.inheritance_anchor_before_hash,
+        anchor_after_hash=segment.inheritance_anchor_after_hash,
+        speaker=segment.speaker,
+        casting=segment.casting,
+        attribution_origin=segment.attribution.origin,
+        manual_override=segment.manual_override,
+        provenance=segment.attribution.override_provenance,
+    )
+
+
+def segment_inheritance_anchors(
+    segments: Sequence[object],
+    index: int,
+) -> tuple[str | None, str | None]:
+    """Return stable immediate-neighbour hashes for one source-bound segment."""
+
+    if not isinstance(segments, Sequence) or not segments:
+        raise ConfidenceRuleError("segments must be a non-empty sequence")
+    if type(index) is not int or not 0 <= index < len(segments):
+        raise ConfidenceRuleError("segment index is outside the sequence")
+    local_hashes = tuple(
+        _require_sha256(
+            getattr(segment, "local_hash", None),
+            field_name="segment local_hash",
+        )
+        for segment in segments
+    )
+    return (
+        local_hashes[index - 1] if index > 0 else None,
+        local_hashes[index + 1] if index + 1 < len(local_hashes) else None,
+    )
+
+
 def _source_provenance_is_exact(source: ManualOverrideSource) -> bool:
     provenance = source.provenance
     if provenance is None:
@@ -448,6 +500,48 @@ class AnchorUniquenessEvidence:
             self.target_at_document_end,
             field_name="target_at_document_end",
         )
+
+
+def segment_anchor_uniqueness(
+    segments: Sequence[object],
+    index: int,
+) -> AnchorUniquenessEvidence:
+    """Prove v1 anchor uniqueness from the complete server-side segment list."""
+
+    before_hash, after_hash = segment_inheritance_anchors(segments, index)
+    local_hashes = tuple(
+        _require_sha256(
+            getattr(segment, "local_hash", None),
+            field_name="segment local_hash",
+        )
+        for segment in segments
+    )
+    target_hash = local_hashes[index]
+    combined_count = sum(
+        1
+        for candidate_index, candidate_hash in enumerate(local_hashes)
+        if candidate_hash == target_hash
+        and (local_hashes[candidate_index - 1] if candidate_index > 0 else None)
+        == before_hash
+        and (
+            local_hashes[candidate_index + 1]
+            if candidate_index + 1 < len(local_hashes)
+            else None
+        )
+        == after_hash
+    )
+    return AnchorUniquenessEvidence(
+        local_hash_match_count=local_hashes.count(target_hash),
+        before_anchor_match_count=(
+            0 if before_hash is None else local_hashes.count(before_hash)
+        ),
+        after_anchor_match_count=(
+            0 if after_hash is None else local_hashes.count(after_hash)
+        ),
+        combined_match_count=combined_count,
+        target_at_document_start=index == 0,
+        target_at_document_end=index + 1 == len(local_hashes),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -673,4 +767,7 @@ __all__ = [
     "SpeakerConfidenceSignals",
     "assess_speaker_confidence",
     "decide_override_inheritance",
+    "manual_override_source",
+    "segment_anchor_uniqueness",
+    "segment_inheritance_anchors",
 ]

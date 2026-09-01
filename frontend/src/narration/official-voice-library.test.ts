@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   OFFICIAL_VOICE_CATALOG_SCHEMA_VERSION,
   OFFICIAL_VOICE_PRESET_IDS,
+  assertOfficialVoiceSelectionResult,
   createOfficialVoiceLibrary,
   createOfficialVoiceLibraryModel,
   filterOfficialVoiceLibraryGroups,
   officialVoiceCatalogFromWire,
+  officialVoiceLanguageFilterForTarget,
   officialVoiceLanguageMatches,
   type OfficialVoiceCatalog,
   type OfficialVoiceCatalogItem,
@@ -263,6 +265,26 @@ function findPresetCard(tree: FakeElement, presetId: string): FakeElement {
 }
 
 
+function findPresetRadio(tree: FakeElement, presetId: string): FakeElement {
+  const radio = findAll(findPresetCard(tree, presetId), (element) => (
+    element.type === "input" && element.props.type === "radio"
+  ))[0];
+  if (!radio) throw new Error(`missing radio ${presetId}`);
+  return radio;
+}
+
+
+function switchLanguage(tree: FakeElement, label: string): void {
+  const tab = findAll(tree, (element) => (
+    element.type === "button"
+    && typeof element.props["aria-pressed"] === "boolean"
+    && textContent(element).includes(label)
+  ))[0];
+  if (!tab) throw new Error(`missing language tab ${label}`);
+  (tab.props.onClick as (() => void))();
+}
+
+
 async function flushPromises(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -286,6 +308,9 @@ describe("official voice library model", () => {
     expect(source.items).toHaveLength(18);
     expect(officialVoiceLanguageMatches("en", "en")).toBe(true);
     expect(officialVoiceLanguageMatches("en", "en-US")).toBe(true);
+    expect(officialVoiceLanguageFilterForTarget("zh-Hans")).toBe("zh-CN");
+    expect(officialVoiceLanguageFilterForTarget("en-US")).toBe("en");
+    expect(officialVoiceLanguageFilterForTarget("ja-JP")).toBe("ja-JP");
   });
 
   it("fails closed for missing, duplicate, reordered, or false validation evidence", () => {
@@ -372,7 +397,7 @@ describe("official voice library model", () => {
 
 
 describe("official voice library component", () => {
-  it("renders 18 native-keyboard cards, folded provenance, and no confirmation controls", () => {
+  it("renders a language-scoped option list with folded provenance and no confirmation controls", () => {
     const harness = createHarness();
     const Library = createOfficialVoiceLibrary(harness.React);
     let tree = harness.render(Library, baseProps());
@@ -382,21 +407,88 @@ describe("official voice library component", () => {
     const buttons = findAll(tree, (element) => element.type === "button");
     const details = findAll(tree, (element) => element.type === "details");
     const summaries = findAll(tree, (element) => element.type === "summary");
-    expect(cards).toHaveLength(18);
-    expect(buttons).toHaveLength(36);
+    expect(cards).toHaveLength(6);
+    expect(buttons).toHaveLength(9);
     expect(buttons.every((button) => button.props.type === "button")).toBe(true);
-    expect(details).toHaveLength(18);
-    expect(summaries).toHaveLength(18);
+    expect(details).toHaveLength(6);
+    expect(summaries).toHaveLength(6);
     expect(details.every((item) => item.props.open === undefined)).toBe(true);
     const inputs = findAll(tree, (element) => element.type === "input");
-    expect(inputs).toHaveLength(1);
+    expect(inputs).toHaveLength(7);
     expect(inputs[0]?.props.type).toBe("search");
-    expect(findAll(tree, (element) => element.type === "select")).toHaveLength(1);
-    expect(findAll(tree, (element) => element.type === "input"
-      && ["checkbox", "radio"].includes(String(element.props.type)))).toHaveLength(0);
-    for (const [, displayName] of ROWS) expect(textContent(tree)).toContain(displayName);
+    expect(findAll(tree, (element) => element.type === "select")).toHaveLength(0);
+    const radios = findAll(tree, (element) => element.type === "input"
+      && element.props.type === "radio");
+    expect(radios).toHaveLength(6);
+    expect(new Set(radios.map((radio) => radio.props.name)).size).toBe(1);
+    expect(radios.every((radio) => radio.props.onKeyDown === undefined)).toBe(true);
+    expect(findAll(tree, (element) => element.type === "label"
+      && classIncludes(element, "anw-official-voice-card__selection"))).toHaveLength(6);
+    expect(findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-card__use",
+    ))).toHaveLength(0);
+    expect(findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-library__filter-count",
+    ))).toHaveLength(0);
+    const resultStatus = findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-library__filter-status",
+    ))[0];
+    expect(resultStatus?.props).toMatchObject({ role: "status", "aria-live": "polite" });
+    expect(textContent(resultStatus)).toBe("当前显示 6 项");
+    const idleLive = findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-library__live-status",
+    ))[0];
+    expect(textContent(idleLive)).toBe("");
+    for (const [, displayName] of ROWS.slice(0, 6)) expect(textContent(tree)).toContain(displayName);
+    expect(textContent(tree)).not.toContain("EN The Bitter Lesson");
+    expect(tree.props["data-official-voice-count"]).toBe(18);
     expect(textContent(tree)).toContain("Preset ID");
     expect(textContent(tree)).toContain("商业发布/再分发未评估");
+
+    switchLanguage(tree, "English");
+    tree = harness.render(Library, baseProps());
+    expect(findAll(tree, (element) => classIncludes(element, "anw-official-voice-card")))
+      .toHaveLength(5);
+    expect(textContent(tree)).toContain("EN The Bitter Lesson");
+    expect(textContent(findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-library__filter-status",
+    ))[0])).toBe("当前显示 5 项");
+
+    const search = findAll(tree, (element) => element.type === "input"
+      && element.props.type === "search")[0];
+    (search?.props.onChange as ((event: { target: { value: string } }) => void))({
+      target: { value: "Bitter" },
+    });
+    tree = harness.render(Library, baseProps());
+    const visibleCount = findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-library__filter-count",
+    ))[0];
+    expect(textContent(visibleCount)).toBe("当前显示 1 项");
+    expect(visibleCount?.props["aria-hidden"]).toBe(true);
+  });
+
+  it("omits the duplicate title and technical eyebrow when embedded in the shared configurator", () => {
+    const harness = createHarness();
+    const Library = createOfficialVoiceLibrary(harness.React);
+    const embeddedProps = baseProps({ presentation: "embedded" });
+    harness.render(Library, embeddedProps);
+    const tree = harness.render(Library, embeddedProps);
+
+    expect(findAll(tree, (element) => element.type === "h2")).toHaveLength(0);
+    expect(findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-library__eyebrow",
+    ))).toHaveLength(0);
+    expect(tree.props["aria-label"]).toBe("官方音色");
+    expect(findAll(tree, (element) => (
+      element.type === "input" && element.props.type === "radio"
+    ))).toHaveLength(6);
   });
 
   it("keeps cross-language guidance non-blocking and sends one direct-use request", async () => {
@@ -407,16 +499,15 @@ describe("official voice library component", () => {
     const Library = createOfficialVoiceLibrary(harness.React);
     harness.render(Library, props);
     let tree = harness.render(Library, props);
+    switchLanguage(tree, "English");
+    tree = harness.render(Library, props);
     const ava = findPresetCard(tree, "onnx.Ava");
     expect(textContent(ava)).toContain("跨语言 · 本项目未专项听检");
     expect(textContent(ava)).toContain("仍可直接使用");
-    const useButton = findAll(ava, (element) => classIncludes(
-      element,
-      "anw-official-voice-card__use",
-    ))[0];
-    expect(useButton?.props.disabled).toBe(false);
+    const radio = findPresetRadio(tree, "onnx.Ava");
+    expect(radio.props.disabled).toBe(false);
 
-    (useButton?.props.onClick as (() => void))();
+    (radio.props.onChange as (() => void))();
     expect(onUse).toHaveBeenCalledTimes(1);
     expect(onUse).toHaveBeenCalledWith(
       NOVEL_ID,
@@ -431,11 +522,17 @@ describe("official voice library component", () => {
     tree = harness.render(Library, props);
     expect(tree.props["data-official-voice-use-phase"]).toBe("applying");
     expect(textContent(tree)).toContain("正在设为旁白");
+    const applyingRadio = findPresetRadio(tree, "onnx.Ava");
+    expect(applyingRadio.props.disabled).toBe(false);
+    expect(applyingRadio.props["aria-disabled"]).toBe(true);
 
     await flushPromises();
     tree = harness.render(Library, props);
     expect(tree.props["data-official-voice-use-phase"]).toBe("applied");
     expect(textContent(findPresetCard(tree, "onnx.Ava"))).toContain("当前使用");
+    const appliedRadio = findPresetRadio(tree, "onnx.Ava");
+    expect(appliedRadio.props).toMatchObject({ checked: true, disabled: false });
+    expect(appliedRadio.props["aria-disabled"]).toBeUndefined();
     expect(onApplied).toHaveBeenCalledTimes(1);
   });
 
@@ -464,13 +561,13 @@ describe("official voice library component", () => {
     harness.render(Library, props);
     const tree = harness.render(Library, props);
     const card = findPresetCard(tree, "onnx.Xiaoyu");
-    expect(textContent(card)).toContain("用于林岚");
     expect(textContent(card)).not.toContain("expectedSettingsVersion");
-    const useButton = findAll(card, (element) => classIncludes(
-      element,
-      "anw-official-voice-card__use",
+    const radio = findAll(card, (element) => (
+      element.type === "input" && element.props.type === "radio"
     ))[0];
-    (useButton?.props.onClick as (() => void))();
+    expect(radio?.props.disabled).toBe(false);
+    expect(radio?.props["aria-label"]).toContain("人物林岚");
+    (radio?.props.onChange as (() => void))();
     expect(onUse).toHaveBeenCalledWith(
       NOVEL_ID,
       {
@@ -485,6 +582,41 @@ describe("official voice library component", () => {
     );
   });
 
+  it("rejects official-selection results that changed preset or character identity", () => {
+    const characterId = "22222222-2222-4222-8222-222222222222";
+    const target = {
+      kind: "character" as const,
+      characterId,
+      characterName: "林岚",
+      targetLanguage: "zh-CN",
+      expectedSettingsVersion: 7,
+      expectedBindingVersion: 4,
+    };
+    const selected = result("onnx.Xiaoyu", {
+      targetKind: "character",
+      characterId,
+      settingsVersion: 8,
+      bindingVersion: 5,
+      languageMismatch: false,
+    });
+
+    expect(() => assertOfficialVoiceSelectionResult(
+      selected,
+      "onnx.Xiaoyu",
+      target,
+    )).not.toThrow();
+    expect(() => assertOfficialVoiceSelectionResult(
+      { ...selected, presetId: "onnx.Junhao" },
+      "onnx.Xiaoyu",
+      target,
+    )).toThrow(/changed identity/u);
+    expect(() => assertOfficialVoiceSelectionResult(
+      { ...selected, characterId: "33333333-3333-4333-8333-333333333333" },
+      "onnx.Xiaoyu",
+      target,
+    )).toThrow(/changed identity/u);
+  });
+
   it("does not make preview availability a prerequisite for using a voice", () => {
     const harness = createHarness();
     const props = baseProps({
@@ -492,19 +624,54 @@ describe("official voice library component", () => {
     });
     const Library = createOfficialVoiceLibrary(harness.React);
     harness.render(Library, props);
-    const tree = harness.render(Library, props);
+    let tree = harness.render(Library, props);
+    switchLanguage(tree, "English");
+    tree = harness.render(Library, props);
     const trump = findPresetCard(tree, "onnx.Trump");
     const previewButton = findAll(trump, (element) => classIncludes(
       element,
       "anw-official-voice-card__preview",
     ))[0];
-    const useButton = findAll(trump, (element) => classIncludes(
-      element,
-      "anw-official-voice-card__use",
-    ))[0];
+    const radio = findAll(trump, (element) => element.type === "input"
+      && element.props.type === "radio")[0];
     expect(previewButton?.props.disabled).toBe(true);
     expect(textContent(previewButton)).toBe("试听暂不可用");
-    expect(useButton?.props.disabled).toBe(false);
+    expect(radio?.props.disabled).toBe(false);
+  });
+
+  it("keeps preview and details independent from the only binding control", async () => {
+    const harness = createHarness();
+    const onUse = vi.fn(async (_novelId, request) => result(request.presetId));
+    const onPreview = vi.fn(async () => undefined);
+    const props = baseProps({ onUse, onPreview, activePresetId: "onnx.Junhao" });
+    const Library = createOfficialVoiceLibrary(harness.React);
+    harness.render(Library, props);
+    let tree = harness.render(Library, props);
+    const current = findPresetRadio(tree, "onnx.Junhao");
+    expect(current.props).toMatchObject({ checked: true, disabled: false });
+    expect(current.props["aria-label"]).toContain("当前使用：作品旁白");
+    (current.props.onChange as (() => void))();
+    expect(onUse).not.toHaveBeenCalled();
+
+    const card = findPresetCard(tree, "onnx.Zhiming");
+    const preview = findAll(card, (element) => classIncludes(
+      element,
+      "anw-official-voice-card__preview",
+    ))[0];
+    (preview?.props.onClick as (() => void))();
+    await flushPromises();
+    tree = harness.render(Library, props);
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(onUse).not.toHaveBeenCalled();
+    expect(textContent(findAll(tree, (element) => classIncludes(
+      element,
+      "anw-official-voice-library__live-status",
+    ))[0])).toContain("试听已开始");
+    const summary = findAll(findPresetCard(tree, "onnx.Zhiming"), (element) => (
+      element.type === "summary"
+    ))[0];
+    expect(summary?.props.onClick).toBeUndefined();
+    expect(onUse).not.toHaveBeenCalled();
   });
 
   it("announces conflicts, blocks stale retries, and resets after refreshed CAS props", async () => {
@@ -518,11 +685,8 @@ describe("official voice library component", () => {
     const Library = createOfficialVoiceLibrary(harness.React);
     harness.render(Library, props);
     let tree = harness.render(Library, props);
-    const useButton = findAll(findPresetCard(tree, "onnx.Junhao"), (element) => classIncludes(
-      element,
-      "anw-official-voice-card__use",
-    ))[0];
-    (useButton?.props.onClick as (() => void))();
+    const radio = findPresetRadio(tree, "onnx.Junhao");
+    (radio.props.onChange as (() => void))();
     await flushPromises();
     tree = harness.render(Library, props);
     expect(tree.props["data-official-voice-use-phase"]).toBe("conflict");
@@ -532,10 +696,10 @@ describe("official voice library component", () => {
     ))[0];
     expect(live?.props).toMatchObject({ role: "status", "aria-live": "polite" });
     expect(textContent(live)).toContain("刷新当前设置后重试");
-    expect(findAll(tree, (element) => classIncludes(
-      element,
-      "anw-official-voice-card__use",
-    )).every((button) => button.props.disabled === true)).toBe(true);
+    const radios = findAll(tree, (element) => element.type === "input"
+      && element.props.type === "radio");
+    expect(radios.every((item) => item.props.disabled === false)).toBe(true);
+    expect(radios.every((item) => item.props["aria-disabled"] === true)).toBe(true);
     const refresh = findAll(tree, (element) => classIncludes(
       element,
       "anw-official-voice-library__refresh",
@@ -578,7 +742,11 @@ describe("official voice library component", () => {
   it("ships 44px touch targets, narrow-screen stacking, focus, and reduced-motion rules", () => {
     expect(OFFICIAL_VOICE_LIBRARY_STYLE_ID).toBe("anw-official-voice-library-styles");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toMatch(/min-height:\s*44px/u);
-    expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("repeat(auto-fit");
+    expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain(".anw-official-voice-library__language-tabs");
+    expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain(".anw-official-voice-library__item +");
+    expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain(".anw-official-voice-card__selection");
+    expect(OFFICIAL_VOICE_LIBRARY_STYLES).not.toContain(".anw-official-voice-card__use");
+    expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain(".anw-official-voice-library__filter-status");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("button:focus-visible");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("@media (max-width: 680px)");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toContain("@media (max-width: 390px)");

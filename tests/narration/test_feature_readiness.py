@@ -35,6 +35,7 @@ from backend.narration.feature_readiness import (
 
 ALL_FEATURES = frozenset(MANAGED_CAPABILITY_KEYS)
 CHARACTER_MATCHING = wire.CapabilityKey.CHARACTER_VOICE_MATCHING
+CHARACTER_CASTING = wire.CapabilityKey.CHARACTER_CAST_PLANNING
 ADVANCED_TUNING = wire.CapabilityKey.NANO_ADVANCED_TUNING
 PRIVATE_DELETION = wire.CapabilityKey.PRIVATE_VOICE_DELETION
 VOICE_GENERATOR = wire.CapabilityKey.VOICE_GENERATOR
@@ -106,28 +107,38 @@ def test_initial_and_starting_snapshots_are_strict_fail_closed_copies() -> None:
             TTS_DATABASE_SCHEMA_OUTDATED,
         ),
         (
+            "character_cast_schema_ready",
+            frozenset({CHARACTER_CASTING}),
+            TTS_DATABASE_SCHEMA_OUTDATED,
+        ),
+        (
             "character_workspace_ready",
-            frozenset({CHARACTER_MATCHING, VOICE_GENERATOR}),
+            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING, VOICE_GENERATOR}),
             TTS_CHARACTER_WORKSPACE_UNAVAILABLE,
         ),
         (
             "novel_agent_ready",
-            frozenset({CHARACTER_MATCHING, VOICE_GENERATOR}),
+            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING, VOICE_GENERATOR}),
             TTS_NOVEL_AGENT_UNAVAILABLE,
         ),
         (
             "official_preset_catalog_ready",
-            frozenset({CHARACTER_MATCHING}),
+            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING}),
             TTS_PROCESSOR_UNAVAILABLE,
         ),
         (
             "official_casting_baseline_ready",
-            frozenset({CHARACTER_MATCHING}),
+            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING}),
             TTS_PROCESSOR_UNAVAILABLE,
         ),
         (
             "official_binding_service_ready",
             frozenset({CHARACTER_MATCHING}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "official_batch_binding_service_ready",
+            frozenset({CHARACTER_CASTING}),
             TTS_PROCESSOR_UNAVAILABLE,
         ),
         (
@@ -233,7 +244,7 @@ def test_each_dependency_revokes_exactly_its_capabilities(
             assert item.reason_code is None
 
 
-def test_all_dependencies_ready_enables_exactly_the_four_frozen_features() -> None:
+def test_all_dependencies_ready_enables_exactly_the_five_frozen_features() -> None:
     provider = NarrationFeatureReadinessProvider()
     starting = provider.begin_startup()
 
@@ -251,6 +262,7 @@ def test_all_dependencies_ready_enables_exactly_the_four_frozen_features() -> No
     )
     assert all(item.visible and item.actionable for item in ready.capabilities)
     assert ready.item(ADVANCED_TUNING).key is ADVANCED_TUNING
+    assert ready.item(CHARACTER_CASTING).key is CHARACTER_CASTING
     assert ready.item(VOICE_GENERATOR).key is VOICE_GENERATOR
 
 
@@ -274,14 +286,15 @@ def test_dependency_publications_are_atomic_under_concurrent_readers() -> None:
 
     ready_pattern = (
         "ready",
-        ("enabled", "enabled", "enabled", "enabled"),
-        (None, None, None, None),
+        ("enabled", "enabled", "enabled", "enabled", "enabled"),
+        (None, None, None, None, None),
     )
     schema_down_pattern = (
         "degraded",
-        ("unavailable", "unavailable", "unavailable", "enabled"),
+        ("unavailable", "enabled", "unavailable", "unavailable", "enabled"),
         (
             TTS_DATABASE_SCHEMA_OUTDATED,
+            None,
             TTS_DATABASE_SCHEMA_OUTDATED,
             TTS_DATABASE_SCHEMA_OUTDATED,
             None,

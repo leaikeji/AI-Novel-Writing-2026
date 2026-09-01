@@ -35,7 +35,7 @@ from ..models import (
     VoiceProfileVersion,
 )
 
-from .contracts import NarrationRequestScope
+from .contracts import LOCAL_OWNER_ACTOR_ID, NarrationRequestScope
 from .authority_locks import (
     VoiceAuthorityLock,
     lock_request_document_mutex,
@@ -138,7 +138,7 @@ class StartNarrationWorkflow:
     force_review: bool
     idempotency_key: str
     explicitly_requested: bool
-    actor: str = "local-owner"
+    actor: str = LOCAL_OWNER_ACTOR_ID
     requested_at: datetime | None = None
     scope: NarrationRequestScope = NarrationRequestScope.fixed_local()
 

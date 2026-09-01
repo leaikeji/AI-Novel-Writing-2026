@@ -38,8 +38,18 @@ from .contracts import (
     LOCAL_OWNER_ID,
     LOCAL_WORKSPACE_ID,
     NARRATION_REVIEW_TAXONOMY_VERSION,
+    SPEAKER_CORRECTION_ISSUE_CODES,
     ConfidenceLevel,
     ReviewIssueSeverity,
+)
+from .confidence import (
+    InheritanceAuditStamp,
+    OverrideInheritanceAuthority,
+    OverrideInheritanceTarget,
+    decide_override_inheritance,
+    manual_override_source,
+    segment_anchor_uniqueness,
+    segment_inheritance_anchors,
 )
 from .script_contracts import (
     SOURCE_BOUND_SEGMENT_KINDS,
@@ -73,12 +83,14 @@ from .script_contracts import (
 from .script_versions import (
     SCRIPT_ANALYZER_FINGERPRINT,
     SCRIPT_RULES_FINGERPRINT,
+    ScriptVersionAllocation,
     _has_deterministic_typed_identity,
     _persisted_version_hash,
     _settings_snapshot_authority,
     _typed_contract_payload_from_rows,
     _verify_casting_target,
 )
+from .requests import advance_request_state
 from .services import (
     IdempotencyConflict,
     InvalidNarrationState,
@@ -100,22 +112,7 @@ from .services import (
 
 
 REVIEW_ACTION_REQUEST_VERSION = "narration-review-action-request/1"
-
-# These findings are fully determined by the corrected speaker identity,
-# confidence, and resolved casting relation.  Voice-rights, pronunciation,
-# cloud, and fallback findings are intentionally preserved for reanalysis.
-_SPEAKER_CORRECTION_ISSUES = frozenset(
-    {
-        "B_SPEAKER_UNKNOWN",
-        "B_SPEAKER_LOW_CONFIDENCE",
-        "B_CHARACTER_ALIAS_CONFLICT",
-        "B_CHARACTER_REFERENCE_INVALID",
-        "B_ANONYMOUS_IDENTITY_CONFLICT",
-        "B_CASTING_TARGET_UNRESOLVED",
-        "W_SPEAKER_MEDIUM_CONFIDENCE",
-    }
-)
-
+INHERITED_ANALYSIS_ACTION_VERSION = "narration-inherited-analysis-action/1"
 
 @dataclass(frozen=True, slots=True)
 class CorrectReviewSegment:
@@ -345,6 +342,73 @@ def _action_id(idempotency_key: str) -> UUID:
     )
 
 
+def inherited_analysis_action_identity(
+    *, request_id: UUID, analysis_idempotency_key: str
+) -> tuple[str, UUID]:
+    """Derive the stable ledger key/id before inheritance provenance is built."""
+
+    _require_uuid(request_id, field_name="request_id")
+    analysis_key = require_nonempty(
+        analysis_idempotency_key,
+        field="analysis_idempotency_key",
+    )
+    key = "analysis-inherit-" + canonical_sha256(
+        {
+            "contract_version": INHERITED_ANALYSIS_ACTION_VERSION,
+            "request_id": str(request_id),
+            "analysis_idempotency_key": analysis_key,
+        }
+    )
+    return key, _action_id(key)
+
+
+def _inherited_analysis_request_hash(
+    *,
+    request_id: UUID,
+    script_id: UUID,
+    source_version_id: UUID,
+    result_version_id: UUID,
+    result_immutable_hash: str,
+    action_key: str,
+    actor_id: str,
+    provenances: frozenset[OverrideProvenance],
+) -> str:
+    def provenance_payload(provenance: OverrideProvenance) -> dict[str, object]:
+        return {
+            "contract_version": provenance.contract_version,
+            "kind": provenance.kind.value,
+            "action_id": str(provenance.action_id),
+            "owner_actor_id": provenance.owner_actor_id,
+            "recorded_at": provenance.recorded_at.isoformat(),
+            "source_script_version_id": str(
+                provenance.source_script_version_id
+            ),
+            "source_segment_id": str(provenance.source_segment_id),
+            "source_immutable_hash": provenance.source_immutable_hash,
+            "source_local_hash": provenance.source_local_hash,
+            "source_anchor_before_hash": provenance.source_anchor_before_hash,
+            "source_anchor_after_hash": provenance.source_anchor_after_hash,
+            "speaker_target_hash": provenance.speaker_target_hash,
+        }
+
+    return canonical_sha256(
+        {
+            "contract_version": INHERITED_ANALYSIS_ACTION_VERSION,
+            "request_id": str(request_id),
+            "script_id": str(script_id),
+            "source_version_id": str(source_version_id),
+            "result_version_id": str(result_version_id),
+            "result_immutable_hash": result_immutable_hash,
+            "action_key": action_key,
+            "actor_id": actor_id,
+            "provenances": sorted(
+                canonical_sha256(provenance_payload(provenance))
+                for provenance in provenances
+            ),
+        }
+    )
+
+
 def _lineage_rows(
     store: NarrationStore,
     *,
@@ -503,6 +567,16 @@ def _review_authority(
     parent_ids: frozenset[UUID] = frozenset()
     manual_parent_ids: frozenset[UUID] = frozenset()
     if candidate.parent_version_id is not None:
+        inherited_source_ids = {
+            provenance.source_script_version_id
+            for segment in candidate.segments
+            if (
+                (provenance := segment.attribution.override_provenance)
+                is not None
+                and provenance.kind is OverrideKind.INHERITED
+                and provenance.source_script_version_id is not None
+            )
+        }
         parent = require_row(
             store.get(NarrationScriptVersion, candidate.parent_version_id),
             label="manual review parent version",
@@ -511,9 +585,14 @@ def _review_authority(
             raise NarrationScopeMismatch(
                 "manual review parent belongs to another script"
             )
-        if parent.state != "review_required":
+        is_manual_correction_parent = parent.state == "review_required"
+        is_inheritance_parent = (
+            parent.state == "approved" and parent.id in inherited_source_ids
+        )
+        if not (is_manual_correction_parent or is_inheritance_parent):
             raise InvalidNarrationState(
-                "manual correction parent must remain review_required"
+                "manual review parent is neither a correction source nor an "
+                "approved inheritance source"
             )
         parent_ids = frozenset({parent.id})
         manual_parent_ids = parent_ids
@@ -557,7 +636,7 @@ def _review_authority(
     group_keys: set[str] = set()
     casting_targets: set[CastingTargetRef] = set()
     provenances: set[OverrideProvenance] = set(pending_provenances)
-    for segment in candidate.segments:
+    for segment_index, segment in enumerate(candidate.segments):
         speaker = segment.speaker
         if speaker.character_id is not None:
             character_ids.add(speaker.character_id)
@@ -601,6 +680,151 @@ def _review_authority(
         if provenance is None:
             continue
         if provenance in pending_provenances:
+            provenances.add(provenance)
+            continue
+        if provenance.kind is OverrideKind.INHERITED:
+            action = require_row(
+                store.get(
+                    NarrationScriptReviewActionRecord,
+                    provenance.action_id,
+                ),
+                label="inherited review action provenance",
+            )
+            action_request = require_row(
+                store.get(NarrationRequest, action.request_id),
+                label="inherited review action request",
+            )
+            result_version = require_row(
+                store.get(NarrationScriptVersion, action.result_version_id),
+                label="inherited review action result version",
+            )
+            source_version_id = provenance.source_script_version_id
+            if source_version_id is None:
+                raise InvalidNarrationState(
+                    "inherited override lacks its source version"
+                )
+            source_version = require_row(
+                store.get(NarrationScriptVersion, source_version_id),
+                label="inherited override source version",
+            )
+            action_provenances = frozenset(
+                item_provenance
+                for item in candidate.segments
+                if (
+                    (item_provenance := item.attribution.override_provenance)
+                    is not None
+                    and item_provenance.action_id == action.id
+                )
+            )
+            expected_request_hash = _inherited_analysis_request_hash(
+                request_id=action.request_id,
+                script_id=candidate.script_id,
+                source_version_id=source_version_id,
+                result_version_id=candidate.script_version_id,
+                result_immutable_hash=candidate.immutable_hash,
+                action_key=action.idempotency_key,
+                actor_id=action.actor_id,
+                provenances=action_provenances,
+            )
+            if (
+                action.owner_id != LOCAL_OWNER_ID
+                or action.workspace_id != LOCAL_WORKSPACE_ID
+                or action.novel_id != candidate.novel_id
+                or action.request_allows_render is not True
+                or action.script_id != candidate.script_id
+                or action.action_kind != "reanalyze_segments"
+                or action.parent_version_id != source_version_id
+                or action.result_version_id != candidate.script_version_id
+                or action.result_edition_id is not None
+                or candidate.parent_version_id != source_version_id
+                or result_version.script_id != action.script_id
+                or result_version.parent_version_id != source_version_id
+                or source_version.script_id != candidate.script_id
+                or source_version.state != "approved"
+                or source_version.immutable_hash
+                != provenance.source_immutable_hash
+                or action.actor_type != "owner"
+                or action.actor_id != provenance.owner_actor_id
+                or action.created_at != provenance.recorded_at
+                or action.request_version_after
+                != action.request_version_before + 1
+                or action.request_hash != expected_request_hash
+                or action_request.owner_id != action.owner_id
+                or action_request.workspace_id != action.workspace_id
+                or action_request.novel_id != action.novel_id
+                or action_request.review_script_id != action.script_id
+                or action_request.current_review_version_id
+                != candidate.script_version_id
+                or action_request.intent == "analyze_only"
+                or action_request.explicit_generation_intent_at is None
+                or action_request.explicit_generation_actor != action.actor_id
+                or action_request.version < action.request_version_after
+            ):
+                raise InvalidNarrationState(
+                    "inherited override provenance differs from its action ledger"
+                )
+            source_contract = load_review_script_contract(
+                store,
+                source_version_id,
+            )
+            source_segment = next(
+                (
+                    item
+                    for item in source_contract.segments
+                    if item.segment_id == provenance.source_segment_id
+                ),
+                None,
+            )
+            if source_segment is None:
+                raise InvalidNarrationState(
+                    "inherited override source segment is unavailable"
+                )
+            before_hash, after_hash = segment_inheritance_anchors(
+                candidate.segments,
+                segment_index,
+            )
+            if (
+                segment.inheritance_anchor_before_hash != before_hash
+                or segment.inheritance_anchor_after_hash != after_hash
+            ):
+                raise InvalidNarrationState(
+                    "inherited override anchors differ from the current script"
+                )
+            source_snapshot = manual_override_source(
+                source_contract,
+                source_segment,
+            )
+            decision = decide_override_inheritance(
+                source=source_snapshot,
+                target=OverrideInheritanceTarget(
+                    novel_id=candidate.novel_id,
+                    script_version_id=candidate.script_version_id,
+                    segment_id=segment.segment_id,
+                    local_hash=segment.local_hash,
+                    anchor_before_hash=before_hash,
+                    anchor_after_hash=after_hash,
+                    speaker=segment.speaker,
+                    casting=segment.casting,
+                    uniqueness=segment_anchor_uniqueness(
+                        candidate.segments,
+                        segment_index,
+                    ),
+                ),
+                authority=OverrideInheritanceAuthority(
+                    novel_id=candidate.novel_id,
+                    owner_actor_id=action.actor_id,
+                    authorized_sources=frozenset({source_snapshot}),
+                ),
+                audit=InheritanceAuditStamp(
+                    action_id=action.id,
+                    owner_actor_id=action.actor_id,
+                    recorded_at=action.created_at,
+                ),
+            )
+            if not decision.eligible or decision.provenance != provenance:
+                raise InvalidNarrationState(
+                    "inherited override no longer satisfies the frozen policy"
+                )
             provenances.add(provenance)
             continue
         if provenance.kind is not OverrideKind.MANUAL_CURRENT:
@@ -809,14 +1033,22 @@ def _replacement_contract(
         raise InvalidNarrationState(
             "synthetic/title segments cannot be manually corrected"
         )
+    target_index = next(
+        index
+        for index, segment in enumerate(parent.segments)
+        if segment.segment_id == target.segment_id
+    )
+    inheritance_anchor_before_hash, inheritance_anchor_after_hash = (
+        segment_inheritance_anchors(parent.segments, target_index)
+    )
     provenance = OverrideProvenance(
         kind=OverrideKind.MANUAL_CURRENT,
         action_id=idempotency_action_id,
         owner_actor_id=actor_id,
         recorded_at=recorded_at,
         source_local_hash=target.local_hash,
-        source_anchor_before_hash=target.inheritance_anchor_before_hash,
-        source_anchor_after_hash=target.inheritance_anchor_after_hash,
+        source_anchor_before_hash=inheritance_anchor_before_hash,
+        source_anchor_after_hash=inheritance_anchor_after_hash,
         speaker_target_hash=speaker_target_hash(speaker, casting),
     )
     attribution = AttributionEvidence(
@@ -862,6 +1094,12 @@ def _replacement_contract(
             changes.update(
                 {
                     "spoken_text": spoken_text,
+                    "inheritance_anchor_before_hash": (
+                        inheritance_anchor_before_hash
+                    ),
+                    "inheritance_anchor_after_hash": (
+                        inheritance_anchor_after_hash
+                    ),
                     "speaker": speaker,
                     "casting": casting,
                     "confidence": ConfidenceLevel.HIGH,
@@ -885,7 +1123,7 @@ def _replacement_contract(
                 for issue in parent.issues
                 if not (
                     issue.segment_id == target.segment_id
-                    and issue.code in _SPEAKER_CORRECTION_ISSUES
+                    and issue.code in SPEAKER_CORRECTION_ISSUE_CODES
                 )
             ),
             key=lambda item: (
@@ -926,7 +1164,7 @@ def _persist_review_contract(
     contract: NarrationScriptContract,
     *,
     idempotency_key: str,
-    pending_provenance: OverrideProvenance,
+    pending_provenances: frozenset[OverrideProvenance],
 ) -> NarrationScriptVersion:
     if store.get(NarrationScriptVersion, contract.script_version_id) is not None:
         raise IdempotencyConflict(
@@ -947,7 +1185,7 @@ def _persist_review_contract(
     authority = _review_authority(
         store,
         contract,
-        pending_provenances=frozenset({pending_provenance}),
+        pending_provenances=pending_provenances,
         require_current_voices=True,
     )
     try:
@@ -1068,6 +1306,143 @@ def _persist_review_contract(
             )
         )
     store.flush()
+    return row
+
+
+def persist_inherited_analysis_result(
+    store: NarrationStore,
+    *,
+    request: NarrationRequest,
+    allocation: ScriptVersionAllocation,
+    contract: NarrationScriptContract,
+    source_version_id: UUID,
+    action_key: str,
+    actor_id: str,
+    pending_provenances: frozenset[OverrideProvenance],
+) -> NarrationScriptVersion:
+    """Persist one exact inherited candidate plus its immutable action ledger."""
+
+    key = require_nonempty(action_key, field="action_key")
+    owner_actor = _require_nfc_text(
+        require_nonempty(actor_id, field="actor_id"),
+        field_name="actor_id",
+        minimum=1,
+        maximum=120,
+    )
+    if type(allocation) is not ScriptVersionAllocation:
+        raise NarrationServiceError("allocation must be ScriptVersionAllocation")
+    if type(contract) is not NarrationScriptContract:
+        raise NarrationServiceError("contract must be NarrationScriptContract")
+    if type(pending_provenances) is not frozenset or not pending_provenances:
+        raise NarrationServiceError(
+            "inherited analysis requires a non-empty provenance set"
+        )
+    action_id = _action_id(key)
+    recorded_at_values = {
+        provenance.recorded_at for provenance in pending_provenances
+    }
+    if (
+        any(
+            provenance.kind is not OverrideKind.INHERITED
+            or provenance.action_id != action_id
+            or provenance.owner_actor_id != owner_actor
+            or provenance.source_script_version_id != source_version_id
+            for provenance in pending_provenances
+        )
+        or len(recorded_at_values) != 1
+    ):
+        raise InvalidNarrationState(
+            "inherited analysis provenances differ from their ledger identity"
+        )
+    recorded_at = next(iter(recorded_at_values))
+    source_version = require_row(
+        store.get(NarrationScriptVersion, source_version_id),
+        label="inherited analysis source version",
+    )
+    if (
+        request.owner_id != LOCAL_OWNER_ID
+        or request.workspace_id != LOCAL_WORKSPACE_ID
+        or request.intent == "analyze_only"
+        or request.state != "analyzing"
+        or request.explicit_generation_intent_at is None
+        or request.explicit_generation_actor != owner_actor
+        or request.review_script_id is not None
+        or request.current_review_version_id is not None
+        or source_version.script_id != allocation.script_id
+        or source_version.state != "approved"
+        or allocation.parent_version_id != source_version_id
+        or contract.parent_version_id != source_version_id
+        or contract.script_version_id != allocation.script_version_id
+        or contract.state is not ScriptVersionState.REVIEW_REQUIRED
+    ):
+        raise InvalidNarrationState(
+            "inherited analysis request/source/result relation is invalid"
+        )
+    if store.find_one(
+        NarrationScriptReviewActionRecord,
+        owner_id=LOCAL_OWNER_ID,
+        workspace_id=LOCAL_WORKSPACE_ID,
+        idempotency_key=key,
+        for_update=True,
+    ) is not None:
+        raise IdempotencyConflict(
+            "inherited analysis action already exists without its script replay"
+        )
+
+    row = _persist_review_contract(
+        store,
+        contract,
+        idempotency_key=allocation.idempotency_key,
+        pending_provenances=pending_provenances,
+    )
+    request.review_script_id = contract.script_id
+    request.current_review_version_id = contract.script_version_id
+    request.version += 1
+    request.updated_at = recorded_at
+    store.flush()
+
+    request_version_before = request.version
+    request_hash = _inherited_analysis_request_hash(
+        request_id=request.id,
+        script_id=contract.script_id,
+        source_version_id=source_version_id,
+        result_version_id=contract.script_version_id,
+        result_immutable_hash=contract.immutable_hash,
+        action_key=key,
+        actor_id=owner_actor,
+        provenances=pending_provenances,
+    )
+    store.add(
+        NarrationScriptReviewActionRecord(
+            id=action_id,
+            owner_id=LOCAL_OWNER_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            novel_id=request.novel_id,
+            request_id=request.id,
+            request_allows_render=True,
+            script_id=contract.script_id,
+            parent_version_id=source_version_id,
+            result_version_id=contract.script_version_id,
+            result_edition_id=None,
+            action_kind="reanalyze_segments",
+            request_hash=request_hash,
+            idempotency_key=key,
+            request_version_before=request_version_before,
+            request_version_after=request_version_before + 1,
+            actor_type="owner",
+            actor_id=owner_actor,
+            created_at=recorded_at,
+        )
+    )
+    store.flush()
+    advance_request_state(
+        store,
+        request.id,
+        expected_version=request_version_before,
+        new_state="review_required",
+        novel_id=request.novel_id,
+        actor="narration-script-analyzer",
+    )
     return row
 
 
@@ -1297,7 +1672,7 @@ def correct_review_segment(
         store,
         child,
         idempotency_key=child_key,
-        pending_provenance=provenance,
+        pending_provenances=frozenset({provenance}),
     )
     action = NarrationScriptReviewActionRecord(
         id=action_id,
@@ -1360,9 +1735,12 @@ def reanalyze_review_segments(
 
 __all__ = [
     "CorrectReviewSegment",
+    "INHERITED_ANALYSIS_ACTION_VERSION",
     "ReanalyzeReviewSegments",
     "ReviewSegmentCorrectionResult",
     "correct_review_segment",
+    "inherited_analysis_action_identity",
     "load_review_script_contract",
+    "persist_inherited_analysis_result",
     "reanalyze_review_segments",
 ]

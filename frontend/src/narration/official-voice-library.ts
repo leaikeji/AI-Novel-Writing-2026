@@ -197,6 +197,9 @@ export interface OfficialVoiceLibraryProps {
   readonly loadError?: string | null;
   readonly disabled?: boolean;
   readonly className?: string;
+  /** Embedded mode omits the duplicate library title inside a configurator disclosure. */
+  readonly presentation?: "standalone" | "embedded";
+  readonly headerAction?: unknown;
   readonly createIdempotencyKey?: () => string;
   readonly onUse: (
     novelId: string,
@@ -306,6 +309,16 @@ const EXPECTED_LANGUAGE_BY_PRESET: Readonly<Record<OfficialVoicePresetId, Offici
     index < 6 ? "zh-CN" : index < 11 ? "en" : "ja-JP",
   ])) as Record<OfficialVoicePresetId, OfficialVoiceLanguageScope>)
 );
+
+
+export function officialVoiceLanguageFilterForTarget(
+  targetLanguage: string,
+): OfficialVoiceLanguageScope {
+  const normalized = targetLanguage.trim().toLocaleLowerCase("en-US");
+  if (normalized === "ja" || normalized.startsWith("ja-")) return "ja-JP";
+  if (normalized === "en" || normalized.startsWith("en-")) return "en";
+  return "zh-CN";
+}
 
 
 export function officialVoiceLanguageMatches(
@@ -489,6 +502,14 @@ function targetActionLabel(target: OfficialVoiceSelectionTarget): string {
 }
 
 
+function targetContextLabel(target: OfficialVoiceSelectionTarget): string {
+  if (target.kind === "narrator") return "作品旁白";
+  return target.characterName?.trim()
+    ? `人物${target.characterName.trim()}`
+    : "当前人物";
+}
+
+
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object";
 }
@@ -504,9 +525,9 @@ function successMessage(
 }
 
 
-function assertSelectionResult(
+export function assertOfficialVoiceSelectionIdentity(
   result: OfficialVoiceSelectionResult,
-  item: OfficialVoiceCatalogItem,
+  expectedPresetId: string,
   target: OfficialVoiceSelectionTarget,
 ): void {
   const expectedCharacterId = target.kind === "character" ? target.characterId : null;
@@ -514,7 +535,7 @@ function assertSelectionResult(
     !isRecord(result)
     || typeof result.replayed !== "boolean"
     || typeof result.selectionStillCurrent !== "boolean"
-    || result.presetId !== item.presetId
+    || result.presetId !== expectedPresetId
     || result.targetKind !== target.kind
     || result.characterId !== expectedCharacterId
     || !Number.isSafeInteger(result.settingsVersion)
@@ -528,6 +549,15 @@ function assertSelectionResult(
   ) {
     throw new OfficialVoiceUseResponseError("official voice selection result changed identity");
   }
+}
+
+
+export function assertOfficialVoiceSelectionResult(
+  result: OfficialVoiceSelectionResult,
+  expectedPresetId: string,
+  target: OfficialVoiceSelectionTarget,
+): void {
+  assertOfficialVoiceSelectionIdentity(result, expectedPresetId, target);
   if (!result.selectionStillCurrent) {
     throw new OfficialVoiceUseConflictError();
   }
@@ -559,7 +589,9 @@ export function createOfficialVoiceLibrary(
     );
     const [previewState, setPreviewState] = React.useState<PreviewState>(IDLE_PREVIEW_STATE);
     const [searchQuery, setSearchQuery] = React.useState("");
-    const [languageFilter, setLanguageFilter] = React.useState<OfficialVoiceLanguageFilter>("all");
+    const [languageFilter, setLanguageFilter] = React.useState<OfficialVoiceLanguageFilter>(() => (
+      officialVoiceLanguageFilterForTarget(props.target.targetLanguage)
+    ));
     const useStateRef = React.useRef(useState);
     useStateRef.current = useState;
     const previewStateRef = React.useRef(previewState);
@@ -605,6 +637,8 @@ export function createOfficialVoiceLibrary(
       previewSequenceRef.current += 1;
       transition({ type: "reset", requestId });
       commitPreview(IDLE_PREVIEW_STATE);
+      setSearchQuery("");
+      setLanguageFilter(officialVoiceLanguageFilterForTarget(props.target.targetLanguage));
     }, [scopeIdentity]);
 
     React.useEffect(() => () => {
@@ -616,7 +650,10 @@ export function createOfficialVoiceLibrary(
 
     const applyVoice = (item: OfficialVoiceCatalogItem) => {
       const current = useStateRef.current;
-      const alreadyApplied = current.phase === "applied" && current.presetId === item.presetId;
+      const currentlyBoundPresetId = current.phase === "applied"
+        ? current.presetId
+        : props.activePresetId ?? null;
+      const alreadyApplied = currentlyBoundPresetId === item.presetId;
       if (
         props.disabled === true
         || !targetReady
@@ -658,6 +695,9 @@ export function createOfficialVoiceLibrary(
       }
       useAbortRef.current?.abort();
       useAbortRef.current = controller;
+      previewAbortRef.current?.abort();
+      previewSequenceRef.current += 1;
+      commitPreview(IDLE_PREVIEW_STATE);
       const request = createOfficialVoiceSelectionRequest(item.presetId, props.target);
       const started = transition({
         type: "start",
@@ -690,7 +730,7 @@ export function createOfficialVoiceLibrary(
             controller.signal,
           );
           if (controller.signal.aborted) return;
-          assertSelectionResult(result, item, props.target);
+          assertOfficialVoiceSelectionResult(result, item.presetId, props.target);
         } catch (reason: unknown) {
           if (controller.signal.aborted || isAbortLike(reason)) return;
           transition({
@@ -752,24 +792,24 @@ export function createOfficialVoiceLibrary(
         });
     };
 
-    const liveMessage = useState.phase === "idle" && previewState.message
-      ? previewState.message
-      : useState.message;
+    const liveMessage = useState.phase === "applying"
+      || useState.phase === "error"
+      || useState.phase === "conflict"
+      ? useState.message
+      : previewState.phase !== "idle"
+        ? previewState.message
+        : useState.phase === "applied"
+          ? useState.message
+          : "";
     const currentPresetId = useState.phase === "applied"
       ? useState.presetId
       : props.activePresetId ?? null;
-    const globalUseBlocked = props.disabled === true
-      || !targetReady
-      || useState.phase === "applying"
+    const useTemporarilyBlocked = useState.phase === "applying"
       || useState.phase === "conflict";
 
     const renderItem = (itemModel: OfficialVoiceLibraryItemModel): unknown => {
       const item = itemModel.item;
       const isCurrent = currentPresetId === item.presetId;
-      const isApplying = useState.phase === "applying" && useState.presetId === item.presetId;
-      const retrying = useState.phase === "error"
-        && useState.presetId === item.presetId
-        && useState.failure.retryable;
       const nonRetryableSameItem = useState.phase === "error"
         && useState.presetId === item.presetId
         && !useState.failure.retryable;
@@ -777,10 +817,12 @@ export function createOfficialVoiceLibrary(
         && previewState.presetId === item.presetId;
       const warningId = `${prefix}-${safeDomToken(item.presetId)}-language-note`;
       const unavailableId = `${prefix}-${safeDomToken(item.presetId)}-availability`;
-      const useDisabled = globalUseBlocked
+      const headingId = `${prefix}-${safeDomToken(item.presetId)}-heading`;
+      const selectionDisabled = props.disabled === true
+        || !targetReady
         || !item.selectableNow
-        || isCurrent
         || nonRetryableSameItem;
+      const selectionAriaDisabled = selectionDisabled || useTemporarilyBlocked;
       const previewDisabled = props.disabled === true
         || !item.previewableNow
         || props.onPreview === undefined
@@ -806,93 +848,83 @@ export function createOfficialVoiceLibrary(
             "data-selectable-now": String(item.selectableNow),
             "data-previewable-now": String(item.previewableNow),
             "data-renderable-existing": String(item.renderableExisting),
+            "aria-labelledby": headingId,
           },
-          h("div", { className: "anw-official-voice-card__heading" },
-            h("div", null,
-              h("h4", null, item.displayName),
-              h("p", { className: "anw-official-voice-card__group" }, item.group),
+          h(
+            "label",
+            {
+              className: [
+                "anw-official-voice-card__selection",
+                selectionAriaDisabled ? "is-disabled" : "",
+              ].filter(Boolean).join(" "),
+            },
+            h("input", {
+              className: "anw-official-voice-card__radio",
+              type: "radio",
+              name: `${prefix}-selection`,
+              value: item.presetId,
+              checked: isCurrent,
+              disabled: selectionDisabled,
+              "aria-disabled": selectionAriaDisabled ? true : undefined,
+              "aria-describedby": describedBy,
+              "aria-label": `${isCurrent ? "当前使用" : "选择使用"}：${targetContextLabel(props.target)} · ${item.displayName}`,
+              onChange: () => applyVoice(item),
+            }),
+            h("span", { className: "anw-official-voice-card__heading" },
+              h("span", null,
+                h("strong", { id: headingId }, item.displayName),
+                h(
+                  "span",
+                  { className: "anw-official-voice-card__group" },
+                  itemModel.languageLabel,
+                ),
+              ),
+              isCurrent
+                ? h("span", { className: "anw-official-voice-card__current" }, "当前使用")
+                : null,
             ),
-            isCurrent
-              ? h("span", { className: "anw-official-voice-card__current" }, "当前使用")
-              : null,
           ),
-          h("div", { className: "anw-official-voice-card__badges" },
-            h("span", { className: "anw-official-voice-card__badge" }, itemModel.languageLabel),
-            h(
-              "span",
-              {
-                className: [
-                  "anw-official-voice-card__badge",
-                  item.validationTier === "canonical_chapter_verified" ? "is-verified" : "is-unreviewed",
-                ].join(" "),
-              },
-              itemModel.validationLabel,
-            ),
-            h(
-              "span",
-              {
-                id: unavailableId,
-                className: [
-                  "anw-official-voice-card__badge",
-                  item.selectableNow ? "is-available" : "is-unavailable",
-                ].join(" "),
-              },
-              itemModel.availabilityLabel,
-            ),
-          ),
-          itemModel.languageNotice === null
-            ? null
-            : h(
-              "p",
-              {
-                id: warningId,
-                className: "anw-official-voice-card__language-note",
-                role: "note",
-              },
-              itemModel.languageNotice,
-            ),
-          h("div", { className: "anw-official-voice-card__actions" },
-            h(
-              "button",
-              {
-                type: "button",
-                className: "anw-official-voice-card__preview",
-                disabled: previewDisabled,
-                "aria-disabled": previewDisabled ? true : undefined,
-                "aria-label": `${item.previewableNow ? "试听" : "试听暂不可用"}${item.displayName}`,
-                onClick: () => previewVoice(item),
-              },
-              previewing
-                ? "加载试听…"
-                : item.previewableNow && props.onPreview !== undefined
-                  ? "试听"
-                  : "试听暂不可用",
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "anw-official-voice-card__use",
-                disabled: useDisabled,
-                "aria-disabled": useDisabled ? true : undefined,
-                "aria-pressed": isCurrent,
-                "aria-describedby": describedBy,
-                onClick: () => applyVoice(item),
-              },
-              isApplying
-                ? "正在使用…"
-                : isCurrent
-                  ? "当前使用"
-                  : retrying
-                    ? "重试使用"
-                    : targetActionLabel(props.target),
-            ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "anw-official-voice-card__preview",
+              disabled: previewDisabled,
+              "aria-disabled": previewDisabled ? true : undefined,
+              "aria-label": `${item.previewableNow ? "试听" : "试听暂不可用"}${item.displayName}`,
+              onClick: () => previewVoice(item),
+            },
+            previewing
+              ? "加载试听…"
+              : item.previewableNow && props.onPreview !== undefined
+                ? "试听"
+                : "试听暂不可用",
           ),
           h(
             "details",
             { className: "anw-official-voice-card__details" },
-            h("summary", null, "模型详情"),
+            h("summary", null, "详情"),
             h("dl", null,
+              h(
+                "div",
+                null,
+                h("dt", null, "使用状态"),
+                h("dd", { id: unavailableId }, itemModel.availabilityLabel),
+              ),
+              h(
+                "div",
+                null,
+                h("dt", null, "技术验证"),
+                h("dd", null, itemModel.validationLabel),
+              ),
+              itemModel.languageNotice === null
+                ? null
+                : h(
+                  "div",
+                  { className: "anw-official-voice-card__language-note" },
+                  h("dt", null, "语言提示"),
+                  h("dd", { id: warningId }, itemModel.languageNotice),
+                ),
               h("div", null, h("dt", null, "Preset ID"), h("dd", null, item.presetId)),
               h("div", null, h("dt", null, "来源语言"), h("dd", null, item.language)),
               h("div", null, h("dt", null, "固定来源"), h("dd", null, item.provenance.repository)),
@@ -935,20 +967,15 @@ export function createOfficialVoiceLibrary(
               "没有匹配的官方音色；可清空搜索或切换语言。",
             )
             : filteredGroups.map((group) => {
-            const groupId = `${prefix}-${safeDomToken(group.languageScope)}-heading`;
             return h(
-              "section",
+              "ul",
               {
                 key: group.languageScope,
-                className: "anw-official-voice-library__group",
-                "aria-labelledby": groupId,
+                id: `${prefix}-${safeDomToken(group.languageScope)}-panel`,
+                className: "anw-official-voice-library__grid",
+                "aria-label": group.label,
               },
-              h("h3", { id: groupId }, group.label),
-              h(
-                "ul",
-                { className: "anw-official-voice-library__grid" },
-                ...group.items.map(renderItem),
-              ),
+              ...group.items.map(renderItem),
             );
           });
 
@@ -957,8 +984,11 @@ export function createOfficialVoiceLibrary(
       {
         className: ["anw-official-voice-library", props.className ?? ""].filter(Boolean).join(" "),
         role: "region",
-        "aria-labelledby": `${prefix}-heading`,
-        "aria-describedby": `${prefix}-summary ${prefix}-live-status`,
+        "aria-labelledby": props.presentation === "embedded" ? undefined : `${prefix}-heading`,
+        "aria-label": props.presentation === "embedded" ? "官方音色" : undefined,
+        "aria-describedby": props.presentation === "embedded"
+          ? `${prefix}-live-status`
+          : `${prefix}-summary ${prefix}-live-status`,
         "aria-busy": props.loading === true || useState.phase === "applying",
         "data-catalog-status": props.loading === true
           ? "loading"
@@ -968,18 +998,23 @@ export function createOfficialVoiceLibrary(
         "data-official-voice-count": model.itemCount,
         "data-official-voice-use-phase": useState.phase,
       },
-      h("header", { className: "anw-official-voice-library__header" },
-        h("div", null,
-          h("p", { className: "anw-official-voice-library__eyebrow" }, "MOSS-TTS-Nano · 官方固定音色"),
-          h("h2", { id: `${prefix}-heading` }, "官方音色库"),
-          h(
-            "p",
-            { id: `${prefix}-summary` },
-            "固定收录 18 个官方音色；当前可用项可在个人本机项目中直接选择，试听可选，不需要语言、版权或质量确认。",
+      props.presentation === "embedded"
+        ? props.headerAction ?? null
+        : h("header", { className: "anw-official-voice-library__header" },
+          h("div", null,
+            h("p", { className: "anw-official-voice-library__eyebrow" }, "官方固定音色"),
+            h("h2", { id: `${prefix}-heading` }, "官方音色库"),
+            h(
+              "p",
+              { id: `${prefix}-summary` },
+              "按语言查看并直接使用；试听可选，技术来源收在详情中。",
+            ),
+          ),
+          h("div", { className: "anw-official-voice-library__header-actions" },
+            props.headerAction ?? null,
+            h("span", { className: "anw-official-voice-library__count" }, "18 项"),
           ),
         ),
-        h("span", { className: "anw-official-voice-library__count" }, "18 项"),
-      ),
       targetReady
         ? null
         : h(
@@ -998,37 +1033,47 @@ export function createOfficialVoiceLibrary(
             h("input", {
               type: "search",
               value: searchQuery,
-              placeholder: "名称、Preset ID 或分组",
+              placeholder: "名称或分组",
               onChange: (event: { target: { value: string } }) => {
                 setSearchQuery(event.target.value);
               },
             }),
           ),
           h(
-            "label",
-            null,
-            h("span", null, "语言"),
-            h(
-              "select",
+            "div",
+            {
+              className: "anw-official-voice-library__language-tabs",
+              role: "group",
+              "aria-label": "官方音色语言",
+            },
+            ...LANGUAGE_ORDER.map((languageScope) => h(
+              "button",
               {
-                value: languageFilter,
-                onChange: (event: { target: { value: string } }) => {
-                  const value = event.target.value;
-                  if (value === "all" || LANGUAGE_ORDER.includes(value as OfficialVoiceLanguageScope)) {
-                    setLanguageFilter(value as OfficialVoiceLanguageFilter);
-                  }
-                },
+                key: languageScope,
+                type: "button",
+                "aria-pressed": languageFilter === languageScope,
+                className: languageFilter === languageScope ? "is-active" : "",
+                onClick: () => setLanguageFilter(languageScope),
               },
-              h("option", { value: "all" }, "全部语言"),
-              h("option", { value: "zh-CN" }, "中文（6）"),
-              h("option", { value: "en" }, "English（5）"),
-              h("option", { value: "ja-JP" }, "日本語（7）"),
-            ),
+              `${LANGUAGE_LABELS[languageScope]}（${LANGUAGE_COUNTS[languageScope]}）`,
+            )),
           ),
+          searchQuery.trim() === ""
+            ? null
+            : h(
+              "span",
+              { className: "anw-official-voice-library__filter-count", "aria-hidden": true },
+              `当前显示 ${filteredCount} 项`,
+            ),
           h(
             "span",
-            { className: "anw-official-voice-library__filter-count", role: "status" },
-            `显示 ${filteredCount} / 18 项`,
+            {
+              className: "anw-official-voice-library__filter-status",
+              role: "status",
+              "aria-live": "polite",
+              "aria-atomic": true,
+            },
+            `当前显示 ${filteredCount} 项`,
           ),
         )
         : null,

@@ -19,9 +19,9 @@ AI小说世界2026 是运行在 QwenPaw 2.1.0 中的个人小说写作 PawApp。
 
 ## MOSS-TTS-Nano 当前范围
 
-MOSS-TTS-Nano 是个人、本地、单用户功能。正式产品范围仅包含 6 个中文 `official_preset`：`onnx.Zhiming`、`onnx.Junhao`、`onnx.Weiguo`、`onnx.Xiaoyu`、`onnx.Yuewen`、`onnx.Lingyu`；固定 ONNX manifest 的 18 项目录只用于底层兼容和技术溯源，不代表 18 项全部进入当前产品范围。作者已确认并锁定绑定旁白 `onnx.Zhiming`、林晚 `onnx.Xiaoyu`、沈川 `onnx.Junhao`，正式产品只使用官方 manifest prompt codes 与官方默认参数。2026-08-28 canonical run `bb03ccaf-4681-490a-b987-84bec9199b3b` 已完成真实 Nano、网页播放器、CodeMirror、跳播、Range/ETag、四桌面组合与固定 30 分钟稳定性；作者随后明确确认“完整章节通过”，同 run listening finalize、resume 与 teardown 已完成，最终 result 为 `PASS_CANDIDATE`、human state 为 `PASS`。长期 QwenPaw 已升级到迁移 `20260828_0024` 并在 `runtime=true / product=true / validation=false / reference=false` 的个人本地产品模式通过验证，隐藏验证 token 已销毁。系统中文输入法另由作者本人确认亲自输入至少两个汉字且功能正常；验收执行器曾因只允许三次撤销而在输入后的基线恢复阶段返回 `HOLD`，该执行器缺陷已修复并通过自动回归，不得反写成用户输入失败。
+MOSS-TTS-Nano 是个人、本地、单用户功能。当前固定目录的 18 个官方 `official_preset` 已进入产品范围，覆盖中文 6 项、English 5 项和日本語 7 项；作者可以搜索、按语言筛选、可选试听，并零确认直接用于旁白或人物。跨语言和未专项听检信息只作提示，不阻断本机写作朗读。人物卡同时保留“根据人物卡匹配并使用官方音色”和“生成并使用人物专属音色”两条不同链路；Nano 高级调音与私人音色生命周期继续使用既有 CAS、幂等和失败不改原绑定规则。
 
-商业发布／再分发审批、英文／日文专项、云端／远程／共享／复杂继承、OS signing／SSHSIG 以及章节／全书音频导出均是当前非目标，不阻断 T4；历史商业和签名审计保留，但其作为本地产品放行前置的旧口径已被取代。云端辅助说话人识别与高级匿名选角继续 `HOLD`，等待单独裁决。个人本地中文有限核心已通过 [T4-GATE](./docs/开发文档/证据/MOSS-TTS-Nano施工/T4-GATE.md)；最终候选 tree 为 `7a57471ebe9ea6cffc6d76529e3fdcab6c1683ad236499fbc2d1fdfb720bde13`。
+当前已应用的线性 Alembic 迁移链包含 `20260830_0035`。MOSS-VoiceGenerator 的 macOS 原生一次性进程、人物卡一键生成、Nano 技术验证、generated Voice Version 与 CAS 自动绑定已经通过机器和产品链路验证；作者尚未完成对专属音色的主观听检，因此不能表述为作者已经满意。商业发布／再分发审批、云端／远程／共享、OS signing／SSHSIG 以及章节／全书音频导出仍是当前非目标。历史中文有限核心证据继续保存在 [T4-GATE](./docs/开发文档/证据/MOSS-TTS-Nano施工/T4-GATE.md)，后续 18 音色与人物专属音色裁决分别以计划 35／40 的现行记录为准。
 
 ## 目录
 

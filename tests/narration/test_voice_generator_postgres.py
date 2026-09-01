@@ -62,7 +62,7 @@ from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
 
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
-EXPECTED_HEAD = "20260830_0035"
+EXPECTED_HEAD = "20260901_0036"
 SCOPE = NarrationRequestScope.fixed_local()
 SessionFactory = Callable[[], Session]
 
@@ -101,7 +101,7 @@ def vg_pg_runtime() -> tuple[Connection, SessionFactory]:
         outer.rollback()
         connection.close()
         engine.dispose()
-        raise RuntimeError("VoiceGenerator PostgreSQL tests require exact head 0035")
+        raise RuntimeError("VoiceGenerator PostgreSQL tests require exact head 0036")
     required = {
         "voice_design_drafts",
         "voice_generator_commands",

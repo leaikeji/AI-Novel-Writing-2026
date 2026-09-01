@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+import logging
 import unicodedata
 from typing import Callable, Final, Iterator, Literal, Protocol, TypeVar
 from uuid import RFC_4122, UUID
@@ -42,6 +43,9 @@ from .services import (
 )
 from .script_contracts import SegmentKind
 from .release_gate import require_narration_t4_http_access
+
+
+logger = logging.getLogger(__name__)
 
 
 NARRATION_SCRIPT_REVIEW_API_VERSION: Final = "narration-script-review-api/1"
@@ -769,6 +773,11 @@ def _run(
             detail=script_api_error_detail(fault).model_dump(mode="json"),
         ) from fault
     except NarrationServiceError as error:
+        logger.warning(
+            "narration script operation rejected by domain authority",
+            exc_info=error,
+            extra={"operation": command.operation.value},
+        )
         fault = _fault_from_service(error)
         raise HTTPException(
             status_code=SCRIPT_API_ERROR_HTTP_STATUS[fault.code],

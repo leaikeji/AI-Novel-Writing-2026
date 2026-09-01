@@ -139,6 +139,7 @@ export interface CharacterVoiceGeneratorProps {
   readonly workspaceSelection: CharacterVoiceGenerationWorkspaceSelection;
   readonly initialCommand?: CharacterVoiceGenerationSnapshot | null;
   readonly className?: string;
+  readonly presentation?: "standalone" | "embedded";
   /** Set to zero only in deterministic unit tests; production defaults to 2 seconds. */
   readonly refreshIntervalMs?: number;
   readonly onLoadLatest?: (
@@ -182,7 +183,7 @@ const STATE_COPY: Readonly<Record<CharacterVoiceGenerationState, string>> = Obje
   waiting_for_heavy_runtime: "正在等待声音生成资源",
   generating_voice: "正在生成专属音色",
   unloading_voice_generator: "声音已生成，正在释放重模型",
-  validating_with_nano: "正在用 MOSS-TTS-Nano 验证音色",
+  validating_with_nano: "正在验证生成结果",
   ready_applied: "专属音色已生成并用于当前人物",
   ready_unapplied: "专属音色已生成，但没有覆盖你刚修改的声音",
   failed_character_analysis: "人物卡分析失败",
@@ -190,7 +191,7 @@ const STATE_COPY: Readonly<Record<CharacterVoiceGenerationState, string>> = Obje
   failed_memory_safety: "本次生成已因内存安全停止",
   failed_generation: "专属音色生成失败",
   failed_audio_validation: "生成音频未通过机器校验",
-  failed_nano_validation: "MOSS-TTS-Nano 技术验证失败",
+  failed_nano_validation: "生成结果未通过验证",
   failed_storage: "专属音色保存失败",
   cancelled: "专属音色生成已取消",
   superseded: "人物资料或声音绑定已变化，本次任务已失效",
@@ -378,7 +379,7 @@ export function deriveCharacterVoiceGeneratorState(
       statusLabel: configurable
         ? "根据已保存的人物卡生成一条专属新音色，并在成功后直接使用。"
         : "当前人物声音为只读。",
-      detail: "生成、重模型释放和 Nano 验证会在后台依次完成。",
+      detail: "原声音会保持到生成和 Nano 验证全部完成。",
       progressPercent: null,
       primaryAction: configurable ? "start" : null,
       primaryLabel: configurable ? "生成专属音色并使用" : null,
@@ -674,6 +675,9 @@ export function createCharacterVoiceGenerator(
       props.className,
     );
     const statusId = `anw-character-voice-generator-${props.characterId}-status`;
+    const primaryLabel = derived.primaryAction === "start" && derived.phase === "idle"
+      ? `为${props.characterName}生成并使用专属音色`
+      : derived.primaryLabel;
     return h(
       "section",
       {
@@ -682,15 +686,22 @@ export function createCharacterVoiceGenerator(
         "aria-describedby": statusId,
         "data-generation-state": derived.phase,
       },
-      h("div", { className: "anw-character-voice-generator__heading" },
-        h("div", null,
-          h("p", { className: "anw-character-voice-generator__eyebrow" }, "人物卡专属音色"),
-          h("h3", { id: `${statusId}-heading` }, `${props.characterName}的专属音色`),
+      props.presentation === "embedded"
+        ? h("div", { className: "anw-character-voice-generator__heading" },
+          h("h3", { id: `${statusId}-heading` }, "生成专属音色"),
+          derived.terminal
+            ? h("span", { className: "anw-character-voice-generator__terminal" }, "本次任务已结束")
+            : null,
+        )
+        : h("div", { className: "anw-character-voice-generator__heading" },
+          h("div", null,
+            h("p", { className: "anw-character-voice-generator__eyebrow" }, "生成专属音色"),
+            h("h3", { id: `${statusId}-heading` }, `为${props.characterName}创建独特声音`),
+          ),
+          derived.terminal
+            ? h("span", { className: "anw-character-voice-generator__terminal" }, "本次任务已结束")
+            : null,
         ),
-        derived.terminal
-          ? h("span", { className: "anw-character-voice-generator__terminal" }, "本次任务已结束")
-          : null,
-      ),
       h("p", {
         id: statusId,
         className: "anw-character-voice-generator__status",
@@ -713,7 +724,7 @@ export function createCharacterVoiceGenerator(
       scoped.errorMessage && scoped.loadPhase !== "error"
         ? h("p", { className: "anw-character-voice-generator__error", role: "alert" }, scoped.errorMessage)
         : null,
-      derived.primaryAction && derived.primaryLabel
+      derived.primaryAction && primaryLabel
         ? h("button", {
           type: "button",
           className: classNames(
@@ -722,7 +733,7 @@ export function createCharacterVoiceGenerator(
           ),
           disabled: derived.primaryDisabled,
           onClick: () => { void run(derived.primaryAction as Exclude<CharacterVoiceGeneratorPrimaryAction, null>); },
-        }, derived.primaryLabel)
+        }, primaryLabel)
         : null,
     );
   };

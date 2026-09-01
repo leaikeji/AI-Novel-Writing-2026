@@ -149,7 +149,7 @@ class IntegratedFakePlayer implements FollowAwareNarrationPlayerController {
       currentSegmentId: segmentId,
       currentOrdinal: ordinal,
       durationMs: 1_200,
-      backend: "web-audio",
+      backend: "media-element",
       source,
       followPaused: this.state.followPaused,
     });
@@ -159,7 +159,7 @@ class IntegratedFakePlayer implements FollowAwareNarrationPlayerController {
       lease,
       segmentId,
       ordinal,
-      backend: "web-audio",
+      backend: "media-element",
     });
   }
 

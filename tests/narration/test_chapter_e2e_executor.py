@@ -49,6 +49,10 @@ CAPABILITY_KEYS = (
     "cloud_assisted_analysis",
     "voice_generator",
     "cache_cleanup",
+    "character_voice_matching",
+    "character_cast_planning",
+    "nano_advanced_tuning",
+    "private_voice_deletion",
 )
 T2_ENABLED = frozenset({"narration_product", "reading_settings"})
 T4_ENABLED = frozenset(
@@ -101,7 +105,7 @@ def _overview_response(
             "contract_version": "narration-settings-api/1",
             "novel_id": str(novel_id),
             "capabilities": {
-                "schema_version": "narration-capabilities/2",
+                "schema_version": "narration-capabilities/3",
                 "items": [
                     {
                         "key": key,

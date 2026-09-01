@@ -3925,6 +3925,7 @@ export function StudioProjectView({
         novelId: novel.id,
         characterId: character.id,
         characterName: character.name,
+        roleType: character.role_type,
       })),
     onSectionChange: onReadingPanelChange,
   });

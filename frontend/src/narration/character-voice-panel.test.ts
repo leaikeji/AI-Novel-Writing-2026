@@ -558,7 +558,7 @@ describe("CharacterVoicePanel", () => {
     expect(textContent(tree)).toContain("作者主动更新朗读时重生成受影响句段");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(":focus-visible");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("repeat(4, minmax(0, 1fr))");
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 640px)");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 768px)");
   });
 
   it("fails closed without read authorization and makes no API request", async () => {

@@ -1,0 +1,39 @@
+{
+  "browser_version": "152.0.4191.53",
+  "console_counts": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "failure_codes": [],
+  "generated_at": "2026-08-31T22:48:12.818Z",
+  "samples": [
+    {"dominant_frequency_hz": 329.58984375, "error_count": 0, "expected_wall_duration_ms": 2000, "frequency_hz": 220, "preserves_pitch": false, "preserves_pitch_property": false, "rate": 1.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 2091.2000000476837},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 1500, "frequency_hz": 220, "preserves_pitch": false, "preserves_pitch_property": false, "rate": 2, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1534.5},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 6000, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 0.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 6030.700000047684},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 4000, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 0.75, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 4009.2000000476837},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 3000, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 3070.2000000476837},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 2400, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1.25, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 2460.7999999523163},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 2000, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 2019.2999999523163},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 1714.2857142857142, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1.75, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1741.2000000476837},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 1500, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1564.3999999761581},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 1333.3333333333333, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2.25, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1404.1000000238419},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 1200, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1231.1999999284744},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 1090.909090909091, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2.75, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1119.2999999523163},
+    {"dominant_frequency_hz": 219.7265625, "error_count": 0, "expected_wall_duration_ms": 1000, "frequency_hz": 220, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 3, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1071.2999999523163},
+    {"dominant_frequency_hz": 660.64453125, "error_count": 0, "expected_wall_duration_ms": 2000, "frequency_hz": 440, "preserves_pitch": false, "preserves_pitch_property": false, "rate": 1.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 2037.8999999761581},
+    {"dominant_frequency_hz": 880.37109375, "error_count": 0, "expected_wall_duration_ms": 1500, "frequency_hz": 440, "preserves_pitch": false, "preserves_pitch_property": false, "rate": 2, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1538.1000000238419},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 6000, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 0.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 5982},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 4000, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 0.75, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 4013.5},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 3000, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 3027},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 2400, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1.25, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 2471.7000000476837},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 2000, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 2064.399999976158},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 1714.2857142857142, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 1.75, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1741.3999999761581},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 1500, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1560},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 1333.3333333333333, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2.25, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1357.3000000715256},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 1200, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2.5, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1280.7000000476837},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 1090.909090909091, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 2.75, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1122.3999999761581},
+    {"dominant_frequency_hz": 439.453125, "error_count": 0, "expected_wall_duration_ms": 1000, "frequency_hz": 440, "preserves_pitch": true, "preserves_pitch_property": true, "rate": 3, "stalled_count": 0, "waiting_count": 0, "wall_duration_ms": 1070.7000000476837}
+  ],
+  "schema_version": "moss-tts-playback-pitch-probe/1.0",
+  "status": "pass"
+}

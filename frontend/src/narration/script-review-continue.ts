@@ -266,14 +266,20 @@ function classifyWorkflow(
       fail("SCOPE_MISMATCH", "生产状态已进入队列但没有真实 Edition。", workflow);
     }
     const manifestRevision = workflow.current_manifest_revision;
+    if (
+      manifestRevision !== null
+      && (!Number.isSafeInteger(manifestRevision) || manifestRevision < 1)
+    ) {
+      fail("SCOPE_MISMATCH", "生产状态返回了无效的 Manifest revision。", workflow);
+    }
+    if (state === "queued" || state === "rendering") {
+      return "waiting";
+    }
     if (manifestRevision === null) {
       if (PLAYABLE_STATES.has(state)) {
         fail("SCOPE_MISMATCH", "可播放生产状态缺少 Manifest revision。", workflow);
       }
       return "waiting";
-    }
-    if (!Number.isSafeInteger(manifestRevision) || manifestRevision < 1) {
-      fail("SCOPE_MISMATCH", "生产状态返回了无效的 Manifest revision。", workflow);
     }
     return "success";
   }

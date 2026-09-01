@@ -1,6 +1,6 @@
 export const NARRATION_SETTINGS_API_VERSION = "narration-settings-api/1" as const;
 export const NARRATION_SETTINGS_SCHEMA_VERSION = "narration-settings/1" as const;
-export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/2" as const;
+export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/3" as const;
 export const NARRATION_VOICE_SCHEMA_VERSION = "narration-voice/2" as const;
 export const NARRATION_CACHE_SCHEMA_VERSION = "narration-cache/1" as const;
 export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "moss-tts-official-preset-catalog/2.0" as const;
@@ -55,6 +55,7 @@ export const CAPABILITY_KEYS = [
   "voice_generator",
   "cache_cleanup",
   "character_voice_matching",
+  "character_cast_planning",
   "nano_advanced_tuning",
   "private_voice_deletion",
 ] as const;
@@ -793,6 +794,10 @@ export const NANO_VOICE_EXPERIMENT_LIST_VERSION = "nano-voice-experiment-list/1"
 export const CHARACTER_VOICE_MATCH_REQUEST_VERSION = "character-voice-match-request/1" as const;
 export const CHARACTER_VOICE_MATCH_VERSION = "character-voice-match/1" as const;
 export const CHARACTER_VOICE_BRIEF_VERSION = "character-voice-brief/1" as const;
+export const NARRATOR_VOICE_BRIEF_VERSION = "narrator-voice-brief/1" as const;
+export const CHARACTER_CAST_PLAN_REQUEST_VERSION = "character-cast-plan-request/1" as const;
+export const CHARACTER_CAST_PLAN_VERSION = "character-cast-plan/1" as const;
+export const CHARACTER_CAST_PLAN_LIST_VERSION = "character-cast-plan-list/1" as const;
 export const CHARACTER_VOICE_GENERATION_REQUEST_VERSION = "character-voice-generation-request/1" as const;
 export const CHARACTER_VOICE_GENERATION_VERSION = "character-voice-generation/1" as const;
 export const CHARACTER_VOICE_GENERATION_LIST_VERSION = "character-voice-generation-list/1" as const;
@@ -898,6 +903,117 @@ export interface CharacterVoiceMatchResource {
   readonly selection_still_current: boolean;
   readonly current_character_binding: CharacterVoiceBindingResource;
   readonly model_evidence: Readonly<Record<string, unknown>>;
+}
+
+export interface NarratorVoiceBriefResource {
+  readonly schema_version: typeof NARRATOR_VOICE_BRIEF_VERSION;
+  readonly language: "zh-CN" | "en" | "ja-JP" | null;
+  readonly presentation: "masculine" | "feminine" | "androgynous" | null;
+  readonly pitch: -2 | -1 | 0 | 1 | 2 | null;
+  readonly pace: -2 | -1 | 0 | 1 | 2 | null;
+  readonly energy: -2 | -1 | 0 | 1 | 2 | null;
+  readonly texture: "clear" | "warm" | "airy" | "husky" | "firm" | "soft" | "bright" | "dark" | null;
+  readonly evidence_fields: readonly string[];
+}
+
+export interface CreateCharacterCastPlanRequest {
+  readonly contract_version: typeof CHARACTER_CAST_PLAN_REQUEST_VERSION;
+  readonly timeline_id: string;
+  readonly mode: "fill_and_deduplicate";
+}
+
+export type CharacterCastPlanState =
+  | "reserved"
+  | "analyzing"
+  | "ready_applied"
+  | "ready_applied_with_warnings"
+  | "ready_unapplied"
+  | "failed"
+  | "superseded";
+
+export type CharacterCastPlanItemState =
+  | "pending"
+  | "analyzing"
+  | "preserved"
+  | "scored"
+  | "assigned"
+  | "blocked";
+
+export interface CharacterCastTargetResource {
+  readonly target_key: string;
+  readonly target_kind: "narrator" | "character";
+  readonly character_id: string | null;
+  readonly character_name: string | null;
+  readonly role_type: string | null;
+}
+
+export interface CharacterCastPlanItemResource {
+  readonly item_id: string;
+  readonly target: CharacterCastTargetResource;
+  readonly state: CharacterCastPlanItemState;
+  readonly attempt: number;
+  readonly workspace_digest: string;
+  readonly lease_expires_at: string | null;
+  readonly brief: CharacterVoiceBriefResource | NarratorVoiceBriefResource | null;
+  readonly selected_preset_id: OfficialPresetId | null;
+  readonly score_milli: number | null;
+  readonly profile_id: string | null;
+  readonly version_id: string | null;
+  readonly voice_action_command_id: string | null;
+  readonly warning_code: string | null;
+  readonly failure_code: string | null;
+}
+
+export interface CharacterCastAssignmentResource {
+  readonly target: CharacterCastTargetResource;
+  readonly preset_id: OfficialPresetId;
+  readonly score_milli: number;
+  readonly voice_action_command_id: string | null;
+}
+
+export interface CharacterCastPreservedResource {
+  readonly target: CharacterCastTargetResource;
+  readonly profile_id: string;
+  readonly version_id: string;
+  readonly preset_id: OfficialPresetId | null;
+  readonly source_type: "preset" | "uploaded" | "generated";
+}
+
+export interface CharacterCastWarningResource {
+  readonly code: string;
+  readonly target_key: string | null;
+  readonly message: string;
+}
+
+export interface CharacterCastPlanResource {
+  readonly contract_version: typeof CHARACTER_CAST_PLAN_VERSION;
+  readonly command_id: string;
+  readonly novel_id: string;
+  readonly timeline_id: string;
+  readonly mode: "fill_and_deduplicate";
+  readonly state: CharacterCastPlanState;
+  readonly server_now: string;
+  readonly progress_current: number;
+  readonly progress_total: number;
+  readonly terminal: boolean;
+  readonly retryable: boolean;
+  readonly current_target_key: string | null;
+  readonly lease_expires_at: string | null;
+  readonly assignments: readonly CharacterCastAssignmentResource[];
+  readonly preserved: readonly CharacterCastPreservedResource[];
+  readonly warnings: readonly CharacterCastWarningResource[];
+  readonly items: readonly CharacterCastPlanItemResource[];
+  readonly failure_code: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly completed_at: string | null;
+}
+
+export interface CharacterCastPlanListResource {
+  readonly contract_version: typeof CHARACTER_CAST_PLAN_LIST_VERSION;
+  readonly novel_id: string;
+  readonly server_now: string;
+  readonly items: readonly CharacterCastPlanResource[];
 }
 
 export interface CreateCharacterVoiceGeneratorCommandRequest {
@@ -2064,6 +2180,194 @@ function validateCharacterVoiceMatch(value: unknown, path: string): void {
   if ((state === "ready_applied") !== stillCurrent) fail(path, "match state/current flag mismatch");
 }
 
+function validateNarratorVoiceBrief(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "schema_version", "language", "presentation", "pitch", "pace", "energy",
+    "texture", "evidence_fields",
+  ], path);
+  literal(item.schema_version, NARRATOR_VOICE_BRIEF_VERSION, `${path}.schema_version`);
+  if (item.language !== null) oneOf(item.language, ["zh-CN", "en", "ja-JP"] as const, `${path}.language`);
+  if (item.presentation !== null) oneOf(item.presentation, ["masculine", "feminine", "androgynous"] as const, `${path}.presentation`);
+  for (const key of ["pitch", "pace", "energy"] as const) {
+    if (item[key] !== null) integer(item[key], `${path}.${key}`, -2, 2);
+  }
+  if (item.texture !== null) {
+    oneOf(item.texture, ["clear", "warm", "airy", "husky", "firm", "soft", "bright", "dark"] as const, `${path}.texture`);
+  }
+  const evidence = stringArray(item.evidence_fields, `${path}.evidence_fields`, 48);
+  const pattern = /^(language|presentation|pitch|pace|energy|texture):(?:narration_settings\.language|novel\.(?:title|genre|subgenre|description|idea|highlight|background|main_plot))$/;
+  if (new Set(evidence).size !== evidence.length || evidence.some((entry) => !pattern.test(entry))) {
+    fail(`${path}.evidence_fields`, "narrator evidence escaped the saved metadata allowlist");
+  }
+  const evidenced = new Set(evidence.map((entry) => entry.split(":", 1)[0]));
+  const populated = new Set<string>(
+    (["language", "presentation", "pitch", "pace", "energy", "texture"] as const)
+      .filter((key) => item[key] !== null),
+  );
+  if (
+    evidenced.size !== populated.size
+    || [...evidenced].some((dimension) => !populated.has(dimension))
+  ) {
+    fail(`${path}.evidence_fields`, "narrator evidence must exactly cover populated dimensions");
+  }
+}
+
+const CHARACTER_CAST_PLAN_STATES = [
+  "reserved", "analyzing", "ready_applied", "ready_applied_with_warnings",
+  "ready_unapplied", "failed", "superseded",
+] as const;
+const CHARACTER_CAST_ITEM_STATES = [
+  "pending", "analyzing", "preserved", "scored", "assigned", "blocked",
+] as const;
+const CAST_TARGET_KEY_PATTERN = /^(?:narrator|character:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+
+function validateCharacterCastTarget(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "target_key", "target_kind", "character_id", "character_name", "role_type",
+  ], path);
+  const targetKey = string(item.target_key, `${path}.target_key`, 1, 64);
+  if (!CAST_TARGET_KEY_PATTERN.test(targetKey)) fail(`${path}.target_key`, "invalid cast target key");
+  const targetKind = oneOf(item.target_kind, ["narrator", "character"] as const, `${path}.target_kind`);
+  const characterId = nullableUuid(item.character_id, `${path}.character_id`);
+  const characterName = nullableString(item.character_name, `${path}.character_name`, 240);
+  const roleType = nullableString(item.role_type, `${path}.role_type`, 30);
+  if (targetKind === "narrator") {
+    if (targetKey !== "narrator" || characterId !== null || characterName !== null || roleType !== null) {
+      fail(path, "narrator target carries character identity");
+    }
+  } else if (
+    characterId === null
+    || characterName === null
+    || roleType === null
+    || targetKey !== `character:${characterId}`
+  ) {
+    fail(path, "character target identity is incomplete");
+  }
+}
+
+function validateCharacterCastPlanItem(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "item_id", "target", "state", "attempt", "workspace_digest",
+    "lease_expires_at", "brief", "selected_preset_id", "score_milli",
+    "profile_id", "version_id", "voice_action_command_id", "warning_code",
+    "failure_code",
+  ], path);
+  uuid(item.item_id, `${path}.item_id`);
+  validateCharacterCastTarget(item.target, `${path}.target`);
+  const target = record(item.target, `${path}.target`);
+  const state = oneOf(item.state, CHARACTER_CAST_ITEM_STATES, `${path}.state`);
+  integer(item.attempt, `${path}.attempt`, 0);
+  sha256(item.workspace_digest, `${path}.workspace_digest`);
+  const lease = nullableTimestamp(item.lease_expires_at, `${path}.lease_expires_at`);
+  if ((state === "analyzing") !== (lease !== null)) fail(path, "cast item lease/state mismatch");
+  if (item.brief !== null) {
+    const brief = record(item.brief, `${path}.brief`);
+    if (target.target_kind === "narrator") {
+      validateNarratorVoiceBrief(brief, `${path}.brief`);
+    } else {
+      validateCharacterVoiceBrief(brief, `${path}.brief`);
+    }
+  }
+  const presetId = item.selected_preset_id === null
+    ? null
+    : string(item.selected_preset_id, `${path}.selected_preset_id`, 6, 85);
+  if (presetId !== null && !OFFICIAL_PRESET_IDS.includes(presetId as OfficialPresetId)) {
+    fail(`${path}.selected_preset_id`, "unknown pinned official preset");
+  }
+  const score = item.score_milli === null
+    ? null
+    : integer(item.score_milli, `${path}.score_milli`, 0, 1_000);
+  const profileId = nullableUuid(item.profile_id, `${path}.profile_id`);
+  const versionId = nullableUuid(item.version_id, `${path}.version_id`);
+  if ((profileId === null) !== (versionId === null)) fail(path, "incomplete cast voice identity");
+  nullableUuid(item.voice_action_command_id, `${path}.voice_action_command_id`);
+  for (const key of ["warning_code", "failure_code"] as const) {
+    const code = nullableString(item[key], `${path}.${key}`, 96);
+    if (code !== null && !SAFE_CODE_PATTERN.test(code)) fail(`${path}.${key}`, "unsafe cast code");
+  }
+  if (["scored", "assigned"].includes(state) && (item.brief === null || presetId === null || score === null)) {
+    fail(path, "scored cast item lacks brief, preset, or score");
+  }
+  if (state === "preserved" && versionId === null) fail(path, "preserved cast item lacks voice identity");
+}
+
+function validateCharacterCastPlan(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, [
+    "contract_version", "command_id", "novel_id", "timeline_id", "mode", "state",
+    "server_now", "progress_current", "progress_total", "terminal", "retryable",
+    "current_target_key", "lease_expires_at", "assignments", "preserved", "warnings",
+    "items", "failure_code", "created_at", "updated_at", "completed_at",
+  ], path);
+  literal(item.contract_version, CHARACTER_CAST_PLAN_VERSION, `${path}.contract_version`);
+  uuid(item.command_id, `${path}.command_id`);
+  uuid(item.novel_id, `${path}.novel_id`);
+  uuid(item.timeline_id, `${path}.timeline_id`);
+  literal(item.mode, "fill_and_deduplicate", `${path}.mode`);
+  const state = oneOf(item.state, CHARACTER_CAST_PLAN_STATES, `${path}.state`);
+  timestamp(item.server_now, `${path}.server_now`);
+  const progressCurrent = integer(item.progress_current, `${path}.progress_current`, 0);
+  const progressTotal = integer(item.progress_total, `${path}.progress_total`, 1);
+  if (progressCurrent > progressTotal) fail(path, "cast progress exceeds total");
+  const terminal = boolean(item.terminal, `${path}.terminal`);
+  boolean(item.retryable, `${path}.retryable`);
+  const targetKey = nullableString(item.current_target_key, `${path}.current_target_key`, 64);
+  if (targetKey !== null && !CAST_TARGET_KEY_PATTERN.test(targetKey)) fail(`${path}.current_target_key`, "invalid active target");
+  const lease = nullableTimestamp(item.lease_expires_at, `${path}.lease_expires_at`);
+  if ((targetKey === null) !== (lease === null)) fail(path, "active target/lease mismatch");
+
+  const assignments = array(item.assignments, `${path}.assignments`);
+  assignments.forEach((entry, index) => {
+    const entryPath = `${path}.assignments[${index}]`;
+    const assignment = record(entry, entryPath);
+    exact(assignment, ["target", "preset_id", "score_milli", "voice_action_command_id"], entryPath);
+    validateCharacterCastTarget(assignment.target, `${entryPath}.target`);
+    const preset = string(assignment.preset_id, `${entryPath}.preset_id`, 6, 85);
+    if (!OFFICIAL_PRESET_IDS.includes(preset as OfficialPresetId)) fail(`${entryPath}.preset_id`, "unknown official preset");
+    integer(assignment.score_milli, `${entryPath}.score_milli`, 0, 1_000);
+    nullableUuid(assignment.voice_action_command_id, `${entryPath}.voice_action_command_id`);
+  });
+  const preserved = array(item.preserved, `${path}.preserved`);
+  preserved.forEach((entry, index) => {
+    const entryPath = `${path}.preserved[${index}]`;
+    const projection = record(entry, entryPath);
+    exact(projection, ["target", "profile_id", "version_id", "preset_id", "source_type"], entryPath);
+    validateCharacterCastTarget(projection.target, `${entryPath}.target`);
+    uuid(projection.profile_id, `${entryPath}.profile_id`);
+    uuid(projection.version_id, `${entryPath}.version_id`);
+    if (projection.preset_id !== null) {
+      const preset = string(projection.preset_id, `${entryPath}.preset_id`, 6, 85);
+      if (!OFFICIAL_PRESET_IDS.includes(preset as OfficialPresetId)) fail(`${entryPath}.preset_id`, "unknown official preset");
+    }
+    oneOf(projection.source_type, ["preset", "uploaded", "generated"] as const, `${entryPath}.source_type`);
+  });
+  const warnings = array(item.warnings, `${path}.warnings`);
+  warnings.forEach((entry, index) => {
+    const entryPath = `${path}.warnings[${index}]`;
+    const warning = record(entry, entryPath);
+    exact(warning, ["code", "target_key", "message"], entryPath);
+    const code = string(warning.code, `${entryPath}.code`, 1, 96);
+    if (!SAFE_CODE_PATTERN.test(code)) fail(`${entryPath}.code`, "unsafe warning code");
+    const warningTarget = nullableString(warning.target_key, `${entryPath}.target_key`, 64);
+    if (warningTarget !== null && !CAST_TARGET_KEY_PATTERN.test(warningTarget)) fail(`${entryPath}.target_key`, "invalid warning target");
+    string(warning.message, `${entryPath}.message`, 1, 400);
+  });
+  const items = array(item.items, `${path}.items`);
+  items.forEach((entry, index) => validateCharacterCastPlanItem(entry, `${path}.items[${index}]`));
+  if (items.length !== progressTotal) fail(`${path}.items`, "cast item count differs from progress total");
+  const failure = nullableString(item.failure_code, `${path}.failure_code`, 96);
+  if (failure !== null && !SAFE_CODE_PATTERN.test(failure)) fail(`${path}.failure_code`, "unsafe failure code");
+  timestamp(item.created_at, `${path}.created_at`);
+  timestamp(item.updated_at, `${path}.updated_at`);
+  const completedAt = nullableTimestamp(item.completed_at, `${path}.completed_at`);
+  const terminalStates = new Set(["ready_applied", "ready_applied_with_warnings", "ready_unapplied", "failed", "superseded"]);
+  if (terminal !== terminalStates.has(state) || terminal !== (completedAt !== null)) fail(path, "cast terminal projection mismatch");
+  if ((state === "failed") !== (failure !== null)) fail(path, "cast failure projection mismatch");
+}
+
 const CHARACTER_VOICE_GENERATOR_STATES = [
   "queued", "analyzing_character", "waiting_for_heavy_runtime",
   "generating_voice", "unloading_voice_generator", "validating_with_nano",
@@ -2385,6 +2689,43 @@ export function parseNanoVoiceExperimentListResource(value: unknown): NanoVoiceE
 
 export function parseCharacterVoiceMatchResource(value: unknown): CharacterVoiceMatchResource {
   return validated(value, validateCharacterVoiceMatch, "character_voice_match");
+}
+
+export function parseCharacterCastPlanResource(
+  value: unknown,
+): CharacterCastPlanResource {
+  return validated(value, validateCharacterCastPlan, "character_cast_plan");
+}
+
+export function parseCharacterCastPlanListResource(
+  value: unknown,
+): CharacterCastPlanListResource {
+  const item = record(value, "character_cast_plans");
+  exact(
+    item,
+    ["contract_version", "novel_id", "server_now", "items"],
+    "character_cast_plans",
+  );
+  literal(
+    item.contract_version,
+    CHARACTER_CAST_PLAN_LIST_VERSION,
+    "character_cast_plans.contract_version",
+  );
+  const novelId = uuid(item.novel_id, "character_cast_plans.novel_id");
+  timestamp(item.server_now, "character_cast_plans.server_now");
+  const items = array(item.items, "character_cast_plans.items");
+  const commandIds: string[] = [];
+  items.forEach((entry, index) => {
+    const path = `character_cast_plans.items[${index}]`;
+    validateCharacterCastPlan(entry, path);
+    const command = record(entry, path);
+    if (command.novel_id !== novelId) fail(path, "cast plan novel scope mismatch");
+    commandIds.push(uuid(command.command_id, `${path}.command_id`));
+  });
+  if (new Set(commandIds).size !== commandIds.length) {
+    fail("character_cast_plans.items", "cast plan command IDs must be unique");
+  }
+  return item as unknown as CharacterCastPlanListResource;
 }
 
 export function parseCharacterVoiceGeneratorCommandResource(

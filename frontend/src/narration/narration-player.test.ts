@@ -118,7 +118,7 @@ class FakeQueue implements SegmentPlaybackQueuePort {
       this.emit({
         type: "buffering",
         lease: options.lease,
-        backend: "web-audio",
+        backend: "media-element",
         segmentId: segment.segment_id,
         ordinal: segment.ordinal,
         durationMs,
@@ -126,7 +126,7 @@ class FakeQueue implements SegmentPlaybackQueuePort {
       this.emit({
         type: "segment-start",
         lease: options.lease,
-        backend: "web-audio",
+        backend: "media-element",
         segmentId: segment.segment_id,
         ordinal: segment.ordinal,
         offsetMs: options.startOffsetMs ?? 0,
@@ -135,7 +135,7 @@ class FakeQueue implements SegmentPlaybackQueuePort {
       return {
         kind: "started",
         lease: options.lease,
-        backend: "web-audio",
+        backend: "media-element",
         segmentId: segment.segment_id,
         ordinal: segment.ordinal,
       };
@@ -323,7 +323,7 @@ describe("ProductionNarrationPlayerController boundary state", () => {
       kind: "play",
       segmentId: segmentId(0),
       ordinal: 0,
-      backend: "web-audio",
+      backend: "media-element",
     });
     const activeLease = harness.queue.starts[0].lease;
     expect(harness.controller.readState()).toMatchObject({
@@ -340,7 +340,7 @@ describe("ProductionNarrationPlayerController boundary state", () => {
     harness.queue.emit({
       type: "segment-end",
       lease: activeLease,
-      backend: "web-audio",
+      backend: "media-element",
       segmentId: segmentId(0),
       ordinal: 0,
       offsetMs: 3_000,
@@ -349,7 +349,7 @@ describe("ProductionNarrationPlayerController boundary state", () => {
     harness.queue.emit({
       type: "segment-start",
       lease: activeLease,
-      backend: "web-audio",
+      backend: "media-element",
       segmentId: segmentId(1),
       ordinal: 1,
       offsetMs: 0,
@@ -405,7 +405,7 @@ describe("ProductionNarrationPlayerController boundary state", () => {
     harness.queue.emit({
       type: "blocked",
       lease: activeLease,
-      backend: "web-audio",
+      backend: "media-element",
       failure: {
         code: "PENDING_GAP",
         message: "pending",
@@ -491,7 +491,7 @@ describe("ProductionNarrationPlayerController fencing and prepare-range", () => 
     harness.queue.emit({
       type: "segment-start",
       lease: staleLease,
-      backend: "web-audio",
+      backend: "media-element",
       segmentId: segmentId(3),
       ordinal: 3,
       offsetMs: 0,
@@ -517,7 +517,7 @@ describe("ProductionNarrationPlayerController fencing and prepare-range", () => 
     harness.queue.emit({
       type: "ended",
       lease: activeLease,
-      backend: "web-audio",
+      backend: "media-element",
       lastSegmentId: segmentId(2),
       lastOrdinal: 2,
     });
@@ -537,7 +537,7 @@ describe("ProductionNarrationPlayerController fencing and prepare-range", () => 
     harness.queue.emit({
       type: "segment-start",
       lease: activeLease,
-      backend: "web-audio",
+      backend: "media-element",
       segmentId: segmentId(2),
       ordinal: 2,
       offsetMs: 0,

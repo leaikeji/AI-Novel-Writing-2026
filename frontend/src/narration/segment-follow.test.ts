@@ -179,7 +179,7 @@ describe("segment-level highlight and follow", () => {
       currentSegmentId: "segment-1",
       currentOrdinal: 0,
       durationMs: 2_000,
-      backend: "web-audio",
+      backend: "media-element",
       source: "gutter",
     }, { requestGeneration: 1 });
     harness.setExpectedToPlayer();
@@ -206,7 +206,7 @@ describe("segment-level highlight and follow", () => {
       phase: "playing",
       currentSegmentId: "segment-1",
       currentOrdinal: 0,
-      backend: "web-audio",
+      backend: "media-element",
       source: "command",
     }, { requestGeneration: 1 });
     harness.setExpectedToPlayer();
@@ -249,7 +249,7 @@ describe("segment-level highlight and follow", () => {
       phase: "playing",
       currentSegmentId: "segment-2",
       currentOrdinal: 1,
-      backend: "web-audio",
+      backend: "media-element",
       source: "command",
     }, { requestGeneration: 1 });
     harness.setExpectedToPlayer();
@@ -281,7 +281,7 @@ describe("segment-level highlight and follow", () => {
       phase: "buffering",
       currentSegmentId: "segment-3",
       currentOrdinal: 2,
-      backend: "web-audio",
+      backend: "media-element",
       source: "gutter",
     }, { requestGeneration: 1 });
     harness.setExpectedToPlayer();
@@ -303,7 +303,7 @@ describe("segment-level highlight and follow", () => {
       phase: "playing",
       currentSegmentId: "segment-2",
       currentOrdinal: 1,
-      backend: "web-audio",
+      backend: "media-element",
       source: "command",
     }, { requestGeneration: 1 });
     harness.setExpectedToPlayer();
@@ -326,7 +326,7 @@ describe("segment follow fencing and safety", () => {
       phase: "playing",
       currentSegmentId: "segment-1",
       currentOrdinal: 0,
-      backend: "web-audio",
+      backend: "media-element",
       source: "command",
     }, { manifestRevision: 5, requestGeneration: 1 });
     harness.controller.synchronizeNow();
@@ -375,7 +375,7 @@ describe("segment follow fencing and safety", () => {
       phase: "playing",
       currentSegmentId: "segment-2",
       currentOrdinal: 1,
-      backend: "web-audio",
+      backend: "media-element",
       source: "command",
     }, { requestGeneration: 1 });
     harness.setExpectedToPlayer();

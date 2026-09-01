@@ -380,7 +380,7 @@ export function createVoiceSourceWorkspace(
         sequence,
         controller,
         null,
-        "私人音色档案已加载。官方音色请在上方音色库直接使用。",
+        "私人音色档案已加载。",
       ).catch((reason: unknown) => {
         if (!ownsScope(generation, sequence, controller) || isAbortLike(reason)) return;
         commit((current) => ({
@@ -1057,7 +1057,7 @@ export function createVoiceSourceWorkspace(
         h("div", null,
           h("p", { className: "anw-voice-workspace__eyebrow" }, "我的音色 · 私人来源"),
           h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "管理私人朗读音色"),
-          h("p", null, "上传来源保留独立的权利、试听和质量流程；官方音色请在上方直接使用。"),
+          h("p", null, "这里只管理当前作品的私人音色；官方音色请在上方直接使用。"),
         ),
         h("span", { className: "anw-voice-workspace__scope" }, "当前作品专属"),
       ),
@@ -1098,7 +1098,7 @@ export function createVoiceSourceWorkspace(
       selectedProfile === null
         ? null
         : h("div", { className: "anw-voice-workspace__source" },
-          h("h3", null, "2. 选择音色来源"),
+          h("h3", { id: `${prefix}-source-heading` }, "2. 选择音色来源"),
           scopedState.selectedSource === "uploaded"
             ? h("label", { className: "anw-voice-workspace__field anw-voice-workspace__language" },
               h("span", null, "声音语言"),
@@ -1117,6 +1117,8 @@ export function createVoiceSourceWorkspace(
             )
             : null,
           h(VoiceSourcePanel, {
+            embedded: true,
+            ariaLabelledBy: `${prefix}-source-heading`,
             model: panelModel,
             selectedSource: scopedState.selectedSource,
             workflow: scopedState.workflow,

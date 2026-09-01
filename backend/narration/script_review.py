@@ -23,6 +23,7 @@ from .contracts import (
 )
 from .script_contracts import (
     ApprovalActorType,
+    AttributionOrigin,
     NarrationScriptContract,
     ScriptApproval,
     ScriptApprovalKind,
@@ -284,10 +285,19 @@ def decide_script_review(
             approval=None,
             reason_code="SCRIPT_BLOCKERS_PRESENT",
         )
+    manual_derived_override = any(
+        segment.manual_override
+        and segment.attribution.origin in {
+            AttributionOrigin.MANUAL_OVERRIDE,
+            AttributionOrigin.INHERITED_OVERRIDE,
+        }
+        for segment in script.segments
+    )
     if (
         context.force_review
         or script.effective_policy is ScriptReviewPolicy.ALWAYS_REVIEW
         or context.verified_manual_review_parent
+        or manual_derived_override
     ):
         return ScriptReviewDecision(
             disposition=ReviewDisposition.REVIEW_REQUIRED,
@@ -296,7 +306,9 @@ def decide_script_review(
             blocker_count=0,
             approval=None,
             reason_code=(
-                "CORRECTED_VERSION_REQUIRES_OWNER_REVIEW"
+                "MANUAL_OVERRIDE_REQUIRES_OWNER_REVIEW"
+                if manual_derived_override
+                else "CORRECTED_VERSION_REQUIRES_OWNER_REVIEW"
                 if context.verified_manual_review_parent
                 else "ALWAYS_REVIEW_POLICY"
             ),
@@ -366,9 +378,17 @@ def manual_freeze_script(
     if not (
         script.effective_policy is ScriptReviewPolicy.ALWAYS_REVIEW
         or context.verified_manual_review_parent
+        or any(
+            segment.manual_override
+            and segment.attribution.origin in {
+                AttributionOrigin.MANUAL_OVERRIDE,
+                AttributionOrigin.INHERITED_OVERRIDE,
+            }
+            for segment in script.segments
+        )
     ):
         raise ReviewStateError(
-            "manual freeze requires always_review or a verified corrected parent"
+            "manual freeze requires an explicit review policy or manual-derived override"
         )
     if script.state is not ScriptVersionState.REVIEW_REQUIRED:
         raise ReviewStateError("manual freeze requires review_required state")

@@ -1646,6 +1646,12 @@ def _typed_contract_payload_from_rows(
                 segment_id=row.id,
                 scene_id=row.scene_id,
                 local_hash=row.local_hash,
+                inheritance_anchor_before_hash=evidence[
+                    "inheritance_anchor_before_hash"
+                ],
+                inheritance_anchor_after_hash=evidence[
+                    "inheritance_anchor_after_hash"
+                ],
                 speaker=speaker,
                 casting=casting,
                 attribution=attribution,
@@ -1740,6 +1746,7 @@ def _typed_contract_payload_from_rows(
         settings_fingerprint=version.settings_fingerprint,
         requested_model_fingerprint=version.requested_model_fingerprint,
         actual_model_fingerprint=version.actual_model_fingerprint,
+        immutable_hash=version.immutable_hash,
         blocker_count=sum(row.severity == "blocker" for row in issue_rows),
         approval=approval,
         anonymous_speakers=typed_anonymous,

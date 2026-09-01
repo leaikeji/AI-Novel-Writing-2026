@@ -9,14 +9,19 @@ import {
   NARRATION_VOICE_SCHEMA_VERSION,
   OFFICIAL_PRESET_EVIDENCE,
   OFFICIAL_PRESET_MANIFEST_IDENTITY,
+  type CharacterVoiceBindingResource,
+  type CharacterVoiceMatchResource,
   type FeatureCapability,
   type NarrationOverviewResponse,
+  type OfficialPresetId,
+  type OfficialVoiceSelectionResponse,
   type VoiceProfileResource,
 } from "./contracts";
 import {
   createCharacterVoiceCardPanel,
   createNarrationReadingPage,
 } from "./index";
+import type { OfficialVoiceSelectionPanelApi } from "./official-voice-selection-panel";
 import type { ReadingPageApi } from "./reading-page";
 import { narratorOptionsFromVoiceProfiles } from "./reading-page";
 import {
@@ -48,17 +53,37 @@ function findAll(root: unknown, predicate: (element: FakeElement) => boolean): F
 }
 
 
+function textContent(root: unknown): string {
+  if (typeof root === "string" || typeof root === "number") return String(root);
+  if (Array.isArray(root)) return root.map(textContent).join("");
+  if (!isElement(root)) return "";
+  return root.children.map(textContent).join("");
+}
+
+
 function componentName(element: FakeElement): string {
   return typeof element.type === "function" ? element.type.name : "";
 }
 
 
-function createReactHarness() {
+function createReactHarness(options: { readonly dependencyAware?: boolean } = {}) {
   const states: Array<{ value: unknown }> = [];
   const refs: Array<{ current: unknown }> = [];
+  const effectSlots: Array<{
+    dependencies: readonly unknown[];
+    effect: () => void | (() => void);
+    cleanup?: () => void;
+    pending: boolean;
+  }> = [];
   let stateIndex = 0;
   let refIndex = 0;
+  let effectIndex = 0;
   let effects: Array<() => void | (() => void)> = [];
+  const dependenciesChanged = (
+    previous: readonly unknown[],
+    next: readonly unknown[],
+  ): boolean => previous.length !== next.length
+    || previous.some((value, index) => !Object.is(value, next[index]));
   const React = {
     createElement(type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]): FakeElement {
       return { type, props: props ?? {}, children };
@@ -78,7 +103,23 @@ function createReactHarness() {
         },
       ];
     },
-    useEffect(effect: () => void | (() => void), _dependencies: readonly unknown[]): void {
+    useEffect(
+      effect: () => void | (() => void),
+      dependencies: readonly unknown[],
+    ): void {
+      if (options.dependencyAware === true) {
+        const index = effectIndex++;
+        const current = effectSlots[index];
+        if (current === undefined) {
+          effectSlots[index] = { dependencies, effect, pending: true };
+          return;
+        }
+        if (!dependenciesChanged(current.dependencies, dependencies)) return;
+        current.dependencies = dependencies;
+        current.effect = effect;
+        current.pending = true;
+        return;
+      }
       effects.push(effect);
     },
     useRef<T>(initial: T): { current: T } {
@@ -92,10 +133,23 @@ function createReactHarness() {
     render<Props>(Component: (props: Props) => unknown, props: Props): FakeElement {
       stateIndex = 0;
       refIndex = 0;
+      effectIndex = 0;
       effects = [];
       return Component(props) as FakeElement;
     },
     flushEffects(): Array<() => void> {
+      if (options.dependencyAware === true) {
+        const cleanups: Array<() => void> = [];
+        for (const slot of effectSlots) {
+          if (!slot.pending) continue;
+          slot.cleanup?.();
+          slot.pending = false;
+          const cleanup = slot.effect();
+          slot.cleanup = cleanup ?? undefined;
+          if (cleanup) cleanups.push(cleanup);
+        }
+        return cleanups;
+      }
       const cleanups: Array<() => void> = [];
       const pending = effects;
       effects = [];
@@ -104,6 +158,15 @@ function createReactHarness() {
         if (cleanup) cleanups.push(cleanup);
       }
       return cleanups;
+    },
+    resetHooks(): void {
+      states.length = 0;
+      refs.length = 0;
+      stateIndex = 0;
+      refIndex = 0;
+      effectIndex = 0;
+      effects = [];
+      effectSlots.length = 0;
     },
   };
 }
@@ -249,6 +312,29 @@ function overviewFixture(): NarrationOverviewResponse {
 }
 
 
+function overviewWithVoiceActions(): NarrationOverviewResponse {
+  const base = overviewFixture();
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      items: base.capabilities.items.map((item) => (
+        item.key === "character_voice_matching" || item.key === "voice_generator"
+          ? {
+            ...item,
+            state: "enabled" as const,
+            visible: true,
+            actionable: true,
+            reason_code: null,
+            required_gate: null,
+          }
+          : item
+      )),
+    },
+  };
+}
+
+
 function readingApi(overview: NarrationOverviewResponse): ReadingPageApi {
   return {
     getOverview: vi.fn(async () => overview),
@@ -334,6 +420,91 @@ function voiceProfile(
     updated_at: CREATED_AT,
     archived_at: null,
     ...changes,
+  };
+}
+
+
+function characterBinding(
+  changes: Partial<CharacterVoiceBindingResource> = {},
+): CharacterVoiceBindingResource {
+  return {
+    contract_version: NARRATION_SETTINGS_API_VERSION,
+    binding_id: "123e4567-e89b-42d3-a456-426614174006",
+    novel_id: NOVEL_ID,
+    character_id: CHARACTER_ID,
+    binding_policy: "dedicated",
+    profile_id: VOICE_PROFILE_ID,
+    version_id: VOICE_VERSION_ID,
+    language: "zh-CN",
+    version: 3,
+    impact: {
+      affected_chapter_count: 0,
+      affected_segment_count: 0,
+      historical_edition_count: 0,
+      regeneration_required: false,
+    },
+    updated_at: CREATED_AT,
+    ...changes,
+  };
+}
+
+
+function characterVoiceMatch(
+  characterId = CHARACTER_ID,
+  changes: Partial<CharacterVoiceMatchResource> = {},
+): CharacterVoiceMatchResource {
+  return {
+    contract_version: "character-voice-match/1",
+    character_id: characterId,
+    brief: {
+      schema_version: "character-voice-brief/1",
+      language: "zh-CN",
+      presentation: "feminine",
+      pitch: 0,
+      pace: 0,
+      energy: 0,
+      texture: "warm",
+      evidence_fields: ["name"],
+    },
+    selected_preset_id: "onnx.Xiaoyu",
+    score_milli: 900,
+    state: "ready_unapplied",
+    selection_still_current: false,
+    current_character_binding: characterBinding({ character_id: characterId }),
+    model_evidence: {},
+    ...changes,
+  };
+}
+
+
+function officialVoiceSelectionResponse(
+  presetId: OfficialPresetId,
+  characterId = CHARACTER_ID,
+): OfficialVoiceSelectionResponse {
+  const profile = voiceProfile();
+  return {
+    contract_version: "official-voice-selection/1.0",
+    replayed: false,
+    selection_still_current: true,
+    frozen_result: {
+      command_id: "123e4567-e89b-42d3-a456-426614174011",
+      preset_id: presetId,
+      target_kind: "character",
+      character_id: characterId,
+      profile_id: profile.profile_id,
+      version_id: profile.current_version_id!,
+      settings_version: 2,
+      binding_version: 4,
+      target_language: "zh-CN",
+      language_mismatch: false,
+      completed_at: CREATED_AT,
+    },
+    profile,
+    current_settings: null,
+    current_character_binding: characterBinding({
+      character_id: characterId,
+      version: 4,
+    }),
   };
 }
 
@@ -464,12 +635,13 @@ describe("T2-GATE narration composition", () => {
       sectionHost.type as (props: typeof sectionHost.props) => unknown,
       sectionHost.props,
     );
-    const characterPanel = findAll(
+    const characterRoster = findAll(
       characterTree,
-      (element) => componentName(element) === "CharacterVoicePanel",
+      (element) => componentName(element) === "CharacterVoiceRoster",
     )[0];
-    expect(characterPanel.props.capabilities).toBe(overview.capabilities);
-    expect(characterPanel.props.authorization).toBe(overview.authorization);
+    expect(characterRoster.props.capabilities).toBe(overview.capabilities);
+    expect(characterRoster.props.authorization).toBe(overview.authorization);
+    expect(characterRoster.props.renderConfigurator).toEqual(expect.any(Function));
     const characterWorkspace = findAll(
       characterTree,
       (element) => componentName(element) === "VoiceSourceWorkspace",
@@ -479,11 +651,47 @@ describe("T2-GATE narration composition", () => {
       characterTree,
       (element) => componentName(element) === "OfficialVoiceSelectionPanel",
     )[0];
-    expect(characterOfficial.props.target).toEqual({
-      kind: "character",
-      characterId: CHARACTER_ID,
-      characterName: "林岚",
+    expect(characterOfficial).toBeUndefined();
+
+    const renderSectionContent = pageHost.props.renderSectionContent as (
+      section: "voice-library",
+      context: { overview: typeof overview; onRefresh: () => void; onNavigate: () => void },
+    ) => FakeElement;
+    const voiceLibraryHost = renderSectionContent("voice-library", {
+      overview,
+      onRefresh: vi.fn(),
+      onNavigate: vi.fn(),
     });
+    harness.resetHooks();
+    let voiceLibraryTree = harness.render(
+      voiceLibraryHost.type as (props: typeof voiceLibraryHost.props) => unknown,
+      voiceLibraryHost.props,
+    );
+    let sharedOfficial = findAll(
+      voiceLibraryTree,
+      (element) => componentName(element) === "OfficialVoiceSelectionPanel",
+    )[0];
+    expect(sharedOfficial).toBeUndefined();
+    expect(findAll(voiceLibraryTree, (element) => element.type === "select")).toHaveLength(0);
+    expect(textContent(voiceLibraryTree)).toContain("作品旁白");
+    expect(textContent(voiceLibraryTree)).not.toContain("使用目标");
+    const changeNarrator = findAll(
+      voiceLibraryTree,
+      (element) => element.type === "button" && textContent(element) === "更换旁白音色",
+    )[0];
+    expect(changeNarrator.props["aria-expanded"]).toBe(false);
+    (changeNarrator.props.onClick as (() => void))();
+    voiceLibraryTree = harness.render(
+      voiceLibraryHost.type as (props: typeof voiceLibraryHost.props) => unknown,
+      voiceLibraryHost.props,
+    );
+    sharedOfficial = findAll(
+      voiceLibraryTree,
+      (element) => componentName(element) === "OfficialVoiceSelectionPanel",
+    )[0];
+    expect(sharedOfficial.props.target).toEqual({ kind: "narrator" });
+    expect(sharedOfficial.props.projection).toEqual({ phase: "loading" });
+    expect(textContent(voiceLibraryTree)).toContain("收起音色列表");
 
     const pronunciationHarness = createReactHarness();
     const PronunciationPage = createNarrationReadingPage(pronunciationHarness.React, { readingApi: readingApi(overview) });
@@ -523,27 +731,89 @@ describe("T2-GATE narration composition", () => {
   });
 
   it("loads the character-card sound tab with scope-drift protection", async () => {
-    const overview = overviewFixture();
+    const overview = overviewWithVoiceActions();
     const harness = createReactHarness();
     const loadOverview = vi.fn(async () => overview);
-    const Card = createCharacterVoiceCardPanel(harness.React, loadOverview);
+    const binding = characterBinding();
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: vi.fn(async () => binding),
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [voiceProfile()],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      loadOverview,
+      undefined,
+      officialVoiceApi,
+    );
     const props = { novelId: NOVEL_ID, characterId: CHARACTER_ID, characterName: "林岚" };
     let tree = harness.render(Card, props);
     expect(tree.props.role).toBe("status");
     harness.flushEffects();
     await settle();
     tree = harness.render(Card, props);
-    const panel = findAll(tree, (element) => componentName(element) === "CharacterVoicePanel")[0];
-    const workspace = findAll(tree, (element) => componentName(element) === "VoiceSourceWorkspace")[0];
-    const official = findAll(
-      tree,
-      (element) => componentName(element) === "OfficialVoiceSelectionPanel",
+    harness.flushEffects();
+    await settle();
+    tree = harness.render(Card, props);
+    expect(componentName(tree)).toBe("CharacterVoiceConfigurator");
+    const official = tree.props.officialVoiceContent as FakeElement;
+    const advancedHost = tree.props.advancedContent as FakeElement;
+    const generator = tree.props.generatorContent as FakeElement;
+    expect(findAll(tree, (element) => componentName(element) === "CharacterVoicePanel"))
+      .toHaveLength(0);
+    expect(findAll(tree, (element) => componentName(element) === "VoiceSourceWorkspace"))
+      .toHaveLength(0);
+    expect(advancedHost.props.key).toBe(`character-voice-advanced:${NOVEL_ID}:${CHARACTER_ID}`);
+    expect(official.props.settings).toBe(overview.settings);
+    expect(official.props.headerAction).toBeUndefined();
+    expect(official.props.presentation).toBe("embedded");
+    expect(componentName(generator)).toBe("CharacterVoiceGenerator");
+    expect(generator.props.presentation).toBe("embedded");
+    expect(officialVoiceApi.getCharacterVoiceBinding).toHaveBeenCalledWith(
+      NOVEL_ID,
+      CHARACTER_ID,
+      expect.any(AbortSignal),
+    );
+    expect(officialVoiceApi.listVoiceProfiles).toHaveBeenCalledWith(expect.objectContaining({
+      novelId: NOVEL_ID,
+      includeLibrary: true,
+    }));
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "resolved",
+      name: "温暖青年女声",
+      sourceLabel: "官方音色",
+      languageLabel: "中文",
+    });
+    expect(loadOverview).toHaveBeenCalledWith(NOVEL_ID, expect.any(AbortSignal));
+
+    harness.resetHooks();
+    const advancedTree = harness.render(
+      advancedHost.type as (props: typeof advancedHost.props) => unknown,
+      advancedHost.props,
+    );
+    expect(advancedTree.props).toMatchObject({
+      className: "anw-character-voice-advanced-stack",
+      "data-character-voice-scope": `${NOVEL_ID}:${CHARACTER_ID}`,
+    });
+    const panel = findAll(
+      advancedTree,
+      (element) => componentName(element) === "CharacterVoicePanel",
+    )[0];
+    const workspace = findAll(
+      advancedTree,
+      (element) => componentName(element) === "VoiceSourceWorkspace",
     )[0];
     expect(panel.props.capabilities).toBe(overview.capabilities);
+    expect(panel.props.presentation).toBe("embedded");
+    expect(panel.props.allowedSourceTypes).toEqual(["uploaded", "generated"]);
     expect(workspace.props.novelId).toBe(NOVEL_ID);
     expect(workspace.props.voiceSources).toBe(overview.voice_sources);
-    expect(official.props.settings).toBe(overview.settings);
-    expect(loadOverview).toHaveBeenCalledWith(NOVEL_ID, expect.any(AbortSignal));
 
     const driftHarness = createReactHarness();
     const DriftCard = createCharacterVoiceCardPanel(
@@ -555,6 +825,421 @@ describe("T2-GATE narration composition", () => {
     await settle();
     const drift = driftHarness.render(DriftCard, props);
     expect(drift.props.role).toBe("alert");
+  });
+
+  it("uses the workspace binding only for the initial projection, then refreshes after a write", async () => {
+    const overview = overviewWithVoiceActions();
+    const harness = createReactHarness({ dependencyAware: true });
+    const getBinding = vi.fn(async () => characterBinding({ version: 4 }));
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: getBinding,
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [voiceProfile()],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overview),
+      undefined,
+      officialVoiceApi,
+    );
+    const props = {
+      novelId: NOVEL_ID,
+      characterId: CHARACTER_ID,
+      characterName: "林岚",
+      initialBinding: {
+        binding_id: characterBinding().binding_id!,
+        binding_policy: "dedicated",
+        profile_id: VOICE_PROFILE_ID,
+        voice_version_id: VOICE_VERSION_ID,
+        language: "zh-CN",
+        version: 3,
+      },
+    };
+
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    let tree = harness.render(Card, props);
+    expect(getBinding).not.toHaveBeenCalled();
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "resolved",
+      name: "温暖青年女声",
+    });
+
+    const official = tree.props.officialVoiceContent as FakeElement;
+    (official.props.onChanged as () => void)();
+    tree = harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    tree = harness.render(Card, props);
+    expect(getBinding).toHaveBeenCalledTimes(1);
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "resolved",
+      name: "温暖青年女声",
+    });
+  });
+
+  it("projects a missing workspace binding as version-zero unset without another read", async () => {
+    const harness = createReactHarness({ dependencyAware: true });
+    const getBinding = vi.fn(async () => characterBinding());
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: getBinding,
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [voiceProfile()],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overviewWithVoiceActions()),
+      undefined,
+      officialVoiceApi,
+    );
+    const props = {
+      novelId: NOVEL_ID,
+      characterId: CHARACTER_ID,
+      characterName: "林岚",
+      initialBinding: null,
+    };
+
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    const tree = harness.render(Card, props);
+    const official = tree.props.officialVoiceContent as FakeElement;
+
+    expect(getBinding).not.toHaveBeenCalled();
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "unbound",
+      message: "尚未单独绑定，将按当前朗读规则选择声音。",
+    });
+    expect(official.props.projection).toMatchObject({
+      phase: "ready",
+      binding: {
+        binding_id: null,
+        novel_id: NOVEL_ID,
+        character_id: CHARACTER_ID,
+        binding_policy: "unset",
+        version: 0,
+      },
+    });
+  });
+
+  it("fails closed instead of hanging when the binding response has another character scope", async () => {
+    const nextCharacterId = "123e4567-e89b-42d3-a456-426614174007";
+    const harness = createReactHarness({ dependencyAware: true });
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: vi.fn(async () => characterBinding({
+        character_id: nextCharacterId,
+      })),
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [voiceProfile()],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overviewWithVoiceActions()),
+      undefined,
+      officialVoiceApi,
+    );
+    const props = { novelId: NOVEL_ID, characterId: CHARACTER_ID, characterName: "林岚" };
+
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    const tree = harness.render(Card, props);
+
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "error",
+      message: expect.stringContaining("直接选择已暂停"),
+    });
+    const official = tree.props.officialVoiceContent as FakeElement;
+    expect(official.props.projection).toEqual({
+      phase: "error",
+      message: "无法读取当前人物的声音绑定，请刷新后重试。",
+    });
+  });
+
+  it("exposes one scoped official-match adapter to the shared configurator", async () => {
+    const matchApi = vi.fn(async () => characterVoiceMatch());
+    const harness = createReactHarness({ dependencyAware: true });
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: vi.fn(async (_novelId: string, characterId: string) => (
+        characterBinding({ character_id: characterId })
+      )),
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [voiceProfile()],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overviewWithVoiceActions()),
+      undefined,
+      officialVoiceApi,
+      { matchCharacterOfficialVoice: matchApi as typeof import("./api").matchCharacterOfficialVoice },
+    );
+    const props = { novelId: NOVEL_ID, characterId: CHARACTER_ID, characterName: "林岚" };
+
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    const tree = harness.render(Card, props);
+    const controller = new AbortController();
+    const result = await (tree.props.onMatchOfficialVoice as (
+      signal: AbortSignal,
+    ) => Promise<{ voiceName: string; presetId: string; selectionStillCurrent: boolean }>)(
+      controller.signal,
+    );
+    expect(matchApi).toHaveBeenCalledWith(
+      NOVEL_ID,
+      CHARACTER_ID,
+      expect.any(Object),
+      expect.any(String),
+      expect.any(AbortSignal),
+    );
+    expect(result).toEqual({
+      voiceName: "Xiaoyu",
+      presetId: "onnx.Xiaoyu",
+      selectionStillCurrent: false,
+    });
+  });
+
+  it("rejects a matched-voice response whose preset identity changed", async () => {
+    const harness = createReactHarness({ dependencyAware: true });
+    const selectOfficial = vi.fn(async () => officialVoiceSelectionResponse("onnx.Junhao"));
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: vi.fn(async () => characterBinding()),
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [voiceProfile()],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: selectOfficial,
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overviewWithVoiceActions()),
+      undefined,
+      officialVoiceApi,
+      { matchCharacterOfficialVoice: vi.fn(async () => characterVoiceMatch()) },
+    );
+    const props = { novelId: NOVEL_ID, characterId: CHARACTER_ID, characterName: "林岚" };
+
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    const tree = harness.render(Card, props);
+    const useMatched = tree.props.onUseMatchedOfficialVoice as (
+      presetId: string,
+      signal: AbortSignal,
+    ) => Promise<unknown>;
+
+    await expect(useMatched("onnx.Xiaoyu", new AbortController().signal))
+      .rejects.toThrow("声音身份与当前人物不一致");
+    expect(selectOfficial).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps VoiceGenerator available when only voice-profile projection fails", async () => {
+    const overview = overviewWithVoiceActions();
+    const harness = createReactHarness();
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: vi.fn(async () => characterBinding()),
+      listVoiceProfiles: vi.fn(async () => {
+        throw new Error("profile projection unavailable");
+      }),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overview),
+      undefined,
+      officialVoiceApi,
+    );
+    const props = { novelId: NOVEL_ID, characterId: CHARACTER_ID, characterName: "林岚" };
+
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    const tree = harness.render(Card, props);
+
+    expect(componentName(tree.props.generatorContent as FakeElement))
+      .toBe("CharacterVoiceGenerator");
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "unresolved",
+      message: "已保存人物声音绑定，但音色详情暂时不可用。",
+    });
+    const official = tree.props.officialVoiceContent as FakeElement;
+    expect(official.props.projection).toEqual({
+      phase: "ready",
+      binding: characterBinding(),
+      profiles: [],
+    });
+  });
+
+  it("does not describe a dedicated unresolved binding as following rules", async () => {
+    const harness = createReactHarness();
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: vi.fn(async () => characterBinding()),
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overviewWithVoiceActions()),
+      undefined,
+      officialVoiceApi,
+    );
+    const props = { novelId: NOVEL_ID, characterId: CHARACTER_ID, characterName: "林岚" };
+
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, props);
+    harness.flushEffects();
+    await settle();
+    const tree = harness.render(Card, props);
+
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "unresolved",
+      message: "已保存人物声音绑定，但音色详情暂时不可用。",
+    });
+  });
+
+  it("ignores a late rejected projection after switching characters", async () => {
+    const nextCharacterId = "123e4567-e89b-42d3-a456-426614174007";
+    const nextProfileId = "123e4567-e89b-42d3-a456-426614174008";
+    const nextVersionId = "123e4567-e89b-42d3-a456-426614174009";
+    const baseNextProfile = voiceProfile();
+    const nextProfile: VoiceProfileResource = {
+      ...baseNextProfile,
+      profile_id: nextProfileId,
+      name: "冷静青年男声",
+      current_version_id: nextVersionId,
+      versions: baseNextProfile.versions.map((version) => ({
+        ...version,
+        profile_id: nextProfileId,
+        version_id: nextVersionId,
+      })),
+    };
+    const nextBinding = characterBinding({
+      binding_id: "123e4567-e89b-42d3-a456-426614174010",
+      character_id: nextCharacterId,
+      profile_id: nextProfileId,
+      version_id: nextVersionId,
+      version: 4,
+    });
+    let rejectOldBinding: (reason: unknown) => void = () => undefined;
+    const oldBinding = new Promise<CharacterVoiceBindingResource>((_resolve, reject) => {
+      rejectOldBinding = reject;
+    });
+    const officialVoiceApi = {
+      getCharacterVoiceBinding: vi.fn((_novelId: string, characterId: string) => (
+        characterId === CHARACTER_ID ? oldBinding : Promise.resolve(nextBinding)
+      )),
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [voiceProfile(), nextProfile],
+      })),
+      listOfficialVoicePresets: vi.fn(),
+      selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+    } as unknown as OfficialVoiceSelectionPanelApi;
+    const harness = createReactHarness({ dependencyAware: true });
+    const Card = createCharacterVoiceCardPanel(
+      harness.React,
+      vi.fn(async () => overviewWithVoiceActions()),
+      undefined,
+      officialVoiceApi,
+    );
+    const oldProps = {
+      novelId: NOVEL_ID,
+      characterId: CHARACTER_ID,
+      characterName: "林岚",
+    };
+    const nextProps = {
+      novelId: NOVEL_ID,
+      characterId: nextCharacterId,
+      characterName: "沈川",
+    };
+
+    harness.render(Card, oldProps);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, oldProps);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, nextProps);
+    harness.flushEffects();
+    await settle();
+    harness.render(Card, nextProps);
+    harness.flushEffects();
+    await settle();
+    let tree = harness.render(Card, nextProps);
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "resolved",
+      name: "冷静青年男声",
+    });
+
+    rejectOldBinding(new Error("old scope failed late"));
+    await settle();
+    tree = harness.render(Card, nextProps);
+    expect(tree.props.currentVoice).toMatchObject({
+      phase: "resolved",
+      name: "冷静青年男声",
+    });
   });
 
   it("combines all six local style fragments and injects only once", () => {
@@ -569,6 +1254,9 @@ describe("T2-GATE narration composition", () => {
     ]) {
       expect(NARRATION_STYLES).toContain(selector);
     }
+    expect(NARRATION_STYLES).toContain(".anw-character-voice-configurator__disclosure-body");
+    expect(NARRATION_STYLES).toContain(".anw-character-voice-configurator__disclosure:not([open])");
+    expect(NARRATION_STYLES).not.toContain(".anw-character-card-voice-match");
 
     const nodes = new Map<string, { id: string; dataset: Record<string, string>; textContent: string }>();
     const appended: unknown[] = [];

@@ -10,8 +10,7 @@ import {
 } from "./playback-contracts";
 import {
   SegmentPlaybackQueue,
-  createDualAudioPlaybackDriver,
-  createWebAudioPlaybackDriver,
+  createMediaElementPlaybackDriver,
   playbackLeasesEqual,
   type PlaybackLease,
   type PreparedPlaybackSegment,
@@ -125,9 +124,10 @@ class FakeDriver implements SegmentPlaybackDriver {
   disposeCount = 0;
 
   constructor(
-    readonly kind: "web-audio" | "dual-audio",
     private readonly holdPlayback = false,
   ) {}
+
+  readonly kind = "media-element" as const;
 
   async prepare(
     segment: ManifestSegmentV2,
@@ -172,12 +172,14 @@ class FakeDriver implements SegmentPlaybackDriver {
 class FakeAudioElement extends EventTarget {
   preload = "";
   src = "";
+  preservesPitch = false;
   playbackRate = 1;
   volume = 1;
   readyState = 0;
   duration = Number.NaN;
   seekWrites: number[] = [];
   playCount = 0;
+  autoEnd = true;
   private position = 0;
 
   get currentTime(): number { return this.position; }
@@ -193,63 +195,8 @@ class FakeAudioElement extends EventTarget {
   }
   async play(): Promise<void> {
     this.playCount += 1;
-    queueMicrotask(() => this.dispatchEvent(new Event("ended")));
+    if (this.autoEnd) queueMicrotask(() => this.dispatchEvent(new Event("ended")));
   }
-}
-
-
-function installFakeWebAudioContext(options: { readonly decodeFails?: boolean } = {}) {
-  const destination = Object.freeze({ kind: "destination" });
-  const gainParameter = {
-    value: 1,
-    setValueAtTime: vi.fn((value: number) => {
-      gainParameter.value = value;
-    }),
-  };
-  const gainNode = {
-    gain: gainParameter,
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-  };
-  const sources: Array<{
-    buffer: unknown;
-    playbackRate: { value: number; setValueAtTime: ReturnType<typeof vi.fn> };
-    connect: ReturnType<typeof vi.fn>;
-    start: ReturnType<typeof vi.fn>;
-    stop: ReturnType<typeof vi.fn>;
-    onended: (() => void) | null;
-  }> = [];
-  const context = {
-    currentTime: 0,
-    destination,
-    createGain: vi.fn(() => gainNode),
-    createBufferSource: vi.fn(() => {
-      const source = {
-        buffer: null as unknown,
-        playbackRate: { value: 1, setValueAtTime: vi.fn() },
-        connect: vi.fn(),
-        start: vi.fn(),
-        stop: vi.fn(),
-        onended: null as (() => void) | null,
-      };
-      source.start.mockImplementation(() => {
-        queueMicrotask(() => source.onended?.());
-      });
-      sources.push(source);
-      return source;
-    }),
-    decodeAudioData: vi.fn(async () => {
-      if (options.decodeFails) throw new Error("decode failed");
-      return { duration: 3 };
-    }),
-    resume: vi.fn(async () => undefined),
-    suspend: vi.fn(async () => undefined),
-    close: vi.fn(async () => undefined),
-  };
-  vi.stubGlobal("AudioContext", function FakeAudioContext() {
-    return context;
-  });
-  return { context, destination, gainNode, gainParameter, sources };
 }
 
 
@@ -263,14 +210,19 @@ function responseFor(segment: ManifestSegmentV2): Response {
 
 
 describe("SegmentPlaybackQueue backend and prefetch contract", () => {
-  it("uses one Web Audio GainNode and never connects a source directly to destination", async () => {
-    const audio = installFakeWebAudioContext();
+  it("uses two media elements and keeps pitch preservation enabled through load, play and rate changes", async () => {
+    const elements = [new FakeAudioElement(), new FakeAudioElement()];
+    let index = 0;
+    vi.stubGlobal("document", { createElement: () => elements[index++] });
+    const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:pitch-preserved-audio");
+    const revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     try {
-      const driver = createWebAudioPlaybackDriver();
-      if (!driver) throw new Error("Web Audio driver was not created");
+      const driver = createMediaElementPlaybackDriver();
+      if (!driver) throw new Error("media element driver was not created");
       const currentManifest = createManifest(["ready"]);
       const controller = new AbortController();
 
+      expect(elements.map((element) => element.preservesPitch)).toEqual([true, true]);
       driver.setVolume(0.35);
       const prepared = await driver.prepare(
         currentManifest.segments[0],
@@ -278,20 +230,51 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
         0,
         controller.signal,
       );
-      await driver.play(prepared, 1, 0, controller.signal);
+      elements[0].duration = 3;
+      elements[0].readyState = 1;
+      elements[0].preservesPitch = false;
+      for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3]) {
+        driver.setRate(rate);
+        expect(elements.map((element) => element.playbackRate)).toEqual([rate, rate]);
+        expect(elements.map((element) => element.preservesPitch)).toEqual([true, true]);
+      }
+      driver.setRate(1.75);
+      await driver.play(prepared, 1.75, 0, controller.signal);
 
-      expect(audio.context.createGain).toHaveBeenCalledOnce();
-      expect(audio.gainNode.connect).toHaveBeenCalledOnce();
-      expect(audio.gainNode.connect).toHaveBeenCalledWith(audio.destination);
-      expect(audio.gainParameter.setValueAtTime).toHaveBeenCalledWith(0.35, 0);
-      expect(audio.sources).toHaveLength(1);
-      expect(audio.sources[0].connect).toHaveBeenCalledOnce();
-      expect(audio.sources[0].connect).toHaveBeenCalledWith(audio.gainNode);
-      expect(audio.sources[0].connect).not.toHaveBeenCalledWith(audio.destination);
+      expect(elements.map((element) => element.preservesPitch)).toEqual([true, true]);
+      expect(elements.map((element) => element.playbackRate)).toEqual([1.75, 1.75]);
+      expect(elements.map((element) => element.volume)).toEqual([0.35, 0.35]);
       expect(() => driver.setVolume(1.01)).toThrow(/between 0 and 1/);
 
       driver.dispose();
-      expect(audio.gainNode.disconnect).toHaveBeenCalledOnce();
+    } finally {
+      createUrl.mockRestore();
+      revokeUrl.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("fails closed when the browser lacks the standard preservesPitch property", () => {
+    class UnsupportedAudioElement extends EventTarget {
+      pause(): void {}
+    }
+    vi.stubGlobal("document", { createElement: () => new UnsupportedAudioElement() });
+    try {
+      expect(createMediaElementPlaybackDriver()).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("fails closed when preservesPitch exists but cannot remain enabled", () => {
+    class StuckPitchAudioElement extends EventTarget {
+      get preservesPitch(): boolean { return false; }
+      set preservesPitch(_value: boolean) {}
+      pause(): void {}
+    }
+    vi.stubGlobal("document", { createElement: () => new StuckPitchAudioElement() });
+    try {
+      expect(createMediaElementPlaybackDriver()).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -315,9 +298,9 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
       },
     }));
     vi.stubGlobal("window", { QwenPaw: { host: { fetch: hostFetch } } });
-    const driver = new FakeDriver("web-audio", true);
+    const driver = new FakeDriver(true);
     const queue = new SegmentPlaybackQueue({
-      createWebAudioDriver: () => driver,
+      createMediaElementDriver: () => driver,
     });
 
     try {
@@ -327,7 +310,7 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
         startOrdinal: 0,
         rate: 1,
         volume: 1,
-      })).resolves.toMatchObject({ kind: "started", backend: "web-audio" });
+      })).resolves.toMatchObject({ kind: "started", backend: "media-element" });
 
       expect(hostFetch).toHaveBeenCalledOnce();
       const [path, init] = hostFetch.mock.calls[0];
@@ -343,7 +326,7 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
     }
   });
 
-  it("waits for dual-audio metadata before validating and applying a restore seek", async () => {
+  it("waits for media-element metadata before validating and applying a restore seek", async () => {
     const elements = [new FakeAudioElement(), new FakeAudioElement()];
     let index = 0;
     vi.stubGlobal("document", {
@@ -352,8 +335,8 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
     const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test-audio");
     const revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     try {
-      const driver = createDualAudioPlaybackDriver();
-      if (!driver) throw new Error("dual audio driver was not created");
+      const driver = createMediaElementPlaybackDriver();
+      if (!driver) throw new Error("media element driver was not created");
       driver.setVolume(0.4);
       expect(elements.map((element) => element.volume)).toEqual([0.4, 0.4]);
       const currentManifest = createManifest(["ready"]);
@@ -403,7 +386,7 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
     }
   });
 
-  it("keeps a dual-audio start paused while metadata is still loading", async () => {
+  it("keeps a media-element start paused while metadata is still loading", async () => {
     const elements = [new FakeAudioElement(), new FakeAudioElement()];
     let index = 0;
     vi.stubGlobal("document", {
@@ -412,8 +395,8 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
     const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test-paused-audio");
     const revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     try {
-      const driver = createDualAudioPlaybackDriver();
-      if (!driver) throw new Error("dual audio driver was not created");
+      const driver = createMediaElementPlaybackDriver();
+      if (!driver) throw new Error("media element driver was not created");
       const currentManifest = createManifest(["ready"]);
       const controller = new AbortController();
       const prepared = await driver.prepare(
@@ -444,13 +427,52 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
     }
   });
 
+  it("changes rate during active playback without rebuilding the segment or moving currentTime", async () => {
+    const elements = [new FakeAudioElement(), new FakeAudioElement()];
+    elements[0].autoEnd = false;
+    let index = 0;
+    vi.stubGlobal("document", { createElement: () => elements[index++] });
+    const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test-rate-switch");
+    const revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    try {
+      const driver = createMediaElementPlaybackDriver();
+      if (!driver) throw new Error("media element driver was not created");
+      const currentManifest = createManifest(["ready"]);
+      const controller = new AbortController();
+      const prepared = await driver.prepare(
+        currentManifest.segments[0],
+        new Uint8Array([1]).buffer,
+        0,
+        controller.signal,
+      );
+      elements[0].duration = 3;
+      elements[0].readyState = 1;
+      const playing = driver.play(prepared, 1, 800, controller.signal);
+      await vi.waitFor(() => expect(elements[0].playCount).toBe(1));
+
+      driver.setRate(2);
+      expect(elements[0].currentTime).toBe(0.8);
+      expect(elements[0].playCount).toBe(1);
+      expect(elements[0].playbackRate).toBe(2);
+      expect(elements[0].preservesPitch).toBe(true);
+
+      elements[0].dispatchEvent(new Event("ended"));
+      await playing;
+      driver.dispose();
+    } finally {
+      createUrl.mockRestore();
+      revokeUrl.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("validates and forwards the first segment restore offset", async () => {
     const manifest = createManifest(["ready"]);
-    const driver = new FakeDriver("web-audio", true);
+    const driver = new FakeDriver(true);
     const events: SegmentPlaybackQueueEvent[] = [];
     const queue = new SegmentPlaybackQueue({
       fetchMedia: (async () => responseFor(manifest.segments[0])) as never,
-      createWebAudioDriver: () => driver,
+      createMediaElementDriver: () => driver,
       onEvent: (event) => events.push(event),
     });
 
@@ -472,10 +494,9 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
     });
   });
 
-  it("prefers Web Audio and fetches a bounded four-segment window", async () => {
+  it("fetches a bounded four-segment window while preparing only the two media slots", async () => {
     const manifest = createManifest(["ready", "ready", "ready", "ready", "ready"]);
-    const driver = new FakeDriver("web-audio", true);
-    const dualFactory = vi.fn(() => new FakeDriver("dual-audio"));
+    const driver = new FakeDriver(true);
     const fetchMedia = vi.fn(async (request: { url: string }) => {
       const segment = manifest.segments.find((candidate) => candidate.audio?.url === request.url);
       if (!segment) throw new Error("unknown URL");
@@ -485,8 +506,7 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
     const queue = new SegmentPlaybackQueue({
       prefetchSegments: 4,
       fetchMedia: fetchMedia as never,
-      createWebAudioDriver: () => driver,
-      createDualAudioDriver: dualFactory,
+      createMediaElementDriver: () => driver,
       isLeaseCurrent: (candidate) => playbackLeasesEqual(candidate, currentLease),
     });
 
@@ -499,23 +519,20 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
       volume: 0.62,
     });
 
-    expect(result).toMatchObject({ kind: "started", backend: "web-audio", ordinal: 0 });
+    expect(result).toMatchObject({ kind: "started", backend: "media-element", ordinal: 0 });
     expect(fetchMedia).toHaveBeenCalledTimes(4);
-    expect(driver.prepared).toEqual([0, 1, 2, 3]);
+    expect(driver.prepared).toEqual([0, 1]);
     expect(driver.played).toEqual([0]);
     expect(driver.volumes).toContain(0.62);
-    expect(dualFactory).not.toHaveBeenCalled();
     currentLease = lease(2);
     queue.stop();
   });
 
-  it("uses dual audio as the only fallback when Web Audio is unavailable", async () => {
+  it("reports playback unavailable instead of falling back to a pitch-changing backend", async () => {
     const manifest = createManifest(["ready"]);
-    const dual = new FakeDriver("dual-audio", true);
     const queue = new SegmentPlaybackQueue({
       fetchMedia: (async () => responseFor(manifest.segments[0])) as never,
-      createWebAudioDriver: () => null,
-      createDualAudioDriver: () => dual,
+      createMediaElementDriver: () => null,
     });
 
     const result = await queue.start({
@@ -526,43 +543,12 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
       volume: 1,
     });
 
-    expect(result).toMatchObject({ kind: "started", backend: "dual-audio" });
-    expect(dual.prepared).toEqual([0]);
-    expect(dual.volumes).toContain(1);
-    queue.stop();
-  });
-
-  it("transfers the latest active volume when Web Audio decode falls back to dual audio", async () => {
-    const audio = installFakeWebAudioContext({ decodeFails: true });
-    const manifest = createManifest(["ready"]);
-    const webAudio = createWebAudioPlaybackDriver();
-    if (!webAudio) throw new Error("Web Audio driver was not created");
-    const dual = new FakeDriver("dual-audio", true);
-    const queue = new SegmentPlaybackQueue({
-      fetchMedia: (async () => responseFor(manifest.segments[0])) as never,
-      createWebAudioDriver: () => webAudio,
-      createDualAudioDriver: () => dual,
+    expect(result).toMatchObject({
+      kind: "error",
+      backend: null,
+      failure: { code: "PLAYBACK_UNAVAILABLE", retryable: false },
     });
-
-    try {
-      const starting = queue.start({
-        lease: lease(),
-        manifest,
-        startOrdinal: 0,
-        rate: 1,
-        volume: 0.37,
-      });
-      queue.setVolume(0.58);
-      await expect(starting).resolves.toMatchObject({ kind: "started", backend: "dual-audio" });
-
-      expect(audio.gainParameter.setValueAtTime).toHaveBeenCalledWith(0.37, 0);
-      expect(audio.gainParameter.setValueAtTime).toHaveBeenCalledWith(0.58, 0);
-      expect(dual.volumes).toContain(0.58);
-      expect(dual.prepared).toEqual([0]);
-    } finally {
-      queue.stop();
-      vi.unstubAllGlobals();
-    }
+    queue.stop();
   });
 
   it("rejects prefetch windows outside the frozen 3-5 segment bound", () => {
@@ -575,7 +561,7 @@ describe("SegmentPlaybackQueue backend and prefetch contract", () => {
 describe("SegmentPlaybackQueue gaps, cancellation and controls", () => {
   it("plays only the contiguous prefix and blocks at a pending gap", async () => {
     const manifest = createManifest(["ready", "ready", "ready", "pending", "ready"]);
-    const driver = new FakeDriver("web-audio");
+    const driver = new FakeDriver();
     const events: SegmentPlaybackQueueEvent[] = [];
     const queue = new SegmentPlaybackQueue({
       fetchMedia: (async (request: { url: string }) => {
@@ -583,7 +569,7 @@ describe("SegmentPlaybackQueue gaps, cancellation and controls", () => {
         if (!segment) throw new Error("unknown URL");
         return responseFor(segment);
       }) as never,
-      createWebAudioDriver: () => driver,
+      createMediaElementDriver: () => driver,
       onEvent: (event) => events.push(event),
     });
 
@@ -612,10 +598,10 @@ describe("SegmentPlaybackQueue gaps, cancellation and controls", () => {
 
   it("forwards pause, resume, bounded rate and bounded volume to the active backend", async () => {
     const manifest = createManifest(["ready"]);
-    const driver = new FakeDriver("web-audio", true);
+    const driver = new FakeDriver(true);
     const queue = new SegmentPlaybackQueue({
       fetchMedia: (async () => responseFor(manifest.segments[0])) as never,
-      createWebAudioDriver: () => driver,
+      createMediaElementDriver: () => driver,
     });
     await queue.start({ lease: lease(), manifest, startOrdinal: 0, rate: 1, volume: 1 });
 
@@ -637,7 +623,7 @@ describe("SegmentPlaybackQueue gaps, cancellation and controls", () => {
 
   it("keeps a pause authoritative while media preparation is still in flight", async () => {
     const currentManifest = createManifest(["ready"]);
-    const driver = new FakeDriver("web-audio", true);
+    const driver = new FakeDriver(true);
     let releasePrepare!: () => void;
     const prepareGate = new Promise<void>((resolve) => { releasePrepare = resolve; });
     const enteredPrepare = vi.fn();
@@ -649,7 +635,7 @@ describe("SegmentPlaybackQueue gaps, cancellation and controls", () => {
     });
     const queue = new SegmentPlaybackQueue({
       fetchMedia: (async () => responseFor(currentManifest.segments[0])) as never,
-      createWebAudioDriver: () => driver,
+      createMediaElementDriver: () => driver,
     });
 
     let startSettled = false;
@@ -697,7 +683,7 @@ describe("SegmentPlaybackQueue gaps, cancellation and controls", () => {
     });
     const queue = new SegmentPlaybackQueue({
       fetchMedia: fetchMedia as never,
-      createWebAudioDriver: () => new FakeDriver("web-audio", true),
+      createMediaElementDriver: () => new FakeDriver(true),
       isLeaseCurrent: (candidate) => playbackLeasesEqual(candidate, currentLease),
     });
 

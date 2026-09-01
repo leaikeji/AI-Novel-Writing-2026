@@ -28,6 +28,7 @@ from backend.narration.character_voice_matching import (
     load_official_voice_casting_baseline,
     match_official_voice,
     parse_character_voice_brief,
+    score_official_voice_candidates,
 )
 from backend.narration.official_presets import (
     OFFICIAL_PRESET_MANIFEST_PATH,
@@ -297,6 +298,29 @@ def test_match_unknown_language_covers_all_and_ties_use_supplied_manifest_order(
 
     assert result.selected_preset_id == "onnx.Junhao"
     assert result.score_milli == 1000
+
+
+def test_candidate_scoring_exposes_manifest_order_for_global_solver() -> None:
+    brief = CharacterVoiceBrief(
+        language=None,
+        presentation=None,
+        pitch=None,
+        pace=None,
+        energy=0,
+        texture=None,
+        evidence_fields=("energy:character.details.voice.energy",),
+    )
+
+    scores = score_official_voice_candidates(
+        brief,
+        effective_language=CharacterVoiceLanguage.EN,
+        baseline=_baseline(),
+    )
+
+    assert tuple(score.preset_id for score in scores) == tuple(
+        preset.preset_id for preset in OFFICIAL_PRESETS if preset.language == "en"
+    )
+    assert all(score.compared_dimensions == ("energy",) for score in scores)
 
 
 def test_match_rejects_a_brief_with_no_scoreable_dimension() -> None:
