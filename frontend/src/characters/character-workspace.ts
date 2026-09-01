@@ -57,6 +57,7 @@ export interface CharacterReactRuntime {
   useState<T>(initial: T | (() => T)): [T, StateSetter<T>];
   useEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]): void;
   useRef<T>(initial: T): { current: T };
+  useId?(): string;
 }
 
 export interface CharacterWorkspacePortalRuntime {
@@ -118,6 +119,11 @@ interface KeyboardEventLike {
 interface PointerEventLike {
   readonly target: unknown;
   readonly currentTarget: unknown;
+}
+
+interface DrawerTrigger {
+  readonly element: HTMLElement;
+  readonly fallbackId: string;
 }
 
 interface ToggleEventLike {
@@ -222,8 +228,12 @@ export function createCharacterWorkspaceDialog(
       "birth_information",
       "age_at_story_start_note",
     ].some((key) => Boolean(initial.selected_instance.profile[key])));
+    const reactInstanceId = React.useId?.();
+    const instanceIdSuffix = reactInstanceId?.replace(/[^a-zA-Z0-9_-]/g, "");
     const baseIdRef = React.useRef(
-      `character-workspace-${workspace.character.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+      `character-workspace-${workspace.character.id.replace(/[^a-zA-Z0-9_-]/g, "-")}${
+        instanceIdSuffix ? `-${instanceIdSuffix}` : ""
+      }`,
     );
     const bodyRef = React.useRef<HTMLElement | null>(null);
     const tabScrollRef = React.useRef<Record<CharacterWorkspaceTab, number>>({
@@ -233,8 +243,29 @@ export function createCharacterWorkspaceDialog(
       voice: 0,
     });
     const lastPropWorkspaceRef = React.useRef(initial);
+    const drawerTriggerRef = React.useRef<DrawerTrigger | null>(null);
+    const drawerWasOpenRef = React.useRef(false);
+    const sourceRequestGenerationRef = React.useRef(0);
     const baseId = baseIdRef.current;
     const dialogId = `${baseId}-dialog`;
+    const currentStateTitleId = `${baseId}-current-state-title`;
+    const recentChangesTitleId = `${baseId}-recent-changes-title`;
+    const factHistoryTitleId = `${baseId}-fact-history-title`;
+    const correctionDialogId = `${baseId}-correction-dialog`;
+    const correctionTitleId = `${baseId}-correction-title`;
+    const batchRevertDialogId = `${baseId}-batch-revert-dialog`;
+    const batchRevertTitleId = `${baseId}-batch-revert-title`;
+    const sourceDialogId = `${baseId}-source-dialog`;
+    const sourceTitleId = `${baseId}-source-title`;
+    const activeSource = sourceFact?.source ?? null;
+    const drawerOpen = Boolean(correctionFact || batchImpact || activeSource);
+    const activeDrawerId = correctionFact
+      ? correctionDialogId
+      : batchImpact
+        ? batchRevertDialogId
+        : activeSource
+          ? sourceDialogId
+          : null;
     const dirty = hasRootChanges(workspace, rootDraft) || hasProfileChanges(workspace, profileDraft);
     const factRiskCount = workspace.writing_state.risk_summary.conflict_count
       + workspace.writing_state.risk_summary.ambiguous_count
@@ -276,6 +307,60 @@ export function createCharacterWorkspaceDialog(
         if (modality === "pointer") previouslyFocused.blur();
         delete previouslyFocused.dataset.characterOpenModality;
       };
+    }, []);
+
+    React.useEffect(() => {
+      if (!activeDrawerId || typeof document === "undefined") return;
+      const focusDrawer = (): void => {
+        const drawer = document.getElementById(activeDrawerId);
+        if (!drawer) return;
+        const closeButton = drawer.querySelector<HTMLButtonElement>(
+          '[data-character-drawer-close="true"]:not([disabled])',
+        );
+        (closeButton ?? drawer).focus({ preventScroll: true });
+      };
+      if (typeof queueMicrotask === "function") queueMicrotask(focusDrawer);
+      else focusDrawer();
+    }, [activeDrawerId]);
+
+    React.useEffect(() => {
+      if (drawerOpen) {
+        drawerWasOpenRef.current = true;
+        return;
+      }
+      if (!drawerWasOpenRef.current) return;
+      drawerWasOpenRef.current = false;
+      const returnTarget = drawerTriggerRef.current;
+      drawerTriggerRef.current = null;
+      const restoreDrawerFocus = (): void => {
+        if (typeof document === "undefined") return;
+        const trigger = returnTarget?.element;
+        const triggerDisabled = Boolean(
+          trigger && "disabled" in trigger && (trigger as HTMLButtonElement).disabled,
+        );
+        if (trigger?.isConnected && !triggerDisabled) {
+          trigger.focus({ preventScroll: true });
+          return;
+        }
+        const fallbackIds = [
+          returnTarget?.fallbackId,
+          recentChangesTitleId,
+          factHistoryTitleId,
+          `${baseId}-tab-growth`,
+        ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
+        for (const fallbackId of fallbackIds) {
+          const fallback = document.getElementById(fallbackId);
+          if (!fallback) continue;
+          fallback.focus({ preventScroll: true });
+          return;
+        }
+      };
+      if (typeof queueMicrotask === "function") queueMicrotask(restoreDrawerFocus);
+      else restoreDrawerFocus();
+    }, [drawerOpen]);
+
+    React.useEffect(() => () => {
+      sourceRequestGenerationRef.current += 1;
     }, []);
 
     React.useEffect(() => {
@@ -353,7 +438,30 @@ export function createCharacterWorkspaceDialog(
       }
     };
 
-    const openCorrection = (fact: ProjectedFactViewV2): void => {
+    const rememberDrawerTrigger = (trigger: HTMLElement, fallbackId: string): void => {
+      drawerTriggerRef.current = { element: trigger, fallbackId };
+    };
+
+    const invalidateSourceRequest = (): void => {
+      sourceRequestGenerationRef.current += 1;
+    };
+
+    const clearSource = (): void => {
+      invalidateSourceRequest();
+      setSourceFact(null);
+      setSourceRevision(null);
+      setSourceResolution(null);
+      setSourceError(null);
+      setSourceLoading(false);
+    };
+
+    const openCorrection = (
+      fact: ProjectedFactViewV2,
+      trigger: HTMLElement,
+      fallbackId: string,
+    ): void => {
+      rememberDrawerTrigger(trigger, fallbackId);
+      invalidateSourceRequest();
       setBatchImpact(null);
       setSourceFact(null);
       setCorrectionFact(fact);
@@ -392,9 +500,20 @@ export function createCharacterWorkspaceDialog(
       }
     };
 
-    const previewBatchRevert = async (fact: ProjectedFactViewV2): Promise<void> => {
+    const closeBatchRevert = (): void => {
+      if (batchSaving) return;
+      setBatchImpact(null);
+    };
+
+    const previewBatchRevert = async (
+      fact: ProjectedFactViewV2,
+      trigger: HTMLElement,
+      fallbackId: string,
+    ): Promise<void> => {
       const batchId = fact.source?.commit_batch_id;
       if (!batchId || !props.onPreviewBatchRevert) return;
+      rememberDrawerTrigger(trigger, fallbackId);
+      invalidateSourceRequest();
       setCorrectionFact(null);
       setSourceFact(null);
       setBatchError(null);
@@ -425,8 +544,15 @@ export function createCharacterWorkspaceDialog(
       }
     };
 
-    const openSource = async (fact: ProjectedFactViewV2): Promise<void> => {
+    const openSource = async (
+      fact: ProjectedFactViewV2,
+      trigger: HTMLElement,
+      fallbackId: string,
+    ): Promise<void> => {
       if (!fact.source || !props.onLoadSource) return;
+      rememberDrawerTrigger(trigger, fallbackId);
+      const requestGeneration = sourceRequestGenerationRef.current + 1;
+      sourceRequestGenerationRef.current = requestGeneration;
       setCorrectionFact(null);
       setBatchImpact(null);
       setSourceFact(fact);
@@ -439,6 +565,7 @@ export function createCharacterWorkspaceDialog(
           fact.source.document_id,
           fact.source.revision_id,
         );
+        if (requestGeneration !== sourceRequestGenerationRef.current) return;
         setSourceRevision(revision);
         if (
           fact.source.source_start === null
@@ -452,7 +579,7 @@ export function createCharacterWorkspaceDialog(
             excerptTruncated: fact.source.source_excerpt_truncated,
           });
         } else {
-          setSourceResolution(await resolveCharacterSourceRange(
+          const resolution = await resolveCharacterSourceRange(
             revision.content_text,
             revision.content_hash,
             {
@@ -464,12 +591,18 @@ export function createCharacterWorkspaceDialog(
               source_excerpt: fact.source.source_excerpt,
               source_excerpt_truncated: fact.source.source_excerpt_truncated,
             },
-          ));
+          );
+          if (requestGeneration !== sourceRequestGenerationRef.current) return;
+          setSourceResolution(resolution);
         }
       } catch (reason) {
-        setSourceError(normalizeActionError(reason).message);
+        if (requestGeneration === sourceRequestGenerationRef.current) {
+          setSourceError(normalizeActionError(reason).message);
+        }
       } finally {
-        setSourceLoading(false);
+        if (requestGeneration === sourceRequestGenerationRef.current) {
+          setSourceLoading(false);
+        }
       }
     };
 
@@ -501,12 +634,12 @@ export function createCharacterWorkspaceDialog(
       }
       if (event.key === "Escape" && batchImpact) {
         event.preventDefault();
-        if (!batchSaving) setBatchImpact(null);
+        closeBatchRevert();
         return;
       }
       if (event.key === "Escape" && sourceFact) {
         event.preventDefault();
-        if (!sourceLoading) setSourceFact(null);
+        clearSource();
         return;
       }
       if (event.key === "Escape" && !saving && props.onRequestClose) {
@@ -517,18 +650,33 @@ export function createCharacterWorkspaceDialog(
       if (event.key !== "Tab" || typeof document === "undefined") return;
       const dialog = document.getElementById(dialogId);
       if (!dialog) return;
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      const focusScope = activeDrawerId
+        ? document.getElementById(activeDrawerId)
+        : dialog;
+      if (!focusScope) return;
+      const focusable = Array.from(focusScope.querySelectorAll<HTMLElement>(
         'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      )).filter((element) => element.offsetParent !== null && !element.closest("[inert]"));
-      if (focusable.length === 0) return;
+      )).filter((element) => (
+        !element.closest('[inert], [hidden], [aria-hidden="true"]')
+        && element.getAttribute("aria-hidden") !== "true"
+      ));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        focusScope.focus({ preventScroll: true });
+        return;
+      }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      const activeIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      if (activeIndex === -1) {
         event.preventDefault();
-        last?.focus();
+        (event.shiftKey ? last : first)?.focus({ preventScroll: true });
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus({ preventScroll: true });
       } else if (!event.shiftKey && document.activeElement === last) {
         event.preventDefault();
-        first?.focus();
+        first?.focus({ preventScroll: true });
       }
     };
 
@@ -819,14 +967,17 @@ export function createCharacterWorkspaceDialog(
         h("span", { className: "anw-character-workspace-readonly-badge" }, "事实投影 · 只读"),
       ),
       renderCharacterStatePanel(React, {
+        currentStateTitleId,
+        recentChangesTitleId,
         workspace,
         historyOpen,
         onToggleHistory: () => setHistoryOpen((value) => !value),
-        onOpenSource: (fact) => void openSource(fact),
-        onCorrectFact: openCorrection,
+        onOpenSource: (fact, trigger) => void openSource(fact, trigger, recentChangesTitleId),
+        onCorrectFact: (fact, trigger) => openCorrection(fact, trigger, recentChangesTitleId),
       }),
       historyOpen
         ? renderCharacterFactHistory(React, {
+            titleId: factHistoryTitleId,
             page: historyPage,
             loading: historyLoading,
             loadingMore: historyLoadingMore,
@@ -842,9 +993,9 @@ export function createCharacterWorkspaceDialog(
               setHistoryPage(null);
             },
             onLoadMore: () => void loadMoreFacts(),
-            onOpenSource: (fact) => void openSource(fact),
-            onCorrectFact: openCorrection,
-            onPreviewBatchRevert: (fact) => void previewBatchRevert(fact),
+            onOpenSource: (fact, trigger) => void openSource(fact, trigger, factHistoryTitleId),
+            onCorrectFact: (fact, trigger) => openCorrection(fact, trigger, factHistoryTitleId),
+            onPreviewBatchRevert: (fact, trigger) => void previewBatchRevert(fact, trigger, factHistoryTitleId),
           })
         : null,
     );
@@ -869,8 +1020,6 @@ export function createCharacterWorkspaceDialog(
     );
 
     const firstErrorField = Object.keys(error?.field_errors ?? {})[0];
-    const activeSource = sourceFact?.source ?? null;
-    const drawerOpen = Boolean(correctionFact || batchImpact || activeSource);
     const instancesForSelectedTimeline = workspace.instances.filter(
       (instance) => instance.origin_timeline_id === workspace.selected_timeline.id,
     );
@@ -880,7 +1029,7 @@ export function createCharacterWorkspaceDialog(
       {
         className: "anw-character-workspace-backdrop",
         onMouseDown: (event: PointerEventLike) => {
-          if (event.target === event.currentTarget && !saving && props.onRequestClose) requestClose();
+          if (event.target === event.currentTarget && !drawerOpen && !saving && props.onRequestClose) requestClose();
         },
       },
       h(
@@ -1095,6 +1244,8 @@ export function createCharacterWorkspaceDialog(
         ),
         correctionFact
           ? renderCharacterFactCorrectionDrawer(React, {
+              dialogId: correctionDialogId,
+              titleId: correctionTitleId,
               fact: correctionFact,
               objectText: correctionObjectText,
               reason: correctionReason,
@@ -1110,27 +1261,27 @@ export function createCharacterWorkspaceDialog(
           : null,
         batchImpact
           ? renderCharacterBatchRevertDrawer(React, {
+              dialogId: batchRevertDialogId,
+              titleId: batchRevertTitleId,
               impact: batchImpact,
               reason: batchReason,
               saving: batchSaving,
               error: batchError,
               onReasonChange: setBatchReason,
               onSubmit: () => void submitBatchRevert(),
-              onClose: () => {
-                if (!batchSaving) setBatchImpact(null);
-              },
+              onClose: closeBatchRevert,
             })
           : null,
         activeSource
           ? renderCharacterSourceViewer(React, {
+              dialogId: sourceDialogId,
+              titleId: sourceTitleId,
               source: activeSource,
               revision: sourceRevision,
               resolution: sourceResolution,
               loading: sourceLoading,
               error: sourceError,
-              onClose: () => {
-                if (!sourceLoading) setSourceFact(null);
-              },
+              onClose: clearSource,
             })
           : null,
       ),

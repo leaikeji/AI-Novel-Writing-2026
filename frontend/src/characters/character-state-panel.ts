@@ -5,12 +5,16 @@ import { characterFactDimensionLabel } from "./model";
 type ElementNode = unknown;
 
 export interface CharacterStatePanelProps {
+  readonly currentStateTitleId: string;
+  readonly recentChangesTitleId: string;
   readonly workspace: CharacterWorkspaceV2;
   readonly historyOpen: boolean;
   readonly onToggleHistory: () => void;
-  readonly onOpenSource: (fact: ProjectedFactViewV2) => void;
-  readonly onCorrectFact: (fact: ProjectedFactViewV2) => void;
+  readonly onOpenSource: (fact: ProjectedFactViewV2, trigger: HTMLElement) => void;
+  readonly onCorrectFact: (fact: ProjectedFactViewV2, trigger: HTMLElement) => void;
 }
+
+interface ButtonEvent { readonly currentTarget: HTMLElement }
 
 export function renderCharacterStatePanel(
   React: CharacterReactRuntime,
@@ -30,8 +34,8 @@ export function renderCharacterStatePanel(
       { className: "anw-character-state-layout" },
       h(
         "section",
-        { className: "anw-character-state-current", "aria-labelledby": "anw-character-current-state-title" },
-        h("h4", { id: "anw-character-current-state-title" }, "当前写作状态"),
+        { className: "anw-character-state-current", "aria-labelledby": props.currentStateTitleId },
+        h("h4", { id: props.currentStateTitleId }, "当前写作状态"),
         h(
           "dl",
           { className: "anw-character-state-slots" },
@@ -78,7 +82,7 @@ export function renderCharacterStatePanel(
       h(
         "div",
         { className: "anw-character-subsection-heading" },
-        h("div", null, h("h4", null, "最近变化"), h("p", null, "只显示最近 5 条，帮助续写前快速校准。")),
+        h("div", null, h("h4", { id: props.recentChangesTitleId, tabIndex: -1 }, "最近变化"), h("p", null, "只显示最近 5 条，帮助续写前快速校准。")),
         h(
           "button",
           { type: "button", className: "anw-character-link-button", onClick: props.onToggleHistory },
@@ -99,9 +103,9 @@ export function renderCharacterStatePanel(
               h(
                 "div",
                 { className: "anw-character-row-actions" },
-                fact.source ? h("button", { type: "button", onClick: () => props.onOpenSource(fact) }, "查看来源") : null,
+                fact.source ? h("button", { type: "button", onClick: (event: ButtonEvent) => props.onOpenSource(fact, event.currentTarget) }, "查看来源") : null,
                 fact.effective_state === "current"
-                  ? h("button", { type: "button", onClick: () => props.onCorrectFact(fact) }, "修正")
+                  ? h("button", { type: "button", onClick: (event: ButtonEvent) => props.onCorrectFact(fact, event.currentTarget) }, "修正")
                   : null,
               ),
             )),

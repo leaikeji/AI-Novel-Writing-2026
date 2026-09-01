@@ -14,6 +14,8 @@ export interface CharacterSourceRevisionV1 {
 }
 
 export interface CharacterSourceViewerProps {
+  readonly dialogId: string;
+  readonly titleId: string;
   readonly source: CharacterFactSourceV2;
   readonly revision: CharacterSourceRevisionV1 | null;
   readonly resolution: SourceRangeResolution | null;
@@ -31,8 +33,16 @@ export function renderCharacterSourceViewer(
   const verified = props.resolution?.status === "verified" ? props.resolution : null;
   return h(
     "aside",
-    { className: "anw-character-source-viewer", role: "dialog", "aria-modal": true, "aria-labelledby": "anw-character-source-title" },
-    h("header", null, h("div", null, h("h3", { id: "anw-character-source-title" }, "来源证据"), h("p", null, props.source.document_title)), h("button", { type: "button", "aria-label": "关闭来源证据", onClick: props.onClose }, "×")),
+    {
+      id: props.dialogId,
+      className: "anw-character-source-viewer",
+      role: "dialog",
+      "aria-modal": true,
+      "aria-labelledby": props.titleId,
+      "aria-busy": props.loading || undefined,
+      tabIndex: -1,
+    },
+    h("header", null, h("div", null, h("h3", { id: props.titleId }, "来源证据"), h("p", null, props.source.document_title)), h("button", { type: "button", "aria-label": "关闭来源证据", "data-character-drawer-close": "true", onClick: props.onClose }, "×")),
     h(
       "div",
       { className: "anw-character-source-body" },
