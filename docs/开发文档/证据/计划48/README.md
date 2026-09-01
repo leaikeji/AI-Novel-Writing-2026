@@ -1,6 +1,6 @@
 # 计划 48 施工与隔离验收证据
 
-状态：**候选施工和隔离运行验收完成；长期 `18088` 未安装；精确提交构建门禁未封口。**
+状态：**候选施工、精确实现提交、提交后全量复查和隔离运行验收完成；长期 `18088` 未安装。**
 
 日期：2026-09-01（Asia/Shanghai）
 
@@ -8,6 +8,7 @@
 
 - 施工分支：`codex/plan48-character-theme-focus`
 - 施工基线：`858e50fd8fc97316a2b5de79a3bd07c5c39c008f`（`origin/main`）
+- 精确实现提交：`b49448c602c7456b33413a283e67a32134efe942`
 - 施工工作树：`/Users/liujia/Documents/AI小说世界2026-cc48`
 - 隔离运行态：QwenPaw 2.1.0，`http://127.0.0.1:18190`
 - 合成小说：`1a734808-914c-408b-93a8-82cbf5e2ca4f`
@@ -41,6 +42,8 @@
 | Diff 格式 | `git diff --check` passed |
 
 说明：第一次全量 Python 在尚未生成 `frontend/dist` 时有 1 个打包契约失败（3432 passed／161 skipped／1 failed）；完成前端构建后立即重跑，全量结果为 3433 passed／161 skipped。未把第一次失败写成已通过。
+
+精确实现提交创建后再次运行全量门禁：前端仍为 123 files／1052 tests passed，Python 仍为 3433 passed／161 skipped／3 warnings，TypeScript 与 157 modules 生产构建通过，插件打包和 12 项 Skill 契约通过。前端命令第一次启动时因当前 shell 未包含固定 Node 路径而未进入测试执行；补入 `/Users/liujia/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin` 后完整重跑通过，该启动器环境问题不记作代码测试通过或失败。
 
 ## 4. 真实浏览器证据
 
@@ -85,10 +88,10 @@
 2. 从仓库外备份 `/tmp/cc48-isolated-rollback.YmP9ab/ai-novel-world-2026` 回装旧包；默认 V1、显式 V1、显式 V2 全部恢复为 200。
 3. 再次热卸载旧包并回装候选；上述 workspace、facts 和宿主页全部再次通过。
 4. 候选包与隔离安装目录排除运行时 `__pycache__`／`.pyc` 后均为 246 个文件，路径＋内容确定性摘要一致：`9fb7db6405859ed81368aaf330dfb9e7f22c7ae919b2870ddf401cba49f8595b`。
+5. 从精确实现提交重新打包后，使用“相对路径 + NUL + 原始内容 + NUL”重新计算本地包与隔离已安装树；两者仍均为 246 个文件，SHA-256 同为 `659b46642518bcdab415e43919ded6ced8981a3ca4b6d5600fa35ec135dea8d1`。随后只读复核默认 V1、显式 V1、显式 V2、facts 和 QwenPaw 根页面仍全部为 HTTP 200。
 
 ## 6. 尚未通过的发布门禁
 
-- 当前候选来自未提交施工工作树，因此还不能满足 `CC48-PACKAGE-G` 的“从精确提交构建”。
 - 合成数据中唯一带 `commit_batch_id` 的事实已经是 `batch_reverted`，真实浏览器没有伪造当前批次来强行打开批次撤销抽屉；该抽屉的唯一 ID、忙碌态、关闭禁用和 Esc 禁用由专门 Vitest 覆盖。
 - 来源 loading 竞态没有在真实网络中人为篡改响应时序；迟到响应失效由 deferred Promise 单元测试覆盖，真实宿主验证了 loading 抽屉可关闭和普通来源焦点闭环。
 - 长期 `18088` 仍是旧人物卡安装包：默认 workspace 为 V1，显式 V1／V2 为 422。该事实只用于说明长期包尚未替换，不代表候选后端失败。
