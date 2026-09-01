@@ -12,10 +12,12 @@ from scripts.tts.chapter_e2e_readiness import (
     ATTESTATION_SCHEMA,
     DatabaseReadinessEvidence,
     EXPECTED_CAPTURES,
+    MINIMUM_DATABASE_REVISION,
     REPORT_SCHEMA,
     ReadinessError,
     SqlAlchemyReadinessReader,
     _canonical_json,
+    _database_revision_ready,
     _fixed_fixture_missing,
     build_parser,
     evaluate_readiness,
@@ -55,6 +57,35 @@ def _ready_evidence() -> DatabaseReadinessEvidence:
         database_checks_completed=True,
         authority_fingerprint_sha256="a" * 64,
     )
+
+
+@pytest.mark.parametrize(
+    ("revisions", "expected"),
+    [
+        (("20260829_0034",), True),
+        (("20260830_0035",), True),
+        (("20260901_0036",), True),
+        (("20260829_0033",), False),
+        (("20990101_9999",), False),
+        (("20260829_0034", "20260830_0035"), False),
+        ((), False),
+    ],
+    ids=(
+        "minimum",
+        "known-descendant-0035",
+        "known-descendant-0036",
+        "known-ancestor-0033",
+        "unknown-or-forked-revision",
+        "multiple-heads",
+        "missing-head",
+    ),
+)
+def test_database_revision_gate_uses_linear_minimum_ancestry(
+    revisions: tuple[str, ...],
+    expected: bool,
+) -> None:
+    assert MINIMUM_DATABASE_REVISION == "20260829_0034"
+    assert _database_revision_ready(revisions) is expected
 
 
 def _private_directory(tmp_path: Path) -> Path:

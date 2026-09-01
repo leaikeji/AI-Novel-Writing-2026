@@ -24,6 +24,7 @@ import type {
   ScriptReviewPanelProps,
   ScriptReviewReactRuntime,
 } from "./script-review-panel";
+import { T4_CHAPTER_NARRATION_STYLES } from "./styles/t4-chapter";
 
 
 interface FakeElement {
@@ -380,6 +381,34 @@ describe("script review panel model", () => {
     }
   });
 
+  it("renders every confidence value with an exhaustive Chinese display label", () => {
+    const expectedLabels: Record<
+      ScriptReviewResource["segments"][number]["confidence"],
+      string
+    > = {
+      high: "高",
+      medium: "中",
+      low: "低",
+      unknown: "未知",
+    };
+    const harness = createReactHarness();
+    const Panel = createScriptReviewPanel(harness.React, api());
+
+    const entries = Object.entries(expectedLabels) as Array<
+      [ScriptReviewResource["segments"][number]["confidence"], string]
+    >;
+    for (const [confidence, label] of entries) {
+      const base = resource();
+      const review: ScriptReviewResource = {
+        ...base,
+        segments: [{ ...base.segments[0], confidence }],
+      };
+      const tree = harness.render(Panel, props(review));
+      expect(textContent(tree)).toContain(`置信度：${label}`);
+      expect(textContent(tree)).not.toContain(`置信度：${confidence}`);
+    }
+  });
+
   it("offers only narrator, resolved character bindings, and resolved anonymous speakers", () => {
     const current = resource();
     const base = current.segments[0];
@@ -719,5 +748,21 @@ describe("script review failures", () => {
       retryable: true,
       refreshRequired: false,
     });
+  });
+});
+
+
+describe("script review responsive layout", () => {
+  it("collapses the workspace and removes the inset shell on narrow screens", () => {
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 768px)");
+    expect(T4_CHAPTER_NARRATION_STYLES).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.anw-script-review-shell\s*\{[\s\S]*?inset: 0;[\s\S]*?width: 100%;/,
+    );
+    expect(T4_CHAPTER_NARRATION_STYLES).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.anw-script-review__workspace\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/,
+    );
+    expect(T4_CHAPTER_NARRATION_STYLES).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.anw-script-review__guide\s*\{[\s\S]*?position: static;/,
+    );
   });
 });

@@ -10,16 +10,22 @@ import psycopg
 from psycopg import sql
 import pytest
 
+from backend.models import Base
 from scripts.tts.validate_database_roles import (
     API_ROLE,
-    EXPECTED_HEAD,
+    CURRENT_PROTECTED_TABLES,
     MIGRATOR_ROLE,
-    PROTECTED_TABLES,
+    NON_TTS_CHARACTER_TABLE_ALLOWLIST,
+    PROTECTED_TABLES_BY_HEAD,
     SCHEMA_OWNER,
+    SUPPORTED_HEADS,
     WORKER_ROLE,
     DatabaseTarget,
     RoleValidationError,
+    _parse_args,
     collect_and_validate,
+    protected_tables_for_head,
+    unclassified_tts_authority_tables,
     validate_target,
 )
 
@@ -76,6 +82,7 @@ def _static_target(tmp_path: Path) -> DatabaseTarget:
             database=database,
             role=WORKER_ROLE,
         ),
+        expected_head="20260829_0034",
     )
 
 
@@ -89,6 +96,7 @@ def _live_target() -> DatabaseTarget:
         "migrator_passfile": os.environ.get("TTS_ROLE_TEST_MIGRATOR_PGPASS"),
         "api_passfile": os.environ.get("TTS_ROLE_TEST_API_PGPASS"),
         "worker_passfile": os.environ.get("TTS_ROLE_TEST_WORKER_PGPASS"),
+        "expected_head": os.environ.get("TTS_ROLE_TEST_EXPECTED_HEAD"),
     }
     missing = sorted(key for key, value in required.items() if not value)
     if missing:
@@ -102,7 +110,7 @@ def _live_target() -> DatabaseTarget:
         migrator_passfile=Path(str(required["migrator_passfile"])),
         api_passfile=Path(str(required["api_passfile"])),
         worker_passfile=Path(str(required["worker_passfile"])),
-        expected_head=os.environ.get("TTS_ROLE_TEST_EXPECTED_HEAD", EXPECTED_HEAD),
+        expected_head=str(required["expected_head"]),
     )
 
 
@@ -119,21 +127,136 @@ def _connect(target: DatabaseTarget, role: str) -> psycopg.Connection[tuple[obje
     )
 
 
-def test_role_names_and_protected_table_contract_are_fixed() -> None:
+def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
     assert (SCHEMA_OWNER, MIGRATOR_ROLE, API_ROLE, WORKER_ROLE) == (
         "ai_novel_schema_owner",
         "ai_novel_migrator",
         "ai_novel_api",
         "ai_novel_worker",
     )
-    assert len(PROTECTED_TABLES) == len(set(PROTECTED_TABLES)) == 55
-    assert tuple(sorted(PROTECTED_TABLES)) == PROTECTED_TABLES
+    assert tuple(PROTECTED_TABLES_BY_HEAD) == SUPPORTED_HEADS
+    expected_counts = {
+        "20260829_0034": 62,
+        "20260830_0035": 65,
+        "20260901_0036": 67,
+    }
+    for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
+        assert (
+            len(protected_tables)
+            == len(set(protected_tables))
+            == expected_counts[head]
+        )
+        assert tuple(sorted(protected_tables)) == protected_tables
+        assert protected_tables_for_head(head) is protected_tables
+    assert set(PROTECTED_TABLES_BY_HEAD["20260829_0034"]) < set(
+        PROTECTED_TABLES_BY_HEAD["20260830_0035"]
+    ) < set(PROTECTED_TABLES_BY_HEAD["20260901_0036"])
+    assert {
+        "nano_voice_experiment_commands",
+        "narration_script_review_actions",
+        "voice_action_commands",
+        "voice_action_receipts",
+        "voice_deletion_asset_plans",
+        "voice_previews",
+        "voice_reference_asset_links",
+    } <= set(PROTECTED_TABLES_BY_HEAD["20260829_0034"])
+    assert set(PROTECTED_TABLES_BY_HEAD["20260830_0035"]) - set(
+        PROTECTED_TABLES_BY_HEAD["20260829_0034"]
+    ) == {
+        "voice_design_drafts",
+        "voice_generator_commands",
+        "voice_generator_run_evidence",
+    }
+    assert set(PROTECTED_TABLES_BY_HEAD["20260901_0036"]) - set(
+        PROTECTED_TABLES_BY_HEAD["20260830_0035"]
+    ) == {
+        "character_cast_plan_commands",
+        "character_cast_plan_items",
+    }
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260901_0036"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:
     sql_source = (ROLE_PACKAGE / "protected-tables.sql").read_text(encoding="utf-8")
     sql_tables = tuple(re.findall(r"\('([a-z][a-z0-9_]*)'\)", sql_source))
-    assert sql_tables == PROTECTED_TABLES
+    assert sql_tables == CURRENT_PROTECTED_TABLES
+    executable_sql = re.sub(r"--.*", "", sql_source).upper()
+    assert "GRANT " not in executable_sql
+
+
+def test_current_protected_tables_are_66_orm_tables_plus_alembic_system_table() -> None:
+    orm_tables = set(Base.metadata.tables)
+    protected_tables = set(CURRENT_PROTECTED_TABLES)
+
+    assert protected_tables - orm_tables == {"alembic_version"}
+    assert len(protected_tables - {"alembic_version"}) == 66
+    assert protected_tables - {"alembic_version"} <= orm_tables
+
+
+def test_tts_authority_prefix_audit_fails_closed_for_unclassified_tables() -> None:
+    assert set(NON_TTS_CHARACTER_TABLE_ALLOWLIST) == {
+        "character_instance_revisions",
+        "character_instances",
+        "character_profile_apply_batches",
+        "character_relationship_revisions",
+        "character_relationships",
+    }
+    assert all(NON_TTS_CHARACTER_TABLE_ALLOWLIST.values())
+    assert unclassified_tts_authority_tables(
+        Base.metadata.tables,
+        protected_tables=CURRENT_PROTECTED_TABLES,
+    ) == ()
+    assert unclassified_tts_authority_tables(
+        (*Base.metadata.tables, "voice_future_authority"),
+        protected_tables=CURRENT_PROTECTED_TABLES,
+    ) == ("voice_future_authority",)
+
+
+@pytest.mark.parametrize(
+    ("head", "error_code"),
+    [
+        ("20260901-0036", "invalid_expected_head"),
+        ("", "invalid_expected_head"),
+        (None, "invalid_expected_head"),
+        ("20990101_9999", "unsupported_expected_head"),
+        ("20260829_0033", "unsupported_expected_head"),
+    ],
+)
+def test_expected_head_is_formatted_supported_and_fail_closed(
+    tmp_path: Path,
+    head: object,
+    error_code: str,
+) -> None:
+    target = _static_target(tmp_path)
+    invalid = DatabaseTarget(
+        **{**target.__dict__, "expected_head": head}  # type: ignore[arg-type]
+    )
+    with pytest.raises(RoleValidationError, match=error_code):
+        validate_target(invalid)
+
+
+def test_cli_requires_explicit_expected_head(tmp_path: Path) -> None:
+    target = _static_target(tmp_path)
+    arguments = [
+        "--host",
+        target.host,
+        "--port",
+        str(target.port),
+        "--database",
+        target.database,
+        "--admin-role",
+        target.admin_role,
+        "--admin-passfile",
+        str(target.admin_passfile),
+        "--migrator-passfile",
+        str(target.migrator_passfile),
+        "--api-passfile",
+        str(target.api_passfile),
+        "--worker-passfile",
+        str(target.worker_passfile),
+    ]
+    with pytest.raises(SystemExit, match="2"):
+        _parse_args(arguments)
 
 
 def test_bootstrap_contract_never_embeds_runtime_passwords() -> None:
@@ -180,9 +303,12 @@ def test_passfile_hardlinks_and_wrong_admin_identity_fail_closed(tmp_path: Path)
 
 
 def test_live_catalog_role_ownership_and_acl_contract() -> None:
-    report = collect_and_validate(_live_target())
+    target = _live_target()
+    report = collect_and_validate(target)
     assert report["status"] == "PASS"
-    assert report["protected_table_count"] == len(PROTECTED_TABLES)
+    assert report["protected_table_count"] == len(
+        protected_tables_for_head(target.expected_head)
+    )
     assert report["worker_business_procedures_present"] is False
     assert report["production_role_switch"] == "HOLD"
 
@@ -191,7 +317,7 @@ def test_live_catalog_role_ownership_and_acl_contract() -> None:
 def test_live_runtime_roles_cannot_raw_mutate_protected_tables(role: str) -> None:
     target = _live_target()
     with _connect(target, role) as connection, connection.cursor() as cursor:
-        for table_name in PROTECTED_TABLES:
+        for table_name in protected_tables_for_head(target.expected_head):
             cursor.execute(
                 """
                 SELECT column_name

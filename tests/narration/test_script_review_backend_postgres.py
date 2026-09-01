@@ -34,6 +34,7 @@ from backend.models import (
     NarrationScriptVersion,
     NarrationSegmentRender,
     NarrationSettingsSnapshot,
+    Novel,
     NovelCharacter,
     NovelNarrationSettings,
     VoiceProfile,
@@ -85,12 +86,12 @@ from backend.narration.snapshots import (
     create_settings_snapshot,
 )
 from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
+from tests.narration.current_schema_gate import assert_database_at_repository_head
 from tests.narration.test_domain_services import _novel
 
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_HEAD = "20260829_0034"
 NOW = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
 POLICY = NarrationProductionPolicy(
     tts_fingerprint="a" * 64,
@@ -168,9 +169,7 @@ def pg_engine() -> Engine:
         assert identity[0] == EXPECTED_DATABASE
         assert identity[1] == EXPECTED_USERNAME
         assert "PostgreSQL 18" in identity[2]
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            EXPECTED_HEAD
-        )
+        assert_database_at_repository_head(connection)
         deferred = dict(
             connection.execute(
                 text(
@@ -284,28 +283,14 @@ def _create_voice(
     return _Voice(profile_id=profile.id, version_id=version.id)
 
 
-def _shared_voice_pair(engine: Engine, *, marker: str) -> tuple[_Voice, _Voice]:
-    with Session(engine, expire_on_commit=False) as session, session.begin():
-        first = _create_voice(session, marker=f"{marker}-v1", novel_id=None)
-        second = _create_voice(session, marker=f"{marker}-v2", novel_id=None)
-    return first, second
-
-
-def _seed_review(
+def _shared_voice_pair(
     engine: Engine,
     *,
     marker: str,
-    source: str,
-    character_voices: tuple[tuple[str, _Voice], ...],
-) -> _ReviewSeed:
-    novel = _novel()
-    novel.title = f"t4-rc-backend-{marker}-{novel.id}"
-    document_id = uuid4()
-    revision_id = uuid4()
-    content_hash = text_sha256(source)
-    character_ids: dict[str, UUID] = {}
-
+) -> tuple[UUID, _Voice, _Voice]:
     with Session(engine, expire_on_commit=False) as session, session.begin():
+        novel = _novel()
+        novel.title = f"t4-rc-backend-{marker}-{novel.id}"
         session.add(novel)
         session.flush()
         narrator = _create_voice(
@@ -313,55 +298,8 @@ def _seed_review(
             marker=f"{marker}-narrator",
             novel_id=novel.id,
         )
-        document = Document(
-            id=document_id,
-            novel_id=novel.id,
-            kind="chapter",
-            title=f"{marker} chapter",
-            position=1,
-            status="draft",
-            version=1,
-        )
-        revision = DocumentRevision(
-            id=revision_id,
-            document_id=document.id,
-            revision_number=1,
-            content_markdown=source,
-            content_text=source,
-            content_hash=content_hash,
-            source="manual",
-        )
-        session.add(document)
-        session.add(revision)
-        for position, (name, voice) in enumerate(character_voices):
-            character = NovelCharacter(
-                id=uuid4(),
-                novel_id=novel.id,
-                role_type="supporting",
-                name=name,
-                description="",
-                details={},
-                lifecycle_state="active",
-                position=position,
-                version=1,
-            )
-            character_ids[name] = character.id
-            session.add(character)
-            session.flush()
-            session.add(
-                CharacterVoiceBinding(
-                    id=uuid4(),
-                    novel_id=novel.id,
-                    character_id=character.id,
-                    profile_id=voice.profile_id,
-                    voice_version_id=voice.version_id,
-                    binding_policy="dedicated",
-                    language="zh-CN",
-                    parameters_json={},
-                    version=1,
-                )
-            )
-
+        first = _create_voice(session, marker=f"{marker}-v1", novel_id=novel.id)
+        second = _create_voice(session, marker=f"{marker}-v2", novel_id=novel.id)
         values = default_narration_settings_values().model_copy(
             update={
                 "narrator": wire.NarratorVoiceSelection(
@@ -383,16 +321,100 @@ def _seed_review(
                 version=1,
             )
         )
+    return novel.id, first, second
+
+
+def _seed_review(
+    engine: Engine,
+    *,
+    novel_id: UUID,
+    marker: str,
+    source: str,
+    character_voices: tuple[tuple[str, _Voice], ...],
+) -> _ReviewSeed:
+    document_id = uuid4()
+    revision_id = uuid4()
+    content_hash = text_sha256(source)
+    character_ids: dict[str, UUID] = {}
+
+    with Session(engine, expire_on_commit=False) as session, session.begin():
+        novel = session.get(Novel, novel_id)
+        assert novel is not None
+        document_position = int(
+            session.scalar(
+                select(func.coalesce(func.max(Document.position), 0)).where(
+                    Document.novel_id == novel_id
+                )
+            )
+            or 0
+        ) + 1
+        document = Document(
+            id=document_id,
+            novel_id=novel_id,
+            kind="chapter",
+            title=f"{marker} chapter",
+            position=document_position,
+            status="draft",
+            version=1,
+        )
+        revision = DocumentRevision(
+            id=revision_id,
+            document_id=document.id,
+            revision_number=1,
+            content_markdown=source,
+            content_text=source,
+            content_hash=content_hash,
+            source="manual",
+        )
+        session.add(document)
+        session.add(revision)
+        character_position = int(
+            session.scalar(
+                select(func.coalesce(func.max(NovelCharacter.position), -1)).where(
+                    NovelCharacter.novel_id == novel_id
+                )
+            )
+            or 0
+        ) + 1
+        for offset, (name, voice) in enumerate(character_voices):
+            character = NovelCharacter(
+                id=uuid4(),
+                novel_id=novel_id,
+                role_type="supporting",
+                name=name,
+                description="",
+                details={},
+                lifecycle_state="active",
+                position=character_position + offset,
+                version=1,
+            )
+            character_ids[name] = character.id
+            session.add(character)
+            session.flush()
+            session.add(
+                CharacterVoiceBinding(
+                    id=uuid4(),
+                    novel_id=novel_id,
+                    character_id=character.id,
+                    profile_id=voice.profile_id,
+                    voice_version_id=voice.version_id,
+                    binding_policy="dedicated",
+                    language="zh-CN",
+                    parameters_json={},
+                    version=1,
+                )
+            )
+
         session.flush()
         store = SqlAlchemyNarrationStore(session)
         snapshot = create_settings_snapshot(
             store,
-            CreateSettingsSnapshot(novel_id=novel.id, settings_version=1),
+            CreateSettingsSnapshot(novel_id=novel_id, settings_version=1),
         )
         request = create_request(
             store,
             CreateNarrationRequest(
-                novel_id=novel.id,
+                novel_id=novel_id,
                 document_id=document.id,
                 source_revision_id=revision.id,
                 source_content_hash=revision.content_hash,
@@ -431,7 +453,7 @@ def _seed_review(
         assert request.state == "review_required"
         assert request.current_review_version_id == resource.script_version_id
     return _ReviewSeed(
-        novel_id=novel.id,
+        novel_id=novel_id,
         document_id=document_id,
         revision_id=revision_id,
         request_id=request_id,
@@ -702,9 +724,12 @@ def test_reverse_voice_approval_lock_plan_has_no_postgresql_deadlock(
     pg_engine: Engine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    voice_one, voice_two = _shared_voice_pair(pg_engine, marker="approve-lock")
+    novel_id, voice_one, voice_two = _shared_voice_pair(
+        pg_engine, marker="approve-lock"
+    )
     seed_one = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="approve-lock-a",
         source=(
             "“第一句。”甲舟说道。\n\n---\n\n"
@@ -714,6 +739,7 @@ def test_reverse_voice_approval_lock_plan_has_no_postgresql_deadlock(
     )
     seed_two = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="approve-lock-b",
         source=(
             "“第一句。”丙川说道。\n\n---\n\n"
@@ -770,9 +796,12 @@ def test_voice_lock_route_and_review_share_version_then_profile_order(
     pg_engine: Engine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    voice, _unused = _shared_voice_pair(pg_engine, marker="cross-route")
+    novel_id, voice, _unused = _shared_voice_pair(
+        pg_engine, marker="cross-route"
+    )
     seed = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="cross-route",
         source="“交错锁验证。”甲锁说道。",
         character_voices=(("甲锁", voice),),
@@ -963,15 +992,19 @@ def test_reverse_patch_authority_lock_plan_has_no_postgresql_deadlock(
     pg_engine: Engine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    voice_one, voice_two = _shared_voice_pair(pg_engine, marker="patch-lock")
+    novel_id, voice_one, voice_two = _shared_voice_pair(
+        pg_engine, marker="patch-lock"
+    )
     seed_one = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="patch-lock-a",
         source="“已有归属。”乙湖说道。\n\n---\n\n“陌生结尾。”",
         character_voices=(("甲林", voice_one), ("乙湖", voice_two)),
     )
     seed_two = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="patch-lock-b",
         source="“已有归属。”丙海说道。\n\n---\n\n“陌生结尾。”",
         character_voices=(("丙海", voice_one), ("丁峰", voice_two)),
@@ -1030,9 +1063,12 @@ def test_reverse_patch_authority_lock_plan_has_no_postgresql_deadlock(
 def test_patch_same_key_replays_and_different_key_loses_request_cas(
     pg_engine: Engine,
 ) -> None:
-    voice_one, _voice_two = _shared_voice_pair(pg_engine, marker="patch-keys")
+    novel_id, voice_one, _voice_two = _shared_voice_pair(
+        pg_engine, marker="patch-keys"
+    )
     same_seed = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="patch-same-key",
         source="“没有说话提示。”",
         character_voices=(("甲子", voice_one),),
@@ -1055,6 +1091,7 @@ def test_patch_same_key_replays_and_different_key_loses_request_cas(
 
     different_seed = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="patch-different-key",
         source="“仍然没有说话提示。”",
         character_voices=(("乙子", voice_one),),
@@ -1089,9 +1126,12 @@ def test_patch_same_key_replays_and_different_key_loses_request_cas(
 def test_approve_same_key_replays_and_different_key_has_one_production_graph(
     pg_engine: Engine,
 ) -> None:
-    voice_one, _voice_two = _shared_voice_pair(pg_engine, marker="approve-keys")
+    novel_id, voice_one, _voice_two = _shared_voice_pair(
+        pg_engine, marker="approve-keys"
+    )
     same_seed = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="approve-same-key",
         source="“我来了。”甲辰说道。",
         character_voices=(("甲辰", voice_one),),
@@ -1112,6 +1152,7 @@ def test_approve_same_key_replays_and_different_key_has_one_production_graph(
 
     different_seed = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="approve-different-key",
         source="“出发。”乙辰说道。",
         character_voices=(("乙辰", voice_one),),
@@ -1144,9 +1185,12 @@ def test_approve_same_key_replays_and_different_key_has_one_production_graph(
 def test_policy_and_queue_failures_roll_back_real_backend_transaction(
     pg_engine: Engine,
 ) -> None:
-    voice_one, _voice_two = _shared_voice_pair(pg_engine, marker="rollback")
+    novel_id, voice_one, _voice_two = _shared_voice_pair(
+        pg_engine, marker="rollback"
+    )
     seed = _seed_review(
         pg_engine,
+        novel_id=novel_id,
         marker="rollback",
         source="“回滚验证。”甲戌说道。",
         character_voices=(("甲戌", voice_one),),

@@ -1141,6 +1141,64 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     color: #fff;
   }
 
+  @media (max-width: 768px) {
+    .anw-script-review-shell {
+      inset: 0;
+      width: 100%;
+      border: 0;
+      border-radius: 0;
+    }
+
+    .anw-script-review__header,
+    .anw-script-review__footer,
+    .anw-script-review__snapshot,
+    .anw-script-review__filters,
+    .anw-script-review__snapshot-choice,
+    .anw-script-review__error,
+    .anw-script-review__global-issues {
+      padding-inline: 14px;
+    }
+
+    .anw-script-review__header {
+      gap: 12px;
+      padding-block: 14px 12px;
+    }
+
+    .anw-script-review__compact-player {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+      padding-inline: 14px;
+    }
+
+    .anw-script-review__compact-player-actions,
+    .anw-script-review__segment-actions {
+      flex-wrap: wrap;
+    }
+
+    .anw-script-review__workspace {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      padding: 0 14px 16px;
+    }
+
+    .anw-script-review__guide {
+      position: static;
+    }
+
+    .anw-script-review__segment-actions button {
+      flex: 1 1 150px;
+    }
+
+    .anw-script-review__footer {
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .anw-script-review__footer button {
+      flex: 1 0 100%;
+    }
+  }
+
   .anw-narration-edition-confirm__copy {
     display: grid;
     gap: 8px;

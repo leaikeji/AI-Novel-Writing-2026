@@ -349,11 +349,6 @@ def _immutable_script_resource(resource: dict[str, Any]) -> dict[str, Any]:
         segment.pop("allowed_actions", None)
         segment.pop("editable", None)
     return result
-    assert harness.store.find_all(
-        NarrationScriptReviewActionRecord,
-        request_id=request.id,
-        action_kind="approve",
-    ) == []
 
 
 def test_http_manual_correction_approval_continues_same_request_to_real_edition(
@@ -477,6 +472,78 @@ def test_http_manual_correction_approval_continues_same_request_to_real_edition(
     assert _graph_snapshot(harness.store) == approval_graph
     assert len(harness.queue.calls) == approval_queue_calls
 
+
+def test_http_legacy_local_owner_request_keeps_actor_through_review_and_edition(
+    harness: HttpReviewHarness,
+) -> None:
+    workflow, parent = _start_always_review(harness)
+    request_id = UUID(workflow["request_id"])
+    request = harness.store.get(NarrationRequest, request_id)
+    assert request is not None
+    request.explicit_generation_actor = "local-owner"
+
+    child, review_workflow, patch_body = _patch_review(harness, workflow, parent)
+    assert request.explicit_generation_actor == "local-owner"
+    after_patch = _graph_snapshot(harness.store)
+    patch_replay = harness.client.patch(
+        (
+            f"/narration-script-versions/{parent['script_version_id']}"
+            f"/segments/{parent['segments'][0]['segment_id']}"
+        ),
+        headers={"Idempotency-Key": PATCH_KEY},
+        json=patch_body,
+    )
+    assert patch_replay.status_code == 201, patch_replay.text
+    assert _immutable_script_resource(
+        patch_replay.json()
+    ) == _immutable_script_resource(child)
+    assert _graph_snapshot(harness.store) == after_patch
+    assert request.explicit_generation_actor == "local-owner"
+
+    approval_body = _approve_body(review_workflow, child)
+    approval_response = harness.client.post(
+        f"/narration-script-versions/{child['script_version_id']}/approve",
+        headers={"Idempotency-Key": APPROVE_KEY},
+        json=approval_body,
+    )
+    assert approval_response.status_code == 200, approval_response.text
+    approved = approval_response.json()
+    assert approved["state"] == "approved"
+
+    request_response = harness.client.get(f"/narration-requests/{request_id}")
+    assert request_response.status_code == 200, request_response.text
+    current = request_response.json()
+    assert current["edition_id"] is not None
+    edition_response = harness.client.get(
+        f"/narration-editions/{current['edition_id']}"
+    )
+    assert edition_response.status_code == 200, edition_response.text
+    assert edition_response.json()["request_id"] == str(request_id)
+    assert request.explicit_generation_actor == "local-owner"
+
+    editions = harness.store.find_all(NarrationEdition, request_id=request_id)
+    actions = harness.store.find_all(
+        NarrationScriptReviewActionRecord,
+        request_id=request_id,
+    )
+    versions = harness.store.find_all(
+        NarrationScriptVersion,
+        script_id=UUID(child["script_id"]),
+    )
+    assert len(editions) == 1
+    assert [action.action_kind for action in actions] == ["patch_segment", "approve"]
+    assert len(versions) == 2
+
+    after_approval = _graph_snapshot(harness.store)
+    approval_replay = harness.client.post(
+        f"/narration-script-versions/{child['script_version_id']}/approve",
+        headers={"Idempotency-Key": APPROVE_KEY},
+        json=approval_body,
+    )
+    assert approval_replay.status_code == 200, approval_replay.text
+    assert approval_replay.json() == approved
+    assert _graph_snapshot(harness.store) == after_approval
+    assert request.explicit_generation_actor == "local-owner"
 
 @pytest.mark.parametrize(
     "policy_mode",

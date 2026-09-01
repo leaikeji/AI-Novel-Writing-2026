@@ -902,17 +902,19 @@ def test_live_postgresql_upgrade_guards_and_conditional_rollback() -> None:
                  "novel": novel_a, "hash": "0" * 64, "key": str(uuid4())})
 
             generation_a, generation_b = uuid4(), uuid4()
-            for generation_id, novel_id, marker in (
-                (generation_a, novel_a, "2"), (generation_b, novel_b, "3"),
+            for generation_id, novel_id, marker, generation_actor in (
+                (generation_a, novel_a, "2", "local-owner"),
+                (generation_b, novel_b, "3", "owner"),
             ):
                 connection.execute(text("""INSERT INTO narration_requests
                     (id,owner_id,workspace_id,novel_id,intent,request_hash,idempotency_key,
                      settings_fingerprint,force_review,effective_policy,state,version,
                      explicit_generation_intent_at,explicit_generation_actor)
                     VALUES (:id,:owner,:workspace,:novel,'batch',:hash,:key,:hash,false,
-                            'blockers_only','created',1,now(),'owner')"""),
+                            'blockers_only','created',1,now(),:generation_actor)"""),
                     {"id": generation_id, "owner": LOCAL_OWNER_ID, "workspace": LOCAL_WORKSPACE_ID,
-                     "novel": novel_id, "hash": marker * 64, "key": str(uuid4())})
+                     "novel": novel_id, "hash": marker * 64, "key": str(uuid4()),
+                     "generation_actor": generation_actor})
             connection.execute(text("""INSERT INTO narration_request_sources
                 (id,request_id,novel_id,document_id,revision_id,content_hash,position)
                 VALUES (:id,:request,:novel,:document,:revision,:hash,0)"""),

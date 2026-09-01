@@ -17,7 +17,19 @@
 1. PostgreSQL 健康后，以管理员专属 pgpass 启动一次 `bootstrap.sh`；显式传入预期数据库、预期管理员及二者组成的确认哨兵。
 2. 迁移 service 仅挂 migrator pgpass，调用 `migrate-as-owner.sh upgrade head`。包装器以 `ai_novel_migrator` 登录，再固定 `SET ROLE ai_novel_schema_owner`；迁移专用 search path 是 owner 独占 CREATE 的 `public,pg_catalog`，URL 不含密码。
 3. 迁移完成后再次运行 `bootstrap.sh`，把新对象纳入 owner/ACL/default-ACL 门禁。
-4. 运行 `scripts/tts/validate_database_roles.py`；只有角色、owner、ACL、实际登录及 raw-DML 负测都通过，才允许考虑切换运行连接。
+4. 运行 `scripts/tts/validate_database_roles.py`，并用必填的 `--expected-head` 明确指定目标库版本；只有角色、owner、ACL、实际登录及 raw-DML 负测都通过，才允许考虑切换运行连接。
+
+角色校验只接受以下三个已审计 head，不会从仓库、脚本默认值或数据库自身猜测期望版本：
+
+| 显式 `--expected-head` | 保护表数量 | 用途 |
+| --- | ---: | --- |
+| `20260829_0034` | 62 | 历史隔离兼容验证 |
+| `20260830_0035` | 65 | 当前长期库迁移前只读预检 |
+| `20260901_0036` | 67 | 当前候选发布验证 |
+
+`protected-tables.sql` 保存当前 `0036` 的 67 表全集；其中 66 张是 ORM 业务表，`alembic_version` 是唯一系统表。旧版本集合是该全集的严格子集。SQL 通过 catalog join 只处理目标库中已存在的表，但长期 `0035` 在迁移前只运行 65 表只读校验，不提前改 ACL；迁移至 `0036` 后才重新执行 bootstrap 并要求 67 表通过。验证器还会拒绝未进入保护清单、也没有非 TTS 理由 allowlist 的 `narration_*`、`voice_*`、`character_*`、媒体和后台任务权威表。
+
+测试环境同样必须显式设置 `TTS_ROLE_TEST_EXPECTED_HEAD`；未设置时 PostgreSQL 集成用例保持跳过，不回退到隐含默认值。此矩阵只扩充读取验证覆盖，不向 API、worker、`PUBLIC` 或任何其他主体授予新权限。
 
 一次性 bootstrap service 至少需要这些环境变量：
 

@@ -10,12 +10,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from alembic.config import Config
-from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.exc import DBAPIError
@@ -76,23 +73,14 @@ from tests.narration.test_domain_services import (
 )
 from tests.narration.test_foundation_integration import POSTPROCESS_FINGERPRINT
 from tests.narration.test_publication_postgres import _seed_scope_foundation
+from tests.narration.current_schema_gate import assert_database_at_repository_head
 
 
-ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_REVISION = "20260829_0034"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 SCOPE = NarrationRequestScope.fixed_local()
 FAILURE_CODE = "NANO_AUDIO_INVALID"
-
-
-def _repository_head() -> str:
-    config = Config(str(ROOT / "alembic.ini"))
-    heads = ScriptDirectory.from_config(config).get_heads()
-    if heads != [EXPECTED_REVISION]:
-        raise RuntimeError(f"failed-segment gate requires head {EXPECTED_REVISION}")
-    return heads[0]
 
 
 def _live_url() -> str:
@@ -128,9 +116,7 @@ def failed_retry_pg_engine() -> Engine:
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT current_database()")) == EXPECTED_DATABASE
         assert connection.scalar(text("SELECT current_user")) == EXPECTED_USERNAME
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            _repository_head()
-        )
+        assert_database_at_repository_head(connection)
         server_version = connection.scalar(text("SHOW server_version"))
         assert isinstance(server_version, str) and server_version.startswith("18.")
     try:
