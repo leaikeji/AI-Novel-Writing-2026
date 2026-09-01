@@ -11,6 +11,7 @@ import {
   RelationshipGraph,
   RelationshipGraphController,
 } from "./relationship-graph";
+import { toggleElementFullscreen } from "./relationship-fullscreen";
 import { relationshipSyncPresentation } from "./relationship-sync-presentation";
 import {
   CharacterRelationshipRecord,
@@ -30,6 +31,8 @@ const { Alert, Button, Empty, Modal, Select, Spin } = host.antd;
 const {
   ExclamationCircleOutlined,
   ExpandOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
   LinkOutlined,
   MinusOutlined,
   PlusOutlined,
@@ -118,13 +121,24 @@ export function RelationshipWorkspace({
   const [autoSyncModelLabel, setAutoSyncModelLabel] = React.useState("");
   const [scale, setScale] = React.useState(1);
   const [dirty, setDirty] = React.useState(false);
+  const [fullscreen, setFullscreen] = React.useState(false);
   const [focusCharacterId, setFocusCharacterId] = React.useState("");
   const [kindFilter, setKindFilter] = React.useState("all" as "all" | RelationshipKind);
   const [directionFilter, setDirectionFilter] = React.useState(
     "all" as "all" | RelationshipDirectionality,
   );
   const controllerRef = React.useRef(null as RelationshipGraphController | null);
+  const canvasShellRef = React.useRef(null as HTMLDivElement | null);
   const syncInFlightRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const syncFullscreenState = () => {
+      setFullscreen(document.fullscreenElement === canvasShellRef.current);
+      window.requestAnimationFrame(() => controllerRef.current?.fit());
+    };
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
 
   const syncRelationships = React.useCallback(async (forceNew: boolean) => {
     if (syncInFlightRef.current) return;
@@ -292,6 +306,17 @@ export function RelationshipWorkspace({
     }
   };
 
+  const toggleFullscreen = async () => {
+    const target = canvasShellRef.current;
+    if (!target) return;
+    setError("");
+    try {
+      await toggleElementFullscreen(target);
+    } catch (reason) {
+      setError(readError(reason));
+    }
+  };
+
   const relationLabel = (relationship: CharacterRelationshipRecord): string => {
     const source = characters.find(
       (character) => character.id === relationship.source_character_id,
@@ -316,130 +341,139 @@ export function RelationshipWorkspace({
     { className: "mb-relationship-workspace" },
     h(
       "div",
-      { className: "mb-relation-heading" },
-      h("h3", null, "角色关系网"),
-      h("p", null, "已确认的关系情报会随章节同步写入；完整关系网由作者显式生成，角色和连线可人工修正"),
-      h(
-        "div",
-        {
-          className: `mb-relation-ai-status${autoSyncBusy ? " is-syncing" : ""}${autoSyncError ? " is-error" : ""}`,
-          role: "status",
-          "aria-live": "polite",
+      {
+        className: `mb-relation-ai-status${autoSyncBusy ? " is-syncing" : ""}${autoSyncError ? " is-error" : ""}`,
+        role: "status",
+        "aria-live": "polite",
+      },
+      h("span", { className: "mb-relation-ai-icon" }, autoSyncBusy ? h(Spin, { size: "small" }) : h(RobotOutlined)),
+      h("span", { className: "mb-relation-ai-copy" }, h("strong", null, autoSyncPresentation.title), h("small", null, autoSyncPresentation.description)),
+      h(Button, {
+        type: "text",
+        size: "small",
+        icon: h(ReloadOutlined),
+        disabled: autoSyncPresentation.actionDisabled,
+        onClick: () => {
+          if (autoSyncPresentation.action === "reload-status") {
+            void loadAutoSyncStatus();
+            return;
+          }
+          void requestRelationshipSync(autoSyncPresentation.forceNew);
         },
-        h("span", { className: "mb-relation-ai-icon" }, autoSyncBusy ? h(Spin, { size: "small" }) : h(RobotOutlined)),
-        h("span", { className: "mb-relation-ai-copy" }, h("strong", null, autoSyncPresentation.title), h("small", null, autoSyncPresentation.description)),
-        h(Button, {
-          type: "text",
-          size: "small",
-          icon: h(ReloadOutlined),
-          disabled: autoSyncPresentation.actionDisabled,
-          onClick: () => {
-            if (autoSyncPresentation.action === "reload-status") {
-              void loadAutoSyncStatus();
-              return;
-            }
-            void requestRelationshipSync(autoSyncPresentation.forceNew);
-          },
-        }, autoSyncPresentation.actionLabel),
-      ),
+      }, autoSyncPresentation.actionLabel),
     ),
     h(
       "div",
-      { className: "mb-relation-overlay-stack" },
-      error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
+      { className: "mb-relation-canvas-shell", ref: canvasShellRef },
       h(
         "div",
-        { className: "mb-relation-toolbar", role: "toolbar", "aria-label": "关系图工具栏" },
+        { className: "mb-relation-overlay-stack" },
+        error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
         h(
           "div",
-          { className: "mb-relation-filter-tools", role: "group", "aria-label": "关系筛选" },
-          h(Select, {
-            className: "mb-relation-character-search",
-            popupClassName: "mb-relation-filter-dropdown",
-            allowClear: true,
-            showSearch: true,
-            value: focusCharacterId || undefined,
-            placeholder: "搜索并聚焦角色",
-            suffixIcon: h(SearchOutlined),
-            optionFilterProp: "label",
-            options: characters.map((character) => ({ label: character.name, value: character.id })),
-            onChange: (value: string | undefined) => {
-              setFocusCharacterId(value || "");
-              if (value) controllerRef.current?.focusNode(value);
-            },
-          }),
-          h(Select, {
-            popupClassName: "mb-relation-filter-dropdown",
-            value: kindFilter,
-            options: KIND_OPTIONS,
-            onChange: (value: "all" | RelationshipKind) => setKindFilter(value),
-            "aria-label": "按关系分类筛选",
-          }),
-          h(Select, {
-            popupClassName: "mb-relation-filter-dropdown",
-            value: directionFilter,
-            options: DIRECTION_OPTIONS,
-            onChange: (value: "all" | RelationshipDirectionality) => setDirectionFilter(value),
-            "aria-label": "按关系方向筛选",
-          }),
-        ),
-        h(
-          "div",
-          { className: "mb-relation-edit-tools" },
-          legacyCount
-            ? h(
-                "button",
-                {
-                  type: "button",
-                  className: `mb-relation-legacy-chip${directionFilter === "legacy_unspecified" ? " is-active" : ""}`,
-                  title: "只查看方向待确认的旧关系",
-                  onClick: () => setDirectionFilter("legacy_unspecified"),
-                },
-                h(ExclamationCircleOutlined),
-                `${legacyCount} 条方向待确认`,
-              )
-            : h("span", { className: "mb-relation-toolbar-spacer" }),
+          { className: "mb-relation-toolbar", role: "toolbar", "aria-label": "关系图工具栏" },
           h(
             "div",
-            { className: "mb-relation-view-tools", role: "group", "aria-label": "画布视图控制" },
-            h(Button, { size: "small", icon: h(MinusOutlined), title: "缩小", "aria-label": "缩小关系图", onClick: () => controllerRef.current?.zoomOut() }),
-            h("span", { className: "mb-relation-scale", "aria-live": "polite" }, `${Math.round(scale * 100)}%`),
-            h(Button, { size: "small", icon: h(PlusOutlined), title: "放大", "aria-label": "放大关系图", onClick: () => controllerRef.current?.zoomIn() }),
-            h(Button, { size: "small", icon: h(ExpandOutlined), title: "适应画布", "aria-label": "适应画布", onClick: () => controllerRef.current?.fit() }),
-            h(Button, { size: "small", icon: h(ReloadOutlined), title: "自动排布", "aria-label": "自动排布", onClick: () => controllerRef.current?.autoLayout() }),
+            { className: "mb-relation-filter-tools", role: "group", "aria-label": "关系筛选" },
+            h(Select, {
+              className: "mb-relation-character-search",
+              popupClassName: "mb-relation-filter-dropdown",
+              allowClear: true,
+              showSearch: true,
+              value: focusCharacterId || undefined,
+              placeholder: "搜索并聚焦角色",
+              suffixIcon: h(SearchOutlined),
+              getPopupContainer: () => canvasShellRef.current ?? document.body,
+              optionFilterProp: "label",
+              options: characters.map((character) => ({ label: character.name, value: character.id })),
+              onChange: (value: string | undefined) => {
+                setFocusCharacterId(value || "");
+                if (value) controllerRef.current?.focusNode(value);
+              },
+            }),
+            h(Select, {
+              popupClassName: "mb-relation-filter-dropdown",
+              getPopupContainer: () => canvasShellRef.current ?? document.body,
+              value: kindFilter,
+              options: KIND_OPTIONS,
+              onChange: (value: "all" | RelationshipKind) => setKindFilter(value),
+              "aria-label": "按关系分类筛选",
+            }),
+            h(Select, {
+              popupClassName: "mb-relation-filter-dropdown",
+              getPopupContainer: () => canvasShellRef.current ?? document.body,
+              value: directionFilter,
+              options: DIRECTION_OPTIONS,
+              onChange: (value: "all" | RelationshipDirectionality) => setDirectionFilter(value),
+              "aria-label": "按关系方向筛选",
+            }),
           ),
-          h(Button, { icon: h(LinkOutlined), className: "anw-primary-button mb-relation-add", disabled: characters.length < 2, onClick: onAddRelationship }, "新增关系"),
+          h(
+            "div",
+            { className: "mb-relation-edit-tools" },
+            legacyCount
+              ? h(
+                  "button",
+                  {
+                    type: "button",
+                    className: `mb-relation-legacy-chip${directionFilter === "legacy_unspecified" ? " is-active" : ""}`,
+                    title: "只查看方向待确认的旧关系",
+                    onClick: () => setDirectionFilter("legacy_unspecified"),
+                  },
+                  h(ExclamationCircleOutlined),
+                  `${legacyCount} 条方向待确认`,
+                )
+              : h("span", { className: "mb-relation-toolbar-spacer" }),
+            h(
+              "div",
+              { className: "mb-relation-view-tools", role: "group", "aria-label": "画布视图控制" },
+              h(Button, { size: "small", icon: h(MinusOutlined), title: "缩小", "aria-label": "缩小关系图", onClick: () => controllerRef.current?.zoomOut() }),
+              h("span", { className: "mb-relation-scale", "aria-live": "polite" }, `${Math.round(scale * 100)}%`),
+              h(Button, { size: "small", icon: h(PlusOutlined), title: "放大", "aria-label": "放大关系图", onClick: () => controllerRef.current?.zoomIn() }),
+              h(Button, { size: "small", icon: h(ExpandOutlined), title: "适应画布", "aria-label": "适应画布", onClick: () => controllerRef.current?.fit() }),
+              h(Button, { size: "small", icon: h(ReloadOutlined), title: "自动排布", "aria-label": "自动排布", onClick: () => controllerRef.current?.autoLayout() }),
+              h(Button, {
+                size: "small",
+                icon: h(fullscreen ? FullscreenExitOutlined : FullscreenOutlined),
+                title: fullscreen ? "退出全屏" : "全屏显示",
+                "aria-label": fullscreen ? "退出关系图全屏" : "全屏显示关系图",
+                "aria-pressed": fullscreen,
+                onClick: () => void toggleFullscreen(),
+              }),
+            ),
+            h(Button, { icon: h(LinkOutlined), className: "anw-primary-button mb-relation-add", disabled: characters.length < 2, onClick: onAddRelationship }, "新增关系"),
+          ),
         ),
       ),
-    ),
-    h(
-      "div",
-      { className: "mb-relation-stage" },
-      h(RelationshipGraph, {
-        characters,
-        relationships: visibleRelationships,
-        view,
-        controllerRef,
-        focusCharacterId,
-        onCharacterClick: (character: NovelCharacterRecord) => onEditCharacter(character.id),
-        onRelationshipClick: (relationship: CharacterRelationshipRecord) => onEditRelationship(relationship.id),
-        onViewStateChange: (nextScale: number, nextDirty: boolean) => {
-          setScale(nextScale);
-          if (nextDirty) setDirty(true);
-        },
-      }),
-      dirty
-        ? h(
-            "div",
-            { className: "mb-relation-layout-actions", role: "status" },
-            h("span", null, "布局有改动"),
-            h(Button, { size: "small", onClick: () => void loadView() }, "撤销"),
-            h(Button, { size: "small", icon: h(SaveOutlined), className: "anw-primary-button", loading: saving, onClick: () => void saveLayout() }, "保存"),
-          )
-        : null,
-      visibleRelationships.length === 0 && relationships.length > 0
-        ? h("div", { className: "mb-relation-filter-empty" }, "当前筛选条件下没有关系")
-        : null,
+      h(
+        "div",
+        { className: "mb-relation-stage" },
+        h(RelationshipGraph, {
+          characters,
+          relationships: visibleRelationships,
+          view,
+          controllerRef,
+          focusCharacterId,
+          onCharacterClick: (character: NovelCharacterRecord) => onEditCharacter(character.id),
+          onRelationshipClick: (relationship: CharacterRelationshipRecord) => onEditRelationship(relationship.id),
+          onViewStateChange: (nextScale: number, nextDirty: boolean) => {
+            setScale(nextScale);
+            if (nextDirty) setDirty(true);
+          },
+        }),
+        dirty
+          ? h(
+              "div",
+              { className: "mb-relation-layout-actions", role: "status" },
+              h("span", null, "布局有改动"),
+              h(Button, { size: "small", onClick: () => void loadView() }, "撤销"),
+              h(Button, { size: "small", icon: h(SaveOutlined), className: "anw-primary-button", loading: saving, onClick: () => void saveLayout() }, "保存"),
+            )
+          : null,
+        visibleRelationships.length === 0 && relationships.length > 0
+          ? h("div", { className: "mb-relation-filter-empty" }, "当前筛选条件下没有关系")
+          : null,
+      ),
     ),
     h(
       "section",

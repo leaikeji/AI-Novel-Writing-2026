@@ -1560,9 +1560,9 @@ export function ensureNovelStyles(): void {
     .mb-inline-empty { display:grid; min-height:86px; place-items:center; border:1px dashed rgba(145,149,158,.3); border-radius:7px; color:#a0a4ab; }
     .mb-relationship-panel,.mb-relationship-workspace { display:grid; gap:16px; min-width:0; }
     .mb-relationship-workspace { position:relative; gap:12px; }
-    .mb-relation-heading { display:grid; justify-items:center; gap:5px; text-align:center; }
-    .mb-relation-heading h3 { margin:0; color:#30343b; font-size:18px; }
-    .mb-relation-heading p { margin:0; color:#969aa1; font-size:12px; }
+    .mb-relation-canvas-shell { display:grid; min-width:0; gap:12px; }
+    .mb-relation-canvas-shell:fullscreen { width:100vw; height:100dvh; grid-template-rows:auto minmax(0,1fr); padding:16px; color:#30343b; background:#f7f8fa; }
+    .mb-relation-canvas-shell:fullscreen .mb-relation-stage { height:auto; min-height:0; }
     .mb-relation-ai-status { display:flex; width:100%; min-width:0; min-height:40px; align-items:center; gap:8px; border:1px solid #dce9e2; border-radius:8px; padding:6px 8px 6px 10px; color:#39745a; background:#f7fbf8; box-shadow:none; text-align:left; }
     .mb-relation-ai-status.is-syncing { border-color:#f0ddc9; color:#b7653d; background:#fff9f4; }
     .mb-relation-ai-status.is-error { border-color:#f3d5d5; color:#b34f4f; background:#fff8f8; }
@@ -1606,7 +1606,7 @@ export function ensureNovelStyles(): void {
     .mb-relation-view-tools .qwenpaw-btn { width:30px; min-width:30px; height:30px; padding:0!important; }
     .mb-relation-scale { width:44px; color:#69717c; font-size:11px; font-variant-numeric:tabular-nums; text-align:center; }
     .mb-relation-add { min-width:100px; }
-    .mb-relation-stage { position:relative; height:540px; min-height:540px; border:1px solid #e5e7ea; border-radius:10px; overflow:hidden; background:linear-gradient(#fdfdfe,#fbfbfc); }
+    .mb-relation-stage { position:relative; height:clamp(660px,70dvh,860px); min-height:660px; border:1px solid #e5e7ea; border-radius:10px; overflow:hidden; background:linear-gradient(#fdfdfe,#fbfbfc); }
     .mb-relation-network { width:100%; height:100%; outline:0; }
     .mb-relation-network:focus-visible { box-shadow:inset 0 0 0 2px rgba(255,117,72,.58); }
     .mb-relation-layout-actions { position:absolute; z-index:3; right:12px; bottom:12px; display:flex; align-items:center; gap:6px; border:1px solid #ffd6c6; border-radius:9px; padding:5px 6px 5px 10px; color:#c65e3b; background:rgba(255,250,247,.97); box-shadow:0 5px 16px rgba(48,43,40,.1); font-size:11px; backdrop-filter:blur(8px); }
@@ -1869,8 +1869,8 @@ export function ensureNovelStyles(): void {
     @media (min-width: 2300px) {
       .mb-workbench { padding:34px 40px 42px; }
       .mb-panel-body { padding:24px 28px 44px; }
-      .mb-relation-stage,.mb-relation-canvas { height:598px; }
-      .mb-relation-stage { min-height:598px; }
+      .mb-relation-stage,.mb-relation-canvas { height:760px; }
+      .mb-relation-stage { min-height:760px; }
     }
 
     @media (max-width: 980px) {
@@ -2066,7 +2066,9 @@ export function ensureNovelStyles(): void {
       .mb-relation-toolbar .mb-relation-scale { align-self:center; }
       .mb-relation-view-tools { order:2; margin-left:0; }
       .mb-relation-add { margin-left:auto; }
-      .mb-relation-stage { height:430px; min-height:430px; }
+      .mb-relation-stage { height:520px; min-height:520px; }
+      .mb-relation-canvas-shell:fullscreen { padding:8px; }
+      .mb-relation-canvas-shell:fullscreen .mb-relation-stage { height:auto; min-height:0; }
       .mb-relation-accessible-list > header { align-items:start; flex-direction:column; gap:4px; }
       .mb-relation-accessible-list ul { grid-template-columns:1fr; }
       .mb-relationship-draft-grid { grid-template-columns:1fr; }
