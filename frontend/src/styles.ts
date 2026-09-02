@@ -1247,6 +1247,215 @@ export function ensureNovelStyles(): void {
     .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor.has-chapter-tree .anw-editor-topbar { width:min(1440px,calc(100% - 28px)); }
     .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor-scroll { grid-template-columns:minmax(0,1fr); }
     .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor-paper { grid-column:1; }
+
+    /*
+     * The host assistant changes the PawApp's real inline space without
+     * changing the viewport. These anonymous container queries therefore own
+     * the workbench degradation; viewport media queries remain only a mobile
+     * fallback. The anw-workbench-main element is the nearest inline-size container.
+     */
+    .anw-workbench-frame .mb-workbench[data-assistant-overlay="true"] {
+      container-type:inline-size;
+      display:grid;
+      height:100%;
+      min-height:0;
+      grid-template-columns:minmax(0,1fr);
+      grid-template-rows:auto minmax(0,1fr);
+      gap:0;
+      padding:0;
+      overflow:hidden;
+      background:#fff;
+    }
+
+    @container (max-width:1040px) {
+      .mb-workbench {
+        --mb-workbench-main-min:0px;
+        --mb-workbench-rail-width:220px;
+        --mb-workbench-gap:12px;
+        --mb-workbench-padding:12px;
+        min-width:0;
+        grid-template-columns:minmax(184px,220px) minmax(0,1fr);
+        overflow-x:hidden;
+      }
+      .mb-book-rail { min-width:0; padding:14px 12px; }
+      .mb-book-cover-wrap { max-width:170px; margin-bottom:12px; }
+      .mb-book-rail > h1,
+      .mb-book-rail > p,
+      .anw-current-model-card > span,
+      .anw-current-model-card > small { overflow-wrap:anywhere; }
+      .mb-workbench .mb-panel-header { min-width:0; min-height:64px; padding:12px 16px; }
+      .mb-workbench .mb-panel-header > h2 { min-width:0; font-size:21px; overflow-wrap:anywhere; }
+      .mb-workbench .mb-panel-actions { min-width:0; flex-wrap:wrap; justify-content:flex-end; }
+      .mb-workbench .mb-panel-body { min-width:0; padding:16px; overflow-x:hidden; }
+      .mb-workbench .mb-panel-body > * { min-width:0; max-width:100%; }
+    }
+
+    @container (max-width:760px) {
+      .mb-workbench,
+      .anw-workbench-frame[data-assistant-density="compact"] .mb-workbench,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-workbench {
+        display:grid;
+        height:100%;
+        min-height:0;
+        grid-template-columns:minmax(0,1fr);
+        grid-template-rows:auto minmax(0,1fr);
+        gap:0;
+        padding:0;
+        overflow:hidden;
+        background:#fff;
+      }
+      .mb-book-rail,
+      .anw-workbench-frame[data-assistant-density="compact"] .mb-book-rail,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-rail {
+        position:static;
+        display:grid;
+        width:100%;
+        max-height:236px;
+        grid-template-columns:64px minmax(0,1fr);
+        align-items:start;
+        column-gap:12px;
+        border:0;
+        border-bottom:1px solid #eceef1;
+        border-radius:0;
+        padding:10px 12px 0;
+        overflow-y:auto;
+        overflow-x:hidden;
+        box-shadow:none;
+      }
+      .mb-book-cover-wrap,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-cover-wrap {
+        grid-row:1/4;
+        width:64px;
+        max-width:64px;
+        margin:0;
+      }
+      .mb-book-cover-actions { display:none; }
+      .mb-book-rail > h1 { min-width:0; margin:0; font-size:17px; }
+      .mb-book-rail > p { min-width:0; min-height:0; max-height:34px; margin:2px 0 0; }
+      .mb-book-stats { min-width:0; margin:3px 0 7px; flex-wrap:wrap; }
+      .anw-current-model-card { grid-column:1/-1; margin:7px 0 0; padding:7px 9px; }
+      .anw-current-model-card > small { display:none; }
+      .mb-book-nav {
+        position:sticky;
+        z-index:8;
+        bottom:0;
+        display:flex;
+        min-width:0;
+        grid-column:1/-1;
+        gap:0;
+        margin:7px -12px 0;
+        border-top:1px solid #eff0f2;
+        padding:0;
+        overflow-x:auto;
+        overflow-y:hidden;
+        background:#fff;
+        overscroll-behavior-x:contain;
+      }
+      .mb-book-nav > button {
+        min-width:max-content;
+        min-height:44px;
+        flex:0 0 auto;
+        justify-content:center;
+        border-radius:0;
+        padding:0 13px;
+        background:#fff;
+        white-space:nowrap;
+      }
+      .mb-book-nav > button.is-active { outline:0; box-shadow:inset 0 -2px #ff7548; }
+      .mb-back-center-wrap { display:none; }
+      .mb-workbench-main {
+        width:100%;
+        min-width:0;
+        min-height:0;
+        border:0;
+        border-radius:0;
+        overflow:hidden;
+        box-shadow:none;
+      }
+      .mb-workbench .mb-panel-header,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-header {
+        min-width:0;
+        min-height:58px;
+        flex-wrap:wrap;
+        padding:10px 12px;
+      }
+      .mb-workbench .mb-panel-header > h2 { font-size:19px; }
+      .mb-workbench .mb-panel-actions { max-width:100%; overflow-x:auto; flex-wrap:nowrap; }
+      .mb-workbench .mb-panel-body,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-body {
+        min-width:0;
+        min-height:0;
+        padding:12px 12px 28px;
+        overflow-y:auto;
+        overflow-x:hidden;
+        overflow-wrap:anywhere;
+      }
+      .mb-workbench .mb-panel-body.is-chapters,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-body.is-chapters {
+        padding:0;
+      }
+      .mb-workbench .mb-role-overview { align-items:stretch; flex-direction:column; }
+      .mb-workbench .mb-role-grid,
+      .mb-workbench .mb-foreshadow-grid,
+      .mb-workbench .mb-template-grid,
+      .mb-workbench .mb-outline-cards,
+      .mb-workbench .mb-relationship-draft-grid { grid-template-columns:minmax(0,1fr); }
+      .mb-workbench .mb-chapter-master-detail,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-master-detail { display:block; }
+      .mb-workbench .mb-chapter-volume-pane,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-volume-pane {
+        border-right:0;
+        border-bottom:1px solid #eceef1;
+        padding:12px;
+        overflow:visible;
+      }
+      .mb-workbench .mb-chapter-volume-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .mb-workbench .mb-chapter-detail-pane { min-width:0; overflow:visible; }
+      .mb-workbench .mb-chapter-table,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-table {
+        max-width:calc(100% - 24px);
+        margin:12px;
+        overflow-x:auto;
+      }
+      .mb-workbench .mb-chapter-table-head,
+      .mb-workbench .mb-chapter-table-row,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-table-head,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-table-row {
+        min-width:650px;
+      }
+    }
+
+    @container (max-width:520px) {
+      .mb-book-rail,
+      .anw-workbench-frame[data-assistant-density="compact"] .mb-book-rail,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-rail {
+        grid-template-columns:minmax(0,1fr);
+      }
+      .mb-book-cover-wrap,
+      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-cover-wrap,
+      .mb-book-rail > p,
+      .mb-book-stats,
+      .anw-current-model-card { display:none; }
+      .mb-book-nav { margin-top:5px; }
+      .mb-workbench .mb-panel-header { align-items:flex-start; }
+      .mb-workbench .mb-panel-header > h2 { width:100%; }
+      .mb-workbench .mb-panel-actions { width:100%; justify-content:flex-start; }
+      .mb-workbench .mb-chapter-volume-list { grid-template-columns:minmax(0,1fr); }
+    }
+
+    @media (max-height:720px) and (min-width:721px) {
+      .mb-book-rail { padding-block:12px; }
+      .mb-book-cover-wrap { max-width:116px; margin-bottom:8px; }
+      .mb-book-rail > p { display:none; }
+      .mb-book-stats,.anw-current-model-card { margin-bottom:8px; }
+      .mb-book-nav {
+        min-height:112px;
+        flex:1 1 auto;
+        overflow-y:auto;
+        overscroll-behavior-y:contain;
+      }
+      .mb-back-center-wrap { flex:0 0 auto; padding-top:8px; }
+    }
     .mb-panel-header { display:flex; min-height:84px; align-items:center; justify-content:space-between; gap:20px; border-bottom:1px solid #eceef1; padding:18px 28px; }
     .mb-panel-header > h2 { margin:0; font-size:25px; line-height:1.3; }
     .mb-panel-actions { display:flex; align-items:center; gap:10px; }

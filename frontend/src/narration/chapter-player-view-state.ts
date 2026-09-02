@@ -90,7 +90,6 @@ export interface ChapterPlayerVoiceIdentityProjection {
   readonly key: string;
   readonly displayName: string;
   readonly sourceLabel: string;
-  readonly stableIdentifier: string;
   readonly legacy: boolean;
 }
 
@@ -106,12 +105,17 @@ export interface ChapterPlayerViewProjection {
   readonly currentTimeMs: number;
   readonly currentTimeLabel: string;
   readonly currentTimeBasis: "chapter" | "segment";
-  readonly currentSentenceLabel: string;
   readonly playableDurationMs: number | null;
   readonly playableDurationLabel: string;
-  readonly playableSentenceLabel: string;
   readonly voiceSummary: string;
   readonly voiceIdentities: readonly ChapterPlayerVoiceIdentityProjection[];
+}
+
+
+export interface ChapterPlaybackStartPosition {
+  readonly ordinal: number;
+  readonly offsetMs: number;
+  readonly resumeExistingSession: boolean;
 }
 
 
@@ -300,6 +304,38 @@ export function formatChapterPlayerTime(milliseconds: number): string {
 }
 
 
+export function chapterPlaybackHasEnded(
+  playerState: NarrationPlayerState | null,
+  segmentCount: number,
+  lastSegmentDurationMs?: number | null,
+): boolean {
+  const safeSegmentCount = Number.isSafeInteger(segmentCount) && segmentCount > 0
+    ? segmentCount
+    : 0;
+  if (safeSegmentCount === 0 || !playerState) return false;
+  if (playerState.phase === "ended") return true;
+  const currentOrdinal = playerState.currentOrdinal;
+  if (
+    currentOrdinal === null
+    || currentOrdinal === undefined
+    || !Number.isSafeInteger(currentOrdinal)
+    || currentOrdinal !== safeSegmentCount - 1
+  ) return false;
+  const manifestDuration = lastSegmentDurationMs !== null
+    && lastSegmentDurationMs !== undefined
+    && Number.isFinite(lastSegmentDurationMs)
+    && lastSegmentDurationMs > 0
+    ? Math.round(lastSegmentDurationMs)
+    : null;
+  const stateDuration = Number.isFinite(playerState.durationMs) && playerState.durationMs > 0
+    ? Math.round(playerState.durationMs)
+    : null;
+  const terminalDuration = manifestDuration ?? stateDuration;
+  return terminalDuration !== null
+    && Math.max(0, Math.round(playerState.offsetMs)) >= terminalDuration;
+}
+
+
 function voiceSourceLabel(identity: NarrationEditionVoiceIdentity): string {
   if (identity.legacy_fallback) return "历史音色标识";
   if (identity.source_type === "preset") return "官方预设";
@@ -322,9 +358,38 @@ function voiceIdentityProjection(
       ? LEGACY_EDITION_VOICE_NAME
       : identity.display_name,
     sourceLabel: voiceSourceLabel(identity),
-    stableIdentifier: identity.voice_version_id,
     legacy: identity.legacy_fallback,
   })));
+}
+
+
+export function resolveChapterPlaybackStartPosition(
+  playerState: NarrationPlayerState | null,
+  segmentCount: number,
+  lastSegmentDurationMs?: number | null,
+): ChapterPlaybackStartPosition {
+  const safeSegmentCount = Number.isSafeInteger(segmentCount) && segmentCount > 0
+    ? segmentCount
+    : 0;
+  if (chapterPlaybackHasEnded(playerState, safeSegmentCount, lastSegmentDurationMs)) {
+    return Object.freeze({ ordinal: 0, offsetMs: 0, resumeExistingSession: false });
+  }
+  const currentOrdinal = playerState?.currentOrdinal;
+  const hasValidOrdinal = currentOrdinal !== null
+    && currentOrdinal !== undefined
+    && Number.isSafeInteger(currentOrdinal)
+    && currentOrdinal >= 0
+    && currentOrdinal < safeSegmentCount;
+  if (!hasValidOrdinal) {
+    return Object.freeze({ ordinal: 0, offsetMs: 0, resumeExistingSession: false });
+  }
+  const validOrdinal = currentOrdinal;
+  const offsetMs = Math.max(0, Math.round(playerState?.offsetMs ?? 0));
+  return Object.freeze({
+    ordinal: validOrdinal,
+    offsetMs,
+    resumeExistingSession: playerState?.phase === "paused",
+  });
 }
 
 
@@ -346,7 +411,15 @@ export function deriveChapterPlayerView(
     : null;
   const identities = voiceIdentityProjection(input.voiceIdentities);
   const playbackPhase = input.playerState?.phase ?? "idle";
-  const playbackLabel = playbackPhase === "idle" && currentSentence !== null
+  const lastManifestSegment = manifestSegments?.[manifestSegments.length - 1];
+  const playbackEnded = chapterPlaybackHasEnded(
+    input.playerState,
+    input.segmentIds.length,
+    lastManifestSegment?.audio?.duration_ms,
+  );
+  const playbackLabel = playbackPhase === "idle" && playbackEnded
+    ? PLAYBACK_LABELS.ended
+    : playbackPhase === "idle" && currentSentence !== null
     ? `上次停在第 ${currentSentence} 段`
     : PLAYBACK_LABELS[playbackPhase];
   const voiceSummary = input.voiceIdentities === undefined
@@ -368,12 +441,8 @@ export function deriveChapterPlayerView(
     currentTimeMs: currentTime.milliseconds,
     currentTimeLabel: formatChapterPlayerTime(currentTime.milliseconds),
     currentTimeBasis: currentTime.basis,
-    currentSentenceLabel: `${currentSentence ?? "—"}/${input.segmentIds.length}`,
     playableDurationMs: durationMs,
     playableDurationLabel: durationMs === null ? "待计算" : formatChapterPlayerTime(durationMs),
-    playableSentenceLabel: states === null
-      ? `—/${input.segmentIds.length}`
-      : `${generation.readyCount}/${input.segmentIds.length}`,
     voiceSummary,
     voiceIdentities: identities,
   });

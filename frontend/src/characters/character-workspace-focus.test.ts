@@ -5,11 +5,12 @@ import {
   type CharacterReactRuntime,
 } from "./character-workspace";
 import type {
+  CharacterBatchRevertImpact,
   CharacterWorkspaceV2,
-  IntelligenceBatchRevertImpactV1,
   ProjectedFactViewV2,
 } from "./contracts";
-import { characterWorkspace } from "./test-fixtures";
+import type { StoryLedgerSourceExcerpt } from "../story-ledger";
+import { characterWorkspace, storyFactImpact } from "./test-fixtures";
 import {
   createReactHarness,
   findAll,
@@ -62,6 +63,46 @@ function workspaceWithSource(): CharacterWorkspaceV2 {
   };
 }
 
+function ledgerSource(
+  workspace: CharacterWorkspaceV2,
+  overrides: Partial<StoryLedgerSourceExcerpt> = {},
+): StoryLedgerSourceExcerpt {
+  const fact = workspace.writing_state.recent_changes[0];
+  return {
+    schema_version: "story-ledger-source/1",
+    novel_id: workspace.novel_id,
+    fact_id: fact.id,
+    ledger_snapshot_token: `ledger-snapshot-${workspace.story_ledger_version}`,
+    story_ledger_version: workspace.story_ledger_version,
+    timeline: {
+      mode: workspace.timeline_mode,
+      timeline_id: workspace.selected_timeline.id,
+      timeline_name: workspace.selected_timeline.name,
+      narrative_cutoff: workspace.projected_state.narrative_cutoff,
+    },
+    available: true,
+    unavailable_reason: null,
+    document_id: fact.source?.document_id ?? null,
+    document_title: fact.source?.document_title ?? null,
+    document_position: fact.source?.document_position ?? null,
+    revision_id: fact.source?.revision_id ?? null,
+    revision_number: 1,
+    revision_is_current: fact.source?.revision_is_current ?? null,
+    source_content_hash: fact.source?.source_content_hash ?? null,
+    source_range_hash: fact.source?.source_range_hash ?? null,
+    source_start: fact.source?.source_start ?? null,
+    source_end: fact.source?.source_end ?? null,
+    excerpt: "开始主动承担风险",
+    excerpt_start: 0,
+    excerpt_end: 8,
+    highlight_start: 0,
+    highlight_end: 8,
+    truncated_before: false,
+    truncated_after: false,
+    ...overrides,
+  };
+}
+
 function openGrowth(root: FakeElement): void {
   (findButton(root, "状态与经历").props.onClick as () => void)();
 }
@@ -88,10 +129,15 @@ class FocusElement {
   blurCount = 0;
   focusable: FocusElement[] = [];
   closeButton: FocusElement | null = null;
+  markNode: FocusElement | null = null;
   owner: FocusDocument | null = null;
+  readonly tagName: string;
+  tabIndex = 0;
+  scrollCount = 0;
 
-  constructor(id: string) {
+  constructor(id: string, tagName = "DIV") {
     this.id = id;
+    this.tagName = tagName;
   }
 
   focus(): void {
@@ -104,10 +150,15 @@ class FocusElement {
     if (this.owner?.activeElement === this) this.owner.activeElement = null;
   }
 
-  querySelector<T>(): T | null {
+  querySelector<T>(selector?: string): T | null {
+    if (selector === "mark") return this.markNode as T | null;
     return this.closeButton && !this.closeButton.disabled
       ? this.closeButton as T
       : null;
+  }
+
+  scrollIntoView(): void {
+    this.scrollCount += 1;
   }
 
   querySelectorAll<T>(): T[] {
@@ -153,6 +204,7 @@ afterEach(() => {
 describe("character workspace nested drawer focus", () => {
   it("keeps drawer and title ids unique when the same character is mounted twice", () => {
     const workspace = characterWorkspace();
+    const onLoadFactImpact = vi.fn().mockResolvedValue(storyFactImpact());
     const firstHarness = createReactHarness();
     const secondHarness = createReactHarness();
     const First = createCharacterWorkspaceDialog({
@@ -164,16 +216,16 @@ describe("character workspace nested drawer focus", () => {
       useId: () => ":workspace-b:",
     });
 
-    let firstRoot = firstHarness.render(First, { workspace });
-    let secondRoot = secondHarness.render(Second, { workspace });
+    let firstRoot = firstHarness.render(First, { workspace, onLoadFactImpact, onCorrectFact: vi.fn() });
+    let secondRoot = secondHarness.render(Second, { workspace, onLoadFactImpact, onCorrectFact: vi.fn() });
     openGrowth(firstRoot);
     openGrowth(secondRoot);
-    firstRoot = firstHarness.render(First, { workspace });
-    secondRoot = secondHarness.render(Second, { workspace });
+    firstRoot = firstHarness.render(First, { workspace, onLoadFactImpact, onCorrectFact: vi.fn() });
+    secondRoot = secondHarness.render(Second, { workspace, onLoadFactImpact, onCorrectFact: vi.fn() });
     clickWithCurrentTarget(firstRoot, "修正", {} as HTMLElement);
     clickWithCurrentTarget(secondRoot, "修正", {} as HTMLElement);
-    firstRoot = firstHarness.render(First, { workspace });
-    secondRoot = secondHarness.render(Second, { workspace });
+    firstRoot = firstHarness.render(First, { workspace, onLoadFactImpact, onCorrectFact: vi.fn() });
+    secondRoot = secondHarness.render(Second, { workspace, onLoadFactImpact, onCorrectFact: vi.fn() });
 
     const firstDrawer = findAll(firstRoot, (element) => (
       element.props.className === "anw-character-drawer anw-character-correction"
@@ -193,12 +245,15 @@ describe("character workspace nested drawer focus", () => {
 
   it("uses currentTarget, derives a unique correction title, traps Tab, and restores focus", async () => {
     const workspace = characterWorkspace();
+    const onLoadFactImpact = vi.fn().mockResolvedValue(storyFactImpact());
+    const onCorrectFact = vi.fn();
+    const props = { workspace, onLoadFactImpact, onCorrectFact };
     const harness = createReactHarness();
     const Component = createCharacterWorkspaceDialog(harness.React);
-    let root = harness.render(Component, { workspace });
+    let root = harness.render(Component, props);
     harness.commitEffects();
     openGrowth(root);
-    root = harness.render(Component, { workspace });
+    root = harness.render(Component, props);
 
     const focusDocument = installFocusDocument();
     const parentDialog = focusDocument.add(new FocusElement("character-workspace-character-1-dialog"));
@@ -213,7 +268,7 @@ describe("character workspace nested drawer focus", () => {
     decoy.focus();
 
     clickWithCurrentTarget(root, "修正", trigger as unknown as HTMLElement);
-    root = harness.render(Component, { workspace });
+    root = harness.render(Component, props);
     harness.commitEffects();
     await settle();
 
@@ -255,7 +310,7 @@ describe("character workspace nested drawer focus", () => {
     expect(focusDocument.activeElement).toBe(fieldNode);
 
     (findButton(drawer, "×").props.onClick as () => void)();
-    root = harness.render(Component, { workspace });
+    root = harness.render(Component, props);
     harness.commitEffects();
     await settle();
     expect(findAll(root, (element) => element.props.id === drawer.props.id)).toHaveLength(0);
@@ -265,12 +320,17 @@ describe("character workspace nested drawer focus", () => {
 
   it("falls back to the recent-changes heading after its trigger is unmounted", async () => {
     const workspace = characterWorkspace();
+    const props = {
+      workspace,
+      onLoadFactImpact: vi.fn().mockResolvedValue(storyFactImpact()),
+      onCorrectFact: vi.fn(),
+    };
     const harness = createReactHarness();
     const Component = createCharacterWorkspaceDialog(harness.React);
-    let root = harness.render(Component, { workspace });
+    let root = harness.render(Component, props);
     harness.commitEffects();
     openGrowth(root);
-    root = harness.render(Component, { workspace });
+    root = harness.render(Component, props);
 
     const focusDocument = installFocusDocument();
     const drawerNode = focusDocument.add(new FocusElement("character-workspace-character-1-correction-dialog"));
@@ -281,12 +341,12 @@ describe("character workspace nested drawer focus", () => {
     trigger.isConnected = false;
 
     clickWithCurrentTarget(root, "修正", trigger as unknown as HTMLElement);
-    root = harness.render(Component, { workspace });
+    root = harness.render(Component, props);
     harness.commitEffects();
     await settle();
     const drawer = findAll(root, (element) => element.props.id === drawerNode.id)[0];
     (findButton(drawer, "×").props.onClick as () => void)();
-    root = harness.render(Component, { workspace });
+    root = harness.render(Component, props);
     harness.commitEffects();
     await settle();
 
@@ -295,25 +355,16 @@ describe("character workspace nested drawer focus", () => {
 
   it("allows Escape while a source is loading and drops late or superseded responses", async () => {
     const workspace = workspaceWithSource();
-    const first = deferred<{
-      id: string;
-      document_id: string;
-      revision_number: number;
-      content_hash: string;
-      content_markdown: string;
-      content_text: string;
-    }>();
-    const secondRevision = {
-      id: "revision-new",
-      document_id: "chapter-12",
+    const first = deferred<StoryLedgerSourceExcerpt>();
+    const secondSource = ledgerSource(workspace, {
       revision_number: 2,
-      content_hash: "a".repeat(64),
-      content_markdown: "新版本",
-      content_text: "新版本",
-    };
+      excerpt: "新版本",
+      excerpt_end: 3,
+      highlight_end: 3,
+    });
     const onLoadSource = vi.fn()
       .mockImplementationOnce(() => first.promise)
-      .mockResolvedValueOnce(secondRevision);
+      .mockResolvedValueOnce(secondSource);
     const harness = createReactHarness();
     const Component = createCharacterWorkspaceDialog(harness.React);
     let root = harness.render(Component, { workspace, onLoadSource });
@@ -321,7 +372,7 @@ describe("character workspace nested drawer focus", () => {
     root = harness.render(Component, { workspace, onLoadSource });
     const trigger = {} as HTMLElement;
 
-    clickWithCurrentTarget(root, "查看来源", trigger);
+    clickWithCurrentTarget(root, "查看", trigger);
     root = harness.render(Component, { workspace, onLoadSource });
     let sourceDrawer = findAll(root, (element) => (
       element.props.id === "character-workspace-character-1-source-dialog"
@@ -339,20 +390,18 @@ describe("character workspace nested drawer focus", () => {
     root = harness.render(Component, { workspace, onLoadSource });
     expect(findAll(root, (element) => element.props.id === sourceDrawer.props.id)).toHaveLength(0);
 
-    clickWithCurrentTarget(root, "查看来源", trigger);
+    clickWithCurrentTarget(root, "查看", trigger);
     await settle();
     root = harness.render(Component, { workspace, onLoadSource });
     sourceDrawer = findAll(root, (element) => element.props.id === "character-workspace-character-1-source-dialog")[0];
     expect(textContent(sourceDrawer)).toContain("revision 2");
 
-    first.resolve({
-      id: "revision-old",
-      document_id: "chapter-12",
+    first.resolve(ledgerSource(workspace, {
       revision_number: 1,
-      content_hash: "a".repeat(64),
-      content_markdown: "旧版本",
-      content_text: "旧版本",
-    });
+      excerpt: "旧版本",
+      excerpt_end: 3,
+      highlight_end: 3,
+    }));
     await settle();
     root = harness.render(Component, { workspace, onLoadSource });
     sourceDrawer = findAll(root, (element) => element.props.id === "character-workspace-character-1-source-dialog")[0];
@@ -360,25 +409,71 @@ describe("character workspace nested drawer focus", () => {
     expect(textContent(sourceDrawer)).not.toContain("revision 1");
   });
 
+  it("focuses and scrolls the mark returned by the bounded ledger source", async () => {
+    const base = workspaceWithSource();
+    const content = "序章目标终点";
+    const workspace = base;
+    const onLoadSource = vi.fn().mockResolvedValue(ledgerSource(workspace, {
+      revision_number: 3,
+      excerpt: content,
+      excerpt_end: 6,
+      highlight_start: 2,
+      highlight_end: 4,
+    }));
+    const focusDocument = installFocusDocument();
+    focusDocument.add(new FocusElement("anw-character-workspace-styles"));
+    focusDocument.add(new FocusElement("character-workspace-character-1-dialog"));
+    const drawerNode = focusDocument.add(new FocusElement("character-workspace-character-1-source-dialog"));
+    const closeNode = focusDocument.add(new FocusElement("source-close", "BUTTON"));
+    const markNode = focusDocument.add(new FocusElement("source-mark", "MARK"));
+    const trigger = focusDocument.add(new FocusElement("source-trigger", "BUTTON"));
+    drawerNode.closeButton = closeNode;
+    drawerNode.markNode = markNode;
+
+    const props = { workspace, onLoadSource };
+    const harness = createReactHarness();
+    const Component = createCharacterWorkspaceDialog(harness.React);
+    let root = harness.render(Component, props);
+    harness.commitEffects();
+    openGrowth(root);
+    root = harness.render(Component, props);
+    clickWithCurrentTarget(root, "查看", trigger as unknown as HTMLElement);
+
+    await vi.waitFor(() => {
+      root = harness.render(Component, props);
+      const drawer = findAll(root, (element) => element.props.id === drawerNode.id)[0];
+      expect(drawer.props["aria-busy"]).not.toBe(true);
+    });
+    harness.commitEffects();
+    await settle();
+
+    expect(markNode.tabIndex).toBe(-1);
+    expect(markNode.scrollCount).toBe(1);
+    expect(focusDocument.activeElement).toBe(markNode);
+  });
+
   it("disables correction close paths and exposes busy semantics while saving", async () => {
     const workspace = characterWorkspace();
     const save = deferred<CharacterWorkspaceV2>();
     const onCorrectFact = vi.fn(() => save.promise);
+    const onLoadFactImpact = vi.fn().mockResolvedValue(storyFactImpact());
+    const props = { workspace, onCorrectFact, onLoadFactImpact };
     const harness = createReactHarness();
     const Component = createCharacterWorkspaceDialog(harness.React);
-    let root = harness.render(Component, { workspace, onCorrectFact });
+    let root = harness.render(Component, props);
     openGrowth(root);
-    root = harness.render(Component, { workspace, onCorrectFact });
+    root = harness.render(Component, props);
     clickWithCurrentTarget(root, "修正", {} as HTMLElement);
-    root = harness.render(Component, { workspace, onCorrectFact });
+    await settle();
+    root = harness.render(Component, props);
     let drawer = findAll(root, (element) => element.props.id === "character-workspace-character-1-correction-dialog")[0];
     const textareas = findAll(drawer, (element) => element.type === "textarea");
     (textareas[0].props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "新的事实" } });
     (textareas[1].props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "有明确章节证据" } });
-    root = harness.render(Component, { workspace, onCorrectFact });
+    root = harness.render(Component, props);
     drawer = findAll(root, (element) => element.props.id === "character-workspace-character-1-correction-dialog")[0];
     (findButton(drawer, "创建替代事实").props.onClick as () => void)();
-    root = harness.render(Component, { workspace, onCorrectFact });
+    root = harness.render(Component, props);
     drawer = findAll(root, (element) => element.props.id === "character-workspace-character-1-correction-dialog")[0];
 
     expect(drawer.props["aria-busy"]).toBe(true);
@@ -387,7 +482,7 @@ describe("character workspace nested drawer focus", () => {
     expect(textContent(drawer)).toContain("完成前无法关闭");
     const preventClose = vi.fn();
     (workspaceDialog(root).props.onKeyDown as (event: unknown) => void)({ key: "Escape", preventDefault: preventClose });
-    root = harness.render(Component, { workspace, onCorrectFact });
+    root = harness.render(Component, props);
     expect(preventClose).toHaveBeenCalledOnce();
     expect(findAll(root, (element) => element.props.id === drawer.props.id)).toHaveLength(1);
 
@@ -397,10 +492,22 @@ describe("character workspace nested drawer focus", () => {
 
   it("derives the batch title and disables all batch close paths while saving", async () => {
     const workspace = workspaceWithSource();
-    const impact: IntelligenceBatchRevertImpactV1 = {
+    const impact: CharacterBatchRevertImpact = {
+      schema_version: "story-ledger-batch-impact-preview/1",
+      novel_id: workspace.novel_id,
       batch_id: "batch-1",
+      preview_snapshot_token: `ledger-snapshot-${workspace.story_ledger_version}`,
+      story_ledger_version: workspace.story_ledger_version,
+      timeline: {
+        mode: workspace.timeline_mode,
+        timeline_id: workspace.selected_timeline.id,
+        timeline_name: workspace.selected_timeline.name,
+        narrative_cutoff: workspace.projected_state.narrative_cutoff,
+      },
       state: "ready",
       already_reverted: false,
+      batch_fact_count: 1,
+      batch_relationship_count: 0,
       facts: [{ id: "fact-1", disposition: "supersede" }],
       relationships: [],
     };
@@ -424,7 +531,7 @@ describe("character workspace nested drawer focus", () => {
     harness.commitEffects();
     await settle();
     root = harness.render(Component, { workspace, onLoadFacts, onPreviewBatchRevert, onRevertBatch });
-    clickWithCurrentTarget(root, "撤销同步", {} as HTMLElement);
+    clickWithCurrentTarget(root, "预览批次撤销", {} as HTMLElement);
     await settle();
     root = harness.render(Component, { workspace, onLoadFacts, onPreviewBatchRevert, onRevertBatch });
     let drawer = findAll(root, (element) => element.props.id === "character-workspace-character-1-batch-revert-dialog")[0];

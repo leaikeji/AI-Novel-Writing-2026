@@ -29,7 +29,7 @@ from .contracts import CharacterWorkspaceError, CharacterWorkspaceErrorCode
 from .service import service_for_session
 
 
-router = APIRouter(tags=["character-workspace-v1"])
+router = APIRouter(tags=["character-workspace-v2"])
 
 
 class _StrictWriteModel(BaseModel):
@@ -91,20 +91,17 @@ def character_workspace_get(
     timeline_id: UUID | None = Query(default=None),
     character_instance_id: UUID | None = Query(default=None),
     narrative_cutoff: int | None = Query(default=None, ge=0),
-    view_version: int = Query(default=1, ge=1, le=2),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     """Aggregate stable identity, timeline profile, and deterministic state."""
 
     try:
-        resolved_view_version: Literal[1, 2] = 2 if view_version == 2 else 1
         workspace = service_for_session(session).get_workspace(
             novel_id,
             character_id,
             timeline_id=timeline_id,
             character_instance_id=character_instance_id,
             narrative_cutoff=narrative_cutoff,
-            view_version=resolved_view_version,
         )
     except CharacterWorkspaceError as error:
         _raise_workspace_error(error)
@@ -168,7 +165,6 @@ def _current_workspace(
             character_id,
             timeline_id=request.selected_timeline_id,
             character_instance_id=request.selected_instance_id,
-            view_version=2,
         ).model_dump(mode="json")
     except Exception:
         return None
@@ -265,7 +261,6 @@ def character_workspace_put(
             character_id,
             timeline_id=request.selected_timeline_id,
             character_instance_id=request.selected_instance_id,
-            view_version=2,
         )
         session.commit()
         return workspace.model_dump(mode="json")

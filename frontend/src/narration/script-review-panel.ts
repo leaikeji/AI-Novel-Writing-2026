@@ -151,6 +151,15 @@ const ISSUE_LABELS: Readonly<Record<ScriptIssueCode, string>> = {
   B_CLOUD_DECISION_UNAVAILABLE: "云端辅助不可用且本地规则无法确定",
 };
 
+const CONFIDENCE_LABELS: Readonly<
+  Record<ScriptReviewSegmentResource["confidence"], string>
+> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+  unknown: "未知",
+};
+
 
 export function scriptReviewIssueLabel(code: ScriptIssueCode): string {
   return ISSUE_LABELS[code];
@@ -758,7 +767,7 @@ export function createScriptReviewPanel(
               h("div", null,
                 h("span", null, `句段 ${segment.ordinal + 1}`),
                 h("strong", null, segment.speaker_label),
-                h("span", null, `置信度 ${segment.confidence}`),
+                h("span", null, `置信度：${CONFIDENCE_LABELS[segment.confidence]}`),
               ),
               h("p", { className: "anw-script-review__source-text" }, segment.source_text || "（结构停顿）"),
               segment.spoken_text === segment.source_text

@@ -46,10 +46,9 @@ export function relationshipCurveSpec(
 
 export function compactRelationshipGraphLabel(
   label: string,
-  fallback: string,
   maxCharacters = 5,
 ): string {
-  const value = (label || fallback).trim();
+  const value = label.trim();
   const characters = Array.from(value);
   if (characters.length <= maxCharacters) return value;
   return `${characters.slice(0, maxCharacters).join("")}…`;

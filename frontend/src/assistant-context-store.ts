@@ -13,6 +13,7 @@ import {
   type EditableFieldAdapter,
   type EditableFieldRegistration,
 } from "./assistant-fields";
+import type { StoryLedgerAssistantContextV1 } from "./story-ledger/assistant-context";
 
 
 const TRUNCATION_MARKER = "\n…[已截断]…\n";
@@ -118,6 +119,40 @@ function cloneEnvelope(envelope: NovelAssistantContextEnvelope): NovelAssistantC
     page: { ...envelope.page },
     entity: envelope.entity ? { ...envelope.entity } : undefined,
     document: envelope.document ? { ...envelope.document } : undefined,
+    ledger: envelope.ledger ? cloneLedgerContext(envelope.ledger) : undefined,
+  };
+}
+
+
+function cloneLedgerContext(
+  context: StoryLedgerAssistantContextV1,
+): StoryLedgerAssistantContextV1 {
+  return {
+    ...context,
+    novel: { ...context.novel },
+    timeline: { ...context.timeline },
+    filters: {
+      ...context.filters,
+      fact_types: [...context.filters.fact_types],
+    },
+    summary: {
+      ...context.summary,
+      by_fact_type: { ...context.summary.by_fact_type },
+      by_effective_state: { ...context.summary.by_effective_state },
+      by_health: { ...context.summary.by_health },
+    },
+    selected_fact: context.selected_fact
+      ? {
+          ...context.selected_fact,
+          entity_labels: [...context.selected_fact.entity_labels],
+          effective_reason_codes: [...context.selected_fact.effective_reason_codes],
+          health_reason_codes: [...context.selected_fact.health_reason_codes],
+          source: context.selected_fact.source
+            ? { ...context.selected_fact.source }
+            : null,
+        }
+      : null,
+    budget: { ...context.budget },
   };
 }
 
@@ -304,6 +339,9 @@ export class NovelAssistantContextStore {
       page: { ...this.envelope.page },
       entity: this.envelope.entity ? { ...this.envelope.entity } : undefined,
       document: this.envelope.document ? { ...this.envelope.document } : undefined,
+      ledger: this.envelope.ledger
+        ? cloneLedgerContext(this.envelope.ledger)
+        : undefined,
       editing: adapters.length
         ? { focusedFieldId, fields: [] }
         : undefined,

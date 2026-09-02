@@ -25,12 +25,13 @@ function contrast(left: string, right: string): number {
 }
 
 describe("character workspace desktop layout contract", () => {
-  it("uses the approved 1240px writing dialog without a mobile redesign", () => {
+  it("keeps the approved 1240px dialog and gives labeled fact cards a narrow-screen fallback", () => {
     expect(CHARACTER_WORKSPACE_CSS).toContain("width: min(1240px, calc(100vw - 64px))");
     expect(CHARACTER_WORKSPACE_CSS).toContain("grid-template-columns: repeat(12");
     expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-state-layout");
-    expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-fact-table-row");
-    expect(CHARACTER_WORKSPACE_CSS).not.toContain("@media (max-width: 720px)");
+    expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-fact-card");
+    expect(CHARACTER_WORKSPACE_CSS).not.toContain("anw-character-fact-table-row");
+    expect(CHARACTER_WORKSPACE_CSS).toContain("@media (max-width: 640px)");
     expect(CHARACTER_WORKSPACE_CSS).toContain("max-height: calc(100dvh - 48px)");
     expect(CHARACTER_WORKSPACE_CSS).toContain("position: sticky");
     expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-workspace-tabs { display: flex; flex: 0 0 auto");
@@ -104,7 +105,7 @@ describe("character workspace desktop layout contract", () => {
       ".anw-character-workspace-button--danger { border-color:var(--anw-character-danger); color:var(--anw-character-danger); background:var(--anw-character-surface); }",
     );
     expect(CHARACTER_WORKSPACE_CSS).toContain(
-      ".anw-character-link-button,.anw-character-row-actions button { border:0; padding:4px 6px; color:#dd5b34; background:transparent; cursor:pointer; font-weight:650; }",
+      ".anw-character-link-button,.anw-character-row-actions button,.anw-character-action-menu summary { border:0; padding:4px 6px; color:#c2411d; background:transparent; cursor:pointer; font-weight:650; }",
     );
     expect(CHARACTER_WORKSPACE_CSS).toMatch(
       /\.anw-character-workspace-dialog \.anw-character-drawer > header button,[^}]*\{[^}]*color:var\(--anw-character-text-strong\);/,

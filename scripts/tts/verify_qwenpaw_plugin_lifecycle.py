@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import time
@@ -30,11 +31,27 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import quote
 
+try:
+    from scripts.tts.candidate_migration_identity import (
+        CandidateMigrationError,
+        inspect_candidate_migrations,
+    )
+except ModuleNotFoundError:  # direct execution from scripts/tts
+    from candidate_migration_identity import (  # type: ignore[no-redef]
+        CandidateMigrationError,
+        inspect_candidate_migrations,
+    )
+
 
 APP_ID = "ai-novel-world-2026"
 APP_VERSION = "0.4.0"
-EXPECTED_MIGRATION_HEAD = "20260829_0034"
 TTS_PROTOCOL_VERSION = "moss-tts-sidecar/1.1"
+
+CANDIDATE_TREE_MAX_ENTRIES = 8192
+CANDIDATE_TREE_MAX_FILES = 4096
+CANDIDATE_TREE_MAX_FILE_BYTES = 64 * 1024 * 1024
+CANDIDATE_TREE_MAX_TOTAL_BYTES = 512 * 1024 * 1024
+CANDIDATE_HASH_CHUNK_BYTES = 1024 * 1024
 
 QWENPAW_IMAGE = "ai-novel-2026-qwenpaw-runtime:2.1.0-mvp0"
 POSTGRES_IMAGE = (
@@ -81,6 +98,8 @@ EXPECTED_DISABLED_NARRATION = {
     "lifecycle_status": "disabled",
     "sidecar_reachable": False,
     "model_ready": False,
+    "model_loaded": False,
+    "idle_unload_seconds": None,
     "product_visible": False,
     "protocol_version": TTS_PROTOCOL_VERSION,
     "worker_generation": None,
@@ -98,6 +117,10 @@ EXPECTED_DISABLED_NARRATION_PRODUCTION = {
     "worker_running": False,
     "reference_clone_ready": False,
     "reason_code": None,
+}
+
+PLUGIN_LOADER_NOT_READY = {
+    "detail": "Plugin loader is not ready yet. Try again shortly."
 }
 
 T4_PROBE_UUID = "00000000-0000-4000-8000-000000000001"
@@ -202,6 +225,7 @@ class GateConfig:
     transcript: Path | None
     confirmation: str | None
     candidate_tree_sha256: str = ""
+    candidate_migration_head: str = ""
     startup_timeout_seconds: int = 180
     registry_timeout_seconds: int = 45
 
@@ -360,7 +384,414 @@ def validate_resource_names(names: ResourceNames) -> None:
             seen.add(value)
 
 
-def validate_candidate(candidate: Path) -> tuple[Path, str]:
+def _tree_identity(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        stat.S_IFMT(value.st_mode),
+        value.st_dev,
+        value.st_ino,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+    )
+
+
+def _directory_open_flags() -> int:
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise GateError("CANDIDATE_NOFOLLOW_UNAVAILABLE")
+    return os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
+
+
+def _file_open_flags() -> int:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise GateError("CANDIDATE_NOFOLLOW_UNAVAILABLE")
+    return os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+
+
+def _open_relative_parent(root_descriptor: int, relative: str) -> tuple[int, str]:
+    parts = relative.split("/")
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise GateError("CANDIDATE_PATH_UNSUPPORTED")
+    descriptor = os.dup(root_descriptor)
+    try:
+        for part in parts[:-1]:
+            child = os.open(
+                part,
+                _directory_open_flags(),
+                dir_fd=descriptor,
+            )
+            os.close(descriptor)
+            descriptor = child
+    except OSError as error:
+        os.close(descriptor)
+        raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED") from error
+    return descriptor, parts[-1]
+
+
+def _collect_candidate_tree(
+    directory_descriptor: int,
+    prefix: str,
+    *,
+    files: list[tuple[str, os.stat_result]],
+    directories: list[tuple[str, os.stat_result]],
+    counters: dict[str, int],
+) -> None:
+    try:
+        iterator = os.scandir(directory_descriptor)
+    except OSError as error:
+        raise GateError("CANDIDATE_TREE_UNREADABLE") from error
+    with iterator:
+        for entry in iterator:
+            counters["entries"] += 1
+            if counters["entries"] > CANDIDATE_TREE_MAX_ENTRIES:
+                raise GateError("CANDIDATE_TREE_ENTRY_LIMIT_EXCEEDED")
+            relative = f"{prefix}/{entry.name}" if prefix else entry.name
+            try:
+                identity = entry.stat(follow_symlinks=False)
+            except OSError as error:
+                raise GateError("CANDIDATE_TREE_UNREADABLE") from error
+            if stat.S_ISLNK(identity.st_mode):
+                raise GateError("CANDIDATE_SYMLINK_FORBIDDEN")
+            if stat.S_ISDIR(identity.st_mode):
+                try:
+                    child_descriptor = os.open(
+                        entry.name,
+                        _directory_open_flags(),
+                        dir_fd=directory_descriptor,
+                    )
+                except OSError as error:
+                    raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED") from error
+                try:
+                    if _tree_identity(os.fstat(child_descriptor)) != _tree_identity(
+                        identity
+                    ):
+                        raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+                    directories.append((relative, identity))
+                    _collect_candidate_tree(
+                        child_descriptor,
+                        relative,
+                        files=files,
+                        directories=directories,
+                        counters=counters,
+                    )
+                    if _tree_identity(os.fstat(child_descriptor)) != _tree_identity(
+                        identity
+                    ):
+                        raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+                finally:
+                    os.close(child_descriptor)
+                continue
+            if not stat.S_ISREG(identity.st_mode):
+                raise GateError("CANDIDATE_SPECIAL_FILE_FORBIDDEN")
+            if identity.st_nlink != 1:
+                raise GateError("CANDIDATE_HARDLINK_FORBIDDEN")
+            counters["files"] += 1
+            if counters["files"] > CANDIDATE_TREE_MAX_FILES:
+                raise GateError("CANDIDATE_TREE_FILE_LIMIT_EXCEEDED")
+            if identity.st_size > CANDIDATE_TREE_MAX_FILE_BYTES:
+                raise GateError("CANDIDATE_TREE_FILE_TOO_LARGE")
+            counters["bytes"] += identity.st_size
+            if counters["bytes"] > CANDIDATE_TREE_MAX_TOTAL_BYTES:
+                raise GateError("CANDIDATE_TREE_TOTAL_BYTES_EXCEEDED")
+            files.append((relative, identity))
+
+
+def _hash_candidate_file(
+    root_descriptor: int,
+    relative: str,
+    before: os.stat_result,
+    digest: Any,
+) -> None:
+    parent_descriptor, name = _open_relative_parent(root_descriptor, relative)
+    try:
+        try:
+            descriptor = os.open(name, _file_open_flags(), dir_fd=parent_descriptor)
+        except OSError as error:
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED") from error
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or _tree_identity(opened) != _tree_identity(before)
+            ):
+                raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+            digest.update(b"F\0")
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            total = 0
+            while True:
+                chunk = os.read(descriptor, CANDIDATE_HASH_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > CANDIDATE_TREE_MAX_FILE_BYTES:
+                    raise GateError("CANDIDATE_TREE_FILE_TOO_LARGE")
+                digest.update(chunk)
+            digest.update(b"\0")
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            final_path = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        except OSError as error:
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED") from error
+        if (
+            total != before.st_size
+            or _tree_identity(after) != _tree_identity(opened)
+            or _tree_identity(final_path) != _tree_identity(before)
+        ):
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+    finally:
+        os.close(parent_descriptor)
+
+
+def _verify_candidate_directory(
+    root_descriptor: int,
+    relative: str,
+    before: os.stat_result,
+) -> None:
+    parent_descriptor, name = _open_relative_parent(root_descriptor, relative)
+    try:
+        try:
+            descriptor = os.open(
+                name,
+                _directory_open_flags(),
+                dir_fd=parent_descriptor,
+            )
+        except OSError as error:
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED") from error
+        try:
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        if _tree_identity(after) != _tree_identity(before):
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+    finally:
+        os.close(parent_descriptor)
+
+
+def _candidate_tree_sha256(candidate: Path) -> str:
+    """Hash one stable candidate tree without following links or buffering files."""
+
+    try:
+        root_before = candidate.lstat()
+    except OSError as error:
+        raise GateError("CANDIDATE_TREE_UNREADABLE") from error
+    if not stat.S_ISDIR(root_before.st_mode) or candidate.is_symlink():
+        raise GateError("CANDIDATE_PATH_NOT_CANONICAL")
+    try:
+        root_descriptor = os.open(candidate, _directory_open_flags())
+    except OSError as error:
+        raise GateError("CANDIDATE_TREE_UNREADABLE") from error
+    try:
+        if _tree_identity(os.fstat(root_descriptor)) != _tree_identity(root_before):
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+        files: list[tuple[str, os.stat_result]] = []
+        directories: list[tuple[str, os.stat_result]] = []
+        counters = {"entries": 0, "files": 0, "bytes": 0}
+        _collect_candidate_tree(
+            root_descriptor,
+            "",
+            files=files,
+            directories=directories,
+            counters=counters,
+        )
+        if not files:
+            raise GateError("CANDIDATE_EMPTY")
+        digest = hashlib.sha256()
+        for relative, _identity in sorted(directories, key=lambda item: item[0]):
+            digest.update(b"D\0")
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+        for relative, identity in sorted(files, key=lambda item: item[0]):
+            _hash_candidate_file(root_descriptor, relative, identity, digest)
+        for relative, identity in sorted(directories, key=lambda item: item[0]):
+            _verify_candidate_directory(root_descriptor, relative, identity)
+        try:
+            root_after = candidate.lstat()
+        except OSError as error:
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED") from error
+        if (
+            _tree_identity(os.fstat(root_descriptor)) != _tree_identity(root_before)
+            or _tree_identity(root_after) != _tree_identity(root_before)
+        ):
+            raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+        return digest.hexdigest()
+    except RecursionError as error:
+        raise GateError("CANDIDATE_TREE_DEPTH_EXCEEDED") from error
+    finally:
+        os.close(root_descriptor)
+
+
+def _container_candidate_hash_program(root: str = "/gate/candidate") -> str:
+    """Return the bounded no-follow hash probe executed in the isolated host."""
+
+    return f"""
+import hashlib
+import os
+import stat
+from pathlib import Path
+
+ROOT = Path({root!r})
+MAX_ENTRIES = {CANDIDATE_TREE_MAX_ENTRIES}
+MAX_FILES = {CANDIDATE_TREE_MAX_FILES}
+MAX_FILE_BYTES = {CANDIDATE_TREE_MAX_FILE_BYTES}
+MAX_TOTAL_BYTES = {CANDIDATE_TREE_MAX_TOTAL_BYTES}
+CHUNK_BYTES = {CANDIDATE_HASH_CHUNK_BYTES}
+
+def identity(value):
+    return (
+        stat.S_IFMT(value.st_mode), value.st_dev, value.st_ino,
+        value.st_nlink, value.st_size, value.st_mtime_ns,
+    )
+
+if not hasattr(os, 'O_NOFOLLOW') or not hasattr(os, 'O_DIRECTORY'):
+    raise RuntimeError('NOFOLLOW_UNAVAILABLE')
+DIR_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
+FILE_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+
+def open_parent(root_descriptor, relative):
+    parts = relative.split('/')
+    if not parts or any(part in ('', '.', '..') for part in parts):
+        raise RuntimeError('PATH_INVALID')
+    descriptor = os.dup(root_descriptor)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, DIR_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+    except Exception:
+        os.close(descriptor)
+        raise
+    return descriptor, parts[-1]
+
+entries = 0
+file_count = 0
+total_bytes = 0
+files = []
+directories = []
+
+def collect(directory_descriptor, prefix):
+    global entries, file_count, total_bytes
+    with os.scandir(directory_descriptor) as iterator:
+        for entry in iterator:
+            entries += 1
+            if entries > MAX_ENTRIES:
+                raise RuntimeError('ENTRY_LIMIT')
+            relative = f'{{prefix}}/{{entry.name}}' if prefix else entry.name
+            metadata = entry.stat(follow_symlinks=False)
+            if stat.S_ISLNK(metadata.st_mode):
+                raise RuntimeError('SYMLINK')
+            if stat.S_ISDIR(metadata.st_mode):
+                child_descriptor = os.open(
+                    entry.name, DIR_FLAGS, dir_fd=directory_descriptor
+                )
+                try:
+                    if identity(os.fstat(child_descriptor)) != identity(metadata):
+                        raise RuntimeError('DIRECTORY_IDENTITY')
+                    directories.append((relative, metadata))
+                    collect(child_descriptor, relative)
+                    if identity(os.fstat(child_descriptor)) != identity(metadata):
+                        raise RuntimeError('DIRECTORY_IDENTITY')
+                finally:
+                    os.close(child_descriptor)
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeError('SPECIAL_FILE')
+            if metadata.st_nlink != 1:
+                raise RuntimeError('HARDLINK')
+            file_count += 1
+            if file_count > MAX_FILES:
+                raise RuntimeError('FILE_COUNT')
+            if metadata.st_size > MAX_FILE_BYTES:
+                raise RuntimeError('FILE_TOO_LARGE')
+            total_bytes += metadata.st_size
+            if total_bytes > MAX_TOTAL_BYTES:
+                raise RuntimeError('TOTAL_BYTES')
+            files.append((relative, metadata))
+
+def hash_file(root_descriptor, relative, before, digest):
+    parent_descriptor, name = open_parent(root_descriptor, relative)
+    try:
+        descriptor = os.open(name, FILE_FLAGS, dir_fd=parent_descriptor)
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or identity(opened) != identity(before)
+            ):
+                raise RuntimeError('FILE_IDENTITY')
+            digest.update(b'F\\0')
+            digest.update(relative.encode('utf-8'))
+            digest.update(b'\\0')
+            size = 0
+            while True:
+                chunk = os.read(descriptor, CHUNK_BYTES)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_FILE_BYTES:
+                    raise RuntimeError('FILE_TOO_LARGE')
+                digest.update(chunk)
+            digest.update(b'\\0')
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        final_path = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        if (
+            size != before.st_size
+            or identity(after) != identity(opened)
+            or identity(final_path) != identity(before)
+        ):
+            raise RuntimeError('FILE_IDENTITY')
+    finally:
+        os.close(parent_descriptor)
+
+def verify_directory(root_descriptor, relative, before):
+    parent_descriptor, name = open_parent(root_descriptor, relative)
+    try:
+        descriptor = os.open(name, DIR_FLAGS, dir_fd=parent_descriptor)
+        try:
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        if identity(after) != identity(before):
+            raise RuntimeError('DIRECTORY_IDENTITY')
+    finally:
+        os.close(parent_descriptor)
+
+root_before = ROOT.lstat()
+if not stat.S_ISDIR(root_before.st_mode) or ROOT.is_symlink():
+    raise RuntimeError('ROOT_INVALID')
+root_descriptor = os.open(ROOT, DIR_FLAGS)
+try:
+    if identity(os.fstat(root_descriptor)) != identity(root_before):
+        raise RuntimeError('ROOT_IDENTITY')
+    collect(root_descriptor, '')
+    if not files:
+        raise RuntimeError('FILE_COUNT')
+    digest = hashlib.sha256()
+    for relative, _before in sorted(directories, key=lambda item: item[0]):
+        digest.update(b'D\\0')
+        digest.update(relative.encode('utf-8'))
+        digest.update(b'\\0')
+    for relative, before in sorted(files, key=lambda item: item[0]):
+        hash_file(root_descriptor, relative, before, digest)
+    for relative, before in sorted(directories, key=lambda item: item[0]):
+        verify_directory(root_descriptor, relative, before)
+    if (
+        identity(os.fstat(root_descriptor)) != identity(root_before)
+        or identity(ROOT.lstat()) != identity(root_before)
+    ):
+        raise RuntimeError('ROOT_IDENTITY')
+    print(digest.hexdigest())
+finally:
+    os.close(root_descriptor)
+""".strip()
+
+
+def validate_candidate(candidate: Path) -> tuple[Path, str, str]:
     """Validate that an immutable, complete 0.4.0 candidate was supplied."""
 
     if not candidate.is_absolute():
@@ -374,6 +805,11 @@ def validate_candidate(candidate: Path) -> tuple[Path, str]:
     if any(character in str(candidate) for character in (",", "\r", "\n")):
         raise GateError("CANDIDATE_PATH_UNSUPPORTED")
 
+    # Apply the complete tree resource/type boundary before reading even the
+    # manifest, then prove that no candidate byte changed while its metadata
+    # and migration identity were inspected.
+    digest = _candidate_tree_sha256(candidate)
+
     required = (
         "plugin.json",
         "plugin.py",
@@ -382,10 +818,6 @@ def validate_candidate(candidate: Path) -> tuple[Path, str]:
         "frontend/dist/index.js",
         "backend/app.py",
         "backend/narration/pawapp_runtime.py",
-        (
-            "backend/migrations/versions/"
-            "20260826_0015_narration_domain_concurrency_guards.py"
-        ),
     ) + tuple(f"skills/{name}/SKILL.md" for name in sorted(NOVEL_SKILLS))
     for relative in required:
         path = candidate / relative
@@ -406,25 +838,13 @@ def validate_candidate(candidate: Path) -> tuple[Path, str]:
     if tool_names != NOVEL_TOOLS:
         raise GateError("CANDIDATE_TOOL_CONTRACT_MISMATCH")
 
-    digest = hashlib.sha256()
-    files = 0
-    for path in sorted(candidate.rglob("*"), key=lambda item: item.relative_to(candidate).as_posix()):
-        if path.is_symlink():
-            raise GateError("CANDIDATE_SYMLINK_FORBIDDEN")
-        if path.is_dir():
-            continue
-        if not path.is_file():
-            raise GateError("CANDIDATE_SPECIAL_FILE_FORBIDDEN")
-        relative = path.relative_to(candidate).as_posix()
-        data = path.read_bytes()
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(data)
-        digest.update(b"\0")
-        files += 1
-    if files == 0:
-        raise GateError("CANDIDATE_EMPTY")
-    return candidate, digest.hexdigest()
+    try:
+        migration_identity = inspect_candidate_migrations(candidate)
+    except CandidateMigrationError as error:
+        raise GateError(error.code) from error
+    if _candidate_tree_sha256(candidate) != digest:
+        raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+    return candidate, digest, migration_identity.head
 
 
 def build_dry_run_plan(config: GateConfig, names: ResourceNames) -> dict[str, object]:
@@ -437,6 +857,7 @@ def build_dry_run_plan(config: GateConfig, names: ResourceNames) -> dict[str, ob
         "run_id": config.run_id,
         "candidate": {
             "plugin": f"{APP_ID}@{APP_VERSION}",
+            "migration_head": config.candidate_migration_head,
             "staging": "docker-cp-to-qwenpaw-container-layer",
             "container_path": "/gate/candidate",
             "host_copy_detached_after_staging": True,
@@ -473,7 +894,7 @@ def build_dry_run_plan(config: GateConfig, names: ResourceNames) -> dict[str, ob
             "start-qwenpaw-with-tts-disabled",
             "docker-cp-candidate-and-verify-tree-hash",
             "public-install",
-            "migrate-to-20260829_0034",
+            f"migrate-to-{config.candidate_migration_head}",
             "verify-disabled-narration-production-t4-routes-and-registries",
             "create-db-and-volume-sentinels",
             "public-force-reinstall",
@@ -907,6 +1328,21 @@ class LifecycleGate:
         ]
 
     def _stage_candidate(self) -> None:
+        host_digest = _candidate_tree_sha256(self.config.candidate)
+        if (
+            not self.config.candidate_tree_sha256
+            or host_digest != self.config.candidate_tree_sha256
+        ):
+            raise GateError("HOST_CANDIDATE_DIGEST_MISMATCH")
+        try:
+            current_identity = inspect_candidate_migrations(self.config.candidate)
+        except CandidateMigrationError as error:
+            raise GateError(error.code) from error
+        if (
+            not self.config.candidate_migration_head
+            or current_identity.head != self.config.candidate_migration_head
+        ):
+            raise GateError("HOST_CANDIDATE_MIGRATION_HEAD_MISMATCH")
         self._run_command(
             [
                 "docker",
@@ -935,6 +1371,7 @@ class LifecycleGate:
             "method": "docker-cp",
             "container_path": "/gate/candidate",
             "tree_sha256": staged_digest,
+            "migration_head": self.config.candidate_migration_head,
             "host_bind_mount_count": 0,
             "helper_container_count": 0,
             "host_copy_detached": True,
@@ -942,19 +1379,6 @@ class LifecycleGate:
         }
 
     def _read_staged_candidate_digest(self, *, step: str) -> str:
-        digest_program = (
-            "from pathlib import Path; import hashlib; "
-            "root=Path('/gate/candidate'); digest=hashlib.sha256(); "
-            "paths=sorted(root.rglob('*'), key=lambda p:p.relative_to(root).as_posix()); "
-            "assert paths; "
-            "assert all(not p.is_symlink() for p in paths); "
-            "[(lambda rel,data: (digest.update(rel.encode('utf-8')), "
-            "digest.update(b'\\0'), digest.update(data), digest.update(b'\\0')))"
-            "(p.relative_to(root).as_posix(), p.read_bytes()) for p in paths "
-            "if p.is_file() and not p.is_symlink()]; "
-            "assert all((p.is_dir() or (p.is_file() and not p.is_symlink())) "
-            "for p in paths); print(digest.hexdigest())"
-        )
         result = self._run_command(
             [
                 "docker",
@@ -962,14 +1386,18 @@ class LifecycleGate:
                 self.names.qwenpaw_container,
                 "/app/venv/bin/python",
                 "-c",
-                digest_program,
+                _container_candidate_hash_program(),
             ],
             step=step,
             timeout=120,
         )
         staged_digest = result.stdout.strip()
         expected_digest = self.config.candidate_tree_sha256
-        if not expected_digest or staged_digest != expected_digest:
+        if (
+            re.fullmatch(r"[0-9a-f]{64}", staged_digest) is None
+            or not expected_digest
+            or staged_digest != expected_digest
+        ):
             raise GateError("STAGED_CANDIDATE_DIGEST_MISMATCH")
         return staged_digest
 
@@ -1127,16 +1555,39 @@ class LifecycleGate:
 
     def _install(self, *, force: bool, step: str) -> None:
         self._read_staged_candidate_digest(step=f"verify-candidate-before-{step}")
-        status, payload = self._http_json(
-            "POST",
-            "/api/plugins/install",
-            body={"source": "/gate/candidate", "force": force},
-            expected_statuses=(200,),
-            step=step,
-        )
+        deadline = self.monotonic() + self.config.registry_timeout_seconds
+        attempts = 0
+        while True:
+            attempts += 1
+            status, payload = self._raw_http_json(
+                "POST",
+                "/api/plugins/install",
+                body={"source": "/gate/candidate", "force": force},
+            )
+            self.evidence.checks[f"http:{step}"] = {
+                "method": "POST",
+                "path": "/api/plugins/install",
+                "status": status,
+                "attempts": attempts,
+                "response_sha256": _sha256_text(
+                    json.dumps(
+                        payload,
+                        sort_keys=True,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    )
+                ),
+            }
+            if status == 503 and payload == PLUGIN_LOADER_NOT_READY:
+                if self.monotonic() >= deadline:
+                    raise GateError("PLUGIN_LOADER_STARTUP_TIMEOUT", step)
+                self.sleep(1)
+                continue
+            break
+        if status != 200:
+            raise GateError("HTTP_STATUS_UNEXPECTED", step)
         if (
-            status != 200
-            or not isinstance(payload, dict)
+            not isinstance(payload, dict)
             or payload.get("id") != APP_ID
             or payload.get("version") != APP_VERSION
             or payload.get("loaded") is not True
@@ -1145,18 +1596,49 @@ class LifecycleGate:
 
     def _migrate_and_verify_head(self) -> None:
         plugin_dir = f"/app/working/plugins/{APP_ID}"
+        expected_head = self.config.candidate_migration_head
+        if re.fullmatch(r"[0-9]{8}_[0-9]{4}", expected_head) is None:
+            raise GateError("CANDIDATE_MIGRATION_HEAD_INVALID")
+        disabled_environment = [
+            "--env",
+            "AI_NOVEL_TTS_RUNTIME_ENABLED=false",
+            "--env",
+            "AI_NOVEL_TTS_PRODUCT_ENABLED=false",
+            "--env",
+            "AI_NOVEL_TTS_VALIDATION_ENABLED=false",
+            "--env",
+            "AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED=false",
+        ]
+        container_head = self._run_command(
+            [
+                "docker",
+                "exec",
+                *disabled_environment,
+                self.names.qwenpaw_container,
+                "/bin/sh",
+                "-lc",
+                (
+                    f"cd {plugin_dir} && "
+                    "/app/venv/bin/python -m alembic -c alembic.ini heads"
+                ),
+            ],
+            step="read-candidate-alembic-head",
+            timeout=60,
+        )
+        head_lines = [
+            line.strip() for line in container_head.stdout.splitlines() if line.strip()
+        ]
+        if len(head_lines) != 1:
+            raise GateError("CANDIDATE_ALEMBIC_HEAD_CARDINALITY_INVALID")
+        match = re.fullmatch(r"([0-9]{8}_[0-9]{4}) \(head\)", head_lines[0])
+        if match is None or match.group(1) != expected_head:
+            raise GateError("CANDIDATE_ALEMBIC_HEAD_MISMATCH")
+        self.evidence.checks["candidate-alembic-head"] = expected_head
         self._run_command(
             [
                 "docker",
                 "exec",
-                "--env",
-                "AI_NOVEL_TTS_RUNTIME_ENABLED=false",
-                "--env",
-                "AI_NOVEL_TTS_PRODUCT_ENABLED=false",
-                "--env",
-                "AI_NOVEL_TTS_VALIDATION_ENABLED=false",
-                "--env",
-                "AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED=false",
+                *disabled_environment,
                 self.names.qwenpaw_container,
                 "/bin/sh",
                 "-lc",
@@ -1183,9 +1665,9 @@ class LifecycleGate:
             ],
             step="read-migration-head",
         )
-        if result.stdout.strip() != EXPECTED_MIGRATION_HEAD:
+        if result.stdout.strip() != expected_head:
             raise GateError("MIGRATION_HEAD_MISMATCH")
-        self.evidence.checks["migration-head"] = EXPECTED_MIGRATION_HEAD
+        self.evidence.checks["migration-head"] = expected_head
 
     def _wait_for_installed_contract(self) -> RegistrySnapshot:
         deadline = self.monotonic() + self.config.registry_timeout_seconds
@@ -1843,7 +2325,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _validated_config(arguments: argparse.Namespace) -> tuple[GateConfig, str]:
     run_id = arguments.run_id or uuid.uuid4().hex[:12]
     create_resource_names(run_id)
-    candidate, candidate_digest = validate_candidate(arguments.candidate)
+    candidate, candidate_digest, candidate_head = validate_candidate(arguments.candidate)
     if arguments.startup_timeout_seconds < 30 or arguments.startup_timeout_seconds > 900:
         raise GateError("STARTUP_TIMEOUT_OUT_OF_RANGE")
     if arguments.registry_timeout_seconds < 10 or arguments.registry_timeout_seconds > 300:
@@ -1862,6 +2344,7 @@ def _validated_config(arguments: argparse.Namespace) -> tuple[GateConfig, str]:
             transcript=arguments.transcript,
             confirmation=arguments.confirm,
             candidate_tree_sha256=candidate_digest,
+            candidate_migration_head=candidate_head,
             startup_timeout_seconds=arguments.startup_timeout_seconds,
             registry_timeout_seconds=arguments.registry_timeout_seconds,
         ),
@@ -1880,6 +2363,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             gate = LifecycleGate(config, names)
             gate.evidence.checks["candidate-tree-sha256"] = candidate_digest
+            gate.evidence.checks["candidate-migration-head"] = (
+                config.candidate_migration_head
+            )
             report = gate.run()
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0

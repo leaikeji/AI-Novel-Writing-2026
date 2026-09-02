@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+from types import MappingProxyType
 from typing import Any, Iterable
 
 import psycopg
@@ -26,9 +27,24 @@ API_ROLE = "ai_novel_api"
 WORKER_ROLE = "ai_novel_worker"
 MANAGED_ROLES = (SCHEMA_OWNER, MIGRATOR_ROLE, API_ROLE, WORKER_ROLE)
 RUNTIME_ROLES = (API_ROLE, WORKER_ROLE)
-EXPECTED_HEAD = "20260829_0034"
+SUPPORTED_HEADS = (
+    "20260829_0034",
+    "20260830_0035",
+    "20260901_0036",
+    "20260902_0037",
+    "20260902_0038",
+)
+VALIDATION_STEPS = MappingProxyType(
+    {
+        "validate-20260829_0034": "20260829_0034",
+        "validate-20260830_0035": "20260830_0035",
+        "validate-20260901_0036": "20260901_0036",
+        "validate-20260902_0037": "20260902_0037",
+        "validate-20260902_0038": "20260902_0038",
+    }
+)
 
-PROTECTED_TABLES = (
+_PROTECTED_TABLES_BEFORE_0034 = (
     "active_job_assets",
     "alembic_version",
     "anonymous_speakers",
@@ -86,9 +102,93 @@ PROTECTED_TABLES = (
     "volumes",
 )
 
+_PROTECTED_TABLES_ADDED_BY_0034 = (
+    "nano_voice_experiment_commands",
+    "narration_script_review_actions",
+    "voice_action_commands",
+    "voice_action_receipts",
+    "voice_deletion_asset_plans",
+    "voice_previews",
+    "voice_reference_asset_links",
+)
+_PROTECTED_TABLES_ADDED_BY_0035 = (
+    "voice_design_drafts",
+    "voice_generator_commands",
+    "voice_generator_run_evidence",
+)
+_PROTECTED_TABLES_ADDED_BY_0036 = (
+    "character_cast_plan_commands",
+    "character_cast_plan_items",
+)
+
+_PROTECTED_TABLES_0034 = tuple(
+    sorted((*_PROTECTED_TABLES_BEFORE_0034, *_PROTECTED_TABLES_ADDED_BY_0034))
+)
+_PROTECTED_TABLES_0035 = tuple(
+    sorted((*_PROTECTED_TABLES_0034, *_PROTECTED_TABLES_ADDED_BY_0035))
+)
+_PROTECTED_TABLES_0036 = tuple(
+    sorted((*_PROTECTED_TABLES_0035, *_PROTECTED_TABLES_ADDED_BY_0036))
+)
+
+PROTECTED_TABLES_BY_HEAD = MappingProxyType(
+    {
+        "20260829_0034": _PROTECTED_TABLES_0034,
+        "20260830_0035": _PROTECTED_TABLES_0035,
+        "20260901_0036": _PROTECTED_TABLES_0036,
+        "20260902_0037": _PROTECTED_TABLES_0036,
+        "20260902_0038": _PROTECTED_TABLES_0036,
+    }
+)
+CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260902_0038"]
+
+# These character-domain tables are not part of TTS authority. Keeping the
+# reviewed reasons next to the prefix audit makes a future character/voice
+# table fail closed instead of silently inheriting this exception.
+NON_TTS_CHARACTER_TABLE_ALLOWLIST = MappingProxyType(
+    {
+        "character_instance_revisions": "immutable multi-timeline character history",
+        "character_instances": "multi-timeline story-state authority",
+        "character_profile_apply_batches": "author-approved character card application audit",
+        "character_relationship_revisions": "immutable relationship graph history",
+        "character_relationships": "novel relationship graph authority",
+    }
+)
+_TTS_AUTHORITY_PREFIXES = (
+    "active_job_",
+    "anonymous_speaker",
+    "asset_tombstone",
+    "background_",
+    "character_",
+    "document_narration_",
+    "generic_voice_",
+    "media_",
+    "model_run_",
+    "nano_",
+    "narration_",
+    "novel_narration_",
+    "pronunciation_",
+    "voice_",
+)
+_TTS_AUTHORITY_EXACT_TABLES = frozenset(
+    {
+        "active_job_assets",
+        "anonymous_speakers",
+        "asset_tombstones",
+        "document_narration_state",
+        "generic_voice_pools",
+        "generic_voice_slots",
+        "model_run_records",
+        "novel_narration_settings",
+        "pronunciation_entries",
+        "pronunciation_profiles",
+    }
+)
+
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 _HOST = re.compile(r"^[A-Za-z0-9._-]+$")
 _HEX_PASSWORD = re.compile(r"^[0-9a-f]{64}$")
+_REVISION = re.compile(r"^[0-9]{8}_[0-9]{4}$")
 
 
 class RoleValidationError(RuntimeError):
@@ -105,7 +205,8 @@ class DatabaseTarget:
     migrator_passfile: Path
     api_passfile: Path
     worker_passfile: Path
-    expected_head: str = EXPECTED_HEAD
+    expected_head: str
+    maintenance_step: str
 
     def passfile_for(self, role: str) -> Path:
         mapping = {
@@ -127,6 +228,40 @@ def _require(condition: bool, check: str) -> None:
 
 def _validate_identifier(value: str, label: str) -> None:
     _require(bool(_IDENTIFIER.fullmatch(value)), f"invalid_{label}")
+
+
+def protected_tables_for_head(expected_head: object) -> tuple[str, ...]:
+    """Return the reviewed table set for one explicit supported revision."""
+
+    _require(
+        type(expected_head) is str
+        and _REVISION.fullmatch(expected_head) is not None,
+        "invalid_expected_head",
+    )
+    tables = PROTECTED_TABLES_BY_HEAD.get(expected_head)
+    _require(tables is not None, "unsupported_expected_head")
+    return tables
+
+
+def unclassified_tts_authority_tables(
+    table_names: Iterable[object],
+    *,
+    protected_tables: Iterable[str],
+) -> tuple[str, ...]:
+    """Return authority-looking tables missing from protection and allowlists."""
+
+    protected = frozenset(protected_tables)
+    allowlisted = frozenset(NON_TTS_CHARACTER_TABLE_ALLOWLIST)
+    authority_tables = {
+        name
+        for name in table_names
+        if type(name) is str
+        and (
+            name in _TTS_AUTHORITY_EXACT_TABLES
+            or name.startswith(_TTS_AUTHORITY_PREFIXES)
+        )
+    }
+    return tuple(sorted(authority_tables - protected - allowlisted))
 
 
 def _validate_passfile(
@@ -153,18 +288,45 @@ def _validate_passfile(
     except OSError as error:
         raise RoleValidationError(f"{role}_passfile_unreadable") from error
     _require(len(records) == 1, f"{role}_passfile_record_count")
-    fields = records[0].split(":")
+    fields: list[str] = []
+    field: list[str] = []
+    escaped = False
+    for character in records[0]:
+        if escaped:
+            _require(character in {":", "\\"}, f"{role}_passfile_escape")
+            field.append(character)
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == ":":
+            fields.append("".join(field))
+            field = []
+        else:
+            field.append(character)
+    _require(not escaped, f"{role}_passfile_escape")
+    fields.append("".join(field))
     _require(len(fields) == 5, f"{role}_passfile_shape")
     record_host, record_port, record_database, record_role, password = fields
     _require(record_host == host, f"{role}_passfile_host")
     _require(record_port == str(port), f"{role}_passfile_port")
     _require(record_database == database, f"{role}_passfile_database")
     _require(record_role == role, f"{role}_passfile_role")
-    _require(bool(_HEX_PASSWORD.fullmatch(password)), f"{role}_passfile_password_strength")
+    if role in (MIGRATOR_ROLE, API_ROLE, WORKER_ROLE):
+        _require(
+            bool(_HEX_PASSWORD.fullmatch(password)),
+            f"{role}_passfile_password_strength",
+        )
+    else:
+        _require(bool(password) and "\x00" not in password, f"{role}_passfile_password_empty")
     del password
 
 
 def validate_target(target: DatabaseTarget) -> None:
+    protected_tables_for_head(target.expected_head)
+    _require(
+        VALIDATION_STEPS.get(target.maintenance_step) == target.expected_head,
+        "maintenance_step_expected_head_mismatch",
+    )
     _require(bool(_HOST.fullmatch(target.host)), "invalid_host")
     _require(1 <= target.port <= 65535, "invalid_port")
     _validate_identifier(target.database, "database")
@@ -247,6 +409,7 @@ def collect_and_validate(target: DatabaseTarget) -> dict[str, Any]:
     """Return secret-free catalog evidence or raise ``RoleValidationError``."""
 
     validate_target(target)
+    protected_tables = protected_tables_for_head(target.expected_head)
     authenticated = _validate_role_logins(target)
 
     with _connect(target, target.admin_role) as connection:
@@ -458,9 +621,12 @@ def collect_and_validate(target: DatabaseTarget) -> dict[str, Any]:
               AND relation.relname = ANY(%s)
             ORDER BY relation.relname, runtime_role.role_name
             """,
-            (API_ROLE, WORKER_ROLE, list(PROTECTED_TABLES)),
+            (API_ROLE, WORKER_ROLE, list(protected_tables)),
         )
-        _require(len(protected_rows) == len(PROTECTED_TABLES) * 2, "protected_table_presence")
+        _require(
+            len(protected_rows) == len(protected_tables) * 2,
+            "protected_table_presence",
+        )
         for row in protected_rows:
             _require(row["can_select"] is True, "protected_table_select")
             for key in (
@@ -472,6 +638,26 @@ def collect_and_validate(target: DatabaseTarget) -> dict[str, Any]:
                 "can_trigger",
             ):
                 _require(row[key] is False, f"protected_table_{key}")
+
+        public_table_rows = _fetch_all(
+            connection,
+            """
+            SELECT relation.relname AS table_name
+            FROM pg_catalog.pg_class relation
+            JOIN pg_catalog.pg_namespace namespace
+              ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'public'
+              AND relation.relkind IN ('r', 'p')
+            ORDER BY relation.relname
+            """,
+        )
+        _require(
+            not unclassified_tts_authority_tables(
+                (row["table_name"] for row in public_table_rows),
+                protected_tables=protected_tables,
+            ),
+            "unclassified_tts_authority_table",
+        )
 
         global_runtime_dml = _fetch_one(
             connection,
@@ -624,9 +810,10 @@ def collect_and_validate(target: DatabaseTarget) -> dict[str, Any]:
         "database": target.database,
         "admin_role": target.admin_role,
         "alembic_head": target.expected_head,
+        "maintenance_step": target.maintenance_step,
         "managed_roles": list(MANAGED_ROLES),
         "authenticated_roles": authenticated,
-        "protected_table_count": len(PROTECTED_TABLES),
+        "protected_table_count": len(protected_tables),
         "public_relation_count": relation_count,
         "public_routine_count": routine_count,
         "security_definer_count": routine_acl["security_definer_count"],
@@ -668,7 +855,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--migrator-passfile", required=True, type=Path)
     parser.add_argument("--api-passfile", required=True, type=Path)
     parser.add_argument("--worker-passfile", required=True, type=Path)
-    parser.add_argument("--expected-head", default=EXPECTED_HEAD)
+    parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--maintenance-step", required=True)
     parser.add_argument("--pretty", action="store_true")
     return parser.parse_args(argv)
 
@@ -685,6 +873,7 @@ def main(argv: list[str] | None = None) -> int:
         api_passfile=arguments.api_passfile,
         worker_passfile=arguments.worker_passfile,
         expected_head=arguments.expected_head,
+        maintenance_step=arguments.maintenance_step,
     )
     try:
         report = collect_and_validate(target)

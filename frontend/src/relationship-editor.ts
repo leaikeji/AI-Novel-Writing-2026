@@ -361,7 +361,7 @@ function fromRelationship(relationship: CharacterRelationshipRecord): Relationsh
     target_character_id: relationship.target_character_id,
     directionality: relationship.directionality,
     relation_kind: relationship.relation_kind,
-    label: relationship.label || relationship.relation_type,
+    label: relationship.label,
     description: relationship.description,
     status: relationship.definition_status || relationship.status,
     original: null,
@@ -558,10 +558,7 @@ export function RelationshipEditor({
     rows = [...rows].sort((left, right) => {
       if (left.id === focusRelationshipId) return -1;
       if (right.id === focusRelationshipId) return 1;
-      return (left.label || left.relation_type).localeCompare(
-        right.label || right.relation_type,
-        "zh-CN",
-      );
+      return left.label.localeCompare(right.label, "zh-CN");
     });
     const nextDrafts = rows.map(fromRelationship);
     if (startWithNew || (!focusCharacterId && !focusRelationshipId)) {

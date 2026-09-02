@@ -11,12 +11,20 @@ import pytest
 from backend.creative_data_models import (
     CharacterInstance,
     CharacterInstanceRevision,
+    StoryEventLink,
     StoryTimeline,
     StoryTimelineLink,
 )
-from backend.models import DerivedSourceBinding, Novel, NovelCharacter, StoryFact
+from backend.models import (
+    DerivedSourceBinding,
+    IntelligenceCommitBatch,
+    Novel,
+    NovelCharacter,
+    StoryFact,
+)
 from backend.story_state.contracts import (
     CharacterContinuityKind,
+    StoryEventLinkType,
     StoryStateError,
     StoryStateErrorCode,
     TimelineLinkType,
@@ -25,6 +33,7 @@ from backend.story_state.persistence import (
     PersistenceErrorCode,
     StoryStatePersistenceError,
     create_character_instance,
+    create_story_event_link,
     create_timeline_link,
     ensure_default_story_state,
     fork_timeline,
@@ -37,6 +46,7 @@ from backend.story_state.persistence import (
     list_timeline_link_payloads,
     list_timeline_payloads,
     patch_character_instance,
+    patch_timeline,
 )
 
 
@@ -127,7 +137,15 @@ def character(value: int = 20) -> NovelCharacter:
     )
 
 
-def fact(value: int, timeline_id: int, sequence: int, text: str) -> StoryFact:
+def fact(
+    value: int,
+    timeline_id: int,
+    sequence: int | None,
+    text: str,
+    *,
+    source_revision_id: int | None = None,
+    status: str = "active",
+) -> StoryFact:
     return StoryFact(
         id=uid(value),
         novel_id=uid(1),
@@ -136,8 +154,10 @@ def fact(value: int, timeline_id: int, sequence: int, text: str) -> StoryFact:
         predicate="状态",
         object_text=text,
         details={"schema_version": "world-state/1", "value": text},
-        source_revision_id=None,
-        source_document_id=None,
+        source_revision_id=(uid(source_revision_id) if source_revision_id else None),
+        source_document_id=(
+            uid(source_revision_id + 1000) if source_revision_id else None
+        ),
         schema_version="story-fact/2",
         timeline_id=uid(timeline_id),
         character_id=None,
@@ -153,7 +173,64 @@ def fact(value: int, timeline_id: int, sequence: int, text: str) -> StoryFact:
         source_start=None,
         source_end=None,
         event_fingerprint=f"{value:064x}",
-        status="active",
+        status=status,
+        created_at=NOW,
+    )
+
+
+def source_binding(
+    value: int,
+    fact_id: int,
+    source_revision_id: int,
+    *,
+    validity_state: str = "current",
+    commit_batch_id: int | None = None,
+) -> DerivedSourceBinding:
+    return DerivedSourceBinding(
+        id=uid(value),
+        derived_entity_id=uid(fact_id),
+        source_chapter_id=uid(source_revision_id + 1000),
+        source_chapter_revision_id=uid(source_revision_id),
+        source_content_hash=f"{source_revision_id:064x}",
+        proposal_item_id=None,
+        commit_batch_id=(uid(commit_batch_id) if commit_batch_id else None),
+        validity_state=validity_state,
+        invalidated_at=None,
+        restored_at=None,
+        created_at=NOW,
+    )
+
+
+def commit_batch(value: int, source_revision_id: int, *, state: str) -> IntelligenceCommitBatch:
+    return IntelligenceCommitBatch(
+        id=uid(value),
+        proposal_id=uid(value + 1000),
+        chapter_revision_id=uid(source_revision_id),
+        commit_key=f"{value:064x}",
+        state=state,
+        accepted_item_ids=[],
+        inverse_operations={},
+        expected_story_ledger_version=1,
+        committed_at=NOW,
+        reverted_at=NOW if state == "reverted" else None,
+        created_at=NOW,
+    )
+
+
+def story_event_link(
+    value: int,
+    source_fact_id: int,
+    target_fact_id: int,
+    *,
+    link_type: str = "supersedes",
+) -> StoryEventLink:
+    return StoryEventLink(
+        id=uid(value),
+        novel_id=uid(1),
+        source_fact_id=uid(source_fact_id),
+        target_fact_id=uid(target_fact_id),
+        link_type=link_type,
+        details_json={},
         created_at=NOW,
     )
 
@@ -505,6 +582,79 @@ def test_character_instance_patch_enforces_novel_scope_and_both_cas_versions() -
     assert "character_instances.novel_id" in session.statements[-1]
 
 
+def test_same_value_timeline_and_instance_patches_do_not_advance_versions() -> None:
+    timeline_novel = novel()
+    timeline_row = timeline(10, primary=True, version=2)
+    timeline_session = FakeSession(
+        scalar_results={Novel: [timeline_novel], StoryTimeline: [timeline_row]},
+    )
+
+    timeline_payload = patch_timeline(
+        timeline_session,
+        uid(1),
+        timeline_row.id,
+        expected_story_ledger_version=1,
+        expected_timeline_version=2,
+        name=timeline_row.name,
+        lifecycle_state=timeline_row.lifecycle_state,
+        clock=lambda: NOW,
+    )
+
+    assert timeline_payload["changed"] is False
+    assert timeline_payload["version"] == 2
+    assert timeline_payload["story_ledger_version"] == 1
+    assert timeline_session.flush_count == 0
+
+    instance_novel = novel()
+    instance_row = instance(30, version=2)
+    instance_session = FakeSession(
+        scalar_results={Novel: [instance_novel], CharacterInstance: [instance_row]},
+    )
+
+    instance_payload = patch_character_instance(
+        instance_session,
+        uid(1),
+        instance_row.id,
+        expected_story_ledger_version=1,
+        expected_instance_version=2,
+        display_label=instance_row.display_label,
+        lifecycle_state=instance_row.lifecycle_state,
+        clock=lambda: NOW,
+    )
+
+    assert instance_payload["changed"] is False
+    assert instance_payload["version"] == 2
+    assert instance_payload["story_ledger_version"] == 1
+    assert instance_session.flush_count == 0
+
+
+def test_story_event_link_same_semantics_with_different_details_is_not_replay() -> None:
+    novel_row = novel()
+    source = fact(100, 10, 1, "新事实")
+    target = fact(101, 10, 1, "旧事实")
+    replay = story_event_link(200, 100, 101)
+    replay.details_json = {"reason": "原原因"}
+    session = FakeSession(
+        scalar_results={Novel: [novel_row], StoryEventLink: [replay]},
+        scalars_results={StoryFact: [[source, target]]},
+    )
+
+    with pytest.raises(StoryStatePersistenceError) as raised:
+        create_story_event_link(
+            session,
+            uid(1),
+            source_fact_id=source.id,
+            target_fact_id=target.id,
+            link_type=StoryEventLinkType.SUPERSEDES,
+            expected_story_ledger_version=1,
+            details={"reason": "另一原因"},
+        )
+
+    assert raised.value.code is PersistenceErrorCode.IDEMPOTENCY_CONFLICT
+    assert novel_row.story_ledger_version == 1
+    assert session.added == []
+
+
 def test_stale_ledger_cas_stops_before_loading_or_writing_children() -> None:
     session = FakeSession(scalar_results={Novel: [novel(version=3)]})
 
@@ -557,6 +707,95 @@ def test_readonly_projection_inherits_parent_pre_anchor_and_excludes_sibling() -
         for sql in session.statements
         if "story_timelines" in sql or "story_facts" in sql or "story_event_links" in sql
     )
+
+
+def test_projection_resolves_source_validity_per_fact_without_revision_cross_contamination() -> None:
+    main = timeline(10, primary=True)
+    accepted = fact(100, 10, 2, "晴", source_revision_id=50)
+    invalid = fact(101, 10, 3, "雨", source_revision_id=50)
+    session = FakeSession(
+        scalar_results={Novel: [novel()]},
+        scalars_results={
+            StoryTimeline: [[main]],
+            StoryFact: [[accepted, invalid]],
+            DerivedSourceBinding: [[
+                source_binding(200, 100, 50),
+                source_binding(
+                    201,
+                    101,
+                    50,
+                    validity_state="source_superseded",
+                ),
+            ]],
+        },
+    )
+
+    payload = get_story_projection_payload(
+        session,
+        uid(1),
+        timeline_id=main.id,
+        narrative_cutoff=10,
+    )
+
+    assert [item["id"] for item in payload["visible_facts"]] == [str(accepted.id)]
+    assert [item["id"] for item in payload["current_facts"]] == [str(accepted.id)]
+    assert str(invalid.id) in payload["suppressed_fact_ids"]
+    assert str(accepted.id) not in payload["ambiguous_fact_ids"]
+
+
+def test_projection_excludes_fact_owned_only_by_reverted_commit_batch() -> None:
+    main = timeline(10, primary=True)
+    reverted_fact = fact(100, 10, 2, "晴", source_revision_id=50)
+    session = FakeSession(
+        scalar_results={Novel: [novel()]},
+        scalars_results={
+            StoryTimeline: [[main]],
+            StoryFact: [[reverted_fact]],
+            DerivedSourceBinding: [[
+                source_binding(200, 100, 50, commit_batch_id=300),
+            ]],
+            IntelligenceCommitBatch: [[commit_batch(300, 50, state="reverted")]],
+        },
+    )
+
+    payload = get_story_projection_payload(
+        session,
+        uid(1),
+        timeline_id=main.id,
+        narrative_cutoff=10,
+    )
+
+    assert payload["visible_facts"] == []
+    assert payload["current_facts"] == []
+    assert payload["suppressed_fact_ids"] == [str(reverted_fact.id)]
+    assert any("intelligence_commit_batches" in sql for sql in session.statements)
+
+
+def test_projection_applies_incoming_supersedes_before_timeline_projection() -> None:
+    main = timeline(10, primary=True)
+    branch = timeline(11, parent=10, anchor=10, position=1)
+    old = fact(100, 10, 2, "雨")
+    replacement_on_other_line = fact(101, 11, 3, "晴")
+    supersedes = story_event_link(200, 101, 100)
+    session = FakeSession(
+        scalar_results={Novel: [novel()]},
+        scalars_results={
+            StoryTimeline: [[main, branch]],
+            StoryFact: [[old, replacement_on_other_line]],
+            StoryEventLink: [[supersedes]],
+        },
+    )
+
+    payload = get_story_projection_payload(
+        session,
+        uid(1),
+        timeline_id=main.id,
+        narrative_cutoff=10,
+    )
+
+    assert payload["visible_facts"] == []
+    assert payload["current_facts"] == []
+    assert str(old.id) in payload["suppressed_fact_ids"]
 
 
 def test_list_helpers_are_readonly_and_novel_scoped() -> None:

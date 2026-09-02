@@ -32,6 +32,7 @@ from backend.narration.official_presets import (
     validate_official_version_evidence,
 )
 from backend.narration.voice_product import build_official_preset_version_rows
+from tests.narration.current_schema_gate import assert_database_at_repository_head
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -259,9 +260,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
             transaction = connection.begin()
             session: Session | None = None
             try:
-                assert connection.scalar(
-                    text("SELECT version_num FROM alembic_version")
-                ) == "20260829_0034"
+                assert_database_at_repository_head(connection)
                 session = Session(bind=connection, join_transaction_mode="create_savepoint")
                 novel_id = uuid4()
                 profile_id = official_preset_canonical_profile_id(

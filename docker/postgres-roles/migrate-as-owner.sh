@@ -33,6 +33,29 @@ PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)
 : "${AI_NOVEL_DB_PORT:?AI_NOVEL_DB_PORT is required}"
 : "${AI_NOVEL_DB_NAME:?AI_NOVEL_DB_NAME is required}"
 : "${AI_NOVEL_MIGRATOR_PGPASS_FILE:?AI_NOVEL_MIGRATOR_PGPASS_FILE is required}"
+: "${AI_NOVEL_MAINTENANCE_STEP:?AI_NOVEL_MAINTENANCE_STEP is required}"
+
+case "$AI_NOVEL_MAINTENANCE_STEP" in
+    upgrade-20260902_0038)
+        [ "$#" -eq 2 ] \
+            && [ "$1" = upgrade ] \
+            && [ "$2" = 20260902_0038 ] \
+            || fail "upgrade step requires exact target 20260902_0038"
+        ;;
+    downgrade-20260902_0037)
+        [ "$#" -eq 2 ] \
+            && [ "$1" = downgrade ] \
+            && [ "$2" = 20260902_0037 ] \
+            || fail "downgrade step requires exact target 20260902_0037"
+        ;;
+    downgrade-20260830_0035)
+        [ "$#" -eq 2 ] \
+            && [ "$1" = downgrade ] \
+            && [ "$2" = 20260830_0035 ] \
+            || fail "downgrade step requires exact target 20260830_0035"
+        ;;
+    *) fail "maintenance step does not authorize schema migration" ;;
+esac
 
 [ -z "${PGPASSWORD:-}" ] || fail "PGPASSWORD is forbidden; use the migrator pgpass file"
 [ -z "${PGOPTIONS:-}" ] || fail "pre-existing PGOPTIONS is forbidden"
@@ -68,7 +91,4 @@ else
     fail "a Python 3.11-compatible interpreter is required"
 fi
 
-if [ "$#" -eq 0 ]; then
-    set -- upgrade head
-fi
 exec "$PYTHON_EXECUTABLE" -m alembic -c "$PROJECT_ROOT/alembic.ini" "$@"

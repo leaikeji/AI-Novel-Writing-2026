@@ -20,7 +20,6 @@ function relationship(
     directionality: "undirected",
     relation_kind: "other",
     label: id,
-    relation_type: id,
     description: "",
     status: "active",
     created_by: "manual",
@@ -69,12 +68,11 @@ describe("relationshipLaneMap", () => {
 
 describe("compactRelationshipGraphLabel", () => {
   it("保留短关系名，避免画布信息损失", () => {
-    expect(compactRelationshipGraphLabel("同盟与青梅", "盟友")).toBe("同盟与青梅");
+    expect(compactRelationshipGraphLabel("同盟与青梅")).toBe("同盟与青梅");
   });
 
   it("压缩长关系名，完整说明仍由悬浮提示和关系列表承载", () => {
-    expect(compactRelationshipGraphLabel("少年军师与街道办主任", "其他")).toBe("少年军师与…");
-    expect(compactRelationshipGraphLabel("", "暗中博弈的对手")).toBe("暗中博弈的…");
+    expect(compactRelationshipGraphLabel("少年军师与街道办主任")).toBe("少年军师与…");
   });
 });
 

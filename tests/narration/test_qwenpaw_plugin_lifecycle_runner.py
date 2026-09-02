@@ -4,6 +4,7 @@ import ast
 import base64
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,14 +53,28 @@ def candidate(tmp_path: Path) -> Path:
         ),
         "plugin.py": "plugin = object()\n",
         "requirements.txt": "",
-        "alembic.ini": "[alembic]\n",
+        "alembic.ini": "[alembic]\nscript_location = backend/migrations\n",
         "frontend/dist/index.js": "export {};\n",
         "backend/app.py": "",
         "backend/narration/pawapp_runtime.py": "",
         (
             "backend/migrations/versions/"
-            "20260826_0015_narration_domain_concurrency_guards.py"
-        ): "revision = '20260826_0015'\n",
+            "20260823_0001_fixture.py"
+        ): (
+            "revision = '20260823_0001'\n"
+            "down_revision = None\n"
+            "branch_labels = None\n"
+            "depends_on = None\n"
+        ),
+        (
+            "backend/migrations/versions/"
+            "20260901_0036_fixture.py"
+        ): (
+            "revision = '20260901_0036'\n"
+            "down_revision = '20260823_0001'\n"
+            "branch_labels = None\n"
+            "depends_on = None\n"
+        ),
     }
     for skill in (
         "novel-direction",
@@ -119,6 +134,7 @@ def test_dry_run_never_touches_docker_or_http(
     assert output["topology"]["published_ports"] == []
     assert output["topology"]["public_api_probe"].startswith("docker-exec")
     assert output["candidate"]["staging"] == "docker-cp-to-qwenpaw-container-layer"
+    assert output["candidate"]["migration_head"] == "20260901_0036"
     assert output["cleanup"]["compose_used"] is False
     assert output["cleanup"]["broad_down_or_volume_prune"] is False
     assert output["public_api_operations"] == [
@@ -579,11 +595,117 @@ def test_http_transport_captures_only_cache_control_header(
     assert json.loads(executor.command[-1]) == {"Accept": "application/json"}
 
 
+def test_install_retries_only_the_exact_public_loader_not_ready_response(
+    runner: ModuleType,
+    candidate: Path,
+) -> None:
+    names = runner.create_resource_names("abcd1234")
+    sleeps: list[float] = []
+
+    class InstallGate(runner.LifecycleGate):
+        def __init__(self) -> None:
+            super().__init__(
+                runner.GateConfig(
+                    "real",
+                    "abcd1234",
+                    candidate,
+                    None,
+                    runner.REAL_CONFIRMATION,
+                ),
+                names,
+                executor=object(),
+                sleep=sleeps.append,
+                monotonic=lambda: 0,
+            )
+            self.responses = iter(
+                (
+                    (503, dict(runner.PLUGIN_LOADER_NOT_READY)),
+                    (
+                        200,
+                        {
+                            "id": runner.APP_ID,
+                            "version": runner.APP_VERSION,
+                            "loaded": True,
+                        },
+                    ),
+                )
+            )
+
+        def _read_staged_candidate_digest(self, *, step: str) -> str:
+            assert step == "verify-candidate-before-initial-install"
+            return "a" * 64
+
+        def _raw_http_json(self, *args: object, **kwargs: object) -> tuple[int, object]:
+            del args, kwargs
+            return next(self.responses)
+
+    gate = InstallGate()
+    gate._install(force=False, step="initial-install")
+
+    assert sleeps == [1]
+    assert gate.evidence.checks["http:initial-install"] == {
+        "method": "POST",
+        "path": "/api/plugins/install",
+        "status": 200,
+        "attempts": 2,
+        "response_sha256": runner._sha256_text(
+            json.dumps(
+                {
+                    "id": runner.APP_ID,
+                    "version": runner.APP_VERSION,
+                    "loaded": True,
+                },
+                sort_keys=True,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+        ),
+    }
+
+
+def test_install_does_not_retry_an_unrecognized_503(
+    runner: ModuleType,
+    candidate: Path,
+) -> None:
+    names = runner.create_resource_names("abcd1234")
+    sleeps: list[float] = []
+
+    class InstallGate(runner.LifecycleGate):
+        def __init__(self) -> None:
+            super().__init__(
+                runner.GateConfig(
+                    "real",
+                    "abcd1234",
+                    candidate,
+                    None,
+                    runner.REAL_CONFIRMATION,
+                ),
+                names,
+                executor=object(),
+                sleep=sleeps.append,
+                monotonic=lambda: 0,
+            )
+
+        def _read_staged_candidate_digest(self, *, step: str) -> str:
+            del step
+            return "a" * 64
+
+        def _raw_http_json(self, *args: object, **kwargs: object) -> tuple[int, object]:
+            del args, kwargs
+            return 503, {"detail": "different failure"}
+
+    gate = InstallGate()
+    with pytest.raises(runner.GateError, match="HTTP_STATUS_UNEXPECTED"):
+        gate._install(force=False, step="initial-install")
+
+    assert sleeps == []
+
+
 def test_migration_exec_reasserts_all_four_disabled_flags(
     runner: ModuleType,
     candidate: Path,
 ) -> None:
-    assert runner.EXPECTED_MIGRATION_HEAD == "20260829_0034"
+    expected_head = "20260901_0036"
 
     class MigrationExecutor:
         def __init__(self) -> None:
@@ -599,11 +721,11 @@ def test_migration_exec_reasserts_all_four_disabled_flags(
             del timeout, check
             command = list(argv)
             self.commands.append(command)
-            stdout = (
-                f"{runner.EXPECTED_MIGRATION_HEAD}\n"
-                if "psql" in command
-                else ""
-            )
+            stdout = ""
+            if "psql" in command:
+                stdout = f"{expected_head}\n"
+            elif any(part.endswith("alembic.ini heads") for part in command):
+                stdout = f"{expected_head} (head)\n"
             return runner.CommandResult(0, stdout, "")
 
     names = runner.create_resource_names("abcd1234")
@@ -615,18 +737,21 @@ def test_migration_exec_reasserts_all_four_disabled_flags(
             candidate,
             None,
             runner.REAL_CONFIRMATION,
+            candidate_migration_head=expected_head,
         ),
         names,
         executor=executor,
     )
     plan = runner.build_dry_run_plan(gate.config, names)
-    assert "migrate-to-20260829_0034" in plan["lifecycle"]
+    assert f"migrate-to-{expected_head}" in plan["lifecycle"]
 
     gate._migrate_and_verify_head()
 
-    migration = executor.commands[0]
-    for item in _explicit_disabled_env()[:4]:
-        assert migration.count(item) == 1
+    assert gate.evidence.checks["candidate-alembic-head"] == expected_head
+    assert gate.evidence.checks["migration-head"] == expected_head
+    for command in executor.commands[:2]:
+        for item in _explicit_disabled_env()[:4]:
+            assert command.count(item) == 1
 
 
 @pytest.mark.parametrize(
@@ -659,7 +784,7 @@ def test_candidate_staging_uses_docker_cp_and_no_helper_container(
     runner: ModuleType,
     candidate: Path,
 ) -> None:
-    _, digest = runner.validate_candidate(candidate)
+    _, digest, candidate_head = runner.validate_candidate(candidate)
     run_id = "abcd1234"
     names = runner.create_resource_names(run_id)
 
@@ -690,6 +815,7 @@ def test_candidate_staging_uses_docker_cp_and_no_helper_container(
         None,
         runner.REAL_CONFIRMATION,
         candidate_tree_sha256=digest,
+        candidate_migration_head=candidate_head,
     )
     gate = runner.LifecycleGate(config, names, executor=executor)
 
@@ -708,11 +834,292 @@ def test_candidate_staging_uses_docker_cp_and_no_helper_container(
         "method": "docker-cp",
         "container_path": "/gate/candidate",
         "tree_sha256": digest,
+        "migration_head": candidate_head,
         "host_bind_mount_count": 0,
         "helper_container_count": 0,
         "host_copy_detached": True,
         "integrity_rechecked_before_each_install": True,
     }
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "limit_value", "failure_code"),
+    [
+        (
+            "CANDIDATE_TREE_MAX_ENTRIES",
+            0,
+            "CANDIDATE_TREE_ENTRY_LIMIT_EXCEEDED",
+        ),
+        ("CANDIDATE_TREE_MAX_FILES", 0, "CANDIDATE_TREE_FILE_LIMIT_EXCEEDED"),
+        ("CANDIDATE_TREE_MAX_FILE_BYTES", 0, "CANDIDATE_TREE_FILE_TOO_LARGE"),
+        (
+            "CANDIDATE_TREE_MAX_TOTAL_BYTES",
+            0,
+            "CANDIDATE_TREE_TOTAL_BYTES_EXCEEDED",
+        ),
+    ],
+)
+def test_candidate_tree_resource_limits_fail_before_external_io(
+    runner: ModuleType,
+    candidate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+    limit_value: int,
+    failure_code: str,
+) -> None:
+    monkeypatch.setattr(runner, limit_name, limit_value)
+
+    with pytest.raises(runner.GateError, match=failure_code):
+        runner._candidate_tree_sha256(candidate)
+
+
+def test_validate_candidate_applies_tree_limits_before_manifest_parsing(
+    runner: ModuleType,
+    candidate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (candidate / "plugin.json").write_text("not json", encoding="utf-8")
+    monkeypatch.setattr(runner, "CANDIDATE_TREE_MAX_ENTRIES", 0)
+
+    with pytest.raises(
+        runner.GateError,
+        match="CANDIDATE_TREE_ENTRY_LIMIT_EXCEEDED",
+    ):
+        runner.validate_candidate(candidate)
+
+
+def test_candidate_tree_detects_file_identity_drift_during_hash(
+    runner: ModuleType,
+    candidate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = runner._hash_candidate_file
+    target = "frontend/dist/index.js"
+    changed = False
+
+    def drift_before_read(
+        root_descriptor: int,
+        relative: str,
+        before: object,
+        digest: object,
+    ) -> None:
+        nonlocal changed
+        if relative == target and not changed:
+            changed = True
+            path = candidate / target
+            path.write_text("export const drift = true;\n", encoding="utf-8")
+        original(root_descriptor, relative, before, digest)
+
+    monkeypatch.setattr(runner, "_hash_candidate_file", drift_before_read)
+
+    with pytest.raises(runner.GateError, match="CANDIDATE_TREE_IDENTITY_CHANGED"):
+        runner._candidate_tree_sha256(candidate)
+    assert changed is True
+
+
+def test_candidate_tree_digest_includes_empty_directories(
+    runner: ModuleType,
+    candidate: Path,
+) -> None:
+    original = runner._candidate_tree_sha256(candidate)
+    empty = candidate / "empty-contract-directory"
+    empty.mkdir()
+
+    changed = runner._candidate_tree_sha256(candidate)
+
+    assert changed != original
+
+
+def test_candidate_tree_rejects_symlinks_hardlinks_and_special_files(
+    runner: ModuleType,
+    candidate: Path,
+) -> None:
+    link = candidate / "candidate-link"
+    link.symlink_to(candidate / "plugin.json")
+    with pytest.raises(runner.GateError, match="CANDIDATE_SYMLINK_FORBIDDEN"):
+        runner._candidate_tree_sha256(candidate)
+    link.unlink()
+
+    hardlink = candidate / "candidate-hardlink"
+    os.link(candidate / "plugin.json", hardlink)
+    with pytest.raises(runner.GateError, match="CANDIDATE_HARDLINK_FORBIDDEN"):
+        runner._candidate_tree_sha256(candidate)
+    hardlink.unlink()
+
+    fifo = candidate / "candidate-fifo"
+    os.mkfifo(fifo)
+    try:
+        with pytest.raises(
+            runner.GateError,
+            match="CANDIDATE_SPECIAL_FILE_FORBIDDEN",
+        ):
+            runner._candidate_tree_sha256(candidate)
+    finally:
+        fifo.unlink()
+
+
+def test_candidate_is_rehashed_before_docker_copy(
+    runner: ModuleType,
+    candidate: Path,
+) -> None:
+    _, digest, candidate_head = runner.validate_candidate(candidate)
+    (candidate / "frontend" / "dist" / "index.js").write_text(
+        "export const changed = true;\n",
+        encoding="utf-8",
+    )
+
+    class ForbiddenExecutor:
+        def run(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("drift must fail before Docker")
+
+    names = runner.create_resource_names("abcd1234")
+    gate = runner.LifecycleGate(
+        runner.GateConfig(
+            "real",
+            "abcd1234",
+            candidate,
+            None,
+            runner.REAL_CONFIRMATION,
+            candidate_tree_sha256=digest,
+            candidate_migration_head=candidate_head,
+        ),
+        names,
+        executor=ForbiddenExecutor(),
+    )
+
+    with pytest.raises(runner.GateError, match="HOST_CANDIDATE_DIGEST_MISMATCH"):
+        gate._stage_candidate()
+
+
+def test_gate_config_head_cannot_drift_to_a_different_candidate_head(
+    runner: ModuleType,
+    candidate: Path,
+) -> None:
+    _, _, frozen_head = runner.validate_candidate(candidate)
+    versions = candidate / "backend" / "migrations" / "versions"
+    (versions / "20260901_0036_fixture.py").unlink()
+    (versions / "20260902_0037_fixture.py").write_text(
+        (
+            "revision = '20260902_0037'\n"
+            "down_revision = '20260823_0001'\n"
+            "branch_labels = None\n"
+            "depends_on = None\n"
+        ),
+        encoding="utf-8",
+    )
+    changed_digest = runner._candidate_tree_sha256(candidate)
+
+    class ForbiddenExecutor:
+        def run(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("head drift must fail before Docker")
+
+    gate = runner.LifecycleGate(
+        runner.GateConfig(
+            "real",
+            "abcd1234",
+            candidate,
+            None,
+            runner.REAL_CONFIRMATION,
+            candidate_tree_sha256=changed_digest,
+            candidate_migration_head=frozen_head,
+        ),
+        runner.create_resource_names("abcd1234"),
+        executor=ForbiddenExecutor(),
+    )
+
+    with pytest.raises(
+        runner.GateError,
+        match="HOST_CANDIDATE_MIGRATION_HEAD_MISMATCH",
+    ):
+        gate._stage_candidate()
+
+
+def test_container_hash_probe_is_bounded_streaming_and_no_follow(
+    runner: ModuleType,
+    candidate: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    expected_digest = runner._candidate_tree_sha256(candidate)
+    program = runner._container_candidate_hash_program(str(candidate))
+
+    compile(program, "<container-candidate-hash>", "exec")
+    exec(program, {})
+    assert capsys.readouterr().out.strip() == expected_digest
+    assert "read_bytes" not in program
+    assert "os.walk" not in program
+    assert "os.scandir(directory_descriptor)" in program
+    assert "O_NOFOLLOW" in program
+    assert "dir_fd=" in program
+    assert f"MAX_ENTRIES = {runner.CANDIDATE_TREE_MAX_ENTRIES}" in program
+    assert f"MAX_FILES = {runner.CANDIDATE_TREE_MAX_FILES}" in program
+    assert f"MAX_FILE_BYTES = {runner.CANDIDATE_TREE_MAX_FILE_BYTES}" in program
+    assert f"MAX_TOTAL_BYTES = {runner.CANDIDATE_TREE_MAX_TOTAL_BYTES}" in program
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "failure_code"),
+    [
+        ("CANDIDATE_TREE_MAX_ENTRIES", "ENTRY_LIMIT"),
+        ("CANDIDATE_TREE_MAX_FILES", "FILE_COUNT"),
+        ("CANDIDATE_TREE_MAX_FILE_BYTES", "FILE_TOO_LARGE"),
+        ("CANDIDATE_TREE_MAX_TOTAL_BYTES", "TOTAL_BYTES"),
+    ],
+)
+def test_container_hash_probe_enforces_each_resource_limit(
+    runner: ModuleType,
+    candidate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+    failure_code: str,
+) -> None:
+    monkeypatch.setattr(runner, limit_name, 0)
+    program = runner._container_candidate_hash_program(str(candidate))
+
+    with pytest.raises(RuntimeError, match=failure_code):
+        exec(program, {})
+
+
+def test_container_hash_probe_detects_identity_drift(
+    runner: ModuleType,
+    candidate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_read = os.read
+    changed = False
+
+    def mutate_first_file(descriptor: int, count: int) -> bytes:
+        nonlocal changed
+        if not changed:
+            changed = True
+            (candidate / "alembic.ini").write_text(
+                "[alembic]\nscript_location = backend/migrations\n# drift\n",
+                encoding="utf-8",
+            )
+        return original_read(descriptor, count)
+
+    monkeypatch.setattr(os, "read", mutate_first_file)
+    program = runner._container_candidate_hash_program(str(candidate))
+
+    with pytest.raises(RuntimeError, match="FILE_IDENTITY"):
+        exec(program, {})
+    assert changed is True
+
+
+def test_candidate_failure_context_never_exposes_candidate_filename(
+    runner: ModuleType,
+    candidate: Path,
+) -> None:
+    versions = candidate / "backend" / "migrations" / "versions"
+    source = versions / "20260901_0036_fixture.py"
+    controlled_name = "20260901_9999_candidate-controlled-secret.py"
+    source.rename(versions / controlled_name)
+
+    with pytest.raises(runner.GateError) as raised:
+        runner.validate_candidate(candidate)
+
+    assert raised.value.code == "MIGRATION_FILENAME_MISMATCH"
+    assert raised.value.detail == ""
+    assert controlled_name not in raised.value.detail
 
 
 def test_failed_command_is_recorded_before_safe_error(

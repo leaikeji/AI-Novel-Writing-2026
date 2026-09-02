@@ -1,6 +1,7 @@
 export const NARRATION_SETTINGS_API_VERSION = "narration-settings-api/1" as const;
 export const NARRATION_SETTINGS_SCHEMA_VERSION = "narration-settings/1" as const;
 export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/3" as const;
+const LEGACY_NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/2" as const;
 export const NARRATION_VOICE_SCHEMA_VERSION = "narration-voice/2" as const;
 export const NARRATION_CACHE_SCHEMA_VERSION = "narration-cache/1" as const;
 export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "moss-tts-official-preset-catalog/2.0" as const;
@@ -62,6 +63,29 @@ export const CAPABILITY_KEYS = [
 
 export type CapabilityKey = typeof CAPABILITY_KEYS[number];
 export type CapabilityState = "enabled" | "disabled" | "unavailable" | "hold";
+
+// The long-term runtime can remain on the pre-cast schema while a frontend-only
+// release is installed. Keep this list explicit so a future capability cannot be
+// silently inferred as supported by an older backend.
+const LEGACY_CAPABILITY_KEYS = [
+  "narration_product",
+  "reading_settings",
+  "narration_synthesis",
+  "product_player",
+  "editor_production",
+  "voice_preview",
+  "preset_voice_source",
+  "reference_clone",
+  "generic_voice_pool",
+  "automatic_generic_casting",
+  "automatic_speaker_detection",
+  "cloud_assisted_analysis",
+  "voice_generator",
+  "cache_cleanup",
+  "character_voice_matching",
+  "nano_advanced_tuning",
+  "private_voice_deletion",
+] as const satisfies readonly CapabilityKey[];
 
 export const T4_PRODUCT_CAPABILITY_KEYS = [
   "narration_product",
@@ -1325,10 +1349,14 @@ function enumArray<const T extends readonly string[]>(
   return parsed;
 }
 
-function validateCapability(value: unknown, path: string): void {
+function validateCapability(
+  value: unknown,
+  path: string,
+  allowedKeys: readonly CapabilityKey[] = CAPABILITY_KEYS,
+): void {
   const item = record(value, path);
   exact(item, ["key", "state", "visible", "actionable", "reason_code", "required_gate"], path);
-  oneOf(item.key, CAPABILITY_KEYS, `${path}.key`);
+  oneOf(item.key, allowedKeys, `${path}.key`);
   const state = oneOf(item.state, ["enabled", "disabled", "unavailable", "hold"] as const, `${path}.state`);
   const visible = boolean(item.visible, `${path}.visible`);
   const actionable = boolean(item.actionable, `${path}.actionable`);
@@ -1342,19 +1370,43 @@ function validateCapability(value: unknown, path: string): void {
   }
 }
 
-function validateCapabilities(value: unknown, path: string): void {
+function normalizeCapabilities(value: unknown, path: string): NarrationCapabilities {
   const item = record(value, path);
   exact(item, ["schema_version", "items"], path);
-  literal(item.schema_version, NARRATION_CAPABILITY_SCHEMA_VERSION, `${path}.schema_version`);
+  const schemaVersion = oneOf(
+    item.schema_version,
+    [NARRATION_CAPABILITY_SCHEMA_VERSION, LEGACY_NARRATION_CAPABILITY_SCHEMA_VERSION] as const,
+    `${path}.schema_version`,
+  );
+  const expectedKeys = schemaVersion === LEGACY_NARRATION_CAPABILITY_SCHEMA_VERSION
+    ? LEGACY_CAPABILITY_KEYS
+    : CAPABILITY_KEYS;
   const items = array(item.items, `${path}.items`);
-  items.forEach((entry, index) => validateCapability(entry, `${path}.items[${index}]`));
+  items.forEach((entry, index) => validateCapability(entry, `${path}.items[${index}]`, expectedKeys));
   const keys = items.map((entry) => record(entry, path).key);
-  if (keys.length !== CAPABILITY_KEYS.length || new Set(keys).size !== CAPABILITY_KEYS.length) {
+  if (keys.length !== expectedKeys.length || new Set(keys).size !== expectedKeys.length) {
     fail(`${path}.items`, "must contain every capability exactly once");
   }
-  CAPABILITY_KEYS.forEach((key) => {
+  expectedKeys.forEach((key) => {
     if (!keys.includes(key)) fail(`${path}.items`, `missing capability ${key}`);
   });
+  if (schemaVersion === NARRATION_CAPABILITY_SCHEMA_VERSION) {
+    return item as unknown as NarrationCapabilities;
+  }
+  return {
+    schema_version: NARRATION_CAPABILITY_SCHEMA_VERSION,
+    items: [
+      ...(items as readonly FeatureCapability[]),
+      {
+        key: "character_cast_planning",
+        state: "unavailable",
+        visible: false,
+        actionable: false,
+        reason_code: "CHARACTER_CAST_SCHEMA_UNAVAILABLE",
+        required_gate: null,
+      },
+    ],
+  };
 }
 
 function validateCloudConsent(value: unknown, path: string): void {
@@ -2834,7 +2886,7 @@ export function parseNarrationOverviewResponse(value: unknown): NarrationOvervie
   exact(item, ["contract_version", "novel_id", "capabilities", "authorization", "runtime", "settings", "coverage", "voice_sources", "cache"], "overview");
   literal(item.contract_version, NARRATION_SETTINGS_API_VERSION, "overview.contract_version");
   const novelId = uuid(item.novel_id, "overview.novel_id");
-  validateCapabilities(item.capabilities, "overview.capabilities");
+  const normalizedCapabilities = normalizeCapabilities(item.capabilities, "overview.capabilities");
   validateAuthorization(item.authorization, "overview.authorization");
   validateRuntime(item.runtime, "overview.runtime");
   validateSettings(item.settings, "overview.settings");
@@ -2845,7 +2897,7 @@ export function parseNarrationOverviewResponse(value: unknown): NarrationOvervie
   if (sourceNames.length !== 3 || new Set(sourceNames).size !== 3 || !["preset", "uploaded", "generated"].every((source) => sourceNames.includes(source))) {
     fail("overview.voice_sources", "must report every voice source exactly once");
   }
-  const capabilityItems = array(record(item.capabilities, "overview.capabilities").items, "overview.capabilities.items")
+  const capabilityItems = array(normalizedCapabilities.items, "overview.capabilities.items")
     .map((entry) => record(entry, "overview.capabilities.items"));
   const capabilityByKey = new Map(capabilityItems.map((entry) => [entry.key, entry]));
   sources.forEach((entry, index) => {
@@ -2885,5 +2937,8 @@ export function parseNarrationOverviewResponse(value: unknown): NarrationOvervie
   if (record(item.settings, "overview.settings").novel_id !== novelId || record(item.cache, "overview.cache").novel_id !== novelId) {
     fail("overview", "child resource novel mismatch");
   }
-  return item as unknown as NarrationOverviewResponse;
+  return {
+    ...item,
+    capabilities: normalizedCapabilities,
+  } as unknown as NarrationOverviewResponse;
 }

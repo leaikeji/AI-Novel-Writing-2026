@@ -25,7 +25,9 @@ from backend.narration.schema_readiness import character_cast_schema_ready
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260901_0036"
+HEAD_REVISION = "20260902_0038"
+STORY_LEDGER_SINGLE_CONTRACT_REVISION = "20260902_0038"
+STORY_LEDGER_INDEX_REVISION = "20260902_0037"
 CHARACTER_CAST_REVISION = "20260901_0036"
 VOICE_GENERATOR_REVISION = "20260830_0035"
 NARRATION_VOICE_LIFECYCLE_REVISION = "20260829_0034"
@@ -129,6 +131,14 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
+    assert (
+        scripts.get_revision(STORY_LEDGER_SINGLE_CONTRACT_REVISION).down_revision
+        == STORY_LEDGER_INDEX_REVISION
+    )
+    assert (
+        scripts.get_revision(STORY_LEDGER_INDEX_REVISION).down_revision
+        == CHARACTER_CAST_REVISION
+    )
     assert (
         scripts.get_revision(CHARACTER_CAST_REVISION).down_revision
         == VOICE_GENERATOR_REVISION
@@ -902,17 +912,19 @@ def test_live_postgresql_upgrade_guards_and_conditional_rollback() -> None:
                  "novel": novel_a, "hash": "0" * 64, "key": str(uuid4())})
 
             generation_a, generation_b = uuid4(), uuid4()
-            for generation_id, novel_id, marker in (
-                (generation_a, novel_a, "2"), (generation_b, novel_b, "3"),
+            for generation_id, novel_id, marker, generation_actor in (
+                (generation_a, novel_a, "2", "local-owner"),
+                (generation_b, novel_b, "3", "owner"),
             ):
                 connection.execute(text("""INSERT INTO narration_requests
                     (id,owner_id,workspace_id,novel_id,intent,request_hash,idempotency_key,
                      settings_fingerprint,force_review,effective_policy,state,version,
                      explicit_generation_intent_at,explicit_generation_actor)
                     VALUES (:id,:owner,:workspace,:novel,'batch',:hash,:key,:hash,false,
-                            'blockers_only','created',1,now(),'owner')"""),
+                            'blockers_only','created',1,now(),:generation_actor)"""),
                     {"id": generation_id, "owner": LOCAL_OWNER_ID, "workspace": LOCAL_WORKSPACE_ID,
-                     "novel": novel_id, "hash": marker * 64, "key": str(uuid4())})
+                     "novel": novel_id, "hash": marker * 64, "key": str(uuid4()),
+                     "generation_actor": generation_actor})
             connection.execute(text("""INSERT INTO narration_request_sources
                 (id,request_id,novel_id,document_id,revision_id,content_hash,position)
                 VALUES (:id,:request,:novel,:document,:revision,:hash,0)"""),

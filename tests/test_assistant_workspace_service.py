@@ -185,7 +185,6 @@ def _relationship(
         label="盟友",
         normalized_label="盟友",
         relation_pair_key=f"{source.id}:{target.id}",
-        relation_type="盟友",
         description=f"第{position}组合作关系",
         status="active",
         created_by="manual",

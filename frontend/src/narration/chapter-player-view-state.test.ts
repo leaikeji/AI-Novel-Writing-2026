@@ -4,8 +4,10 @@ import type { NarrationEditionVoiceIdentity } from "./chapter-contracts";
 import {
   INITIAL_CHAPTER_PLAYER_LAYOUT_STATE,
   LEGACY_EDITION_VOICE_NAME,
+  chapterPlaybackHasEnded,
   deriveChapterPlayerView,
   formatChapterPlayerTime,
+  resolveChapterPlaybackStartPosition,
   transitionChapterPlayerLayout,
 } from "./chapter-player-view-state";
 import type { NarrationPlayerState } from "./narration-player";
@@ -123,10 +125,8 @@ describe("chapter player view state", () => {
       currentTimeMs: 1_600,
       currentTimeLabel: "0:01",
       currentTimeBasis: "chapter",
-      currentSentenceLabel: "2/3",
       playableDurationMs: 3_100,
       playableDurationLabel: "0:03",
-      playableSentenceLabel: "2/3",
       voiceSummary: "林晚的雨夜声线 · 高级调音",
     });
     expect(view.generation).toMatchObject({
@@ -161,6 +161,39 @@ describe("chapter player view state", () => {
     expect(view.playbackLabel).not.toBe("尚未播放");
   });
 
+  it("recognizes a restored idle cursor at the exact chapter end", () => {
+    const restored: NarrationPlayerState = Object.freeze({
+      ...playerState(),
+      phase: "idle",
+      currentSegmentId: SEGMENT_3,
+      currentOrdinal: 2,
+      offsetMs: 3_000,
+      durationMs: 0,
+      backend: null,
+      source: null,
+    });
+    const manifest = [
+      manifestSegment(SEGMENT_1, 0, "ready", 1_000),
+      manifestSegment(SEGMENT_2, 1, "ready", 2_000),
+      manifestSegment(SEGMENT_3, 2, "ready", 3_000),
+    ];
+    const view = deriveChapterPlayerView({
+      contentPhase: "ready",
+      sourceKind: "current",
+      playerState: restored,
+      segmentIds: [SEGMENT_1, SEGMENT_2, SEGMENT_3],
+      manifestSegments: manifest,
+    });
+
+    expect(chapterPlaybackHasEnded(restored, 3, 3_000)).toBe(true);
+    expect(view.playbackLabel).toBe("本章播放结束");
+    expect(resolveChapterPlaybackStartPosition(restored, 3, 3_000)).toEqual({
+      ordinal: 0,
+      offsetMs: 0,
+      resumeExistingSession: false,
+    });
+  });
+
   it("fails timing closed on a misaligned manifest while retaining exact segment generation states", () => {
     const view = deriveChapterPlayerView({
       contentPhase: "ready",
@@ -178,7 +211,6 @@ describe("chapter player view state", () => {
     expect(view.playableDurationLabel).toBe("待计算");
     expect(view.currentTimeBasis).toBe("segment");
     expect(view.currentTimeMs).toBe(500);
-    expect(view.playableSentenceLabel).toBe("1/2");
     expect(view.generation.failedCount).toBe(1);
   });
 
@@ -198,7 +230,6 @@ describe("chapter player view state", () => {
       key: identity.voice_version_id,
       displayName: LEGACY_EDITION_VOICE_NAME,
       sourceLabel: "历史音色标识",
-      stableIdentifier: identity.voice_version_id,
       legacy: true,
     });
   });
@@ -227,5 +258,56 @@ describe("chapter player view state", () => {
     expect(formatChapterPlayerTime(0)).toBe("0:00");
     expect(formatChapterPlayerTime(65_999)).toBe("1:05");
     expect(formatChapterPlayerTime(3_661_000)).toBe("1:01:01");
+  });
+
+  it("restarts from the first sentence after the chapter has ended", () => {
+    expect(resolveChapterPlaybackStartPosition(Object.freeze({
+      ...playerState(),
+      phase: "ended",
+      currentSegmentId: SEGMENT_3,
+      currentOrdinal: 2,
+      offsetMs: 1_000,
+      durationMs: 1_000,
+    }), 3)).toEqual({ ordinal: 0, offsetMs: 0, resumeExistingSession: false });
+  });
+
+  it("treats the exact end of the last segment as ended even before the phase settles", () => {
+    expect(resolveChapterPlaybackStartPosition(Object.freeze({
+      ...playerState(),
+      phase: "paused",
+      currentSegmentId: SEGMENT_3,
+      currentOrdinal: 2,
+      offsetMs: 1_000,
+      durationMs: 1_000,
+    }), 3)).toEqual({ ordinal: 0, offsetMs: 0, resumeExistingSession: false });
+  });
+
+  it("preserves a valid mid-chapter resume position and bounds an invalid one", () => {
+    expect(resolveChapterPlaybackStartPosition(Object.freeze({
+      ...playerState(),
+      phase: "paused",
+      currentOrdinal: 1,
+      offsetMs: 420,
+    }), 3)).toEqual({ ordinal: 1, offsetMs: 420, resumeExistingSession: true });
+    expect(resolveChapterPlaybackStartPosition(Object.freeze({
+      ...playerState(),
+      phase: "idle",
+      currentOrdinal: 99,
+      offsetMs: -5,
+    }), 3)).toEqual({ ordinal: 0, offsetMs: 0, resumeExistingSession: false });
+  });
+
+  it("fails closed when no valid segment exists instead of reusing an unrelated offset", () => {
+    expect(resolveChapterPlaybackStartPosition(Object.freeze({
+      ...playerState(),
+      phase: "idle",
+      currentOrdinal: 99,
+      offsetMs: 800,
+    }), 3)).toEqual({ ordinal: 0, offsetMs: 0, resumeExistingSession: false });
+    expect(resolveChapterPlaybackStartPosition(playerState(), 0)).toEqual({
+      ordinal: 0,
+      offsetMs: 0,
+      resumeExistingSession: false,
+    });
   });
 });

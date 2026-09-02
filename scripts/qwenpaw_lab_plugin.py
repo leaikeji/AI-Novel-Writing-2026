@@ -11,12 +11,15 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 CONTAINER = os.environ.get("QWENPAW_CONTAINER", "ai-novel-2026-qwenpaw-lab")
 BASE_URL = os.environ.get("QWENPAW_BASE_URL", "http://127.0.0.1:18088").rstrip("/")
 PLUGIN_ID = "ai-novel-world-2026"
@@ -28,6 +31,8 @@ PLUGIN_INSTALL_FAILURE_MARKERS = (
     "api install failed",
     "plugin installation failed",
 )
+OFFLINE_MAINTENANCE_CONFIRMATION = "INSTALL-ai-novel-world-2026-WHILE-STOPPED"
+_LOWER_HEX = frozenset("0123456789abcdef")
 TTS_RUNTIME_EXPECTATION_ENV = "QWENPAW_EXPECT_TTS_RUNTIME"
 TTS_RUNTIME_EXPECTATIONS = frozenset({"disabled", "ready"})
 TTS_PRODUCT_EXPECTATION_ENV = "QWENPAW_EXPECT_TTS_PRODUCT"
@@ -56,10 +61,22 @@ INSTALLED_EMBEDDING_ROOT_KEY_PATH = (
 INSTALLED_EMBEDDING_RECORDS_DIR = (
     "/app/working.secret/ai-novel-world-2026/embedding/records"
 )
+QWENPAW_DATA_VOLUME = os.environ.get(
+    "QWENPAW_DATA_VOLUME",
+    "ai-novel-2026-qwenpaw-data",
+)
+QWENPAW_SECRETS_VOLUME = os.environ.get(
+    "QWENPAW_SECRETS_VOLUME",
+    "ai-novel-2026-qwenpaw-secrets",
+)
+QWENPAW_BACKUPS_VOLUME = os.environ.get(
+    "QWENPAW_BACKUPS_VOLUME",
+    "ai-novel-2026-qwenpaw-backups",
+)
 VOLUMES = (
-    "ai-novel-2026-qwenpaw-data:/app/working",
-    "ai-novel-2026-qwenpaw-secrets:/app/working.secret",
-    "ai-novel-2026-qwenpaw-backups:/app/working.backups",
+    f"{QWENPAW_DATA_VOLUME}:/app/working",
+    f"{QWENPAW_SECRETS_VOLUME}:/app/working.secret",
+    f"{QWENPAW_BACKUPS_VOLUME}:/app/working.backups",
 )
 
 
@@ -535,7 +552,7 @@ def remove_stale_installer_container() -> None:
     run("docker", "rm", "-f", INSTALLER_CONTAINER)
 
 
-def run_disposable_installer_container(*, timeout_seconds: float = 120) -> None:
+def run_disposable_installer_container(*, timeout_seconds: float = 120) -> str:
     """Run the one-shot installer without Docker Desktop's attach-start path."""
 
     try:
@@ -564,6 +581,26 @@ def run_disposable_installer_container(*, timeout_seconds: float = 120) -> None:
         print(logs)
     if exit_code != "0":
         raise RuntimeError(f"installer exited with status {exit_code or 'unknown'}")
+    return logs
+
+
+def reject_reported_plugin_install_failure(output: str) -> None:
+    """Reject public CLI success statuses whose own message reports failure."""
+
+    normalized_output = output.casefold()
+    reported_failure = next(
+        (
+            marker
+            for marker in PLUGIN_INSTALL_FAILURE_MARKERS
+            if marker in normalized_output
+        ),
+        None,
+    )
+    if reported_failure is not None:
+        raise RuntimeError(
+            "QwenPaw public plugin install reported failure "
+            f"({reported_failure!r}) despite process status 0"
+        )
 
 
 def hot_install_packaged_plugin() -> None:
@@ -589,20 +626,7 @@ def hot_install_packaged_plugin() -> None:
         )
         if install_output:
             print(install_output)
-        normalized_output = install_output.casefold()
-        reported_failure = next(
-            (
-                marker
-                for marker in PLUGIN_INSTALL_FAILURE_MARKERS
-                if marker in normalized_output
-            ),
-            None,
-        )
-        if reported_failure is not None:
-            raise RuntimeError(
-                "QwenPaw public plugin install reported failure "
-                f"({reported_failure!r}) despite process status 0"
-            )
+        reject_reported_plugin_install_failure(install_output)
     finally:
         run("docker", "exec", CONTAINER, "rm", "-rf", "--", stage_path)
 
@@ -662,12 +686,210 @@ def offline_plugin_command(
                 # avoids that host bind and leaves the named data volumes as
                 # the only shared writable state.
                 run("docker", "cp", str(PLUGIN_DIR), f"{INSTALLER_CONTAINER}:/plugin")
-            run_disposable_installer_container()
+            install_output = run_disposable_installer_container()
+            reject_reported_plugin_install_failure(install_output)
         finally:
             remove_stale_installer_container()
     finally:
         run("docker", "start", CONTAINER)
     wait_until_healthy()
+
+
+def validate_offline_maintenance_candidate(
+    candidate: Path,
+    *,
+    expected_tree_sha256: str,
+    expected_head: str,
+) -> Path:
+    """Apply the immutable lifecycle gate before a stopped-host install."""
+
+    if (
+        len(expected_tree_sha256) != 64
+        or any(character not in _LOWER_HEX for character in expected_tree_sha256)
+    ):
+        raise RuntimeError("expected candidate tree SHA-256 must be lowercase hex")
+    from scripts.tts.verify_qwenpaw_plugin_lifecycle import validate_candidate
+
+    resolved, actual_tree_sha256, actual_head = validate_candidate(candidate)
+    if actual_tree_sha256 != expected_tree_sha256:
+        raise RuntimeError("offline maintenance candidate tree SHA-256 mismatch")
+    if actual_head != expected_head:
+        raise RuntimeError("offline maintenance candidate migration head mismatch")
+    return resolved
+
+
+def inspect_offline_maintenance_target(
+    *,
+    expected_container_id: str,
+    expected_image_id: str,
+) -> tuple[str, tuple[str, ...]]:
+    """Bind one stopped install to the frozen formal container and its volumes."""
+
+    if (
+        len(expected_container_id) != 64
+        or any(character not in _LOWER_HEX for character in expected_container_id)
+    ):
+        raise RuntimeError("expected QwenPaw container ID must be lowercase hex")
+    if (
+        not expected_image_id.startswith("sha256:")
+        or len(expected_image_id) != 71
+        or any(character not in _LOWER_HEX for character in expected_image_id[7:])
+    ):
+        raise RuntimeError("expected QwenPaw image ID must be sha256 lowercase hex")
+
+    raw_descriptor = run("docker", "inspect", CONTAINER, capture=True)
+    try:
+        descriptors = json.loads(raw_descriptor)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("QwenPaw container inspection was not valid JSON") from error
+    if not isinstance(descriptors, list) or len(descriptors) != 1:
+        raise RuntimeError("QwenPaw container inspection was not unique")
+    descriptor = descriptors[0]
+    if not isinstance(descriptor, dict):
+        raise RuntimeError("QwenPaw container inspection shape was invalid")
+    if descriptor.get("Name") != f"/{CONTAINER}":
+        raise RuntimeError("QwenPaw container name mismatch")
+    if descriptor.get("Id") != expected_container_id:
+        raise RuntimeError("QwenPaw container ID mismatch")
+    if descriptor.get("Image") != expected_image_id:
+        raise RuntimeError("QwenPaw immutable image ID mismatch")
+    state = descriptor.get("State")
+    if not isinstance(state, dict) or state.get("Running") is not False:
+        raise RuntimeError("offline maintenance install requires QwenPaw stopped")
+
+    mounts = descriptor.get("Mounts")
+    if not isinstance(mounts, list):
+        raise RuntimeError("QwenPaw volume inspection shape was invalid")
+    validated_mounts: list[str] = []
+    for expected_mount in VOLUMES:
+        expected_name, expected_destination = expected_mount.split(":", 1)
+        matching = [
+            mount
+            for mount in mounts
+            if isinstance(mount, dict)
+            and mount.get("Destination") == expected_destination
+        ]
+        if len(matching) != 1:
+            raise RuntimeError(
+                f"QwenPaw volume destination mismatch: {expected_destination}"
+            )
+        mount = matching[0]
+        if (
+            mount.get("Type") != "volume"
+            or mount.get("Name") != expected_name
+            or mount.get("RW") is not True
+        ):
+            raise RuntimeError(
+                f"QwenPaw volume identity mismatch: {expected_destination}"
+            )
+        validated_mounts.append(f"{expected_name}:{expected_destination}")
+    return expected_image_id, tuple(validated_mounts)
+
+
+def validate_installer_candidate_copy(
+    *,
+    container_path: str,
+    expected_tree_sha256: str,
+    expected_head: str,
+) -> None:
+    """Copy one installer tree back and apply the complete host lifecycle gate."""
+
+    with tempfile.TemporaryDirectory(prefix="ai-novel-offline-install-") as directory:
+        copied = (Path(directory) / PLUGIN_ID).resolve()
+        copied.mkdir(mode=0o700)
+        run(
+            "docker",
+            "cp",
+            f"{INSTALLER_CONTAINER}:{container_path}/.",
+            str(copied),
+        )
+        validate_offline_maintenance_candidate(
+            copied,
+            expected_tree_sha256=expected_tree_sha256,
+            expected_head=expected_head,
+        )
+
+
+def offline_install_stopped_candidate(
+    *,
+    candidate: Path,
+    expected_tree_sha256: str,
+    expected_head: str,
+    expected_container_id: str,
+    expected_image_id: str,
+    confirm: str,
+) -> None:
+    """Install one immutable candidate while leaving the formal host stopped.
+
+    This is the maintenance-window primitive used only after schema and role
+    gates pass. It neither stops nor starts the formal QwenPaw container, so a
+    failed install cannot silently reopen an old package against a new schema.
+    """
+
+    if confirm != OFFLINE_MAINTENANCE_CONFIRMATION:
+        raise RuntimeError(
+            "offline maintenance install requires --confirm "
+            f"{OFFLINE_MAINTENANCE_CONFIRMATION}"
+        )
+    package = validate_offline_maintenance_candidate(
+        candidate,
+        expected_tree_sha256=expected_tree_sha256,
+        expected_head=expected_head,
+    )
+    image, target_volumes = inspect_offline_maintenance_target(
+        expected_container_id=expected_container_id,
+        expected_image_id=expected_image_id,
+    )
+    remove_stale_installer_container()
+    command = [
+        "docker",
+        "create",
+        "--name",
+        INSTALLER_CONTAINER,
+        "--platform",
+        "linux/arm64",
+        "--network",
+        "none",
+        "--label",
+        f"{INSTALLER_LABEL_KEY}={INSTALLER_LABEL_VALUE}",
+        "-e",
+        "TZ=Asia/Shanghai",
+        "-e",
+        "PYTHONDONTWRITEBYTECODE=1",
+    ]
+    for volume in target_volumes:
+        command.extend(("-v", volume))
+    command.extend((image, "qwenpaw", "plugin", "install", "--force", "/plugin"))
+    run(*command)
+    try:
+        run("docker", "cp", str(package), f"{INSTALLER_CONTAINER}:/plugin")
+        validate_installer_candidate_copy(
+            container_path="/plugin",
+            expected_tree_sha256=expected_tree_sha256,
+            expected_head=expected_head,
+        )
+        inspect_offline_maintenance_target(
+            expected_container_id=expected_container_id,
+            expected_image_id=expected_image_id,
+        )
+        install_output = run_disposable_installer_container()
+        reject_reported_plugin_install_failure(install_output)
+        validate_installer_candidate_copy(
+            container_path=INSTALLED_PLUGIN_DIR,
+            expected_tree_sha256=expected_tree_sha256,
+            expected_head=expected_head,
+        )
+        inspect_offline_maintenance_target(
+            expected_container_id=expected_container_id,
+            expected_image_id=expected_image_id,
+        )
+    finally:
+        remove_stale_installer_container()
+    validate_offline_maintenance_candidate(
+        package,
+        expected_tree_sha256=expected_tree_sha256,
+        expected_head=expected_head,
+    )
 
 
 def install() -> None:
@@ -933,6 +1155,13 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("install")
     subparsers.add_parser("verify")
+    maintenance_parser = subparsers.add_parser("offline-install-stopped")
+    maintenance_parser.add_argument("--candidate", required=True, type=Path)
+    maintenance_parser.add_argument("--expected-tree-sha256", required=True)
+    maintenance_parser.add_argument("--expected-head", required=True)
+    maintenance_parser.add_argument("--expected-container-id", required=True)
+    maintenance_parser.add_argument("--expected-image-id", required=True)
+    maintenance_parser.add_argument("--confirm", default="")
     uninstall_parser = subparsers.add_parser("uninstall")
     uninstall_parser.add_argument("--confirm", default="")
     return parser.parse_args()
@@ -944,6 +1173,15 @@ def main() -> None:
         install()
     elif args.command == "verify":
         verify()
+    elif args.command == "offline-install-stopped":
+        offline_install_stopped_candidate(
+            candidate=args.candidate,
+            expected_tree_sha256=args.expected_tree_sha256,
+            expected_head=args.expected_head,
+            expected_container_id=args.expected_container_id,
+            expected_image_id=args.expected_image_id,
+            confirm=args.confirm,
+        )
     else:
         uninstall(args.confirm)
 

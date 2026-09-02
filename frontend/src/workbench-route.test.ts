@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   isCreativeCenterRouteSession,
   isNovelWorkbenchRouteSession,
+  workbenchLedgerPath,
+  workbenchLedgerRouteFromSearch,
   replaceWorkbenchHistoryUrl,
   RouteSessionLocation,
   RouteSessionStateMachine,
@@ -33,6 +35,9 @@ class MemorySessionStorage implements RouteSessionStorage {
 
 const OWNER_ONE = "owner_token_0000000000000001";
 const OWNER_TWO = "owner_token_0000000000000002";
+const FACT_ID = "11111111-1111-4111-8111-111111111111";
+const TIMELINE_ID = "22222222-2222-4222-8222-222222222222";
+const DOCUMENT_ID = "33333333-3333-4333-8333-333333333333";
 
 
 function locationOf(path: string): RouteSessionLocation {
@@ -298,6 +303,52 @@ describe("RouteSessionStateMachine", () => {
       readingPanel: "characters",
     });
     expect(refreshed.ownerToken).toBe(explicit.ownerToken);
+  });
+
+  it("restores a validated ledger deep link and ignores invalid optional fields", () => {
+    const harness = createHarness(
+      `/chat/session-1?novel_workbench=1&novel_id=novel-1&section=ledger&ledger_fact=${FACT_ID}&ledger_timeline=${TIMELINE_ID}&ledger_type=character_state&ledger_state=current&ledger_health=conflict&ledger_source_document=${DOCUMENT_ID}`,
+    );
+    const explicit = harness.machine.resolve();
+    expect(explicit.route).toMatchObject({
+      section: "ledger",
+      ledger: {
+        factId: FACT_ID,
+        timelineId: TIMELINE_ID,
+        factType: "character_state",
+        effectiveState: "current",
+        health: "conflict",
+        sourceDocumentId: DOCUMENT_ID,
+      },
+    });
+
+    harness.navigate("/chat/session-1");
+    expect(harness.machine.resolve().route).toMatchObject(explicit.route!);
+
+    harness.navigate(
+      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=ledger&ledger_fact=not-a-uuid&ledger_type=unknown&ledger_health=broken",
+    );
+    const invalid = harness.machine.resolve();
+    expect(invalid.route).toMatchObject({ section: "ledger", ledger: {} });
+  });
+
+  it("serializes only the frozen ledger route fields", () => {
+    const path = workbenchLedgerPath("novel-1", {
+      factId: FACT_ID,
+      timelineId: "invalid",
+      factType: "world_state",
+      health: "ok",
+    });
+    const url = new URL(path, "https://qwenpaw.test");
+
+    expect(url.searchParams.get("section")).toBe("ledger");
+    expect(url.searchParams.get("ledger_fact")).toBe(FACT_ID);
+    expect(url.searchParams.has("ledger_timeline")).toBe(false);
+    expect(workbenchLedgerRouteFromSearch(url.search)).toEqual({
+      factId: FACT_ID,
+      factType: "world_state",
+      health: "ok",
+    });
   });
 
   it.each(["advanced-tuning", "private-voices"] as const)(

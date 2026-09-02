@@ -1,0 +1,619 @@
+{
+  "checks": {
+    "candidate-alembic-head": "20260901_0036",
+    "candidate-migration-head": "20260901_0036",
+    "candidate-staging": {
+      "container_path": "/gate/candidate",
+      "helper_container_count": 0,
+      "host_bind_mount_count": 0,
+      "host_copy_detached": true,
+      "integrity_rechecked_before_each_install": true,
+      "method": "docker-cp",
+      "migration_head": "20260901_0036",
+      "tree_sha256": "55b03590cea2cc31210ac51d0c78adb2a20fdc7d4b94c981c521cbe0caebeb44"
+    },
+    "candidate-tree-sha256": "55b03590cea2cc31210ac51d0c78adb2a20fdc7d4b94c981c521cbe0caebeb44",
+    "command:container-http-delete-b1745c74d464": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "db540ba56d93fb3e1351ce601080f1052e20a2081b172545efdcc14f075b17aa"
+    },
+    "command:container-http-get-2d2fdcfcdab9": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-3b86c658c0bf": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6ff483268374e4761ee4b5dc89d7e24cb0e1f44dc930b43b30117f2c4d4684dc"
+    },
+    "command:container-http-get-7435e6bc430b": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0e239771f80ff85859cc7a9bbf6ec20b0f79b43ca27d784aef267c9a07ba857a"
+    },
+    "command:container-http-get-75823c550d2b": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4159ab7e2eb685eba3b6c0c081b03a06111fbb17035f5d6f507cd0283e6ccd0d"
+    },
+    "command:container-http-get-7e8f8b7629fd": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "173a59b8ca1d559aec36319713ed265a7234d8ff36c38dd146363950bdbb0439"
+    },
+    "command:container-http-get-85736ae1e233": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3fdc647aea74b373ddda1703a37b6a383a9963f67e9b333418ae4c3542097ac8"
+    },
+    "command:container-http-get-a7fb52cbe313": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "58c14e721b7bc3a0be8caa0bf395eb60fa0903c3a4f4eecebda246fefa63ef07"
+    },
+    "command:container-http-get-ac3174e3d5a7": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6090ea021228b47b3d3bdf7034bae193ab187ad78727606a0206b3f46e2a29c6"
+    },
+    "command:container-http-get-cf82f7f72284": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-cff6c79375f2": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "69e09a52ca1c93d39d4a18872f4fef504300791dae6c2e9a81b2123379e11d30"
+    },
+    "command:container-http-get-d67b39af99d7": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "048d2e599b0d3480c2a342073090bbe613b2b4d53bac0eef83f726b8a7c8ea4f"
+    },
+    "command:container-http-get-d7ad856a3c75": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4ca2921a4fb724a3e758a49bcd3e984b509190e2267c3b694cc1c14c901717f1"
+    },
+    "command:container-http-get-de2fd1b89ba9": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-e93542073f21": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d7bc07822195c076e81ca7c164bf222cbed2d49cd16867091a965c359e5cb8e7"
+    },
+    "command:container-http-get-f13e665a7941": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "743324accf5588769f35ee64b4ea03f17c815f9f63e1606dda16e86ff2752e2c"
+    },
+    "command:container-http-post-1b6750056d76": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c11e33eaeadb09105b278e3fb7d5f5929abffe2fb8135774b6791f7536abd935"
+    },
+    "command:container-http-post-d7ad856a3c75": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "b89898e9b7437bb7a61e0e871119b91af5a540c23bd2b00c215216cb8960ee7a"
+    },
+    "command:create-network": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d666affaf8925b28d0448b36e11b9fedde3cb696aadeda78916618766d3470ce"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-tts49real0903-novel-media": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f3e940cffb04fa1b23c3165d3e54316256166a68c9f76120e145e6520d9c4e89"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-tts49real0903-postgres-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "5d8d2aef51b23d4f5282c459a52d585f076787641e40c0171b3dd502fb257222"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-tts49real0903-qwen-backups": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "419cda10911d4668c9de335bbfcba406a155bd7bca12962dae9fb2820b381ddd"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-tts49real0903-qwen-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6c74dfa33a3179b84bbb620345e9f072115a8710fd06203a72700beae18a6ceb"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-tts49real0903-qwen-secrets": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f0630e632429187de89cd51e88362e58ea7f64fcf87e20981fedc4c2ea3ee2db"
+    },
+    "command:create-volume-sentinels": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:docker-cp-candidate": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:docker-server-available": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "aaa3c9962de64c23cb8de5e57eb229d404b0c35bf1efa3565b1f1e77933b25ef"
+    },
+    "command:hash-staged-candidate": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "252cec74b895e49b3c09f27f9af46ab02232ad83d9f38916214f4606491444ef"
+    },
+    "command:image-present-postgres": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e9266002cea916b56f48d207564b32da673f1c0fe994aa748e19cca03a7b61f3"
+    },
+    "command:image-present-qwenpaw": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3970563e2131317e732b35e134c57f8e1dc6720664470119dbb3f1c86f62eb4e"
+    },
+    "command:inspect-qwenpaw-topology": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0f51e982006beafcc4495e6d41e5302b5a8205315499089306bc34da5c6528b7"
+    },
+    "command:list-owned-containers": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "50dba5ca3eb6ac8d588d579f3f9c72e07351d7303deecfc95147c81c871f64a3"
+    },
+    "command:migrate-plugin-to-head": {
+      "returncode": 0,
+      "stderr_sha256": "84b9cfdaaae75628f3cbd7082d9c05399a66f8049b2a84369fcf326d0622ec92",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:plugin-directory-removed": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:prepare-candidate-staging-directory": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:read-candidate-alembic-head": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f9977e94dce34a4214198b2148fd0c3ceaa1602ba1604dbe71fd430d89f64b6e"
+    },
+    "command:read-db-sentinel": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "fe81f94835bdb3cb55806dbb226473194585745b6f6a12f2b90379d62820a848"
+    },
+    "command:read-migration-head": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e59a679396747cf38319d7d0966f1325e8ee0500176e4a82ac57c3cb11edf61e"
+    },
+    "command:read-volume-sentinels": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ed55d79a3cb574c8f50b6899f916827927e6d26061a1a249488c701d59ae1a87"
+    },
+    "command:start-postgres": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1c04848ac4e5377a5400e680e15d490eec264ae5e4565d1a0272a457173dfdd9"
+    },
+    "command:start-qwenpaw": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "418fc2f6c69ca0aaedb4e1a84cd8decc764fab637e1fa5de3d6918d7a478e706"
+    },
+    "command:verify-candidate-before-force-reinstall": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "252cec74b895e49b3c09f27f9af46ab02232ad83d9f38916214f4606491444ef"
+    },
+    "command:verify-candidate-before-initial-install": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "252cec74b895e49b3c09f27f9af46ab02232ad83d9f38916214f4606491444ef"
+    },
+    "command:verify-candidate-before-reinstall": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "252cec74b895e49b3c09f27f9af46ab02232ad83d9f38916214f4606491444ef"
+    },
+    "command:verify-internal-network": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+    },
+    "http:app-health-installed": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/health",
+      "response_sha256": "582db83fabc26de2b37c73df49ff8258e31150bd870c794c451dd72911d216fc",
+      "status": 200
+    },
+    "http:create-db-sentinel": {
+      "method": "POST",
+      "path": "/api/ai-novel-world-2026/novels",
+      "response_sha256": "a904b87887ebf7e146076b5d2d9ce91b767e64fd3108258c39f1af5b84b0d8d6",
+      "status": 201
+    },
+    "http:force-reinstall": {
+      "attempts": 1,
+      "method": "POST",
+      "path": "/api/plugins/install",
+      "response_sha256": "e0233be48ca722c0fed94eef6c649cd5ad5e565423646f63485a4541e3b26706",
+      "status": 200
+    },
+    "http:frontend-asset-installed": {
+      "method": "GET",
+      "path": "/api/plugins/ai-novel-world-2026/files/frontend/dist/index.js",
+      "response_bytes": 3436837,
+      "response_sha256": "aa1132056272b1eb6f78ea17c71fc9c4c853ae45954e92cef27cfb677b0a013a",
+      "status": 200
+    },
+    "http:frontend-static-route-removed": {
+      "method": "GET",
+      "path": "/api/plugins/ai-novel-world-2026/files/frontend/dist/index.js",
+      "response_bytes": 51,
+      "response_sha256": "824bbc54fe55738814d6200573334323961c8c867795c435dbe43365f86ab7f4",
+      "status": 404
+    },
+    "http:health-route-removed": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/health",
+      "response_bytes": 22,
+      "response_sha256": "37ec4665a8102d115ffd1ac20dae94c98b4dac64b0c1a68228aa2a531caeb35d",
+      "status": 404
+    },
+    "http:initial-install": {
+      "attempts": 1,
+      "method": "POST",
+      "path": "/api/plugins/install",
+      "response_sha256": "e0233be48ca722c0fed94eef6c649cd5ad5e565423646f63485a4541e3b26706",
+      "status": 200
+    },
+    "http:list-agents": {
+      "method": "GET",
+      "path": "/api/agents",
+      "response_sha256": "f578c030e50785acce5e0d55d1285226ffc2e5d61acfa6179336bda204f9e3e7",
+      "status": 200
+    },
+    "http:list-pawapps-installed": {
+      "method": "GET",
+      "path": "/api/pawapps",
+      "response_sha256": "554f6119bdc4c2bba1156a4c3496dd5777f7dad607448f0dde6ea7f63d039cee",
+      "status": 200
+    },
+    "http:list-pawapps-uninstalled": {
+      "method": "GET",
+      "path": "/api/pawapps",
+      "response_sha256": "21250f1dcf541521e98d238ded196d5b73489f1b462d0fda184d8e574d39e063",
+      "status": 200
+    },
+    "http:list-plugins-installed": {
+      "method": "GET",
+      "path": "/api/plugins",
+      "response_sha256": "905f2f69b0d8591b518f3550860024291629384c686547d0907329118df03bff",
+      "status": 200
+    },
+    "http:list-plugins-uninstalled": {
+      "method": "GET",
+      "path": "/api/plugins",
+      "response_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "status": 200
+    },
+    "http:list-skills-37a8eec1": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "cc9103fc95a0435e4562bd4c8d03498c8bc7863c95b0a27cb3e6172309c38054",
+      "status": 200
+    },
+    "http:list-skills-a609982d": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "7f481fb8fa2b904bcfb4f841b4e388e7ffe97d88ef51ae841162372539f120f6",
+      "status": 200
+    },
+    "http:list-tools-37a8eec1": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "4676bf00f08644ebe1fa3b9f605be52ca425ce8734b9496b2f35b8a4face26e1",
+      "status": 200
+    },
+    "http:list-tools-a609982d": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "2f9d909cf29a11f7eb7a51a98626ce017cbe800c1ddeae0fbbf70dbb13d3dddf",
+      "status": 200
+    },
+    "http:native-frontend-shell-after-uninstall": {
+      "method": "GET",
+      "path": "/frontend_plugin",
+      "response_bytes": 1073,
+      "response_sha256": "1df923a980f61c6e912745b83ba2b010bd9b6cecb2a6bc3e9ceb2cbd05544d8f",
+      "status": 200
+    },
+    "http:native-route-agents": {
+      "method": "GET",
+      "path": "/api/agents",
+      "response_sha256": "f578c030e50785acce5e0d55d1285226ffc2e5d61acfa6179336bda204f9e3e7",
+      "status": 200
+    },
+    "http:native-route-skills": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "79715039e22fafe2e74987a81d75e66550df46eaac31051a4e7238c11b7cc781",
+      "status": 200
+    },
+    "http:native-route-tools": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "58493815f5871a5e64ad63708a14b12f58754aec193c7d4604487f8040dcbbbc",
+      "status": 200
+    },
+    "http:novel-route-removed": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/novels",
+      "response_bytes": 22,
+      "response_sha256": "37ec4665a8102d115ffd1ac20dae94c98b4dac64b0c1a68228aa2a531caeb35d",
+      "status": 404
+    },
+    "http:pawapp-detail-removed": {
+      "method": "GET",
+      "path": "/api/pawapps/ai-novel-world-2026",
+      "response_bytes": 51,
+      "response_sha256": "3e90ce84c41a3e7404e1e03776cd1c813a642e2638ca29e4f8654b87633a4adc",
+      "status": 404
+    },
+    "http:plugin-status-removed": {
+      "method": "GET",
+      "path": "/api/plugins/ai-novel-world-2026/status",
+      "response_bytes": 52,
+      "response_sha256": "69d1711d2c1ffbe14c4cca01f4187da79914002a4cc42a966f83334696ab6257",
+      "status": 404
+    },
+    "http:public-delete-uninstall": {
+      "method": "DELETE",
+      "path": "/api/plugins/ai-novel-world-2026",
+      "response_sha256": "d862d54f2b192cb9b3fb234fc20ab7750e10223cc867114c64ac82092ffd3779",
+      "status": 200
+    },
+    "http:read-db-sentinel-after-reinstall": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/novels/3784ddfd-487f-46fa-8fff-566018a5c9d7",
+      "response_sha256": "a904b87887ebf7e146076b5d2d9ce91b767e64fd3108258c39f1af5b84b0d8d6",
+      "status": 200
+    },
+    "http:reinstall": {
+      "attempts": 1,
+      "method": "POST",
+      "path": "/api/plugins/install",
+      "response_sha256": "e0233be48ca722c0fed94eef6c649cd5ad5e565423646f63485a4541e3b26706",
+      "status": 200
+    },
+    "http:t4-narration-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-requests/00000000-0000-4000-8000-000000000001",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "http:t4-playback-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-editions/00000000-0000-4000-8000-000000000001/manifest",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "http:t4-script-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-scripts/00000000-0000-4000-8000-000000000001",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "installed-registry": {
+      "agent_ids": [
+        "QwenPaw_QA_Agent_0.2",
+        "default"
+      ],
+      "skills_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review"
+        ]
+      },
+      "tools_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ],
+        "default": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ]
+      }
+    },
+    "isolated-topology": {
+      "container_count": 2,
+      "host_bind_mount_count": 0,
+      "model_mount_count": 0,
+      "network_internal": true,
+      "outbound_network_route": false,
+      "postgres_host_port": false,
+      "qwenpaw_host_port": false,
+      "sidecar_started": false,
+      "token_mount_count": 0
+    },
+    "migration-head": "20260901_0036",
+    "narration-disabled": {
+      "idle_unload_seconds": null,
+      "lease_generation": null,
+      "lifecycle_status": "disabled",
+      "model_fingerprint_sha256": null,
+      "model_loaded": false,
+      "model_ready": false,
+      "product_visible": false,
+      "protocol_version": "moss-tts-sidecar/1.1",
+      "reason_code": null,
+      "sidecar_reachable": false,
+      "technical_enabled": false,
+      "worker_generation": null
+    },
+    "narration-production-disabled": {
+      "digest_keyring_loaded": false,
+      "lifecycle_status": "disabled",
+      "playback_installed": false,
+      "product_requested": false,
+      "production_backend_installed": false,
+      "reason_code": null,
+      "reference_clone_ready": false,
+      "worker_running": false
+    },
+    "postgres-ready": {
+      "attempts": 2
+    },
+    "preflight-absent:container:ai-novel-2026-t1gate-tts49real0903-postgres": true,
+    "preflight-absent:container:ai-novel-2026-t1gate-tts49real0903-qwenpaw": true,
+    "preflight-absent:network:ai-novel-2026-t1gate-tts49real0903-net": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-tts49real0903-novel-media": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-tts49real0903-postgres-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-tts49real0903-qwen-backups": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-tts49real0903-qwen-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-tts49real0903-qwen-secrets": true,
+    "qwenpaw-ready": {
+      "attempts": 8
+    },
+    "sentinels-created": {
+      "db_digest": "2181fa2c253ebe540b890567c7493e228f43d892fc1298f31b24778000278a32",
+      "file_digest": "add4964fc07642b950656e5bd77b622e3ba112525badf25efbfb7d5ddd628497",
+      "volume_sentinel_count": 4
+    },
+    "sentinels-preserved": {
+      "db_digest": "2181fa2c253ebe540b890567c7493e228f43d892fc1298f31b24778000278a32",
+      "file_digest": "add4964fc07642b950656e5bd77b622e3ba112525badf25efbfb7d5ddd628497",
+      "volume_sentinel_count": 4
+    },
+    "t4-routes-disabled-without-token": {
+      "narration": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      },
+      "playback": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      },
+      "script": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      }
+    },
+    "tts-disabled-by-construction": {
+      "host_bind_mount_count": 0,
+      "model_mount_count": 0,
+      "moss_env_count": 0,
+      "outbound_network_route": false,
+      "product_env": false,
+      "public_api_probe": "container-loopback",
+      "python_package_index_access": false,
+      "qwenpaw_host_port": false,
+      "reference_clone_env": false,
+      "runtime_env": false,
+      "sidecar_network_present": false,
+      "storage_root_env_count": 0,
+      "token_mount_count": 0,
+      "validation_env": false
+    },
+    "uninstalled-zero-residue": {
+      "agent_ids": [
+        "QwenPaw_QA_Agent_0.2",
+        "default"
+      ],
+      "skills_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "default": []
+      },
+      "tools_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "default": []
+      }
+    }
+  },
+  "cleanup": {
+    "already_absent": [],
+    "broad_cleanup_used": false,
+    "failures": [],
+    "removed_exact_resources": [
+      "container:ai-novel-2026-t1gate-tts49real0903-qwenpaw",
+      "container:ai-novel-2026-t1gate-tts49real0903-postgres",
+      "volume:ai-novel-2026-t1gate-tts49real0903-postgres-data",
+      "volume:ai-novel-2026-t1gate-tts49real0903-novel-media",
+      "volume:ai-novel-2026-t1gate-tts49real0903-qwen-backups",
+      "volume:ai-novel-2026-t1gate-tts49real0903-qwen-secrets",
+      "volume:ai-novel-2026-t1gate-tts49real0903-qwen-data",
+      "network:ai-novel-2026-t1gate-tts49real0903-net"
+    ],
+    "status": "passed"
+  },
+  "failure_code": null,
+  "gate": "T1-GATE-INSTALL",
+  "mode": "real",
+  "phases": [
+    "preflight",
+    "create-isolated-runtime",
+    "stage-candidate-with-docker-cp",
+    "install",
+    "force-reinstall",
+    "uninstall",
+    "reinstall"
+  ],
+  "run_id": "tts49real0903",
+  "schema_version": 1,
+  "status": "passed"
+}

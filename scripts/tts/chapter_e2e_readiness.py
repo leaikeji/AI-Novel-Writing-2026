@@ -69,6 +69,9 @@ from backend.narration.production_runtime import (  # noqa: E402
     MEDIA_ROOT_ENV,
     MODEL_METADATA_ROOT_ENV,
 )
+from backend.narration.schema_readiness import (  # noqa: E402
+    database_revision_satisfies,
+)
 from backend.narration.storage import (  # noqa: E402
     NarrationStorage,
     StorageError,
@@ -82,7 +85,7 @@ from scripts.tts.validate_chapter_e2e import (  # noqa: E402
 
 ATTESTATION_SCHEMA: Final = "moss-tts-t4k-readiness-attestation/1.1"
 REPORT_SCHEMA: Final = "moss-tts-t4k-readiness-report/1.1"
-EXPECTED_DATABASE_REVISION: Final = "20260829_0034"
+MINIMUM_DATABASE_REVISION: Final = "20260829_0034"
 FIXTURE_PATH: Final = (
     REPOSITORY_ROOT / "tests/fixtures/narration/chapter-e2e-v3.json"
 )
@@ -232,6 +235,15 @@ class DatabaseReadinessEvidence:
 
 class ReadinessReader(Protocol):
     def audit(self, attestation: ReadinessAttestation) -> DatabaseReadinessEvidence: ...
+
+
+def _database_revision_ready(revisions: Sequence[object]) -> bool:
+    """Accept one known linear descendant of the T4-K minimum revision."""
+
+    return database_revision_satisfies(
+        revisions,
+        minimum_revision=MINIMUM_DATABASE_REVISION,
+    )
 
 
 def _canonical_json(value: object) -> str:
@@ -717,7 +729,7 @@ class SqlAlchemyReadinessReader:
                     text("SELECT version_num FROM alembic_version")
                 )
             )
-            if revisions != (EXPECTED_DATABASE_REVISION,):
+            if not _database_revision_ready(revisions):
                 missing.add("DATABASE_SCHEMA_NOT_READY")
 
             novel = session.get(Novel, attestation.novel_id)

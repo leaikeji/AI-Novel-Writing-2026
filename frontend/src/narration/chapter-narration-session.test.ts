@@ -414,6 +414,7 @@ interface HarnessOptions {
     message?: string,
   ) => void;
   bridgeContentHash?: string;
+  maxPollAttempts?: number;
 }
 
 
@@ -589,7 +590,7 @@ function createHarness(options: HarnessOptions = {}) {
     onPlaybackPreferenceStatus: options.onPlaybackPreferenceStatus,
     pollScheduleMs: [1],
     pollTimeoutMs: options.pollTimeoutMs ?? 20,
-    maxPollAttempts: 10,
+    maxPollAttempts: options.maxPollAttempts ?? 10,
     dependencies,
   });
   return {
@@ -637,6 +638,166 @@ describe("chapter narration bundle gates", () => {
     expect(delay).toHaveBeenCalledOnce();
     expect(harness.session.readSnapshot()).toMatchObject({ phase: "ready", error: null });
     expect(harness.session.player).not.toBeNull();
+  });
+
+  it("stops transient projection retries at the configured attempt limit", async () => {
+    const resources = fixture();
+    const staleEdition = Object.freeze({
+      ...resources.edition,
+      state: "rendering" as const,
+      queued_segment_count: 2,
+      ready_segment_count: 0,
+    });
+    const getEdition = vi.fn<ChapterNarrationSessionDependencies["getNarrationEdition"]>(
+      async () => staleEdition,
+    );
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>(
+      async (_milliseconds, signal) => {
+        if (signal.aborted) throw new DOMException("aborted", "AbortError");
+      },
+    );
+    const harness = createHarness({
+      getEdition,
+      delay,
+      maxPollAttempts: 3,
+    });
+
+    await expect(harness.session.load()).rejects.toThrow("edition.state does not match");
+    expect(getEdition).toHaveBeenCalledTimes(3);
+    expect(delay).toHaveBeenCalledTimes(2);
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "error", bundle: null });
+    expect(harness.session.player).toBeNull();
+    expect(harness.bridge.readSnapshot().edition).toBeNull();
+    expect(harness.queues).toHaveLength(0);
+  });
+
+  it("stops transient projection retries at the load deadline", async () => {
+    const resources = fixture();
+    const staleEdition = Object.freeze({
+      ...resources.edition,
+      state: "rendering" as const,
+      queued_segment_count: 2,
+      ready_segment_count: 0,
+    });
+    let clock = 0;
+    const getEdition = vi.fn<ChapterNarrationSessionDependencies["getNarrationEdition"]>(
+      async () => staleEdition,
+    );
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>(
+      async (_milliseconds, signal) => {
+        if (signal.aborted) throw new DOMException("aborted", "AbortError");
+        clock = 10;
+      },
+    );
+    const harness = createHarness({
+      getEdition,
+      delay,
+      now: () => clock,
+      pollTimeoutMs: 10,
+    });
+
+    await expect(harness.session.load()).rejects.toThrow(
+      "edition projection did not converge before the load deadline",
+    );
+    expect(getEdition).toHaveBeenCalledOnce();
+    expect(delay).toHaveBeenCalledOnce();
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "error", bundle: null });
+    expect(harness.session.player).toBeNull();
+    expect(harness.bridge.readSnapshot().edition).toBeNull();
+    expect(harness.queues).toHaveLength(0);
+  });
+
+  it("dispose during a load retry delay aborts without installing runtime state", async () => {
+    const resources = fixture();
+    const staleEdition = Object.freeze({
+      ...resources.edition,
+      state: "rendering" as const,
+      queued_segment_count: 2,
+      ready_segment_count: 0,
+    });
+    let notifyDelay!: () => void;
+    const delayStarted = new Promise<void>((resolve) => { notifyDelay = resolve; });
+    const getEdition = vi.fn<ChapterNarrationSessionDependencies["getNarrationEdition"]>(
+      async () => staleEdition,
+    );
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>(
+      async (_milliseconds, signal) => new Promise<void>((_resolve, reject) => {
+        notifyDelay();
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("disposed", "AbortError"));
+        }, { once: true });
+      }),
+    );
+    const harness = createHarness({ getEdition, delay });
+    const loading = harness.session.load();
+    await delayStarted;
+
+    harness.session.dispose();
+
+    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
+    expect(getEdition).toHaveBeenCalledOnce();
+    expect(delay).toHaveBeenCalledOnce();
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "disposed", bundle: null });
+    expect(harness.session.player).toBeNull();
+    expect(harness.bridge.readSnapshot().edition).toBeNull();
+    expect(harness.queues).toHaveLength(0);
+  });
+
+  it("a newer load supersedes an older load waiting between retries", async () => {
+    const resources = fixture();
+    const staleEdition = Object.freeze({
+      ...resources.edition,
+      state: "rendering" as const,
+      queued_segment_count: 2,
+      ready_segment_count: 0,
+    });
+    const getEdition = vi.fn<ChapterNarrationSessionDependencies["getNarrationEdition"]>()
+      .mockResolvedValueOnce(staleEdition)
+      .mockResolvedValue(resources.edition);
+    let notifyDelay!: () => void;
+    const delayStarted = new Promise<void>((resolve) => { notifyDelay = resolve; });
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>(
+      async (_milliseconds, signal) => new Promise<void>((_resolve, reject) => {
+        notifyDelay();
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("superseded", "AbortError"));
+        }, { once: true });
+      }),
+    );
+    const harness = createHarness({ getEdition, delay });
+    const olderLoad = harness.session.load();
+    await delayStarted;
+    expect(harness.session.player).toBeNull();
+    expect(harness.bridge.readSnapshot().edition).toBeNull();
+    expect(harness.queues).toHaveLength(0);
+
+    const newerLoad = harness.session.load();
+
+    await expect(olderLoad).rejects.toMatchObject({ name: "AbortError" });
+    await expect(newerLoad).resolves.toMatchObject({ status: "ready" });
+    expect(getEdition).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledOnce();
+    expect(harness.queues).toHaveLength(1);
+    expect(harness.session.player).not.toBeNull();
+    expect(harness.bridge.readSnapshot().edition?.editionId).toBe(EDITION_ID);
+  });
+
+  it("does not retry a non-transient load failure or install partial runtime state", async () => {
+    const getEdition = vi.fn<ChapterNarrationSessionDependencies["getNarrationEdition"]>(
+      async () => {
+        throw new Error("edition request failed");
+      },
+    );
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>();
+    const harness = createHarness({ getEdition, delay });
+
+    await expect(harness.session.load()).rejects.toThrow("edition request failed");
+    expect(getEdition).toHaveBeenCalledOnce();
+    expect(delay).not.toHaveBeenCalled();
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "error", bundle: null });
+    expect(harness.session.player).toBeNull();
+    expect(harness.bridge.readSnapshot().edition).toBeNull();
+    expect(harness.queues).toHaveLength(0);
   });
 
   it("returns an explicit no-edition result without constructing playback runtime", async () => {

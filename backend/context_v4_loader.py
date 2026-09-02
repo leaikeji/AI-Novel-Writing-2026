@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, TypeVar
 from uuid import UUID, NAMESPACE_URL, uuid5
 
 from sqlalchemy import and_, case, select
@@ -50,17 +50,104 @@ from .models import (
     Document,
     DocumentRevision,
     DocumentWorkingCopy,
+    IntelligenceCommitBatch,
     Novel,
     StoryFact,
     Volume,
 )
 from .story_state import StoryEventLinkRecord, StoryFactV2, StoryTimelineRecord
 from .story_state.contracts import StoryVisibilityV1, VisibilityScope
+from .story_state.fact_authority import (
+    FactAuthorityRow,
+    resolve_fact_authority_rows,
+)
 from .volume_chapter_titles import context_chapter_title
 
 
 CONTEXT_POLICY_VERSION = "context-v4-production/1"
 TOKEN_ESTIMATOR_VERSION = "unicode-cjk-estimator/1"
+
+
+_StoryFactRowT = TypeVar("_StoryFactRowT", bound=FactAuthorityRow)
+
+
+def _resolve_story_fact_rows(
+    facts: Sequence[_StoryFactRowT],
+    bindings: Sequence[DerivedSourceBinding],
+    batch_states: Mapping[UUID, str],
+    event_links: Sequence[StoryEventLink],
+) -> tuple[tuple[_StoryFactRowT, ...], dict[UUID, bool]]:
+    """Apply the frozen fact-specific authority resolver before assembly."""
+
+    superseded_fact_ids = {
+        link.target_fact_id
+        for link in event_links
+        if link.link_type == "supersedes"
+    }
+    results = resolve_fact_authority_rows(
+        facts,
+        bindings=bindings,
+        batch_states=batch_states,
+        incoming_superseded_fact_ids=superseded_fact_ids,
+    )
+    included = [
+        fact for fact in facts if results[fact.id].included_in_current_projection
+    ]
+    source_validity = {
+        fact.source_revision_id: True
+        for fact in included
+        if fact.source_revision_id is not None
+    }
+    return tuple(included), source_validity
+
+
+def _load_effective_story_fact_rows(
+    session: Session,
+    facts: Sequence[_StoryFactRowT],
+    event_links: Sequence[StoryEventLink],
+) -> tuple[tuple[_StoryFactRowT, ...], dict[UUID, bool]]:
+    """Load provenance evidence for ``facts`` and resolve each fact once."""
+
+    fact_ids = tuple(item.id for item in facts)
+    binding_rows = (
+        tuple(
+            session.scalars(
+                select(DerivedSourceBinding).where(
+                    DerivedSourceBinding.derived_entity_id.in_(fact_ids),
+                )
+            )
+        )
+        if fact_ids
+        else ()
+    )
+    batch_ids = tuple(
+        sorted(
+            {
+                binding.commit_batch_id
+                for binding in binding_rows
+                if binding.commit_batch_id is not None
+            },
+            key=str,
+        )
+    )
+    batch_states = (
+        {
+            batch.id: batch.state
+            for batch in session.scalars(
+                select(IntelligenceCommitBatch).where(
+                    IntelligenceCommitBatch.id.in_(batch_ids)
+                )
+            )
+        }
+        if batch_ids
+        else {}
+    )
+    return _resolve_story_fact_rows(
+        facts,
+        binding_rows,
+        batch_states,
+        event_links,
+    )
 
 
 def _block_id(*parts: object) -> UUID:
@@ -470,37 +557,33 @@ def assemble_writing_context_from_db(
         )
     )
     timelines = tuple(StoryTimelineRecord.model_validate(item) for item in timeline_rows)
-    facts: list[StoryFactV2] = []
-    for row in session.scalars(
-        select(StoryFact).where(
-            StoryFact.novel_id == position.novel_id,
-            StoryFact.schema_version == "story-fact/2",
+    fact_rows = tuple(
+        session.scalars(
+            select(StoryFact).where(
+                StoryFact.novel_id == position.novel_id,
+                StoryFact.schema_version == "story-fact/2",
+            )
         )
-    ):
+    )
+    validated_facts: list[StoryFactV2] = []
+    for row in fact_rows:
         try:
-            facts.append(StoryFactV2.model_validate(row))
+            validated_facts.append(StoryFactV2.model_validate(row))
         except ValueError:
             continue
-    event_links = tuple(
-        StoryEventLinkRecord.model_validate(item)
-        for item in session.scalars(
+    link_rows = tuple(
+        session.scalars(
             select(StoryEventLink).where(StoryEventLink.novel_id == position.novel_id)
         )
     )
-    source_validity: dict[UUID, bool] = {}
-    for binding in session.scalars(
-        select(DerivedSourceBinding)
-        .join(Document, Document.id == DerivedSourceBinding.source_chapter_id)
-        .where(
-            Document.novel_id == position.novel_id,
-            DerivedSourceBinding.derived_entity_type == "story_fact",
-        )
-    ):
-        valid = binding.validity_state in {"current", "source_restored"}
-        previous = source_validity.get(binding.source_chapter_revision_id)
-        source_validity[binding.source_chapter_revision_id] = (
-            valid if previous is None else previous and valid
-        )
+    facts, source_validity = _load_effective_story_fact_rows(
+        session,
+        validated_facts,
+        link_rows,
+    )
+    event_links = tuple(
+        StoryEventLinkRecord.model_validate(item) for item in link_rows
+    )
     blocks: list[ContextBlockV2] = []
     if chapter_brief is not None:
         brief_content = json.dumps({

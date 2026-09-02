@@ -14,7 +14,7 @@ class FakeSession:
         self.rows = list(rows)
 
     def scalar(self, _statement):
-        return self.rows.pop(0)
+        return self.rows.pop(0) if self.rows else None
 
 
 def scoped_rows():
@@ -114,6 +114,8 @@ def test_atomic_command_derives_bounded_child_keys_and_calls_both_writers(
         "no_changes": False,
         "root_replayed": False,
         "profile_replayed": False,
+        "changed": True,
+        "story_ledger_version": 12,
     }
     assert [name for name, _kwargs in calls] == ["root", "profile"]
     root_key = str(calls[0][1]["operation_key"])
@@ -171,6 +173,99 @@ def test_root_only_save_never_touches_story_profile_writer(
 
     assert result["root_replayed"] is True
     assert result["profile_replayed"] is False
+
+
+def test_root_only_actual_change_advances_ledger_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    novel, character, instance, timeline = scoped_rows()
+    monkeypatch.setattr(
+        commands,
+        "validate_character_root_update",
+        lambda *_args, **_kwargs: {
+            "role_type": character.role_type,
+            "name": character.name,
+            "description": "新小传",
+            "details": dict(character.details),
+        },
+    )
+    monkeypatch.setattr(
+        commands,
+        "save_character_root",
+        lambda *_args, **_kwargs: SimpleNamespace(replayed=False),
+    )
+
+    result = commands.save_character_workspace(
+        FakeSession([novel, character, instance, timeline]),
+        novel.id,
+        character.id,
+        selected_timeline_id=timeline.id,
+        selected_instance_id=instance.id,
+        operation_key="root-change",
+        expected_character_catalog_version=7,
+        expected_story_ledger_version=11,
+        expected_character_version=3,
+        expected_instance_version=2,
+        root_patch={
+            "role_type": character.role_type,
+            "name": character.name,
+            "description": "新小传",
+            "gender": "",
+            "core_theme": "",
+        },
+        profile=None,
+    )
+
+    assert result["changed"] is True
+    assert result["story_ledger_version"] == 12
+    assert novel.story_ledger_version == 12
+
+
+def test_same_root_payload_is_noop_without_creating_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    novel, character, instance, timeline = scoped_rows()
+    monkeypatch.setattr(
+        commands,
+        "validate_character_root_update",
+        lambda *_args, **_kwargs: {
+            "role_type": character.role_type,
+            "name": character.name,
+            "description": character.description,
+            "details": dict(character.details),
+        },
+    )
+    monkeypatch.setattr(
+        commands,
+        "save_character_root",
+        lambda *_args, **_kwargs: pytest.fail("same-value root must not write"),
+    )
+
+    result = commands.save_character_workspace(
+        FakeSession([novel, character, instance, timeline, None]),
+        novel.id,
+        character.id,
+        selected_timeline_id=timeline.id,
+        selected_instance_id=instance.id,
+        operation_key="same-root",
+        expected_character_catalog_version=7,
+        expected_story_ledger_version=11,
+        expected_character_version=3,
+        expected_instance_version=2,
+        root_patch={
+            "role_type": character.role_type,
+            "name": character.name,
+            "description": character.description,
+            "gender": "",
+            "core_theme": "",
+        },
+        profile=None,
+    )
+
+    assert result["no_changes"] is True
+    assert result["changed"] is False
+    assert result["story_ledger_version"] == 11
+    assert novel.story_ledger_version == 11
 
 
 def test_no_change_command_returns_without_calling_writers(

@@ -36,7 +36,7 @@ describe("workbench equal-height layout styles", () => {
   });
 
   it("keeps outline footer gutters equal and unifies the chapter-count corners", () => {
-    expect(studioSource).toContain('section === "outline" ? " is-outline" : ""');
+    expect(studioSource).toContain('studioSection === "outline" ? " is-outline" : ""');
     expect(styleSource).toContain(".mb-panel-body.is-outline { padding-bottom:28px;");
     expect(styleSource).toContain(".anw-workbench-frame[data-assistant-density=\"constrained\"] .mb-panel-body.is-outline { padding-bottom:16px;");
     expect(styleSource).toContain(".mb-panel-body.is-outline { padding-bottom:14px;");

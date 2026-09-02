@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from backend.models import (
+    NarrationEdition,
     NarrationRequest,
     NarrationScene,
     NarrationScript,
@@ -111,6 +112,7 @@ def _command(
     segment_index: int = 0,
     key: str = "review-patch-action-0001",
     spoken_text: str = "修正后的朗读文本。",
+    actor_id: str = "owner",
 ) -> CorrectReviewSegment:
     segment = contract.segments[segment_index]
     return CorrectReviewSegment(
@@ -122,7 +124,7 @@ def _command(
         expected_immutable_hash=contract.immutable_hash,
         expected_local_hash=segment.local_hash,
         idempotency_key=key,
-        actor_id="owner",
+        actor_id=actor_id,
         speaker=SpeakerRef(SpeakerKind.NARRATOR),
         casting=casting,
         spoken_text=spoken_text,
@@ -569,7 +571,10 @@ def test_two_sequential_corrections_use_same_request_and_manual_parent_chain() -
     assert request.version == second.request_version_after
 
 
-def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger() -> None:
+@pytest.mark.parametrize("generation_actor", ["owner", "local-owner"])
+def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger(
+    generation_actor: str,
+) -> None:
     (
         store,
         _novel,
@@ -580,6 +585,7 @@ def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger()
         parent,
         casting,
     ) = _review_seed("“第一句。”\n\n“第二句。”")
+    request.explicit_generation_actor = generation_actor
     first = correct_review_segment(
         store,
         _command(
@@ -589,6 +595,7 @@ def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger()
             segment_index=0,
             key="inherit-source-first",
             spoken_text="第一句人工修正。",
+            actor_id=generation_actor,
         ),
     )
     second = correct_review_segment(
@@ -600,6 +607,7 @@ def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger()
             segment_index=1,
             key="inherit-source-second",
             spoken_text="第二句人工修正。",
+            actor_id=generation_actor,
         ),
     )
     freeze_script_version(
@@ -607,7 +615,7 @@ def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger()
         second.result_version_id,
         request_id=request.id,
         actor_type="owner",
-        actor_id="owner",
+        actor_id=generation_actor,
     )
     approved = load_script_contract(store, second.result_version_id)
     assert approved.state is ScriptVersionState.APPROVED
@@ -624,7 +632,7 @@ def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger()
             settings_fingerprint=request.settings_fingerprint,
             effective_policy=request.effective_policy,
             explicit_generation_intent_at=request.explicit_generation_intent_at,
-            explicit_generation_actor="owner",
+            explicit_generation_actor=generation_actor,
         ),
     )
     inherited = analyze_narration_script(
@@ -673,6 +681,74 @@ def test_new_generation_inherits_exact_approved_manual_corrections_with_ledger()
     inheritance_actions[0].request_hash = "f" * 64
     with pytest.raises(InvalidNarrationState, match="action ledger"):
         load_script_contract(store, inherited.script_version_id)
+
+
+def test_generation_actor_mismatch_skips_inheritance_without_edition_writes() -> None:
+    (
+        store,
+        _novel,
+        document,
+        revision,
+        _character,
+        request,
+        parent,
+        casting,
+    ) = _review_seed("“唯一一句。”")
+    corrected = correct_review_segment(
+        store,
+        _command(
+            request,
+            parent,
+            casting,
+            key="actor-mismatch-source",
+            spoken_text="唯一一句人工修正。",
+            actor_id="owner",
+        ),
+    )
+    freeze_script_version(
+        store,
+        corrected.result_version_id,
+        request_id=request.id,
+        actor_type="owner",
+        actor_id="owner",
+    )
+    action_count = len(store.rows[NarrationScriptReviewActionRecord])
+    edition_count = len(store.rows[NarrationEdition])
+
+    next_request = create_request(
+        store,
+        CreateNarrationRequest(
+            novel_id=request.novel_id,
+            document_id=document.id,
+            source_revision_id=revision.id,
+            source_content_hash=revision.content_hash,
+            intent="update",
+            idempotency_key="actor-mismatch-next-request",
+            settings_fingerprint=request.settings_fingerprint,
+            effective_policy=request.effective_policy,
+            explicit_generation_intent_at=request.explicit_generation_intent_at,
+            explicit_generation_actor="local-owner",
+        ),
+    )
+    analyzed = analyze_narration_script(
+        store,
+        AnalyzeNarrationScript(
+            request_id=next_request.id,
+            document_id=document.id,
+            revision_id=revision.id,
+            content_hash=revision.content_hash,
+            idempotency_key="actor-mismatch-next-analysis",
+        ),
+    )
+
+    assert analyzed.parent_version_id is None
+    assert all(
+        segment.attribution.origin is not AttributionOrigin.INHERITED_OVERRIDE
+        and not segment.manual_override
+        for segment in analyzed.segments
+    )
+    assert len(store.rows[NarrationScriptReviewActionRecord]) == action_count
+    assert len(store.rows[NarrationEdition]) == edition_count == 0
 
 
 def test_partial_reanalysis_interface_is_explicitly_fail_closed_without_writes() -> None:

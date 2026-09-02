@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  createChapterNarrationPanel,
+  createChapterNarrationPanel as createChapterNarrationPanelWithIcons,
   deriveChapterNarrationPanelModel,
+  type ChapterNarrationPanelIcons,
   type ChapterNarrationPanelProps,
   type ChapterNarrationPanelReactRuntime,
 } from "./chapter-narration-panel";
@@ -234,6 +235,31 @@ const React: ChapterNarrationPanelReactRuntime = {
 };
 
 
+function TestIcon(): null {
+  return null;
+}
+
+
+const ICONS: ChapterNarrationPanelIcons = Object.freeze({
+  Previous: TestIcon,
+  Next: TestIcon,
+  Play: TestIcon,
+  Pause: TestIcon,
+  Loading: TestIcon,
+  Volume: TestIcon,
+  Speaker: TestIcon,
+  More: TestIcon,
+  Warning: TestIcon,
+});
+
+
+function createChapterNarrationPanel(
+  runtime: ChapterNarrationPanelReactRuntime,
+): ReturnType<typeof createChapterNarrationPanelWithIcons> {
+  return createChapterNarrationPanelWithIcons(runtime, ICONS);
+}
+
+
 describe("chapter narration panel", () => {
   it("uses sentence-level progress and derives truthful previous/next targets", () => {
     const model = deriveChapterNarrationPanelModel(props({ playerState: playerState("playing") }));
@@ -314,7 +340,7 @@ describe("chapter narration panel", () => {
     ]);
   });
 
-  it("shows truthful timing, whole-chapter generation, frozen legacy identity, and preference status", () => {
+  it("shows concise truthful timing while keeping generation and frozen voice details secondary", () => {
     const Panel = createChapterNarrationPanel(React);
     const root = Panel(props({
       manifestSegments: manifestSegments(),
@@ -322,9 +348,10 @@ describe("chapter narration panel", () => {
       playbackPreferenceStatus: { state: "conflict" },
     }));
 
-    expect(textContent(root)).toContain("可播放0:03 · 2/2 句");
-    expect(textContent(root)).toContain("全章生成100%");
+    expect(textContent(root)).toContain("0:00 / 0:03");
+    expect(textContent(root)).not.toContain("全章生成100%");
     expect(textContent(root)).toContain("旧版未保存名称");
+    expect(textContent(root)).not.toContain("90000000-0000-4000-8000-000000000001");
     expect(textContent(root)).toContain("播放偏好已在别处更新");
     const player = findAll(root, (item) => item.props["aria-label"] === "章节智能朗读播放器")[0];
     expect(player.props).toMatchObject({
@@ -337,12 +364,33 @@ describe("chapter narration panel", () => {
     });
   });
 
+  it("centralizes secondary-surface Escape handling at the player root", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props());
+    const player = findAll(
+      root,
+      (item) => item.props["aria-label"] === "章节智能朗读播放器",
+    )[0];
+    const details = findAll(root, (item) => item.props.id === "anw-chapter-player-details")[0];
+    const volume = findAll(root, (item) => item.props.id === "anw-chapter-player-volume")[0];
+
+    expect(player.props.onKeyDown).toBeTypeOf("function");
+    expect(details.props.onKeyDown).toBeUndefined();
+    expect(volume.props.onKeyDown).toBeUndefined();
+    const preventDefault = vi.fn();
+    (player.props.onKeyDown as (event: { key: string; preventDefault(): void }) => void)({
+      key: "Enter",
+      preventDefault,
+    });
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
   it("keeps failure rows in a closed details region instead of the compact bar", () => {
     const Panel = createChapterNarrationPanel(React);
     const root = Panel(props({ failedSegments: failedSegments() }));
     const trigger = findAll(
       root,
-      (item) => item.type === "button" && textContent(item) === "失败 2",
+      (item) => item.type === "button" && textContent(item) === "查看失败",
     )[0];
     const details = findAll(root, (item) => item.props.id === "anw-chapter-player-details")[0];
     const failures = findAll(root, (item) => item.props["aria-label"] === "失败句段重试")[0];
@@ -350,27 +398,61 @@ describe("chapter narration panel", () => {
       "aria-controls": "anw-chapter-player-details",
       "aria-expanded": false,
     });
+    expect(trigger.props["aria-haspopup"]).toBeUndefined();
+    expect(details.props.role).toBe("region");
+    expect(findAll(
+      root,
+      (item) => item.type === "button"
+        && (textContent(item) === "查看失败" || textContent(item).includes("失败 2")),
+    )).toHaveLength(1);
     expect(details.props.hidden).toBe(true);
     expect(failures.props.hidden).toBe(true);
   });
 
-  it("uses natural player layout, explicit narrow-screen rules, and 44px controls", () => {
+  it("uses the selected three-zone layout, flush alignment, and 44px controls", () => {
     expect(T4_CHAPTER_NARRATION_STYLES).not.toContain("--anw-chapter-player-height");
     expect(T4_CHAPTER_NARRATION_STYLES).not.toContain("94px");
     expect(T4_CHAPTER_NARRATION_STYLES).toContain("min-height: 44px");
-    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@container (max-width: 720px)");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@container (max-width: 760px)");
     expect(T4_CHAPTER_NARRATION_STYLES).toContain(
-      "grid-template-columns: minmax(0, 1fr) auto auto",
+      "grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)",
+    );
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("border-radius: 14px 14px 0 0");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("--anw-chapter-editor-scrollbar-width: 0px");
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain(
+      "calc(100% - 48px - var(--anw-chapter-editor-scrollbar-width))",
     );
     expect(T4_CHAPTER_NARRATION_STYLES).toContain(
-      ".anw-chapter-narration-details__overview,",
+      "calc((100% - var(--anw-chapter-editor-scrollbar-width) - 1440px) / 2)",
     );
-    expect(T4_CHAPTER_NARRATION_STYLES).toContain(
-      "grid-template-columns: minmax(0, 1fr);",
-    );
+    expect(T4_CHAPTER_NARRATION_STYLES).toContain("box-shadow: 0 -8px 24px");
+    expect(T4_CHAPTER_NARRATION_STYLES).not.toContain(".anw-chapter-narration-player__metrics");
+    expect(T4_CHAPTER_NARRATION_STYLES).not.toContain(".anw-chapter-narration-status-grid");
+    expect(T4_CHAPTER_NARRATION_STYLES).not.toContain(".anw-chapter-narration-source");
     expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 720px)");
     expect(T4_CHAPTER_NARRATION_STYLES).toContain("z-index: 0;");
-    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 390px)");
+  });
+
+  it("renders speaker, transport, and tools as three semantic zones without a sentence excerpt", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props());
+    const zones = findAll(root, (item) => typeof item.props["data-player-zone"] === "string");
+    expect(zones.map((item) => item.props["data-player-zone"])).toEqual([
+      "identity", "transport", "tools",
+    ]);
+    expect(textContent(zones[0])).toBe("旁白");
+    expect(textContent(zones[1])).toBe("");
+    expect(textContent(zones[2])).toContain("0:00 / 待计算");
+    expect(textContent(zones[2])).not.toContain("句");
+    expect(textContent(zones[0])).not.toContain("第一句。");
+    expect(textContent(zones[1])).not.toContain("第二句。");
+    expect(textContent(root)).not.toMatch(/[⏮⏭▶]/u);
+    const more = findAll(
+      root,
+      (item) => item.type === "button" && item.props["aria-label"] === "打开朗读详情",
+    );
+    expect(more).toHaveLength(1);
+    expect(textContent(more[0])).toBe("更多");
   });
 
   it("exposes only bounded non-sensitive playback state for the fixed observer", () => {
@@ -422,23 +504,82 @@ describe("chapter narration panel", () => {
     expect(player.props["data-segment-states"]).toBe("");
   });
 
-  it("labels diverged playback as old draft and offers explicit follow resume", () => {
+  it("surfaces the exact mismatch warning and keeps follow recovery in details", () => {
+    const onUpdate = vi.fn();
     const onResumeFollow = vi.fn();
     const Panel = createChapterNarrationPanel(React);
     const root = Panel(props({
       sourceKind: "working-copy-diverged",
       followPaused: true,
+      onUpdate,
       onResumeFollow,
     }));
-    expect(textContent(root)).toContain("旧稿朗读");
-    expect(textContent(root)).toContain("正文待更新");
-    expect(textContent(root)).toContain("旧稿字幕");
+    expect(textContent(root)).toContain("朗读内容与当前正文不一致");
+    expect(textContent(root)).not.toContain("旧稿字幕");
+    const updates = findAll(
+      root,
+      (item) => item.type === "button" && textContent(item) === "更新朗读",
+    );
+    expect(updates).toHaveLength(1);
+    const update = updates[0];
+    (update.props.onClick as () => void)();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
     const resume = findAll(
       root,
       (item) => item.type === "button" && textContent(item) === "返回当前朗读位置",
     )[0];
     (resume.props.onClick as () => void)();
     expect(onResumeFollow).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps terminal generation failure visible before the retry inventory arrives", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({
+      segmentStates: Object.freeze(["failed", "cancelled"]),
+      failedSegments: null,
+    }));
+    expect(textContent(root)).toContain("全章生成 0/2 · 可播 0 句 · 未完成 2 句");
+    expect(findAll(
+      root,
+      (item) => item.props.role === "alert"
+        && String(item.props.className).includes("anw-chapter-narration-notice"),
+    )).toHaveLength(1);
+  });
+
+  it("labels an ended Edition as a restart instead of a generic play action", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({ playerState: playerState("ended") }));
+    const restart = findAll(
+      root,
+      (item) => item.type === "button"
+        && item.props["aria-label"] === "从头重新播放章节朗读",
+    );
+    expect(restart).toHaveLength(1);
+    expect(restart[0].props.title).toBe("重新播放");
+  });
+
+  it("labels a restored cursor at the last sentence end as a restart", () => {
+    const restoredAtEnd: NarrationPlayerState = Object.freeze({
+      ...playerState("idle"),
+      currentSegmentId: SEGMENT_2,
+      currentOrdinal: 1,
+      offsetMs: 2_000,
+      durationMs: 0,
+    });
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({
+      playerState: restoredAtEnd,
+      manifestSegments: manifestSegments(),
+    }));
+    expect(findAll(
+      root,
+      (item) => item.type === "button"
+        && item.props["aria-label"] === "从头重新播放章节朗读",
+    )).toHaveLength(1);
+    expect(findAll(
+      root,
+      (item) => item.type === "strong" && textContent(item) === "朗读版本",
+    )).toHaveLength(0);
   });
 
   it("offers the explicit cursor command only for the textarea fallback", () => {

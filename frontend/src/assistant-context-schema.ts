@@ -2,6 +2,10 @@ import type {
   EditableFieldPersistence,
   EditableFieldSelectionDirection,
 } from "./assistant-fields";
+import {
+  validateStoryLedgerAssistantContext,
+  type StoryLedgerAssistantContextV1,
+} from "./story-ledger/assistant-context";
 
 
 export const NOVEL_ASSISTANT_CONTEXT_SCHEMA_VERSION = 2 as const;
@@ -19,6 +23,7 @@ export const NOVEL_PAGE_SECTIONS = [
   "roles",
   "clues",
   "settings",
+  "ledger",
 ] as const;
 
 
@@ -39,6 +44,7 @@ export const NOVEL_PAGE_VIEWS = [
   "storyline-editor",
   "foreshadow-editor",
   "novel-settings",
+  "story-ledger",
 ] as const;
 
 
@@ -116,6 +122,7 @@ export interface NovelAssistantContextV2 {
     savedContentHash: string;
     dirty: boolean;
   };
+  ledger?: StoryLedgerAssistantContextV1;
   editing?: {
     focusedFieldId?: string;
     fields: EditableFieldSnapshot[];
@@ -136,6 +143,7 @@ export interface NovelAssistantContextEnvelope {
   page: NovelAssistantContextV2["page"];
   entity?: NovelAssistantContextV2["entity"];
   document?: NovelAssistantContextV2["document"];
+  ledger?: StoryLedgerAssistantContextV1;
 }
 
 
@@ -149,6 +157,7 @@ export type NovelAssistantContextValidationReason =
   | "invalid-page"
   | "invalid-entity"
   | "invalid-document"
+  | "invalid-ledger"
   | "invalid-editing"
   | "invalid-selection"
   | "invalid-budget"
@@ -313,7 +322,8 @@ export function validateNovelAssistantContextV2(
   if (!isRecord(value.page)
     || !oneOf(value.page.section, NOVEL_PAGE_SECTIONS)
     || !oneOf(value.page.view, NOVEL_PAGE_VIEWS)
-    || (value.page.modal !== undefined && !oneOf(value.page.modal, NOVEL_PAGE_VIEWS))) {
+    || (value.page.modal !== undefined && !oneOf(value.page.modal, NOVEL_PAGE_VIEWS))
+    || ((value.page.section === "ledger") !== (value.page.view === "story-ledger"))) {
     return { ok: false, reason: "invalid-page" };
   }
   if (!validateEntity(value.entity)) {
@@ -321,6 +331,15 @@ export function validateNovelAssistantContextV2(
   }
   if (!validateDocument(value.document)) {
     return { ok: false, reason: "invalid-document" };
+  }
+  const isLedgerPage = value.page.section === "ledger"
+    && value.page.view === "story-ledger";
+  if (isLedgerPage !== (value.ledger !== undefined)
+    || (value.ledger !== undefined
+      && (!validateStoryLedgerAssistantContext(value.ledger)
+        || value.ledger.novel.id !== value.novel.id
+        || value.ledger.novel.title !== value.novel.title))) {
+    return { ok: false, reason: "invalid-ledger" };
   }
   if (!validateEditing(value.editing)) {
     return { ok: false, reason: "invalid-editing" };

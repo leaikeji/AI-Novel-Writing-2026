@@ -165,7 +165,6 @@ def populated_store() -> tuple[FactStore, UUID, UUID, list[StoryFact]]:
     ]
     current_binding = DerivedSourceBinding(
         id=uuid4(),
-        derived_entity_type="story_fact",
         derived_entity_id=facts[0].id,
         source_chapter_id=document.id,
         source_chapter_revision_id=revision.id,
@@ -236,6 +235,135 @@ def test_fact_history_keeps_effective_state_and_health_orthogonal() -> None:
     assert page.total_summary.superseded == 2
 
 
+def test_bindings_are_fact_specific_and_health_is_independent() -> None:
+    store, line_id, person_id, facts = populated_store()
+    document = next(iter(store.read_set.documents_by_id.values()))
+    revision = next(iter(store.read_set.revisions_by_id.values()))
+    invalid_sibling = story_fact(
+        store,
+        line_id,
+        person_id,
+        dimension="goal",
+        value="失效来源目标",
+        sequence=6,
+        created_offset=6,
+        source_document_id=document.id,
+        source_revision_id=revision.id,
+    )
+    hash_mismatch = story_fact(
+        store,
+        line_id,
+        person_id,
+        dimension="health",
+        value="轻伤",
+        sequence=7,
+        created_offset=7,
+        source_document_id=document.id,
+        source_revision_id=revision.id,
+    )
+    lifecycle_invalid = story_fact(
+        store,
+        line_id,
+        person_id,
+        dimension="possession",
+        value="失效物品",
+        sequence=3,
+        created_offset=8,
+        status="invalid",
+    )
+    missing_batch_fact = story_fact(
+        store,
+        line_id,
+        person_id,
+        dimension="emotion",
+        value="来源批次缺失",
+        sequence=8,
+        created_offset=9,
+        source_document_id=document.id,
+        source_revision_id=revision.id,
+    )
+    invalid_binding = DerivedSourceBinding(
+        id=uuid4(),
+        derived_entity_id=invalid_sibling.id,
+        source_chapter_id=document.id,
+        source_chapter_revision_id=revision.id,
+        source_content_hash=revision.content_hash,
+        validity_state="source_superseded",
+        created_at=NOW,
+    )
+    mismatched_hash_binding = DerivedSourceBinding(
+        id=uuid4(),
+        derived_entity_id=hash_mismatch.id,
+        source_chapter_id=document.id,
+        source_chapter_revision_id=revision.id,
+        source_content_hash="f" * 64,
+        validity_state="current",
+        created_at=NOW,
+    )
+    missing_batch_binding = DerivedSourceBinding(
+        id=uuid4(),
+        derived_entity_id=missing_batch_fact.id,
+        source_chapter_id=document.id,
+        source_chapter_revision_id=revision.id,
+        source_content_hash=revision.content_hash,
+        commit_batch_id=uuid4(),
+        validity_state="current",
+        created_at=NOW,
+    )
+    store.read_set = replace(
+        store.read_set,
+        facts=(
+            *store.read_set.facts,
+            invalid_sibling,
+            hash_mismatch,
+            lifecycle_invalid,
+            missing_batch_fact,
+        ),
+        bindings_by_fact_id={
+            **store.read_set.bindings_by_fact_id,
+            invalid_sibling.id: (invalid_binding,),
+            hash_mismatch.id: (mismatched_hash_binding,),
+            missing_batch_fact.id: (missing_batch_binding,),
+        },
+    )
+    store.projection_payload["ambiguous_fact_ids"].append(  # type: ignore[union-attr]
+        str(invalid_sibling.id)
+    )
+    store.projection_payload["visible_facts"].append(  # type: ignore[union-attr]
+        {"id": str(hash_mismatch.id)}
+    )
+    store.projection_payload["current_facts"].append(  # type: ignore[union-attr]
+        {"id": str(hash_mismatch.id)}
+    )
+    store.projection_payload["suppressed_fact_ids"].append(  # type: ignore[union-attr]
+        str(lifecycle_invalid.id)
+    )
+    store.projection_payload["current_facts"].append(  # type: ignore[union-attr]
+        {"id": str(missing_batch_fact.id)}
+    )
+    store.projection_payload["visible_facts"].append(  # type: ignore[union-attr]
+        {"id": str(missing_batch_fact.id)}
+    )
+
+    page = CharacterWorkspaceService(store).list_facts(
+        store.root.novel_id,
+        store.root.id,
+        timeline_id=line_id,
+        character_instance_id=person_id,
+    )
+
+    by_id = {item.id: item for item in page.items}
+    assert by_id[facts[0].id].effective_state == "current"
+    assert by_id[invalid_sibling.id].effective_state == "source_invalid"
+    assert by_id[invalid_sibling.id].health == "ok"
+    assert by_id[hash_mismatch.id].effective_state == "current"
+    assert by_id[hash_mismatch.id].health == "ambiguous"
+    assert by_id[lifecycle_invalid.id].effective_state == "source_invalid"
+    assert by_id[lifecycle_invalid.id].health == "ok"
+    assert by_id[missing_batch_fact.id].effective_state == "source_invalid"
+    assert by_id[missing_batch_fact.id].health == "ambiguous"
+
+
 def test_source_hashes_use_unicode_code_points_and_never_return_whole_revision() -> None:
     store, line_id, person_id, facts = populated_store()
 
@@ -294,12 +422,13 @@ def test_fact_history_cursor_is_stable_and_invalid_cursor_is_rejected() -> None:
 def test_filters_and_batch_revert_priority_share_the_same_summary_rules() -> None:
     store, line_id, person_id, facts = populated_store()
     batch_id = uuid4()
+    source_revision_id = uuid4()
+    facts[4].source_revision_id = source_revision_id
     binding = DerivedSourceBinding(
         id=uuid4(),
-        derived_entity_type="story_fact",
         derived_entity_id=facts[4].id,
         source_chapter_id=uuid4(),
-        source_chapter_revision_id=uuid4(),
+        source_chapter_revision_id=source_revision_id,
         source_content_hash="a" * 64,
         commit_batch_id=batch_id,
         validity_state="current",
@@ -313,6 +442,13 @@ def test_filters_and_batch_revert_priority_share_the_same_summary_rules() -> Non
         },
         batch_state_by_id={batch_id: "reverted"},
     )
+    store.projection_payload["conflicts"].append(  # type: ignore[union-attr]
+        {
+            "conflict_key": "reverted-goal",
+            "fact_ids": [str(facts[4].id), str(facts[0].id)],
+            "reason": "same_position",
+        }
+    )
 
     page = CharacterWorkspaceService(store).list_facts(
         store.root.novel_id,
@@ -323,6 +459,7 @@ def test_filters_and_batch_revert_priority_share_the_same_summary_rules() -> Non
     )
 
     assert [item.id for item in page.items] == [facts[4].id]
+    assert page.items[0].health == "conflict"
     assert page.total_summary.model_dump() == {
         "total": 1,
         "current": 0,

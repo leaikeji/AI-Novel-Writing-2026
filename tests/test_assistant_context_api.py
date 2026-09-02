@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from backend import assistant_api
 from backend.assistant_context_registry import (
     AssistantContextRefRegistry,
     CONTEXT_REF_MAX_REQUEST_BYTES,
+    STORY_LEDGER_CONTEXT_MAX_CODE_POINTS,
 )
 from backend.database import get_session
 
@@ -60,6 +62,59 @@ def body(*, document_id: str | None = str(DOCUMENT_ID)) -> dict[str, object]:
     }
     if document_id is not None:
         value["documentId"] = document_id
+    return value
+
+
+def ledger_snapshot() -> dict[str, object]:
+    value = snapshot(with_document=False)
+    value["page"] = {"section": "ledger", "view": "story-ledger"}
+    ledger: dict[str, object] = {
+        "schema_version": "story-ledger-assistant-context/1",
+        "novel": {"id": str(NOVEL_ID), "title": "潮声替我说晚安"},
+        "ledger_snapshot_token": "snapshot-token-1",
+        "timeline": {"id": "timeline-1", "name": "主线"},
+        "filters": {
+            "fact_types": [],
+            "effective_state": None,
+            "health": None,
+            "dimension": None,
+            "source_document_id": None,
+            "commit_batch_id": None,
+            "fact_timeline_id": None,
+            "entity_type": None,
+            "entity_id": None,
+            "review_only": False,
+        },
+        "summary": {
+            "total": 0,
+            "review_required": 0,
+            "by_fact_type": {},
+            "by_effective_state": {},
+            "by_health": {},
+        },
+        "selected_fact_id": None,
+        "selected_fact": None,
+        "budget": {
+            "max_code_points": STORY_LEDGER_CONTEXT_MAX_CODE_POINTS,
+            "used_code_points": 0,
+            "truncated": False,
+        },
+    }
+    budget = ledger["budget"]
+    assert isinstance(budget, dict)
+    for _ in range(8):
+        used = len(
+            json.dumps(
+                ledger,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+        if budget["used_code_points"] == used:
+            break
+        budget["used_code_points"] = used
+    value["ledger"] = ledger
     return value
 
 
@@ -125,6 +180,27 @@ def test_endpoint_supports_a_first_ref_without_a_native_session(
     )
     assert leased.accepted
     assert leased.snapshot["sessionId"] == "first-native-session"
+
+
+def test_endpoint_accepts_the_frozen_story_ledger_context(
+    client: TestClient,
+) -> None:
+    payload = body(document_id=None)
+    payload["snapshot"] = ledger_snapshot()
+
+    response = client.post("/assistant-contexts", json=payload)
+
+    assert response.status_code == 201
+    leased = assistant_api.assistant_context_registry.lease_for_runtime(
+        response.json()["contextRef"],
+        agent_id="ai-novel-writer",
+        session_id="session-1",
+    )
+    assert leased.accepted
+    assert leased.snapshot is not None
+    assert leased.snapshot["ledger"]["schema_version"] == (
+        "story-ledger-assistant-context/1"
+    )
 
 
 def test_endpoint_rejects_cross_novel_document_without_creating_a_ref(

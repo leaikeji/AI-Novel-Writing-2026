@@ -72,6 +72,16 @@ file_owner() {
     fi
 }
 
+file_nlink() {
+    if stat -c '%h' "$1" >/dev/null 2>&1; then
+        stat -c '%h' "$1"
+    elif stat -f '%l' "$1" >/dev/null 2>&1; then
+        stat -f '%l' "$1"
+    else
+        fail "cannot inspect file link count"
+    fi
+}
+
 prepare_directory() {
     directory=$1
     target_uid=$2
@@ -174,6 +184,7 @@ require_value AI_NOVEL_API_UID
 require_value AI_NOVEL_API_GID
 require_value AI_NOVEL_WORKER_UID
 require_value AI_NOVEL_WORKER_GID
+require_value AI_NOVEL_MAINTENANCE_STEP
 
 require_identifier "$AI_NOVEL_EXPECTED_DATABASE" AI_NOVEL_EXPECTED_DATABASE
 require_identifier "$AI_NOVEL_EXPECTED_ADMIN_ROLE" AI_NOVEL_EXPECTED_ADMIN_ROLE
@@ -192,15 +203,33 @@ require_numeric_id "$AI_NOVEL_WORKER_GID" AI_NOVEL_WORKER_GID
 [ "$AI_NOVEL_ROLE_BOOTSTRAP_CONFIRM" = "$AI_NOVEL_EXPECTED_DATABASE:$AI_NOVEL_EXPECTED_ADMIN_ROLE" ] \
     || fail "AI_NOVEL_ROLE_BOOTSTRAP_CONFIRM mismatch"
 
+case "$AI_NOVEL_MAINTENANCE_STEP" in
+    bootstrap-20260830_0035) expected_alembic_head=20260830_0035 ;;
+    bootstrap-20260902_0037) expected_alembic_head=20260902_0037 ;;
+    bootstrap-20260902_0038) expected_alembic_head=20260902_0038 ;;
+    *) fail "maintenance step does not authorize database-role bootstrap" ;;
+esac
+
 [ ! -L "$PGPASSFILE" ] || fail "admin pgpass must not be a symlink"
 [ -f "$PGPASSFILE" ] || fail "admin PGPASSFILE must be a regular file"
 [ "$(file_mode "$PGPASSFILE")" = 600 ] || fail "admin PGPASSFILE mode must be 0600"
+[ "$(file_nlink "$PGPASSFILE")" = 1 ] || fail "admin PGPASSFILE must have one hard link"
+admin_pgpass_parent=$(dirname -- "$PGPASSFILE")
+[ ! -L "$admin_pgpass_parent" ] || fail "admin pgpass parent must not be a symlink"
+[ -d "$admin_pgpass_parent" ] || fail "admin pgpass parent must be a directory"
+[ "$(file_mode "$admin_pgpass_parent")" = 700 ] || fail "admin pgpass parent mode must be 0700"
 
 actual_identity=$(psql -X -q -A -t -v ON_ERROR_STOP=1 \
     -c "SELECT current_database() || ':' || session_user || ':' || current_user")
 [ "$actual_identity" = "$AI_NOVEL_EXPECTED_DATABASE:$AI_NOVEL_EXPECTED_ADMIN_ROLE:$AI_NOVEL_EXPECTED_ADMIN_ROLE" ] \
     || fail "live database/admin identity mismatch"
 unset actual_identity
+
+actual_alembic_head=$(psql -X -q -A -t -v ON_ERROR_STOP=1 \
+    -c "SELECT version_num FROM public.alembic_version")
+[ "$actual_alembic_head" = "$expected_alembic_head" ] \
+    || fail "live Alembic head does not match maintenance step"
+unset actual_alembic_head expected_alembic_head admin_pgpass_parent
 
 ensure_pgpass "$MIGRATOR_PGPASS" ai_novel_migrator "$AI_NOVEL_MIGRATOR_UID" "$AI_NOVEL_MIGRATOR_GID"
 ensure_pgpass "$API_PGPASS" ai_novel_api "$AI_NOVEL_API_UID" "$AI_NOVEL_API_GID"

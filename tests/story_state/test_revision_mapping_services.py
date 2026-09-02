@@ -465,8 +465,10 @@ def test_single_timeline_mapping_omission_auto_maps_complete_unicode_text() -> N
     document = chapter_document()
     revision = chapter_revision("甲😀\n丙")
     only_line = timeline(10, primary=True)
+    novel_row = novel(version=4)
     session = FakeSession(
         scalar_results={
+            Novel: [novel_row],
             Document: [document],
             DocumentRevision: [revision],
             RevisionTimelineMappingHead: [None],
@@ -502,15 +504,49 @@ def test_single_timeline_mapping_omission_auto_maps_complete_unicode_text() -> N
     assert head.current_mapping_revision_id == mapping.id
     assert head.version == 1
     assert result["mapping"]["head_version"] == 1
+    assert result["changed"] is True
+    assert result["story_ledger_version"] == 5
+    assert novel_row.story_ledger_version == 5
     assert session.flush_count == 1
     assert session.commit_count == 0
+
+    replay_session = FakeSession(
+        scalar_results={
+            Novel: [novel_row],
+            Document: [document],
+            DocumentRevision: [revision],
+            RevisionTimelineMappingHead: [head],
+        },
+        scalars_results={
+            StoryTimeline: [[only_line]],
+            RevisionTimelineMapping: [[mapping]],
+            RevisionTimelineMappingSegment: [[segment]],
+        },
+    )
+    replay = save_revision_timeline_mapping(
+        replay_session,
+        uid(1),
+        document.id,
+        revision.id,
+        expected_head_version=0,
+        operation_key="mapping.auto.1",
+    )
+    assert replay["replayed"] is True
+    assert replay["changed"] is False
+    assert replay["story_ledger_version"] == 5
+    assert novel_row.story_ledger_version == 5
+    assert replay_session.flush_count == 0
 
 
 def test_multi_timeline_mapping_requires_explicit_segments() -> None:
     document = chapter_document()
     revision = chapter_revision()
     session = FakeSession(
-        scalar_results={Document: [document], DocumentRevision: [revision]},
+        scalar_results={
+            Novel: [novel()],
+            Document: [document],
+            DocumentRevision: [revision],
+        },
         scalars_results={StoryTimeline: [[timeline(10), timeline(11, parent=10, anchor=2)]]},
     )
 
@@ -533,7 +569,11 @@ def test_explicit_mapping_requires_exact_gapless_character_ranges() -> None:
     revision = chapter_revision()
     lines = [timeline(10), timeline(11, parent=10, anchor=2)]
     session = FakeSession(
-        scalar_results={Document: [document], DocumentRevision: [revision]},
+        scalar_results={
+            Novel: [novel()],
+            Document: [document],
+            DocumentRevision: [revision],
+        },
         scalars_results={StoryTimeline: [lines]},
     )
     with pytest.raises(MappingServiceError) as caught:
@@ -563,6 +603,7 @@ def test_explicit_mapping_saves_ordered_ranges_and_enforces_head_cas() -> None:
     lines = [timeline(10), timeline(11, parent=10, anchor=2)]
     session = FakeSession(
         scalar_results={
+            Novel: [novel()],
             Document: [document],
             DocumentRevision: [revision],
             RevisionTimelineMappingHead: [None],
@@ -607,6 +648,7 @@ def test_explicit_mapping_saves_ordered_ranges_and_enforces_head_cas() -> None:
     )
     stale = FakeSession(
         scalar_results={
+            Novel: [novel()],
             Document: [document],
             DocumentRevision: [revision],
             RevisionTimelineMappingHead: [head],

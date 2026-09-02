@@ -225,6 +225,28 @@ def single_line_store() -> tuple[MemoryStore, StoryTimeline, CharacterInstance]:
         "suppressed_fact_ids": [],
         "inheritance_path": [str(line.id)],
     }
+    store.fact_rows.append(
+        StoryFact(
+            id=UUID(str(fact["id"])),
+            novel_id=root.novel_id,
+            fact_type="character_state",
+            subject=root.name,
+            predicate="location",
+            object_text="旧港",
+            details={"schema_version": "character-state/1", "value": "旧港"},
+            schema_version="story-fact/2",
+            timeline_id=line.id,
+            character_id=root.id,
+            character_instance_id=person.id,
+            dimension="location",
+            event_kind="moved",
+            story_sequence=3,
+            visibility_json={"schema_version": "story-visibility/1", "scope": "author"},
+            event_fingerprint="f" * 64,
+            status="active",
+            created_at=NOW,
+        )
+    )
     return store, line, person
 
 
@@ -273,7 +295,7 @@ def test_single_timeline_resolves_without_extra_arguments() -> None:
 
     workspace = service.get_workspace(store.root.novel_id, store.root.id, narrative_cutoff=8)
 
-    assert workspace.schema_version == "character-workspace/1"
+    assert workspace.schema_version == "character-workspace/2"
     assert workspace.timeline_mode == "single"
     assert workspace.character_catalog_version == 7
     assert workspace.story_ledger_version == 11
@@ -283,31 +305,9 @@ def test_single_timeline_resolves_without_extra_arguments() -> None:
     assert store.projection_calls == [(store.root.novel_id, line.id, 8)]
 
 
-def test_workspace_v2_requires_explicit_view_version_and_keeps_v1_default() -> None:
+def test_workspace_returns_only_v2_with_current_and_historical_facts() -> None:
     store, line, person = single_line_store()
     raw = store.projection_payload["current_facts"][0]  # type: ignore[index]
-    store.fact_rows.append(
-        StoryFact(
-            id=UUID(str(raw["id"])),
-            novel_id=store.root.novel_id,
-            fact_type="character_state",
-            subject=store.root.name,
-            predicate="location",
-            object_text="旧港",
-            details={"schema_version": "character-state/1", "value": "旧港"},
-            schema_version="story-fact/2",
-            timeline_id=line.id,
-            character_id=store.root.id,
-            character_instance_id=person.id,
-            dimension="location",
-            event_kind="moved",
-            story_sequence=3,
-            visibility_json={"schema_version": "story-visibility/1", "scope": "author"},
-            event_fingerprint="9" * 64,
-            status="active",
-            created_at=NOW,
-        )
-    )
     action_id = uuid4()
     action_payload = {
         **raw,
@@ -348,24 +348,18 @@ def test_workspace_v2_requires_explicit_view_version_and_keeps_v1_default() -> N
     )
     service = CharacterWorkspaceService(store)
 
-    default_workspace = service.get_workspace(store.root.novel_id, store.root.id)
-    v2_workspace = service.get_workspace(
-        store.root.novel_id,
-        store.root.id,
-        view_version=2,
-    )
+    workspace = service.get_workspace(store.root.novel_id, store.root.id)
 
-    assert default_workspace.schema_version == "character-workspace/1"
-    assert v2_workspace.schema_version == "character-workspace/2"
-    assert [fact.object_text for fact in v2_workspace.projected_state.current_facts] == [
+    assert workspace.schema_version == "character-workspace/2"
+    assert [fact.object_text for fact in workspace.projected_state.current_facts] == [
         "旧港"
     ]
     location = next(
-        slot for slot in v2_workspace.writing_state.slots if slot.key == "location"
+        slot for slot in workspace.writing_state.slots if slot.key == "location"
     )
     assert [value.object_text for value in location.values] == ["旧港"]
-    assert v2_workspace.writing_state.history_summary.current == 1
-    assert v2_workspace.writing_state.history_summary.historical == 1
+    assert workspace.writing_state.history_summary.current == 1
+    assert workspace.writing_state.history_summary.historical == 1
 
 
 def test_multiline_requires_explicit_timeline_before_projection() -> None:
@@ -489,7 +483,6 @@ def test_workspace_reads_revisions_alias_relationship_brief_and_root_voice_bindi
         label="盟友",
         normalized_label="盟友",
         relation_pair_key="pair",
-        relation_type="盟友",
         status="active",
         created_by="manual",
         manual_override=True,
@@ -517,6 +510,27 @@ def test_workspace_reads_revisions_alias_relationship_brief_and_root_voice_bindi
     )
     store.projection_payload["visible_facts"].append(relationship_fact)  # type: ignore[union-attr]
     store.projection_payload["current_facts"].append(relationship_fact)  # type: ignore[union-attr]
+    store.fact_rows.append(
+        StoryFact(
+            id=UUID(str(relationship_fact["id"])),
+            novel_id=store.root.novel_id,
+            fact_type="relationship_state",
+            subject=store.root.name,
+            predicate="trust",
+            object_text="加深",
+            details={"schema_version": "relationship-state/1", "value": "加深"},
+            schema_version="story-fact/2",
+            timeline_id=line.id,
+            relationship_id=relation.id,
+            dimension="trust",
+            event_kind="strengthened",
+            story_sequence=3,
+            visibility_json={"schema_version": "story-visibility/1", "scope": "author"},
+            event_fingerprint="e" * 64,
+            status="active",
+            created_at=NOW,
+        )
+    )
     store.brief_rows.append(chapter_reference(store.root, line, person))
     store.voice = CharacterVoiceBinding(
         id=uuid4(),
@@ -601,7 +615,7 @@ def test_archive_impact_separates_live_dependencies_from_preserved_facts() -> No
 
     assert impact.requires_confirmation is True
     assert impact.current_dependency_count == 4
-    assert impact.preserved_history_count == 1
+    assert impact.preserved_history_count == 2
     fact_ref = next(item for item in impact.references if item.reference_type == "story_fact")
     assert fact_ref.disposition == "preserved_history"
 

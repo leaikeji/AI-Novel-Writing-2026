@@ -828,6 +828,333 @@ def test_offline_installer_stages_package_without_host_bind(
     assert healthy == [True]
 
 
+def test_offline_maintenance_installer_requires_stopped_host_and_keeps_it_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    package = (tmp_path / lab.PLUGIN_ID).resolve()
+    package.mkdir()
+    validations: list[tuple[Path, str, str]] = []
+
+    def fake_validate(
+        candidate: Path,
+        *,
+        expected_tree_sha256: str,
+        expected_head: str,
+    ) -> Path:
+        validations.append((candidate, expected_tree_sha256, expected_head))
+        return candidate
+
+    monkeypatch.setattr(lab, "validate_offline_maintenance_candidate", fake_validate)
+    copied_validations: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        lab,
+        "validate_installer_candidate_copy",
+        lambda *, container_path, expected_tree_sha256, expected_head: copied_validations.append(
+            (container_path, expected_tree_sha256, expected_head)
+        ),
+    )
+    calls: list[tuple[str, ...]] = []
+    installer_exists = False
+    container_id = "b" * 64
+    image_id = "sha256:" + "c" * 64
+    descriptor = [
+        {
+            "Id": container_id,
+            "Image": image_id,
+            "Name": f"/{lab.CONTAINER}",
+            "State": {"Running": False},
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": mount.split(":", 1)[0],
+                    "Destination": mount.split(":", 1)[1],
+                    "RW": True,
+                }
+                for mount in lab.VOLUMES
+            ],
+        }
+    ]
+
+    def fake_run(*args: str, **kwargs: object) -> str:
+        nonlocal installer_exists
+        calls.append(args)
+        if args[:3] == ("docker", "inspect", lab.CONTAINER):
+            return json.dumps(descriptor)
+        if args[:3] == ("docker", "ps", "-a"):
+            if installer_exists:
+                return (
+                    f"{lab.INSTALLER_CONTAINER}\t"
+                    f"{lab.INSTALLER_LABEL_VALUE}"
+                )
+            return ""
+        if args[:2] == ("docker", "create"):
+            installer_exists = True
+        if args[:3] == ("docker", "wait", lab.INSTALLER_CONTAINER):
+            return "0"
+        if args[:3] == ("docker", "logs", lab.INSTALLER_CONTAINER):
+            return "plugin installed"
+        if args[:4] == ("docker", "rm", "-f", lab.INSTALLER_CONTAINER):
+            installer_exists = False
+        return "" if kwargs.get("capture") is True else ""
+
+    monkeypatch.setattr(lab, "run", fake_run)
+    digest = "a" * 64
+    lab.offline_install_stopped_candidate(
+        candidate=package,
+        expected_tree_sha256=digest,
+        expected_head="20260902_0038",
+        expected_container_id=container_id,
+        expected_image_id=image_id,
+        confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
+    )
+
+    assert validations == [
+        (package, digest, "20260902_0038"),
+        (package, digest, "20260902_0038"),
+    ]
+    assert copied_validations == [
+        ("/plugin", digest, "20260902_0038"),
+        (lab.INSTALLED_PLUGIN_DIR, digest, "20260902_0038"),
+    ]
+    create = next(call for call in calls if call[:2] == ("docker", "create"))
+    assert ("--network", "none") == (
+        create[create.index("--network")],
+        create[create.index("--network") + 1],
+    )
+    assert (
+        "docker",
+        "cp",
+        str(package),
+        f"{lab.INSTALLER_CONTAINER}:/plugin",
+    ) in calls
+    assert image_id in create
+    for mount in lab.VOLUMES:
+        assert mount in create
+    assert sum(call[:3] == ("docker", "inspect", lab.CONTAINER) for call in calls) == 3
+    assert not any(call[:3] == ("docker", "stop", lab.CONTAINER) for call in calls)
+    assert not any(call[:3] == ("docker", "start", lab.CONTAINER) for call in calls)
+
+
+def test_offline_maintenance_installer_can_bind_isolated_rehearsal_volumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QWENPAW_DATA_VOLUME", "isolated-data")
+    monkeypatch.setenv("QWENPAW_SECRETS_VOLUME", "isolated-secrets")
+    monkeypatch.setenv("QWENPAW_BACKUPS_VOLUME", "isolated-backups")
+
+    lab = load_script("qwenpaw_lab_plugin")
+
+    assert lab.VOLUMES == (
+        "isolated-data:/app/working",
+        "isolated-secrets:/app/working.secret",
+        "isolated-backups:/app/working.backups",
+    )
+
+
+def test_offline_maintenance_installer_rejects_running_host(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    package = (tmp_path / lab.PLUGIN_ID).resolve()
+    package.mkdir()
+    monkeypatch.setattr(
+        lab,
+        "validate_offline_maintenance_candidate",
+        lambda candidate, **_kwargs: candidate,
+    )
+    calls: list[tuple[str, ...]] = []
+    container_id = "b" * 64
+    image_id = "sha256:" + "c" * 64
+
+    def fake_run(*args: str, **_kwargs: object) -> str:
+        calls.append(args)
+        if args[:3] == ("docker", "inspect", lab.CONTAINER):
+            return json.dumps(
+                [
+                    {
+                        "Id": container_id,
+                        "Image": image_id,
+                        "Name": f"/{lab.CONTAINER}",
+                        "State": {"Running": True},
+                        "Mounts": [],
+                    }
+                ]
+            )
+        return ""
+
+    monkeypatch.setattr(lab, "run", fake_run)
+    with pytest.raises(RuntimeError, match="requires QwenPaw stopped"):
+        lab.offline_install_stopped_candidate(
+            candidate=package,
+            expected_tree_sha256="a" * 64,
+            expected_head="20260902_0038",
+            expected_container_id=container_id,
+            expected_image_id=image_id,
+            confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
+        )
+
+    assert not any(call[:2] == ("docker", "create") for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("container", "container ID mismatch"),
+        ("image", "immutable image ID mismatch"),
+        ("mount", "volume identity mismatch"),
+    ],
+)
+def test_offline_maintenance_installer_binds_frozen_target_before_create(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    package = (tmp_path / lab.PLUGIN_ID).resolve()
+    package.mkdir()
+    monkeypatch.setattr(
+        lab,
+        "validate_offline_maintenance_candidate",
+        lambda candidate, **_kwargs: candidate,
+    )
+    container_id = "b" * 64
+    image_id = "sha256:" + "c" * 64
+    mounts = [
+        {
+            "Type": "volume",
+            "Name": mount.split(":", 1)[0],
+            "Destination": mount.split(":", 1)[1],
+            "RW": True,
+        }
+        for mount in lab.VOLUMES
+    ]
+    descriptor = {
+        "Id": "d" * 64 if mutation == "container" else container_id,
+        "Image": "sha256:" + "e" * 64 if mutation == "image" else image_id,
+        "Name": f"/{lab.CONTAINER}",
+        "State": {"Running": False},
+        "Mounts": mounts,
+    }
+    if mutation == "mount":
+        descriptor["Mounts"][0]["Name"] = "wrong-volume"
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(*args: str, **_kwargs: object) -> str:
+        calls.append(args)
+        if args[:3] == ("docker", "inspect", lab.CONTAINER):
+            return json.dumps([descriptor])
+        return ""
+
+    monkeypatch.setattr(lab, "run", fake_run)
+    with pytest.raises(RuntimeError, match=message):
+        lab.offline_install_stopped_candidate(
+            candidate=package,
+            expected_tree_sha256="a" * 64,
+            expected_head="20260902_0038",
+            expected_container_id=container_id,
+            expected_image_id=image_id,
+            confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
+        )
+
+    assert not any(call[:2] == ("docker", "create") for call in calls)
+    assert not any(call[:3] == ("docker", "start", lab.CONTAINER) for call in calls)
+
+
+def test_offline_maintenance_installer_rejects_staged_copy_before_cli_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    package = (tmp_path / lab.PLUGIN_ID).resolve()
+    package.mkdir()
+    monkeypatch.setattr(
+        lab,
+        "validate_offline_maintenance_candidate",
+        lambda candidate, **_kwargs: candidate,
+    )
+    monkeypatch.setattr(
+        lab,
+        "validate_installer_candidate_copy",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("staged digest mismatch")),
+    )
+    container_id = "b" * 64
+    image_id = "sha256:" + "c" * 64
+    descriptor = [
+        {
+            "Id": container_id,
+            "Image": image_id,
+            "Name": f"/{lab.CONTAINER}",
+            "State": {"Running": False},
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": mount.split(":", 1)[0],
+                    "Destination": mount.split(":", 1)[1],
+                    "RW": True,
+                }
+                for mount in lab.VOLUMES
+            ],
+        }
+    ]
+    calls: list[tuple[str, ...]] = []
+    installer_exists = False
+
+    def fake_run(*args: str, **kwargs: object) -> str:
+        nonlocal installer_exists
+        calls.append(args)
+        if args[:3] == ("docker", "inspect", lab.CONTAINER):
+            return json.dumps(descriptor)
+        if args[:3] == ("docker", "ps", "-a"):
+            return (
+                f"{lab.INSTALLER_CONTAINER}\t{lab.INSTALLER_LABEL_VALUE}"
+                if installer_exists
+                else ""
+            )
+        if args[:2] == ("docker", "create"):
+            installer_exists = True
+        if args[:4] == ("docker", "rm", "-f", lab.INSTALLER_CONTAINER):
+            installer_exists = False
+        return "" if kwargs.get("capture") is True else ""
+
+    monkeypatch.setattr(lab, "run", fake_run)
+    with pytest.raises(RuntimeError, match="staged digest mismatch"):
+        lab.offline_install_stopped_candidate(
+            candidate=package,
+            expected_tree_sha256="a" * 64,
+            expected_head="20260902_0038",
+            expected_container_id=container_id,
+            expected_image_id=image_id,
+            confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
+        )
+
+    assert not any(
+        call[:3] == ("docker", "start", lab.INSTALLER_CONTAINER) for call in calls
+    )
+    assert not any(call[:3] == ("docker", "start", lab.CONTAINER) for call in calls)
+
+
+def test_offline_maintenance_installer_requires_exact_confirmation(
+    tmp_path: Path,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    package = (tmp_path / lab.PLUGIN_ID).resolve()
+    package.mkdir()
+
+    with pytest.raises(RuntimeError, match="requires --confirm"):
+        lab.offline_install_stopped_candidate(
+            candidate=package,
+            expected_tree_sha256="a" * 64,
+            expected_head="20260902_0038",
+            expected_container_id="b" * 64,
+            expected_image_id="sha256:" + "c" * 64,
+            confirm="wrong",
+        )
+
+
 def test_hot_installer_uses_public_cli_and_exact_unique_stage_cleanup(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

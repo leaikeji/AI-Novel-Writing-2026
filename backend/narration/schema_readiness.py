@@ -20,6 +20,7 @@ from sqlalchemy.engine import Engine
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_CONFIG_PATH = REPOSITORY_ROOT / "alembic.ini"
+REPOSITORY_BASE_REVISION = "20260823_0001"
 NARRATION_FEATURE_MINIMUM_DATABASE_REVISION = "20260829_0034"
 VOICE_GENERATOR_MINIMUM_DATABASE_REVISION = "20260830_0035"
 CHARACTER_CAST_MINIMUM_DATABASE_REVISION = "20260901_0036"
@@ -305,7 +306,7 @@ def database_revision_satisfies(
     ):
         return False
     chain = _linear_repository_chain(str(config_path.resolve()))
-    if not chain:
+    if not chain or chain[-1] != REPOSITORY_BASE_REVISION:
         return False
     current_revision = values[0]
     try:
@@ -314,6 +315,20 @@ def database_revision_satisfies(
     except ValueError:
         return False
     return current_index <= minimum_index
+
+
+def repository_unique_head() -> str | None:
+    """Return the trusted repository's sole canonical head, or fail closed.
+
+    This intentionally accepts no path.  Candidate packages must use the
+    separate no-execution AST parser and cannot be routed through Alembic's
+    trusted-repository loader.
+    """
+
+    chain = _linear_repository_chain(str(ALEMBIC_CONFIG_PATH.resolve()))
+    if not chain or chain[-1] != REPOSITORY_BASE_REVISION:
+        return None
+    return chain[0]
 
 
 def _function_definitions_satisfy(
@@ -528,9 +543,11 @@ __all__ = [
     "ALEMBIC_CONFIG_PATH",
     "CHARACTER_CAST_MINIMUM_DATABASE_REVISION",
     "NARRATION_FEATURE_MINIMUM_DATABASE_REVISION",
+    "REPOSITORY_BASE_REVISION",
     "VOICE_GENERATOR_MINIMUM_DATABASE_REVISION",
     "database_revision_satisfies",
     "character_cast_schema_ready",
     "narration_feature_schema_ready",
+    "repository_unique_head",
     "voice_generator_schema_ready",
 ]

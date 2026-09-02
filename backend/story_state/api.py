@@ -208,6 +208,7 @@ def _raise(error: Exception) -> None:
             status.HTTP_404_NOT_FOUND
             if error.code
             in {
+                MappingServiceErrorCode.NOVEL_NOT_FOUND,
                 MappingServiceErrorCode.DOCUMENT_NOT_FOUND,
                 MappingServiceErrorCode.REVISION_NOT_FOUND,
                 MappingServiceErrorCode.MAPPING_NOT_FOUND,
@@ -237,7 +238,11 @@ def _raise(error: Exception) -> None:
                 PersistenceErrorCode.FACT_NOT_FOUND,
             }
             else status.HTTP_409_CONFLICT
-            if error.code is PersistenceErrorCode.VERSION_CONFLICT
+            if error.code
+            in {
+                PersistenceErrorCode.VERSION_CONFLICT,
+                PersistenceErrorCode.IDEMPOTENCY_CONFLICT,
+            }
             else status.HTTP_422_UNPROCESSABLE_CONTENT
         )
         raise HTTPException(

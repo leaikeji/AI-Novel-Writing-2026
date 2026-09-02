@@ -228,6 +228,7 @@ def _append_revision(
     restored_from_revision_id: UUID | None,
     id_factory: IdFactory,
     clock: Clock,
+    advance_ledger: bool,
 ) -> dict[str, object]:
     replay = next((row for row in revisions if row.operation_key == operation_key), None)
     if replay is not None:
@@ -283,7 +284,8 @@ def _append_revision(
     instance.current_revision_id = row.id
     instance.version += 1
     instance.updated_at = clock()
-    novel.story_ledger_version += 1
+    if advance_ledger:
+        novel.story_ledger_version += 1
     session.flush()
     return {
         "revision": character_instance_revision_payload(row),
@@ -305,6 +307,7 @@ def save_character_instance_profile(
     source_kind: Literal["manual", "ai_adopt"] = "manual",
     id_factory: IdFactory = uuid4,
     clock: Clock = _now,
+    _advance_ledger: bool = True,
 ) -> dict[str, object]:
     novel = _require_novel(session, novel_id, for_update=True)
     instance = _locked_instance(session, novel_id, instance_id)
@@ -329,6 +332,7 @@ def save_character_instance_profile(
         restored_from_revision_id=None,
         id_factory=id_factory,
         clock=clock,
+        advance_ledger=_advance_ledger,
     )
 
 
@@ -343,6 +347,7 @@ def restore_character_instance_profile(
     operation_key: str,
     id_factory: IdFactory = uuid4,
     clock: Clock = _now,
+    _advance_ledger: bool = True,
 ) -> dict[str, object]:
     novel = _require_novel(session, novel_id, for_update=True)
     instance = _locked_instance(session, novel_id, instance_id)
@@ -378,6 +383,7 @@ def restore_character_instance_profile(
         restored_from_revision_id=target.id,
         id_factory=id_factory,
         clock=clock,
+        advance_ledger=_advance_ledger,
     )
 
 

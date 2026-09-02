@@ -61,11 +61,11 @@ from backend.narration.storage import NarrationStorage
 from backend.narration.voice_product import VoicePreviewPolicy
 from backend.narration.voice_deletion import VoiceDeletionService
 from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
+from tests.narration.current_schema_gate import assert_database_at_repository_head
 
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USER = "tts_test"
-EXPECTED_HEAD = "20260829_0034"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 SCOPE = NarrationRequestScope.fixed_local()
 SessionFactory = Callable[[], Session]
@@ -114,11 +114,15 @@ def nano_pg_runtime() -> tuple[Connection, SessionFactory]:
         connection.close()
         engine.dispose()
         raise RuntimeError("disposable TTS database lacks the 0034 experiment schema")
-    if connection.scalar(text("SELECT version_num FROM alembic_version")) != EXPECTED_HEAD:
+    try:
+        assert_database_at_repository_head(connection)
+    except AssertionError as error:
         outer.rollback()
         connection.close()
         engine.dispose()
-        raise RuntimeError("Nano experiment PostgreSQL tests require exact head 0034")
+        raise RuntimeError(
+            "Nano experiment PostgreSQL tests require the repository head"
+        ) from error
     factory = sessionmaker(
         bind=connection,
         expire_on_commit=False,

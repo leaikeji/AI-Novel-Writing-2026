@@ -10,12 +10,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..creative_authority import save_character_root
-from ..creative_data_models import CharacterInstance, StoryTimeline
+from ..creative_data_models import (
+    CharacterInstance,
+    NovelCharacterRevision,
+    StoryTimeline,
+)
 from ..creative_services import validate_character_root_update
 from ..models import Novel, NovelCharacter
 from ..services import NotFoundError, ValidationError
 from ..story_state.revisions import (
     CharacterInstanceProfile,
+    RevisionServiceError,
+    RevisionServiceErrorCode,
     save_character_instance_profile,
 )
 
@@ -88,10 +94,15 @@ def save_character_workspace(
             "no_changes": True,
             "root_replayed": False,
             "profile_replayed": False,
+            "changed": False,
+            "story_ledger_version": novel.story_ledger_version,
         }
 
+    ledger_before = int(novel.story_ledger_version)
     root_replayed = False
     profile_replayed = False
+    root_applied = False
+    profile_applied = False
     if root_patch is not None:
         validated = validate_character_root_update(
             session,
@@ -104,31 +115,51 @@ def save_character_workspace(
                 "core_theme": root_patch.get("core_theme", ""),
             },
         )
-        root_result = save_character_root(
-            session,
-            novel_id,
-            character_id,
-            expected_catalog_version=expected_character_catalog_version,
-            expected_character_version=expected_character_version,
-            operation_key=_child_operation_key(operation_key, "root"),
-            source_kind="manual",
-            role_type=validated["role_type"],
-            name=validated["name"],
-            description=validated["description"],
-            details=validated["details"],
-            lifecycle_state=character.lifecycle_state,
-            position=character.position,
-            change_set={
-                "edited_fields": [
-                    "role_type",
-                    "name",
-                    "description",
-                    "details.gender",
-                    "details.core_theme",
-                ]
-            },
+        root_changed = any(
+            (
+                character.role_type != validated["role_type"],
+                character.name != validated["name"],
+                character.description != validated["description"],
+                dict(character.details or {}) != validated["details"],
+            )
         )
-        root_replayed = root_result.replayed
+        root_operation_key = _child_operation_key(operation_key, "root")
+        existing_root_operation = None
+        if not root_changed:
+            existing_root_operation = session.scalar(
+                select(NovelCharacterRevision.id).where(
+                    NovelCharacterRevision.novel_id == novel_id,
+                    NovelCharacterRevision.character_id == character_id,
+                    NovelCharacterRevision.operation_key == root_operation_key,
+                )
+            )
+        if root_changed or existing_root_operation is not None:
+            root_result = save_character_root(
+                session,
+                novel_id,
+                character_id,
+                expected_catalog_version=expected_character_catalog_version,
+                expected_character_version=expected_character_version,
+                operation_key=root_operation_key,
+                source_kind="manual",
+                role_type=validated["role_type"],
+                name=validated["name"],
+                description=validated["description"],
+                details=validated["details"],
+                lifecycle_state=character.lifecycle_state,
+                position=character.position,
+                change_set={
+                    "edited_fields": [
+                        "role_type",
+                        "name",
+                        "description",
+                        "details.gender",
+                        "details.core_theme",
+                    ]
+                },
+            )
+            root_replayed = root_result.replayed
+            root_applied = not root_replayed
 
     if profile is not None:
         profile_result = save_character_instance_profile(
@@ -142,11 +173,29 @@ def save_character_workspace(
             source_kind="manual",
         )
         profile_replayed = bool(profile_result["replayed"])
+        profile_applied = not profile_replayed
+
+    changed = root_applied or profile_applied
+    if (
+        root_patch is not None
+        and not root_replayed
+        and not profile_applied
+        and ledger_before != expected_story_ledger_version
+    ):
+        raise RevisionServiceError(
+            RevisionServiceErrorCode.VERSION_CONFLICT,
+            "story ledger version changed",
+            current={"story_ledger_version": ledger_before},
+        )
+    if root_applied and novel.story_ledger_version == ledger_before:
+        novel.story_ledger_version += 1
 
     return {
-        "no_changes": False,
+        "no_changes": not changed,
         "root_replayed": root_replayed,
         "profile_replayed": profile_replayed,
+        "changed": changed,
+        "story_ledger_version": novel.story_ledger_version,
     }
 
 

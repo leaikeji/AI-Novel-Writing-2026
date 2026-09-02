@@ -14,6 +14,7 @@ from .character_profile_services import (
     CharacterProfileValidationError,
     normalize_character_profile_output,
 )
+from .creative_authority import AuthorityIdempotencyConflict
 from .creative_schemas import (
     ApplyOutlineGenerationRequest,
     ApplyCharacterProfileCompletionRequest,
@@ -245,6 +246,11 @@ def _raise(error: Exception) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"type": "entity_conflict", "current": error.current},
+        ) from error
+    if isinstance(error, AuthorityIdempotencyConflict):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": "idempotency_conflict", "message": str(error)},
         ) from error
     if isinstance(error, CharacterLinkRequiredError):
         raise HTTPException(
@@ -586,12 +592,11 @@ def characters_delete(
     character_id: UUID,
     expected_version: int = Query(ge=1),
     session: Session = Depends(get_session),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     try:
-        delete_novel_character(
+        return delete_novel_character(
             session, novel_id, character_id, expected_version=expected_version
         )
-        return {"deleted": True}
     except Exception as error:
         session.rollback()
         _raise(error)
@@ -925,7 +930,7 @@ def relationships_create(
             timeline_id=request.timeline_id,
             source_character_instance_id=request.source_character_instance_id,
             target_character_instance_id=request.target_character_instance_id,
-            label=request.label or request.relation_type or "",
+            label=request.label,
             directionality=request.directionality,
             relation_kind=request.relation_kind,
             description=request.description,
@@ -972,7 +977,7 @@ def relationships_update(
             timeline_id=request.timeline_id,
             source_character_instance_id=request.source_character_instance_id,
             target_character_instance_id=request.target_character_instance_id,
-            label=request.label or request.relation_type,
+            label=request.label,
             directionality=request.directionality,
             relation_kind=request.relation_kind,
             description=request.description,
@@ -1053,12 +1058,11 @@ def relationships_delete(
     relationship_id: UUID,
     expected_version: int = Query(ge=1),
     session: Session = Depends(get_session),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     try:
-        delete_character_relationship(
+        return delete_character_relationship(
             session, novel_id, relationship_id, expected_version=expected_version
         )
-        return {"deleted": True}
     except Exception as error:
         session.rollback()
         _raise(error)
@@ -1135,10 +1139,11 @@ def storylines_delete(
     storyline_id: UUID,
     expected_version: int = Query(ge=1),
     session: Session = Depends(get_session),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     try:
-        delete_storyline(session, novel_id, storyline_id, expected_version=expected_version)
-        return {"deleted": True}
+        return delete_storyline(
+            session, novel_id, storyline_id, expected_version=expected_version
+        )
     except Exception as error:
         session.rollback()
         _raise(error)
@@ -1215,10 +1220,11 @@ def foreshadows_delete(
     foreshadow_id: UUID,
     expected_version: int = Query(ge=1),
     session: Session = Depends(get_session),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     try:
-        delete_foreshadow(session, novel_id, foreshadow_id, expected_version=expected_version)
-        return {"deleted": True}
+        return delete_foreshadow(
+            session, novel_id, foreshadow_id, expected_version=expected_version
+        )
     except Exception as error:
         session.rollback()
         _raise(error)
@@ -1560,16 +1566,15 @@ def volumes_delete(
     volume_id: UUID,
     request: DeleteVolumeRequest,
     session: Session = Depends(get_session),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     try:
-        delete_volume(
+        return delete_volume(
             session,
             novel_id,
             volume_id,
             expected_version=request.expected_version,
             move_documents_to=request.move_documents_to,
         )
-        return {"deleted": True}
     except Exception as error:
         session.rollback()
         _raise(error)
@@ -1619,12 +1624,11 @@ def documents_delete(
     document_id: UUID,
     expected_version: int = Query(ge=1),
     session: Session = Depends(get_session),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     try:
-        delete_document(
+        return delete_document(
             session, novel_id, document_id, expected_version=expected_version
         )
-        return {"deleted": True}
     except Exception as error:
         session.rollback()
         _raise(error)

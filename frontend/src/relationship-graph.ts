@@ -131,7 +131,7 @@ function graphEdge(relationship: CharacterRelationshipRecord, lane: number): Edg
     id: relationship.id,
     from: relationship.source_character_id,
     to: relationship.target_character_id,
-    label: compactRelationshipGraphLabel(relationship.label, relationship.relation_type),
+    label: compactRelationshipGraphLabel(relationship.label),
     arrows: relationship.directionality === "directed"
       ? { to: { enabled: true, scaleFactor: 0.72, type: "arrow" } }
       : undefined,

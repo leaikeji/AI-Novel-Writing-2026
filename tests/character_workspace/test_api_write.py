@@ -125,30 +125,16 @@ def test_put_rolls_back_everything_and_returns_current_workspace_on_cas(
     assert caught.value.detail["current_workspace"] == current
 
 
-@pytest.mark.parametrize(
-    ("query_view_version", "expected_service_version", "expected_schema"),
-    (
-        (None, 1, "character-workspace/1"),
-        (1, 1, "character-workspace/1"),
-        (2, 2, "character-workspace/2"),
-    ),
-    ids=("default-v1", "explicit-v1", "explicit-v2"),
-)
-def test_get_negotiates_numeric_workspace_view_version_through_fastapi(
+@pytest.mark.parametrize("params", (None, {"view_version": 1}, {"view_version": 2}))
+def test_get_exposes_only_the_current_workspace_contract(
     monkeypatch: pytest.MonkeyPatch,
-    query_view_version: int | None,
-    expected_service_version: int,
-    expected_schema: str,
+    params: dict[str, int] | None,
 ) -> None:
-    observed: list[int] = []
+    observed: list[dict[str, object]] = []
 
     def get_workspace(*_args: object, **kwargs: object) -> WorkspaceResult:
-        view_version = kwargs["view_version"]
-        assert isinstance(view_version, int)
-        observed.append(view_version)
-        return WorkspaceResult(
-            {"schema_version": f"character-workspace/{view_version}"}
-        )
+        observed.append(kwargs)
+        return WorkspaceResult({"schema_version": "character-workspace/2"})
 
     monkeypatch.setattr(
         api,
@@ -159,11 +145,6 @@ def test_get_negotiates_numeric_workspace_view_version_through_fastapi(
     app.include_router(api.router)
     app.dependency_overrides[api.get_session] = lambda: FakeSession()
 
-    params = (
-        {"view_version": query_view_version}
-        if query_view_version is not None
-        else None
-    )
     with TestClient(app) as client:
         response = client.get(
             f"/novels/{uuid4()}/characters/{uuid4()}/workspace",
@@ -171,5 +152,5 @@ def test_get_negotiates_numeric_workspace_view_version_through_fastapi(
         )
 
     assert response.status_code == 200
-    assert response.json() == {"schema_version": expected_schema}
-    assert observed == [expected_service_version]
+    assert response.json() == {"schema_version": "character-workspace/2"}
+    assert observed and "view_version" not in observed[0]

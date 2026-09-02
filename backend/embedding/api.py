@@ -32,6 +32,7 @@ from ..creative_data_models import (
     SemanticChunk,
     SemanticEmbedding,
     SemanticSource,
+    StoryEventLink,
     StoryTimeline,
 )
 from ..background.jobs import manual_retry, request_cancel
@@ -86,9 +87,16 @@ from .retrieval import (
     retrieve,
 )
 from .secrets import EmbeddingSecretError, EmbeddingSecretStore
-from ..models import BackgroundJob, DerivedSourceBinding, DocumentWorkingCopy, StoryFact
+from ..models import (
+    BackgroundJob,
+    DerivedSourceBinding,
+    DocumentWorkingCopy,
+    IntelligenceCommitBatch,
+    StoryFact,
+)
 from ..narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID, NarrationRequestScope
 from ..story_state.contracts import StoryFactV2
+from ..story_state.fact_authority import resolve_fact_authority_rows
 
 
 router = APIRouter(tags=["embedding"])
@@ -1228,23 +1236,62 @@ def _inheritance_scope(
     return frozenset(path), tuple(reversed(target_to_root))
 
 
-def _story_fact_source_is_effective(session: Session, fact: StoryFact) -> bool:
-    if fact.status not in {"active", "source_restored"}:
-        return False
-    if fact.source_revision_id is None:
-        return True
+def _included_story_fact_ids(
+    session: Session,
+    facts: Iterable[StoryFactV2],
+) -> frozenset[UUID]:
+    """Resolve lifecycle/provenance for facts without weakening caller scope."""
+
+    records = tuple(facts)
+    if not records:
+        return frozenset()
+    fact_ids = tuple(fact.id for fact in records)
     bindings = tuple(
         session.scalars(
             select(DerivedSourceBinding).where(
-                DerivedSourceBinding.derived_entity_type == "story_fact",
-                DerivedSourceBinding.derived_entity_id == fact.id,
-                DerivedSourceBinding.source_chapter_revision_id
-                == fact.source_revision_id,
+                DerivedSourceBinding.derived_entity_id.in_(fact_ids),
             )
         )
     )
-    return bool(bindings) and all(
-        item.validity_state in {"current", "source_restored"} for item in bindings
+    batch_ids = {
+        binding.commit_batch_id
+        for binding in bindings
+        if binding.commit_batch_id is not None
+    }
+    batch_states = (
+        {
+            batch.id: batch.state
+            for batch in session.scalars(
+                select(IntelligenceCommitBatch).where(
+                    IntelligenceCommitBatch.id.in_(batch_ids)
+                )
+            )
+        }
+        if batch_ids
+        else {}
+    )
+    incoming_supersedes = {
+        link.target_fact_id
+        for link in session.scalars(
+            select(StoryEventLink).where(
+                StoryEventLink.novel_id.in_(
+                    tuple({fact.novel_id for fact in records})
+                ),
+                StoryEventLink.target_fact_id.in_(fact_ids),
+                StoryEventLink.link_type == "supersedes",
+            )
+        )
+    }
+    results = resolve_fact_authority_rows(
+        records,
+        bindings=bindings,
+        batch_states=batch_states,
+        incoming_superseded_fact_ids=incoming_supersedes,
+    )
+    return frozenset(
+        fact.id
+        for fact in records
+        if results[fact.id].included_in_current_projection
     )
 
 
@@ -1266,13 +1313,11 @@ def _known_visibility_keys(
                 StoryFact.fact_type == "knowledge_event",
                 StoryFact.character_instance_id == observer_id,
                 StoryFact.timeline_id.in_(tuple(scope.reachable_timeline_ids)),
-                StoryFact.status.in_(("active", "source_restored")),
             )
             .order_by(StoryFact.created_at, StoryFact.id)
         )
     )
     facts: list[StoryFactV2] = []
-    row_by_id: dict[UUID, StoryFact] = {}
     for row in rows:
         try:
             fact = StoryFactV2.model_validate(row)
@@ -1280,34 +1325,15 @@ def _known_visibility_keys(
             # A malformed row cannot grant visibility; search fails closed.
             continue
         facts.append(fact)
-        row_by_id[fact.id] = row
-    bindings_by_fact: dict[UUID, list[DerivedSourceBinding]] = {}
-    if row_by_id:
-        for binding in session.scalars(
-            select(DerivedSourceBinding).where(
-                DerivedSourceBinding.derived_entity_type == "story_fact",
-                DerivedSourceBinding.derived_entity_id.in_(tuple(row_by_id)),
-            )
-        ):
-            bindings_by_fact.setdefault(binding.derived_entity_id, []).append(binding)
-    source_validity: dict[UUID, bool] = {}
-    for fact in facts:
-        if fact.source_revision_id is not None:
-            matching = [
-                item
-                for item in bindings_by_fact.get(fact.id, ())
-                if item.source_chapter_revision_id == fact.source_revision_id
-            ]
-            current = bool(matching) and all(
-                item.validity_state in {"current", "source_restored"}
-                for item in matching
-            )
-            previous = source_validity.get(fact.source_revision_id)
-            source_validity[fact.source_revision_id] = (
-                current if previous is None else previous and current
-            )
+    included_ids = _included_story_fact_ids(session, facts)
+    included_facts = [fact for fact in facts if fact.id in included_ids]
+    source_validity = {
+        fact.source_revision_id: True
+        for fact in included_facts
+        if fact.source_revision_id is not None
+    }
     return derive_known_visibility_keys(
-        facts,
+        included_facts,
         scope=scope,
         source_revision_validity=source_validity,
     )
@@ -1340,12 +1366,17 @@ def _source_is_current(session: Session, source: SemanticSource) -> bool:
         ) == 1
     if source.source_type == "story_fact":
         fact = session.get(StoryFact, source.source_entity_id)
-        return (
-            fact is not None
-            and fact.novel_id == source.novel_id
-            and fact.source_revision_id == source.source_revision_id
-            and _story_fact_source_is_effective(session, fact)
-        )
+        if (
+            fact is None
+            or fact.novel_id != source.novel_id
+            or fact.source_revision_id != source.source_revision_id
+        ):
+            return False
+        try:
+            record = StoryFactV2.model_validate(fact)
+        except ValueError:
+            return False
+        return fact.id in _included_story_fact_ids(session, (record,))
     return False
 
 

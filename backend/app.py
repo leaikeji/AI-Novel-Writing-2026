@@ -33,6 +33,7 @@ from .embedding.runtime import (
 )
 from .story_state.api import router as story_state_router
 from .story_state.corrections_api import router as story_corrections_router
+from .story_ledger.api import router as story_ledger_router
 from .volume_chapter_titles import VolumeChapterContractError, contract_error_detail
 from .database import database_status, get_engine, get_session
 from .generation_dependencies import (
@@ -132,6 +133,7 @@ from .services import (
     ChapterLengthValidationError,
     CandidateConflictError,
     DraftConflictError,
+    IntelligenceCommitConflictError,
     NotFoundError,
     ProposalSupersededError,
     RestorationPlanConflictError,
@@ -157,7 +159,6 @@ from .services import (
     list_chapter_generation_jobs,
     list_intelligence_proposals,
     list_novels,
-    list_story_facts,
     preview_restore_revision,
     reject_candidate,
     review_intelligence_item,
@@ -199,6 +200,7 @@ router.include_router(writing_eval_router)
 router.include_router(embedding_router)
 router.include_router(story_state_router)
 router.include_router(story_corrections_router)
+router.include_router(story_ledger_router)
 router.include_router(character_workspace_router)
 
 
@@ -524,6 +526,17 @@ def _raise_domain(error: Exception) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"type": "proposal_superseded", "proposal": error.proposal},
+        ) from error
+    if isinstance(error, IntelligenceCommitConflictError):
+        detail: dict[str, object] = {
+            "type": error.code,
+            "message": str(error),
+        }
+        if error.current:
+            detail["current"] = error.current
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail,
         ) from error
     if isinstance(error, RestorationPlanConflictError):
         raise HTTPException(
@@ -1119,22 +1132,12 @@ def intelligence_proposals_commit(
             session,
             proposal_id,
             accepted_item_ids=request.accepted_item_ids,
-            item_overrides=request.item_overrides,
+            expected_story_ledger_version=request.expected_story_ledger_version,
+            operation_key=request.operation_key,
         )
         return result
     except Exception as error:
         session.rollback()
-        _raise_domain(error)
-        raise
-
-
-@router.get("/novels/{novel_id}/story-facts")
-def story_facts_index(
-    novel_id: UUID, session: Session = Depends(get_session)
-) -> list[dict[str, object]]:
-    try:
-        return list_story_facts(session, novel_id)
-    except Exception as error:
         _raise_domain(error)
         raise
 

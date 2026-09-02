@@ -346,13 +346,14 @@ class UpdateCharacterRequest(BaseModel):
 
 
 class CreateRelationshipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     source_character_id: UUID
     target_character_id: UUID
     timeline_id: UUID | None = None
     source_character_instance_id: UUID | None = None
     target_character_instance_id: UUID | None = None
-    label: str | None = Field(default=None, min_length=1, max_length=80)
-    relation_type: str | None = Field(default=None, min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=80)
     directionality: str = Field(default="undirected", pattern="^(directed|undirected)$")
     relation_kind: str = Field(
         default="other",
@@ -362,6 +363,8 @@ class CreateRelationshipRequest(BaseModel):
 
 
 class UpdateRelationshipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     expected_version: int = Field(ge=1)
     source_character_id: UUID | None = None
     target_character_id: UUID | None = None
@@ -369,7 +372,6 @@ class UpdateRelationshipRequest(BaseModel):
     source_character_instance_id: UUID | None = None
     target_character_instance_id: UUID | None = None
     label: str | None = Field(default=None, min_length=1, max_length=80)
-    relation_type: str | None = Field(default=None, min_length=1, max_length=80)
     directionality: str | None = Field(default=None, pattern="^(directed|undirected)$")
     relation_kind: str | None = Field(
         default=None,
@@ -380,6 +382,8 @@ class UpdateRelationshipRequest(BaseModel):
 
 
 class RelationshipBatchOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     action: str = Field(pattern="^(create|update|archive|restore)$")
     client_id: str | None = Field(default=None, max_length=120)
     relationship_id: UUID | None = None
@@ -390,7 +394,6 @@ class RelationshipBatchOperation(BaseModel):
     source_character_instance_id: UUID | None = None
     target_character_instance_id: UUID | None = None
     label: str | None = Field(default=None, min_length=1, max_length=80)
-    relation_type: str | None = Field(default=None, min_length=1, max_length=80)
     directionality: str | None = Field(
         default=None, pattern="^(directed|undirected)$"
     )
