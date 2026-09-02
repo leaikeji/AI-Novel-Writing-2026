@@ -496,7 +496,7 @@ export function RelationshipWorkspace({
                 { type: "button", onClick: () => onEditRelationship(relationship.id) },
                 h("span", { className: `mb-relation-direction is-${relationship.directionality}` }, relationLabel(relationship)),
                 h("span", { className: "mb-relation-list-title" },
-                  h("strong", null, relationship.label || relationship.relation_type),
+                  h("strong", null, relationship.label),
                   h("em", { className: relationship.manual_override ? "is-manual" : "is-ai" }, relationship.manual_override ? "人工确认" : `AI生成${relationship.confidence ? ` ${relationship.confidence}%` : ""}`),
                 ),
                 h("small", null, relationship.latest_state ? `当前变化：${relationship.latest_state}` : (relationship.description || "未填写关系说明")),

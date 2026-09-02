@@ -23,6 +23,7 @@ from ..models import (
     StoryFact,
 )
 from .contracts import StoryFactV2
+from .fact_authority import resolve_fact_authority_rows
 
 
 class StoryCorrectionErrorCode(str, Enum):
@@ -138,7 +139,6 @@ def _validated_source(
     binding = session.scalar(
         select(DerivedSourceBinding)
         .where(
-            DerivedSourceBinding.derived_entity_type == "story_fact",
             DerivedSourceBinding.derived_entity_id == target.id,
             DerivedSourceBinding.source_chapter_revision_id == revision.id,
         )
@@ -152,11 +152,10 @@ def _validated_source(
     if (
         binding.source_chapter_id != revision.document_id
         or binding.source_content_hash != revision.content_hash
-        or binding.validity_state not in {"current", "source_restored"}
     ):
         raise StoryCorrectionError(
             StoryCorrectionErrorCode.SOURCE_INVALID,
-            "事实来源绑定不是当前有效证据",
+            "事实来源绑定与来源版本不一致",
         )
     return revision, binding
 
@@ -224,13 +223,10 @@ def correct_story_fact(
             "故事账本版本已经变化",
             current={"story_ledger_version": novel.story_ledger_version},
         )
-    if target.schema_version != "story-fact/2" or target.status not in {
-        "active",
-        "source_restored",
-    }:
+    if target.schema_version != "story-fact/2":
         raise StoryCorrectionError(
             StoryCorrectionErrorCode.INVALID_TARGET,
-            "只有当前有效或历史可见的 StoryFact v2 可以修正",
+            "只有 StoryFact v2 可以修正",
         )
     incoming = session.scalar(
         select(StoryEventLink.id).where(
@@ -243,6 +239,26 @@ def correct_story_fact(
         raise StoryCorrectionError(
             StoryCorrectionErrorCode.INVALID_TARGET,
             "该事实已经被其他事实替代",
+        )
+    revision, binding = _validated_source(session, target)
+    batch_states: dict[UUID, str] = {}
+    if binding is not None and binding.commit_batch_id is not None:
+        owning_batch = session.get(IntelligenceCommitBatch, binding.commit_batch_id)
+        if owning_batch is not None:
+            batch_states[owning_batch.id] = owning_batch.state
+    authority = resolve_fact_authority_rows(
+        (target,),
+        bindings=((binding,) if binding is not None else ()),
+        batch_states=batch_states,
+    )[target.id]
+    if not authority.included_in_current_projection:
+        raise StoryCorrectionError(
+            StoryCorrectionErrorCode.INVALID_TARGET,
+            "只有当前有效或历史可见的 StoryFact v2 可以修正",
+            current={
+                "effective_state": authority.effective_state.value,
+                "reason_codes": [reason.value for reason in authority.reason_codes],
+            },
         )
     current_editable = {
         "predicate": target.predicate,
@@ -263,8 +279,6 @@ def correct_story_fact(
             StoryCorrectionErrorCode.INVALID_REPLACEMENT,
             "替代事实必须至少修改一个可编辑字段",
         )
-    revision, binding = _validated_source(session, target)
-
     merged = {
         "id": uuid4(),
         "novel_id": target.novel_id,
@@ -318,7 +332,6 @@ def correct_story_fact(
         session.add(
             DerivedSourceBinding(
                 id=uuid4(),
-                derived_entity_type="story_fact",
                 derived_entity_id=replacement_row.id,
                 source_chapter_id=revision.document_id,
                 source_chapter_revision_id=revision.id,
@@ -479,9 +492,35 @@ def revert_intelligence_batch(
     if novel is None:
         raise StoryCorrectionError(StoryCorrectionErrorCode.BATCH_NOT_FOUND, "小说不存在")
     batch, _proposal = _batch_scope(session, novel_id, batch_id, lock=True)
+    cleaned_reason = reason.strip() if reason is not None else None
+    operation_hash = _canonical_hash(
+        {
+            "batch_id": str(batch.id),
+            "reason": cleaned_reason,
+        }
+    )
     if batch.state == "reverted":
+        audit = dict((batch.inverse_operations or {}).get("revert_audit") or {})
+        stored_hash = audit.get("operation_hash")
+        if stored_hash is None and audit.get("operation_key"):
+            stored_hash = _canonical_hash(
+                {
+                    "batch_id": str(batch.id),
+                    "reason": audit.get("reason"),
+                }
+            )
+        if (
+            audit.get("operation_key") != operation_key
+            or stored_hash != operation_hash
+        ):
+            raise StoryCorrectionError(
+                StoryCorrectionErrorCode.IDEMPOTENCY_CONFLICT,
+                "operation_key 已被另一份批次撤销内容使用",
+            )
         return {
             "replayed": True,
+            "changed": False,
+            "outcome": "already_reverted",
             "batch_id": str(batch.id),
             "state": batch.state,
             "story_ledger_version": novel.story_ledger_version,
@@ -499,8 +538,8 @@ def revert_intelligence_batch(
         )
     inverse = dict(batch.inverse_operations or {})
     fact_ids = [UUID(value) for value in inverse.get("created_story_fact_ids", [])]
-    if fact_ids:
-        owned_ids = set(
+    owned_ids = (
+        set(
             session.scalars(
                 select(DerivedSourceBinding.derived_entity_id)
                 .where(
@@ -510,25 +549,24 @@ def revert_intelligence_batch(
                 .with_for_update()
             )
         )
-        facts = session.scalars(
-            select(StoryFact)
-            .where(
-                StoryFact.novel_id == novel_id,
-                StoryFact.id.in_(owned_ids),
-            )
-            .with_for_update()
+        if fact_ids
+        else set()
+    )
+    if not owned_ids:
+        raise StoryCorrectionError(
+            StoryCorrectionErrorCode.INVALID_TARGET,
+            "同步批次没有可撤销的权威事实",
         )
-        for fact in facts:
-            fact.status = "superseded"
     now = datetime.now(UTC)
     batch.state = "reverted"
     batch.reverted_at = now
     batch.inverse_operations = {
         **inverse,
         "revert_audit": {
-            "schema_version": "intelligence-batch-revert/1",
+            "schema_version": "intelligence-batch-revert/2",
             "operation_key": operation_key,
-            "reason": reason,
+            "operation_hash": operation_hash,
+            "reason": cleaned_reason,
             "reverted_at": now.isoformat(),
         },
     }
@@ -536,6 +574,8 @@ def revert_intelligence_batch(
     session.flush()
     return {
         "replayed": False,
+        "changed": True,
+        "outcome": "reverted",
         "batch_id": str(batch.id),
         "state": batch.state,
         "story_ledger_version": novel.story_ledger_version,

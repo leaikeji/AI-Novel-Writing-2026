@@ -41,11 +41,13 @@ def _write_test_passfile(
     port: int,
     database: str,
     role: str,
+    encoded_password: str | None = None,
 ) -> Path:
     root.mkdir(mode=0o700)
     path = root / ".pgpass"
+    password = encoded_password if encoded_password is not None else "0" * 64
     path.write_text(
-        f"{host}:{port}:{database}:{role}:{'0' * 64}\n",
+        f"{host}:{port}:{database}:{role}:{password}\n",
         encoding="utf-8",
     )
     path.chmod(0o600)
@@ -63,7 +65,12 @@ def _static_target(tmp_path: Path) -> DatabaseTarget:
         database=database,
         admin_role=admin,
         admin_passfile=_write_test_passfile(
-            tmp_path / "admin", host=host, port=port, database=database, role=admin
+            tmp_path / "admin",
+            host=host,
+            port=port,
+            database=database,
+            role=admin,
+            encoded_password=r"local\:admin\\password",
         ),
         migrator_passfile=_write_test_passfile(
             tmp_path / "migrator",
@@ -83,6 +90,7 @@ def _static_target(tmp_path: Path) -> DatabaseTarget:
             role=WORKER_ROLE,
         ),
         expected_head="20260829_0034",
+        maintenance_step="validate-20260829_0034",
     )
 
 
@@ -97,6 +105,7 @@ def _live_target() -> DatabaseTarget:
         "api_passfile": os.environ.get("TTS_ROLE_TEST_API_PGPASS"),
         "worker_passfile": os.environ.get("TTS_ROLE_TEST_WORKER_PGPASS"),
         "expected_head": os.environ.get("TTS_ROLE_TEST_EXPECTED_HEAD"),
+        "maintenance_step": os.environ.get("TTS_ROLE_TEST_MAINTENANCE_STEP"),
     }
     missing = sorted(key for key, value in required.items() if not value)
     if missing:
@@ -111,6 +120,7 @@ def _live_target() -> DatabaseTarget:
         api_passfile=Path(str(required["api_passfile"])),
         worker_passfile=Path(str(required["worker_passfile"])),
         expected_head=str(required["expected_head"]),
+        maintenance_step=str(required["maintenance_step"]),
     )
 
 
@@ -139,6 +149,8 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "20260829_0034": 62,
         "20260830_0035": 65,
         "20260901_0036": 67,
+        "20260902_0037": 67,
+        "20260902_0038": 67,
     }
     for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
         assert (
@@ -151,6 +163,12 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
     assert set(PROTECTED_TABLES_BY_HEAD["20260829_0034"]) < set(
         PROTECTED_TABLES_BY_HEAD["20260830_0035"]
     ) < set(PROTECTED_TABLES_BY_HEAD["20260901_0036"])
+    assert set(PROTECTED_TABLES_BY_HEAD["20260902_0037"]) == set(
+        PROTECTED_TABLES_BY_HEAD["20260901_0036"]
+    )
+    assert set(PROTECTED_TABLES_BY_HEAD["20260902_0038"]) == set(
+        PROTECTED_TABLES_BY_HEAD["20260902_0037"]
+    )
     assert {
         "nano_voice_experiment_commands",
         "narration_script_review_actions",
@@ -173,7 +191,7 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "character_cast_plan_commands",
         "character_cast_plan_items",
     }
-    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260901_0036"]
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260902_0038"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:
@@ -254,6 +272,8 @@ def test_cli_requires_explicit_expected_head(tmp_path: Path) -> None:
         str(target.api_passfile),
         "--worker-passfile",
         str(target.worker_passfile),
+        "--maintenance-step",
+        target.maintenance_step,
     ]
     with pytest.raises(SystemExit, match="2"):
         _parse_args(arguments)
@@ -272,9 +292,62 @@ def test_bootstrap_contract_never_embeds_runtime_passwords() -> None:
     assert "/run/ai-novel-db-auth/api/.pgpass" in sql_source
     assert "/run/ai-novel-db-auth/worker/.pgpass" in sql_source
     assert "mountpoint -q" in shell_source
+    assert "PASSWORD NULL" in sql_source
+    assert "upgrade-20260902_0038" in migration_source
+    assert "downgrade-20260902_0037" in migration_source
+    assert "downgrade-20260830_0035" in migration_source
+    assert "upgrade head" not in migration_source
     executable_sql = re.sub(r"--.*", "", sql_source)
     assert "CREATE FUNCTION" not in executable_sql
     assert "CREATE PROCEDURE" not in executable_sql
+
+
+def test_production_maintenance_overlay_is_explicit_and_fail_closed() -> None:
+    overlay = ROLE_PACKAGE / "compose.maintenance.yaml"
+    source = overlay.read_text(encoding="utf-8")
+
+    assert not (ROLE_PACKAGE / "compose.example.yaml").exists()
+    assert source.count('profiles: ["database-role-maintenance"]') == 3
+    for service in (
+        "database-role-bootstrap",
+        "database-role-validate",
+        "database-schema-migrate",
+    ):
+        assert f"  {service}:" in source
+    for variable in (
+        "AI_NOVEL_MAINTENANCE_ROOT_VOLUME:?",
+        "POSTGRES_ROLE_BOOTSTRAP_ADMIN_PGPASS_DIR:?",
+        "AI_NOVEL_ROLE_EXPECTED_HEAD:?",
+        "AI_NOVEL_MIGRATION_COMMAND:?",
+        "AI_NOVEL_MIGRATION_TARGET:?",
+        "AI_NOVEL_MAINTENANCE_STEP:?",
+        "AI_NOVEL_MAINTENANCE_QWENPAW_IMAGE:?",
+    ):
+        assert variable in source
+    assert "POSTGRES_PASSWORD" not in source
+    assert "PGPASSWORD" not in source
+    assert 'user: "65532:65532"' in source
+    assert 'AI_NOVEL_MIGRATOR_UID: "65532"' in source
+    assert 'AI_NOVEL_API_UID: "0"' in source
+    assert 'AI_NOVEL_WORKER_UID: "0"' in source
+    assert "ai-novel-2026-db-migrator-auth" in source
+    assert "ai-novel-2026-db-api-auth" in source
+    assert "ai-novel-2026-db-worker-auth" in source
+    assert source.count("external: true") == 5
+    assert "AI_NOVEL_DATABASE_NETWORK" in source
+    assert "AI_NOVEL_ROLE_PGHOST" in source
+    assert "create_host_path: false" in source
+    assert 'cap_add: ["DAC_READ_SEARCH"]' in source
+    assert source.count("pull_policy: never") == 3
+
+    migrate_block = source.split("  database-schema-migrate:", 1)[1].split(
+        "\nvolumes:", 1
+    )[0]
+    assert "source: db-migrator-auth" in migrate_block
+    assert "source: db-api-auth" not in migrate_block
+    assert "source: db-worker-auth" not in migrate_block
+    assert "read_only: true" in migrate_block
+    assert 'cap_drop: ["ALL"]' in migrate_block
 
 
 def test_passfiles_require_distinct_0700_parents_and_0600_regular_files(tmp_path: Path) -> None:
@@ -285,6 +358,39 @@ def test_passfiles_require_distinct_0700_parents_and_0600_regular_files(tmp_path
     target.api_passfile.chmod(0o640)
     with pytest.raises(RoleValidationError, match="ai_novel_api_passfile_mode"):
         validate_target(target)
+
+
+def test_admin_passfile_allows_non_hex_password_and_libpq_escapes(tmp_path: Path) -> None:
+    target = _static_target(tmp_path)
+
+    validate_target(target)
+
+    target.migrator_passfile.write_text(
+        (
+            f"{target.host}:{target.port}:{target.database}:"
+            f"{MIGRATOR_ROLE}:not-a-generated-password\n"
+        ),
+        encoding="utf-8",
+    )
+    target.migrator_passfile.chmod(0o600)
+    with pytest.raises(
+        RoleValidationError,
+        match="ai_novel_migrator_passfile_password_strength",
+    ):
+        validate_target(target)
+
+
+def test_validation_step_must_match_expected_head(tmp_path: Path) -> None:
+    target = _static_target(tmp_path)
+    mismatched = DatabaseTarget(
+        **{**target.__dict__, "maintenance_step": "validate-20260830_0035"}
+    )
+
+    with pytest.raises(
+        RoleValidationError,
+        match="maintenance_step_expected_head_mismatch",
+    ):
+        validate_target(mismatched)
 
 
 def test_passfile_hardlinks_and_wrong_admin_identity_fail_closed(tmp_path: Path) -> None:

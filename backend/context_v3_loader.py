@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .context_v4_loader import _load_effective_story_fact_rows
 from .creative_data_models import (
     CharacterInstance,
     CharacterInstanceRevision,
@@ -27,7 +28,6 @@ from .creative_data_models import (
 from .embedding.chunking import render_structured_setting
 from .models import (
     ChapterBrief,
-    DerivedSourceBinding,
     Document,
     DocumentWorkingCopy,
     Novel,
@@ -330,26 +330,30 @@ def load_context_snapshot(
             )
         )
 
-    facts = tuple(
-        _fact_record(item)
-        for item in session.scalars(
+    fact_rows = tuple(
+        session.scalars(
             select(StoryFact)
             .where(
                 StoryFact.novel_id == novel_id,
                 StoryFact.schema_version == "story-fact/2",
-                StoryFact.status.in_(("active", "source_restored")),
             )
             .order_by(StoryFact.created_at, StoryFact.id)
         )
     )
-    links = tuple(
-        _event_link_record(item)
-        for item in session.scalars(
+    link_rows = tuple(
+        session.scalars(
             select(StoryEventLink)
             .where(StoryEventLink.novel_id == novel_id)
             .order_by(StoryEventLink.created_at, StoryEventLink.id)
         )
     )
+    fact_rows, validity = _load_effective_story_fact_rows(
+        session,
+        fact_rows,
+        link_rows,
+    )
+    facts = tuple(_fact_record(item) for item in fact_rows)
+    links = tuple(_event_link_record(item) for item in link_rows)
     current_revision_ids = set(
         session.scalars(
             select(DocumentWorkingCopy.base_revision_id)
@@ -357,22 +361,13 @@ def load_context_snapshot(
             .where(Document.novel_id == novel_id)
         )
     )
-    validity = {
-        fact.source_revision_id: fact.source_revision_id in current_revision_ids
-        for fact in facts
-        if fact.source_revision_id is not None
-    }
-    for binding in session.scalars(
-        select(DerivedSourceBinding)
-        .join(StoryFact, StoryFact.id == DerivedSourceBinding.derived_entity_id)
-        .where(
-            StoryFact.novel_id == novel_id,
-            DerivedSourceBinding.derived_entity_type == "story_fact",
-        )
-    ):
-        validity[binding.source_chapter_revision_id] = binding.validity_state in {
-            "current", "source_restored"
+    validity.update(
+        {
+            revision_id: True
+            for revision_id in current_revision_ids
+            if revision_id is not None
         }
+    )
 
     planning: list[FormalPlanningRecordV1] = []
     outline_head = session.get(NovelOutlineHead, novel_id)

@@ -14,12 +14,11 @@ from .corrections import (
     StoryCorrectionError,
     StoryCorrectionErrorCode,
     correct_story_fact,
-    intelligence_batch_revert_impact,
     revert_intelligence_batch,
 )
 
 
-router = APIRouter(tags=["story-fact-corrections-v1"])
+router = APIRouter(tags=["story-ledger-v1"])
 
 
 class _Strict(BaseModel):
@@ -85,7 +84,7 @@ def _raise(error: StoryCorrectionError) -> None:
     ) from error
 
 
-@router.post("/novels/{novel_id}/story-facts/{fact_id}/corrections")
+@router.post("/novels/{novel_id}/story-ledger/facts/{fact_id}/corrections")
 def story_fact_correction_create(
     novel_id: UUID,
     fact_id: UUID,
@@ -113,22 +112,7 @@ def story_fact_correction_create(
         raise
 
 
-@router.get(
-    "/novels/{novel_id}/intelligence-commit-batches/{batch_id}/revert-impact"
-)
-def intelligence_batch_revert_impact_get(
-    novel_id: UUID,
-    batch_id: UUID,
-    session: Session = Depends(get_session),
-) -> dict[str, object]:
-    try:
-        return intelligence_batch_revert_impact(session, novel_id, batch_id)
-    except StoryCorrectionError as error:
-        _raise(error)
-        raise
-
-
-@router.post("/novels/{novel_id}/intelligence-commit-batches/{batch_id}/revert")
+@router.post("/novels/{novel_id}/story-ledger/batches/{batch_id}/revert")
 def intelligence_batch_revert_create(
     novel_id: UUID,
     batch_id: UUID,

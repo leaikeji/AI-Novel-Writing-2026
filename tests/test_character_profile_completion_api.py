@@ -678,6 +678,34 @@ def test_apply_domain_failure_rolls_back_and_maps_to_422(
     assert http.session.rollback_count == 1
 
 
+def test_apply_idempotency_conflict_maps_to_structured_409(
+    monkeypatch: pytest.MonkeyPatch,
+    api,
+    http,
+) -> None:
+    monkeypatch.setattr(
+        api,
+        "apply_character_profile_completion",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            api.AuthorityIdempotencyConflict("apply-key-001")
+        ),
+    )
+
+    response = http.client.post(
+        f"/novels/{uuid4()}/character-profile-completion/jobs/{uuid4()}/apply",
+        json={
+            "idempotency_key": "apply-key-001",
+            "decisions": [
+                {"character_id": str(uuid4()), "base_version": 1}
+            ],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["type"] == "idempotency_conflict"
+    assert http.session.rollback_count == 1
+
+
 def test_restore_forwards_scope_batch_and_idempotency_key(
     monkeypatch: pytest.MonkeyPatch,
     api,

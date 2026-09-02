@@ -43,6 +43,12 @@ from ..story_state import (
     resolve_character_instance,
     resolve_timeline,
 )
+from ..story_state.effective_state import (
+    FactHealthEvidence,
+    FactProjectionEvidence,
+    classify_fact_health,
+)
+from ..story_state.fact_authority import resolve_fact_authority_rows
 from ..story_state.persistence import get_story_projection_payload
 from ..volume_chapter_titles import context_chapter_title
 from .contracts import (
@@ -52,20 +58,17 @@ from .contracts import (
     CharacterArchiveImpactV1,
     CharacterFactHistoryPage,
     CharacterInstanceView,
-    CharacterProjectedState,
     CharacterProjectedStateV2,
     CharacterRelationshipView,
     CharacterRootView,
     CharacterVoiceBindingView,
     CharacterWorkspaceError,
     CharacterWorkspaceErrorCode,
-    CharacterWorkspaceV1,
     CharacterWorkspaceV2,
     FactEffectiveState,
     FactHealth,
     FactHistorySummary,
     FactSourceView,
-    ProjectedFactView,
     ProjectedFactViewV2,
     ProjectionConflictView,
     TimelineView,
@@ -94,6 +97,15 @@ class _ClassifiedFact:
     row: StoryFact
     effective_state: FactEffectiveState
     health: FactHealth
+
+
+@dataclass(frozen=True, slots=True)
+class _CharacterProjectionSlice:
+    timeline_id: UUID
+    narrative_cutoff: int | None
+    current_fact_ids: tuple[UUID, ...]
+    conflicts: tuple[ProjectionConflictView, ...]
+    ambiguous_fact_ids: tuple[UUID, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,7 +369,6 @@ class SqlAlchemyCharacterWorkspaceStore:
         bindings = self._scalars(
             select(DerivedSourceBinding)
             .where(
-                DerivedSourceBinding.derived_entity_type == "story_fact",
                 DerivedSourceBinding.derived_entity_id.in_(fact_ids),
             )
             .order_by(DerivedSourceBinding.created_at, DerivedSourceBinding.id)
@@ -552,8 +563,7 @@ class CharacterWorkspaceService:
         timeline_id: UUID | None = None,
         character_instance_id: UUID | None = None,
         narrative_cutoff: int | None = None,
-        view_version: Literal[1, 2] = 1,
-    ) -> CharacterWorkspaceV1 | CharacterWorkspaceV2:
+    ) -> CharacterWorkspaceV2:
         scope = self._resolve_scope(
             novel_id,
             character_id,
@@ -569,24 +579,40 @@ class CharacterWorkspaceService:
         root_revision = self.store.character_revision(scope.root)
         relationship_rows = self._relationships_for_scope(scope)
         relationship_ids = {row.id for row in relationship_rows}
-        read_set = (
-            self._fact_read_set(novel_id, character_id, tuple(relationship_ids))
-            if view_version == 2
-            else None
-        )
-        workspace_facts = (
-            read_set.facts
-            if read_set is not None
-            else self.store.story_facts(novel_id, character_id, tuple(relationship_ids))
+        read_set = self._fact_read_set(
+            novel_id,
+            character_id,
+            tuple(relationship_ids),
         )
         character_fact_ids = {
             row.id
-            for row in workspace_facts
+            for row in read_set.facts
             if row.relationship_id in relationship_ids
             or row.character_instance_id in {None, scope.instance.id}
         }
         ordinals = _store_chapter_ordinals(self.store, novel_id)
-        workspace = CharacterWorkspaceV1(
+        projection_slice = _projection_slice(
+            projection,
+            character_id=character_id,
+            instance_id=scope.instance.id,
+            character_fact_ids=character_fact_ids,
+            relationship_ids=relationship_ids,
+        )
+        fact_views = _fact_views(
+            read_set,
+            projection=projection,
+            instance_id=scope.instance.id,
+            relationship_ids=relationship_ids,
+            document_ordinals=ordinals,
+        )
+        facts_by_id = {fact.id: fact for fact in fact_views}
+        current_facts = tuple(
+            facts_by_id[fact_id]
+            for fact_id in projection_slice.current_fact_ids
+            if fact_id in facts_by_id
+            and facts_by_id[fact_id].effective_state == "current"
+        )
+        return CharacterWorkspaceV2(
             novel_id=novel_id,
             character_catalog_version=scope.novel.character_catalog_version,
             story_ledger_version=scope.novel.story_ledger_version,
@@ -631,43 +657,13 @@ class CharacterWorkspaceService:
             voice_binding=_voice_binding_view(
                 self.store.voice_binding(novel_id, character_id)
             ),
-            projected_state=_projected_state(
-                projection,
-                character_id=character_id,
-                instance_id=scope.instance.id,
-                character_fact_ids=character_fact_ids,
-                relationship_ids=relationship_ids,
+            projected_state=CharacterProjectedStateV2(
+                timeline_id=projection_slice.timeline_id,
+                narrative_cutoff=projection_slice.narrative_cutoff,
+                current_facts=current_facts,
+                conflicts=projection_slice.conflicts,
+                ambiguous_fact_ids=projection_slice.ambiguous_fact_ids,
             ),
-        )
-        if view_version == 1:
-            return workspace
-
-        assert read_set is not None
-        fact_views = _fact_views(
-            read_set,
-            projection=projection,
-            instance_id=scope.instance.id,
-            relationship_ids=relationship_ids,
-            document_ordinals=ordinals,
-        )
-        facts_by_id = {fact.id: fact for fact in fact_views}
-        current_v2 = tuple(
-            facts_by_id[fact.id]
-            for fact in workspace.projected_state.current_facts
-            if fact.id in facts_by_id
-            and facts_by_id[fact.id].effective_state == "current"
-        )
-        projected_state_v2 = CharacterProjectedStateV2(
-            timeline_id=workspace.projected_state.timeline_id,
-            narrative_cutoff=workspace.projected_state.narrative_cutoff,
-            current_facts=current_v2,
-            conflicts=workspace.projected_state.conflicts,
-            ambiguous_fact_ids=workspace.projected_state.ambiguous_fact_ids,
-        )
-        payload = workspace.model_dump(exclude={"schema_version", "projected_state"})
-        return CharacterWorkspaceV2(
-            **payload,
-            projected_state=projected_state_v2,
             writing_state=build_writing_state(
                 timeline_id=scope.timeline.id,
                 narrative_cutoff=narrative_cutoff,
@@ -1029,17 +1025,17 @@ def _store_chapter_ordinals(
     return dict(resolver(novel_id))
 
 
-def _projected_state(
+def _projection_slice(
     payload: dict[str, Any],
     *,
     character_id: UUID,
     instance_id: UUID,
     character_fact_ids: set[UUID],
     relationship_ids: set[UUID],
-) -> CharacterProjectedState:
+) -> _CharacterProjectionSlice:
     all_character_fact_ids = set(character_fact_ids)
     relationship_id_strings = {str(item) for item in relationship_ids}
-    current: list[ProjectedFactView] = []
+    current_fact_ids: list[UUID] = []
     for raw in payload.get("visible_facts", []):
         if (
             raw.get("character_id") == str(character_id)
@@ -1054,37 +1050,9 @@ def _projected_state(
             and raw.get("relationship_id") not in relationship_id_strings
         ):
             continue
-        fact = ProjectedFactView(
-            id=UUID(str(raw["id"])),
-            fact_type=str(raw["fact_type"]),
-            timeline_id=UUID(str(raw["timeline_id"])),
-            character_id=(
-                UUID(str(raw["character_id"])) if raw.get("character_id") else None
-            ),
-            character_instance_id=(
-                UUID(str(raw["character_instance_id"]))
-                if raw.get("character_instance_id")
-                else None
-            ),
-            relationship_id=(
-                UUID(str(raw["relationship_id"]))
-                if raw.get("relationship_id")
-                else None
-            ),
-            dimension=str(raw["dimension"]),
-            event_kind=str(raw["event_kind"]),
-            predicate=str(raw["predicate"]),
-            object_text=str(raw["object_text"]),
-            details=dict(raw.get("details") or {}),
-            story_sequence=raw.get("story_sequence"),
-            source_revision_id=(
-                UUID(str(raw["source_revision_id"]))
-                if raw.get("source_revision_id")
-                else None
-            ),
-        )
-        current.append(fact)
-        all_character_fact_ids.add(fact.id)
+        fact_id = UUID(str(raw["id"]))
+        current_fact_ids.append(fact_id)
+        all_character_fact_ids.add(fact_id)
     conflicts = tuple(
         ProjectionConflictView.model_validate(item)
         for item in payload.get("conflicts", [])
@@ -1100,10 +1068,10 @@ def _projected_state(
             key=str,
         )
     )
-    return CharacterProjectedState(
+    return _CharacterProjectionSlice(
         timeline_id=UUID(str(payload["timeline_id"])),
         narrative_cutoff=payload.get("narrative_cutoff"),
-        current_facts=tuple(current),
+        current_fact_ids=tuple(current_fact_ids),
         conflicts=conflicts,
         ambiguous_fact_ids=ambiguous,
     )
@@ -1155,11 +1123,37 @@ def _classify_facts(
         UUID(str(item)) for item in projection.get("suppressed_fact_ids", [])
     }
     eligible_ids = visible_ids | ambiguous_ids | suppressed_ids
-    conflict_ids = {
-        UUID(str(fact_id))
-        for conflict in projection.get("conflicts", [])
-        for fact_id in conflict.get("fact_ids", [])
+    conflict_reasons_by_fact_id: dict[UUID, set[str]] = {}
+    for conflict in projection.get("conflicts", []):
+        reason = str(conflict.get("reason") or "")
+        for fact_id in conflict.get("fact_ids", []):
+            conflict_reasons_by_fact_id.setdefault(UUID(str(fact_id)), set()).add(
+                reason
+            )
+    projection_by_fact_id = {
+        row.id: FactProjectionEvidence(
+            timeline_in_scope=True,
+            narrative_cutoff=projection.get("narrative_cutoff"),
+            story_sequence=row.story_sequence,
+            story_sequence_required=(
+                row.id in ambiguous_ids and row.story_sequence is None
+            ),
+            selected_as_current=row.id in current_ids,
+            is_state_fact=_is_state_row(row),
+        )
+        for row in read_set.facts
     }
+    effective_results = resolve_fact_authority_rows(
+        read_set.facts,
+        bindings=(
+            binding
+            for fact_bindings in read_set.bindings_by_fact_id.values()
+            for binding in fact_bindings
+        ),
+        batch_states=read_set.batch_state_by_id,
+        incoming_superseded_fact_ids=read_set.superseded_fact_ids,
+        projection_by_fact_id=projection_by_fact_id,
+    )
     results: list[_ClassifiedFact] = []
     for row in read_set.facts:
         if row.id not in eligible_ids:
@@ -1169,40 +1163,31 @@ def _classify_facts(
             and row.character_instance_id not in {None, instance_id}
         ):
             continue
-        source_ambiguous = _fact_source_is_ambiguous(row, read_set)
-        bindings = read_set.bindings_by_fact_id.get(row.id, ())
-        has_reverted_batch = any(
-            binding.commit_batch_id is not None
-            and read_set.batch_state_by_id.get(binding.commit_batch_id) == "reverted"
-            for binding in bindings
+        projection_evidence = projection_by_fact_id[row.id]
+        effective_result = effective_results[row.id]
+        (
+            source_reference_incomplete,
+            source_hash_mismatch,
+            source_coordinate_invalid,
+        ) = _fact_source_health_flags(row, read_set)
+        conflict_reasons = conflict_reasons_by_fact_id.get(row.id, set())
+        health_result = classify_fact_health(
+            FactHealthEvidence(
+                explicit_contradiction=(
+                    "explicit_contradiction" in conflict_reasons
+                ),
+                same_position_conflict="same_position" in conflict_reasons,
+                source_reference_incomplete=source_reference_incomplete,
+                source_hash_mismatch=source_hash_mismatch,
+                source_coordinate_invalid=source_coordinate_invalid,
+                projection=projection_evidence,
+            )
         )
-        has_invalid_binding = bool(bindings) and not any(
-            binding.validity_state in {"current", "source_restored"}
-            for binding in bindings
-        )
-        if has_reverted_batch:
-            effective_state: FactEffectiveState = "batch_reverted"
-        elif row.id in read_set.superseded_fact_ids or row.status == "superseded":
-            effective_state = "superseded"
-        elif row.status in {"invalid", "source_superseded"} or has_invalid_binding:
-            effective_state = "source_invalid"
-        elif row.id in current_ids and _is_state_row(row):
-            effective_state = "current"
-        else:
-            effective_state = "historical"
-
-        health: FactHealth
-        if row.id in conflict_ids:
-            health = "conflict"
-        elif row.id in ambiguous_ids or source_ambiguous:
-            health = "ambiguous"
-        else:
-            health = "ok"
         results.append(
             _ClassifiedFact(
                 row=row,
-                effective_state=effective_state,
-                health=health,
+                effective_state=effective_result.effective_state.value,
+                health=health_result.health.value,
             )
         )
     return tuple(results)
@@ -1214,9 +1199,7 @@ def _classified_fact_view(
     document_ordinals: dict[UUID, int],
 ) -> ProjectedFactViewV2:
     row = fact.row
-    source, _source_ambiguous = _fact_source_view(
-        row, read_set, document_ordinals
-    )
+    source = _fact_source_view(row, read_set, document_ordinals)
     return ProjectedFactViewV2(
         id=row.id,
         fact_type=row.fact_type,
@@ -1303,31 +1286,59 @@ def _matching_source_binding(
             for binding in bindings
             if binding.source_chapter_revision_id == row.source_revision_id
         ),
-        bindings[-1] if bindings else None,
+        None,
     )
 
 
-def _fact_source_is_ambiguous(
+def _fact_source_health_flags(
     row: StoryFact,
     read_set: CharacterFactReadSet,
-) -> bool:
+) -> tuple[bool, bool, bool]:
+    """Return source-reference, hash and coordinate health evidence."""
+
     if row.source_document_id is None and row.source_revision_id is None:
-        return False
-    if row.source_document_id is None or row.source_revision_id is None:
-        return True
+        return (
+            False,
+            False,
+            row.source_start is not None or row.source_end is not None,
+        )
     document = read_set.documents_by_id.get(row.source_document_id)
     revision = read_set.revisions_by_id.get(row.source_revision_id)
     binding = _matching_source_binding(row, read_set)
-    if document is None or revision is None or revision.document_id != document.id:
-        return True
-    if binding is None or binding.source_content_hash != revision.content_hash:
-        return True
+    reference_incomplete = (
+        row.source_document_id is None
+        or row.source_revision_id is None
+        or document is None
+        or revision is None
+        or (
+            document is not None
+            and revision is not None
+            and revision.document_id != document.id
+        )
+        or binding is None
+        or (
+            binding is not None
+            and binding.commit_batch_id is not None
+            and binding.commit_batch_id not in read_set.batch_state_by_id
+        )
+    )
+    hash_mismatch = (
+        binding is not None
+        and revision is not None
+        and binding.source_content_hash != revision.content_hash
+    )
     if row.source_start is None and row.source_end is None:
-        return False
-    return not (
-        row.source_start is not None
-        and row.source_end is not None
-        and 0 <= row.source_start < row.source_end <= len(revision.content_text)
+        coordinate_invalid = False
+    elif row.source_start is None or row.source_end is None or revision is None:
+        coordinate_invalid = True
+    else:
+        coordinate_invalid = not (
+            0 <= row.source_start < row.source_end <= len(revision.content_text)
+        )
+    return (
+        reference_incomplete,
+        hash_mismatch,
+        coordinate_invalid,
     )
 
 
@@ -1335,23 +1346,16 @@ def _fact_source_view(
     row: StoryFact,
     read_set: CharacterFactReadSet,
     document_ordinals: dict[UUID, int],
-) -> tuple[FactSourceView | None, bool]:
+) -> FactSourceView | None:
     if row.source_document_id is None or row.source_revision_id is None:
-        return None, False
+        return None
     document = read_set.documents_by_id.get(row.source_document_id)
     revision = read_set.revisions_by_id.get(row.source_revision_id)
     matching_binding = _matching_source_binding(row, read_set)
     if document is None or revision is None or revision.document_id != document.id:
-        return None, True
+        return None
 
     source_content_hash = revision.content_hash
-    source_ambiguous = matching_binding is None
-    if (
-        matching_binding is not None
-        and matching_binding.source_content_hash != revision.content_hash
-    ):
-        source_ambiguous = True
-
     source_range_hash: str | None = None
     source_excerpt = ""
     source_excerpt_truncated = False
@@ -1361,10 +1365,6 @@ def _fact_source_view(
             source_range_hash = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
             source_excerpt = evidence[:500]
             source_excerpt_truncated = len(evidence) > 500
-        else:
-            source_ambiguous = True
-    elif row.source_start is not None or row.source_end is not None:
-        source_ambiguous = True
 
     document_position = document_ordinals.get(document.id, document.position)
     document_title = (
@@ -1372,32 +1372,29 @@ def _fact_source_view(
         if document.kind == "chapter"
         else document.title
     )
-    return (
-        FactSourceView(
-            document_id=document.id,
-            document_title=document_title,
-            document_position=document_position,
-            revision_id=revision.id,
-            revision_is_current=(
-                read_set.current_revision_by_document_id.get(document.id) == revision.id
-            ),
-            source_content_hash=source_content_hash,
-            source_start=row.source_start,
-            source_end=row.source_end,
-            source_range_hash=source_range_hash,
-            source_excerpt=source_excerpt,
-            source_excerpt_truncated=source_excerpt_truncated,
-            binding_state=(
-                matching_binding.validity_state if matching_binding is not None else None
-            ),
-            proposal_item_id=(
-                matching_binding.proposal_item_id if matching_binding is not None else None
-            ),
-            commit_batch_id=(
-                matching_binding.commit_batch_id if matching_binding is not None else None
-            ),
+    return FactSourceView(
+        document_id=document.id,
+        document_title=document_title,
+        document_position=document_position,
+        revision_id=revision.id,
+        revision_is_current=(
+            read_set.current_revision_by_document_id.get(document.id) == revision.id
         ),
-        source_ambiguous,
+        source_content_hash=source_content_hash,
+        source_start=row.source_start,
+        source_end=row.source_end,
+        source_range_hash=source_range_hash,
+        source_excerpt=source_excerpt,
+        source_excerpt_truncated=source_excerpt_truncated,
+        binding_state=(
+            matching_binding.validity_state if matching_binding is not None else None
+        ),
+        proposal_item_id=(
+            matching_binding.proposal_item_id if matching_binding is not None else None
+        ),
+        commit_batch_id=(
+            matching_binding.commit_batch_id if matching_binding is not None else None
+        ),
     )
 
 

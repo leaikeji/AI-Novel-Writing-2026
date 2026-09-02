@@ -1206,7 +1206,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           method: "POST",
           body: JSON.stringify({
             accepted_item_ids: selectedIds,
-            item_overrides: {},
           }),
         },
       );

@@ -31,6 +31,17 @@ SUPPORTED_HEADS = (
     "20260829_0034",
     "20260830_0035",
     "20260901_0036",
+    "20260902_0037",
+    "20260902_0038",
+)
+VALIDATION_STEPS = MappingProxyType(
+    {
+        "validate-20260829_0034": "20260829_0034",
+        "validate-20260830_0035": "20260830_0035",
+        "validate-20260901_0036": "20260901_0036",
+        "validate-20260902_0037": "20260902_0037",
+        "validate-20260902_0038": "20260902_0038",
+    }
 )
 
 _PROTECTED_TABLES_BEFORE_0034 = (
@@ -125,9 +136,11 @@ PROTECTED_TABLES_BY_HEAD = MappingProxyType(
         "20260829_0034": _PROTECTED_TABLES_0034,
         "20260830_0035": _PROTECTED_TABLES_0035,
         "20260901_0036": _PROTECTED_TABLES_0036,
+        "20260902_0037": _PROTECTED_TABLES_0036,
+        "20260902_0038": _PROTECTED_TABLES_0036,
     }
 )
-CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260901_0036"]
+CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260902_0038"]
 
 # These character-domain tables are not part of TTS authority. Keeping the
 # reviewed reasons next to the prefix audit makes a future character/voice
@@ -193,6 +206,7 @@ class DatabaseTarget:
     api_passfile: Path
     worker_passfile: Path
     expected_head: str
+    maintenance_step: str
 
     def passfile_for(self, role: str) -> Path:
         mapping = {
@@ -274,19 +288,45 @@ def _validate_passfile(
     except OSError as error:
         raise RoleValidationError(f"{role}_passfile_unreadable") from error
     _require(len(records) == 1, f"{role}_passfile_record_count")
-    fields = records[0].split(":")
+    fields: list[str] = []
+    field: list[str] = []
+    escaped = False
+    for character in records[0]:
+        if escaped:
+            _require(character in {":", "\\"}, f"{role}_passfile_escape")
+            field.append(character)
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == ":":
+            fields.append("".join(field))
+            field = []
+        else:
+            field.append(character)
+    _require(not escaped, f"{role}_passfile_escape")
+    fields.append("".join(field))
     _require(len(fields) == 5, f"{role}_passfile_shape")
     record_host, record_port, record_database, record_role, password = fields
     _require(record_host == host, f"{role}_passfile_host")
     _require(record_port == str(port), f"{role}_passfile_port")
     _require(record_database == database, f"{role}_passfile_database")
     _require(record_role == role, f"{role}_passfile_role")
-    _require(bool(_HEX_PASSWORD.fullmatch(password)), f"{role}_passfile_password_strength")
+    if role in (MIGRATOR_ROLE, API_ROLE, WORKER_ROLE):
+        _require(
+            bool(_HEX_PASSWORD.fullmatch(password)),
+            f"{role}_passfile_password_strength",
+        )
+    else:
+        _require(bool(password) and "\x00" not in password, f"{role}_passfile_password_empty")
     del password
 
 
 def validate_target(target: DatabaseTarget) -> None:
     protected_tables_for_head(target.expected_head)
+    _require(
+        VALIDATION_STEPS.get(target.maintenance_step) == target.expected_head,
+        "maintenance_step_expected_head_mismatch",
+    )
     _require(bool(_HOST.fullmatch(target.host)), "invalid_host")
     _require(1 <= target.port <= 65535, "invalid_port")
     _validate_identifier(target.database, "database")
@@ -770,6 +810,7 @@ def collect_and_validate(target: DatabaseTarget) -> dict[str, Any]:
         "database": target.database,
         "admin_role": target.admin_role,
         "alembic_head": target.expected_head,
+        "maintenance_step": target.maintenance_step,
         "managed_roles": list(MANAGED_ROLES),
         "authenticated_roles": authenticated,
         "protected_table_count": len(protected_tables),
@@ -815,6 +856,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--api-passfile", required=True, type=Path)
     parser.add_argument("--worker-passfile", required=True, type=Path)
     parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--maintenance-step", required=True)
     parser.add_argument("--pretty", action="store_true")
     return parser.parse_args(argv)
 
@@ -831,6 +873,7 @@ def main(argv: list[str] | None = None) -> int:
         api_passfile=arguments.api_passfile,
         worker_passfile=arguments.worker_passfile,
         expected_head=arguments.expected_head,
+        maintenance_step=arguments.maintenance_step,
     )
     try:
         report = collect_and_validate(target)

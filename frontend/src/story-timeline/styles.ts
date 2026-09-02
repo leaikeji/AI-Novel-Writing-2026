@@ -7,14 +7,18 @@ export function ensureStoryTimelineStyles(): void {
   style.textContent = `
     .anw-timeline-workspace { display: grid; gap: 16px; }
     .anw-timeline-header { display:flex; gap:12px; justify-content:space-between; align-items:flex-start; }
+    .anw-timeline-header-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
     .anw-timeline-muted { color: rgba(0,0,0,.58); margin: 4px 0 0; }
+    .anw-timeline-status { margin:0; color:rgba(0,0,0,.66); }
     .anw-timeline-list { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
     .anw-timeline-list button { border:1px solid #d9d9d9; border-radius:8px; padding:8px 12px; background:#fff; cursor:pointer; }
-    .anw-timeline-list button[aria-current='true'] { border-color:#1677ff; color:#1677ff; background:#e6f4ff; }
+    .anw-timeline-list button[aria-selected='true'] { border-color:#1677ff; color:#1677ff; background:#e6f4ff; }
+    .anw-timeline-list button:focus-visible,
+    .anw-instance-list button:focus-visible { outline:3px solid rgba(22,119,255,.28); outline-offset:2px; }
     .anw-timeline-grid { display:grid; grid-template-columns:minmax(220px,.8fr) minmax(300px,1.2fr); gap:16px; }
     .anw-instance-list { display:grid; gap:8px; }
     .anw-instance-list button { text-align:left; border:1px solid #eee; border-radius:8px; padding:10px; background:#fff; cursor:pointer; }
-    .anw-instance-list button[aria-current='true'] { border-color:#1677ff; }
+    .anw-instance-list button[aria-pressed='true'] { border-color:#1677ff; }
     .anw-timeline-fork-form { display:grid; gap:10px; }
     .anw-timeline-fork-form label { display:grid; gap:5px; font-weight:600; }
     .anw-timeline-fork-form input { width:100%; box-sizing:border-box; border:1px solid #d9d9d9; border-radius:6px; padding:8px; font:inherit; font-weight:400; }
@@ -23,7 +27,7 @@ export function ensureStoryTimelineStyles(): void {
     .anw-instance-summary dl div { display:grid; grid-template-columns:minmax(72px,auto) 1fr; gap:12px; align-items:start; }
     .anw-instance-summary dt { color:rgba(0,0,0,.58); }
     .anw-instance-summary dd { margin:0; overflow-wrap:anywhere; }
-    @media (max-width: 760px) { .anw-timeline-grid { grid-template-columns:1fr; } .anw-timeline-header { flex-direction:column; } }
+    @media (max-width: 760px) { .anw-timeline-grid { grid-template-columns:1fr; } .anw-timeline-header { flex-direction:column; } .anw-timeline-header-actions { justify-content:flex-start; } }
   `;
   document.head.appendChild(style);
 }

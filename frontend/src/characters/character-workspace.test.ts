@@ -4,7 +4,7 @@ import {
   createCharacterWorkspaceDialog,
   type CharacterWorkspaceDialogProps,
 } from "./character-workspace";
-import { characterWorkspace, multiTimelineWorkspace } from "./test-fixtures";
+import { characterWorkspace, multiTimelineWorkspace, storyFactImpact } from "./test-fixtures";
 import { createReactHarness, findAll, findButton, settle, textContent } from "./test-harness";
 
 describe("formal character workspace", () => {
@@ -99,11 +99,14 @@ describe("formal character workspace", () => {
     await settle();
     root = harness.render(Component, { workspace, onLoadFacts });
 
-    expect(onLoadFacts).toHaveBeenCalledWith(expect.objectContaining({
-      limit: 20,
-      effective_state: "all",
-      health: "all",
-    }));
+    expect(onLoadFacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 20,
+        effective_state: "all",
+        health: "all",
+      }),
+      expect.any(AbortSignal),
+    );
     expect(textContent(root)).toContain("历史、失效与已撤销事实保留用于审计");
     expect(textContent(root)).toContain("开始主动承担风险");
   });
@@ -114,16 +117,19 @@ describe("formal character workspace", () => {
       ...workspace,
       story_ledger_version: 20,
     });
+    const onLoadFactImpact = vi.fn().mockResolvedValue(storyFactImpact());
     const harness = createReactHarness();
     const Component = createCharacterWorkspaceDialog(harness.React);
-    let root = harness.render(Component, { workspace, onCorrectFact });
+    const props = { workspace, onCorrectFact, onLoadFactImpact };
+    let root = harness.render(Component, props);
     (findButton(root, "状态与经历").props.onClick as () => void)();
-    root = harness.render(Component, { workspace, onCorrectFact });
+    root = harness.render(Component, props);
     const correctionTrigger = {} as HTMLElement;
     (findButton(root, "修正").props.onClick as (
       event: { currentTarget: HTMLElement },
     ) => void)({ currentTarget: correctionTrigger });
-    root = harness.render(Component, { workspace, onCorrectFact });
+    await settle();
+    root = harness.render(Component, props);
     let drawer = findAll(root, (element) => element.props.className === "anw-character-drawer anw-character-correction")[0];
     const textareas = findAll(drawer, (element) => element.type === "textarea");
     (textareas[0].props.onChange as (event: { target: { value: string } }) => void)({
@@ -132,7 +138,7 @@ describe("formal character workspace", () => {
     (textareas[1].props.onChange as (event: { target: { value: string } }) => void)({
       target: { value: "章节明确写出新的选择" },
     });
-    root = harness.render(Component, { workspace, onCorrectFact });
+    root = harness.render(Component, props);
     drawer = findAll(root, (element) => element.props.className === "anw-character-drawer anw-character-correction")[0];
     (findButton(drawer, "创建替代事实").props.onClick as () => void)();
     await settle();
@@ -145,6 +151,7 @@ describe("formal character workspace", () => {
         reason: "章节明确写出新的选择",
         replacement: { object_text: "开始主动保护同伴" },
       }),
+      expect.any(AbortSignal),
     );
   });
 

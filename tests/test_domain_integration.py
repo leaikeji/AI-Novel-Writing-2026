@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from backend.creative_data_models import (
     CharacterInstance,
     CharacterInstanceRevision,
+    NovelCharacterRevision,
     StoryTimeline,
 )
 from backend.story_state.contracts import StoryEventLinkType
@@ -43,6 +44,10 @@ from backend.creative_services import (
     create_private_asset,
     create_storyline,
     delete_character_relationship,
+    delete_document,
+    delete_foreshadow,
+    delete_novel_character,
+    delete_storyline,
     delete_volume,
     fail_creative_generation,
     get_relationship_graph_view,
@@ -62,7 +67,6 @@ from backend.creative_services import (
     save_relationship_graph_view,
     snapshot_private_assets,
     start_creative_generation as _start_creative_generation,
-    sync_relationships_from_intelligence_proposal,
     update_chapter_creation_draft,
     update_foreshadow,
     update_document_metadata,
@@ -72,6 +76,8 @@ from backend.creative_services import (
     update_novel_character,
     update_private_asset,
     update_character_relationship,
+    update_storyline,
+    update_volume,
 )
 from backend.models import (
     CandidateRevision,
@@ -79,6 +85,7 @@ from backend.models import (
     ChapterGenerationJob,
     CharacterRelationship,
     CharacterRelationshipRevision,
+    DerivedSourceBinding,
     Document,
     DocumentRevision,
     DocumentWorkingCopy,
@@ -86,7 +93,9 @@ from backend.models import (
     IntelligenceProposal,
     IntelligenceProposalItem,
     Novel,
+    Foreshadow,
     StoryFact,
+    Storyline,
     Volume,
 )
 from backend.embedding.writing import resolve_writing_position
@@ -100,6 +109,7 @@ from backend.services import (
     complete_chapter_generation as _complete_chapter_generation,
     complete_intelligence_proposal as _complete_intelligence_proposal,
     DraftConflictError,
+    IntelligenceCommitConflictError,
     fail_chapter_generation,
     RestorationPlanConflictError,
     create_checkpoint,
@@ -112,7 +122,6 @@ from backend.services import (
     get_novel,
     get_novel_context,
     list_chapter_generation_jobs,
-    list_story_facts,
     preview_restore_revision,
     restore_revision,
     save_chapter_brief,
@@ -138,6 +147,31 @@ def _requested_model_kwargs() -> dict[str, str]:
         "requested_model_id": TEST_MODEL_ID,
         "generation_contract_version": TEST_CONTRACT_VERSION,
     }
+
+
+def _story_facts(session: Session, novel_id: UUID) -> list[dict[str, object]]:
+    """Read authoritative fact rows directly; no retired API compatibility helper."""
+
+    rows = session.scalars(
+        select(StoryFact)
+        .where(StoryFact.novel_id == novel_id)
+        .order_by(StoryFact.created_at, StoryFact.id)
+    )
+    return [
+        {
+            "id": str(row.id),
+            "fact_type": row.fact_type,
+            "subject": row.subject,
+            "relationship_id": (
+                str(row.relationship_id) if row.relationship_id else None
+            ),
+            "source_revision_id": (
+                str(row.source_revision_id) if row.source_revision_id else None
+            ),
+            "status": row.status,
+        }
+        for row in rows
+    ]
 
 
 def start_chapter_generation(*args, **kwargs):
@@ -504,15 +538,9 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
     assert projected_existing["version"] == planned["version"]
     assert projected_existing["manual_override"] is True
 
-    first_sync = sync_relationships_from_intelligence_proposal(
-        session,
-        UUID(proposal["id"]),
-    )
-    assert first_sync["changes"] == {"created": 0, "updated": 0, "skipped": 0}
-    assert first_sync["deprecated"] is True
-    generated = first_sync["relationships"][0]
+    generated = list_character_relationships(session, novel_id)[0]
     assert generated["id"] == planned["id"]
-    fact = list_story_facts(session, novel_id)[0]
+    fact = _story_facts(session, novel_id)[0]
     assert fact["fact_type"] == "relationship_state"
     assert fact["relationship_id"] == planned["id"]
 
@@ -530,12 +558,7 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
     )
     assert edited["manual_override"] is True
 
-    second_sync = sync_relationships_from_intelligence_proposal(
-        session,
-        UUID(proposal["id"]),
-    )
-    assert second_sync["changes"] == {"created": 0, "updated": 0, "skipped": 0}
-    assert second_sync["relationships"][0]["label"] == "作者确认的同盟"
+    assert list_character_relationships(session, novel_id)[0]["label"] == "作者确认的同盟"
 
 
 def test_sync_progress_can_create_the_first_relationship_atomically_and_idempotently(
@@ -603,7 +626,16 @@ def test_sync_progress_can_create_the_first_relationship_atomically_and_idempote
                 "reasoning_summary": "形成稳定协作关系",
                 "confidence": 93,
                 "details": {},
-            }
+            },
+            {
+                "fact_type": "general_fact",
+                "subject": "旧电台档案",
+                "predicate": "调查状态",
+                "object": "等待共同核查",
+                "source_text": "共同调查旧电台档案",
+                "reasoning_summary": "用于验证不同接受集合不能复用操作键",
+                "confidence": 88,
+            },
         ],
         actual_model_id=TEST_MODEL_ID,
         provider_profile=TEST_PROVIDER_ID,
@@ -611,14 +643,20 @@ def test_sync_progress_can_create_the_first_relationship_atomically_and_idempote
     assert proposal["items"][0]["suggested_payload"]["entity"]["is_new"] is True
     assert list_character_relationships(session, novel_id) == []
     ledger_before = session.get(Novel, novel_id).story_ledger_version
+    operation_key = "commit-first-relationship"
 
     selected = [UUID(proposal["items"][0]["id"])]
     committed = commit_intelligence_items(
         session,
         UUID(proposal["id"]),
         accepted_item_ids=selected,
+        expected_story_ledger_version=ledger_before,
+        operation_key=operation_key,
     )
 
+    assert committed["changed"] is True
+    assert committed["replayed"] is False
+    assert committed["outcome"] == "committed"
     assert committed["relationship_sync"] == {"created": 1, "updated": 0, "skipped": 0}
     relationships = list_character_relationships(session, novel_id)
     assert len(relationships) == 1
@@ -626,7 +664,7 @@ def test_sync_progress_can_create_the_first_relationship_atomically_and_idempote
     assert relationship["label"] == "调查同盟"
     assert relationship["manual_override"] is False
     assert relationship["created_by"] == "ai_auto"
-    facts = list_story_facts(session, novel_id)
+    facts = _story_facts(session, novel_id)
     assert len(facts) == 1
     assert facts[0]["relationship_id"] == relationship["id"]
     assert session.scalar(
@@ -640,9 +678,14 @@ def test_sync_progress_can_create_the_first_relationship_atomically_and_idempote
         session,
         UUID(proposal["id"]),
         accepted_item_ids=selected,
+        expected_story_ledger_version=ledger_before,
+        operation_key=operation_key,
     )
     assert replayed["commit_batch"]["id"] == committed["commit_batch"]["id"]
     assert replayed["relationship_sync"] == committed["relationship_sync"]
+    assert replayed["changed"] is False
+    assert replayed["replayed"] is True
+    assert replayed["outcome"] == "already_committed"
     assert session.scalar(
         select(func.count(CharacterRelationship.id)).where(
             CharacterRelationship.novel_id == novel_id
@@ -657,6 +700,146 @@ def test_sync_progress_can_create_the_first_relationship_atomically_and_idempote
         )
     ) == 1
     assert session.get(Novel, novel_id).story_ledger_version == ledger_before + 1
+
+    with pytest.raises(IntelligenceCommitConflictError) as payload_conflict:
+        commit_intelligence_items(
+            session,
+            UUID(proposal["id"]),
+            accepted_item_ids=[UUID(proposal["items"][1]["id"])],
+            expected_story_ledger_version=ledger_before + 1,
+            operation_key=operation_key,
+        )
+    assert payload_conflict.value.code == "idempotency_conflict"
+    session.rollback()
+
+    with pytest.raises(IntelligenceCommitConflictError) as version_conflict:
+        commit_intelligence_items(
+            session,
+            UUID(proposal["id"]),
+            accepted_item_ids=selected,
+            expected_story_ledger_version=ledger_before,
+            operation_key="commit-new-stale-attempt",
+        )
+    assert version_conflict.value.code == "story_ledger_version_conflict"
+    assert version_conflict.value.current == {
+        "story_ledger_version": ledger_before + 1
+    }
+    session.rollback()
+
+    no_change = commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=selected,
+        expected_story_ledger_version=ledger_before + 1,
+        operation_key="commit-no-change-receipt",
+    )
+    assert no_change["changed"] is False
+    assert no_change["replayed"] is False
+    assert no_change["outcome"] == "no_change"
+    assert no_change["commit_batch"]["state"] == "no_change"
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before + 1
+    committed_batches = session.scalars(
+        select(IntelligenceCommitBatch).where(
+            IntelligenceCommitBatch.proposal_id == UUID(proposal["id"]),
+            IntelligenceCommitBatch.state == "committed",
+        )
+    ).all()
+    assert all(
+        dict(batch.inverse_operations or {}).get("created_story_fact_ids")
+        for batch in committed_batches
+    )
+
+    no_change_replay = commit_intelligence_items(
+        session,
+        UUID(proposal["id"]),
+        accepted_item_ids=selected,
+        expected_story_ledger_version=ledger_before,
+        operation_key="commit-no-change-receipt",
+    )
+    assert no_change_replay["commit_batch"]["id"] == no_change["commit_batch"]["id"]
+    assert no_change_replay["changed"] is False
+    assert no_change_replay["replayed"] is True
+    assert no_change_replay["outcome"] == "no_change"
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before + 1
+
+
+def test_intelligence_commit_concurrent_same_operation_replays_once(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-情报提交并发幂等")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="蓝色车票留在抽屉里。",
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+    proposal = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[
+            {
+                "fact_type": "general_fact",
+                "subject": "车票",
+                "predicate": "颜色",
+                "object": "蓝色",
+                "source_text": "蓝色车票",
+                "reasoning_summary": "正文明确给出颜色",
+                "confidence": 99,
+            }
+        ],
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
+    )
+    proposal_id = UUID(proposal["id"])
+    selected = [UUID(proposal["items"][0]["id"])]
+    ledger_before = session.get(Novel, novel_id).story_ledger_version
+    barrier = Barrier(2)
+    worker_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+
+    def submit() -> dict[str, object]:
+        with Session(worker_engine, expire_on_commit=False) as worker:
+            barrier.wait()
+            return commit_intelligence_items(
+                worker,
+                proposal_id,
+                accepted_item_ids=selected,
+                expected_story_ledger_version=ledger_before,
+                operation_key="concurrent-intelligence-commit",
+            )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _index: submit(), range(2)))
+    finally:
+        worker_engine.dispose()
+
+    assert sorted(result["changed"] for result in results) == [False, True]
+    assert sorted(result["replayed"] for result in results) == [False, True]
+    assert {result["commit_batch"]["id"] for result in results} == {
+        results[0]["commit_batch"]["id"]
+    }
+    session.expire_all()
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before + 1
+    assert session.scalar(
+        select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
+    ) == 1
+    assert session.scalar(
+        select(func.count(IntelligenceCommitBatch.id)).where(
+            IntelligenceCommitBatch.proposal_id == proposal_id
+        )
+    ) == 1
 
 
 def test_incremental_relationship_visibility_tracks_source_revision_and_manual_override(
@@ -1058,6 +1241,7 @@ def test_sync_progress_revalidates_relationship_instances_against_the_timeline(
         name="同步审计分支",
         fork_story_sequence=2,
     )
+    session.commit()
     proposal_item = session.get(
         IntelligenceProposalItem,
         UUID(proposal["items"][0]["id"]),
@@ -1069,12 +1253,15 @@ def test_sync_progress_revalidates_relationship_instances_against_the_timeline(
     tampered_payload["entity"] = tampered_entity
     proposal_item.suggested_payload = tampered_payload
     session.flush()
+    ledger_before_commit = session.get(Novel, novel_id).story_ledger_version
 
     with pytest.raises(ValidationError, match="人物实例或时间线已失效"):
         commit_intelligence_items(
             session,
             UUID(proposal["id"]),
             accepted_item_ids=[UUID(proposal["items"][0]["id"])],
+            expected_story_ledger_version=ledger_before_commit,
+            operation_key="invalid-relationship-commit",
         )
     session.rollback()
 
@@ -1086,6 +1273,12 @@ def test_sync_progress_revalidates_relationship_instances_against_the_timeline(
     assert session.scalar(
         select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
     ) == 0
+    assert session.scalar(
+        select(func.count(IntelligenceCommitBatch.id)).where(
+            IntelligenceCommitBatch.proposal_id == UUID(proposal["id"])
+        )
+    ) == 0
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before_commit
 
 
 def test_sync_progress_retries_a_stale_running_proposal(
@@ -1297,6 +1490,7 @@ def test_relationship_graph_status_matches_snapshot_and_prevents_parallel_force_
             ],
         },
     )
+    ledger_before_apply = get_novel(session, novel_id)["story_ledger_version"]
     applied = apply_relationship_graph_generation(
         session,
         novel_id,
@@ -1307,6 +1501,16 @@ def test_relationship_graph_status_matches_snapshot_and_prevents_parallel_force_
     assert applied["status"]["stale"] is False
     assert applied["status"]["job"]["id"] == first["id"]
     assert len(applied["relationships"]) == 1
+    assert applied["changed"] is True
+    assert applied["story_ledger_version"] == ledger_before_apply + 1
+
+    replayed_apply = apply_relationship_graph_generation(
+        session,
+        novel_id,
+        UUID(completed["id"]),
+    )
+    assert replayed_apply["changed"] is False
+    assert replayed_apply["story_ledger_version"] == applied["story_ledger_version"]
 
     updated = update_novel_character(
         session,
@@ -1918,7 +2122,7 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
         actual_model_id=TEST_MODEL_ID,
         provider_profile=TEST_PROVIDER_ID,
     )
-    assert list_story_facts(session, novel_id) == []
+    assert _story_facts(session, novel_id) == []
 
     committed = commit_intelligence_items(
         session,
@@ -1926,10 +2130,56 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
         accepted_item_ids=[UUID(proposal["items"][0]["id"])],
     )
     assert committed["state"] == "partially_accepted"
-    facts = list_story_facts(session, novel_id)
+    facts = _story_facts(session, novel_id)
     assert len(facts) == 1
     assert facts[0]["subject"] == "信封邮戳"
     assert facts[0]["source_revision_id"] == adopted["revision"]["id"]
+
+
+def test_intelligence_no_changes_keeps_a_named_character_out_of_the_ledger(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-情报无变化")
+    novel_id = UUID(novel["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    create_novel_character(
+        session,
+        novel_id,
+        role_type="main",
+        name="沈砚",
+        description="声音修复师",
+        details={},
+    )
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=1,
+        content_markdown="沈砚核对完旧磁带编号，把记录本合上。",
+    )
+    revision = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )["revision"]
+    proposal = start_intelligence_proposal(
+        session,
+        document_id,
+        revision_id=UUID(revision["id"]),
+    )
+    ledger_before = session.get(Novel, novel_id).story_ledger_version
+
+    completed = complete_intelligence_proposal(
+        session,
+        UUID(proposal["id"]),
+        items=[],
+        actual_model_id=TEST_MODEL_ID,
+        provider_profile=TEST_PROVIDER_ID,
+    )
+
+    assert completed["state"] == "ready"
+    assert completed["items"] == []
+    assert _story_facts(session, novel_id) == []
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before
 
 
 def test_restore_reactivates_target_facts_without_duplicate_commits(
@@ -1992,9 +2242,13 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
         expected_draft_version=current["draft_version"],
         content_markdown="版本 B：银色怀表埋在旧桥下。",
     )
-    revision_b = create_checkpoint(
+    ledger_before_checkpoint_b = session.get(Novel, novel_id).story_ledger_version
+    checkpoint_b = create_checkpoint(
         session, document_id, expected_draft_version=saved_b["draft_version"]
-    )["revision"]
+    )
+    revision_b = checkpoint_b["revision"]
+    assert checkpoint_b["reconciliation"]["changed"] is True
+    assert checkpoint_b["story_ledger_version"] == ledger_before_checkpoint_b + 1
     proposal_b = start_intelligence_proposal(
         session, document_id, revision_id=UUID(revision_b["id"])
     )
@@ -2021,8 +2275,22 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
         accepted_item_ids=[UUID(proposal_b["items"][0]["id"])],
     )
 
-    before_restore = {fact["subject"]: fact["status"] for fact in list_story_facts(session, novel_id)}
-    assert before_restore == {"怀表": "active", "车票": "source_superseded"}
+    before_restore = {
+        fact["subject"]: fact["status"] for fact in _story_facts(session, novel_id)
+    }
+    assert before_restore == {"怀表": "active", "车票": "active"}
+    before_binding_state = {
+        fact.subject: binding.validity_state
+        for binding, fact in session.execute(
+            select(DerivedSourceBinding, StoryFact)
+            .join(StoryFact, StoryFact.id == DerivedSourceBinding.derived_entity_id)
+            .where(StoryFact.novel_id == novel_id)
+        ).all()
+    }
+    assert before_binding_state == {
+        "怀表": "current",
+        "车票": "source_superseded",
+    }
 
     preview = preview_restore_revision(session, document_id, UUID(revision_a["id"]))
     assert [fact["subject"] for fact in preview["will_deactivate"]] == ["怀表"]
@@ -2040,6 +2308,7 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
     session.rollback()
     assert get_document(session, document_id)["base_revision_id"] == revision_b["id"]
 
+    ledger_before_restore = session.get(Novel, novel_id).story_ledger_version
     restored = restore_revision(
         session,
         document_id,
@@ -2048,8 +2317,24 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
         expected_fact_plan_hash=preview["fact_plan_hash"],
     )
     assert restored["revision"]["restored_from_revision_id"] == revision_a["id"]
-    after_restore = {fact["subject"]: fact["status"] for fact in list_story_facts(session, novel_id)}
-    assert after_restore == {"怀表": "source_superseded", "车票": "source_restored"}
+    assert restored["reconciliation"]["changed"] is True
+    assert restored["story_ledger_version"] == ledger_before_restore + 1
+    after_restore = {
+        fact["subject"]: fact["status"] for fact in _story_facts(session, novel_id)
+    }
+    assert after_restore == {"怀表": "active", "车票": "active"}
+    after_binding_state = {
+        fact.subject: binding.validity_state
+        for binding, fact in session.execute(
+            select(DerivedSourceBinding, StoryFact)
+            .join(StoryFact, StoryFact.id == DerivedSourceBinding.derived_entity_id)
+            .where(StoryFact.novel_id == novel_id)
+        ).all()
+    }
+    assert after_binding_state == {
+        "怀表": "source_superseded",
+        "车票": "source_restored",
+    }
     assert [fact["subject"] for fact in get_novel_context(session, novel_id)["story_facts"]] == ["车票"]
     assert session.scalar(
         select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
@@ -2062,13 +2347,16 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
     ) == 2
 
     second_preview = preview_restore_revision(session, document_id, UUID(revision_a["id"]))
-    restore_revision(
+    ledger_before_replay = session.get(Novel, novel_id).story_ledger_version
+    replayed_restore = restore_revision(
         session,
         document_id,
         UUID(revision_a["id"]),
         expected_draft_version=second_preview["expected_draft_version"],
         expected_fact_plan_hash=second_preview["fact_plan_hash"],
     )
+    assert replayed_restore["reconciliation"]["changed"] is False
+    assert session.get(Novel, novel_id).story_ledger_version == ledger_before_replay
     assert session.scalar(
         select(func.count(StoryFact.id)).where(StoryFact.novel_id == novel_id)
     ) == 2
@@ -2295,12 +2583,14 @@ def test_outline_completion_materializes_roles_and_updates_main_storyline(
         plot_text="两人从互相试探到共同改变家庭命运。",
         highlight_text="重返一九八八，把错过的青春重新写一遍。",
     )
+    ledger_before = session.get(Novel, novel_id).story_ledger_version
     first = complete_outline_draft(
         session,
         novel_id,
         expected_version=outline["version"],
     )
     assert first["novel"]["outline_target_chapters"] == 10
+    assert first["novel"]["story_ledger_version"] == ledger_before + 1
     assert [item["name"] for item in first["characters"]] == ["林知夏", "顾明川"]
     lead_instance = session.scalar(
         select(CharacterInstance).where(
@@ -2918,6 +3208,7 @@ def test_cover_settings_and_narrative_foreshadow_progress_persist(
     assert text_cover["cover_mode"] == "text"
     assert text_cover["cover_image_data"] == ""
 
+    ledger_before_create = get_novel(session, novel_id)["story_ledger_version"]
     created = create_foreshadow(
         session,
         novel_id,
@@ -2926,6 +3217,7 @@ def test_cover_settings_and_narrative_foreshadow_progress_persist(
         latest_progress="第一章确认录音来自明日。",
     )
     assert created["latest_progress"] == "第一章确认录音来自明日。"
+    assert created["story_ledger_version"] == ledger_before_create + 1
     changed = update_foreshadow(
         session,
         novel_id,
@@ -2938,6 +3230,21 @@ def test_cover_settings_and_narrative_foreshadow_progress_persist(
         progress=30,
     )
     assert changed["latest_progress"] == "第五章确认录音与旧案重合。"
+    assert changed["story_ledger_version"] == ledger_before_create + 2
+    unchanged = update_foreshadow(
+        session,
+        novel_id,
+        UUID(created["id"]),
+        expected_version=changed["version"],
+        title=changed["title"],
+        content=changed["content"],
+        latest_progress=changed["latest_progress"],
+        status=changed["planning_status"],
+        progress=changed["planning_progress"],
+    )
+    assert unchanged["changed"] is False
+    assert unchanged["version"] == changed["version"]
+    assert unchanged["story_ledger_version"] == changed["story_ledger_version"]
     assert list_foreshadows(session, novel_id)[0]["latest_progress"] == changed["latest_progress"]
 
 
@@ -3243,3 +3550,237 @@ def test_volume_chapter_reorder_delete_guard_and_export_structure(
             expected_version=remaining["version"],
         )
     session.rollback()
+
+
+def test_ledger_visible_root_and_source_writers_advance_once_and_noop_zero(
+    session: Session,
+) -> None:
+    novel = create_novel(session, "pytest-账本写命令矩阵")
+    novel_id = UUID(novel["id"])
+
+    character = create_novel_character(
+        session,
+        novel_id,
+        role_type="supporting",
+        name="档案管理员",
+        description="负责保管旧案卷宗。",
+        details={},
+    )
+    novel_row = session.get(Novel, novel_id)
+    assert novel_row is not None
+    character_ledger = novel_row.story_ledger_version
+    character_catalog = novel_row.character_catalog_version
+    archived_character = delete_novel_character(
+        session,
+        novel_id,
+        UUID(character["id"]),
+        expected_version=character["version"],
+    )
+    assert archived_character["changed"] is True
+    assert archived_character["story_ledger_version"] == character_ledger + 1
+    assert novel_row.character_catalog_version == character_catalog + 1
+    archive_revision = session.scalar(
+        select(NovelCharacterRevision).where(
+            NovelCharacterRevision.character_id == UUID(character["id"]),
+            NovelCharacterRevision.lifecycle_state == "archived",
+        )
+    )
+    assert archive_revision is not None
+    archived_character_replay = delete_novel_character(
+        session,
+        novel_id,
+        UUID(character["id"]),
+        expected_version=character["version"],
+    )
+    assert archived_character_replay["changed"] is False
+    assert archived_character_replay["replayed"] is True
+    assert archived_character_replay["story_ledger_version"] == character_ledger + 1
+
+    ledger = get_novel(session, novel_id)["story_ledger_version"]
+    storyline = create_storyline(
+        session,
+        novel_id,
+        storyline_type="main",
+        title="追查旧案",
+        description="主角开始追查旧案。",
+    )
+    assert storyline["story_ledger_version"] == ledger + 1
+    storyline_noop = update_storyline(
+        session,
+        novel_id,
+        UUID(storyline["id"]),
+        expected_version=storyline["version"],
+        storyline_type=storyline["storyline_type"],
+        title=storyline["title"],
+        description=storyline["description"],
+        status=storyline["planning_status"],
+        progress=storyline["planning_progress"],
+    )
+    assert storyline_noop["changed"] is False
+    assert storyline_noop["story_ledger_version"] == ledger + 1
+    storyline_changed = update_storyline(
+        session,
+        novel_id,
+        UUID(storyline["id"]),
+        expected_version=storyline["version"],
+        storyline_type=storyline["storyline_type"],
+        title=storyline["title"],
+        description="主角确认旧案与现在的失踪事件相关。",
+        status="active",
+        progress=20,
+    )
+    assert storyline_changed["story_ledger_version"] == ledger + 2
+    archived = delete_storyline(
+        session,
+        novel_id,
+        UUID(storyline["id"]),
+        expected_version=storyline_changed["version"],
+    )
+    assert archived["changed"] is True
+    assert archived["story_ledger_version"] == ledger + 3
+    storyline_row = session.get(Storyline, UUID(storyline["id"]))
+    assert storyline_row is not None and storyline_row.status == "archived"
+    archived_noop = delete_storyline(
+        session,
+        novel_id,
+        storyline_row.id,
+        expected_version=storyline_row.version,
+    )
+    assert archived_noop["changed"] is False
+    assert archived_noop["story_ledger_version"] == ledger + 3
+
+    foreshadow = create_foreshadow(
+        session,
+        novel_id,
+        title="旧钥匙",
+        content="钥匙来自已封存的档案室。",
+        latest_progress="尚未揭示",
+    )
+    dropped = delete_foreshadow(
+        session,
+        novel_id,
+        UUID(foreshadow["id"]),
+        expected_version=foreshadow["version"],
+    )
+    assert dropped["changed"] is True
+    foreshadow_row = session.get(Foreshadow, UUID(foreshadow["id"]))
+    assert foreshadow_row is not None and foreshadow_row.status == "dropped"
+
+    first_volume_id = UUID(novel["tree"][0]["id"])
+    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document = get_document(session, document_id)
+    saved = save_draft(
+        session,
+        document_id,
+        expected_draft_version=document["draft_version"],
+        content_markdown=_long_chapter("第一章留下权威来源。"),
+    )
+    checkpoint = create_checkpoint(
+        session,
+        document_id,
+        expected_draft_version=saved["draft_version"],
+    )
+    source_fact = StoryFact(
+        novel_id=novel_id,
+        fact_type="general_fact",
+        subject="旧钥匙",
+        predicate="来源",
+        object_text="档案室",
+        details={"schema_version": "general-fact/1", "value": "档案室"},
+        source_revision_id=UUID(checkpoint["revision"]["id"]),
+        source_document_id=document_id,
+        schema_version="story-fact/2",
+        status="active",
+    )
+    session.add(source_fact)
+    session.commit()
+
+    source_ledger = get_novel(session, novel_id)["story_ledger_version"]
+    same_document = update_document_metadata(
+        session,
+        novel_id,
+        document_id,
+        expected_version=checkpoint["document"]["version"],
+        title=checkpoint["document"]["title"],
+    )
+    assert same_document["changed"] is False
+    assert same_document["story_ledger_version"] == source_ledger
+    renamed_document = update_document_metadata(
+        session,
+        novel_id,
+        document_id,
+        expected_version=same_document["version"],
+        title="权威来源章",
+    )
+    assert renamed_document["changed"] is True
+    assert renamed_document["story_ledger_version"] == source_ledger + 1
+    with pytest.raises(ValidationError, match="故事账本的权威来源"):
+        delete_document(
+            session,
+            novel_id,
+            document_id,
+            expected_version=renamed_document["version"],
+        )
+    session.rollback()
+    assert session.get(Document, document_id) is not None
+
+    first_volume = session.get(Volume, first_volume_id)
+    assert first_volume is not None
+    volume_ledger = get_novel(session, novel_id)["story_ledger_version"]
+    same_volume = update_volume(
+        session,
+        novel_id,
+        first_volume_id,
+        expected_version=first_volume.version,
+        title=first_volume.title,
+    )
+    assert same_volume["changed"] is False
+    renamed_volume = update_volume(
+        session,
+        novel_id,
+        first_volume_id,
+        expected_version=same_volume["version"],
+        title="来源卷",
+    )
+    assert renamed_volume["story_ledger_version"] == volume_ledger + 1
+
+    second_document = create_document(
+        session,
+        novel_id,
+        "第二章",
+        volume_id=first_volume_id,
+    )
+    chapter_ledger = get_novel(session, novel_id)["story_ledger_version"]
+    reordered_chapters = reorder_chapters(
+        session,
+        novel_id,
+        ordered_document_ids=[UUID(second_document["id"]), document_id],
+        volume_by_document={},
+    )
+    assert reordered_chapters[0]["changed"] is True
+    assert reordered_chapters[0]["story_ledger_version"] == chapter_ledger + 1
+    repeated_chapters = reorder_chapters(
+        session,
+        novel_id,
+        ordered_document_ids=[UUID(second_document["id"]), document_id],
+        volume_by_document={},
+    )
+    assert repeated_chapters[0]["changed"] is False
+    assert repeated_chapters[0]["story_ledger_version"] == chapter_ledger + 1
+
+    second_volume = create_volume(session, novel_id, "第二卷")
+    volume_order_ledger = get_novel(session, novel_id)["story_ledger_version"]
+    reordered_volumes = reorder_volumes(
+        session,
+        novel_id,
+        ordered_volume_ids=[UUID(second_volume["id"]), first_volume_id],
+    )
+    assert reordered_volumes[0]["changed"] is True
+    assert reordered_volumes[0]["story_ledger_version"] == volume_order_ledger + 1
+    repeated_volumes = reorder_volumes(
+        session,
+        novel_id,
+        ordered_volume_ids=[UUID(second_volume["id"]), first_volume_id],
+    )
+    assert repeated_volumes[0]["changed"] is False
+    assert repeated_volumes[0]["story_ledger_version"] == volume_order_ledger + 1

@@ -30,7 +30,7 @@ def test_repository_unique_head_uses_the_canonical_repository_only() -> None:
     chain = _linear_repository_chain(str(ALEMBIC_CONFIG_PATH.resolve()))
 
     assert chain[-1] == REPOSITORY_BASE_REVISION
-    assert repository_unique_head() == chain[0] == "20260901_0036"
+    assert repository_unique_head() == chain[0] == "20260902_0038"
     assert repository_head_or_fail() == chain[0]
 
 
@@ -43,8 +43,8 @@ def test_current_schema_gate_requires_an_exact_database_head() -> None:
             return self.revision
 
     assert assert_database_at_repository_head(  # type: ignore[arg-type]
-        FakeConnection("20260901_0036")
-    ) == "20260901_0036"
+        FakeConnection("20260902_0038")
+    ) == "20260902_0038"
     with pytest.raises(AssertionError, match="does not match repository"):
         assert_database_at_repository_head(  # type: ignore[arg-type]
             FakeConnection("20260830_0035")
@@ -65,11 +65,25 @@ def test_minimum_and_known_linear_descendants_are_accepted() -> None:
     assert database_revision_satisfies(
         ("20260901_0036",), minimum_revision=MINIMUM
     )
+    assert database_revision_satisfies(
+        ("20260902_0037",), minimum_revision=MINIMUM
+    )
+    assert database_revision_satisfies(
+        ("20260902_0038",), minimum_revision=MINIMUM
+    )
 
 
 def test_character_cast_requires_0036_or_a_known_linear_descendant() -> None:
     assert database_revision_satisfies(
         ("20260901_0036",),
+        minimum_revision=CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
+    )
+    assert database_revision_satisfies(
+        ("20260902_0037",),
+        minimum_revision=CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
+    )
+    assert database_revision_satisfies(
+        ("20260902_0038",),
         minimum_revision=CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
     )
     assert not database_revision_satisfies(
@@ -134,6 +148,12 @@ def test_repository_chain_is_resolved_from_the_config_not_process_cwd(
         str(ALEMBIC_CONFIG_PATH.resolve())
     )
     assert "20260901_0036" in _linear_repository_chain(
+        str(ALEMBIC_CONFIG_PATH.resolve())
+    )
+    assert "20260902_0037" in _linear_repository_chain(
+        str(ALEMBIC_CONFIG_PATH.resolve())
+    )
+    assert "20260902_0038" in _linear_repository_chain(
         str(ALEMBIC_CONFIG_PATH.resolve())
     )
     assert database_revision_satisfies(

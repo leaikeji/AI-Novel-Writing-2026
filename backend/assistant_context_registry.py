@@ -38,13 +38,15 @@ CONTEXT_SCHEMA_VERSION = 2
 CONTEXT_SNAPSHOT_MAX_TTL = timedelta(minutes=20)
 CONTEXT_MAX_CLOCK_SKEW = timedelta(seconds=60)
 SELECTION_CONTEXT_MAX_CHARACTERS = 1_500
+STORY_LEDGER_CONTEXT_SCHEMA = "story-ledger-assistant-context/1"
+STORY_LEDGER_CONTEXT_MAX_CODE_POINTS = 6_000
 
 
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _CONTEXT_REF_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 _PAGE_SECTIONS = frozenset(
-    {"chapters", "outline", "roles", "clues", "settings"},
+    {"chapters", "outline", "roles", "clues", "settings", "ledger"},
 )
 _PAGE_VIEWS = frozenset(
     {
@@ -61,6 +63,7 @@ _PAGE_VIEWS = frozenset(
         "storyline-editor",
         "foreshadow-editor",
         "novel-settings",
+        "story-ledger",
     },
 )
 _ENTITY_TYPES = frozenset(
@@ -488,6 +491,272 @@ def _validate_budget(value: object) -> bool:
     )
 
 
+def _nullable_bounded_string(value: object, maximum: int) -> bool:
+    return value is None or _bounded_string(value, 0, maximum)
+
+
+def _bounded_string_list(
+    value: object,
+    *,
+    maximum_items: int,
+    maximum_characters: int,
+    require_non_empty: bool = False,
+) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) <= maximum_items
+        and all(
+            _bounded_string(
+                item,
+                1 if require_non_empty else 0,
+                maximum_characters,
+            )
+            for item in value
+        )
+    )
+
+
+def _bounded_count_record(
+    value: object,
+    *,
+    maximum_entries: int,
+) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and len(value) <= maximum_entries
+        and all(
+            _bounded_string(key, 1, 80)
+            and _safe_integer(count)
+            for key, count in value.items()
+        )
+    )
+
+
+def _validate_story_ledger_source(value: object) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, Mapping) or not _only_keys(
+        value,
+        required=frozenset(
+            {
+                "document_id",
+                "document_title",
+                "revision_id",
+                "revision_is_current",
+                "coordinate_version",
+                "source_start",
+                "source_end",
+                "range_hash",
+            },
+        ),
+    ):
+        return False
+    start = value.get("source_start")
+    end = value.get("source_end")
+    coordinate_version = value.get("coordinate_version")
+    return (
+        _nullable_bounded_string(value.get("document_id"), 128)
+        and _nullable_bounded_string(value.get("document_title"), 240)
+        and _nullable_bounded_string(value.get("revision_id"), 128)
+        and (
+            value.get("revision_is_current") is None
+            or isinstance(value.get("revision_is_current"), bool)
+        )
+        and coordinate_version in {None, "unicode-codepoint-v1"}
+        and (start is None or _safe_integer(start))
+        and (end is None or _safe_integer(end))
+        and _nullable_bounded_string(value.get("range_hash"), 64)
+        and ((start is None) == (end is None))
+        and ((coordinate_version is None) == (start is None))
+        and (start is None or end is None or end >= start)
+    )
+
+
+def _validate_story_ledger_selected_fact(value: object) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, Mapping) or not _only_keys(
+        value,
+        required=frozenset(
+            {
+                "id",
+                "fact_type",
+                "entity_labels",
+                "predicate",
+                "object_text",
+                "object_text_truncated",
+                "effective_state",
+                "health",
+                "effective_reason_codes",
+                "health_reason_codes",
+                "source",
+            },
+        ),
+    ):
+        return False
+    return (
+        _bounded_string(value.get("id"), 1, 128)
+        and _bounded_string(value.get("fact_type"), 1, 80)
+        and _bounded_string_list(
+            value.get("entity_labels"),
+            maximum_items=6,
+            maximum_characters=120,
+        )
+        and _bounded_string(value.get("predicate"), 0, 240)
+        and _bounded_string(value.get("object_text"), 0, 1_800)
+        and isinstance(value.get("object_text_truncated"), bool)
+        and _bounded_string(value.get("effective_state"), 1, 40)
+        and _bounded_string(value.get("health"), 1, 40)
+        and _bounded_string_list(
+            value.get("effective_reason_codes"),
+            maximum_items=8,
+            maximum_characters=64,
+        )
+        and _bounded_string_list(
+            value.get("health_reason_codes"),
+            maximum_items=8,
+            maximum_characters=64,
+        )
+        and _validate_story_ledger_source(value.get("source"))
+    )
+
+
+def _story_ledger_json_code_points(value: Mapping[str, object]) -> int | None:
+    try:
+        serialized = json.dumps(
+            dict(value),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        return None
+    return len(serialized)
+
+
+def _validate_story_ledger_context(value: object) -> bool:
+    if not isinstance(value, Mapping) or not _only_keys(
+        value,
+        required=frozenset(
+            {
+                "schema_version",
+                "novel",
+                "ledger_snapshot_token",
+                "timeline",
+                "filters",
+                "summary",
+                "selected_fact_id",
+                "selected_fact",
+                "budget",
+            },
+        ),
+    ):
+        return False
+    novel = value.get("novel")
+    timeline = value.get("timeline")
+    filters = value.get("filters")
+    summary = value.get("summary")
+    selected_fact_id = value.get("selected_fact_id")
+    selected_fact = value.get("selected_fact")
+    budget = value.get("budget")
+    if (
+        value.get("schema_version") != STORY_LEDGER_CONTEXT_SCHEMA
+        or not isinstance(novel, Mapping)
+        or not _only_keys(novel, required=frozenset({"id", "title"}))
+        or not _bounded_string(novel.get("id"), 1, 128)
+        or not _bounded_string(novel.get("title"), 0, 240)
+        or not _bounded_string(value.get("ledger_snapshot_token"), 1, 512)
+        or not isinstance(timeline, Mapping)
+        or not _only_keys(timeline, required=frozenset({"id", "name"}))
+        or not _nullable_bounded_string(timeline.get("id"), 128)
+        or not _nullable_bounded_string(timeline.get("name"), 160)
+        or not isinstance(filters, Mapping)
+        or not _only_keys(
+            filters,
+            required=frozenset(
+                {
+                    "fact_types",
+                    "effective_state",
+                    "health",
+                    "dimension",
+                    "source_document_id",
+                    "commit_batch_id",
+                    "fact_timeline_id",
+                    "entity_type",
+                    "entity_id",
+                    "review_only",
+                },
+            ),
+        )
+        or not _bounded_string_list(
+            filters.get("fact_types"),
+            maximum_items=8,
+            maximum_characters=80,
+        )
+        or not _nullable_bounded_string(filters.get("effective_state"), 40)
+        or not _nullable_bounded_string(filters.get("health"), 40)
+        or not _nullable_bounded_string(filters.get("dimension"), 80)
+        or not _nullable_bounded_string(filters.get("source_document_id"), 128)
+        or not _nullable_bounded_string(filters.get("commit_batch_id"), 128)
+        or not _nullable_bounded_string(filters.get("fact_timeline_id"), 128)
+        or not _nullable_bounded_string(filters.get("entity_type"), 40)
+        or not _nullable_bounded_string(filters.get("entity_id"), 128)
+        or not isinstance(filters.get("review_only"), bool)
+        or not isinstance(summary, Mapping)
+        or not _only_keys(
+            summary,
+            required=frozenset(
+                {
+                    "total",
+                    "review_required",
+                    "by_fact_type",
+                    "by_effective_state",
+                    "by_health",
+                },
+            ),
+        )
+        or not _safe_integer(summary.get("total"))
+        or not _safe_integer(summary.get("review_required"))
+        or not _bounded_count_record(
+            summary.get("by_fact_type"), maximum_entries=16
+        )
+        or not _bounded_count_record(
+            summary.get("by_effective_state"), maximum_entries=8
+        )
+        or not _bounded_count_record(
+            summary.get("by_health"), maximum_entries=8
+        )
+        or not (
+            selected_fact_id is None
+            or _bounded_string(selected_fact_id, 1, 128)
+        )
+        or not _validate_story_ledger_selected_fact(selected_fact)
+        or (
+            isinstance(selected_fact, Mapping)
+            and selected_fact.get("id") != selected_fact_id
+        )
+        or not isinstance(budget, Mapping)
+        or not _only_keys(
+            budget,
+            required=frozenset(
+                {"max_code_points", "used_code_points", "truncated"},
+            ),
+        )
+        or budget.get("max_code_points")
+        != STORY_LEDGER_CONTEXT_MAX_CODE_POINTS
+        or not _safe_integer(budget.get("used_code_points"))
+        or not isinstance(budget.get("truncated"), bool)
+    ):
+        return False
+    code_points = _story_ledger_json_code_points(value)
+    return (
+        code_points is not None
+        and code_points <= STORY_LEDGER_CONTEXT_MAX_CODE_POINTS
+        and budget.get("used_code_points") == code_points
+    )
+
+
 def _validate_snapshot(
     snapshot: Mapping[str, object],
     binding: ContextRefBinding,
@@ -508,7 +777,14 @@ def _validate_snapshot(
             },
         ),
         optional=frozenset(
-            {"sessionId", "entity", "document", "editing", "selection"},
+            {
+                "sessionId",
+                "entity",
+                "document",
+                "ledger",
+                "editing",
+                "selection",
+            },
         ),
     ):
         raise ContextRefCreateError(
@@ -577,12 +853,33 @@ def _validate_snapshot(
         page.get("section") not in _PAGE_SECTIONS
         or page.get("view") not in _PAGE_VIEWS
         or (
+            (page.get("section") == "ledger")
+            != (page.get("view") == "story-ledger")
+        )
+        or (
             "modal" in page
             and page.get("modal") not in _PAGE_VIEWS
         )
     ):
         raise ContextRefCreateError(
             ContextRefCreateErrorCode.INVALID_SNAPSHOT,
+        )
+
+    ledger = snapshot.get("ledger")
+    is_ledger_page = (
+        page.get("section") == "ledger"
+        and page.get("view") == "story-ledger"
+    )
+    if is_ledger_page != ("ledger" in snapshot) or (
+        "ledger" in snapshot
+        and not _validate_story_ledger_context(ledger)
+    ):
+        raise ContextRefCreateError(
+            ContextRefCreateErrorCode.INVALID_SNAPSHOT,
+        )
+    if isinstance(ledger, Mapping) and ledger.get("novel") != novel:
+        raise ContextRefCreateError(
+            ContextRefCreateErrorCode.INVALID_BINDING,
         )
 
     document = snapshot.get("document")

@@ -19,6 +19,7 @@ from backend.assistant_context_registry import (
     CONTEXT_REF_MAX_PROCESS,
     CONTEXT_REF_MAX_REQUEST_BYTES,
     CONTEXT_REF_OWNER_RATE_LIMIT,
+    STORY_LEDGER_CONTEXT_MAX_CODE_POINTS,
     ContextRefBinding,
     ContextRefCreateError,
     ContextRefCreateErrorCode,
@@ -116,6 +117,87 @@ def valid_snapshot(
     return snapshot
 
 
+def story_ledger_context(scope: ContextRefBinding) -> dict[str, object]:
+    value: dict[str, object] = {
+        "schema_version": "story-ledger-assistant-context/1",
+        "novel": {"id": scope.novel_id, "title": "潮声替我说晚安"},
+        "ledger_snapshot_token": "snapshot-token-1",
+        "timeline": {"id": "timeline-1", "name": "主线"},
+        "filters": {
+            "fact_types": ["character_state"],
+            "effective_state": "current",
+            "health": "ok",
+            "dimension": None,
+            "source_document_id": None,
+            "commit_batch_id": None,
+            "fact_timeline_id": None,
+            "entity_type": None,
+            "entity_id": None,
+            "review_only": False,
+        },
+        "summary": {
+            "total": 1,
+            "review_required": 0,
+            "by_fact_type": {"character_state": 1},
+            "by_effective_state": {"current": 1},
+            "by_health": {"ok": 1},
+        },
+        "selected_fact_id": "fact-1",
+        "selected_fact": {
+            "id": "fact-1",
+            "fact_type": "character_state",
+            "entity_labels": [],
+            "predicate": "",
+            "object_text": "",
+            "object_text_truncated": False,
+            "effective_state": "current",
+            "health": "ok",
+            "effective_reason_codes": [],
+            "health_reason_codes": [],
+            "source": None,
+        },
+        "budget": {
+            "max_code_points": STORY_LEDGER_CONTEXT_MAX_CODE_POINTS,
+            "used_code_points": 0,
+            "truncated": False,
+        },
+    }
+    budget = value["budget"]
+    assert isinstance(budget, dict)
+    for _ in range(8):
+        used = len(
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+        if budget["used_code_points"] == used:
+            break
+        budget["used_code_points"] = used
+    assert budget["used_code_points"] == len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+    )
+    return value
+
+
+def valid_story_ledger_snapshot(
+    scope: ContextRefBinding,
+) -> dict[str, object]:
+    value = valid_snapshot(scope)
+    value.pop("document", None)
+    value.pop("editing", None)
+    value["page"] = {"section": "ledger", "view": "story-ledger"}
+    value["ledger"] = story_ledger_context(scope)
+    return value
+
+
 def selection(now: datetime = NOW, *, text: str = "需要润色的句子") -> dict[str, object]:
     return {
         "id": "selection-1",
@@ -179,6 +261,78 @@ def test_create_uses_256_bit_web_safe_ref_and_returns_defensive_snapshots() -> N
         "section": "chapters",
         "view": "chapter-editor",
     }
+
+
+def test_story_ledger_context_is_strictly_accepted_and_leased() -> None:
+    registry = AssistantContextRefRegistry(clock=MutableClock())
+    scope = binding(document_id=None)
+    created = registry.create(
+        binding=scope,
+        snapshot=valid_story_ledger_snapshot(scope),
+    )
+
+    leased = registry.lease(created.context_ref, binding=scope)
+
+    assert leased.accepted
+    assert leased.snapshot is not None
+    assert leased.snapshot["page"] == {
+        "section": "ledger",
+        "view": "story-ledger",
+    }
+    assert leased.snapshot["ledger"]["schema_version"] == (
+        "story-ledger-assistant-context/1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (
+            lambda value: value["ledger"].update(
+                source_excerpt="must never enter the context"
+            ),
+            ContextRefCreateErrorCode.INVALID_SNAPSHOT,
+        ),
+        (
+            lambda value: value["page"].update(view="chapter-editor"),
+            ContextRefCreateErrorCode.INVALID_SNAPSHOT,
+        ),
+        (
+            lambda value: value.pop("ledger"),
+            ContextRefCreateErrorCode.INVALID_SNAPSHOT,
+        ),
+        (
+            lambda value: value["ledger"]["budget"].update(
+                used_code_points=(
+                    value["ledger"]["budget"]["used_code_points"] + 1
+                ),
+            ),
+            ContextRefCreateErrorCode.INVALID_SNAPSHOT,
+        ),
+        (
+            lambda value: value["ledger"]["selected_fact"].update(id="fact-2"),
+            ContextRefCreateErrorCode.INVALID_SNAPSHOT,
+        ),
+        (
+            lambda value: value["ledger"]["novel"].update(id="novel-2"),
+            ContextRefCreateErrorCode.INVALID_BINDING,
+        ),
+    ],
+)
+def test_story_ledger_context_rejects_unpaired_or_unapproved_payloads(
+    mutation: object,
+    expected: ContextRefCreateErrorCode,
+) -> None:
+    registry = AssistantContextRefRegistry(clock=MutableClock())
+    scope = binding(document_id=None)
+    payload = valid_story_ledger_snapshot(scope)
+    assert callable(mutation)
+    mutation(payload)
+
+    assert_create_error(
+        expected,
+        lambda: registry.create(binding=scope, snapshot=payload),
+    )
 
 
 def test_first_lease_is_idempotent_for_30_seconds_then_deleted() -> None:
@@ -531,7 +685,7 @@ def test_selection_shape_anchor_and_lifetime_are_validated(
 
 @pytest.mark.parametrize(
     "field_name",
-    ["sessionId", "entity", "document", "editing", "selection"],
+    ["sessionId", "entity", "document", "ledger", "editing", "selection"],
 )
 def test_optional_schema_fields_reject_explicit_null(field_name: str) -> None:
     scope = binding(

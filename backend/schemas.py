@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateNovelRequest(BaseModel):
@@ -66,5 +66,13 @@ class ReviewIntelligenceItemRequest(BaseModel):
 
 
 class CommitIntelligenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     accepted_item_ids: list[UUID] = Field(min_length=1, max_length=200)
-    item_overrides: dict[str, dict[str, object]] = Field(default_factory=dict)
+    expected_story_ledger_version: int | None = Field(default=None, ge=1)
+    operation_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=120,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )

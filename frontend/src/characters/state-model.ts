@@ -1,109 +1,38 @@
 import type { JsonValue } from "./contracts";
+import type {
+  StoryLedgerFactCorrectionDraft,
+  StoryLedgerFactCorrectionTarget,
+  StoryLedgerFactFilters,
+  StoryLedgerFactStateItem,
+  StoryLedgerRiskSummary,
+} from "../story-ledger/state-model";
+import type {
+  StoryLedgerFactEffectiveState,
+  StoryLedgerFactHealth,
+} from "../story-ledger/contracts";
 
-export const FACT_EFFECTIVE_STATES = [
-  "current",
-  "historical",
-  "superseded",
-  "source_invalid",
-  "batch_reverted",
-] as const;
+export {
+  FACT_EFFECTIVE_STATE_LABELS,
+  FACT_HEALTH_LABELS,
+  createStoryLedgerFactCorrectionDraft as createCharacterFactCorrectionDraft,
+  filterStoryLedgerFacts as filterCharacterFacts,
+  matchesStoryLedgerFactFilters as matchesCharacterFactFilters,
+  storyLedgerFactCorrectionErrors as characterFactCorrectionErrors,
+  summarizeStoryLedgerRisks as summarizeCharacterFactRisks,
+  updateStoryLedgerFactCorrectionDraft as updateCharacterFactCorrectionDraft,
+} from "../story-ledger/state-model";
+export {
+  STORY_LEDGER_EFFECTIVE_STATES as FACT_EFFECTIVE_STATES,
+  STORY_LEDGER_HEALTH_STATES as FACT_HEALTH_STATES,
+} from "../story-ledger/contracts";
 
-export type FactEffectiveState = (typeof FACT_EFFECTIVE_STATES)[number];
+export type FactEffectiveState = StoryLedgerFactEffectiveState;
 export type FactEffectiveStateFilter = "all" | FactEffectiveState;
-
-export const FACT_HEALTH_STATES = ["ok", "conflict", "ambiguous"] as const;
-export type FactHealth = (typeof FACT_HEALTH_STATES)[number];
+export type FactHealth = StoryLedgerFactHealth;
 export type FactHealthFilter = "all" | FactHealth;
-
-export interface CharacterFactStateItem {
-  readonly id: string;
-  readonly dimension: string;
-  readonly effective_state: FactEffectiveState;
-  readonly health: FactHealth;
-  readonly source_document_id: string | null;
-}
-
-export interface CharacterFactFilters {
-  readonly effectiveState: FactEffectiveStateFilter;
-  readonly health: FactHealthFilter;
-  readonly dimension?: string | null;
-  readonly sourceDocumentId?: string | null;
-}
-
-export interface CharacterFactRiskSummary {
-  readonly actionableCount: number;
-  readonly conflictCount: number;
-  readonly ambiguousCount: number;
-  readonly invalidSourceCount: number;
-}
-
-export const FACT_EFFECTIVE_STATE_LABELS: Readonly<Record<FactEffectiveState, string>> = {
-  current: "当前值",
-  historical: "历史变化",
-  superseded: "已被替代",
-  source_invalid: "来源失效",
-  batch_reverted: "已撤销同步",
-};
-
-export const FACT_HEALTH_LABELS: Readonly<Record<FactHealth, string>> = {
-  ok: "正常",
-  conflict: "冲突",
-  ambiguous: "不确定",
-};
-
-export function matchesCharacterFactFilters(
-  fact: CharacterFactStateItem,
-  filters: CharacterFactFilters,
-): boolean {
-  return (
-    (filters.effectiveState === "all" || fact.effective_state === filters.effectiveState)
-    && (filters.health === "all" || fact.health === filters.health)
-    && (!filters.dimension || fact.dimension === filters.dimension)
-    && (!filters.sourceDocumentId || fact.source_document_id === filters.sourceDocumentId)
-  );
-}
-
-export function filterCharacterFacts<T extends CharacterFactStateItem>(
-  facts: readonly T[],
-  filters: CharacterFactFilters,
-): readonly T[] {
-  return facts.filter((fact) => matchesCharacterFactFilters(fact, filters));
-}
-
-/**
- * A tab badge counts facts that need author attention, not history volume. One
- * fact is counted once even when, for example, it is both conflicted and has an
- * invalid source. Superseded and reverted facts remain auditable but are not
- * author to-dos.
- */
-export function summarizeCharacterFactRisks(
-  facts: readonly CharacterFactStateItem[],
-): CharacterFactRiskSummary {
-  const actionableIds = new Set<string>();
-  const conflictIds = new Set<string>();
-  const ambiguousIds = new Set<string>();
-  const invalidSourceIds = new Set<string>();
-
-  for (const fact of facts) {
-    if (fact.health === "conflict") conflictIds.add(fact.id);
-    if (fact.health === "ambiguous") ambiguousIds.add(fact.id);
-    if (fact.effective_state === "source_invalid") invalidSourceIds.add(fact.id);
-    if (
-      fact.health === "conflict"
-      || fact.health === "ambiguous"
-      || fact.effective_state === "source_invalid"
-    ) {
-      actionableIds.add(fact.id);
-    }
-  }
-
-  return {
-    actionableCount: actionableIds.size,
-    conflictCount: conflictIds.size,
-    ambiguousCount: ambiguousIds.size,
-    invalidSourceCount: invalidSourceIds.size,
-  };
-}
+export type CharacterFactStateItem = StoryLedgerFactStateItem;
+export type CharacterFactFilters = StoryLedgerFactFilters;
+export type CharacterFactRiskSummary = StoryLedgerRiskSummary;
 
 export interface CharacterRootEditableDetails {
   readonly gender: JsonValue;
@@ -267,63 +196,8 @@ export function characterProfileGroupCompletion(
   return { key, filled, total: fields.length, complete: filled === fields.length };
 }
 
-export interface CharacterFactCorrectionTarget {
-  readonly id: string;
-  readonly fact_type: string;
-  readonly timeline_id: string;
-  readonly character_id: string | null;
-  readonly character_instance_id: string | null;
-  readonly relationship_id: string | null;
-  readonly dimension: string;
-  readonly event_kind: string;
-  readonly predicate: string;
-  readonly object_text: string;
-  readonly details: Readonly<Record<string, JsonValue>>;
-}
-
-export interface CharacterFactCorrectionDraft extends CharacterFactCorrectionTarget {
-  readonly target_fact_id: string;
-  readonly reason: string;
-}
-
-export function createCharacterFactCorrectionDraft(
-  target: CharacterFactCorrectionTarget,
-): CharacterFactCorrectionDraft {
-  return {
-    ...target,
-    details: cloneJsonValue(target.details) as Readonly<Record<string, JsonValue>>,
-    target_fact_id: target.id,
-    reason: "",
-  };
-}
-
-export function updateCharacterFactCorrectionDraft(
-  draft: CharacterFactCorrectionDraft,
-  patch: Readonly<{
-    object_text?: string;
-    details?: Readonly<Record<string, JsonValue>>;
-    reason?: string;
-  }>,
-): CharacterFactCorrectionDraft {
-  return {
-    ...draft,
-    ...(patch.object_text === undefined ? {} : { object_text: patch.object_text }),
-    ...(patch.details === undefined
-      ? {}
-      : { details: cloneJsonValue(patch.details) as Readonly<Record<string, JsonValue>> }),
-    ...(patch.reason === undefined ? {} : { reason: patch.reason }),
-  };
-}
-
-export function characterFactCorrectionErrors(
-  draft: CharacterFactCorrectionDraft,
-): Readonly<Record<string, string>> {
-  const errors: Record<string, string> = {};
-  if (!draft.object_text.trim()) errors.object_text = "请填写替代事实";
-  if (!draft.reason.trim()) errors.reason = "请说明修正理由";
-  if (draft.reason.length > 1_000) errors.reason = "修正理由不能超过 1000 个字符";
-  return errors;
-}
+export type CharacterFactCorrectionTarget = StoryLedgerFactCorrectionTarget;
+export type CharacterFactCorrectionDraft = StoryLedgerFactCorrectionDraft;
 
 function isFilledProfileValue(value: unknown): boolean {
   if (value === null || value === undefined) return false;

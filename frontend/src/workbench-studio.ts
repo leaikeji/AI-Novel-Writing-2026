@@ -93,26 +93,50 @@ import {
   type ReadingScopeTarget,
   type ReadingSectionKey,
 } from "./narration";
-import { rememberWorkbenchRoleView } from "./workbench-route";
+import {
+  activeWorkbenchRoute,
+  normalizeWorkbenchLedgerRoute,
+  rememberWorkbenchLedgerLocation,
+  rememberWorkbenchRoleView,
+  replaceWorkbenchHistoryUrl,
+  workbenchLedgerPath,
+  workbenchLedgerRouteFromSearch,
+  type WorkbenchLedgerRoute,
+} from "./workbench-route";
 import { createNovelSemanticIndexCard } from "./embedding";
 import {
   createStoryTimelineWorkspace,
   type CharacterInstanceRecord,
+  type StoryTimelineContext,
+  type StoryTimelineLedgerSnapshot,
+  type StoryTimelineLedgerSnapshotSource,
   type StoryTimelineRecord,
   type TimelineIndexResource,
 } from "./story-timeline";
+import {
+  buildStoryLedgerAssistantContextFromWorkspace,
+  correctStoryLedgerFact,
+  createStoryLedgerWorkspace,
+  isAbortLike,
+  loadStoryLedgerBatchImpactPreview,
+  loadStoryLedgerFactImpactPreview,
+  loadStoryLedgerFactSource,
+  loadStoryLedgerSummary,
+  revertStoryLedgerBatch,
+  type StoryLedgerBatchImpactPreview,
+  type StoryLedgerFilters,
+  type StoryLedgerWorkspaceContext,
+} from "./story-ledger";
 import {
   createCharacterWorkspaceDialog,
   getCharacterWorkspacePortalContainer,
   type CharacterFactHistoryPageV2,
   type CharacterFactHistoryQueryV2,
-  type CharacterSourceRevisionV1,
   type CharacterWorkspaceSaveCommandV2,
-  type CharacterWorkspaceSelectionV1,
+  type CharacterWorkspaceSelection,
   type CharacterWorkspaceV2,
   type CharacterWorkspaceVoiceSlotProps,
   type IntelligenceBatchRevertCommandV1,
-  type IntelligenceBatchRevertImpactV1,
   type StoryFactCorrectionCommandV1,
 } from "./characters";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
@@ -181,9 +205,11 @@ const NarrationReadingPage = createNarrationReadingPage(React);
 const CharacterVoiceCardPanel = createCharacterVoiceCardPanel(React);
 const NovelSemanticIndexCard = createNovelSemanticIndexCard(React, host.antd);
 const StoryTimelineWorkspace = createStoryTimelineWorkspace(React, host.antd);
+const StoryLedgerWorkspace = createStoryLedgerWorkspace(React);
 
 
 export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings" | "reading";
+export type StudioWorkbenchSection = WorkbenchSection | "ledger";
 
 interface CharacterWorkspacePickerState {
   readonly character: NovelCharacterRecord;
@@ -194,14 +220,74 @@ interface CharacterWorkspacePickerState {
 }
 
 
-export const WORKBENCH_SECTIONS: readonly WorkbenchSection[] = [
+export const WORKBENCH_SECTIONS: readonly StudioWorkbenchSection[] = [
   "chapters",
   "outline",
   "roles",
   "clues",
   "settings",
   "reading",
+  "ledger",
 ] as const;
+
+
+export function studioSectionFromSearch(
+  search: string,
+  fallback: WorkbenchSection,
+  storedSection?: StudioWorkbenchSection,
+): StudioWorkbenchSection {
+  const querySection = new URLSearchParams(search).get("section");
+  if (querySection === "ledger") return "ledger";
+  if (querySection) return fallback;
+  return storedSection === "ledger" ? "ledger" : fallback;
+}
+
+
+export function studioDomainLoadIsCurrent(
+  generation: number,
+  currentGeneration: number,
+  signal: AbortSignal,
+): boolean {
+  return generation === currentGeneration && !signal.aborted;
+}
+
+
+export function studioOverlayVisibleWidth(
+  layout: AssistantWorkspaceLayout | undefined,
+): number | null {
+  if (!layout?.assistantOverlay) return null;
+  return Math.max(0, layout.containerWidth - layout.assistantWidth);
+}
+
+
+export function studioLedgerFiltersFromRoute(
+  route: WorkbenchLedgerRoute,
+): StoryLedgerFilters {
+  return {
+    ...(route.factType ? { factTypes: [route.factType] } : {}),
+    ...(route.effectiveState ? { effectiveState: route.effectiveState } : {}),
+    ...(route.health ? { health: route.health } : {}),
+    ...(route.sourceDocumentId ? { sourceDocumentId: route.sourceDocumentId } : {}),
+  };
+}
+
+
+export function studioLedgerRouteFromContext(
+  context: StoryLedgerWorkspaceContext,
+  fallbackTimelineId: string | null = null,
+): WorkbenchLedgerRoute {
+  const factTypes = context.filters.factTypes ?? [];
+  return normalizeWorkbenchLedgerRoute({
+    factId: context.selectedFactId ?? undefined,
+    timelineId: context.timeline?.timeline_id ?? fallbackTimelineId ?? undefined,
+    factType: factTypes.length === 1
+      ? factTypes[0] as WorkbenchLedgerRoute["factType"]
+      : undefined,
+    effectiveState: context.filters.effectiveState ?? undefined,
+    health: context.filters.health ?? undefined,
+    sourceDocumentId: context.filters.sourceDocumentId ?? undefined,
+  });
+}
 
 
 export const STUDIO_ASSISTANT_FIELD_IDS = {
@@ -378,13 +464,23 @@ export function mountStudioAssistantScope(
 
 export function studioAssistantPageEnvelope(
   novel: Pick<NovelRecord, "id" | "title">,
-  section: WorkbenchSection,
+  section: StudioWorkbenchSection,
   roleView: "list" | "graph" = "list",
+  ledgerContext?: NovelAssistantContextEnvelope["ledger"],
 ): NovelAssistantContextEnvelope | null {
   const base = {
     agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
     novel: { id: novel.id, title: novel.title },
   };
+  if (section === "ledger") {
+    if (!ledgerContext) return null;
+    return {
+      ...base,
+      page: { section: "ledger", view: "story-ledger" },
+      entity: { type: "novel", id: novel.id, title: novel.title },
+      ledger: ledgerContext,
+    };
+  }
   if (section === "outline") {
     return {
       ...base,
@@ -544,7 +640,7 @@ function field(label: string, control: unknown, hint?: string): unknown {
 }
 
 
-function sectionIcon(section: WorkbenchSection): any {
+function sectionIcon(section: StudioWorkbenchSection): any {
   return {
     chapters: FileTextOutlined,
     outline: UnorderedListOutlined,
@@ -552,11 +648,12 @@ function sectionIcon(section: WorkbenchSection): any {
     clues: BulbOutlined,
     settings: SettingOutlined,
     reading: SoundOutlined,
+    ledger: BookOutlined,
   }[section];
 }
 
 
-function sectionLabel(section: WorkbenchSection): string {
+function sectionLabel(section: StudioWorkbenchSection): string {
   return {
     chapters: "章节",
     outline: "大纲",
@@ -564,6 +661,7 @@ function sectionLabel(section: WorkbenchSection): string {
     clues: "线索",
     settings: "设定",
     reading: "朗读",
+    ledger: "账本",
   }[section];
 }
 
@@ -2343,7 +2441,43 @@ export function StudioProjectView({
   assistantWorkspaceLayout,
   selectionEditReviewHost: SelectionEditReviewHost,
 }: StudioProps) {
+  const overlayVisibleWidth = studioOverlayVisibleWidth(assistantWorkspaceLayout);
+  const activeRoute = activeWorkbenchRoute();
+  const storedLedgerRoute = activeRoute?.novelId === novel.id
+    && activeRoute.section === "ledger"
+    ? activeRoute.ledger ?? {}
+    : {};
+  const querySection = new URLSearchParams(window.location.search).get("section");
+  const initialLedgerRoute = querySection === "ledger"
+    ? workbenchLedgerRouteFromSearch(window.location.search)
+    : normalizeWorkbenchLedgerRoute(storedLedgerRoute);
+  const initialStudioSection = studioSectionFromSearch(
+    window.location.search,
+    section,
+    activeRoute?.novelId === novel.id ? activeRoute.section : undefined,
+  );
   const [busy, setBusy] = React.useState(false);
+  const [studioSection, setStudioSection] = React.useState(
+    initialStudioSection as StudioWorkbenchSection,
+  );
+  const [ledgerRoute, setLedgerRoute] = React.useState(
+    initialLedgerRoute as WorkbenchLedgerRoute,
+  );
+  const [storyTimelines, setStoryTimelines] = React.useState(
+    [] as StoryTimelineRecord[],
+  );
+  const [storyTimelinesReady, setStoryTimelinesReady] = React.useState(false);
+  const [currentTimelineId, setCurrentTimelineId] = React.useState(
+    initialLedgerRoute.timelineId ?? null as string | null,
+  );
+  const [ledgerSnapshot, setLedgerSnapshot] = React.useState({
+    ledger_snapshot_token: null,
+    story_ledger_version: novel.story_ledger_version,
+  } as StoryTimelineLedgerSnapshot);
+  const [ledgerRefreshKey, setLedgerRefreshKey] = React.useState(0);
+  const [storyLedgerContext, setStoryLedgerContext] = React.useState(
+    null as StoryLedgerWorkspaceContext | null,
+  );
   const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
   const [generationModelStatusError, setGenerationModelStatusError] = React.useState(false);
   const [characters, setCharacters] = React.useState([] as NovelCharacterRecord[]);
@@ -2392,6 +2526,16 @@ export function StudioProjectView({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState([] as NovelSearchResultRecord[]);
   const [searching, setSearching] = React.useState(false);
+
+  const externalSectionRef = React.useRef({ novelId: novel.id, section });
+  const domainLoadGenerationRef = React.useRef(0);
+  const domainLoadAbortRef = React.useRef(null as AbortController | null);
+  const ledgerRouteRef = React.useRef(ledgerRoute) as StudioMutableRef<WorkbenchLedgerRoute>;
+  const ledgerSnapshotRef = React.useRef(
+    ledgerSnapshot,
+  ) as StudioMutableRef<StoryTimelineLedgerSnapshot>;
+  ledgerRouteRef.current = ledgerRoute;
+  ledgerSnapshotRef.current = ledgerSnapshot;
 
   const characterFormRef = React.useRef(characterForm) as StudioMutableRef<typeof characterForm>;
   const storylineFormRef = React.useRef(storylineForm) as StudioMutableRef<typeof storylineForm>;
@@ -2546,6 +2690,179 @@ export function StudioProjectView({
     focus: () => focusAssistantControl(id),
   });
 
+  const replaceLedgerLocation = React.useCallback((next: WorkbenchLedgerRoute): void => {
+    const normalized = normalizeWorkbenchLedgerRoute(next);
+    if (JSON.stringify(normalized) !== JSON.stringify(ledgerRouteRef.current)) {
+      ledgerRouteRef.current = normalized;
+      setLedgerRoute(normalized);
+    }
+    setStudioSection("ledger");
+    rememberWorkbenchLedgerLocation(novel.id, normalized);
+    replaceWorkbenchHistoryUrl(
+      window.history,
+      window.location.href,
+      workbenchLedgerPath(novel.id, normalized),
+    );
+  }, [novel.id]);
+
+  const handleStoryLedgerContextChange = React.useCallback(
+    (context: StoryLedgerWorkspaceContext): void => {
+      setStoryLedgerContext(context);
+      if (!context.summary) return;
+      const next = studioLedgerRouteFromContext(
+        context,
+        ledgerRouteRef.current.timelineId ?? null,
+      );
+      if (JSON.stringify(next) !== JSON.stringify(ledgerRouteRef.current)) {
+        replaceLedgerLocation(next);
+      }
+    },
+    [replaceLedgerLocation],
+  );
+
+  const observeLedgerSnapshot = React.useCallback(
+    (next: StoryTimelineLedgerSnapshot): void => {
+      const current = ledgerSnapshotRef.current;
+      if (next.story_ledger_version < current.story_ledger_version) return;
+      if (next.story_ledger_version === current.story_ledger_version) {
+        if (next.ledger_snapshot_token === current.ledger_snapshot_token) return;
+        if (next.ledger_snapshot_token === null) return;
+      }
+      ledgerSnapshotRef.current = next;
+      setLedgerSnapshot(next);
+    },
+    [],
+  );
+
+  const markExternalLedgerMutation = React.useCallback((storyLedgerVersion: number): void => {
+    if (storyLedgerVersion <= ledgerSnapshotRef.current.story_ledger_version) return;
+    const next = {
+      ledger_snapshot_token: null,
+      story_ledger_version: storyLedgerVersion,
+    } as const;
+    ledgerSnapshotRef.current = next;
+    setLedgerSnapshot(next);
+    setLedgerRefreshKey((current: number) => current + 1);
+  }, []);
+
+  const invalidateExternalLedgerSnapshot = React.useCallback((): void => {
+    if (ledgerSnapshotRef.current.ledger_snapshot_token !== null) {
+      const next = { ...ledgerSnapshotRef.current, ledger_snapshot_token: null };
+      ledgerSnapshotRef.current = next;
+      setLedgerSnapshot(next);
+    }
+    setLedgerRefreshKey((current: number) => current + 1);
+  }, []);
+
+  const refreshTimelineLedgerSnapshot = React.useCallback(
+    async (
+      context: StoryTimelineContext,
+      signal?: AbortSignal,
+    ): Promise<StoryTimelineLedgerSnapshot> => {
+      if (!context.timelineId) {
+        return {
+          ledger_snapshot_token: null,
+          story_ledger_version: novel.story_ledger_version,
+        };
+      }
+      const next = await loadStoryLedgerSummary({
+        novelId: novel.id,
+        timelineId: context.timelineId,
+        narrativeCutoff: null,
+        snapshotToken: null,
+      }, {}, signal);
+      return {
+        ledger_snapshot_token: next.ledger_snapshot_token,
+        story_ledger_version: next.story_ledger_version,
+      };
+    },
+    [novel.id, novel.story_ledger_version],
+  );
+
+  const ledgerAssistantContext = storyLedgerContext
+    && storyLedgerContext.summary?.novel_id === novel.id
+    ? buildStoryLedgerAssistantContextFromWorkspace({
+        novel: { id: novel.id, title: novel.title },
+        context: storyLedgerContext,
+      })
+    : null;
+  const ledgerAssistantFingerprint = ledgerAssistantContext
+    ? JSON.stringify(ledgerAssistantContext)
+    : "";
+
+  React.useEffect(() => {
+    const previous = externalSectionRef.current;
+    const novelChanged = previous.novelId !== novel.id;
+    const sectionChanged = previous.section !== section;
+    externalSectionRef.current = { novelId: novel.id, section };
+    if (novelChanged) {
+      const nextActiveRoute = activeWorkbenchRoute();
+      const nextQuerySection = new URLSearchParams(window.location.search).get("section");
+      const nextRoute = nextQuerySection === "ledger"
+        ? workbenchLedgerRouteFromSearch(window.location.search)
+        : normalizeWorkbenchLedgerRoute(
+            nextActiveRoute?.novelId === novel.id
+              && nextActiveRoute.section === "ledger"
+              ? nextActiveRoute.ledger ?? {}
+              : {},
+          );
+      ledgerRouteRef.current = nextRoute;
+      setLedgerRoute(nextRoute);
+      setStudioSection(studioSectionFromSearch(
+        window.location.search,
+        section,
+        nextActiveRoute?.novelId === novel.id ? nextActiveRoute.section : undefined,
+      ));
+      setCurrentTimelineId(nextRoute.timelineId ?? null);
+      setStoryTimelines([]);
+      setStoryTimelinesReady(false);
+      setCharacters([]);
+      setRelationships([]);
+      setStorylines([]);
+      setForeshadows([]);
+      setStoryLedgerContext(null);
+      setLedgerSnapshot({
+        ledger_snapshot_token: null,
+        story_ledger_version: novel.story_ledger_version,
+      });
+      ledgerSnapshotRef.current = {
+        ledger_snapshot_token: null,
+        story_ledger_version: novel.story_ledger_version,
+      };
+      setLedgerRefreshKey(0);
+    } else if (sectionChanged) {
+      setStudioSection(section);
+    }
+  }, [novel.id, section]);
+
+  React.useEffect(() => {
+    if (novel.story_ledger_version <= ledgerSnapshotRef.current.story_ledger_version) return;
+    const next = {
+      ledger_snapshot_token: null,
+      story_ledger_version: novel.story_ledger_version,
+    } as const;
+    ledgerSnapshotRef.current = next;
+    setLedgerSnapshot(next);
+  }, [novel.id, novel.story_ledger_version]);
+
+  React.useEffect(() => {
+    const active = storyTimelines.filter(
+      (timeline: StoryTimelineRecord) => timeline.lifecycle_state === "active",
+    );
+    const selected = active.find(
+      (timeline: StoryTimelineRecord) => timeline.id === currentTimelineId,
+    )
+      ?? active.find(
+        (timeline: StoryTimelineRecord) => timeline.id === ledgerRouteRef.current.timelineId,
+      )
+      ?? active.find((timeline: StoryTimelineRecord) => timeline.is_primary)
+      ?? active[0]
+      ?? null;
+    if ((selected?.id ?? null) !== currentTimelineId) {
+      setCurrentTimelineId(selected?.id ?? null);
+    }
+  }, [storyTimelines, currentTimelineId]);
+
   React.useEffect(() => {
     let active = true;
     const load = () => {
@@ -2572,7 +2889,12 @@ export function StudioProjectView({
   React.useEffect(() => {
     // Settings still uses a modal without a frozen V2 page contract.
     if (settingsOpen) return;
-    const envelope = studioAssistantPageEnvelope(novel, section, roleTab);
+    const envelope = studioAssistantPageEnvelope(
+      novel,
+      studioSection,
+      roleTab,
+      ledgerAssistantContext ?? undefined,
+    );
     if (!envelope) return;
     const mounted = mountStudioAssistantScope(
       assistantContextRuntime,
@@ -2583,10 +2905,17 @@ export function StudioProjectView({
       },
     );
     return () => mounted.dispose();
-  }, [novel.id, novel.title, roleTab, section, settingsOpen]);
+  }, [
+    ledgerAssistantFingerprint,
+    novel.id,
+    novel.title,
+    roleTab,
+    studioSection,
+    settingsOpen,
+  ]);
 
   React.useEffect(() => {
-    if (!characterOpen || section !== "roles" || roleTab !== "list") return;
+    if (!characterOpen || studioSection !== "roles" || roleTab !== "list") return;
     const background = studioAssistantPageEnvelope(novel, "roles", "list");
     if (!background) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
@@ -2646,10 +2975,10 @@ export function StudioProjectView({
       }
       mounted.dispose();
     };
-  }, [characterEditing?.id, characterOpen, novel.id, novel.title, roleTab, section]);
+  }, [characterEditing?.id, characterOpen, novel.id, novel.title, roleTab, studioSection]);
 
   React.useEffect(() => {
-    if (!storylineOpen || section !== "clues") return;
+    if (!storylineOpen || studioSection !== "clues") return;
     const background = studioAssistantPageEnvelope(novel, "clues");
     if (!background) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
@@ -2740,10 +3069,10 @@ export function StudioProjectView({
       }
       mounted.dispose();
     };
-  }, [novel.id, novel.title, section, storylineEditing?.id, storylineOpen]);
+  }, [novel.id, novel.title, studioSection, storylineEditing?.id, storylineOpen]);
 
   React.useEffect(() => {
-    if (!foreshadowOpen || section !== "settings" || settingsTab !== "foreshadow") return;
+    if (!foreshadowOpen || studioSection !== "settings" || settingsTab !== "foreshadow") return;
     const background = studioAssistantPageEnvelope(novel, "settings");
     if (!background) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
@@ -2824,10 +3153,10 @@ export function StudioProjectView({
       }
       mounted.dispose();
     };
-  }, [foreshadowEditing?.id, foreshadowOpen, novel.id, novel.title, section, settingsTab]);
+  }, [foreshadowEditing?.id, foreshadowOpen, novel.id, novel.title, studioSection, settingsTab]);
 
   React.useEffect(() => {
-    if (!settingsOpen || section !== "settings" || settingsTab !== "template") return;
+    if (!settingsOpen || studioSection !== "settings" || settingsTab !== "template") return;
     const background = studioAssistantPageEnvelope(novel, "settings");
     if (!background) return;
     const ids = STUDIO_ASSISTANT_FIELD_IDS;
@@ -2896,7 +3225,7 @@ export function StudioProjectView({
       }
       mounted.dispose();
     };
-  }, [novel.id, novel.title, section, settingsOpen, settingsTab]);
+  }, [novel.id, novel.title, studioSection, settingsOpen, settingsTab]);
 
   const volumes = novel.tree.filter((item: VolumeRecord) => item.id !== null);
   const volumesByPosition = [...volumes]
@@ -2954,25 +3283,82 @@ export function StudioProjectView({
   };
 
   const loadDomains = React.useCallback(async () => {
+    const generation = domainLoadGenerationRef.current + 1;
+    domainLoadGenerationRef.current = generation;
+    domainLoadAbortRef.current?.abort();
+    const controller = new AbortController();
+    domainLoadAbortRef.current = controller;
+    const isCurrent = () => studioDomainLoadIsCurrent(
+      generation,
+      domainLoadGenerationRef.current,
+      controller.signal,
+    );
     const failures: string[] = [];
     await Promise.all([
-      apiRequest<NovelCharacterRecord[]>(`/novels/${novel.id}/characters`)
-        .then(setCharacters)
-        .catch((reason) => failures.push(readableError(reason, "加载角色失败"))),
-      apiRequest<CharacterRelationshipRecord[]>(`/novels/${novel.id}/relationships`)
-        .then(setRelationships)
-        .catch((reason) => failures.push(readableError(reason, "加载角色关系失败"))),
-      apiRequest<StorylineRecord[]>(`/novels/${novel.id}/storylines`)
-        .then(setStorylines)
-        .catch((reason) => failures.push(readableError(reason, "加载故事线失败"))),
-      apiRequest<ForeshadowRecord[]>(`/novels/${novel.id}/foreshadows`)
-        .then(setForeshadows)
-        .catch((reason) => failures.push(readableError(reason, "加载伏笔失败"))),
+      apiRequest<NovelCharacterRecord[]>(`/novels/${novel.id}/characters`, {
+        signal: controller.signal,
+      })
+        .then((items) => { if (isCurrent()) setCharacters(items); })
+        .catch((reason) => {
+          if (isCurrent() && !isAbortLike(reason)) {
+            failures.push(readableError(reason, "加载角色失败"));
+          }
+        }),
+      apiRequest<CharacterRelationshipRecord[]>(`/novels/${novel.id}/relationships`, {
+        signal: controller.signal,
+      })
+        .then((items) => { if (isCurrent()) setRelationships(items); })
+        .catch((reason) => {
+          if (isCurrent() && !isAbortLike(reason)) {
+            failures.push(readableError(reason, "加载角色关系失败"));
+          }
+        }),
+      apiRequest<StorylineRecord[]>(`/novels/${novel.id}/storylines`, {
+        signal: controller.signal,
+      })
+        .then((items) => { if (isCurrent()) setStorylines(items); })
+        .catch((reason) => {
+          if (isCurrent() && !isAbortLike(reason)) {
+            failures.push(readableError(reason, "加载故事线失败"));
+          }
+        }),
+      apiRequest<ForeshadowRecord[]>(`/novels/${novel.id}/foreshadows`, {
+        signal: controller.signal,
+      })
+        .then((items) => { if (isCurrent()) setForeshadows(items); })
+        .catch((reason) => {
+          if (isCurrent() && !isAbortLike(reason)) {
+            failures.push(readableError(reason, "加载伏笔失败"));
+          }
+        }),
+      apiRequest<TimelineIndexResource>(`/novels/${novel.id}/timelines`, {
+        signal: controller.signal,
+      })
+        .then((resource) => {
+          if (!isCurrent()) return;
+          setStoryTimelines([...resource.items]);
+          setStoryTimelinesReady(true);
+        })
+        .catch((reason) => {
+          if (!isCurrent() || isAbortLike(reason)) return;
+          setStoryTimelinesReady(true);
+          failures.push(readableError(reason, "加载时间线失败"));
+        }),
     ]);
-    if (failures.length > 0) onError(failures.join("；"));
+    if (isCurrent() && failures.length > 0) onError(failures.join("；"));
+    if (domainLoadAbortRef.current === controller) {
+      domainLoadAbortRef.current = null;
+    }
   }, [novel.id]);
 
-  React.useEffect(() => { void loadDomains(); }, [loadDomains]);
+  React.useEffect(() => {
+    void loadDomains();
+    return () => {
+      domainLoadGenerationRef.current += 1;
+      domainLoadAbortRef.current?.abort();
+      domainLoadAbortRef.current = null;
+    };
+  }, [loadDomains]);
   React.useEffect(() => {
     setSelectedChapterVolumeKey(null);
   }, [novel.id]);
@@ -3197,10 +3583,9 @@ export function StudioProjectView({
 
   const loadCharacterWorkspace = (
     characterId: string,
-    selection?: CharacterWorkspaceSelectionV1,
+    selection?: CharacterWorkspaceSelection,
   ): Promise<CharacterWorkspaceV2> => {
     const query = new URLSearchParams();
-    query.set("view_version", "2");
     if (selection) {
       query.set("timeline_id", selection.timelineId);
       query.set("character_instance_id", selection.instanceId);
@@ -3283,12 +3668,14 @@ export function StudioProjectView({
       },
     );
     await loadDomains();
+    markExternalLedgerMutation(next.story_ledger_version);
     return next;
   };
 
   const loadCharacterFacts = (
     workspace: CharacterWorkspaceV2,
     query: CharacterFactHistoryQueryV2,
+    signal?: AbortSignal,
   ): Promise<CharacterFactHistoryPageV2> => {
     const params = new URLSearchParams({
       timeline_id: workspace.selected_timeline.id,
@@ -3305,53 +3692,80 @@ export function StudioProjectView({
     if (query.source_document_id) params.set("source_document_id", query.source_document_id);
     return apiRequest<CharacterFactHistoryPageV2>(
       `/novels/${novel.id}/characters/${workspace.character.id}/facts?${params}`,
+      { signal },
     );
   };
+
+  const loadCharacterFactImpact = (
+    workspace: CharacterWorkspaceV2,
+    factId: string,
+    signal?: AbortSignal,
+  ) => loadStoryLedgerFactImpactPreview({
+    novelId: novel.id,
+    timelineId: workspace.selected_timeline.id,
+    narrativeCutoff: workspace.projected_state.narrative_cutoff,
+    snapshotToken: ledgerSnapshot.story_ledger_version === workspace.story_ledger_version
+      ? ledgerSnapshot.ledger_snapshot_token
+      : null,
+  }, factId, signal);
 
   const correctCharacterFact = async (
     workspace: CharacterWorkspaceV2,
     factId: string,
     command: StoryFactCorrectionCommandV1,
+    signal?: AbortSignal,
   ): Promise<CharacterWorkspaceV2> => {
-    await apiRequest(`/novels/${novel.id}/story-facts/${factId}/corrections`, {
-      method: "POST",
-      body: JSON.stringify(command),
-    });
+    await correctStoryLedgerFact(novel.id, factId, command, signal);
     await loadDomains();
-    return loadCharacterWorkspace(workspace.character.id, {
+    const next = await loadCharacterWorkspace(workspace.character.id, {
       timelineId: workspace.selected_timeline.id,
       instanceId: workspace.selected_instance.id,
     });
+    markExternalLedgerMutation(next.story_ledger_version);
+    return next;
   };
 
   const previewCharacterBatchRevert = (
+    workspace: CharacterWorkspaceV2,
     batchId: string,
-  ): Promise<IntelligenceBatchRevertImpactV1> => apiRequest<IntelligenceBatchRevertImpactV1>(
-    `/novels/${novel.id}/intelligence-commit-batches/${batchId}/revert-impact`,
-  );
+    signal?: AbortSignal,
+  ): Promise<StoryLedgerBatchImpactPreview> => loadStoryLedgerBatchImpactPreview({
+    novelId: novel.id,
+    timelineId: workspace.selected_timeline.id,
+    narrativeCutoff: workspace.projected_state.narrative_cutoff,
+    snapshotToken: ledgerSnapshot.story_ledger_version === workspace.story_ledger_version
+      ? ledgerSnapshot.ledger_snapshot_token
+      : null,
+  }, batchId, signal);
 
   const revertCharacterBatch = async (
     workspace: CharacterWorkspaceV2,
     batchId: string,
     command: IntelligenceBatchRevertCommandV1,
+    signal?: AbortSignal,
   ): Promise<CharacterWorkspaceV2> => {
-    await apiRequest(`/novels/${novel.id}/intelligence-commit-batches/${batchId}/revert`, {
-      method: "POST",
-      body: JSON.stringify(command),
-    });
+    await revertStoryLedgerBatch(novel.id, batchId, command, signal);
     await loadDomains();
-    return loadCharacterWorkspace(workspace.character.id, {
+    const next = await loadCharacterWorkspace(workspace.character.id, {
       timelineId: workspace.selected_timeline.id,
       instanceId: workspace.selected_instance.id,
     });
+    markExternalLedgerMutation(next.story_ledger_version);
+    return next;
   };
 
-  const loadCharacterSourceRevision = (
-    documentId: string,
-    revisionId: string,
-  ): Promise<CharacterSourceRevisionV1> => apiRequest<CharacterSourceRevisionV1>(
-    `/documents/${documentId}/revisions/${revisionId}`,
-  );
+  const loadCharacterFactSource = (
+    workspace: CharacterWorkspaceV2,
+    factId: string,
+    signal?: AbortSignal,
+  ) => loadStoryLedgerFactSource({
+    novelId: novel.id,
+    timelineId: workspace.selected_timeline.id,
+    narrativeCutoff: workspace.projected_state.narrative_cutoff,
+    snapshotToken: ledgerSnapshot.story_ledger_version === workspace.story_ledger_version
+      ? ledgerSnapshot.ledger_snapshot_token
+      : null,
+  }, factId, signal);
 
   const saveCharacter = () => perform(async () => {
     const current = characterFormRef.current;
@@ -3368,7 +3782,9 @@ export function StudioProjectView({
     setCharacterOpen(false);
     await loadDomains();
     setCharacterEditing(created);
-    setCharacterWorkspace(await loadCharacterWorkspace(created.id));
+    const next = await loadCharacterWorkspace(created.id);
+    markExternalLedgerMutation(next.story_ledger_version);
+    setCharacterWorkspace(next);
   }, "保存角色失败");
 
   const deleteCharacter = (item: NovelCharacterRecord) => {
@@ -3385,6 +3801,7 @@ export function StudioProjectView({
         okButtonProps: { danger: true },
         onOk: () => perform(async () => {
           await apiRequest(`/novels/${novel.id}/characters/${item.id}?expected_version=${item.version}`, { method: "DELETE" });
+          invalidateExternalLedgerSnapshot();
           await loadDomains();
         }, "归档人物失败"),
       }))
@@ -3427,12 +3844,14 @@ export function StudioProjectView({
     await apiRequest(`/novels/${novel.id}/storylines${storylineEditing ? `/${storylineEditing.id}` : ""}`, {
       method: storylineEditing ? "PUT" : "POST", body: JSON.stringify(payload),
     });
+    invalidateExternalLedgerSnapshot();
     setStorylineOpen(false);
     await loadDomains();
   }, "保存故事线失败");
 
   const deleteStoryline = (item: StorylineRecord) => perform(async () => {
     await apiRequest(`/novels/${novel.id}/storylines/${item.id}?expected_version=${item.version}`, { method: "DELETE" });
+    invalidateExternalLedgerSnapshot();
     await loadDomains();
   }, "删除故事线失败");
 
@@ -3450,12 +3869,14 @@ export function StudioProjectView({
     await apiRequest(`/novels/${novel.id}/foreshadows${foreshadowEditing ? `/${foreshadowEditing.id}` : ""}`, {
       method: foreshadowEditing ? "PUT" : "POST", body: JSON.stringify(payload),
     });
+    invalidateExternalLedgerSnapshot();
     setForeshadowOpen(false);
     await loadDomains();
   }, "保存伏笔失败");
 
   const deleteForeshadow = (item: ForeshadowRecord) => perform(async () => {
     await apiRequest(`/novels/${novel.id}/foreshadows/${item.id}?expected_version=${item.version}`, { method: "DELETE" });
+    invalidateExternalLedgerSnapshot();
     await loadDomains();
   }, "删除伏笔失败");
 
@@ -3472,6 +3893,7 @@ export function StudioProjectView({
       method: "PUT",
       body: JSON.stringify({ expected_version: novel.version, ...settingsFormRef.current }),
     });
+    markExternalLedgerMutation(updated.story_ledger_version);
     onNovelChanged(updated);
     setSettingsOpen(false);
   }, "保存模板设定失败");
@@ -3823,7 +4245,10 @@ export function StudioProjectView({
               onEditCharacter: openRelationshipsForCharacter,
               onEditRelationship: openRelationshipById,
               onAddRelationship: openNewRelationship,
-              onRelationshipsChanged: setRelationships,
+              onRelationshipsChanged: (nextRelationships: CharacterRelationshipRecord[]) => {
+                setRelationships(nextRelationships);
+                invalidateExternalLedgerSnapshot();
+              },
             })
           : h(Empty, { description: "请先新增至少两个角色" }),
       );
@@ -3847,6 +4272,9 @@ export function StudioProjectView({
 
   const templateEntries = Object.entries(novel.template_data || {}).filter(([key]) => !key.startsWith("cover_"));
   const foreshadowStatusLabel: Record<string, string> = { planned: "待埋设", active: "进行中", resolved: "已解决", dropped: "已放弃" };
+  const activeStoryTimelines = storyTimelines.filter(
+    (timeline: StoryTimelineRecord) => timeline.lifecycle_state === "active",
+  );
   const renderSettings = () => settingsTab === "template"
     ? h(
         "div",
@@ -3877,7 +4305,25 @@ export function StudioProjectView({
       ? h(StoryTimelineWorkspace, {
           novelId: novel.id,
           initialStoryLedgerVersion: novel.story_ledger_version,
+          ledgerSnapshot,
+          refreshKey: ledgerRefreshKey,
+          currentTimelineId,
           characters: characters.map((item: NovelCharacterRecord) => ({ id: item.id, name: item.name })),
+          refreshLedgerSnapshot: refreshTimelineLedgerSnapshot,
+          onTimelineContextChange: (context: StoryTimelineContext) => {
+            setCurrentTimelineId(context.timelineId);
+          },
+          onLedgerSnapshotChange: (
+            snapshot: StoryTimelineLedgerSnapshot,
+            _source: StoryTimelineLedgerSnapshotSource,
+          ) => observeLedgerSnapshot(snapshot),
+          onOpenLedger: ({ ledger_timeline: timelineId }: {
+            section: "ledger";
+            ledger_timeline: string;
+          }) => replaceLedgerLocation({
+            ...ledgerRouteRef.current,
+            timelineId,
+          }),
           onOpenCharacterCard: ({ characterId, timelineId, instanceId }: {
             characterId: string;
             timelineId: string;
@@ -3891,6 +4337,40 @@ export function StudioProjectView({
           },
         })
       : h(NovelSemanticIndexCard, { novelId: novel.id, novelTitle: novel.title });
+
+  const renderLedger = () => {
+    if (!storyTimelinesReady || (activeStoryTimelines.length > 0 && !currentTimelineId)) {
+      return h(
+        "div",
+        { className: "mb-large-empty", role: "status", "aria-live": "polite" },
+        h(Spin),
+        h("span", null, "正在确定账本时间线…"),
+      );
+    }
+    return h(StoryLedgerWorkspace, {
+      novelId: novel.id,
+      timelineId: currentTimelineId,
+      narrativeCutoff: null,
+      snapshotToken: ledgerSnapshot.ledger_snapshot_token,
+      initialFactId: ledgerRoute.factId ?? null,
+      initialFilters: studioLedgerFiltersFromRoute(ledgerRoute),
+      timelineOptions: activeStoryTimelines.map((timeline: StoryTimelineRecord) => ({
+        id: timeline.id,
+        name: timeline.name,
+      })),
+      onTimelineChange: (timelineId: string) => {
+        setCurrentTimelineId(timelineId);
+        replaceLedgerLocation({ ...ledgerRouteRef.current, timelineId });
+      },
+      onSnapshotChange: (snapshotToken: string, storyLedgerVersion: number) => {
+        observeLedgerSnapshot({
+          ledger_snapshot_token: snapshotToken,
+          story_ledger_version: storyLedgerVersion,
+        });
+      },
+      onContextChange: handleStoryLedgerContextChange,
+    });
+  };
 
   const narrationScopeTargets: ReadingScopeTarget[] = novel.tree.flatMap(
     (volume: VolumeRecord) => {
@@ -3930,7 +4410,7 @@ export function StudioProjectView({
     onSectionChange: onReadingPanelChange,
   });
 
-  const panelActions = section === "chapters"
+  const panelActions = studioSection === "chapters"
     ? h(React.Fragment, null,
         h(Button, {
           className: "mb-chapter-sort",
@@ -3965,29 +4445,31 @@ export function StudioProjectView({
           onClick: openChapterWizard,
         }, "新建章节"),
       )
-    : section === "outline"
+    : studioSection === "outline"
       ? hasOutline && !outlineEditing
         ? h(Button, { className: "anw-primary-button", icon: h(EditOutlined), onClick: () => openOutline(1) }, "编辑大纲")
         : null
-      : section === "roles"
+      : studioSection === "roles"
         ? h("div", { className: "mb-top-tabs" }, h("button", { type: "button", className: roleTab === "list" ? "is-active" : "", onClick: () => setRoleSubview("list") }, "角色列表"), h("button", { type: "button", className: roleTab === "graph" ? "is-active" : "", onClick: () => setRoleSubview("graph") }, "关系网"))
-        : section === "clues"
+        : studioSection === "clues"
           ? h("div", { className: "mb-top-tabs is-four" }, ...(Object.keys(storylineLabels) as StorylineType[]).map((type) => h("button", { key: type, type: "button", className: clueTab === type ? "is-active" : "", onClick: () => setClueTab(type) }, storylineLabels[type])))
-          : section === "settings"
+          : studioSection === "settings"
             ? h("div", { className: "mb-top-tabs is-settings" }, h("button", { type: "button", className: settingsTab === "template" ? "is-active" : "", onClick: () => setSettingsTab("template") }, "模板设定"), h("button", { type: "button", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => setSettingsTab("foreshadow") }, "伏笔管理"), h("button", { type: "button", className: settingsTab === "timeline" ? "is-active" : "", onClick: () => setSettingsTab("timeline") }, "时间线与人物实例"), h("button", { type: "button", className: settingsTab === "semantic-index" ? "is-active" : "", onClick: () => setSettingsTab("semantic-index") }, "语义索引"))
             : null;
 
-  const panelBody = section === "chapters"
+  const panelBody = studioSection === "chapters"
     ? renderChapters()
-    : section === "outline"
+    : studioSection === "outline"
       ? renderOutline()
-      : section === "roles"
+      : studioSection === "roles"
         ? renderRoles()
-        : section === "clues"
+        : studioSection === "clues"
           ? renderClues()
-          : section === "settings"
+          : studioSection === "settings"
             ? renderSettings()
-            : renderReading();
+            : studioSection === "ledger"
+              ? renderLedger()
+              : renderReading();
   const characterPickerInstances = characterWorkspacePicker
     ? characterWorkspacePicker.instances.filter(
         (instance: CharacterInstanceRecord) =>
@@ -4007,6 +4489,9 @@ export function StudioProjectView({
           className: "anw-app mb-workbench",
           "data-assistant-density": assistantWorkspaceLayout?.density ?? "comfortable",
           "data-assistant-overlay": String(assistantWorkspaceLayout?.assistantOverlay === true),
+          style: overlayVisibleWidth === null
+            ? undefined
+            : { width: `${overlayVisibleWidth}px`, maxWidth: "100%" },
         },
         h(
           "aside",
@@ -4028,9 +4513,20 @@ export function StudioProjectView({
               return h("button", {
                 key: item,
                 type: "button",
-                className: section === item ? "is-active" : "",
-                "aria-current": section === item ? "page" : undefined,
-                onClick: () => onSectionChange(item),
+                className: studioSection === item ? "is-active" : "",
+                "aria-current": studioSection === item ? "page" : undefined,
+                onClick: () => {
+                  if (item === "ledger") {
+                    replaceLedgerLocation({
+                      ...ledgerRouteRef.current,
+                      timelineId: currentTimelineId
+                        ?? ledgerRouteRef.current.timelineId,
+                    });
+                    return;
+                  }
+                  setStudioSection(item);
+                  onSectionChange(item);
+                },
               }, h(Icon), h("span", null, sectionLabel(item)));
             }),
           ),
@@ -4039,10 +4535,10 @@ export function StudioProjectView({
         h(
           "section",
           { className: "mb-workbench-main" },
-          section === "reading"
+          studioSection === "reading"
             ? null
-            : h("header", { className: `mb-panel-header ${section === "roles" || section === "clues" || section === "settings" ? "is-tabs-only" : ""}` }, h("h2", null, section === "chapters" ? "章节列表" : sectionLabel(section)), h("div", { className: "mb-panel-actions" }, panelActions)),
-          h("div", { className: `mb-panel-body${section === "reading" ? " is-reading" : ""}${section === "outline" ? " is-outline" : ""}${section === "chapters" ? " is-chapters" : ""}` }, panelBody),
+            : h("header", { className: `mb-panel-header ${studioSection === "roles" || studioSection === "clues" || studioSection === "settings" ? "is-tabs-only" : ""}` }, h("h2", null, studioSection === "chapters" ? "章节列表" : sectionLabel(studioSection)), h("div", { className: "mb-panel-actions" }, panelActions)),
+          h("div", { className: `mb-panel-body${studioSection === "reading" ? " is-reading" : ""}${studioSection === "outline" ? " is-outline" : ""}${studioSection === "chapters" ? " is-chapters" : ""}` }, panelBody),
         ),
       ),
     ),
@@ -4212,27 +4708,43 @@ export function StudioProjectView({
         setCharacterWorkspace(next);
         return next;
       },
-      onSelectionChange: async (selection: CharacterWorkspaceSelectionV1) => {
+      onSelectionChange: async (selection: CharacterWorkspaceSelection) => {
         const next = await loadCharacterWorkspace(characterWorkspace.character.id, selection);
         setCharacterWorkspace(next);
         return next;
       },
-      onLoadFacts: (query: CharacterFactHistoryQueryV2) => loadCharacterFacts(
+      onLoadFacts: (query: CharacterFactHistoryQueryV2, signal?: AbortSignal) => loadCharacterFacts(
         characterWorkspace,
         query,
+        signal,
       ),
-      onCorrectFact: async (factId: string, command: StoryFactCorrectionCommandV1) => {
-        const next = await correctCharacterFact(characterWorkspace, factId, command);
+      onLoadFactImpact: (factId: string, signal?: AbortSignal) => (
+        loadCharacterFactImpact(characterWorkspace, factId, signal)
+      ),
+      onCorrectFact: async (
+        factId: string,
+        command: StoryFactCorrectionCommandV1,
+        signal?: AbortSignal,
+      ) => {
+        const next = await correctCharacterFact(characterWorkspace, factId, command, signal);
         setCharacterWorkspace(next);
         return next;
       },
-      onPreviewBatchRevert: previewCharacterBatchRevert,
-      onRevertBatch: async (batchId: string, command: IntelligenceBatchRevertCommandV1) => {
-        const next = await revertCharacterBatch(characterWorkspace, batchId, command);
+      onPreviewBatchRevert: (batchId: string, signal?: AbortSignal) => (
+        previewCharacterBatchRevert(characterWorkspace, batchId, signal)
+      ),
+      onRevertBatch: async (
+        batchId: string,
+        command: IntelligenceBatchRevertCommandV1,
+        signal?: AbortSignal,
+      ) => {
+        const next = await revertCharacterBatch(characterWorkspace, batchId, command, signal);
         setCharacterWorkspace(next);
         return next;
       },
-      onLoadSource: loadCharacterSourceRevision,
+      onLoadSource: (factId: string, signal?: AbortSignal) => (
+        loadCharacterFactSource(characterWorkspace, factId, signal)
+      ),
       voiceSlot: ({
         novelId,
         characterId,
@@ -4276,7 +4788,10 @@ export function StudioProjectView({
       focusRelationshipId: relationshipFocusId,
       startWithNew: relationshipStartWithNew,
       onClose: () => setRelationshipOpen(false),
-      onSaved: loadDomains,
+      onSaved: async () => {
+        invalidateExternalLedgerSnapshot();
+        await loadDomains();
+      },
       selectionEditReviewHost: SelectionEditReviewHost,
     }),
     h(Modal, { open: storylineOpen, className: "anw-modal mb-entity-modal", wrapClassName: "anw-assistant-aware-modal-wrap", mask: false, width: 680, title: storylineEditing ? "编辑故事线" : `新增${storylineLabels[storylineForm.storyline_type as StorylineType]}`, footer: null, onCancel: () => setStorylineOpen(false) },

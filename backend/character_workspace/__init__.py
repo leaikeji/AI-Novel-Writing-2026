@@ -4,7 +4,7 @@ from .contracts import (
     CharacterArchiveImpactV1,
     CharacterWorkspaceError,
     CharacterWorkspaceErrorCode,
-    CharacterWorkspaceV1,
+    CharacterWorkspaceV2,
 )
 from .service import (
     CharacterWorkspaceService,
@@ -20,7 +20,7 @@ __all__ = [
     "CharacterWorkspaceErrorCode",
     "CharacterWorkspaceService",
     "CharacterWorkspaceStore",
-    "CharacterWorkspaceV1",
+    "CharacterWorkspaceV2",
     "SqlAlchemyCharacterWorkspaceStore",
     "service_for_session",
     "router",

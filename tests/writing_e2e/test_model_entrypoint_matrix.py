@@ -486,7 +486,84 @@ def test_candidate_adoption_and_storyfact_commit_require_explicit_commands(
             "commit",
             (
                 proposal_id,
-                {"accepted_item_ids": [item_id], "item_overrides": {}},
+                {
+                    "accepted_item_ids": [item_id],
+                    "expected_story_ledger_version": None,
+                    "operation_key": None,
+                },
             ),
         ),
     ]
+
+
+def test_storyfact_commit_forwards_snapshot_and_stable_operation_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = import_app(monkeypatch)
+    proposal_id = uuid4()
+    item_id = uuid4()
+    captured: dict[str, object] = {}
+
+    def commit(_session, received_id, **kwargs):
+        captured.update({"proposal_id": received_id, **kwargs})
+        return {"state": "accepted"}
+
+    monkeypatch.setattr(app, "commit_intelligence_items", commit)
+
+    result = app.intelligence_proposals_commit(
+        proposal_id,
+        app.CommitIntelligenceRequest(
+            accepted_item_ids=[item_id],
+            expected_story_ledger_version=7,
+            operation_key="chapter-intel:attempt-7",
+        ),
+        session=FakeSession(),
+    )
+
+    assert result == {"state": "accepted"}
+    assert captured == {
+        "proposal_id": proposal_id,
+        "accepted_item_ids": [item_id],
+        "expected_story_ledger_version": 7,
+        "operation_key": "chapter-intel:attempt-7",
+    }
+
+
+@pytest.mark.parametrize(
+    ("code", "current"),
+    [
+        ("idempotency_conflict", {}),
+        ("story_ledger_version_conflict", {"story_ledger_version": 9}),
+    ],
+)
+def test_storyfact_commit_maps_frozen_conflicts_to_http_409(
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    current: dict[str, object],
+) -> None:
+    app = import_app(monkeypatch)
+
+    def fail(*_args, **_kwargs):
+        raise app.IntelligenceCommitConflictError(
+            code,
+            "commit conflict",
+            current=current,
+        )
+
+    monkeypatch.setattr(app, "commit_intelligence_items", fail)
+
+    with pytest.raises(HTTPException) as raised:
+        app.intelligence_proposals_commit(
+            uuid4(),
+            app.CommitIntelligenceRequest(
+                accepted_item_ids=[uuid4()],
+                expected_story_ledger_version=8,
+                operation_key="chapter-intel:attempt-8",
+            ),
+            session=FakeSession(),
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["type"] == code
+    if current:
+        assert raised.value.detail["current"] == current

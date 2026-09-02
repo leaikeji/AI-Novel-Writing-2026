@@ -5,11 +5,11 @@ import type {
   CharacterFactHealth,
   CharacterFactEffectiveState,
   CharacterWorkspaceSaveCommandV2,
-  CharacterWorkspaceSelectionV1,
+  CharacterWorkspaceSelection,
   CharacterWorkspaceV2,
   CharacterWorkspaceVoiceSlotProps,
+  CharacterBatchRevertImpact,
   IntelligenceBatchRevertCommandV1,
-  IntelligenceBatchRevertImpactV1,
   ProjectedFactViewV2,
   StoryFactCorrectionCommandV1,
 } from "./contracts";
@@ -40,12 +40,17 @@ import {
   renderCharacterBatchRevertDrawer,
   renderCharacterFactCorrectionDrawer,
 } from "./character-fact-correction";
-import { resolveCharacterSourceRange, type SourceRangeResolution } from "./source-coordinate";
 import { characterProfileGroupCompletion, validateCharacterProfile } from "./state-model";
 import {
-  renderCharacterSourceViewer,
-  type CharacterSourceRevisionV1,
-} from "./workbench-character-source";
+  StoryLedgerRequestFence,
+  isAbortLike,
+  prepareStoryLedgerOperationAttempt,
+  renderStoryLedgerSourceViewer,
+  storyLedgerFilterIdentity,
+  type StoryLedgerFactImpactPreview,
+  type StoryLedgerOperationAttempt,
+  type StoryLedgerSourceExcerpt,
+} from "../story-ledger";
 
 type StateSetter<T> = (value: T | ((previous: T) => T)) => void;
 type ElementNode = unknown;
@@ -80,27 +85,35 @@ export interface CharacterWorkspaceDialogProps {
   readonly workspace: CharacterWorkspaceV2;
   readonly onSave?: (command: CharacterWorkspaceSaveCommandV2) => Promise<CharacterWorkspaceV2>;
   readonly onSelectionChange?: (
-    selection: CharacterWorkspaceSelectionV1,
+    selection: CharacterWorkspaceSelection,
   ) => Promise<CharacterWorkspaceV2>;
   readonly voiceSlot?: (props: CharacterWorkspaceVoiceSlotProps) => ElementNode;
   readonly onLoadFacts?: (
     query: CharacterFactHistoryQueryV2,
+    signal?: AbortSignal,
   ) => Promise<CharacterFactHistoryPageV2>;
+  readonly onLoadFactImpact?: (
+    factId: string,
+    signal?: AbortSignal,
+  ) => Promise<StoryLedgerFactImpactPreview>;
   readonly onCorrectFact?: (
     factId: string,
     command: StoryFactCorrectionCommandV1,
+    signal?: AbortSignal,
   ) => Promise<CharacterWorkspaceV2>;
   readonly onPreviewBatchRevert?: (
     batchId: string,
-  ) => Promise<IntelligenceBatchRevertImpactV1>;
+    signal?: AbortSignal,
+  ) => Promise<CharacterBatchRevertImpact>;
   readonly onRevertBatch?: (
     batchId: string,
     command: IntelligenceBatchRevertCommandV1,
+    signal?: AbortSignal,
   ) => Promise<CharacterWorkspaceV2>;
   readonly onLoadSource?: (
-    documentId: string,
-    revisionId: string,
-  ) => Promise<CharacterSourceRevisionV1>;
+    factId: string,
+    signal?: AbortSignal,
+  ) => Promise<StoryLedgerSourceExcerpt>;
   readonly onRequestClose?: () => void;
   readonly titleId?: string;
   readonly className?: string;
@@ -178,10 +191,13 @@ function errorFieldId(baseId: string, field: string): string {
   return `${baseId}-field-${scope}-${normalized.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-function workspaceOperationKey(scope: "correction" | "revert"): string {
-  const random = globalThis.crypto?.randomUUID?.()
-    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  return `character-${scope}:${random}`;
+function storyLedgerScopeIdentity(workspace: CharacterWorkspaceV2): string {
+  return JSON.stringify([
+    workspace.novel_id,
+    workspace.selected_timeline.id,
+    workspace.selected_instance.id,
+    workspace.story_ledger_version,
+  ]);
 }
 
 export function createCharacterWorkspaceDialog(
@@ -206,19 +222,24 @@ export function createCharacterWorkspaceDialog(
     const [historyError, setHistoryError] = React.useState<string | null>(null);
     const [historyEffectiveState, setHistoryEffectiveState] = React.useState<CharacterFactEffectiveState | "all">("all");
     const [historyHealth, setHistoryHealth] = React.useState<CharacterFactHealth | "all">("all");
+    const [historyDimension, setHistoryDimension] = React.useState("");
+    const [historySourceDocumentId, setHistorySourceDocumentId] = React.useState("");
     const [historyRefresh, setHistoryRefresh] = React.useState(0);
     const [correctionFact, setCorrectionFact] = React.useState<ProjectedFactViewV2 | null>(null);
     const [correctionObjectText, setCorrectionObjectText] = React.useState("");
     const [correctionReason, setCorrectionReason] = React.useState("");
+    const [correctionImpact, setCorrectionImpact] = React.useState<StoryLedgerFactImpactPreview | null>(null);
+    const [correctionImpactLoading, setCorrectionImpactLoading] = React.useState(false);
+    const [correctionImpactError, setCorrectionImpactError] = React.useState<string | null>(null);
     const [correctionSaving, setCorrectionSaving] = React.useState(false);
     const [correctionError, setCorrectionError] = React.useState<string | null>(null);
-    const [batchImpact, setBatchImpact] = React.useState<IntelligenceBatchRevertImpactV1 | null>(null);
+    const [batchImpact, setBatchImpact] = React.useState<CharacterBatchRevertImpact | null>(null);
+    const [batchPreviewingId, setBatchPreviewingId] = React.useState<string | null>(null);
     const [batchReason, setBatchReason] = React.useState("");
     const [batchSaving, setBatchSaving] = React.useState(false);
     const [batchError, setBatchError] = React.useState<string | null>(null);
     const [sourceFact, setSourceFact] = React.useState<ProjectedFactViewV2 | null>(null);
-    const [sourceRevision, setSourceRevision] = React.useState<CharacterSourceRevisionV1 | null>(null);
-    const [sourceResolution, setSourceResolution] = React.useState<SourceRangeResolution | null>(null);
+    const [sourcePayload, setSourcePayload] = React.useState<StoryLedgerSourceExcerpt | null>(null);
     const [sourceLoading, setSourceLoading] = React.useState(false);
     const [sourceError, setSourceError] = React.useState<string | null>(null);
     const [identityOpen, setIdentityOpen] = React.useState(true);
@@ -245,7 +266,11 @@ export function createCharacterWorkspaceDialog(
     const lastPropWorkspaceRef = React.useRef(initial);
     const drawerTriggerRef = React.useRef<DrawerTrigger | null>(null);
     const drawerWasOpenRef = React.useRef(false);
-    const sourceRequestGenerationRef = React.useRef(0);
+    const requestFenceRef = React.useRef(new StoryLedgerRequestFence());
+    const correctionAttemptRef = React.useRef<StoryLedgerOperationAttempt | null>(null);
+    const batchAttemptRef = React.useRef<StoryLedgerOperationAttempt | null>(null);
+    const lastLedgerScopeRef = React.useRef(storyLedgerScopeIdentity(initial));
+    const requestFence = requestFenceRef.current;
     const baseId = baseIdRef.current;
     const dialogId = `${baseId}-dialog`;
     const currentStateTitleId = `${baseId}-current-state-title`;
@@ -257,6 +282,13 @@ export function createCharacterWorkspaceDialog(
     const batchRevertTitleId = `${baseId}-batch-revert-title`;
     const sourceDialogId = `${baseId}-source-dialog`;
     const sourceTitleId = `${baseId}-source-title`;
+    const scopeIdentity = storyLedgerScopeIdentity(workspace);
+    const historyFilterIdentity = storyLedgerFilterIdentity({
+      effectiveState: historyEffectiveState === "all" ? null : historyEffectiveState,
+      health: historyHealth === "all" ? null : historyHealth,
+      dimension: historyDimension || null,
+      sourceDocumentId: historySourceDocumentId || null,
+    });
     const activeSource = sourceFact?.source ?? null;
     const drawerOpen = Boolean(correctionFact || batchImpact || activeSource);
     const activeDrawerId = correctionFact
@@ -270,7 +302,8 @@ export function createCharacterWorkspaceDialog(
     const factRiskCount = workspace.writing_state.risk_summary.conflict_count
       + workspace.writing_state.risk_summary.ambiguous_count
       + workspace.writing_state.risk_summary.invalid_source_count;
-    const showCharacterDraftActions = activeTab !== "voice" || dirty;
+    const correctionAvailable = Boolean(props.onCorrectFact && props.onLoadFactImpact);
+    const showCharacterDraftActions = dirty;
     const multiTimeline = isMultiTimeline(workspace);
     const requestClose = (): void => {
       if (!props.onRequestClose) return;
@@ -279,10 +312,22 @@ export function createCharacterWorkspaceDialog(
       props.onRequestClose();
     };
 
-    const applyWorkspace = (next: CharacterWorkspaceV2): void => {
+    const applyWorkspace = (
+      next: CharacterWorkspaceV2,
+      preserveCharacterDrafts = false,
+    ): void => {
+      requestFence.invalidateMany([
+        "history-initial",
+        "history-more",
+        "correction-impact",
+        "batch-preview",
+        "source",
+      ]);
       setWorkspace(next);
-      setRootDraft(rootDraftFromWorkspace(next));
-      setProfileDraft(profileDraftFromWorkspace(next));
+      if (!preserveCharacterDrafts) {
+        setRootDraft(rootDraftFromWorkspace(next));
+        setProfileDraft(profileDraftFromWorkspace(next));
+      }
       setHistoryPage(null);
       setHistoryRefresh((value) => value + 1);
       setError(null);
@@ -324,6 +369,24 @@ export function createCharacterWorkspaceDialog(
     }, [activeDrawerId]);
 
     React.useEffect(() => {
+      if (
+        !sourcePayload?.available
+        || typeof document === "undefined"
+        || typeof HTMLElement === "undefined"
+      ) return;
+      const focusVerifiedSource = (): void => {
+        const drawer = document.getElementById(sourceDialogId);
+        const mark = drawer?.querySelector<HTMLElement>("mark");
+        if (!mark || mark.tagName !== "MARK") return;
+        mark.tabIndex = -1;
+        mark.focus({ preventScroll: true });
+        mark.scrollIntoView?.({ block: "center", inline: "nearest" });
+      };
+      if (typeof queueMicrotask === "function") queueMicrotask(focusVerifiedSource);
+      else focusVerifiedSource();
+    }, [sourcePayload]);
+
+    React.useEffect(() => {
       if (drawerOpen) {
         drawerWasOpenRef.current = true;
         return;
@@ -359,14 +422,41 @@ export function createCharacterWorkspaceDialog(
       else restoreDrawerFocus();
     }, [drawerOpen]);
 
+    React.useEffect(() => {
+      requestFence.setScope(scopeIdentity);
+      if (lastLedgerScopeRef.current === scopeIdentity) return;
+      lastLedgerScopeRef.current = scopeIdentity;
+      setHistoryPage(null);
+      setHistoryLoading(false);
+      setHistoryLoadingMore(false);
+      setHistoryError(null);
+      setCorrectionFact(null);
+      setCorrectionImpact(null);
+      setCorrectionImpactLoading(false);
+      setCorrectionImpactError(null);
+      setCorrectionSaving(false);
+      setCorrectionError(null);
+      setBatchImpact(null);
+      setBatchPreviewingId(null);
+      setBatchSaving(false);
+      setBatchError(null);
+      setSourceFact(null);
+      setSourcePayload(null);
+      setSourceLoading(false);
+      setSourceError(null);
+      correctionAttemptRef.current = null;
+      batchAttemptRef.current = null;
+    }, [scopeIdentity]);
+
     React.useEffect(() => () => {
-      sourceRequestGenerationRef.current += 1;
+      requestFence.dispose();
     }, []);
 
     React.useEffect(() => {
       if (lastPropWorkspaceRef.current !== props.workspace) {
         if (!dirty) {
           lastPropWorkspaceRef.current = props.workspace;
+          requestFence.setScope(storyLedgerScopeIdentity(props.workspace));
           applyWorkspace(props.workspace);
         }
       }
@@ -391,50 +481,90 @@ export function createCharacterWorkspaceDialog(
     }, [error]);
 
     React.useEffect(() => {
-      if (!historyOpen || !props.onLoadFacts) return;
-      let cancelled = false;
+      requestFence.invalidate("history-more");
+      setHistoryLoadingMore(false);
+      if (!historyOpen || !props.onLoadFacts) {
+        requestFence.invalidate("history-initial");
+        setHistoryLoading(false);
+        return;
+      }
+      const identity = JSON.stringify([
+        scopeIdentity,
+        workspace.story_ledger_version,
+        historyFilterIdentity,
+        "initial",
+      ]);
+      const lease = requestFence.begin("history-initial", identity);
       setHistoryLoading(true);
       setHistoryError(null);
       void props.onLoadFacts({
         limit: 20,
         effective_state: historyEffectiveState,
         health: historyHealth,
-      }).then((page) => {
-        if (!cancelled) setHistoryPage(page);
+        dimension: historyDimension || null,
+        source_document_id: historySourceDocumentId || null,
+      }, lease.signal).then((page) => {
+        if (lease.isCurrent()) setHistoryPage(page);
       }).catch((reason) => {
-        if (!cancelled) setHistoryError(normalizeActionError(reason).message);
+        if (lease.isCurrent() && !isAbortLike(reason)) {
+          setHistoryError(normalizeActionError(reason).message);
+        }
       }).finally(() => {
-        if (!cancelled) setHistoryLoading(false);
+        if (!lease.isCurrent()) return;
+        setHistoryLoading(false);
       });
-      return () => { cancelled = true; };
+      return () => {
+        if (lease.isCurrent()) requestFence.invalidate("history-initial");
+      };
     }, [
       historyOpen,
       historyEffectiveState,
       historyHealth,
+      historyDimension,
+      historySourceDocumentId,
       historyRefresh,
       workspace.selected_timeline.id,
       workspace.selected_instance.id,
+      workspace.story_ledger_version,
     ]);
 
     const loadMoreFacts = async (): Promise<void> => {
       if (!props.onLoadFacts || !historyPage?.next_cursor || historyLoadingMore) return;
+      const cursor = historyPage.next_cursor;
+      const identity = JSON.stringify([
+        scopeIdentity,
+        workspace.story_ledger_version,
+        historyFilterIdentity,
+        cursor,
+      ]);
+      const lease = requestFence.begin("history-more", identity);
       setHistoryLoadingMore(true);
       setHistoryError(null);
       try {
         const next = await props.onLoadFacts({
-          cursor: historyPage.next_cursor,
+          cursor,
           limit: 20,
           effective_state: historyEffectiveState,
           health: historyHealth,
-        });
-        setHistoryPage({
-          ...next,
-          items: [...historyPage.items, ...next.items],
+          dimension: historyDimension || null,
+          source_document_id: historySourceDocumentId || null,
+        }, lease.signal);
+        if (!lease.isCurrent()) return;
+        setHistoryPage((current) => {
+          if (!current || current.next_cursor !== cursor) return current;
+          return {
+            ...next,
+            items: [...current.items, ...next.items],
+          };
         });
       } catch (reason) {
-        setHistoryError(normalizeActionError(reason).message);
+        if (lease.isCurrent() && !isAbortLike(reason)) {
+          setHistoryError(normalizeActionError(reason).message);
+        }
       } finally {
-        setHistoryLoadingMore(false);
+        if (lease.isCurrent()) {
+          setHistoryLoadingMore(false);
+        }
       }
     };
 
@@ -442,15 +572,10 @@ export function createCharacterWorkspaceDialog(
       drawerTriggerRef.current = { element: trigger, fallbackId };
     };
 
-    const invalidateSourceRequest = (): void => {
-      sourceRequestGenerationRef.current += 1;
-    };
-
     const clearSource = (): void => {
-      invalidateSourceRequest();
+      requestFence.invalidate("source");
       setSourceFact(null);
-      setSourceRevision(null);
-      setSourceResolution(null);
+      setSourcePayload(null);
       setSourceError(null);
       setSourceLoading(false);
     };
@@ -460,14 +585,63 @@ export function createCharacterWorkspaceDialog(
       trigger: HTMLElement,
       fallbackId: string,
     ): void => {
+      if (!props.onLoadFactImpact || !props.onCorrectFact) return;
       rememberDrawerTrigger(trigger, fallbackId);
-      invalidateSourceRequest();
+      requestFence.invalidateMany([
+        "batch-preview",
+        "batch-mutation",
+        "source",
+        "correction-impact",
+        "correction-mutation",
+      ]);
       setBatchImpact(null);
+      setBatchPreviewingId(null);
+      setBatchReason("");
+      setBatchError(null);
       setSourceFact(null);
+      setSourcePayload(null);
+      setSourceLoading(false);
+      setSourceError(null);
       setCorrectionFact(fact);
       setCorrectionObjectText(fact.object_text);
       setCorrectionReason("");
+      setCorrectionImpact(null);
+      setCorrectionImpactError(null);
       setCorrectionError(null);
+      correctionAttemptRef.current = null;
+      batchAttemptRef.current = null;
+
+      const identity = JSON.stringify([
+        scopeIdentity,
+        workspace.story_ledger_version,
+        fact.id,
+      ]);
+      const lease = requestFence.begin("correction-impact", identity);
+      setCorrectionImpactLoading(true);
+      void props.onLoadFactImpact(fact.id, lease.signal).then((impact) => {
+        if (!lease.isCurrent()) return;
+        if (
+          impact.novel_id !== workspace.novel_id
+          || impact.fact_id !== fact.id
+          || impact.story_ledger_version !== workspace.story_ledger_version
+          || impact.timeline.timeline_id !== workspace.selected_timeline.id
+        ) {
+          setCorrectionImpactError("影响预览与当前人物或账本快照不匹配，请关闭后重新打开。");
+          setCorrectionObjectText(fact.object_text);
+          setCorrectionReason("");
+          return;
+        }
+        setCorrectionImpact(impact);
+      }).catch((reason) => {
+        if (lease.isCurrent() && !isAbortLike(reason)) {
+          setCorrectionImpactError(normalizeActionError(reason).message);
+          setCorrectionObjectText(fact.object_text);
+          setCorrectionReason("");
+        }
+      }).finally(() => {
+        if (!lease.isCurrent()) return;
+        setCorrectionImpactLoading(false);
+      });
     };
 
     const closeCorrection = (): void => {
@@ -476,33 +650,77 @@ export function createCharacterWorkspaceDialog(
         || Boolean(correctionReason.trim());
       if (changed && typeof window !== "undefined"
         && !window.confirm("事实修正尚未提交，确定放弃吗？")) return;
+      requestFence.invalidateMany(["correction-impact", "correction-mutation"]);
       setCorrectionFact(null);
+      setCorrectionImpact(null);
+      setCorrectionImpactLoading(false);
+      setCorrectionImpactError(null);
+      setCorrectionError(null);
+      correctionAttemptRef.current = null;
     };
 
     const submitCorrection = async (): Promise<void> => {
       if (!correctionFact || !props.onCorrectFact || correctionSaving) return;
+      if (
+        !correctionImpact
+        || !correctionImpact.correction_supported
+        || correctionImpact.fact_id !== correctionFact.id
+        || correctionImpact.story_ledger_version !== workspace.story_ledger_version
+      ) {
+        setCorrectionError("必须先取得与当前账本快照一致的真实影响预览。");
+        return;
+      }
+      const payload = {
+        expected_story_ledger_version: workspace.story_ledger_version,
+        reason: correctionReason.trim(),
+        replacement: { object_text: correctionObjectText.trim() },
+      };
+      const attempt = prepareStoryLedgerOperationAttempt(
+        correctionAttemptRef.current,
+        "correction",
+        correctionFact.id,
+        payload,
+      );
+      correctionAttemptRef.current = attempt;
+      const lease = requestFence.begin("correction-mutation", JSON.stringify([
+        scopeIdentity,
+        correctionFact.id,
+        attempt.operationKey,
+        attempt.payloadIdentity,
+      ]));
       setCorrectionSaving(true);
       setCorrectionError(null);
       try {
         const next = await props.onCorrectFact(correctionFact.id, {
           schema_version: "story-fact-correction/1",
-          operation_key: workspaceOperationKey("correction"),
-          expected_story_ledger_version: workspace.story_ledger_version,
-          reason: correctionReason.trim(),
-          replacement: { object_text: correctionObjectText.trim() },
-        });
-        applyWorkspace(next);
+          operation_key: attempt.operationKey,
+          ...payload,
+        }, lease.signal);
+        if (!lease.isCurrent()) return;
+        correctionAttemptRef.current = null;
+        applyWorkspace(next, true);
         setCorrectionFact(null);
+        setCorrectionImpact(null);
+        setCorrectionImpactError(null);
       } catch (reason) {
-        setCorrectionError(normalizeActionError(reason).message);
+        if (lease.isCurrent() && !isAbortLike(reason)) {
+          setCorrectionError(normalizeActionError(reason).message);
+        }
       } finally {
-        setCorrectionSaving(false);
+        if (lease.isCurrent()) {
+          setCorrectionSaving(false);
+        }
       }
     };
 
     const closeBatchRevert = (): void => {
       if (batchSaving) return;
+      requestFence.invalidateMany(["batch-preview", "batch-mutation"]);
       setBatchImpact(null);
+      setBatchPreviewingId(null);
+      setBatchReason("");
+      setBatchError(null);
+      batchAttemptRef.current = null;
     };
 
     const previewBatchRevert = async (
@@ -513,34 +731,94 @@ export function createCharacterWorkspaceDialog(
       const batchId = fact.source?.commit_batch_id;
       if (!batchId || !props.onPreviewBatchRevert) return;
       rememberDrawerTrigger(trigger, fallbackId);
-      invalidateSourceRequest();
+      requestFence.invalidateMany([
+        "correction-impact",
+        "correction-mutation",
+        "batch-mutation",
+        "source",
+      ]);
       setCorrectionFact(null);
+      setCorrectionImpact(null);
+      setCorrectionImpactLoading(false);
+      setCorrectionImpactError(null);
+      setCorrectionError(null);
       setSourceFact(null);
+      setSourcePayload(null);
+      setSourceLoading(false);
+      setSourceError(null);
+      setBatchImpact(null);
+      setBatchReason("");
       setBatchError(null);
+      correctionAttemptRef.current = null;
+      batchAttemptRef.current = null;
+      const lease = requestFence.begin("batch-preview", JSON.stringify([
+        scopeIdentity,
+        workspace.story_ledger_version,
+        batchId,
+      ]));
+      setBatchPreviewingId(batchId);
       try {
-        setBatchImpact(await props.onPreviewBatchRevert(batchId));
-        setBatchReason("");
+        const impact = await props.onPreviewBatchRevert(batchId, lease.signal);
+        if (!lease.isCurrent()) return;
+        if (
+          impact.novel_id !== workspace.novel_id
+          || impact.batch_id !== batchId
+          || impact.story_ledger_version !== workspace.story_ledger_version
+          || impact.timeline.timeline_id !== workspace.selected_timeline.id
+        ) {
+          setHistoryError("撤销影响预览与当前人物或账本快照不匹配，请刷新后重试。");
+          return;
+        }
+        setBatchImpact(impact);
       } catch (reason) {
-        setHistoryError(normalizeActionError(reason).message);
+        if (lease.isCurrent() && !isAbortLike(reason)) {
+          setHistoryError(normalizeActionError(reason).message);
+        }
+      } finally {
+        if (lease.isCurrent()) {
+          setBatchPreviewingId(null);
+        }
       }
     };
 
     const submitBatchRevert = async (): Promise<void> => {
       if (!batchImpact || !props.onRevertBatch || batchSaving) return;
+      const payload = {
+        expected_story_ledger_version: workspace.story_ledger_version,
+        reason: batchReason.trim() || null,
+      };
+      const attempt = prepareStoryLedgerOperationAttempt(
+        batchAttemptRef.current,
+        "batch-revert",
+        batchImpact.batch_id,
+        payload,
+      );
+      batchAttemptRef.current = attempt;
+      const lease = requestFence.begin("batch-mutation", JSON.stringify([
+        scopeIdentity,
+        batchImpact.batch_id,
+        attempt.operationKey,
+        attempt.payloadIdentity,
+      ]));
       setBatchSaving(true);
       setBatchError(null);
       try {
         const next = await props.onRevertBatch(batchImpact.batch_id, {
-          operation_key: workspaceOperationKey("revert"),
-          expected_story_ledger_version: workspace.story_ledger_version,
-          reason: batchReason.trim() || null,
-        });
-        applyWorkspace(next);
+          operation_key: attempt.operationKey,
+          ...payload,
+        }, lease.signal);
+        if (!lease.isCurrent()) return;
+        batchAttemptRef.current = null;
+        applyWorkspace(next, true);
         setBatchImpact(null);
       } catch (reason) {
-        setBatchError(normalizeActionError(reason).message);
+        if (lease.isCurrent() && !isAbortLike(reason)) {
+          setBatchError(normalizeActionError(reason).message);
+        }
       } finally {
-        setBatchSaving(false);
+        if (lease.isCurrent()) {
+          setBatchSaving(false);
+        }
       }
     };
 
@@ -551,56 +829,54 @@ export function createCharacterWorkspaceDialog(
     ): Promise<void> => {
       if (!fact.source || !props.onLoadSource) return;
       rememberDrawerTrigger(trigger, fallbackId);
-      const requestGeneration = sourceRequestGenerationRef.current + 1;
-      sourceRequestGenerationRef.current = requestGeneration;
+      requestFence.invalidateMany([
+        "correction-impact",
+        "correction-mutation",
+        "batch-preview",
+        "batch-mutation",
+      ]);
       setCorrectionFact(null);
+      setCorrectionImpact(null);
+      setCorrectionImpactLoading(false);
+      setCorrectionImpactError(null);
+      setCorrectionError(null);
       setBatchImpact(null);
+      setBatchPreviewingId(null);
+      setBatchReason("");
+      setBatchError(null);
       setSourceFact(fact);
-      setSourceRevision(null);
-      setSourceResolution(null);
+      setSourcePayload(null);
       setSourceError(null);
       setSourceLoading(true);
+      correctionAttemptRef.current = null;
+      batchAttemptRef.current = null;
+      const lease = requestFence.begin("source", JSON.stringify([
+        scopeIdentity,
+        workspace.story_ledger_version,
+        fact.id,
+      ]));
       try {
-        const revision = await props.onLoadSource(
-          fact.source.document_id,
-          fact.source.revision_id,
-        );
-        if (requestGeneration !== sourceRequestGenerationRef.current) return;
-        setSourceRevision(revision);
+        const source = await props.onLoadSource(fact.id, lease.signal);
+        if (!lease.isCurrent()) return;
         if (
-          fact.source.source_start === null
-          || fact.source.source_end === null
-          || fact.source.source_range_hash === null
+          source.novel_id !== workspace.novel_id
+          || source.fact_id !== fact.id
+          || source.story_ledger_version !== workspace.story_ledger_version
+          || source.timeline.timeline_id !== workspace.selected_timeline.id
         ) {
-          setSourceResolution({
-            status: "fallback",
-            reason: "invalid_range",
-            excerpt: [...fact.source.source_excerpt].slice(0, 500).join(""),
-            excerptTruncated: fact.source.source_excerpt_truncated,
-          });
-        } else {
-          const resolution = await resolveCharacterSourceRange(
-            revision.content_text,
-            revision.content_hash,
-            {
-              source_content_hash: fact.source.source_content_hash,
-              source_coordinate: fact.source.source_coordinate,
-              source_start: fact.source.source_start,
-              source_end: fact.source.source_end,
-              source_range_hash: fact.source.source_range_hash,
-              source_excerpt: fact.source.source_excerpt,
-              source_excerpt_truncated: fact.source.source_excerpt_truncated,
-            },
-          );
-          if (requestGeneration !== sourceRequestGenerationRef.current) return;
-          setSourceResolution(resolution);
+          setSourceError("来源摘录与当前人物或账本快照不匹配，请关闭后重新打开。");
+          return;
         }
+        setSourcePayload(source);
+        setSourceError(source.available
+          ? null
+          : source.unavailable_reason || "该事实没有可显示的安全来源摘录。");
       } catch (reason) {
-        if (requestGeneration === sourceRequestGenerationRef.current) {
+        if (lease.isCurrent() && !isAbortLike(reason)) {
           setSourceError(normalizeActionError(reason).message);
         }
       } finally {
-        if (requestGeneration === sourceRequestGenerationRef.current) {
+        if (lease.isCurrent()) {
           setSourceLoading(false);
         }
       }
@@ -950,6 +1226,29 @@ export function createCharacterWorkspaceDialog(
       ),
     );
 
+    const knownHistoryFacts = [
+      ...workspace.projected_state.current_facts,
+      ...workspace.writing_state.recent_changes,
+      ...(historyPage?.items ?? []),
+    ];
+    const historyDimensionOptions = [...new Set(
+      knownHistoryFacts.map((fact) => fact.dimension).filter(Boolean),
+    )].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    if (historyDimension && !historyDimensionOptions.includes(historyDimension)) {
+      historyDimensionOptions.push(historyDimension);
+    }
+    const sourceOptionLabels = new Map<string, string>();
+    for (const fact of knownHistoryFacts) {
+      if (!fact.source) continue;
+      sourceOptionLabels.set(fact.source.document_id, fact.source.document_title);
+    }
+    if (historySourceDocumentId && !sourceOptionLabels.has(historySourceDocumentId)) {
+      sourceOptionLabels.set(historySourceDocumentId, historySourceDocumentId);
+    }
+    const historySourceOptions = [...sourceOptionLabels.entries()]
+      .map(([id, label]) => ({ id, label }))
+      .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+
     const growthPanel = h(
       "section",
       {
@@ -972,8 +1271,12 @@ export function createCharacterWorkspaceDialog(
         workspace,
         historyOpen,
         onToggleHistory: () => setHistoryOpen((value) => !value),
-        onOpenSource: (fact, trigger) => void openSource(fact, trigger, recentChangesTitleId),
-        onCorrectFact: (fact, trigger) => openCorrection(fact, trigger, recentChangesTitleId),
+        onOpenSource: props.onLoadSource
+          ? (fact, trigger) => void openSource(fact, trigger, recentChangesTitleId)
+          : undefined,
+        onCorrectFact: correctionAvailable
+          ? (fact, trigger) => openCorrection(fact, trigger, recentChangesTitleId)
+          : undefined,
       }),
       historyOpen
         ? renderCharacterFactHistory(React, {
@@ -981,9 +1284,14 @@ export function createCharacterWorkspaceDialog(
             page: historyPage,
             loading: historyLoading,
             loadingMore: historyLoadingMore,
+            batchPreviewing: batchPreviewingId !== null,
             error: historyError,
             effectiveState: historyEffectiveState,
             health: historyHealth,
+            dimension: historyDimension,
+            sourceDocumentId: historySourceDocumentId,
+            dimensionOptions: historyDimensionOptions,
+            sourceOptions: historySourceOptions,
             onEffectiveStateChange: (value) => {
               setHistoryEffectiveState(value);
               setHistoryPage(null);
@@ -992,10 +1300,24 @@ export function createCharacterWorkspaceDialog(
               setHistoryHealth(value);
               setHistoryPage(null);
             },
+            onDimensionChange: (value) => {
+              setHistoryDimension(value);
+              setHistoryPage(null);
+            },
+            onSourceDocumentChange: (value) => {
+              setHistorySourceDocumentId(value);
+              setHistoryPage(null);
+            },
             onLoadMore: () => void loadMoreFacts(),
-            onOpenSource: (fact, trigger) => void openSource(fact, trigger, factHistoryTitleId),
-            onCorrectFact: (fact, trigger) => openCorrection(fact, trigger, factHistoryTitleId),
-            onPreviewBatchRevert: (fact, trigger) => void previewBatchRevert(fact, trigger, factHistoryTitleId),
+            onOpenSource: props.onLoadSource
+              ? (fact, trigger) => void openSource(fact, trigger, factHistoryTitleId)
+              : undefined,
+            onCorrectFact: correctionAvailable
+              ? (fact, trigger) => openCorrection(fact, trigger, factHistoryTitleId)
+              : undefined,
+            onPreviewBatchRevert: props.onPreviewBatchRevert
+              ? (fact, trigger) => void previewBatchRevert(fact, trigger, factHistoryTitleId)
+              : undefined,
           })
         : null,
     );
@@ -1251,8 +1573,11 @@ export function createCharacterWorkspaceDialog(
               reason: correctionReason,
               saving: correctionSaving,
               error: correctionError,
-              onObjectTextChange: setCorrectionObjectText,
-              onReasonChange: setCorrectionReason,
+              impact: correctionImpact,
+              impactLoading: correctionImpactLoading,
+              impactError: correctionImpactError,
+              onObjectTextChange: correctionImpactError ? () => undefined : setCorrectionObjectText,
+              onReasonChange: correctionImpactError ? () => undefined : setCorrectionReason,
               onSubmit: () => void submitCorrection(),
               onClose: () => {
                 closeCorrection();
@@ -1273,12 +1598,10 @@ export function createCharacterWorkspaceDialog(
             })
           : null,
         activeSource
-          ? renderCharacterSourceViewer(React, {
+          ? renderStoryLedgerSourceViewer(React, {
               dialogId: sourceDialogId,
               titleId: sourceTitleId,
-              source: activeSource,
-              revision: sourceRevision,
-              resolution: sourceResolution,
+              source: sourcePayload,
               loading: sourceLoading,
               error: sourceError,
               onClose: clearSource,

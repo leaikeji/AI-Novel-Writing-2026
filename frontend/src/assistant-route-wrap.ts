@@ -214,6 +214,7 @@ const SECTION_LABELS = {
   roles: "角色",
   clues: "线索",
   settings: "设定",
+  ledger: "账本",
 } as const;
 
 

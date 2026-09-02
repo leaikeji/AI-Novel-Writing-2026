@@ -317,6 +317,13 @@ class StoryFact(Base):
     __table_args__ = (
         UniqueConstraint("id", "novel_id", name="uq_story_fact_novel_scope"),
         Index("ix_story_facts_novel_type", "novel_id", "fact_type"),
+        Index(
+            "ix_story_facts_novel_created_v2",
+            "novel_id",
+            text("created_at DESC"),
+            text("id DESC"),
+            postgresql_where=text("schema_version = 'story-fact/2'"),
+        ),
         Index("ix_story_facts_timeline_state", "novel_id", "timeline_id", "fact_type", "status", "story_sequence", "created_at"),
         Index("ix_story_facts_character_instance", "novel_id", "character_instance_id", "fact_type", "status", "created_at"),
         Index("uq_story_fact_event_fingerprint", "novel_id", "event_fingerprint", unique=True, postgresql_where=text("event_fingerprint IS NOT NULL")),
@@ -461,19 +468,15 @@ class DerivedSourceBinding(Base):
     __tablename__ = "derived_source_bindings"
     __table_args__ = (
         UniqueConstraint(
-            "derived_entity_type",
             "derived_entity_id",
             "source_chapter_revision_id",
-            name="uq_derived_source_entity_revision",
+            name="uq_derived_source_fact_revision",
         ),
         Index("ix_derived_source_document_validity", "source_chapter_id", "validity_state"),
         Index("ix_derived_source_revision", "source_chapter_revision_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    derived_entity_type: Mapped[str] = mapped_column(
-        String(40), nullable=False, default="story_fact"
-    )
     derived_entity_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("story_facts.id", ondelete="CASCADE"), nullable=False
     )
@@ -817,8 +820,6 @@ class CharacterRelationship(Base):
     label: Mapped[str] = mapped_column(String(80), nullable=False)
     normalized_label: Mapped[str] = mapped_column(String(80), nullable=False)
     relation_pair_key: Mapped[str] = mapped_column(String(73), nullable=False)
-    # Kept as a compatibility alias while older clients migrate to `label`.
-    relation_type: Mapped[str] = mapped_column(String(80), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
     created_by: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")

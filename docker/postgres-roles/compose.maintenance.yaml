@@ -1,0 +1,177 @@
+# Explicit one-shot maintenance overlay. Never load this file for ordinary
+# QwenPaw startup. Every required host path is fail-closed at Compose parsing.
+services:
+  database-role-bootstrap:
+    image: pgvector/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+    pull_policy: never
+    user: "0:0"
+    entrypoint: ["/release/docker/postgres-roles/bootstrap.sh"]
+    restart: "no"
+    read_only: true
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      PGHOST: "${AI_NOVEL_ROLE_PGHOST:-postgres}"
+      PGPORT: "5432"
+      PGDATABASE: "${POSTGRES_DB:-ai_novel_world_2026}"
+      PGUSER: "${POSTGRES_USER:-ai_novel}"
+      PGPASSFILE: /run/ai-novel-db-auth/admin/.pgpass
+      AI_NOVEL_EXPECTED_DATABASE: "${POSTGRES_DB:-ai_novel_world_2026}"
+      AI_NOVEL_EXPECTED_ADMIN_ROLE: "${POSTGRES_USER:-ai_novel}"
+      AI_NOVEL_ROLE_BOOTSTRAP_CONFIRM: "${POSTGRES_DB:-ai_novel_world_2026}:${POSTGRES_USER:-ai_novel}"
+      AI_NOVEL_RUNTIME_PGHOST: "${AI_NOVEL_ROLE_PGHOST:-postgres}"
+      AI_NOVEL_RUNTIME_PGPORT: "5432"
+      AI_NOVEL_MIGRATOR_UID: "65532"
+      AI_NOVEL_MIGRATOR_GID: "65532"
+      AI_NOVEL_API_UID: "0"
+      AI_NOVEL_API_GID: "0"
+      AI_NOVEL_WORKER_UID: "0"
+      AI_NOVEL_WORKER_GID: "0"
+      AI_NOVEL_MAINTENANCE_STEP: "${AI_NOVEL_MAINTENANCE_STEP:?set exact single-service maintenance step}"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    volumes:
+      - type: volume
+        source: maintenance-root
+        target: /release
+        read_only: true
+      - type: bind
+        source: "${POSTGRES_ROLE_BOOTSTRAP_ADMIN_PGPASS_DIR:?set external 0700 admin pgpass directory}"
+        target: /run/ai-novel-db-auth/admin
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: db-migrator-auth
+        target: /run/ai-novel-db-auth/migrator
+      - type: volume
+        source: db-api-auth
+        target: /run/ai-novel-db-auth/api
+      - type: volume
+        source: db-worker-auth
+        target: /run/ai-novel-db-auth/worker
+    profiles: ["database-role-maintenance"]
+
+  database-role-validate:
+    image: "${AI_NOVEL_MAINTENANCE_QWENPAW_IMAGE:?set immutable QwenPaw image ID}"
+    pull_policy: never
+    user: "0:0"
+    entrypoint:
+      - /app/venv/bin/python
+      - /release/scripts/tts/validate_database_roles.py
+    command:
+      - --host
+      - "${AI_NOVEL_ROLE_PGHOST:-postgres}"
+      - --port
+      - "5432"
+      - --database
+      - "${POSTGRES_DB:-ai_novel_world_2026}"
+      - --admin-role
+      - "${POSTGRES_USER:-ai_novel}"
+      - --admin-passfile
+      - /run/ai-novel-db-auth/admin/.pgpass
+      - --migrator-passfile
+      - /run/ai-novel-db-auth/migrator/.pgpass
+      - --api-passfile
+      - /run/ai-novel-db-auth/api/.pgpass
+      - --worker-passfile
+      - /run/ai-novel-db-auth/worker/.pgpass
+      - --expected-head
+      - "${AI_NOVEL_ROLE_EXPECTED_HEAD:?set exact expected Alembic head}"
+      - --maintenance-step
+      - "${AI_NOVEL_MAINTENANCE_STEP:?set exact single-service maintenance step}"
+      - --pretty
+    restart: "no"
+    read_only: true
+    cap_drop: ["ALL"]
+    cap_add: ["DAC_READ_SEARCH"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    volumes:
+      - type: volume
+        source: maintenance-root
+        target: /release
+        read_only: true
+      - type: bind
+        source: "${POSTGRES_ROLE_BOOTSTRAP_ADMIN_PGPASS_DIR:?set external 0700 admin pgpass directory}"
+        target: /run/ai-novel-db-auth/admin
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: db-migrator-auth
+        target: /run/ai-novel-db-auth/migrator
+        read_only: true
+      - type: volume
+        source: db-api-auth
+        target: /run/ai-novel-db-auth/api
+        read_only: true
+      - type: volume
+        source: db-worker-auth
+        target: /run/ai-novel-db-auth/worker
+        read_only: true
+    profiles: ["database-role-maintenance"]
+
+  database-schema-migrate:
+    image: "${AI_NOVEL_MAINTENANCE_QWENPAW_IMAGE:?set immutable QwenPaw image ID}"
+    pull_policy: never
+    user: "65532:65532"
+    entrypoint: ["/release/docker/postgres-roles/migrate-as-owner.sh"]
+    command:
+      - "${AI_NOVEL_MIGRATION_COMMAND:?set upgrade or downgrade}"
+      - "${AI_NOVEL_MIGRATION_TARGET:?set exact migration target}"
+    restart: "no"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      AI_NOVEL_DB_HOST: "${AI_NOVEL_ROLE_PGHOST:-postgres}"
+      AI_NOVEL_DB_PORT: "5432"
+      AI_NOVEL_DB_NAME: "${POSTGRES_DB:-ai_novel_world_2026}"
+      AI_NOVEL_MIGRATOR_PGPASS_FILE: /run/ai-novel-db-auth/migrator/.pgpass
+      AI_NOVEL_MAINTENANCE_STEP: "${AI_NOVEL_MAINTENANCE_STEP:?set exact single-service maintenance step}"
+      PYTHONDONTWRITEBYTECODE: "1"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+    volumes:
+      - type: volume
+        source: maintenance-root
+        target: /release
+        read_only: true
+      - type: volume
+        source: db-migrator-auth
+        target: /run/ai-novel-db-auth/migrator
+        read_only: true
+    profiles: ["database-role-maintenance"]
+
+volumes:
+  maintenance-root:
+    name: "${AI_NOVEL_MAINTENANCE_ROOT_VOLUME:?set immutable maintenance-root volume}"
+    external: true
+  db-migrator-auth:
+    name: "${AI_NOVEL_DB_MIGRATOR_AUTH_VOLUME:-ai-novel-2026-db-migrator-auth}"
+    external: true
+  db-api-auth:
+    name: "${AI_NOVEL_DB_API_AUTH_VOLUME:-ai-novel-2026-db-api-auth}"
+    external: true
+  db-worker-auth:
+    name: "${AI_NOVEL_DB_WORKER_AUTH_VOLUME:-ai-novel-2026-db-worker-auth}"
+    external: true
+
+networks:
+  default:
+    name: "${AI_NOVEL_DATABASE_NETWORK:-ai-novel-world-2026_default}"
+    external: true

@@ -25,7 +25,13 @@ from ..creative_data_models import (
     StoryTimeline,
     StoryTimelineLink,
 )
-from ..models import DerivedSourceBinding, Novel, NovelCharacter, StoryFact
+from ..models import (
+    DerivedSourceBinding,
+    IntelligenceCommitBatch,
+    Novel,
+    NovelCharacter,
+    StoryFact,
+)
 
 from .contracts import (
     CharacterContinuityKind,
@@ -50,6 +56,7 @@ from .engine import (
     resolve_character_instance,
     resolve_timeline,
 )
+from .fact_authority import resolve_fact_authority_rows
 
 
 IdFactory = Callable[[], UUID]
@@ -60,6 +67,7 @@ class PersistenceErrorCode(str, Enum):
     NOVEL_NOT_FOUND = "novel_not_found"
     CHARACTER_NOT_FOUND = "character_not_found"
     VERSION_CONFLICT = "version_conflict"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
     INVALID_PATCH = "invalid_patch"
     FACT_NOT_FOUND = "fact_not_found"
     FACT_SCHEMA_INVALID = "fact_schema_invalid"
@@ -366,6 +374,11 @@ def patch_timeline(
             PersistenceErrorCode.INVALID_PATCH,
             "primary timeline cannot be archived",
         )
+    if next_name == row.name and next_lifecycle.value == row.lifecycle_state:
+        payload = timeline_payload(row)
+        payload["story_ledger_version"] = novel.story_ledger_version
+        payload["changed"] = False
+        return payload
     normalized_name = next_name.casefold()
     duplicate = session.scalar(
         select(StoryTimeline.id).where(
@@ -389,6 +402,7 @@ def patch_timeline(
     session.flush()
     payload = timeline_payload(row)
     payload["story_ledger_version"] = novel.story_ledger_version
+    payload["changed"] = True
     return payload
 
 
@@ -500,6 +514,7 @@ def ensure_default_story_state(
     character_ids: Sequence[UUID] | None = None,
     id_factory: IdFactory = uuid4,
     clock: Clock = _now,
+    _advance_ledger: bool = True,
 ) -> dict[str, Any]:
     novel = _lock_ledger(session, novel_id, expected_story_ledger_version)
     timelines = _timeline_rows(session, novel_id, for_update=True)
@@ -580,7 +595,8 @@ def ensure_default_story_state(
     new_rows.extend(revision_rows)
     if new_rows:
         session.add_all(new_rows)
-        novel.story_ledger_version += 1
+        if _advance_ledger:
+            novel.story_ledger_version += 1
         session.flush()
     return {
         "timeline": timeline_payload(new_rows[0]) if plan.timeline is not None else None,
@@ -606,6 +622,7 @@ def fork_timeline(
     fork_anchor: Mapping[str, object] | None = None,
     id_factory: IdFactory = uuid4,
     clock: Clock = _now,
+    _advance_ledger: bool = True,
 ) -> dict[str, Any]:
     novel = _lock_ledger(session, novel_id, expected_story_ledger_version)
     timelines = _timeline_rows(session, novel_id, for_update=True)
@@ -690,7 +707,8 @@ def fork_timeline(
     session.add_all(derived_rows)
     session.flush()
     session.add_all(revision_rows)
-    novel.story_ledger_version += 1
+    if _advance_ledger:
+        novel.story_ledger_version += 1
     session.flush()
     return {
         "timeline": timeline_payload(timeline_row),
@@ -715,6 +733,7 @@ def create_timeline_link(
     details: Mapping[str, object] | None = None,
     id_factory: IdFactory = uuid4,
     clock: Clock = _now,
+    _advance_ledger: bool = True,
 ) -> dict[str, Any]:
     novel = _lock_ledger(session, novel_id, expected_story_ledger_version)
     rows = _timeline_rows(session, novel_id, for_update=True)
@@ -758,7 +777,8 @@ def create_timeline_link(
         return payload
     row = _new_timeline_link(record)
     session.add(row)
-    novel.story_ledger_version += 1
+    if _advance_ledger:
+        novel.story_ledger_version += 1
     session.flush()
     payload = timeline_link_payload(row)
     payload["story_ledger_version"] = novel.story_ledger_version
@@ -791,7 +811,8 @@ def create_merge_timeline(
             PersistenceErrorCode.INVALID_PATCH,
             "a merge requires at least two inputs including its primary timeline",
         )
-    rows = _timeline_rows(session, novel_id, for_update=False)
+    novel = _lock_ledger(session, novel_id, expected_story_ledger_version)
+    rows = _timeline_rows(session, novel_id, for_update=True)
     by_id = {row.id: row for row in rows}
     for timeline_id in unique_inputs:
         row = by_id.get(timeline_id)
@@ -818,6 +839,7 @@ def create_merge_timeline(
         name=name,
         fork_story_sequence=merge_story_sequence,
         fork_anchor={**dict(merge_anchor or {}), "merge_inputs": [str(i) for i in unique_inputs]},
+        _advance_ledger=False,
     )
     target_id = UUID(str(result["timeline"]["id"]))
     target = session.get(StoryTimeline, target_id)
@@ -844,11 +866,13 @@ def create_merge_timeline(
             source_story_sequence=merge_story_sequence,
             target_story_sequence=merge_story_sequence,
             details={"state_propagation": "none"},
+            _advance_ledger=False,
         )
         ledger_version = int(link["story_ledger_version"])
         references.append(link)
     result["merge_references"] = references
-    result["story_ledger_version"] = ledger_version
+    novel.story_ledger_version += 1
+    result["story_ledger_version"] = novel.story_ledger_version
     return result
 
 
@@ -907,6 +931,12 @@ def create_story_event_link(
         )
     )
     if replay is not None:
+        if dict(replay.details_json or {}) != dict(details or {}):
+            raise StoryStatePersistenceError(
+                PersistenceErrorCode.IDEMPOTENCY_CONFLICT,
+                "story event link already exists with different details",
+                current=story_event_link_payload(replay),
+            )
         payload = story_event_link_payload(replay)
         payload["story_ledger_version"] = novel.story_ledger_version
         payload["replayed"] = True
@@ -1054,6 +1084,14 @@ def patch_character_instance(
     candidate["version"] = row.version + 1
     candidate["updated_at"] = clock()
     validated = CharacterInstanceRecord.model_validate(candidate)
+    if (
+        validated.display_label == row.display_label
+        and validated.lifecycle_state.value == row.lifecycle_state
+    ):
+        payload = character_instance_payload(row)
+        payload["story_ledger_version"] = novel.story_ledger_version
+        payload["changed"] = False
+        return payload
     row.display_label = validated.display_label
     row.lifecycle_state = validated.lifecycle_state.value
     row.version = validated.version
@@ -1062,6 +1100,7 @@ def patch_character_instance(
     session.flush()
     payload = character_instance_payload(row)
     payload["story_ledger_version"] = novel.story_ledger_version
+    payload["changed"] = True
     return payload
 
 
@@ -1103,7 +1142,6 @@ def get_story_projection_payload(
                 .join(StoryFact, StoryFact.id == DerivedSourceBinding.derived_entity_id)
                 .where(
                     StoryFact.novel_id == novel_id,
-                    DerivedSourceBinding.derived_entity_type == "story_fact",
                     DerivedSourceBinding.derived_entity_id.in_(fact_ids),
                 )
             )
@@ -1111,21 +1149,71 @@ def get_story_projection_payload(
         if fact_ids
         else []
     )
-    effective_states = {"current", "source_restored"}
-    validity: dict[UUID, bool] = {}
-    for binding in binding_rows:
-        current = binding.validity_state in effective_states
-        existing = validity.get(binding.source_chapter_revision_id)
-        validity[binding.source_chapter_revision_id] = (
-            current if existing is None else existing and current
-        )
+    batch_ids = {
+        binding.commit_batch_id
+        for binding in binding_rows
+        if binding.commit_batch_id is not None
+    }
+    batch_states = (
+        {
+            batch.id: batch.state
+            for batch in session.scalars(
+                select(IntelligenceCommitBatch).where(
+                    IntelligenceCommitBatch.id.in_(batch_ids)
+                )
+            )
+        }
+        if batch_ids
+        else {}
+    )
+    incoming_supersedes = {
+        row.target_fact_id for row in link_rows if row.link_type == "supersedes"
+    }
+    resolved_states = resolve_fact_authority_rows(
+        facts,
+        bindings=binding_rows,
+        batch_states=batch_states,
+        incoming_superseded_fact_ids=incoming_supersedes,
+    )
+    included_facts = [
+        fact
+        for fact in facts
+        if resolved_states[fact.id].included_in_current_projection
+    ]
+    resolver_suppressed_ids = {
+        fact.id
+        for fact in facts
+        if not resolved_states[fact.id].included_in_current_projection
+    }
+
+    # The engine keeps this compatibility input, but every revision supplied
+    # here belongs to a fact that has already passed fact-specific resolution.
+    # It must therefore contain true values only and must never aggregate
+    # validity across sibling facts from the same revision.
+    validity = {
+        fact.source_revision_id: True
+        for fact in included_facts
+        if fact.source_revision_id is not None
+    }
     projection = project_story_facts(
         novel_id,
         resolved.id,
         narrative_cutoff=narrative_cutoff,
         timelines=timeline_records,
-        facts=facts,
+        facts=included_facts,
         event_links=[_event_link_record(row) for row in link_rows],
         source_revision_validity=validity,
     )
+    if resolver_suppressed_ids:
+        projection = projection.model_copy(
+            update={
+                "suppressed_fact_ids": tuple(
+                    sorted(
+                        set(projection.suppressed_fact_ids)
+                        | resolver_suppressed_ids,
+                        key=str,
+                    )
+                )
+            }
+        )
     return projection_payload(projection)

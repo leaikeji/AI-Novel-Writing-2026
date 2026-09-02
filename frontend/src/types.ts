@@ -343,19 +343,6 @@ export interface GenerationModelStatus {
   policy: "follow-agent-effective";
 }
 
-export interface StoryFactRecord {
-  id: string;
-  novel_id: string;
-  fact_type: string;
-  subject: string;
-  predicate: string;
-  object_text: string;
-  details: Record<string, unknown>;
-  source_revision_id: string | null;
-  status: string;
-  created_at: string | null;
-}
-
 export interface RestorePreviewFactRecord {
   id: string;
   fact_type: string;
@@ -471,7 +458,6 @@ export interface CharacterRelationshipRecord {
   directionality: RelationshipDirectionality;
   relation_kind: RelationshipKind;
   label: string;
-  relation_type: string;
   description: string;
   status: "active" | "resolved" | "archived";
   definition_status?: "active" | "resolved" | "archived";

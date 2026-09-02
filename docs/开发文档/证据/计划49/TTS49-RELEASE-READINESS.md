@@ -1,14 +1,14 @@
 # TTS49 部署前发布审计
 
-状态：**候选级 `TTS49-RELEASE-READY=PASS`。2026-09-02 首次长期预检曾得到 `TTS49-LONGTERM-DEPLOY=BLOCKED_ROLE_BASELINE`；该阻断已由计划 53 独立解除，当前长期 schema 为 `20260902_0037`、四角色已建立、完整候选已安装。**
+状态：**候选级 `TTS49-RELEASE-READY=PASS`。2026-09-02 首次长期预检曾得到 `TTS49-LONGTERM-DEPLOY=BLOCKED_ROLE_BASELINE`；该阻断已由计划 53 独立解除，计划 53 验收时长期 schema 为 `20260902_0037`、四角色已建立、完整候选已安装。后续计划 54 已将长期 schema 与安装树升至 `20260902_0038`。**
 
 日期：2026-09-01（Asia/Shanghai）
 
 ## 2026-09-02 当前运行态补记
 
-计划 53 已在本计划首次预检之后独立完成备份、四角色基线建立、`0035 → 0036 → 0037` 线性迁移、完整候选安装与健康复核。当前四角色均存在（schema owner 禁止登录，migrator/API/worker 允许登录）；PawApp 与 Narration lifecycle ready，Sidecar reachable，production worker running，`character_cast_planning` enabled。`character_cast_plan_commands/items` 当前计数为 `0/0`。
+计划 53 已在本计划首次预检之后独立完成备份、四角色基线建立、`0035 → 0036 → 0037` 线性迁移、完整候选安装与健康复核。四角色均存在（schema owner 禁止登录，migrator/API/worker 允许登录）；PawApp 与 Narration lifecycle ready，Sidecar reachable，production worker running，`character_cast_planning` enabled。计划 53 验收时 `character_cast_plan_commands/items` 计数为 `0/0`。
 
-因此 `TTS49-LONGTERM-DEPLOY=BLOCKED_ROLE_BASELINE` 只描述下方首次尝试的历史结果，不再是当前阻断。计划 53 的发布证据负责当前 `0037` 身份；本文件仍保留计划 49 的 `0036` 候选和恢复演练，不回写历史 hash。
+因此 `TTS49-LONGTERM-DEPLOY=BLOCKED_ROLE_BASELINE` 只描述下方首次尝试的历史结果，不再是当前阻断。计划 53 的发布证据负责其 `0037` 历史身份；[计划 54](../../54-故事账本单契约收缩与测试小说清理计划.md)负责现在的 `0038` 身份。本文件仍保留计划 49 的 `0036` 候选和恢复演练，不回写历史 hash。
 
 ## 2026-09-02 首次长期预检增量（历史）
 

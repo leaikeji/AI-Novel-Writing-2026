@@ -27,7 +27,7 @@ from ..creative_data_models import (
     RevisionTimelineMappingSegment,
     StoryTimeline,
 )
-from ..models import Document, DocumentRevision
+from ..models import Document, DocumentRevision, Novel
 
 from .contracts import StoryTimeV1
 from .persistence import _iso
@@ -43,6 +43,7 @@ def _now() -> datetime:
 
 
 class MappingServiceErrorCode(str, Enum):
+    NOVEL_NOT_FOUND = "novel_not_found"
     DOCUMENT_NOT_FOUND = "document_not_found"
     REVISION_NOT_FOUND = "document_revision_not_found"
     MAPPING_NOT_FOUND = "timeline_mapping_not_found"
@@ -263,6 +264,14 @@ def save_revision_timeline_mapping(
 ) -> dict[str, object]:
     """Append a mapping revision and move its CAS head in one transaction."""
 
+    novel = session.scalar(
+        select(Novel).where(Novel.id == novel_id).with_for_update()
+    )
+    if novel is None:
+        raise MappingServiceError(
+            MappingServiceErrorCode.NOVEL_NOT_FOUND,
+            "novel was not found",
+        )
     key = _validate_operation_key(operation_key)
     _, source_revision = _document_and_revision(
         session, novel_id, document_id, revision_id
@@ -328,6 +337,8 @@ def save_revision_timeline_mapping(
                 is_current=bool(head and head.current_mapping_revision_id == replay.id),
             ),
             "replayed": True,
+            "changed": False,
+            "story_ledger_version": novel.story_ledger_version,
         }
 
     actual_head_version = head.version if head is not None else 0
@@ -397,12 +408,15 @@ def save_revision_timeline_mapping(
         head.updated_at = created_at
     session.add(row)
     session.add_all(segment_rows)
+    novel.story_ledger_version += 1
     session.flush()
     return {
         "mapping": timeline_mapping_payload(
             row, segment_rows, head_version=head.version, is_current=True
         ),
         "replayed": False,
+        "changed": True,
+        "story_ledger_version": novel.story_ledger_version,
     }
 
 

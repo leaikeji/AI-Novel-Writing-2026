@@ -120,7 +120,7 @@ class CharacterVoiceBindingView(_ReadModel):
     version: int
 
 
-class ProjectedFactView(_ReadModel):
+class _ProjectedFactCore(_ReadModel):
     id: UUID
     fact_type: str
     timeline_id: UUID
@@ -170,7 +170,7 @@ class FactSourceView(_ReadModel):
     commit_batch_id: UUID | None = None
 
 
-class ProjectedFactViewV2(ProjectedFactView):
+class ProjectedFactViewV2(_ProjectedFactCore):
     source_document_id: UUID | None = None
     story_time: dict[str, JsonValue] | None = None
     created_at: datetime
@@ -239,32 +239,6 @@ class CharacterWritingState(_ReadModel):
     recent_changes: tuple[ProjectedFactViewV2, ...] = ()
     risk_summary: WritingStateRiskSummary
     history_summary: FactHistorySummary
-
-
-class CharacterProjectedState(_ReadModel):
-    timeline_id: UUID
-    narrative_cutoff: int | None = None
-    current_facts: tuple[ProjectedFactView, ...] = ()
-    conflicts: tuple[ProjectionConflictView, ...] = ()
-    ambiguous_fact_ids: tuple[UUID, ...] = ()
-
-
-class CharacterWorkspaceV1(_ReadModel):
-    schema_version: Literal["character-workspace/1"] = "character-workspace/1"
-    novel_id: UUID
-    character_catalog_version: int
-    story_ledger_version: int
-    timeline_mode: Literal["single", "multiple"]
-    character: CharacterRootView
-    selected_timeline: TimelineView
-    selected_instance: CharacterInstanceView
-    timelines: tuple[TimelineView, ...]
-    instances: tuple[CharacterInstanceView, ...]
-    aliases: tuple[CharacterAliasView, ...]
-    relationships: tuple[CharacterRelationshipView, ...]
-    chapter_references: tuple[ChapterCharacterReference, ...]
-    voice_binding: CharacterVoiceBindingView | None = None
-    projected_state: CharacterProjectedState
 
 
 class CharacterWorkspaceV2(_ReadModel):

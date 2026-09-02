@@ -1,9 +1,14 @@
-export type JsonPrimitive = string | number | boolean | null;
+import type {
+  IntelligenceBatchRevertCommandV1 as SharedIntelligenceBatchRevertCommandV1,
+  StoryFactCorrectionCommandV1 as SharedStoryFactCorrectionCommandV1,
+  StoryFactCorrectionResultV1 as SharedStoryFactCorrectionResultV1,
+  StoryLedgerFactEffectiveState,
+  StoryLedgerFactHealth,
+  StoryLedgerBatchImpactPreview,
+} from "../story-ledger/contracts";
 
-export type JsonValue =
-  | JsonPrimitive
-  | readonly JsonValue[]
-  | { readonly [key: string]: JsonValue };
+export type { JsonPrimitive, JsonValue } from "../story-ledger/contracts";
+import type { JsonValue } from "../story-ledger/contracts";
 
 export interface CharacterRootView {
   readonly id: string;
@@ -87,7 +92,7 @@ export interface CharacterVoiceBindingView {
   readonly version: number;
 }
 
-export interface ProjectedFactView {
+interface ProjectedFactCore {
   readonly id: string;
   readonly fact_type: string;
   readonly timeline_id: string;
@@ -109,45 +114,8 @@ export interface ProjectionConflictView {
   readonly reason: string;
 }
 
-export interface CharacterProjectedState {
-  readonly timeline_id: string;
-  readonly narrative_cutoff: number | null;
-  readonly current_facts: readonly ProjectedFactView[];
-  readonly conflicts: readonly ProjectionConflictView[];
-  readonly ambiguous_fact_ids: readonly string[];
-}
-
-/**
- * Frozen UI boundary for the formal character workspace. Keep the field names in
- * sync with backend/character_workspace/contracts.py; the shared frontend DTO is
- * intentionally not imported so this feature can be integrated independently.
- */
-export interface CharacterWorkspaceV1 {
-  readonly schema_version: string;
-  readonly novel_id: string;
-  readonly character_catalog_version: number;
-  readonly story_ledger_version: number;
-  readonly timeline_mode: "single" | "multiple";
-  readonly character: CharacterRootView;
-  readonly selected_timeline: TimelineView;
-  readonly selected_instance: CharacterInstanceView;
-  readonly timelines: readonly TimelineView[];
-  readonly instances: readonly CharacterInstanceView[];
-  readonly aliases: readonly CharacterAliasView[];
-  readonly relationships: readonly CharacterRelationshipView[];
-  readonly chapter_references: readonly ChapterCharacterReference[];
-  readonly voice_binding: CharacterVoiceBindingView | null;
-  readonly projected_state: CharacterProjectedState;
-}
-
-export type CharacterFactEffectiveState =
-  | "current"
-  | "historical"
-  | "superseded"
-  | "source_invalid"
-  | "batch_reverted";
-
-export type CharacterFactHealth = "ok" | "conflict" | "ambiguous";
+export type CharacterFactEffectiveState = StoryLedgerFactEffectiveState;
+export type CharacterFactHealth = StoryLedgerFactHealth;
 
 export interface CharacterFactSourceV2 {
   readonly document_id: string;
@@ -162,12 +130,12 @@ export interface CharacterFactSourceV2 {
   readonly source_range_hash: string | null;
   readonly source_excerpt: string;
   readonly source_excerpt_truncated: boolean;
-  readonly binding_state: string;
+  readonly binding_state: string | null;
   readonly proposal_item_id: string | null;
   readonly commit_batch_id: string | null;
 }
 
-export interface ProjectedFactViewV2 extends ProjectedFactView {
+export interface ProjectedFactViewV2 extends ProjectedFactCore {
   readonly source_document_id: string | null;
   readonly story_time: Readonly<Record<string, JsonValue>> | null;
   readonly created_at: string | null;
@@ -176,8 +144,12 @@ export interface ProjectedFactViewV2 extends ProjectedFactView {
   readonly source: CharacterFactSourceV2 | null;
 }
 
-export interface CharacterProjectedStateV2 extends Omit<CharacterProjectedState, "current_facts"> {
+export interface CharacterProjectedStateV2 {
+  readonly timeline_id: string;
+  readonly narrative_cutoff: number | null;
   readonly current_facts: readonly ProjectedFactViewV2[];
+  readonly conflicts: readonly ProjectionConflictView[];
+  readonly ambiguous_fact_ids: readonly string[];
 }
 
 export interface CharacterWritingStateAsOfV2 {
@@ -224,32 +196,31 @@ export interface CharacterWritingStateV2 {
 }
 
 export interface CharacterWorkspaceV2
-  extends Omit<CharacterWorkspaceV1, "schema_version" | "projected_state"> {
+{
   readonly schema_version: "character-workspace/2";
+  readonly novel_id: string;
+  readonly character_catalog_version: number;
+  readonly story_ledger_version: number;
+  readonly timeline_mode: "single" | "multiple";
+  readonly character: CharacterRootView;
+  readonly selected_timeline: TimelineView;
+  readonly selected_instance: CharacterInstanceView;
+  readonly timelines: readonly TimelineView[];
+  readonly instances: readonly CharacterInstanceView[];
+  readonly aliases: readonly CharacterAliasView[];
+  readonly relationships: readonly CharacterRelationshipView[];
+  readonly chapter_references: readonly ChapterCharacterReference[];
+  readonly voice_binding: CharacterVoiceBindingView | null;
   readonly projected_state: CharacterProjectedStateV2;
   readonly writing_state: CharacterWritingStateV2;
 }
 
-export interface CharacterRootPatchV1 {
+export interface CharacterRootPatchV2 {
   readonly name: string;
   readonly role_type: string;
   readonly description: string;
   readonly gender: string;
   readonly core_theme: string;
-}
-
-export interface CharacterWorkspaceSaveCommandV1 {
-  readonly schema_version: "character-workspace-save/1";
-  readonly novel_id: string;
-  readonly character_id: string;
-  readonly selected_timeline_id: string;
-  readonly selected_instance_id: string;
-  readonly expected_character_catalog_version: number;
-  readonly expected_story_ledger_version: number;
-  readonly expected_character_version: number;
-  readonly expected_instance_version: number;
-  readonly root: CharacterRootPatchV1 | null;
-  readonly profile: Readonly<Record<string, JsonValue>> | null;
 }
 
 export interface CharacterWorkspaceSaveCommandV2 {
@@ -261,7 +232,7 @@ export interface CharacterWorkspaceSaveCommandV2 {
   readonly expected_story_ledger_version: number;
   readonly expected_character_version: number;
   readonly expected_instance_version: number;
-  readonly root_patch: CharacterRootPatchV1 | null;
+  readonly root_patch: CharacterRootPatchV2 | null;
   readonly profile: Readonly<Record<string, JsonValue>> | null;
 }
 
@@ -281,41 +252,12 @@ export interface CharacterFactHistoryQueryV2 {
   readonly source_document_id?: string | null;
 }
 
-export interface StoryFactCorrectionCommandV1 {
-  readonly schema_version: "story-fact-correction/1";
-  readonly operation_key: string;
-  readonly expected_story_ledger_version: number;
-  readonly reason: string;
-  readonly replacement: Readonly<Record<string, JsonValue>>;
-}
+export type StoryFactCorrectionCommandV1 = SharedStoryFactCorrectionCommandV1;
+export type StoryFactCorrectionResultV1 = SharedStoryFactCorrectionResultV1;
+export type CharacterBatchRevertImpact = StoryLedgerBatchImpactPreview;
+export type IntelligenceBatchRevertCommandV1 = SharedIntelligenceBatchRevertCommandV1;
 
-export interface StoryFactCorrectionResultV1 {
-  readonly replayed: boolean;
-  readonly story_ledger_version: number;
-  readonly fact: Readonly<Record<string, JsonValue>>;
-}
-
-export interface IntelligenceBatchRevertImpactV1 {
-  readonly batch_id: string;
-  readonly state: string;
-  readonly already_reverted: boolean;
-  readonly facts: readonly (Readonly<Record<string, JsonValue>> & {
-    readonly id: string;
-    readonly disposition: "preserve_followup" | "supersede" | "preserve";
-  })[];
-  readonly relationships: readonly (Readonly<Record<string, JsonValue>> & {
-    readonly id: string;
-    readonly disposition: "preserve_root_reproject_visibility";
-  })[];
-}
-
-export interface IntelligenceBatchRevertCommandV1 {
-  readonly operation_key: string;
-  readonly expected_story_ledger_version: number;
-  readonly reason?: string | null;
-}
-
-export interface CharacterWorkspaceSelectionV1 {
+export interface CharacterWorkspaceSelection {
   readonly timelineId: string;
   readonly instanceId: string;
 }
@@ -328,7 +270,7 @@ export interface CharacterWorkspaceActionError {
   readonly code: string;
   readonly message: string;
   readonly field_errors?: CharacterWorkspaceFieldErrors;
-  readonly current_workspace?: CharacterWorkspaceV1 | CharacterWorkspaceV2;
+  readonly current_workspace?: CharacterWorkspaceV2;
 }
 
 export interface CharacterWorkspaceVoiceSlotProps {

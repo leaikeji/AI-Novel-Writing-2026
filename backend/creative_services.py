@@ -23,6 +23,7 @@ from .character_profile_services import (
     validate_character_profile_apply_plan,
 )
 from .creative_authority import (
+    AuthorityIdempotencyConflict,
     establish_character_revision,
     get_outline,
     get_settings,
@@ -202,6 +203,23 @@ def _lock_novel(session: Session, novel_id: UUID) -> Novel:
     if novel is None:
         raise NotFoundError(f"novel {novel_id} not found")
     return novel
+
+
+def _story_fact_source_exists(
+    session: Session,
+    novel_id: UUID,
+    *,
+    document_ids: Iterable[UUID] | None = None,
+) -> bool:
+    """Return whether immutable ledger evidence depends on the source scope."""
+
+    statement = select(StoryFact.id).where(StoryFact.novel_id == novel_id)
+    if document_ids is not None:
+        scoped_ids = tuple(document_ids)
+        if not scoped_ids:
+            return False
+        statement = statement.where(StoryFact.source_document_id.in_(scoped_ids))
+    return session.scalar(statement.limit(1)) is not None
 
 
 def _lock_volume(session: Session, novel_id: UUID, volume_id: UUID) -> Volume:
@@ -824,6 +842,7 @@ def complete_outline_draft(
     novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
     if novel is None:
         raise NotFoundError(f"novel {novel_id} not found")
+    ledger_before = novel.story_ledger_version
     draft = session.scalar(
         select(OutlineDraft).where(OutlineDraft.novel_id == novel_id).with_for_update()
     )
@@ -977,6 +996,7 @@ def complete_outline_draft(
         session,
         novel_id,
         expected_story_ledger_version=novel.story_ledger_version,
+        _advance_ledger=False,
     )
     primary_timeline = session.scalar(
         select(StoryTimeline).where(
@@ -1058,6 +1078,7 @@ def complete_outline_draft(
             ),
             profile=CharacterInstanceProfileV2.model_validate(merged_profile),
             source_kind="manual",
+            _advance_ledger=False,
         )
     current_character_revisions: dict[UUID, NovelCharacterRevision] = {}
     for row in session.scalars(
@@ -1111,11 +1132,15 @@ def complete_outline_draft(
             )
         )
     else:
-        main_line.description = draft.plot_text
-        main_line.version += 1
+        if main_line.description != draft.plot_text:
+            main_line.description = draft.plot_text
+            main_line.version += 1
     draft.state = "completed"
     draft.step = 5
     draft.version += 1
+    if novel.story_ledger_version != ledger_before:
+        raise ValidationError("大纲正式化子操作意外推进了故事账本版本")
+    novel.story_ledger_version += 1
     session.commit()
     characters = list_novel_characters(session, novel_id)
     return {"outline": _outline_payload(draft), "novel": get_novel(session, novel_id), "characters": characters}
@@ -1146,7 +1171,8 @@ def create_novel_character(
     description: str,
     details: dict[str, Any],
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
+    ledger_before = novel.story_ledger_version
     if role_type not in ROLE_TYPES:
         raise ValidationError("角色类型无效")
     clean_name = _clean_title(name, "角色姓名")
@@ -1173,9 +1199,6 @@ def create_novel_character(
     # novel that has not been rebuilt yet.  Existing active roots are filled in
     # deterministically, so creating one character never leaves a partial
     # single-line catalog.
-    novel = session.get(Novel, novel_id)
-    if novel is None:  # Defensive: _require_novel above already proved scope.
-        raise NotFoundError(f"novel {novel_id} not found")
     establish_character_revision(
         session,
         novel_id,
@@ -1191,8 +1214,13 @@ def create_novel_character(
         novel_id,
         expected_story_ledger_version=novel.story_ledger_version,
     )
+    if novel.story_ledger_version == ledger_before:
+        novel.story_ledger_version += 1
     session.commit()
-    return _character_payload(character)
+    payload = _character_payload(character)
+    payload["changed"] = True
+    payload["story_ledger_version"] = novel.story_ledger_version
+    return payload
 
 
 def update_novel_character(
@@ -1218,8 +1246,6 @@ def update_novel_character(
     )
     if character is None:
         raise NotFoundError(f"character {character_id} not found")
-    if character.version != expected_version:
-        raise EntityConflictError(_character_payload(character))
     validated = validate_character_root_update(
         session,
         character,
@@ -1228,13 +1254,29 @@ def update_novel_character(
         description=description,
         details_patch=details,
     )
+    operation_key = f"character-update:{character_id}:v{expected_version}"
+    desired_is_current = all(
+        (
+            character.role_type == validated["role_type"],
+            character.name == validated["name"],
+            character.description == validated["description"],
+            dict(character.details or {}) == validated["details"],
+        )
+    )
+    if character.version == expected_version and desired_is_current:
+        payload = _character_payload(character)
+        payload["changed"] = False
+        payload["replayed"] = False
+        payload["story_ledger_version"] = novel.story_ledger_version
+        session.commit()
+        return payload
     result = save_character_root(
         session,
         novel_id,
         character_id,
         expected_catalog_version=novel.character_catalog_version,
         expected_character_version=expected_version,
-        operation_key=f"character-update:{character_id}:{uuid4()}",
+        operation_key=operation_key,
         source_kind="manual",
         role_type=validated["role_type"],
         name=validated["name"],
@@ -1244,8 +1286,14 @@ def update_novel_character(
         position=character.position,
         change_set={"edited_fields": ["role_type", "name", "description", "details"]},
     )
+    if not result.replayed:
+        novel.story_ledger_version += 1
     session.commit()
-    return _character_payload(result.character)
+    payload = _character_payload(result.character)
+    payload["changed"] = not result.replayed
+    payload["replayed"] = result.replayed
+    payload["story_ledger_version"] = novel.story_ledger_version
+    return payload
 
 
 def validate_character_root_update(
@@ -1290,7 +1338,8 @@ def validate_character_root_update(
 
 def delete_novel_character(
     session: Session, novel_id: UUID, character_id: UUID, *, expected_version: int
-) -> None:
+) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     character = session.scalar(
         select(NovelCharacter)
         .where(NovelCharacter.id == character_id, NovelCharacter.novel_id == novel_id)
@@ -1298,10 +1347,37 @@ def delete_novel_character(
     )
     if character is None:
         raise NotFoundError(f"character {character_id} not found")
-    if character.version != expected_version:
-        raise EntityConflictError(_character_payload(character))
-    if character.lifecycle_state == "archived":
-        return
+    if character.lifecycle_state == "archived" and character.version == expected_version:
+        session.commit()
+        return {
+            "deleted": True,
+            "changed": False,
+            "story_ledger_version": novel.story_ledger_version,
+        }
+    root_result = save_character_root(
+        session,
+        novel_id,
+        character_id,
+        expected_catalog_version=novel.character_catalog_version,
+        expected_character_version=expected_version,
+        operation_key=f"character-archive:{character_id}:v{expected_version}",
+        source_kind="manual",
+        role_type=character.role_type,
+        name=character.name,
+        description=character.description,
+        details=dict(character.details or {}),
+        lifecycle_state="archived",
+        position=character.position,
+        change_set={"archived": True},
+    )
+    if root_result.replayed:
+        session.commit()
+        return {
+            "deleted": True,
+            "changed": False,
+            "replayed": True,
+            "story_ledger_version": novel.story_ledger_version,
+        }
     relations = session.scalars(
         select(CharacterRelationship)
         .where(
@@ -1316,10 +1392,13 @@ def delete_novel_character(
     ).all()
     for relation in relations:
         _archive_relationship_entity(session, relation)
-    character.lifecycle_state = "archived"
-    character.archived_at = datetime.now(timezone.utc)
-    character.version += 1
+    novel.story_ledger_version += 1
     session.commit()
+    return {
+        "deleted": True,
+        "changed": True,
+        "story_ledger_version": novel.story_ledger_version,
+    }
 
 
 def _normalize_relationship_label(value: str) -> str:
@@ -1557,7 +1636,6 @@ def _relationship_payload(
         "directionality": relation.directionality,
         "relation_kind": relation.relation_kind,
         "label": relation.label,
-        "relation_type": relation.label,
         "description": relation.description,
         "status": relation.status,
         "definition_status": relation.status,
@@ -1587,6 +1665,35 @@ def _relationship_payload(
         "created_at": _iso(relation.created_at),
         "updated_at": _iso(relation.updated_at),
     }
+
+
+def _relationship_authority_signature(
+    relation: CharacterRelationship,
+) -> tuple[object, ...]:
+    """Fields whose change is visible to the ledger or relationship history."""
+
+    return (
+        relation.source_character_id,
+        relation.target_character_id,
+        relation.timeline_id,
+        relation.source_character_instance_id,
+        relation.target_character_instance_id,
+        relation.directionality,
+        relation.relation_kind,
+        relation.label,
+        relation.normalized_label,
+        relation.relation_pair_key,
+        relation.description,
+        relation.status,
+        relation.archived_at,
+        relation.created_by,
+        relation.manual_override,
+        relation.confidence,
+        tuple(relation.evidence_json or ()),
+        relation.source_generation_job_id,
+        relation.source_chapter_revision_id,
+        relation.proposal_item_id,
+    )
 
 
 def _relationship_revision_payload(
@@ -1743,7 +1850,6 @@ def _create_relationship_entity(
         label=clean_label,
         normalized_label=normalized_label,
         relation_pair_key=_relationship_pair_key(source_character_id, target_character_id),
-        relation_type=clean_label,
         description=description.strip(),
         status="active",
         created_by=created_by,
@@ -1786,6 +1892,7 @@ def _update_relationship_entity(
 ) -> CharacterRelationship:
     if relation.version != expected_version:
         raise EntityConflictError(_relationship_payload(relation))
+    previous_signature = _relationship_authority_signature(relation)
     next_directionality = directionality or relation.directionality
     if next_directionality not in RELATIONSHIP_DIRECTIONALITIES:
         raise ValidationError("请先明确选择有向或无向关系")
@@ -1856,7 +1963,6 @@ def _update_relationship_entity(
     relation.label = clean_label
     relation.normalized_label = normalized_label
     relation.relation_pair_key = _relationship_pair_key(next_source, next_target)
-    relation.relation_type = clean_label
     if description is not None:
         relation.description = description.strip()
     relation.status = next_status
@@ -1874,6 +1980,8 @@ def _update_relationship_entity(
         relation.source_chapter_revision_id = source_chapter_revision_id
     if proposal_item_id is not None:
         relation.proposal_item_id = proposal_item_id
+    if _relationship_authority_signature(relation) == previous_signature:
+        return relation
     relation.version += 1
     _record_relationship_revision(
         session,
@@ -2006,6 +2114,12 @@ def list_character_relationships(
     relations = session.scalars(
         query.order_by(CharacterRelationship.created_at, CharacterRelationship.id)
     ).all()
+    projection = get_story_projection_payload(
+        session,
+        novel_id,
+        timeline_id=timeline_id,
+        narrative_cutoff=narrative_cutoff,
+    )
     if not include_archived:
         incremental_relationship_ids = {
             relation.id
@@ -2013,16 +2127,14 @@ def list_character_relationships(
             if not relation.manual_override and relation.proposal_item_id is not None
         }
         current_incremental_ids = (
-            set(
-                session.scalars(
-                    select(StoryFact.relationship_id).where(
-                        StoryFact.novel_id == novel_id,
-                        StoryFact.fact_type == "relationship_state",
-                        StoryFact.relationship_id.in_(incremental_relationship_ids),
-                        StoryFact.status.in_(("active", "source_restored")),
-                    )
-                ).all()
-            )
+            {
+                UUID(str(fact["relationship_id"]))
+                for fact in projection.get("visible_facts", [])
+                if fact.get("fact_type") == "relationship_state"
+                and fact.get("relationship_id") is not None
+                and UUID(str(fact["relationship_id"]))
+                in incremental_relationship_ids
+            }
             if incremental_relationship_ids
             else set()
         )
@@ -2033,12 +2145,6 @@ def list_character_relationships(
             or relation.proposal_item_id is None
             or relation.id in current_incremental_ids
         ]
-    projection = get_story_projection_payload(
-        session,
-        novel_id,
-        timeline_id=timeline_id,
-        narrative_cutoff=narrative_cutoff,
-    )
     return [
         _relationship_payload(relation, projection=projection) for relation in relations
     ]
@@ -2127,12 +2233,6 @@ def build_relationship_graph_snapshot(
         for document in chapter_tree.chapters
         if document.id in document_row_by_id
     ]
-    current_revision_ids = {
-        working.base_revision_id
-        for _, working in document_rows
-        if working.base_revision_id is not None
-    }
-
     manual_rows = session.scalars(
         select(CharacterRelationship)
         .where(
@@ -2159,35 +2259,24 @@ def build_relationship_graph_snapshot(
             }
         )
 
-    facts = session.scalars(
-        select(StoryFact)
-        .where(
-            StoryFact.novel_id == novel_id,
-            StoryFact.schema_version == "story-fact/2",
-            StoryFact.fact_type == "relationship_state",
-            StoryFact.relationship_id.is_not(None),
-            or_(
-                StoryFact.status == "source_restored",
-                and_(
-                    StoryFact.status == "active",
-                    StoryFact.source_revision_id.in_(current_revision_ids),
-                ),
-            ),
-        )
-        .order_by(StoryFact.created_at.desc(), StoryFact.id.desc())
-        .limit(300)
-    ).all()
+    projection = get_story_projection_payload(session, novel_id)
+    facts = [
+        fact
+        for fact in projection.get("visible_facts", [])
+        if fact.get("fact_type") == "relationship_state"
+        and fact.get("relationship_id") is not None
+    ][-300:]
     accepted_facts: list[dict[str, Any]] = []
     for fact in facts:
-        details = fact.details if isinstance(fact.details, dict) else {}
+        details = fact.get("details") if isinstance(fact.get("details"), dict) else {}
         accepted_facts.append(
             {
-                "relationship_id": str(fact.relationship_id),
-                "subject": fact.subject,
-                "predicate": fact.predicate,
-                "object": _relationship_snapshot_text(fact.object_text, 900),
+                "relationship_id": str(fact["relationship_id"]),
+                "subject": fact.get("subject"),
+                "predicate": fact.get("predicate"),
+                "object": _relationship_snapshot_text(fact.get("object_text"), 900),
                 "evidence": _relationship_snapshot_text(details.get("source_text"), 500),
-                "status": fact.status,
+                "status": fact.get("status"),
             }
         )
 
@@ -2377,22 +2466,12 @@ def build_character_profile_completion_snapshot(
         for document in chapter_tree.chapters
         if document.id in formal_revision_row_by_id
     ]
-    current_revision_ids = [revision.id for _, revision in formal_revision_rows]
-    fact_query = select(StoryFact).where(
-        StoryFact.novel_id == novel_id,
-        StoryFact.fact_type == "character_state",
-        StoryFact.status.in_(("active", "source_restored")),
-    )
-    if current_revision_ids:
-        fact_query = fact_query.where(
-            (StoryFact.source_revision_id.is_(None))
-            | (StoryFact.source_revision_id.in_(current_revision_ids))
-        )
-    else:
-        fact_query = fact_query.where(StoryFact.source_revision_id.is_(None))
-    facts = session.scalars(
-        fact_query.order_by(StoryFact.created_at.desc(), StoryFact.id.desc()).limit(300)
-    ).all()
+    projection = get_story_projection_payload(session, novel_id)
+    facts = [
+        fact
+        for fact in projection.get("visible_facts", [])
+        if fact.get("fact_type") == "character_state"
+    ][-300:]
 
     return build_character_profile_snapshot(
         novel={
@@ -2421,16 +2500,14 @@ def build_character_profile_completion_snapshot(
         ],
         story_facts=[
             {
-                "id": str(fact.id),
-                "fact_type": fact.fact_type,
-                "status": fact.status,
-                "subject": fact.subject,
-                "predicate": fact.predicate,
-                "object_text": fact.object_text,
-                "details": dict(fact.details or {}),
-                "source_revision_id": (
-                    str(fact.source_revision_id) if fact.source_revision_id else None
-                ),
+                "id": str(fact["id"]),
+                "fact_type": fact.get("fact_type"),
+                "status": fact.get("status"),
+                "subject": fact.get("subject"),
+                "predicate": fact.get("predicate"),
+                "object_text": fact.get("object_text"),
+                "details": dict(fact.get("details") or {}),
+                "source_revision_id": fact.get("source_revision_id"),
                 "position": index,
             }
             for index, fact in enumerate(facts)
@@ -2587,7 +2664,7 @@ def apply_character_profile_completion(
     idempotency_key: str,
     decisions: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     clean_key = idempotency_key.strip()
     normalized_decisions = sorted(
         (
@@ -2618,8 +2695,17 @@ def apply_character_profile_completion(
             or existing.generation_job_id != job_id
             or list(existing.decisions_json or []) != normalized_decisions
         ):
-            raise ValidationError("角色卡应用幂等键已用于不同请求")
-        return get_character_profile_completion_status(session, novel_id)
+            raise AuthorityIdempotencyConflict(clean_key)
+        status = get_character_profile_completion_status(session, novel_id)
+        status.update(
+            {
+                "changed": False,
+                "replayed": True,
+                "story_ledger_version": novel.story_ledger_version,
+            }
+        )
+        session.commit()
+        return status
     job = session.scalar(
         select(CreativeGenerationJob)
         .where(
@@ -2671,30 +2757,62 @@ def apply_character_profile_completion(
     before_snapshot: dict[str, Any] = {}
     after_snapshot: dict[str, Any] = {}
     result_versions: dict[str, int] = {}
-    for decision in plan["decisions"]:
-        character = by_id[decision["character_id"]]
-        before_details = dict(character.details or {})
-        after_details = {**before_details, "personality": decision["personality"]}
-        before_snapshot[str(character.id)] = before_details
-        after_snapshot[str(character.id)] = after_details
-        character.details = after_details
-        character.version += 1
-        result_versions[str(character.id)] = character.version
+    batch_id = uuid4()
     batch = CharacterProfileApplyBatch(
-        id=uuid4(),
+        id=batch_id,
         novel_id=novel_id,
         generation_job_id=job_id,
         idempotency_key=clean_key,
         state="applied",
         decisions_json=normalized_decisions,
-        before_snapshot=before_snapshot,
-        after_snapshot=after_snapshot,
+        before_snapshot={},
+        after_snapshot={},
         base_versions=plan["base_versions"],
-        result_versions=result_versions,
+        result_versions={},
     )
     session.add(batch)
+    for decision in plan["decisions"]:
+        character = by_id[decision["character_id"]]
+        before_details = dict(character.details or {})
+        after_details = {**before_details, "personality": decision["personality"]}
+        if after_details == before_details:
+            continue
+        before_snapshot[str(character.id)] = before_details
+        after_snapshot[str(character.id)] = after_details
+        root_result = save_character_root(
+            session,
+            novel_id,
+            character.id,
+            expected_catalog_version=novel.character_catalog_version,
+            expected_character_version=character.version,
+            operation_key=f"profile-apply:{batch_id}:{character.id}",
+            source_kind="ai_adopt",
+            role_type=character.role_type,
+            name=character.name,
+            description=character.description,
+            details=after_details,
+            lifecycle_state=character.lifecycle_state,
+            position=character.position,
+            change_set={"profile_completion": True},
+            source_batch_id=batch_id,
+        )
+        result_versions[str(character.id)] = root_result.character.version
+    batch.before_snapshot = before_snapshot
+    batch.after_snapshot = after_snapshot
+    batch.result_versions = result_versions
+    changed = bool(result_versions)
+    if changed:
+        novel.story_ledger_version += 1
     session.commit()
-    return get_character_profile_completion_status(session, novel_id)
+    status = get_character_profile_completion_status(session, novel_id)
+    status.update(
+        {
+            "changed": changed,
+            "replayed": False,
+            "story_ledger_version": novel.story_ledger_version,
+        }
+    )
+    return status
 
 
 def restore_character_profile_apply_batch(
@@ -2704,7 +2822,7 @@ def restore_character_profile_apply_batch(
     *,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     clean_key = idempotency_key.strip()
     _lock_generation_attempt(
         session,
@@ -2720,8 +2838,17 @@ def restore_character_profile_apply_batch(
     )
     if existing is not None:
         if existing.state != "restored" or existing.restored_from_batch_id != batch_id:
-            raise ValidationError("角色卡恢复幂等键已用于不同请求")
-        return get_character_profile_completion_status(session, novel_id)
+            raise AuthorityIdempotencyConflict(clean_key)
+        status = get_character_profile_completion_status(session, novel_id)
+        status.update(
+            {
+                "changed": False,
+                "replayed": True,
+                "story_ledger_version": novel.story_ledger_version,
+            }
+        )
+        session.commit()
+        return status
     source_batch = session.scalar(
         select(CharacterProfileApplyBatch)
         .where(
@@ -2751,6 +2878,21 @@ def restore_character_profile_apply_batch(
     after_restore: dict[str, Any] = {}
     restore_base_versions: dict[str, int] = {}
     restore_result_versions: dict[str, int] = {}
+    restored_batch_id = uuid4()
+    restored_batch = CharacterProfileApplyBatch(
+        id=restored_batch_id,
+        novel_id=novel_id,
+        generation_job_id=source_batch.generation_job_id,
+        restored_from_batch_id=source_batch.id,
+        idempotency_key=clean_key,
+        state="restored",
+        decisions_json=list(source_batch.decisions_json or []),
+        before_snapshot={},
+        after_snapshot={},
+        base_versions={},
+        result_versions={},
+    )
+    session.add(restored_batch)
     source_before = dict(source_batch.before_snapshot or {})
     source_after = dict(source_batch.after_snapshot or {})
     for character in characters:
@@ -2767,25 +2909,41 @@ def restore_character_profile_apply_batch(
         before_restore[character_id] = current_details
         after_restore[character_id] = restored_details
         restore_base_versions[character_id] = character.version
-        character.details = restored_details
-        character.version += 1
-        restore_result_versions[character_id] = character.version
-    restored_batch = CharacterProfileApplyBatch(
-        id=uuid4(),
-        novel_id=novel_id,
-        generation_job_id=source_batch.generation_job_id,
-        restored_from_batch_id=source_batch.id,
-        idempotency_key=clean_key,
-        state="restored",
-        decisions_json=list(source_batch.decisions_json or []),
-        before_snapshot=before_restore,
-        after_snapshot=after_restore,
-        base_versions=restore_base_versions,
-        result_versions=restore_result_versions,
-    )
-    session.add(restored_batch)
+        root_result = save_character_root(
+            session,
+            novel_id,
+            character.id,
+            expected_catalog_version=novel.character_catalog_version,
+            expected_character_version=character.version,
+            operation_key=f"profile-restore:{restored_batch_id}:{character.id}",
+            source_kind="profile_restore",
+            role_type=character.role_type,
+            name=character.name,
+            description=character.description,
+            details=restored_details,
+            lifecycle_state=character.lifecycle_state,
+            position=character.position,
+            change_set={"restored_profile_batch_id": str(source_batch.id)},
+            source_batch_id=restored_batch_id,
+        )
+        restore_result_versions[character_id] = root_result.character.version
+    restored_batch.before_snapshot = before_restore
+    restored_batch.after_snapshot = after_restore
+    restored_batch.base_versions = restore_base_versions
+    restored_batch.result_versions = restore_result_versions
+    changed = bool(restore_result_versions)
+    if changed:
+        novel.story_ledger_version += 1
     session.commit()
-    return get_character_profile_completion_status(session, novel_id)
+    status = get_character_profile_completion_status(session, novel_id)
+    status.update(
+        {
+            "changed": changed,
+            "replayed": False,
+            "story_ledger_version": novel.story_ledger_version,
+        }
+    )
+    return status
 
 
 def _manual_relationship_blocks(
@@ -2812,6 +2970,7 @@ def apply_relationship_graph_generation(
 ) -> dict[str, Any]:
     """Reconcile a complete model snapshot without touching author overrides."""
 
+    novel = _lock_novel(session, novel_id)
     job = session.scalar(
         select(CreativeGenerationJob)
         .where(
@@ -2972,8 +3131,6 @@ def apply_relationship_graph_generation(
                     source_generation_job_id=job.id,
                 )
                 changes["updated"] += 1
-            else:
-                relation.source_generation_job_id = job.id
         matched_ids.add(relation.id)
 
     if candidates and validated_candidate_count == 0:
@@ -2994,33 +3151,19 @@ def apply_relationship_graph_generation(
             )
             changes["archived"] += 1
 
+    changed = any(changes[key] for key in ("created", "updated", "archived"))
+    if changed:
+        novel.story_ledger_version += 1
     session.commit()
     return {
         "job": _creative_job_payload(job),
         "changes": changes,
+        "changed": changed,
+        "story_ledger_version": novel.story_ledger_version,
         "relationships": list_character_relationships(session, novel_id),
         "status": get_relationship_auto_sync_status(session, novel_id),
     }
 
-
-def sync_relationships_from_intelligence_proposal(
-    session: Session,
-    proposal_id: UUID,
-) -> dict[str, Any]:
-    """Compatibility read for callers predating StoryFact v2.
-
-    Relationship changes are now accepted as typed StoryFact events. This
-    function intentionally performs no inference and no database write.
-    """
-
-    proposal = session.get(IntelligenceProposal, proposal_id)
-    if proposal is None:
-        raise NotFoundError(f"intelligence proposal {proposal_id} not found")
-    return {
-        "changes": {"created": 0, "updated": 0, "skipped": 0},
-        "relationships": list_character_relationships(session, proposal.novel_id),
-        "deprecated": True,
-    }
 
 def create_character_relationship(
     session: Session,
@@ -3036,7 +3179,7 @@ def create_character_relationship(
     relation_kind: str = "other",
     description: str = "",
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     relation = _create_relationship_entity(
         session,
         novel_id,
@@ -3050,8 +3193,12 @@ def create_character_relationship(
         relation_kind=relation_kind,
         description=description,
     )
+    novel.story_ledger_version += 1
     session.commit()
-    return _relationship_payload(relation)
+    payload = _relationship_payload(relation)
+    payload["changed"] = True
+    payload["story_ledger_version"] = novel.story_ledger_version
+    return payload
 
 
 def update_character_relationship(
@@ -3071,6 +3218,7 @@ def update_character_relationship(
     description: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     relation = session.scalar(
         select(CharacterRelationship)
         .where(
@@ -3081,6 +3229,7 @@ def update_character_relationship(
     )
     if relation is None:
         raise NotFoundError(f"relationship {relationship_id} not found")
+    previous_version = relation.version
     _update_relationship_entity(
         session,
         relation,
@@ -3096,13 +3245,20 @@ def update_character_relationship(
         description=description,
         status=status,
     )
+    changed = relation.version != previous_version
+    if changed:
+        novel.story_ledger_version += 1
     session.commit()
-    return _relationship_payload(relation)
+    payload = _relationship_payload(relation)
+    payload["changed"] = changed
+    payload["story_ledger_version"] = novel.story_ledger_version
+    return payload
 
 
 def delete_character_relationship(
     session: Session, novel_id: UUID, relationship_id: UUID, *, expected_version: int
-) -> None:
+) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     relation = session.scalar(
         select(CharacterRelationship)
         .where(
@@ -3113,8 +3269,17 @@ def delete_character_relationship(
     )
     if relation is None:
         raise NotFoundError(f"relationship {relationship_id} not found")
+    previous_version = relation.version
     _archive_relationship_entity(session, relation, expected_version=expected_version)
+    changed = relation.version != previous_version
+    if changed:
+        novel.story_ledger_version += 1
     session.commit()
+    return {
+        "deleted": True,
+        "changed": changed,
+        "story_ledger_version": novel.story_ledger_version,
+    }
 
 
 def restore_character_relationship(
@@ -3124,6 +3289,7 @@ def restore_character_relationship(
     *,
     expected_version: int,
 ) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     relation = session.scalar(
         select(CharacterRelationship)
         .where(
@@ -3134,9 +3300,16 @@ def restore_character_relationship(
     )
     if relation is None:
         raise NotFoundError(f"relationship {relationship_id} not found")
+    previous_version = relation.version
     _restore_relationship_entity(session, relation, expected_version=expected_version)
+    changed = relation.version != previous_version
+    if changed:
+        novel.story_ledger_version += 1
     session.commit()
-    return _relationship_payload(relation)
+    payload = _relationship_payload(relation)
+    payload["changed"] = changed
+    payload["story_ledger_version"] = novel.story_ledger_version
+    return payload
 
 
 def batch_character_relationships(
@@ -3145,8 +3318,9 @@ def batch_character_relationships(
     *,
     operations: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     results: list[dict[str, Any]] = []
+    changed = False
     for operation in operations:
         action = str(operation.get("action", ""))
         relationship_id = operation.get("relationship_id")
@@ -3167,7 +3341,7 @@ def batch_character_relationships(
         if action == "create":
             source_character_id = operation.get("source_character_id")
             target_character_id = operation.get("target_character_id")
-            label = operation.get("label") or operation.get("relation_type")
+            label = operation.get("label")
             if source_character_id is None or target_character_id is None or not label:
                 raise ValidationError("新增关系缺少角色或关系名称")
             relation = _create_relationship_entity(
@@ -3183,10 +3357,12 @@ def batch_character_relationships(
                 relation_kind=str(operation.get("relation_kind") or "other"),
                 description=str(operation.get("description") or ""),
             )
+            changed = True
         elif action == "update" and relation is not None:
             expected_version = operation.get("expected_version")
             if expected_version is None:
                 raise ValidationError("编辑关系缺少 expected_version")
+            previous_version = relation.version
             relation = _update_relationship_entity(
                 session,
                 relation,
@@ -3196,30 +3372,35 @@ def batch_character_relationships(
                 timeline_id=operation.get("timeline_id"),
                 source_character_instance_id=operation.get("source_character_instance_id"),
                 target_character_instance_id=operation.get("target_character_instance_id"),
-                label=operation.get("label") or operation.get("relation_type"),
+                label=operation.get("label"),
                 directionality=operation.get("directionality"),
                 relation_kind=operation.get("relation_kind"),
                 description=operation.get("description"),
                 status=operation.get("status"),
             )
+            changed = changed or relation.version != previous_version
         elif action == "archive" and relation is not None:
             expected_version = operation.get("expected_version")
             if expected_version is None:
                 raise ValidationError("归档关系缺少 expected_version")
+            previous_version = relation.version
             relation = _archive_relationship_entity(
                 session,
                 relation,
                 expected_version=int(expected_version),
             )
+            changed = changed or relation.version != previous_version
         elif action == "restore" and relation is not None:
             expected_version = operation.get("expected_version")
             if expected_version is None:
                 raise ValidationError("恢复关系缺少 expected_version")
+            previous_version = relation.version
             relation = _restore_relationship_entity(
                 session,
                 relation,
                 expected_version=int(expected_version),
             )
+            changed = changed or relation.version != previous_version
         else:
             raise ValidationError("不支持的关系批量操作")
         results.append(
@@ -3228,6 +3409,8 @@ def batch_character_relationships(
                 "relationship": _relationship_payload(relation),
             }
         )
+    if changed:
+        novel.story_ledger_version += 1
     session.commit()
     current_relations = session.scalars(
         select(CharacterRelationship)
@@ -3240,6 +3423,8 @@ def batch_character_relationships(
     return {
         "operations": results,
         "relationships": [_relationship_payload(item) for item in current_relations],
+        "changed": changed,
+        "story_ledger_version": novel.story_ledger_version,
     }
 
 
@@ -3480,7 +3665,7 @@ def create_storyline(
     title: str,
     description: str,
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     if storyline_type not in STORYLINE_TYPES:
         raise ValidationError("故事线类型无效")
     item = Storyline(
@@ -3492,8 +3677,13 @@ def create_storyline(
         position=_next_position(session, Storyline, novel_id),
     )
     session.add(item)
+    novel.story_ledger_version += 1
     session.commit()
-    return _storyline_payload(item)
+    payload = _storyline_payload(item)
+    payload.update(
+        {"changed": True, "story_ledger_version": novel.story_ledger_version}
+    )
+    return payload
 
 
 def update_storyline(
@@ -3508,6 +3698,7 @@ def update_storyline(
     status: str,
     progress: int,
 ) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     item = session.scalar(
         select(Storyline)
         .where(Storyline.id == storyline_id, Storyline.novel_id == novel_id)
@@ -3521,19 +3712,37 @@ def update_storyline(
         raise ValidationError("故事线类型或状态无效")
     if not 0 <= progress <= 100:
         raise ValidationError("故事线进度必须在0到100之间")
-    item.storyline_type = storyline_type
-    item.title = _clean_title(title, "故事线名称")
-    item.description = description.strip()
-    item.status = status
-    item.progress = progress
+    desired = {
+        "storyline_type": storyline_type,
+        "title": _clean_title(title, "故事线名称"),
+        "description": description.strip(),
+        "status": status,
+        "progress": progress,
+    }
+    changed = any(getattr(item, key) != value for key, value in desired.items())
+    if not changed:
+        payload = _storyline_payload(item)
+        payload.update(
+            {"changed": False, "story_ledger_version": novel.story_ledger_version}
+        )
+        session.commit()
+        return payload
+    for key, value in desired.items():
+        setattr(item, key, value)
     item.version += 1
+    novel.story_ledger_version += 1
     session.commit()
-    return _storyline_payload(item)
+    payload = _storyline_payload(item)
+    payload.update(
+        {"changed": True, "story_ledger_version": novel.story_ledger_version}
+    )
+    return payload
 
 
 def delete_storyline(
     session: Session, novel_id: UUID, storyline_id: UUID, *, expected_version: int
-) -> None:
+) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     item = session.scalar(
         select(Storyline)
         .where(Storyline.id == storyline_id, Storyline.novel_id == novel_id)
@@ -3543,8 +3752,17 @@ def delete_storyline(
         raise NotFoundError(f"storyline {storyline_id} not found")
     if item.version != expected_version:
         raise EntityConflictError(_storyline_payload(item))
-    session.delete(item)
+    changed = item.status != "archived"
+    if changed:
+        item.status = "archived"
+        item.version += 1
+        novel.story_ledger_version += 1
     session.commit()
+    return {
+        "deleted": True,
+        "changed": changed,
+        "story_ledger_version": novel.story_ledger_version,
+    }
 
 
 def _foreshadow_payload(
@@ -3621,7 +3839,7 @@ def list_foreshadows(
 def create_foreshadow(
     session: Session, novel_id: UUID, *, title: str, content: str, latest_progress: str
 ) -> dict[str, Any]:
-    _require_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     item = Foreshadow(
         id=uuid4(),
         novel_id=novel_id,
@@ -3631,8 +3849,13 @@ def create_foreshadow(
         position=_next_position(session, Foreshadow, novel_id),
     )
     session.add(item)
+    novel.story_ledger_version += 1
     session.commit()
-    return _foreshadow_payload(item)
+    payload = _foreshadow_payload(item)
+    payload.update(
+        {"changed": True, "story_ledger_version": novel.story_ledger_version}
+    )
+    return payload
 
 
 def update_foreshadow(
@@ -3647,6 +3870,7 @@ def update_foreshadow(
     status: str,
     progress: int,
 ) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     item = session.scalar(
         select(Foreshadow)
         .where(Foreshadow.id == foreshadow_id, Foreshadow.novel_id == novel_id)
@@ -3658,19 +3882,37 @@ def update_foreshadow(
         raise EntityConflictError(_foreshadow_payload(item))
     if status not in FORESHADOW_STATUSES or not 0 <= progress <= 100:
         raise ValidationError("伏笔状态或进度无效")
-    item.title = _clean_title(title, "伏笔名称")
-    item.content = content.strip()
-    item.latest_progress = latest_progress.strip()
-    item.status = status
-    item.progress = progress
+    desired = {
+        "title": _clean_title(title, "伏笔名称"),
+        "content": content.strip(),
+        "latest_progress": latest_progress.strip(),
+        "status": status,
+        "progress": progress,
+    }
+    changed = any(getattr(item, key) != value for key, value in desired.items())
+    if not changed:
+        payload = _foreshadow_payload(item)
+        payload.update(
+            {"changed": False, "story_ledger_version": novel.story_ledger_version}
+        )
+        session.commit()
+        return payload
+    for key, value in desired.items():
+        setattr(item, key, value)
     item.version += 1
+    novel.story_ledger_version += 1
     session.commit()
-    return _foreshadow_payload(item)
+    payload = _foreshadow_payload(item)
+    payload.update(
+        {"changed": True, "story_ledger_version": novel.story_ledger_version}
+    )
+    return payload
 
 
 def delete_foreshadow(
     session: Session, novel_id: UUID, foreshadow_id: UUID, *, expected_version: int
-) -> None:
+) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     item = session.scalar(
         select(Foreshadow)
         .where(Foreshadow.id == foreshadow_id, Foreshadow.novel_id == novel_id)
@@ -3680,8 +3922,17 @@ def delete_foreshadow(
         raise NotFoundError(f"foreshadow {foreshadow_id} not found")
     if item.version != expected_version:
         raise EntityConflictError(_foreshadow_payload(item))
-    session.delete(item)
+    changed = item.status != "dropped"
+    if changed:
+        item.status = "dropped"
+        item.version += 1
+        novel.story_ledger_version += 1
     session.commit()
+    return {
+        "deleted": True,
+        "changed": changed,
+        "story_ledger_version": novel.story_ledger_version,
+    }
 
 
 def _chapter_draft_payload(draft: ChapterCreationDraft) -> dict[str, Any]:
@@ -5076,7 +5327,7 @@ def update_volume(
     expected_version: int,
     title: str,
 ) -> dict[str, Any]:
-    _lock_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     volume = session.scalar(
         select(Volume)
         .where(Volume.id == volume_id, Volume.novel_id == novel_id)
@@ -5090,10 +5341,34 @@ def update_volume(
     }
     if volume.version != expected_version:
         raise EntityConflictError(current)
-    volume.title = semantic_title(title, "volume")
+    normalized_title = semantic_title(title, "volume")
+    if volume.title == normalized_title:
+        current.update(
+            {
+                "changed": False,
+                "story_ledger_version": novel.story_ledger_version,
+            }
+        )
+        session.commit()
+        return current
+    affected_document_ids = tuple(
+        session.scalars(select(Document.id).where(Document.volume_id == volume_id))
+    )
+    volume.title = normalized_title
     volume.version += 1
+    if _story_fact_source_exists(
+        session, novel_id, document_ids=affected_document_ids
+    ):
+        novel.story_ledger_version += 1
     session.commit()
-    current.update({"title": volume.title, "version": volume.version})
+    current.update(
+        {
+            "title": volume.title,
+            "version": volume.version,
+            "changed": True,
+            "story_ledger_version": novel.story_ledger_version,
+        }
+    )
     return current
 
 
@@ -5158,8 +5433,8 @@ def delete_volume(
     *,
     expected_version: int,
     move_documents_to: UUID | None = None,
-) -> None:
-    _lock_novel(session, novel_id)
+) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     volume = session.scalar(
         select(Volume)
         .where(Volume.id == volume_id, Volume.novel_id == novel_id)
@@ -5186,21 +5461,49 @@ def delete_volume(
         for document in documents:
             document.volume_id = target.id
             document.version += 1
+    ledger_visible = _story_fact_source_exists(session, novel_id)
     session.delete(volume)
+    if ledger_visible:
+        novel.story_ledger_version += 1
     session.commit()
     _refresh_active_novel_index_after_commit(session, novel_id)
+    return {
+        "deleted": True,
+        "changed": True,
+        "story_ledger_version": novel.story_ledger_version,
+    }
 
 
 def reorder_volumes(
     session: Session, novel_id: UUID, *, ordered_volume_ids: list[UUID]
 ) -> list[dict[str, Any]]:
-    _lock_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     volumes = session.scalars(
         select(Volume).where(Volume.novel_id == novel_id).with_for_update()
     ).all()
     by_id = {item.id: item for item in volumes}
     if len(ordered_volume_ids) != len(set(ordered_volume_ids)) or set(ordered_volume_ids) != set(by_id):
         raise ValidationError("分卷排序必须包含当前小说的全部分卷且不能重复")
+    changed_volume_ids = {
+        volume_id
+        for index, volume_id in enumerate(ordered_volume_ids, start=1)
+        if by_id[volume_id].position != index * 1000
+    }
+    changed = bool(changed_volume_ids)
+    if not changed:
+        session.commit()
+        return [
+            {
+                "id": str(by_id[item_id].id),
+                "novel_id": str(novel_id),
+                "title": by_id[item_id].title,
+                "position": by_id[item_id].position,
+                "version": by_id[item_id].version,
+                "changed": False,
+                "story_ledger_version": novel.story_ledger_version,
+            }
+            for item_id in ordered_volume_ids
+        ]
     temporary_base = min((item.position for item in volumes), default=0) - (
         len(volumes) + 1
     ) * 1000
@@ -5210,12 +5513,16 @@ def reorder_volumes(
     for index, volume_id in enumerate(ordered_volume_ids, start=1):
         volume = by_id[volume_id]
         volume.position = index * 1000
-        volume.version += 1
+        if volume_id in changed_volume_ids:
+            volume.version += 1
+    if _story_fact_source_exists(session, novel_id):
+        novel.story_ledger_version += 1
     session.commit()
     _refresh_active_novel_index_after_commit(session, novel_id)
     return [
         {"id": str(by_id[item_id].id), "novel_id": str(novel_id), "title": by_id[item_id].title,
-         "position": by_id[item_id].position, "version": by_id[item_id].version}
+         "position": by_id[item_id].position, "version": by_id[item_id].version,
+         "changed": True, "story_ledger_version": novel.story_ledger_version}
         for item_id in ordered_volume_ids
     ]
 
@@ -5228,7 +5535,7 @@ def update_document_metadata(
     expected_version: int,
     title: str,
 ) -> dict[str, Any]:
-    _lock_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     document = session.scalar(
         select(Document)
         .where(Document.id == document_id, Document.novel_id == novel_id)
@@ -5242,26 +5549,39 @@ def update_document_metadata(
     if document.version != expected_version:
         raise EntityConflictError(_document_payload(document, working))
     if document.kind == "chapter":
-        document.title = semantic_title(title, "chapter")
+        normalized_title = semantic_title(title, "chapter")
     else:
         normalized_title = title.strip()
         if not normalized_title:
             raise VolumeChapterContractError(
                 "document_title_required", "文档标题不能为空"
             )
-        document.title = normalized_title
+    if document.title == normalized_title:
+        payload = _document_payload(document, working)
+        payload.update(
+            {"changed": False, "story_ledger_version": novel.story_ledger_version}
+        )
+        session.commit()
+        return payload
+    document.title = normalized_title
     document.version += 1
+    if _story_fact_source_exists(session, novel_id, document_ids=(document.id,)):
+        novel.story_ledger_version += 1
     was_chapter = document.kind == "chapter"
     session.commit()
     if was_chapter:
         _refresh_active_novel_index_after_commit(session, novel_id)
-    return get_document(session, document.id)
+    payload = get_document(session, document.id)
+    payload.update(
+        {"changed": True, "story_ledger_version": novel.story_ledger_version}
+    )
+    return payload
 
 
 def delete_document(
     session: Session, novel_id: UUID, document_id: UUID, *, expected_version: int
-) -> None:
-    _lock_novel(session, novel_id)
+) -> dict[str, Any]:
+    novel = _lock_novel(session, novel_id)
     document = session.scalar(
         select(Document)
         .where(Document.id == document_id, Document.novel_id == novel_id)
@@ -5274,11 +5594,18 @@ def delete_document(
         raise NotFoundError(f"working copy for document {document_id} not found")
     if document.version != expected_version:
         raise EntityConflictError(_document_payload(document, working))
+    if _story_fact_source_exists(session, novel_id, document_ids=(document.id,)):
+        raise ValidationError("该文档仍是故事账本的权威来源，不能删除")
     was_chapter = document.kind == "chapter"
     session.delete(document)
     session.commit()
     if was_chapter:
         _refresh_active_novel_index_after_commit(session, novel_id)
+    return {
+        "deleted": True,
+        "changed": True,
+        "story_ledger_version": novel.story_ledger_version,
+    }
 
 
 def reorder_chapters(
@@ -5288,7 +5615,7 @@ def reorder_chapters(
     ordered_document_ids: list[UUID],
     volume_by_document: dict[str, UUID | None],
 ) -> list[dict[str, Any]]:
-    _lock_novel(session, novel_id)
+    novel = _lock_novel(session, novel_id)
     volumes = session.scalars(
         select(Volume)
         .where(Volume.novel_id == novel_id)
@@ -5344,21 +5671,55 @@ def reorder_chapters(
             "chapter_order_inconsistent",
             "章节排序必须按分卷顺序连续排列，未分卷章节必须位于最后",
         )
-    temporary_base = min((item.position for item in chapters), default=0) - (
-        len(chapters) + 1
-    ) * 1000
-    for index, document_id in enumerate(ordered_document_ids, start=1):
-        by_id[document_id].position = temporary_base + index
-    session.flush()
+    changed_document_ids = {
+        document_id
+        for index, document_id in enumerate(ordered_document_ids, start=1)
+        if by_id[document_id].position != index * 1000
+        or by_id[document_id].volume_id != target_volume_by_document[document_id]
+    }
+    if not changed_document_ids:
+        session.commit()
+        payloads = [get_document(session, item_id) for item_id in ordered_document_ids]
+        for payload in payloads:
+            payload.update(
+                {
+                    "changed": False,
+                    "story_ledger_version": novel.story_ledger_version,
+                }
+            )
+        return payloads
+    position_changed = any(
+        by_id[document_id].position != index * 1000
+        for index, document_id in enumerate(ordered_document_ids, start=1)
+    )
+    if position_changed:
+        temporary_base = min((item.position for item in chapters), default=0) - (
+            len(chapters) + 1
+        ) * 1000
+        for index, document_id in enumerate(ordered_document_ids, start=1):
+            by_id[document_id].position = temporary_base + index
+        session.flush()
     for index, document_id in enumerate(ordered_document_ids, start=1):
         document = by_id[document_id]
         document.position = index * 1000
-        if document_id in normalized_volume_mapping:
-            document.volume_id = normalized_volume_mapping[document_id]
-        document.version += 1
+        document.volume_id = target_volume_by_document[document_id]
+        if document_id in changed_document_ids:
+            document.version += 1
+    if _story_fact_source_exists(
+        session, novel_id, document_ids=changed_document_ids
+    ):
+        novel.story_ledger_version += 1
     session.commit()
     _refresh_active_novel_index_after_commit(session, novel_id)
-    return [get_document(session, item_id) for item_id in ordered_document_ids]
+    payloads = [get_document(session, item_id) for item_id in ordered_document_ids]
+    for payload in payloads:
+        payload.update(
+            {
+                "changed": True,
+                "story_ledger_version": novel.story_ledger_version,
+            }
+        )
+    return payloads
 
 
 def build_novel_export(

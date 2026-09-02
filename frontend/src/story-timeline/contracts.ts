@@ -1,3 +1,5 @@
+import type { StoryLedgerSummary } from "../story-ledger/contracts";
+
 export interface StoryTimelineRecord {
   readonly id: string;
   readonly novel_id: string;
@@ -51,4 +53,37 @@ export interface StoryTimelineCharacterCardTarget {
   readonly characterId: string;
   readonly timelineId: string;
   readonly instanceId: string;
+}
+
+/**
+ * Workbench-owned timeline context. A single active timeline resolves without
+ * author input; multiple active timelines keep the selected ID explicit.
+ */
+export interface StoryTimelineContext {
+  readonly mode: "none" | "single" | "multiple";
+  readonly timelineId: string | null;
+  readonly timelineName: string | null;
+}
+
+/**
+ * The workbench is the sole owner of this snapshot. The timeline workspace
+ * consumes it for CAS and reports fresher mutation/refresh observations back.
+ */
+export type StoryTimelineLedgerSnapshot = Pick<
+  StoryLedgerSummary,
+  "story_ledger_version"
+> & {
+  /** Null means a successful mutation invalidated the previously opaque token. */
+  readonly ledger_snapshot_token: StoryLedgerSummary["ledger_snapshot_token"] | null;
+};
+
+export type StoryTimelineLedgerSnapshotSource =
+  | "mutation"
+  | "refresh"
+  | "conflict";
+
+/** Frozen internal deep-link keys consumed by the W3c workbench integrator. */
+export interface StoryTimelineLedgerDeepLink {
+  readonly section: "ledger";
+  readonly ledger_timeline: string;
 }

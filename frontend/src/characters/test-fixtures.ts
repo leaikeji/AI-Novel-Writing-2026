@@ -1,4 +1,33 @@
 import type { CharacterWorkspaceV2 } from "./contracts";
+import type { StoryLedgerFactImpactPreview } from "../story-ledger";
+
+export function storyFactImpact(
+  overrides: Partial<StoryLedgerFactImpactPreview> = {},
+): StoryLedgerFactImpactPreview {
+  return {
+    schema_version: "story-ledger-fact-impact-preview/1",
+    novel_id: "novel-1",
+    fact_id: "fact-1",
+    preview_snapshot_token: "ledger-snapshot-19",
+    story_ledger_version: 19,
+    timeline: {
+      mode: "single",
+      timeline_id: "timeline-main",
+      timeline_name: "主时间线",
+      narrative_cutoff: 12,
+    },
+    currently_in_projection: true,
+    current_projection_fact_count: 1,
+    related_event_link_count: 0,
+    embedding_rebuild_required: true,
+    commit_batch_ids: [],
+    batch_fact_count: 0,
+    batch_relationship_count: 0,
+    correction_supported: true,
+    correction_block_reason: null,
+    ...overrides,
+  };
+}
 
 export function characterWorkspace(
   overrides: Partial<CharacterWorkspaceV2> = {},

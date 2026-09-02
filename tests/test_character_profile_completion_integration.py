@@ -10,6 +10,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from backend.character_profile_services import normalize_character_profile_output
+from backend.creative_authority import AuthorityIdempotencyConflict
+from backend.creative_data_models import NovelCharacterRevision
 from backend.creative_services import (
     EntityConflictError,
     apply_character_profile_completion,
@@ -21,7 +23,7 @@ from backend.creative_services import (
     start_creative_generation,
     update_novel_character,
 )
-from backend.models import CharacterProfileApplyBatch, NovelCharacter
+from backend.models import CharacterProfileApplyBatch, Novel, NovelCharacter
 from backend.services import create_checkpoint, create_novel, save_draft
 
 
@@ -268,6 +270,10 @@ def test_apply_is_atomic_preserves_hidden_details_and_is_idempotent(
     before = {item["id"]: dict(item["details"]) for item in created}
     job, output = _ready_profile_job(database_session, novel_id)
     decisions = _decisions(output)
+    novel_row = database_session.get(Novel, novel_id)
+    assert novel_row is not None
+    ledger_before = novel_row.story_ledger_version
+    catalog_before = novel_row.character_catalog_version
 
     result = apply_character_profile_completion(
         database_session,
@@ -279,6 +285,9 @@ def test_apply_is_atomic_preserves_hidden_details_and_is_idempotent(
     rows = _character_rows(database_session, novel_id)
 
     assert result["state"] == "applied"
+    assert result["changed"] is True
+    assert result["story_ledger_version"] == ledger_before + 1
+    assert novel_row.character_catalog_version == catalog_before + 2
     assert result["can_restore"] is True
     assert result["last_apply_batch_id"]
     assert [row.version for row in rows] == [2, 2]
@@ -308,10 +317,35 @@ def test_apply_is_atomic_preserves_hidden_details_and_is_idempotent(
             CharacterProfileApplyBatch.novel_id == novel_id
         )
     )
+    batch_id = UUID(str(result["last_apply_batch_id"]))
+    authority_revision_count = database_session.scalar(
+        select(func.count(NovelCharacterRevision.id)).where(
+            NovelCharacterRevision.source_batch_id == batch_id
+        )
+    )
 
     assert repeated["last_apply_batch_id"] == result["last_apply_batch_id"]
+    assert repeated["changed"] is False
+    assert repeated["replayed"] is True
+    assert repeated["story_ledger_version"] == ledger_before + 1
     assert [row.version for row in repeated_rows] == [2, 2]
     assert batch_count == 1
+    assert authority_revision_count == 2
+
+    conflicting_decisions = [dict(item) for item in decisions]
+    conflicting_decisions[0]["replace_existing"] = not bool(
+        conflicting_decisions[0]["replace_existing"]
+    )
+    with pytest.raises(AuthorityIdempotencyConflict):
+        apply_character_profile_completion(
+            database_session,
+            novel_id,
+            UUID(str(job["id"])),
+            idempotency_key="profile-apply-idempotent-001",
+            decisions=conflicting_decisions,
+        )
+    database_session.rollback()
+    assert database_session.get(Novel, novel_id).story_ledger_version == ledger_before + 1
 
 
 def test_concurrent_character_version_conflict_rolls_back_entire_apply_batch(
@@ -383,6 +417,10 @@ def test_restore_creates_new_versions_and_an_idempotent_restore_batch(
         )
     )
     assert source_batch is not None
+    novel_row = database_session.get(Novel, novel_id)
+    assert novel_row is not None
+    ledger_before_restore = novel_row.story_ledger_version
+    catalog_before_restore = novel_row.character_catalog_version
 
     restored = restore_character_profile_apply_batch(
         database_session,
@@ -400,6 +438,9 @@ def test_restore_creates_new_versions_and_an_idempotent_restore_batch(
     )
 
     assert restored["state"] == "applied"
+    assert restored["changed"] is True
+    assert restored["story_ledger_version"] == ledger_before_restore + 1
+    assert novel_row.character_catalog_version == catalog_before_restore + 2
     assert restored["can_restore"] is False
     assert [row.version for row in rows] == [3, 3]
     assert all(row.details == original_details[str(row.id)] for row in rows)
@@ -419,6 +460,9 @@ def test_restore_creates_new_versions_and_an_idempotent_restore_batch(
         )
     )
     assert repeated["state"] == "applied"
+    assert repeated["changed"] is False
+    assert repeated["replayed"] is True
+    assert repeated["story_ledger_version"] == ledger_before_restore + 1
     assert [row.version for row in repeated_rows] == [3, 3]
     assert batch_count == 2
 
