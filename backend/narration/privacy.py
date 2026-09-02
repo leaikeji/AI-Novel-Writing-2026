@@ -17,6 +17,7 @@ from typing import Callable, Final, Mapping, Protocol, TypeVar
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -364,11 +365,161 @@ class NarrationSettingsMutationStore(NarrationStore, Protocol):
     def delete(self, row: object) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class _BindingImpactAggregate:
+    affected_chapter_count: int
+    affected_segment_count: int
+    historical_edition_count: int
+
+
 class SqlAlchemyNarrationSettingsStore(SqlAlchemyNarrationStore):
-    """T2 settings adapter adds only the deletion needed by replacement PUTs."""
+    """T2 settings adapter with bounded read projections and replacement PUTs."""
 
     def delete(self, row: object) -> None:
         self.session.delete(row)
+
+    def require_character_scope(
+        self,
+        *,
+        novel_id: UUID,
+        character_ids: tuple[UUID, ...],
+    ) -> None:
+        target_ids = tuple(sorted(set(character_ids), key=str))
+        if not target_ids:
+            return
+        rows = self.session.execute(
+            select(NovelCharacter.id, NovelCharacter.novel_id).where(
+                NovelCharacter.id.in_(target_ids)
+            )
+        ).all()
+        by_id = {row.id: row.novel_id for row in rows}
+        if any(character_id not in by_id for character_id in target_ids):
+            raise NarrationNotFound("character not found")
+        if any(by_id[character_id] != novel_id for character_id in target_ids):
+            raise NarrationScopeMismatch("character belongs to another novel")
+
+    def character_binding_impacts(
+        self,
+        *,
+        novel_id: UUID,
+        character_ids: tuple[UUID, ...],
+    ) -> dict[UUID, _BindingImpactAggregate]:
+        """Aggregate historical impact without hydrating segment text or N+1 rows."""
+
+        target_ids = tuple(sorted(set(character_ids), key=str))
+        if not target_ids:
+            return {}
+        scoped_segments = (
+            select(
+                NarrationSegment.character_id.label("character_id"),
+                NarrationSegment.script_version_id.label("script_version_id"),
+                NarrationScriptVersion.id.label("resolved_version_id"),
+                NarrationScript.id.label("script_id"),
+                NarrationScript.novel_id.label("script_novel_id"),
+                NarrationScript.document_id.label("document_id"),
+            )
+            .select_from(NarrationSegment)
+            .outerjoin(
+                NarrationScriptVersion,
+                NarrationScriptVersion.id == NarrationSegment.script_version_id,
+            )
+            .outerjoin(
+                NarrationScript,
+                NarrationScript.id == NarrationScriptVersion.script_id,
+            )
+            .where(NarrationSegment.character_id.in_(target_ids))
+            .cte("character_binding_scoped_segments")
+        )
+        segment_stats = (
+            select(
+                scoped_segments.c.character_id,
+                func.count().label("segment_count"),
+                func.count(func.distinct(scoped_segments.c.document_id)).label(
+                    "chapter_count"
+                ),
+                func.bool_and(
+                    scoped_segments.c.resolved_version_id.is_not(None)
+                ).label("versions_complete"),
+                func.bool_and(scoped_segments.c.script_id.is_not(None)).label(
+                    "scripts_complete"
+                ),
+                func.bool_and(scoped_segments.c.script_novel_id == novel_id).label(
+                    "scripts_in_scope"
+                ),
+            )
+            .group_by(scoped_segments.c.character_id)
+            .cte("character_binding_segment_stats")
+        )
+        character_versions = (
+            select(
+                scoped_segments.c.character_id,
+                scoped_segments.c.script_version_id,
+            )
+            .distinct()
+            .cte("character_binding_versions")
+        )
+        edition_stats = (
+            select(
+                character_versions.c.character_id,
+                func.count(NarrationEdition.id).label("edition_count"),
+                func.bool_and(
+                    or_(
+                        NarrationEdition.id.is_(None),
+                        NarrationEdition.novel_id == novel_id,
+                    )
+                ).label("editions_in_scope"),
+            )
+            .select_from(character_versions)
+            .outerjoin(
+                NarrationEdition,
+                NarrationEdition.script_version_id
+                == character_versions.c.script_version_id,
+            )
+            .group_by(character_versions.c.character_id)
+            .cte("character_binding_edition_stats")
+        )
+        rows = self.session.execute(
+            select(
+                segment_stats.c.character_id,
+                segment_stats.c.segment_count,
+                segment_stats.c.chapter_count,
+                segment_stats.c.versions_complete,
+                segment_stats.c.scripts_complete,
+                segment_stats.c.scripts_in_scope,
+                edition_stats.c.edition_count,
+                edition_stats.c.editions_in_scope,
+            ).join(
+                edition_stats,
+                edition_stats.c.character_id == segment_stats.c.character_id,
+            )
+        ).all()
+        aggregates = {
+            character_id: _BindingImpactAggregate(0, 0, 0)
+            for character_id in target_ids
+        }
+        for row in rows:
+            if row.versions_complete is not True:
+                raise InvalidNarrationState(
+                    "character segment names a missing script version"
+                )
+            if row.scripts_complete is not True:
+                raise InvalidNarrationState(
+                    "character segment names a missing narration script"
+                )
+            if row.scripts_in_scope is not True:
+                raise NarrationScopeMismatch(
+                    "character segment script left its novel"
+                )
+            if row.editions_in_scope is not True:
+                raise NarrationScopeMismatch(
+                    "character binding impact edition left its novel"
+                )
+            aggregates[row.character_id] = _BindingImpactAggregate(
+                affected_chapter_count=int(row.chapter_count),
+                affected_segment_count=int(row.segment_count),
+                historical_edition_count=int(row.edition_count),
+            )
+        return aggregates
 
 
 RuntimeStatusProvider = Callable[[], Mapping[str, object]]
@@ -534,6 +685,20 @@ def _require_character(
     if character.novel_id != novel_id:
         raise NarrationScopeMismatch("character belongs to another novel")
     return character
+
+
+def _require_characters(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    character_ids: tuple[UUID, ...],
+) -> None:
+    validator = getattr(store, "require_character_scope", None)
+    if callable(validator):
+        validator(novel_id=novel_id, character_ids=character_ids)
+        return
+    for character_id in character_ids:
+        _require_character(store, novel_id=novel_id, character_id=character_id)
 
 
 def _validate_text_character(
@@ -977,14 +1142,56 @@ def _binding_impact(
     )
 
 
+def _binding_impacts(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    character_ids: tuple[UUID, ...],
+) -> dict[UUID, wire.VoiceBindingImpact]:
+    target_ids = tuple(sorted(set(character_ids), key=str))
+    projector = getattr(store, "character_binding_impacts", None)
+    if callable(projector):
+        aggregates = projector(novel_id=novel_id, character_ids=target_ids)
+        if set(aggregates) != set(target_ids):
+            raise InvalidNarrationState(
+                "character binding impact projection is incomplete"
+            )
+        return {
+            character_id: wire.VoiceBindingImpact(
+                affected_chapter_count=aggregate.affected_chapter_count,
+                affected_segment_count=aggregate.affected_segment_count,
+                historical_edition_count=aggregate.historical_edition_count,
+                regeneration_required=aggregate.affected_segment_count > 0,
+            )
+            for character_id, aggregate in aggregates.items()
+        }
+    return {
+        character_id: _binding_impact(
+            store,
+            novel_id=novel_id,
+            character_id=character_id,
+        )
+        for character_id in target_ids
+    }
+
+
 def _binding_resource(
     store: NarrationStore,
     *,
     novel_id: UUID,
     character_id: UUID,
     row: CharacterVoiceBinding | None,
+    impact: wire.VoiceBindingImpact | None = None,
 ) -> wire.CharacterVoiceBindingResource:
-    impact = _binding_impact(store, novel_id=novel_id, character_id=character_id)
+    resolved_impact = (
+        impact
+        if impact is not None
+        else _binding_impacts(
+            store,
+            novel_id=novel_id,
+            character_ids=(character_id,),
+        )[character_id]
+    )
     if row is None:
         return wire.CharacterVoiceBindingResource(
             binding_id=None,
@@ -995,7 +1202,7 @@ def _binding_resource(
             version_id=None,
             language="zh-CN",
             version=0,
-            impact=impact,
+            impact=resolved_impact,
             updated_at=None,
         )
     if row.novel_id != novel_id or row.character_id != character_id:
@@ -1011,7 +1218,7 @@ def _binding_resource(
         version_id=row.voice_version_id,
         language=row.language,
         version=row.version,
-        impact=impact,
+        impact=resolved_impact,
         updated_at=row.updated_at,
     )
 
@@ -1044,14 +1251,23 @@ def list_character_voice_bindings(
         novel_id=novel_id,
         order_by=("character_id",),
     )
-    for row in rows:
-        _require_character(store, novel_id=novel_id, character_id=row.character_id)
+    _require_characters(
+        store,
+        novel_id=novel_id,
+        character_ids=tuple(row.character_id for row in rows),
+    )
+    impacts = _binding_impacts(
+        store,
+        novel_id=novel_id,
+        character_ids=tuple(row.character_id for row in rows),
+    )
     items = [
         _binding_resource(
             store,
             novel_id=novel_id,
             character_id=row.character_id,
             row=row,
+            impact=impacts[row.character_id],
         )
         for row in rows
     ]

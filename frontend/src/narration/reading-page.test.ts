@@ -562,9 +562,14 @@ describe("reading page controller and navigation", () => {
   it("renders integrated panels from the exact loaded overview and shared navigation", async () => {
     const harness = createReactHarness();
     const overview = overviewFixture();
+    const listVoiceProfiles = vi.fn(async () => ({
+      contract_version: NARRATION_SETTINGS_API_VERSION,
+      items: [],
+    }));
     const api: ReadingPageApi = {
       getOverview: vi.fn(async () => overview),
       listScopeOverrides: vi.fn(async () => scopeList()),
+      listVoiceProfiles,
       putSettings: vi.fn(),
       putScopeOverride: vi.fn(),
     };
@@ -586,11 +591,16 @@ describe("reading page controller and navigation", () => {
     harness.flushEffects();
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     let tree = harness.render(ReadingPage, props);
 
     expect(textContent(tree)).toContain("已汇合：characters");
     expect(renderSectionContent).toHaveBeenCalledWith("characters", expect.any(Object));
     expect(sharedContexts[0]?.overview).toBe(overview);
+    expect(sharedContexts[0]?.voiceProfiles).toEqual([]);
+    expect(sharedContexts[0]?.voiceProfilesError).toBeNull();
+    expect(listVoiceProfiles).toHaveBeenCalledTimes(1);
 
     sharedContexts[0]?.onNavigate("storage-privacy");
     tree = harness.render(ReadingPage, props);

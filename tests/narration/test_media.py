@@ -499,6 +499,33 @@ def test_db_root_snapshot_stops_after_the_bounded_input_limit() -> None:
     assert generated == 1_001
 
 
+def test_db_root_snapshot_reads_all_categories_in_one_query() -> None:
+    asset_id = uuid4()
+
+    class RecordingSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, _statement: object):
+            self.calls += 1
+            return [
+                ("render_assets", asset_id),
+                ("manifest_assets", asset_id),
+                ("active_job_assets", None),
+            ]
+
+    session = RecordingSession()
+    roots = load_reference_roots_in_session(
+        session,  # type: ignore[arg-type]
+        asset_ids=(asset_id,),
+    )
+
+    assert session.calls == 1
+    assert roots.render_assets == frozenset({asset_id})
+    assert roots.manifest_assets == frozenset({asset_id})
+    assert roots.active_job_assets == frozenset()
+
+
 @pytest.mark.parametrize("asset_class", ["source", "voice_reference"])
 def test_source_and_private_reference_classes_never_enter_ordinary_gc(asset_class: str) -> None:
     asset = _asset(asset_class=asset_class)

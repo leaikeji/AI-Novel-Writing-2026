@@ -36,6 +36,7 @@ from backend.narration.privacy import (
     create_cloud_consent,
     default_narration_settings_values,
     get_narration_settings,
+    list_character_voice_bindings,
     narration_coverage,
     narration_runtime_resource,
     revoke_cloud_consent,
@@ -1172,6 +1173,63 @@ def test_character_binding_cas_rights_history_impact_and_unset_deletes_only_bind
     assert cleared.version == 0
     assert store.find_all(CharacterVoiceBinding) == []
     assert store.get(NarrationEdition, edition_id) is unchanged_edition
+
+
+def test_character_binding_list_uses_one_bulk_impact_projection() -> None:
+    second_character_id = uuid4()
+
+    class ProjectingMemoryStore(MemoryStore):
+        def __init__(self, *rows: object) -> None:
+            super().__init__(*rows)
+            self.projection_calls: list[tuple[UUID, tuple[UUID, ...]]] = []
+
+        def character_binding_impacts(
+            self,
+            *,
+            novel_id: UUID,
+            character_ids: tuple[UUID, ...],
+        ) -> dict[UUID, wire.VoiceBindingImpact]:
+            self.projection_calls.append((novel_id, character_ids))
+            return {
+                character_id: wire.VoiceBindingImpact(
+                    affected_chapter_count=index + 1,
+                    affected_segment_count=(index + 1) * 10,
+                    historical_edition_count=index,
+                    regeneration_required=True,
+                )
+                for index, character_id in enumerate(character_ids)
+            }
+
+    bindings = [
+        CharacterVoiceBinding(
+            id=uuid4(),
+            novel_id=NOVEL_ID,
+            character_id=character_id,
+            profile_id=uuid4(),
+            voice_version_id=uuid4(),
+            binding_policy="dedicated",
+            language="zh-CN",
+            parameters_json={},
+            version=1,
+            updated_at=NOW,
+        )
+        for character_id in (CHARACTER_ID, second_character_id)
+    ]
+    store = ProjectingMemoryStore(
+        novel(),
+        character(),
+        character(second_character_id),
+        *bindings,
+    )
+
+    result = list_character_voice_bindings(store, novel_id=NOVEL_ID)
+
+    assert len(result.items) == 2
+    assert store.projection_calls == [(
+        NOVEL_ID,
+        tuple(sorted((CHARACTER_ID, second_character_id), key=str)),
+    )]
+    assert sorted(item.impact.affected_segment_count for item in result.items) == [10, 20]
 
 
 def test_revoked_voice_blocks_binding_without_changing_history() -> None:

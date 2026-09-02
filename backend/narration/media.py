@@ -18,7 +18,7 @@ from pathlib import PurePosixPath
 from typing import Iterable, Iterator, Mapping
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -500,78 +500,71 @@ def _bounded_asset_ids(asset_ids: Iterable[UUID]) -> tuple[UUID, ...]:
     return tuple(unique)
 
 
-def _uuid_set(session: Session, statement: object) -> frozenset[UUID]:
-    return frozenset(value for value in session.scalars(statement) if value is not None)
-
-
 def load_reference_roots_in_session(
     session: Session, *, asset_ids: Iterable[UUID]
 ) -> ReferenceRoots:
     """Build roots only from structured DB associations, never caller JSON."""
 
     ids = _bounded_asset_ids(asset_ids)
-    covers = _uuid_set(session, select(Novel.cover_asset_id).where(Novel.cover_asset_id.in_(ids)))
-    renders = _uuid_set(
-        session, select(NarrationRenderAsset.asset_id).where(NarrationRenderAsset.asset_id.in_(ids))
-    )
-    exports = _uuid_set(
-        session, select(NarrationExport.asset_id).where(NarrationExport.asset_id.in_(ids))
-    )
-    voice_references = _uuid_set(
-        session,
-        select(VoiceProfileVersion.reference_asset_id).where(
-            VoiceProfileVersion.reference_asset_id.in_(ids)
+    category_queries = (
+        select(literal("novel_cover"), Novel.cover_asset_id).where(
+            Novel.cover_asset_id.in_(ids)
         ),
-    ) | _uuid_set(
-        session,
-        select(VoiceProfileVersion.preview_asset_id).where(
-            VoiceProfileVersion.preview_asset_id.in_(ids)
+        select(literal("render_assets"), NarrationRenderAsset.asset_id).where(
+            NarrationRenderAsset.asset_id.in_(ids)
         ),
-    )
-    locked = _uuid_set(
-        session,
-        select(VoiceProfileVersion.reference_asset_id).where(
+        select(literal("export_assets"), NarrationExport.asset_id).where(
+            NarrationExport.asset_id.in_(ids)
+        ),
+        select(
+            literal("voice_references"), VoiceProfileVersion.reference_asset_id
+        ).where(VoiceProfileVersion.reference_asset_id.in_(ids)),
+        select(
+            literal("voice_references"), VoiceProfileVersion.preview_asset_id
+        ).where(VoiceProfileVersion.preview_asset_id.in_(ids)),
+        select(
+            literal("locked_voice_assets"), VoiceProfileVersion.reference_asset_id
+        ).where(
             VoiceProfileVersion.state == "locked",
             VoiceProfileVersion.reference_asset_id.in_(ids),
         ),
-    ) | _uuid_set(
-        session,
-        select(VoiceProfileVersion.preview_asset_id).where(
+        select(
+            literal("locked_voice_assets"), VoiceProfileVersion.preview_asset_id
+        ).where(
             VoiceProfileVersion.state == "locked",
             VoiceProfileVersion.preview_asset_id.in_(ids),
         ),
-    )
-    manifests = _uuid_set(
-        session,
-        select(NarrationRenderAsset.asset_id)
+        select(literal("manifest_assets"), NarrationRenderAsset.asset_id)
         .join(
             NarrationManifestSegment,
             NarrationManifestSegment.render_id == NarrationRenderAsset.render_id,
         )
         .where(NarrationRenderAsset.asset_id.in_(ids)),
-    )
-    active_jobs = _uuid_set(
-        session,
-        select(ActiveJobAsset.asset_id).where(
+        select(literal("active_job_assets"), ActiveJobAsset.asset_id).where(
             ActiveJobAsset.asset_id.in_(ids), ActiveJobAsset.released_at.is_(None)
         ),
-    )
-    uploaded = _uuid_set(
-        session,
-        select(VoiceProfileVersion.reference_asset_id).where(
+        select(
+            literal("uploaded_originals"), VoiceProfileVersion.reference_asset_id
+        ).where(
             VoiceProfileVersion.source_type == "uploaded",
             VoiceProfileVersion.reference_asset_id.in_(ids),
         ),
     )
+    values: dict[str, set[UUID]] = {
+        "novel_cover": set(),
+        "render_assets": set(),
+        "export_assets": set(),
+        "voice_references": set(),
+        "locked_voice_assets": set(),
+        "manifest_assets": set(),
+        "active_job_assets": set(),
+        "uploaded_originals": set(),
+    }
+    for category, asset_id in session.execute(union_all(*category_queries)):
+        if asset_id is not None:
+            values[str(category)].add(asset_id)
     return ReferenceRoots(
-        novel_cover=covers,
-        render_assets=renders,
-        export_assets=exports,
-        voice_references=voice_references,
-        locked_voice_assets=locked,
-        manifest_assets=manifests,
-        active_job_assets=active_jobs,
-        uploaded_originals=uploaded,
+        **{category: frozenset(asset_ids) for category, asset_ids in values.items()}
     )
 
 

@@ -118,6 +118,8 @@ type ExternalReadingSection = Exclude<ReadingSectionKey, "overview" | "narrator"
 
 export interface ReadingSectionRenderContext {
   readonly overview: NarrationOverviewResponse;
+  readonly voiceProfiles: readonly VoiceProfileResource[];
+  readonly voiceProfilesError: string | null;
   readonly onRefresh: () => void;
   readonly onNavigate: (section: ReadingSectionKey) => void;
 }
@@ -685,7 +687,13 @@ export function createReadingPage(
     const externalContent = activeSection !== "overview" && activeSection !== "narrator"
       ? props.renderSectionContent?.(
         activeSection,
-        { overview, onRefresh: reload, onNavigate: navigate },
+        {
+          overview,
+          voiceProfiles: loadState.voiceProfiles,
+          voiceProfilesError: loadState.voiceProfilesError,
+          onRefresh: reload,
+          onNavigate: navigate,
+        },
       ) ?? props.sectionContent?.[activeSection]
       : undefined;
     const sectionBody = activeSection === "overview"
@@ -723,6 +731,8 @@ export function createReadingPage(
           }),
           props.renderNarratorVoiceWorkspace?.({
             overview,
+            voiceProfiles: loadState.voiceProfiles,
+            voiceProfilesError: loadState.voiceProfilesError,
             onRefresh: reload,
             onNavigate: navigate,
           }) ?? null,

@@ -602,10 +602,18 @@ describe("T2-GATE narration composition", () => {
     await settle();
     pageHost = harness.render(Page, characterPageProps);
     const renderNarratorWorkspace = pageHost.props.renderNarratorVoiceWorkspace as (
-      context: { overview: typeof overview; onRefresh: () => void; onNavigate: () => void },
+      context: {
+        overview: typeof overview;
+        voiceProfiles: readonly VoiceProfileResource[];
+        voiceProfilesError: string | null;
+        onRefresh: () => void;
+        onNavigate: () => void;
+      },
     ) => FakeElement;
     const narratorWorkspace = renderNarratorWorkspace({
       overview,
+      voiceProfiles: [voiceProfile()],
+      voiceProfilesError: null,
       onRefresh: vi.fn(),
       onNavigate: vi.fn(),
     });
@@ -655,10 +663,18 @@ describe("T2-GATE narration composition", () => {
 
     const renderSectionContent = pageHost.props.renderSectionContent as (
       section: "voice-library",
-      context: { overview: typeof overview; onRefresh: () => void; onNavigate: () => void },
+      context: {
+        overview: typeof overview;
+        voiceProfiles: readonly VoiceProfileResource[];
+        voiceProfilesError: string | null;
+        onRefresh: () => void;
+        onNavigate: () => void;
+      },
     ) => FakeElement;
     const voiceLibraryHost = renderSectionContent("voice-library", {
       overview,
+      voiceProfiles: [voiceProfile()],
+      voiceProfilesError: null,
       onRefresh: vi.fn(),
       onNavigate: vi.fn(),
     });
@@ -690,7 +706,11 @@ describe("T2-GATE narration composition", () => {
       (element) => componentName(element) === "OfficialVoiceSelectionPanel",
     )[0];
     expect(sharedOfficial.props.target).toEqual({ kind: "narrator" });
-    expect(sharedOfficial.props.projection).toEqual({ phase: "loading" });
+    expect(sharedOfficial.props.projection).toEqual({
+      phase: "ready",
+      binding: null,
+      profiles: [voiceProfile()],
+    });
     expect(textContent(voiceLibraryTree)).toContain("收起音色列表");
 
     const pronunciationHarness = createReactHarness();
@@ -831,6 +851,7 @@ describe("T2-GATE narration composition", () => {
     const overview = overviewWithVoiceActions();
     const harness = createReactHarness({ dependencyAware: true });
     const getBinding = vi.fn(async () => characterBinding({ version: 4 }));
+    const loadOverview = vi.fn(async () => overview);
     const officialVoiceApi = {
       getCharacterVoiceBinding: getBinding,
       listVoiceProfiles: vi.fn(async () => ({
@@ -844,7 +865,7 @@ describe("T2-GATE narration composition", () => {
     } as unknown as OfficialVoiceSelectionPanelApi;
     const Card = createCharacterVoiceCardPanel(
       harness.React,
-      vi.fn(async () => overview),
+      loadOverview,
       undefined,
       officialVoiceApi,
     );
@@ -852,6 +873,8 @@ describe("T2-GATE narration composition", () => {
       novelId: NOVEL_ID,
       characterId: CHARACTER_ID,
       characterName: "林岚",
+      initialOverview: overview,
+      initialProfiles: [voiceProfile()],
       initialBinding: {
         binding_id: characterBinding().binding_id!,
         binding_policy: "dedicated",
@@ -870,6 +893,8 @@ describe("T2-GATE narration composition", () => {
     await settle();
     let tree = harness.render(Card, props);
     expect(getBinding).not.toHaveBeenCalled();
+    expect(loadOverview).not.toHaveBeenCalled();
+    expect(officialVoiceApi.listVoiceProfiles).not.toHaveBeenCalled();
     expect(tree.props.currentVoice).toMatchObject({
       phase: "resolved",
       name: "温暖青年女声",
@@ -885,6 +910,8 @@ describe("T2-GATE narration composition", () => {
     await settle();
     tree = harness.render(Card, props);
     expect(getBinding).toHaveBeenCalledTimes(1);
+    expect(loadOverview).toHaveBeenCalledTimes(1);
+    expect(officialVoiceApi.listVoiceProfiles).toHaveBeenCalledTimes(1);
     expect(tree.props.currentVoice).toMatchObject({
       phase: "resolved",
       name: "温暖青年女声",
