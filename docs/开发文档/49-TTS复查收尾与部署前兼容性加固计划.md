@@ -1,10 +1,17 @@
 # 开发计划 49：TTS 复查收尾与部署前兼容性加固
 
-状态：**V1.5 源码施工与隔离验收已完成：`TTS49-CODE-FINAL=PASS`、`TTS49-SCHEMA-COMPAT-FINAL=PASS`、`TTS49-RELEASE-READY=PASS`。候选位于 `codex/tts49-compat-hardening` 的未提交工作树；长期迁移、安装、重启、提交和推送仍未授权、未执行。**
+状态：**V1.5 源码施工与隔离验收已完成：`TTS49-CODE-FINAL=PASS`、`TTS49-SCHEMA-COMPAT-FINAL=PASS`、候选级 `TTS49-RELEASE-READY=PASS`。2026-09-02 首次长期预检曾得到 `BLOCKED_ROLE_BASELINE`；该阻断随后由计划 53 独立建立四角色基线并完成线性 `0035 → 0036 → 0037` 发布而解除。当前长期 PawApp health ready、整书选角能力 enabled；计划 49 的历史候选身份和发布演练仍按当时 `0036` 冻结。**
 
 日期：2026-09-01（Asia/Shanghai）
 
 ## 一、真实基线
+
+### 0. 2026-09-02 当前运行态补记
+
+- 当前源码和长期数据库唯一 head 均为 `20260902_0037`；`0037` 属于后续故事账本迁移，不改写本计划的 `0036` 历史候选与迁移证据。
+- `ai_novel_schema_owner`、`ai_novel_migrator`、`ai_novel_api`、`ai_novel_worker` 均已建立；schema owner 不登录，其余三个运行/迁移身份可登录。
+- PawApp health=`ready`，Narration lifecycle=`ready`，Sidecar reachable=true，production worker running=true；`character_cast_planning` 为 enabled，当前选角命令/条目为 `0/0`。
+- 上述解阻、迁移和完整候选安装由计划 53 负责。下文 `0035`、单超级用户和 `BLOCKED_ROLE_BASELINE` 记录保留为本计划首次部署尝试的时间截面，不再代表当前运行态。
 
 ### 1. Git 与候选实现
 
@@ -25,12 +32,13 @@
 
 这些结果证明当前候选基线可继续收尾，不代表计划 49 已实施，也不能替代长期部署和真人验收。
 
-### 3. 长期运行态
+### 3. 首次发布前的长期运行态（历史截面）
 
 2026-09-01 的只读核验结果：
 
 - QwenPaw、PostgreSQL 和 MOSS-TTS Sidecar 均为 `healthy`，PawApp health 为 `ready`。
 - 长期数据库迁移版本为 `20260830_0035`，不是候选源码的 `0036`。
+- 2026-09-02 的实际发布预检确认，长期库只有 `ai_novel` 登录超级用户，没有 `ai_novel_schema_owner`、`ai_novel_migrator`、`ai_novel_api`、`ai_novel_worker`。因此 65 表角色预检无法满足本计划冻结的生产身份，发布在迁移和 ACL 写入前停止。
 - 长期 `narration_features` 只公开 `character_voice_matching`、`nano_advanced_tuning`、`private_voice_deletion` 和 `voice_generator`；没有 `character_cast_planning`。
 - 因此计划 47 的整书智能配音仍只是已提交候选，尚未长期部署；不得把“容器健康”表述为“计划 47 已上线”。
 - 长期库当前有 18 条 `explicit_generation_actor='local-owner'` 的历史生成请求。数量会随业务变化，施工 G0 必须重新只读冻结；不得批量回填或改写。
@@ -488,4 +496,4 @@ V1.5 在保留 V1.4 候选/仓库隔离、AST 无执行解析、并行互斥和�
 
 V1.5 不新增迁移、不重写播放器/选角/VoiceGenerator、不回填 18 条历史 actor，也不以自动化替代作者听检或真实 Provider 成功链。
 
-终审裁决：**V1.5 已完成源码施工与隔离验收，计划 49 的代码、schema 兼容和发布准备三项裁决均为 PASS。最终候选证据见[计划 49 验收目录](./证据/计划49/README.md)。当前仍不能开始长期部署，也不能宣称计划 45/47 的作者听感、真实 Provider 或表达风格验收已经完成。**
+终审裁决：**V1.5 候选的代码、schema 兼容和隔离发布准备为 PASS。首次长期部署的 `BLOCKED_ROLE_BASELINE` 已由计划 53 通过独立备份、四角色建立、线性迁移和完整候选安装解除，当前运行态为 `0037`/health ready/整书选角能力 enabled；不得把这一运行门禁解除表述为计划 47 的真实 Provider 整书选角成功链或作者听感已通过。最终候选证据见[计划 49 验收目录](./证据/计划49/README.md)。**

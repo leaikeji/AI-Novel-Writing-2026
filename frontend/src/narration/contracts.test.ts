@@ -515,6 +515,42 @@ describe("narration T2 wire contract", () => {
     expect(parsed.capabilities.items).toHaveLength(CAPABILITY_KEYS.length);
     expect(parsed.voice_sources.every((source) => !source.available)).toBe(true);
 
+    const legacy = structuredClone(overview) as unknown as {
+      capabilities: {
+        schema_version: string;
+        items: Array<{ key: string }>;
+      };
+    };
+    legacy.capabilities.schema_version = "narration-capabilities/2";
+    legacy.capabilities.items = legacy.capabilities.items.filter(
+      (entry) => entry.key !== "character_cast_planning",
+    );
+    const parsedLegacy = parseNarrationOverviewResponse(legacy);
+    expect(parsedLegacy.capabilities.schema_version).toBe(NARRATION_CAPABILITY_SCHEMA_VERSION);
+    expect(parsedLegacy.capabilities.items).toHaveLength(CAPABILITY_KEYS.length);
+    expect(parsedLegacy.capabilities.items.find(
+      (entry) => entry.key === "character_cast_planning",
+    )).toEqual({
+      key: "character_cast_planning",
+      state: "unavailable",
+      visible: false,
+      actionable: false,
+      reason_code: "CHARACTER_CAST_SCHEMA_UNAVAILABLE",
+      required_gate: null,
+    });
+
+    const incompleteLegacy = structuredClone(legacy);
+    incompleteLegacy.capabilities.items.pop();
+    expect(() => parseNarrationOverviewResponse(incompleteLegacy)).toThrow(/every capability/);
+
+    const futureCapabilityInLegacy = structuredClone(legacy);
+    const castCapability = overview.capabilities.items.find(
+      (entry) => entry.key === "character_cast_planning",
+    );
+    if (!castCapability) throw new Error("missing character cast capability fixture");
+    futureCapabilityInLegacy.capabilities.items.push(structuredClone(castCapability));
+    expect(() => parseNarrationOverviewResponse(futureCapabilityInLegacy)).toThrow(/expected one of/);
+
     const missing = structuredClone(overview);
     missing.capabilities.items.pop();
     expect(() => parseNarrationOverviewResponse(missing)).toThrow(/every capability/);

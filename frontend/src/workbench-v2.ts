@@ -66,6 +66,7 @@ import {
   type ChapterNarrationPanelPhase,
   type ChapterNarrationSourceKind,
 } from "./narration/chapter-narration-panel";
+import { resolveChapterPlaybackStartPosition } from "./narration/chapter-player-view-state";
 import {
   DEFAULT_PLAYBACK_PROFILE_ID,
   createChapterNarrationSession,
@@ -134,7 +135,6 @@ const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
 const NovelCoverView = createNovelCoverView(React);
-const ChapterNarrationPanel = createChapterNarrationPanel(React);
 const ScriptReviewPanel = createScriptReviewPanel(React);
 const NARRATION_GATE_REFRESH_MILLISECONDS = 5_000;
 const {
@@ -153,19 +153,37 @@ const {
   CaretRightOutlined,
   ClockCircleOutlined,
   CopyOutlined,
+  CaretRightFilled,
   DatabaseOutlined,
   DoubleLeftOutlined,
   DoubleRightOutlined,
   EditOutlined,
+  ExclamationCircleFilled,
   FileTextOutlined,
+  LoadingOutlined,
+  MoreOutlined,
+  PauseOutlined,
   SaveOutlined,
   SearchOutlined,
   SettingOutlined,
   SoundOutlined,
+  StepBackwardOutlined,
+  StepForwardOutlined,
   TeamOutlined,
   UnorderedListOutlined,
   UserOutlined,
 } = host.antdIcons;
+const ChapterNarrationPanel = createChapterNarrationPanel(React, {
+  Previous: StepBackwardOutlined,
+  Next: StepForwardOutlined,
+  Play: CaretRightFilled,
+  Pause: PauseOutlined,
+  Loading: LoadingOutlined,
+  Volume: SoundOutlined,
+  Speaker: UserOutlined,
+  More: MoreOutlined,
+  Warning: ExclamationCircleFilled,
+});
 
 
 type ProjectSection = WorkbenchRouteSection;
@@ -1423,16 +1441,21 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       setNarrationStatus("朗读已暂停。");
       return;
     }
+    const segmentCount = snapshot.bundle?.script.segments.length ?? 0;
+    const lastManifestSegment = segmentCount > 0
+      ? snapshot.bundle?.manifest.segments[segmentCount - 1]
+      : undefined;
+    const start = resolveChapterPlaybackStartPosition(
+      snapshot.playerState,
+      segmentCount,
+      lastManifestSegment?.audio?.duration_ms,
+    );
     setNarrationError(null);
-    if (snapshot.playerState?.phase === "paused") {
+    if (start.resumeExistingSession) {
       void session.resume().then(reportPlaybackResult);
       return;
     }
-    playNarrationOrdinal(
-      snapshot.playerState?.currentOrdinal ?? 0,
-      "readonly-segment",
-      snapshot.playerState?.offsetMs ?? 0,
-    );
+    playNarrationOrdinal(start.ordinal, "readonly-segment", start.offsetMs);
   };
 
   const closeScriptReview = (): void => {

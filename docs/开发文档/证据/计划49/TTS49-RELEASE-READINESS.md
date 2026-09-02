@@ -1,8 +1,27 @@
 # TTS49 部署前发布审计
 
-状态：**`TTS49-RELEASE-READY=PASS`；长期发布未授权、未执行。**
+状态：**候选级 `TTS49-RELEASE-READY=PASS`。2026-09-02 首次长期预检曾得到 `TTS49-LONGTERM-DEPLOY=BLOCKED_ROLE_BASELINE`；该阻断已由计划 53 独立解除，当前长期 schema 为 `20260902_0037`、四角色已建立、完整候选已安装。**
 
 日期：2026-09-01（Asia/Shanghai）
+
+## 2026-09-02 当前运行态补记
+
+计划 53 已在本计划首次预检之后独立完成备份、四角色基线建立、`0035 → 0036 → 0037` 线性迁移、完整候选安装与健康复核。当前四角色均存在（schema owner 禁止登录，migrator/API/worker 允许登录）；PawApp 与 Narration lifecycle ready，Sidecar reachable，production worker running，`character_cast_planning` enabled。`character_cast_plan_commands/items` 当前计数为 `0/0`。
+
+因此 `TTS49-LONGTERM-DEPLOY=BLOCKED_ROLE_BASELINE` 只描述下方首次尝试的历史结果，不再是当前阻断。计划 53 的发布证据负责当前 `0037` 身份；本文件仍保留计划 49 的 `0036` 候选和恢复演练，不回写历史 hash。
+
+## 2026-09-02 首次长期预检增量（历史）
+
+用户另行授权长期部署后，已完成数据库、媒体、已安装插件和候选包备份，并实际执行维护窗前只读检查。长期数据库虽然处于预期的 `20260830_0035`，但角色目录只有 `ai_novel` 登录超级用户；以下四个冻结生产角色均不存在：
+
+- `ai_novel_schema_owner`
+- `ai_novel_migrator`
+- `ai_novel_api`
+- `ai_novel_worker`
+
+因此本文件第 2 步的 0035／65 表角色预检不具备通过条件。发布在迁移、ACL 写入和候选后端安装前停止；数据库保持 `0035`，角色和媒体保持原样。计划 50 后续使用“旧已安装插件＋新前端 bundle”的单文件兼容包，只改变 `frontend/dist/index.js`，不提供 `character_cast_planning`，不构成计划 49 的完整发布。
+
+恢复与证据见[计划 50 部署记录](../计划50/README.md)。重新尝试完整发布前，必须先单独设计并验收长期四角色基线的建立或迁移；不得把当前单超级用户连接直接解释为 65 表角色门禁已通过。
 
 ## 发布候选
 

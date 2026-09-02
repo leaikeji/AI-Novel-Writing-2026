@@ -5,6 +5,7 @@ import type {
 } from "./chapter-contracts";
 import {
   INITIAL_CHAPTER_PLAYER_LAYOUT_STATE,
+  chapterPlaybackHasEnded,
   deriveChapterPlayerView,
   transitionChapterPlayerLayout,
   type ChapterPlayerLayoutMode,
@@ -101,6 +102,19 @@ export type ChapterNarrationPanelReactRuntime = Pick<
 >;
 
 
+export interface ChapterNarrationPanelIcons {
+  readonly Previous: unknown;
+  readonly Next: unknown;
+  readonly Play: unknown;
+  readonly Pause: unknown;
+  readonly Loading: unknown;
+  readonly Volume: unknown;
+  readonly Speaker: unknown;
+  readonly More: unknown;
+  readonly Warning: unknown;
+}
+
+
 const ACTIVE_PLAYER_PHASES = new Set<NarrationPlayerPhase>([
   "preparing",
   "buffering",
@@ -140,12 +154,24 @@ export function deriveChapterNarrationPanelModel(
   const currentSegment = currentOrdinal === null ? null : props.segments[currentOrdinal] ?? null;
   const canPlay = props.phase === "ready" && hasEdition && !props.busy;
   const canSeek = canPlay;
+  const lastManifestSegment = props.manifestSegments?.length === props.segments.length
+    ? props.manifestSegments[props.manifestSegments.length - 1]
+    : undefined;
+  const playbackEnded = chapterPlaybackHasEnded(
+    props.playerState,
+    props.segments.length,
+    lastManifestSegment?.ordinal === props.segments.length - 1
+      ? lastManifestSegment.audio?.duration_ms
+      : undefined,
+  );
   const playbackLabel = props.playerState?.phase === "playing"
     ? "暂停"
     : props.playerState?.phase === "preparing"
     ? "准备中"
     : props.playerState?.phase === "buffering"
     ? "缓冲中"
+    : playbackEnded
+    ? "重新播放"
     : "播放";
   return Object.freeze({
     hasEdition,
@@ -178,18 +204,6 @@ function editionOptionLabel(edition: EditionHistoryItem): string {
     : edition.source_status === "superseded" ? "历史版本" : "旧稿版本";
   const readiness = `${edition.ready_segment_count}/${edition.total_segment_count} 句可用`;
   return `${source} · ${readiness}`;
-}
-
-
-function buttonIcon(label: string): string {
-  switch (label) {
-    case "上一句": return "⏮";
-    case "下一句": return "⏭";
-    case "暂停": return "Ⅱ";
-    case "准备中": return "…";
-    case "缓冲中": return "…";
-    default: return "▶";
-  }
 }
 
 
@@ -230,6 +244,7 @@ function detailsHeading(mode: ChapterPlayerLayoutMode): string {
 
 export function createChapterNarrationPanel(
   React: ChapterNarrationPanelReactRuntime,
+  icons: ChapterNarrationPanelIcons,
 ): (props: ChapterNarrationPanelProps) => unknown {
   const h = React.createElement;
   return function ChapterNarrationPanel(props) {
@@ -252,8 +267,12 @@ export function createChapterNarrationPanel(
     const retryAnnouncement = props.retryErrorMessage ?? props.retryStatusMessage;
     const preferenceAnnouncement = playbackPreferenceMessage(props.playbackPreferenceStatus);
     const [layoutState, setLayoutState] = React.useState(INITIAL_CHAPTER_PLAYER_LAYOUT_STATE);
+    const [volumeOpen, setVolumeOpen] = React.useState(false);
     const moreTriggerRef = React.useRef<{ focus(): void } | null>(null);
     const failureTriggerRef = React.useRef<{ focus(): void } | null>(null);
+    const volumeTriggerRef = React.useRef<{ focus(): void } | null>(null);
+    const volumeInputRef = React.useRef<{ focus(): void } | null>(null);
+    const playerRootRef = React.useRef<HTMLElement | null>(null);
     React.useEffect(() => {
       if (failedItems.length === 0) {
         setLayoutState((current) => transitionChapterPlayerLayout(current, {
@@ -277,6 +296,10 @@ export function createChapterNarrationPanel(
     const currentVolumePercent = volumePercent(playerState?.volume);
     const currentRate = boundedPlaybackRate(playerState?.rate);
     const detailsId = "anw-chapter-player-details";
+    const volumeId = "anw-chapter-player-volume";
+    const speakerLabel = model.currentSegment?.speaker_label
+      ?? props.segments[0]?.speaker_label
+      ?? "章节朗读";
 
     const setLayout = (action: Parameters<typeof transitionChapterPlayerLayout>[1]) => {
       setLayoutState((current) => transitionChapterPlayerLayout(current, action));
@@ -288,6 +311,25 @@ export function createChapterNarrationPanel(
       setLayout({ type: "close-details" });
       returnTarget?.focus();
     };
+    React.useEffect(() => {
+      if (volumeOpen) volumeInputRef.current?.focus();
+    }, [volumeOpen]);
+    React.useEffect(() => {
+      const root = playerRootRef.current;
+      const scrollSurface = root?.parentElement?.querySelector<HTMLElement>(
+        ":scope > .anw-editor-scroll",
+      ) ?? null;
+      if (!root || !scrollSurface) return undefined;
+      const synchronizeScrollbarWidth = () => {
+        const width = Math.max(0, scrollSurface.offsetWidth - scrollSurface.clientWidth);
+        root.style.setProperty("--anw-chapter-editor-scrollbar-width", `${width}px`);
+      };
+      synchronizeScrollbarWidth();
+      if (typeof ResizeObserver === "undefined") return undefined;
+      const observer = new ResizeObserver(synchronizeScrollbarWidth);
+      observer.observe(scrollSurface);
+      return () => observer.disconnect();
+    }, []);
 
     const editionSelect = props.editions.length > 0
       ? h(
@@ -396,9 +438,63 @@ export function createChapterNarrationPanel(
         )
       : null;
 
+    let noticeKind: "warning" | "error" | "progress" | "info" | null = null;
+    let noticeText = "";
+    let noticeActionLabel: string | null = null;
+    let noticeAction: (() => void) | null = null;
+    let noticeShowsProgress = false;
+    const updateNoticeActive = props.sourceKind === "working-copy-diverged"
+      || props.updateRequired === true;
+    if (props.errorMessage) {
+      noticeKind = "error";
+      noticeText = props.errorMessage;
+    } else if (updateNoticeActive) {
+      noticeKind = "warning";
+      noticeText = "朗读内容与当前正文不一致";
+      noticeActionLabel = "更新朗读";
+      noticeAction = props.onUpdate;
+    } else if (props.sourceKind === "historical") {
+      noticeKind = "warning";
+      noticeText = "正在播放历史朗读版本";
+    } else if (failedItems.length > 0) {
+      noticeKind = "error";
+      noticeText = `有 ${failedItems.length} 个句段生成失败`;
+      noticeActionLabel = "查看失败";
+      noticeAction = () => {
+        setVolumeOpen(false);
+        setLayout({ type: "open-failure-details", failureCount: failedItems.length });
+      };
+    } else if (view.generation.state === "failed") {
+      noticeKind = "error";
+      noticeText = view.generation.label;
+    } else if (
+      view.generation.state === "processing"
+      || view.generation.state === "partial"
+      || view.generation.state === "unknown"
+    ) {
+      noticeKind = "progress";
+      noticeText = view.generation.label;
+      noticeShowsProgress = view.generation.state !== "unknown";
+    } else if (
+      props.playbackPreferenceStatus?.state === "conflict"
+      || props.playbackPreferenceStatus?.state === "error"
+    ) {
+      noticeKind = props.playbackPreferenceStatus.state === "error" ? "error" : "warning";
+      noticeText = preferenceAnnouncement ?? "播放偏好暂未保存";
+    } else if (props.retryErrorMessage) {
+      noticeKind = "error";
+      noticeText = props.retryErrorMessage;
+    } else if (props.followPaused) {
+      noticeKind = "info";
+      noticeText = "已暂停自动跟随朗读位置";
+      noticeActionLabel = "返回朗读位置";
+      noticeAction = props.onResumeFollow;
+    }
+
     return h(
       "section",
       {
+        ref: playerRootRef,
         className: `anw-chapter-narration-player is-${props.phase} is-layout-${layoutMode}`,
         "aria-label": "章节智能朗读播放器",
         "data-content-phase": props.phase,
@@ -413,209 +509,70 @@ export function createChapterNarrationPanel(
           ? ""
           : String(playerState.currentOrdinal),
         "data-segment-states": segmentStates,
+        onKeyDown: (event: { key: string; preventDefault(): void }) => {
+          if (event.key !== "Escape") return;
+          if (volumeOpen) {
+            event.preventDefault();
+            setVolumeOpen(false);
+            volumeTriggerRef.current?.focus();
+            return;
+          }
+          if (!detailsVisible) return;
+          event.preventDefault();
+          closeDetails();
+        },
       },
-      h(
-        "div",
-        { className: "anw-chapter-narration-player__compact" },
-        h(
-          "div",
-          { className: "anw-chapter-narration-player__identity" },
-          h("span", { className: `anw-chapter-narration-source is-${props.sourceKind}` }, view.sourceLabel),
-          h(
+      noticeKind
+        ? h(
             "div",
-            { className: "anw-chapter-narration-current-copy" },
-            h(
-              "strong",
-              null,
-              `${model.currentSegment?.speaker_label ?? "章节朗读"}${
-                props.sourceKind === "working-copy-diverged" ? " · 旧稿字幕" : ""
-              }`,
-            ),
-            h(
-              "span",
-              { className: "anw-chapter-narration-voice-summary" },
-              view.voiceSummary,
-            ),
-            h(
-              "span",
-              { title: model.currentSegment?.source_text ?? props.statusMessage },
-              model.currentSegment?.source_text ?? props.statusMessage,
-            ),
-          ),
-        ),
-        h(
-          "div",
-          { className: "anw-chapter-narration-player__controls" },
-          model.hasEdition
-            ? h(
-                "button",
-                {
-                  type: "button",
-                  className: "anw-chapter-narration-icon-button",
-                  disabled: !model.canSeek || model.previousOrdinal === null,
-                  onClick: () => {
-                    if (model.previousOrdinal !== null) props.onSeekOrdinal(model.previousOrdinal);
-                  },
-                  title: "上一句",
-                  "aria-label": "朗读上一句",
-                },
-                buttonIcon("上一句"),
-              )
-            : null,
-          model.hasEdition
-            ? h(
-                "button",
-                {
-                  type: "button",
-                  className: "anw-chapter-narration-play-button",
-                  disabled: toggleDisabled,
-                  onClick: props.onTogglePlayback,
-                  title: model.playbackLabel,
-                  "aria-label": model.playbackLabel === "暂停" ? "暂停章节朗读" : "播放章节朗读",
-                },
-                buttonIcon(model.playbackLabel),
-              )
-            : h(
-                "button",
-                {
-                  type: "button",
-                  className: "anw-chapter-narration-primary-action",
-                  disabled: !model.canGenerate,
-                  onClick: props.onGenerate,
-                },
-                props.busy ? "正在准备朗读…" : "智能朗读",
-              ),
-          model.hasEdition
-            ? h(
-                "button",
-                {
-                  type: "button",
-                  className: "anw-chapter-narration-icon-button",
-                  disabled: !model.canSeek || model.nextOrdinal === null,
-                  onClick: () => {
-                    if (model.nextOrdinal !== null) props.onSeekOrdinal(model.nextOrdinal);
-                  },
-                  title: "下一句",
-                  "aria-label": "朗读下一句",
-                },
-                buttonIcon("下一句"),
-              )
-            : null,
-        ),
-        h(
-          "div",
-          { className: "anw-chapter-narration-player__metrics", "aria-label": "朗读进度摘要" },
-          h(
-            "div",
-            { className: "anw-chapter-narration-metric" },
-            h("span", null, "当前"),
-            h("strong", null, `${view.currentTimeLabel} · 第 ${view.currentSentenceLabel} 句`),
-          ),
-          h(
-            "div",
-            { className: "anw-chapter-narration-metric" },
-            h("span", null, "可播放"),
-            h("strong", null, `${view.playableDurationLabel} · ${view.playableSentenceLabel} 句`),
-          ),
-          h(
-            "div",
-            { className: `anw-chapter-narration-generation is-${view.generation.state}` },
-            h(
-              "div",
-              null,
-              h("span", null, "全章生成"),
-              h("strong", null, `${view.generation.completionPercent}%`),
-            ),
-            h("progress", {
-              max: Math.max(1, view.generation.totalCount),
-              value: view.generation.completedCount,
-              "aria-label": "全章音频生成进度",
-              "aria-valuetext": view.generation.label,
-            }),
-          ),
-        ),
-        model.hasEdition
-          ? h(
-              "div",
-              { className: "anw-chapter-narration-player__preferences" },
-              h(
-                "label",
-                { className: "anw-chapter-narration-select" },
-                h("span", null, "倍速"),
-                h(
-                  "select",
-                  {
-                    value: String(currentRate),
-                    disabled: props.busy,
-                    onChange: (event: { target: { value: string } }) => {
-                      props.onRateChange(Number(event.target.value));
-                    },
-                    "aria-label": "朗读倍速，范围 0.5 到 3 倍",
-                  },
-                  ...PLAYBACK_RATE_OPTIONS.map((rate) => h(
-                    "option",
-                    { key: rate, value: String(rate) },
-                    `${rate}×`,
-                  )),
-                ),
-              ),
-              h(
-                "label",
-                { className: "anw-chapter-narration-volume" },
-                h("span", null, "音量"),
-                h("input", {
-                  id: "anw-chapter-narration-volume",
-                  type: "range",
-                  min: 0,
-                  max: 100,
-                  step: 1,
-                  value: currentVolumePercent,
-                  disabled: props.busy,
-                  onChange: (event: { target: { value: string } }) => {
-                    const percent = Math.min(100, Math.max(0, Number(event.target.value)));
-                    props.onVolumeChange(percent / 100);
-                  },
-                  "aria-label": "章节朗读音量",
-                  "aria-valuetext": `${currentVolumePercent}%`,
-                }),
-                h("output", { htmlFor: "anw-chapter-narration-volume" }, `${currentVolumePercent}%`),
-              ),
-            )
-          : null,
-        h(
-          "div",
-          { className: "anw-chapter-narration-player__view-actions" },
-          failedItems.length > 0
-            ? h(
-                "button",
-                {
-                  type: "button",
-                  className: "anw-chapter-narration-failure-trigger",
-                  ref: failureTriggerRef,
-                  "aria-controls": detailsId,
-                  "aria-expanded": layoutMode === "failure-details",
-                  onClick: () => setLayout({
-                    type: "open-failure-details",
-                    failureCount: failedItems.length,
-                  }),
-                },
-                `失败 ${failedItems.length}`,
-              )
-            : null,
-          h(
-            "button",
             {
-              type: "button",
-              className: "anw-chapter-narration-more",
-              ref: moreTriggerRef,
-              "aria-controls": detailsId,
-              "aria-expanded": layoutMode === "expanded",
-              onClick: () => setLayout({ type: "toggle-expanded" }),
+              className: `anw-chapter-narration-notice is-${noticeKind}`,
+              role: noticeKind === "error" ? "alert" : "status",
             },
-            layoutMode === "expanded" ? "收起" : "更多",
-          ),
-        ),
-      ),
+            h(
+              "span",
+              { className: "anw-chapter-narration-notice__icon", "aria-hidden": "true" },
+              h(
+                noticeKind === "progress"
+                  ? icons.Loading
+                  : noticeKind === "info" ? icons.Speaker : icons.Warning,
+                noticeKind === "progress" ? { spin: true } : null,
+              ),
+            ),
+            h(
+              "div",
+              { className: "anw-chapter-narration-notice__copy" },
+              h("span", null, noticeText),
+              noticeShowsProgress
+                ? h("progress", {
+                    max: Math.max(1, view.generation.totalCount),
+                    value: view.generation.completedCount,
+                    "aria-label": "全章音频生成进度",
+                    "aria-valuetext": view.generation.label,
+                  })
+                : null,
+            ),
+            noticeAction && noticeActionLabel
+              ? h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "anw-chapter-narration-notice__action",
+                    disabled: noticeActionLabel === "更新朗读" && !model.canUpdate,
+                    onClick: noticeAction,
+                    ...(noticeActionLabel === "查看失败"
+                      ? {
+                          ref: failureTriggerRef,
+                          "aria-controls": detailsId,
+                          "aria-expanded": layoutMode === "failure-details",
+                        }
+                      : {}),
+                  },
+                  noticeActionLabel,
+                )
+              : null,
+          )
+        : null,
       model.hasEdition
         ? h(
             "div",
@@ -633,9 +590,207 @@ export function createChapterNarrationPanel(
               "aria-label": "按句段跳转章节朗读位置",
               "aria-valuetext": model.progressLabel,
             }),
-            h("span", null, `${model.progressLabel} · ${view.playbackLabel}`),
+            h(
+              "span",
+              { className: "anw-chapter-narration-sr-only", "aria-live": "polite" },
+              `${model.progressLabel} · ${view.playbackLabel}`,
+            ),
           )
         : null,
+      h(
+        "div",
+        { className: "anw-chapter-narration-player__compact" },
+        h(
+          "div",
+          {
+            className: "anw-chapter-narration-player__identity",
+            "data-player-zone": "identity",
+            "aria-live": "polite",
+            "aria-atomic": "true",
+          },
+          h(
+            "span",
+            { className: "anw-chapter-narration-player__speaker-icon", "aria-hidden": "true" },
+            h(icons.Speaker),
+          ),
+          h("strong", { title: speakerLabel }, speakerLabel),
+        ),
+        h(
+          "div",
+          {
+            className: "anw-chapter-narration-player__controls",
+            "data-player-zone": "transport",
+          },
+          model.hasEdition
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-chapter-narration-icon-button",
+                  disabled: !model.canSeek || model.previousOrdinal === null,
+                  onClick: () => {
+                    if (model.previousOrdinal !== null) props.onSeekOrdinal(model.previousOrdinal);
+                  },
+                  title: "上一句",
+                  "aria-label": "朗读上一句",
+                },
+                h(icons.Previous, { "aria-hidden": "true" }),
+              )
+            : null,
+          model.hasEdition
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-chapter-narration-play-button",
+                  disabled: toggleDisabled,
+                  onClick: props.onTogglePlayback,
+                  title: model.playbackLabel,
+                  "aria-label": model.playbackLabel === "暂停"
+                    ? "暂停章节朗读"
+                    : model.playbackLabel === "重新播放"
+                    ? "从头重新播放章节朗读"
+                    : "播放章节朗读",
+                },
+                h(
+                  playbackBusy
+                    ? icons.Loading
+                    : model.playbackLabel === "暂停" ? icons.Pause : icons.Play,
+                  playbackBusy ? { spin: true, "aria-hidden": "true" } : { "aria-hidden": "true" },
+                ),
+              )
+            : props.phase === "no-edition"
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-chapter-narration-primary-action",
+                  disabled: !model.canGenerate,
+                  onClick: props.onGenerate,
+                },
+                props.busy ? "正在准备朗读…" : "智能朗读",
+              )
+            : h("span", { className: "anw-chapter-narration-player__phase" }, view.contentLabel),
+          model.hasEdition
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-chapter-narration-icon-button",
+                  disabled: !model.canSeek || model.nextOrdinal === null,
+                  onClick: () => {
+                    if (model.nextOrdinal !== null) props.onSeekOrdinal(model.nextOrdinal);
+                  },
+                  title: "下一句",
+                  "aria-label": "朗读下一句",
+                },
+                h(icons.Next, { "aria-hidden": "true" }),
+              )
+            : null,
+        ),
+        model.hasEdition
+          ? h(
+              "div",
+              {
+                className: "anw-chapter-narration-player__tools",
+                "data-player-zone": "tools",
+              },
+              h(
+                "span",
+                {
+                  className: "anw-chapter-narration-player__time",
+                  "aria-label": `当前 ${view.currentTimeLabel}，总时长 ${view.playableDurationLabel}`,
+                },
+                `${view.currentTimeLabel} / ${view.playableDurationLabel}`,
+              ),
+              h(
+                "label",
+                { className: "anw-chapter-narration-rate" },
+                h("span", { className: "anw-chapter-narration-sr-only" }, "倍速"),
+                h(
+                  "select",
+                  {
+                    className: "anw-chapter-narration-rate__select",
+                    value: String(currentRate),
+                    disabled: props.busy,
+                    onChange: (event: { target: { value: string } }) => {
+                      props.onRateChange(Number(event.target.value));
+                    },
+                    "aria-label": "朗读倍速，范围 0.5 到 3 倍",
+                  },
+                  ...PLAYBACK_RATE_OPTIONS.map((rate) => h(
+                    "option",
+                    { key: rate, value: String(rate) },
+                    `${rate}×`,
+                  )),
+                ),
+              ),
+              h(
+                "div",
+                { className: "anw-chapter-narration-volume-control" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "anw-chapter-narration-tool-button",
+                    ref: volumeTriggerRef,
+                    disabled: props.busy,
+                    "aria-label": `章节朗读音量，当前 ${currentVolumePercent}%`,
+                    "aria-controls": volumeId,
+                    "aria-expanded": volumeOpen,
+                    onClick: () => {
+                      setLayout({ type: "close-details" });
+                      setVolumeOpen((current) => !current);
+                    },
+                  },
+                  h(icons.Volume, { "aria-hidden": "true" }),
+                ),
+                h(
+                  "label",
+                  {
+                    id: volumeId,
+                    className: "anw-chapter-narration-volume-popover",
+                    hidden: !volumeOpen,
+                  },
+                  h("span", null, `音量 ${currentVolumePercent}%`),
+                  h("input", {
+                    ref: volumeInputRef,
+                    type: "range",
+                    min: 0,
+                    max: 100,
+                    step: 1,
+                    value: currentVolumePercent,
+                    disabled: props.busy,
+                    onChange: (event: { target: { value: string } }) => {
+                      const percent = Math.min(100, Math.max(0, Number(event.target.value)));
+                      props.onVolumeChange(percent / 100);
+                    },
+                    "aria-label": "章节朗读音量",
+                    "aria-valuetext": `${currentVolumePercent}%`,
+                  }),
+                ),
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-chapter-narration-more",
+                  ref: moreTriggerRef,
+                  "aria-controls": detailsId,
+                  "aria-expanded": detailsVisible,
+                  "aria-label": detailsVisible ? "关闭朗读详情" : "打开朗读详情",
+                  onClick: () => {
+                    setVolumeOpen(false);
+                    if (detailsVisible) closeDetails();
+                    else setLayout({ type: "toggle-expanded" });
+                  },
+                },
+                h(icons.More, { "aria-hidden": "true" }),
+                h("span", null, detailsVisible ? "关闭" : "更多"),
+              ),
+            )
+          : h("div", { className: "anw-chapter-narration-player__tools", "aria-hidden": "true" }),
+      ),
       h(
         "section",
         {
@@ -643,26 +798,16 @@ export function createChapterNarrationPanel(
           className: `anw-chapter-narration-details is-${layoutMode}`,
           hidden: !detailsVisible,
           role: "region",
-          "aria-label": detailsHeading(layoutMode),
+          "aria-labelledby": `${detailsId}-title`,
         },
         h(
           "header",
           { className: "anw-chapter-narration-details__header" },
           h("div", null,
-            h("strong", null, detailsHeading(layoutMode)),
+            h("strong", { id: `${detailsId}-title` }, detailsHeading(layoutMode)),
             h("span", null, layoutMode === "failure-details"
               ? "失败详情不会改变正文、选角或历史版本。"
-              : "状态、冻结声音与其他操作"),
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "anw-chapter-narration-details__close",
-              onClick: closeDetails,
-              "aria-label": "关闭朗读详情",
-            },
-            "关闭",
+              : "朗读版本、声音与维护操作"),
           ),
         ),
         h(
@@ -672,17 +817,15 @@ export function createChapterNarrationPanel(
             hidden: layoutMode !== "expanded",
           },
           h(
-            "dl",
-            { className: "anw-chapter-narration-status-grid", "aria-label": "朗读正交状态" },
-            h("div", null, h("dt", null, "内容"), h("dd", null, view.contentLabel)),
-            h("div", null, h("dt", null, "播放"), h("dd", null, view.playbackLabel)),
-            h("div", null, h("dt", null, "来源"), h("dd", null, view.sourceLabel)),
-            h("div", null, h("dt", null, "生成"), h("dd", null, view.generation.label)),
+            "div",
+            { className: "anw-chapter-narration-details__version" },
+            editionSelect,
+            h("span", null, `${view.sourceLabel} · ${view.playbackLabel}`),
           ),
           h(
-            "section",
+            "details",
             { className: "anw-chapter-narration-voices", "aria-label": "本朗读版本的冻结声音" },
-            h("strong", null, "本版本的声音"),
+            h("summary", null, `本版本声音（${view.voiceIdentities.length}）`),
             view.voiceIdentities.length > 0
               ? h(
                   "ul",
@@ -691,7 +834,7 @@ export function createChapterNarrationPanel(
                     "li",
                     { key: identity.key },
                     h("span", null, identity.displayName),
-                    h("small", null, `${identity.sourceLabel} · 稳定标识 ${identity.stableIdentifier}`),
+                    h("small", null, identity.sourceLabel),
                   )),
                 )
               : h("p", null, view.voiceSummary),
@@ -699,8 +842,7 @@ export function createChapterNarrationPanel(
           h(
             "div",
             { className: "anw-chapter-narration-player__actions" },
-            editionSelect,
-            props.followPaused
+            props.followPaused && noticeActionLabel !== "返回朗读位置"
               ? h(
                   "button",
                   {
@@ -736,30 +878,16 @@ export function createChapterNarrationPanel(
                   "复核脚本",
                 )
               : null,
-            model.hasEdition
+            model.hasEdition && !updateNoticeActive
               ? h(
                   "button",
                   {
                     type: "button",
-                    className: `anw-chapter-narration-update ${props.updateRequired ? "is-required" : ""}`,
+                    className: "anw-chapter-narration-update",
                     disabled: !model.canUpdate,
                     onClick: props.onUpdate,
                   },
-                  props.busy ? "正在处理…" : props.updateRequired ? "更新朗读" : "重新生成朗读",
-                )
-              : null,
-            failedItems.length > 0
-              ? h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "anw-chapter-narration-link-button",
-                    onClick: () => setLayout({
-                      type: "open-failure-details",
-                      failureCount: failedItems.length,
-                    }),
-                  },
-                  `查看 ${failedItems.length} 个失败句段`,
+                  props.busy ? "正在处理…" : "重新生成朗读",
                 )
               : null,
           ),
@@ -798,9 +926,10 @@ export function createChapterNarrationPanel(
       h(
         "div",
         {
-          className: `anw-chapter-narration-live ${props.errorMessage ? "is-error" : ""}`,
+          className: "anw-chapter-narration-live",
           role: "status",
           "aria-live": "polite",
+          "aria-atomic": "true",
         },
         props.errorMessage ?? props.statusMessage,
       ),
