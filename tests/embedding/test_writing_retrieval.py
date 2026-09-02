@@ -1,5 +1,13 @@
+from uuid import uuid4
+
+import pytest
+
 from backend.embedding.contracts import RetrievalPurpose
-from backend.embedding.writing import deterministic_query, retrieval_purpose_for_selection
+from backend.embedding.writing import (
+    deterministic_query,
+    retrieval_purpose_for_selection,
+    retrieve_for_writing,
+)
 
 
 def test_selection_operation_matrix_is_explicit() -> None:
@@ -31,3 +39,52 @@ def test_query_renderer_is_bounded_and_deterministic() -> None:
     assert first == second
     assert "chapter_body" in first
     assert len(first) <= 4000
+
+
+@pytest.mark.asyncio
+async def test_failed_retrieval_is_context_only_not_fictional_lexical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.embedding import writing
+
+    async def fail(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("retrieval unavailable")
+
+    monkeypatch.setattr(writing, "semantic_search", fail)
+
+    snapshot = await retrieve_for_writing(
+        object(),  # type: ignore[arg-type]
+        novel_id=uuid4(),
+        purpose=RetrievalPurpose.CHAPTER_BODY,
+        query="蓝钥匙",
+    )
+
+    assert snapshot["mode"] == "context_only"
+    assert snapshot["retrieval_policy_version"] == "writing-retrieval/3"
+    assert snapshot["degraded_reason"] == "semantic_retrieval_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_lexical_only_is_preserved_only_after_search_reports_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.embedding import writing
+
+    async def lexical(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "mode": "lexical_only",
+            "hits": [],
+            "degraded_reason": "dense_timeout",
+        }
+
+    monkeypatch.setattr(writing, "semantic_search", lexical)
+
+    snapshot = await retrieve_for_writing(
+        object(),  # type: ignore[arg-type]
+        novel_id=uuid4(),
+        purpose=RetrievalPurpose.CHAPTER_BODY,
+        query="蓝钥匙",
+    )
+
+    assert snapshot["mode"] == "lexical_only"
+    assert snapshot["degraded_reason"] == "dense_timeout"

@@ -223,6 +223,8 @@ describe("SelectionEditRuntime", () => {
     const runtime = {
       getState: () => state,
       subscribe: vi.fn(() => vi.fn()),
+      getRetrievalStatus: () => ({ summary: null, novelId: undefined }),
+      subscribeRetrievalStatus: vi.fn(() => vi.fn()),
       handleSurfaceAction: vi.fn(),
       focusSource: vi.fn(),
     } as unknown as SelectionEditRuntime;
@@ -283,6 +285,37 @@ describe("SelectionEditRuntime", () => {
     await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("discarded"));
     expect(values.getValue()).toBe("旧句留在这里。");
     expect(values.applyValue).toHaveBeenCalledTimes(2);
+  });
+
+  it("publishes only the frozen retrieval summary for the active selection task", async () => {
+    const summary = {
+      schema_version: "retrieval-summary/1",
+      outcome: "degraded",
+      mode: "lexical_only",
+      reason_code: "provider_unavailable",
+      hit_count: 2,
+      index_state: "ready",
+    } as const;
+    const client: SelectionEditGenerationClient = {
+      start: vi.fn(async (payload) => readyJob(payload.input_snapshot, {
+        retrieval_summary: { ...summary, query: "must-not-render" },
+      } as unknown as Partial<CreativeGenerationRecord>)),
+    };
+    const values = await harness(client);
+    const listener = vi.fn();
+    values.runtime.subscribeRetrievalStatus(listener);
+
+    await values.runtime.start({
+      record: values.record,
+      fieldLabel: "创作思路",
+      operation: "polish",
+    });
+
+    expect(values.runtime.getRetrievalStatus()).toEqual({
+      summary,
+      novelId: "00000000-0000-4000-8000-000000000031",
+    });
+    expect(listener).toHaveBeenLastCalledWith(values.runtime.getRetrievalStatus());
   });
 
   it("fails closed when the field changes while the model is running", async () => {

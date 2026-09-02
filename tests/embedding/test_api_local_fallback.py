@@ -234,3 +234,104 @@ async def test_semantic_search_uses_authority_lexical_when_attached_index_has_no
     assert result["index_status"] == "updating"
     assert result["generation_id"] is None
     assert result["hits"][0]["source_revision_id"] == str(revision_id)
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_routes_indexed_path_through_bounded_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    novel_id = uuid4()
+    timeline_id = uuid4()
+    generation_id = uuid4()
+    configuration = SimpleNamespace(
+        active_generation_id=generation_id,
+        credential_ref=None,
+        retrieval_policy_version="writing-retrieval/2",
+    )
+    generation = SimpleNamespace(
+        id=generation_id,
+        state="active",
+        profile_id=uuid4(),
+    )
+    build = SimpleNamespace(
+        generation_id=generation_id,
+        novel_id=novel_id,
+        index_version=7,
+        sync_state="current",
+        published_digest="0" * 64,
+        authority_digest="0" * 64,
+    )
+
+    class IndexedSession:
+        def __init__(self) -> None:
+            self.scalar_calls = 0
+
+        def scalar(self, _statement):
+            self.scalar_calls += 1
+            return None if self.scalar_calls == 1 else build
+
+        def get(self, model, identity):
+            if model is api.EmbeddingGeneration and identity == generation_id:
+                return generation
+            return None
+
+    captured = {}
+    monkeypatch.setattr(
+        api, "get_configuration", lambda *_args, **_kwargs: configuration
+    )
+    monkeypatch.setattr(
+        api,
+        "_inheritance_scope",
+        lambda *_args, **_kwargs: (
+            frozenset({timeline_id}),
+            ((timeline_id, 8),),
+        ),
+    )
+    monkeypatch.setattr(api, "_known_visibility_keys", lambda *_a, **_k: frozenset())
+
+    def bounded(_session, *, request, dense_input, effective_story_fact_ids):
+        captured["request"] = request
+        captured["dense_input"] = dense_input
+        captured["fact_ids"] = effective_story_fact_ids
+        return SimpleNamespace(
+            enriched_candidate_count=1,
+            candidates_by_id={},
+            result=SimpleNamespace(
+                hits=(),
+                degradation_reason=SimpleNamespace(value="dense_unavailable"),
+                policy_version="writing-retrieval/3",
+                mode=SimpleNamespace(value="lexical_only"),
+                diagnostics=SimpleNamespace(
+                    below_threshold_count=1,
+                    duplicate_source_count=0,
+                    quota_omitted_count=0,
+                    top_k_omitted_count=0,
+                    filtered=(),
+                ),
+                dense=SimpleNamespace(
+                    provider_request_id=None,
+                    token_count=None,
+                    latency_ms=None,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(api, "execute_bounded_retrieval", bounded)
+    result = await api.semantic_search(
+        novel_id,
+        SemanticSearchRequest(
+            query="蓝钥匙",
+            retrieval_purpose=RetrievalPurpose.CHAPTER_BODY,
+            corpora=(EmbeddingCorpus.MANUSCRIPT,),
+            timeline_id=timeline_id,
+            narrative_sequence=3,
+            story_sequence_cutoff=8,
+        ),
+        IndexedSession(),
+    )
+
+    assert captured["request"].scope.index_version == 7
+    assert captured["request"].scope.narrative_sequence_cutoff == 2
+    assert captured["dense_input"].status.value == "unavailable"
+    assert captured["fact_ids"] == frozenset()
+    assert result["retrieval_policy_version"] == "writing-retrieval/3"

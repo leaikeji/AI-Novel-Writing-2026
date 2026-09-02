@@ -14,17 +14,20 @@ from hashlib import sha256
 from typing import Callable, Protocol, Sequence
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, delete, distinct, exists, func, literal, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from ...creative_data_models import (
+    EmbeddingGeneration,
     EmbeddingGenerationNovel,
     EmbeddingIndexBatch,
+    EmbeddingIndexBatchItem,
     SemanticChunk,
     SemanticEmbedding,
     SemanticSource,
     SemanticSourceRefresh,
 )
+from ...models import BackgroundJob
 from .contracts import (
     PendingSourceSpec,
     PublicationAuthority,
@@ -36,6 +39,11 @@ from .contracts import (
 
 
 ACTIVE_REFRESH_STATES = frozenset({"pending", "queued", "building", "ready"})
+ACTIVE_BATCH_STATES = frozenset({"pending", "queued", "running"})
+ACTIVE_BACKGROUND_JOB_STATES = frozenset(
+    {"queued", "running", "retry_wait", "cancel_requested"}
+)
+MAX_GC_SOURCES_PER_RUN = 500
 BUILDABLE_NOVEL_STATES = frozenset({"ready", "updating", "outdated", "partial_failed"})
 _LOGICAL_KEY_FIELD = "_refresh_logical_key"
 
@@ -215,37 +223,43 @@ class SqlAlchemyRefreshStore:
     def refresh_build_state(self, refresh: SemanticSourceRefresh) -> RefreshBuildState:
         if refresh.pending_source_id is None:
             return RefreshBuildState(0, 0, 0, 0, 0)
-        states = tuple(
-            self.session.scalars(
-                select(EmbeddingIndexBatch.state).where(
-                    EmbeddingIndexBatch.refresh_id == refresh.id
-                )
+        batch_count, ready_batch_count, failed_batch_count = self.session.execute(
+            select(
+                func.count(EmbeddingIndexBatch.id),
+                func.coalesce(
+                    func.sum(case((EmbeddingIndexBatch.state == "ready", 1), else_=0)),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (EmbeddingIndexBatch.state.in_({"failed", "cancelled"}), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+            ).where(EmbeddingIndexBatch.refresh_id == refresh.id)
+        ).one()
+        chunk_count, embedded_count = self.session.execute(
+            select(
+                func.count(distinct(SemanticChunk.id)),
+                func.count(distinct(SemanticEmbedding.chunk_id)),
             )
-        )
-        chunk_ids = tuple(
-            self.session.scalars(
-                select(SemanticChunk.id).where(
-                    SemanticChunk.source_id == refresh.pending_source_id
-                )
+            .select_from(SemanticChunk)
+            .outerjoin(
+                SemanticEmbedding,
+                (SemanticEmbedding.chunk_id == SemanticChunk.id)
+                & (SemanticEmbedding.generation_id == refresh.generation_id),
             )
-        )
-        embedded = 0
-        if chunk_ids:
-            embedded = int(
-                self.session.scalar(
-                    select(func.count()).select_from(SemanticEmbedding).where(
-                        SemanticEmbedding.generation_id == refresh.generation_id,
-                        SemanticEmbedding.chunk_id.in_(chunk_ids),
-                    )
-                )
-                or 0
-            )
+            .where(SemanticChunk.source_id == refresh.pending_source_id)
+        ).one()
         return RefreshBuildState(
-            batch_count=len(states),
-            ready_batch_count=sum(state == "ready" for state in states),
-            failed_batch_count=sum(state in {"failed", "cancelled"} for state in states),
-            chunk_count=len(chunk_ids),
-            embedded_count=embedded,
+            batch_count=int(batch_count or 0),
+            ready_batch_count=int(ready_batch_count or 0),
+            failed_batch_count=int(failed_batch_count or 0),
+            chunk_count=int(chunk_count or 0),
+            embedded_count=int(embedded_count or 0),
         )
 
     def active_refresh_count(self, generation_id: UUID, novel_id: UUID) -> int:
@@ -261,34 +275,30 @@ class SqlAlchemyRefreshStore:
         )
 
     def current_index_counts(self, generation_id: UUID, novel_id: UUID) -> tuple[int, int, int]:
-        current_source_ids = tuple(
-            self.session.scalars(
-                select(SemanticSource.id).where(
-                    SemanticSource.generation_id == generation_id,
-                    SemanticSource.novel_id == novel_id,
-                    SemanticSource.status == "current",
-                )
+        source_count, chunk_count, embedded_count = self.session.execute(
+            select(
+                func.count(distinct(SemanticSource.id)),
+                func.count(distinct(SemanticChunk.id)),
+                func.count(distinct(SemanticEmbedding.chunk_id)),
             )
-        )
-        if not current_source_ids:
-            return (0, 0, 0)
-        chunk_ids = tuple(
-            self.session.scalars(
-                select(SemanticChunk.id).where(SemanticChunk.source_id.in_(current_source_ids))
+            .select_from(SemanticSource)
+            .outerjoin(SemanticChunk, SemanticChunk.source_id == SemanticSource.id)
+            .outerjoin(
+                SemanticEmbedding,
+                (SemanticEmbedding.chunk_id == SemanticChunk.id)
+                & (SemanticEmbedding.generation_id == generation_id),
             )
-        )
-        if not chunk_ids:
-            return (len(current_source_ids), 0, 0)
-        embedded = int(
-            self.session.scalar(
-                select(func.count()).select_from(SemanticEmbedding).where(
-                    SemanticEmbedding.generation_id == generation_id,
-                    SemanticEmbedding.chunk_id.in_(chunk_ids),
-                )
+            .where(
+                SemanticSource.generation_id == generation_id,
+                SemanticSource.novel_id == novel_id,
+                SemanticSource.status == "current",
             )
-            or 0
+        ).one()
+        return (
+            int(source_count or 0),
+            int(chunk_count or 0),
+            int(embedded_count or 0),
         )
-        return (len(current_source_ids), len(chunk_ids), embedded)
 
     def add(self, value: object) -> None:
         self.session.add(value)
@@ -578,6 +588,167 @@ class IncrementalRefreshService:
         return PublishResult(
             refresh.id, False, False, code, build.index_version, build.sync_state
         )
+
+
+@dataclass(frozen=True, slots=True)
+class DerivedDataGcResult:
+    source_count: int
+    chunk_count: int
+    embedding_count: int
+    preserved_batch_count: int
+
+
+def gc_obsolete_active_generation_data(
+    session: Session,
+    *,
+    generation_id: UUID,
+    novel_id: UUID | None = None,
+    source_limit: int = MAX_GC_SOURCES_PER_RUN,
+) -> DerivedDataGcResult:
+    """Delete a bounded set of unreachable derived rows from an active generation.
+
+    The caller owns the transaction.  Current/pending sources, active refreshes,
+    active batches/jobs, and mixed-source batches are excluded before locks are
+    taken, so this helper cannot cross generation or authority boundaries.
+    """
+
+    if not 1 <= source_limit <= MAX_GC_SOURCES_PER_RUN:
+        raise RefreshServiceError(
+            "gc_limit_invalid",
+            f"source_limit must be between 1 and {MAX_GC_SOURCES_PER_RUN}",
+        )
+    generation_is_active = session.scalar(
+        select(func.count())
+        .select_from(EmbeddingGeneration)
+        .where(
+            EmbeddingGeneration.id == generation_id,
+            EmbeddingGeneration.state == "active",
+        )
+    )
+    if int(generation_is_active or 0) != 1:
+        raise RefreshServiceError(
+            "gc_generation_not_active",
+            "derived-data GC is allowed only for the active generation",
+        )
+
+    referenced_chunk = aliased(SemanticChunk)
+    referenced_item = aliased(EmbeddingIndexBatchItem)
+    referenced_batch = aliased(EmbeddingIndexBatch)
+    referenced_job = aliased(BackgroundJob)
+    has_active_execution_reference = exists(
+        select(literal(1))
+        .select_from(referenced_chunk)
+        .join(
+            referenced_item,
+            referenced_item.chunk_id == referenced_chunk.id,
+        )
+        .join(
+            referenced_batch,
+            referenced_batch.id == referenced_item.batch_id,
+        )
+        .outerjoin(
+            referenced_job,
+            referenced_job.id == referenced_batch.background_job_id,
+        )
+        .where(
+            referenced_chunk.source_id == SemanticSource.id,
+            or_(
+                referenced_batch.state.in_(ACTIVE_BATCH_STATES),
+                referenced_job.state.in_(ACTIVE_BACKGROUND_JOB_STATES),
+            ),
+        )
+    )
+    has_active_refresh = exists(
+        select(literal(1)).select_from(SemanticSourceRefresh).where(
+            SemanticSourceRefresh.pending_source_id == SemanticSource.id,
+            SemanticSourceRefresh.state.in_(ACTIVE_REFRESH_STATES),
+        )
+    )
+
+    source_chunk = aliased(SemanticChunk)
+    source_item = aliased(EmbeddingIndexBatchItem)
+    other_item = aliased(EmbeddingIndexBatchItem)
+    other_chunk = aliased(SemanticChunk)
+    batch_has_other_source = exists(
+        select(literal(1))
+        .select_from(other_item)
+        .join(other_chunk, other_chunk.id == other_item.chunk_id)
+        .where(
+            other_item.batch_id == source_item.batch_id,
+            other_chunk.source_id != SemanticSource.id,
+        )
+    )
+    participates_in_mixed_batch = exists(
+        select(literal(1))
+        .select_from(source_chunk)
+        .join(source_item, source_item.chunk_id == source_chunk.id)
+        .where(
+            source_chunk.source_id == SemanticSource.id,
+            batch_has_other_source,
+        )
+    )
+
+    candidate_statement = select(SemanticSource.id).where(
+        SemanticSource.generation_id == generation_id,
+        SemanticSource.status.in_(("invalid", "retired")),
+        ~has_active_refresh,
+        ~has_active_execution_reference,
+        ~participates_in_mixed_batch,
+    )
+    if novel_id is not None:
+        candidate_statement = candidate_statement.where(
+            SemanticSource.novel_id == novel_id
+        )
+    source_ids = tuple(
+        session.scalars(
+            candidate_statement
+            .order_by(SemanticSource.created_at, SemanticSource.id)
+            .limit(source_limit)
+            .with_for_update(skip_locked=True)
+        )
+    )[:source_limit]
+    if not source_ids:
+        return DerivedDataGcResult(0, 0, 0, 0)
+
+    chunk_count, embedding_count = session.execute(
+        select(
+            func.count(distinct(SemanticChunk.id)),
+            func.count(distinct(SemanticEmbedding.id)),
+        )
+        .select_from(SemanticChunk)
+        .outerjoin(
+            SemanticEmbedding,
+            SemanticEmbedding.chunk_id == SemanticChunk.id,
+        )
+        .where(SemanticChunk.source_id.in_(source_ids))
+    ).one()
+    batch_ids = tuple(
+        session.scalars(
+            select(distinct(EmbeddingIndexBatchItem.batch_id))
+            .select_from(EmbeddingIndexBatchItem)
+            .join(SemanticChunk, SemanticChunk.id == EmbeddingIndexBatchItem.chunk_id)
+            .where(SemanticChunk.source_id.in_(source_ids))
+        )
+    )
+    chunk_ids = select(SemanticChunk.id).where(
+        SemanticChunk.source_id.in_(source_ids)
+    )
+    session.execute(
+        delete(SemanticEmbedding).where(SemanticEmbedding.chunk_id.in_(chunk_ids))
+    )
+    session.execute(
+        delete(EmbeddingIndexBatchItem).where(
+            EmbeddingIndexBatchItem.chunk_id.in_(chunk_ids)
+        )
+    )
+    session.execute(delete(SemanticSource).where(SemanticSource.id.in_(source_ids)))
+    session.flush()
+    return DerivedDataGcResult(
+        source_count=len(source_ids),
+        chunk_count=int(chunk_count or 0),
+        embedding_count=int(embedding_count or 0),
+        preserved_batch_count=len(batch_ids),
+    )
 
 
 def service_for_session(

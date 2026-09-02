@@ -39,6 +39,7 @@ import {
   DocumentRecord,
   GenerationModelStatus,
   NovelCharacterRecord,
+  NovelMetadataRecord,
   NovelRecord,
   RestorePreviewRecord,
   VolumeRecord,
@@ -129,6 +130,12 @@ import {
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 import { navigateNovelSurface } from "./novel-surface-navigation";
 import { createNovelCoverView } from "./novel-cover";
+import { loadNovelWorkspace } from "./novel-navigation/api";
+import {
+  CHAPTER_TREE_ROW_HEIGHT,
+  flattenChapterTreeRows,
+  virtualizeChapterTreeRows,
+} from "./novel-navigation/virtual-tree";
 
 
 const host = window.QwenPaw.host;
@@ -475,10 +482,16 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const [chapterTreeSearchOpen, setChapterTreeSearchOpen] = React.useState(false);
   const [chapterTreeQuery, setChapterTreeQuery] = React.useState("");
   const [expandedChapterVolumeIds, setExpandedChapterVolumeIds] = React.useState(null as string[] | null);
+  const [chapterTreeScrollTop, setChapterTreeScrollTop] = React.useState(0);
+  const [chapterTreeViewportHeight, setChapterTreeViewportHeight] = React.useState(720);
   const timerRef = React.useRef(null as ReturnType<typeof setTimeout> | null);
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
   const documentGenerationRef = React.useRef(0);
+  const novelGenerationRef = React.useRef(0);
+  const novelLoadAbortRef = React.useRef(null as AbortController | null);
+  const chapterTreeNavRef = React.useRef(null as HTMLElement | null);
+  const chapterTreeAutoFocusDocumentRef = React.useRef(null as string | null);
   const saveInFlightRef = React.useRef(null as Promise<DocumentRecord | null> | null);
   const editorSurfaceParentRef = React.useRef(null as HTMLDivElement | null);
   const editorSurfaceRef = React.useRef(null as ChapterEditorSurfaceHandle | null);
@@ -719,27 +732,48 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   }, []);
 
   const loadNovel = React.useCallback(async (novelId: string) => {
+    const generation = novelGenerationRef.current + 1;
+    novelGenerationRef.current = generation;
+    novelLoadAbortRef.current?.abort("novel switched");
+    const controller = new AbortController();
+    novelLoadAbortRef.current = controller;
     setBusy(true);
     try {
-      const loaded = await apiRequest<NovelRecord>(`/novels/${novelId}`);
+      const documentLoad = queryDocumentId
+        ? loadDocument(queryDocumentId)
+        : Promise.resolve();
+      const loaded = await loadNovelWorkspace(novelId, {
+        signal: controller.signal,
+        onPage: (current) => {
+          if (novelGenerationRef.current === generation && !controller.signal.aborted) {
+            setNovel(current);
+          }
+        },
+      });
+      if (novelGenerationRef.current !== generation || controller.signal.aborted) return;
       setNovel(loaded);
       setError("");
       if (queryDocumentId) {
-        const selected = loaded.tree.flatMap((volume) => volume.documents)
-          .find((item) => item.id === queryDocumentId) ?? firstDocument(loaded);
-        if (selected) await loadDocument(selected.id);
+        await documentLoad;
       } else {
         setEditorOpen(false);
         workbenchStore.getState().select(loaded.id, null);
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "加载小说失败");
+      if (!controller.signal.aborted && novelGenerationRef.current === generation) {
+        setError(reason instanceof Error ? reason.message : "加载小说失败");
+      }
     } finally {
-      setBusy(false);
+      if (novelLoadAbortRef.current === controller) novelLoadAbortRef.current = null;
+      if (novelGenerationRef.current === generation) setBusy(false);
     }
   }, [loadDocument, queryDocumentId]);
 
   React.useEffect(() => { if (queryNovelId) void loadNovel(queryNovelId); }, [loadNovel, queryNovelId]);
+
+  React.useEffect(() => () => {
+    novelLoadAbortRef.current?.abort("workbench unmounted");
+  }, []);
 
   React.useEffect(() => {
     const novelId = novel?.id;
@@ -806,6 +840,39 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     });
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [document?.id, editorOpen, section]);
+
+  React.useLayoutEffect(() => {
+    const element = chapterTreeNavRef.current;
+    if (!element) return;
+    const updateHeight = () => setChapterTreeViewportHeight(element.clientHeight || 720);
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [chapterTreeCollapsed, document?.id, editorOpen]);
+
+  React.useEffect(() => {
+    if (!novel || !document) return;
+    const volumes = buildChapterTreeVolumes(novel);
+    const expandedKeys = new Set<string>(
+      expandedChapterVolumeIds ?? volumes.map((volume: ChapterTreeVolume) => volume.key),
+    );
+    const rows = flattenChapterTreeRows(volumes, expandedKeys);
+    const index = rows.findIndex(
+      (row) => row.kind === "chapter" && row.chapter.document.id === document.id,
+    );
+    if (index < 0) return;
+    const signature = `${document.id}:${rows.length}`;
+    if (chapterTreeAutoFocusDocumentRef.current === signature) return;
+    const top = index * CHAPTER_TREE_ROW_HEIGHT;
+    chapterTreeAutoFocusDocumentRef.current = signature;
+    setChapterTreeScrollTop(top);
+    window.requestAnimationFrame(() => {
+      if (chapterTreeAutoFocusDocumentRef.current !== signature) return;
+      if (chapterTreeNavRef.current) chapterTreeNavRef.current.scrollTop = top;
+    });
+  }, [document?.id, expandedChapterVolumeIds, novel]);
 
   React.useEffect(() => {
     if (!queryNovelId) return;
@@ -1943,7 +2010,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
 
   const refreshNovel = async (): Promise<NovelRecord | null> => {
     if (!novel) return null;
-    const loaded = await apiRequest<NovelRecord>(`/novels/${novel.id}`);
+    const loaded = await loadNovelWorkspace(novel.id);
     setNovel(loaded);
     return loaded;
   };
@@ -2156,6 +2223,40 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       okButtonProps: { className: "anw-primary-button" },
       onOk: () => restore(revision.id, preview),
     });
+  };
+
+  const loadMoreRevisions = async () => {
+    const active = documentRef.current;
+    const cursor = active?.revision_next_cursor;
+    if (!active || !cursor) return;
+    const generation = documentGenerationRef.current;
+    setBusy(true);
+    try {
+      const page = await apiRequest<{
+        items: DocumentRecord["revisions"];
+        next_cursor: string | null;
+      }>(`/documents/${active.id}/revisions?limit=50&cursor=${encodeURIComponent(cursor)}`);
+      if (documentGenerationRef.current !== generation || documentRef.current?.id !== active.id) return;
+      const known = new Set(active.revisions.map(
+        (revision: DocumentRecord["revisions"][number]) => revision.id,
+      ));
+      const updated = {
+        ...active,
+        revisions: [
+          ...active.revisions,
+          ...page.items.filter(
+            (revision: DocumentRecord["revisions"][number]) => !known.has(revision.id),
+          ),
+        ],
+        revision_next_cursor: page.next_cursor,
+      };
+      documentRef.current = updated;
+      setDocument(updated);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "加载更多版本失败");
+    } finally {
+      if (documentGenerationRef.current === generation) setBusy(false);
+    }
   };
 
   const copyContext = async () => {
@@ -2473,6 +2574,40 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     const chapterTreeVolumes = novel ? buildChapterTreeVolumes(novel, chapterTreeQuery) : [];
     const expandedVolumeKeys = expandedChapterVolumeIds
       ?? allChapterTreeVolumes.map((item: ChapterTreeVolume) => item.key);
+    const chapterTreeRows = flattenChapterTreeRows(
+      chapterTreeVolumes,
+      new Set(expandedVolumeKeys),
+      Boolean(chapterTreeQuery.trim()),
+    );
+    const chapterTreeWindow = virtualizeChapterTreeRows(
+      chapterTreeRows,
+      chapterTreeScrollTop,
+      chapterTreeViewportHeight,
+    );
+    const moveChapterTreeFocus = (documentId: string, direction: -1 | 1) => {
+      const currentIndex = chapterTreeRows.findIndex(
+        (row) => row.kind === "chapter" && row.chapter.document.id === documentId,
+      );
+      if (currentIndex < 0) return;
+      let targetIndex = currentIndex + direction;
+      while (targetIndex >= 0 && targetIndex < chapterTreeRows.length) {
+        const target = chapterTreeRows[targetIndex];
+        if (target.kind === "chapter") {
+          const top = targetIndex * CHAPTER_TREE_ROW_HEIGHT;
+          if (chapterTreeNavRef.current) chapterTreeNavRef.current.scrollTop = top;
+          setChapterTreeScrollTop(top);
+          window.requestAnimationFrame(() => {
+            const nav = chapterTreeNavRef.current as HTMLElement | null;
+            const nextButton = nav?.querySelector(
+              `[data-document-id="${target.chapter.document.id}"]`,
+            ) as HTMLElement | null;
+            nextButton?.focus();
+          });
+          return;
+        }
+        targetIndex += direction;
+      }
+    };
     const toggleChapterVolume = (volumeKey: string) => {
       setExpandedChapterVolumeIds((current: string[] | null) => {
         const openKeys = current ?? allChapterTreeVolumes.map((item: ChapterTreeVolume) => item.key);
@@ -2539,60 +2674,97 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                     prefix: h(SearchOutlined),
                     placeholder: "搜索卷或章节",
                     "aria-label": "搜索卷或章节",
-                    onChange: (event: any) => setChapterTreeQuery(event.target.value),
+                    onChange: (event: any) => {
+                      setChapterTreeQuery(event.target.value);
+                      setChapterTreeScrollTop(0);
+                      if (chapterTreeNavRef.current) chapterTreeNavRef.current.scrollTop = 0;
+                    },
                   }),
                 )
               : null,
             h("div", { className: "anw-chapter-tree-book-title", title: novel?.title }, novel?.title),
             h(
               "nav",
-              { className: "anw-chapter-tree-nav", "aria-label": "全书卷章导航" },
-              chapterTreeVolumes.length
-                ? chapterTreeVolumes.map((item: ChapterTreeVolume) => {
-                    const expanded = Boolean(chapterTreeQuery.trim()) || expandedVolumeKeys.includes(item.key);
-                    const volumeLabel = item.displayTitle;
-                    const treeId = `anw-chapter-tree-volume-${item.key}`;
-                    return h(
-                      "section",
-                      { key: item.key, className: `anw-chapter-tree-volume ${expanded ? "is-expanded" : ""}` },
-                      h(
+              {
+                ref: chapterTreeNavRef,
+                className: "anw-chapter-tree-nav",
+                "aria-label": "全书卷章导航",
+                onScroll: (event: any) => setChapterTreeScrollTop(event.currentTarget.scrollTop),
+              },
+              chapterTreeRows.length
+                ? h(
+                    "div",
+                    {
+                      style: {
+                        position: "relative",
+                        height: `${chapterTreeWindow.totalHeight}px`,
+                      },
+                    },
+                    ...chapterTreeWindow.rows.map(({ row, top }) => {
+                      if (row.kind === "volume") {
+                        const item = row.volume;
+                        const expanded = Boolean(chapterTreeQuery.trim())
+                          || expandedVolumeKeys.includes(item.key);
+                        return h(
+                          "div",
+                          {
+                            key: row.key,
+                            className: `anw-chapter-tree-volume ${expanded ? "is-expanded" : ""}`,
+                            style: {
+                              position: "absolute",
+                              top: `${top}px`,
+                              right: 0,
+                              left: 0,
+                              height: "42px",
+                            },
+                          },
+                          h(
+                            "button",
+                            {
+                              type: "button",
+                              className: "anw-chapter-tree-volume-toggle",
+                              onClick: () => toggleChapterVolume(item.key),
+                              "aria-expanded": expanded,
+                            },
+                            h(expanded ? CaretDownOutlined : CaretRightOutlined),
+                            h("strong", { title: item.displayTitle }, item.displayTitle),
+                            h("span", null, `${item.chapters.length}章`),
+                          ),
+                        );
+                      }
+                      const chapter = row.chapter;
+                      const active = chapter.document.id === document.id;
+                      return h(
                         "button",
                         {
+                          key: row.key,
                           type: "button",
-                          className: "anw-chapter-tree-volume-toggle",
-                          onClick: () => toggleChapterVolume(item.key),
-                          "aria-expanded": expanded,
-                          "aria-controls": treeId,
+                          className: `anw-chapter-tree-chapter ${active ? "is-active" : ""}`,
+                          style: {
+                            position: "absolute",
+                            top: `${top}px`,
+                            right: 0,
+                            left: 0,
+                            height: "40px",
+                          },
+                          "aria-current": active ? "page" : undefined,
+                          "data-document-id": chapter.document.id,
+                          onClick: () => { void navigateToChapter(chapter.document.id); },
+                          onKeyDown: (event: any) => {
+                            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                            event.preventDefault();
+                            moveChapterTreeFocus(
+                              chapter.document.id,
+                              event.key === "ArrowDown" ? 1 : -1,
+                            );
+                          },
+                          title: chapter.displayTitle,
                         },
-                        h(expanded ? CaretDownOutlined : CaretRightOutlined),
-                        h("strong", { title: volumeLabel }, volumeLabel),
-                        h("span", null, `${item.chapters.length}章`),
-                      ),
-                      expanded
-                        ? h(
-                            "div",
-                            { id: treeId, className: "anw-chapter-tree-chapters" },
-                            ...item.chapters.map((chapter: ChapterTreeChapter) => {
-                              const active = chapter.document.id === document.id;
-                              return h(
-                                "button",
-                                {
-                                  key: chapter.document.id,
-                                  type: "button",
-                                  className: `anw-chapter-tree-chapter ${active ? "is-active" : ""}`,
-                                  "aria-current": active ? "page" : undefined,
-                                  "data-document-id": chapter.document.id,
-                                  onClick: () => { void navigateToChapter(chapter.document.id); },
-                                  title: chapter.displayTitle,
-                                },
-                                h("span", null, chapter.displayTitle),
-                                h("small", null, `${chapter.document.visible_character_count}字`),
-                              );
-                            }),
-                          )
-                        : null,
-                    );
-                  })
+                        h("span", null, chapter.displayTitle),
+                        h("small", null, `${chapter.document.visible_character_count}字`),
+                      );
+                    }),
+                  )
                 : h(
                     "div",
                     { className: "anw-chapter-tree-empty" },
@@ -3118,6 +3290,13 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                     "恢复为新版本",
                   ),
                 )),
+                document.revision_next_cursor
+                  ? h(
+                      Button,
+                      { block: true, loading: busy, onClick: () => void loadMoreRevisions() },
+                      "加载更早版本",
+                    )
+                  : null,
               )
             : h(Empty, { description: "暂无版本" }),
         ),
@@ -3136,7 +3315,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     onSectionChange: (next: WorkbenchSection) => { void switchSection(next); },
     onReadingPanelChange: switchReadingPanel,
     onSelectDocument: selectDocument,
-    onNovelChanged: (updated: NovelRecord) => setNovel(updated),
+    onNovelChanged: (updated: NovelMetadataRecord) => {
+      setNovel((current: NovelRecord | null) => (
+        current ? { ...current, ...updated, tree: current.tree } : current
+      ));
+    },
     onReload: refreshNovel,
     openChapterWizardSignal,
     onBack: () => { clearWorkbenchRoute(); navigateNovelSurface(CREATIVE_CENTER_CHAT_PATH); },

@@ -78,7 +78,7 @@ def test_chapter_creation_persists_only_semantic_name(monkeypatch):
     monkeypatch.setattr(
         services,
         "_refresh_active_novel_index_after_commit",
-        lambda session, target_id: captured.setdefault("refreshed_novel_id", target_id),
+        lambda session, target_id, **_kwargs: captured.setdefault("refreshed_novel_id", target_id),
     )
     monkeypatch.setattr(
         services,

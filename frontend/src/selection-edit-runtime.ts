@@ -38,6 +38,10 @@ import {
   type SelectionEditReviewSurfaceAction,
 } from "./selection-edit-review-surface";
 import type { CreativeGenerationRecord } from "./types";
+import {
+  retrievalSummaryFromJob,
+  type RetrievalSummaryV1,
+} from "./retrieval-status";
 
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -91,6 +95,12 @@ export interface SelectionEditReviewHostProps {
 export type SelectionEditReviewHostComponent = (
   props: SelectionEditReviewHostProps,
 ) => unknown;
+
+
+export interface SelectionRetrievalStatusSnapshot {
+  readonly summary: RetrievalSummaryV1 | null;
+  readonly novelId?: string;
+}
 
 
 function defaultUuid(): string {
@@ -199,6 +209,10 @@ export class SelectionEditRuntime {
   private readonly sha256: (value: string) => Promise<string>;
   private readonly coordinator = createSelectionEditReviewCoordinator();
   private active?: ActiveSelectionEdit;
+  private retrievalSummary: RetrievalSummaryV1 | null = null;
+  private readonly retrievalListeners = new Set<(
+    snapshot: SelectionRetrievalStatusSnapshot,
+  ) => void>();
   private disposed = false;
 
   constructor(options: SelectionEditRuntimeOptions) {
@@ -222,6 +236,21 @@ export class SelectionEditRuntime {
   subscribe(listener: (state: SelectionEditReviewSessionState) => void): () => void {
     this.assertActive();
     return this.coordinator.subscribe(listener);
+  }
+
+  getRetrievalStatus(): SelectionRetrievalStatusSnapshot {
+    return {
+      summary: this.retrievalSummary,
+      novelId: this.active?.record.novelId,
+    };
+  }
+
+  subscribeRetrievalStatus(
+    listener: (snapshot: SelectionRetrievalStatusSnapshot) => void,
+  ): () => void {
+    this.assertActive();
+    this.retrievalListeners.add(listener);
+    return () => this.retrievalListeners.delete(listener);
   }
 
   async start(
@@ -296,6 +325,7 @@ export class SelectionEditRuntime {
     if (current.phase !== "idle") this.coordinator.dispatch({ type: "reset" });
     this.active?.abort?.abort();
     this.active = active;
+    this.publishRetrievalSummary(null);
     const prepared = this.coordinator.dispatch({
       type: "prepare",
       identity: {
@@ -366,6 +396,7 @@ export class SelectionEditRuntime {
     this.disposed = true;
     this.active?.abort?.abort();
     this.active = undefined;
+    this.retrievalListeners.clear();
     this.coordinator.dispose();
   }
 
@@ -374,6 +405,7 @@ export class SelectionEditRuntime {
     forceNew: boolean,
   ): Promise<void | AssistantSelectionEditorTaskStartResult> {
     const generation = ++active.generation;
+    this.publishRetrievalSummary(null);
     active.abort?.abort();
     const abort = new AbortController();
     active.abort = abort;
@@ -382,6 +414,7 @@ export class SelectionEditRuntime {
       const payload = await this.buildPayload(active, forceNew);
       const job = await this.generationClient.start(payload, abort.signal);
       if (!this.isCurrent(active, generation)) return job.id ? { jobId: job.id } : undefined;
+      this.publishRetrievalSummary(retrievalSummaryFromJob(job));
       active.jobId = job.id;
       const bindingInput = {
         selectionId: active.record.selectionId,
@@ -411,8 +444,7 @@ export class SelectionEditRuntime {
       }
       if (job.novel_id !== active.record.novelId
         || (selectionEntityType(active.record.fieldId) === "document"
-          && job.document_id !== active.record.documentId)
-        || job.input_snapshot.selection_id !== active.record.selectionId) {
+          && job.document_id !== active.record.documentId)) {
         this.coordinator.dispatch({ type: "conflict", message: "返回任务不属于当前作品、文档或选区。" });
         return { jobId: job.id };
       }
@@ -613,6 +645,12 @@ export class SelectionEditRuntime {
     return this.active === active && active.generation === generation && !this.disposed;
   }
 
+  private publishRetrievalSummary(summary: RetrievalSummaryV1 | null): void {
+    this.retrievalSummary = summary;
+    const snapshot = this.getRetrievalStatus();
+    for (const listener of this.retrievalListeners) listener(snapshot);
+  }
+
   private assertActive(): void {
     if (this.disposed) throw new Error("selection edit runtime is disposed");
   }
@@ -627,7 +665,9 @@ export function createSelectionEditReviewHost(
   const Surface = createSelectionEditReviewSurface(React);
   return function SelectionEditReviewHost(props: SelectionEditReviewHostProps): unknown {
     const [state, setState] = React.useState(() => runtime.getState());
+    const [retrieval, setRetrieval] = React.useState(() => runtime.getRetrievalStatus());
     React.useEffect(() => runtime.subscribe(setState), []);
+    React.useEffect(() => runtime.subscribeRetrievalStatus(setRetrieval), []);
     const identity = activeIdentity(state);
     const fieldIds = typeof props.fieldIds === "string" ? [props.fieldIds] : props.fieldIds;
     const active = Boolean(identity && fieldIds.includes(identity.target.fieldId)
@@ -653,6 +693,8 @@ export function createSelectionEditReviewHost(
           state,
           onAction: (action: SelectionEditReviewSurfaceAction) => runtime.handleSurfaceAction(action),
           onReturnFocus: (target: { fieldId: string }) => runtime.focusSource(target.fieldId),
+          retrievalSummary: retrieval.summary,
+          retrievalNovelId: retrieval.novelId,
         })
         : null,
     );

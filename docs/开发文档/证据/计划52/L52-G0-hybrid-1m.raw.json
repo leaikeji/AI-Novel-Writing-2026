@@ -1,0 +1,29 @@
+{
+  "database_name": "ai_novel_world_2026_plan52_test",
+  "profiles": [
+    {
+      "fake_query_adapter_calls": 5,
+      "hit_count": 4,
+      "mode": "hybrid",
+      "p50_ms": 1102.045,
+      "p95_ms": 1233.976,
+      "peak_tracemalloc_mib": 14.87,
+      "profile": "1m",
+      "provider_calls": 0,
+      "seed": {
+        "chapter_count": 500,
+        "elapsed_ms": 451.219,
+        "fact_count": 2000,
+        "historical_revision_count": 10,
+        "semantic_chunk_count": 1500,
+        "semantic_source_count": 500,
+        "target_characters": 1000000
+      },
+      "sql_count_max": 1508,
+      "sql_count_min": 1508,
+      "top_hit_contains_target": true
+    }
+  ],
+  "samples": 5,
+  "schema_version": "plan52-g0-hybrid-evidence/1"
+}

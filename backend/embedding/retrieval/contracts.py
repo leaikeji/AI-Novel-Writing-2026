@@ -18,7 +18,13 @@ from ..contracts import EmbeddingCorpus
 
 SEMANTIC_RETRIEVAL_SCHEMA_VERSION = "semantic-retrieval/2"
 DEFAULT_QUERY_POLICY_VERSION = "retrieval-policy/1"
+WRITING_RETRIEVAL_POLICY_VERSION = "writing-retrieval/3"
 RRF_VERSION = "rrf/1"
+DENSE_CANDIDATE_CAP = 80
+LEXICAL_CANDIDATE_CAP = 80
+FINAL_HIT_CAP = 10
+ADJACENT_NEIGHBORS_PER_HIT_CAP = 2
+ADJACENT_NEIGHBORS_GLOBAL_CAP = 20
 
 
 class _StrictModel(BaseModel):
@@ -206,6 +212,8 @@ class RetrievalPolicyV1(_StrictModel):
     minimum_fused_score: float = Field(default=0.0, ge=0)
     corpus_quotas: tuple[CorpusQuota, ...] = Field(default_factory=_default_quotas)
     adjacent_chunk_radius: int = Field(default=1, ge=0, le=5)
+    max_adjacent_neighbors_per_hit: int = Field(default=10, ge=0, le=10)
+    max_adjacent_neighbors_total: int = Field(default=500, ge=0, le=500)
     max_results: int = Field(default=50, ge=1, le=50)
     dense_timeout_seconds: Literal[8] = 8
 
@@ -234,6 +242,19 @@ class RetrievalPolicyV1(_StrictModel):
             (item.limit for item in self.corpus_quotas if item.corpus is corpus),
             0,
         )
+
+
+def writing_retrieval_policy_v3() -> RetrievalPolicyV1:
+    """Return the frozen bounded policy for the SQL-backed writing path."""
+
+    return RetrievalPolicyV1(
+        policy_version=WRITING_RETRIEVAL_POLICY_VERSION,
+        minimum_lexical_raw_score=0.01,
+        adjacent_chunk_radius=1,
+        max_adjacent_neighbors_per_hit=ADJACENT_NEIGHBORS_PER_HIT_CAP,
+        max_adjacent_neighbors_total=ADJACENT_NEIGHBORS_GLOBAL_CAP,
+        max_results=FINAL_HIT_CAP,
+    )
 
 
 class RetrievalCandidate(_StrictModel):

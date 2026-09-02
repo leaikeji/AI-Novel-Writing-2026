@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   isCreativeCenterRouteSession,
   isNovelWorkbenchRouteSession,
+  workbenchSettingsPath,
   workbenchLedgerPath,
   workbenchLedgerRouteFromSearch,
   replaceWorkbenchHistoryUrl,
@@ -303,6 +304,35 @@ describe("RouteSessionStateMachine", () => {
       readingPanel: "characters",
     });
     expect(refreshed.ownerToken).toBe(explicit.ownerToken);
+  });
+
+  it("keeps the semantic-index settings deep link across host normalization and refresh", () => {
+    const path = workbenchSettingsPath("novel-1", "semantic-index");
+    expect(path).toBe(
+      "/chat?novel_workbench=1&novel_id=novel-1&section=settings&settings_tab=semantic-index",
+    );
+    const harness = createHarness(path);
+    const explicit = harness.machine.resolve();
+    expect(explicit.route).toMatchObject({
+      novelId: "novel-1",
+      section: "settings",
+      settingsTab: "semantic-index",
+    });
+
+    harness.navigate("/chat/session-settings");
+    expect(harness.machine.resolve().route).toMatchObject({
+      section: "settings",
+      settingsTab: "semantic-index",
+    });
+    const refreshed = new RouteSessionStateMachine({
+      getLocation: () => locationOf("/chat/session-settings"),
+      storage: harness.storage,
+      createOwnerToken: () => OWNER_TWO,
+    }).resolve();
+    expect(refreshed.route).toMatchObject({
+      section: "settings",
+      settingsTab: "semantic-index",
+    });
   });
 
   it("restores a validated ledger deep link and ignores invalid optional fields", () => {

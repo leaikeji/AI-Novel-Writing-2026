@@ -109,8 +109,16 @@ class _FakeAuthoritySession:
     def scalars(self, statement: object) -> tuple[object, ...]:
         sql = str(statement)
         self.statements.append(sql)
+        if "similarity" in sql and "documents" in sql:
+            return tuple(document.id for document, _revision in self.chapters)
         if "revision_timeline_mapping_segments" in sql:
             return self.segments
+        if "revision_timeline_mapping_heads" in sql:
+            return tuple(
+                value
+                for (model, _identity), value in self.objects.items()
+                if model is RevisionTimelineMappingHead
+            )
         if "story_timelines" in sql:
             return self.timelines
         if "documents" in sql:
@@ -120,6 +128,15 @@ class _FakeAuthoritySession:
     def execute(self, statement: object) -> SimpleNamespace:
         sql = str(statement)
         self.statements.append(sql)
+        if "row_number()" in sql:
+            return SimpleNamespace(
+                all=lambda: [
+                    (document.id, ordinal)
+                    for ordinal, (document, _revision) in enumerate(
+                        self.chapters, start=1
+                    )
+                ]
+            )
         if "novel_asset_bindings" in sql:
             return SimpleNamespace(all=lambda: list(self.bindings))
         if "documents" in sql:
@@ -554,3 +571,47 @@ def test_non_author_perspective_cannot_receive_author_only_authority() -> None:
 
     assert not result.hits
     assert result.diagnostics.filtered_visibility_count == 1
+
+
+def test_local_authority_fallback_has_source_chunk_and_final_hit_caps() -> None:
+    owner_id, workspace_id, novel_id = uuid4(), uuid4(), uuid4()
+    timeline = _timeline(novel_id=novel_id, name="main", primary=True)
+    chapters = tuple(
+        _chapter(
+            novel_id=novel_id,
+            position=index,
+            title=f"第{index}章",
+            text=f"蓝钥匙证据 {index}",
+        )
+        for index in range(1, 101)
+    )
+    session = _FakeAuthoritySession(
+        novel=_novel(
+            novel_id=novel_id,
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+        ),
+        timelines=(timeline,),
+        chapters=chapters,
+    )
+
+    result = search_local_authority(
+        session,
+        LocalLexicalSearchRequest(
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+            novel_id=novel_id,
+            query="蓝钥匙证据",
+            corpora=frozenset({EmbeddingCorpus.MANUSCRIPT}),
+            top_k=50,
+        ),
+    )
+
+    assert result.diagnostics.candidate_chunk_count == 80
+    assert len(result.hits) == 10
+    bounded_queries = [
+        sql
+        for sql in session.statements
+        if "documents" in sql and "LIMIT" in sql
+    ]
+    assert len(bounded_queries) == 2

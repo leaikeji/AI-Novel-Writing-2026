@@ -91,7 +91,7 @@ async def test_vector_failure_degrades_without_persisting_query_or_blocking_writ
         query=query,
     )
 
-    assert snapshot["mode"] == "lexical_only"
+    assert snapshot["mode"] == "context_only"
     assert snapshot["hits"] == []
     assert snapshot["degraded_reason"] == expected_reason
     assert query not in repr(snapshot)

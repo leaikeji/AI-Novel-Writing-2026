@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.embedding.contracts import (
+    DEFAULT_NOVEL_EMBEDDING_CORPORA,
     TARGET_CANDIDATE_DIMENSION,
     TARGET_CANDIDATE_MODEL_ID,
     ConsentAction,
@@ -20,6 +21,7 @@ from backend.embedding.contracts import (
     EmbeddingProfileResource,
     NovelEmbeddingConsentMutation,
     NovelEmbeddingConsentResource,
+    NovelEmbeddingConsentState,
     PerspectiveKind,
     SemanticIndexStatus,
     SemanticMatchChannel,
@@ -115,6 +117,7 @@ def test_config_resource_exposes_only_credential_presence_metadata() -> None:
 def test_consent_grant_and_revoke_are_distinct_commands() -> None:
     grant = NovelEmbeddingConsentMutation(
         action=ConsentAction.GRANT,
+        expected_version=0,
         idempotency_key="grant:novel-1:1",
         notice_version="embedding-notice/1",
         acknowledged_corpora=[
@@ -126,6 +129,7 @@ def test_consent_grant_and_revoke_are_distinct_commands() -> None:
     consent_id = uuid4()
     revoke = NovelEmbeddingConsentMutation(
         action=ConsentAction.REVOKE,
+        expected_version=1,
         idempotency_key="revoke:novel-1:1",
         active_consent_id=consent_id,
     )
@@ -136,23 +140,34 @@ def test_consent_grant_and_revoke_are_distinct_commands() -> None:
     with pytest.raises(ValidationError):
         NovelEmbeddingConsentMutation(
             action=ConsentAction.GRANT,
+            expected_version=0,
             idempotency_key="grant-1",
             acknowledged_corpora=[EmbeddingCorpus.MANUSCRIPT],
         )
     with pytest.raises(ValidationError):
         NovelEmbeddingConsentMutation(
             action=ConsentAction.REVOKE,
+            expected_version=1,
             idempotency_key="revoke-1",
         )
     with pytest.raises(ValidationError):
         NovelEmbeddingConsentMutation(
             action=ConsentAction.GRANT,
+            expected_version=0,
             idempotency_key="grant-2",
             notice_version="embedding-notice/1",
             acknowledged_corpora=[
                 EmbeddingCorpus.MANUSCRIPT,
                 EmbeddingCorpus.MANUSCRIPT,
             ],
+        )
+    with pytest.raises(ValidationError):
+        NovelEmbeddingConsentMutation(
+            action=ConsentAction.GRANT,
+            expected_version=-1,
+            idempotency_key="grant-3",
+            notice_version="embedding-notice/1",
+            acknowledged_corpora=[EmbeddingCorpus.MANUSCRIPT],
         )
 
 
@@ -269,6 +284,21 @@ def test_status_corpus_and_error_code_values_are_stable() -> None:
     }
     assert EmbeddingGenerationStatus.PARTIAL_FAILURE.value == "partial_failure"
     assert SemanticIndexStatus.NOT_AUTHORIZED.value == "not_authorized"
+    assert tuple(item.value for item in DEFAULT_NOVEL_EMBEDDING_CORPORA) == (
+        "manuscript",
+        "planning",
+        "private_asset",
+    )
+    assert {item.value for item in NovelEmbeddingConsentState} == {
+        "not_authorized",
+        "granted",
+        "revoked",
+        "requires_reconsent",
+    }
+    assert EmbeddingErrorCode.CONSENT_VERSION_CONFLICT.value == "consent_version_conflict"
+    assert EmbeddingErrorCode.CONSENT_SCOPE_MISMATCH.value == "consent_scope_mismatch"
+    assert EmbeddingErrorCode.CONSENT_TARGET_CHANGED.value == "consent_target_changed"
+    assert EmbeddingErrorCode.INDEX_ENQUEUE_FAILED.value == "index_enqueue_failed"
 
     error = EmbeddingErrorResource(
         code=EmbeddingErrorCode.EMBEDDING_CONSENT_REQUIRED,

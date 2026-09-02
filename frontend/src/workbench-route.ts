@@ -58,6 +58,17 @@ export const WORKBENCH_READING_PANELS = [
 export type WorkbenchReadingPanel = typeof WORKBENCH_READING_PANELS[number];
 
 
+export const WORKBENCH_SETTINGS_TABS = [
+  "template",
+  "foreshadow",
+  "timeline",
+  "semantic-index",
+] as const;
+
+
+export type WorkbenchSettingsTab = typeof WORKBENCH_SETTINGS_TABS[number];
+
+
 export type RouteSessionState =
   | "ordinary-chat"
   | "workbench-no-session"
@@ -72,6 +83,7 @@ export interface WorkbenchRouteState {
   roleView?: "list" | "graph";
   section?: WorkbenchStoredSection;
   readingPanel?: WorkbenchReadingPanel;
+  settingsTab?: WorkbenchSettingsTab;
   ledger?: WorkbenchLedgerRoute;
 }
 
@@ -126,6 +138,7 @@ interface ExplicitWorkbenchRoute {
   roleView?: "list" | "graph";
   section?: WorkbenchStoredSection;
   readingPanel?: WorkbenchReadingPanel;
+  settingsTab?: WorkbenchSettingsTab;
   ledger?: WorkbenchLedgerRoute;
 }
 
@@ -134,6 +147,7 @@ export interface WorkbenchLocationUpdate {
   documentId?: string;
   section: WorkbenchRouteSection;
   readingPanel?: WorkbenchReadingPanel;
+  settingsTab?: WorkbenchSettingsTab;
 }
 
 
@@ -195,13 +209,21 @@ export function isWorkbenchReadingPanel(value: unknown): value is WorkbenchReadi
 }
 
 
+export function isWorkbenchSettingsTab(value: unknown): value is WorkbenchSettingsTab {
+  return typeof value === "string"
+    && (WORKBENCH_SETTINGS_TABS as readonly string[]).includes(value);
+}
+
+
 function routePageLocation(
   section: WorkbenchStoredSection | undefined,
   readingPanel: WorkbenchReadingPanel | undefined,
   ledger?: WorkbenchLedgerRoute,
-): Pick<WorkbenchRouteState, "section" | "readingPanel" | "ledger"> {
+  settingsTab?: WorkbenchSettingsTab,
+): Pick<WorkbenchRouteState, "section" | "readingPanel" | "settingsTab" | "ledger"> {
   if (!section) return {};
   if (section === "ledger") return { section, ledger: { ...(ledger ?? {}) } };
+  if (section === "settings") return settingsTab ? { section, settingsTab } : { section };
   if (section !== "reading") return { section };
   return {
     section,
@@ -288,6 +310,20 @@ export function workbenchLedgerPath(
 }
 
 
+export function workbenchSettingsPath(
+  novelId: string,
+  settingsTab: WorkbenchSettingsTab,
+): string {
+  const query = new URLSearchParams({
+    novel_workbench: "1",
+    novel_id: novelId,
+    section: "settings",
+    settings_tab: settingsTab,
+  });
+  return `/chat?${query.toString()}`;
+}
+
+
 function explicitWorkbenchRoute(
   location: RouteSessionLocation,
 ): ExplicitWorkbenchRoute | null {
@@ -306,6 +342,11 @@ function explicitWorkbenchRoute(
     )
       ? query.get("reading_panel") as WorkbenchReadingPanel
       : undefined;
+    const settingsTab = section === "settings" && isWorkbenchSettingsTab(
+      query.get("settings_tab"),
+    )
+      ? query.get("settings_tab") as WorkbenchSettingsTab
+      : undefined;
     return {
       novelId,
       documentId: nonEmptyQueryValue(query, "document_id"),
@@ -316,6 +357,7 @@ function explicitWorkbenchRoute(
         section,
         readingPanel,
         section === "ledger" ? workbenchLedgerRouteFromSearch(location.search) : undefined,
+        settingsTab,
       ),
     };
   }
@@ -371,13 +413,22 @@ function validLedgerRoute(value: unknown): value is WorkbenchLedgerRoute {
 
 function validStoredPageLocation(candidate: Record<string, unknown>): boolean {
   if (candidate.section === undefined) {
-    return candidate.readingPanel === undefined && candidate.ledger === undefined;
+    return candidate.readingPanel === undefined
+      && candidate.settingsTab === undefined
+      && candidate.ledger === undefined;
   }
   if (!isWorkbenchStoredSection(candidate.section) || candidate.section === "chapters") return false;
   if (candidate.section === "ledger") {
-    return candidate.readingPanel === undefined && validLedgerRoute(candidate.ledger);
+    return candidate.readingPanel === undefined
+      && candidate.settingsTab === undefined
+      && validLedgerRoute(candidate.ledger);
   }
   if (candidate.ledger !== undefined) return false;
+  if (candidate.section === "settings") {
+    return candidate.readingPanel === undefined
+      && (candidate.settingsTab === undefined || isWorkbenchSettingsTab(candidate.settingsTab));
+  }
+  if (candidate.settingsTab !== undefined) return false;
   if (candidate.section !== "reading") return candidate.readingPanel === undefined;
   return isWorkbenchReadingPanel(candidate.readingPanel);
 }
@@ -492,7 +543,12 @@ export class RouteSessionStateMachine {
         documentId: explicit.documentId,
         chatPath: sessionPath ?? reusable?.chatPath,
         roleView: explicit.roleView ?? reusable?.roleView,
-        ...routePageLocation(explicit.section, explicit.readingPanel, explicit.ledger),
+        ...routePageLocation(
+          explicit.section,
+          explicit.readingPanel,
+          explicit.ledger,
+          explicit.settingsTab,
+        ),
         ownerToken,
       };
       const state = sessionPath ? "workbench-session" : "workbench-no-session";
@@ -515,7 +571,12 @@ export class RouteSessionStateMachine {
         documentId: activeRoute.documentId,
         chatPath: undefined,
         roleView: activeRoute.roleView,
-        ...routePageLocation(activeRoute.section, activeRoute.readingPanel, activeRoute.ledger),
+        ...routePageLocation(
+          activeRoute.section,
+          activeRoute.readingPanel,
+          activeRoute.ledger,
+          activeRoute.settingsTab,
+        ),
         ownerToken: activeRoute.ownerToken,
       });
     }
@@ -530,7 +591,12 @@ export class RouteSessionStateMachine {
       documentId: stored.documentId,
       chatPath: sessionPath,
       roleView: stored.roleView,
-      ...routePageLocation(stored.section, stored.readingPanel, stored.ledger),
+      ...routePageLocation(
+        stored.section,
+        stored.readingPanel,
+        stored.ledger,
+        stored.settingsTab,
+      ),
       ownerToken: stored.ownerToken,
     };
     return this.persistWorkbench("workbench-session", route);
@@ -556,6 +622,7 @@ export class RouteSessionStateMachine {
         activeRoute?.section,
         activeRoute?.readingPanel,
         activeRoute?.ledger,
+        activeRoute?.settingsTab,
       ),
       ownerToken,
     };
@@ -595,6 +662,7 @@ export class RouteSessionStateMachine {
         active.route.section,
         active.route.readingPanel,
         active.route.ledger,
+        active.route.settingsTab,
       ),
       ownerToken: active.route.ownerToken,
     });
@@ -630,7 +698,14 @@ export class RouteSessionStateMachine {
       documentId: update.documentId,
       chatPath: activeRoute?.chatPath,
       roleView: activeRoute?.roleView,
-      ...routePageLocation(section, readingPanel),
+      ...routePageLocation(
+        section,
+        readingPanel,
+        undefined,
+        section === "settings" && isWorkbenchSettingsTab(update.settingsTab)
+          ? update.settingsTab
+          : undefined,
+      ),
       ownerToken,
     });
   }

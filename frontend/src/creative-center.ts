@@ -12,7 +12,7 @@ import {
   AssetPresetRecord,
   CreativeGenerationRecord,
   NovelCreationDraftRecord,
-  NovelRecord,
+  NovelMetadataRecord,
   NovelSummary,
   PrivateAssetRecord,
   PrivateAssetType,
@@ -659,9 +659,9 @@ function ChoiceCard(props: { selected: boolean; icon: any; title: string; copy: 
 }
 
 
-function CreateNovelWizard(props: { open: boolean; onClose: () => void; onCompleted: (novel: NovelRecord, next?: "outline") => Promise<void> }) {
+function CreateNovelWizard(props: { open: boolean; onClose: () => void; onCompleted: (novel: NovelMetadataRecord, next?: "outline") => Promise<void> }) {
   const [draft, setDraft] = React.useState(null as NovelCreationDraftRecord | null);
-  const [completedNovel, setCompletedNovel] = React.useState(null as NovelRecord | null);
+  const [completedNovel, setCompletedNovel] = React.useState(null as NovelMetadataRecord | null);
   const [step, setStep] = React.useState(0);
   const [data, setData] = React.useState({ writing_type: "", audience: "male", cover_mode: "ai", template_data: {} } as Record<string, any>);
   const [loading, setLoading] = React.useState(false);
@@ -1065,7 +1065,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     if (!draft || busy) return;
     setBusy(true);
     try {
-      const result = await apiRequest<{ draft: NovelCreationDraftRecord; novel: NovelRecord }>(`/creation-drafts/${draft.id}/complete`, {
+      const result = await apiRequest<{ draft: NovelCreationDraftRecord; novel: NovelMetadataRecord }>(`/creation-drafts/${draft.id}/complete`, {
         method: "POST",
         body: JSON.stringify({ expected_version: draft.version }),
       });
@@ -1530,7 +1530,7 @@ export function NovelLibraryPage() {
     h(CreateNovelWizard, {
       open: wizardOpen,
       onClose: () => setWizardOpen(false),
-      onCompleted: async (novel: NovelRecord, next?: "outline") => {
+      onCompleted: async (novel: NovelMetadataRecord, next?: "outline") => {
         setWizardOpen(false);
         await reload();
         setActiveNovelId(novel.id);

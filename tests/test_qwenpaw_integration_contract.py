@@ -904,19 +904,19 @@ def test_offline_maintenance_installer_requires_stopped_host_and_keeps_it_stoppe
     lab.offline_install_stopped_candidate(
         candidate=package,
         expected_tree_sha256=digest,
-        expected_head="20260902_0038",
+        expected_head="20260902_0039",
         expected_container_id=container_id,
         expected_image_id=image_id,
         confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
     )
 
     assert validations == [
-        (package, digest, "20260902_0038"),
-        (package, digest, "20260902_0038"),
+        (package, digest, "20260902_0039"),
+        (package, digest, "20260902_0039"),
     ]
     assert copied_validations == [
-        ("/plugin", digest, "20260902_0038"),
-        (lab.INSTALLED_PLUGIN_DIR, digest, "20260902_0038"),
+        ("/plugin", digest, "20260902_0039"),
+        (lab.INSTALLED_PLUGIN_DIR, digest, "20260902_0039"),
     ]
     create = next(call for call in calls if call[:2] == ("docker", "create"))
     assert ("--network", "none") == (
@@ -990,7 +990,7 @@ def test_offline_maintenance_installer_rejects_running_host(
         lab.offline_install_stopped_candidate(
             candidate=package,
             expected_tree_sha256="a" * 64,
-            expected_head="20260902_0038",
+            expected_head="20260902_0039",
             expected_container_id=container_id,
             expected_image_id=image_id,
             confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
@@ -1054,7 +1054,7 @@ def test_offline_maintenance_installer_binds_frozen_target_before_create(
         lab.offline_install_stopped_candidate(
             candidate=package,
             expected_tree_sha256="a" * 64,
-            expected_head="20260902_0038",
+            expected_head="20260902_0039",
             expected_container_id=container_id,
             expected_image_id=image_id,
             confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
@@ -1125,7 +1125,7 @@ def test_offline_maintenance_installer_rejects_staged_copy_before_cli_start(
         lab.offline_install_stopped_candidate(
             candidate=package,
             expected_tree_sha256="a" * 64,
-            expected_head="20260902_0038",
+            expected_head="20260902_0039",
             expected_container_id=container_id,
             expected_image_id=image_id,
             confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION,
@@ -1148,7 +1148,7 @@ def test_offline_maintenance_installer_requires_exact_confirmation(
         lab.offline_install_stopped_candidate(
             candidate=package,
             expected_tree_sha256="a" * 64,
-            expected_head="20260902_0038",
+            expected_head="20260902_0039",
             expected_container_id="b" * 64,
             expected_image_id="sha256:" + "c" * 64,
             confirm="wrong",

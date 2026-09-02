@@ -212,6 +212,23 @@ def test_single_timeline_defaults_to_versioned_identity_mapping() -> None:
     assert [item.title for item in envelope.included_blocks] == ["previous"]
 
 
+def test_single_timeline_accepts_the_frozen_identity_version_from_loader() -> None:
+    novel_id = uuid4()
+    main = _timeline(novel_id)
+    envelope = assemble_novel_context(
+        _snapshot(
+            novel_id,
+            main,
+            narrative_sequence=5,
+            story_cutoff=5,
+            mapping_version=SINGLE_TIMELINE_MAPPING_VERSION,
+        )
+    )
+
+    assert envelope.chapter_timeline.mapping_kind is TimelineMappingKind.SINGLE_TIMELINE_IDENTITY
+    assert envelope.chapter_timeline.mapping_version == SINGLE_TIMELINE_MAPPING_VERSION
+
+
 def test_multi_timeline_without_story_mapping_fails_structurally() -> None:
     novel_id = uuid4()
     main = _timeline(novel_id)
@@ -371,6 +388,45 @@ def test_required_or_explicit_content_over_real_budget_returns_overflow() -> Non
     assert captured.value.code is ContextAssemblyErrorCode.CONTEXT_OVERFLOW
     assert captured.value.details["overflow_tokens"] == 1
     assert captured.value.details["mandatory_block_ids"] == [str(required.block_id)]
+
+
+def test_production_fact_ceiling_fails_closed_without_truncating_projection() -> None:
+    novel_id = uuid4()
+    main = _timeline(novel_id)
+    facts = tuple(
+        _fact(novel_id, main.id, sequence=index + 1, label=f"fact-{index}")
+        for index in range(3)
+    )
+    snapshot = _snapshot(novel_id, main, facts=facts).model_copy(
+        update={"max_final_story_facts": 2}
+    )
+
+    with pytest.raises(ContextAssemblyError) as captured:
+        assemble_novel_context(snapshot)
+
+    assert captured.value.code is ContextAssemblyErrorCode.CONTEXT_SELECTION_INCOMPLETE
+    assert captured.value.details == {
+        "resource": "story_facts",
+        "candidate_count": 3,
+        "selected_count": 3,
+        "cap": 2,
+    }
+
+
+def test_new_selection_fields_are_additive_for_legacy_snapshot_inputs() -> None:
+    novel_id = uuid4()
+    main = _timeline(novel_id)
+    payload = _snapshot(novel_id, main).model_dump()
+    payload.pop("max_final_story_facts")
+
+    restored = NovelContextAssemblySnapshotV4.model_validate(payload)
+
+    assert restored.max_final_story_facts is None
+    assert ContextAssemblyErrorCode.CONTEXT_SCOPE_UNRESOLVED.value == "context_scope_unresolved"
+    assert (
+        ContextAssemblyErrorCode.CONTEXT_SELECTION_INCOMPLETE.value
+        == "context_selection_incomplete"
+    )
 
 
 def test_writing_snapshot_hash_is_stable_and_bound_to_budgeted_model() -> None:

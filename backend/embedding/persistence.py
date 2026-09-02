@@ -7,6 +7,7 @@ calls and secret-file writes are deliberately outside these transactions.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID, uuid4
@@ -40,19 +41,89 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _novel_in_scope(
-    session: Session, *, novel_id: UUID, owner_id: UUID, workspace_id: UUID
+def require_novel_in_scope(
+    session: Session,
+    *,
+    novel_id: UUID,
+    owner_id: UUID,
+    workspace_id: UUID,
+    for_update: bool = False,
 ) -> Novel:
-    novel = session.scalar(
-        select(Novel).where(
-            Novel.id == novel_id,
-            Novel.owner_id == owner_id,
-            Novel.workspace_id == workspace_id,
-        )
+    statement = select(Novel).where(
+        Novel.id == novel_id,
+        Novel.owner_id == owner_id,
+        Novel.workspace_id == workspace_id,
     )
+    if for_update:
+        statement = statement.with_for_update()
+    novel = session.scalar(statement)
     if novel is None:
         raise EmbeddingLifecycleError("novel_not_found", "novel is outside the local scope")
     return novel
+
+
+@dataclass(frozen=True, slots=True)
+class NovelConsentHistory:
+    """The monotonic consent CAS derived from immutable grant rows plus revocation."""
+
+    records: tuple[NovelEmbeddingConsent, ...]
+    version: int
+    latest: NovelEmbeddingConsent | None
+    active: NovelEmbeddingConsent | None
+
+
+def derive_consent_history_version(
+    records: tuple[NovelEmbeddingConsent, ...],
+) -> int:
+    """Return 0, 1, 2, 3... without adding a mutable version column.
+
+    A grant contributes an odd version and revoking the current grant advances
+    it to the following even version.  A later grant creates another row and
+    therefore advances the version again.
+    """
+
+    active_count = sum(record.revoked_at is None for record in records)
+    if active_count > 1:
+        raise EmbeddingLifecycleError(
+            "consent_history_invalid", "novel has more than one active consent"
+        )
+    return len(records) * 2 - active_count
+
+
+def load_consent_history(
+    session: Session,
+    *,
+    novel_id: UUID,
+    owner_id: UUID,
+    workspace_id: UUID,
+    for_update: bool = False,
+) -> NovelConsentHistory:
+    require_novel_in_scope(
+        session,
+        novel_id=novel_id,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        for_update=for_update,
+    )
+    statement = (
+        select(NovelEmbeddingConsent)
+        .where(NovelEmbeddingConsent.novel_id == novel_id)
+        .order_by(
+            NovelEmbeddingConsent.confirmed_at,
+            NovelEmbeddingConsent.id,
+        )
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    records = tuple(session.scalars(statement))
+    active = next((record for record in records if record.revoked_at is None), None)
+    latest = active or (records[-1] if records else None)
+    return NovelConsentHistory(
+        records=records,
+        version=derive_consent_history_version(records),
+        latest=latest,
+        active=active,
+    )
 
 
 def get_configuration(
@@ -266,6 +337,64 @@ def create_verified_candidate(
     return profile, generation
 
 
+def _validate_consent_idempotency_key(value: str) -> str:
+    key = value.strip()
+    if not key or len(key) > 160:
+        raise EmbeddingLifecycleError(
+            "request_validation_failed", "consent idempotency key is invalid"
+        )
+    return key
+
+
+def _consent_payload_matches(
+    consent: NovelEmbeddingConsent,
+    *,
+    notice_version: str,
+    corpora: tuple[str, ...],
+    provider_id: str,
+    model_id: str,
+) -> bool:
+    return (
+        consent.notice_version == notice_version
+        and tuple(sorted(consent.data_scope_json)) == tuple(sorted(corpora))
+        and consent.provider_id == provider_id
+        and consent.model_id == model_id
+    )
+
+
+def _consent_cycle_key(base_key: str, *, expected_version: int) -> str:
+    """Resolve a fresh key when one fixed UI key already names an old grant."""
+
+    return "consent-cycle:" + _digest(
+        {
+            "schema_version": "novel-consent-idempotency/2",
+            "base_key": base_key,
+            "expected_version": expected_version,
+        }
+    )
+
+
+def _consent_operation_hash(
+    *,
+    notice_version: str,
+    corpora: tuple[str, ...],
+    provider_id: str,
+    model_id: str,
+    consent_version: int,
+) -> str:
+    return _digest(
+        {
+            "schema_version": "novel-consent-operation/2",
+            "action": "grant",
+            "notice_version": notice_version,
+            "corpora": sorted(corpora),
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "consent_version": consent_version,
+        }
+    )
+
+
 def grant_consent(
     session: Session,
     *,
@@ -276,47 +405,124 @@ def grant_consent(
     notice_version: str,
     corpora: tuple[str, ...],
     actor: str,
+    provider_id: str = "aliyun-bailian",
     model_id: str = "qwen3.7-text-embedding",
+    expected_version: int | None = None,
 ) -> NovelEmbeddingConsent:
-    _novel_in_scope(
-        session, novel_id=novel_id, owner_id=owner_id, workspace_id=workspace_id
-    )
-    operation_hash = _digest(
-        {"action": "grant", "notice_version": notice_version, "corpora": sorted(corpora)}
-    )
-    replay = session.scalar(
-        select(NovelEmbeddingConsent).where(
-            NovelEmbeddingConsent.novel_id == novel_id,
-            NovelEmbeddingConsent.idempotency_key == idempotency_key,
+    """Grant or explicitly re-grant one novel inside the caller transaction.
+
+    Exact active replays win before the optional CAS check.  When a fixed key
+    already belongs to a revoked row, a deterministic cycle key is derived from
+    the expected history version so the same-notice re-grant creates new audit
+    evidence instead of returning the revoked row.
+    """
+
+    base_key = _validate_consent_idempotency_key(idempotency_key)
+    if not corpora or len(corpora) != len(set(corpora)):
+        raise EmbeddingLifecycleError(
+            "consent_scope_mismatch", "consent corpora must be non-empty and unique"
         )
+    history = load_consent_history(
+        session,
+        novel_id=novel_id,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        for_update=True,
     )
-    if replay is not None:
-        if replay.operation_hash != operation_hash:
+    by_key = {record.idempotency_key: record for record in history.records}
+
+    direct_replay = by_key.get(base_key)
+    if direct_replay is not None:
+        if not _consent_payload_matches(
+            direct_replay,
+            notice_version=notice_version,
+            corpora=corpora,
+            provider_id=provider_id,
+            model_id=model_id,
+        ):
             raise EmbeddingLifecycleError("idempotency_conflict", "consent command changed")
-        _attach_consent_to_candidate(
-            session,
-            consent=replay,
-            owner_id=owner_id,
-            workspace_id=workspace_id,
-        )
-        return replay
-    active = session.scalar(
-        select(NovelEmbeddingConsent).where(
-            NovelEmbeddingConsent.novel_id == novel_id,
-            NovelEmbeddingConsent.revoked_at.is_(None),
+        if direct_replay.revoked_at is None:
+            return direct_replay
+
+    replay_versions = (
+        (expected_version,)
+        if expected_version is not None
+        else tuple(
+            dict.fromkeys(
+                max(0, history.version - offset)
+                for offset in (1, 2)
+                if history.active is not None
+            )
         )
     )
+    for replay_version in replay_versions:
+        cycle_replay = by_key.get(
+            _consent_cycle_key(base_key, expected_version=replay_version)
+        )
+        if cycle_replay is not None:
+            if not _consent_payload_matches(
+                cycle_replay,
+                notice_version=notice_version,
+                corpora=corpora,
+                provider_id=provider_id,
+                model_id=model_id,
+            ):
+                raise EmbeddingLifecycleError(
+                    "idempotency_conflict", "consent command changed"
+                )
+            if cycle_replay.revoked_at is None:
+                return cycle_replay
+
+    if expected_version is not None and history.version != expected_version:
+        raise EmbeddingLifecycleError(
+            "consent_version_conflict", "consent history changed"
+        )
+
+    active = history.active
     if active is not None:
-        if active.notice_version == notice_version:
-            raise EmbeddingLifecycleError("consent_already_active", "novel already has active consent")
+        if _consent_payload_matches(
+            active,
+            notice_version=notice_version,
+            corpora=corpora,
+            provider_id=provider_id,
+            model_id=model_id,
+        ):
+            raise EmbeddingLifecycleError(
+                "consent_already_active", "novel already has active consent"
+            )
         active.revoked_actor = actor
-        active.revoked_reason = "notice_upgraded"
+        active.revoked_reason = "consent_reconfirmed"
         active.revoked_at = _now()
+
+    resolved_key = (
+        base_key
+        if not history.records and direct_replay is None
+        else _consent_cycle_key(base_key, expected_version=history.version)
+    )
+    key_collision = by_key.get(resolved_key)
+    if key_collision is not None:
+        if _consent_payload_matches(
+            key_collision,
+            notice_version=notice_version,
+            corpora=corpora,
+            provider_id=provider_id,
+            model_id=model_id,
+        ) and key_collision.revoked_at is None:
+            return key_collision
+        raise EmbeddingLifecycleError("idempotency_conflict", "consent command changed")
+
+    operation_hash = _consent_operation_hash(
+        notice_version=notice_version,
+        corpora=corpora,
+        provider_id=provider_id,
+        model_id=model_id,
+        consent_version=(len(history.records) + 1) * 2 - 1,
+    )
     consent = NovelEmbeddingConsent(
         id=uuid4(), novel_id=novel_id, purpose="semantic_index",
         data_scope_json=list(corpora), notice_version=notice_version,
-        provider_id="aliyun-bailian", model_id=model_id,
-        idempotency_key=idempotency_key, operation_hash=operation_hash,
+        provider_id=provider_id, model_id=model_id,
+        idempotency_key=resolved_key, operation_hash=operation_hash,
         confirmed_actor=actor, confirmed_at=_now(),
     )
     session.add(consent)
@@ -460,20 +666,31 @@ def revoke_consent(
     workspace_id: UUID,
     actor: str,
     reason: str,
+    expected_version: int | None = None,
 ) -> NovelEmbeddingConsent:
-    _novel_in_scope(
-        session, novel_id=novel_id, owner_id=owner_id, workspace_id=workspace_id
+    history = load_consent_history(
+        session,
+        novel_id=novel_id,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        for_update=True,
     )
-    consent = session.scalar(
-        select(NovelEmbeddingConsent)
-        .where(
-            NovelEmbeddingConsent.id == consent_id,
-            NovelEmbeddingConsent.novel_id == novel_id,
-        )
-        .with_for_update()
+    consent = next(
+        (record for record in history.records if record.id == consent_id),
+        None,
     )
     if consent is None:
         raise EmbeddingLifecycleError("consent_not_found", "active consent was not found")
+    # Retrying the exact revoke is a no-op even when its original expected
+    # version is now stale.
+    if consent.revoked_at is not None:
+        return consent
+    if expected_version is not None and history.version != expected_version:
+        raise EmbeddingLifecycleError(
+            "consent_version_conflict", "consent history changed"
+        )
+    if history.active is None or history.active.id != consent.id:
+        raise EmbeddingLifecycleError("consent_target_changed", "active consent changed")
     if consent.revoked_at is None:
         consent.revoked_actor = actor
         consent.revoked_reason = reason

@@ -5,7 +5,11 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
+import pytest
+
 from backend.context_v4 import (
+    ContextAssemblyError,
+    ContextAssemblyErrorCode,
     ContextBudgetV2,
     NovelContextAssemblySnapshotV4,
     PerspectiveKind,
@@ -13,8 +17,14 @@ from backend.context_v4 import (
     RetrievalPurpose,
     StoryPositionV3,
     assemble_novel_context,
+    resolve_context_scope,
 )
-from backend.context_v4_loader import _character_blocks, _manuscript_blocks
+from backend.context_v4_loader import (
+    MAX_MANUSCRIPT_EVIDENCE,
+    _ChapterRevisionRef,
+    _character_blocks,
+    _hydrate_manuscript_blocks,
+)
 from backend.context_v4_loader import TOKEN_ESTIMATOR_VERSION
 from backend.creative_data_models import (
     CharacterInstance,
@@ -41,20 +51,11 @@ class LoaderSession:
         self,
         *,
         scalar_batches: dict[type[Any], list[list[Any]]] | None = None,
-        rows: list[Any] | None = None,
     ) -> None:
         self.scalar_batches = {
             model: [list(batch) for batch in batches]
             for model, batches in (scalar_batches or {}).items()
         }
-        self.rows: dict[tuple[type[Any], Any], Any] = {}
-        for row in rows or []:
-            identity = getattr(row, "id", None)
-            if identity is None:
-                identity = getattr(row, "revision_id", None)
-            if identity is None:
-                identity = getattr(row, "document_id", None)
-            self.rows[(type(row), identity)] = row
 
     @staticmethod
     def _entity(statement: Any) -> type[Any]:
@@ -66,8 +67,8 @@ class LoaderSession:
         batches = self.scalar_batches.get(self._entity(statement), [])
         return batches.pop(0) if batches else []
 
-    def get(self, model: type[Any], identity: Any) -> Any:
-        return self.rows.get((model, identity))
+    def scalar(self, statement: Any) -> Any:
+        return None
 
 
 def timeline(
@@ -265,15 +266,52 @@ def _assemble_manuscript(
     )
 
 
+def _resolved_scope(timelines: list[StoryTimeline], *, timeline_id: int) -> Any:
+    snapshot = NovelContextAssemblySnapshotV4(
+        novel_id=uid(1),
+        purpose=RetrievalPurpose.REVIEW,
+        position=StoryPositionV3(
+            timeline_id=uid(timeline_id),
+            narrative_sequence=5,
+            story_sequence_cutoff=20,
+            timeline_mapping_version="map/1",
+        ),
+        perspective=PerspectiveV1(kind=PerspectiveKind.AUTHOR),
+        budget=ContextBudgetV2(
+            requested_provider_id="provider",
+            requested_model_id="model",
+            budget_provider_id="provider",
+            budget_model_id="model",
+            effective_context_window_tokens=100_000,
+            reserved_output_tokens=1_000,
+            reserved_prompt_tokens=1_000,
+            fixed_overhead_tokens=100,
+            estimator_version=TOKEN_ESTIMATOR_VERSION,
+        ),
+        timelines=tuple(StoryTimelineRecord.model_validate(item) for item in timelines),
+    )
+    return resolve_context_scope(snapshot)
+
+
+def _ref(item: tuple[Document, DocumentRevision, DocumentWorkingCopy]) -> _ChapterRevisionRef:
+    document, revision, _ = item
+    return _ChapterRevisionRef(
+        document_id=document.id,
+        title=document.title,
+        narrative_sequence=document.position,
+        revision_id=revision.id,
+        content_hash=revision.content_hash,
+    )
+
+
 def test_multi_timeline_character_loader_uses_exact_target_instance_only() -> None:
     target, target_revision = character_instance(31, 11, 131, label="目标线身份")
-    sibling, sibling_revision = character_instance(32, 12, 132, label="兄弟线秘密")
     session = LoaderSession(
         scalar_batches={
+            CharacterInstance: [[target.id], [target]],
             NovelCharacterRevision: [[root_revision()]],
-            CharacterInstance: [[target, sibling]],
+            CharacterInstanceRevision: [[target_revision]],
         },
-        rows=[target_revision, sibling_revision],
     )
 
     blocks = _character_blocks(session, uid(1), timeline_id=uid(11))
@@ -300,32 +338,29 @@ def test_multi_timeline_manuscript_loader_preserves_mapping_and_excludes_sibling
             zip(documents, (10, 11, 10, 12), (5, 12, 11, 12), strict=True)
         )
     ]
-    rows: list[Any] = []
-    for (document, revision, working), (head, mapping, _) in zip(
-        documents, mappings, strict=True
-    ):
-        rows.extend((revision, working, head, mapping))
     session = LoaderSession(
         scalar_batches={
-            Document: [[item[0] for item in documents]],
-            RevisionTimelineMappingSegment: [[item[2]] for item in mappings],
+            RevisionTimelineMappingHead: [[item[0] for item in mappings]],
+            RevisionTimelineMapping: [[item[1] for item in mappings]],
+            RevisionTimelineMappingSegment: [[mappings[0][2], mappings[1][2]]],
+            DocumentRevision: [[documents[0][1], documents[1][1]]],
         },
-        rows=rows,
     )
 
-    blocks = _manuscript_blocks(
+    blocks = _hydrate_manuscript_blocks(
         session,
-        uid(1),
-        uid(11),
+        novel_id=uid(1),
+        timeline_id=uid(11),
         timelines=(main, target, sibling),
+        scope=_resolved_scope([main, target, sibling], timeline_id=11),
+        refs=tuple(_ref(item) for item in documents),
     )
 
     assert [(block.content, block.timeline_id) for block in blocks] == [
         ("父线分叉前事实", uid(10)),
         ("目标线合法事实", uid(11)),
-        # The parent post-fork segment cannot be inherited into the branch.
-        ("兄弟线绝密事实", uid(12)),
     ]
+    # Parent post-fork and sibling segments are removed before body hydration.
     included = _assemble_manuscript(blocks, [main, target, sibling])
     assert included == ("父线分叉前事实", "目标线合法事实")
 
@@ -334,38 +369,88 @@ def test_multi_timeline_unmapped_revision_fails_closed_without_target_disguise()
     main = timeline(10, primary=True)
     target = timeline(11, parent=10, fork_sequence=10)
     document, revision, working = chapter(50, position=1, content="没有映射的正文")
-    session = LoaderSession(
-        scalar_batches={Document: [[document]]},
-        rows=[revision, working],
-    )
+    session = LoaderSession(scalar_batches={RevisionTimelineMappingHead: [[]]})
 
-    blocks = _manuscript_blocks(
-        session,
-        uid(1),
-        uid(11),
-        timelines=(main, target),
-    )
+    with pytest.raises(ContextAssemblyError) as captured:
+        _hydrate_manuscript_blocks(
+            session,
+            novel_id=uid(1),
+            timeline_id=uid(11),
+            timelines=(main, target),
+            scope=_resolved_scope([main, target], timeline_id=11),
+            refs=(_ref((document, revision, working)),),
+        )
 
-    assert all(block.timeline_id != uid(11) for block in blocks)
-    assert "没有映射的正文" not in _assemble_manuscript(blocks, [main, target])
+    assert captured.value.code is ContextAssemblyErrorCode.CONTEXT_SELECTION_INCOMPLETE
 
 
 def test_single_timeline_identity_loader_keeps_full_current_revision() -> None:
     main = timeline(10, primary=True)
     document, revision, working = chapter(60, position=1, content="单线完整正文")
-    session = LoaderSession(
-        scalar_batches={Document: [[document]]},
-        rows=[revision, working],
-    )
+    session = LoaderSession(scalar_batches={DocumentRevision: [[revision]]})
 
-    blocks = _manuscript_blocks(
+    blocks = _hydrate_manuscript_blocks(
         session,
-        uid(1),
-        uid(10),
+        novel_id=uid(1),
+        timeline_id=uid(10),
         timelines=(main,),
+        scope=_resolved_scope([main], timeline_id=10),
+        refs=(_ref((document, revision, working)),),
     )
 
     assert len(blocks) == 1
     assert blocks[0].content == "单线完整正文"
     assert blocks[0].timeline_id == uid(10)
     assert blocks[0].narrative_sequence == 1
+
+
+def test_mapped_manuscript_segments_use_cap_plus_one_and_fail_before_body_hydration() -> None:
+    main = timeline(10, primary=True)
+    target = timeline(11, parent=10, fork_sequence=10)
+    document, revision, working = chapter(
+        70,
+        position=1,
+        content="字" * (MAX_MANUSCRIPT_EVIDENCE + 1),
+    )
+    head, mapping, _ = mapped_revision(
+        document,
+        revision,
+        mapping_id=300,
+        timeline_id=11,
+        story_sequence=1,
+    )
+    segments = [
+        RevisionTimelineMappingSegment(
+            id=uid(500 + index),
+            mapping_revision_id=mapping.id,
+            novel_id=uid(1),
+            timeline_id=uid(11),
+            ordinal=index,
+            source_start=index,
+            source_end=index + 1,
+            story_sequence=1,
+            story_time_json={},
+        )
+        for index in range(MAX_MANUSCRIPT_EVIDENCE + 1)
+    ]
+    session = LoaderSession(
+        scalar_batches={
+            RevisionTimelineMappingHead: [[head]],
+            RevisionTimelineMapping: [[mapping]],
+            RevisionTimelineMappingSegment: [segments],
+        }
+    )
+
+    with pytest.raises(ContextAssemblyError) as captured:
+        _hydrate_manuscript_blocks(
+            session,
+            novel_id=uid(1),
+            timeline_id=uid(11),
+            timelines=(main, target),
+            scope=_resolved_scope([main, target], timeline_id=11),
+            refs=(_ref((document, revision, working)),),
+        )
+
+    assert captured.value.code is ContextAssemblyErrorCode.CONTEXT_SELECTION_INCOMPLETE
+    assert captured.value.details["candidate_count"] == MAX_MANUSCRIPT_EVIDENCE + 1
+    assert session.scalar_batches.get(DocumentRevision) is None

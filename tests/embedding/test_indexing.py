@@ -3,7 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
+from backend.embedding import indexing
 from backend.creative_data_models import (
+    EmbeddingConfiguration,
     EmbeddingIndexBatch,
     EmbeddingIndexBatchItem,
     SemanticChunk,
@@ -13,13 +17,14 @@ from backend.creative_data_models import (
 )
 from backend.embedding.chunking import V1SourceInput, render_v1_source
 from backend.embedding.indexing import (
+    SourceRefreshHint,
     _copy_reprojection_embeddings,
     _metadata_only_reprojection_source,
     _manuscript_sources,
     _same_source_projection,
 )
 from backend.volume_chapter_titles import embedding_chapter_title
-from backend.models import Document, DocumentRevision
+from backend.models import Document, DocumentRevision, Novel
 
 
 def _projection() -> tuple[V1SourceInput, object, SemanticSource]:
@@ -228,6 +233,155 @@ def test_manuscript_position_counts_canonical_chapter_without_revision() -> None
     )
 
     assert sources[0][2:6] == (2, 2, 2, 2)
+
+
+class _TargetedManuscriptSession:
+    def __init__(
+        self,
+        timeline: StoryTimeline,
+        document: Document,
+        revision: DocumentRevision,
+    ) -> None:
+        self.timeline = timeline
+        self.document = document
+        self.revision = revision
+        self.sql: list[str] = []
+
+    def scalars(self, statement: object) -> tuple[object, ...]:
+        sql = str(statement)
+        self.sql.append(sql)
+        if "story_timelines" in sql:
+            return (self.timeline,)
+        raise AssertionError("targeted refresh must not hydrate every document")
+
+    def execute(self, statement: object) -> SimpleNamespace:
+        sql = str(statement)
+        self.sql.append(sql)
+        if "row_number()" in sql:
+            return SimpleNamespace(all=lambda: [(self.document.id, 2)])
+        if "document_working_copies" in sql:
+            return SimpleNamespace(all=lambda: [(self.document, self.revision)])
+        raise AssertionError(sql)
+
+
+def test_targeted_manuscript_hint_loads_only_affected_revision() -> None:
+    novel_id = uuid4()
+    document = Document(
+        id=uuid4(),
+        novel_id=novel_id,
+        kind="chapter",
+        title="潮声",
+        position=2_000,
+        status="final",
+        version=1,
+    )
+    revision = DocumentRevision(
+        id=uuid4(),
+        document_id=document.id,
+        revision_number=2,
+        content_markdown="潮声入夜",
+        content_text="潮声入夜",
+        content_hash="2" * 64,
+        source="manual",
+    )
+    timeline = StoryTimeline(
+        id=uuid4(),
+        novel_id=novel_id,
+        timeline_key="main",
+        name="主线",
+        normalized_name="主线",
+        timeline_kind="main",
+        is_primary=True,
+        parent_timeline_id=None,
+        fork_anchor_json={},
+        lifecycle_state="active",
+        position=1,
+        version=1,
+    )
+    session = _TargetedManuscriptSession(timeline, document, revision)
+
+    sources, failures = _manuscript_sources(
+        session,  # type: ignore[arg-type]
+        build=SimpleNamespace(novel_id=novel_id),
+        source_entity_ids=frozenset({document.id}),
+    )
+
+    assert failures == 0
+    assert len(sources) == 1
+    assert sources[0][0].source_entity_id == document.id
+    assert sources[0][2:6] == (2, 2, 2, 2)
+    assert any("row_number()" in sql for sql in session.sql)
+    target_sql = next(sql for sql in session.sql if "document_working_copies" in sql)
+    assert "documents.id IN" in target_sql
+
+
+def test_source_refresh_hint_rejects_unknown_source_type() -> None:
+    try:
+        SourceRefreshHint(source_type="unknown", source_entity_id=uuid4())
+    except ValueError as error:
+        assert "unsupported semantic source hint" in str(error)
+    else:  # pragma: no cover - defensive contract assertion
+        raise AssertionError("unknown source hint was accepted")
+
+
+def test_active_refresh_forwards_narrow_source_hints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    novel_id = uuid4()
+    generation_id = uuid4()
+    novel = Novel(
+        id=novel_id,
+        owner_id=uuid4(),
+        workspace_id=uuid4(),
+        title="回声档案",
+    )
+    configuration = EmbeddingConfiguration(
+        id=uuid4(),
+        owner_id=novel.owner_id,
+        workspace_id=novel.workspace_id,
+        base_url="https://example.invalid",
+        active_generation_id=generation_id,
+        connection_state="ready",
+        connection_summary_json={},
+        retrieval_policy_version="writing-retrieval/3",
+        version=1,
+    )
+    consent = SimpleNamespace(id=uuid4())
+    build = SimpleNamespace(id=uuid4())
+    hint = SourceRefreshHint(
+        source_type="chapter_revision",
+        source_entity_id=uuid4(),
+    )
+    captured: dict[str, object] = {}
+
+    class _Session:
+        def __init__(self) -> None:
+            self.scalar_values = iter((configuration, consent, build))
+
+        def get(self, model: type[object], identity: object) -> object | None:
+            if model is Novel and identity == novel_id:
+                return novel
+            return None
+
+        def scalar(self, _statement: object) -> object:
+            return next(self.scalar_values)
+
+    def _prepare(_session: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return build
+
+    monkeypatch.setattr(indexing, "prepare_v1_novel_index", _prepare)
+
+    assert indexing.request_active_novel_refresh(
+        _Session(),  # type: ignore[arg-type]
+        novel_id,
+        source_hints=(hint,),
+    )
+    assert captured == {
+        "generation_id": generation_id,
+        "novel_id": novel_id,
+        "source_hints": (hint,),
+    }
 
 
 class _CopySession:

@@ -119,7 +119,11 @@ from .creative_services import (
     update_volume,
 )
 from .database import get_session
-from .context_v4 import RetrievalPurpose as ContextRetrievalPurpose
+from .context_v4 import (
+    ContextAssemblyError,
+    ContextAssemblyErrorCode,
+    RetrievalPurpose as ContextRetrievalPurpose,
+)
 from .context_v4_loader import assemble_writing_context_from_db
 from .embedding.contracts import RetrievalPurpose
 from .embedding.writing import (
@@ -173,6 +177,15 @@ def _reported_actual_ids(
         provider if isinstance(provider, str) else None,
         model if isinstance(model, str) else None,
     )
+
+
+def _public_creative_job(payload: dict[str, object] | None) -> dict[str, object] | None:
+    if payload is None:
+        return None
+    public = dict(payload)
+    public.pop("input_snapshot", None)
+    public.pop("should_execute", None)
+    return public
 
 
 async def _creative_writing_retrieval(
@@ -241,6 +254,23 @@ def _raise(error: Exception) -> None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"type": error.code, "message": str(error)},
+        ) from error
+    if isinstance(error, ContextAssemblyError):
+        conflict_codes = {
+            ContextAssemblyErrorCode.CONTEXT_SCOPE_UNRESOLVED,
+            ContextAssemblyErrorCode.CONTEXT_SELECTION_INCOMPLETE,
+        }
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+                if error.code in conflict_codes
+                else status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail={
+                "type": error.code.value,
+                "message": str(error),
+                "details": error.details,
+            },
         ) from error
     if isinstance(error, EntityConflictError):
         raise HTTPException(
@@ -710,7 +740,10 @@ async def character_profile_completion_generate(
         if isinstance(error, (ModelVerificationError, CharacterProfileValidationError)):
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={"type": "model_verification_failed", "job": failed},
+                detail={
+                    "type": "model_verification_failed",
+                    "job": _public_creative_job(failed),
+                },
             ) from error
         _raise(error)
         raise
@@ -842,7 +875,7 @@ async def relationships_auto_sync(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "type": "relationship_generation_in_progress",
-                    "job": job,
+                    "job": _public_creative_job(job),
                 },
             )
         if job["state"] == "running" and job.get("should_execute", True):
@@ -909,7 +942,10 @@ async def relationships_auto_sync(
             if isinstance(error, ModelVerificationError):
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail={"type": "model_verification_failed", "job": failed},
+                    detail={
+                        "type": "model_verification_failed",
+                        "job": _public_creative_job(failed),
+                    },
                 ) from error
         _raise(error)
         raise
@@ -1359,7 +1395,7 @@ async def creative_generations_create(
             writing_context=writing_context,
         )
         if job["state"] != "running" or not job.get("should_execute", True):
-            return job
+            return _public_creative_job(job) or {}
         generation_session_id = f"novel-creative-generation:{job['id']}"
         prompt = build_creative_generation_prompt(job)
         kind = str(job["kind"])
@@ -1468,7 +1504,10 @@ async def creative_generations_create(
             if isinstance(error, (ModelVerificationError, SelectionEditDiffError)):
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail={"type": "model_verification_failed", "job": failed},
+                    detail={
+                        "type": "model_verification_failed",
+                        "job": _public_creative_job(failed),
+                    },
                 ) from error
         _raise(error)
         raise

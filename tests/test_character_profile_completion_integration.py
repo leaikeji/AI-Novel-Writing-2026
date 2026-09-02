@@ -92,7 +92,7 @@ def _create_profile_novel(
         f"{TEST_TITLE_PREFIX}{uuid4()}",
     )
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     character_specs = [
         (
             "江述",

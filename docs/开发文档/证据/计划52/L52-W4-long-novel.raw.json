@@ -1,0 +1,309 @@
+{
+  "alembic_head": "20260902_0039",
+  "database_name": "ai_novel_world_2026_plan52_test",
+  "host": {
+    "machine": "arm64",
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "processor": "arm",
+    "python": "3.12.13"
+  },
+  "profiles": [
+    {
+      "lexical_explain": {
+        "candidate_bounded": {
+          "execution_ms": 23.415,
+          "planning_ms": 1.653,
+          "root_rows": 1.0,
+          "scans": [
+            {
+              "actual_rows": 1.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_chunks",
+              "rows_removed_by_filter": 1499,
+              "shared_hit_blocks": 250,
+              "shared_read_blocks": 0
+            },
+            {
+              "actual_rows": 1.0,
+              "index": "uq_semantic_source_generation_scope",
+              "node_type": "Index Scan",
+              "relation": "semantic_sources",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 3,
+              "shared_read_blocks": 0
+            }
+          ]
+        },
+        "current_unbounded": {
+          "execution_ms": 29.055,
+          "planning_ms": 0.047,
+          "root_rows": 1500.0,
+          "scans": [
+            {
+              "actual_rows": 1500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_chunks",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 250,
+              "shared_read_blocks": 0
+            },
+            {
+              "actual_rows": 500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_sources",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 30,
+              "shared_read_blocks": 0
+            }
+          ]
+        }
+      },
+      "paths": {
+        "assistant_context": {
+          "p50_ms": 118.721,
+          "p95_ms": 142.559,
+          "peak_tracemalloc_mib": 2.42,
+          "response_bytes": 352620,
+          "samples": 5,
+          "sql_count_max": 21,
+          "sql_count_min": 21
+        },
+        "authority_local_lexical": {
+          "p50_ms": 90.009,
+          "p95_ms": 95.424,
+          "peak_tracemalloc_mib": 0.253,
+          "response_bytes": 3285,
+          "samples": 5,
+          "sql_count_max": 5,
+          "sql_count_min": 5
+        },
+        "context_v4": {
+          "p50_ms": 104.699,
+          "p95_ms": 104.881,
+          "peak_tracemalloc_mib": 1.954,
+          "response_bytes": 228422,
+          "samples": 5,
+          "sql_count_max": 17,
+          "sql_count_min": 17
+        },
+        "indexed_lexical_current": {
+          "p50_ms": 41.14,
+          "p95_ms": 73.412,
+          "peak_tracemalloc_mib": 0.545,
+          "response_bytes": 3039,
+          "samples": 5,
+          "sql_count_max": 3,
+          "sql_count_min": 3
+        },
+        "list_novels": {
+          "p50_ms": 2.931,
+          "p95_ms": 6.395,
+          "peak_tracemalloc_mib": 0.123,
+          "response_bytes": 2296,
+          "samples": 5,
+          "sql_count_max": 1,
+          "sql_count_min": 1
+        },
+        "open_novel_metadata": {
+          "p50_ms": 2.55,
+          "p95_ms": 3.401,
+          "peak_tracemalloc_mib": 0.039,
+          "response_bytes": 627,
+          "samples": 5,
+          "sql_count_max": 2,
+          "sql_count_min": 2
+        },
+        "prompt_builder": {
+          "p50_ms": 0.65,
+          "p95_ms": 0.75,
+          "peak_tracemalloc_mib": 0.224,
+          "response_bytes": 68641,
+          "samples": 5,
+          "sql_count_max": 0,
+          "sql_count_min": 0
+        },
+        "search_novel": {
+          "p50_ms": 26.405,
+          "p95_ms": 34.206,
+          "peak_tracemalloc_mib": 1.011,
+          "response_bytes": 1263,
+          "samples": 5,
+          "sql_count_max": 4,
+          "sql_count_min": 4
+        },
+        "selected_document": {
+          "p50_ms": 4.174,
+          "p95_ms": 4.198,
+          "peak_tracemalloc_mib": 0.051,
+          "response_bytes": 6969,
+          "samples": 5,
+          "sql_count_max": 4,
+          "sql_count_min": 4
+        }
+      },
+      "profile": "1m",
+      "seed": {
+        "chapter_count": 500,
+        "elapsed_ms": 361.028,
+        "fact_count": 2000,
+        "historical_revision_count": 10,
+        "semantic_chunk_count": 1500,
+        "semantic_source_count": 500,
+        "target_characters": 1000000
+      }
+    },
+    {
+      "lexical_explain": {
+        "candidate_bounded": {
+          "execution_ms": 120.77,
+          "planning_ms": 1.755,
+          "root_rows": 1.0,
+          "scans": [
+            {
+              "actual_rows": 1.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_chunks",
+              "rows_removed_by_filter": 7499,
+              "shared_hit_blocks": 1500,
+              "shared_read_blocks": 0
+            },
+            {
+              "actual_rows": 1.0,
+              "index": "uq_semantic_source_generation_scope",
+              "node_type": "Index Scan",
+              "relation": "semantic_sources",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 3,
+              "shared_read_blocks": 0
+            }
+          ]
+        },
+        "current_unbounded": {
+          "execution_ms": 148.43,
+          "planning_ms": 0.052,
+          "root_rows": 7500.0,
+          "scans": [
+            {
+              "actual_rows": 7500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_chunks",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 1500,
+              "shared_read_blocks": 0
+            },
+            {
+              "actual_rows": 2500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_sources",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 177,
+              "shared_read_blocks": 0
+            }
+          ]
+        }
+      },
+      "paths": {
+        "assistant_context": {
+          "p50_ms": 135.657,
+          "p95_ms": 141.23,
+          "peak_tracemalloc_mib": 2.087,
+          "response_bytes": 352960,
+          "samples": 5,
+          "sql_count_max": 21,
+          "sql_count_min": 21
+        },
+        "authority_local_lexical": {
+          "p50_ms": 363.618,
+          "p95_ms": 367.76,
+          "peak_tracemalloc_mib": 0.084,
+          "response_bytes": 3285,
+          "samples": 5,
+          "sql_count_max": 5,
+          "sql_count_min": 5
+        },
+        "context_v4": {
+          "p50_ms": 123.343,
+          "p95_ms": 147.693,
+          "peak_tracemalloc_mib": 2.002,
+          "response_bytes": 228762,
+          "samples": 5,
+          "sql_count_max": 17,
+          "sql_count_min": 17
+        },
+        "indexed_lexical_current": {
+          "p50_ms": 93.723,
+          "p95_ms": 98.387,
+          "peak_tracemalloc_mib": 0.138,
+          "response_bytes": 3039,
+          "samples": 5,
+          "sql_count_max": 3,
+          "sql_count_min": 3
+        },
+        "list_novels": {
+          "p50_ms": 3.219,
+          "p95_ms": 3.332,
+          "peak_tracemalloc_mib": 0.043,
+          "response_bytes": 2297,
+          "samples": 5,
+          "sql_count_max": 1,
+          "sql_count_min": 1
+        },
+        "open_novel_metadata": {
+          "p50_ms": 2.735,
+          "p95_ms": 2.892,
+          "peak_tracemalloc_mib": 0.024,
+          "response_bytes": 628,
+          "samples": 5,
+          "sql_count_max": 2,
+          "sql_count_min": 2
+        },
+        "prompt_builder": {
+          "p50_ms": 0.608,
+          "p95_ms": 0.662,
+          "peak_tracemalloc_mib": 0.224,
+          "response_bytes": 68644,
+          "samples": 5,
+          "sql_count_max": 0,
+          "sql_count_min": 0
+        },
+        "search_novel": {
+          "p50_ms": 107.63,
+          "p95_ms": 135.615,
+          "peak_tracemalloc_mib": 4.515,
+          "response_bytes": 1263,
+          "samples": 5,
+          "sql_count_max": 4,
+          "sql_count_min": 4
+        },
+        "selected_document": {
+          "p50_ms": 3.934,
+          "p95_ms": 4.186,
+          "peak_tracemalloc_mib": 0.05,
+          "response_bytes": 6969,
+          "samples": 5,
+          "sql_count_max": 4,
+          "sql_count_min": 4
+        }
+      },
+      "profile": "5m",
+      "seed": {
+        "chapter_count": 2500,
+        "elapsed_ms": 1492.015,
+        "fact_count": 10000,
+        "historical_revision_count": 50,
+        "semantic_chunk_count": 7500,
+        "semantic_source_count": 2500,
+        "target_characters": 5000000
+      }
+    }
+  ],
+  "provider_calls": 0,
+  "samples_per_path": 5,
+  "schema_version": "plan52-scale-evidence/2"
+}

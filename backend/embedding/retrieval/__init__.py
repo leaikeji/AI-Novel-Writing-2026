@@ -2,8 +2,14 @@
 
 from .contracts import (
     DEFAULT_QUERY_POLICY_VERSION,
+    ADJACENT_NEIGHBORS_GLOBAL_CAP,
+    ADJACENT_NEIGHBORS_PER_HIT_CAP,
+    DENSE_CANDIDATE_CAP,
+    FINAL_HIT_CAP,
+    LEXICAL_CANDIDATE_CAP,
     RRF_VERSION,
     SEMANTIC_RETRIEVAL_SCHEMA_VERSION,
+    WRITING_RETRIEVAL_POLICY_VERSION,
     CandidateFilterReason,
     CandidateVisibility,
     CorpusQuota,
@@ -26,14 +32,21 @@ from .contracts import (
     SemanticSearchRequestV2,
     SemanticSearchResultV2,
     TimelineSearchLimit,
+    writing_retrieval_policy_v3,
 )
 from .engine import candidate_filter_reason, filter_candidates, retrieve
 from .knowledge import KnowledgeProjectionScope, derive_known_visibility_keys
 
 __all__ = [
     "DEFAULT_QUERY_POLICY_VERSION",
+    "ADJACENT_NEIGHBORS_GLOBAL_CAP",
+    "ADJACENT_NEIGHBORS_PER_HIT_CAP",
+    "DENSE_CANDIDATE_CAP",
+    "FINAL_HIT_CAP",
+    "LEXICAL_CANDIDATE_CAP",
     "RRF_VERSION",
     "SEMANTIC_RETRIEVAL_SCHEMA_VERSION",
+    "WRITING_RETRIEVAL_POLICY_VERSION",
     "CandidateFilterReason",
     "CandidateVisibility",
     "CorpusQuota",
@@ -56,6 +69,7 @@ __all__ = [
     "SemanticSearchRequestV2",
     "SemanticSearchResultV2",
     "TimelineSearchLimit",
+    "writing_retrieval_policy_v3",
     "candidate_filter_reason",
     "filter_candidates",
     "retrieve",

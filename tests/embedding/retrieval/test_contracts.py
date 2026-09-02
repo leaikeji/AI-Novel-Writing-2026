@@ -7,12 +7,18 @@ from pydantic import ValidationError
 
 from backend.embedding.contracts import EmbeddingCorpus
 from backend.embedding.retrieval import (
+    ADJACENT_NEIGHBORS_GLOBAL_CAP,
+    ADJACENT_NEIGHBORS_PER_HIT_CAP,
+    DENSE_CANDIDATE_CAP,
+    FINAL_HIT_CAP,
+    LEXICAL_CANDIDATE_CAP,
     RetrievalPerspective,
     RetrievalPolicyV1,
     RetrievalPurpose,
     SearchScope,
     SemanticSearchRequestV2,
     TimelineSearchLimit,
+    writing_retrieval_policy_v3,
 )
 
 
@@ -113,3 +119,17 @@ def test_eight_second_dense_budget_is_a_frozen_policy_field() -> None:
     assert policy.dense_timeout_seconds == 8
     with pytest.raises(ValidationError):
         RetrievalPolicyV1(dense_timeout_seconds=5)
+
+
+def test_writing_retrieval_v3_has_frozen_scale_budgets() -> None:
+    policy = writing_retrieval_policy_v3()
+
+    assert policy.policy_version == "writing-retrieval/3"
+    assert (DENSE_CANDIDATE_CAP, LEXICAL_CANDIDATE_CAP) == (80, 80)
+    assert policy.max_results == FINAL_HIT_CAP == 10
+    assert (
+        policy.max_adjacent_neighbors_per_hit
+        == ADJACENT_NEIGHBORS_PER_HIT_CAP
+        == 2
+    )
+    assert policy.max_adjacent_neighbors_total == ADJACENT_NEIGHBORS_GLOBAL_CAP == 20

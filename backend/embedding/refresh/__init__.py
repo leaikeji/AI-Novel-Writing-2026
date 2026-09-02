@@ -9,15 +9,20 @@ from .contracts import (
     RefreshRequestResult,
 )
 from .service import (
+    DerivedDataGcResult,
     IncrementalRefreshService,
+    MAX_GC_SOURCES_PER_RUN,
     RefreshServiceError,
     SqlAlchemyRefreshStore,
+    gc_obsolete_active_generation_data,
     refresh_request_digest,
     service_for_session,
 )
 
 __all__ = [
     "IncrementalRefreshService",
+    "DerivedDataGcResult",
+    "MAX_GC_SOURCES_PER_RUN",
     "PendingSourceSpec",
     "PublicationAuthority",
     "PublishResult",
@@ -26,6 +31,7 @@ __all__ = [
     "RefreshRequestResult",
     "RefreshServiceError",
     "SqlAlchemyRefreshStore",
+    "gc_obsolete_active_generation_data",
     "refresh_request_digest",
     "service_for_session",
 ]

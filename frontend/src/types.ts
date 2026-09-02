@@ -31,6 +31,7 @@ export interface DocumentRecord {
   version_state?: DocumentVersionState;
   updated_at: string | null;
   revisions: RevisionSummary[];
+  revision_next_cursor?: string | null;
 }
 
 export interface NovelSearchResultRecord {
@@ -97,6 +98,41 @@ export interface NovelRecord {
   tree: VolumeRecord[];
 }
 
+export type NovelMetadataRecord = Omit<NovelRecord, "tree"> & {
+  visible_character_count: number;
+};
+
+export interface WorkspaceManifestItem {
+  kind: "volume" | "document";
+  id: string;
+  parent_volume_id: string | null;
+  document_type: DocumentRecord["kind"] | null;
+  title: string;
+  position: number;
+  status: string | null;
+  version: number;
+  draft_version: number | null;
+  base_revision_id: string | null;
+  content_hash: string | null;
+  visible_character_count: number | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceManifestPage {
+  schema_version: "novel-workspace-manifest/1";
+  novel: {
+    id: string;
+    title: string;
+    description: string;
+    story_ledger_version: number;
+    visible_character_count: number;
+    updated_at: string | null;
+  };
+  items: WorkspaceManifestItem[];
+  next_cursor: string | null;
+  manifest_etag: string;
+}
+
 export type PrivateAssetType = "plot" | "writing_style" | "vocabulary" | "idea";
 
 export interface NovelCreationDraftRecord {
@@ -142,7 +178,7 @@ export interface CreativeGenerationRecord {
   kind: string;
   state: "running" | "ready" | "failed";
   input_hash: string;
-  input_snapshot: Record<string, unknown>;
+  input_snapshot?: Record<string, unknown>;
   execution_agent_id: string | null;
   requested_provider_id: string | null;
   requested_model_id: string;
@@ -245,7 +281,6 @@ export interface GenerationJobRecord {
     id: string;
     asset_type: PrivateAssetType;
     title: string;
-    content: string;
     version: number;
   }>;
   requested_model_id: string;

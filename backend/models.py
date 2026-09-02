@@ -194,6 +194,9 @@ class DocumentWorkingCopy(Base):
     draft_version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
     content_markdown: Mapped[str] = mapped_column(Text, nullable=False, default="")
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    visible_character_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

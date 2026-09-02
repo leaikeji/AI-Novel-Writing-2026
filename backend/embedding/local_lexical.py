@@ -16,7 +16,7 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy import and_, case, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..creative_data_models import (
@@ -58,6 +58,9 @@ from .retrieval.contracts import (
 
 
 LOCAL_LEXICAL_POLICY_VERSION = "authority-local-lexical/1"
+LOCAL_AUTHORITY_SOURCE_CAP = 80
+LOCAL_AUTHORITY_CHUNK_CAP = 80
+LOCAL_AUTHORITY_FINAL_HIT_CAP = 10
 _SEARCHABLE_CORPORA = frozenset(
     {
         EmbeddingCorpus.MANUSCRIPT,
@@ -365,6 +368,144 @@ def _timeline_scope(
     return requested, MappingProxyType(limits)
 
 
+def _canonical_document_order(novel_id: UUID):
+    return (
+        select(
+            Document.id.label("document_id"),
+            func.row_number()
+            .over(
+                order_by=(
+                    case((Document.volume_id.is_(None), 1), else_=0),
+                    Volume.position,
+                    Document.position,
+                    Document.id,
+                )
+            )
+            .label("narrative_sequence"),
+        )
+        .outerjoin(
+            Volume,
+            and_(
+                Volume.id == Document.volume_id,
+                Volume.novel_id == Document.novel_id,
+            ),
+        )
+        .where(Document.novel_id == novel_id, Document.kind == "chapter")
+        .subquery()
+    )
+
+
+def _bounded_manuscript_source_ids(
+    session: Session,
+    *,
+    request: LocalLexicalSearchRequest,
+    timelines: Sequence[StoryTimeline],
+    target_timeline_id: UUID,
+    timeline_limits: Mapping[UUID, int | None],
+) -> tuple[UUID, ...]:
+    """Select relevant current authority IDs before any chapter text hydration."""
+
+    canonical = _canonical_document_order(request.novel_id)
+    base_conditions: list[object] = [
+        Document.novel_id == request.novel_id,
+        Document.kind == "chapter",
+        DocumentRevision.content_text != "",
+    ]
+    if request.narrative_sequence_cutoff is not None:
+        base_conditions.append(
+            canonical.c.narrative_sequence <= request.narrative_sequence_cutoff
+        )
+    if len(timelines) == 1:
+        cutoff = timeline_limits.get(target_timeline_id)
+        if cutoff is not None:
+            base_conditions.append(canonical.c.narrative_sequence <= cutoff)
+        score = func.similarity(
+            func.concat(Document.title, " ", DocumentRevision.content_text),
+            request.query,
+        )
+        statement = (
+            select(canonical.c.document_id)
+            .select_from(canonical)
+            .join(Document, Document.id == canonical.c.document_id)
+            .join(
+                DocumentWorkingCopy,
+                DocumentWorkingCopy.document_id == Document.id,
+            )
+            .join(
+                DocumentRevision,
+                DocumentRevision.id == DocumentWorkingCopy.base_revision_id,
+            )
+            .where(*base_conditions, score > request.minimum_score)
+            .order_by(score.desc(), canonical.c.document_id)
+            .limit(LOCAL_AUTHORITY_SOURCE_CAP)
+        )
+        return tuple(session.scalars(statement))[:LOCAL_AUTHORITY_SOURCE_CAP]
+
+    excerpt = func.substr(
+        DocumentRevision.content_text,
+        RevisionTimelineMappingSegment.source_start + 1,
+        RevisionTimelineMappingSegment.source_end
+        - RevisionTimelineMappingSegment.source_start,
+    )
+    score = func.similarity(func.concat(Document.title, " ", excerpt), request.query)
+    story_scope: list[object] = []
+    for timeline_id, cutoff in timeline_limits.items():
+        item: object = RevisionTimelineMappingSegment.timeline_id == timeline_id
+        if cutoff is not None:
+            item = and_(
+                item,
+                RevisionTimelineMappingSegment.story_sequence.is_not(None),
+                RevisionTimelineMappingSegment.story_sequence <= cutoff,
+            )
+        story_scope.append(item)
+    best_score = func.max(score)
+    statement = (
+        select(canonical.c.document_id)
+        .select_from(canonical)
+        .join(Document, Document.id == canonical.c.document_id)
+        .join(
+            DocumentWorkingCopy,
+            DocumentWorkingCopy.document_id == Document.id,
+        )
+        .join(
+            DocumentRevision,
+            DocumentRevision.id == DocumentWorkingCopy.base_revision_id,
+        )
+        .join(
+            RevisionTimelineMappingHead,
+            and_(
+                RevisionTimelineMappingHead.revision_id == DocumentRevision.id,
+                RevisionTimelineMappingHead.document_id == Document.id,
+                RevisionTimelineMappingHead.novel_id == request.novel_id,
+                RevisionTimelineMappingHead.source_content_hash
+                == DocumentRevision.content_hash,
+            ),
+        )
+        .join(
+            RevisionTimelineMappingSegment,
+            and_(
+                RevisionTimelineMappingSegment.mapping_revision_id
+                == RevisionTimelineMappingHead.current_mapping_revision_id,
+                RevisionTimelineMappingSegment.novel_id == request.novel_id,
+            ),
+        )
+        .where(
+            *base_conditions,
+            or_(*story_scope),
+            RevisionTimelineMappingSegment.source_start >= 0,
+            RevisionTimelineMappingSegment.source_end
+            > RevisionTimelineMappingSegment.source_start,
+            RevisionTimelineMappingSegment.source_end
+            <= func.char_length(DocumentRevision.content_text),
+            score > request.minimum_score,
+        )
+        .group_by(canonical.c.document_id)
+        .order_by(best_score.desc(), canonical.c.document_id)
+        .limit(LOCAL_AUTHORITY_SOURCE_CAP)
+    )
+    return tuple(session.scalars(statement))[:LOCAL_AUTHORITY_SOURCE_CAP]
+
+
 def _load_manuscript(
     session: Session,
     *,
@@ -374,31 +515,24 @@ def _load_manuscript(
     timeline_limits: Mapping[UUID, int | None],
     diagnostics: _MutableDiagnostics,
 ) -> list[_AuthoritySource]:
-    canonical_documents = tuple(
-        session.scalars(
-            select(Document)
-            .outerjoin(
-                Volume,
-                and_(
-                    Volume.id == Document.volume_id,
-                    Volume.novel_id == Document.novel_id,
-                ),
-            )
-            .where(
-                Document.novel_id == request.novel_id,
-                Document.kind == "chapter",
-            )
-            .order_by(
-                case((Document.volume_id.is_(None), 1), else_=0),
-                Volume.position,
-                Document.position,
-                Document.id,
-            )
-        )
+    source_ids = _bounded_manuscript_source_ids(
+        session,
+        request=request,
+        timelines=timelines,
+        target_timeline_id=target_timeline_id,
+        timeline_limits=timeline_limits,
     )
+    if not source_ids:
+        return []
+    canonical_order = _canonical_document_order(request.novel_id)
     narrative_by_document_id = {
-        document.id: ordinal
-        for ordinal, document in enumerate(canonical_documents, start=1)
+        document_id: int(sequence)
+        for document_id, sequence in session.execute(
+            select(
+                canonical_order.c.document_id,
+                canonical_order.c.narrative_sequence,
+            ).where(canonical_order.c.document_id.in_(source_ids))
+        ).all()
     }
     rows = session.execute(
         select(Document, DocumentRevision)
@@ -417,6 +551,7 @@ def _load_manuscript(
         .where(
             Document.novel_id == request.novel_id,
             Document.kind == "chapter",
+            Document.id.in_(source_ids),
         )
         .order_by(
             case((Document.volume_id.is_(None), 1), else_=0),
@@ -424,15 +559,53 @@ def _load_manuscript(
             Document.position,
             Document.id,
         )
+        .limit(LOCAL_AUTHORITY_SOURCE_CAP)
     ).all()
     single_timeline = len(timelines) == 1
+    heads_by_revision_id: dict[UUID, RevisionTimelineMappingHead] = {}
+    segments_by_mapping_id: dict[UUID, list[RevisionTimelineMappingSegment]] = {}
+    if not single_timeline:
+        revision_ids = tuple(revision.id for _document, revision in rows)
+        heads = tuple(
+            session.scalars(
+                select(RevisionTimelineMappingHead).where(
+                    RevisionTimelineMappingHead.revision_id.in_(revision_ids),
+                    RevisionTimelineMappingHead.novel_id == request.novel_id,
+                )
+            )
+        )
+        heads_by_revision_id = {head.revision_id: head for head in heads}
+        mapping_revision_ids = tuple(
+            sorted(
+                {head.current_mapping_revision_id for head in heads},
+                key=str,
+            )
+        )
+        if mapping_revision_ids:
+            for segment in session.scalars(
+                select(RevisionTimelineMappingSegment)
+                .where(
+                    RevisionTimelineMappingSegment.mapping_revision_id.in_(
+                        mapping_revision_ids
+                    ),
+                    RevisionTimelineMappingSegment.novel_id == request.novel_id,
+                )
+                .order_by(
+                    RevisionTimelineMappingSegment.mapping_revision_id,
+                    RevisionTimelineMappingSegment.ordinal,
+                )
+            ):
+                segments_by_mapping_id.setdefault(
+                    segment.mapping_revision_id, []
+                ).append(segment)
     sources: list[_AuthoritySource] = []
+    selected_source_ids = set(source_ids)
     for document, revision in sorted(
         rows,
         key=lambda item: narrative_by_document_id.get(item[0].id, 2**63 - 1),
     ):
         narrative_sequence = narrative_by_document_id.get(document.id)
-        if narrative_sequence is None:
+        if document.id not in selected_source_ids or narrative_sequence is None:
             continue
         if document.novel_id != request.novel_id or revision.document_id != document.id:
             continue
@@ -465,7 +638,7 @@ def _load_manuscript(
             )
             continue
 
-        head = session.get(RevisionTimelineMappingHead, revision.id)
+        head = heads_by_revision_id.get(revision.id)
         if (
             head is None
             or head.novel_id != request.novel_id
@@ -475,15 +648,7 @@ def _load_manuscript(
             diagnostics.unmapped_revision_count += 1
             continue
         segments = tuple(
-            session.scalars(
-                select(RevisionTimelineMappingSegment)
-                .where(
-                    RevisionTimelineMappingSegment.mapping_revision_id
-                    == head.current_mapping_revision_id,
-                    RevisionTimelineMappingSegment.novel_id == request.novel_id,
-                )
-                .order_by(RevisionTimelineMappingSegment.ordinal)
-            )
+            segments_by_mapping_id.get(head.current_mapping_revision_id, ())
         )
         accepted_segment = False
         for segment in segments:
@@ -595,6 +760,10 @@ def _load_private_assets(
     request: LocalLexicalSearchRequest,
     diagnostics: _MutableDiagnostics,
 ) -> list[_AuthoritySource]:
+    similarity = func.similarity(
+        func.concat(PrivateAssetVersion.title, " ", PrivateAssetVersion.content),
+        request.query,
+    )
     rows = session.execute(
         select(NovelAssetBinding, PrivateAssetVersion)
         .join(
@@ -605,8 +774,14 @@ def _load_private_assets(
             NovelAssetBinding.novel_id == request.novel_id,
             NovelAssetBinding.lifecycle_state == "active",
             NovelAssetBinding.usage_policy != "prohibited",
+            similarity > request.minimum_score,
         )
-        .order_by(NovelAssetBinding.position, NovelAssetBinding.id)
+        .order_by(
+            similarity.desc(),
+            NovelAssetBinding.position,
+            NovelAssetBinding.id,
+        )
+        .limit(LOCAL_AUTHORITY_SOURCE_CAP)
     ).all()
     sources: list[_AuthoritySource] = []
     for binding, version in rows:
@@ -684,7 +859,8 @@ def _rank_sources(
     scored: list[LocalLexicalHit] = []
     candidate_chunk_count = 0
     below_threshold_count = 0
-    for source in sources:
+    exhausted = False
+    for source in sources[:LOCAL_AUTHORITY_SOURCE_CAP]:
         if (
             source.visibility is CandidateVisibility.AUTHOR_ONLY
             and request.perspective is not RetrievalPerspective.AUTHOR
@@ -704,6 +880,9 @@ def _rank_sources(
             renderer_version=V1_RENDERER_VERSION,
         )
         for chunk in chunk_rendered_source(rendered, chunker_version=V1_CHUNKER_VERSION):
+            if candidate_chunk_count >= LOCAL_AUTHORITY_CHUNK_CAP:
+                exhausted = True
+                break
             candidate_chunk_count += 1
             score = _lexical_score(request.query, chunk.text)
             if score <= request.minimum_score:
@@ -743,6 +922,8 @@ def _rank_sources(
                     usage_policy=source.usage_policy,
                 )
             )
+        if exhausted:
+            break
     scored.sort(
         key=lambda item: (
             -item.lexical_raw_score,
@@ -752,7 +933,7 @@ def _rank_sources(
             item.chunk_ordinal,
         )
     )
-    selected = tuple(scored[: request.top_k])
+    selected = tuple(scored[: min(request.top_k, LOCAL_AUTHORITY_FINAL_HIT_CAP)])
     return LocalLexicalResult(
         hits=selected,
         diagnostics=LocalLexicalDiagnostics(

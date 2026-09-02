@@ -1,0 +1,86 @@
+{
+  "base": {
+    "chapter_count": 2500,
+    "elapsed_ms": 1494.682,
+    "fact_count": 10000,
+    "historical_revision_count": 50,
+    "semantic_chunk_count": 7500,
+    "semantic_source_count": 2500,
+    "target_characters": 5000000
+  },
+  "churn": [
+    {
+      "current_query": {
+        "execution_ms": 131.662,
+        "planning_ms": 0.145,
+        "root_rows": 7500.0,
+        "scans": [
+          {
+            "actual_rows": 15000.0,
+            "index": null,
+            "node_type": "Seq Scan",
+            "relation": "semantic_chunks",
+            "rows_removed_by_filter": 0,
+            "shared_hit_blocks": 1819,
+            "shared_read_blocks": 0
+          },
+          {
+            "actual_rows": 2500.0,
+            "index": null,
+            "node_type": "Seq Scan",
+            "relation": "semantic_sources",
+            "rows_removed_by_filter": 2500,
+            "shared_hit_blocks": 267,
+            "shared_read_blocks": 0
+          }
+        ]
+      },
+      "current_source_count": 2500,
+      "factor": 1,
+      "observed_retired_source_count": 2500,
+      "retired_chunk_count": 7500,
+      "retired_source_count": 2500,
+      "seed_ms": 291.254,
+      "total_chunk_count": 15000,
+      "total_source_count": 5000
+    },
+    {
+      "current_query": {
+        "execution_ms": 136.604,
+        "planning_ms": 0.129,
+        "root_rows": 7500.0,
+        "scans": [
+          {
+            "actual_rows": 82500.0,
+            "index": null,
+            "node_type": "Seq Scan",
+            "relation": "semantic_chunks",
+            "rows_removed_by_filter": 0,
+            "shared_hit_blocks": 8637,
+            "shared_read_blocks": 0
+          },
+          {
+            "actual_rows": 2500.0,
+            "index": null,
+            "node_type": "Seq Scan",
+            "relation": "semantic_sources",
+            "rows_removed_by_filter": 25000,
+            "shared_hit_blocks": 1457,
+            "shared_read_blocks": 0
+          }
+        ]
+      },
+      "current_source_count": 2500,
+      "factor": 10,
+      "observed_retired_source_count": 25000,
+      "retired_chunk_count": 75000,
+      "retired_source_count": 25000,
+      "seed_ms": 2112.878,
+      "total_chunk_count": 82500,
+      "total_source_count": 27500
+    }
+  ],
+  "database_name": "ai_novel_world_2026_plan52_test",
+  "provider_calls": 0,
+  "schema_version": "plan52-g0-churn-evidence/1"
+}

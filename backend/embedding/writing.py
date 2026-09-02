@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from ..creative_data_models import (
@@ -29,9 +29,8 @@ from .contracts import (
     SemanticPerspective,
     SemanticSearchRequest,
 )
+from .retrieval import WRITING_RETRIEVAL_POLICY_VERSION
 
-
-WRITING_RETRIEVAL_POLICY_VERSION = "writing-retrieval/2"
 
 _NON_DEGRADABLE_RETRIEVAL_CODES = frozenset(
     {
@@ -63,35 +62,44 @@ class WritingPosition:
 def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosition:
     """Resolve the independent narrative/story coordinates without guessing."""
 
-    document = session.get(Document, document_id)
-    if document is None or document.kind != "chapter":
-        raise ValueError("chapter document is required")
-    ordered_document_ids = tuple(
-        session.scalars(
-            select(Document.id)
-            .outerjoin(
-                Volume,
-                and_(
-                    Volume.id == Document.volume_id,
-                    Volume.novel_id == Document.novel_id,
+    ranked_chapters = (
+        select(
+            Document.id.label("document_id"),
+            Document.novel_id,
+            Document.title,
+            func.row_number()
+            .over(
+                partition_by=Document.novel_id,
+                order_by=(
+                    case((Document.volume_id.is_(None), 1), else_=0),
+                    Volume.position,
+                    Document.position,
+                    Document.id,
                 ),
             )
-            .where(
-                Document.novel_id == document.novel_id,
-                Document.kind == "chapter",
-            )
-            .order_by(
-                case((Document.volume_id.is_(None), 1), else_=0),
-                Volume.position,
-                Document.position,
-                Document.id,
-            )
+            .label("narrative_sequence"),
         )
+        .outerjoin(
+            Volume,
+            and_(
+                Volume.id == Document.volume_id,
+                Volume.novel_id == Document.novel_id,
+            ),
+        )
+        .where(Document.kind == "chapter")
+        .subquery()
     )
-    try:
-        narrative_sequence = ordered_document_ids.index(document.id) + 1
-    except ValueError as error:
-        raise ValueError("chapter document is outside its canonical novel tree") from error
+    document = session.execute(
+        select(
+            ranked_chapters.c.document_id,
+            ranked_chapters.c.novel_id,
+            ranked_chapters.c.title,
+            ranked_chapters.c.narrative_sequence,
+        ).where(ranked_chapters.c.document_id == document_id)
+    ).one_or_none()
+    if document is None:
+        raise ValueError("chapter document is required")
+    narrative_sequence = int(document.narrative_sequence)
     display_title = context_chapter_title(document.title, narrative_sequence)
     timelines = tuple(
         session.scalars(
@@ -104,14 +112,14 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
     if len(timelines) == 1:
         return WritingPosition(
             novel_id=document.novel_id,
-            document_id=document.id,
+            document_id=document.document_id,
             title=display_title,
             narrative_sequence=narrative_sequence,
             timeline_id=timelines[0].id,
             story_sequence_cutoff=narrative_sequence,
             mapping_version="single-timeline-identity/1",
         )
-    working = session.get(DocumentWorkingCopy, document.id)
+    working = session.get(DocumentWorkingCopy, document.document_id)
     head = (
         session.get(RevisionTimelineMappingHead, working.base_revision_id)
         if working is not None and working.base_revision_id is not None
@@ -141,7 +149,7 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
         )
     return WritingPosition(
         novel_id=document.novel_id,
-        document_id=document.id,
+        document_id=document.document_id,
         title=display_title,
         narrative_sequence=narrative_sequence,
         timeline_id=next(iter(timeline_ids)),
@@ -199,7 +207,10 @@ def _degraded_snapshot(reason: str) -> dict[str, Any]:
     return {
         "schema_version": "writing-retrieval-snapshot/1",
         "retrieval_policy_version": WRITING_RETRIEVAL_POLICY_VERSION,
-        "mode": "lexical_only",
+        # An exception here means neither indexed retrieval nor the authority
+        # fallback returned evidence.  Never report lexical execution merely
+        # because that fallback exists as a configured capability.
+        "mode": "context_only",
         "generation_id": None,
         "index_version": None,
         "hits": [],
@@ -273,7 +284,10 @@ async def retrieve_for_writing(
         "retrieval_policy_version": result.get(
             "retrieval_policy_version", WRITING_RETRIEVAL_POLICY_VERSION
         ),
-        "mode": result.get("mode", "lexical_only"),
+        # ``semantic_search`` reports lexical_only only after its local or
+        # indexed lexical channel actually ran.  A missing mode is no evidence
+        # that either channel executed.
+        "mode": result.get("mode") or "context_only",
         "generation_id": result.get("generation_id"),
         "index_version": result.get("index_version"),
         "hits": result.get("hits", []),

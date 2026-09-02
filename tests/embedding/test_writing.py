@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -29,6 +30,16 @@ class _Session:
         if "story_timelines" in sql:
             return (self.timeline,)
         return self.ordered_document_ids
+
+    def execute(self, _statement: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            one_or_none=lambda: SimpleNamespace(
+                document_id=self.target.id,
+                novel_id=self.target.novel_id,
+                title=self.target.title,
+                narrative_sequence=self.ordered_document_ids.index(self.target.id) + 1,
+            )
+        )
 
 
 def test_writing_position_uses_canonical_ordinal_and_derived_non_empty_title() -> None:

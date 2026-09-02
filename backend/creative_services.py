@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -70,6 +71,7 @@ from .models import (
     Volume,
 )
 from .model_execution import ModelEvidencePolicyError, candidate_actual_identity
+from .retrieval_summary import retrieval_summary
 from .private_library import UsagePolicy, create_asset, get_asset, update_asset
 from .relationship_contracts import (
     RELATIONSHIP_DIRECTIONALITIES,
@@ -114,6 +116,9 @@ from .story_state.revisions import (
     CharacterInstanceProfileV2,
     save_character_instance_profile,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 PRIVATE_ASSET_TYPES = {"plot", "writing_style", "vocabulary", "idea"}
@@ -376,11 +381,31 @@ def complete_novel_creation_draft(
         novel.id,
         expected_story_ledger_version=novel.story_ledger_version,
     )
+    from .embedding.consent_service import prepare_new_novel_default_consent
+
+    consent_preparation = prepare_new_novel_default_consent(
+        session,
+        novel_id=novel.id,
+        owner_id=novel.owner_id,
+        workspace_id=novel.workspace_id,
+    )
     draft.state = "completed"
     draft.step = 6
     draft.completed_novel_id = novel.id
     draft.version += 1
     session.commit()
+    if consent_preparation.enqueue_after_commit:
+        from .embedding.consent_service import enqueue_new_novel_index_after_commit
+
+        try:
+            enqueue_new_novel_index_after_commit(session, consent_preparation)
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception(
+                "new novel semantic index enqueue failed",
+                extra={"novel_id": str(novel.id)},
+            )
     return {"draft": _creation_draft_payload(draft), "novel": get_novel(session, novel.id)}
 
 
@@ -2547,7 +2572,7 @@ def _character_profile_jobs(
         )
         .limit(30)
     ).all()
-    return [_creative_job_payload(job) for job in jobs]
+    return [_creative_job_payload(job, include_snapshot=True) for job in jobs]
 
 
 def get_character_profile_completion_status(
@@ -2618,7 +2643,7 @@ def get_character_profile_completion_status(
         "source_summary": source_summary,
         "job": (
             {
-                **job,
+                **{key: value for key, value in job.items() if key != "input_snapshot"},
                 "requested_model": job.get("requested_model_id"),
                 "actual_model": job.get("actual_model_id"),
             }
@@ -2745,7 +2770,7 @@ def apply_character_profile_completion(
             dict(job.output_json or {}),
             decisions=normalized_decisions,
             current_characters=current_records,
-            job=_creative_job_payload(job),
+                job=_creative_job_payload(job, include_snapshot=True),
         )
     except CharacterProfileValidationError as error:
         if "版本冲突" in str(error) or "已过期" in str(error):
@@ -4354,8 +4379,12 @@ def complete_chapter_creation_draft(
     return {"draft": _chapter_draft_payload(draft), "document": get_document(session, document.id)}
 
 
-def _creative_job_payload(job: CreativeGenerationJob) -> dict[str, Any]:
-    return {
+def _creative_job_payload(
+    job: CreativeGenerationJob,
+    *,
+    include_snapshot: bool = False,
+) -> dict[str, Any]:
+    payload = {
         "id": str(job.id),
         "scope_type": job.scope_type,
         "scope_id": str(job.scope_id),
@@ -4364,7 +4393,6 @@ def _creative_job_payload(job: CreativeGenerationJob) -> dict[str, Any]:
         "kind": job.kind,
         "state": job.state,
         "input_hash": job.input_hash,
-        "input_snapshot": job.input_snapshot,
         "execution_agent_id": job.execution_agent_id,
         "requested_provider_id": job.requested_provider_id,
         "requested_model_id": job.requested_model_id,
@@ -4381,7 +4409,13 @@ def _creative_job_payload(job: CreativeGenerationJob) -> dict[str, Any]:
         "failure_message": job.failure_message,
         "created_at": _iso(job.created_at),
         "completed_at": _iso(job.completed_at),
+        "retrieval_summary": retrieval_summary(
+            (job.input_snapshot or {}).get("writing_retrieval")
+        ),
     }
+    if include_snapshot:
+        payload["input_snapshot"] = job.input_snapshot
+    return payload
 
 
 def _selection_edit_validation_message(error: PydanticValidationError) -> str:
@@ -4877,7 +4911,7 @@ def start_creative_generation(
             .order_by(CreativeGenerationJob.created_at.desc(), CreativeGenerationJob.id.desc())
         )
         if running is not None:
-            payload = _creative_job_payload(running)
+            payload = _creative_job_payload(running, include_snapshot=True)
             payload["should_execute"] = False
             return payload
     _lock_generation_attempt(
@@ -4897,7 +4931,7 @@ def start_creative_generation(
         .order_by(CreativeGenerationJob.attempt.desc())
     )
     if existing and not force_new and existing.state in {"running", "ready"}:
-        payload = _creative_job_payload(existing)
+        payload = _creative_job_payload(existing, include_snapshot=True)
         payload["should_execute"] = False
         return payload
     if existing:
@@ -4921,7 +4955,7 @@ def start_creative_generation(
     )
     session.add(job)
     session.commit()
-    payload = _creative_job_payload(job)
+    payload = _creative_job_payload(job, include_snapshot=True)
     payload["should_execute"] = True
     return payload
 

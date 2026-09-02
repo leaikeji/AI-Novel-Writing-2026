@@ -249,6 +249,8 @@ class ContextAssemblyErrorCode(str, Enum):
     TIMELINE_REQUIRED = "timeline_required"
     TIMELINE_MAPPING_REQUIRED = "timeline_mapping_required"
     CONTEXT_OVERFLOW = "context_overflow"
+    CONTEXT_SCOPE_UNRESOLVED = "context_scope_unresolved"
+    CONTEXT_SELECTION_INCOMPLETE = "context_selection_incomplete"
 
 
 class ContextAssemblyError(ValueError):
@@ -276,6 +278,7 @@ class OmissionCode(str, Enum):
     AMBIGUOUS = "ambiguous"
     PROHIBITED = "prohibited"
     BUDGET_OMITTED = "budget_omitted"
+    SELECTION_CAP_OMITTED = "selection_cap_omitted"
 
 
 class ContextOmissionV2(_StrictModel):
@@ -380,6 +383,11 @@ class NovelContextAssemblySnapshotV4(_StrictModel):
     event_links: tuple[StoryEventLinkRecord, ...] = ()
     source_revision_validity: dict[UUID, bool] = Field(default_factory=dict)
     blocks: tuple[ContextBlockV2, ...] = ()
+    # Persistence adapters may impose a stricter, versioned source-selection
+    # ceiling.  ``None`` preserves the original pure-assembler contract for
+    # historical snapshots and non-production callers.
+    max_final_story_facts: int | None = Field(default=None, ge=1)
+    preselection_omissions: tuple[ContextOmissionV2, ...] = ()
 
     @model_validator(mode="after")
     def validate_token_estimator(self) -> "NovelContextAssemblySnapshotV4":

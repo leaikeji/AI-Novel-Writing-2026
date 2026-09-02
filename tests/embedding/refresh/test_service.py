@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from backend.creative_data_models import (
     EmbeddingGenerationNovel,
@@ -17,6 +18,8 @@ from backend.embedding.refresh import (
     RefreshBuildState,
     RefreshRequest,
     RefreshServiceError,
+    SqlAlchemyRefreshStore,
+    gc_obsolete_active_generation_data,
 )
 
 
@@ -379,3 +382,105 @@ def test_service_never_owns_commit_or_cloud_transport() -> None:
     assert ".commit(" not in source
     assert "DashScope" not in source
     assert "httpx" not in source
+
+
+class _AggregateResult:
+    def __init__(self, row: tuple[int, ...]) -> None:
+        self.row = row
+
+    def one(self) -> tuple[int, ...]:
+        return self.row
+
+
+class _AggregateSession:
+    def __init__(self, rows: list[tuple[int, ...]]) -> None:
+        self.rows = rows
+        self.sql: list[str] = []
+
+    def execute(self, statement: object) -> _AggregateResult:
+        self.sql.append(str(statement))
+        return _AggregateResult(self.rows.pop(0))
+
+
+def test_sql_store_counts_with_aggregates_without_materializing_ids() -> None:
+    refresh = SemanticSourceRefresh(
+        id=uuid4(),
+        generation_id=uuid4(),
+        novel_id=uuid4(),
+        source_type="chapter_revision",
+        source_entity_id=uuid4(),
+        source_revision_id=uuid4(),
+        target_content_hash=HASH_A,
+        request_digest=HASH_B,
+        state="building",
+        pending_source_id=uuid4(),
+    )
+    session = _AggregateSession([(2, 2, 0), (3, 3), (4, 7, 7)])
+    store = SqlAlchemyRefreshStore(session)  # type: ignore[arg-type]
+
+    evidence = store.refresh_build_state(refresh)
+    counts = store.current_index_counts(refresh.generation_id, refresh.novel_id)
+
+    assert evidence == RefreshBuildState(2, 2, 0, 3, 3)
+    assert counts == (4, 7, 7)
+    assert len(session.sql) == 3
+    assert all("count(" in statement.lower() for statement in session.sql)
+    assert "SELECT semantic_chunks.id" not in "\n".join(session.sql)
+    assert "SELECT semantic_sources.id" not in "\n".join(session.sql)
+
+
+class _GcSession:
+    def __init__(self) -> None:
+        self.source_id = uuid4()
+        self.batch_id = uuid4()
+        self.sql: list[str] = []
+        self.flush_count = 0
+
+    def _sql(self, statement: object) -> str:
+        return str(
+            statement.compile(  # type: ignore[attr-defined]
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+
+    def scalar(self, statement: object) -> int:
+        self.sql.append(self._sql(statement))
+        return 1
+
+    def scalars(self, statement: object) -> tuple[UUID, ...]:
+        sql = self._sql(statement)
+        self.sql.append(sql)
+        if "semantic_sources" in sql and "FOR UPDATE" in sql:
+            return (self.source_id,)
+        return (self.batch_id,)
+
+    def execute(self, statement: object) -> _AggregateResult:
+        self.sql.append(self._sql(statement))
+        if str(statement).lstrip().startswith("SELECT"):
+            return _AggregateResult((3, 3))
+        return _AggregateResult(())
+
+    def flush(self) -> None:
+        self.flush_count += 1
+
+
+def test_gc_is_active_generation_only_bounded_and_reference_safe() -> None:
+    session = _GcSession()
+    generation_id = uuid4()
+
+    result = gc_obsolete_active_generation_data(
+        session,  # type: ignore[arg-type]
+        generation_id=generation_id,
+    )
+
+    assert result.source_count == 1
+    assert result.chunk_count == result.embedding_count == 3
+    assert result.preserved_batch_count == 1
+    candidate_sql = next(sql for sql in session.sql if "FOR UPDATE" in sql)
+    assert "LIMIT 500" in candidate_sql
+    assert "semantic_sources.status IN ('invalid', 'retired')" in candidate_sql
+    assert "semantic_source_refreshes" in candidate_sql
+    assert "embedding_index_batches" in candidate_sql
+    assert "background_jobs" in candidate_sql
+    assert session.flush_count == 1

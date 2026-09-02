@@ -622,6 +622,12 @@ export function ensureNovelStyles(): void {
     .anw-assistant-pane-inner { position:relative; box-sizing:border-box; min-height:0; height:100%; }
     .anw-assistant-pane-inner.has-status-bar { padding-top:88px; }
     .anw-assistant-pane-inner > :first-child { min-height:0; height:100%; }
+    .anw-assistant-pane .qwenpaw-chat-anywhere-layout-right-header { min-width:0; overflow:hidden; }
+    .anw-assistant-pane .qwenpaw-chat-anywhere-default-header-right { width:100%; min-width:0; overflow:hidden; }
+    .anw-assistant-pane .qwenpaw-chat-anywhere-default-header-right > :first-child { min-width:0; flex:1 1 0; overflow:hidden; }
+    .anw-assistant-pane .qwenpaw-sender-actions-list { width:100%; min-width:0; }
+    .anw-assistant-pane .qwenpaw-sender-actions-list > :nth-child(2) { min-width:0; flex:1 1 0; }
+    .anw-assistant-pane .qwenpaw-sender-actions-list > :nth-child(2) > :nth-child(2) { min-width:40px; flex:1 1 0; }
     .anw-assistant-context-status-slot { position:absolute; z-index:4; top:0; right:0; left:0; box-sizing:border-box; height:88px; border-bottom:1px solid #eceef1; padding-right:54px; background:rgba(255,255,255,.98); }
     .anw-assistant-context-status { display:grid; height:100%; align-content:center; gap:4px; overflow:hidden; padding:9px 48px 9px 14px; color:#6d727a; }
     .anw-assistant-context-status-main { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }

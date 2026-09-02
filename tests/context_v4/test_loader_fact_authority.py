@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import UUID
 
-from backend import context_v3_loader, context_v4_loader
+from backend import context_v4_loader
 from backend.models import DerivedSourceBinding, IntelligenceCommitBatch
 
 
@@ -61,13 +61,6 @@ class _AuthoritySession:
         if entity is IntelligenceCommitBatch:
             return self.batches
         raise AssertionError(f"unexpected authority query: {entity}")
-
-
-def test_context_v3_and_v4_reuse_one_fact_authority_adapter() -> None:
-    assert (
-        context_v3_loader._load_effective_story_fact_rows
-        is context_v4_loader._load_effective_story_fact_rows
-    )
 
 
 def test_fact_binding_validity_is_fact_specific_with_shared_revision() -> None:
@@ -129,4 +122,31 @@ def test_reverted_batch_supersedes_and_lifecycle_use_shared_resolver() -> None:
 
     assert [fact.id for fact in included] == [replacement.id]
     assert source_validity == {source_revision_id: True}
+    assert session.loaded_entities == [DerivedSourceBinding, IntelligenceCommitBatch]
+
+
+def test_missing_owning_batch_fails_closed_in_context_loader() -> None:
+    source_revision_id = _uid(120)
+    missing_batch_id = _uid(220)
+    fact = _fact(30, source_revision_id=source_revision_id)
+    session = _AuthoritySession(
+        [
+            _binding(
+                fact.id,
+                source_revision_id,
+                "current",
+                commit_batch_id=missing_batch_id,
+            )
+        ],
+        [],
+    )
+
+    included, source_validity = context_v4_loader._load_effective_story_fact_rows(
+        session,  # type: ignore[arg-type]
+        [fact],
+        [],
+    )
+
+    assert included == ()
+    assert source_validity == {}
     assert session.loaded_entities == [DerivedSourceBinding, IntelligenceCommitBatch]

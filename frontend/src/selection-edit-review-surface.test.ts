@@ -211,6 +211,32 @@ describe("SelectionEditReviewSurface reviewing state", () => {
       .toHaveLength(1);
   });
 
+  it("attaches the retrieval status to an applicable selection review", () => {
+    const harness = createReactHarness();
+    const Surface = createSelectionEditReviewSurface(harness.React);
+    const tree = harness.render(Surface, {
+      state: reviewState(),
+      onAction: vi.fn(),
+      retrievalNovelId: "novel-1",
+      retrievalSummary: {
+        schema_version: "retrieval-summary/1",
+        outcome: "no_hit",
+        mode: "context_only",
+        reason_code: "no_hit",
+        hit_count: 0,
+        index_state: "ready",
+      },
+    });
+    const status = findAll(tree, (element) => (
+      typeof element.type === "function"
+      && (element.props as Record<string, unknown>).novelId === "novel-1"
+    ));
+    expect(status).toHaveLength(1);
+    expect(status[0].props).toMatchObject({
+      summary: { mode: "context_only", outcome: "no_hit" },
+    });
+  });
+
   it.each([
     ["polish", "AI 润色审阅"],
     ["rewrite", "AI 改写审阅"],

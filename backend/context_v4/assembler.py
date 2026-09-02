@@ -63,6 +63,7 @@ _OMISSION_EXPLANATIONS: dict[OmissionCode, str] = {
     OmissionCode.AMBIGUOUS: "故事事实缺少可比较位置或有效来源依据。",
     OmissionCode.PROHIBITED: "上下文策略明确禁止使用该完整块。",
     OmissionCode.BUDGET_OMITTED: "完整逻辑块无法放入真实模型输入预算，未做静默截断。",
+    OmissionCode.SELECTION_CAP_OMITTED: "候选超过版本化选择上限，已保留更接近当前写作位置的记录。",
 }
 
 
@@ -72,6 +73,18 @@ class _OmissionAccumulator:
     source_ids: set[UUID] = field(default_factory=set)
     block_ids: set[UUID] = field(default_factory=set)
     estimated_tokens: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedContextScope:
+    """Pure, comparable scope shared by selection and final assembly."""
+
+    timeline: StoryTimelineRecord
+    position: StoryPositionV3
+    mapping_kind: TimelineMappingKind
+    mapping_version: str
+    inheritance_path: tuple[UUID, ...]
+    story_limits: Mapping[UUID, int]
 
 
 def _add_omission(
@@ -150,7 +163,8 @@ def _resolve_position(
     elif (
         len(active) == 1
         and position.story_sequence_cutoff == position.narrative_sequence
-        and position.timeline_mapping_version is None
+        and position.timeline_mapping_version
+        in {None, SINGLE_TIMELINE_MAPPING_VERSION}
     ):
         cutoff = position.story_sequence_cutoff
         mapping_kind = TimelineMappingKind.SINGLE_TIMELINE_IDENTITY
@@ -203,6 +217,34 @@ def _timeline_limits(
         current_limit = min(current_limit, current.fork_story_sequence)
         current = by_id[current.parent_timeline_id]
     return tuple(reversed(target_to_root)), limits
+
+
+def resolve_context_scope(
+    snapshot: NovelContextAssemblySnapshotV4,
+) -> ResolvedContextScope:
+    """Resolve exactly the scope rules used by :func:`assemble_novel_context`.
+
+    Database adapters call this before selecting source IDs so they cannot
+    drift from the pure assembler's timeline and cutoff semantics.
+    """
+
+    validate_inheritance_dag(snapshot.timelines, snapshot.novel_id)
+    resolved, position, mapping_kind, mapping_version = _resolve_position(snapshot)
+    assert position.story_sequence_cutoff is not None
+    inheritance_path, story_limits = _timeline_limits(
+        snapshot.timelines,
+        novel_id=snapshot.novel_id,
+        timeline_id=resolved.id,
+        story_cutoff=position.story_sequence_cutoff,
+    )
+    return ResolvedContextScope(
+        timeline=resolved,
+        position=position,
+        mapping_kind=mapping_kind,
+        mapping_version=mapping_version,
+        inheritance_path=inheritance_path,
+        story_limits=story_limits,
+    )
 
 
 def _visible(
@@ -259,7 +301,10 @@ def _narrative_allows(
 ) -> bool:
     if purpose in {RetrievalPurpose.CHAPTER_BODY, RetrievalPurpose.CHAPTER_OUTLINE}:
         return source_sequence < target_sequence
-    return source_sequence <= target_sequence
+    # Review and selection contexts may use the loader's bounded four-before /
+    # four-after evidence window.  The persistence selector, not an unbounded
+    # pure snapshot scan, owns that versioned adjacency policy.
+    return True
 
 
 def _eligible_blocks(
@@ -482,15 +527,14 @@ def assemble_novel_context(
     omissions: dict[OmissionCode, _OmissionAccumulator] = defaultdict(
         _OmissionAccumulator
     )
-    validate_inheritance_dag(snapshot.timelines, snapshot.novel_id)
-    resolved, position, mapping_kind, mapping_version = _resolve_position(snapshot)
+    scope = resolve_context_scope(snapshot)
+    resolved = scope.timeline
+    position = scope.position
+    mapping_kind = scope.mapping_kind
+    mapping_version = scope.mapping_version
+    inheritance_path = scope.inheritance_path
+    story_limits = scope.story_limits
     assert position.story_sequence_cutoff is not None
-    inheritance_path, story_limits = _timeline_limits(
-        snapshot.timelines,
-        novel_id=snapshot.novel_id,
-        timeline_id=resolved.id,
-        story_cutoff=position.story_sequence_cutoff,
-    )
     fact_inputs = _fact_inputs(
         snapshot,
         story_cutoff=position.story_sequence_cutoff,
@@ -505,6 +549,20 @@ def assemble_novel_context(
         event_links=snapshot.event_links,
         source_revision_validity=snapshot.source_revision_validity,
     )
+    if (
+        snapshot.max_final_story_facts is not None
+        and len(projection.visible_facts) > snapshot.max_final_story_facts
+    ):
+        raise ContextAssemblyError(
+            ContextAssemblyErrorCode.CONTEXT_SELECTION_INCOMPLETE,
+            "visible story facts exceed the proven final selection boundary",
+            details={
+                "resource": "story_facts",
+                "candidate_count": len(fact_inputs),
+                "selected_count": len(projection.visible_facts),
+                "cap": snapshot.max_final_story_facts,
+            },
+        )
     _fact_omissions(
         fact_inputs,
         projection=projection,
@@ -538,7 +596,7 @@ def assemble_novel_context(
         visible_story_facts=projection.visible_facts,
         included_blocks=included,
         diagnostics=ContextDiagnosticsV2(
-            omissions=_omission_records(omissions),
+            omissions=(*snapshot.preselection_omissions, *_omission_records(omissions)),
             conflicts=tuple(
                 ContextConflictV2(
                     conflict_key=item.conflict_key,

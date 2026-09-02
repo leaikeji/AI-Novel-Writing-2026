@@ -167,6 +167,41 @@ def test_chapter_prompt_enforces_current_acceptance_window() -> None:
             ],
             "story_facts": [],
             "private_assets": [],
+            "writing_context": {
+                "assembly_hash": "a" * 64,
+                "context_policy_version": "context-source-policy/1",
+                "envelope": {
+                    "chapter_timeline": {
+                        "timeline_key": "main",
+                        "narrative_sequence": 4,
+                        "story_sequence_cutoff": 3,
+                    },
+                    "included_blocks": [
+                        {
+                            "block_id": "brief-block",
+                            "section": "chapter_requirements",
+                            "source_kind": "chapter_brief",
+                            "source_id": "chapter-4",
+                            "title": "章前要求",
+                            "content": "推进防汛主线；人物核对值班表。",
+                            "requirement": "required",
+                            "priority": 0,
+                        },
+                        {
+                            "block_id": "draft-block",
+                            "section": "manuscript",
+                            "source_kind": "current_chapter_draft",
+                            "source_id": "chapter-4",
+                            "title": "当前章旧稿",
+                            "content": "旧稿内容。",
+                            "requirement": "preferred",
+                            "priority": 0,
+                        },
+                    ],
+                    "diagnostics": {"omissions": []},
+                    "budget": {},
+                },
+            },
         }
     prompt = build_chapter_generation_prompt(snapshot)
 
@@ -208,6 +243,28 @@ def test_chapter_prompt_enforces_current_acceptance_window() -> None:
     assert "最终完整正文仍必须落入 2125—2875 的硬范围" in retry_prompt
     assert "不要删除必要转折或截断结尾" in retry_prompt
     assert "job-overlong" not in retry_prompt
+
+
+def test_chapter_prompt_fails_closed_without_v4_or_with_budget_hash_drift() -> None:
+    snapshot = {
+        "novel": {"title": "长篇小说"},
+        "chapter": {"document_id": "chapter-1", "title": "第一章"},
+        "brief": {"target_word_count": 1000},
+    }
+    with pytest.raises(Exception, match="Context V4"):
+        build_chapter_generation_prompt(snapshot)
+
+    snapshot["writing_context"] = {
+        "envelope": {
+            "included_blocks": [],
+            "chapter_timeline": {},
+            "diagnostics": {"omissions": []},
+            "budget": {},
+        }
+    }
+    snapshot["prompt_budget_ledger"] = {"final_prompt_hash": "0" * 64}
+    with pytest.raises(Exception, match="预算账本不一致"):
+        build_chapter_generation_prompt(snapshot)
 
 
 def test_reply_audit_reads_actual_provider_usage_metadata() -> None:

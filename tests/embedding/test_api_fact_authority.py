@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -157,16 +156,6 @@ def character_scope() -> KnowledgeProjectionScope:
     )
 
 
-def story_fact_source(fact: StoryFact) -> SimpleNamespace:
-    return SimpleNamespace(
-        status="current",
-        source_type="story_fact",
-        source_entity_id=fact.id,
-        source_revision_id=fact.source_revision_id,
-        novel_id=fact.novel_id,
-    )
-
-
 def test_known_visibility_resolves_mixed_same_revision_bindings_per_fact() -> None:
     accepted = knowledge_fact(100, key="secret:accepted", source_revision_id=50)
     invalid = knowledge_fact(101, key="secret:invalid", source_revision_id=50)
@@ -272,7 +261,7 @@ def test_story_fact_semantic_source_uses_commit_batch_state(
         },
     )
 
-    assert api._source_is_current(session, story_fact_source(fact)) is expected
+    assert (fact.id in api._included_story_fact_ids(session, (fact,))) is expected
 
 
 def test_story_fact_semantic_source_uses_incoming_supersedes() -> None:
@@ -287,4 +276,4 @@ def test_story_fact_semantic_source_uses_incoming_supersedes() -> None:
         },
     )
 
-    assert api._source_is_current(session, story_fact_source(fact)) is False
+    assert fact.id not in api._included_story_fact_ids(session, (fact,))

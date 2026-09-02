@@ -1,7 +1,9 @@
 from .assembler import (
+    ResolvedContextScope,
     assemble_novel_context,
     freeze_writing_context,
     freeze_writing_context_v2,
+    resolve_context_scope,
 )
 from .contracts import (
     CONTEXT_SECTION_ORDER,
@@ -65,7 +67,9 @@ __all__ = [
     "TimelineMappingKind",
     "WritingContextSnapshotV1",
     "WritingContextSnapshotV2",
+    "ResolvedContextScope",
     "assemble_novel_context",
     "freeze_writing_context",
     "freeze_writing_context_v2",
+    "resolve_context_scope",
 ]

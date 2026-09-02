@@ -456,7 +456,7 @@ def test_sync_progress_incrementally_materializes_relationships_and_respects_man
 ) -> None:
     novel = create_novel(session, "pytest-同步进展关系网")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     source = create_novel_character(
         session,
         novel_id,
@@ -566,7 +566,7 @@ def test_sync_progress_can_create_the_first_relationship_atomically_and_idempote
 ) -> None:
     novel = create_novel(session, "pytest-同步进展首条关系")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     source = create_novel_character(
         session,
         novel_id,
@@ -768,7 +768,7 @@ def test_intelligence_commit_concurrent_same_operation_replays_once(
 ) -> None:
     novel = create_novel(session, "pytest-情报提交并发幂等")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     saved = save_draft(
         session,
         document_id,
@@ -847,7 +847,7 @@ def test_incremental_relationship_visibility_tracks_source_revision_and_manual_o
 ) -> None:
     novel = create_novel(session, "pytest-同步关系来源有效性")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     source = create_novel_character(
         session,
         novel_id,
@@ -983,7 +983,7 @@ def test_sync_progress_rejects_an_unknown_new_relationship_character_key_without
 ) -> None:
     novel = create_novel(session, "pytest-同步进展关系越权")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     create_novel_character(
         session,
         novel_id,
@@ -1057,7 +1057,7 @@ def test_sync_progress_counts_a_new_relationship_once_when_two_events_share_it(
 ) -> None:
     novel = create_novel(session, "pytest-同步进展关系计数")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     source = create_novel_character(
         session,
         novel_id,
@@ -1159,7 +1159,7 @@ def test_sync_progress_revalidates_relationship_instances_against_the_timeline(
 ) -> None:
     novel_payload = create_novel(session, "pytest-同步进展时间线重验")
     novel_id = UUID(novel_payload["id"])
-    document_id = UUID(novel_payload["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel_payload["initial_document_id"])
     source = create_novel_character(
         session,
         novel_id,
@@ -1285,7 +1285,7 @@ def test_sync_progress_retries_a_stale_running_proposal(
     session: Session,
 ) -> None:
     novel = create_novel(session, "pytest-同步进展超时恢复")
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     saved = save_draft(
         session,
         document_id,
@@ -1679,8 +1679,8 @@ def test_relationship_graph_is_versioned_atomic_and_layout_persistent(
 def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
     novel = create_novel(session, "pytest-CAS小说")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
-    assert novel["tree"][0]["documents"][0]["version_state"] == "empty_draft"
+    document_id = UUID(novel["initial_document_id"])
+    assert get_document(session, document_id)["version_state"] == "empty_draft"
 
     first_save = save_draft(
         session,
@@ -1734,15 +1734,19 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
     context = get_novel_context(session, novel_id, document_id=document_id)
     assert context["novel"]["title"] == "pytest-CAS小说"
     assert context["documents"][-1]["base_revision_id"] == restored["revision"]["id"]
-    assert context["retrieval"].startswith("deterministic/context-v3")
+    assert context["retrieval"].startswith("deterministic/context-v4")
+    assert context["context_v4"]["schema_version"] == "writing-context-snapshot/2"
+    assert "context_v3" not in context
 
 
 def test_create_novel_is_ready_to_write(session: Session) -> None:
     novel = create_novel(session, "pytest-开箱即写")
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     document = get_document(session, document_id)
 
-    assert novel["tree"][0]["title"] == ""
+    assert session.scalar(
+        select(Volume.title).where(Volume.novel_id == novel_id)
+    ) == ""
     assert document["title"] == ""
     assert document["draft_version"] == 1
     assert document["revisions"][0]["revision_number"] == 1
@@ -1965,7 +1969,7 @@ def test_chapter_name_commit_survives_post_commit_index_refresh_failure(
 ) -> None:
     novel = create_novel(session, "pytest-章名刷新失败隔离")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
 
     def fail_refresh(*_args: object, **_kwargs: object) -> bool:
         raise RuntimeError("synthetic post-commit refresh failure")
@@ -1995,9 +1999,12 @@ def test_novel_scoped_queries_and_commands_never_cross_books(session: Session) -
     second = create_novel(session, "pytest-隔离乙")
     first_id = UUID(first["id"])
     second_id = UUID(second["id"])
-    first_document_id = UUID(first["tree"][0]["documents"][0]["id"])
-    second_document_id = UUID(second["tree"][0]["documents"][0]["id"])
-    second_volume_id = UUID(second["tree"][0]["id"])
+    first_document_id = UUID(first["initial_document_id"])
+    second_document_id = UUID(second["initial_document_id"])
+    second_volume_id = session.scalar(
+        select(Volume.id).where(Volume.novel_id == second_id)
+    )
+    assert second_volume_id is not None
 
     save_draft(
         session,
@@ -2042,7 +2049,7 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
 ) -> None:
     novel = create_novel(session, "pytest-候选闭环")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     create_novel_character(
         session,
         novel_id,
@@ -2068,6 +2075,18 @@ def test_reviewed_candidate_and_intelligence_are_separate_authority_steps(
     assert job["generation_context_snapshot"]["schema_version"] == 4
     assert "context_v3" not in job["generation_context_snapshot"]
     assert "previous_context" not in job["generation_context_snapshot"]
+    ledger = job["generation_context_snapshot"]["prompt_budget_ledger"]
+    assert ledger["schema_version"] == "prompt-budget-ledger/1"
+    assert ledger["included_token_count"] <= ledger["hard_input_token_budget"]
+    assert ledger["remaining_token_count"] >= 0
+    assert len(ledger["final_prompt_hash"]) == 64
+    assert len(ledger["component_manifest_hash"]) == 64
+    requirements = [
+        item
+        for item in ledger["components"]
+        if item["kind"] == "chapter_requirements"
+    ]
+    assert len(requirements) == 1
     completed = complete_chapter_generation(
         session,
         UUID(job["id"]),
@@ -2141,7 +2160,7 @@ def test_intelligence_no_changes_keeps_a_named_character_out_of_the_ledger(
 ) -> None:
     novel = create_novel(session, "pytest-情报无变化")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     create_novel_character(
         session,
         novel_id,
@@ -2187,7 +2206,7 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
 ) -> None:
     novel = create_novel(session, "pytest-版本事实事务")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
 
     saved_a = save_draft(
         session,
@@ -2369,7 +2388,7 @@ def test_restore_reactivates_target_facts_without_duplicate_commits(
 
 def test_candidate_adoption_rejects_a_changed_working_copy(session: Session) -> None:
     novel = create_novel(session, "pytest-候选冲突")
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     brief = save_chapter_brief(
         session,
         document_id,
@@ -2437,7 +2456,9 @@ def test_six_step_creation_is_persisted_validated_and_idempotent(
     assert novel["genre"] == "年代言情"
     assert novel["author_name"] == "pytest-作者"
     assert novel["cover_image_data"] == "data:image/jpeg;base64,AA=="
-    assert novel["tree"] == []
+    assert session.scalar(
+        select(func.count(Document.id)).where(Document.novel_id == UUID(novel["id"]))
+    ) == 0
 
     replayed = complete_novel_creation_draft(
         session,
@@ -2739,7 +2760,7 @@ def test_next_chapter_required_roles_reject_uncertain_supporting_inference(
 ) -> None:
     novel = create_novel(session, "pytest-下一章必现角色")
     novel_id = UUID(novel["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     create_novel_character(
         session,
         novel_id,
@@ -2896,7 +2917,7 @@ def test_generation_requires_matching_model_evidence_and_acceptance_window(
     session: Session,
 ) -> None:
     novel = create_novel(session, "pytest-通用模型门槛")
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     brief = save_chapter_brief(
         session,
         document_id,
@@ -3012,7 +3033,7 @@ def test_candidate_adoption_recomputes_the_frozen_upper_bound(
     session: Session,
 ) -> None:
     novel = create_novel(session, "pytest-候选采用长度防线")
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     brief = save_chapter_brief(
         session,
         document_id,
@@ -3067,7 +3088,7 @@ def test_stale_chapter_generation_is_failed_before_new_attempt(
     session: Session,
 ) -> None:
     novel = create_novel(session, "pytest-章节生成超时恢复")
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     brief = save_chapter_brief(
         session,
         document_id,
@@ -3141,7 +3162,7 @@ def test_concurrent_forced_generation_allocates_unique_attempts(
     session: Session,
 ) -> None:
     novel = create_novel(session, "pytest-并发生成尝试")
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    document_id = UUID(novel["initial_document_id"])
     brief = save_chapter_brief(
         session,
         document_id,
@@ -3320,7 +3341,7 @@ def test_structured_creative_jobs_keep_failed_attempts_and_model_identity(
     assert second["actual_model_id"] == TEST_MODEL_ID
     assert second["actual_provider_id"] == TEST_PROVIDER_ID
     assert second["requested_provider_id"] == TEST_PROVIDER_ID
-    assert second["input_snapshot"] == snapshot
+    assert "input_snapshot" not in second
 
     short_target = start_creative_generation(
         session,
@@ -3448,8 +3469,11 @@ def test_volume_chapter_reorder_delete_guard_and_export_structure(
 ) -> None:
     novel = create_novel(session, "pytest-卷章导出")
     novel_id = UUID(novel["id"])
-    first_volume_id = UUID(novel["tree"][0]["id"])
-    first_document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    first_volume_id = session.scalar(
+        select(Volume.id).where(Volume.novel_id == novel_id)
+    )
+    assert first_volume_id is not None
+    first_document_id = UUID(novel["initial_document_id"])
     second_volume = create_volume(session, novel_id, "第二卷")
     second_volume_id = UUID(second_volume["id"])
     second_document = create_document(
@@ -3541,13 +3565,14 @@ def test_volume_chapter_reorder_delete_guard_and_export_structure(
         expected_version=current_second_volume["version"],
         move_documents_to=first_volume_id,
     )
-    remaining = get_novel(session, novel_id)["tree"][0]
+    remaining = session.scalar(select(Volume).where(Volume.novel_id == novel_id))
+    assert remaining is not None
     with pytest.raises(ValidationError, match="最后一个分卷仍有章节"):
         delete_volume(
             session,
             novel_id,
-            UUID(remaining["id"]),
-            expected_version=remaining["version"],
+            remaining.id,
+            expected_version=remaining.version,
         )
     session.rollback()
 
@@ -3666,8 +3691,11 @@ def test_ledger_visible_root_and_source_writers_advance_once_and_noop_zero(
     foreshadow_row = session.get(Foreshadow, UUID(foreshadow["id"]))
     assert foreshadow_row is not None and foreshadow_row.status == "dropped"
 
-    first_volume_id = UUID(novel["tree"][0]["id"])
-    document_id = UUID(novel["tree"][0]["documents"][0]["id"])
+    first_volume_id = session.scalar(
+        select(Volume.id).where(Volume.novel_id == novel_id)
+    )
+    assert first_volume_id is not None
+    document_id = UUID(novel["initial_document_id"])
     document = get_document(session, document_id)
     saved = save_draft(
         session,

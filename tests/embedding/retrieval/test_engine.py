@@ -25,6 +25,7 @@ from backend.embedding.retrieval import (
     TimelineSearchLimit,
     filter_candidates,
     retrieve,
+    writing_retrieval_policy_v3,
 )
 
 
@@ -371,3 +372,53 @@ def test_skipped_dense_channel_is_lexical_only_without_false_failure() -> None:
     assert result.mode is RetrievalMode.LEXICAL_ONLY
     assert result.degraded is False
     assert result.degradation_reason is None
+
+
+def test_v3_expansion_is_bounded_per_hit_and_globally() -> None:
+    anchors = tuple(
+        candidate(
+            1_000 + index,
+            source_id=uid(2_000 + index),
+            source_revision_id=uid(3_000 + index),
+            chunk_ordinal=2,
+        )
+        for index in range(10)
+    )
+    neighbors = tuple(
+        candidate(
+            10_000 + index * 10 + ordinal,
+            source_id=anchor.source_id,
+            source_revision_id=anchor.source_revision_id,
+            chunk_ordinal=ordinal,
+        )
+        for index, anchor in enumerate(anchors)
+        for ordinal in (0, 1, 3, 4)
+    )
+    policy = writing_retrieval_policy_v3().model_copy(
+        update={
+            "adjacent_chunk_radius": 5,
+            "corpus_quotas": (
+                CorpusQuota(corpus=EmbeddingCorpus.MANUSCRIPT, limit=50),
+            ),
+        }
+    )
+
+    result = retrieve(
+        request(top_k=50),
+        candidates=anchors,
+        expansion_candidates=neighbors,
+        lexical=RetrievalChannelEvidence(
+            channel=RetrievalChannel.LEXICAL,
+            status=RetrievalChannelStatus.AVAILABLE,
+            scores=tuple(
+                RawChannelScore(chunk_id=anchor.chunk_id, score=1.0)
+                for anchor in anchors
+            ),
+        ),
+        dense=dense_skipped(),
+        policy=policy,
+    )
+
+    assert len(result.hits) == 10
+    assert all(len(hit.chunks) - 1 <= 2 for hit in result.hits)
+    assert sum(len(hit.chunks) - 1 for hit in result.hits) == 20

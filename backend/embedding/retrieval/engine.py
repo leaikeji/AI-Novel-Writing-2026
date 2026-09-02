@@ -241,7 +241,12 @@ def _rank_candidates(
             ranked,
             key=lambda item: (
                 -item.fused_score,
-                item.candidate.corpus.value,
+                min(
+                    item.lexical_rank if item.lexical_rank is not None else 2**31,
+                    item.dense_rank if item.dense_rank is not None else 2**31,
+                ),
+                str(item.candidate.source_id),
+                item.candidate.chunk_ordinal,
                 str(item.candidate.chunk_id),
             ),
         )
@@ -266,16 +271,28 @@ def _expand_adjacent(
     *,
     visible_candidates: Sequence[RetrievalCandidate],
     radius: int,
+    max_neighbors: int,
 ) -> tuple[RetrievalEvidenceChunk, ...]:
-    neighbors = (
+    neighbors = [
         item
         for item in visible_candidates
         if item.source_revision_identity == anchor.source_revision_identity
+        and item.chunk_id != anchor.chunk_id
         and abs(item.chunk_ordinal - anchor.chunk_ordinal) <= radius
+    ]
+    neighbors.sort(
+        key=lambda item: (
+            abs(item.chunk_ordinal - anchor.chunk_ordinal),
+            item.chunk_ordinal,
+            str(item.chunk_id),
+        )
     )
+    selected = [anchor, *neighbors[:max_neighbors]]
     return tuple(
         _evidence_chunk(item)
-        for item in sorted(neighbors, key=lambda item: (item.chunk_ordinal, str(item.chunk_id)))
+        for item in sorted(
+            selected, key=lambda item: (item.chunk_ordinal, str(item.chunk_id))
+        )
     )
 
 
@@ -300,6 +317,7 @@ def retrieve(
     lexical: RetrievalChannelEvidence,
     dense: RetrievalChannelEvidence,
     policy: RetrievalPolicyV1,
+    expansion_candidates: Iterable[RetrievalCandidate] = (),
 ) -> SemanticSearchResultV2:
     """Filter, gate raw relevance, fuse, deduplicate, quota, then expand."""
 
@@ -310,6 +328,14 @@ def retrieve(
 
     all_candidates = tuple(candidates)
     visible, filtered = filter_candidates(all_candidates, request.scope)
+    raw_expansion_candidates = tuple(expansion_candidates)
+    expansion_visible, _ = filter_candidates(
+        raw_expansion_candidates, request.scope
+    )
+    expansion_by_id = {item.chunk_id: item for item in visible}
+    for item in expansion_visible:
+        expansion_by_id.setdefault(item.chunk_id, item)
+    expansion_pool = tuple(expansion_by_id.values())
     visible_ids = {item.chunk_id for item in visible}
     visible_lexical = _visible_channel_evidence(lexical, visible_ids)
     visible_dense = _visible_channel_evidence(dense, visible_ids)
@@ -341,6 +367,7 @@ def retrieve(
     accepted_hits: list[SemanticRetrievalHitV2] = []
     duplicate_source_count = 0
     quota_omitted_count = 0
+    adjacent_neighbors_remaining = policy.max_adjacent_neighbors_total
     for item in above_threshold:
         source_identity = item.candidate.source_identity
         if source_identity in seen_sources:
@@ -359,6 +386,17 @@ def retrieve(
             )
             if rank is not None
         )
+        max_neighbors = min(
+            policy.max_adjacent_neighbors_per_hit,
+            adjacent_neighbors_remaining,
+        )
+        expanded_chunks = _expand_adjacent(
+            item.candidate,
+            visible_candidates=expansion_pool,
+            radius=policy.adjacent_chunk_radius,
+            max_neighbors=max_neighbors,
+        )
+        adjacent_neighbors_remaining -= max(0, len(expanded_chunks) - 1)
         accepted_hits.append(
             SemanticRetrievalHitV2(
                 corpus=item.candidate.corpus,
@@ -366,11 +404,7 @@ def retrieve(
                 source_id=item.candidate.source_id,
                 source_revision_id=item.candidate.source_revision_id,
                 anchor_chunk_id=item.candidate.chunk_id,
-                chunks=_expand_adjacent(
-                    item.candidate,
-                    visible_candidates=visible,
-                    radius=policy.adjacent_chunk_radius,
-                ),
+                chunks=expanded_chunks,
                 lexical_raw_score=item.lexical_raw,
                 dense_raw_score=item.dense_raw,
                 lexical_rank=item.lexical_rank,

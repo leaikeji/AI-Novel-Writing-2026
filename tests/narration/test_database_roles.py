@@ -151,6 +151,7 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "20260901_0036": 67,
         "20260902_0037": 67,
         "20260902_0038": 67,
+        "20260902_0039": 67,
     }
     for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
         assert (
@@ -168,6 +169,9 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
     )
     assert set(PROTECTED_TABLES_BY_HEAD["20260902_0038"]) == set(
         PROTECTED_TABLES_BY_HEAD["20260902_0037"]
+    )
+    assert set(PROTECTED_TABLES_BY_HEAD["20260902_0039"]) == set(
+        PROTECTED_TABLES_BY_HEAD["20260902_0038"]
     )
     assert {
         "nano_voice_experiment_commands",
@@ -191,7 +195,7 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "character_cast_plan_commands",
         "character_cast_plan_items",
     }
-    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260902_0038"]
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260902_0039"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:
@@ -293,8 +297,8 @@ def test_bootstrap_contract_never_embeds_runtime_passwords() -> None:
     assert "/run/ai-novel-db-auth/worker/.pgpass" in sql_source
     assert "mountpoint -q" in shell_source
     assert "PASSWORD NULL" in sql_source
-    assert "upgrade-20260902_0038" in migration_source
-    assert "downgrade-20260902_0037" in migration_source
+    assert "upgrade-20260902_0039" in migration_source
+    assert "downgrade-20260902_0038" in migration_source
     assert "downgrade-20260830_0035" in migration_source
     assert "upgrade head" not in migration_source
     executable_sql = re.sub(r"--.*", "", sql_source)

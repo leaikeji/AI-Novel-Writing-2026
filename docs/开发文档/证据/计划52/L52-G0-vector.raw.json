@@ -1,0 +1,102 @@
+{
+  "ann_index": null,
+  "database_name": "ai_novel_world_2026_plan52_test",
+  "dimension": 2048,
+  "distance_metric": "cosine",
+  "provider_calls": 0,
+  "schema_version": "plan52-g0-vector-evidence/1",
+  "sizes": [
+    {
+      "candidate_bounded": {
+        "explain": {
+          "execution_ms": 6.217,
+          "planning_ms": 0.029,
+          "root_rows": 80.0,
+          "scans": [
+            {
+              "actual_rows": 1500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "plan52_g0_vector_probe",
+              "shared_hit_blocks": 12012,
+              "shared_read_blocks": 0
+            }
+          ]
+        },
+        "p50_ms": 6.16,
+        "p95_ms": 7.074,
+        "returned_rows": 80,
+        "samples": 5
+      },
+      "current_unbounded": {
+        "explain": {
+          "execution_ms": 6.409,
+          "planning_ms": 0.024,
+          "root_rows": 1500.0,
+          "scans": [
+            {
+              "actual_rows": 1500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "plan52_g0_vector_probe",
+              "shared_hit_blocks": 12012,
+              "shared_read_blocks": 0
+            }
+          ]
+        },
+        "p50_ms": 7.6,
+        "p95_ms": 8.247,
+        "returned_rows": 1500,
+        "samples": 5
+      },
+      "row_count": 1500,
+      "seed_ms": 37.65
+    },
+    {
+      "candidate_bounded": {
+        "explain": {
+          "execution_ms": 28.87,
+          "planning_ms": 0.034,
+          "root_rows": 80.0,
+          "scans": [
+            {
+              "actual_rows": 7500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "plan52_g0_vector_probe",
+              "shared_hit_blocks": 60056,
+              "shared_read_blocks": 0
+            }
+          ]
+        },
+        "p50_ms": 34.923,
+        "p95_ms": 46.637,
+        "returned_rows": 80,
+        "samples": 5
+      },
+      "current_unbounded": {
+        "explain": {
+          "execution_ms": 42.879,
+          "planning_ms": 0.042,
+          "root_rows": 7500.0,
+          "scans": [
+            {
+              "actual_rows": 7500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "plan52_g0_vector_probe",
+              "shared_hit_blocks": 60056,
+              "shared_read_blocks": 0
+            }
+          ]
+        },
+        "p50_ms": 35.466,
+        "p95_ms": 67.28,
+        "returned_rows": 7500,
+        "samples": 5
+      },
+      "row_count": 7500,
+      "seed_ms": 167.673
+    }
+  ]
+}

@@ -662,8 +662,16 @@ def replace_novel_bindings(
         row.updated_at = now
         active_rows.append(row)
     session.flush()
-    from ..embedding.indexing import request_active_novel_refresh
-    request_active_novel_refresh(session, novel_id)
+    from ..embedding.indexing import SourceRefreshHint, request_active_novel_refresh
+    affected_asset_ids = set(existing) | set(desired)
+    request_active_novel_refresh(
+        session,
+        novel_id,
+        source_hints=tuple(
+            SourceRefreshHint("private_asset_version", asset_id)
+            for asset_id in sorted(affected_asset_ids, key=str)
+        ),
+    )
     return BindingSetResult(
         tuple(_binding_views_from_rows(active_rows, pairs)), True
     )

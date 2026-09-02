@@ -572,7 +572,7 @@ def test_recovery_query_filters_by_selection_id() -> None:
     )
 
     assert len(recovered) == 1
-    assert recovered[0]["input_snapshot"]["selection_id"] == str(wanted)
+    assert "input_snapshot" not in recovered[0]
 
 
 def test_12k_diff_p95_is_below_100ms() -> None:

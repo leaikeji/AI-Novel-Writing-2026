@@ -63,6 +63,11 @@ import {
 } from "./chapter-intelligence";
 import { chapterOrdinalFor } from "./chapter-tree";
 import { chapterDisplayTitle } from "./presenters";
+import {
+  createRetrievalStatusNotice,
+  retrievalSummaryFromJob,
+  type RetrievalSummaryV1,
+} from "./retrieval-status";
 const host = window.QwenPaw.host;
 const React = host.React;
 const ReactDOM = host.ReactDOM;
@@ -90,6 +95,7 @@ const {
   SyncOutlined,
 } = host.antdIcons;
 const TextArea = Input.TextArea;
+const RetrievalStatusNotice = createRetrievalStatusNotice(React);
 
 
 interface ChapterWorkflowProps {
@@ -678,6 +684,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [titleToolsTarget, setTitleToolsTarget] = React.useState(null as HTMLElement | null);
   const [reviewJob, setReviewJob] = React.useState(null as CreativeGenerationRecord | null);
+  const [bodyRetrievalSummary, setBodyRetrievalSummary] = React.useState(
+    null as RetrievalSummaryV1 | null,
+  );
   const [activeGenerationModel, setActiveGenerationModel] = React.useState(null as GenerationModelStatus | null);
   const [busyAction, setBusyAction] = React.useState("");
 
@@ -707,6 +716,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setSelectedIntelligenceItemIds([]);
     setReviewOpen(false);
     setReviewJob(null);
+    setBodyRetrievalSummary(null);
   }, [document.id]);
 
   React.useEffect(() => {
@@ -965,6 +975,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
               }),
             },
           );
+          setBodyRetrievalSummary(retrievalSummaryFromJob(job));
           if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
           acceptedJob = job;
           break;
@@ -1424,6 +1435,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: () => { void confirmSyncProgress(); }, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
       h(Button, { className: "anw-history-button", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load" }, "历史"),
     ),
+    h(RetrievalStatusNotice, {
+      summary: bodyRetrievalSummary,
+      novelId: novel.id,
+      compact: true,
+    }),
     mountedTitleTools,
     h(Modal, {
       open: briefOpen,
@@ -1506,6 +1522,11 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           h("span", null, maximumCount ? `验收 ${minimumCount}–${maximumCount} 字` : `验收不少于 ${minimumCount} 字`),
           h("span", null, verifiedGenerationModelLabel(job)),
         ),
+        h(RetrievalStatusNotice, {
+          summary: retrievalSummaryFromJob(job),
+          novelId: novel.id,
+          compact: true,
+        }),
         candidate ? h("p", null, candidate.content_text.slice(0, 230) || "本次生成正文为空") : h("p", { className: "is-error" }, job.failure_message || "本次生成没有可用正文"),
         h("footer", null, job.asset_snapshot?.length ? h("small", null, `采用私有库：${job.asset_snapshot.map((item: GenerationJobRecord["asset_snapshot"][number]) => item.title).join("、")}`) : h("small", null, "未选择私有库配置"), h(Button, { disabled: !candidate || candidate.state === "rejected", loading: busyAction === `restore:${candidate?.id}`, onClick: () => void restoreCandidate(job) }, candidate ? "恢复此版本" : "需要整章重写")),
       );
@@ -1600,6 +1621,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       centered: true,
       footer: [h(Button, { key: "close", type: "primary", onClick: () => setReviewOpen(false) }, "关闭")],
       onCancel: () => setReviewOpen(false),
-    }, reviewJob ? h("div", { className: "anw-review-result" }, h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "模型已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
+    }, reviewJob ? h("div", { className: "anw-review-result" }, h(RetrievalStatusNotice, { summary: retrievalSummaryFromJob(reviewJob), novelId: novel.id }), h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "模型已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
   );
 }

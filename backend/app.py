@@ -8,11 +8,12 @@ import time
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from qwenpaw.pawapp import PawApp
 from sqlalchemy.orm import Session
 
 from .assistant_api import router as assistant_router
+from .context_v4 import ContextAssemblyError, ContextAssemblyErrorCode
 from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
 from .creative_schemas import SELECTION_EDIT_OPERATIONS
@@ -56,6 +57,10 @@ from .model_runtime import (
     normalize_intelligence_generation_json,
     parse_model_json,
     reply_final_text,
+)
+from .novel_workspace_service import (
+    WorkspaceManifestError,
+    get_workspace_manifest,
 )
 from .writing_eval_api import router as writing_eval_router
 from .character_workspace.api import router as character_workspace_router
@@ -156,6 +161,7 @@ from .services import (
     get_novel,
     get_novel_context,
     get_revision,
+    list_document_revisions,
     list_chapter_generation_jobs,
     list_intelligence_proposals,
     list_novels,
@@ -187,6 +193,13 @@ def _reported_actual_ids(
         provider if isinstance(provider, str) else None,
         model if isinstance(model, str) else None,
     )
+
+
+def _public_generation_job(payload: dict[str, Any]) -> dict[str, Any]:
+    public = dict(payload)
+    public.pop("generation_context_snapshot", None)
+    public.pop("should_execute", None)
+    return public
 router.include_router(assistant_router)
 router.include_router(creative_router)
 router.include_router(creative_data_router)
@@ -503,6 +516,23 @@ def _raise_domain(error: Exception) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"type": error.code, "message": str(error)},
         ) from error
+    if isinstance(error, ContextAssemblyError):
+        conflict_codes = {
+            ContextAssemblyErrorCode.CONTEXT_SCOPE_UNRESOLVED,
+            ContextAssemblyErrorCode.CONTEXT_SELECTION_INCOMPLETE,
+        }
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+                if error.code in conflict_codes
+                else status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail={
+                "type": error.code.value,
+                "message": str(error),
+                "details": error.details,
+            },
+        ) from error
     if isinstance(error, DraftConflictError):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -646,10 +676,20 @@ def novels_get(novel_id: UUID, session: Session = Depends(get_session)) -> dict[
         raise
 
 
-@router.get("/novels/{novel_id}/tree")
-def novels_tree(novel_id: UUID, session: Session = Depends(get_session)) -> list[dict[str, object]]:
+@router.get("/novels/{novel_id}/workspace-manifest")
+def novels_workspace_manifest(
+    novel_id: UUID,
+    cursor: str | None = None,
+    limit: int = Query(default=200, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
     try:
-        return get_novel(session, novel_id)["tree"]
+        return get_workspace_manifest(session, novel_id, cursor=cursor, limit=limit)
+    except WorkspaceManifestError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     except Exception as error:
         _raise_domain(error)
         raise
@@ -730,6 +770,25 @@ def documents_checkpoint(
         )
     except Exception as error:
         session.rollback()
+        _raise_domain(error)
+        raise
+
+
+@router.get("/documents/{document_id}/revisions")
+def revisions_index(
+    document_id: UUID,
+    cursor: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=50),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return list_document_revisions(
+            session,
+            document_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except Exception as error:
         _raise_domain(error)
         raise
 
@@ -876,9 +935,9 @@ async def generation_jobs_create_body(
             effective_context_window_tokens=configured_model.effective_max_input_length,
         )
         if job["state"] == "ready" and job.get("candidate"):
-            return job
+            return _public_generation_job(job)
         if not job.get("should_execute", True):
-            return job
+            return _public_generation_job(job)
         prompt = build_chapter_generation_prompt(job["generation_context_snapshot"])
         ensure_prompt_within_effective_limit(prompt, configured_model)
         generation_session_id = f"novel-generation:{job['id']}"

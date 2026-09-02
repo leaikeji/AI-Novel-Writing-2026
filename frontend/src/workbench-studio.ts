@@ -18,6 +18,7 @@ import {
   GenerationModelStatus,
   NovelCharacterRecord,
   NovelCoverMode,
+  NovelMetadataRecord,
   NovelExportRecord,
   NovelRecord,
   NovelSearchResultRecord,
@@ -81,6 +82,10 @@ import {
   nextChapterOrdinalForVolume,
 } from "./chapter-tree";
 import {
+  fixedVirtualScrollTarget,
+  virtualizeFixedRows,
+} from "./novel-navigation/virtual-tree";
+import {
   chapterVersionPresentation,
   formatChapterUpdatedAt,
 } from "./chapter-list";
@@ -95,15 +100,24 @@ import {
 } from "./narration";
 import {
   activeWorkbenchRoute,
+  isWorkbenchSettingsTab,
   normalizeWorkbenchLedgerRoute,
   rememberWorkbenchLedgerLocation,
+  rememberWorkbenchLocation,
   rememberWorkbenchRoleView,
   replaceWorkbenchHistoryUrl,
   workbenchLedgerPath,
   workbenchLedgerRouteFromSearch,
+  workbenchSettingsPath,
+  type WorkbenchSettingsTab,
   type WorkbenchLedgerRoute,
 } from "./workbench-route";
 import { createNovelSemanticIndexCard } from "./embedding";
+import {
+  createRetrievalStatusNotice,
+  retrievalSummaryFromJob,
+  type RetrievalSummaryV1,
+} from "./retrieval-status";
 import {
   createStoryTimelineWorkspace,
   type CharacterInstanceRecord,
@@ -147,6 +161,8 @@ const React = host.React;
 const ReactDOM = host.ReactDOM;
 const h = React.createElement;
 const NovelCoverView = createNovelCoverView(React);
+const CHAPTER_DASHBOARD_ROW_HEIGHT = 72;
+const CHAPTER_DASHBOARD_OVERSCAN_ROWS = 8;
 const CharacterWorkspaceDialog = createCharacterWorkspaceDialog(
   React,
   typeof ReactDOM?.createPortal === "function"
@@ -204,6 +220,7 @@ const UNGROUPED_CHAPTER_VOLUME_KEY = "unassigned";
 const NarrationReadingPage = createNarrationReadingPage(React);
 const CharacterVoiceCardPanel = createCharacterVoiceCardPanel(React);
 const NovelSemanticIndexCard = createNovelSemanticIndexCard(React, host.antd);
+const RetrievalStatusNotice = createRetrievalStatusNotice(React);
 const StoryTimelineWorkspace = createStoryTimelineWorkspace(React, host.antd);
 const StoryLedgerWorkspace = createStoryLedgerWorkspace(React);
 
@@ -681,7 +698,7 @@ function downloadExport(record: NovelExportRecord, title: string): void {
 interface OutlineWizardProps {
   novel: NovelRecord;
   startStep: number;
-  onCompleted: (novel: NovelRecord) => void;
+  onCompleted: (novel: NovelMetadataRecord) => void;
   onError: (message: string) => void;
   selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
@@ -701,6 +718,9 @@ function OutlineWizard({
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [activityText, setActivityText] = React.useState("");
+  const [retrievalSummary, setRetrievalSummary] = React.useState(
+    null as RetrievalSummaryV1 | null,
+  );
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterIndex, setCharacterIndex] = React.useState(-1);
   const [characterForm, setCharacterForm] = React.useState({
@@ -836,6 +856,7 @@ function OutlineWizard({
         },
       }),
     });
+    setRetrievalSummary(retrievalSummaryFromJob(job));
     if (job.state !== "ready") throw new Error(job.failure_message || "模型生成失败");
     return job;
   };
@@ -973,7 +994,7 @@ function OutlineWizard({
     setGenerating(true);
     try {
       const saved = await saveDraft(draft, 5, outlineCompletionPatch(draft));
-      const result = await apiRequest<{ outline: OutlineDraftRecord; novel: NovelRecord }>(
+      const result = await apiRequest<{ outline: OutlineDraftRecord; novel: NovelMetadataRecord }>(
         `/novels/${novel.id}/outline-draft/complete`,
         { method: "POST", body: JSON.stringify({ expected_version: saved.version }) },
       );
@@ -1374,6 +1395,11 @@ function OutlineWizard({
     h(
       "section",
       { className: "mb-outline-workspace", "aria-busy": loading || generating },
+      h(RetrievalStatusNotice, {
+        summary: retrievalSummary,
+        novelId: novel.id,
+        compact: true,
+      }),
       loading
         ? h(
             "div",
@@ -1603,6 +1629,9 @@ function ChapterCreationWizard({
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [outlineTaskModelLabel, setOutlineTaskModelLabel] = React.useState("");
   const [recommendationTaskModelLabel, setRecommendationTaskModelLabel] = React.useState("");
+  const [outlineRetrievalSummary, setOutlineRetrievalSummary] = React.useState(
+    null as RetrievalSummaryV1 | null,
+  );
   const [innerError, setInnerError] = React.useState("");
   const [reboundNotice, setReboundNotice] = React.useState("");
   const [expandedGroups, setExpandedGroups] = React.useState(["main"] as StorylineType[]);
@@ -1670,6 +1699,7 @@ function ChapterCreationWizard({
     setRequestPhase("not_started");
     setInnerError("");
     setReboundNotice("");
+    setOutlineRetrievalSummary(null);
     draftKeyRef.current = window.sessionStorage.getItem(`anw-chapter-draft:${novel.id}`) || "";
   }, [novel.id]);
 
@@ -1682,6 +1712,7 @@ function ChapterCreationWizard({
     setDraft(null);
     setInnerError("");
     setReboundNotice("");
+    setOutlineRetrievalSummary(null);
   }, [open]);
 
   React.useEffect(() => {
@@ -1992,6 +2023,7 @@ function ChapterCreationWizard({
               },
             }),
           });
+          setOutlineRetrievalSummary(retrievalSummaryFromJob(job));
           setOutlineTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
           if (job.state !== "ready") {
             throw new Error(job.failure_message || "模型章纲生成失败");
@@ -2221,6 +2253,11 @@ function ChapterCreationWizard({
     if (outlineText) return h(
       "div",
       { className: "mb-chapter-step-body is-outline-result" },
+      h(RetrievalStatusNotice, {
+        summary: outlineRetrievalSummary,
+        novelId: novel.id,
+        compact: true,
+      }),
       h("div", { className: "mb-chapter-target-block" }, h("strong", null, "目标字数"), h(InputNumber, { min: 2000, max: 5000, controls: false, value: targetCharacterCount, onChange: (value: number | null) => setTargetCharacterCount(Math.max(2000, Math.min(5000, Number(value || 2500)))) }), h("small", null, h(BulbOutlined), " AI生成字数会有±500-1500字的浮动，请合理设置目标字数"), h("small", null, "字数限制：2000-5000字")),
       h("div", { className: "mb-chapter-result-heading" }, h("h3", null, "章节大纲已生成"), h("p", null, outlineTaskModelLabel ? `任务模型：${outlineTaskModelLabel}` : "请查看并确认生成的章节大纲")),
       field(
@@ -2416,7 +2453,7 @@ interface StudioProps {
   onSectionChange: (section: WorkbenchSection) => void;
   onReadingPanelChange: (section: ReadingSectionKey) => void;
   onSelectDocument: (documentId: string) => void;
-  onNovelChanged: (novel: NovelRecord) => void;
+  onNovelChanged: (novel: NovelMetadataRecord) => void;
   onReload: () => Promise<NovelRecord | null>;
   onBack: () => void;
   onError: (message: string) => void;
@@ -2456,6 +2493,15 @@ export function StudioProjectView({
     section,
     activeRoute?.novelId === novel.id ? activeRoute.section : undefined,
   );
+  const querySettingsTab = new URLSearchParams(window.location.search).get("settings_tab");
+  const initialSettingsTab: WorkbenchSettingsTab = initialStudioSection === "settings"
+    && isWorkbenchSettingsTab(querySettingsTab)
+    ? querySettingsTab
+    : activeRoute?.novelId === novel.id
+      && activeRoute.section === "settings"
+      && isWorkbenchSettingsTab(activeRoute.settingsTab)
+      ? activeRoute.settingsTab
+      : "template";
   const [busy, setBusy] = React.useState(false);
   const [studioSection, setStudioSection] = React.useState(
     initialStudioSection as StudioWorkbenchSection,
@@ -2488,10 +2534,13 @@ export function StudioProjectView({
     (new URLSearchParams(window.location.search).get("role_view") === "graph" ? "graph" : "list") as "list" | "graph",
   );
   const [clueTab, setClueTab] = React.useState("main" as StorylineType);
-  const [settingsTab, setSettingsTab] = React.useState("template" as "template" | "foreshadow" | "timeline" | "semantic-index");
+  const [settingsTab, setSettingsTab] = React.useState(initialSettingsTab);
   const [selectedChapterVolumeKey, setSelectedChapterVolumeKey] = React.useState(
     null as string | null,
   );
+  const [chapterDashboardScrollTop, setChapterDashboardScrollTop] = React.useState(0);
+  const [chapterDashboardViewportHeight, setChapterDashboardViewportHeight] = React.useState(720);
+  const chapterDashboardRef = React.useRef(null as HTMLElement | null);
   const [volumeDescending, setVolumeDescending] = React.useState(true);
   const [outlineEditing, setOutlineEditing] = React.useState(false);
   const [outlineStep, setOutlineStep] = React.useState(0);
@@ -2526,6 +2575,35 @@ export function StudioProjectView({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState([] as NovelSearchResultRecord[]);
   const [searching, setSearching] = React.useState(false);
+
+  React.useLayoutEffect(() => {
+    if (studioSection !== "chapters") return;
+    const element = chapterDashboardRef.current;
+    if (!element) return;
+    const updateHeight = () => setChapterDashboardViewportHeight(element.clientHeight || 720);
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [studioSection, selectedChapterVolumeKey]);
+
+  React.useEffect(() => {
+    setChapterDashboardScrollTop(0);
+    if (chapterDashboardRef.current) chapterDashboardRef.current.scrollTop = 0;
+  }, [selectedChapterVolumeKey]);
+
+  React.useEffect(() => {
+    if (studioSection !== "settings") return;
+    const next = isWorkbenchSettingsTab(querySettingsTab)
+      ? querySettingsTab
+      : activeRoute?.novelId === novel.id
+        && activeRoute.section === "settings"
+        && isWorkbenchSettingsTab(activeRoute.settingsTab)
+        ? activeRoute.settingsTab
+        : "template";
+    setSettingsTab((current: WorkbenchSettingsTab) => current === next ? current : next);
+  }, [activeRoute?.settingsTab, novel.id, querySettingsTab, studioSection]);
 
   const externalSectionRef = React.useRef({ novelId: novel.id, section });
   const domainLoadGenerationRef = React.useRef(0);
@@ -2705,6 +2783,19 @@ export function StudioProjectView({
     );
   }, [novel.id]);
 
+  const changeSettingsTab = (next: WorkbenchSettingsTab): void => {
+    setSettingsTab(next);
+    rememberWorkbenchLocation(novel.id, {
+      section: "settings",
+      settingsTab: next,
+    });
+    replaceWorkbenchHistoryUrl(
+      window.history,
+      window.location.href,
+      workbenchSettingsPath(novel.id, next),
+    );
+  };
+
   const handleStoryLedgerContextChange = React.useCallback(
     (context: StoryLedgerWorkspaceContext): void => {
       setStoryLedgerContext(context);
@@ -2813,6 +2904,16 @@ export function StudioProjectView({
         section,
         nextActiveRoute?.novelId === novel.id ? nextActiveRoute.section : undefined,
       ));
+      const nextSettingsTab = new URLSearchParams(window.location.search).get("settings_tab");
+      setSettingsTab(
+        nextActiveRoute?.novelId === novel.id
+          && nextActiveRoute.section === "settings"
+          && isWorkbenchSettingsTab(nextActiveRoute.settingsTab)
+          ? nextActiveRoute.settingsTab
+          : isWorkbenchSettingsTab(nextSettingsTab)
+            ? nextSettingsTab
+            : "template",
+      );
       setCurrentTimelineId(nextRoute.timelineId ?? null);
       setStoryTimelines([]);
       setStoryTimelinesReady(false);
@@ -3272,6 +3373,13 @@ export function StudioProjectView({
         .filter((document: DocumentRecord) => document.kind === "chapter")
         .sort((left: DocumentRecord, right: DocumentRecord) => left.position - right.position)
     : ungroupedChapters;
+  const chapterDashboardWindow = virtualizeFixedRows(
+    selectedVolumeChapters,
+    chapterDashboardScrollTop,
+    chapterDashboardViewportHeight,
+    CHAPTER_DASHBOARD_ROW_HEIGHT,
+    CHAPTER_DASHBOARD_OVERSCAN_ROWS,
+  );
 
   const setRoleSubview = (next: "list" | "graph") => {
     setRoleTab(next);
@@ -3390,7 +3498,13 @@ export function StudioProjectView({
 
   const refreshAll = async () => {
     const next = await onReload();
-    if (next) onNovelChanged(next);
+    if (next) onNovelChanged({
+      ...next,
+      visible_character_count: canonicalChapterDocuments(next).reduce(
+        (total: number, document: DocumentRecord) => total + document.visible_character_count,
+        0,
+      ),
+    });
     await loadDomains();
   };
 
@@ -3564,7 +3678,7 @@ export function StudioProjectView({
       nextCover = "";
     }
     if (!nextCover && coverMode !== "text") throw new Error("请先选择或上传封面");
-    const updated = await apiRequest<NovelRecord>(`/novels/${novel.id}/settings`, {
+    const updated = await apiRequest<NovelMetadataRecord>(`/novels/${novel.id}/settings`, {
       method: "PUT",
       body: JSON.stringify({
         expected_version: novel.version,
@@ -3889,7 +4003,7 @@ export function StudioProjectView({
   };
 
   const saveSettings = () => perform(async () => {
-    const updated = await apiRequest<NovelRecord>(`/novels/${novel.id}/settings`, {
+    const updated = await apiRequest<NovelMetadataRecord>(`/novels/${novel.id}/settings`, {
       method: "PUT",
       body: JSON.stringify({ expected_version: novel.version, ...settingsFormRef.current }),
     });
@@ -4097,7 +4211,73 @@ export function StudioProjectView({
               h("span", null),
             ),
             selectedVolumeChapters.length
-              ? selectedVolumeChapters.map((document: DocumentRecord) => renderChapterTableRow(document))
+              ? h(
+                  "div",
+                  {
+                    ref: chapterDashboardRef,
+                    className: "mb-chapter-table-viewport",
+                    role: "list",
+                    tabIndex: 0,
+                    "aria-label": `${selectedVolumeTitle}章节列表，共${selectedVolumeChapters.length}章`,
+                    onScroll: (event: { currentTarget: { scrollTop: number } }) => {
+                      setChapterDashboardScrollTop(event.currentTarget.scrollTop);
+                    },
+                    onKeyDown: (event: {
+                      key: string;
+                      preventDefault: () => void;
+                      currentTarget: {
+                        clientHeight: number;
+                        scrollHeight: number;
+                        scrollTop: number;
+                        scrollTo: (options: { top: number; behavior: "auto" }) => void;
+                      };
+                    }) => {
+                      const element = event.currentTarget;
+                      const target = fixedVirtualScrollTarget(
+                        event.key,
+                        element.scrollTop,
+                        element.clientHeight,
+                        element.scrollHeight,
+                      );
+                      if (target === null) return;
+                      event.preventDefault();
+                      element.scrollTo({ top: target, behavior: "auto" });
+                      setChapterDashboardScrollTop(target);
+                    },
+                    style: {
+                      position: "relative",
+                      height: "min(70vh, 760px)",
+                      minHeight: "288px",
+                      overflow: "auto",
+                      overscrollBehavior: "contain",
+                    },
+                  },
+                  h(
+                    "div",
+                    {
+                      style: {
+                        position: "relative",
+                        height: `${chapterDashboardWindow.totalHeight}px`,
+                        minWidth: "650px",
+                      },
+                    },
+                    ...chapterDashboardWindow.rows.map(({ row, top }) => h(
+                      "div",
+                      {
+                        key: row.id,
+                        role: "listitem",
+                        style: {
+                          position: "absolute",
+                          top: `${top}px`,
+                          insetInline: 0,
+                          height: `${CHAPTER_DASHBOARD_ROW_HEIGHT}px`,
+                          boxSizing: "border-box",
+                        },
+                      },
+                      renderChapterTableRow(row),
+                    )),
+                  ),
+                )
               : h(
                   "div",
                   { className: "mb-chapter-detail-empty" },
@@ -4122,7 +4302,7 @@ export function StudioProjectView({
     ? h(OutlineWizard, {
         novel,
         startStep: outlineStep,
-        onCompleted: (updated: NovelRecord) => {
+        onCompleted: (updated: NovelMetadataRecord) => {
           onNovelChanged(updated);
           setOutlineEditing(false);
           void loadDomains();
@@ -4454,7 +4634,7 @@ export function StudioProjectView({
         : studioSection === "clues"
           ? h("div", { className: "mb-top-tabs is-four" }, ...(Object.keys(storylineLabels) as StorylineType[]).map((type) => h("button", { key: type, type: "button", className: clueTab === type ? "is-active" : "", onClick: () => setClueTab(type) }, storylineLabels[type])))
           : studioSection === "settings"
-            ? h("div", { className: "mb-top-tabs is-settings" }, h("button", { type: "button", className: settingsTab === "template" ? "is-active" : "", onClick: () => setSettingsTab("template") }, "模板设定"), h("button", { type: "button", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => setSettingsTab("foreshadow") }, "伏笔管理"), h("button", { type: "button", className: settingsTab === "timeline" ? "is-active" : "", onClick: () => setSettingsTab("timeline") }, "时间线与人物实例"), h("button", { type: "button", className: settingsTab === "semantic-index" ? "is-active" : "", onClick: () => setSettingsTab("semantic-index") }, "语义索引"))
+            ? h("div", { className: "mb-top-tabs is-settings", role: "tablist", "aria-label": "设定分类" }, h("button", { type: "button", role: "tab", "aria-selected": settingsTab === "template", className: settingsTab === "template" ? "is-active" : "", onClick: () => changeSettingsTab("template") }, "模板设定"), h("button", { type: "button", role: "tab", "aria-selected": settingsTab === "foreshadow", className: settingsTab === "foreshadow" ? "is-active" : "", onClick: () => changeSettingsTab("foreshadow") }, "伏笔管理"), h("button", { type: "button", role: "tab", "aria-selected": settingsTab === "timeline", className: settingsTab === "timeline" ? "is-active" : "", onClick: () => changeSettingsTab("timeline") }, "时间线与人物实例"), h("button", { type: "button", role: "tab", "aria-selected": settingsTab === "semantic-index", className: settingsTab === "semantic-index" ? "is-active" : "", onClick: () => changeSettingsTab("semantic-index") }, "语义索引"))
             : null;
 
   const panelBody = studioSection === "chapters"

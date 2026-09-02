@@ -51,6 +51,13 @@ class ConsentAction(str, Enum):
     REVOKE = "revoke"
 
 
+class NovelEmbeddingConsentState(str, Enum):
+    NOT_AUTHORIZED = "not_authorized"
+    GRANTED = "granted"
+    REVOKED = "revoked"
+    REQUIRES_RECONSENT = "requires_reconsent"
+
+
 class VerificationStatus(str, Enum):
     UNVERIFIED = "unverified"
     VERIFIED = "verified"
@@ -67,6 +74,13 @@ class EmbeddingCorpus(str, Enum):
     STORYLINE = "storyline"
     FORESHADOW = "foreshadow"
     TIMELINE = "timeline"
+
+
+DEFAULT_NOVEL_EMBEDDING_CORPORA = (
+    EmbeddingCorpus.MANUSCRIPT,
+    EmbeddingCorpus.PLANNING,
+    EmbeddingCorpus.PRIVATE_ASSET,
+)
 
 
 class EmbeddingConnectionStatus(str, Enum):
@@ -161,6 +175,10 @@ class EmbeddingErrorCode(str, Enum):
     EMBEDDING_UNAVAILABLE = "embedding_unavailable"
     SEMANTIC_INDEX_STALE = "semantic_index_stale"
     SEMANTIC_SCOPE_VIOLATION = "semantic_scope_violation"
+    CONSENT_VERSION_CONFLICT = "consent_version_conflict"
+    CONSENT_SCOPE_MISMATCH = "consent_scope_mismatch"
+    CONSENT_TARGET_CHANGED = "consent_target_changed"
+    INDEX_ENQUEUE_FAILED = "index_enqueue_failed"
 
 
 class EmbeddingCredentialMutation(_StrictModel):
@@ -255,6 +273,7 @@ class EmbeddingConfigResource(_StrictModel):
 class NovelEmbeddingConsentMutation(_StrictModel):
     contract_version: Literal[EMBEDDING_CONTRACT_VERSION] = EMBEDDING_CONTRACT_VERSION
     action: ConsentAction
+    expected_version: int = Field(ge=0)
     idempotency_key: str = Field(min_length=1, max_length=160)
     active_consent_id: UUID | None = None
     notice_version: str | None = Field(default=None, min_length=1, max_length=100)

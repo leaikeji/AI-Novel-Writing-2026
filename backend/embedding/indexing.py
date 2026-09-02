@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..background.contracts import LocalWorkspaceScope
@@ -48,6 +49,7 @@ from .refresh import (
     PendingSourceSpec,
     PublicationAuthority,
     RefreshRequest,
+    gc_obsolete_active_generation_data,
     service_for_session,
 )
 from ..models import Document, DocumentRevision, DocumentWorkingCopy, Volume
@@ -56,12 +58,53 @@ from ..volume_chapter_titles import embedding_chapter_title
 
 
 V1_CORPORA = frozenset({"manuscript", "planning", "private_asset"})
+_SOURCE_HINT_TYPES = frozenset(
+    {
+        "chapter_revision",
+        "outline_revision",
+        "setting_revision",
+        "private_asset_version",
+    }
+)
+_SOURCE_HINT_CORPUS = {
+    "chapter_revision": "manuscript",
+    "outline_revision": "planning",
+    "setting_revision": "planning",
+    "private_asset_version": "private_asset",
+}
 # The current DashScope workspace endpoint is fast for one 2048-dimension
 # document (including 1,800-character chunks) but can keep multi-document
 # arrays open for minutes.  Preserve the protocol cap of ten while using the
 # verified singleton product policy for predictable local-job fencing.
 EMBEDDING_BATCH_MAX_ITEMS = 1
 EMBEDDING_BATCH_MAX_CHARACTERS = 1_200
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRefreshHint:
+    """One authoritative entity affected by the caller's formal write."""
+
+    source_type: str
+    source_entity_id: UUID
+
+    def __post_init__(self) -> None:
+        if self.source_type not in _SOURCE_HINT_TYPES:
+            raise ValueError(f"unsupported semantic source hint: {self.source_type}")
+
+
+def _normalize_source_hints(
+    source_hints: tuple[SourceRefreshHint, ...] | None,
+) -> tuple[SourceRefreshHint, ...] | None:
+    if source_hints is None:
+        return None
+    if not source_hints:
+        raise ValueError("source_hints must not be empty when supplied")
+    unique = {
+        (hint.source_type, hint.source_entity_id): hint for hint in source_hints
+    }
+    return tuple(
+        unique[key] for key in sorted(unique, key=lambda item: (item[0], str(item[1])))
+    )
 
 
 def _digest(value: object) -> str:
@@ -427,7 +470,10 @@ def build_generation_chunker(session: Session, generation_id: UUID) -> str:
 
 
 def _manuscript_sources(
-    session: Session, *, build: EmbeddingGenerationNovel
+    session: Session,
+    *,
+    build: EmbeddingGenerationNovel,
+    source_entity_ids: frozenset[UUID] | None = None,
 ) -> tuple[
     list[
         tuple[
@@ -451,9 +497,48 @@ def _manuscript_sources(
         )
     )
     single_timeline_id = timelines[0].id if len(timelines) == 1 else None
-    canonical_documents = tuple(
-        session.scalars(
-            select(Document)
+    if source_entity_ids is None:
+        canonical_documents = tuple(
+            session.scalars(
+                select(Document)
+                .outerjoin(
+                    Volume,
+                    and_(
+                        Volume.id == Document.volume_id,
+                        Volume.novel_id == Document.novel_id,
+                    ),
+                )
+                .where(
+                    Document.novel_id == build.novel_id,
+                    Document.kind == "chapter",
+                )
+                .order_by(
+                    case((Document.volume_id.is_(None), 1), else_=0),
+                    Volume.position,
+                    Document.position,
+                    Document.id,
+                )
+            )
+        )
+        narrative_by_document_id = {
+            document.id: ordinal
+            for ordinal, document in enumerate(canonical_documents, start=1)
+        }
+    else:
+        canonical_order = (
+            select(
+                Document.id.label("document_id"),
+                func.row_number()
+                .over(
+                    order_by=(
+                        case((Document.volume_id.is_(None), 1), else_=0),
+                        Volume.position,
+                        Document.position,
+                        Document.id,
+                    )
+                )
+                .label("narrative_sequence"),
+            )
             .outerjoin(
                 Volume,
                 and_(
@@ -465,19 +550,18 @@ def _manuscript_sources(
                 Document.novel_id == build.novel_id,
                 Document.kind == "chapter",
             )
-            .order_by(
-                case((Document.volume_id.is_(None), 1), else_=0),
-                Volume.position,
-                Document.position,
-                Document.id,
-            )
+            .subquery()
         )
-    )
-    narrative_by_document_id = {
-        document.id: ordinal
-        for ordinal, document in enumerate(canonical_documents, start=1)
-    }
-    rows = session.execute(
+        narrative_by_document_id = {
+            document_id: int(sequence)
+            for document_id, sequence in session.execute(
+                select(
+                    canonical_order.c.document_id,
+                    canonical_order.c.narrative_sequence,
+                ).where(canonical_order.c.document_id.in_(source_entity_ids))
+            ).all()
+        }
+    row_statement = (
         select(Document, DocumentRevision)
         .join(DocumentWorkingCopy, DocumentWorkingCopy.document_id == Document.id)
         .join(DocumentRevision, DocumentRevision.id == DocumentWorkingCopy.base_revision_id)
@@ -495,7 +579,10 @@ def _manuscript_sources(
             Document.position,
             Document.id,
         )
-    ).all()
+    )
+    if source_entity_ids is not None:
+        row_statement = row_statement.where(Document.id.in_(source_entity_ids))
+    rows = session.execute(row_statement).all()
     results: list[
         tuple[
             V1SourceInput,
@@ -585,6 +672,7 @@ def prepare_v1_novel_index(
     *,
     generation_id: UUID,
     novel_id: UUID,
+    source_hints: tuple[SourceRefreshHint, ...] | None = None,
 ) -> EmbeddingGenerationNovel:
     """Build local sources/chunks and enqueue batches; never calls the cloud."""
 
@@ -600,13 +688,28 @@ def prepare_v1_novel_index(
         raise EmbeddingLifecycleError("generation_novel_not_found", "generation novel is missing")
     generation = session.get(EmbeddingGeneration, generation_id)
     active_refresh = generation is not None and generation.state == "active"
+    normalized_hints = _normalize_source_hints(source_hints)
+    if normalized_hints is not None and not active_refresh:
+        raise EmbeddingLifecycleError(
+            "source_hint_requires_active_generation",
+            "source hints are valid only for incremental active-generation refresh",
+        )
     if build.state != "pending" and not (
-        active_refresh and build.state in {"ready", "outdated", "partial_failed"}
+        active_refresh
+        and build.state in {"ready", "updating", "outdated", "partial_failed"}
     ):
         return build
     if generation is None or generation.state not in {"draft", "building", "active"}:
         raise EmbeddingLifecycleError("generation_state_invalid", "generation cannot be built")
     target = frozenset(build.target_corpora_json) & V1_CORPORA
+    if normalized_hints is not None:
+        normalized_hints = tuple(
+            hint
+            for hint in normalized_hints
+            if _SOURCE_HINT_CORPUS[hint.source_type] in target
+        )
+        if not normalized_hints:
+            return build
     sources: list[
         tuple[
             V1SourceInput,
@@ -620,10 +723,40 @@ def prepare_v1_novel_index(
         ]
     ] = []
     failures = 0
-    if "manuscript" in target:
-        manuscript, failures = _manuscript_sources(session, build=build)
+    hinted_entities: dict[str, frozenset[UUID]] = {
+        source_type: frozenset(
+            hint.source_entity_id
+            for hint in normalized_hints or ()
+            if hint.source_type == source_type
+        )
+        for source_type in _SOURCE_HINT_TYPES
+    }
+    if normalized_hints is not None and any(
+        hint.source_type in {"outline_revision", "setting_revision"}
+        and hint.source_entity_id != novel_id
+        for hint in normalized_hints
+    ):
+        raise EmbeddingLifecycleError(
+            "source_hint_scope_invalid",
+            "planning source hints must identify the indexed novel",
+        )
+    manuscript_ids = hinted_entities["chapter_revision"]
+    if "manuscript" in target and (
+        normalized_hints is None or manuscript_ids
+    ):
+        manuscript, failures = _manuscript_sources(
+            session,
+            build=build,
+            source_entity_ids=(manuscript_ids if normalized_hints is not None else None),
+        )
         sources.extend((*item, {"visibility": "public"}) for item in manuscript)
-    if "planning" in target:
+    load_outline = normalized_hints is None or bool(
+        hinted_entities["outline_revision"]
+    )
+    load_setting = normalized_hints is None or bool(
+        hinted_entities["setting_revision"]
+    )
+    if "planning" in target and load_outline:
         outline_head = session.get(NovelOutlineHead, novel_id)
         if outline_head is not None:
             revision = session.get(NovelOutlineRevision, outline_head.current_revision_id)
@@ -643,6 +776,7 @@ def prepare_v1_novel_index(
                         {"outline_revision_id": str(revision.id)},
                         {"visibility": "author_only"},
                     ))
+    if "planning" in target and load_setting:
         setting_head = session.get(NovelSettingHead, novel_id)
         if setting_head is not None:
             revision = session.get(NovelSettingRevision, setting_head.current_revision_id)
@@ -657,8 +791,11 @@ def prepare_v1_novel_index(
                     {"setting_revision_id": str(revision.id)},
                     {"visibility": "author_only"},
                 ))
-    if "private_asset" in target:
-        binding_rows = session.execute(
+    asset_ids = hinted_entities["private_asset_version"]
+    if "private_asset" in target and (
+        normalized_hints is None or asset_ids
+    ):
+        binding_statement = (
             select(NovelAssetBinding, PrivateAssetVersion)
             .join(PrivateAssetVersion, PrivateAssetVersion.id == NovelAssetBinding.asset_version_id)
             .where(
@@ -667,7 +804,12 @@ def prepare_v1_novel_index(
                 NovelAssetBinding.usage_policy != "prohibited",
             )
             .order_by(NovelAssetBinding.position, NovelAssetBinding.id)
-        ).all()
+        )
+        if normalized_hints is not None:
+            binding_statement = binding_statement.where(
+                NovelAssetBinding.asset_id.in_(asset_ids)
+            )
+        binding_rows = session.execute(binding_statement).all()
         for binding, version in binding_rows:
             sources.append((
                 V1SourceInput(
@@ -679,7 +821,7 @@ def prepare_v1_novel_index(
                 {"binding_id": str(binding.id), "asset_version_id": str(version.id)},
                 {"visibility": "author_only"},
             ))
-    authority_digest = _digest([
+    authority_projection = [
             {
                 "corpus": item[0].corpus,
                 "source_type": item[0].source_type,
@@ -693,7 +835,22 @@ def prepare_v1_novel_index(
                 "locator": item[6],
             }
             for item in sources
-        ])
+        ]
+    previous_authority_digest = build.authority_digest
+    authority_digest = (
+        _digest(authority_projection)
+        if normalized_hints is None
+        else _digest(
+            {
+                "previous_authority_digest": previous_authority_digest,
+                "source_hints": [
+                    [hint.source_type, str(hint.source_entity_id)]
+                    for hint in normalized_hints
+                ],
+                "desired_projection": authority_projection,
+            }
+        )
+    )
     build.authority_digest = authority_digest
     if active_refresh:
         if build.state == "pending":
@@ -712,20 +869,38 @@ def prepare_v1_novel_index(
             else -1
         ) + 1
         created_refreshes = 0
+        requested_changes = 0
         desired_logical_keys: set[str] = set()
-        current_sources = tuple(
-            session.scalars(
-                select(SemanticSource)
-                .where(
-                    SemanticSource.generation_id == generation_id,
-                    SemanticSource.novel_id == novel_id,
-                    SemanticSource.status == "current",
+        source_scope_filter = (
+            or_(
+                *(
+                    and_(
+                        SemanticSource.source_type == hint.source_type,
+                        SemanticSource.source_entity_id == hint.source_entity_id,
+                    )
+                    for hint in normalized_hints
                 )
-                .with_for_update()
+            )
+            if normalized_hints is not None
+            else None
+        )
+        source_statement = select(SemanticSource).where(
+            SemanticSource.generation_id == generation_id,
+            SemanticSource.novel_id == novel_id,
+            SemanticSource.status.in_({"current", "pending"}),
+        )
+        if source_scope_filter is not None:
+            source_statement = source_statement.where(source_scope_filter)
+        candidate_sources = tuple(
+            session.scalars(
+                source_statement.with_for_update()
             )
         )
+        current_sources = tuple(
+            source for source in candidate_sources if source.status == "current"
+        )
         current_by_logical_key: dict[str, list[SemanticSource]] = {}
-        for current_source in current_sources:
+        for current_source in candidate_sources:
             current_key = str(
                 current_source.source_locator_json.get("_refresh_logical_key")
                 or _logical_source_key(
@@ -752,6 +927,9 @@ def prepare_v1_novel_index(
             )
             desired_logical_keys.add(logical_key)
             candidates = tuple(current_by_logical_key.get(logical_key, ()))
+            current_candidates = tuple(
+                candidate for candidate in candidates if candidate.status == "current"
+            )
             if any(
                 _same_source_projection(
                     current,
@@ -769,7 +947,7 @@ def prepare_v1_novel_index(
             ):
                 continue
             reusable_source = _metadata_only_reprojection_source(
-                candidates,
+                current_candidates,
                 rendered=rendered,
                 source_input=source_input,
                 timeline_id=timeline_id,
@@ -808,6 +986,7 @@ def prepare_v1_novel_index(
             ))
             if not requested.created:
                 continue
+            requested_changes += 1
             chunks = _persist_chunks_for_rendered(
                 session,
                 generation_id=generation_id,
@@ -829,7 +1008,7 @@ def prepare_v1_novel_index(
                 refresh_service.mark_queued(requested.refresh_id)
                 refresh_service.mark_building(requested.refresh_id)
                 refresh_service.mark_ready(requested.refresh_id)
-                for current in candidates:
+                for current in current_candidates:
                     current.status = "retired"
                 consent_active = bool(
                     session.scalar(
@@ -853,7 +1032,7 @@ def prepare_v1_novel_index(
                     ),
                 )
                 if not published.published:
-                    for current in candidates:
+                    for current in current_candidates:
                         current.status = "current"
                     raise EmbeddingLifecycleError(
                         published.code or "metadata_reprojection_failed",
@@ -873,15 +1052,7 @@ def prepare_v1_novel_index(
             refresh_service.mark_queued(requested.refresh_id)
             created_refreshes += 1
         retired_removed_sources = 0
-        for current_source in session.scalars(
-            select(SemanticSource)
-            .where(
-                SemanticSource.generation_id == generation_id,
-                SemanticSource.novel_id == novel_id,
-                SemanticSource.status == "current",
-            )
-            .with_for_update()
-        ):
+        for current_source in current_sources:
             current_logical_key = str(
                 current_source.source_locator_json.get("_refresh_logical_key")
                 or _logical_source_key(
@@ -891,51 +1062,51 @@ def prepare_v1_novel_index(
                     locator=current_source.source_locator_json,
                 )
             )
-            if current_logical_key not in desired_logical_keys:
+            if (
+                current_logical_key not in desired_logical_keys
+                and not (
+                    normalized_hints is not None
+                    and failures
+                    and current_source.source_type == "chapter_revision"
+                )
+            ):
                 current_source.status = "retired"
                 retired_removed_sources += 1
+        if (
+            normalized_hints is not None
+            and requested_changes == 0
+            and retired_removed_sources == 0
+        ):
+            authority_digest = previous_authority_digest
+            build.authority_digest = previous_authority_digest
         if retired_removed_sources:
             build.index_version += 1
+        pending_refreshes = refresh_service.store.active_refresh_count(
+            generation_id, novel_id
+        )
         build.failure_count = failures
         if failures:
             build.sync_state = "partial_failed"
             build.failure_code = "TIMELINE_MAPPING_REQUIRED"
-        elif created_refreshes == 0:
+        elif created_refreshes == 0 and pending_refreshes == 0:
             build.sync_state = "current"
             build.state = "ready"
             build.last_refresh_at = func.now()
             build.published_digest = authority_digest
-            current_source_ids = tuple(
-                session.scalars(
-                    select(SemanticSource.id).where(
-                        SemanticSource.generation_id == generation_id,
-                        SemanticSource.novel_id == novel_id,
-                        SemanticSource.status == "current",
-                    )
-                )
+            (
+                build.source_count,
+                build.chunk_count,
+                build.embedded_count,
+            ) = refresh_service.store.current_index_counts(generation_id, novel_id)
+        elif pending_refreshes:
+            build.sync_state = "updating"
+            build.state = "updating"
+        if requested_changes or retired_removed_sources:
+            gc_obsolete_active_generation_data(
+                session,
+                generation_id=generation_id,
+                novel_id=novel_id,
             )
-            build.source_count = len(current_source_ids)
-            if current_source_ids:
-                current_chunk_ids = tuple(
-                    session.scalars(
-                        select(SemanticChunk.id).where(
-                            SemanticChunk.source_id.in_(current_source_ids)
-                        )
-                    )
-                )
-                build.chunk_count = len(current_chunk_ids)
-                build.embedded_count = int(
-                    session.scalar(
-                        select(func.count()).select_from(SemanticEmbedding).where(
-                            SemanticEmbedding.generation_id == generation_id,
-                            SemanticEmbedding.chunk_id.in_(current_chunk_ids),
-                        )
-                    )
-                    or 0
-                ) if current_chunk_ids else 0
-            else:
-                build.chunk_count = 0
-                build.embedded_count = 0
         session.flush()
         return build
 
@@ -1006,7 +1177,12 @@ def prepare_v1_novel_index(
     return build
 
 
-def request_active_novel_refresh(session: Session, novel_id: UUID) -> bool:
+def request_active_novel_refresh(
+    session: Session,
+    novel_id: UUID,
+    *,
+    source_hints: tuple[SourceRefreshHint, ...] | None = None,
+) -> bool:
     """Queue the current authority projection after a formal write.
 
     The caller owns the surrounding authority transaction.  This helper does
@@ -1015,7 +1191,7 @@ def request_active_novel_refresh(session: Session, novel_id: UUID) -> bool:
     """
 
     novel = session.get(Novel, novel_id)
-    if novel is None:
+    if not isinstance(novel, Novel):
         return False
     configuration = session.scalar(
         select(EmbeddingConfiguration).where(
@@ -1023,7 +1199,10 @@ def request_active_novel_refresh(session: Session, novel_id: UUID) -> bool:
             EmbeddingConfiguration.workspace_id == novel.workspace_id,
         )
     )
-    if configuration is None or configuration.active_generation_id is None:
+    if (
+        not isinstance(configuration, EmbeddingConfiguration)
+        or configuration.active_generation_id is None
+    ):
         return False
     consent = session.scalar(
         select(NovelEmbeddingConsent).where(
@@ -1045,5 +1224,6 @@ def request_active_novel_refresh(session: Session, novel_id: UUID) -> bool:
         session,
         generation_id=configuration.active_generation_id,
         novel_id=novel_id,
+        source_hints=source_hints,
     )
     return True

@@ -1,0 +1,162 @@
+{
+  "alembic_head": "20260902_0038",
+  "database_name": "ai_novel_world_2026_plan52_test",
+  "host": {
+    "machine": "arm64",
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "processor": "arm",
+    "python": "3.12.13"
+  },
+  "profiles": [
+    {
+      "lexical_explain": {
+        "candidate_bounded": {
+          "execution_ms": 25.143,
+          "planning_ms": 1.939,
+          "root_rows": 1.0,
+          "scans": [
+            {
+              "actual_rows": 1.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_chunks",
+              "rows_removed_by_filter": 1499,
+              "shared_hit_blocks": 260,
+              "shared_read_blocks": 0
+            },
+            {
+              "actual_rows": 1.0,
+              "index": "uq_semantic_source_generation_scope",
+              "node_type": "Index Scan",
+              "relation": "semantic_sources",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 3,
+              "shared_read_blocks": 0
+            }
+          ]
+        },
+        "current_unbounded": {
+          "execution_ms": 28.931,
+          "planning_ms": 0.083,
+          "root_rows": 1500.0,
+          "scans": [
+            {
+              "actual_rows": 1500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_chunks",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 260,
+              "shared_read_blocks": 0
+            },
+            {
+              "actual_rows": 500.0,
+              "index": null,
+              "node_type": "Seq Scan",
+              "relation": "semantic_sources",
+              "rows_removed_by_filter": 0,
+              "shared_hit_blocks": 33,
+              "shared_read_blocks": 0
+            }
+          ]
+        }
+      },
+      "paths": {
+        "assistant_context": {
+          "p50_ms": 339.128,
+          "p95_ms": 378.214,
+          "peak_tracemalloc_mib": 14.809,
+          "response_bytes": 540911,
+          "samples": 5,
+          "sql_count_max": 58,
+          "sql_count_min": 58
+        },
+        "authority_local_lexical": {
+          "p50_ms": 644.686,
+          "p95_ms": 662.058,
+          "peak_tracemalloc_mib": 6.118,
+          "response_bytes": 3293,
+          "samples": 5,
+          "sql_count_max": 4,
+          "sql_count_min": 4
+        },
+        "context_v4": {
+          "p50_ms": 1161.637,
+          "p95_ms": 1184.536,
+          "peak_tracemalloc_mib": 30.12,
+          "response_bytes": 2838571,
+          "samples": 5,
+          "sql_count_max": 1011,
+          "sql_count_min": 1011
+        },
+        "indexed_lexical_current": {
+          "p50_ms": 59.593,
+          "p95_ms": 65.883,
+          "peak_tracemalloc_mib": 5.043,
+          "response_bytes": 1666726,
+          "samples": 5,
+          "sql_count_max": 1,
+          "sql_count_min": 1
+        },
+        "list_novels": {
+          "p50_ms": 508.05,
+          "p95_ms": 563.791,
+          "peak_tracemalloc_mib": 0.899,
+          "response_bytes": 464,
+          "samples": 5,
+          "sql_count_max": 502,
+          "sql_count_min": 502
+        },
+        "open_novel_full_tree": {
+          "p50_ms": 293.335,
+          "p95_ms": 318.01,
+          "peak_tracemalloc_mib": 9.022,
+          "response_bytes": 3276218,
+          "samples": 5,
+          "sql_count_max": 5,
+          "sql_count_min": 5
+        },
+        "prompt_builder": {
+          "p50_ms": 2.7,
+          "p95_ms": 2.917,
+          "peak_tracemalloc_mib": 2.102,
+          "response_bytes": 805443,
+          "samples": 5,
+          "sql_count_max": 0,
+          "sql_count_min": 0
+        },
+        "search_novel": {
+          "p50_ms": 25.873,
+          "p95_ms": 28.293,
+          "peak_tracemalloc_mib": 0.956,
+          "response_bytes": 1263,
+          "samples": 5,
+          "sql_count_max": 4,
+          "sql_count_min": 4
+        },
+        "selected_document": {
+          "p50_ms": 4.472,
+          "p95_ms": 5.281,
+          "peak_tracemalloc_mib": 0.05,
+          "response_bytes": 6939,
+          "samples": 5,
+          "sql_count_max": 4,
+          "sql_count_min": 4
+        }
+      },
+      "profile": "1m",
+      "seed": {
+        "chapter_count": 500,
+        "elapsed_ms": 425.485,
+        "fact_count": 2000,
+        "historical_revision_count": 10,
+        "semantic_chunk_count": 1500,
+        "semantic_source_count": 500,
+        "target_characters": 1000000
+      }
+    }
+  ],
+  "provider_calls": 0,
+  "samples_per_path": 5,
+  "schema_version": "plan52-g0-evidence/1"
+}
