@@ -54,7 +54,7 @@ _SHA256_RE: Final = re.compile(r"^[a-f0-9]{64}$")
 _TOKEN_RE: Final = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 _MAX_JSON_BYTES: Final = 2 * 1024 * 1024
 _T2_CAPABILITY_MATRIX_FINGERPRINT: Final = (
-    "74dbceb61756ca3cd2b212e685a35d8078d0c431270da3a73bb1d60617aab375"
+    "bb271cc1a4921bc1bbd0b6f629cd7d3154b4155cf28d130b49c2a1641d045420"
 )
 _GATE_NOT_FOUND_DETAIL: Final = {
     "code": "RESOURCE_NOT_FOUND",

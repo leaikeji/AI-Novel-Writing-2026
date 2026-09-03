@@ -55,6 +55,7 @@ EDITION_ID = UUID("10000000-0000-4000-8000-000000000001")
 SEGMENT_ID = UUID("10000000-0000-4000-8000-000000000010")
 ASSET_ID = UUID("20000000-0000-4000-8000-000000000020")
 VOICE_PREVIEW_ID = UUID("30000000-0000-4000-8000-000000000030")
+GENERIC_VOICE_SLOT_ID = UUID("50000000-0000-4000-8000-000000000050")
 MANIFEST_ID = UUID("40000000-0000-4000-8000-000000000001")
 
 
@@ -583,6 +584,7 @@ def test_http_media_requires_scope_headers_and_forwards_range_conditions() -> No
         "edition_id": EDITION_ID,
         "manifest_revision": 4,
         "voice_preview_id": None,
+        "generic_voice_slot_id": None,
         "method": "GET",
         "range_header": "bytes=0-2",
         "if_range": f'"{"1" * 64}"',
@@ -597,6 +599,16 @@ def test_http_media_requires_scope_headers_and_forwards_range_conditions() -> No
     assert backend.media_calls[-1]["voice_preview_id"] == VOICE_PREVIEW_ID
     assert backend.media_calls[-1]["edition_id"] is None
     assert backend.media_calls[-1]["manifest_revision"] is None
+    assert backend.media_calls[-1]["generic_voice_slot_id"] is None
+
+    generic = client.get(
+        path,
+        headers={"X-Narration-Generic-Voice-Slot-Id": str(GENERIC_VOICE_SLOT_ID)},
+    )
+    assert generic.status_code == 200 and generic.content == b"abc"
+    assert backend.media_calls[-1]["generic_voice_slot_id"] == GENERIC_VOICE_SLOT_ID
+    assert backend.media_calls[-1]["voice_preview_id"] is None
+    assert backend.media_calls[-1]["edition_id"] is None
 
     conflicting = client.get(
         path,
@@ -604,6 +616,7 @@ def test_http_media_requires_scope_headers_and_forwards_range_conditions() -> No
             "X-Narration-Voice-Preview-Id": str(VOICE_PREVIEW_ID),
             "X-Narration-Edition-Id": str(EDITION_ID),
             "X-Narration-Manifest-Revision": "4",
+            "X-Narration-Generic-Voice-Slot-Id": str(GENERIC_VOICE_SLOT_ID),
         },
     )
     assert conflicting.status_code == 422

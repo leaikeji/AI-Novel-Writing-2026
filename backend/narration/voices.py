@@ -402,7 +402,7 @@ def _require_rights_available(
     return rights
 
 
-def _media_link(
+def voice_preview_media_link(
     store: NarrationStore,
     profile: VoiceProfile,
     asset_id: UUID | None,
@@ -553,7 +553,7 @@ def voice_profile_resource(
                     else None
                 ),
                 reference_asset_id=version.reference_asset_id,
-                preview_asset=_media_link(
+                preview_asset=voice_preview_media_link(
                     store,
                     profile,
                     _latest_preview_asset_id(store, profile, version, at=now),
@@ -599,6 +599,19 @@ def list_voice_profiles(
     # audit and historical Edition evidence.  Its media rows are deliberately
     # no longer publishable, so it must not poison the active selection list.
     scoped = [row for row in scoped if row.status != "unavailable"]
+    # Generic pack voices are system-library implementation assets.  They are
+    # only selectable through a complete, active GenericVoicePool projection;
+    # publishing them in the ordinary profile picker would expose incomplete
+    # candidates and invite scope-invalid narrator/character bindings.
+    scoped = [
+        row
+        for row in scoped
+        if row.current_version_id is None
+        or (
+            (current := store.get(VoiceProfileVersion, row.current_version_id)) is None
+            or current.activation_basis != "generic_voice_pack_generation"
+        )
+    ]
     if novel_id is None:
         selected = [row for row in scoped if include_library and row.novel_id is None]
     else:
@@ -1359,5 +1372,6 @@ __all__ = [
     "list_voice_profiles",
     "parse_uploaded_voice_multipart",
     "update_voice_profile",
+    "voice_preview_media_link",
     "voice_profile_resource",
 ]

@@ -60,18 +60,6 @@ def _settings_values() -> dict[str, object]:
     }
 
 
-def _voice_pool_slots() -> list[dict[str, object]]:
-    return [
-        {
-            "slot_key": f"slot-{index:02d}",
-            "voice_version_id": str(VOICE_VERSION_ID),
-            "enabled": True,
-            "priority": index,
-        }
-        for index in range(24)
-    ]
-
-
 @dataclass(frozen=True, slots=True)
 class ApiCase:
     name: str
@@ -397,29 +385,11 @@ def _api_cases() -> list[ApiCase]:
             command_fields={"novel_id": NOVEL_ID},
         ),
         ApiCase(
-            "generic-pool-put",
-            settings_api.NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL,
-            "PUT",
-            f"/novels/{NOVEL_ID}/generic-voice-pools",
-            {"json": {"expected_version": 0, "slots": _voice_pool_slots()}},
-            {"novel_id": NOVEL_ID},
-            wire.PutGenericVoicePoolRequest,
-        ),
-        ApiCase(
             "casting-rules-get",
             settings_api.NarrationSettingsOperation.GET_CASTING_RULES,
             "GET",
             f"/novels/{NOVEL_ID}/casting-rules",
             command_fields={"novel_id": NOVEL_ID},
-        ),
-        ApiCase(
-            "casting-rules-put",
-            settings_api.NarrationSettingsOperation.PUT_CASTING_RULES,
-            "PUT",
-            f"/novels/{NOVEL_ID}/casting-rules",
-            {"json": {"expected_version": 0, "items": []}},
-            {"novel_id": NOVEL_ID},
-            wire.PutVoiceCastingRulesRequest,
         ),
         ApiCase(
             "pronunciation-get",
@@ -469,7 +439,7 @@ def _api_cases() -> list[ApiCase]:
             wire.ExecuteNarrationCacheCleanupRequest,
         ),
     ]
-    assert len(cases) == 33
+    assert len(cases) == 31
     assert {case.operation for case in cases} == set(
         settings_api.NarrationSettingsOperation
     )
@@ -738,7 +708,7 @@ def test_no_go_surface_has_no_synthesis_player_or_voice_generator_route() -> Non
     }
     paths = {path for _, path in operations}
 
-    assert len(operations) == 33
+    assert len(operations) == 31
     assert all("synthesis" not in path for path in paths)
     assert all("player" not in path for path in paths)
     assert all("voice-generator" not in path for path in paths)
@@ -875,6 +845,9 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
             wire.CapabilityKey.NANO_ADVANCED_TUNING,
             wire.CapabilityKey.PRIVATE_VOICE_DELETION,
             wire.CapabilityKey.VOICE_GENERATOR,
+            wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
+            wire.CapabilityKey.GENERIC_VOICE_POOL,
+            wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
         }
 
         def with_managed_readiness(
@@ -907,6 +880,9 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
                 wire.CapabilityKey.NANO_ADVANCED_TUNING,
                 wire.CapabilityKey.PRIVATE_VOICE_DELETION,
                 wire.CapabilityKey.VOICE_GENERATOR,
+                wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
+                wire.CapabilityKey.GENERIC_VOICE_POOL,
+                wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
             }:
                 assert item == (
                     backend_app.NARRATION_FEATURE_READINESS_PROVIDER

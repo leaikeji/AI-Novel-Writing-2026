@@ -69,7 +69,14 @@ def _isolated_test_database_url() -> str:
 
 
 @pytest.fixture
-def database_session() -> Session:
+def database_session(monkeypatch: pytest.MonkeyPatch) -> Session:
+    from backend.narration import official_voice_selection
+
+    monkeypatch.setattr(
+        official_voice_selection,
+        "initialize_new_novel_default_narrator",
+        lambda _session, *, novel_id: None,
+    )
     engine = create_engine(_isolated_test_database_url(), pool_pre_ping=True)
     with Session(engine, expire_on_commit=False) as session:
         yield session

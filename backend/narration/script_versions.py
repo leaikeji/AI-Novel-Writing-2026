@@ -25,6 +25,7 @@ from ..models import (
     NovelCharacter,
     VoiceProfile,
     VoiceProfileVersion,
+    VoiceCastingRule,
 )
 
 from .contracts import (
@@ -36,7 +37,7 @@ from .contracts import (
     issue_severity,
 )
 from .aliases import CHARACTER_ALIAS_NORMALIZATION_VERSION
-from .casting import CASTING_RESOLVER_VERSION
+from .casting import CASTING_RESOLVER_VERSION, automatic_generic_casting_rule_id
 from .expression import EXPRESSION_RULESET_VERSION
 from .scenes import SCENE_RULESET_VERSION
 from .snapshots import SETTINGS_SNAPSHOT_SCHEMA_VERSION
@@ -53,6 +54,7 @@ from .script_contracts import (
     AttributionOrigin,
     CastingDecision,
     CastingDecisionOrigin,
+    CastingRuleAuthorityRecord,
     CastingTargetKind,
     CastingTargetRef,
     NarrationScriptContract,
@@ -737,6 +739,46 @@ def _settings_snapshot_narrator_profile(
     return profile_id
 
 
+def _is_server_automatic_pool_decision(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    casting: CastingDecision,
+    historical_read: bool,
+) -> bool:
+    """Recognize the reconstructible Plan 55 pool rule, never a DB rule."""
+
+    if (
+        casting.origin is not CastingDecisionOrigin.CASTING_RULE
+        or casting.rule_id is None
+        or casting.rule_version != 1
+        or casting.final_target is None
+        or casting.final_target.kind is not CastingTargetKind.GENERIC_SLOT
+        or casting.final_target.pool_id is None
+        or store.get(VoiceCastingRule, casting.rule_id) is not None
+    ):
+        return False
+    pool_id = casting.final_target.pool_id
+    if not casting.candidate_targets or any(
+        target.kind is not CastingTargetKind.GENERIC_SLOT
+        or target.pool_id != pool_id
+        for target in casting.candidate_targets
+    ):
+        return False
+    pool = store.get(GenericVoicePool, pool_id)
+    if (
+        pool is None
+        or pool.novel_id != novel_id
+        or (not historical_read and pool.status != "active")
+    ):
+        return False
+    return casting.rule_id == automatic_generic_casting_rule_id(
+        novel_id=novel_id,
+        pool_id=pool.id,
+        pool_version=pool.version_number,
+    )
+
+
 def _settings_snapshot_authority(
     store: NarrationStore,
     *,
@@ -906,6 +948,8 @@ def _build_script_authority_for_candidate(
         item.anonymous_speaker_id: item for item in anonymous_identities
     }
     casting_targets: set[CastingTargetRef] = set()
+    casting_rule_records: set[CastingRuleAuthorityRecord] = set()
+    group_keys: set[str] = set()
     historical_anonymous_ids: set[UUID] = set()
     current_scene_ids = {scene.scene_id for scene in candidate.scenes}
 
@@ -936,10 +980,6 @@ def _build_script_authority_for_candidate(
 
     for segment in candidate.segments:
         speaker = segment.speaker
-        if speaker.kind is SpeakerKind.GROUP:
-            raise InvalidNarrationState(
-                "group speaker authority is not persistently replayable in T3"
-            )
         if speaker.character_id is not None:
             character = require_row(
                 store.get(NovelCharacter, speaker.character_id), label="character"
@@ -984,12 +1024,44 @@ def _build_script_authority_for_candidate(
             character_ids.add(character_id)
 
         casting = segment.casting
-        if casting.origin in {
-            CastingDecisionOrigin.CASTING_RULE,
-            CastingDecisionOrigin.MANUAL_OVERRIDE,
-        }:
+        automatic_pool_decision = _is_server_automatic_pool_decision(
+            store,
+            novel_id=candidate.novel_id,
+            casting=casting,
+            historical_read=historical_read,
+        )
+        if (
+            casting.origin is CastingDecisionOrigin.MANUAL_OVERRIDE
+            or (
+                casting.origin is CastingDecisionOrigin.CASTING_RULE
+                and not automatic_pool_decision
+            )
+        ):
             raise InvalidNarrationState(
                 "casting rule/manual authority remains HOLD until exact replay evidence exists"
+            )
+        if speaker.kind is SpeakerKind.GROUP:
+            if not automatic_pool_decision or speaker.group_key is None:
+                raise InvalidNarrationState(
+                    "group speaker authority requires the server automatic pool"
+                )
+            casting_rule_records.add(
+                CastingRuleAuthorityRecord(
+                    decision=casting,
+                    segment_id=segment.segment_id,
+                    source_local_hash=segment.local_hash,
+                    speaker_target_hash=speaker_target_hash(speaker, casting),
+                )
+            )
+            group_keys.add(speaker.group_key)
+        elif automatic_pool_decision:
+            casting_rule_records.add(
+                CastingRuleAuthorityRecord(
+                    decision=casting,
+                    segment_id=segment.segment_id,
+                    source_local_hash=segment.local_hash,
+                    speaker_target_hash=speaker_target_hash(speaker, casting),
+                )
             )
         for target in casting.candidate_targets:
             _verify_casting_target(
@@ -1099,9 +1171,9 @@ def _build_script_authority_for_candidate(
         character_ids=frozenset(character_ids),
         anonymous_speakers=frozenset(anonymous_identities),
         verified_historical_anonymous_ids=frozenset(historical_anonymous_ids),
-        group_keys=frozenset(),
+        group_keys=frozenset(group_keys),
         casting_targets=frozenset(casting_targets),
-        casting_rule_records=frozenset(),
+        casting_rule_records=frozenset(casting_rule_records),
         cloud_records=frozenset(),
         override_provenances=frozenset(),
     )
@@ -1711,8 +1783,15 @@ def _typed_contract_payload_from_rows(
         "requested_model_fingerprint": version.requested_model_fingerprint,
         "actual_model_fingerprint": version.actual_model_fingerprint,
         "anonymous_speakers": [
-            anonymous_payloads[key]
-            for key in sorted(anonymous_payloads, key=str)
+            item
+            for item in sorted(
+                anonymous_payloads.values(),
+                key=lambda value: (
+                    value["stable_key_algorithm"],
+                    value["stable_key"],
+                    value["anonymous_speaker_id"],
+                ),
+            )
         ],
         "scenes": scene_payloads,
         "segments": segment_payloads,

@@ -100,6 +100,57 @@ def test_existing_voice_generator_resources_remain_recoverable_during_host_outag
     assert capability_checks == [wire.CapabilityKey.VOICE_GENERATOR]
 
 
+def test_voice_preparation_projects_active_generic_pack_or_starts_one_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    novel_id = uuid4()
+    events: list[tuple[str, object]] = []
+
+    class Service:
+        ready = True
+
+        def active_pack_ready(self) -> bool:
+            return self.ready
+
+        def ensure_novel_projection(self, value) -> None:
+            events.append(("project", value))
+
+        def build(self, *, idempotency_key: str) -> None:
+            events.append(("build", idempotency_key))
+
+    service = Service()
+    monkeypatch.setattr(
+        voice_features_api,
+        "current_generic_voice_pack_service",
+        lambda: service,
+    )
+
+    voice_features_api._prepare_generic_voice_pack_for_novel(novel_id)
+    service.ready = False
+    voice_features_api._prepare_generic_voice_pack_for_novel(novel_id)
+
+    assert events == [
+        ("project", novel_id),
+        ("build", voice_features_api.AUTOMATIC_GENERIC_PACK_BUILD_KEY),
+    ]
+
+
+def test_generic_pack_failure_never_blocks_existing_official_narration_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Service:
+        def active_pack_ready(self) -> bool:
+            raise RuntimeError("isolated failure")
+
+    monkeypatch.setattr(
+        voice_features_api,
+        "current_generic_voice_pack_service",
+        lambda: Service(),
+    )
+
+    voice_features_api._prepare_generic_voice_pack_for_novel(uuid4())
+
+
 def test_plan35_plan40_and_plan47_routes_and_idempotency_boundaries_are_exact() -> None:
     methods_by_path = {
         (route.path, method)
@@ -172,6 +223,34 @@ def test_plan35_plan40_and_plan47_routes_and_idempotency_boundaries_are_exact() 
             "/novels/{novel_id}/character-cast-plans/{command_id}/retry",
             "POST",
         ),
+        ("/novels/{novel_id}/voice-preparation-commands", "GET"),
+        ("/novels/{novel_id}/voice-preparation-commands", "POST"),
+        ("/novels/{novel_id}/voice-preparation-commands/{command_id}", "GET"),
+        (
+            "/novels/{novel_id}/voice-preparation-commands/{command_id}/resume",
+            "POST",
+        ),
+        (
+            "/novels/{novel_id}/voice-preparation-commands/{command_id}/retry",
+            "POST",
+        ),
+        (
+            "/novels/{novel_id}/voice-preparation-commands/{command_id}/cancel",
+            "POST",
+        ),
+        ("/voice-library/generic-pack", "GET"),
+        ("/voice-library/generic-pack/build-commands", "POST"),
+        ("/voice-library/generic-pack/build-commands/{command_id}", "GET"),
+        (
+            "/voice-library/generic-pack/build-commands/{command_id}/retry",
+            "POST",
+        ),
+        (
+            "/voice-library/generic-pack/build-commands/{command_id}/cancel",
+            "POST",
+        ),
+        ("/voice-library/generic-pack/slots/{slot_key}/regenerate", "POST"),
+        ("/voice-library/generic-pack/slots/{slot_key}/reject", "POST"),
     }
 
     creation_paths = {
@@ -180,6 +259,9 @@ def test_plan35_plan40_and_plan47_routes_and_idempotency_boundaries_are_exact() 
         "/novels/{novel_id}/characters/{character_id}/official-voice-match",
         "/novels/{novel_id}/characters/{character_id}/voice-generator-commands",
         "/novels/{novel_id}/character-cast-plans",
+        "/novels/{novel_id}/voice-preparation-commands",
+        "/voice-library/generic-pack/build-commands",
+        "/voice-library/generic-pack/slots/{slot_key}/regenerate",
     }
     for path, method in methods_by_path:
         headers = [field.alias for field in _route(path, method).dependant.header_params]

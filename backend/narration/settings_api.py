@@ -67,9 +67,7 @@ class NarrationSettingsOperation(str, Enum):
     GET_CHARACTER_VOICE_BINDING = "get_character_voice_binding"
     PUT_CHARACTER_VOICE_BINDING = "put_character_voice_binding"
     GET_GENERIC_VOICE_POOL = "get_generic_voice_pool"
-    PUT_GENERIC_VOICE_POOL = "put_generic_voice_pool"
     GET_CASTING_RULES = "get_casting_rules"
-    PUT_CASTING_RULES = "put_casting_rules"
     GET_PRONUNCIATION_PROFILE = "get_pronunciation_profile"
     PUT_PRONUNCIATION_PROFILE = "put_pronunciation_profile"
     GET_CACHE_STATUS = "get_cache_status"
@@ -950,26 +948,6 @@ def generic_voice_pool_get(
     )
 
 
-@router.put(
-    "/novels/{novel_id}/generic-voice-pools",
-    response_model=wire.GenericVoicePoolResource,
-)
-def generic_voice_pool_put(
-    novel_id: UUID,
-    payload: wire.PutGenericVoicePoolRequest,
-    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
-) -> wire.GenericVoicePoolResource:
-    return _run(
-        backend,
-        NarrationSettingsApiCommand(
-            operation=NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL,
-            novel_id=novel_id,
-            payload=payload,
-        ),
-        wire.GenericVoicePoolResource,
-    )
-
-
 @router.get(
     "/novels/{novel_id}/casting-rules",
     response_model=wire.VoiceCastingRulesResource,
@@ -983,26 +961,6 @@ def casting_rules_get(
         NarrationSettingsApiCommand(
             operation=NarrationSettingsOperation.GET_CASTING_RULES,
             novel_id=novel_id,
-        ),
-        wire.VoiceCastingRulesResource,
-    )
-
-
-@router.put(
-    "/novels/{novel_id}/casting-rules",
-    response_model=wire.VoiceCastingRulesResource,
-)
-def casting_rules_put(
-    novel_id: UUID,
-    payload: wire.PutVoiceCastingRulesRequest,
-    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
-) -> wire.VoiceCastingRulesResource:
-    return _run(
-        backend,
-        NarrationSettingsApiCommand(
-            operation=NarrationSettingsOperation.PUT_CASTING_RULES,
-            novel_id=novel_id,
-            payload=payload,
         ),
         wire.VoiceCastingRulesResource,
     )

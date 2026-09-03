@@ -105,7 +105,7 @@ def _overview_response(
             "contract_version": "narration-settings-api/1",
             "novel_id": str(novel_id),
             "capabilities": {
-                "schema_version": "narration-capabilities/3",
+                "schema_version": "narration-capabilities/4",
                 "items": [
                     {
                         "key": key,

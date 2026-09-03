@@ -333,16 +333,18 @@ describe("character voice generator panel", () => {
   it("restores the latest durable command after a page refresh", async () => {
     const harness = createHarness();
     const Panel = createCharacterVoiceGenerator(harness.React);
+    const onCommandChanged = vi.fn();
     const onLoadLatest = vi.fn(async () => snapshot("validating_with_nano", {
       progressPercent: 84,
       cancellable: false,
     }));
-    const props = baseProps({ onLoadLatest });
+    const props = baseProps({ onLoadLatest, onCommandChanged });
     harness.render(Panel, props);
     await Promise.resolve();
     await Promise.resolve();
     const restored = harness.render(Panel, props);
     expect(onLoadLatest).toHaveBeenCalledWith(CHARACTER_ID, expect.any(AbortSignal));
+    expect(onCommandChanged).not.toHaveBeenCalled();
     expect(textContent(restored)).toContain("正在验证生成结果");
     expect(textContent(restored)).toContain("84%");
   });
@@ -365,10 +367,12 @@ describe("character voice generator panel", () => {
     const harness = createHarness();
     const Panel = createCharacterVoiceGenerator(harness.React);
     const onUseGeneratedVoice = vi.fn(async () => snapshot("ready_applied"));
+    const onCommandChanged = vi.fn();
     const props = baseProps({
       expectedBindingVersion: 7,
       initialCommand: snapshot("ready_unapplied", { currentBindingVersion: 12 }),
       onUseGeneratedVoice,
+      onCommandChanged,
     });
     const tree = harness.render(Panel, props);
     expect(findAll(tree, (element) => element.type === "button")).toHaveLength(1);
@@ -379,6 +383,7 @@ describe("character voice generator panel", () => {
       commandId: COMMAND_ID,
       expectedBindingVersion: 12,
     });
+    expect(onCommandChanged).toHaveBeenCalledWith(expect.objectContaining({ state: "ready_applied" }));
   });
 
   it("exposes cancellation only during the server-authorized window and retry after failure", async () => {

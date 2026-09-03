@@ -34,6 +34,7 @@ SUPPORTED_HEADS = (
     "20260902_0037",
     "20260902_0038",
     "20260902_0039",
+    "20260903_0040",
 )
 VALIDATION_STEPS = MappingProxyType(
     {
@@ -43,6 +44,7 @@ VALIDATION_STEPS = MappingProxyType(
         "validate-20260902_0037": "20260902_0037",
         "validate-20260902_0038": "20260902_0038",
         "validate-20260902_0039": "20260902_0039",
+        "validate-20260903_0040": "20260903_0040",
     }
 )
 
@@ -122,6 +124,14 @@ _PROTECTED_TABLES_ADDED_BY_0036 = (
     "character_cast_plan_commands",
     "character_cast_plan_items",
 )
+_PROTECTED_TABLES_ADDED_BY_0040 = (
+    "generic_voice_design_drafts",
+    "generic_voice_generation_commands",
+    "generic_voice_pack_version_slots",
+    "generic_voice_pack_versions",
+    "voice_preparation_commands",
+    "voice_preparation_items",
+)
 
 _PROTECTED_TABLES_0034 = tuple(
     sorted((*_PROTECTED_TABLES_BEFORE_0034, *_PROTECTED_TABLES_ADDED_BY_0034))
@@ -132,6 +142,9 @@ _PROTECTED_TABLES_0035 = tuple(
 _PROTECTED_TABLES_0036 = tuple(
     sorted((*_PROTECTED_TABLES_0035, *_PROTECTED_TABLES_ADDED_BY_0036))
 )
+_PROTECTED_TABLES_0040 = tuple(
+    sorted((*_PROTECTED_TABLES_0036, *_PROTECTED_TABLES_ADDED_BY_0040))
+)
 
 PROTECTED_TABLES_BY_HEAD = MappingProxyType(
     {
@@ -141,9 +154,10 @@ PROTECTED_TABLES_BY_HEAD = MappingProxyType(
         "20260902_0037": _PROTECTED_TABLES_0036,
         "20260902_0038": _PROTECTED_TABLES_0036,
         "20260902_0039": _PROTECTED_TABLES_0036,
+        "20260903_0040": _PROTECTED_TABLES_0040,
     }
 )
-CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260902_0039"]
+CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260903_0040"]
 
 # These character-domain tables are not part of TTS authority. Keeping the
 # reviewed reasons next to the prefix audit makes a future character/voice

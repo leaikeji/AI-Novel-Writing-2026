@@ -54,6 +54,7 @@ from .voices import voice_profile_resource
 
 OFFICIAL_VOICE_SELECTION_OPERATION: Final = "official_preset_selection"
 OFFICIAL_VOICE_SELECTION_ACTOR: Final = "local-owner"
+DEFAULT_NARRATOR_PRESET_ID: Final = "onnx.Junhao"
 _IDEMPOTENCY_KEY: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 
 SessionFactory = Callable[[], Session]
@@ -726,9 +727,47 @@ class OfficialVoiceSelectionService:
         return tuple(responses[selection.target_key] for selection in selections)
 
 
+def initialize_new_novel_default_narrator(
+    session: Session,
+    *,
+    novel_id: UUID,
+) -> wire.NarrationSettingsResource:
+    """Create the project-wide narrator default inside the novel transaction.
+
+    Official profiles are novel-scoped, so a future-book default cannot be a
+    shared profile UUID.  Materialize the pinned preset through the same
+    receipt, provenance, rights and CAS path as an explicit author selection.
+    """
+
+    if not isinstance(session, Session) or not session.in_transaction():
+        raise RuntimeError("new-novel narrator initialization requires an active session")
+    response = OfficialVoiceSelectionService(
+        lambda: session
+    ).select_official_voices_atomically_in_session(
+        session,
+        novel_id=novel_id,
+        selections=(
+            OfficialVoiceBatchSelection(
+                target_key="narrator",
+                request=wire.OfficialVoiceSelectionRequest(
+                    preset_id=DEFAULT_NARRATOR_PRESET_ID,
+                    target_kind=wire.OfficialVoiceSelectionTargetKind.NARRATOR,
+                    expected_settings_version=0,
+                ),
+                idempotency_key=f"new-novel-default-narrator:{novel_id}",
+            ),
+        ),
+    )[0]
+    if response.current_settings is None:
+        raise InvalidNarrationState("new-novel narrator initialization lost settings")
+    return response.current_settings
+
+
 __all__ = [
+    "DEFAULT_NARRATOR_PRESET_ID",
     "OFFICIAL_VOICE_SELECTION_ACTOR",
     "OFFICIAL_VOICE_SELECTION_OPERATION",
     "OfficialVoiceBatchSelection",
     "OfficialVoiceSelectionService",
+    "initialize_new_novel_default_narrator",
 ]

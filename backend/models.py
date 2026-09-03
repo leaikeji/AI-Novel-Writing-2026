@@ -1478,7 +1478,8 @@ class VoiceProfileVersion(Base):
         ),
         CheckConstraint(
             "activation_basis IN ('preview_confirmed','explicit_official_preset_selection',"
-            "'character_one_click_generation','experimental_machine_validated')",
+            "'character_one_click_generation','experimental_machine_validated',"
+            "'generic_voice_pack_generation')",
             name="ck_voice_profile_version_activation_basis",
         ),
         CheckConstraint(
@@ -1498,6 +1499,10 @@ class VoiceProfileVersion(Base):
             "(activation_basis='character_one_click_generation' AND source_type='generated' "
             "AND validation_basis='machine_validated' AND quality_state='accepted' "
             "AND model_run_id IS NOT NULL AND reference_asset_id IS NOT NULL "
+            "AND locked_actor IS NULL AND locked_at IS NULL) OR "
+            "(activation_basis='generic_voice_pack_generation' AND source_type='generated' "
+            "AND validation_basis='machine_validated' AND quality_state='accepted' "
+            "AND model_run_id IS NOT NULL AND reference_asset_id IS NOT NULL "
             "AND locked_actor IS NULL AND locked_at IS NULL))",
             name="ck_voice_profile_version_locked_shape",
         ),
@@ -1512,7 +1517,7 @@ class VoiceProfileVersion(Base):
         CheckConstraint(
             "model_run_id IS NULL OR (state='locked' AND source_type='generated' "
             "AND activation_basis IN ('experimental_machine_validated',"
-            "'character_one_click_generation') "
+            "'character_one_click_generation','generic_voice_pack_generation') "
             "AND validation_basis='machine_validated' AND quality_state='accepted')",
             name="ck_voice_profile_version_model_run_shape",
         ),
@@ -2359,6 +2364,235 @@ class NanoVoiceExperimentCommand(Base):
     )
 
 
+class VoicePreparationCommand(Base):
+    """Durable parent command for automatic per-character voice preparation."""
+
+    __tablename__ = "voice_preparation_commands"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["novel_id", "owner_id", "workspace_id"],
+            ["novels.id", "novels.owner_id", "novels.workspace_id"],
+            name="fk_voice_preparation_novel_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["document_id", "novel_id"],
+            ["documents.id", "documents.novel_id"],
+            name="fk_voice_preparation_document_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["preflight_request_id", "novel_id"],
+            ["narration_requests.id", "narration_requests.novel_id"],
+            name="fk_voice_preparation_preflight_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["narration_request_id", "novel_id"],
+            ["narration_requests.id", "narration_requests.novel_id"],
+            name="fk_voice_preparation_result_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "owner_id", "workspace_id", "novel_id", "external_idempotency_digest",
+            name="uq_voice_preparation_idempotency",
+        ),
+        UniqueConstraint("id", "novel_id", name="uq_voice_preparation_novel_guard"),
+        UniqueConstraint(
+            "owner_id", "workspace_id", "continuation_idempotency_key",
+            name="uq_voice_preparation_continuation_key",
+        ),
+        UniqueConstraint("narration_request_id", name="uq_voice_preparation_result_request"),
+        Index(
+            "uq_voice_preparation_active_document",
+            "novel_id", "document_id",
+            unique=True,
+            postgresql_where=text(
+                "document_id IS NOT NULL AND state IN ('reserved','preparing')"
+            ),
+        ),
+        Index(
+            "uq_voice_preparation_active_book",
+            "novel_id",
+            unique=True,
+            postgresql_where=text(
+                "document_id IS NULL AND state IN ('reserved','preparing')"
+            ),
+        ),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_voice_preparation_fixed_local_scope",
+        ),
+        CheckConstraint("mode='prepare_missing_dedicated'", name="ck_voice_preparation_mode"),
+        CheckConstraint(
+            "state IN ('reserved','preparing','ready','ready_with_warnings',"
+            "'failed','cancelled','superseded')",
+            name="ck_voice_preparation_state",
+        ),
+        CheckConstraint(
+            "continuation_state IN ('not_applicable','pending','creating','created',"
+            "'cancelled','superseded','failed')",
+            name="ck_voice_preparation_continuation_state",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$' "
+            "AND external_idempotency_digest ~ '^[0-9a-f]{64}$' "
+            "AND workspace_digest ~ '^[0-9a-f]{64}$' "
+            "AND (expected_content_hash IS NULL OR expected_content_hash ~ '^[0-9a-f]{64}$') "
+            "AND (speaker_digest IS NULL OR speaker_digest ~ '^[0-9a-f]{64}$')",
+            name="ck_voice_preparation_digests",
+        ),
+        CheckConstraint(
+            "aggregate_version>0 AND character_catalog_version>=0 "
+            "AND progress_current>=0 AND progress_total>=0 "
+            "AND progress_current<=progress_total AND background_remaining>=0 "
+            "AND preparation_attempt>=0",
+            name="ck_voice_preparation_counters",
+        ),
+        CheckConstraint(
+            "(document_id IS NULL AND source_revision_id IS NULL "
+            "AND expected_draft_version IS NULL AND expected_content_hash IS NULL "
+            "AND expected_settings_version IS NULL AND preflight_request_id IS NULL "
+            "AND preflight_script_version_id IS NULL AND speaker_digest IS NULL "
+            "AND speaker_digest_version IS NULL AND continuation_state='not_applicable' "
+            "AND continuation_idempotency_key IS NULL AND narration_request_id IS NULL) OR "
+            "(document_id IS NOT NULL AND source_revision_id IS NOT NULL "
+            "AND expected_draft_version>0 AND expected_content_hash IS NOT NULL "
+            "AND expected_settings_version>0 AND preflight_request_id IS NOT NULL "
+            "AND preflight_script_version_id IS NOT NULL AND speaker_digest IS NOT NULL "
+            "AND speaker_digest_version='narration-voice-preparation-speakers/1' "
+            "AND continuation_idempotency_key IS NOT NULL)",
+            name="ck_voice_preparation_chapter_shape",
+        ),
+        CheckConstraint(
+            "(lease_fence IS NULL AND lease_expires_at IS NULL) OR "
+            "(lease_fence IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            name="ck_voice_preparation_lease",
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code ~ '^[A-Z][A-Z0-9_]{0,95}$'",
+            name="ck_voice_preparation_failure_code",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    document_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    source_revision_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("document_revisions.id", ondelete="RESTRICT"))
+    mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    explicit_requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    external_idempotency_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="reserved")
+    aggregate_version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    character_catalog_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    workspace_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    preflight_request_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    preflight_script_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("narration_script_versions.id", ondelete="RESTRICT"))
+    expected_draft_version: Mapped[int | None] = mapped_column(BigInteger)
+    expected_content_hash: Mapped[str | None] = mapped_column(String(64))
+    expected_settings_version: Mapped[int | None] = mapped_column(BigInteger)
+    speaker_digest_version: Mapped[str | None] = mapped_column(String(80))
+    speaker_digest: Mapped[str | None] = mapped_column(String(64))
+    progress_current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chapter_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    background_remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    continuation_idempotency_key: Mapped[str | None] = mapped_column(String(160))
+    continuation_state: Mapped[str] = mapped_column(String(24), nullable=False, default="not_applicable")
+    narration_request_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    preparation_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_fence: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class VoicePreparationItem(Base):
+    __tablename__ = "voice_preparation_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["command_id", "novel_id"],
+            ["voice_preparation_commands.id", "voice_preparation_commands.novel_id"],
+            name="fk_voice_preparation_item_command_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["character_id", "novel_id"],
+            ["novel_characters.id", "novel_characters.novel_id"],
+            name="fk_voice_preparation_item_character_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["result_voice_version_id", "result_profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_voice_preparation_item_result_version",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("command_id", "position", name="uq_voice_preparation_item_position"),
+        UniqueConstraint("command_id", "character_id", name="uq_voice_preparation_item_character"),
+        Index("ix_voice_preparation_items_command_state", "command_id", "state", "position"),
+        CheckConstraint(
+            "state IN ('pending','preserved','queued','generating','ready_applied',"
+            "'ready_unapplied','fallback_official','failed','cancelled')",
+            name="ck_voice_preparation_item_state",
+        ),
+        CheckConstraint("role_type IN ('main','supporting')", name="ck_voice_preparation_item_role"),
+        CheckConstraint(
+            "position>=0 AND expected_binding_version>=0 "
+            "AND workspace_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_voice_preparation_item_identity",
+        ),
+        CheckConstraint(
+            "original_voice_kind IN ('none','official','private','uploaded','generated')",
+            name="ck_voice_preparation_item_original_kind",
+        ),
+        CheckConstraint(
+            "(original_profile_id IS NULL AND original_voice_version_id IS NULL) OR "
+            "(original_profile_id IS NOT NULL AND original_voice_version_id IS NOT NULL)",
+            name="ck_voice_preparation_item_original_shape",
+        ),
+        CheckConstraint(
+            "(result_profile_id IS NULL AND result_voice_version_id IS NULL) OR "
+            "(result_profile_id IS NOT NULL AND result_voice_version_id IS NOT NULL)",
+            name="ck_voice_preparation_item_result_shape",
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code ~ '^[A-Z][A-Z0-9_]{0,95}$'",
+            name="ck_voice_preparation_item_failure_code",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    command_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    character_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    role_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    chapter_speaker: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    expected_binding_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    workspace_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_voice_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    original_profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"))
+    original_voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profile_versions.id", ondelete="RESTRICT"))
+    original_usable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    usable_for_narration: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    voice_generator_command_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_generator_commands.id", ondelete="RESTRICT"))
+    result_profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"))
+    result_voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    applied_binding_version: Mapped[int | None] = mapped_column(BigInteger)
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class VoiceDesignDraft(Base):
     """Immutable character workspace projection used by VoiceGenerator."""
 
@@ -2753,14 +2987,313 @@ class CharacterVoiceBinding(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class GenericVoicePackVersion(Base):
+    """Immutable workspace-level 24-slot voice-pack candidate."""
+
+    __tablename__ = "generic_voice_pack_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "language", "version_number",
+            name="uq_generic_voice_pack_version_number",
+        ),
+        UniqueConstraint("id", "workspace_id", name="uq_generic_voice_pack_scope"),
+        Index(
+            "uq_generic_voice_pack_active_language",
+            "workspace_id", "language",
+            unique=True,
+            postgresql_where=text("state='active'"),
+        ),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_generic_voice_pack_fixed_local_scope",
+        ),
+        CheckConstraint("language='zh-CN'", name="ck_generic_voice_pack_language"),
+        CheckConstraint(
+            "state IN ('building','ready_to_activate','active','retired_for_new_use',"
+            "'rejected','failed','superseded')",
+            name="ck_generic_voice_pack_state",
+        ),
+        CheckConstraint(
+            "slot_total=24 AND validated_slot_count>=0 "
+            "AND validated_slot_count<=slot_total",
+            name="ck_generic_voice_pack_progress",
+        ),
+        CheckConstraint(
+            "taxonomy_sha256 ~ '^[0-9a-f]{64}$' "
+            "AND design_catalog_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_generic_voice_pack_digests",
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code ~ '^[A-Z][A-Z0-9_]{0,95}$'",
+            name="ck_generic_voice_pack_failure_code",
+        ),
+        CheckConstraint(
+            "state NOT IN ('ready_to_activate','active') OR validated_slot_count=24",
+            name="ck_generic_voice_pack_activation_progress",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    language: Mapped[str] = mapped_column(String(40), nullable=False)
+    catalog_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    taxonomy_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    design_catalog_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    predecessor_version_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("generic_voice_pack_versions.id", ondelete="RESTRICT"),
+    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="building")
+    slot_total: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
+    validated_slot_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class GenericVoiceDesignDraft(Base):
+    """Immutable checked-in design projection for one generic voice slot."""
+
+    __tablename__ = "generic_voice_design_drafts"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "fingerprint", name="uq_generic_voice_design_fingerprint"
+        ),
+        UniqueConstraint("id", "workspace_id", name="uq_generic_voice_design_scope"),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_generic_voice_design_fixed_local_scope",
+        ),
+        CheckConstraint("language='zh-CN' AND seed>=0", name="ck_generic_voice_design_language_seed"),
+        CheckConstraint(
+            "slot_key ~ '^[a-z][a-z0-9_]{0,79}$' "
+            "AND instruction_digest ~ '^[0-9a-f]{64}$' "
+            "AND parameters_digest ~ '^[0-9a-f]{64}$' "
+            "AND runtime_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_generic_voice_design_identity",
+        ),
+        CheckConstraint(
+            "char_length(instruction) BETWEEN 1 AND 1200 AND instruction=btrim(instruction)",
+            name="ck_generic_voice_design_instruction",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    language: Mapped[str] = mapped_column(String(40), nullable=False)
+    slot_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    instruction_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    parameters_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    parameters_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_identity_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    runtime_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class GenericVoiceGenerationCommand(Base):
+    """Recoverable workspace command for one generic VoiceGenerator slot."""
+
+    __tablename__ = "generic_voice_generation_commands"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["pack_version_id", "workspace_id"],
+            ["generic_voice_pack_versions.id", "generic_voice_pack_versions.workspace_id"],
+            name="fk_generic_voice_generation_pack_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["design_draft_id", "workspace_id"],
+            ["generic_voice_design_drafts.id", "generic_voice_design_drafts.workspace_id"],
+            name="fk_generic_voice_generation_design_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["background_job_id", "owner_id", "workspace_id"],
+            ["background_jobs.id", "background_jobs.owner_id", "background_jobs.workspace_id"],
+            name="fk_generic_voice_generation_job_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["voice_version_id", "voice_profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_generic_voice_generation_version_profile",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "owner_id", "workspace_id", "idempotency_key",
+            name="uq_generic_voice_generation_idempotency",
+        ),
+        UniqueConstraint("host_request_id", name="uq_generic_voice_generation_host_request"),
+        Index(
+            "uq_generic_voice_generation_pack_slot_active",
+            "pack_version_id", "slot_key",
+            unique=True,
+            postgresql_where=text("state IN ('queued','building')"),
+        ),
+        CheckConstraint(
+            "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
+            "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
+            name="ck_generic_voice_generation_fixed_local_scope",
+        ),
+        CheckConstraint("language='zh-CN'", name="ck_generic_voice_generation_language"),
+        CheckConstraint(
+            "state IN ('queued','building','ready','failed','cancelled','superseded')",
+            name="ck_generic_voice_generation_state",
+        ),
+        CheckConstraint(
+            "slot_key ~ '^[a-z][a-z0-9_]{0,79}$' "
+            "AND request_hash ~ '^[0-9a-f]{64}$' "
+            "AND design_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_generic_voice_generation_identity",
+        ),
+        CheckConstraint(
+            "attempt>=0 AND progress_current>=0 AND progress_total=2 "
+            "AND progress_current<=progress_total",
+            name="ck_generic_voice_generation_progress",
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code ~ '^[A-Z][A-Z0-9_]{0,95}$'",
+            name="ck_generic_voice_generation_failure_code",
+        ),
+        CheckConstraint(
+            "(lease_fence IS NULL AND lease_expires_at IS NULL) OR "
+            "(lease_fence IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            name="ck_generic_voice_generation_lease",
+        ),
+        CheckConstraint(
+            "(voice_profile_id IS NULL AND voice_version_id IS NULL) OR "
+            "(voice_profile_id IS NOT NULL AND voice_version_id IS NOT NULL)",
+            name="ck_generic_voice_generation_result_shape",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    pack_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    design_draft_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    background_job_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    host_request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    language: Mapped[str] = mapped_column(String(40), nullable=False)
+    slot_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    design_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="queued")
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_fence: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    generated_reference_asset_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"))
+    nano_validation_asset_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="RESTRICT"))
+    generator_model_run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("model_run_records.id", ondelete="RESTRICT"))
+    nano_model_run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("model_run_records.id", ondelete="RESTRICT"))
+    voice_profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"))
+    voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    progress_current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class GenericVoicePackVersionSlot(Base):
+    __tablename__ = "generic_voice_pack_version_slots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["pack_version_id", "workspace_id"],
+            ["generic_voice_pack_versions.id", "generic_voice_pack_versions.workspace_id"],
+            name="fk_generic_voice_pack_slot_pack_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["voice_version_id", "voice_profile_id"],
+            ["voice_profile_versions.id", "voice_profile_versions.profile_id"],
+            name="fk_generic_voice_pack_slot_voice_version",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("pack_version_id", "position", name="uq_generic_voice_pack_slot_position"),
+        UniqueConstraint("pack_version_id", "slot_key", name="uq_generic_voice_pack_slot_key"),
+        CheckConstraint(
+            "state IN ('pending','generating','validated','reused','rejected','failed')",
+            name="ck_generic_voice_pack_slot_state",
+        ),
+        CheckConstraint(
+            "position>=0 AND position<24 AND slot_key ~ '^[a-z][a-z0-9_]{0,79}$'",
+            name="ck_generic_voice_pack_slot_position_key",
+        ),
+        CheckConstraint(
+            "(voice_profile_id IS NULL AND voice_version_id IS NULL) OR "
+            "(voice_profile_id IS NOT NULL AND voice_version_id IS NOT NULL)",
+            name="ck_generic_voice_pack_slot_voice_shape",
+        ),
+        CheckConstraint(
+            "design_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND (reference_audio_sha256 IS NULL OR reference_audio_sha256 ~ '^[0-9a-f]{64}$') "
+            "AND (validation_audio_sha256 IS NULL OR validation_audio_sha256 ~ '^[0-9a-f]{64}$')",
+            name="ck_generic_voice_pack_slot_digests",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    pack_version_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    slot_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    design_draft_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("generic_voice_design_drafts.id", ondelete="RESTRICT"))
+    generation_command_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("generic_voice_generation_commands.id", ondelete="RESTRICT"))
+    voice_profile_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="RESTRICT"))
+    voice_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    design_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    reference_audio_sha256: Mapped[str | None] = mapped_column(String(64))
+    validation_audio_sha256: Mapped[str | None] = mapped_column(String(64))
+    rights_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    quality_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class GenericVoicePool(Base):
     __tablename__ = "generic_voice_pools"
-    __table_args__ = (UniqueConstraint("novel_id", "name", "version_number", name="uq_generic_voice_pool_version"),)
+    __table_args__ = (
+        UniqueConstraint("novel_id", "name", "version_number", name="uq_generic_voice_pool_version"),
+        ForeignKeyConstraint(
+            ["source_pack_version_id"],
+            ["generic_voice_pack_versions.id"],
+            name="fk_generic_voice_pool_source_pack",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("language IN ('zh-CN','en','ja-JP')", name="ck_generic_voice_pool_language"),
+        CheckConstraint(
+            "(source_pack_version_id IS NULL AND status<>'active') OR "
+            "source_pack_version_id IS NOT NULL",
+            name="ck_generic_voice_pool_source_shape",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    language: Mapped[str] = mapped_column(String(40), nullable=False, default="zh-CN")
+    source_pack_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     attributes_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 NARRATION_SETTINGS_API_VERSION: Final = "narration-settings-api/1"
 NARRATION_SETTINGS_SCHEMA_VERSION: Final = "narration-settings/1"
-NARRATION_CAPABILITY_SCHEMA_VERSION: Final = "narration-capabilities/3"
+NARRATION_CAPABILITY_SCHEMA_VERSION: Final = "narration-capabilities/4"
 NARRATION_VOICE_SCHEMA_VERSION: Final = "narration-voice/2"
 NARRATION_CACHE_SCHEMA_VERSION: Final = "narration-cache/1"
 REFERENCE_UPLOAD_MAX_BYTES: Final = 16 * 1024 * 1024
@@ -68,6 +68,7 @@ class CapabilityKey(str, Enum):
     CHARACTER_CAST_PLANNING = "character_cast_planning"
     NANO_ADVANCED_TUNING = "nano_advanced_tuning"
     PRIVATE_VOICE_DELETION = "private_voice_deletion"
+    AUTOMATIC_CHARACTER_VOICE_GENERATION = "automatic_character_voice_generation"
 
 
 T4_PRODUCT_CAPABILITY_KEYS: Final[frozenset[CapabilityKey]] = frozenset(
@@ -123,7 +124,7 @@ class FeatureCapability(_StrictModel):
 
 
 class NarrationCapabilities(_StrictModel):
-    schema_version: Literal["narration-capabilities/3"] = (
+    schema_version: Literal["narration-capabilities/4"] = (
         NARRATION_CAPABILITY_SCHEMA_VERSION
     )
     items: list[FeatureCapability]
@@ -221,6 +222,12 @@ def t2_hold_capabilities() -> NarrationCapabilities:
             True,
             "TTS_FEATURE_STARTING",
             "TTS35-CORE",
+        ),
+        (
+            CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
+            False,
+            "TTS_FEATURE_STARTING",
+            "TTS55-CHARACTER",
         ),
     )
     return NarrationCapabilities(
@@ -659,6 +666,7 @@ class VoiceActivationBasis(str, Enum):
     PREVIEW_CONFIRMED = "preview_confirmed"
     EXPLICIT_OFFICIAL_PRESET_SELECTION = "explicit_official_preset_selection"
     CHARACTER_ONE_CLICK_GENERATION = "character_one_click_generation"
+    GENERIC_VOICE_PACK_GENERATION = "generic_voice_pack_generation"
     EXPERIMENTAL_MACHINE_VALIDATED = "experimental_machine_validated"
 
 
@@ -880,6 +888,12 @@ class VoiceProfileVersionResource(_StrictModel):
             is VoiceActivationBasis.CHARACTER_ONE_CLICK_GENERATION
             and self.validation_basis is VoiceValidationBasis.MACHINE_VALIDATED
         )
+        generic_pack_generated = (
+            self.source_type is VoiceSourceType.GENERATED
+            and self.activation_basis
+            is VoiceActivationBasis.GENERIC_VOICE_PACK_GENERATION
+            and self.validation_basis is VoiceValidationBasis.MACHINE_VALIDATED
+        )
         if self.source_type is VoiceSourceType.PRESET and self.preset_key is None:
             raise ValueError("preset source requires preset_key")
         if (
@@ -926,7 +940,7 @@ class VoiceProfileVersionResource(_StrictModel):
                 and self.locked_at is None
             )
             machine_validated = (
-                (experimental or character_generated)
+                (experimental or character_generated or generic_pack_generated)
                 and self.quality_state is VoiceQualityState.ACCEPTED
                 and self.locked_at is None
             )
@@ -1541,6 +1555,241 @@ CharacterCastPlanItemState = Literal[
 ]
 
 
+VoicePreparationState = Literal[
+    "reserved",
+    "preparing",
+    "ready",
+    "ready_with_warnings",
+    "failed",
+    "cancelled",
+    "superseded",
+]
+VoicePreparationItemState = Literal[
+    "pending",
+    "preserved",
+    "queued",
+    "generating",
+    "ready_applied",
+    "ready_unapplied",
+    "fallback_official",
+    "failed",
+    "cancelled",
+]
+VoicePreparationContinuationState = Literal[
+    "not_applicable",
+    "pending",
+    "creating",
+    "created",
+    "cancelled",
+    "superseded",
+    "failed",
+]
+
+
+class CreateVoicePreparationRequest(_StrictModel):
+    contract_version: Literal["narration-voice-preparation-request/1"] = (
+        "narration-voice-preparation-request/1"
+    )
+    mode: Literal["prepare_missing_dedicated"] = "prepare_missing_dedicated"
+    document_id: UUID | None = None
+    expected_draft_version: int | None = Field(default=None, ge=1, strict=True)
+    expected_content_hash: str | None = None
+    expected_settings_version: int | None = Field(default=None, ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def validate_chapter_cas(self) -> "CreateVoicePreparationRequest":
+        values = (
+            self.expected_draft_version,
+            self.expected_content_hash,
+            self.expected_settings_version,
+        )
+        if self.document_id is None:
+            if any(value is not None for value in values):
+                raise ValueError("whole-book preparation cannot carry chapter CAS")
+        elif any(value is None for value in values):
+            raise ValueError("chapter preparation requires complete chapter CAS")
+        if self.expected_content_hash is not None and _SHA256.fullmatch(
+            self.expected_content_hash
+        ) is None:
+            raise ValueError("expected_content_hash must be lowercase SHA-256")
+        return self
+
+
+class VoicePreparationTargetResource(_StrictModel):
+    character_id: UUID
+    character_name: str = Field(min_length=1, max_length=240)
+    role_type: Literal["main", "supporting"]
+    chapter_speaker: bool = Field(strict=True)
+    state: VoicePreparationItemState
+    voice_generator_command_id: UUID | None = None
+    profile_id: UUID | None = None
+    voice_version_id: UUID | None = None
+    failure_code: str | None = Field(default=None, max_length=96)
+
+    @field_validator("failure_code")
+    @classmethod
+    def validate_failure_code(cls, value: str | None) -> str | None:
+        if value is not None and _SAFE_CODE.fullmatch(value) is None:
+            raise ValueError("voice preparation failure code must be stable")
+        return value
+
+
+class VoicePreparationResource(_StrictModel):
+    contract_version: Literal["narration-voice-preparation/1"] = (
+        "narration-voice-preparation/1"
+    )
+    command_id: UUID
+    novel_id: UUID
+    document_id: UUID | None = None
+    state: VoicePreparationState
+    server_now: datetime
+    progress_current: int = Field(ge=0, strict=True)
+    progress_total: int = Field(ge=0, strict=True)
+    preflight_request_id: UUID | None = None
+    preflight_script_version_id: UUID | None = None
+    chapter_ready: bool = Field(strict=True)
+    background_remaining: int = Field(ge=0, strict=True)
+    continuation_state: VoicePreparationContinuationState
+    narration_request_id: UUID | None = None
+    current_target: VoicePreparationTargetResource | None = None
+    preserved: list[VoicePreparationTargetResource]
+    generated: list[VoicePreparationTargetResource]
+    fallback: list[VoicePreparationTargetResource]
+    failed: list[VoicePreparationTargetResource]
+    cancellable: bool = Field(strict=True)
+    retryable: bool = Field(strict=True)
+    terminal: bool = Field(strict=True)
+    failure_code: str | None = Field(default=None, max_length=96)
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_projection(self) -> "VoicePreparationResource":
+        if self.progress_current > self.progress_total:
+            raise ValueError("voice preparation progress is invalid")
+        if self.failure_code is not None and _SAFE_CODE.fullmatch(
+            self.failure_code
+        ) is None:
+            raise ValueError("voice preparation failure code must be stable")
+        active = self.state in {"reserved", "preparing"}
+        if self.terminal == active:
+            raise ValueError("voice preparation terminal flag drifted")
+        if self.terminal and self.cancellable:
+            raise ValueError("terminal voice preparation cannot be cancelled")
+        if self.state == "failed" and self.failure_code is None:
+            raise ValueError("failed voice preparation requires failure evidence")
+        return self
+
+
+class VoicePreparationListResource(_StrictModel):
+    contract_version: Literal["narration-voice-preparation-list/1"] = (
+        "narration-voice-preparation-list/1"
+    )
+    novel_id: UUID
+    server_now: datetime
+    items: list[VoicePreparationResource]
+
+
+GenericVoicePackState = Literal[
+    "missing",
+    "building",
+    "ready_to_activate",
+    "active",
+    "retired_for_new_use",
+    "rejected",
+    "failed",
+    "superseded",
+]
+GenericVoicePackSlotState = Literal[
+    "pending", "generating", "validated", "reused", "rejected", "failed"
+]
+GenericVoicePackSlotCategory = Literal[
+    "child", "youth", "middle_age", "older", "neutral_group"
+]
+
+
+class GenericVoicePackSlotResource(_StrictModel):
+    slot_id: UUID
+    slot_key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,79}$")
+    label: str = Field(min_length=1, max_length=120)
+    category: GenericVoicePackSlotCategory
+    state: GenericVoicePackSlotState
+    preview_available: bool = Field(strict=True)
+    preview_asset: MediaAssetLink | None = None
+    voice_profile_id: UUID | None = None
+    voice_version_id: UUID | None = None
+    failure_code: str | None = Field(default=None, max_length=96)
+
+    @model_validator(mode="after")
+    def validate_preview_identity(self) -> "GenericVoicePackSlotResource":
+        has_identity = self.voice_profile_id is not None and self.voice_version_id is not None
+        if (self.voice_profile_id is None) != (self.voice_version_id is None):
+            raise ValueError("generic voice slot identity must be complete")
+        has_preview = self.preview_asset is not None
+        if self.preview_available != (has_identity and has_preview):
+            raise ValueError("generic voice slot preview identity is inconsistent")
+        is_published = self.state in {"validated", "reused"}
+        if is_published != has_preview:
+            raise ValueError("generic voice slot preview publication is inconsistent")
+        return self
+
+
+class GenericVoicePackResource(_StrictModel):
+    contract_version: Literal["generic-voice-pack/1"] = "generic-voice-pack/1"
+    language: Literal["zh-CN"] = "zh-CN"
+    pack_version_id: UUID | None = None
+    state: GenericVoicePackState
+    prepared_slots: int = Field(ge=0, le=24, strict=True)
+    total_slots: Literal[24] = 24
+    slots: list[GenericVoicePackSlotResource]
+    failure_code: str | None = Field(default=None, max_length=96)
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_pack(self) -> "GenericVoicePackResource":
+        prepared = sum(item.state in {"validated", "reused"} for item in self.slots)
+        if prepared != self.prepared_slots or len({item.slot_key for item in self.slots}) != len(self.slots):
+            raise ValueError("generic voice pack slot projection is invalid")
+        if self.state == "missing":
+            if self.pack_version_id is not None or self.slots or self.prepared_slots:
+                raise ValueError("missing generic voice pack must be empty")
+        elif self.pack_version_id is None:
+            raise ValueError("generic voice pack requires immutable identity")
+        return self
+
+
+GenericVoiceBuildCommandState = Literal[
+    "queued", "building", "ready", "failed", "cancelled", "superseded"
+]
+
+
+class GenericVoiceBuildCommandResource(_StrictModel):
+    contract_version: Literal["generic-voice-generation-command/1"] = (
+        "generic-voice-generation-command/1"
+    )
+    command_id: UUID
+    pack_version_id: UUID
+    state: GenericVoiceBuildCommandState
+    progress_current: int = Field(ge=0, le=24, strict=True)
+    progress_total: Literal[24] = 24
+    current_slot_key: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,79}$")
+    cancellable: bool = Field(strict=True)
+    retryable: bool = Field(strict=True)
+    terminal: bool = Field(strict=True)
+    failure_code: str | None = Field(default=None, max_length=96)
+    updated_at: datetime
+
+
+class GenericVoicePackLoadResource(_StrictModel):
+    pack: GenericVoicePackResource
+    command: GenericVoiceBuildCommandResource | None = None
+
+
+class RejectGenericVoiceSlotRequest(_StrictModel):
+    expected_pack_version_id: UUID
+
+
 class CreateCharacterCastPlanRequest(_StrictModel):
     contract_version: Literal["character-cast-plan-request/1"] = (
         "character-cast-plan-request/1"
@@ -2112,6 +2361,7 @@ class CastingSpeakerKind(str, Enum):
     CHARACTER = "character"
     ANONYMOUS = "anonymous"
     GROUP = "group"
+    UNKNOWN = "unknown"
 
 
 class CastingGender(str, Enum):
@@ -2140,7 +2390,7 @@ class CastingContextKind(str, Enum):
 
 
 class VoiceCastingCondition(_StrictModel):
-    speaker_kinds: list[CastingSpeakerKind] = Field(max_length=3)
+    speaker_kinds: list[CastingSpeakerKind] = Field(max_length=4)
     genders: list[CastingGender] = Field(max_length=4)
     age_bands: list[CastingAgeBand] = Field(max_length=6)
     context_kinds: list[CastingContextKind] = Field(max_length=6)
@@ -2227,17 +2477,6 @@ class VoiceCastingRulesResource(_StrictModel):
             raise ValueError("empty casting rule set is version zero")
         if self.items and self.version < 1:
             raise ValueError("persisted casting rules require a positive version")
-        return self
-
-
-class PutVoiceCastingRulesRequest(_StrictModel):
-    expected_version: int = Field(ge=0, strict=True)
-    items: list[VoiceCastingRuleInput] = Field(max_length=500)
-
-    @model_validator(mode="after")
-    def validate_priorities(self) -> "PutVoiceCastingRulesRequest":
-        if len({item.priority for item in self.items}) != len(self.items):
-            raise ValueError("casting rule priorities must be unique")
         return self
 
 
@@ -2402,24 +2641,6 @@ class GenericVoicePoolResource(_StrictModel):
             or self.production_ready_slot_count >= 24
         ):
             raise ValueError("incomplete pool requires 24 persisted but non-production-ready slots")
-        return self
-
-
-class GenericVoiceSlotSelectionRequest(_StrictModel):
-    slot_key: str = Field(min_length=1, max_length=80)
-    voice_version_id: UUID
-    enabled: bool = Field(strict=True)
-    priority: int = Field(ge=-10_000, le=10_000, strict=True)
-
-
-class PutGenericVoicePoolRequest(_StrictModel):
-    expected_version: int = Field(ge=0, strict=True)
-    slots: list[GenericVoiceSlotSelectionRequest] = Field(min_length=24, max_length=24)
-
-    @model_validator(mode="after")
-    def validate_unique_slots(self) -> "PutGenericVoicePoolRequest":
-        if len({item.slot_key for item in self.slots}) != 24:
-            raise ValueError("generic voice pool request requires 24 unique slot keys")
         return self
 
 

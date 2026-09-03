@@ -1,0 +1,131 @@
+{
+  "schema_version": "generic-voice-design-catalog/1",
+  "catalog_id": "ai-novel-world-2026-generic-voice-design-zh-cn-v1",
+  "taxonomy_catalog_id": "ai-novel-world-2026-generic-casting-taxonomy-v1",
+  "taxonomy_sha256": "e8fc37ed5ad4f4371d79131626be305fc67083019d1007e31434baa1113a092d",
+  "language": "zh-CN",
+  "usage_scope": "workspace_library_private_use",
+  "source_kind": "voice_generator",
+  "slots": [
+    {
+      "slot_key": "female_child_bright",
+      "seed": 550001,
+      "instruction": "设计一条独特自然的中文女童声音：音高偏高，语气明亮，清晰有朝气，语速适中。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_teen_gentle",
+      "seed": 550002,
+      "instruction": "设计一条独特自然的中文少女声音：音高略高，语气温柔，质感清澈，节奏舒缓。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_young_gentle",
+      "seed": 550003,
+      "instruction": "设计一条独特自然的中文青年女性声音：音高适中，温柔亲和，气息平稳，语速略慢。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_young_bright",
+      "seed": 550004,
+      "instruction": "设计一条独特自然的中文青年女性声音：音高略高，明快有活力，吐字清楚，语速略快。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_young_cool",
+      "seed": 550005,
+      "instruction": "设计一条独特自然的中文青年女性声音：音高适中，冷静克制，质感清晰，语速平稳。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_middle_warm",
+      "seed": 550006,
+      "instruction": "设计一条独特自然的中文中年女性声音：音高适中偏低，温暖从容，质感柔和，语速适中。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_middle_authoritative",
+      "seed": 550007,
+      "instruction": "设计一条独特自然的中文中年女性声音：音高偏低，沉稳坚定，发声有支撑，节奏清楚。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_elderly_kind",
+      "seed": 550008,
+      "instruction": "设计一条独特自然的中文老年女性声音：音高适中，慈祥柔和，带轻微岁月质感，语速略慢。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "female_elderly_stern",
+      "seed": 550009,
+      "instruction": "设计一条独特自然的中文老年女性声音：音高偏低，严肃克制，质感坚实，语速沉着。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_child_bright",
+      "seed": 550010,
+      "instruction": "设计一条独特自然的中文男童声音：音高偏高，明亮灵动，吐字清楚，语速适中。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_teen_clean",
+      "seed": 550011,
+      "instruction": "设计一条独特自然的中文少年声音：音高清朗，质感干净，能量适中，节奏自然。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_young_warm",
+      "seed": 551012,
+      "instruction": "设计一条独特自然的中文青年男性声音：音高适中，温和亲切，质感温暖，语速舒展。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_young_calm",
+      "seed": 550013,
+      "instruction": "设计一条独特自然的中文青年男性声音：音高适中偏低，沉静克制，发声清晰，语速平稳。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_young_cool",
+      "seed": 550014,
+      "instruction": "设计一条独特自然的中文青年男性声音：音高偏低，冷峻利落，质感清晰，节奏稍紧。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_middle_warm",
+      "seed": 550015,
+      "instruction": "设计一条独特自然的中文中年男性声音：音高偏低，温厚可靠，质感饱满，语速从容。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_middle_authoritative",
+      "seed": 550016,
+      "instruction": "设计一条独特自然的中文中年男性声音：音高低沉，威严坚定，发声有力量，节奏稳健。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_elderly_kind",
+      "seed": 550017,
+      "instruction": "设计一条独特自然的中文老年男性声音：音高偏低，慈和温暖，带轻微岁月质感，语速略慢。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "male_elderly_stern",
+      "seed": 550018,
+      "instruction": "设计一条独特自然的中文老年男性声音：音高低沉，严肃克制，质感坚实，语速沉稳。保持适合小说人物对白的稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "neutral_young",
+      "seed": 550019,
+      "instruction": "设计一条独特自然的中文青年中性声音：音高适中，声音呈现中性，质感清晰，语速平稳。保持适合未知人物对白的稳定声线，不推断身份，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "neutral_middle",
+      "seed": 550020,
+      "instruction": "设计一条独特自然的中文中年中性声音：音高适中偏低，声音呈现中性，沉着清晰，语速从容。保持适合未知人物对白的稳定声线，不推断身份，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "announcer_female",
+      "seed": 550021,
+      "instruction": "设计一条独特自然的中文女性播报声音：音高适中，吐字准确，信息感清楚，节奏均匀，情绪中性。保持稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "announcer_male",
+      "seed": 550022,
+      "instruction": "设计一条独特自然的中文男性播报声音：音高适中偏低，吐字准确，信息感清楚，节奏均匀，情绪中性。保持稳定声线，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "crowd_female",
+      "seed": 550023,
+      "instruction": "设计一条独特自然的中文女性群体代表声线：呈现多人共同回应时的整体感，吐字仍然清楚，节奏简洁，避免具体个人特征，不模仿任何现实人物。"
+    },
+    {
+      "slot_key": "crowd_male",
+      "seed": 551024,
+      "instruction": "设计一条独特自然的中文成年男性单人声线，用于未具名男性群体的简短对白。明确只生成一个人自然说话的声音，不模拟多人合声；音高适中，吐字清楚，反应迅速，语速偏快，句尾干净，不拖腔，不刻意压低或夸张表演，不模仿任何现实人物。"
+    }
+  ]
+}

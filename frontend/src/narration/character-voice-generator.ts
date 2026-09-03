@@ -556,7 +556,6 @@ export function createCharacterVoiceGenerator(
       void props.onLoadLatest(props.characterId, controller.signal).then((command) => {
         if (controller.signal.aborted || !mountedRef.current) return;
         setLocal({ scope, loadPhase: "ready", command, busyAction: null, errorMessage: null });
-        if (command) props.onCommandChanged?.(command);
       }).catch((reason: unknown) => {
         if (controller.signal.aborted || !mountedRef.current) return;
         setLocal({

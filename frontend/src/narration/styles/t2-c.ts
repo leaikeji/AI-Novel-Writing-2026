@@ -378,7 +378,9 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
     z-index: 1150;
     inset: 0;
     display: grid;
+    grid-template-rows: minmax(0, 1fr);
     justify-items: end;
+    overflow: hidden;
   }
 
   .anw-character-voice-drawer-layer[hidden] {
@@ -403,6 +405,9 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
     width: min(760px, 92vw);
     height: 100%;
     min-width: 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
     color: var(--anw-text, #343844);
     background: var(--anw-card, #fff);
     box-shadow: -18px 0 48px rgba(20, 24, 32, .18);
@@ -443,10 +448,32 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
   }
 
   .anw-character-voice-drawer__body {
+    box-sizing: border-box;
     min-width: 0;
-    overflow: auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding: 18px 20px 32px;
     overscroll-behavior: contain;
+    scrollbar-color: rgba(103, 110, 124, .42) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    touch-action: pan-y;
+  }
+
+  .anw-character-voice-drawer__body::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .anw-character-voice-drawer__body::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .anw-character-voice-drawer__body::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: rgba(103, 110, 124, .42);
+    background-clip: padding-box;
   }
 
   .anw-character-voice-configurator {
@@ -595,12 +622,6 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
   }
 
   @media (max-width: 768px) {
-    .anw-workbench-frame:has(
-      .anw-character-voice-drawer-layer:not([hidden])
-    ) {
-      z-index: 1200;
-    }
-
     .anw-character-voice-roster__header {
       align-items: stretch;
       flex-direction: column;

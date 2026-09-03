@@ -93,9 +93,11 @@ from backend.models import (
     IntelligenceProposal,
     IntelligenceProposalItem,
     Novel,
+    NovelNarrationSettings,
     Foreshadow,
     StoryFact,
     Storyline,
+    VoiceProfileVersion,
     Volume,
 )
 from backend.embedding.writing import resolve_writing_position
@@ -269,32 +271,49 @@ def _create_long_novel_via_wizard(
 
 
 @pytest.fixture
-def session():
+def session(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    default_narrator_tests = {
+        "test_create_novel_is_ready_to_write",
+        "test_wizard_created_novel_uses_the_project_default_narrator",
+    }
+    keep_narrator_evidence = request.node.name in default_narrator_tests
+    if not keep_narrator_evidence:
+        from backend.narration import official_voice_selection
+
+        monkeypatch.setattr(
+            official_voice_selection,
+            "initialize_new_novel_default_narrator",
+            lambda _session, *, novel_id: None,
+        )
     engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
     with Session(engine, expire_on_commit=False) as database_session:
         yield database_session
         database_session.rollback()
-        database_session.execute(
-            text(
-                "DELETE FROM creative_generation_jobs WHERE "
-                "novel_id IN (SELECT id FROM novels WHERE title LIKE 'pytest-%') OR "
-                "scope_id IN (SELECT id FROM novel_creation_drafts "
-                "WHERE draft_key LIKE 'pytest-%')"
+        if not keep_narrator_evidence:
+            database_session.execute(
+                text(
+                    "DELETE FROM creative_generation_jobs WHERE "
+                    "novel_id IN (SELECT id FROM novels WHERE title LIKE 'pytest-%') OR "
+                    "scope_id IN (SELECT id FROM novel_creation_drafts "
+                    "WHERE draft_key LIKE 'pytest-%')"
+                )
             )
-        )
-        database_session.execute(
-            text("DELETE FROM novels WHERE title LIKE 'pytest-%'")
-        )
-        database_session.execute(
-            text("DELETE FROM novel_creation_drafts WHERE draft_key LIKE 'pytest-%'")
-        )
-        database_session.execute(
-            text("DELETE FROM asset_presets WHERE title LIKE 'pytest-%'")
-        )
-        database_session.execute(
-            text("DELETE FROM private_assets WHERE title LIKE 'pytest-%'")
-        )
-        database_session.commit()
+            database_session.execute(
+                text(
+                    "DELETE FROM novels WHERE title LIKE 'pytest-%' "
+                    "AND title NOT IN ('pytest-开箱即写', 'pytest-新书默认旁白')"
+                )
+            )
+            database_session.execute(
+                text("DELETE FROM novel_creation_drafts WHERE draft_key LIKE 'pytest-%'")
+            )
+            database_session.execute(
+                text("DELETE FROM asset_presets WHERE title LIKE 'pytest-%'")
+            )
+            database_session.execute(
+                text("DELETE FROM private_assets WHERE title LIKE 'pytest-%'")
+            )
+            database_session.commit()
     engine.dispose()
 
 
@@ -1741,6 +1760,7 @@ def test_draft_cas_checkpoint_search_and_restore(session: Session) -> None:
 
 def test_create_novel_is_ready_to_write(session: Session) -> None:
     novel = create_novel(session, "pytest-开箱即写")
+    novel_id = UUID(novel["id"])
     document_id = UUID(novel["initial_document_id"])
     document = get_document(session, document_id)
 
@@ -1752,6 +1772,40 @@ def test_create_novel_is_ready_to_write(session: Session) -> None:
     assert document["revisions"][0]["revision_number"] == 1
     assert session.scalar(select(Novel).where(Novel.id == UUID(novel["id"]))) is not None
     assert session.scalar(select(Document).where(Document.id == document_id)) is not None
+    settings = session.scalar(
+        select(NovelNarrationSettings).where(
+            NovelNarrationSettings.novel_id == novel_id
+        )
+    )
+    assert settings is not None
+    assert settings.version == 1
+    narrator = session.get(VoiceProfileVersion, settings.narrator_version_id)
+    assert narrator is not None
+    assert narrator.profile_id == settings.narrator_profile_id
+    assert narrator.preset_key == "onnx.Junhao"
+
+
+def test_wizard_created_novel_uses_the_project_default_narrator(
+    session: Session,
+) -> None:
+    created = _create_long_novel_via_wizard(
+        session,
+        draft_key="pytest-新书默认旁白",
+        title="pytest-新书默认旁白",
+    )
+    novel_id = UUID(created["novel"]["id"])
+
+    settings = session.scalar(
+        select(NovelNarrationSettings).where(
+            NovelNarrationSettings.novel_id == novel_id
+        )
+    )
+    assert settings is not None
+    assert settings.version == 1
+    narrator = session.get(VoiceProfileVersion, settings.narrator_version_id)
+    assert narrator is not None
+    assert narrator.profile_id == settings.narrator_profile_id
+    assert narrator.preset_key == "onnx.Junhao"
 
 
 def test_chapter_creation_without_valid_volume_is_structured_and_zero_write(

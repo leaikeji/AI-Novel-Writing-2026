@@ -164,6 +164,8 @@ def test_narration_runtime_uses_only_public_pawapp_lifecycle_contracts() -> None
     assert [ast.unparse(item) for item in uninstall.decorator_list] == [
         "pawapp.on_uninstall"
     ]
+    assert [argument.arg for argument in uninstall.args.kwonlyargs] == ["plugin_id"]
+    assert [ast.unparse(value) for value in uninstall.args.kw_defaults] == ["None"]
     assert "await launch_narration_runtime()" in ast.unparse(startup)
     assert "await stop_narration_runtime()" in ast.unparse(shutdown)
     assert "await stop_narration_runtime()" in ast.unparse(uninstall)

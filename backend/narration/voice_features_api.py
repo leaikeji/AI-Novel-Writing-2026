@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import UTC, datetime
 import hashlib
 import logging
 import time
 from typing import Awaitable, Callable, Mapping
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -88,11 +89,14 @@ from .nano_experiments import (
 from .official_voice_selection import OfficialVoiceSelectionService
 from .privacy import get_character_voice_binding, get_narration_settings
 from .production_runtime import (
+    current_generic_voice_pack_service,
     current_nano_experiment_service,
     current_private_voice_deletion_service,
     current_private_voice_lifecycle_service,
     current_voice_generator_service,
+    current_voice_preparation_service,
     current_voice_product_port,
+    wake_voice_preparation_reconciler,
 )
 from .services import (
     IdempotencyConflict,
@@ -111,6 +115,7 @@ from .voice_generator_service import (
     VoiceGeneratorAnalysis,
     voice_generator_request_hash,
 )
+from .voice_preparation import VoicePreparationCreateRequest
 
 
 # Product default proven by the T3/T5 cold-run matrix. Authors may still
@@ -118,6 +123,7 @@ from .voice_generator_service import (
 # must not derive an unqualified seed from an idempotency hash.
 DEFAULT_VOICE_GENERATOR_SEED = 104_729
 logger = logging.getLogger(__name__)
+AUTOMATIC_GENERIC_PACK_BUILD_KEY = "automatic-generic-voice-pack:zh-CN:v1"
 
 
 def _resolved_voice_generator_seed(requested_seed: str | None) -> int:
@@ -624,7 +630,6 @@ async def _run_voice_generator_analysis(
     command_id: UUID,
     timeline_id: UUID | None,
     character_instance_id: UUID | None,
-    request_hash: str,
     requested_seed: str | None,
     ctx,
     configured_model: ModelAudit,
@@ -772,7 +777,6 @@ async def character_voice_generator_commands_create(
             command_id=reservation.command_id,
             timeline_id=payload.timeline_id,
             character_instance_id=payload.character_instance_id,
-            request_hash=request_hash,
             requested_seed=payload.seed,
             ctx=ctx,
             configured_model=configured_model,
@@ -862,7 +866,6 @@ async def character_voice_generator_command_retry(
             command_id=reservation.command_id,
             timeline_id=None,
             character_instance_id=None,
-            request_hash=request_hash,
             requested_seed=None,
             ctx=ctx,
             configured_model=configured_model,
@@ -892,6 +895,437 @@ def character_voice_generator_command_apply(
             expected_binding_version=payload.expected_binding_version,
         )
         return service.get_resource(novel_id=novel_id, command_id=command_id)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+def _voice_preparation_service(require_actionable: bool = True):
+    if require_actionable:
+        _require_capability(wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION)
+    service = current_voice_preparation_service()
+    if service is None:
+        _raise_feature_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "capability_unavailable",
+            "人物声音自动准备服务当前不可用。",
+            retryable=True,
+            capability=wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
+        )
+    return service
+
+
+def _prepare_generic_voice_pack_for_novel(novel_id: UUID) -> None:
+    """Project an active pack or start its workspace build without blocking narration."""
+
+    service = current_generic_voice_pack_service()
+    if service is None:
+        return
+    try:
+        if service.active_pack_ready():
+            service.ensure_novel_projection(novel_id)
+        else:
+            service.build(idempotency_key=AUTOMATIC_GENERIC_PACK_BUILD_KEY)
+    except Exception as error:
+        # A chapter still has the existing same-language official fallback.
+        # The durable pack resource exposes the failure for management/retry;
+        # it must not turn an otherwise usable narration request into a gate.
+        logger.warning(
+            "generic voice pack preparation did not complete",
+            exc_info=error,
+            extra={"novel_id": str(novel_id)},
+        )
+
+
+async def _prepare_voice_generator_children(
+    *,
+    service,
+    novel_id: UUID,
+    command_id: UUID,
+    ctx,
+    configured_model: ModelAudit,
+    model_probe: EffectiveModelProbe,
+) -> None:
+    """Analyze all frozen targets; heavy generation remains scheduler-serialized."""
+
+    try:
+        for _ in range(256):
+            command = service.get_domain(novel_id=novel_id, command_id=command_id)
+            candidate = None
+            for item in command.items:
+                if item.voice_generator_command_id is None:
+                    continue
+                child = service.voice_generator_service.get_resource(
+                    novel_id=novel_id,
+                    command_id=item.voice_generator_command_id,
+                )
+                if child.state == "queued":
+                    candidate = (item.character_id, child.command_id)
+                    break
+            if candidate is None:
+                if not any(item.state.value == "pending" for item in command.items):
+                    break
+                command = service.reserve_next_pending(
+                    novel_id=novel_id,
+                    command_id=command_id,
+                )
+                candidate = next(
+                    (
+                        (item.character_id, item.voice_generator_command_id)
+                        for item in command.items
+                        if item.voice_generator_command_id is not None
+                        and service.voice_generator_service.get_resource(
+                            novel_id=novel_id,
+                            command_id=item.voice_generator_command_id,
+                        ).state
+                        == "queued"
+                    ),
+                    None,
+                )
+            if candidate is None:
+                break
+            character_id, child_id = candidate
+            with Session(get_engine()) as analysis_session:
+                try:
+                    await _run_voice_generator_analysis(
+                        service=service.voice_generator_service,
+                        novel_id=novel_id,
+                        character_id=character_id,
+                        command_id=child_id,
+                        timeline_id=None,
+                        character_instance_id=None,
+                        requested_seed=None,
+                        ctx=ctx,
+                        configured_model=configured_model,
+                        model_probe=model_probe,
+                        session=analysis_session,
+                    )
+                except Exception as error:
+                    analysis_session.rollback()
+                    logger.warning(
+                        "automatic character voice analysis failed",
+                        exc_info=error,
+                        extra={
+                            "voice_preparation_command_id": str(command_id),
+                            "voice_generator_command_id": str(child_id),
+                        },
+                    )
+            service.reconcile_once(novel_id=novel_id, command_id=command_id)
+            wake_voice_preparation_reconciler()
+    except Exception as error:
+        # Durable child/parent state remains the recovery authority.  This
+        # task must never turn an already accepted HTTP response into a lost
+        # in-memory-only workflow.
+        logger.warning(
+            "voice preparation background analysis stopped",
+            exc_info=error,
+            extra={"voice_preparation_command_id": str(command_id)},
+        )
+    finally:
+        wake_voice_preparation_reconciler()
+
+
+@router.get(
+    "/novels/{novel_id}/voice-preparation-commands",
+    response_model=wire.VoicePreparationListResource,
+)
+def voice_preparation_commands_index(
+    novel_id: UUID,
+) -> wire.VoicePreparationListResource:
+    try:
+        return _voice_preparation_service(False).list_resources(novel_id=novel_id)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/voice-preparation-commands",
+    response_model=wire.VoicePreparationResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def voice_preparation_command_create(
+    novel_id: UUID,
+    payload: wire.CreateVoicePreparationRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_HEADER_PATTERN,
+    ),
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
+) -> wire.VoicePreparationResource:
+    service = _voice_preparation_service()
+    try:
+        _prepare_generic_voice_pack_for_novel(novel_id)
+        reservation = service.create(
+            VoicePreparationCreateRequest(
+                novel_id=novel_id,
+                document_id=payload.document_id,
+                expected_draft_version=payload.expected_draft_version,
+                expected_content_hash=payload.expected_content_hash,
+                expected_settings_version=payload.expected_settings_version,
+                idempotency_key=idempotency_key,
+                actor="local-owner",
+                explicit_requested_at=datetime.now(UTC),
+                mode=payload.mode,
+            )
+        )
+        background_tasks.add_task(
+            _prepare_voice_generator_children,
+            service=service,
+            novel_id=novel_id,
+            command_id=reservation.command_id,
+            ctx=ctx,
+            configured_model=configured_model,
+            model_probe=model_probe,
+        )
+        wake_voice_preparation_reconciler()
+        return service.get_resource(
+            novel_id=novel_id, command_id=reservation.command_id
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.get(
+    "/novels/{novel_id}/voice-preparation-commands/{command_id}",
+    response_model=wire.VoicePreparationResource,
+)
+def voice_preparation_command_get(
+    novel_id: UUID,
+    command_id: UUID,
+) -> wire.VoicePreparationResource:
+    try:
+        return _voice_preparation_service(False).get_resource(
+            novel_id=novel_id, command_id=command_id
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/voice-preparation-commands/{command_id}/resume",
+    response_model=wire.VoicePreparationResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def voice_preparation_command_resume(
+    novel_id: UUID,
+    command_id: UUID,
+    background_tasks: BackgroundTasks,
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
+) -> wire.VoicePreparationResource:
+    """Reacquire public Agent context for an interrupted durable command."""
+
+    service = _voice_preparation_service()
+    try:
+        current = service.get_resource(novel_id=novel_id, command_id=command_id)
+        if not current.terminal:
+            background_tasks.add_task(
+                _prepare_voice_generator_children,
+                service=service,
+                novel_id=novel_id,
+                command_id=command_id,
+                ctx=ctx,
+                configured_model=configured_model,
+                model_probe=model_probe,
+            )
+            wake_voice_preparation_reconciler()
+        return current
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/voice-preparation-commands/{command_id}/retry",
+    response_model=wire.VoicePreparationResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def voice_preparation_command_retry(
+    novel_id: UUID,
+    command_id: UUID,
+    background_tasks: BackgroundTasks,
+    ctx=Depends(get_novel_generation_ctx),
+    configured_model: ModelAudit = Depends(get_novel_effective_model),
+    model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
+) -> wire.VoicePreparationResource:
+    service = _voice_preparation_service()
+    try:
+        reservation = service.retry(novel_id=novel_id, command_id=command_id)
+        background_tasks.add_task(
+            _prepare_voice_generator_children,
+            service=service,
+            novel_id=novel_id,
+            command_id=reservation.command_id,
+            ctx=ctx,
+            configured_model=configured_model,
+            model_probe=model_probe,
+        )
+        wake_voice_preparation_reconciler()
+        return service.get_resource(
+            novel_id=novel_id, command_id=reservation.command_id
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/novels/{novel_id}/voice-preparation-commands/{command_id}/cancel",
+    response_model=wire.VoicePreparationResource,
+)
+def voice_preparation_command_cancel(
+    novel_id: UUID,
+    command_id: UUID,
+) -> wire.VoicePreparationResource:
+    try:
+        result = _voice_preparation_service(False).cancel(
+            novel_id=novel_id, command_id=command_id
+        )
+        wake_voice_preparation_reconciler()
+        return result
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+def _generic_voice_pack_service(require_actionable: bool = True):
+    if require_actionable:
+        _require_capability(wire.CapabilityKey.GENERIC_VOICE_POOL)
+    service = current_generic_voice_pack_service()
+    if service is None:
+        _raise_feature_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "capability_unavailable",
+            "中文通用角色音色服务当前不可用。",
+            retryable=True,
+            capability=wire.CapabilityKey.GENERIC_VOICE_POOL,
+        )
+    return service
+
+
+@router.get(
+    "/voice-library/generic-pack",
+    response_model=wire.GenericVoicePackLoadResource,
+)
+def generic_voice_pack_get() -> wire.GenericVoicePackLoadResource:
+    try:
+        return _generic_voice_pack_service(False).get_load_resource()
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/voice-library/generic-pack/build-commands",
+    response_model=wire.GenericVoicePackLoadResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def generic_voice_pack_build(
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_HEADER_PATTERN,
+    ),
+) -> wire.GenericVoicePackLoadResource:
+    try:
+        return _generic_voice_pack_service().build(idempotency_key=idempotency_key)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.get(
+    "/voice-library/generic-pack/build-commands/{command_id}",
+    response_model=wire.GenericVoicePackLoadResource,
+)
+def generic_voice_pack_build_get(
+    command_id: UUID,
+) -> wire.GenericVoicePackLoadResource:
+    try:
+        return _generic_voice_pack_service(False).get_build_resource(command_id)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/voice-library/generic-pack/build-commands/{command_id}/retry",
+    response_model=wire.GenericVoicePackLoadResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def generic_voice_pack_build_retry(
+    command_id: UUID,
+) -> wire.GenericVoicePackLoadResource:
+    try:
+        return _generic_voice_pack_service().retry(command_id)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/voice-library/generic-pack/build-commands/{command_id}/cancel",
+    response_model=wire.GenericVoicePackLoadResource,
+)
+def generic_voice_pack_build_cancel(
+    command_id: UUID,
+) -> wire.GenericVoicePackLoadResource:
+    try:
+        return _generic_voice_pack_service(False).cancel(command_id)
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/voice-library/generic-pack/slots/{slot_key}/regenerate",
+    response_model=wire.GenericVoicePackLoadResource,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def generic_voice_pack_slot_regenerate(
+    slot_key: str,
+    payload: wire.RejectGenericVoiceSlotRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_HEADER_PATTERN,
+    ),
+) -> wire.GenericVoicePackLoadResource:
+    try:
+        return _generic_voice_pack_service().regenerate(
+            slot_key=slot_key,
+            expected_pack_version_id=payload.expected_pack_version_id,
+            idempotency_key=idempotency_key,
+        )
+    except Exception as error:
+        _raise_service_error(error)
+        raise
+
+
+@router.post(
+    "/voice-library/generic-pack/slots/{slot_key}/reject",
+    response_model=wire.GenericVoicePackLoadResource,
+)
+def generic_voice_pack_slot_reject(
+    slot_key: str,
+    payload: wire.RejectGenericVoiceSlotRequest,
+) -> wire.GenericVoicePackLoadResource:
+    try:
+        return _generic_voice_pack_service().reject(
+            slot_key=slot_key,
+            expected_pack_version_id=payload.expected_pack_version_id,
+        )
     except Exception as error:
         _raise_service_error(error)
         raise

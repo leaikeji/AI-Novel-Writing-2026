@@ -1384,6 +1384,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         generation,
         intent,
         forceReview: false,
+        automaticVoicePreparationEnabled: liveGate.canPrepareVoices,
         signal: controller.signal,
         saveStableSource: saveStableNarrationSource,
         isGenerationCurrent: (documentId, expectedGeneration) => (

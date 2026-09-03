@@ -362,6 +362,32 @@ def test_voice_version_and_profile_freeze_locked_identity() -> None:
         wire.VoiceProfileResource.model_validate(invalid_profile)
 
 
+def test_generic_pack_voice_version_is_a_machine_validated_library_voice() -> None:
+    generic = locked_voice_version()
+    generic.update(
+        {
+            "source_type": "generated",
+            "preset_key": None,
+            "quality_state": "accepted",
+            "activation_basis": "generic_voice_pack_generation",
+            "validation_basis": "machine_validated",
+            "rights": {
+                **generic["rights"],
+                "source_kind": "voice_generator",
+                "source_identifier_sha256": "e" * 64,
+            },
+            "official_preset": None,
+            "reference_asset_id": uuid4(),
+            "description_available": True,
+            "locked_at": None,
+        }
+    )
+
+    parsed = wire.VoiceProfileVersionResource.model_validate(generic)
+
+    assert parsed.activation_basis is wire.VoiceActivationBasis.GENERIC_VOICE_PACK_GENERATION
+
+
 def test_official_voice_selection_request_has_one_exact_target_shape() -> None:
     narrator = wire.OfficialVoiceSelectionRequest.model_validate(
         {
@@ -464,7 +490,7 @@ def test_character_binding_shape_matches_database_guard() -> None:
         )
 
 
-def test_casting_rule_request_cannot_forge_server_identity_or_target_shape() -> None:
+def test_casting_rule_resource_cannot_forge_target_shape() -> None:
     rule = {
         "priority": 10,
         "enabled": True,
@@ -483,18 +509,8 @@ def test_casting_rule_request_cannot_forge_server_identity_or_target_shape() -> 
             "version_id": None,
         },
     }
-    request = wire.PutVoiceCastingRulesRequest.model_validate(
-        {"expected_version": 0, "items": [rule]}
-    )
-    assert request.items[0].target.kind is wire.VoiceCastingTargetKind.REQUIRE_REVIEW
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        wire.PutVoiceCastingRulesRequest.model_validate(
-            {
-                "expected_version": 0,
-                "items": [{**rule, "rule_id": uuid4(), "source": "user"}],
-            }
-        )
+    parsed = wire.VoiceCastingRuleInput.model_validate(rule)
+    assert parsed.target.kind is wire.VoiceCastingTargetKind.REQUIRE_REVIEW
     with pytest.raises(ValidationError, match="cannot carry a voice"):
         wire.VoiceCastingTarget.model_validate(
             {
@@ -505,31 +521,6 @@ def test_casting_rule_request_cannot_forge_server_identity_or_target_shape() -> 
                 "version_id": VOICE_VERSION_ID,
             }
         )
-
-
-def test_generic_pool_update_uses_server_derived_slot_state() -> None:
-    slots = [
-        {
-            "slot_key": f"slot-{index}",
-            "voice_version_id": uuid4(),
-            "enabled": True,
-            "priority": index,
-        }
-        for index in range(24)
-    ]
-    request = wire.PutGenericVoicePoolRequest.model_validate(
-        {"expected_version": 0, "slots": slots}
-    )
-    assert len(request.slots) == 24
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        wire.PutGenericVoicePoolRequest.model_validate(
-            {
-                "expected_version": 0,
-                "slots": [{**item, "state": "ready"} for item in slots],
-            }
-        )
-
 
 def test_media_links_never_expose_filesystem_or_supplier_urls() -> None:
     asset_id = uuid4()
@@ -790,9 +781,7 @@ def test_router_freezes_all_t2_paths_and_methods() -> None:
         ("GET", "/novels/{novel_id}/characters/{character_id}/voice-binding"),
         ("PUT", "/novels/{novel_id}/characters/{character_id}/voice-binding"),
         ("GET", "/novels/{novel_id}/generic-voice-pools"),
-        ("PUT", "/novels/{novel_id}/generic-voice-pools"),
         ("GET", "/novels/{novel_id}/casting-rules"),
-        ("PUT", "/novels/{novel_id}/casting-rules"),
         ("GET", "/novels/{novel_id}/pronunciation-profile"),
         ("PUT", "/novels/{novel_id}/pronunciation-profile"),
         ("GET", "/novels/{novel_id}/narration-cache"),

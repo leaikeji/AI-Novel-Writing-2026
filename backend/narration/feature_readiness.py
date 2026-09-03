@@ -82,6 +82,9 @@ MANAGED_CAPABILITY_KEYS: Final[tuple[wire.CapabilityKey, ...]] = (
     wire.CapabilityKey.NANO_ADVANCED_TUNING,
     wire.CapabilityKey.PRIVATE_VOICE_DELETION,
     wire.CapabilityKey.VOICE_GENERATOR,
+    wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
+    wire.CapabilityKey.GENERIC_VOICE_POOL,
+    wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
 )
 
 _SAFE_REASON = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
@@ -133,6 +136,15 @@ class NarrationFeatureDependencies:
     voice_generator_heavy_lock_ready: bool = False
     voice_generator_processor_ready: bool = False
     voice_generator_reconciler_ready: bool = False
+    automatic_voice_preparation_schema_ready: bool = False
+    voice_preparation_processor_ready: bool = False
+    voice_preparation_reconciler_ready: bool = False
+    narration_continuation_service_ready: bool = False
+    generic_voice_pack_service_ready: bool = False
+    generic_voice_processor_ready: bool = False
+    generic_voice_projection_service_ready: bool = False
+    generic_voice_resolver_ready: bool = False
+    generic_voice_active_pack_ready: bool = False
 
     def __post_init__(self) -> None:
         for dependency in fields(self):
@@ -294,6 +306,38 @@ _DEPENDENCY_MATRIX: Final[
             "voice_generator_reconciler_ready",
             TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE,
         ),
+    ),
+    wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION: (
+        ("automatic_voice_preparation_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
+        ("character_workspace_ready", TTS_CHARACTER_WORKSPACE_UNAVAILABLE),
+        ("novel_agent_ready", TTS_NOVEL_AGENT_UNAVAILABLE),
+        ("voice_generator_host_protocol_ready", TTS_VOICE_GENERATOR_HOST_UNAVAILABLE),
+        ("voice_generator_model_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
+        ("voice_generator_codec_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
+        ("voice_generator_heavy_lock_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("voice_generator_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("voice_generator_reconciler_ready", TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE),
+        ("voice_preparation_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("voice_preparation_reconciler_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("narration_continuation_service_ready", TTS_PROCESSOR_UNAVAILABLE),
+    ),
+    wire.CapabilityKey.GENERIC_VOICE_POOL: (
+        ("automatic_voice_preparation_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
+        ("storage_ready", TTS_STORAGE_UNAVAILABLE),
+        ("digest_keyring_ready", TTS_DIGEST_KEYRING_UNAVAILABLE),
+        ("voice_generator_host_protocol_ready", TTS_VOICE_GENERATOR_HOST_UNAVAILABLE),
+        ("voice_generator_model_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
+        ("voice_generator_codec_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
+        ("voice_generator_heavy_lock_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("generic_voice_pack_service_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("generic_voice_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
+    ),
+    wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING: (
+        ("automatic_voice_preparation_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
+        ("generic_voice_pack_service_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("generic_voice_projection_service_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("generic_voice_resolver_ready", TTS_PROCESSOR_UNAVAILABLE),
+        ("generic_voice_active_pack_ready", TTS_PROCESSOR_UNAVAILABLE),
     ),
 }
 

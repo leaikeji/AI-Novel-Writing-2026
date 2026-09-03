@@ -10,15 +10,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, replace
 from types import SimpleNamespace
+import unicodedata
 from uuid import UUID
 
 from pydantic import ValidationError
 
 from ..models import (
+    AnonymousSpeaker,
     CharacterAlias,
     CharacterVoiceBinding,
     Document,
     DocumentRevision,
+    GenericVoicePackVersion,
+    GenericVoicePackVersionSlot,
+    GenericVoicePool,
+    GenericVoiceSlot,
     NarrationRequest,
     NarrationRequestSource,
     NarrationSettingsSnapshot,
@@ -37,14 +43,25 @@ from .aliases import (
     normalize_character_alias,
 )
 from .casting import (
+    AnonymousBindingSnapshot,
     CastingAttributes,
     CastingInventory,
     CastingRequest,
+    CastingRuleAction,
+    CastingRuleSnapshot,
     CastingScopeKind,
     CharacterBindingSnapshot,
+    GenericPoolSnapshot,
+    GenericSlotSnapshot,
     NarratorSelectionSnapshot,
     VoiceVersionSnapshot,
+    automatic_generic_casting_rule_id,
     resolve_casting,
+)
+from .anonymous_speakers import (
+    AnonymousReuseBasis,
+    AnonymousScopeAuthority,
+    materialize_anonymous_identity,
 )
 from .contracts import (
     LOCAL_OWNER_ID,
@@ -76,6 +93,7 @@ from .script_contracts import (
     NARRATION_SCRIPT_CONTRACT_VERSION,
     AttributionEvidence,
     AttributionOrigin,
+    AnonymousSpeakerIdentity,
     CastingDecisionOrigin,
     NarrationScriptContract,
     OverrideProvenance,
@@ -83,7 +101,11 @@ from .script_contracts import (
     ScriptReviewPolicy,
     ScriptVersionState,
     SegmentContract,
+    SegmentKind,
+    AnonymousScopeKind,
     SpeakerKind,
+    SpeakerRef,
+    derive_group_key,
     initial_materialized_state,
     script_immutable_payload,
 )
@@ -122,10 +144,299 @@ from .services import (
 )
 from .snapshots import SETTINGS_SNAPSHOT_SCHEMA_VERSION
 from .speaker_rules import (
+    ResolvedSpeakerLabel,
     SpeakerRuleContext,
     attribute_speaker_local,
+    build_resolved_speaker_index,
 )
+from .voice_pool import load_voice_pool_catalog
 from .voices import _rights_state
+
+
+_GENERIC_CASTING_EVIDENCE_VERSION = "generic-casting-evidence/1"
+
+
+def _generic_slot_shape(
+    *, slot_key: str, category: str
+) -> tuple[
+    tuple[wire.CastingSpeakerKind, ...],
+    tuple[wire.CastingGender, ...],
+    tuple[wire.CastingAgeBand, ...],
+    tuple[wire.CastingContextKind, ...],
+    bool,
+]:
+    """Derive casting metadata from the one frozen taxonomy category.
+
+    Keeping this mechanical avoids introducing a second age/gender catalog.
+    Unknown or malformed categories fail closed instead of guessing.
+    """
+
+    if category.startswith("female_"):
+        genders = (wire.CastingGender.FEMALE,)
+    elif category.startswith("male_"):
+        genders = (wire.CastingGender.MALE,)
+    elif category.startswith("neutral_"):
+        genders = (wire.CastingGender.NEUTRAL,)
+    else:
+        raise InvalidNarrationState("generic voice category has an unknown gender")
+
+    age_bands: tuple[wire.CastingAgeBand, ...]
+    if category.endswith("_child"):
+        age_bands = (wire.CastingAgeBand.CHILD,)
+    elif category.endswith("_teen"):
+        age_bands = (wire.CastingAgeBand.TEEN,)
+    elif category.endswith("_young_adult"):
+        age_bands = (wire.CastingAgeBand.YOUNG_ADULT,)
+    elif category.endswith("_middle_aged"):
+        age_bands = (wire.CastingAgeBand.MIDDLE_AGED,)
+    elif category.endswith("_elderly"):
+        age_bands = (wire.CastingAgeBand.ELDERLY,)
+    elif category.endswith(("_announcer", "_group")):
+        age_bands = ()
+    else:
+        raise InvalidNarrationState("generic voice category has an unknown age band")
+
+    if category.endswith("_group"):
+        speaker_kinds = (
+            wire.CastingSpeakerKind.GROUP,
+            wire.CastingSpeakerKind.UNKNOWN,
+        )
+        context_kinds = (wire.CastingContextKind.GROUP,)
+    elif category.endswith("_announcer"):
+        speaker_kinds = (
+            wire.CastingSpeakerKind.CHARACTER,
+            wire.CastingSpeakerKind.ANONYMOUS,
+            wire.CastingSpeakerKind.UNKNOWN,
+        )
+        context_kinds = (wire.CastingContextKind.BROADCAST,)
+    else:
+        speaker_kinds = (
+            wire.CastingSpeakerKind.CHARACTER,
+            wire.CastingSpeakerKind.ANONYMOUS,
+            wire.CastingSpeakerKind.UNKNOWN,
+        )
+        context_kinds = ()
+    return (
+        speaker_kinds,
+        genders,
+        age_bands,
+        context_kinds,
+        slot_key == "neutral_young",
+    )
+
+
+def _generic_pool_snapshot(
+    store: NarrationStore, *, novel_id: UUID
+) -> GenericPoolSnapshot | None:
+    pools = store.find_all(
+        GenericVoicePool,
+        novel_id=novel_id,
+        status="active",
+        order_by=("version_number",),
+    )
+    if not pools:
+        return None
+    if len(pools) != 1:
+        raise InvalidNarrationState("multiple active generic voice pools exist")
+    pool = pools[0]
+    if pool.language != "zh-CN" or pool.source_pack_version_id is None:
+        return None
+    pack = store.get(GenericVoicePackVersion, pool.source_pack_version_id)
+    if (
+        pack is None
+        or pack.workspace_id != LOCAL_WORKSPACE_ID
+        or pack.language != "zh-CN"
+        or pack.state != "active"
+        or pack.validated_slot_count != 24
+    ):
+        return None
+    catalog = load_voice_pool_catalog()
+    catalog_by_key = {item.slot_key: item for item in catalog.slots}
+    pool_slots = store.find_all(
+        GenericVoiceSlot,
+        pool_id=pool.id,
+        order_by=("position",),
+    )
+    pack_slots = store.find_all(
+        GenericVoicePackVersionSlot,
+        pack_version_id=pack.id,
+        order_by=("position",),
+    )
+    if (
+        len(pool_slots) != 24
+        or len(pack_slots) != 24
+        or [row.position for row in pool_slots] != list(range(24))
+        or [row.position for row in pack_slots] != list(range(24))
+        or {row.slot_key for row in pool_slots} != set(catalog_by_key)
+        or {row.slot_key for row in pack_slots} != set(catalog_by_key)
+    ):
+        return None
+    source_by_key = {row.slot_key: row for row in pack_slots}
+    snapshots: list[GenericSlotSnapshot] = []
+    for row in pool_slots:
+        source = source_by_key[row.slot_key]
+        if (
+            not row.enabled
+            or source.voice_version_id != row.voice_version_id
+            or source.state not in {"validated", "reused"}
+            or not source.rights_approved
+            or not source.quality_approved
+        ):
+            return None
+        version = require_row(
+            store.get(VoiceProfileVersion, row.voice_version_id),
+            label="generic voice version",
+        )
+        voice = _voice_snapshot(
+            store,
+            novel_id=novel_id,
+            profile_id=version.profile_id,
+            version_id=row.voice_version_id,
+        )
+        if voice is None or voice.blocker_codes(novel_id=novel_id):
+            return None
+        catalog_slot = catalog_by_key[row.slot_key]
+        speaker_kinds, genders, ages, contexts, neutral = _generic_slot_shape(
+            slot_key=row.slot_key,
+            category=catalog_slot.category,
+        )
+        snapshots.append(
+            GenericSlotSnapshot(
+                pool_id=pool.id,
+                slot_id=row.id,
+                slot_key=row.slot_key,
+                position=row.position,
+                enabled=True,
+                state=wire.GenericVoiceSlotState.READY,
+                rights_approved=True,
+                quality_approved=True,
+                production_ready=True,
+                voice=voice,
+                speaker_kinds=speaker_kinds,
+                genders=genders,
+                age_bands=ages,
+                context_kinds=contexts,
+                neutral_fallback=neutral,
+            )
+        )
+    return GenericPoolSnapshot(
+        novel_id=novel_id,
+        pool_id=pool.id,
+        version=pool.version_number,
+        state=wire.GenericVoicePoolState.READY,
+        ready_slot_count=24,
+        rights_approved_slot_count=24,
+        quality_approved_slot_count=24,
+        production_ready_slot_count=24,
+        slots=tuple(snapshots),
+    )
+
+
+def _automatic_generic_rule(
+    *, novel_id: UUID, pool: GenericPoolSnapshot
+) -> CastingRuleSnapshot:
+    assert pool.pool_id is not None
+    return CastingRuleSnapshot(
+        novel_id=novel_id,
+        rule_id=automatic_generic_casting_rule_id(
+            novel_id=novel_id,
+            pool_id=pool.pool_id,
+            pool_version=pool.version,
+        ),
+        version=1,
+        priority=-10_000,
+        enabled=True,
+        condition=wire.VoiceCastingCondition(
+            speaker_kinds=[
+                wire.CastingSpeakerKind.CHARACTER,
+                wire.CastingSpeakerKind.ANONYMOUS,
+                wire.CastingSpeakerKind.GROUP,
+            ],
+            genders=[],
+            age_bands=[],
+            context_kinds=[],
+            role_tags=[],
+        ),
+        action=CastingRuleAction.AUTOMATIC_POOL,
+        pool_id=pool.pool_id,
+    )
+
+
+def _anonymous_identity(row: AnonymousSpeaker) -> AnonymousSpeakerIdentity:
+    try:
+        return AnonymousSpeakerIdentity(
+            anonymous_speaker_id=row.id,
+            stable_key_algorithm=row.stable_key_algorithm,
+            stable_key=row.stable_key,
+            display_name=row.display_name,
+            scope_kind=AnonymousScopeKind(row.scope_kind),
+            scope_id=row.scope_id,
+            confidence=ConfidenceLevel(row.confidence),
+        )
+    except (TypeError, ValueError) as error:
+        raise InvalidNarrationState(
+            "anonymous speaker identity contains unknown persisted values"
+        ) from error
+
+
+def _explicit_casting_attributes(
+    *,
+    label: str | None,
+    segment_kind: SegmentKind,
+    speaker_kind: SpeakerKind,
+    anonymous_stable_key: str | None = None,
+) -> CastingAttributes:
+    value = unicodedata.normalize("NFKC", label or "").casefold()
+    female = any(
+        marker in value
+        for marker in ("女童", "女孩", "少女", "女人", "女子", "女性", "妇人", "老妇", "老妪", "老太太", "姑娘", "女声")
+    )
+    male = any(
+        marker in value
+        for marker in ("男童", "男孩", "少年", "男人", "男子", "男性", "老汉", "老翁", "男声")
+    )
+    if female == male:
+        gender = (
+            wire.CastingGender.NEUTRAL
+            if "中性" in value and not female
+            else wire.CastingGender.UNKNOWN
+        )
+    else:
+        gender = wire.CastingGender.FEMALE if female else wire.CastingGender.MALE
+
+    age_matches = [
+        (wire.CastingAgeBand.CHILD, ("男童", "女童", "小男孩", "小女孩", "孩子")),
+        (wire.CastingAgeBand.TEEN, ("少年", "少女")),
+        (wire.CastingAgeBand.YOUNG_ADULT, ("青年", "年轻")),
+        (wire.CastingAgeBand.MIDDLE_AGED, ("中年",)),
+        (wire.CastingAgeBand.ELDERLY, ("老年", "老人", "老者", "老妇", "老妪", "老太太", "老汉", "老翁")),
+    ]
+    matched_ages = {
+        age for age, markers in age_matches if any(marker in value for marker in markers)
+    }
+    age_band = (
+        next(iter(matched_ages))
+        if len(matched_ages) == 1
+        else wire.CastingAgeBand.UNKNOWN
+    )
+    context_by_kind = {
+        SegmentKind.DIALOGUE: wire.CastingContextKind.DIALOGUE,
+        SegmentKind.INNER_MONOLOGUE: wire.CastingContextKind.INNER_MONOLOGUE,
+        SegmentKind.LETTER: wire.CastingContextKind.LETTER,
+        SegmentKind.PHONE: wire.CastingContextKind.TELEPHONE,
+        SegmentKind.BROADCAST: wire.CastingContextKind.BROADCAST,
+    }
+    context_kind = (
+        wire.CastingContextKind.GROUP
+        if speaker_kind is SpeakerKind.GROUP
+        else context_by_kind.get(segment_kind)
+    )
+    return CastingAttributes(
+        gender=gender,
+        age_band=age_band,
+        context_kind=context_kind,
+        anonymous_stable_key=anonymous_stable_key,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,9 +757,59 @@ def _casting_inventory(
                 ),
             )
         )
+    generic_pool = _generic_pool_snapshot(store, novel_id=novel_id)
+    anonymous_bindings: list[AnonymousBindingSnapshot] = []
+    for row in store.find_all(
+        AnonymousSpeaker,
+        novel_id=novel_id,
+        lifecycle_state="active",
+        order_by=("id",),
+    ):
+        if row.promoted_character_id is not None or row.voice_version_id is None:
+            continue
+        version = store.get(VoiceProfileVersion, row.voice_version_id)
+        if version is None:
+            continue
+        voice = _voice_snapshot(
+            store,
+            novel_id=novel_id,
+            profile_id=version.profile_id,
+            version_id=version.id,
+        )
+        slot = None
+        pool_version = None
+        pool_active = None
+        if row.slot_id is not None:
+            if generic_pool is None:
+                continue
+            slot = generic_pool.slot(row.slot_id)
+            if slot is None or slot.voice is None or slot.voice.version_id != version.id:
+                continue
+            pool_version = generic_pool.version
+            pool_active = True
+        anonymous_bindings.append(
+            AnonymousBindingSnapshot(
+                novel_id=novel_id,
+                anonymous_speaker_id=row.id,
+                profile_id=version.profile_id,
+                version_id=version.id,
+                voice=voice,
+                slot=slot,
+                pool_version=pool_version,
+                pool_active=pool_active,
+            )
+        )
+    rules = (
+        (_automatic_generic_rule(novel_id=novel_id, pool=generic_pool),)
+        if generic_pool is not None
+        else ()
+    )
     return CastingInventory(
         narrator_selections=narrator_selections,
         character_bindings=tuple(bindings),
+        anonymous_bindings=tuple(anonymous_bindings),
+        rules=rules,
+        generic_pool=generic_pool,
     )
 
 
@@ -737,6 +1098,123 @@ def _inherit_manual_overrides(
     return inherited, frozenset(provenances)
 
 
+def _resolved_non_character_records(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    chapter_id: UUID,
+    scene_id: UUID,
+    extra: tuple[ResolvedSpeakerLabel, ...] = (),
+) -> tuple[ResolvedSpeakerLabel, ...]:
+    records = list(extra)
+    for row in store.find_all(
+        AnonymousSpeaker,
+        novel_id=novel_id,
+        lifecycle_state="active",
+        order_by=("id",),
+    ):
+        if row.promoted_character_id is not None:
+            continue
+        if row.scope_kind == "novel" and row.scope_id == novel_id:
+            pass
+        elif row.scope_kind == "chapter" and row.scope_id == chapter_id:
+            pass
+        elif row.scope_kind == "scene" and row.scope_id == scene_id:
+            pass
+        else:
+            continue
+        records.append(
+            ResolvedSpeakerLabel(
+                row.display_name,
+                SpeakerRef(
+                    SpeakerKind.ANONYMOUS,
+                    anonymous_speaker_id=row.id,
+                ),
+            )
+        )
+    return tuple(records)
+
+
+def _materialize_explicit_anonymous_speaker(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    chapter_id: UUID,
+    label: str,
+    attributes: CastingAttributes,
+) -> AnonymousSpeaker:
+    normalized = normalize_character_alias(label)
+    for row in store.find_all(
+        AnonymousSpeaker,
+        novel_id=novel_id,
+        lifecycle_state="active",
+        order_by=("id",),
+    ):
+        if (
+            row.promoted_character_id is None
+            and row.scope_kind == "chapter"
+            and row.scope_id == chapter_id
+            and normalize_character_alias(row.display_name) == normalized
+        ):
+            return row
+    evidence_hash = canonical_sha256(
+        {
+            "schema_version": _GENERIC_CASTING_EVIDENCE_VERSION,
+            "novel_id": str(novel_id),
+            "chapter_id": str(chapter_id),
+            "normalized_label": normalized,
+        }
+    )
+    seed = materialize_anonymous_identity(
+        authority=AnonymousScopeAuthority(
+            novel_id=novel_id,
+            chapter_ids=frozenset({chapter_id}),
+        ),
+        scope_kind=AnonymousScopeKind.CHAPTER,
+        scope_id=chapter_id,
+        source_label=label,
+        evidence_hash=evidence_hash,
+        display_name=unicodedata.normalize("NFC", label),
+        confidence=ConfidenceLevel.HIGH,
+        reuse_basis=AnonymousReuseBasis.EXPLICIT_ALIAS,
+        explicit_aliases=(label,),
+    )
+    existing = store.get(AnonymousSpeaker, seed.identity.anonymous_speaker_id)
+    if existing is not None:
+        if _anonymous_identity(existing) != seed.identity:
+            raise NarrationScopeMismatch(
+                "derived anonymous speaker identity collides with persisted authority"
+            )
+        return existing
+    row = AnonymousSpeaker(
+        id=seed.identity.anonymous_speaker_id,
+        novel_id=novel_id,
+        stable_key_algorithm=seed.identity.stable_key_algorithm,
+        stable_key=seed.identity.stable_key,
+        display_name=seed.identity.display_name,
+        scope_kind=seed.identity.scope_kind.value,
+        scope_id=seed.identity.scope_id,
+        inferred_json={
+            "schema_version": _GENERIC_CASTING_EVIDENCE_VERSION,
+            "source": "explicit_dialogue_cue",
+            "source_label": label,
+            "evidence_hash": evidence_hash,
+            "gender": attributes.gender.value,
+            "age_band": attributes.age_band.value,
+            "context_kind": (
+                attributes.context_kind.value if attributes.context_kind else None
+            ),
+        },
+        confidence=seed.identity.confidence.value,
+        slot_id=None,
+        voice_version_id=None,
+        lifecycle_state="active",
+    )
+    store.add(row)
+    store.flush()
+    return row
+
+
 def _materialize_contract(
     store: NarrationStore,
     *,
@@ -782,6 +1260,13 @@ def _materialize_contract(
     used_slot_ids: dict[UUID, set[UUID]] = {
         scene.scene_id: set() for scene in scenes
     }
+    assigned_by_speaker: dict[UUID, dict[tuple[str, str], tuple[UUID, UUID | None]]] = {
+        scene.scene_id: {} for scene in scenes
+    }
+    group_records: dict[UUID, list[ResolvedSpeakerLabel]] = {
+        scene.scene_id: [] for scene in scenes
+    }
+    anonymous_identities: dict[UUID, AnonymousSpeakerIdentity] = {}
     segments: list[SegmentContract] = []
     issues: list[ScriptIssueContract] = []
     materialized = segmentation.segments
@@ -819,20 +1304,127 @@ def _materialize_contract(
             previous_paragraph is not None
             and previous_paragraph == source_segment.paragraph_ordinal
         )
-        speaker = attribute_speaker_local(
-            SpeakerRuleContext(
-                segment_kind=source_segment.segment_kind,
-                source_text=source_segment.source_text,
-                cue_before=before,
-                cue_after=after,
-                scene_character_ids=frozenset(scene_characters[scene_id]),
-                previous_speaker=previous_speaker,
-                same_paragraph_continuation=same_paragraph,
-            ),
-            aliases=aliases,
+        rule_context = SpeakerRuleContext(
+            segment_kind=source_segment.segment_kind,
+            source_text=source_segment.source_text,
+            cue_before=before,
+            cue_after=after,
+            scene_character_ids=frozenset(scene_characters[scene_id]),
+            previous_speaker=previous_speaker,
+            same_paragraph_continuation=same_paragraph,
         )
+        resolved_records = _resolved_non_character_records(
+            store,
+            novel_id=context.request.novel_id,
+            chapter_id=context.document.id,
+            scene_id=scene_id,
+            extra=tuple(group_records[scene_id]),
+        )
+        resolved_index = build_resolved_speaker_index(
+            resolved_records,
+            allowed_speakers=frozenset(record.speaker for record in resolved_records),
+        )
+        speaker = attribute_speaker_local(
+            rule_context,
+            aliases=aliases,
+            resolved_speakers=resolved_index,
+        )
+        speaker_label: str | None = None
+        if (
+            inventory.generic_pool is not None
+            and speaker.speaker.kind is SpeakerKind.UNKNOWN
+            and speaker.unresolved_label is not None
+            and speaker.unresolved_kind in {SpeakerKind.ANONYMOUS, SpeakerKind.GROUP}
+        ):
+            speaker_label = speaker.unresolved_label
+            preliminary = _explicit_casting_attributes(
+                label=speaker_label,
+                segment_kind=source_segment.segment_kind,
+                speaker_kind=speaker.unresolved_kind,
+            )
+            if speaker.unresolved_kind is SpeakerKind.ANONYMOUS:
+                anonymous = _materialize_explicit_anonymous_speaker(
+                    store,
+                    novel_id=context.request.novel_id,
+                    chapter_id=context.document.id,
+                    label=speaker_label,
+                    attributes=preliminary,
+                )
+                anonymous_identities[anonymous.id] = _anonymous_identity(anonymous)
+            else:
+                evidence_hash = canonical_sha256(
+                    {
+                        "schema_version": _GENERIC_CASTING_EVIDENCE_VERSION,
+                        "scene_id": str(scene_id),
+                        "label": normalize_character_alias(speaker_label),
+                    }
+                )
+                group_ref = SpeakerRef(
+                    SpeakerKind.GROUP,
+                    group_key=derive_group_key(
+                        novel_id=context.request.novel_id,
+                        scene_id=scene_id,
+                        label=speaker_label,
+                        evidence_hash=evidence_hash,
+                    ),
+                )
+                record = ResolvedSpeakerLabel(speaker_label, group_ref)
+                if record not in group_records[scene_id]:
+                    group_records[scene_id].append(record)
+            resolved_records = _resolved_non_character_records(
+                store,
+                novel_id=context.request.novel_id,
+                chapter_id=context.document.id,
+                scene_id=scene_id,
+                extra=tuple(group_records[scene_id]),
+            )
+            resolved_index = build_resolved_speaker_index(
+                resolved_records,
+                allowed_speakers=frozenset(
+                    record.speaker for record in resolved_records
+                ),
+            )
+            speaker = attribute_speaker_local(
+                rule_context,
+                aliases=aliases,
+                resolved_speakers=resolved_index,
+            )
         if speaker.speaker.character_id is not None:
             scene_characters[scene_id].add(speaker.speaker.character_id)
+        anonymous_row = None
+        anonymous_stable_key = None
+        if speaker.speaker.kind is SpeakerKind.ANONYMOUS:
+            anonymous_row = require_row(
+                store.get(
+                    AnonymousSpeaker,
+                    speaker.speaker.anonymous_speaker_id,
+                    for_update=True,
+                ),
+                label="anonymous speaker",
+            )
+            anonymous_identities[anonymous_row.id] = _anonymous_identity(anonymous_row)
+            speaker_label = anonymous_row.display_name
+            anonymous_stable_key = anonymous_row.stable_key
+        attributes = _explicit_casting_attributes(
+            label=speaker_label,
+            segment_kind=source_segment.segment_kind,
+            speaker_kind=speaker.speaker.kind,
+            anonymous_stable_key=anonymous_stable_key,
+        )
+        identity_value = (
+            speaker.speaker.character_id
+            or speaker.speaker.anonymous_speaker_id
+            or speaker.speaker.group_key
+            or source_segment.local_hash
+        )
+        speaker_key = (speaker.speaker.kind.value, str(identity_value))
+        used_voices = set(used_voice_ids[scene_id])
+        used_slots = set(used_slot_ids[scene_id])
+        previous_assignment = assigned_by_speaker[scene_id].get(speaker_key)
+        if previous_assignment is not None:
+            used_voices.discard(previous_assignment[0])
+            if previous_assignment[1] is not None:
+                used_slots.discard(previous_assignment[1])
         casting = resolve_casting(
             CastingRequest(
                 novel_id=context.request.novel_id,
@@ -843,12 +1435,12 @@ def _materialize_contract(
                 chapter_id=context.document.id,
                 volume_id=context.document.volume_id,
                 scene_id=scene_id,
-                attributes=CastingAttributes(),
+                attributes=attributes,
                 same_scene_voice_deduplication=(
                     context.settings.casting.same_scene_voice_deduplication
                 ),
-                used_voice_version_ids=frozenset(used_voice_ids[scene_id]),
-                used_slot_ids=frozenset(used_slot_ids[scene_id]),
+                used_voice_version_ids=frozenset(used_voices),
+                used_slot_ids=frozenset(used_slots),
             ),
             inventory,
         )
@@ -856,6 +1448,42 @@ def _materialize_contract(
             used_voice_ids[scene_id].add(casting.resolved_voice.version_id)
             if casting.resolved_voice.slot_id is not None:
                 used_slot_ids[scene_id].add(casting.resolved_voice.slot_id)
+            assigned_by_speaker[scene_id][speaker_key] = (
+                casting.resolved_voice.version_id,
+                casting.resolved_voice.slot_id,
+            )
+            if (
+                anonymous_row is not None
+                and casting.resolved_voice.slot_id is not None
+                and anonymous_row.voice_version_id is None
+                and inventory.generic_pool is not None
+            ):
+                slot = inventory.generic_pool.slot(casting.resolved_voice.slot_id)
+                if slot is None or slot.voice is None:
+                    raise InvalidNarrationState(
+                        "resolved anonymous generic slot disappeared"
+                    )
+                anonymous_row.slot_id = slot.slot_id
+                anonymous_row.voice_version_id = slot.voice.version_id
+                binding = AnonymousBindingSnapshot(
+                    novel_id=context.request.novel_id,
+                    anonymous_speaker_id=anonymous_row.id,
+                    profile_id=slot.voice.profile_id,
+                    version_id=slot.voice.version_id,
+                    voice=slot.voice,
+                    slot=slot,
+                    pool_version=inventory.generic_pool.version,
+                    pool_active=True,
+                )
+                inventory = replace(
+                    inventory,
+                    anonymous_bindings=tuple(
+                        item
+                        for item in inventory.anonymous_bindings
+                        if item.anonymous_speaker_id != anonymous_row.id
+                    )
+                    + (binding,),
+                )
         expression = classify_expression(
             ExpressionContext(
                 segment_kind=source_segment.segment_kind,
@@ -935,7 +1563,16 @@ def _materialize_contract(
         "settings_fingerprint": context.request.settings_fingerprint,
         "requested_model_fingerprint": None,
         "actual_model_fingerprint": None,
-        "anonymous_speakers": (),
+        "anonymous_speakers": tuple(
+            sorted(
+                anonymous_identities.values(),
+                key=lambda item: (
+                    item.stable_key_algorithm,
+                    item.stable_key,
+                    str(item.anonymous_speaker_id),
+                ),
+            )
+        ),
         "scenes": scenes,
         "segments": tuple(segments),
         "issues": canonical_issues,

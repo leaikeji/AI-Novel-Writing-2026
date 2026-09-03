@@ -9,6 +9,7 @@ both the job and Nano resource generations before making media reachable.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Final, Literal, Mapping, Protocol
@@ -16,6 +17,8 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from ..models import (
     BackgroundJob,
@@ -292,25 +295,55 @@ def _validated_voice_generator_decode_parameters(
     if render_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256:
         raise WorkerSecurityError("VoiceGenerator render model identity changed")
     parameters = voice.parameters_json
-    expected_parameter_keys = {
+    character_parameter_keys = {
         "schema_version",
         "draft_fingerprint",
         "runtime_identity",
         "generator_parameters",
         "nano_parameters_digest",
     }
+    generic_parameter_keys = {
+        "schema_version",
+        "design_fingerprint",
+    }
+    character_generated = (
+        type(parameters) is dict
+        and set(parameters) == character_parameter_keys
+        and parameters.get("schema_version") == "voice-generator-version/1"
+        and parameters.get("runtime_identity")
+        == dict(VOICE_GENERATOR_RUNTIME_IDENTITY.wire_payload())
+        and parameters.get("generator_parameters")
+        == dict(VOICE_GENERATOR_AUDIO_PARAMETERS.wire_payload())
+        and type(parameters.get("draft_fingerprint")) is str
+        and len(parameters["draft_fingerprint"]) == 64
+        and type(parameters.get("nano_parameters_digest")) is str
+        and len(parameters["nano_parameters_digest"]) == 64
+        and voice.activation_basis == "character_one_click_generation"
+    )
+    generic_generated = (
+        type(parameters) is dict
+        and set(parameters) == generic_parameter_keys
+        and parameters.get("schema_version") == "generic-voice-version/1"
+        and type(parameters.get("design_fingerprint")) is str
+        and len(parameters["design_fingerprint"]) == 64
+        and voice.activation_basis == "generic_voice_pack_generation"
+    )
+    rights_identifier = getattr(rights, "source_identifier", None)
+    rights_identifier_valid = (
+        type(rights_identifier) is str
+        and (
+            (
+                character_generated
+                and rights_identifier.startswith("local://voice-generator/")
+            )
+            or (
+                generic_generated
+                and rights_identifier.startswith("local://generic-voice/")
+            )
+        )
+    )
     if (
-        type(parameters) is not dict
-        or set(parameters) != expected_parameter_keys
-        or parameters.get("schema_version") != "voice-generator-version/1"
-        or parameters.get("runtime_identity")
-        != dict(VOICE_GENERATOR_RUNTIME_IDENTITY.wire_payload())
-        or parameters.get("generator_parameters")
-        != dict(VOICE_GENERATOR_AUDIO_PARAMETERS.wire_payload())
-        or type(parameters.get("draft_fingerprint")) is not str
-        or len(parameters["draft_fingerprint"]) != 64
-        or type(parameters.get("nano_parameters_digest")) is not str
-        or len(parameters["nano_parameters_digest"]) != 64
+        not (character_generated or generic_generated)
         or voice.source_type != "generated"
         or voice.provider_id != "local-native-host"
         or voice.model_id != "OpenMOSS-Team/MOSS-VoiceGenerator"
@@ -322,7 +355,6 @@ def _validated_voice_generator_decode_parameters(
         or not 0 <= voice.seed <= 2**63 - 1
         or voice.state != "locked"
         or voice.quality_state != "accepted"
-        or voice.activation_basis != "character_one_click_generation"
         or voice.validation_basis != "machine_validated"
         or voice.model_run_id is None
         or voice.locked_actor is not None
@@ -334,8 +366,7 @@ def _validated_voice_generator_decode_parameters(
         or type(voice.description_digest) is not str
         or len(voice.description_digest) != 64
         or getattr(rights, "source_kind", None) != "voice_generator"
-        or type(getattr(rights, "source_identifier", None)) is not str
-        or not rights.source_identifier.startswith("local://voice-generator/")
+        or not rights_identifier_valid
         or getattr(rights, "notice_version", None)
         != "voice-generator-private-use/1"
         or getattr(rights, "purpose", None) != "private_novel_narration"
@@ -651,7 +682,8 @@ class SqlAlchemyNarrationWorkerRepository:
             if type(parameters) is not dict:
                 raise WorkerContractError("voice parameters must be an object")
             decode_parameters: NanoDecodeParametersV2 | None = None
-            voice_generator_reference = False
+            generated_reference = False
+            character_voice_generator_reference = False
             if voice.source_type == "preset":
                 if (
                     rights.source_kind != "official_preset"
@@ -698,13 +730,20 @@ class SqlAlchemyNarrationWorkerRepository:
                 if rights.source_kind != "user_upload":
                     raise WorkerSecurityError("uploaded voice provenance changed")
             elif voice.source_type == "generated":
-                if parameters.get("schema_version") == "voice-generator-version/1":
+                if parameters.get("schema_version") in {
+                    "voice-generator-version/1",
+                    "generic-voice-version/1",
+                }:
                     decode_parameters = _validated_voice_generator_decode_parameters(
                         voice=voice,
                         rights=rights,
                         render_model_fingerprint=render.model_fingerprint,
                     )
-                    voice_generator_reference = True
+                    generated_reference = True
+                    character_voice_generator_reference = (
+                        parameters.get("schema_version")
+                        == "voice-generator-version/1"
+                    )
                 else:
                     decode_parameters = _validated_nano_experiment_decode_parameters(
                         voice=voice,
@@ -720,7 +759,7 @@ class SqlAlchemyNarrationWorkerRepository:
             ):
                 raise WorkerContractError("voice max_new_frames is outside the worker bound")
             sample_mode = parameters.get("sample_mode", "fixed")
-            if voice_generator_reference:
+            if generated_reference:
                 configured_frames = PRODUCTION_NANO_MAX_NEW_FRAMES
                 sample_mode = "full"
             if (
@@ -808,7 +847,7 @@ class SqlAlchemyNarrationWorkerRepository:
                     byte_size=asset.byte_size,
                     content_type=asset.mime_type,
                 )
-                if voice_generator_reference:
+                if character_voice_generator_reference:
                     expected_validation_parameters_digest = canonical_sha256(
                         {
                             "schema_version": (
@@ -1103,23 +1142,6 @@ class SqlAlchemyNarrationWorkerRepository:
                 edition_id=edition.id,
                 for_update=True,
             )
-            append_manifest_revision(
-                store,
-                PublishManifest(
-                    edition_id=edition.id,
-                    expected_current_revision=(
-                        pointer.current_manifest_revision
-                        if pointer is not None
-                        else 0
-                    ),
-                    expected_state_version=(
-                        pointer.version if pointer is not None else 0
-                    ),
-                    buffer_policy=BUFFER_POLICIES[edition.buffer_policy_version],
-                    segments=self._manifest_inputs(store, edition),
-                    updated_actor=actor,
-                ),
-            )
             edition_segments = store.find_all(
                 NarrationEditionSegment,
                 edition_id=edition.id,
@@ -1133,6 +1155,29 @@ class SqlAlchemyNarrationWorkerRepository:
             has_ready = any(
                 segment.render_state == "ready" for segment in edition_segments
             )
+            # Before any segment is playable, a partially terminalized Edition
+            # still has public status ``pending`` and the Manifest contract
+            # correctly rejects it.  Wait for either a playable segment or the
+            # whole Edition to become terminal; otherwise recovery of one old
+            # attempt would poison the scheduler maintenance loop.
+            if has_ready or terminal:
+                append_manifest_revision(
+                    store,
+                    PublishManifest(
+                        edition_id=edition.id,
+                        expected_current_revision=(
+                            pointer.current_manifest_revision
+                            if pointer is not None
+                            else 0
+                        ),
+                        expected_state_version=(
+                            pointer.version if pointer is not None else 0
+                        ),
+                        buffer_policy=BUFFER_POLICIES[edition.buffer_policy_version],
+                        segments=self._manifest_inputs(store, edition),
+                        updated_actor=actor,
+                    ),
+                )
             if terminal and not has_ready:
                 edition.state = "unavailable"
                 edition.unavailable_reason = error_code
@@ -1794,6 +1839,13 @@ class NarrationSegmentWorker:
                 error_code="STALE_WORKER_FENCE",
             )
         except Exception as error:
+            logger.exception(
+                "narration segment worker failed",
+                extra={
+                    "job_id": str(lease.fence.job_id),
+                    "error_type": type(error).__name__,
+                },
+            )
             if work is None:
                 classification, error_code = self._classification(error)
                 try:

@@ -265,8 +265,21 @@ def _voice_generator_voice_evidence() -> tuple[SimpleNamespace, SimpleNamespace]
     return voice, rights
 
 
-def test_worker_projects_validated_voice_generator_reference_to_nano() -> None:
+@pytest.mark.parametrize(
+    "activation_basis",
+    ("character_one_click_generation", "generic_voice_pack_generation"),
+)
+def test_worker_projects_validated_voice_generator_reference_to_nano(
+    activation_basis: str,
+) -> None:
     voice, rights = _voice_generator_voice_evidence()
+    voice.activation_basis = activation_basis
+    if activation_basis == "generic_voice_pack_generation":
+        voice.parameters_json = {
+            "schema_version": "generic-voice-version/1",
+            "design_fingerprint": "e" * 64,
+        }
+        rights.source_identifier = f"local://generic-voice/{uuid4()}/male_child_bright"
 
     decoded = worker_module._validated_voice_generator_decode_parameters(  # noqa: SLF001
         voice=voice,
@@ -275,6 +288,21 @@ def test_worker_projects_validated_voice_generator_reference_to_nano() -> None:
     )
 
     assert decoded == NanoDecodeParametersV2()
+
+
+def test_worker_rejects_generic_voice_with_character_parameter_shape() -> None:
+    voice, rights = _voice_generator_voice_evidence()
+    voice.activation_basis = "generic_voice_pack_generation"
+
+    with pytest.raises(
+        worker_module.WorkerSecurityError,
+        match="version evidence changed",
+    ):
+        worker_module._validated_voice_generator_decode_parameters(  # noqa: SLF001
+            voice=voice,
+            rights=rights,
+            render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+        )
 
 
 def test_worker_rejects_voice_generator_evidence_drift() -> None:
@@ -1908,6 +1936,76 @@ def test_expired_segment_terminalizer_closes_render_and_appends_failed_manifest(
         session, job_id=target_job.id
     ) is False
     assert len(store.find_all(NarrationManifest, edition_id=edition.id)) == 1
+
+
+def test_expired_segment_terminalizer_waits_before_first_playable_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = MemoryNarrationStore()
+    (
+        _novel,
+        _document,
+        _revision,
+        request,
+        edition,
+        _segments,
+        renders,
+        _voice,
+        _rights,
+    ) = _edition_with_ready_renders(store)
+    edition_segments = store.find_all(
+        NarrationEditionSegment,
+        edition_id=edition.id,
+        order_by=("ordinal",),
+    )
+    target_render = renders[0]
+    target_segment = edition_segments[0]
+    target_job = store.get(BackgroundJob, target_render.source_job_id)
+    assert target_job is not None
+    target_job.state = "cancelled"
+    target_render.state = "rendering"
+    target_segment.render_state = "rendering"
+    renders[1].state = "pending"
+    edition_segments[1].render_state = "queued"
+    edition.state = "rendering"
+    request.state = "rendering"
+
+    class TerminalSession:
+        def scalar(self, _statement: object) -> object:
+            return target_job
+
+        def get(self, model: type[object], row_id: object) -> object | None:
+            return store.get(model, row_id)
+
+        def flush(self) -> None:
+            return None
+
+    repository = object.__new__(SqlAlchemyNarrationWorkerRepository)
+    repository._scope = NarrationRequestScope.fixed_local()
+    monkeypatch.setattr(
+        worker_module,
+        "SqlAlchemyNarrationStore",
+        lambda _session: store,
+    )
+    monkeypatch.setattr(
+        repository,
+        "_work_rows",
+        lambda _session, *, job, for_update, validate_current_authority: SimpleNamespace(
+            render=target_render,
+            fanout_segments=(target_segment,),
+            fanout_editions=(edition,),
+        ),
+    )
+
+    assert repository.terminalize_job_in_session(  # type: ignore[arg-type]
+        TerminalSession(), job_id=target_job.id
+    ) is True
+    assert target_render.state == "cancelled"
+    assert target_segment.render_state == "cancelled"
+    assert edition_segments[1].render_state == "queued"
+    assert edition.state == "rendering"
+    assert request.state == "rendering"
+    assert store.find_all(NarrationManifest, edition_id=edition.id) == []
 
 
 @pytest.mark.parametrize(

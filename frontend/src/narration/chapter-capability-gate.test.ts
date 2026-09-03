@@ -21,7 +21,7 @@ function capabilities(
   const enabledKeys = new Set(enabled);
   const visibleHeldKeys = new Set(visibleHeld);
   return Object.freeze({
-    schema_version: "narration-capabilities/3",
+    schema_version: "narration-capabilities/4",
     items: Object.freeze(CAPABILITY_KEYS.map((key): FeatureCapability => {
       if (enabledKeys.has(key)) {
         return Object.freeze({
@@ -98,6 +98,7 @@ describe("chapter narration capability gate", () => {
       visible: false,
       canLoadSession: false,
       canProduce: false,
+      canPrepareVoices: false,
       reasonCode: "PRODUCT_PLAYER_GATE_REQUIRED",
       blockedCapability: "product_player",
     });
@@ -131,6 +132,7 @@ describe("chapter narration capability gate", () => {
       visible: true,
       canLoadSession: true,
       canProduce: true,
+      canPrepareVoices: false,
       reasonCode: null,
       blockedCapability: null,
     });

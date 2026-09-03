@@ -877,7 +877,7 @@ def _assert_overview_capability_tier(
         if (
             payload.get("contract_version") != "narration-settings-api/1"
             or payload.get("novel_id") != str(novel_id)
-            or capabilities.get("schema_version") != "narration-capabilities/3"
+            or capabilities.get("schema_version") != "narration-capabilities/4"
             or runtime.get("product_visible") is not False
         ):
             raise RunnerError(code)

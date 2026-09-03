@@ -20,6 +20,8 @@ from ..models import (
     BackgroundJob,
     CharacterVoiceBinding,
     Document,
+    GenericVoicePackVersion,
+    GenericVoicePackVersionSlot,
     GenericVoicePool,
     GenericVoiceSlot,
     NarrationEdition,
@@ -35,7 +37,12 @@ from ..models import (
     VoiceProfileVersion,
 )
 
-from .contracts import LOCAL_OWNER_ACTOR_ID, NarrationRequestScope
+from .contracts import (
+    LOCAL_OWNER_ACTOR_ID,
+    LOCAL_OWNER_ID,
+    LOCAL_WORKSPACE_ID,
+    NarrationRequestScope,
+)
 from .authority_locks import (
     VoiceAuthorityLock,
     lock_request_document_mutex,
@@ -140,6 +147,10 @@ class StartNarrationWorkflow:
     explicitly_requested: bool
     actor: str = LOCAL_OWNER_ACTOR_ID
     requested_at: datetime | None = None
+    # Internal continuation fence used by Plan 55. Public callers leave this
+    # unset; when present the freshly analyzed script must match the preflight
+    # speaker identity before any Edition or render job can be created.
+    expected_speaker_digest: str | None = None
     scope: NarrationRequestScope = NarrationRequestScope.fixed_local()
 
 
@@ -291,6 +302,11 @@ def _validate_start(command: StartNarrationWorkflow) -> None:
         or command.requested_at.tzinfo is None
     ):
         raise NarrationServiceError("requested_at must be timezone-aware")
+    if command.expected_speaker_digest is not None:
+        require_sha256(
+            command.expected_speaker_digest,
+            field="expected_speaker_digest",
+        )
 
 
 def _snapshot_policy(snapshot: NarrationSettingsSnapshot) -> str:
@@ -540,6 +556,62 @@ def project_edition(
     )
 
 
+def _require_active_generic_slot(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    slot: GenericVoiceSlot,
+    expected_pool_id: UUID | None = None,
+) -> GenericVoicePool:
+    pool = require_row(
+        store.get(GenericVoicePool, slot.pool_id, for_update=True),
+        label="generic voice pool",
+    )
+    if expected_pool_id is not None and pool.id != expected_pool_id:
+        raise NarrationScopeMismatch("generic voice target differs from its pool")
+    if (
+        pool.novel_id != novel_id
+        or pool.status != "active"
+        or pool.source_pack_version_id is None
+        or pool.language != "zh-CN"
+        or type(slot.enabled) is not bool
+        or not slot.enabled
+    ):
+        raise NarrationScopeMismatch("generic voice slot is no longer usable")
+    pack = require_row(
+        store.get(
+            GenericVoicePackVersion,
+            pool.source_pack_version_id,
+            for_update=True,
+        ),
+        label="generic voice source pack",
+    )
+    if (
+        pack.workspace_id != LOCAL_WORKSPACE_ID
+        or pack.language != pool.language
+        or pack.state != "active"
+        or pack.validated_slot_count != 24
+    ):
+        raise NarrationScopeMismatch("generic voice source pack is no longer active")
+    source_slots = store.find_all(
+        GenericVoicePackVersionSlot,
+        pack_version_id=pack.id,
+        slot_key=slot.slot_key,
+        for_update=True,
+    )
+    if (
+        len(source_slots) != 1
+        or source_slots[0].voice_version_id != slot.voice_version_id
+        or source_slots[0].state not in {"validated", "reused"}
+        or not source_slots[0].rights_approved
+        or not source_slots[0].quality_approved
+    ):
+        raise NarrationScopeMismatch(
+            "generic voice slot differs from its active source pack"
+        )
+    return pool
+
+
 def _voice_resolution(
     store: NarrationStore,
     *,
@@ -556,6 +628,7 @@ def _voice_resolution(
         )
 
     slot_id: UUID | None = None
+    workspace_library_voice = False
     authority: dict[str, object]
     if target.kind is CastingTargetKind.PROFILE:
         resolved = settings_snapshot.snapshot_json.get("resolved_settings")
@@ -614,6 +687,21 @@ def _voice_resolution(
         )
         profile_id = voice.profile_id
         slot_id = anonymous.slot_id
+        if slot_id is not None:
+            slot = require_row(
+                store.get(GenericVoiceSlot, slot_id, for_update=True),
+                label="anonymous generic voice slot",
+            )
+            if slot.voice_version_id != voice_version_id:
+                raise NarrationScopeMismatch(
+                    "anonymous binding differs from its generic slot"
+                )
+            _require_active_generic_slot(
+                store,
+                novel_id=novel_id,
+                slot=slot,
+            )
+            workspace_library_voice = True
         authority = {
             "kind": "anonymous_binding",
             "anonymous_speaker_id": str(anonymous.id),
@@ -623,18 +711,16 @@ def _voice_resolution(
             store.get(GenericVoiceSlot, target.slot_id, for_update=True),
             label="generic voice slot",
         )
-        pool = require_row(
-            store.get(GenericVoicePool, target.pool_id, for_update=True),
-            label="generic voice pool",
+        if segment.speaker_kind not in {"anonymous", "group", "unknown"}:
+            raise NarrationScopeMismatch(
+                "generic voice slots are limited to non-character speakers"
+            )
+        pool = _require_active_generic_slot(
+            store,
+            novel_id=novel_id,
+            slot=slot,
+            expected_pool_id=target.pool_id,
         )
-        if (
-            slot.pool_id != pool.id
-            or pool.novel_id != novel_id
-            or pool.status != "active"
-            or type(slot.enabled) is not bool
-            or not slot.enabled
-        ):
-            raise NarrationScopeMismatch("generic voice slot is no longer usable")
         voice_version_id = slot.voice_version_id
         voice = require_row(
             store.get(VoiceProfileVersion, voice_version_id, for_update=True),
@@ -642,6 +728,7 @@ def _voice_resolution(
         )
         profile_id = voice.profile_id
         slot_id = slot.id
+        workspace_library_voice = True
         authority = {
             "kind": "generic_slot",
             "pool_id": str(pool.id),
@@ -661,7 +748,18 @@ def _voice_resolution(
         store.get(VoiceProfile, profile_id, for_update=True),
         label="resolved voice profile",
     )
-    if profile.novel_id != novel_id:
+    if workspace_library_voice:
+        if (
+            profile.novel_id is not None
+            or profile.owner_id != LOCAL_OWNER_ID
+            or profile.workspace_id != LOCAL_WORKSPACE_ID
+            or voice.activation_basis != "generic_voice_pack_generation"
+            or voice.validation_basis != "machine_validated"
+        ):
+            raise NarrationScopeMismatch(
+                "generic slot voice is outside the validated workspace library"
+            )
+    elif profile.novel_id != novel_id:
         raise NarrationScopeMismatch("resolved voice profile belongs to another novel")
     resolution = {
         "contract_version": NARRATION_EDITION_RESOLUTION_VERSION,
@@ -808,6 +906,31 @@ def _continue_request(
         store.get(NarrationRequest, request.id, for_update=True),
         label="narration request",
     )
+    if command.expected_speaker_digest is not None:
+        # Import locally to keep the foundational workflow independent unless
+        # the Plan 55 continuation fence is explicitly requested.
+        from .voice_preparation import FrozenSpeakerSegment, speaker_summary_digest
+
+        frozen_segments = tuple(
+            FrozenSpeakerSegment(
+                ordinal=segment.ordinal,
+                segment_kind=segment.segment_kind,
+                source_start_utf16=segment.source_start_utf16,
+                source_end_utf16=segment.source_end_utf16,
+                speaker_kind=segment.speaker_kind,
+                character_id=segment.character_id,
+                anonymous_speaker_id=segment.anonymous_speaker_id,
+            )
+            for segment in store.find_all(
+                NarrationSegment,
+                script_version_id=contract.script_version_id,
+                order_by=("ordinal",),
+            )
+        )
+        if speaker_summary_digest(frozen_segments) != command.expected_speaker_digest:
+            raise StaleNarrationInput(
+                "narration speaker identity changed after voice preflight"
+            )
     if request.intent == "analyze_only":
         return project_workflow(store, request, replayed=replayed)
     if contract.state is not ScriptVersionState.APPROVED:

@@ -366,6 +366,51 @@ def test_profile_listing_never_leaks_another_novel() -> None:
     store.add(book_a)
     store.add(book_b)
     library = create_profile(store, None, key="profile-library", name="私人音色库")
+    generic_library = create_profile(
+        store,
+        None,
+        key="profile-generic-library",
+        name="通用角色音色 · 中性青年",
+    )
+    generic_profile = store.get(VoiceProfile, generic_library.profile_id)
+    assert generic_profile is not None
+    generic_rights = active_rights(
+        novel_id=None,
+        source_kind="voice_generator",
+        source_identifier="local://generic-voice/test/neutral_young",
+    )
+    generic_version = VoiceProfileVersion(
+        id=uuid4(),
+        profile_id=generic_profile.id,
+        owner_id=LOCAL_OWNER_ID,
+        workspace_id=LOCAL_WORKSPACE_ID,
+        version_number=1,
+        source_type="generated",
+        state="locked",
+        provider_id="local-native-host",
+        model_id="OpenMOSS-Team/MOSS-VoiceGenerator",
+        model_revision="test-only-metadata",
+        preset_key=None,
+        reference_asset_id=uuid4(),
+        preview_asset_id=None,
+        rights_record_id=generic_rights.id,
+        description_digest_key_id="sha256-public-v1",
+        description_digest=SHA_A,
+        language="zh-CN",
+        seed=1,
+        parameters_json={},
+        fingerprint=SHA_A,
+        quality_state="accepted",
+        activation_basis="generic_voice_pack_generation",
+        validation_basis="machine_validated",
+        locked_actor=None,
+        locked_at=None,
+        created_at=NOW,
+    )
+    generic_profile.current_version_id = generic_version.id
+    generic_profile.status = "active"
+    store.add(generic_rights)
+    store.add(generic_version)
     local = create_profile(store, book_a, key="profile-book-a", name="甲作品")
     create_profile(store, book_b, key="profile-book-b", name="乙作品")
     deleted = create_profile(

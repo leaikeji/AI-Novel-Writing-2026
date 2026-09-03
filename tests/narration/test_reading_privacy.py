@@ -739,8 +739,6 @@ def test_reference_clone_has_an_independent_exact_release_gate() -> None:
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_UPLOADED_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
-        NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL,
-        NarrationSettingsOperation.PUT_CASTING_RULES,
         NarrationSettingsOperation.PREVIEW_CACHE_CLEANUP,
         NarrationSettingsOperation.EXECUTE_CACHE_CLEANUP,
     ],
@@ -1415,20 +1413,18 @@ def test_runtime_projection_requires_both_release_and_ready_evidence_for_product
     )
 
 
-def test_dispatcher_owns_exact_33_operations_and_preserves_specific_holds() -> None:
+def test_dispatcher_owns_exact_31_operations_and_preserves_specific_holds() -> None:
     owned = (
         READING_PRIVACY_OPERATIONS
         | VoiceSettingsHandler.operations
         | PronunciationSettingsHandler.operations
         | {
             NarrationSettingsOperation.GET_GENERIC_VOICE_POOL,
-            NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL,
             NarrationSettingsOperation.GET_CASTING_RULES,
-            NarrationSettingsOperation.PUT_CASTING_RULES,
         }
     )
     assert owned == set(NarrationSettingsOperation)
-    assert len(owned) == 33
+    assert len(owned) == 31
 
     store = MemoryStore(novel())
     blocked = authorized_backend(store)

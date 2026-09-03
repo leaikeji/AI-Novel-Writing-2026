@@ -548,6 +548,41 @@ class SqlAlchemyVoiceGeneratorService:
 
         return _transaction(self._session_factory, operation)
 
+    def expire_stale_analysis(
+        self,
+        *,
+        novel_id: UUID,
+        command_id: UUID,
+        older_than: datetime,
+    ) -> bool:
+        """Fence an Agent analysis abandoned by a crashed request worker.
+
+        The late response cannot publish because ``finish_analysis`` only
+        accepts ``analyzing_character``.  A parent preparation command can
+        therefore fall back safely instead of remaining active forever.
+        """
+
+        def operation(session: Session) -> bool:
+            row = _required_command(
+                session, novel_id=novel_id, command_id=command_id, for_update=True
+            )
+            if (
+                row.state != VoiceGeneratorCommandState.ANALYZING_CHARACTER.value
+                or row.started_at is None
+                or row.started_at > older_than
+            ):
+                return False
+            _mark_terminal(
+                row,
+                state=VoiceGeneratorCommandState.FAILED_CHARACTER_ANALYSIS,
+                failure_code="CHARACTER_VOICE_MODEL_UNAVAILABLE",
+                now=datetime.now(UTC),
+            )
+            session.flush()
+            return True
+
+        return _transaction(self._session_factory, operation)
+
     def finish_analysis(
         self,
         *,

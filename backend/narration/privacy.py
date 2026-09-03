@@ -71,11 +71,7 @@ from .settings_api import (
     NarrationSettingsApiCommand,
     NarrationSettingsOperation,
 )
-from .voice_pool import (
-    GenericCastingUnavailable,
-    GenericVoicePoolUnavailable,
-    VoicePoolHandlers,
-)
+from .voice_pool import GenericCastingUnavailable, VoicePoolHandlers
 from .voices import (
     OfficialVoiceSelectionPort,
     VoiceProductPort,
@@ -128,8 +124,6 @@ _MUTATION_CAPABILITY: Final[dict[NarrationSettingsOperation, wire.CapabilityKey]
     NarrationSettingsOperation.CREATE_VOICE_PREVIEW: wire.CapabilityKey.VOICE_PREVIEW,
     NarrationSettingsOperation.LOCK_VOICE_PROFILE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.PUT_CHARACTER_VOICE_BINDING: wire.CapabilityKey.READING_SETTINGS,
-    NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL: wire.CapabilityKey.GENERIC_VOICE_POOL,
-    NarrationSettingsOperation.PUT_CASTING_RULES: wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
     NarrationSettingsOperation.PUT_PRONUNCIATION_PROFILE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.PREVIEW_CACHE_CLEANUP: wire.CapabilityKey.CACHE_CLEANUP,
     NarrationSettingsOperation.EXECUTE_CACHE_CLEANUP: wire.CapabilityKey.CACHE_CLEANUP,
@@ -294,8 +288,6 @@ _CONFIGURE_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
         NarrationSettingsOperation.CREATE_CLOUD_CONSENT,
         NarrationSettingsOperation.REVOKE_CLOUD_CONSENT,
         NarrationSettingsOperation.PUT_CHARACTER_VOICE_BINDING,
-        NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL,
-        NarrationSettingsOperation.PUT_CASTING_RULES,
         NarrationSettingsOperation.PUT_PRONUNCIATION_PROFILE,
         NarrationSettingsOperation.PREVIEW_CACHE_CLEANUP,
         NarrationSettingsOperation.EXECUTE_CACHE_CLEANUP,
@@ -1655,24 +1647,8 @@ class NarrationSettingsBackend:
             novel_id = _required_novel_id(command)
             if command.operation is NarrationSettingsOperation.GET_GENERIC_VOICE_POOL:
                 return self.voice_pool.get_pool(novel_id)
-            if command.operation is NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL:
-                return self.voice_pool.put_pool(
-                    novel_id,
-                    _payload(command, wire.PutGenericVoicePoolRequest),
-                )
             if command.operation is NarrationSettingsOperation.GET_CASTING_RULES:
                 return self.voice_pool.get_casting_rules(novel_id)
-            if command.operation is NarrationSettingsOperation.PUT_CASTING_RULES:
-                return self.voice_pool.put_casting_rules(
-                    novel_id,
-                    _payload(command, wire.PutVoiceCastingRulesRequest),
-                )
-        except GenericVoicePoolUnavailable as error:
-            raise NarrationApiFault(
-                wire.NarrationErrorCode.GENERIC_VOICE_POOL_UNAVAILABLE,
-                "通用音色基础包尚未具备权利、质量与生产证据。",
-                capability=wire.CapabilityKey.GENERIC_VOICE_POOL,
-            ) from error
         except GenericCastingUnavailable as error:
             raise NarrationApiFault(
                 wire.NarrationErrorCode.GENERIC_VOICE_POOL_UNAVAILABLE,
@@ -1845,9 +1821,7 @@ _DISPATCH_OPERATION_GROUPS: Final = (
     frozenset(
         {
             NarrationSettingsOperation.GET_GENERIC_VOICE_POOL,
-            NarrationSettingsOperation.PUT_GENERIC_VOICE_POOL,
             NarrationSettingsOperation.GET_CASTING_RULES,
-            NarrationSettingsOperation.PUT_CASTING_RULES,
         }
     ),
 )

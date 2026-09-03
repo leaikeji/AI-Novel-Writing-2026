@@ -50,14 +50,8 @@ type PlaybackState =
 export class VoicePreviewPlaybackError extends Error {}
 
 
-function previewMediaPath(preview: VoicePreviewResource): string {
-  if (preview.status !== "ready" || preview.asset === null) {
-    throw new VoicePreviewPlaybackError("试听尚未就绪，不能加载音频。");
-  }
-  const { asset_id: assetId, content_path: contentPath } = preview.asset;
-  if (!CANONICAL_UUID.test(preview.preview_id)) {
-    throw new VoicePreviewPlaybackError("试听任务标识无效。");
-  }
+function mediaPath(asset: MediaAssetLink): string {
+  const { asset_id: assetId, content_path: contentPath } = asset;
   if (!CANONICAL_UUID.test(assetId)) {
     throw new VoicePreviewPlaybackError("试听音频标识无效。");
   }
@@ -71,6 +65,17 @@ function previewMediaPath(preview: VoicePreviewResource): string {
     throw new VoicePreviewPlaybackError("试听音频路径未通过范围校验。");
   }
   return `/${APP_ID}${contentPath}`;
+}
+
+
+function previewMediaPath(preview: VoicePreviewResource): string {
+  if (preview.status !== "ready" || preview.asset === null) {
+    throw new VoicePreviewPlaybackError("试听尚未就绪，不能加载音频。");
+  }
+  if (!CANONICAL_UUID.test(preview.preview_id)) {
+    throw new VoicePreviewPlaybackError("试听任务标识无效。");
+  }
+  return mediaPath(preview.asset);
 }
 
 
@@ -123,12 +128,44 @@ export async function fetchVoicePreviewObjectUrl(
 }
 
 
-/** Play one already-validated temporary preview and release its object URL. */
-export async function playReadyVoicePreview(
-  preview: VoicePreviewResource,
+/** Load one persisted generic-slot validation asset through its narrow scope header. */
+export async function fetchGenericVoiceSlotObjectUrl(
+  slotId: string,
+  asset: MediaAssetLink,
+  options: {
+    readonly host?: VoicePreviewHost;
+    readonly objectUrls?: VoicePreviewObjectUrlApi;
+    readonly signal?: AbortSignal;
+  } = {},
+): Promise<string> {
+  if (!CANONICAL_UUID.test(slotId)) {
+    throw new VoicePreviewPlaybackError("通用音色槽位标识无效。");
+  }
+  const path = mediaPath(asset);
+  const host = options.host ?? window.QwenPaw.host;
+  const objectUrls = options.objectUrls ?? URL;
+  const response = await host.fetch(path, {
+    method: "GET",
+    headers: {
+      Accept: asset.mime_type,
+      "X-Narration-Generic-Voice-Slot-Id": slotId,
+    },
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    throw new VoicePreviewPlaybackError(`试听音频加载失败（HTTP ${response.status}）。`);
+  }
+  const blob = await response.blob();
+  assertMediaResponse(response, asset, blob);
+  return objectUrls.createObjectURL(blob);
+}
+
+
+async function playObjectUrl(
+  objectUrlPromise: Promise<string>,
   signal: AbortSignal,
 ): Promise<void> {
-  const objectUrl = await fetchVoicePreviewObjectUrl(preview, { signal });
+  const objectUrl = await objectUrlPromise;
   if (signal.aborted) {
     URL.revokeObjectURL(objectUrl);
     throw new DOMException("Aborted", "AbortError");
@@ -157,6 +194,24 @@ export async function playReadyVoicePreview(
     cleanup();
     throw error;
   }
+}
+
+
+/** Play one already-validated temporary preview and release its object URL. */
+export async function playReadyVoicePreview(
+  preview: VoicePreviewResource,
+  signal: AbortSignal,
+): Promise<void> {
+  await playObjectUrl(fetchVoicePreviewObjectUrl(preview, { signal }), signal);
+}
+
+
+export async function playGenericVoiceSlotPreview(
+  slotId: string,
+  asset: MediaAssetLink,
+  signal: AbortSignal,
+): Promise<void> {
+  await playObjectUrl(fetchGenericVoiceSlotObjectUrl(slotId, asset, { signal }), signal);
 }
 
 

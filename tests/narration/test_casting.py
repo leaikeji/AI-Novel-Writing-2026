@@ -708,6 +708,37 @@ def test_unknown_speaker_and_synthetic_pause_have_frozen_shapes() -> None:
     assert pause.issues == ()
 
 
+def test_explicit_unknown_can_use_a_server_authorized_generic_pool_rule() -> None:
+    slots = tuple(
+        replace(
+            generic_slot(index),
+            speaker_kinds=(),
+            neutral_fallback=index == 0,
+        )
+        for index in range(24)
+    )
+    pool = ready_pool(slots=slots)
+    generic_unknown = resolve_casting(
+        request(
+            speaker=SpeakerRef(kind=SpeakerKind.UNKNOWN),
+            attributes=CastingAttributes(
+                context_kind=wire.CastingContextKind.DIALOGUE,
+            ),
+        ),
+        CastingInventory(
+            rules=(
+                automatic_rule(speaker=wire.CastingSpeakerKind.UNKNOWN),
+            ),
+            generic_pool=pool,
+        ),
+    )
+
+    assert generic_unknown.source is CastingResolutionSource.GENERIC_RULE
+    assert generic_unknown.blocker_codes == ()
+    assert generic_unknown.resolved_voice is not None
+    assert generic_unknown.resolved_voice.slot_id == slots[0].slot_id
+
+
 def test_automatic_generic_casting_requires_complete_ready_24_slot_pool() -> None:
     result = resolve_casting(
         request(),

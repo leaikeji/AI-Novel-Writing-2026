@@ -473,11 +473,17 @@ describe("CharacterVoiceRoster", () => {
 
   it("has narrow-screen wrapping, 44px targets and visible keyboard focus", () => {
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 768px)");
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-workbench-frame:has(");
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("z-index: 1200");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("min-height: 44px");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-roster button:focus-visible");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-drawer");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("width: 100vw");
+  });
+
+  it("constrains the drawer to one viewport and gives its body the only vertical scrollbar", () => {
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer-layer \{[\s\S]*?grid-template-rows: minmax\(0, 1fr\);[\s\S]*?overflow: hidden;/);
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer \{[\s\S]*?min-height: 0;[\s\S]*?max-height: 100%;[\s\S]*?overflow: hidden;/);
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer__body \{[\s\S]*?min-height: 0;[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("scrollbar-gutter: stable");
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-drawer__body::-webkit-scrollbar-thumb");
   });
 });

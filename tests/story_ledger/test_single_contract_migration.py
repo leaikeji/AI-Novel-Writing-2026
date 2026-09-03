@@ -13,7 +13,8 @@ from backend.models import CharacterRelationship, DerivedSourceBinding
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260902_0038"
 DOWN_REVISION = "20260902_0037"
-HEAD_REVISION = "20260902_0039"
+HEAD_REVISION = "20260903_0040"
+VISIBLE_COUNT_REVISION = "20260902_0039"
 MIGRATION = (
     ROOT
     / "backend/migrations/versions/20260902_0038_story_ledger_single_contract.py"
@@ -27,7 +28,8 @@ def _scripts() -> ScriptDirectory:
 def test_single_contract_revision_is_the_only_linear_head() -> None:
     scripts = _scripts()
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == REVISION
+    assert scripts.get_revision(HEAD_REVISION).down_revision == VISIBLE_COUNT_REVISION
+    assert scripts.get_revision(VISIBLE_COUNT_REVISION).down_revision == REVISION
     assert scripts.get_revision(REVISION).down_revision == DOWN_REVISION
 
 

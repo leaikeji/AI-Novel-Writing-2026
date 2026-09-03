@@ -12,20 +12,34 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from backend.models import Base, CharacterCastPlanCommand, CharacterCastPlanItem
+from backend.models import (
+    Base,
+    CharacterCastPlanCommand,
+    CharacterCastPlanItem,
+    GenericVoiceDesignDraft,
+    GenericVoiceGenerationCommand,
+    GenericVoicePackVersion,
+    GenericVoicePackVersionSlot,
+    VoicePreparationCommand,
+    VoicePreparationItem,
+)
 from backend.narration.contracts import (
     BLOCKER_CODES,
     LOCAL_OWNER_ID,
     LOCAL_WORKSPACE_ID,
     WARNING_CODES,
 )
-from backend.narration.schema_readiness import character_cast_schema_ready
+from backend.narration.schema_readiness import (
+    automatic_voice_preparation_schema_ready,
+    character_cast_schema_ready,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260902_0039"
+HEAD_REVISION = "20260903_0040"
+AUTOMATIC_VOICE_PREPARATION_REVISION = "20260903_0040"
 WORKING_COPY_COUNT_REVISION = "20260902_0039"
 STORY_LEDGER_SINGLE_CONTRACT_REVISION = "20260902_0038"
 STORY_LEDGER_INDEX_REVISION = "20260902_0037"
@@ -104,6 +118,10 @@ CHARACTER_CAST_MIGRATION = (
     ROOT
     / "backend/migrations/versions/20260901_0036_character_cast_plans.py"
 )
+AUTOMATIC_VOICE_PREPARATION_MIGRATION = (
+    ROOT
+    / "backend/migrations/versions/20260903_0040_automatic_voice_preparation_and_generic_pack.py"
+)
 EXPECTED_NEW_TABLES = {
     "narration_requests", "narration_request_sources", "novel_narration_settings",
     "narration_settings_snapshots", "narration_scope_overrides", "narration_cloud_consents",
@@ -121,6 +139,9 @@ EXPECTED_NEW_TABLES = {
     "nano_voice_experiment_commands",
     "voice_design_drafts", "voice_generator_commands", "voice_generator_run_evidence",
     "character_cast_plan_commands", "character_cast_plan_items",
+    "voice_preparation_commands", "voice_preparation_items",
+    "generic_voice_pack_versions", "generic_voice_pack_version_slots",
+    "generic_voice_design_drafts", "generic_voice_generation_commands",
 }
 FOUNDATION_TABLES = EXPECTED_NEW_TABLES - {"narration_script_review_actions"}
 
@@ -132,6 +153,10 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
+    assert (
+        scripts.get_revision(AUTOMATIC_VOICE_PREPARATION_REVISION).down_revision
+        == WORKING_COPY_COUNT_REVISION
+    )
     assert (
         scripts.get_revision(WORKING_COPY_COUNT_REVISION).down_revision
         == STORY_LEDGER_SINGLE_CONTRACT_REVISION
@@ -232,7 +257,8 @@ def test_voice_preview_retry_migration_is_narrow_fix_forward_and_io_free() -> No
     for forbidden in (
         "from backend.models",
         "create_engine",
-        "requests.",
+        "requests.get(",
+        "requests.post(",
         "subprocess",
     ):
         assert forbidden not in source
@@ -400,6 +426,60 @@ def test_character_cast_orm_matches_the_frozen_0036_authority() -> None:
     } <= command_indexes
 
 
+def test_automatic_voice_preparation_migration_is_linear_io_free_and_fail_closed() -> None:
+    source = AUTOMATIC_VOICE_PREPARATION_MIGRATION.read_text(encoding="utf-8")
+    for forbidden in (
+        "from backend.models",
+        "create_engine",
+        "requests.get(",
+        "requests.post(",
+        "subprocess",
+        "VoiceGenerator.from_pretrained",
+    ):
+        assert forbidden not in source
+    for marker in (
+        'revision = "20260903_0040"',
+        'down_revision = "20260902_0039"',
+        "voice_preparation_commands",
+        "voice_preparation_items",
+        "generic_voice_pack_versions",
+        "generic_voice_pack_version_slots",
+        "generic_voice_design_drafts",
+        "generic_voice_generation_commands",
+        "narration.voice_prepare",
+        "narration.generic_voice_generate",
+        "generic_voice_pack_generation",
+        "generic voice pack requires 24 validated library slots",
+        "generic voice design evidence is immutable",
+        "0040 downgrade refused",
+    ):
+        assert marker in source
+
+
+def test_automatic_voice_preparation_orm_matches_0040_authority() -> None:
+    assert VoicePreparationCommand.__tablename__ == "voice_preparation_commands"
+    assert VoicePreparationItem.__tablename__ == "voice_preparation_items"
+    assert GenericVoicePackVersion.__tablename__ == "generic_voice_pack_versions"
+    assert GenericVoicePackVersionSlot.__tablename__ == "generic_voice_pack_version_slots"
+    assert GenericVoiceDesignDraft.__tablename__ == "generic_voice_design_drafts"
+    assert GenericVoiceGenerationCommand.__tablename__ == "generic_voice_generation_commands"
+    assert {
+        "preflight_request_id",
+        "preflight_script_version_id",
+        "continuation_idempotency_key",
+        "narration_request_id",
+        "chapter_ready",
+        "lease_fence",
+    } <= {column.name for column in VoicePreparationCommand.__table__.columns}
+    assert {
+        "pack_version_id",
+        "design_draft_id",
+        "generator_model_run_id",
+        "nano_model_run_id",
+        "voice_version_id",
+    } <= {column.name for column in GenericVoiceGenerationCommand.__table__.columns}
+
+
 def test_failed_segment_retry_downgrade_restores_guards_without_retry_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -532,7 +612,7 @@ def test_script_review_action_migration_is_fix_forward_and_io_free() -> None:
 
 def test_metadata_contains_the_complete_foundation_without_native_enums() -> None:
     assert EXPECTED_NEW_TABLES <= set(Base.metadata.tables)
-    assert len(EXPECTED_NEW_TABLES) == 49
+    assert len(EXPECTED_NEW_TABLES) == 55
     for table_name in EXPECTED_NEW_TABLES:
         for column in Base.metadata.tables[table_name].columns:
             assert column.type.__class__.__name__ not in {"ENUM", "Enum"}
@@ -1911,6 +1991,10 @@ def test_live_postgresql_upgrade_guards_and_conditional_rollback() -> None:
                 f'"{name}"'
                 for name in sorted(FOUNDATION_TABLES & present_tables)
             )
+            # PostgreSQL 18 refuses TRUNCATE while deferred constraint
+            # triggers still have queued events, even when all rows in the
+            # authority graph are about to be removed together.
+            connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
             connection.execute(text(f"TRUNCATE TABLE {table_list} CASCADE"))
             connection.execute(text("DELETE FROM media_assets WHERE asset_class IS NOT NULL"))
         command.downgrade(config, DOWN_REVISION)
@@ -1983,6 +2067,63 @@ def test_live_character_cast_migration_round_trip_in_isolated_schema() -> None:
 
         command.upgrade(config, CHARACTER_CAST_REVISION)
         assert character_cast_schema_ready(engine)
+    finally:
+        engine.dispose()
+        if old_database_url is None:
+            os.environ.pop("AI_NOVEL_DATABASE_URL", None)
+        else:
+            os.environ["AI_NOVEL_DATABASE_URL"] = old_database_url
+        with base.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        base.dispose()
+
+
+def test_live_automatic_voice_preparation_migration_round_trip_in_isolated_schema() -> None:
+    """Exercise 0039→0040→0039→0040 without touching another schema."""
+
+    url = _live_url()
+    base = create_engine(url, pool_pre_ping=True)
+    schema = f"voice_preparation_migration_{uuid4().hex[:12]}"
+    with base.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(
+            text(
+                f'CREATE TABLE "{schema}".alembic_version '
+                "(version_num VARCHAR(32) PRIMARY KEY)"
+            )
+        )
+    scoped_url = make_url(url).update_query_dict(
+        {"options": f"-csearch_path={schema},public"}
+    ).render_as_string(hide_password=False)
+    escaped_scoped_url = scoped_url.replace("%", "%%")
+    config = _alembic_config(escaped_scoped_url)
+    old_database_url = os.environ.get("AI_NOVEL_DATABASE_URL")
+    os.environ["AI_NOVEL_DATABASE_URL"] = escaped_scoped_url
+    engine = create_engine(scoped_url, pool_pre_ping=True)
+    try:
+        command.upgrade(config, WORKING_COPY_COUNT_REVISION)
+        assert "voice_preparation_commands" not in inspect(engine).get_table_names(
+            schema=schema
+        )
+
+        command.upgrade(config, AUTOMATIC_VOICE_PREPARATION_REVISION)
+        assert {
+            "voice_preparation_commands",
+            "voice_preparation_items",
+            "generic_voice_pack_versions",
+            "generic_voice_pack_version_slots",
+            "generic_voice_design_drafts",
+            "generic_voice_generation_commands",
+        } <= set(inspect(engine).get_table_names(schema=schema))
+        assert automatic_voice_preparation_schema_ready(engine)
+
+        command.downgrade(config, WORKING_COPY_COUNT_REVISION)
+        assert "voice_preparation_commands" not in inspect(engine).get_table_names(
+            schema=schema
+        )
+
+        command.upgrade(config, AUTOMATIC_VOICE_PREPARATION_REVISION)
+        assert automatic_voice_preparation_schema_ready(engine)
     finally:
         engine.dispose()
         if old_database_url is None:

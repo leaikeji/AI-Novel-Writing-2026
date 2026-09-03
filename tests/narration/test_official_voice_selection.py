@@ -24,8 +24,10 @@ from backend.narration import schemas as wire
 from backend.narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
 from backend.narration.official_presets import OFFICIAL_PRESETS
 from backend.narration.official_voice_selection import (
+    DEFAULT_NARRATOR_PRESET_ID,
     OfficialVoiceBatchSelection,
     OfficialVoiceSelectionService,
+    initialize_new_novel_default_narrator,
 )
 from backend.narration.services import IdempotencyConflict, NarrationCasConflict
 
@@ -279,6 +281,44 @@ def test_all_eighteen_narrator_and_character_actions_are_atomic_and_replayable(
         )
         assert settings is not None and settings.version == 18
         assert binding is not None and binding.version == 18
+
+
+def test_new_novel_default_narrator_uses_junhao_through_the_audited_path(
+    selection_engine: Engine,
+) -> None:
+    factory = _factory(selection_engine)
+    novel_id, _ = _seed_novel(factory, with_character=False)
+
+    with factory() as session, session.begin():
+        settings = initialize_new_novel_default_narrator(
+            session,
+            novel_id=novel_id,
+        )
+        assert settings.exists
+        assert settings.version == 1
+        assert settings.values.narrator is not None
+        version = session.get(
+            VoiceProfileVersion,
+            settings.values.narrator.version_id,
+        )
+        assert version is not None
+        assert version.preset_key == DEFAULT_NARRATOR_PRESET_ID
+        assert session.scalar(
+            select(func.count()).select_from(VoiceActionCommand).where(
+                VoiceActionCommand.novel_id == novel_id,
+                VoiceActionCommand.state == "completed",
+            )
+        ) == 1
+
+
+def test_new_novel_default_narrator_rejects_a_session_without_owner_transaction(
+) -> None:
+    with Session() as session:
+        with pytest.raises(
+            RuntimeError,
+            match="new-novel narrator initialization requires an active session",
+        ):
+            initialize_new_novel_default_narrator(session, novel_id=uuid4())
 
 
 def test_service_satisfies_real_0031_deferred_closure_then_outer_rolls_back(

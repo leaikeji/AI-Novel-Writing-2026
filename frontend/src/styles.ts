@@ -1,3 +1,5 @@
+import { VOICE_PREPARATION_STYLES } from "./narration/styles/voice-preparation";
+
 const STYLE_ID = "ai-novel-world-2026-ui";
 
 
@@ -5,7 +7,7 @@ export function ensureNovelStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ID;
-  style.textContent = `
+  style.textContent = `${VOICE_PREPARATION_STYLES}\n` + `
     :root {
       --anw-orange: #ff7043;
       --anw-orange-strong: #ff5d2a;
@@ -606,6 +608,9 @@ export function ensureNovelStyles(): void {
     .anw-save-confirm-copy b { margin-top:6px; color:#34373c; }
 
     .anw-workbench-frame { --anw-chapter-tree-width:270px; --mb-workbench-rail-width:clamp(260px,19vw,320px); --mb-workbench-main-min:640px; --mb-workbench-gap:clamp(18px,1.5vw,28px); --mb-workbench-padding:24px; --mb-panel-body-padding:24px 28px 44px; position:relative; isolation:isolate; display:flex; width:100%; height:100%; min-height:0; overflow:hidden; background:var(--anw-canvas); }
+    .anw-workbench-frame:has(.anw-character-workspace-backdrop),
+    .anw-workbench-frame:has(.anw-story-ledger-modal-layer),
+    .anw-workbench-frame:has(.anw-character-voice-drawer-layer:not([hidden])) { z-index:900; }
     .anw-workbench-frame[data-assistant-density="comfortable"] { --anw-chapter-tree-width:286px; }
     .anw-workbench-frame[data-assistant-density="compact"] { --anw-chapter-tree-width:240px; --mb-workbench-rail-width:260px; --mb-workbench-main-min:0px; --mb-workbench-gap:18px; --mb-workbench-padding:18px; }
     .anw-workbench-frame[data-assistant-density="constrained"] { --anw-chapter-tree-width:220px; --mb-workbench-rail-width:220px; --mb-workbench-main-min:0px; --mb-workbench-gap:12px; --mb-workbench-padding:12px; --mb-panel-body-padding:16px 16px 32px; }

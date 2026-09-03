@@ -228,9 +228,17 @@ _T2_CAPABILITY_ROWS = (
         "TTS_FEATURE_STARTING",
         "TTS35-CORE",
     ),
+    (
+        "automatic_character_voice_generation",
+        "unavailable",
+        False,
+        False,
+        "TTS_FEATURE_STARTING",
+        "TTS55-CHARACTER",
+    ),
 )
 T2_CAPABILITY_MATRIX = {
-    "schema_version": "narration-capabilities/3",
+    "schema_version": "narration-capabilities/4",
     "items": [
         {
             "key": key,

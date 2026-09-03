@@ -1,7 +1,30 @@
+import type {
+  VoicePreparationSnapshot,
+  VoicePreparationTargetSummary,
+} from "./voice-preparation";
+import type {
+  GenericVoiceGenerationCommandSnapshot,
+  GenericVoicePackLoadResult,
+  GenericVoicePackSlotCategory,
+  GenericVoicePackSlotSnapshot,
+  GenericVoicePackSnapshot,
+} from "./generic-voice-pack";
+
+export type {
+  VoicePreparationSnapshot,
+  VoicePreparationTargetSummary,
+} from "./voice-preparation";
+export type {
+  GenericVoiceGenerationCommandSnapshot,
+  GenericVoicePackLoadResult,
+  GenericVoicePackSlotSnapshot,
+  GenericVoicePackSnapshot,
+} from "./generic-voice-pack";
+
 export const NARRATION_SETTINGS_API_VERSION = "narration-settings-api/1" as const;
 export const NARRATION_SETTINGS_SCHEMA_VERSION = "narration-settings/1" as const;
-export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/3" as const;
-const LEGACY_NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/2" as const;
+export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/4" as const;
+const LEGACY_NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/3" as const;
 export const NARRATION_VOICE_SCHEMA_VERSION = "narration-voice/2" as const;
 export const NARRATION_CACHE_SCHEMA_VERSION = "narration-cache/1" as const;
 export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "moss-tts-official-preset-catalog/2.0" as const;
@@ -59,6 +82,7 @@ export const CAPABILITY_KEYS = [
   "character_cast_planning",
   "nano_advanced_tuning",
   "private_voice_deletion",
+  "automatic_character_voice_generation",
 ] as const;
 
 export type CapabilityKey = typeof CAPABILITY_KEYS[number];
@@ -83,6 +107,7 @@ const LEGACY_CAPABILITY_KEYS = [
   "voice_generator",
   "cache_cleanup",
   "character_voice_matching",
+  "character_cast_planning",
   "nano_advanced_tuning",
   "private_voice_deletion",
 ] as const satisfies readonly CapabilityKey[];
@@ -431,7 +456,7 @@ export interface VoiceProfileVersionResource {
   readonly language: string;
   readonly fingerprint: string;
   readonly quality_state: VoiceQualityState;
-  readonly activation_basis: "preview_confirmed" | "explicit_official_preset_selection" | "character_one_click_generation" | "experimental_machine_validated";
+  readonly activation_basis: "preview_confirmed" | "explicit_official_preset_selection" | "character_one_click_generation" | "generic_voice_pack_generation" | "experimental_machine_validated";
   readonly validation_basis: "pending" | "human_accepted" | "machine_validated" | "not_required";
   readonly rights: VoiceRightsSummary;
   readonly official_preset: OfficialPresetProvenance | null;
@@ -502,7 +527,10 @@ export function voiceActivationEvidenceIsUsable(
     || (
       version.source_type === "generated"
       && version.rights.source_kind === "voice_generator"
-      && version.activation_basis === "character_one_click_generation"
+      && (
+        version.activation_basis === "character_one_click_generation"
+        || version.activation_basis === "generic_voice_pack_generation"
+      )
       && version.validation_basis === "machine_validated"
       && version.quality_state === "accepted"
       && version.reference_asset_id !== null
@@ -696,11 +724,6 @@ export interface VoiceCastingRulesResource {
   readonly novel_id: string;
   readonly version: number;
   readonly items: readonly VoiceCastingRuleResource[];
-}
-
-export interface PutVoiceCastingRulesRequest {
-  readonly expected_version: number;
-  readonly items: readonly VoiceCastingRuleInput[];
 }
 
 export interface VoiceSourceAvailability {
@@ -1111,6 +1134,19 @@ export interface CharacterVoiceGeneratorCommandListResource {
   readonly items: readonly CharacterVoiceGeneratorCommandResource[];
 }
 
+export interface CreateVoicePreparationRequest {
+  readonly contract_version: "narration-voice-preparation-request/1";
+  readonly mode: "prepare_missing_dedicated";
+  readonly document_id: string | null;
+  readonly expected_draft_version: number | null;
+  readonly expected_content_hash: string | null;
+  readonly expected_settings_version: number | null;
+}
+
+export interface RejectGenericVoiceSlotRequest {
+  readonly expected_pack_version_id: string;
+}
+
 export type PrivateVoiceDeletionState =
   | "grace_pending"
   | "requested"
@@ -1398,11 +1434,11 @@ function normalizeCapabilities(value: unknown, path: string): NarrationCapabilit
     items: [
       ...(items as readonly FeatureCapability[]),
       {
-        key: "character_cast_planning",
+        key: "automatic_character_voice_generation",
         state: "unavailable",
         visible: false,
         actionable: false,
-        reason_code: "CHARACTER_CAST_SCHEMA_UNAVAILABLE",
+        reason_code: "AUTOMATIC_CHARACTER_VOICE_GENERATION_UNAVAILABLE",
         required_gate: null,
       },
     ],
@@ -1685,7 +1721,7 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
   });
 }
 
-function validateMedia(value: unknown, path: string): void {
+function parseMediaAssetLink(value: unknown, path: string): MediaAssetLink {
   const item = record(value, path);
   exact(item, ["asset_id", "content_path", "mime_type", "byte_size", "duration_ms", "checksum_sha256"], path);
   const assetId = uuid(item.asset_id, `${path}.asset_id`);
@@ -1695,6 +1731,18 @@ function validateMedia(value: unknown, path: string): void {
   integer(item.byte_size, `${path}.byte_size`, 1);
   integer(item.duration_ms, `${path}.duration_ms`, 1);
   sha256(item.checksum_sha256, `${path}.checksum_sha256`);
+  return {
+    asset_id: assetId,
+    content_path: contentPath,
+    mime_type: item.mime_type as string,
+    byte_size: item.byte_size as number,
+    duration_ms: item.duration_ms as number,
+    checksum_sha256: item.checksum_sha256 as string,
+  };
+}
+
+function validateMedia(value: unknown, path: string): void {
+  parseMediaAssetLink(value, path);
 }
 
 function validateVoiceVersion(value: unknown, path: string): void {
@@ -1721,7 +1769,7 @@ function validateVoiceVersion(value: unknown, path: string): void {
   const quality = oneOf(item.quality_state, ["pending", "accepted", "rejected"] as const, `${path}.quality_state`);
   const activation = oneOf(
     item.activation_basis,
-    ["preview_confirmed", "explicit_official_preset_selection", "character_one_click_generation", "experimental_machine_validated"] as const,
+    ["preview_confirmed", "explicit_official_preset_selection", "character_one_click_generation", "generic_voice_pack_generation", "experimental_machine_validated"] as const,
     `${path}.activation_basis`,
   );
   const validation = oneOf(
@@ -1750,6 +1798,14 @@ function validateVoiceVersion(value: unknown, path: string): void {
     && rights.source_kind === "voice_generator"
     && reference !== null
     && description;
+  const machineGenericPack = source === "generated"
+    && activation === "generic_voice_pack_generation"
+    && validation === "machine_validated"
+    && quality === "accepted"
+    && lockedAt === null
+    && rights.source_kind === "voice_generator"
+    && reference !== null
+    && description;
   const carriesOfficialPreset = source === "preset" || machineExperimental;
   if (carriesOfficialPreset !== (preset !== null)) fail(path, "preset_key source mismatch");
   if (rights.source_kind === "official_preset") {
@@ -1767,7 +1823,7 @@ function validateVoiceVersion(value: unknown, path: string): void {
     && activation === "explicit_official_preset_selection"
     && validation === "not_required" && quality === "pending" && lockedAt === null;
   if (state === "locked" && !(
-    humanConfirmed || officialDirect || machineExperimental || machineCharacter
+    humanConfirmed || officialDirect || machineExperimental || machineCharacter || machineGenericPack
   )) {
     fail(path, "invalid locked voice activation evidence");
   }
@@ -2637,6 +2693,229 @@ function validatePrivateVoiceLifecycle(value: unknown, path: string): void {
       if (record(profile.active_request, itemPath).profile_id !== profileId) fail(itemPath, "active request profile mismatch");
     }
   });
+}
+
+function parseVoicePreparationTarget(
+  value: unknown,
+  path: string,
+): VoicePreparationTargetSummary {
+  const item = record(value, path);
+  exact(item, [
+    "character_id", "character_name", "role_type", "chapter_speaker", "state",
+    "voice_generator_command_id", "profile_id", "voice_version_id", "failure_code",
+  ], path);
+  const state = oneOf(item.state, [
+    "pending", "preserved", "queued", "generating", "ready_applied",
+    "ready_unapplied", "fallback_official", "failed", "cancelled",
+  ] as const, `${path}.state`);
+  uuid(item.character_id, `${path}.character_id`);
+  string(item.character_name, `${path}.character_name`, 1, 240);
+  oneOf(item.role_type, ["main", "supporting"] as const, `${path}.role_type`);
+  boolean(item.chapter_speaker, `${path}.chapter_speaker`);
+  nullableUuid(item.voice_generator_command_id, `${path}.voice_generator_command_id`);
+  nullableUuid(item.profile_id, `${path}.profile_id`);
+  nullableUuid(item.voice_version_id, `${path}.voice_version_id`);
+  const failureCode = nullableString(item.failure_code, `${path}.failure_code`, 96);
+  if (failureCode !== null && !SAFE_CODE_PATTERN.test(failureCode)) {
+    fail(`${path}.failure_code`, "unsafe reason code");
+  }
+  return {
+    characterId: item.character_id as string,
+    characterName: item.character_name as string,
+    state,
+  };
+}
+
+function parseVoicePreparationTargets(
+  value: unknown,
+  path: string,
+): readonly VoicePreparationTargetSummary[] {
+  return array(value, path).map((entry, index) =>
+    parseVoicePreparationTarget(entry, `${path}[${index}]`));
+}
+
+export function parseVoicePreparationResource(
+  value: unknown,
+): VoicePreparationSnapshot {
+  const item = record(value, "voice_preparation");
+  exact(item, [
+    "contract_version", "command_id", "novel_id", "document_id", "state",
+    "server_now", "progress_current", "progress_total", "preflight_request_id",
+    "preflight_script_version_id", "chapter_ready", "background_remaining",
+    "continuation_state", "narration_request_id", "current_target", "preserved",
+    "generated", "fallback", "failed", "cancellable", "retryable", "terminal",
+    "failure_code", "created_at", "updated_at", "completed_at",
+  ], "voice_preparation");
+  literal(item.contract_version, "narration-voice-preparation/1", "voice_preparation.contract_version");
+  uuid(item.command_id, "voice_preparation.command_id");
+  uuid(item.novel_id, "voice_preparation.novel_id");
+  nullableUuid(item.document_id, "voice_preparation.document_id");
+  const state = oneOf(item.state, [
+    "reserved", "preparing", "ready", "ready_with_warnings", "failed",
+    "cancelled", "superseded",
+  ] as const, "voice_preparation.state");
+  timestamp(item.server_now, "voice_preparation.server_now");
+  const progressCurrent = integer(item.progress_current, "voice_preparation.progress_current");
+  const progressTotal = integer(item.progress_total, "voice_preparation.progress_total");
+  if (progressCurrent > progressTotal) fail("voice_preparation", "invalid progress");
+  nullableUuid(item.preflight_request_id, "voice_preparation.preflight_request_id");
+  nullableUuid(item.preflight_script_version_id, "voice_preparation.preflight_script_version_id");
+  boolean(item.chapter_ready, "voice_preparation.chapter_ready");
+  integer(item.background_remaining, "voice_preparation.background_remaining");
+  oneOf(item.continuation_state, [
+    "not_applicable", "pending", "creating", "created", "cancelled", "superseded", "failed",
+  ] as const, "voice_preparation.continuation_state");
+  nullableUuid(item.narration_request_id, "voice_preparation.narration_request_id");
+  const currentTarget = item.current_target === null
+    ? null
+    : parseVoicePreparationTarget(item.current_target, "voice_preparation.current_target");
+  const preserved = parseVoicePreparationTargets(item.preserved, "voice_preparation.preserved");
+  const generated = parseVoicePreparationTargets(item.generated, "voice_preparation.generated");
+  const fallback = parseVoicePreparationTargets(item.fallback, "voice_preparation.fallback");
+  const failed = parseVoicePreparationTargets(item.failed, "voice_preparation.failed");
+  boolean(item.cancellable, "voice_preparation.cancellable");
+  boolean(item.retryable, "voice_preparation.retryable");
+  boolean(item.terminal, "voice_preparation.terminal");
+  const failureCode = nullableString(item.failure_code, "voice_preparation.failure_code", 96);
+  if (failureCode !== null && !SAFE_CODE_PATTERN.test(failureCode)) {
+    fail("voice_preparation.failure_code", "unsafe reason code");
+  }
+  timestamp(item.created_at, "voice_preparation.created_at");
+  timestamp(item.updated_at, "voice_preparation.updated_at");
+  nullableTimestamp(item.completed_at, "voice_preparation.completed_at");
+  return Object.freeze({
+    contractVersion: "narration-voice-preparation/1",
+    commandId: item.command_id as string,
+    state,
+    serverNow: item.server_now as string,
+    progressCurrent,
+    progressTotal,
+    preflightRequestId: item.preflight_request_id as string | null,
+    preflightScriptVersionId: item.preflight_script_version_id as string | null,
+    chapterReady: item.chapter_ready as boolean,
+    backgroundRemaining: item.background_remaining as number,
+    continuationState: item.continuation_state as string,
+    narrationRequestId: item.narration_request_id as string | null,
+    currentTarget,
+    preserved,
+    generated,
+    fallback,
+    failed,
+    cancellable: item.cancellable as boolean,
+    retryable: item.retryable as boolean,
+    terminal: item.terminal as boolean,
+    failureCode,
+    updatedAt: item.updated_at as string,
+  });
+}
+
+export function parseVoicePreparationListResource(
+  value: unknown,
+): readonly VoicePreparationSnapshot[] {
+  const item = record(value, "voice_preparations");
+  exact(item, ["contract_version", "novel_id", "server_now", "items"], "voice_preparations");
+  literal(item.contract_version, "narration-voice-preparation-list/1", "voice_preparations.contract_version");
+  uuid(item.novel_id, "voice_preparations.novel_id");
+  timestamp(item.server_now, "voice_preparations.server_now");
+  return array(item.items, "voice_preparations.items").map(parseVoicePreparationResource);
+}
+
+function parseGenericVoiceSlot(value: unknown, path: string): GenericVoicePackSlotSnapshot {
+  const item = record(value, path);
+  exact(item, ["slot_id", "slot_key", "label", "category", "state", "preview_available", "preview_asset", "voice_profile_id", "voice_version_id", "failure_code"], path);
+  const slotId = uuid(item.slot_id, `${path}.slot_id`);
+  string(item.slot_key, `${path}.slot_key`, 1, 80);
+  string(item.label, `${path}.label`, 1, 120);
+  const category = oneOf(item.category, ["child", "youth", "middle_age", "older", "neutral_group"] as const, `${path}.category`);
+  const state = oneOf(item.state, ["pending", "generating", "validated", "reused", "rejected", "failed"] as const, `${path}.state`);
+  boolean(item.preview_available, `${path}.preview_available`);
+  const previewAsset = item.preview_asset === null
+    ? null
+    : parseMediaAssetLink(item.preview_asset, `${path}.preview_asset`);
+  const voiceProfileId = nullableUuid(item.voice_profile_id, `${path}.voice_profile_id`);
+  const voiceVersionId = nullableUuid(item.voice_version_id, `${path}.voice_version_id`);
+  if ((voiceProfileId === null) !== (voiceVersionId === null)) fail(path, "incomplete generic voice identity");
+  if ((item.preview_available as boolean) !== (previewAsset !== null)) fail(path, "generic preview asset mismatch");
+  if ((item.preview_available as boolean) !== (state === "validated" || state === "reused")) {
+    fail(path, "generic preview state mismatch");
+  }
+  if (previewAsset !== null && voiceProfileId === null) fail(path, "generic preview identity mismatch");
+  if ((state === "validated" || state === "reused") && (previewAsset === null || voiceProfileId === null)) {
+    fail(path, "validated generic voice lacks preview publication");
+  }
+  const failureCode = nullableString(item.failure_code, `${path}.failure_code`, 96);
+  if (failureCode !== null && !SAFE_CODE_PATTERN.test(failureCode)) fail(`${path}.failure_code`, "unsafe reason code");
+  return {
+    slotId,
+    slotKey: item.slot_key as string,
+    label: item.label as string,
+    category: category as GenericVoicePackSlotCategory,
+    state,
+    previewAvailable: item.preview_available as boolean,
+    previewAsset,
+    voiceProfileId,
+    voiceVersionId,
+    failureCode,
+  };
+}
+
+export function parseGenericVoicePackLoadResource(value: unknown): GenericVoicePackLoadResult {
+  const envelope = record(value, "generic_voice_pack_load");
+  exact(envelope, ["pack", "command"], "generic_voice_pack_load");
+  const source = record(envelope.pack, "generic_voice_pack_load.pack");
+  exact(source, ["contract_version", "language", "pack_version_id", "state", "prepared_slots", "total_slots", "slots", "failure_code", "updated_at"], "generic_voice_pack_load.pack");
+  literal(source.contract_version, "generic-voice-pack/1", "generic_voice_pack_load.pack.contract_version");
+  literal(source.language, "zh-CN", "generic_voice_pack_load.pack.language");
+  nullableUuid(source.pack_version_id, "generic_voice_pack_load.pack.pack_version_id");
+  const packState = oneOf(source.state, ["missing", "building", "ready_to_activate", "active", "retired_for_new_use", "rejected", "failed", "superseded"] as const, "generic_voice_pack_load.pack.state");
+  const preparedSlots = integer(source.prepared_slots, "generic_voice_pack_load.pack.prepared_slots");
+  literal(source.total_slots, 24, "generic_voice_pack_load.pack.total_slots");
+  const slots = array(source.slots, "generic_voice_pack_load.pack.slots").map((entry, index) => parseGenericVoiceSlot(entry, `generic_voice_pack_load.pack.slots[${index}]`));
+  const packFailure = nullableString(source.failure_code, "generic_voice_pack_load.pack.failure_code", 96);
+  timestamp(source.updated_at, "generic_voice_pack_load.pack.updated_at");
+  const pack: GenericVoicePackSnapshot = {
+    contractVersion: "generic-voice-pack/1",
+    language: "zh-CN",
+    packVersionId: source.pack_version_id as string | null,
+    state: packState,
+    preparedSlots,
+    totalSlots: 24,
+    slots,
+    failureCode: packFailure,
+    updatedAt: source.updated_at as string,
+  };
+  let command: GenericVoiceGenerationCommandSnapshot | null = null;
+  if (envelope.command !== null) {
+    const wireCommand = record(envelope.command, "generic_voice_pack_load.command");
+    exact(wireCommand, ["contract_version", "command_id", "pack_version_id", "state", "progress_current", "progress_total", "current_slot_key", "cancellable", "retryable", "terminal", "failure_code", "updated_at"], "generic_voice_pack_load.command");
+    literal(wireCommand.contract_version, "generic-voice-generation-command/1", "generic_voice_pack_load.command.contract_version");
+    uuid(wireCommand.command_id, "generic_voice_pack_load.command.command_id");
+    uuid(wireCommand.pack_version_id, "generic_voice_pack_load.command.pack_version_id");
+    const commandState = oneOf(wireCommand.state, ["queued", "building", "ready", "failed", "cancelled", "superseded"] as const, "generic_voice_pack_load.command.state");
+    const progressCurrent = integer(wireCommand.progress_current, "generic_voice_pack_load.command.progress_current");
+    literal(wireCommand.progress_total, 24, "generic_voice_pack_load.command.progress_total");
+    nullableString(wireCommand.current_slot_key, "generic_voice_pack_load.command.current_slot_key", 80);
+    boolean(wireCommand.cancellable, "generic_voice_pack_load.command.cancellable");
+    boolean(wireCommand.retryable, "generic_voice_pack_load.command.retryable");
+    boolean(wireCommand.terminal, "generic_voice_pack_load.command.terminal");
+    const commandFailure = nullableString(wireCommand.failure_code, "generic_voice_pack_load.command.failure_code", 96);
+    timestamp(wireCommand.updated_at, "generic_voice_pack_load.command.updated_at");
+    command = {
+      contractVersion: "generic-voice-generation-command/1",
+      commandId: wireCommand.command_id as string,
+      packVersionId: wireCommand.pack_version_id as string,
+      state: commandState,
+      progressCurrent,
+      progressTotal: 24,
+      currentSlotKey: wireCommand.current_slot_key as string | null,
+      cancellable: wireCommand.cancellable as boolean,
+      retryable: wireCommand.retryable as boolean,
+      terminal: wireCommand.terminal as boolean,
+      failureCode: commandFailure,
+      updatedAt: wireCommand.updated_at as string,
+    };
+  }
+  return { pack, command };
 }
 
 function validated<T>(value: unknown, validator: (value: unknown, path: string) => void, path: string): T {

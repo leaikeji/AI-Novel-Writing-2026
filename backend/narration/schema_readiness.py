@@ -24,6 +24,7 @@ REPOSITORY_BASE_REVISION = "20260823_0001"
 NARRATION_FEATURE_MINIMUM_DATABASE_REVISION = "20260829_0034"
 VOICE_GENERATOR_MINIMUM_DATABASE_REVISION = "20260830_0035"
 CHARACTER_CAST_MINIMUM_DATABASE_REVISION = "20260901_0036"
+AUTOMATIC_VOICE_PREPARATION_MINIMUM_DATABASE_REVISION = "20260903_0040"
 
 _FEATURE_REQUIRED_COLUMNS = {
     "voice_profile_versions": {"model_run_id"},
@@ -235,6 +236,92 @@ _CHARACTER_CAST_REQUIRED_INDEXES = {
     "character_cast_plan_items": {
         "ix_character_cast_plan_items_command_state",
     },
+}
+
+_AUTOMATIC_VOICE_PREPARATION_REQUIRED_COLUMNS = {
+    "voice_preparation_commands": {
+        "id", "novel_id", "document_id", "preflight_request_id",
+        "preflight_script_version_id", "speaker_digest", "chapter_ready",
+        "continuation_idempotency_key", "continuation_state",
+        "narration_request_id", "lease_fence", "lease_expires_at", "state",
+    },
+    "voice_preparation_items": {
+        "id", "command_id", "character_id", "expected_binding_version",
+        "workspace_digest", "voice_generator_command_id", "result_profile_id",
+        "result_voice_version_id", "applied_binding_version", "state",
+    },
+    "generic_voice_pack_versions": {
+        "id", "workspace_id", "language", "catalog_id", "taxonomy_sha256",
+        "design_catalog_sha256", "version_number", "state", "slot_total",
+        "validated_slot_count",
+    },
+    "generic_voice_pack_version_slots": {
+        "id", "pack_version_id", "workspace_id", "slot_key", "position",
+        "state", "design_draft_id", "generation_command_id",
+        "voice_profile_id", "voice_version_id", "rights_approved",
+        "quality_approved",
+    },
+    "generic_voice_design_drafts": {
+        "id", "workspace_id", "language", "slot_key", "instruction_digest",
+        "parameters_digest", "runtime_fingerprint", "fingerprint",
+    },
+    "generic_voice_generation_commands": {
+        "id", "workspace_id", "pack_version_id", "design_draft_id",
+        "background_job_id", "host_request_id", "slot_key", "state",
+        "lease_fence", "lease_expires_at", "generator_model_run_id",
+        "nano_model_run_id", "voice_profile_id", "voice_version_id",
+    },
+    "generic_voice_pools": {"language", "source_pack_version_id"},
+}
+_AUTOMATIC_VOICE_PREPARATION_REQUIRED_CHECKS = {
+    "voice_preparation_commands": {
+        "ck_voice_preparation_state", "ck_voice_preparation_chapter_shape",
+        "ck_voice_preparation_lease",
+    },
+    "voice_preparation_items": {
+        "ck_voice_preparation_item_state", "ck_voice_preparation_item_identity",
+    },
+    "generic_voice_pack_versions": {
+        "ck_generic_voice_pack_state", "ck_generic_voice_pack_progress",
+        "ck_generic_voice_pack_activation_progress",
+    },
+    "generic_voice_generation_commands": {
+        "ck_generic_voice_generation_state", "ck_generic_voice_generation_lease",
+    },
+    "generic_voice_pools": {
+        "ck_generic_voice_pool_language", "ck_generic_voice_pool_source_shape",
+    },
+}
+_AUTOMATIC_VOICE_PREPARATION_REQUIRED_INDEXES = {
+    "voice_preparation_commands": {
+        "uq_voice_preparation_active_document", "uq_voice_preparation_active_book",
+    },
+    "generic_voice_pack_versions": {"uq_generic_voice_pack_active_language"},
+    "generic_voice_generation_commands": {
+        "uq_generic_voice_generation_pack_slot_active"
+    },
+}
+_AUTOMATIC_VOICE_PREPARATION_REQUIRED_TRIGGERS = {
+    "trg_generic_voice_pack_activation",
+    "trg_generic_voice_pool_source",
+    "trg_generic_voice_design_immutable",
+}
+_AUTOMATIC_VOICE_PREPARATION_FUNCTION_MARKERS = {
+    "narration_guard_generic_voice_pack_v1()": (
+        "generic voice pack requires 24 validated library slots",
+        "generic_voice_pack_generation",
+    ),
+    "narration_guard_generic_voice_pool_v1()": (
+        "generic voice pool requires an active complete source pack",
+        "validated_slot_count",
+    ),
+    "narration_reject_generic_voice_design_mutation_v1()": (
+        "generic voice design evidence is immutable",
+    ),
+    "narration_guard_two_phase_voice_generator_run_v1()": (
+        "narration.voice_generate",
+        "narration.generic_voice_generate",
+    ),
 }
 
 
@@ -539,12 +626,99 @@ def character_cast_schema_ready(engine: Engine) -> bool:
     return True
 
 
+def automatic_voice_preparation_schema_ready(engine: Engine) -> bool:
+    """Verify the complete 0040 preparation and generic-pack authority."""
+
+    if not isinstance(engine, Engine):
+        return False
+    try:
+        with engine.connect() as connection:
+            if connection.dialect.name != "postgresql":
+                return False
+            revisions = tuple(
+                str(value)
+                for value in connection.scalars(
+                    text("SELECT version_num FROM alembic_version")
+                )
+            )
+            if not database_revision_satisfies(
+                revisions,
+                minimum_revision=AUTOMATIC_VOICE_PREPARATION_MINIMUM_DATABASE_REVISION,
+            ):
+                return False
+            inspector = inspect(connection)
+            table_names = set(inspector.get_table_names())
+            if not set(_AUTOMATIC_VOICE_PREPARATION_REQUIRED_COLUMNS).issubset(
+                table_names
+            ):
+                return False
+            for table_name, required in _AUTOMATIC_VOICE_PREPARATION_REQUIRED_COLUMNS.items():
+                columns = {
+                    str(column.get("name"))
+                    for column in inspector.get_columns(table_name)
+                }
+                if not required.issubset(columns):
+                    return False
+            for table_name, required in _AUTOMATIC_VOICE_PREPARATION_REQUIRED_CHECKS.items():
+                checks = {
+                    str(constraint.get("name"))
+                    for constraint in inspector.get_check_constraints(table_name)
+                }
+                if not required.issubset(checks):
+                    return False
+            for table_name, required in _AUTOMATIC_VOICE_PREPARATION_REQUIRED_INDEXES.items():
+                indexes = {
+                    str(index.get("name"))
+                    for index in inspector.get_indexes(table_name)
+                }
+                if not required.issubset(indexes):
+                    return False
+            triggers = set(
+                connection.scalars(
+                    text(
+                        "SELECT trigger_name FROM information_schema.triggers "
+                        "WHERE trigger_schema = current_schema()"
+                    )
+                )
+            )
+            if not _AUTOMATIC_VOICE_PREPARATION_REQUIRED_TRIGGERS.issubset(triggers):
+                return False
+            for signature, markers in _AUTOMATIC_VOICE_PREPARATION_FUNCTION_MARKERS.items():
+                definition = connection.scalar(
+                    text("SELECT pg_get_functiondef(to_regprocedure(:signature))"),
+                    {"signature": signature},
+                )
+                if type(definition) is not str or not all(
+                    marker in definition for marker in markers
+                ):
+                    return False
+            policies = dict(
+                connection.execute(
+                    text(
+                        "SELECT job_kind, resource_class FROM "
+                        "background_job_kind_policies WHERE job_kind IN "
+                        "('narration.voice_prepare','narration.generic_voice_generate')"
+                    )
+                ).all()
+            )
+            if policies != {
+                "narration.voice_prepare": "cpu-analysis",
+                "narration.generic_voice_generate": "moss-nano",
+            }:
+                return False
+    except Exception:
+        return False
+    return True
+
+
 __all__ = [
     "ALEMBIC_CONFIG_PATH",
+    "AUTOMATIC_VOICE_PREPARATION_MINIMUM_DATABASE_REVISION",
     "CHARACTER_CAST_MINIMUM_DATABASE_REVISION",
     "NARRATION_FEATURE_MINIMUM_DATABASE_REVISION",
     "REPOSITORY_BASE_REVISION",
     "VOICE_GENERATOR_MINIMUM_DATABASE_REVISION",
+    "automatic_voice_preparation_schema_ready",
     "database_revision_satisfies",
     "character_cast_schema_ready",
     "narration_feature_schema_ready",

@@ -5,7 +5,7 @@ import {
   startChapterNarrationWorkflow,
   type ChapterNarrationWorkflowDependencies,
 } from "./chapter-narration-workflow";
-import type { NarrationSettingsResource } from "./contracts";
+import type { NarrationSettingsResource, VoicePreparationSnapshot } from "./contracts";
 import type { NarrationWorkflowResource } from "./chapter-contracts";
 
 
@@ -83,11 +83,50 @@ function workflow(
 }
 
 
+function preparation(
+  state: VoicePreparationSnapshot["state"],
+  narrationRequestId: string | null,
+): VoicePreparationSnapshot {
+  const terminal = ["ready", "ready_with_warnings", "failed", "cancelled", "superseded"]
+    .includes(state);
+  return {
+    contractVersion: "narration-voice-preparation/1",
+    commandId: "99999999-9999-4999-8999-999999999999",
+    state,
+    serverNow: "2026-09-03T00:00:00Z",
+    progressCurrent: narrationRequestId === null ? 1 : 2,
+    progressTotal: 2,
+    preflightRequestId: REQUEST_ID,
+    preflightScriptVersionId: SCRIPT_ID,
+    chapterReady: narrationRequestId !== null,
+    backgroundRemaining: 0,
+    continuationState: narrationRequestId === null ? "pending" : "created",
+    narrationRequestId,
+    currentTarget: null,
+    preserved: [],
+    generated: [],
+    fallback: [],
+    failed: [],
+    cancellable: !terminal,
+    retryable: false,
+    terminal,
+    failureCode: null,
+    updatedAt: "2026-09-03T00:00:00Z",
+  };
+}
+
+
 function dependencies(overrides: Partial<ChapterNarrationWorkflowDependencies> = {}) {
   return {
     getSettings: vi.fn(async () => settings()),
     createWorkflow: vi.fn(async () => workflow("queued", EDITION_ID)),
     getWorkflow: vi.fn(async () => workflow("queued", EDITION_ID)),
+    createVoicePreparation: vi.fn(async () => {
+      throw new Error("unexpected voice preparation call");
+    }),
+    getVoicePreparation: vi.fn(async () => {
+      throw new Error("unexpected voice preparation poll");
+    }),
     createActionId: () => ACTION_ID,
     delay: vi.fn(async () => undefined),
     now: () => 0,
@@ -115,6 +154,37 @@ function options(deps: ChapterNarrationWorkflowDependencies) {
 
 
 describe("startChapterNarrationWorkflow", () => {
+  it("一次智能朗读先准备人物声音并复用服务端续接的正式请求", async () => {
+    const createVoicePreparation = vi.fn(async () => preparation("preparing", null));
+    const getVoicePreparation = vi.fn(async () => preparation("ready", REQUEST_ID));
+    const deps = dependencies({
+      createVoicePreparation,
+      getVoicePreparation,
+      getWorkflow: vi.fn(async () => workflow("partial_ready", EDITION_ID)),
+    });
+
+    const result = await startChapterNarrationWorkflow({
+      ...options(deps),
+      automaticVoicePreparationEnabled: true,
+      pollScheduleMs: [1],
+    });
+
+    expect(createVoicePreparation).toHaveBeenCalledWith(
+      NOVEL_ID,
+      expect.objectContaining({
+        document_id: DOCUMENT_ID,
+        expected_draft_version: 9,
+        expected_content_hash: HASH,
+        expected_settings_version: 3,
+      }),
+      `chapter-voice-prepare:${ACTION_ID}`,
+      expect.any(AbortSignal),
+    );
+    expect(getVoicePreparation).toHaveBeenCalledTimes(1);
+    expect(deps.createWorkflow).not.toHaveBeenCalled();
+    expect(result.workflow.request_id).toBe(REQUEST_ID);
+  });
+
   it("完成保存屏障后才读取设置并创建严格作用域请求", async () => {
     const order: string[] = [];
     const deps = dependencies({

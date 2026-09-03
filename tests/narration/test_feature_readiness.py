@@ -39,6 +39,9 @@ CHARACTER_CASTING = wire.CapabilityKey.CHARACTER_CAST_PLANNING
 ADVANCED_TUNING = wire.CapabilityKey.NANO_ADVANCED_TUNING
 PRIVATE_DELETION = wire.CapabilityKey.PRIVATE_VOICE_DELETION
 VOICE_GENERATOR = wire.CapabilityKey.VOICE_GENERATOR
+AUTOMATIC_CHARACTER = wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION
+GENERIC_POOL = wire.CapabilityKey.GENERIC_VOICE_POOL
+AUTOMATIC_GENERIC = wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING
 
 
 def _assert_all_unavailable(
@@ -113,12 +116,12 @@ def test_initial_and_starting_snapshots_are_strict_fail_closed_copies() -> None:
         ),
         (
             "character_workspace_ready",
-            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING, VOICE_GENERATOR}),
+            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING, VOICE_GENERATOR, AUTOMATIC_CHARACTER}),
             TTS_CHARACTER_WORKSPACE_UNAVAILABLE,
         ),
         (
             "novel_agent_ready",
-            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING, VOICE_GENERATOR}),
+            frozenset({CHARACTER_MATCHING, CHARACTER_CASTING, VOICE_GENERATOR, AUTOMATIC_CHARACTER}),
             TTS_NOVEL_AGENT_UNAVAILABLE,
         ),
         (
@@ -143,12 +146,12 @@ def test_initial_and_starting_snapshots_are_strict_fail_closed_copies() -> None:
         ),
         (
             "storage_ready",
-            frozenset({ADVANCED_TUNING, PRIVATE_DELETION, VOICE_GENERATOR}),
+            frozenset({ADVANCED_TUNING, PRIVATE_DELETION, VOICE_GENERATOR, GENERIC_POOL}),
             TTS_STORAGE_UNAVAILABLE,
         ),
         (
             "digest_keyring_ready",
-            frozenset({ADVANCED_TUNING, PRIVATE_DELETION, VOICE_GENERATOR}),
+            frozenset({ADVANCED_TUNING, PRIVATE_DELETION, VOICE_GENERATOR, GENERIC_POOL}),
             TTS_DIGEST_KEYRING_UNAVAILABLE,
         ),
         (
@@ -183,33 +186,78 @@ def test_initial_and_starting_snapshots_are_strict_fail_closed_copies() -> None:
         ),
         (
             "voice_generator_host_protocol_ready",
-            frozenset({VOICE_GENERATOR}),
+            frozenset({VOICE_GENERATOR, AUTOMATIC_CHARACTER, GENERIC_POOL}),
             TTS_VOICE_GENERATOR_HOST_UNAVAILABLE,
         ),
         (
             "voice_generator_model_identity_ready",
-            frozenset({VOICE_GENERATOR}),
+            frozenset({VOICE_GENERATOR, AUTOMATIC_CHARACTER, GENERIC_POOL}),
             TTS_VOICE_GENERATOR_IDENTITY_MISMATCH,
         ),
         (
             "voice_generator_codec_identity_ready",
-            frozenset({VOICE_GENERATOR}),
+            frozenset({VOICE_GENERATOR, AUTOMATIC_CHARACTER, GENERIC_POOL}),
             TTS_VOICE_GENERATOR_IDENTITY_MISMATCH,
         ),
         (
             "voice_generator_heavy_lock_ready",
-            frozenset({VOICE_GENERATOR}),
+            frozenset({VOICE_GENERATOR, AUTOMATIC_CHARACTER, GENERIC_POOL}),
             TTS_PROCESSOR_UNAVAILABLE,
         ),
         (
             "voice_generator_processor_ready",
-            frozenset({VOICE_GENERATOR}),
+            frozenset({VOICE_GENERATOR, AUTOMATIC_CHARACTER}),
             TTS_PROCESSOR_UNAVAILABLE,
         ),
         (
             "voice_generator_reconciler_ready",
-            frozenset({VOICE_GENERATOR}),
+            frozenset({VOICE_GENERATOR, AUTOMATIC_CHARACTER}),
             TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE,
+        ),
+        (
+            "automatic_voice_preparation_schema_ready",
+            frozenset({AUTOMATIC_CHARACTER, GENERIC_POOL, AUTOMATIC_GENERIC}),
+            TTS_DATABASE_SCHEMA_OUTDATED,
+        ),
+        (
+            "voice_preparation_processor_ready",
+            frozenset({AUTOMATIC_CHARACTER}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "voice_preparation_reconciler_ready",
+            frozenset({AUTOMATIC_CHARACTER}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "narration_continuation_service_ready",
+            frozenset({AUTOMATIC_CHARACTER}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "generic_voice_pack_service_ready",
+            frozenset({GENERIC_POOL, AUTOMATIC_GENERIC}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "generic_voice_processor_ready",
+            frozenset({GENERIC_POOL}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "generic_voice_projection_service_ready",
+            frozenset({AUTOMATIC_GENERIC}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "generic_voice_resolver_ready",
+            frozenset({AUTOMATIC_GENERIC}),
+            TTS_PROCESSOR_UNAVAILABLE,
+        ),
+        (
+            "generic_voice_active_pack_ready",
+            frozenset({AUTOMATIC_GENERIC}),
+            TTS_PROCESSOR_UNAVAILABLE,
         ),
     ),
 )
@@ -244,7 +292,7 @@ def test_each_dependency_revokes_exactly_its_capabilities(
             assert item.reason_code is None
 
 
-def test_all_dependencies_ready_enables_exactly_the_five_frozen_features() -> None:
+def test_all_dependencies_ready_enables_every_managed_feature() -> None:
     provider = NarrationFeatureReadinessProvider()
     starting = provider.begin_startup()
 
@@ -286,17 +334,23 @@ def test_dependency_publications_are_atomic_under_concurrent_readers() -> None:
 
     ready_pattern = (
         "ready",
-        ("enabled", "enabled", "enabled", "enabled", "enabled"),
-        (None, None, None, None, None),
+        tuple("enabled" for _key in MANAGED_CAPABILITY_KEYS),
+        tuple(None for _key in MANAGED_CAPABILITY_KEYS),
     )
     schema_down_pattern = (
         "degraded",
-        ("unavailable", "enabled", "unavailable", "unavailable", "enabled"),
+        (
+            "unavailable", "enabled", "unavailable", "unavailable", "enabled",
+            "enabled", "enabled", "enabled",
+        ),
         (
             TTS_DATABASE_SCHEMA_OUTDATED,
             None,
             TTS_DATABASE_SCHEMA_OUTDATED,
             TTS_DATABASE_SCHEMA_OUTDATED,
+            None,
+            None,
+            None,
             None,
         ),
     )

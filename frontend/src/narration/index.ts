@@ -20,6 +20,19 @@ import {
   retryCharacterVoiceGeneratorCommand,
   retryCharacterCastPlan,
   selectOfficialVoice,
+  buildGenericVoicePack,
+  cancelGenericVoicePackBuild,
+  cancelVoicePreparationCommand,
+  createVoicePreparationCommand,
+  getGenericVoicePack,
+  getGenericVoicePackBuildCommand,
+  getVoicePreparationCommand,
+  listVoicePreparationCommands,
+  regenerateGenericVoicePackSlot,
+  rejectGenericVoicePackSlot,
+  retryGenericVoicePackBuild,
+  retryVoicePreparationCommand,
+  resumeVoicePreparationCommand,
 } from "./api";
 import {
   createCachePanel,
@@ -54,6 +67,7 @@ import type {
   CharacterVoiceBindingResource,
   CharacterCastPlanResource,
   NarrationOverviewResponse,
+  MediaAssetLink,
   OfficialPresetId,
   VoiceProfileResource,
 } from "./contracts";
@@ -78,7 +92,10 @@ import {
   assertOfficialVoiceSelectionResult,
   type OfficialVoiceSelectionTarget,
 } from "./official-voice-library";
-import { playReadyVoicePreview } from "./voice-preview-playback";
+import {
+  playGenericVoiceSlotPreview,
+  playReadyVoicePreview,
+} from "./voice-preview-playback";
 import {
   createReadingPage,
   type ReadingPageProps,
@@ -101,6 +118,14 @@ import {
   createNanoAdvancedWorkspace,
   createPrivateVoiceLifecycleWorkspace,
 } from "./voice-feature-workspaces";
+import {
+  createVoicePreparation,
+  type VoicePreparationReactRuntime,
+} from "./voice-preparation";
+import {
+  createGenericVoicePack,
+  type GenericVoicePackReactRuntime,
+} from "./generic-voice-pack";
 
 
 export interface NarrationCharacterSummary {
@@ -165,6 +190,23 @@ export interface NarrationReadingPageDependencies {
     retryPlan: typeof retryCharacterCastPlan;
     listTimelines: typeof listStoryTimelines;
   }>;
+  readonly voicePreparationApi?: Readonly<{
+    list: typeof listVoicePreparationCommands;
+    create: typeof createVoicePreparationCommand;
+    get: typeof getVoicePreparationCommand;
+    resume: typeof resumeVoicePreparationCommand;
+    retry: typeof retryVoicePreparationCommand;
+    cancel: typeof cancelVoicePreparationCommand;
+  }>;
+  readonly genericVoicePackApi?: Readonly<{
+    get: typeof getGenericVoicePack;
+    build: typeof buildGenericVoicePack;
+    getCommand: typeof getGenericVoicePackBuildCommand;
+    retry: typeof retryGenericVoicePackBuild;
+    cancel: typeof cancelGenericVoicePackBuild;
+    regenerate: typeof regenerateGenericVoicePackSlot;
+    reject: typeof rejectGenericVoicePackSlot;
+  }>;
 }
 
 
@@ -176,7 +218,9 @@ type NarrationReactRuntime = ReadingPageReactRuntime
   & ReadingRulesReactRuntime
   & CharacterVoiceRosterReactRuntime
   & CharacterVoiceConfiguratorReactRuntime
-  & CharacterVoiceGeneratorReactRuntime;
+  & CharacterVoiceGeneratorReactRuntime
+  & VoicePreparationReactRuntime
+  & GenericVoicePackReactRuntime;
 
 
 interface CharacterVoiceSectionProps {
@@ -434,6 +478,8 @@ export function createNarrationReadingPage(
   const ReadingStatus = createReadingStatus(React);
   const NanoAdvancedWorkspace = createNanoAdvancedWorkspace(React);
   const PrivateVoiceLifecycleWorkspace = createPrivateVoiceLifecycleWorkspace(React);
+  const VoicePreparation = createVoicePreparation(React);
+  const GenericVoicePack = createGenericVoicePack(React);
   const characterRosterApi = dependencies.characterRosterApi ?? {
     listBindings: listCharacterVoiceBindings,
   };
@@ -447,6 +493,23 @@ export function createNarrationReadingPage(
     retryPlan: retryCharacterCastPlan,
     listTimelines: listStoryTimelines,
   };
+  const voicePreparationApi = dependencies.voicePreparationApi ?? {
+    list: listVoicePreparationCommands,
+    create: createVoicePreparationCommand,
+    get: getVoicePreparationCommand,
+    resume: resumeVoicePreparationCommand,
+    retry: retryVoicePreparationCommand,
+    cancel: cancelVoicePreparationCommand,
+  };
+  const genericVoicePackApi = dependencies.genericVoicePackApi ?? {
+    get: getGenericVoicePack,
+    build: buildGenericVoicePack,
+    getCommand: getGenericVoicePackBuildCommand,
+    retry: retryGenericVoicePackBuild,
+    cancel: cancelGenericVoicePackBuild,
+    regenerate: regenerateGenericVoicePackSlot,
+    reject: rejectGenericVoicePackSlot,
+  };
   const officialPreviewApi = {
     createOfficialVoicePreview: dependencies.officialVoiceApi?.createOfficialVoicePreview
       ?? createOfficialVoicePreview,
@@ -456,7 +519,6 @@ export function createNarrationReadingPage(
     const scopedCharacters = props.characters.filter(
       (character) => character.novelId === props.novelId,
     );
-    const [rosterRefreshVersion, setRosterRefreshVersion] = React.useState(0);
     const [rosterState, setRosterState] = React.useState<Readonly<{
       phase: "loading" | "ready" | "error";
       bindings: readonly CharacterVoiceBindingResource[];
@@ -471,9 +533,15 @@ export function createNarrationReadingPage(
       && castCapability.visible
       && castCapability.actionable
       && overview.authorization.can_configure;
+    const preparationCapability = capabilityFor(
+      overview,
+      "automatic_character_voice_generation",
+    );
+    const preparationAvailable = preparationCapability.state === "enabled"
+      && preparationCapability.visible
+      && preparationCapability.actionable;
 
     const refreshRoster = (): void => {
-      setRosterRefreshVersion((value) => value + 1);
       props.context.onRefresh();
     };
 
@@ -523,7 +591,7 @@ export function createNarrationReadingPage(
         }
       });
       return () => controller.abort();
-    }, [props.novelId, rosterRefreshVersion]);
+    }, [props.novelId]);
 
     React.useEffect(() => {
       castRunnerRef.current?.abort();
@@ -610,6 +678,57 @@ export function createNarrationReadingPage(
             props.context.voiceProfilesError
               ? h("p", { role: "alert" }, props.context.voiceProfilesError)
               : null,
+            h(VoicePreparation, {
+              key: `voice-preparation:${props.novelId}`,
+              capabilityEnabled: preparationAvailable,
+              canConfigure: overview.authorization.can_configure,
+              presentation: "card",
+              onLoadLatest: async (signal: AbortSignal) => {
+                const commands = await voicePreparationApi.list(
+                  props.novelId,
+                  signal,
+                );
+                const current = commands.find((command) => !command.terminal)
+                  ?? commands[0]
+                  ?? null;
+                if (current === null || current.terminal || !preparationAvailable) {
+                  return current;
+                }
+                const resumed = await voicePreparationApi.resume(
+                  props.novelId,
+                  current.commandId,
+                  signal,
+                );
+                if (resumed.terminal && !signal.aborted) {
+                  queueMicrotask(refreshRoster);
+                }
+                return resumed;
+              },
+              onStart: () => voicePreparationApi.create(
+                props.novelId,
+                {
+                  contract_version: "narration-voice-preparation-request/1",
+                  mode: "prepare_missing_dedicated",
+                  document_id: null,
+                  expected_draft_version: null,
+                  expected_content_hash: null,
+                  expected_settings_version: null,
+                },
+                createNarrationIdempotencyKey("voice-preparation"),
+              ),
+              onRefresh: (commandId: string, signal: AbortSignal) => (
+                voicePreparationApi.get(props.novelId, commandId, signal)
+              ),
+              onRetry: (commandId: string) => (
+                voicePreparationApi.retry(props.novelId, commandId)
+              ),
+              onCancel: (commandId: string) => (
+                voicePreparationApi.cancel(props.novelId, commandId)
+              ),
+              onCommandChanged: (command: { readonly terminal: boolean }) => {
+                if (command.terminal) refreshRoster();
+              },
+            }),
             h(CharacterVoiceRoster, {
             novelId: props.novelId,
             characters: scopedCharacters,
@@ -802,6 +921,10 @@ export function createNarrationReadingPage(
         const privateSourceCreationAvailable = overview.voice_sources.some((source) => (
           source.available && source.source_type === "uploaded"
         ));
+        const genericPoolCapability = capabilityFor(overview, "generic_voice_pool");
+        const genericPoolAvailable = genericPoolCapability.state === "enabled"
+          && genericPoolCapability.visible
+          && genericPoolCapability.actionable;
         return h(
           "div",
           { className: "anw-narration-private-stack" },
@@ -819,6 +942,44 @@ export function createNarrationReadingPage(
             novelId: props.novelId,
             overview,
             onChanged: context.onRefresh,
+          }),
+          h(GenericVoicePack, {
+            capabilityEnabled: genericPoolAvailable,
+            canConfigure: overview.authorization.can_configure,
+            onLoadLatest: (signal: AbortSignal) => genericVoicePackApi.get(signal),
+            onRefreshCommand: (
+              commandId: string,
+              signal: AbortSignal,
+            ) => genericVoicePackApi.getCommand(commandId, signal),
+            onBuild: () => genericVoicePackApi.build(
+              createNarrationIdempotencyKey("generic-voice-pack"),
+            ),
+            onRetry: (commandId: string) => genericVoicePackApi.retry(commandId),
+            onCancel: (commandId: string) => genericVoicePackApi.cancel(commandId),
+            onRegenerateSlot: (slotKey: string, expectedPackVersionId: string | null) => {
+              if (expectedPackVersionId === null) {
+                return Promise.reject(new Error("通用音色包版本尚未建立。"));
+              }
+              return genericVoicePackApi.regenerate(
+                slotKey,
+                { expected_pack_version_id: expectedPackVersionId },
+                createNarrationIdempotencyKey("generic-voice-regenerate"),
+              );
+            },
+            onRejectSlot: (slotKey: string, expectedPackVersionId: string) => (
+              genericVoicePackApi.reject(
+                slotKey,
+                { expected_pack_version_id: expectedPackVersionId },
+              )
+            ),
+            onPreviewSlot: async (slotId: string, previewAsset: MediaAssetLink) => {
+              const controller = new AbortController();
+              await playGenericVoiceSlotPreview(
+                slotId,
+                previewAsset,
+                controller.signal,
+              );
+            },
           }),
           h(CachePanel, {
             novelId: props.novelId,

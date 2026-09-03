@@ -9,9 +9,11 @@ from backend.narration.schema_readiness import (
     _function_definitions_satisfy,
     _linear_repository_chain,
     ALEMBIC_CONFIG_PATH,
+    AUTOMATIC_VOICE_PREPARATION_MINIMUM_DATABASE_REVISION,
     CHARACTER_CAST_MINIMUM_DATABASE_REVISION,
     REPOSITORY_BASE_REVISION,
     character_cast_schema_ready,
+    automatic_voice_preparation_schema_ready,
     database_revision_satisfies,
     narration_feature_schema_ready,
     repository_unique_head,
@@ -30,7 +32,7 @@ def test_repository_unique_head_uses_the_canonical_repository_only() -> None:
     chain = _linear_repository_chain(str(ALEMBIC_CONFIG_PATH.resolve()))
 
     assert chain[-1] == REPOSITORY_BASE_REVISION
-    assert repository_unique_head() == chain[0] == "20260902_0039"
+    assert repository_unique_head() == chain[0] == "20260903_0040"
     assert repository_head_or_fail() == chain[0]
 
 
@@ -43,8 +45,8 @@ def test_current_schema_gate_requires_an_exact_database_head() -> None:
             return self.revision
 
     assert assert_database_at_repository_head(  # type: ignore[arg-type]
-        FakeConnection("20260902_0039")
-    ) == "20260902_0039"
+        FakeConnection("20260903_0040")
+    ) == "20260903_0040"
     with pytest.raises(AssertionError, match="does not match repository"):
         assert_database_at_repository_head(  # type: ignore[arg-type]
             FakeConnection("20260830_0035")
@@ -73,6 +75,20 @@ def test_minimum_and_known_linear_descendants_are_accepted() -> None:
     )
     assert database_revision_satisfies(
         ("20260902_0039",), minimum_revision=MINIMUM
+    )
+    assert database_revision_satisfies(
+        ("20260903_0040",), minimum_revision=MINIMUM
+    )
+
+
+def test_automatic_voice_preparation_requires_0040() -> None:
+    assert database_revision_satisfies(
+        ("20260903_0040",),
+        minimum_revision=AUTOMATIC_VOICE_PREPARATION_MINIMUM_DATABASE_REVISION,
+    )
+    assert not database_revision_satisfies(
+        ("20260902_0039",),
+        minimum_revision=AUTOMATIC_VOICE_PREPARATION_MINIMUM_DATABASE_REVISION,
     )
 
 
@@ -166,6 +182,9 @@ def test_repository_chain_is_resolved_from_the_config_not_process_cwd(
     assert "20260902_0039" in _linear_repository_chain(
         str(ALEMBIC_CONFIG_PATH.resolve())
     )
+    assert "20260903_0040" in _linear_repository_chain(
+        str(ALEMBIC_CONFIG_PATH.resolve())
+    )
     assert database_revision_satisfies(
         ("20260829_0034",),
         minimum_revision=MINIMUM,
@@ -177,6 +196,7 @@ def test_feature_schema_sentinel_rejects_non_engine_values() -> None:
     assert narration_feature_schema_ready(None) is False  # type: ignore[arg-type]
     assert voice_generator_schema_ready(None) is False  # type: ignore[arg-type]
     assert character_cast_schema_ready(None) is False  # type: ignore[arg-type]
+    assert automatic_voice_preparation_schema_ready(None) is False  # type: ignore[arg-type]
 
 
 def test_feature_schema_sentinel_requires_current_function_bodies() -> None:

@@ -25,11 +25,11 @@ from backend.narration.settings_api import (
     NarrationSettingsApiCommand,
     NarrationSettingsOperation,
 )
+from tests.narration.current_schema_gate import assert_database_at_repository_head
 
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_HEAD = "20260826_0015"
 
 
 def _live_url() -> str:
@@ -60,7 +60,7 @@ def _live_url() -> str:
 def pg_engine() -> Engine:
     engine = create_engine(_live_url(), pool_pre_ping=True, pool_size=6)
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == EXPECTED_HEAD
+        assert_database_at_repository_head(connection)
         assert int(connection.scalar(text("SHOW server_version_num"))) // 10_000 == 18
     try:
         yield engine

@@ -1,5 +1,7 @@
 import {
+  createVoicePreparationCommand,
   createNarrationWorkflow,
+  getVoicePreparationCommand,
   getNarrationSettings,
   getNarrationWorkflow,
 } from "./api";
@@ -27,7 +29,7 @@ export interface StableChapterNarrationSource {
 
 
 export interface ChapterNarrationWorkflowProgress {
-  readonly step: "saving" | "settings" | "request" | "waiting" | "actionable";
+  readonly step: "saving" | "settings" | "voices" | "request" | "waiting" | "actionable";
   readonly message: string;
   readonly workflow: NarrationWorkflowResource | null;
 }
@@ -44,6 +46,7 @@ export type ChapterNarrationWorkflowErrorCode =
   | "INVALID_INPUT"
   | "SETTINGS_REQUIRED"
   | "STALE_GENERATION"
+  | "VOICE_PREPARATION_FAILED"
   | "WORKFLOW_TIMEOUT";
 
 
@@ -62,6 +65,8 @@ export interface ChapterNarrationWorkflowDependencies {
   readonly getSettings: typeof getNarrationSettings;
   readonly createWorkflow: typeof createNarrationWorkflow;
   readonly getWorkflow: typeof getNarrationWorkflow;
+  readonly createVoicePreparation: typeof createVoicePreparationCommand;
+  readonly getVoicePreparation: typeof getVoicePreparationCommand;
   readonly createActionId: () => string;
   readonly delay: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly now: () => number;
@@ -74,6 +79,7 @@ export interface StartChapterNarrationWorkflowOptions {
   readonly generation: number;
   readonly intent: Exclude<NarrationWorkflowIntent, "analyze_only">;
   readonly forceReview: boolean;
+  readonly automaticVoicePreparationEnabled?: boolean;
   readonly saveStableSource: () => Promise<StableChapterNarrationSource>;
   readonly isGenerationCurrent: (documentId: string, generation: number) => boolean;
   readonly onProgress?: (progress: ChapterNarrationWorkflowProgress) => void;
@@ -115,6 +121,8 @@ const DEFAULT_DEPENDENCIES: ChapterNarrationWorkflowDependencies = Object.freeze
   getSettings: getNarrationSettings,
   createWorkflow: createNarrationWorkflow,
   getWorkflow: getNarrationWorkflow,
+  createVoicePreparation: createVoicePreparationCommand,
+  getVoicePreparation: getVoicePreparationCommand,
   createActionId: defaultActionId,
   delay: defaultDelay,
   now: () => Date.now(),
@@ -266,19 +274,74 @@ export async function startChapterNarrationWorkflow(
       fail("INVALID_INPUT", "朗读操作标识必须是 UUID。");
     }
     const idempotencyKey = `chapter-tts:${actionId.toLowerCase()}`;
-    publish(options, "request", "正在建立不可变正文快照与朗读脚本。", null);
-    let workflow = await dependencies.createWorkflow(
-      options.documentId,
-      {
-        intent: options.intent,
-        expected_draft_version: source.draftVersion,
-        expected_content_hash: source.contentHash,
-        expected_settings_version: settings.version,
-        force_review: options.forceReview,
-      },
-      idempotencyKey,
-      controller.signal,
-    );
+    let workflow: NarrationWorkflowResource;
+    if (options.automaticVoicePreparationEnabled === true && !options.forceReview) {
+      publish(options, "voices", "正在分析本章人物并准备声音。", null);
+      let preparation = await dependencies.createVoicePreparation(
+        options.novelId,
+        {
+          contract_version: "narration-voice-preparation-request/1",
+          mode: "prepare_missing_dedicated",
+          document_id: options.documentId,
+          expected_draft_version: source.draftVersion,
+          expected_content_hash: source.contentHash,
+          expected_settings_version: settings.version,
+        },
+        `chapter-voice-prepare:${actionId.toLowerCase()}`,
+        controller.signal,
+      );
+      const preparationStartedAt = dependencies.now();
+      let preparationAttempt = 0;
+      while (preparation.narrationRequestId === null) {
+        if (preparation.terminal) {
+          fail(
+            "VOICE_PREPARATION_FAILED",
+            preparation.failureCode === null
+              ? "人物声音准备未能继续创建章节朗读，请重新点击智能朗读。"
+              : `人物声音准备未完成（${preparation.failureCode}）。`,
+          );
+        }
+        if (dependencies.now() - preparationStartedAt >= 60 * 60 * 1_000) {
+          fail("WORKFLOW_TIMEOUT", "人物声音仍在后台准备，可稍后重新点击智能朗读恢复进度。");
+        }
+        publish(
+          options,
+          "voices",
+          `正在准备人物声音 ${preparation.progressCurrent}/${preparation.progressTotal}。`,
+          null,
+        );
+        const schedule = options.pollScheduleMs ?? DEFAULT_POLL_SCHEDULE_MS;
+        await dependencies.delay(
+          schedule[Math.min(preparationAttempt, schedule.length - 1)],
+          controller.signal,
+        );
+        preparationAttempt += 1;
+        assertCurrent(options);
+        preparation = await dependencies.getVoicePreparation(
+          options.novelId,
+          preparation.commandId,
+          controller.signal,
+        );
+      }
+      workflow = await dependencies.getWorkflow(
+        preparation.narrationRequestId,
+        controller.signal,
+      );
+    } else {
+      publish(options, "request", "正在建立不可变正文快照与朗读脚本。", null);
+      workflow = await dependencies.createWorkflow(
+        options.documentId,
+        {
+          intent: options.intent,
+          expected_draft_version: source.draftVersion,
+          expected_content_hash: source.contentHash,
+          expected_settings_version: settings.version,
+          force_review: options.forceReview,
+        },
+        idempotencyKey,
+        controller.signal,
+      );
+    }
     assertCurrent(options);
     publish(
       options,

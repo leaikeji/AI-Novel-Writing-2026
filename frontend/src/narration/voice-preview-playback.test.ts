@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createVoicePreviewPlayback,
+  fetchGenericVoiceSlotObjectUrl,
   fetchVoicePreviewObjectUrl,
   type VoicePreviewPlaybackReactRuntime,
 } from "./voice-preview-playback";
@@ -15,6 +16,7 @@ const PREVIEW_ID = "11111111-1111-4111-8111-111111111111";
 const PROFILE_ID = "22222222-2222-4222-8222-222222222222";
 const VERSION_ID = "33333333-3333-4333-8333-333333333333";
 const ASSET_ID = "44444444-4444-4444-8444-444444444444";
+const SLOT_ID = "55555555-5555-4555-8555-555555555555";
 
 
 function preview(path = `/media-assets/${ASSET_ID}/content`): VoicePreviewResource {
@@ -41,6 +43,33 @@ function preview(path = `/media-assets/${ASSET_ID}/content`): VoicePreviewResour
 
 
 describe("voice preview controlled playback", () => {
+  it("loads a persisted generic slot preview with only the slot authorization header", async () => {
+    const host = {
+      fetch: vi.fn(async () => new Response(
+        new Blob(["WAVE"], { type: "audio/wav" }),
+        { status: 200, headers: { "Content-Type": "audio/wav", "Content-Length": "4" } },
+      )),
+    };
+    const objectUrls = {
+      createObjectURL: vi.fn(() => "blob:generic-slot"),
+      revokeObjectURL: vi.fn(),
+    };
+    const asset = preview().asset!;
+
+    await expect(fetchGenericVoiceSlotObjectUrl(SLOT_ID, asset, { host, objectUrls }))
+      .resolves.toBe("blob:generic-slot");
+    expect(host.fetch).toHaveBeenCalledWith(
+      `/ai-novel-world-2026/media-assets/${ASSET_ID}/content`,
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          Accept: "audio/wav",
+          "X-Narration-Generic-Voice-Slot-Id": SLOT_ID,
+        },
+      }),
+    );
+  });
+
   it("uses the frozen media path and preview header without query or token", async () => {
     const host = {
       fetch: vi.fn(async (_input: string, _init?: RequestInit) => new Response(

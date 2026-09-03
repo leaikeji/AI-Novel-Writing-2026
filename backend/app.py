@@ -481,7 +481,11 @@ async def _stop_narration_runtime() -> None:
 
 
 @pawapp.on_uninstall
-async def _uninstall_narration_runtime() -> None:
+async def _uninstall_narration_runtime(*, plugin_id: str | None = None) -> None:
+    # QwenPaw 2.1 passes the public plugin identifier to uninstall hooks.
+    # Keep the argument optional so the hook remains directly testable while
+    # ensuring hot reinstall can always tear down the previous runtime.
+    del plugin_id
     try:
         await stop_embedding_runtime()
     finally:

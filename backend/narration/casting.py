@@ -14,7 +14,7 @@ import hashlib
 import re
 import unicodedata
 from typing import Final, Iterable
-from uuid import RFC_4122, UUID
+from uuid import NAMESPACE_URL, RFC_4122, UUID, uuid5
 
 from . import schemas as wire
 from .contracts import issue_severity
@@ -36,6 +36,10 @@ from .script_contracts import (
 CASTING_RESOLVER_VERSION: Final = "narration-casting-resolver/1"
 GENERIC_ASSIGNMENT_VERSION: Final = "narration-generic-assignment/1"
 GENERIC_POOL_REQUIRED_SLOT_COUNT: Final = 24
+AUTOMATIC_GENERIC_CASTING_RULE_NAMESPACE: Final = uuid5(
+    NAMESPACE_URL,
+    "app://ai-novel-world-2026/narration/generic-casting-rule/v1",
+)
 
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _SLOT_KEY = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
@@ -69,6 +73,20 @@ class CastingResolutionSource(str, Enum):
     CHARACTER_INHERITED = "character_inherited"
     ANONYMOUS_BINDING = "anonymous_binding"
     GENERIC_RULE = "generic_rule"
+
+
+def automatic_generic_casting_rule_id(
+    *, novel_id: UUID, pool_id: UUID, pool_version: int
+) -> UUID:
+    """Rebuild the identity of the server-owned automatic pool rule."""
+
+    _require_uuid(novel_id, field_name="automatic rule novel_id")
+    _require_uuid(pool_id, field_name="automatic rule pool_id")
+    _require_positive_int(pool_version, field_name="automatic rule pool_version")
+    return uuid5(
+        AUTOMATIC_GENERIC_CASTING_RULE_NAMESPACE,
+        f"{novel_id}:{pool_id}:{pool_version}",
+    )
 
 
 def _require_uuid(value: object, *, field_name: str) -> UUID:
@@ -1121,6 +1139,7 @@ def _rule_matches(rule: CastingRuleSnapshot, request: CastingRequest) -> bool:
         SpeakerKind.CHARACTER,
         SpeakerKind.ANONYMOUS,
         SpeakerKind.GROUP,
+        SpeakerKind.UNKNOWN,
     }:
         return False
     speaker_kind = wire.CastingSpeakerKind(request.speaker.kind.value)
@@ -1311,7 +1330,11 @@ def _stable_identity(request: CastingRequest) -> str:
     if speaker.kind is SpeakerKind.GROUP:
         assert speaker.group_key is not None
         return f"group:{speaker.group_key}"
-    raise CastingInputError("generic casting requires character/anonymous/group")
+    if speaker.kind is SpeakerKind.UNKNOWN:
+        return f"unknown:{request.source_local_hash}"
+    raise CastingInputError(
+        "generic casting requires character/anonymous/group/unknown"
+    )
 
 
 def _stable_slot_order(
@@ -1548,8 +1571,6 @@ def resolve_casting(
             resolved_voice=None,
             issues=(),
         )
-    if request.speaker.kind is SpeakerKind.UNKNOWN:
-        return _unresolved(request, codes=("B_SPEAKER_UNKNOWN",))
     if request.speaker.kind is SpeakerKind.NARRATOR:
         return _resolve_narrator(request, inventory)
 
@@ -1584,10 +1605,13 @@ def resolve_casting(
     automatic_rules = _matching_rules(request, inventory, automatic=True)
     if automatic_rules:
         return _resolve_automatic_rule(request, inventory, automatic_rules[0])
+    if request.speaker.kind is SpeakerKind.UNKNOWN:
+        return _unresolved(request, codes=("B_SPEAKER_UNKNOWN",))
     return _unresolved(request, codes=("B_VOICE_MISSING",))
 
 
 __all__ = [
+    "AUTOMATIC_GENERIC_CASTING_RULE_NAMESPACE",
     "CASTING_RESOLVER_VERSION",
     "GENERIC_ASSIGNMENT_VERSION",
     "GENERIC_POOL_REQUIRED_SLOT_COUNT",
@@ -1607,5 +1631,6 @@ __all__ = [
     "NarratorSelectionSnapshot",
     "ResolvedVoiceSnapshot",
     "VoiceVersionSnapshot",
+    "automatic_generic_casting_rule_id",
     "resolve_casting",
 ]

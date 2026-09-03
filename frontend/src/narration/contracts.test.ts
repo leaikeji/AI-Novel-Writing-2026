@@ -20,6 +20,7 @@ import {
   parseNarrationOverviewResponse,
   parseNarrationScopeOverrideListResponse,
   parseNarrationSettingsResource,
+  parseGenericVoicePackLoadResource,
   parseVoicePreviewResource,
   parseVoiceCastingRulesResource,
   parseVoiceProfileResource,
@@ -521,21 +522,21 @@ describe("narration T2 wire contract", () => {
         items: Array<{ key: string }>;
       };
     };
-    legacy.capabilities.schema_version = "narration-capabilities/2";
+    legacy.capabilities.schema_version = "narration-capabilities/3";
     legacy.capabilities.items = legacy.capabilities.items.filter(
-      (entry) => entry.key !== "character_cast_planning",
+      (entry) => entry.key !== "automatic_character_voice_generation",
     );
     const parsedLegacy = parseNarrationOverviewResponse(legacy);
     expect(parsedLegacy.capabilities.schema_version).toBe(NARRATION_CAPABILITY_SCHEMA_VERSION);
     expect(parsedLegacy.capabilities.items).toHaveLength(CAPABILITY_KEYS.length);
     expect(parsedLegacy.capabilities.items.find(
-      (entry) => entry.key === "character_cast_planning",
+      (entry) => entry.key === "automatic_character_voice_generation",
     )).toEqual({
-      key: "character_cast_planning",
+      key: "automatic_character_voice_generation",
       state: "unavailable",
       visible: false,
       actionable: false,
-      reason_code: "CHARACTER_CAST_SCHEMA_UNAVAILABLE",
+      reason_code: "AUTOMATIC_CHARACTER_VOICE_GENERATION_UNAVAILABLE",
       required_gate: null,
     });
 
@@ -544,11 +545,11 @@ describe("narration T2 wire contract", () => {
     expect(() => parseNarrationOverviewResponse(incompleteLegacy)).toThrow(/every capability/);
 
     const futureCapabilityInLegacy = structuredClone(legacy);
-    const castCapability = overview.capabilities.items.find(
-      (entry) => entry.key === "character_cast_planning",
+    const futureCapability = overview.capabilities.items.find(
+      (entry) => entry.key === "automatic_character_voice_generation",
     );
-    if (!castCapability) throw new Error("missing character cast capability fixture");
-    futureCapabilityInLegacy.capabilities.items.push(structuredClone(castCapability));
+    if (!futureCapability) throw new Error("missing future capability fixture");
+    futureCapabilityInLegacy.capabilities.items.push(structuredClone(futureCapability));
     expect(() => parseNarrationOverviewResponse(futureCapabilityInLegacy)).toThrow(/expected one of/);
 
     const missing = structuredClone(overview);
@@ -696,6 +697,37 @@ describe("narration T2 wire contract", () => {
     })).toThrow(/preset_key source mismatch/);
   });
 
+  it("accepts machine-validated generic pack library voices", () => {
+    const genericVersion = {
+      ...lockedVersion(),
+      source_type: "generated",
+      preset_key: null,
+      quality_state: "accepted",
+      activation_basis: "generic_voice_pack_generation",
+      validation_basis: "machine_validated",
+      rights: {
+        ...rights(),
+        source_kind: "voice_generator",
+        source_identifier_sha256: "e".repeat(64),
+      },
+      official_preset: null,
+      reference_asset_id: CHARACTER_ID,
+      description_available: true,
+      locked_at: null,
+    };
+    const genericProfile = {
+      ...profile(),
+      novel_id: null,
+      versions: [genericVersion],
+    };
+
+    const parsed = parseVoiceProfileResource(genericProfile);
+
+    expect(parsed.versions[0]!.activation_basis).toBe("generic_voice_pack_generation");
+    expect(voiceSourceEvidenceIsUsable(parsed.versions[0]!)).toBe(true);
+    expect(voiceActivationEvidenceIsUsable(parsed.versions[0]!)).toBe(true);
+  });
+
   it("publishes preview audio only in ready state", () => {
     const ready = {
       contract_version: NARRATION_SETTINGS_API_VERSION,
@@ -711,6 +743,40 @@ describe("narration T2 wire contract", () => {
     };
     expect(parseVoicePreviewResource(ready).temporary).toBe(true);
     expect(() => parseVoicePreviewResource({ ...ready, status: "running" })).toThrow(/non-ready preview/);
+  });
+
+  it("requires a scoped media publication for every validated generic slot", () => {
+    const payload = {
+      pack: {
+        contract_version: "generic-voice-pack/1",
+        language: "zh-CN",
+        pack_version_id: PROFILE_ID,
+        state: "building",
+        prepared_slots: 1,
+        total_slots: 24,
+        slots: [{
+          slot_id: CHARACTER_ID,
+          slot_key: "male_child_bright",
+          label: "男童·明亮",
+          category: "child",
+          state: "validated",
+          preview_available: true,
+          preview_asset: mediaAsset(),
+          voice_profile_id: PROFILE_ID,
+          voice_version_id: VERSION_ID,
+          failure_code: null,
+        }],
+        failure_code: null,
+        updated_at: NOW,
+      },
+      command: null,
+    };
+    expect(parseGenericVoicePackLoadResource(payload).pack.slots[0]?.slotId)
+      .toBe(CHARACTER_ID);
+    const missingAsset = structuredClone(payload);
+    missingAsset.pack.slots[0]!.preview_asset = null as never;
+    expect(() => parseGenericVoicePackLoadResource(missingAsset))
+      .toThrow(/preview asset mismatch|lacks preview publication/);
   });
 
   it("keeps unset character bindings empty and version zero", () => {

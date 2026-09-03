@@ -935,6 +935,11 @@ def create_novel(session: Session, title: str, description: str = "") -> dict[st
         novel.id,
         expected_story_ledger_version=novel.story_ledger_version,
     )
+    from .narration.official_voice_selection import (
+        initialize_new_novel_default_narrator,
+    )
+
+    initialize_new_novel_default_narrator(session, novel_id=novel.id)
     from .embedding.consent_service import prepare_new_novel_default_consent
 
     consent_preparation = prepare_new_novel_default_consent(

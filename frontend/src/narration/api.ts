@@ -54,6 +54,9 @@ import {
   parseOfficialVoiceSelectionResponse,
   parsePrivateVoiceDeletionRequestResource,
   parsePrivateVoiceLifecycleResource,
+  parseVoicePreparationListResource,
+  parseVoicePreparationResource,
+  parseGenericVoicePackLoadResource,
   parsePronunciationProfileResource,
   parseVoicePreviewResource,
   parseVoiceProfileListResponse,
@@ -107,7 +110,6 @@ import type {
   PutCharacterVoiceBindingRequest,
   PutNarrationScopeOverrideRequest,
   PutPronunciationProfileRequest,
-  PutVoiceCastingRulesRequest,
   RevokeNarrationCloudConsentRequest,
   UpdateNarrationSettingsRequest,
   UpdateNarrationPlaybackPreferencesRequest,
@@ -118,6 +120,10 @@ import type {
   VoiceProfileResource,
   VoiceProfileVersionResource,
   VoiceCastingRulesResource,
+  CreateVoicePreparationRequest,
+  VoicePreparationSnapshot,
+  GenericVoicePackLoadResult,
+  RejectGenericVoiceSlotRequest,
 } from "./contracts";
 
 type ResponseParser<T> = (value: unknown) => T;
@@ -759,6 +765,163 @@ export async function applyCharacterVoiceGeneratorCommand(
   return result;
 }
 
+export async function listVoicePreparationCommands(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<readonly VoicePreparationSnapshot[]> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-preparation-commands`,
+    parseVoicePreparationListResource,
+    { signal },
+  );
+}
+
+export async function createVoicePreparationCommand(
+  novelId: string,
+  payload: CreateVoicePreparationRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<VoicePreparationSnapshot> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-preparation-commands`,
+    parseVoicePreparationResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export async function getVoicePreparationCommand(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<VoicePreparationSnapshot> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}`,
+    parseVoicePreparationResource,
+    { signal },
+  );
+}
+
+export async function resumeVoicePreparationCommand(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<VoicePreparationSnapshot> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}/resume`,
+    parseVoicePreparationResource,
+    { method: "POST", signal },
+  );
+}
+
+export async function retryVoicePreparationCommand(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<VoicePreparationSnapshot> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}/retry`,
+    parseVoicePreparationResource,
+    { method: "POST", signal },
+  );
+}
+
+export async function cancelVoicePreparationCommand(
+  novelId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<VoicePreparationSnapshot> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}/cancel`,
+    parseVoicePreparationResource,
+    { method: "POST", signal },
+  );
+}
+
+export async function getGenericVoicePack(
+  signal?: AbortSignal,
+): Promise<GenericVoicePackLoadResult> {
+  return parsedRequest(
+    "/voice-library/generic-pack",
+    parseGenericVoicePackLoadResource,
+    { signal },
+  );
+}
+
+export async function buildGenericVoicePack(
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<GenericVoicePackLoadResult> {
+  return parsedRequest(
+    "/voice-library/generic-pack/build-commands",
+    parseGenericVoicePackLoadResource,
+    { method: "POST", headers: idempotencyHeaders(idempotencyKey), signal },
+  );
+}
+
+export async function getGenericVoicePackBuildCommand(
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<GenericVoicePackLoadResult> {
+  return parsedRequest(
+    `/voice-library/generic-pack/build-commands/${pathSegment(commandId)}`,
+    parseGenericVoicePackLoadResource,
+    { signal },
+  );
+}
+
+export async function retryGenericVoicePackBuild(
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<GenericVoicePackLoadResult> {
+  return parsedRequest(
+    `/voice-library/generic-pack/build-commands/${pathSegment(commandId)}/retry`,
+    parseGenericVoicePackLoadResource,
+    { method: "POST", signal },
+  );
+}
+
+export async function cancelGenericVoicePackBuild(
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<GenericVoicePackLoadResult> {
+  return parsedRequest(
+    `/voice-library/generic-pack/build-commands/${pathSegment(commandId)}/cancel`,
+    parseGenericVoicePackLoadResource,
+    { method: "POST", signal },
+  );
+}
+
+export async function regenerateGenericVoicePackSlot(
+  slotKey: string,
+  payload: RejectGenericVoiceSlotRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<GenericVoicePackLoadResult> {
+  return parsedRequest(
+    `/voice-library/generic-pack/slots/${pathSegment(slotKey)}/regenerate`,
+    parseGenericVoicePackLoadResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export async function rejectGenericVoicePackSlot(
+  slotKey: string,
+  payload: RejectGenericVoiceSlotRequest,
+  signal?: AbortSignal,
+): Promise<GenericVoicePackLoadResult> {
+  return parsedRequest(
+    `/voice-library/generic-pack/slots/${pathSegment(slotKey)}/reject`,
+    parseGenericVoicePackLoadResource,
+    jsonInit("POST", payload, signal),
+  );
+}
+
 export async function getPrivateVoiceLifecycle(
   novelId: string,
   signal?: AbortSignal,
@@ -984,18 +1147,6 @@ export function getVoiceCastingRules(
     `/novels/${pathSegment(novelId)}/casting-rules`,
     parseVoiceCastingRulesResource,
     { signal },
-  );
-}
-
-export function putVoiceCastingRules(
-  novelId: string,
-  payload: PutVoiceCastingRulesRequest,
-  signal?: AbortSignal,
-): Promise<VoiceCastingRulesResource> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/casting-rules`,
-    parseVoiceCastingRulesResource,
-    jsonInit("PUT", payload, signal),
   );
 }
 

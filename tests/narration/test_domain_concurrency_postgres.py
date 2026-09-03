@@ -57,12 +57,12 @@ from backend.narration.services import (
 )
 from backend.narration.settings import NarrationSettingsUpdate, update_settings
 from backend.narration.snapshots import CreateSettingsSnapshot, create_settings_snapshot
+from tests.narration.current_schema_gate import assert_database_at_repository_head
 from backend.services import content_hash
 
 
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USERNAME = "tts_test"
-EXPECTED_HEAD = "20260826_0015"
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 NOW = datetime(2026, 8, 26, 8, 0, tzinfo=UTC)
@@ -98,9 +98,8 @@ def _live_url() -> str:
 def pg_engine() -> Engine:
     engine = create_engine(_live_url(), pool_pre_ping=True, pool_size=12, max_overflow=4)
     with engine.connect() as connection:
-        head = connection.scalar(text("SELECT version_num FROM alembic_version"))
+        head = assert_database_at_repository_head(connection)
         version_num = int(connection.scalar(text("SHOW server_version_num")))
-        assert head == EXPECTED_HEAD
         assert version_num // 10_000 == 18
         print(
             f"POSTGRES_GATE_EVIDENCE version_num={version_num} alembic_head={head}",

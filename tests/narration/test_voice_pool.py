@@ -2,27 +2,31 @@ from __future__ import annotations
 
 from collections import defaultdict
 from copy import deepcopy
+import hashlib
 import json
 from typing import TypeVar
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import pytest
 
 from backend.models import GenericVoicePool, Novel, VoiceCastingRule
 from backend.narration import schemas as wire
 from backend.narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
+from backend.narration.runtime import EXPECTED_PRODUCTION_MODEL_FINGERPRINT_SHA256
 from backend.narration.services import NarrationScopeMismatch, NarrationServiceError
+from backend.narration.voice_generator_runtime import EXPECTED_RUNTIME_FINGERPRINT
 from backend.narration.voice_pool import (
     GenericCastingUnavailable,
-    GenericVoicePoolUnavailable,
+    GenericVoicePackState,
     VOICE_POOL_CATALOG_PATH,
     VoicePoolHandlers,
+    WorkspaceGenericVoicePack,
+    WorkspaceGenericVoiceSlot,
     get_generic_voice_pool,
     get_voice_casting_rules,
     load_voice_pool_catalog,
     parse_voice_pool_catalog,
-    put_generic_voice_pool,
-    put_voice_casting_rules,
+    project_active_generic_voice_pack,
 )
 
 
@@ -104,18 +108,45 @@ def seeded_store(*, local: bool = True) -> MemoryStore:
     return store
 
 
-def pool_request() -> wire.PutGenericVoicePoolRequest:
-    return wire.PutGenericVoicePoolRequest(
-        expected_version=0,
-        slots=[
-            wire.GenericVoiceSlotSelectionRequest(
-                slot_key=f"slot_{index}",
-                voice_version_id=uuid4(),
-                enabled=True,
-                priority=index,
-            )
-            for index in range(24)
-        ],
+def _digest(label: str) -> str:
+    return hashlib.sha256(label.encode("utf-8")).hexdigest()
+
+
+def workspace_pack(
+    *,
+    state: GenericVoicePackState = GenericVoicePackState.ACTIVE,
+    workspace_id: UUID = LOCAL_WORKSPACE_ID,
+    count: int = 24,
+    rejected_index: int | None = None,
+) -> WorkspaceGenericVoicePack:
+    catalog = load_voice_pool_catalog()
+    slots = tuple(
+        WorkspaceGenericVoiceSlot(
+            slot_key=item.slot_key,
+            profile_id=uuid5(UUID(int=1), f"profile:{item.slot_key}"),
+            voice_version_id=uuid5(UUID(int=1), f"version:{item.slot_key}"),
+            workspace_id=workspace_id,
+            profile_novel_id=None,
+            language="zh-CN",
+            source_kind="voice_generator",
+            design_fingerprint=_digest(f"design:{item.slot_key}"),
+            generator_model_fingerprint=EXPECTED_RUNTIME_FINGERPRINT,
+            nano_model_fingerprint=EXPECTED_PRODUCTION_MODEL_FINGERPRINT_SHA256,
+            reference_audio_sha256=_digest(f"reference:{item.slot_key}"),
+            validation_audio_sha256=_digest(f"validation:{item.slot_key}"),
+            rights_approved=True,
+            quality_approved=True,
+            rejected=index == rejected_index,
+        )
+        for index, item in enumerate(catalog.slots[:count])
+    )
+    return WorkspaceGenericVoicePack(
+        pack_version_id=uuid4(),
+        workspace_id=workspace_id,
+        language="zh-CN",
+        state=state,
+        taxonomy_sha256=catalog.catalog_sha256,
+        slots=slots,
     )
 
 
@@ -232,22 +263,6 @@ def test_multiple_persisted_pool_identities_fail_closed() -> None:
         get_generic_voice_pool(store, novel_id=NOVEL_ID)
 
 
-def test_put_pool_is_fail_closed_and_has_no_partial_write() -> None:
-    store = seeded_store()
-
-    with pytest.raises(GenericVoicePoolUnavailable, match="no rights/quality"):
-        put_generic_voice_pool(
-            store,
-            novel_id=NOVEL_ID,
-            request=pool_request(),
-        )
-
-    assert store.locked_novel_reads == 1
-    assert store.add_count == 0
-    assert store.flush_count == 0
-    assert store.rows[GenericVoicePool] == []
-
-
 def test_cross_scope_novel_is_rejected_before_pool_projection() -> None:
     store = seeded_store(local=False)
 
@@ -262,10 +277,6 @@ def test_casting_rules_remain_empty_or_unavailable_until_t3() -> None:
     assert empty.version == 0
     assert empty.items == []
 
-    request = wire.PutVoiceCastingRulesRequest(expected_version=0, items=[])
-    with pytest.raises(GenericCastingUnavailable, match="before T3-GATE"):
-        put_voice_casting_rules(store, novel_id=NOVEL_ID, request=request)
-
     store.rows[VoiceCastingRule].append(
         VoiceCastingRule(
             id=uuid4(),
@@ -279,14 +290,77 @@ def test_casting_rules_remain_empty_or_unavailable_until_t3() -> None:
     with pytest.raises(GenericCastingUnavailable, match="stay hidden"):
         VoicePoolHandlers(store).get_casting_rules(NOVEL_ID)
 
+def test_active_workspace_pack_projects_all_24_slots_in_taxonomy_order() -> None:
+    catalog = load_voice_pool_catalog()
+    pack = workspace_pack()
 
-def test_handler_put_methods_preserve_no_go_boundary() -> None:
-    handlers = VoicePoolHandlers(seeded_store())
+    result = project_active_generic_voice_pack(
+        novel_id=NOVEL_ID,
+        workspace_id=LOCAL_WORKSPACE_ID,
+        pack=pack,
+        catalog=catalog,
+    )
 
-    with pytest.raises(GenericVoicePoolUnavailable):
-        handlers.put_pool(NOVEL_ID, pool_request())
-    with pytest.raises(GenericCastingUnavailable):
-        handlers.put_casting_rules(
-            NOVEL_ID,
-            wire.PutVoiceCastingRulesRequest(expected_version=0, items=[]),
+    assert result.novel_id == NOVEL_ID
+    assert result.workspace_id == LOCAL_WORKSPACE_ID
+    assert result.source_pack_version_id == pack.pack_version_id
+    assert result.language == "zh-CN"
+    assert len(result.slots) == 24
+    assert tuple(item.slot_key for item in result.slots) == tuple(
+        item.slot_key for item in catalog.slots
+    )
+    assert tuple(item.position for item in result.slots) == tuple(range(24))
+    assert all(item.labels[-1] == "zh-CN" for item in result.slots)
+
+
+@pytest.mark.parametrize(
+    ("pack", "reason"),
+    [
+        (workspace_pack(count=23), "GENERIC_VOICE_PACK_INCOMPLETE"),
+        (
+            workspace_pack(state=GenericVoicePackState.BUILDING),
+            "GENERIC_VOICE_PACK_NOT_READY",
+        ),
+        (
+            workspace_pack(state=GenericVoicePackState.RETIRED_FOR_NEW_USE),
+            "GENERIC_VOICE_PACK_RETIRED",
+        ),
+        (workspace_pack(rejected_index=4), "GENERIC_VOICE_PACK_SLOT_REJECTED"),
+    ],
+)
+def test_partial_retired_or_rejected_pack_cannot_project(
+    pack: WorkspaceGenericVoicePack,
+    reason: str,
+) -> None:
+    with pytest.raises(NarrationServiceError, match=reason):
+        project_active_generic_voice_pack(
+            novel_id=NOVEL_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            pack=pack,
+        )
+
+
+def test_workspace_pack_projection_rejects_cross_scope_and_taxonomy_drift() -> None:
+    other_workspace = uuid4()
+    with pytest.raises(NarrationServiceError, match="SCOPE_MISMATCH"):
+        project_active_generic_voice_pack(
+            novel_id=NOVEL_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            pack=workspace_pack(workspace_id=other_workspace),
+        )
+
+    pack = workspace_pack()
+    drifted = WorkspaceGenericVoicePack(
+        pack_version_id=pack.pack_version_id,
+        workspace_id=pack.workspace_id,
+        language=pack.language,
+        state=pack.state,
+        taxonomy_sha256="0" * 64,
+        slots=pack.slots,
+    )
+    with pytest.raises(NarrationServiceError, match="VERSION_CONFLICT"):
+        project_active_generic_voice_pack(
+            novel_id=NOVEL_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            pack=drifted,
         )
