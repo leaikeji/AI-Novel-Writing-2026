@@ -303,6 +303,8 @@ def test_bootstrap_contract_never_embeds_runtime_passwords() -> None:
     assert "PGPASSWORD is forbidden" in migration_source
     assert "postgresql+psycopg://ai_novel_migrator@" in migration_source
     assert "postgresql+psycopg://ai_novel_migrator:" not in migration_source
+    assert "if [ -x /app/venv/bin/python ]; then" in migration_source
+    assert "PYTHON_EXECUTABLE=/app/venv/bin/python" in migration_source
     assert "/run/ai-novel-db-auth/migrator/.pgpass" in sql_source
     assert "/run/ai-novel-db-auth/api/.pgpass" in sql_source
     assert "/run/ai-novel-db-auth/worker/.pgpass" in sql_source

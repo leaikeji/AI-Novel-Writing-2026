@@ -107,7 +107,9 @@ export PGOPTIONS='-c role=ai_novel_schema_owner -c search_path=public,pg_catalog
 export AI_NOVEL_DATABASE_URL="postgresql+psycopg://ai_novel_migrator@${AI_NOVEL_DB_HOST}:${AI_NOVEL_DB_PORT}/${AI_NOVEL_DB_NAME}"
 
 cd "$PROJECT_ROOT"
-if [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
+if [ -x /app/venv/bin/python ]; then
+    PYTHON_EXECUTABLE=/app/venv/bin/python
+elif [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXECUTABLE=$PROJECT_ROOT/.venv/bin/python
 elif command -v python3 >/dev/null 2>&1; then
     PYTHON_EXECUTABLE=$(command -v python3)
