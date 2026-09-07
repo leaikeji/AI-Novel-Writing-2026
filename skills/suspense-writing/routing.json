@@ -1,0 +1,37 @@
+{
+  "routing_schema_version": "writing-capability/1",
+  "skill_id": "suspense-writing",
+  "capability_version": "1.0.0",
+  "kind": "genre",
+  "display_name": "悬疑写作",
+  "description": "为悬疑、刑侦、推理和规则生存任务选择线索、人物知识、调查行动及揭晓方法；普通秘密、书名或校对不构成题材依据。",
+  "approval_ref": "s57-suspense-golden-finger-20260903",
+  "release_status": "author_approved",
+  "genre_aliases": ["悬疑", "悬疑推理", "刑侦", "推理", "规则生存", "规则怪谈"],
+  "mechanism_tags": [],
+  "applicable_tasks": ["direction", "chapter_body", "chapter_outline", "chapter_storyline_recommendation", "outline_background", "outline_characters", "outline_plot", "outline_highlight", "character_profile_completion", "review", "continuity_check", "selection_edit"],
+  "excluded_tasks": ["mechanical", "excluded", "novel_naming", "novel_template"],
+  "semantic_criteria": [
+    "本次获准资料把未知真相、调查核查、已知威胁或共享规则求生作为当前任务的读者承诺。",
+    "当前任务需要设计或检查线索与竞争解释、人物知识边界、调查行动、揭晓或阶段回收。",
+    "只补选当前任务适用的类型方法；题材明确但当前只需缓冲关系或对白时不强制案件反转。"
+  ],
+  "negative_examples": [
+    "爱情对白中一句‘我有个秘密’，没有调查或悬疑承诺。",
+    "作者只要求修正标点、拼写或整理已有字段。",
+    "书名包含谜、诡、案等字，但获准资料未提供题材依据。",
+    "作者明确本次不用悬疑方法；角色对白中的否定不等于作者排除。"
+  ],
+  "reference_rules": [
+    {
+      "key": "mystery_mechanisms",
+      "path": "references/mystery-mechanisms.md",
+      "tasks": ["direction", "chapter_outline", "chapter_storyline_recommendation", "outline_background", "outline_plot", "outline_highlight", "review", "continuity_check"],
+      "required": false
+    }
+  ],
+  "conflicts_with": [],
+  "supersedes": [],
+  "auto_eligible": true,
+  "budget_hint": 2000
+}

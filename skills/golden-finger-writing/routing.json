@@ -1,0 +1,38 @@
+{
+  "routing_schema_version": "writing-capability/1",
+  "skill_id": "golden-finger-writing",
+  "capability_version": "1.0.0",
+  "kind": "mechanism",
+  "display_name": "金手指机制写作",
+  "description": "处理特殊优势的获得、运用、成长、回报、主线绑定与策略边界，覆盖系统、信息、时间、经营及关系机制；不把玄幻题材或普通天赋自动认作金手指。",
+  "approval_ref": "s57-suspense-golden-finger-20260903",
+  "release_status": "author_approved",
+  "genre_aliases": [],
+  "mechanism_tags": ["金手指", "系统能力", "时间回溯", "未来预知", "特殊信息优势", "资源兑换能力", "特殊经营优势"],
+  "applicable_tasks": ["direction", "chapter_body", "chapter_outline", "chapter_storyline_recommendation", "outline_background", "outline_characters", "outline_plot", "outline_highlight", "character_profile_completion", "review", "continuity_check", "selection_edit"],
+  "excluded_tasks": ["mechanical", "excluded", "novel_naming", "novel_template"],
+  "semantic_criteria": [
+    "获准设定或当前任务呈现区别于普通技能的特殊优势，能通过触发或输入、运用、状态变化与收益产生机制关系。",
+    "本次需要设计、续写或检查该优势如何服务目标、改变行动、成长兑现、形成边界或出现重复。",
+    "可与任何题材并存；悬疑分类已经命中仍独立判断机制，不因没有数值面板就排除。",
+    "已确立的低代价、无敌或经营路线仍可适用，不以必须削弱优势作为选入条件。"
+  ],
+  "negative_examples": [
+    "作品分类是玄幻，但没有任何特殊优势机制依据。",
+    "‘系统’指公司软件、交通系统或一般制度，不是角色的特殊能力。",
+    "普通训练、聪明或职业经验，没有任务所需的特殊优势。",
+    "作者明确本次不要金手指；只校对现有句子或提取字段。"
+  ],
+  "reference_rules": [
+    {
+      "key": "mechanism_design",
+      "path": "references/mechanisms.md",
+      "tasks": ["direction", "chapter_outline", "chapter_storyline_recommendation", "outline_background", "outline_plot", "outline_highlight", "review", "continuity_check"],
+      "required": false
+    }
+  ],
+  "conflicts_with": [],
+  "supersedes": [],
+  "auto_eligible": true,
+  "budget_hint": 2000
+}
