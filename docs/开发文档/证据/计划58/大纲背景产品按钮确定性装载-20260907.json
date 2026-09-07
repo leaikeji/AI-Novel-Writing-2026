@@ -1,0 +1,101 @@
+{
+  "schema_version": "s58-outline-background-product-button-evidence/1",
+  "observed_at": "2026-09-07T14:43:37+08:00",
+  "scope": {
+    "environment": "isolated-qwenpaw-2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "base_url_after_isolated_restart": "http://127.0.0.1:54385",
+    "data_class": "synthetic-test-only",
+    "novel_id": "f1b25dac-32a6-407b-949f-eb2b23cb4626",
+    "novel_title": "雾宅来信",
+    "outline_draft_id": "bf228eac-81c6-4631-8c3f-c92e81810a30"
+  },
+  "product_button": {
+    "kind": "outline_background",
+    "action_id": "9f02bafa-9967-4421-a5d2-1ca8303082fc",
+    "dispatch_id": "9e28493b-0d4b-4701-b585-e5e1bcc3bd94",
+    "job_id": "4155b683-8a50-418a-8002-5ebb6ea821d3",
+    "dispatch_state": "dispatched",
+    "job_state": "ready",
+    "scope_kind": "novel",
+    "task_scope_type": "outline",
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "generation_contract_version": "follow-agent-effective-v6",
+    "public_actual_model_evidence": "not_exposed",
+    "public_verification_reason": "public_usage_not_exposed_pre_post_match",
+    "input_hash": "df65024906b58babb2857aa73db20c31a6e17129475d7d2329f03f97e998345a",
+    "method_packet_sha256": "92f4b540fc365a8099e8d05485e26d583da8e8a8f3aa4332937ca66b2c276370",
+    "semantic_enabled": false
+  },
+  "provider_observation": {
+    "receipts_before": 0,
+    "receipts_after": 1,
+    "new_receipts": 1,
+    "model": "s58-fake-model",
+    "tools": [],
+    "tool_choice": null,
+    "primary_heading_counts": {
+      "novel-direction": 0,
+      "story-foundation": 1,
+      "character-craft": 0,
+      "chapter-outline": 0,
+      "style-review": 0,
+      "prose-writing": 0
+    },
+    "approved_block_matches": {
+      "story-foundation/SKILL.md": {
+        "sha256": "3295af62c986114b421720e2c4e4d191d76ba628a2551ce33c32c84918e50ec9",
+        "count": 1
+      },
+      "story-foundation/references/story-architecture.md": {
+        "sha256": "83757f93f4f08a38eb11a6c621edb0d455832d8035a8bfe1de88e9ee51c7b0c6",
+        "count": 1
+      },
+      "suspense-writing/SKILL.md": {
+        "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5",
+        "count": 1
+      },
+      "suspense-writing/references/mystery-mechanisms.md": {
+        "sha256": "a9291722876f80410808c77ea6ac9e8cc932685cabe6acd1115a3c9b929923a1",
+        "count": 1
+      }
+    }
+  },
+  "author_ui_observation": {
+    "background_result_visible": true,
+    "method_receipt_visible": true,
+    "method_receipt_text": "本次已装载到请求：故事设定总表与总体架构 · 悬疑写作",
+    "method_details_expandable": true,
+    "receipt_caveat_visible": "这是请求装载记录，不代表模型一定遵循或写作效果已经验证。",
+    "screenshots": "observed inline only; no screenshot file persisted"
+  },
+  "negative_controls": [
+    {
+      "condition": "an already-open page retained the pre-upgrade JavaScript bundle",
+      "observation": "two outline calls used the legacy path; no writing dispatch was created, no method blocks were present, and the full host tool list was exposed",
+      "decision": "rejected as product evidence; a newly loaded page was required"
+    },
+    {
+      "condition": "the isolated QwenPaw container was restarted before public Skill enablement was restored",
+      "observation": "the catalog returned catalog_available=false and the old compatibility path remained active",
+      "decision": "restored the frozen public Agent Skill state through supported APIs before rerunning; did not count the legacy receipt"
+    }
+  ],
+  "claim_boundary": {
+    "proven": "the isolated product outline-background button, after a current frontend load and public Agent Skill-state restoration, creates one managed action, makes exactly one loopback model request, injects the frozen story-foundation and suspense-writing blocks once, exposes no tools, applies the result, and shows the frozen method receipt to the author",
+    "not_proven": [
+      "literary quality improvement",
+      "outline characters, plot, or highlight buttons",
+      "chapter outline or storyline recommendation buttons",
+      "review, selection edit, or character profile buttons",
+      "native chat routing",
+      "semantic routing",
+      "provider billing or token usage",
+      "full G-BUTTON or G-FULL"
+    ]
+  }
+}

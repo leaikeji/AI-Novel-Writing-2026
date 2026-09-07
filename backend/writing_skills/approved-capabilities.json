@@ -1,0 +1,34 @@
+[
+  {
+    "skill_id": "golden-finger-writing",
+    "capability_version": "1.0.0",
+    "approval_ref": "s57-suspense-golden-finger-20260903",
+    "routing_hash": "38661dbb8bf5aea1121ab1a75dce3b95eb63695e0710c6a8947fa6ccd4162745",
+    "assets": [
+      {
+        "path": "SKILL.md",
+        "sha256": "8a633d560524c21d44674f596519a5c28a10c83786fb4fdb12804e629ea7640e"
+      },
+      {
+        "path": "references/mechanisms.md",
+        "sha256": "a60451c17a52d1228a8c37c5a2fba61c91e8552087f5ca75cda7fa3422791772"
+      }
+    ]
+  },
+  {
+    "skill_id": "suspense-writing",
+    "capability_version": "1.0.0",
+    "approval_ref": "s57-suspense-golden-finger-20260903",
+    "routing_hash": "2caf4857bd4b30f82b3f45dc28e24b609c34a95233332dd45299667e580f3804",
+    "assets": [
+      {
+        "path": "SKILL.md",
+        "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5"
+      },
+      {
+        "path": "references/mystery-mechanisms.md",
+        "sha256": "a9291722876f80410808c77ea6ac9e8cc932685cabe6acd1115a3c9b929923a1"
+      }
+    ]
+  }
+]

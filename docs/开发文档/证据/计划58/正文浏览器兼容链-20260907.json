@@ -1,0 +1,78 @@
+{
+  "schema_version": "s58-browser-legacy-evidence/1",
+  "date": "2026-09-07",
+  "host": "ai-novel-s58-qwenpaw-test",
+  "port": 55472,
+  "package": "/var/folders/6l/f68z37bx5dg_sb8l_7799dww0000gn/T/s58-panel-scope-0wjn5xhp/ai-novel-world-2026",
+  "skill_state_snapshot": "/var/folders/6l/f68z37bx5dg_sb8l_7799dww0000gn/T/ai-novel-skill-state-7wi75_gm.json",
+  "novel_id": "3f2a6e14-07a5-4656-924a-b622d775b01b",
+  "document_id": "891ce317-a1af-4c13-a223-9c385f86a27b",
+  "job_id": "5a899268-60f8-4ce8-b85d-67297a8739f8",
+  "release_gate": false,
+  "catalog_available": true,
+  "job_state": "ready",
+  "visible_character_count": 1000,
+  "ui_observations": [
+    "Empty chapter → generation options → skip private assets → confirm s58-fake/s58-fake-model → generated 1000 synthetic characters in editor",
+    "History shows adopted; public actual identity not exposed with matching pre/post effective model",
+    "Cancelled follow-up story synchronization; no additional model request",
+    "Requested viewports 1280x800 and 1920x1080: editor and native assistant visible",
+    "Requested viewport 360x800: expanded assistant obscures editor; manual collapse makes editor accessible",
+    "Chapter navigation count remained 0 while editor showed 1000; not claimed full navigation non-regression"
+  ],
+  "transport": {
+    "count": 3,
+    "last": {
+      "ordinal": 3,
+      "model": "s58-fake-model",
+      "method_marker_count": 0,
+      "primary_heading_count": 0,
+      "method_roles": [],
+      "tools": [
+        "Skill",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "grep_search",
+        "glob_search",
+        "execute_shell_command",
+        "send_file_to_user",
+        "web_search",
+        "web_fetch",
+        "desktop_screenshot",
+        "view_image",
+        "view_video",
+        "get_current_time",
+        "set_user_timezone",
+        "get_token_usage",
+        "list_agents",
+        "chat_with_agent",
+        "submit_to_agent",
+        "check_agent_task",
+        "spawn_subagent",
+        "run_tool_batch",
+        "browser",
+        "novel_get_context",
+        "novel_get_document",
+        "novel_search",
+        "novel_get_workspace_context",
+        "novel_prepare_selection_edit",
+        "recall_history",
+        "memory_search"
+      ],
+      "tool_choice": null,
+      "input_hash": "e3abdbab7add70c0ca95d271c396eab56faea9f093829428c17737672b862722",
+      "approved_block_matches": {}
+    }
+  },
+  "limits": [
+    "Legacy branch only; no complete Skill bytes observed in this immediate fake response request",
+    "Does not prove managed chapter UI or G-BUTTON",
+    "Screenshots inspected inline, not persisted as image files",
+    "Only synthetic test chapter changed; no author novel or authoritative story fact modified"
+  ],
+  "cleanup": {
+    "viewport_reset": true,
+    "temporary_tab_closed": true
+  }
+}

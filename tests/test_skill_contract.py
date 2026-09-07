@@ -1,11 +1,12 @@
 from pathlib import Path
 import re
+from backend.writing_skills.catalog import packaged_approvals, published_skill_ids
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = ROOT / "skills"
 NOVEL_AGENT_PROMPT = ROOT / "qwenpaw-agent" / "AI_NOVEL_WORLD.md"
-EXPECTED_SKILLS = {
+TASK_SKILLS = {
     "novel-direction",
     "story-foundation",
     "character-craft",
@@ -16,6 +17,8 @@ EXPECTED_SKILLS = {
     "continuity-check",
     "style-review",
 }
+CAPABILITY_SKILLS = {a.skill_id for a in packaged_approvals()}
+EXPECTED_SKILLS = published_skill_ids(SKILLS_ROOT)
 EXPECTED_SKILL_VERSION = "0.4.0"
 REFERENCE_LINK = re.compile(r"\[[^\]]+\]\((references/[^)]+\.md)\)")
 
@@ -40,7 +43,7 @@ def test_skills_are_versioned_and_reference_only_existing_local_craft_guides() -
 
 
 def test_skills_allow_controlled_candidates_but_not_authoritative_model_writes() -> None:
-    for skill_path in SKILLS_ROOT.glob("*/SKILL.md"):
+    for skill_path in (SKILLS_ROOT / name / "SKILL.md" for name in TASK_SKILLS):
         text = skill_path.read_text(encoding="utf-8")
         assert "PawApp" in text
         assert any(
@@ -58,6 +61,30 @@ def test_skills_allow_controlled_candidates_but_not_authoritative_model_writes()
         assert "二者都不表示只读" in text
         assert "立即调用提案工具" in text
         assert "上一张未应用" in text
+
+
+def test_capability_skills_are_author_released_not_empirically_promoted() -> None:
+    for name in CAPABILITY_SKILLS:
+        text = (SKILLS_ROOT / name / "SKILL.md").read_text(encoding="utf-8")
+        metadata = dict(re.findall(r'^  (\w+): "?([^"\n]+)"?$', text.split("---", 2)[1], re.MULTILINE))
+        assert metadata["capability_version"] == "1.0.0"
+        assert metadata["release_status"] == "author_approved"
+        assert metadata["empirical_status"] == "inconclusive"
+        # Capability modules cannot supplant the product's final-write contract.
+        assert "PawApp" in text and "prose-writing" in text
+        assert "权威" in text and "不得声称" in text
+
+
+def test_capability_routing_keeps_generic_fallback_and_output_owner() -> None:
+    agent = NOVEL_AGENT_PROMPT.read_text(encoding="utf-8")
+    assert "不维护固定分类名称清单" in agent
+    assert "managed_skill_dispatch" in agent
+    assert "提示本身不是工程隔离措施" in agent
+    assert "未匹配已有分类 Skill 时仅使用通用方法" in agent
+    assert "正文最终仍由 `prose-writing` 收口" in agent
+    assert "不因“玄幻”“成长”标签自动给作品添加金手指" in agent
+    assert "不凭空生成单书 Skill" in agent
+    assert "不强制 JSON" in agent
 
 
 def test_novel_agent_defines_distinct_and_measurable_selection_operations() -> None:

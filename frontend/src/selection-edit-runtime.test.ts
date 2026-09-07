@@ -225,6 +225,8 @@ describe("SelectionEditRuntime", () => {
       subscribe: vi.fn(() => vi.fn()),
       getRetrievalStatus: () => ({ summary: null, novelId: undefined }),
       subscribeRetrievalStatus: vi.fn(() => vi.fn()),
+      getWritingMethodStatus: () => ({ status: null }),
+      subscribeWritingMethodStatus: vi.fn(() => vi.fn()),
       handleSurfaceAction: vi.fn(),
       focusSource: vi.fn(),
     } as unknown as SelectionEditRuntime;

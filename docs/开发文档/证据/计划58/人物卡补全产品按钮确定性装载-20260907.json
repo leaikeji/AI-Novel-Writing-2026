@@ -1,0 +1,160 @@
+{
+  "schema_version": "plan58-character-profile-button-evidence/1",
+  "observed_at": "2026-09-07T16:41:00+08:00",
+  "environment": {
+    "qwenpaw_version": "2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "qwenpaw_origin": "http://127.0.0.1:54385",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "database_port": 55471,
+    "transport": "loopback fake OpenAI fixture",
+    "effective_provider_id": "s58-fake",
+    "effective_model_id": "s58-fake-model",
+    "long_lived_origin_touched": false
+  },
+  "scope": {
+    "novel_id": "b135e721-9b31-479a-b7f6-2828322646f3",
+    "novel_title": "s58-managed-outline-9cae2c67-7784-4f0e-bf98-ced12204e439",
+    "genre": "悬疑",
+    "subgenre": "刑侦",
+    "character_id": "c9b12b97-b7f0-4ef6-9c3e-89d1ec221aa9",
+    "character_name": "林澈",
+    "character_base_version": 1,
+    "status_input_hash": "afff6017181b3d0c85d19ab3c455127ac7858c7e26be3da132e504b19ac5ccb2",
+    "synthetic_only": true
+  },
+  "action": {
+    "action_id": "00e4959a-d617-404b-9ca3-4dfba5debaf2",
+    "dispatch_id": "902c95bd-beb3-4036-9113-3da13c8da401",
+    "dispatch_state": "dispatched",
+    "job_id": "cb9a38a0-fc21-49ae-81fb-da146bf6789d",
+    "job_ref": "creative:cb9a38a0-fc21-49ae-81fb-da146bf6789d",
+    "job_state": "ready",
+    "job_attempt": 1,
+    "kind": "character_profile_completion",
+    "client_input_hash": "a76516073687703b45a22e746febd1ac4eb44d052c546061f4f550486dc1b3c3",
+    "route_request_key": "673f9272c2017e2de363275a1c4656351c6f13c3e50456d4621c2af0c1a06b0a",
+    "job_input_hash": "67595d464bfeff96056bf63f3478faa9ccd70318c11f2ce3d0391aaa7e0b4b63",
+    "method_input_hash": "ac90c43a708f90354323123e8a96737ceeb84d12ec6651d5932ab7caa2b33c32",
+    "route_source_version": "902a0fd256da65172fa7de435a7e04b19e623009dae3b52ea87d081e1d8571f9"
+  },
+  "method_plan": {
+    "catalog_version": "6561a4d89e94edc25e7e60d5ce1a440cfd8d2c2e42f4bb58e40913cba0d13525",
+    "primary_skill": "character-craft",
+    "selected_ids": [
+      "suspense-writing"
+    ],
+    "blocks": [
+      {
+        "skill_id": "character-craft",
+        "path": "SKILL.md",
+        "sha256": "a12d9e0d496e1d4c507b9d90bd85f3337670c0b8f66b582be2a5984d7b97452e"
+      },
+      {
+        "skill_id": "character-craft",
+        "path": "references/character-dynamics.md",
+        "sha256": "207b380db08a4f29784659fadeec7c72a7a1696232a6ba015dd47ac94e2b0d08"
+      },
+      {
+        "skill_id": "suspense-writing",
+        "path": "SKILL.md",
+        "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5"
+      }
+    ]
+  },
+  "provider_observation": {
+    "receipt_count_after_click": 1,
+    "receipt_count_after_recovery_get": 1,
+    "model": "s58-fake-model",
+    "provider_message_hash": "2a98f7f5371f3d6eeef95b495eae86237a76aa25ed023cbc10bc724921ce3a9f",
+    "tools": [],
+    "tool_choice": null,
+    "exact_block_counts": {
+      "character-craft/SKILL.md": 1,
+      "character-craft/references/character-dynamics.md": 1,
+      "suspense-writing/SKILL.md": 1
+    },
+    "other_primary_heading_counts": {
+      "novel-direction": 0,
+      "story-foundation": 0,
+      "chapter-outline": 0,
+      "style-review": 0,
+      "prose-writing": 0
+    }
+  },
+  "model_evidence": {
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "reported_actual": null,
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "usage_status": "not_exposed",
+    "private_usage_buffer_used": false
+  },
+  "result": {
+    "output_schema_version": "character-profile-completion-v1",
+    "candidate_count": 1,
+    "candidate_character_id": "c9b12b97-b7f0-4ef6-9c3e-89d1ec221aa9",
+    "candidate_personality": "面对证据冲突会反复核对，并承担延误行动的风险",
+    "candidate_basis": "designed",
+    "candidate_confidence": 88,
+    "candidate_default_selected": false,
+    "author_apply_clicked": false,
+    "character_version_after_review": 1,
+    "formal_personality_after_review": null,
+    "formal_profile_exactly_unchanged": true
+  },
+  "ui_observation": {
+    "real_product_button_clicked": "分析角色性格",
+    "confirmation_clicked_once": true,
+    "candidate_review_dialog_seen": true,
+    "apply_button_text": "应用所选候选（0）",
+    "apply_button_disabled": true,
+    "method_receipt_text": "本次已装载到请求：人物塑造与人物弧线 · 悬疑写作",
+    "persistent_screenshot_created": false
+  },
+  "recovery": {
+    "method": "GET",
+    "path_shape": "/novels/{novel_id}/writing-method-actions/{action_id}",
+    "returned_same_job_id": true,
+    "returned_same_dispatch_id": true,
+    "returned_same_method_input_hash": true,
+    "returned_ready_dispatched": true,
+    "redispatched_model": false
+  },
+  "validation_contract": {
+    "exact_novel_ownership": true,
+    "server_rebuilt_profile_snapshot": true,
+    "expected_source_hash_verified_before_model_and_catalog": true,
+    "character_base_version_verified": true,
+    "evidence_quote_verified_against_server_snapshot": true,
+    "server_owned_genre_subgenre": true,
+    "forged_source_hash_rejected_before_model_and_catalog": true,
+    "legacy_full_snapshot_endpoint_compatible": true
+  },
+  "verification": {
+    "backend_character_related_tests": 75,
+    "backend_writing_skills_tests": 269,
+    "frontend_character_related_tests": 14,
+    "frontend_test_files": 154,
+    "frontend_tests": 1363,
+    "frontend_typecheck_exit_code": 0,
+    "frontend_build_modules": 196,
+    "fixture_py_compile_exit_code": 0,
+    "plugin_package_exit_code": 0,
+    "git_diff_check_exit_code": 0
+  },
+  "release_boundary": {
+    "managed_task": "character_profile_completion",
+    "relationship_graph_task": "excluded_fact_extraction",
+    "candidate_only": true,
+    "full_button_gate_released": false
+  },
+  "limits": [
+    "隔离假模型只证明人物卡补全按钮的稳定动作、服务端快照重建、真实方法字节、空工具、候选默认不选和只读恢复，不证明人物设计质量提升。",
+    "本次没有选择或应用候选，正式人物卡的version、description和personality保持不变。",
+    "关系网仍是事实抽取任务并明确排除创作分类装载，不能用人物卡按钮结果放行关系抽取。",
+    "宿主没有公开actual模型或usage，证据保持not_exposed，未用回环观察值倒填权威字段。",
+    "本证据只裁决人物卡补全确定性按钮子门禁；D/S/E正式样本、原生聊天、语义增强和完整G-BUTTON/G-FULL仍未通过。"
+  ]
+}

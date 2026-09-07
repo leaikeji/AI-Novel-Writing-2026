@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.model_runtime import ModelAudit
+from backend.writing_skills.load_policy import PublicLoadCapabilities
 
 
 def _import_creative_api(monkeypatch: pytest.MonkeyPatch):
@@ -62,7 +63,17 @@ class _FakeSession:
 
 @pytest.fixture
 def api(monkeypatch: pytest.MonkeyPatch):
-    return _import_creative_api(monkeypatch)
+    module = _import_creative_api(monkeypatch)
+    from backend.writing_skills import creative
+
+    # This suite exercises the dedicated compatibility endpoint. Production
+    # keeps it closed whenever the server-owned managed button gate is open.
+    monkeypatch.setattr(
+        creative,
+        "NOVEL_CREATIVE_CAPABILITIES",
+        PublicLoadCapabilities(),
+    )
+    return module
 
 
 @pytest.fixture
@@ -84,6 +95,9 @@ def http(api):
     app.dependency_overrides[api.get_session] = lambda: session
     app.dependency_overrides[api.get_novel_generation_ctx] = lambda: ctx
     app.dependency_overrides[api.get_novel_effective_model] = lambda: configured_model
+    app.dependency_overrides[
+        api.get_character_profile_legacy_effective_model
+    ] = lambda: configured_model
 
     async def model_probe():
         return configured_model

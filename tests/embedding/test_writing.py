@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from backend.creative_data_models import StoryTimeline
 from backend.embedding.writing import resolve_writing_position
-from backend.models import Document
+from backend.models import Document, DocumentWorkingCopy
 
 
 class _Session:
@@ -19,10 +19,13 @@ class _Session:
         self.target = target
         self.ordered_document_ids = ordered_document_ids
         self.timeline = timeline
+        self.base_revision_id = uuid4()
 
     def get(self, model: type[object], identity: object) -> object | None:
         if model is Document and identity == self.target.id:
             return self.target
+        if model is DocumentWorkingCopy and identity == self.target.id:
+            return SimpleNamespace(base_revision_id=self.base_revision_id)
         return None
 
     def scalars(self, statement: Any) -> tuple[object, ...]:
@@ -75,3 +78,4 @@ def test_writing_position_uses_canonical_ordinal_and_derived_non_empty_title() -
     assert position.narrative_sequence == 2
     assert position.story_sequence_cutoff == 2
     assert position.title == "第2章"
+    assert position.document_revision_id == session.base_revision_id

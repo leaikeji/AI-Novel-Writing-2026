@@ -8,7 +8,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError as PydanticValidationError
@@ -104,8 +104,12 @@ from .volume_chapter_titles import (
     context_chapter_title,
     display_chapter_title,
     display_volume_title,
+    next_chapter_ordinal,
     semantic_title,
 )
+
+if TYPE_CHECKING:
+    from .writing_skills.persistence import Claim
 from .selection_edit_diff import (
     SELECTION_EDIT_REPLACEMENT_MAX_CHARACTERS,
     SelectionEditDiffError,
@@ -2645,6 +2649,7 @@ def get_character_profile_completion_status(
         "eligible": domain_status["eligible"],
         "state": domain_status["state"],
         "stale": domain_status["stale"],
+        "input_hash": domain_status["input_hash"],
         "source_summary": source_summary,
         "job": (
             {
@@ -4807,36 +4812,226 @@ def apply_outline_generation_candidate(
     )
 
 
-def start_creative_generation(
+def _chapter_draft_id_set(
+    data: dict[str, Any],
+    key: str,
+    *,
+    allowed: set[UUID],
+) -> set[UUID]:
+    raw = data.get(key, [])
+    if not isinstance(raw, list):
+        raise ValidationError(f"章节草稿 {key} 无效")
+    try:
+        values = [UUID(str(value)) for value in raw]
+    except (TypeError, ValueError, AttributeError) as error:
+        raise ValidationError(f"章节草稿 {key} 无效") from error
+    if len(values) != len(set(values)) or not set(values) <= allowed:
+        raise ValidationError(f"章节草稿 {key} 越出当前小说范围")
+    return set(values)
+
+
+def build_chapter_creation_generation_snapshot(
+    session: Session,
+    draft: ChapterCreationDraft,
+    *,
+    kind: str,
+    request_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebuild the model-visible chapter-helper input from server-owned rows.
+
+    The browser contributes only the stable draft/version binding and, for an
+    outline retry, a bounded attempt number. Storylines, characters,
+    foreshadows and the prior chapter are all selected from this novel here.
+    """
+
+    if kind not in {"chapter_storyline_recommendation", "chapter_outline"}:
+        raise ValidationError("章节辅助生成类型无效")
+    if draft.state != "draft" or draft.volume_id is None:
+        raise ValidationError("章节草稿不在可生成状态")
+    novel = session.get(Novel, draft.novel_id)
+    if novel is None:
+        raise NotFoundError("章节草稿小说不存在")
+    volumes = session.scalars(
+        select(Volume).where(Volume.novel_id == novel.id)
+    ).all()
+    documents = session.scalars(
+        select(Document).where(Document.novel_id == novel.id)
+    ).all()
+    tree = canonical_tree(volumes, documents)
+    try:
+        chapter_number = next_chapter_ordinal(tree, draft.volume_id)
+    except KeyError as error:
+        raise ValidationError("章节草稿分卷不属于当前小说") from error
+    previous_chapter = None
+    if chapter_number > 1:
+        previous = tree.chapters[chapter_number - 2]
+        working = session.get(DocumentWorkingCopy, previous.id)
+        if working is None:
+            raise ValidationError("上一章正文草稿不存在")
+        ending_limit = 1800 if kind == "chapter_storyline_recommendation" else 3000
+        previous_chapter = {
+            "title": display_chapter_title(previous.title, chapter_number - 1),
+            "ending": working.content_markdown[-ending_limit:],
+        }
+
+    storyline_rows = session.scalars(
+        select(Storyline)
+        .where(Storyline.novel_id == novel.id, Storyline.status != "archived")
+        .order_by(Storyline.position, Storyline.id)
+    ).all()
+    storylines = [
+        {
+            "id": str(item.id),
+            "type": item.storyline_type,
+            "title": item.title,
+            "description": item.description,
+            "status": item.status,
+            "progress": item.progress,
+        }
+        for item in storyline_rows
+    ]
+    novel_snapshot: dict[str, Any] = {
+        "title": novel.title,
+        "genre": novel.genre,
+        "subgenre": novel.subgenre,
+        "main_plot": novel.main_plot,
+    }
+    if kind == "chapter_storyline_recommendation":
+        if request_snapshot:
+            raise ValidationError("受管线路推荐不接受浏览器资料")
+        return {
+            "novel": novel_snapshot,
+            "chapter_number": chapter_number,
+            "storylines": storylines,
+            "previous_chapter": previous_chapter,
+        }
+
+    if set(request_snapshot) != {"rewrite_attempt"}:
+        raise ValidationError("受管章纲只接受重写次数")
+    rewrite_attempt = request_snapshot.get("rewrite_attempt")
+    if type(rewrite_attempt) is not int or not 1 <= rewrite_attempt <= 3:
+        raise ValidationError("受管章纲重写次数无效")
+
+    character_rows = session.scalars(
+        select(NovelCharacter)
+        .where(
+            NovelCharacter.novel_id == novel.id,
+            NovelCharacter.lifecycle_state == "active",
+        )
+        .order_by(NovelCharacter.position, NovelCharacter.id)
+    ).all()
+    foreshadow_rows = session.scalars(
+        select(Foreshadow)
+        .where(
+            Foreshadow.novel_id == novel.id,
+            Foreshadow.status.in_(("planned", "active")),
+        )
+        .order_by(Foreshadow.position, Foreshadow.id)
+    ).all()
+    data = dict(draft.data_json or {})
+    storyline_ids = _chapter_draft_id_set(
+        data, "storyline_ids", allowed={item.id for item in storyline_rows}
+    )
+    required_role_ids = _chapter_draft_id_set(
+        data, "required_role_ids", allowed={item.id for item in character_rows}
+    )
+    optional_role_ids = _chapter_draft_id_set(
+        data, "optional_role_ids", allowed={item.id for item in character_rows}
+    )
+    if required_role_ids & optional_role_ids:
+        raise ValidationError("章节草稿必需与可选角色重复")
+    foreshadow_ids = _chapter_draft_id_set(
+        data, "foreshadow_ids", allowed={item.id for item in foreshadow_rows}
+    )
+    allow_new_role = data.get("allow_new_role", True)
+    allow_exit_role = data.get("allow_exit_role", True)
+    auto_select_foreshadows = data.get("auto_select_foreshadows", False)
+    if any(
+        type(value) is not bool
+        for value in (allow_new_role, allow_exit_role, auto_select_foreshadows)
+    ):
+        raise ValidationError("章节草稿布尔选项无效")
+
+    characters = [
+        {
+            "id": str(item.id),
+            "role_type": item.role_type,
+            "name": item.name,
+            "description": item.description,
+            "details": item.details,
+            "version": item.version,
+        }
+        for item in character_rows
+    ]
+    foreshadows = [
+        {
+            "id": str(item.id),
+            "title": item.title,
+            "content": item.content,
+            "latest_progress": item.latest_progress,
+            "status": item.status,
+            "progress": item.progress,
+            "version": item.version,
+        }
+        for item in foreshadow_rows
+    ]
+    novel_snapshot.update(
+        highlight=novel.highlight,
+        background=novel.background,
+    )
+    return {
+        "novel": novel_snapshot,
+        "chapter_number": chapter_number,
+        "target_character_count": draft.target_character_count,
+        "expectation_text": draft.expectation_text,
+        "storylines": [
+            item for item, row in zip(storylines, storyline_rows, strict=True)
+            if row.id in storyline_ids
+        ],
+        "required_roles": [
+            item for item, row in zip(characters, character_rows, strict=True)
+            if row.id in required_role_ids
+        ],
+        "optional_roles": [
+            item for item, row in zip(characters, character_rows, strict=True)
+            if row.id in optional_role_ids
+        ],
+        "allow_new_role": allow_new_role,
+        "allow_exit_role": allow_exit_role,
+        "auto_select_foreshadows": auto_select_foreshadows,
+        "foreshadows": [
+            item for item, row in zip(foreshadows, foreshadow_rows, strict=True)
+            if row.id in foreshadow_ids
+        ],
+        "available_foreshadows": foreshadows if auto_select_foreshadows else [],
+        "previous_chapter": previous_chapter,
+        "rewrite_attempt": rewrite_attempt,
+        "rewrite_requirement": (
+            "上次章纲未达到260—500字或内容被截断，请完整重写，不能续写残句。"
+            if rewrite_attempt > 1
+            else ""
+        ),
+    }
+
+
+def prepare_creative_generation(
     session: Session,
     *,
     scope_type: str,
     scope_id: UUID,
     kind: str,
     input_snapshot: dict[str, Any],
-    execution_agent_id: str,
-    requested_provider_id: str,
-    requested_model_id: str,
-    generation_contract_version: str,
     novel_id: UUID | None = None,
     document_id: UUID | None = None,
     target_character_count: int | None = None,
-    force_new: bool = False,
     writing_retrieval: dict[str, Any] | None = None,
     writing_context: dict[str, Any] | None = None,
+    trusted_chapter_sources: bool = False,
 ) -> dict[str, Any]:
+    """Construct the one validated model-visible snapshot without creating a job."""
+
     if kind not in CREATIVE_GENERATION_KINDS:
         raise ValidationError("创作生成类型无效")
-    if not all(
-        value.strip()
-        for value in (
-            execution_agent_id,
-            requested_provider_id,
-            requested_model_id,
-            generation_contract_version,
-        )
-    ):
-        raise ValidationError("创作生成缺少可核验的 Agent 或 requested 模型证据")
     if novel_id:
         _require_novel(session, novel_id)
     if document_id:
@@ -4854,6 +5049,38 @@ def start_creative_generation(
             novel_id=novel_id,
             document_id=document_id,
         )
+        if novel_id is not None:
+            novel = session.get(Novel, novel_id)
+            if novel is None:
+                raise NotFoundError("选区编辑小说不存在")
+            # These server-owned labels are visible to both the method router
+            # and the final generation prompt. The strict client snapshot does
+            # not accept them, so an author cannot forge classification.
+            input_snapshot = {
+                **input_snapshot,
+                "genre": novel.genre,
+                "subgenre": novel.subgenre,
+            }
+    if kind == "character_profile_completion":
+        if target_character_count is not None or document_id is not None:
+            raise ValidationError("角色卡补全不接受文档或字数范围")
+        if novel_id is None or scope_type != "novel" or scope_id != novel_id:
+            raise ValidationError("角色卡补全必须绑定当前小说")
+        current_snapshot = build_character_profile_completion_snapshot(
+            session, novel_id
+        )
+        from .writing_skills.contracts import canonical_hash
+        if set(input_snapshot) == {"expected_source_hash"}:
+            expected_source_hash = input_snapshot.get("expected_source_hash")
+            if not isinstance(expected_source_hash, str):
+                raise ValidationError("角色卡补全来源声明无效")
+            if canonical_hash(current_snapshot) != expected_source_hash:
+                raise ValidationError("角色卡补全来源已变化")
+        elif canonical_hash(input_snapshot) != canonical_hash(current_snapshot):
+            # Preserve the dedicated legacy endpoint while ensuring callers
+            # cannot substitute a different profile snapshot.
+            raise ValidationError("角色卡补全输入不是当前服务端快照")
+        input_snapshot = current_snapshot
     _validate_creative_generation_scope(
         session,
         scope_type=scope_type,
@@ -4862,6 +5089,28 @@ def start_creative_generation(
         novel_id=novel_id,
         document_id=document_id,
     )
+    if trusted_chapter_sources and kind in {
+        "chapter_storyline_recommendation",
+        "chapter_outline",
+    }:
+        draft = session.get(ChapterCreationDraft, scope_id)
+        if draft is None or novel_id is None or draft.novel_id != novel_id:
+            raise ValidationError("章节辅助生成范围无效")
+        minimal_snapshot = (
+            {}
+            if kind == "chapter_storyline_recommendation"
+            else {"rewrite_attempt": input_snapshot.get("rewrite_attempt")}
+        )
+        rebuilt_snapshot = build_chapter_creation_generation_snapshot(
+            session,
+            draft,
+            kind=kind,
+            request_snapshot=minimal_snapshot,
+        )
+        minimal_keys = set() if kind == "chapter_storyline_recommendation" else {"rewrite_attempt"}
+        if set(input_snapshot) != minimal_keys and input_snapshot != rebuilt_snapshot:
+            raise ValidationError("章节辅助生成资料已变化")
+        input_snapshot = rebuilt_snapshot
     if kind in OUTLINE_GENERATION_KINDS:
         if novel_id is None:
             raise ValidationError("大纲生成缺少小说范围")
@@ -4881,6 +5130,219 @@ def start_creative_generation(
     if writing_context is not None:
         input_snapshot = dict(input_snapshot)
         input_snapshot["writing_context"] = writing_context
+    return input_snapshot
+
+
+def start_creative_generation(
+    session: Session,
+    *,
+    scope_type: str,
+    scope_id: UUID,
+    kind: str,
+    input_snapshot: dict[str, Any],
+    execution_agent_id: str,
+    requested_provider_id: str,
+    requested_model_id: str,
+    generation_contract_version: str,
+    novel_id: UUID | None = None,
+    document_id: UUID | None = None,
+    target_character_count: int | None = None,
+    force_new: bool = False,
+    writing_retrieval: dict[str, Any] | None = None,
+    writing_context: dict[str, Any] | None = None,
+    method_dispatch: "Claim | None" = None,
+    method_scope_version: int | None = None,
+) -> dict[str, Any]:
+    if not all(
+        value.strip()
+        for value in (
+            execution_agent_id,
+            requested_provider_id,
+            requested_model_id,
+            generation_contract_version,
+        )
+    ):
+        raise ValidationError("创作生成缺少可核验的 Agent 或 requested 模型证据")
+    input_snapshot = prepare_creative_generation(
+        session,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        kind=kind,
+        input_snapshot=input_snapshot,
+        novel_id=novel_id,
+        document_id=document_id,
+        target_character_count=target_character_count,
+        writing_retrieval=writing_retrieval,
+        writing_context=writing_context,
+        trusted_chapter_sources=method_dispatch is not None,
+    )
+    method_binding: dict[str, str] | None = None
+    if method_dispatch is not None:
+        from .writing_skills.contracts import (
+            FIXED_LOCAL_OWNER_ID,
+            FIXED_LOCAL_WORKSPACE_ID,
+            canonical_hash,
+        )
+        from .writing_skills.persistence import lock_assembled_action
+        from .writing_skills.primary import creative_primary_skill
+        from .writing_skills.projection import creative_projection
+
+        def authorize_method_scope(current_session: Session, scope: Any) -> None:
+            _validate_creative_generation_scope(
+                current_session,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                kind=kind,
+                novel_id=novel_id,
+                document_id=document_id,
+            )
+            if kind in {"novel_template", "novel_naming"}:
+                if (
+                    scope.kind != "creation_draft"
+                    or scope.scope_id != scope_id
+                    or scope.document_id is not None
+                    or scope.owner_id != FIXED_LOCAL_OWNER_ID
+                    or scope.workspace_id != FIXED_LOCAL_WORKSPACE_ID
+                ):
+                    raise ValidationError("method dispatch creation scope mismatch")
+                return
+            novel = current_session.get(Novel, novel_id) if novel_id is not None else None
+            if (
+                novel is None
+                or scope.kind != "novel"
+                or scope.scope_id != novel.id
+                or scope.document_id != document_id
+                or scope.owner_id != novel.owner_id
+                or scope.workspace_id != novel.workspace_id
+            ):
+                raise ValidationError("method dispatch novel scope mismatch")
+
+        method_dispatch = lock_assembled_action(
+            session, method_dispatch, authorize=authorize_method_scope
+        )
+        prompt = build_creative_generation_prompt(
+            {"kind": kind, "input_snapshot": input_snapshot}
+        )
+        operation = (
+            str(input_snapshot.get("operation") or "")
+            if kind == "selection_edit"
+            else ""
+        )
+        primary_skill = creative_primary_skill(kind, operation=operation)
+        frozen = method_dispatch.request
+        projection = creative_projection(
+            frozen.projection.scope,
+            kind,
+            input_snapshot,
+            prompt,
+            required_ids=frozen.preferences.required_ids,
+        )
+        if kind in {"novel_template", "novel_naming"}:
+            draft = session.get(NovelCreationDraft, scope_id)
+            if (
+                method_scope_version is None
+                or draft is None
+                or draft.version != method_scope_version
+            ):
+                raise ValidationError("method dispatch creation draft version changed")
+            projection = projection.model_copy(
+                update={
+                    "source_version": canonical_hash(
+                        {
+                            "model_source": projection.source_version,
+                            "scope_version": method_scope_version,
+                        }
+                    )
+                }
+            )
+        elif kind in OUTLINE_GENERATION_KINDS:
+            draft = session.get(OutlineDraft, scope_id)
+            audit_context = input_snapshot.get("audit_context")
+            if (
+                method_scope_version is None
+                or draft is None
+                or draft.version != method_scope_version
+                or not isinstance(audit_context, dict)
+                or audit_context.get("source_outline_version")
+                != method_scope_version
+            ):
+                raise ValidationError("method dispatch outline draft version changed")
+        elif kind in {"chapter_storyline_recommendation", "chapter_outline"}:
+            draft = session.get(ChapterCreationDraft, scope_id)
+            if (
+                method_scope_version is None
+                or draft is None
+                or draft.novel_id != novel_id
+                or draft.state != "draft"
+                or draft.version != method_scope_version
+            ):
+                raise ValidationError(
+                    "method dispatch chapter creation draft version changed"
+                )
+            projection = projection.model_copy(
+                update={
+                    "source_version": canonical_hash(
+                        {
+                            "model_source": projection.source_version,
+                            "scope_version": method_scope_version,
+                        }
+                    )
+                }
+            )
+        elif kind in {"review", "selection_edit"}:
+            working_copy = session.get(DocumentWorkingCopy, document_id)
+            selection_base = input_snapshot.get("base")
+            if (
+                method_scope_version is None
+                or document_id is None
+                or working_copy is None
+                or working_copy.draft_version != method_scope_version
+                or (
+                    kind == "review"
+                    and working_copy.content_hash
+                    != input_snapshot.get("content_hash")
+                )
+                or (
+                    kind == "selection_edit"
+                    and (
+                        not isinstance(selection_base, dict)
+                        or working_copy.content_hash
+                        != selection_base.get("field_value_sha256")
+                    )
+                )
+            ):
+                raise ValidationError("method dispatch document version changed")
+            projection = projection.model_copy(
+                update={
+                    "source_version": canonical_hash(
+                        {
+                            "model_source": projection.source_version,
+                            "scope_version": method_scope_version,
+                        }
+                    )
+                }
+            )
+        packet = method_dispatch.packet
+        if (
+            frozen.identity.agent_id != execution_agent_id
+            or frozen.provider_id != requested_provider_id
+            or frozen.model_id != requested_model_id
+            or frozen.projection != projection
+            or packet.plan.primary_skill != primary_skill
+            or packet.plan.task != projection.task
+            or not any(
+                block.skill_id == primary_skill
+                and block.path == "SKILL.md"
+                and block.text.strip()
+                for block in packet.blocks
+            )
+        ):
+            raise ValidationError("method dispatch source, model or primary Skill changed")
+        method_binding = {
+            "schema_version": "job-skill-invocation/1",
+            "method_input_hash": packet.method_input_hash,
+            "primary_skill": primary_skill,
+        }
     serialized = json.dumps(
         {
             "input_snapshot": input_snapshot,
@@ -4889,6 +5351,7 @@ def start_creative_generation(
             "requested_model_id": requested_model_id,
             "generation_contract_version": generation_contract_version,
             "target_character_count": target_character_count,
+            "method_binding": method_binding,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -4936,6 +5399,17 @@ def start_creative_generation(
         .order_by(CreativeGenerationJob.attempt.desc())
     )
     if existing and not force_new and existing.state in {"running", "ready"}:
+        if method_dispatch is not None:
+            from .writing_skills.persistence import advance_in_transaction
+            linked = advance_in_transaction(
+                session,
+                method_dispatch,
+                "dispatch_started",
+                job_ref=f"creative:{existing.id}",
+            )
+            if existing.state == "ready":
+                advance_in_transaction(session, linked, "dispatched")
+            session.commit()
         payload = _creative_job_payload(existing, include_snapshot=True)
         payload["should_execute"] = False
         return payload
@@ -4959,6 +5433,14 @@ def start_creative_generation(
         attempt=attempt,
     )
     session.add(job)
+    if method_dispatch is not None:
+        from .writing_skills.persistence import advance_in_transaction
+        advance_in_transaction(
+            session,
+            method_dispatch,
+            "dispatch_started",
+            job_ref=f"creative:{job.id}",
+        )
     session.commit()
     payload = _creative_job_payload(job, include_snapshot=True)
     payload["should_execute"] = True

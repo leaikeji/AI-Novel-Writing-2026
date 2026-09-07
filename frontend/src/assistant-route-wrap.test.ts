@@ -359,6 +359,43 @@ describe("assistant route wrap", () => {
     React.unmount();
   });
 
+  it("clears native method evidence when the novel document scope changes", () => {
+    const React = new HookTestReact();
+    let route = workbenchRoute("document-1");
+    const clear = vi.fn();
+    const nativeRuntime = {
+      bind: vi.fn(),
+      clear,
+      getSnapshot: vi.fn(() => ({ binding: null, status: null, checking: false, error: null })),
+      subscribe: vi.fn(() => vi.fn()),
+      dispose: vi.fn(),
+    };
+    const wrap = createAssistantRouteWrap({
+      React,
+      Workbench: () => "workbench",
+      getRouteSession: () => route,
+      getLocation: () => ({ pathname: "/chat/session-1", search: "" }),
+      eventTarget: null,
+      createResizeObserver: () => null,
+      createAssistantPane: () => () => "assistant",
+      nativeWritingMethodRuntime: nativeRuntime,
+    });
+    const Component = wrap(() => "native-chat") as () => unknown;
+
+    React.render(Component);
+    React.flushEffects();
+    expect(clear).toHaveBeenCalledTimes(1);
+
+    React.render(Component);
+    React.flushEffects();
+    expect(clear).toHaveBeenCalledTimes(1);
+
+    route = workbenchRoute("document-2");
+    React.render(Component);
+    React.flushEffects();
+    expect(clear).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the public session getter when the host session hook is temporarily null", () => {
     const React = new HookTestReact();
     const runtime = new NovelAssistantContextRuntime();

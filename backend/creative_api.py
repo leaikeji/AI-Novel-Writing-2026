@@ -6,7 +6,7 @@ import json
 import time
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -137,7 +137,9 @@ from .generation_dependencies import (
     EffectiveModelProbe,
     NovelModelEvidenceRejected,
     failed_novel_model_evidence,
+    get_creative_effective_model,
     get_novel_effective_model,
+    get_character_profile_legacy_effective_model,
     get_novel_effective_model_probe,
     get_novel_generation_ctx,
     verify_novel_model_reply,
@@ -195,7 +197,10 @@ async def _creative_writing_retrieval(
     purpose: RetrievalPurpose | None = None
     title = outline = expectation = selection = before = after = instruction = ""
     if request.kind == "chapter_outline":
-        purpose = RetrievalPurpose.CHAPTER_OUTLINE
+        # A not-yet-created chapter has no authoritative timeline position.
+        # Its server-built snapshot contains only the canonical prior chapter;
+        # broad retrieval here could otherwise expose later/future chapters.
+        return None
     elif request.kind == "review":
         purpose = RetrievalPurpose.CHAPTER_REVIEW
     elif request.kind == "selection_edit":
@@ -243,6 +248,62 @@ async def _creative_writing_retrieval(
         narrative_sequence=position.narrative_sequence if position else None,
         story_sequence_cutoff=position.story_sequence_cutoff if position else None,
     )
+
+
+async def _creative_generation_context(
+    session: Session,
+    request: StartCreativeGenerationRequest,
+    configured_model: ModelAudit,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Build the existing retrieval/Context V4 input after action claim."""
+
+    writing_retrieval = await _creative_writing_retrieval(session, request)
+    writing_context = None
+    if (
+        request.document_id is not None
+        and request.kind in {"chapter_outline", "review", "selection_edit"}
+    ):
+        if configured_model.effective_max_input_length is None:
+            raise ValidationError("当前正文模型没有提供可核验的有效上下文窗口")
+        position = resolve_writing_position(session, request.document_id)
+        context_purpose = (
+            ContextRetrievalPurpose.CHAPTER_OUTLINE
+            if request.kind == "chapter_outline"
+            else ContextRetrievalPurpose.REVIEW
+            if request.kind == "review"
+            else ContextRetrievalPurpose.SELECTION
+        )
+        brief = session.scalar(
+            select(ChapterBrief).where(
+                ChapterBrief.document_id == request.document_id
+            )
+        )
+        target = request.target_character_count or 0
+        reserved_output = max(
+            1024,
+            min(
+                configured_model.effective_max_input_length // 4,
+                target * 2
+                if target
+                else configured_model.effective_max_input_length // 8,
+            ),
+        )
+        writing_context = assemble_writing_context_from_db(
+            session,
+            position=position,
+            purpose=context_purpose,
+            requested_provider_id=configured_model.provider_id,
+            requested_model_id=configured_model.model_id,
+            budget_provider_id=configured_model.provider_id,
+            budget_model_id=configured_model.model_id,
+            effective_context_window_tokens=(
+                configured_model.effective_max_input_length
+            ),
+            reserved_output_tokens=reserved_output,
+            chapter_brief=brief,
+            writing_retrieval=writing_retrieval,
+        )
+    return writing_retrieval, writing_context
 
 
 def _raise(error: Exception) -> None:
@@ -650,10 +711,24 @@ async def character_profile_completion_generate(
     novel_id: UUID,
     request: GenerateCharacterProfileCompletionRequest,
     ctx=Depends(get_novel_generation_ctx),
-    configured_model: ModelAudit = Depends(get_novel_effective_model),
+    configured_model: ModelAudit | None = Depends(
+        get_character_profile_legacy_effective_model
+    ),
     model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
+    from .writing_skills.creative import creative_button_released
+
+    if creative_button_released("character_profile_completion"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "type": "managed_writing_action_required",
+                "message": "当前人物卡补全已启用受管写作方法，请刷新页面后重试",
+            },
+        )
+    if configured_model is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "generation model unavailable")
     job: dict[str, object] | None = None
     owns_execution = False
     model_evidence: dict[str, object] | None = None
@@ -1330,53 +1405,51 @@ def chapter_drafts_complete(
 async def creative_generations_create(
     request: StartCreativeGenerationRequest,
     ctx=Depends(get_novel_generation_ctx),
-    configured_model: ModelAudit = Depends(get_novel_effective_model),
+    configured_model: ModelAudit | None = Depends(get_creative_effective_model),
     model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
+    http_request: Request = None,
 ) -> dict[str, object]:
+    if request.writing_action is not None:
+        from .writing_skills.creative import generate_managed_creation_helper
+
+        async def context_loader(
+            configured: ModelAudit,
+        ) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+            return await _creative_generation_context(
+                session,
+                request,
+                configured,
+            )
+
+        return await generate_managed_creation_helper(
+            request=request,
+            ctx=ctx,
+            model_probe=model_probe,
+            session=session,
+            asgi_app=http_request.app,
+            context_loader=context_loader,
+        )
+    from .writing_skills.creative import creative_button_released
+
+    if creative_button_released(request.kind, request.input_snapshot):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "type": "managed_writing_action_required",
+                "message": "当前创作入口已启用受管写作方法，请刷新页面后重试",
+            },
+        )
+    if configured_model is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "generation model unavailable")
     job: dict[str, object] | None = None
     model_evidence: dict[str, object] | None = None
     try:
-        writing_retrieval = await _creative_writing_retrieval(session, request)
-        writing_context = None
-        if (
-            request.document_id is not None
-            and request.kind in {"chapter_outline", "review", "selection_edit"}
-        ):
-            if configured_model.effective_max_input_length is None:
-                raise ValidationError("当前正文模型没有提供可核验的有效上下文窗口")
-            position = resolve_writing_position(session, request.document_id)
-            context_purpose = (
-                ContextRetrievalPurpose.CHAPTER_OUTLINE
-                if request.kind == "chapter_outline"
-                else ContextRetrievalPurpose.REVIEW
-                if request.kind == "review"
-                else ContextRetrievalPurpose.SELECTION
-            )
-            brief = session.scalar(
-                select(ChapterBrief).where(ChapterBrief.document_id == request.document_id)
-            )
-            target = request.target_character_count or 0
-            reserved_output = max(
-                1024,
-                min(
-                    configured_model.effective_max_input_length // 4,
-                    target * 2 if target else configured_model.effective_max_input_length // 8,
-                ),
-            )
-            writing_context = assemble_writing_context_from_db(
-                session,
-                position=position,
-                purpose=context_purpose,
-                requested_provider_id=configured_model.provider_id,
-                requested_model_id=configured_model.model_id,
-                budget_provider_id=configured_model.provider_id,
-                budget_model_id=configured_model.model_id,
-                effective_context_window_tokens=configured_model.effective_max_input_length,
-                reserved_output_tokens=reserved_output,
-                chapter_brief=brief,
-                writing_retrieval=writing_retrieval,
-            )
+        writing_retrieval, writing_context = await _creative_generation_context(
+            session,
+            request,
+            configured_model,
+        )
         job = start_creative_generation(
             session,
             scope_type=request.scope_type,

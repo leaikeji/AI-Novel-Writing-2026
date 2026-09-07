@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -150,17 +150,21 @@ def test_endpoint_creates_no_store_ref_and_runtime_can_lease_it(client: TestClie
     payload = response.json()
     assert set(payload) == {
         "contextRef",
+        "writingActionId",
         "expiresAt",
         "contextRevision",
         "payloadCharacters",
     }
     assert len(payload["contextRef"]) == 43
+    assert str(UUID(payload["writingActionId"])) == payload["writingActionId"]
     leased = assistant_api.assistant_context_registry.lease_for_runtime(
         payload["contextRef"],
         agent_id="ai-novel-writer",
         session_id="session-1",
     )
     assert leased.accepted
+    assert leased.writing_action_id == UUID(payload["writingActionId"])
+    assert leased.runtime_app is client.app
     assert leased.snapshot["novel"]["id"] == str(NOVEL_ID)
 
 
@@ -180,6 +184,29 @@ def test_endpoint_supports_a_first_ref_without_a_native_session(
     )
     assert leased.accepted
     assert leased.snapshot["sessionId"] == "first-native-session"
+
+
+def test_each_prepared_send_gets_a_new_action_but_ref_retry_keeps_identity(
+    client: TestClient,
+) -> None:
+    first = client.post("/assistant-contexts", json=body()).json()
+    second = client.post("/assistant-contexts", json=body()).json()
+    assert first["contextRef"] != second["contextRef"]
+    assert first["writingActionId"] != second["writingActionId"]
+
+    first_lease = assistant_api.assistant_context_registry.lease_for_runtime(
+        first["contextRef"],
+        agent_id="ai-novel-writer",
+        session_id="session-1",
+    )
+    retry_lease = assistant_api.assistant_context_registry.lease_for_runtime(
+        first["contextRef"],
+        agent_id="ai-novel-writer",
+        session_id="session-1",
+    )
+    assert first_lease.accepted and retry_lease.accepted
+    assert first_lease.writing_action_id == retry_lease.writing_action_id
+    assert str(first_lease.writing_action_id) == first["writingActionId"]
 
 
 def test_endpoint_accepts_the_frozen_story_ledger_context(

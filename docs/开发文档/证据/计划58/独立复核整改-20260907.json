@@ -1,0 +1,78 @@
+{
+  "schema_version": "plan58-independent-audit-remediation/1",
+  "observed_at": "2026-09-07T18:10:00+08:00",
+  "status": "partial",
+  "fixed": {
+    "character_profile_session_ticket": {
+      "status": "pass_automated",
+      "product_file_sha256": "131893d17f3c2da0dd4eb7e27122c47ce44c273fc1008ffbcfea5431e5824743",
+      "assertions": [
+        "ticket persisted before POST",
+        "rebuilt client performs GET recovery only"
+      ]
+    },
+    "legacy_bypass_gate": {
+      "status": "pass_automated",
+      "assertions": [
+        "released chapter body without writing_action returns managed_writing_action_required",
+        "released managed creative kinds without writing_action return managed_writing_action_required",
+        "dedicated character profile legacy endpoint is closed while managed gate is released",
+        "rejections occur with zero model, catalog and chat calls",
+        "non-body selection and explicitly closed server gates retain compatibility"
+      ]
+    },
+    "chapter_helper_authoritative_projection": {
+      "status": "pass_automated",
+      "service_file_sha256": "3d90a54cb08e86a0679eabe8b206194fddb289b7e2af0cc714f6b877c48fd39c",
+      "assertions": [
+        "managed browser payload cannot contain novel, storyline, character, foreshadow or previous chapter objects",
+        "server rebuilds the current novel, persisted draft selections, canonical prior chapter and bounded retry instruction",
+        "foreign persisted ids fail before model and catalog",
+        "chapter outline broad retrieval is disabled without an authoritative story position",
+        "source change is rechecked before the generation model call"
+      ]
+    }
+  },
+  "still_blocked": {
+    "production_mechanism_source": {
+      "status": "unresolved_by_design",
+      "reason": "The current schema has no authoritative mechanism_tags field. Ordinary outline, body and idea prose remain content; keywords cannot be promoted to mechanism facts.",
+      "impact": "golden-finger-writing is available and may be author-required, but cannot be claimed as automatically selected from implicit plot by the deterministic production route; this belongs to the separately gated semantic branch"
+    },
+    "native_entry": "blocked_by_public_per-send-task-and-history-isolation-contract",
+    "semantic_release": "blocked_pending_real-S-and-E-gates-and-approved-model-budget",
+    "remote_cancellation": "blocked_no_public-confirmed-provider-termination"
+  },
+  "tests": {
+    "managed_backend_targeted": "57 passed",
+    "writing_skills_suite": "310 passed after D-E button projection cases were added",
+    "legacy_character_and_read_safety": "26 passed, 6 skipped",
+    "frontend_full": "154 files, 1365 tests passed",
+    "full_backend_first_run": "7 failed; all were test compatibility-fixture updates, not counted as pass",
+    "previously_failed_cases_rerun": "7 passed",
+    "full_backend_misconfigured_database_attempts": "not counted: one run used the wrong database name and one omitted the postgres username; safety fixtures/connection rejected both before the affected tests",
+    "full_backend_final": "pass: reached 100 percent with exit code 0 against 127.0.0.1:55471/ai_novel_s58_test",
+    "frontend_typecheck": "pass",
+    "frontend_build": "pass: 196 modules transformed",
+    "skill_and_qwenpaw_contracts": "pass",
+    "plugin_package": "pass",
+    "skill_creator_quick_validate": "pass for suspense-writing and golden-finger-writing in isolated QwenPaw container"
+  },
+  "semantic_components": {
+    "pure_contract_sha256": "cc8a15a8c3befab5ced7ccb3f3d231677b30e6b7f3db3d2911ca3167d9f2e07d",
+    "runtime_adapter_sha256": "799c6edb20cab5f32dd9d3d257af3e26bc9e971ee9b4ea5dd946b4d870bc19a0",
+    "button_orchestration_connected_default_off": true,
+    "public_chat_adapter_fake_verified": true,
+    "isolated_qwenpaw_fake_receipts": 2,
+    "product_connected": false,
+    "public_release": false,
+    "real_model_calls": 0
+  },
+  "release_decision": {
+    "G_BUTTON": "pass_isolated_deterministic_buttons_after_current-package_positive_product_click",
+    "G_NATIVE": "blocked",
+    "G_SEMANTIC_BUTTON": "blocked",
+    "G_SEMANTIC_NATIVE": "blocked",
+    "G_FULL": "blocked"
+  }
+}

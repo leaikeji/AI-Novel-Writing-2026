@@ -1267,6 +1267,7 @@ def _scope_snapshot(
             story_sequence_cutoff=position.story_sequence_cutoff,
             timeline_mapping_version=position.mapping_version,
             chapter_id=position.document_id,
+            document_revision_id=position.document_revision_id,
         ),
         perspective=PerspectiveV1(kind=PerspectiveKind.AUTHOR),
         budget=budget,

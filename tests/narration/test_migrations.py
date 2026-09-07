@@ -38,7 +38,7 @@ from backend.narration.schema_readiness import (
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260903_0040"
+HEAD_REVISION = "20260905_0042"
 AUTOMATIC_VOICE_PREPARATION_REVISION = "20260903_0040"
 WORKING_COPY_COUNT_REVISION = "20260902_0039"
 STORY_LEDGER_SINGLE_CONTRACT_REVISION = "20260902_0038"
@@ -153,6 +153,8 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260905_0041"
+    assert scripts.get_revision("20260905_0041").down_revision == AUTOMATIC_VOICE_PREPARATION_REVISION
     assert (
         scripts.get_revision(AUTOMATIC_VOICE_PREPARATION_REVISION).down_revision
         == WORKING_COPY_COUNT_REVISION

@@ -162,6 +162,7 @@ async def assistant_contexts_create(
             binding=binding,
             snapshot=snapshot,
             request_body_size=len(raw),
+            runtime_app=request.app,
         )
     except ContextRefCreateError as error:
         raise _creation_error(error) from None
@@ -172,6 +173,7 @@ async def assistant_contexts_create(
         headers={"Cache-Control": "no-store"},
         content={
             "contextRef": created.context_ref,
+            "writingActionId": str(created.writing_action_id),
             "expiresAt": expires_at,
             "contextRevision": created.context_revision,
             "payloadCharacters": created.payload_characters,

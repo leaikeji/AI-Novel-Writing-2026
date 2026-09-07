@@ -13,6 +13,8 @@ import {
   createRetrievalStatusNotice,
   type RetrievalSummaryV1,
 } from "./retrieval-status";
+import type { WritingMethodStatus } from "./writing-skills/contracts";
+import { createWritingMethodReceiptNotice } from "./writing-skills/status";
 
 
 export type SelectionEditReviewSurfaceReactRuntime = Pick<
@@ -51,6 +53,7 @@ export interface SelectionEditReviewSurfaceProps {
   readonly className?: string;
   readonly retrievalSummary?: RetrievalSummaryV1 | null;
   readonly retrievalNovelId?: string;
+  readonly writingMethodStatus?: WritingMethodStatus | null;
 }
 
 
@@ -162,6 +165,7 @@ export function createSelectionEditReviewSurface(
 ): (props: SelectionEditReviewSurfaceProps) => unknown {
   const h = React.createElement;
   const RetrievalStatusNotice = createRetrievalStatusNotice(React);
+  const WritingMethodReceiptNotice = createWritingMethodReceiptNotice(React);
 
   return function SelectionEditReviewSurface(
     props: SelectionEditReviewSurfaceProps,
@@ -302,6 +306,9 @@ export function createSelectionEditReviewSurface(
           novelId: props.retrievalNovelId,
           compact: true,
         })
+      : null;
+    const methodReceipt = props.writingMethodStatus
+      ? h(WritingMethodReceiptNotice, { status: props.writingMethodStatus })
       : null;
 
     const renderDiff = (
@@ -474,6 +481,7 @@ export function createSelectionEditReviewSurface(
         commonRootProps,
         heading(state.phase === "preparing" ? "正在准备 AI 修改" : "AI 正在生成候选"),
         liveStatus,
+        methodReceipt,
         retrievalNotice,
         originalText,
         h(
@@ -494,6 +502,7 @@ export function createSelectionEditReviewSurface(
         commonRootProps,
         heading("选区编辑失败"),
         liveStatus,
+        methodReceipt,
         retrievalNotice,
         h("p", { className: "anw-selection-edit-review-error" }, state.message),
         originalText,
@@ -519,6 +528,7 @@ export function createSelectionEditReviewSurface(
         commonRootProps,
         heading("内容发生冲突"),
         liveStatus,
+        methodReceipt,
         retrievalNotice,
         h("p", { className: "anw-selection-edit-review-error" }, state.message),
         draft ? renderDiff(draft, false) : originalText,
@@ -550,6 +560,7 @@ export function createSelectionEditReviewSurface(
         commonRootProps,
         heading("AI 修改已应用"),
         liveStatus,
+        methodReceipt,
         retrievalNotice,
         h("p", null, state.message),
         h(
@@ -684,6 +695,7 @@ export function createSelectionEditReviewSurface(
           : null,
       ),
       retrievalNotice,
+      methodReceipt,
       metrics.changeCount === 0
         ? h(
           "div",

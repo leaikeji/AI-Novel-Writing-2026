@@ -276,6 +276,7 @@ def test_full_single_timeline_loader_freezes_a_v2_snapshot_without_unbounded_sou
         timeline_id=timeline.id,
         story_sequence_cutoff=1,
         mapping_version="single-timeline-identity/1",
+        document_revision_id=_uid(11),
     )
 
     snapshot = assemble_writing_context_from_db(
@@ -293,5 +294,6 @@ def test_full_single_timeline_loader_freezes_a_v2_snapshot_without_unbounded_sou
 
     assert snapshot["schema_version"] == "writing-context-snapshot/2"
     assert snapshot["context_policy_version"] == "context-source-policy/1"
+    assert snapshot["envelope"]["position"]["document_revision_id"] == str(_uid(11))
     assert snapshot["envelope"]["current_story_facts"] == []
     assert snapshot["envelope"]["included_blocks"] == []

@@ -1,0 +1,51 @@
+{
+  "schema_version": "plan58-native-compression-probe/1",
+  "recorded_at": "2026-09-07T22:26:00+08:00",
+  "runtime": {
+    "qwenpaw": "2.1.0",
+    "agentscope": "2.0.4.post1",
+    "container": "ai-novel-2026-qwenpaw-lab",
+    "provider_calls": 0,
+    "host_state_mutation": false,
+    "host_secret_read": false
+  },
+  "public_contract": {
+    "request_payload_transform_is_synchronous": true,
+    "middleware_has_request_session_agent_context": true,
+    "compression_uses_on_compress_context": true,
+    "compression_model_calls_traverse_on_model_call": true
+  },
+  "result": {
+    "sdk_injection_calls": 2,
+    "packet_counts": [1, 1],
+    "compression_packet_counts": [0],
+    "writing_model_calls": 2,
+    "compression_model_calls": 1,
+    "authorization_checks": 3,
+    "tool_io": 0,
+    "tool_calls_intercepted": 1,
+    "binding_expired_after_exit": true
+  },
+  "tests": {
+    "command": ".venv/bin/python -m pytest -q tests/writing_skills/test_load_policy.py",
+    "collected": 25,
+    "result": "passed"
+  },
+  "source_hashes": {
+    "backend/writing_skills/load_policy.py": "609d7b573ceba482bafc9c9c1211fdc44e453071bb914b16552c2a682166648c",
+    "tests/writing_skills/test_load_policy.py": "b91595d19c04e62cacb0384df972de25796be4fd5293995567549e45ca2e76a7",
+    "docs/开发文档/证据/计划58/public_contract_probe.py": "894d7295ada0391b29a14256c4f9137a00b027e77449589d750f470eb4c4e3bc"
+  },
+  "gate": {
+    "compression_isolation_technical_probe": "passed",
+    "G-NATIVE": "blocked",
+    "remaining": [
+      "production per-send action",
+      "current request task projection",
+      "durable pre-model claim",
+      "scope revalidation before model",
+      "native method status UI",
+      "real native page non-regression"
+    ]
+  }
+}

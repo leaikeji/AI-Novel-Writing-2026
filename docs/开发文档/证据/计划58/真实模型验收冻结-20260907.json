@@ -1,0 +1,64 @@
+{
+  "schema_version": "plan58-real-model-evaluation-freeze/1",
+  "frozen_at": "2026-09-07T21:17:01+08:00",
+  "authorization": {
+    "approved": true,
+    "user_requirement": "模拟真实写作，不要乱取书名",
+    "maximum_auxiliary_route_calls": 40,
+    "maximum_short_generation_calls": 8
+  },
+  "effective_model": {
+    "agent_id": "ai-novel-writer",
+    "provider_id": "minimax-cn",
+    "model_id": "MiniMax-M3",
+    "source": "GET /api/models/active?scope=effective&agent_id=ai-novel-writer",
+    "mutation": "none"
+  },
+  "work": {
+    "title": "雾宅来信",
+    "kind": "synthetic_isolated_evaluation_work",
+    "author_novel_mutation": false,
+    "formal_revision_mutation": false,
+    "story_ledger_mutation": false
+  },
+  "mainline": {
+    "characters": ["林澈", "周栩", "孟青山", "许遥"],
+    "facts": [
+      "连日暴雨切断封闭小镇与外界交通",
+      "停职刑警林澈收到一封署名死者的新证词",
+      "来信、档案编号和借阅记录的时间互相冲突",
+      "旧案涉及被篡改卷宗与失踪者名单",
+      "林澈依靠核验、访谈、路线和证据链调查，没有超常能力"
+    ]
+  },
+  "mechanism_stress_branch": {
+    "same_work_and_case": true,
+    "single_added_variable": "林澈每天午夜只能收到一段次日匿名画面",
+    "limits": ["画面没有声音", "画面可能断章取义", "主动核验会暴露林澈的行踪"],
+    "authority": "evaluation_only_not_formal_canon"
+  },
+  "generation_design": {
+    "button_short_generations": 4,
+    "native_short_generations": 4,
+    "comparison_rule": "同模型、同作品、同任务事实；只改变确定性或语义取得的方法集合",
+    "forbidden": ["临时另起书名", "写回正式小说", "把模型自述当方法装载证据"]
+  },
+  "budget_ledger": {
+    "auxiliary_route_calls_used": 21,
+    "short_generation_calls_used": 6,
+    "failed_or_unknown_calls_used": 5
+  },
+  "completed_attempts": {
+    "technical_probe": "真实模型语义探针-S01-20260907.json",
+    "semantic_s_group_v1": "真实模型S组语义路由-20260907.json",
+    "fixed_book_writing_ab_v1": "雾宅来信-真实写作AB-20260907.json",
+    "fixed_book_writing_retry_v1": "雾宅来信-真实写作纠错-20260907.json"
+  },
+  "preflight": {
+    "isolated_host_model": "s58-fake / s58-fake-model",
+    "real_host_candidate_plugin_install": false,
+    "provider_secret_read": false,
+    "provider_secret_copy": false,
+    "long_lived_model_switch": false
+  }
+}

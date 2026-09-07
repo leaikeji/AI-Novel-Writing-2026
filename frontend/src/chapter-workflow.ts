@@ -63,6 +63,15 @@ import {
 } from "./chapter-intelligence";
 import { chapterOrdinalFor } from "./chapter-tree";
 import { chapterDisplayTitle } from "./presenters";
+import { ChapterMethodClient, chapterMethodCatalog, writingPageTabId } from "./writing-skills/chapter";
+import type { WritingMethodSnapshot } from "./writing-skills/api";
+import type { WritingMethodStatus } from "./writing-skills/contracts";
+import {
+  createWritingMethodReceiptNotice,
+  createWritingMethodStatusNotice,
+} from "./writing-skills/status";
+import { createChapterMethodHistory } from "./writing-skills/history";
+import { ReviewMethodClient, reviewMethodCatalog } from "./writing-skills/review";
 import {
   createRetrievalStatusNotice,
   retrievalSummaryFromJob,
@@ -96,6 +105,9 @@ const {
 } = host.antdIcons;
 const TextArea = Input.TextArea;
 const RetrievalStatusNotice = createRetrievalStatusNotice(React);
+const WritingMethodStatusNotice = createWritingMethodStatusNotice(React);
+const WritingMethodReceiptNotice = createWritingMethodReceiptNotice(React);
+const ChapterMethodHistoryNotice = createChapterMethodHistory(React);
 
 
 interface ChapterWorkflowProps {
@@ -684,14 +696,64 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [titleToolsTarget, setTitleToolsTarget] = React.useState(null as HTMLElement | null);
   const [reviewJob, setReviewJob] = React.useState(null as CreativeGenerationRecord | null);
+  const [reviewMethodStatus, setReviewMethodStatus] = React.useState(
+    null as WritingMethodStatus | null,
+  );
+  const [reviewMethodNames, setReviewMethodNames] = React.useState(
+    {} as Readonly<Record<string, string>>,
+  );
+  const reviewMethodClientRef = React.useRef(null as ReviewMethodClient | null);
   const [bodyRetrievalSummary, setBodyRetrievalSummary] = React.useState(
     null as RetrievalSummaryV1 | null,
   );
   const [activeGenerationModel, setActiveGenerationModel] = React.useState(null as GenerationModelStatus | null);
   const [busyAction, setBusyAction] = React.useState("");
+  const methodClientRef = React.useRef(null as ChapterMethodClient | null);
+  const methodReadyRef = React.useRef(null as Promise<ChapterMethodClient | null> | null);
+  const bodySubmissionRef = React.useRef(null as string | null);
+  const [methodSnapshot, setMethodSnapshot] = React.useState(null as WritingMethodSnapshot | null);
+  const [methodNames, setMethodNames] = React.useState({} as Readonly<Record<string, string>>);
+  const [methodMode, setMethodMode] = React.useState("auto" as "auto" | "generic_only");
+  const [methodAvailability, setMethodAvailability] = React.useState("loading" as "loading" | "available" | "legacy" | "unavailable");
+  // A return to the same document is a new visit; old modal callbacks stay revoked.
+  const chapterVisit = React.useMemo(() => ({ active: false }), [novel.id, document.id]);
+  const requireChapterVisit = () => {
+    if (!chapterVisit.active) throw new Error("章节已切换，原操作已失效");
+  };
+  React.useEffect(() => {
+    chapterVisit.active = true;
+    return () => { chapterVisit.active = false; };
+  }, [chapterVisit]);
+
+  React.useEffect(() => {
+    let active = true;
+    let client: ChapterMethodClient | null = null;
+    methodClientRef.current = null;
+    bodySubmissionRef.current = null;
+    setMethodSnapshot(null);
+    setMethodNames({});
+    setMethodMode("auto");
+    setMethodAvailability("loading");
+    const ready = Promise.resolve().then(() => chapterMethodCatalog(document.id, novel.id, writingPageTabId())).then(catalog => {
+      if (!active) throw new Error("章节已切换，写作方法目录结果已隔离");
+      setMethodNames(catalog.displayNames);
+      setMethodAvailability(!catalog.catalogAvailable ? "unavailable" : catalog.available ? "available" : "legacy");
+      client = new ChapterMethodClient(catalog.binding, snapshot => {
+        if (active) setMethodSnapshot(snapshot);
+      }, apiRequest, sessionStorage, { managed: catalog.available, catalog: catalog.catalogAvailable });
+      methodClientRef.current = client;
+      if (client.getSnapshot().action) void client.recover().catch(() => undefined); // GET-only refresh recovery.
+      return client;
+    });
+    methodReadyRef.current = ready;
+    void ready.catch(() => { if (active) setMethodAvailability("unavailable"); }); // No silent fallback.
+    return () => { active = false; client?.dispose(); };
+  }, [document.id, novel.id]);
 
   const loadGenerationModel = async (): Promise<GenerationModelStatus> => {
+    requireChapterVisit();
     const current = await getGenerationModelStatus();
+    requireChapterVisit();
     setActiveGenerationModel(current);
     return current;
   };
@@ -716,7 +778,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setSelectedIntelligenceItemIds([]);
     setReviewOpen(false);
     setReviewJob(null);
+    reviewMethodClientRef.current = null;
+    setReviewMethodStatus(null);
+    setReviewMethodNames({});
     setBodyRetrievalSummary(null);
+    setBusyAction("");
+    setActiveGenerationModel(null);
+    onBodyGenerationStateChange?.(false, "");
   }, [document.id]);
 
   React.useEffect(() => {
@@ -735,7 +803,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   }, [titleToolsTargetId, document.id]);
 
   const loadBrief = async (): Promise<ChapterBriefRecord> => {
+    requireChapterVisit();
     const loaded = await apiRequest<ChapterBriefRecord>(`/documents/${document.id}/chapter-brief`);
+    requireChapterVisit();
     const loadedForm = briefToForm(loaded);
     setBrief(loaded);
     briefFormRef.current = loadedForm;
@@ -887,24 +957,30 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   };
 
   const loadAssets = async () => {
+    requireChapterVisit();
     const loaded = await apiRequest<PrivateAssetRecord[]>("/private-assets");
+    requireChapterVisit();
     setAssets(loaded.filter((item) => !item.archived));
     return loaded;
   };
 
   const openAssetPicker = async () => {
+    if (!chapterVisit.active) return;
+    setMethodMode("auto"); // A fresh author action starts with the published default.
     setBusyAction("assets-load");
     try {
       await loadAssets();
       setAssetPickerOpen(true);
     } catch (reason) {
+      if (!chapterVisit.active) return;
       onError(errorMessage(reason, "加载私有库配置失败"));
     } finally {
-      setBusyAction("");
+      if (chapterVisit.active) setBusyAction("");
     }
   };
 
   const openGenerationOptions = () => {
+    if (!chapterVisit.active) return;
     if (document.visible_character_count === 0) {
       void openAssetPicker();
       return;
@@ -922,10 +998,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   if (generateActionRef) generateActionRef.current = openGenerationOptions;
 
   const ensureBrief = async (): Promise<ChapterBriefRecord> => {
+    requireChapterVisit();
     const currentBrief = brief ?? await loadBrief();
+    requireChapterVisit();
     if (currentBrief.version > 0 && currentBrief.target_word_count >= 500) return currentBrief;
     const form = briefToForm(currentBrief);
     const saved = await persistBrief(currentBrief, { ...form, targetWordCount: Math.max(2500, form.targetWordCount) });
+    requireChapterVisit();
     const savedForm = briefToForm(saved);
     setBrief(saved);
     briefFormRef.current = savedForm;
@@ -935,22 +1014,38 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   };
 
   const generateBody = async (assetIds: string[] = selectedAssetIds) => {
+    if (!chapterVisit.active || bodySubmissionRef.current) return;
+    const submissionId = crypto.randomUUID();
+    bodySubmissionRef.current = submissionId;
+    const requireCurrentChapter = () => {
+      requireChapterVisit();
+      if (bodySubmissionRef.current !== submissionId) throw new Error("章节已切换，原任务结果不会写入当前章节");
+    };
     setAssetPickerOpen(false);
     const bodyStage = "正在分析角色关系、伏笔推进和章节情节";
     setGenerationStage(bodyStage);
     onBodyGenerationStateChange?.(true, bodyStage);
     setBusyAction("generate");
     try {
+      if (!methodReadyRef.current) throw new Error("写作方法状态尚未准备好，请稍后重试");
+      const methodClient = await methodReadyRef.current;
+      requireCurrentChapter();
+      if (methodClient && !methodClient.managedAvailable) methodClient.beginLegacyGeneration();
       const currentModel = await loadGenerationModel();
+      requireCurrentChapter();
       const currentModelLabel = generationModelLabel(currentModel);
       if (onPrepareGeneration) {
         const prepared = await onPrepareGeneration();
+        requireCurrentChapter();
         if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
+        if (prepared.id !== document.id) throw new Error("保存结果与当前章节不一致，未发起生成");
       }
       const currentBrief = await ensureBrief();
+      requireCurrentChapter();
       const lengthWindow = chapterLengthWindow(currentBrief.target_word_count);
       let acceptedJob: GenerationJobRecord | null = null;
       let lastFailure: unknown = null;
+      let retryOfActionId: string | undefined;
       const maximumAttempts = 3;
 
       for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
@@ -964,25 +1059,35 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           : `第 ${attempt} 次整章重写中，上次正文未达 ${lengthWindow.label}…`);
 
         try {
-          const job = await apiRequest<GenerationJobRecord>(
+          const input = {
+            expected_brief_version: currentBrief.version,
+            force_new: true,
+            asset_ids: assetIds,
+          };
+          const job = methodClient?.managedAvailable ? await methodClient.start({ ...input, method_mode: methodMode,
+            ...(retryOfActionId ? { retry_of_action_id: retryOfActionId } : {}) }) : await apiRequest<GenerationJobRecord>(
             `/documents/${document.id}/generation-jobs/body`,
             {
               method: "POST",
-              body: JSON.stringify({
-                expected_brief_version: currentBrief.version,
-                force_new: true,
-                asset_ids: assetIds,
-              }),
+              body: JSON.stringify(input),
             },
           );
+          requireCurrentChapter();
+          if (job.state === "method_pending") throw new Error("原写作动作仍在处理中，请查询原任务；不会重新生成。");
           setBodyRetrievalSummary(retrievalSummaryFromJob(job));
           if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
           acceptedJob = job;
           break;
         } catch (reason) {
+          requireCurrentChapter();
           lastFailure = reason;
           if (!isRetryableChapterLengthFailure(reason) || attempt === maximumAttempts) {
             throw reason;
+          }
+          retryOfActionId = methodClient?.managedAvailable
+            ? methodClient.getSnapshot().action?.action_id : undefined;
+          if (methodClient?.managedAvailable && !retryOfActionId) {
+            throw new Error("字数重写缺少原写作动作，已停止自动重试。");
           }
         }
       }
@@ -996,6 +1101,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           body: JSON.stringify({ expected_draft_version: acceptedJob.candidate.base_draft_version }),
         },
       );
+      requireCurrentChapter();
       setFeaturedCandidateId(result.candidate.id);
       setSelectedAssetIds([]);
       const completedModel = completedGenerationModelLabel(acceptedJob);
@@ -1003,6 +1109,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       setGeneratingOpen(false);
       await confirmSyncProgress(result.document);
     } catch (reason) {
+      if (!chapterVisit.active || bodySubmissionRef.current !== submissionId) return;
       const message = errorMessage(reason, "生成正文失败");
       const lengthFailure = isRetryableChapterLengthFailure(reason);
       onError(message);
@@ -1024,18 +1131,27 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         okText: "我知道了",
       });
     } finally {
-      setGeneratingOpen(false);
-      onBodyGenerationStateChange?.(false, "");
-      setBusyAction("");
+      if (chapterVisit.active && bodySubmissionRef.current === submissionId) {
+        bodySubmissionRef.current = null;
+        setGeneratingOpen(false);
+        onBodyGenerationStateChange?.(false, "");
+        setBusyAction("");
+      }
     }
   };
 
   const confirmGenerateBody = async (assetIds: string[]) => {
+    if (!chapterVisit.active) return;
+    if (methodAvailability === "loading" || methodAvailability === "unavailable") {
+      onError("写作方法目录尚无法确认，请查询原任务或稍后重试；不会降级生成。");
+      return;
+    }
     setAssetPickerOpen(false);
     let currentModel: GenerationModelStatus;
     try {
       currentModel = await loadGenerationModel();
     } catch (reason) {
+      if (!chapterVisit.active) return;
       onError(errorMessage(reason, "读取当前有效模型失败"));
       return;
     }
@@ -1050,6 +1166,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         h("p", null, "生成开始后请勿重复发起；失败时系统会保留正式正文不变。"),
         h("p", null, "若完整正文未进入字数硬范围，系统最多自动整章重写两次（本次最多 3 次模型调用）。"),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
+        h("p", null, methodClientRef.current?.managedAvailable
+          ? `本次写作方法：${methodMode === "generic_only" ? "仅通用" : "自动选择"}；语义补选未启用。`
+          : "自动方法入口未开放；本次使用原写作流程，不承诺分类方法已装载。"),
         h("p", null, "若多次出现生成失败，请检查当前有效模型连接。"),
         h("b", null, "确定继续生成吗？"),
       ),
@@ -1237,11 +1356,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   };
 
   const confirmSyncProgress = async (preparedOverride?: unknown) => {
+    if (!chapterVisit.active) return;
     const source = resolveSyncProgressDocument(document, preparedOverride);
     let currentModel: GenerationModelStatus;
     try {
       currentModel = await loadGenerationModel();
     } catch (reason) {
+      if (!chapterVisit.active) return;
       onError(errorMessage(reason, "读取当前有效模型失败"));
       return;
     }
@@ -1258,7 +1379,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       ),
       okText: "继续同步",
       cancelText: "取消",
-      onOk: () => { void runSyncProgress(source); },
+      onOk: () => { if (chapterVisit.active) void runSyncProgress(source); },
     });
   };
 
@@ -1266,32 +1387,94 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setBusyAction("review");
     setGenerationStage("正在从文字流畅、描写生动、人物一致性等维度审阅正文");
     setGeneratingOpen(true);
+    setReviewMethodStatus(null);
     try {
       await loadGenerationModel();
       const prepared = onPrepareGeneration ? await onPrepareGeneration() : document;
+      requireChapterVisit();
       if (!prepared) throw new Error("当前正文保存失败，请稍后重试");
       const currentBrief = await ensureBrief();
-      const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-        method: "POST",
-        body: JSON.stringify({
-          scope_type: "document",
-          scope_id: prepared.id,
-          novel_id: novel.id,
-          document_id: prepared.id,
-          kind: "review",
-          input_snapshot: {
-            novel_title: novel.title,
-            chapter_title: resolvedChapterNumber === undefined
-              ? prepared.title
-              : chapterDisplayTitle(resolvedChapterNumber, prepared.title),
-            visible_character_count: prepared.visible_character_count,
-            outline_text: currentBrief.outline_text,
-            expectation_text: currentBrief.expectation_text,
-            content_markdown: prepared.content_markdown,
-          },
-          force_new: true,
-        }),
-      });
+      requireChapterVisit();
+      const inputSnapshot = {
+        novel_title: novel.title,
+        genre: novel.genre,
+        subgenre: novel.subgenre,
+        chapter_title: resolvedChapterNumber === undefined
+          ? prepared.title
+          : chapterDisplayTitle(resolvedChapterNumber, prepared.title),
+        visible_character_count: prepared.visible_character_count,
+        outline_text: currentBrief.outline_text,
+        expectation_text: currentBrief.expectation_text,
+        content_markdown: prepared.content_markdown,
+        draft_version: prepared.draft_version,
+        content_hash: prepared.content_hash,
+      } as const;
+      let methodClient: ReviewMethodClient;
+      try {
+        const catalog = await reviewMethodCatalog(
+          novel.id,
+          prepared.id,
+          prepared.draft_version,
+          prepared.content_hash,
+          writingPageTabId(),
+        );
+        requireChapterVisit();
+        setReviewMethodNames(catalog.displayNames);
+        methodClient = new ReviewMethodClient(
+          catalog,
+          apiRequest,
+          window.sessionStorage,
+        );
+        reviewMethodClientRef.current = methodClient;
+      } catch {
+        throw new Error("审稿写作方法目录暂不可用，未发送新的模型请求");
+      }
+      let raw: Awaited<ReturnType<ReviewMethodClient["start"]>>;
+      try {
+        if (methodClient.managedAvailable) {
+          const recovered = methodClient.hasRecoveryTicket
+            ? await methodClient.recover()
+            : null;
+          if (recovered && recovered.state === "failed"
+            && recovered.writing_method.state === "failed") {
+            methodClient.clearRecovery();
+          }
+          raw = recovered && !(recovered.state === "failed"
+            && recovered.writing_method.state === "failed")
+            ? recovered
+            : await methodClient.start({
+                expected_scope_version: prepared.draft_version,
+                input_snapshot: inputSnapshot,
+                force_new: true,
+              });
+        } else {
+          raw = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+            method: "POST",
+            body: JSON.stringify({
+              scope_type: "document",
+              scope_id: prepared.id,
+              novel_id: novel.id,
+              document_id: prepared.id,
+              kind: "review",
+              input_snapshot: inputSnapshot,
+              force_new: true,
+            }),
+          }) as typeof raw;
+        }
+      } catch (error) {
+        setReviewMethodStatus(methodClient.currentStatus);
+        throw error;
+      }
+      requireChapterVisit();
+      setReviewMethodStatus(raw.writing_method ?? methodClient.currentStatus);
+      if (raw.state === "method_pending" || raw.state === "running") {
+        throw new Error("原审稿任务仍在处理中，请稍后查询，不能重复生成");
+      }
+      const job = raw as CreativeGenerationRecord;
+      if (job.kind !== "review" || job.scope_id !== prepared.id
+        || job.novel_id !== novel.id || job.document_id !== prepared.id) {
+        throw new Error("审稿结果与当前正文范围不匹配");
+      }
       if (job.state !== "ready") throw new Error(job.failure_message || "模型审稿失败");
       setReviewJob(job);
       setReviewOpen(true);
@@ -1302,6 +1485,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       setGeneratingOpen(false);
       setBusyAction("");
     }
+  };
+
+  const closeReview = () => {
+    setReviewOpen(false);
+    reviewMethodClientRef.current?.clearRecovery();
+    reviewMethodClientRef.current = null;
   };
 
   const confirmReview = async () => {
@@ -1440,6 +1629,26 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       novelId: novel.id,
       compact: true,
     }),
+    methodSnapshot ? h(WritingMethodStatusNotice, { snapshot: methodSnapshot, displayNames: methodNames }) : null,
+    !reviewOpen && reviewMethodStatus
+      ? h(WritingMethodReceiptNotice, {
+          status: reviewMethodStatus,
+          displayNames: reviewMethodNames,
+        })
+      : null,
+    methodSnapshot?.action ? h(Button, {
+      loading: methodSnapshot.loading,
+      onClick: async () => {
+        if (!chapterVisit.active) return;
+        const client = methodClientRef.current;
+        if (!client) return;
+        try {
+          const result = await client.recover();
+          if (!chapterVisit.active) return;
+          if (result.state === "ready") onStatus("原任务已生成候选，可在“历史”查看；查询不会自动采用或重新生成。");
+        } catch (reason) { if (chapterVisit.active) onError(errorMessage(reason, "查询原写作任务失败")); }
+      },
+    }, "查询原任务") : null,
     mountedTitleTools,
     h(Modal, {
       open: briefOpen,
@@ -1481,6 +1690,17 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       onCancel: () => setAssetPickerOpen(false),
       footer: [h(Button, { key: "skip", onClick: () => confirmGenerateBody([]) }, "跳过"), h(Button, { key: "generate", type: "primary", onClick: () => confirmGenerateBody(selectedAssetIds) }, `确定选择${selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ""}`)],
     }, h("section", { className: "anw-asset-picker" },
+      field("本次写作方法", h("select", {
+        "aria-label": "本次写作方法", value: methodMode, disabled: methodAvailability !== "available",
+        style: { maxWidth: "100%", padding: "8px 12px", borderRadius: "6px" },
+        onChange: (event: { target: { value: string } }) => {
+          if (event.target.value === "auto" || event.target.value === "generic_only") setMethodMode(event.target.value);
+        },
+      }, h("option", { value: "auto" }, "自动选择写作方法"), h("option", { value: "generic_only" }, "本次仅通用")),
+      methodAvailability === "available" ? "仅影响本次生成；语义补选未启用。"
+        : methodAvailability === "loading" ? "正在确认入口能力…"
+        : methodAvailability === "legacy" ? "自动方法入口未开放；保留原写作流程，不承诺分类方法已装载。"
+        : "方法目录暂不可用；可查询原任务，不能降级发起新生成。"),
       h("p", { className: "anw-asset-picker-copy" }, "AI 将重点展示选中的内容到生成结果中"),
       h("div", { className: "anw-asset-search-row" }, h(Input, { value: assetSearch, prefix: h(SearchOutlined), placeholder: "搜索私有库素材", onChange: (event: any) => setAssetSearch(event.target.value) }), h(Button, { type: "link", icon: h(PlusOutlined), onClick: () => setQuickAssetOpen(true) }, "快速添加私有素材")),
       h(Tabs, { activeKey: assetTab, onChange: (key: string) => setAssetTab(key as PrivateAssetType), items: ASSET_TABS.map((tab) => ({
@@ -1517,6 +1737,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       const maximumCount = job.maximum_visible_character_count;
       return h("article", { key: job.id, className: `anw-history-card${candidate?.id === featuredCandidateId ? " is-featured" : ""}` },
         h("header", null, h("div", null, h("strong", null, `第 ${job.attempt || 1} 次生成`), h("span", null, formatDate(job.completed_at || job.created_at))), h(Tag, { color: stateColor(state) }, stateLabel(state))),
+        h(ChapterMethodHistoryNotice, { key: `${document.id}:${job.id}`, documentId: document.id, jobId: job.id }),
         h("div", { className: "anw-history-meta" },
           h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`),
           h("span", null, maximumCount ? `验收 ${minimumCount}–${maximumCount} 字` : `验收不少于 ${minimumCount} 字`),
@@ -1619,8 +1840,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       title: h("div", { className: "anw-review-title" }, h(AuditOutlined), h("strong", null, "AI审稿报告"), h(Tag, { color: "processing" }, reviewJob ? verifiedGenerationModelLabel(reviewJob) : "当前任务模型")),
       width: 820,
       centered: true,
-      footer: [h(Button, { key: "close", type: "primary", onClick: () => setReviewOpen(false) }, "关闭")],
-      onCancel: () => setReviewOpen(false),
-    }, reviewJob ? h("div", { className: "anw-review-result" }, h(RetrievalStatusNotice, { summary: retrievalSummaryFromJob(reviewJob), novelId: novel.id }), h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "模型已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
+      footer: [h(Button, { key: "close", type: "primary", onClick: closeReview }, "关闭")],
+      onCancel: closeReview,
+    }, reviewJob ? h("div", { className: "anw-review-result" }, h(WritingMethodReceiptNotice, { status: reviewMethodStatus, displayNames: reviewMethodNames }), h(RetrievalStatusNotice, { summary: retrievalSummaryFromJob(reviewJob), novelId: novel.id }), h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "模型已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
   );
 }

@@ -1,0 +1,173 @@
+{
+  "schema_version": "plan58-selection-edit-button-evidence/1",
+  "observed_at": "2026-09-07T16:10:00+08:00",
+  "environment": {
+    "qwenpaw_version": "2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "qwenpaw_origin": "http://127.0.0.1:54385",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "database_port": 55471,
+    "transport": "loopback fake OpenAI fixture",
+    "effective_provider_id": "s58-fake",
+    "effective_model_id": "s58-fake-model",
+    "long_lived_origin_touched": false
+  },
+  "scope": {
+    "novel_id": "3f2a6e14-07a5-4656-924a-b622d775b01b",
+    "document_id": "891ce317-a1af-4c13-a223-9c385f86a27b",
+    "field_id": "chapter.body",
+    "genre": "悬疑",
+    "draft_version": 3,
+    "content_hash": "d5538334d1bb9774b04ff5ec89f760d4dd5a382e7826ec040d12eb4ad31154b7",
+    "visible_character_count": 1000,
+    "selected_visible_character_count": 7,
+    "synthetic_only": true
+  },
+  "action": {
+    "action_id": "68e709d2-643a-4e7c-95c3-083967cd69d0",
+    "dispatch_id": "06d5c267-7c33-46dd-9a5a-0decdfaa7033",
+    "dispatch_state": "dispatched",
+    "job_id": "7233530d-247d-47a1-8b25-88bc28546e0b",
+    "job_ref": "creative:7233530d-247d-47a1-8b25-88bc28546e0b",
+    "job_state": "ready",
+    "job_attempt": 1,
+    "kind": "selection_edit",
+    "operation": "polish",
+    "selection_id": "ba1d50e1-648a-42f2-ac92-9b1aab4e9eb5",
+    "client_input_hash": "11183eac4a0f763c1a3efcbea307e93476a54bf2844e0cd11360da82b9a5b1d1",
+    "route_request_key": "0f567e79ce7199c678922504a95f9a059bf918bc039e435135b580da80089cb4",
+    "job_input_hash": "79b839c991fa636b2633fba116a55416b1acc108ff6ff3871257d7f30c7a6c17",
+    "method_input_hash": "a89facbd1e7b50fee9fe1c08a07e08cdc8811f056c4bc7dd92c3ad8eb634a188",
+    "route_source_version": "938e12fe850fb163724d82057d17614526065c9f62bdd6dc744014b6fb102128"
+  },
+  "method_plan": {
+    "catalog_version": "6561a4d89e94edc25e7e60d5ce1a440cfd8d2c2e42f4bb58e40913cba0d13525",
+    "primary_skill": "prose-writing",
+    "selected_ids": [
+      "suspense-writing"
+    ],
+    "blocks": [
+      {
+        "skill_id": "prose-writing",
+        "path": "SKILL.md",
+        "sha256": "ccd22858290df7940f5df8e90d5819b213bd916925bca55c9f81950be0e1bda4"
+      },
+      {
+        "skill_id": "prose-writing",
+        "path": "references/narrative-craft.md",
+        "sha256": "3f1e8601db9de30cb1601757f05a4280f5049941070209bec696c976a9eefe21"
+      },
+      {
+        "skill_id": "prose-writing",
+        "path": "references/genre-promises.md",
+        "sha256": "b0eeb87862539b2c76fab0f2497afc2ca7df778d123207dc8880a6e01a93557a"
+      },
+      {
+        "skill_id": "suspense-writing",
+        "path": "SKILL.md",
+        "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5"
+      }
+    ]
+  },
+  "provider_observation": {
+    "receipt_count_after_click": 1,
+    "receipt_count_after_recovery_get": 1,
+    "model": "s58-fake-model",
+    "provider_message_hash": "338efec6b07997a4fa00104818c6064341589430e9fb87a18bc6ddfddc2dba05",
+    "tools": [],
+    "tool_choice": null,
+    "exact_block_counts": {
+      "prose-writing/SKILL.md": 1,
+      "prose-writing/references/narrative-craft.md": 1,
+      "prose-writing/references/genre-promises.md": 1,
+      "suspense-writing/SKILL.md": 1
+    },
+    "other_primary_heading_counts": {
+      "novel-direction": 0,
+      "story-foundation": 0,
+      "character-craft": 0,
+      "chapter-outline": 0,
+      "style-review": 0
+    }
+  },
+  "model_evidence": {
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "reported_actual": null,
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "usage_status": "not_exposed",
+    "private_usage_buffer_used": false
+  },
+  "result": {
+    "output_schema_version": 2,
+    "output_text": "林澈停在档案架前，重新核对死者来信的邮戳。",
+    "diff_change_count": 1,
+    "candidate_auto_applied": false,
+    "author_accept_clicked": false,
+    "working_copy_draft_version_after_review": 3,
+    "working_copy_content_hash_after_review": "d5538334d1bb9774b04ff5ec89f760d4dd5a382e7826ec040d12eb4ad31154b7",
+    "working_copy_visible_character_count_after_review": 1000,
+    "working_copy_exactly_unchanged": true
+  },
+  "ui_observation": {
+    "real_product_button_clicked": "润色选中文字",
+    "selection_created_in_real_editor": true,
+    "diff_review_surface_seen": true,
+    "diff_deleted_text": "测测测测测测测",
+    "diff_inserted_text": "林澈停在档案架前，重新核对死者来信的邮戳。",
+    "method_receipt_text": "本次已装载到请求：小说正文写作 · 悬疑写作",
+    "retrieval_notice_seen": true,
+    "persistent_screenshot_created": false
+  },
+  "recovery": {
+    "method": "GET",
+    "path_shape": "/documents/{document_id}/writing-method-actions/{action_id}",
+    "returned_same_job_id": true,
+    "returned_same_dispatch_id": true,
+    "returned_same_method_input_hash": true,
+    "returned_ready_dispatched": true,
+    "redispatched_model": false
+  },
+  "validation_contract": {
+    "exact_document_ownership": true,
+    "exact_working_copy_version": true,
+    "exact_whole_body_hash": true,
+    "javascript_utf16_selection_slice": true,
+    "exact_before_after_context": true,
+    "server_owned_genre_subgenre": true,
+    "forged_scope_rejected_before_model_and_catalog": true
+  },
+  "verification": {
+    "backend_selection_related_tests": 50,
+    "backend_writing_skills_tests": 267,
+    "frontend_selection_related_tests": 31,
+    "frontend_test_files": 153,
+    "frontend_tests": 1359,
+    "frontend_typecheck_exit_code": 0,
+    "frontend_build_modules": 195,
+    "plugin_package_exit_code": 0,
+    "git_diff_check_exit_code": 0
+  },
+  "release_boundary": {
+    "managed_field": "chapter.body",
+    "managed_operations": [
+      "polish",
+      "rewrite",
+      "expand",
+      "shorten",
+      "dialogue",
+      "review",
+      "custom"
+    ],
+    "non_document_or_non_body_selection_path": "legacy_compatible",
+    "full_selection_matrix_released": false
+  },
+  "limits": [
+    "隔离假模型只证明当前章节正文选区按钮的稳定动作、精确范围核验、真实装载字节、空工具、V2 Diff候选和只读恢复，不证明文学质量提升。",
+    "本次只实点polish；其余六种操作由同一合同的自动化测试覆盖，不能写成七种操作均已逐一完成真实产品点击。",
+    "章节正文始终未被自动写回；人物卡、设定字段等非chapter.body选区仍走旧兼容链，不能据此放行全选区矩阵。",
+    "宿主没有公开actual模型或usage，证据保持not_exposed，未用回环观察值倒填权威字段。",
+    "本证据只裁决章节正文选区确定性按钮子门禁，不放行人物卡、原生聊天、语义增强或完整G-BUTTON/G-FULL。"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "s58-chapter-transport",
+  "name": "S58 isolated chapter transport",
+  "version": "0.0.1",
+  "type": "app",
+  "description": "Exact project chapter orchestration with a loopback fake Provider only",
+  "author": "AI小说世界2026 tests",
+  "entry": {"backend": "plugin.py"},
+  "dependencies": [],
+  "qwenpaw_version": {"min": "2.1.0", "max": "2.2.0"}
+}

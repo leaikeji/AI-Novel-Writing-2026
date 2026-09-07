@@ -34,3 +34,4 @@ include = ["backend*"]
 
 [tool.setuptools.package-data]
 "backend.embedding" = ["fixtures/*.json"]
+"backend.writing_skills" = ["approved-capabilities.json"]

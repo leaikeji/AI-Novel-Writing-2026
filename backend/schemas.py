@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from .writing_skills.contracts import MethodPreferences
 
 
 class CreateNovelRequest(BaseModel):
@@ -46,11 +47,20 @@ class SaveChapterBriefRequest(BaseModel):
     role_constraints: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class WritingActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action_id: UUID
+    tab_id: str = Field(min_length=1, max_length=160)
+    retry_of_action_id: UUID | None = None
+    preferences: MethodPreferences = Field(default_factory=MethodPreferences)
+
+
 class GenerateChapterRequest(BaseModel):
     expected_brief_version: int = Field(ge=1)
     force_new: bool = False
     asset_ids: list[UUID] = Field(default_factory=list, max_length=500)
     preset_id: UUID | None = None
+    writing_action: WritingActionRequest | None = None
 
 
 class AdoptCandidateRequest(BaseModel):

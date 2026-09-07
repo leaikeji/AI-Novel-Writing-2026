@@ -40,6 +40,7 @@ describe("assistant context_ref HTTP transport", () => {
   it("posts only the approved binding and snapshot through the PawApp API", async () => {
     const request = vi.fn(async (_path: string, _init?: RequestInit): Promise<unknown> => ({
       contextRef: "A".repeat(43),
+      writingActionId: "00000000-0000-4000-8000-000000000058",
       expiresAt: "2026-08-25T10:05:00.000Z",
       contextRevision: 9,
       payloadCharacters: 300,
@@ -49,6 +50,7 @@ describe("assistant context_ref HTTP transport", () => {
 
     await expect(client(input(), controller.signal)).resolves.toEqual({
       contextRef: "A".repeat(43),
+      writingActionId: "00000000-0000-4000-8000-000000000058",
       expiresAt: "2026-08-25T10:05:00.000Z",
       contextRevision: 9,
       payloadCharacters: 300,
@@ -76,6 +78,7 @@ describe("assistant context_ref HTTP transport", () => {
   it("omits absent first-session/document bindings rather than sending null", async () => {
     const request = vi.fn(async (_path: string, _init?: RequestInit): Promise<unknown> => ({
       contextRef: "B".repeat(43),
+      writingActionId: "00000000-0000-4000-8000-000000000059",
       expiresAt: "2026-08-25T10:05:00.000Z",
       contextRevision: 9,
       payloadCharacters: 280,

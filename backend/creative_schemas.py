@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .schemas import WritingActionRequest
 
 
 SELECTION_EDIT_OPERATIONS = (
@@ -510,19 +513,174 @@ class StartCreativeGenerationRequest(BaseModel):
     scope_type: str = Field(min_length=1, max_length=40)
     scope_id: UUID
     kind: str = Field(
-        pattern="^(novel_template|novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_storyline_recommendation|chapter_outline|review|selection_edit)$"
+        pattern="^(novel_template|novel_naming|novel_cover|outline_background|outline_characters|outline_plot|outline_highlight|chapter_storyline_recommendation|chapter_outline|character_profile_completion|review|selection_edit)$"
     )
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     novel_id: UUID | None = None
     document_id: UUID | None = None
     target_character_count: int | None = Field(default=None, ge=1, le=50_000)
+    expected_scope_version: int | None = Field(default=None, ge=1)
     force_new: bool = False
+    writing_action: WritingActionRequest | None = None
 
     @model_validator(mode="after")
     def validate_selection_edit_request(self) -> "StartCreativeGenerationRequest":
+        if self.writing_action is not None and self.kind in {
+            "novel_template",
+            "novel_naming",
+        }:
+            if self.expected_scope_version is None:
+                raise ValueError("受管建书辅助生成必须绑定当前草稿版本")
+            allowed = (
+                {"audience", "idea"}
+                if self.kind == "novel_template"
+                else {
+                    "audience",
+                    "genre",
+                    "subgenre",
+                    "idea",
+                    "template_name",
+                    "template_data",
+                }
+            )
+            unknown = set(self.input_snapshot) - allowed
+            if unknown:
+                raise ValueError("受管建书辅助输入包含未允许字段")
+            for key, value in self.input_snapshot.items():
+                if key == "template_data":
+                    if not isinstance(value, dict):
+                        raise ValueError("template_data 必须是对象")
+                    continue
+                if not isinstance(value, str) or len(value) > 30_000:
+                    raise ValueError("受管建书辅助文本字段无效")
+            if (
+                self.scope_type != "novel_creation"
+                or self.novel_id is not None
+                or self.document_id is not None
+                or self.target_character_count is not None
+            ):
+                raise ValueError("受管建书辅助范围无效")
+            return self
         if self.kind.startswith("outline_"):
             snapshot = OutlineGenerationRequestSnapshot.model_validate(self.input_snapshot)
+            if self.writing_action is not None:
+                if (
+                    self.expected_scope_version is None
+                    or self.expected_scope_version != snapshot.expected_outline_version
+                ):
+                    raise ValueError("受管大纲生成必须绑定当前大纲版本")
+                if (
+                    self.scope_type != "outline"
+                    or self.novel_id is None
+                    or self.document_id is not None
+                    or self.target_character_count is not None
+                ):
+                    raise ValueError("受管大纲生成范围无效")
             self.input_snapshot = snapshot.model_dump(mode="json")
+            return self
+        if self.writing_action is not None and self.kind in {
+            "chapter_storyline_recommendation",
+            "chapter_outline",
+        }:
+            if (
+                self.expected_scope_version is None
+                or self.scope_type != "chapter_creation"
+                or self.novel_id is None
+                or self.document_id is not None
+                or self.target_character_count is not None
+            ):
+                raise ValueError("受管章节辅助生成范围无效")
+            if self.kind == "chapter_storyline_recommendation":
+                if self.input_snapshot:
+                    raise ValueError("受管线路推荐不接受浏览器资料")
+            else:
+                if set(self.input_snapshot) != {"rewrite_attempt"}:
+                    raise ValueError("受管章纲只接受重写次数")
+                rewrite_attempt = self.input_snapshot.get("rewrite_attempt")
+                if type(rewrite_attempt) is not int or not 1 <= rewrite_attempt <= 3:
+                    raise ValueError("受管章纲重写次数无效")
+            return self
+        if self.writing_action is not None and self.kind == "review":
+            allowed = {
+                "novel_title",
+                "genre",
+                "subgenre",
+                "chapter_title",
+                "visible_character_count",
+                "outline_text",
+                "expectation_text",
+                "content_markdown",
+                "draft_version",
+                "content_hash",
+            }
+            if set(self.input_snapshot) != allowed:
+                raise ValueError("受管审稿输入字段不完整或包含未知字段")
+            if (
+                self.scope_type != "document"
+                or self.document_id is None
+                or self.scope_id != self.document_id
+                or self.novel_id is None
+                or self.target_character_count is not None
+            ):
+                raise ValueError("受管审稿范围无效")
+            draft_version = self.input_snapshot.get("draft_version")
+            if (
+                type(draft_version) is not int
+                or draft_version < 1
+                or self.expected_scope_version != draft_version
+            ):
+                raise ValueError("受管审稿必须绑定当前正文草稿版本")
+            visible_count = self.input_snapshot.get("visible_character_count")
+            if type(visible_count) is not int or visible_count < 0:
+                raise ValueError("受管审稿可见字数无效")
+            content_hash = self.input_snapshot.get("content_hash")
+            if (
+                not isinstance(content_hash, str)
+                or re.fullmatch(r"[0-9a-f]{64}", content_hash) is None
+            ):
+                raise ValueError("受管审稿正文哈希无效")
+            text_limits = {
+                "novel_title": 240,
+                "genre": 80,
+                "subgenre": 80,
+                "chapter_title": 240,
+                "outline_text": 30_000,
+                "expectation_text": 12_000,
+                "content_markdown": 300_000,
+            }
+            if any(
+                not isinstance(self.input_snapshot.get(key), str)
+                or len(self.input_snapshot[key]) > limit
+                for key, limit in text_limits.items()
+            ):
+                raise ValueError("受管审稿文本字段无效")
+            try:
+                json.dumps(
+                    self.input_snapshot,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+            except (TypeError, ValueError) as error:
+                raise ValueError("受管审稿输入不是严格JSON") from error
+            return self
+        if self.writing_action is not None and self.kind == "character_profile_completion":
+            if (
+                self.scope_type != "novel"
+                or self.novel_id is None
+                or self.scope_id != self.novel_id
+                or self.document_id is not None
+                or self.target_character_count is not None
+                or self.expected_scope_version is not None
+                or set(self.input_snapshot) != {"expected_source_hash"}
+            ):
+                raise ValueError("受管角色卡补全范围或输入无效")
+            source_hash = self.input_snapshot.get("expected_source_hash")
+            if (
+                not isinstance(source_hash, str)
+                or re.fullmatch(r"[0-9a-f]{64}", source_hash) is None
+            ):
+                raise ValueError("受管角色卡补全来源哈希无效")
             return self
         if self.kind != "selection_edit":
             return self
@@ -539,6 +697,16 @@ class StartCreativeGenerationRequest(BaseModel):
             raise ValueError("非文档选区任务必须使用 novel scope")
         if self.target_character_count is not None:
             raise ValueError("selection_edit 不接受 target_character_count")
+        if self.writing_action is not None:
+            if (
+                target.entity_type != "document"
+                or target.field_id != "chapter.body"
+                or target.persistence != "autosave"
+                or snapshot.base.persistence_version_kind != "draft"
+                or snapshot.base.persistence_version is None
+                or self.expected_scope_version != snapshot.base.persistence_version
+            ):
+                raise ValueError("受管选区编辑首期仅支持当前章节正文草稿")
         self.input_snapshot = snapshot.model_dump(mode="json")
         return self
 

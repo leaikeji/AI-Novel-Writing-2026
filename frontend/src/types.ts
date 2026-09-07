@@ -195,6 +195,7 @@ export interface CreativeGenerationRecord {
   failure_message: string | null;
   created_at: string | null;
   completed_at: string | null;
+  writing_method?: import("./writing-skills/contracts").WritingMethodStatus;
 }
 
 export interface RoleConstraints {

@@ -18,6 +18,7 @@ from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
 from .creative_schemas import SELECTION_EDIT_OPERATIONS
 from .creative_data_api import router as creative_data_router
+from .writing_skills.api import router as writing_skills_router
 from .embedding.api import router as embedding_router
 from .embedding.contracts import RetrievalPurpose
 from .embedding.writing import (
@@ -42,6 +43,7 @@ from .generation_dependencies import (
     NovelModelEvidenceRejected,
     failed_novel_model_evidence,
     get_novel_effective_model,
+    get_chapter_effective_model,
     get_novel_effective_model_probe,
     get_novel_generation_ctx,
     verify_novel_model_reply,
@@ -203,6 +205,7 @@ def _public_generation_job(payload: dict[str, Any]) -> dict[str, Any]:
 router.include_router(assistant_router)
 router.include_router(creative_router)
 router.include_router(creative_data_router)
+router.include_router(writing_skills_router)
 router.include_router(narration_settings_router)
 router.include_router(narration_health_router)
 router.include_router(narration_script_router)
@@ -580,35 +583,13 @@ def _raise_domain(error: Exception) -> None:
     if isinstance(error, ChapterLengthValidationError):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=_chapter_length_error_detail(error),
+            detail=error.as_detail(),
         ) from error
     if isinstance(error, NotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     if isinstance(error, ValidationError):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
     raise error
-
-
-def _chapter_length_error_detail(
-    error: ChapterLengthValidationError,
-    *,
-    job: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    detail: dict[str, Any] = {
-        "type": "chapter_length_out_of_range",
-        "reason_code": error.error_code,
-        "message": str(error),
-        "direction": error.validation_state,
-        "validation_state": error.validation_state,
-        "retryable": True,
-        "output_visible_character_count": error.output_visible_character_count,
-        "minimum_visible_character_count": error.minimum_visible_character_count,
-        "maximum_visible_character_count": error.maximum_visible_character_count,
-        "requested_visible_character_count": error.requested_visible_character_count,
-    }
-    if job is not None:
-        detail["job"] = job
-    return detail
 
 
 @router.get("/health")
@@ -900,10 +881,30 @@ async def generation_jobs_create_body(
     document_id: UUID,
     request: GenerateChapterRequest,
     ctx=Depends(get_novel_generation_ctx),
-    configured_model: ModelAudit = Depends(get_novel_effective_model),
+    configured_model: ModelAudit | None = Depends(get_chapter_effective_model),
     model_probe: EffectiveModelProbe = Depends(get_novel_effective_model_probe),
     session: Session = Depends(get_session),
+    http_request: Request = None,
 ) -> dict[str, object]:
+    if request.writing_action is not None:
+        from .writing_skills.button import generate_managed_chapter
+        return await generate_managed_chapter(
+            document_id=document_id, request=request, ctx=ctx,
+            model_probe=model_probe, session=session, asgi_app=http_request.app if http_request else None,
+        )
+    from .writing_skills.button import CHAPTER_CAPABILITIES
+    from .writing_skills.load_policy import public_entry_released
+
+    if public_entry_released(CHAPTER_CAPABILITIES):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "type": "managed_writing_action_required",
+                "message": "当前章节正文入口已启用受管写作方法，请刷新页面后重试",
+            },
+        )
+    if configured_model is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "generation model unavailable")
     job: dict[str, Any] | None = None
     model_evidence: dict[str, object] | None = None
     try:
@@ -1007,7 +1008,7 @@ async def generation_jobs_create_body(
             if isinstance(error, ChapterLengthValidationError):
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=_chapter_length_error_detail(error, job=failed),
+                    detail=error.as_detail(job=failed),
                 ) from error
             if not isinstance(
                 error,

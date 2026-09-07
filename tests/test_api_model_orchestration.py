@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from backend.model_runtime import ModelAudit
+from backend.writing_skills.load_policy import PublicLoadCapabilities
 
 
 def _import_creative_api(monkeypatch):
@@ -23,7 +24,21 @@ def _import_creative_api(monkeypatch):
     monkeypatch.setitem(sys.modules, "qwenpaw.pawapp", pawapp_module)
     monkeypatch.delitem(sys.modules, "backend.generation_dependencies", raising=False)
     monkeypatch.delitem(sys.modules, "backend.creative_api", raising=False)
-    return importlib.import_module("backend.creative_api")
+    module = importlib.import_module("backend.creative_api")
+    from backend.writing_skills import creative
+
+    # These direct endpoint tests cover the explicit compatibility branch.
+    monkeypatch.setattr(
+        creative,
+        "CREATION_HELPER_CAPABILITIES",
+        PublicLoadCapabilities(),
+    )
+    monkeypatch.setattr(
+        creative,
+        "NOVEL_CREATIVE_CAPABILITIES",
+        PublicLoadCapabilities(),
+    )
+    return module
 
 
 def _reply_with_usage(provider_id: str, model_id: str, *, text: str):

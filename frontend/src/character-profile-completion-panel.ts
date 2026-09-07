@@ -14,6 +14,13 @@ import {
   type CharacterProfileCompletionLocalPhase,
   type CharacterProfileCompletionStatusRecord,
 } from "./character-profile-completion";
+import {
+  CharacterProfileMethodClient,
+  characterProfileMethodCatalog,
+} from "./writing-skills/profile";
+import { writingPageTabId } from "./writing-skills/creative-client";
+import { createWritingMethodReceiptNotice } from "./writing-skills/status";
+import type { WritingMethodStatus } from "./writing-skills/contracts";
 
 
 const host = window.QwenPaw.host;
@@ -21,6 +28,7 @@ const React = host.React;
 const h = React.createElement;
 const { Alert, Button, Checkbox, Modal, Progress, Spin, Tag } = host.antd;
 const { ReloadOutlined, RobotOutlined } = host.antdIcons;
+const WritingMethodReceiptNotice = createWritingMethodReceiptNotice(React);
 
 
 interface CharacterProfileCompletionPanelProps {
@@ -50,6 +58,12 @@ export function CharacterProfileCompletionPanel({
   const [error, setError] = React.useState("");
   const [confirming, setConfirming] = React.useState(false);
   const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [writingMethodStatus, setWritingMethodStatus] = React.useState(
+    null as WritingMethodStatus | null,
+  );
+  const [writingMethodNames, setWritingMethodNames] = React.useState(
+    {} as Readonly<Record<string, string>>,
+  );
   const [selection, dispatchSelection] = React.useReducer(
     reduceCharacterProfileCompletionSelection,
     undefined,
@@ -71,8 +85,10 @@ export function CharacterProfileCompletionPanel({
           candidates: next.candidates,
         });
       }
+      return next;
     } catch (reason) {
       setError(readError(reason));
+      return null;
     } finally {
       if (!silent) setPhase("idle");
     }
@@ -80,9 +96,38 @@ export function CharacterProfileCompletionPanel({
 
   React.useEffect(() => {
     setStatus(null);
+    setWritingMethodStatus(null);
+    setWritingMethodNames({});
     dispatchSelection({ type: "clear-selections" });
     void loadStatus();
   }, [loadStatus, novelId]);
+
+  React.useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const catalog = await characterProfileMethodCatalog(
+          novelId,
+          writingPageTabId(),
+        );
+        if (!active || !catalog.available || !catalog.catalogAvailable) return;
+        const client = new CharacterProfileMethodClient(
+          catalog,
+          apiRequest,
+          window.sessionStorage,
+        );
+        if (!client.hasRecoveryTicket) return;
+        const recovered = await client.recover();
+        if (!active) return;
+        setWritingMethodNames(catalog.displayNames);
+        setWritingMethodStatus(recovered.writing_method);
+      } catch {
+        // A stale or foreign ticket is not permission to create a new action.
+        // The explicit generate path will surface current catalog errors.
+      }
+    })();
+    return () => { active = false; };
+  }, [novelId]);
 
   React.useEffect(() => {
     if (status?.state !== "running") return undefined;
@@ -117,10 +162,48 @@ export function CharacterProfileCompletionPanel({
           setPhase("preparing");
           setError("");
           try {
-            const next = await apiRequest<CharacterProfileCompletionApiStatus>(
-              `/novels/${novelId}/character-profile-completion/generate`,
-              { method: "POST", body: JSON.stringify({ force_new: forceNew }) },
+            if (!status?.input_hash || !/^[a-f0-9]{64}$/.test(status.input_hash)) {
+              throw new Error("当前人物资料来源摘要无效，请重新读取状态");
+            }
+            const catalog = await characterProfileMethodCatalog(
+              novelId,
+              writingPageTabId(),
             );
+            setWritingMethodNames(catalog.displayNames);
+            let next: CharacterProfileCompletionApiStatus | null;
+            if (catalog.available) {
+              if (!catalog.catalogAvailable) {
+                throw new Error("人物写作方法目录暂不可用，未发送模型请求");
+              }
+              const client = new CharacterProfileMethodClient(
+                catalog,
+                apiRequest,
+                window.sessionStorage,
+              );
+              let generated;
+              try {
+                generated = await client.start({
+                  expectedSourceHash: status.input_hash,
+                  forceNew,
+                });
+              } catch (reason) {
+                if (!client.hasRecoveryTicket) throw reason;
+                try {
+                  generated = await client.recover();
+                } catch {
+                  throw reason;
+                }
+              }
+              setWritingMethodStatus(generated.writing_method);
+              next = await loadStatus(true);
+            } else {
+              next = await apiRequest<CharacterProfileCompletionApiStatus>(
+                `/novels/${novelId}/character-profile-completion/generate`,
+                { method: "POST", body: JSON.stringify({ force_new: forceNew }) },
+              );
+              setStatus(next);
+            }
+            if (!next) throw new Error("人物候选状态读取失败");
             setStatus(next);
             if (next.job?.id && next.candidates.length) {
               dispatchSelection({
@@ -259,6 +342,10 @@ export function CharacterProfileCompletionPanel({
         onClick: runAction,
       }, presentation.actionLabel),
     ),
+    h(WritingMethodReceiptNotice, {
+      status: writingMethodStatus,
+      displayNames: writingMethodNames,
+    }),
     h(
       Modal,
       {

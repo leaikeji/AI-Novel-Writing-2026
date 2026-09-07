@@ -57,6 +57,7 @@ class WritingPosition:
     timeline_id: UUID
     story_sequence_cutoff: int
     mapping_version: str
+    document_revision_id: UUID | None = None
 
 
 def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosition:
@@ -101,6 +102,12 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
         raise ValueError("chapter document is required")
     narrative_sequence = int(document.narrative_sequence)
     display_title = context_chapter_title(document.title, narrative_sequence)
+    working = session.get(DocumentWorkingCopy, document.document_id)
+    document_revision_id = (
+        working.base_revision_id
+        if working is not None and working.base_revision_id is not None
+        else None
+    )
     timelines = tuple(
         session.scalars(
             select(StoryTimeline).where(
@@ -118,8 +125,8 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
             timeline_id=timelines[0].id,
             story_sequence_cutoff=narrative_sequence,
             mapping_version="single-timeline-identity/1",
+            document_revision_id=document_revision_id,
         )
-    working = session.get(DocumentWorkingCopy, document.document_id)
     head = (
         session.get(RevisionTimelineMappingHead, working.base_revision_id)
         if working is not None and working.base_revision_id is not None
@@ -155,6 +162,7 @@ def resolve_writing_position(session: Session, document_id: UUID) -> WritingPosi
         timeline_id=next(iter(timeline_ids)),
         story_sequence_cutoff=max(story_sequences),
         mapping_version=f"revision-timeline-mapping/{head.version}",
+        document_revision_id=document_revision_id,
     )
 
 

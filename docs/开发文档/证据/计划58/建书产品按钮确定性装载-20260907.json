@@ -1,0 +1,143 @@
+{
+  "schema_version": "s58-creation-product-button-evidence/1",
+  "observed_at": "2026-09-07T14:06:55+08:00",
+  "scope": {
+    "environment": "isolated-qwenpaw-2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "base_url": "http://127.0.0.1:55472",
+    "data_class": "synthetic-test-only"
+  },
+  "naming_button": {
+    "draft_id": "17f8e52e-43e4-4f7a-9061-ad137bced3ee",
+    "draft_version_at_dispatch": 5,
+    "action_id": "2a08b15f-f0a3-4750-95c5-b703d531bb86",
+    "dispatch_id": "431143f2-88cf-4fb2-b6f4-83e752da4af6",
+    "job_id": "79dee399-3f0b-4e88-bf5a-debe6bf26506",
+    "dispatch_state": "dispatched",
+    "job_state": "ready",
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "public_actual_model_evidence": "not_exposed",
+    "method_input_hash": "04280d1e0502bd0c851992b287642c9eae2f3830d2c3ab59f95c433eafd76a13",
+    "catalog_version": "6561a4d89e94edc25e7e60d5ce1a440cfd8d2c2e42f4bb58e40913cba0d13525",
+    "source_hash": "dcd7812a69b3451390159d0e2350ecd51a87267b723f98763e70c3eda5f12518",
+    "semantic_enabled": false,
+    "output_title_count": 8,
+    "provider_receipts_before": 1,
+    "provider_receipts_after": 2,
+    "new_receipts": 1,
+    "provider_observation": {
+      "model": "s58-fake-model",
+      "tools": [],
+      "tool_choice": null,
+      "primary_heading_counts": {
+        "novel-direction": 1,
+        "story-foundation": 0,
+        "character-craft": 0,
+        "chapter-outline": 0,
+        "style-review": 0,
+        "prose-writing": 0
+      },
+      "approved_block_matches": {
+        "novel-direction/SKILL.md": {
+          "sha256": "856e928b2c0a9296d7355b03c90a6e509ea3dddd3568e965601df723543c51f0",
+          "count": 1
+        },
+        "novel-direction/references/premise-and-reader-promise.md": {
+          "sha256": "0021742323cbc13a14f678008f6b7e95cf841f164bf0d709adb993f433a7a8a6",
+          "count": 1
+        }
+      }
+    },
+    "persistence_observation": {
+      "close_and_save_version": 6,
+      "naming_generation_job_id": "79dee399-3f0b-4e88-bf5a-debe6bf26506",
+      "reopen_showed_same_titles": true,
+      "provider_receipts_after_reopen": 2
+    }
+  },
+  "template_button": {
+    "draft_id": "86200ef9-60a7-4837-ae35-bb6ba1453a67",
+    "draft_version_at_dispatch": 3,
+    "persisted_draft_version": 4,
+    "action_id": "0322bc44-389b-4c94-a090-330059adfed8",
+    "dispatch_id": "cc21c506-187c-4802-ba2a-3731602e6e25",
+    "job_id": "554c1bc3-dafd-4059-8c97-cbebb8f56935",
+    "dispatch_state": "dispatched",
+    "job_state": "ready",
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "public_actual_model_evidence": "not_exposed",
+    "method_input_hash": "51d8bb68ba4145ec4509d7bafa4479885d109d235d7ddcbecf22ba89e1cd9c8b",
+    "catalog_version": "6561a4d89e94edc25e7e60d5ce1a440cfd8d2c2e42f4bb58e40913cba0d13525",
+    "source_hash": "881f7e30e084208cebfba28a454567bb4df64e186915e3cf23a9a488b9f7b463",
+    "semantic_enabled": false,
+    "output": {
+      "genre": "悬疑",
+      "template_key": "s58-suspense-template",
+      "template_name": "封闭小镇旧案",
+      "template_field_count": 5
+    },
+    "provider_observation": {
+      "receipts_before": 0,
+      "receipts_after": 1,
+      "new_receipts": 1,
+      "model": "s58-fake-model",
+      "tools": [],
+      "tool_choice": null,
+      "primary_heading_counts": {
+        "novel-direction": 1,
+        "story-foundation": 0,
+        "character-craft": 0,
+        "chapter-outline": 0,
+        "style-review": 0,
+        "prose-writing": 0
+      },
+      "approved_block_matches": {
+        "novel-direction/SKILL.md": {
+          "sha256": "856e928b2c0a9296d7355b03c90a6e509ea3dddd3568e965601df723543c51f0",
+          "count": 1
+        },
+        "novel-direction/references/premise-and-reader-promise.md": {
+          "sha256": "0021742323cbc13a14f678008f6b7e95cf841f164bf0d709adb993f433a7a8a6",
+          "count": 1
+        }
+      }
+    },
+    "persistence_observation": {
+      "template_generation_job_id": "554c1bc3-dafd-4059-8c97-cbebb8f56935",
+      "saved_before_author_continues": true
+    }
+  },
+  "routing_explanation": {
+    "primary_skill": "novel-direction",
+    "selected_additional_skills": [],
+    "reason": "novel_template and novel_naming are pre-novel direction tasks; the current published deterministic routing contract does not infer a genre module from idea prose"
+  },
+  "author_ui_observation": {
+    "naming_model_copy": "取名模型：s58-fake / s58-fake-model",
+    "naming_result_visible": true,
+    "template_model_copy": "任务模型：s58-fake / s58-fake-model",
+    "template_result_visible": true,
+    "template_result": "悬疑·封闭小镇旧案",
+    "viewport": "current in-app browser viewport",
+    "screenshots": "observed inline only; no screenshot file persisted"
+  },
+  "claim_boundary": {
+    "proven": "isolated product novel-template and novel-naming buttons each deterministically inject the frozen approved primary method blocks exactly once, keep tools empty, and persist author-visible results without an extra model request",
+    "not_proven": [
+      "literary quality improvement",
+      "genre Skill selection for pre-novel direction tasks",
+      "other creative buttons",
+      "native chat routing",
+      "semantic routing",
+      "provider usage or billing",
+      "full G-BUTTON or G-FULL"
+    ]
+  }
+}

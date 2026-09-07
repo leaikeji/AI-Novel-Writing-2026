@@ -1,0 +1,69 @@
+{
+  "schema_version": "writing-routing-scenarios/1",
+  "frozen_at": "2026-09-07T17:00:00+08:00",
+  "catalog_fixture": {
+    "future_genre": {
+      "skill_id": "future-space-writing",
+      "kind": "genre",
+      "label": "测试太空生态",
+      "description": "测试未来分类：处理轨道栖居地、封闭生态、资源配额与太空社会治理的叙事；普通地面社区或单纯科技道具不适用。",
+      "semantic_criteria": ["当前任务的主要矛盾来自轨道或太空封闭生态中的资源循环、配额和共同治理。"],
+      "negative_examples": ["只有未来科技名词，但冲突与太空生态或资源治理无关。"]
+    },
+    "future_mechanism": {
+      "skill_id": "future-time-loop",
+      "kind": "mechanism",
+      "label": "测试时间存档",
+      "description": "测试未来机制：处理角色保存并读取某一时间状态的能力、重置边界及跨轮次损失；普通回忆或日程重复不适用。",
+      "semantic_criteria": ["当前任务明确出现可保存、读取或重置时间状态的特殊能力，并要求处理其运用或代价。"],
+      "negative_examples": ["只是回忆过去、重复日程或叙事倒叙，没有可操作的时间状态。", "死亡后自动回到固定清晨但角色不能主动保存或读取状态，属于通用特殊优势，不属于本测试专用存档模块。"],
+      "supersedes": ["golden-finger-writing"]
+    }
+  },
+  "d_scenarios": [
+    {"id":"D01","task":"chapter_body","sources":[["genre","悬疑"]],"expected":["suspense-writing"]},
+    {"id":"D02","task":"review","sources":[["subgenre","刑侦"]],"expected":["suspense-writing"]},
+    {"id":"D03","task":"chapter_body","sources":[["mechanism","金手指"]],"expected":["golden-finger-writing"]},
+    {"id":"D04","task":"outline_plot","sources":[["genre","都市"],["mechanism","系统能力"]],"expected":["golden-finger-writing"]},
+    {"id":"D05","task":"chapter_outline","sources":[["genre","悬疑推理"],["mechanism","特殊信息优势"]],"expected":["suspense-writing","golden-finger-writing"]},
+    {"id":"D06","task":"continuity_check","sources":[["subgenre","规则怪谈"],["mechanism","时间回溯"]],"expected":["suspense-writing","golden-finger-writing"]},
+    {"id":"D07","task":"direction","sources":[["genre","测试太空生态"]],"expected":["future-space-writing"]},
+    {"id":"D08","task":"outline_background","sources":[["genre","推理"],["mechanism","测试时间存档"]],"expected":["suspense-writing","future-time-loop"]},
+    {"id":"D09","task":"chapter_body","sources":[["content","办公室电脑系统升级完成，员工重新登录软件。"]],"expected":[]},
+    {"id":"D10","task":"selection_edit","sources":[["content","她说自己有一个秘密，却没有调查、威胁或求生承诺。"]],"expected":[]},
+    {"id":"D11","task":"chapter_outline","sources":[["content","人物对白：不要金手指，靠我自己。"]],"expected":[]},
+    {"id":"D12","task":"review","sources":[["genre","悬疑"]],"preferences":{"excluded_ids":["suspense-writing"]},"expected":[]},
+    {"id":"D13","task":"chapter_body","sources":[["genre","悬疑"],["mechanism","系统能力"]],"preferences":{"mode":"generic_only"},"expected":[]},
+    {"id":"D14","task":"mechanical","sources":[["genre","悬疑"],["mechanism","金手指"]],"expected":[]},
+    {"id":"D15","task":"excluded","sources":[["genre","刑侦"],["mechanism","未来预知"]],"expected":[]},
+    {"id":"D16","task":"chapter_body","sources":[],"expected":[]},
+    {"id":"D17","task":"novel_template","sources":[["genre","悬疑"],["mechanism","金手指"]],"expected":[]},
+    {"id":"D18","task":"novel_naming","sources":[["genre","推理"],["mechanism","系统能力"]],"expected":[]},
+    {"id":"D19","task":"outline_characters","sources":[["genre","玄幻"]],"expected":[]},
+    {"id":"D20","task":"chapter_body","sources":[["author_request","作者在受控界面明确要求本次使用金手指机制写作。"]],"preferences":{"required_ids":["golden-finger-writing"]},"expected":["golden-finger-writing"]}
+  ],
+  "s_scenarios": [
+    {"id":"S01","task":"chapter_body","sources":[["content","死者的门禁记录与监控时间冲突，主角决定核对两名证人的路线。"]],"expected":["suspense-writing"]},
+    {"id":"S02","task":"review","sources":[["content","审查本章线索是否支持两个竞争解释，以及人物是否知道尚未公开的尸检结果。"]],"expected":["suspense-writing"]},
+    {"id":"S03","task":"chapter_outline","sources":[["content","读者已知凶手身份，本章规划警方怎样取得合法证据并阻止下一次袭击。"]],"expected":["suspense-writing"]},
+    {"id":"S04","task":"outline_plot","sources":[["content","所有住户共享一套会变化的夜间规则，违反者会失踪，主角必须验证哪条规则被篡改。"]],"expected":["suspense-writing"]},
+    {"id":"S05","task":"continuity_check","sources":[["content","核查最终揭晓能否重新解释前三章已出现的钥匙、潮痕和错误证词。"]],"expected":["suspense-writing"]},
+    {"id":"S06","task":"selection_edit","sources":[["content","恋人承认曾隐瞒生日惊喜，二人把误会说开；没有调查或危险承诺。"]],"expected":[]},
+    {"id":"S07","task":"direction","sources":[["content","人类在轨道温室中通过生态配额共同修复地球，冲突围绕社区治理与资源循环展开。"]],"expected":["future-space-writing"]},
+    {"id":"S08","task":"chapter_body","sources":[["content","续写一家人准备年夜饭的日常段落，保持温暖轻松，不引入额外危机。"]],"expected":[]},
+    {"id":"S09","task":"outline_highlight","sources":[["content","这段内容只是两位舞者排练并修复友情，没有案件、调查或未知威胁。"]],"expected":[]},
+    {"id":"S10","task":"chapter_outline","sources":[["content","主角每到午夜可将当日状态保存一次，失败后读取存档，但仍会失去当天建立的人际信任。"]],"expected":["future-time-loop"]},
+    {"id":"S11","task":"chapter_body","sources":[["content","主角每天收到一页次日报纸，并据此抢先避开事故；报纸只显示一条未来事件。"]],"expected":["golden-finger-writing"]},
+    {"id":"S12","task":"outline_plot","sources":[["content","每次死亡都会回到同一个清晨，主角利用保留的记忆改变行动顺序。"]],"expected":["golden-finger-writing"]},
+    {"id":"S13","task":"chapter_outline","sources":[["content","完成救援任务会获得可兑换工具的积分，兑换选择直接改变下一次行动能力。"]],"expected":["golden-finger-writing"]},
+    {"id":"S14","task":"outline_background","sources":[["content","经营者能提前一天看到市场需求，利用信息安排库存和现金流，预测并不要求付出代价。"]],"expected":["golden-finger-writing"]},
+    {"id":"S15","task":"character_profile_completion","sources":[["content","角色天生能看见谎言留下的颜色，他习惯依赖这一优势判断谈判对象。"]],"expected":["golden-finger-writing"]},
+    {"id":"S16","task":"chapter_body","sources":[["content","经验丰富的刑警凭训练、访谈和普通数据库分析锁定嫌疑人，没有超常优势。"]],"expected":[]},
+    {"id":"S17","task":"review","sources":[["content","公司更换订单系统后出现库存错误，请检查职场剧情的因果是否连贯。"]],"expected":[]},
+    {"id":"S18","task":"outline_characters","sources":[["content","修行者按公开功法训练多年取得进步，所有同门都能学习，没有独占资源或特殊机制。"]],"expected":[]},
+    {"id":"S19","task":"chapter_storyline_recommendation","sources":[["content","停职刑警会收到下一起案件发生前的匿名画面，必须核验画面并阻止犯罪，同时找出发送者。"]],"expected":["suspense-writing","golden-finger-writing"]},
+    {"id":"S20","task":"chapter_outline","sources":[["content","住户要验证致命公寓规则；主角每天只能冻结一条规则十分钟，使用后会暴露自己的房间号。"]],"expected":["suspense-writing","golden-finger-writing"]}
+  ],
+  "e_button_ids": ["S01","S06","S07","S10","S11","S17","S19","S20"],
+  "e_native_ids": ["S01","S06","S07","S10","S11","S17","S19","S20"]
+}

@@ -1,0 +1,59 @@
+{
+  "schema_version": "plan58-routing-evaluation-freeze/1",
+  "observed_at": "2026-09-07T17:12:00+08:00",
+  "fixture": {
+    "path": "tests/writing_skills/fixtures/routing_scenarios.json",
+    "sha256": "90799b7adf4ed38b5842a9cdf224a0e92f7bcfc2bff0cd202b7a7fd89e98c9dd",
+    "schema_version": "writing-routing-scenarios/1",
+    "frozen_at": "2026-09-07T17:00:00+08:00",
+    "d_count": 20,
+    "s_count": 20,
+    "e_button_count": 8,
+    "e_native_count": 8
+  },
+  "coverage": {
+    "suspense_positive": 12,
+    "suspense_exclusion_or_counterexample": 28,
+    "golden_finger_positive": 12,
+    "golden_finger_exclusion_or_counterexample": 28,
+    "s_future_module_cases": 2,
+    "s_formal_mixed_cases": 2,
+    "e_ids_frozen_before_entry_runs": true
+  },
+  "d_resolver_contract": {
+    "expected_auxiliary_calls": 0,
+    "actual_auxiliary_calls": 0,
+    "correct_sets": 20,
+    "total": 20,
+    "score": "20/20",
+    "status": "pass_resolver_fixture_only"
+  },
+  "d_entry_gate": {
+    "status": "blocked",
+    "reason": "评测投影器直接构造mechanism SourceItem，生产章节与创作入口没有可信的结构化mechanism来源；20/20不能作为真实入口D门禁。",
+    "correct_sets": null,
+    "total": 20,
+    "supersedes_interpretation_at": "2026-09-07T17:40:00+08:00"
+  },
+  "semantic_technical_dry_run": {
+    "implementation_path": "backend/writing_skills/semantic.py",
+    "implementation_sha256_at_observation": "6aa0d3702e4ffc83072b2ea9109b92186ab5bf7172bf03f22715ddd1f35fc8ff",
+    "combined_contract_tests": 20,
+    "combined_contract_tests_passed": 20,
+    "fake_s_group_calls": 20,
+    "one_call_per_unresolved_scenario": true,
+    "tools_allowed": false,
+    "recursion_allowed": false,
+    "automatic_retry_allowed": false,
+    "invalid_candidate_or_evidence_fails_closed": true,
+    "real_model_calls": 0,
+    "counts_as_s_quality_score": false
+  },
+  "limits": [
+    "D组使用纯确定性resolver和测试目录，20/20只证明明确结构化标签、排除和未来模块发现合同；独立复核后已撤销对生产D门禁的通过表述。",
+    "S组20题及E-B/E-N各8题已经冻结，但当前20次是假oracle返回，用于验证计分与单次调用管线，不能计算真实模型precision、recall或18/20集合门禁。",
+    "future-space-writing与future-time-loop只存在于测试内存目录，不进入正式skills目录、批准索引或作者可见能力。",
+    "本轮没有调用当前有效写作模型，没有消耗计划中尚待单独批准的40次辅助路由或8次短生成额度。",
+    "G-SEMANTIC-BUTTON、G-SEMANTIC-NATIVE、G-NATIVE和G-FULL保持未通过。"
+  ]
+}

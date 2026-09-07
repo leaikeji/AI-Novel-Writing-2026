@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -216,6 +217,11 @@ def copy_tree(relative_path: str) -> None:
 
 
 def main() -> None:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from backend.writing_skills.catalog import published_skill_ids
+    # Validate external approval hashes before replacing any existing output.
+    published_skill_ids(ROOT / "skills")
     if OUTPUT.exists():
         shutil.rmtree(OUTPUT)
     OUTPUT.mkdir(parents=True)

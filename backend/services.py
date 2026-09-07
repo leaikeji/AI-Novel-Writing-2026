@@ -9,12 +9,15 @@ import math
 import re
 from datetime import datetime, timedelta, timezone
 from difflib import unified_diff
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from .writing_skills.persistence import Claim
 
 from .context_v4 import (
     ContextAssemblyError,
@@ -119,6 +122,21 @@ class ChapterLengthValidationError(ValidationError):
         self.minimum_visible_character_count = minimum_visible_character_count
         self.maximum_visible_character_count = maximum_visible_character_count
         self.requested_visible_character_count = requested_visible_character_count
+
+    def as_detail(self, *, job: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Shared rejection contract for legacy and managed chapter entries."""
+        detail: dict[str, Any] = {
+            "type": "chapter_length_out_of_range", "reason_code": self.error_code,
+            "message": str(self), "direction": self.validation_state,
+            "validation_state": self.validation_state, "retryable": True,
+            "output_visible_character_count": self.output_visible_character_count,
+            "minimum_visible_character_count": self.minimum_visible_character_count,
+            "maximum_visible_character_count": self.maximum_visible_character_count,
+            "requested_visible_character_count": self.requested_visible_character_count,
+        }
+        if job is not None:
+            detail["job"] = job
+        return detail
 
 
 class DraftConflictError(DomainError):
@@ -1327,14 +1345,18 @@ def _generation_snapshot(
     writing_retrieval: dict[str, Any] | None,
     writing_context: dict[str, Any],
 ) -> dict[str, Any]:
+    novel = session.execute(select(Novel.title, Novel.genre, Novel.subgenre).where(
+        Novel.id == document.novel_id
+    )).first()
+    if novel is None:
+        raise NotFoundError("generation novel not found")
     return {
         "schema_version": 4,
         "novel": {
             "id": str(document.novel_id),
-            "title": str(
-                session.scalar(select(Novel.title).where(Novel.id == document.novel_id))
-                or ""
-            ),
+            "title": novel.title or "",
+            "genre": novel.genre or "",
+            "subgenre": novel.subgenre or "",
         },
         "chapter": {
             "document_id": str(document.id),
@@ -1381,7 +1403,7 @@ def _generation_asset_snapshot(
     )
 
 
-def start_chapter_generation(
+def prepare_chapter_generation(
     session: Session,
     document_id: UUID,
     *,
@@ -1396,7 +1418,13 @@ def start_chapter_generation(
     writing_retrieval: dict[str, Any] | None = None,
     writing_position: WritingPosition,
     effective_context_window_tokens: int,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build task input locally without claiming a job or calling a model.
+
+    Routing consumes this same prompt after action lookup. Job creation later
+    rebuilds and compares the projection, so changed sources cannot be mixed
+    with an old method packet. Existing output/Context V4 contracts remain here.
+    """
     document = _require_document(session, document_id)
     if document.kind != "chapter":
         raise ValidationError("body generation is only available for chapter documents")
@@ -1473,8 +1501,86 @@ def start_chapter_generation(
         effective_context_window_tokens=effective_context_window_tokens,
         reserved_output_tokens=max(1, int(brief.target_word_count) * 2),
     )
+    return snapshot, asset_snapshot
+
+
+def start_chapter_generation(
+    session: Session,
+    document_id: UUID,
+    *,
+    expected_brief_version: int,
+    execution_agent_id: str,
+    requested_provider_id: str,
+    requested_model_id: str,
+    generation_contract_version: str,
+    force_new: bool = False,
+    asset_ids: list[UUID] | None = None,
+    preset_id: UUID | None = None,
+    writing_retrieval: dict[str, Any] | None = None,
+    writing_position: WritingPosition,
+    effective_context_window_tokens: int,
+    method_dispatch: Claim | None = None,
+) -> dict[str, Any]:
+    document = _require_document(session, document_id)
+    if method_dispatch is not None:
+        from .writing_skills.persistence import lock_assembled_action
+        def authorize_method_scope(current_session, scope):
+            novel = current_session.execute(select(Novel.id, Novel.owner_id, Novel.workspace_id).where(
+                Novel.id == document.novel_id
+            )).first()
+            if (novel is None or scope.kind != "novel" or scope.scope_id != novel.id
+                    or scope.document_id != document_id or scope.owner_id != novel.owner_id
+                    or scope.workspace_id != novel.workspace_id):
+                raise ValidationError("method dispatch chapter scope mismatch")
+        method_dispatch = lock_assembled_action(session, method_dispatch,
+                                                authorize=authorize_method_scope)
+    snapshot, asset_snapshot = prepare_chapter_generation(
+        session, document_id, expected_brief_version=expected_brief_version,
+        execution_agent_id=execution_agent_id, requested_provider_id=requested_provider_id,
+        requested_model_id=requested_model_id, generation_contract_version=generation_contract_version,
+        force_new=force_new, asset_ids=asset_ids, preset_id=preset_id,
+        writing_retrieval=writing_retrieval, writing_position=writing_position,
+        effective_context_window_tokens=effective_context_window_tokens,
+    )
+    prompt = build_chapter_generation_prompt(snapshot)
+    if method_dispatch is not None:
+        from .writing_skills.projection import chapter_routing_projection
+        from .writing_skills.load_policy import ManagedMethodPolicy
+        frozen = method_dispatch.request
+        if (frozen.identity.agent_id != execution_agent_id
+                or frozen.provider_id != requested_provider_id or frozen.model_id != requested_model_id
+                or frozen.projection != chapter_routing_projection(frozen.projection.scope, snapshot,
+                                                                    required_ids=frozen.preferences.required_ids)):
+            raise ValidationError("method dispatch source or model changed")
+        packet = method_dispatch.packet
+        if (packet.plan.primary_skill != "prose-writing" or packet.plan.task != "chapter_body"
+                or not any(block.skill_id == "prose-writing" and block.path == "SKILL.md" and block.text.strip()
+                           for block in packet.blocks)):
+            raise ValidationError("method dispatch primary body missing")
+        method_tokens = sum(estimate_token_count(block.text) for block in packet.blocks)
+        # Recompute from frozen bytes, never trust a caller-supplied estimate.
+        # A labelled conservative framing reserve is not a Provider tokenizer
+        # measurement. The entry composer must also reserve its host overhead.
+        method_tokens += estimate_token_count(ManagedMethodPolicy(packet).instruction) + 1024
+        if method_tokens > snapshot["prompt_budget_ledger"]["remaining_token_count"]:
+            raise ValidationError("method dispatch exceeds remaining prompt budget")
+        snapshot["skill_invocation"] = {
+            "schema_version": "job-skill-invocation/1",
+            "dispatch_id": str(method_dispatch.id),
+            "method_input_hash": method_dispatch.packet.method_input_hash,
+            "estimated_method_and_framing_tokens": method_tokens,
+        }
+        if method_dispatch.request.retry_of_action_id is not None:
+            snapshot["skill_invocation"]["retry_of_action_id"] = str(method_dispatch.request.retry_of_action_id)
+    hash_snapshot = dict(snapshot)
+    if method_dispatch is not None:
+        # Random action/dispatch IDs link evidence, never defeat business dedup.
+        hash_snapshot["skill_invocation"] = {
+            key: value for key, value in snapshot["skill_invocation"].items()
+            if key not in {"dispatch_id", "retry_of_action_id"}
+        }
     hash_material = {
-        "input_snapshot": snapshot,
+        "input_snapshot": hash_snapshot,
         "execution_agent_id": execution_agent_id,
         "requested_provider_id": requested_provider_id,
         "requested_model_id": requested_model_id,
@@ -1502,6 +1608,13 @@ def start_chapter_generation(
         ).order_by(ChapterGenerationJob.attempt.desc())
     )
     if existing is not None and not force_new and existing.state in {"running", "ready"}:
+        if method_dispatch is not None:
+            from .writing_skills.persistence import advance_in_transaction
+            linked = advance_in_transaction(session, method_dispatch, "dispatch_started",
+                                             job_ref=f"chapter:{existing.id}")
+            if existing.state == "ready":
+                advance_in_transaction(session, linked, "dispatched")
+            session.commit()
         payload = _generation_job_payload(session, existing, include_snapshot=True)
         payload["should_execute"] = False
         return payload
@@ -1512,20 +1625,24 @@ def start_chapter_generation(
         kind="body",
         input_hash=input_hash,
         state="running",
-        brief_version=brief.version,
-        base_revision_id=working.base_revision_id,
-        base_draft_version=working.draft_version,
-        base_content_hash=working.content_hash,
+        brief_version=snapshot["brief"]["version"],
+        base_revision_id=UUID(snapshot["chapter"]["base_revision_id"]) if snapshot["chapter"]["base_revision_id"] else None,
+        base_draft_version=snapshot["chapter"]["base_draft_version"],
+        base_content_hash=snapshot["chapter"]["base_content_hash"],
         generation_context_snapshot=snapshot,
         asset_snapshot=asset_snapshot,
         execution_agent_id=execution_agent_id,
         requested_provider_id=requested_provider_id,
         requested_model_id=requested_model_id,
         generation_contract_version=generation_contract_version,
-        target_visible_character_count=minimum_count,
+        target_visible_character_count=snapshot["acceptance"]["minimum_visible_character_count"],
         attempt=attempt,
     )
     session.add(job)
+    if method_dispatch is not None:
+        from .writing_skills.persistence import advance_in_transaction
+        advance_in_transaction(session, method_dispatch, "dispatch_started",
+                               job_ref=f"chapter:{job.id}")
     session.commit()
     payload = _generation_job_payload(session, job, include_snapshot=True)
     payload["should_execute"] = True
@@ -1576,14 +1693,18 @@ def _prompt_budget_ledger(
         )
     final_prompt_tokens = max(1, estimate_token_count(prompt))
     scaffold_tokens = max(0, final_prompt_tokens - rendered_block_tokens)
+    has_classification = "genre" in snapshot.get("novel", {}) or "subgenre" in snapshot.get("novel", {})
+    renderer_version = "chapter-prompt-renderer/5" if has_classification else "chapter-prompt-renderer/4"
     scaffold_identity = json.dumps(
         {
-            "renderer": "chapter-prompt-renderer/4",
+            "renderer": renderer_version,
             "novel_id": snapshot.get("novel", {}).get("id"),
             "document_id": snapshot.get("chapter", {}).get("document_id"),
             "acceptance": snapshot.get("acceptance", {}),
             "length_control": snapshot.get("length_control", {}),
             "context_assembly_hash": writing_context.get("assembly_hash"),
+            **({"classification": {key: snapshot["novel"].get(key, "") for key in ("genre", "subgenre")}}
+               if has_classification else {}),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -1592,7 +1713,7 @@ def _prompt_budget_ledger(
     components.insert(
         0,
         {
-            "component_id": "chapter-prompt-template/v4",
+            "component_id": "chapter-prompt-template/v5" if has_classification else "chapter-prompt-template/v4",
             "kind": "fixed_prompt",
             "source_kind": "pawapp_prompt_renderer",
             "source_id": str(snapshot.get("chapter", {}).get("document_id") or ""),
@@ -1638,7 +1759,7 @@ def _prompt_budget_ledger(
     )
     return {
         "schema_version": "prompt-budget-ledger/1",
-        "renderer_version": "chapter-prompt-renderer/4",
+        "renderer_version": renderer_version,
         "selection_policy_version": writing_context.get("context_policy_version"),
         "estimator_version": "unicode-cjk-estimator/1",
         "effective_context_window_tokens": effective_context_window_tokens,
@@ -1762,6 +1883,11 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
                 "可见字符的写作体量展开；这只是校准锚点，最终完整正文"
                 f"仍必须落入 {minimum_visible_character_count}—{maximum_visible_character_count} 的硬范围。"
             )
+    classification_text = ""
+    if "genre" in snapshot["novel"] or "subgenre" in snapshot["novel"]:
+        classification_text = "分类资料：" + json.dumps({
+            key: snapshot["novel"].get(key, "") for key in ("genre", "subgenre")
+        }, ensure_ascii=False, sort_keys=True) + "\n"
     prompt = f"""【AI小说世界2026 PawApp可信任务封套】
 kind=chapter_generation
 contract=chapter-prose-candidate/v3
@@ -1777,7 +1903,7 @@ contract=chapter-prose-candidate/v3
 输出的第一个字必须已经属于小说场景。
 
 作品：{snapshot['novel']['title']}
-章节：{snapshot['chapter']['title']}
+{classification_text}章节：{snapshot['chapter']['title']}
 创作目标：约 {requested_visible_character_count} 个中文可见字符
 验收范围：{minimum_visible_character_count}—{maximum_visible_character_count} 个中文可见字符；低于下限或超过上限都必须整章重写
 按情节自然分段，不限定机械段数；全文围绕 {requested_visible_character_count} 字展开，并严格控制在 {minimum_visible_character_count}—{maximum_visible_character_count} 个可见字符范围内。

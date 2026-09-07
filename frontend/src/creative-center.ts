@@ -22,6 +22,11 @@ import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
 import { navigateNovelSurface } from "./novel-surface-navigation";
 import { createEmbeddingConfigPage } from "./embedding";
+import {
+  CreationMethodClient,
+  creationMethodCatalog,
+  creationPageTabId,
+} from "./writing-skills/creation";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 
 
@@ -675,6 +680,8 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
   const [templateTaskModelLabel, setTemplateTaskModelLabel] = React.useState("");
   const [namingTaskModelLabel, setNamingTaskModelLabel] = React.useState("");
   const [coverTaskModelLabel, setCoverTaskModelLabel] = React.useState("");
+  const creationMethodRef = React.useRef(null as CreationMethodClient | null);
+  const creationCatalogBlockedRef = React.useRef(false);
 
   React.useEffect(() => {
     setBusy(false);
@@ -707,6 +714,88 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         template_data: {},
         ...(next.data || {}),
       };
+      try {
+        const catalog = await creationMethodCatalog(
+          next.id,
+          creationPageTabId(),
+        );
+        const client = new CreationMethodClient(
+          catalog,
+          apiRequest,
+          window.sessionStorage,
+        );
+        creationMethodRef.current = client;
+        creationCatalogBlockedRef.current = false;
+        if (client.hasRecoveryTicket) {
+          const recovered = await client.recover().catch(() => null);
+          // Keep the ticket and managed client when GET fails. That failure is
+          // not authority to fall back to another model request.
+          if (recovered !== null && recovered.state === "ready") {
+            const job = recovered as CreativeGenerationRecord;
+            const output = job.output_json || {};
+            let recoveredPatch: Record<string, unknown> | null = null;
+            if (job.kind === "novel_template") {
+              const fields = Array.isArray(output.template_fields)
+                ? output.template_fields.map(String)
+                : [];
+              const templateData = output.template_data
+                && typeof output.template_data === "object"
+                ? output.template_data
+                : {};
+              if (String(output.genre || "").trim()
+                && String(output.template_key || "").trim()
+                && String(output.template_name || "").trim()
+                && fields.length > 0
+                && fields.every(field => String((templateData as any)[field] || "").trim())) {
+                recoveredPatch = {
+                  genre: String(output.genre),
+                  subgenre: String(output.template_name),
+                  template_key: String(output.template_key),
+                  template_name: String(output.template_name),
+                  template_fields: fields,
+                  template_data: templateData,
+                  template_generation_job_id: job.id,
+                };
+              }
+            } else if (job.kind === "novel_naming") {
+              const titles = Array.isArray(output.titles)
+                ? output.titles.slice(0, 8)
+                : [];
+              if (titles.length > 0) {
+                recoveredPatch = {
+                  title: titles.map((title: unknown, index: number) => (
+                    `${index + 1}. ${String(title).trim()}`
+                  )).join(" "),
+                  naming_generation_job_id: job.id,
+                };
+              }
+            }
+            const marker = job.kind === "novel_template"
+              ? "template_generation_job_id"
+              : "naming_generation_job_id";
+            if (recoveredPatch && nextData[marker] !== job.id) {
+              next = await apiRequest<NovelCreationDraftRecord>(
+                `/creation-drafts/${next.id}`,
+                {
+                  method: "PATCH",
+                  body: JSON.stringify({
+                    expected_version: next.version,
+                    step: next.step,
+                    data_patch: { ...nextData, ...recoveredPatch },
+                  }),
+                },
+              );
+              Object.assign(nextData, next.data || {});
+            }
+            if (nextData[marker] === job.id) client.clearRecovery();
+          }
+        }
+      } catch {
+        // No verified catalog means no generation. A verified catalog whose
+        // server gate is false is represented by a non-null legacy client.
+        creationMethodRef.current = null;
+        creationCatalogBlockedRef.current = true;
+      }
       setDraft(next);
       setData(nextData);
       setStep(next.step || 0);
@@ -814,16 +903,28 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     try {
       const currentModel = await getGenerationModelStatus();
       setTemplateTaskModelLabel(generationModelLabel(currentModel));
-      const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-        method: "POST",
-        body: JSON.stringify({
+      const managed = creationMethodRef.current;
+      if (creationCatalogBlockedRef.current) {
+        throw new Error("写作方法目录暂不可用，未发送新的模型请求");
+      }
+      const generationInput = {
+        kind: "novel_template" as const,
+        expected_scope_version: draft.version,
+        input_snapshot: {
+          audience: data.audience,
+          idea: data.idea,
+        },
+        force_new: true,
+      };
+      const job = managed?.managedAvailable
+        ? await managed.start(generationInput) as CreativeGenerationRecord
+        : await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+          method: "POST",
+          body: JSON.stringify({
           scope_type: "novel_creation",
           scope_id: draft.id,
           kind: "novel_template",
-          input_snapshot: {
-            audience: data.audience,
-            idea: data.idea,
-          },
+          input_snapshot: generationInput.input_snapshot,
           force_new: true,
         }),
       });
@@ -850,6 +951,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         template_data: templateData,
         template_generation_job_id: job.id,
       });
+      managed?.clearRecovery();
       setError("");
     } catch (reason) {
       setError(readableError(reason, "AI模板生成失败"));
@@ -1009,20 +1111,32 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
         setBusy(true);
         void (async () => {
           try {
-            const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-              method: "POST",
-              body: JSON.stringify({
+            const managed = creationMethodRef.current;
+            if (creationCatalogBlockedRef.current) {
+              throw new Error("写作方法目录暂不可用，未发送新的模型请求");
+            }
+            const generationInput = {
+              kind: "novel_naming" as const,
+              expected_scope_version: draft.version,
+              input_snapshot: {
+                audience: data.audience,
+                genre: data.genre,
+                subgenre: data.subgenre,
+                idea: data.idea,
+                template_name: data.template_name,
+                template_data: data.template_data,
+              },
+              force_new: true,
+            };
+            const job = managed?.managedAvailable
+              ? await managed.start(generationInput) as CreativeGenerationRecord
+              : await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+                method: "POST",
+                body: JSON.stringify({
                 scope_type: "novel_creation",
                 scope_id: draft.id,
                 kind: "novel_naming",
-                input_snapshot: {
-                  audience: data.audience,
-                  genre: data.genre,
-                  subgenre: data.subgenre,
-                  idea: data.idea,
-                  template_name: data.template_name,
-                  template_data: data.template_data,
-                },
+                input_snapshot: generationInput.input_snapshot,
                 force_new: true,
               }),
             });

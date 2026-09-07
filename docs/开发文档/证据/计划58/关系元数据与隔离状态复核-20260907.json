@@ -1,0 +1,89 @@
+{
+  "schema_version": "plan58-relation-and-runtime-review/1",
+  "recorded_at": "2026-09-07T22:04:32+08:00",
+  "scope": "plan58_only",
+  "real_model_calls_added": 0,
+  "budget_after_review": {
+    "auxiliary_route_calls_used": 21,
+    "auxiliary_route_calls_limit": 40,
+    "short_generation_calls_used": 6,
+    "short_generation_calls_limit": 8
+  },
+  "independent_gate_review": {
+    "G-BUTTON": "pass_isolated_deterministic_buttons_only",
+    "G-SEMANTIC-BUTTON": "blocked",
+    "G-NATIVE": "blocked",
+    "G-SEMANTIC-NATIVE": "blocked",
+    "G-FULL": "blocked"
+  },
+  "semantic_freeze_regressions": {
+    "candidate_fields_checked": [
+      "description",
+      "semantic_criteria",
+      "negative_examples",
+      "conflicts_with",
+      "supersedes"
+    ],
+    "candidate_drift_result": "fail_closed_before_merge",
+    "routing_hash_changes_catalog_version": true,
+    "catalog_version_changes_method_input_hash": true,
+    "persisted_action_uses_original_packet_after_current_relation_drift": true,
+    "targeted_semantic_tests": {
+      "command": ".venv/bin/python -m pytest -q tests/writing_skills/test_semantic.py tests/writing_skills/test_semantic_runtime.py tests/writing_skills/test_semantic_orchestration.py",
+      "result": "passed",
+      "collected": 39
+    },
+    "full_writing_skill_tests": {
+      "database": "127.0.0.1:55471/ai_novel_s58_test",
+      "command": "S58_TEST_DATABASE_URL=<isolated-test-url> .venv/bin/python -m pytest -q tests/writing_skills",
+      "result": "passed",
+      "collected": 329
+    }
+  },
+  "writing_evaluation_correction": {
+    "work": "雾宅来信",
+    "transport_success_is_not_quality_pass": true,
+    "human_adoptable_samples": 0,
+    "human_reviewed_samples": 6,
+    "eligible_button_entry_samples": 0,
+    "eligible_native_entry_samples": 0,
+    "quality_claim": "not_supported"
+  },
+  "runtime_state": {
+    "isolated_before_recovery": {
+      "host": "127.0.0.1:54385",
+      "suspense-writing": false,
+      "golden-finger-writing": false,
+      "drift_cause": "unknown"
+    },
+    "recovery": {
+      "api": "POST /api/skills/batch-enable",
+      "payload": ["suspense-writing"],
+      "result": "success",
+      "private_state_access": false
+    },
+    "isolated_after_recovery": {
+      "provider_id": "s58-fake",
+      "model_id": "s58-fake-model",
+      "suspense-writing": true,
+      "golden-finger-writing": false
+    },
+    "long_lived_after_review": {
+      "host": "127.0.0.1:18088",
+      "provider_id": "minimax-cn",
+      "model_id": "MiniMax-M3",
+      "suspense-writing": true,
+      "golden-finger-writing": true,
+      "mutation": "none"
+    }
+  },
+  "source_hashes": {
+    "backend/writing_skills/semantic.py": "009b6f1efe438e3ed412d73df514c592515aa5005608a2e2e8e02af4e367e7f7",
+    "backend/writing_skills/semantic_runtime.py": "45e310c3205b5f7ea3fea0566223e7a2a8128aec968e93628a18307a2f16b33d",
+    "backend/writing_skills/contracts.py": "281e2c3f03b742fce9ce9ded8c170ab04b6424652d7a035bb41d6aa2e3c3b0c7",
+    "tests/writing_skills/test_semantic.py": "72299cd9bef7b455667e29dfbad4b6b96fb397f1d7e5665564cc432f4da7edfc",
+    "tests/writing_skills/test_semantic_runtime.py": "964680b45b554cbc0fb243ded1824c965092f94c8c25fbaef47a3c79b3d891e7",
+    "tests/writing_skills/test_semantic_orchestration.py": "658e491f96b41000cd98c92640bd224568e9a4c1fae56390c5f2925758108700",
+    "tests/writing_skills/test_button_http.py": "4be1a10f666901566ecc77f1b438dbd87a07231339d7a6f7397505ac205f4bc3"
+  }
+}

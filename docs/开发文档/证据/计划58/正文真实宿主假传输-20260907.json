@@ -1,0 +1,75 @@
+{
+  "schema_version": "s58-chapter-transport-evidence/1",
+  "date": "2026-09-07",
+  "fixture": "tests/writing_skills/fixtures/chapter_transport",
+  "host": "ai-novel-s58-qwenpaw-test",
+  "http_port": 55472,
+  "database": "ai_novel_s58_test",
+  "document_id": "891ce317-a1af-4c13-a223-9c385f86a27b",
+  "action_id": "758ccb98-9485-470c-8db4-a97c22513dc7",
+  "dispatch_id": "31dd3067-bb61-4dd4-be33-e831061c0aed",
+  "job_id": "a64d7773-78d7-41af-aa9f-a7c32385f0c1",
+  "candidate_id": "af5db727-2cbf-4478-ab63-70591d2f6732",
+  "observed_http_statuses": {
+    "initial": 200,
+    "replay": 200,
+    "changed_same_action": 409
+  },
+  "provider_receipts": [
+    {
+      "ordinal": 1,
+      "model": "s58-fake-model",
+      "method_marker_count": 0,
+      "primary_heading_count": 1,
+      "method_roles": [],
+      "tools": [],
+      "tool_choice": null,
+      "input_hash": "08a4cbc2ff006604b78199e4a8b483ecc9c44a367328ae981bd13fc9e6011903",
+      "approved_block_matches": {
+        "prose-writing/SKILL.md": {
+          "sha256": "ccd22858290df7940f5df8e90d5819b213bd916925bca55c9f81950be0e1bda4",
+          "count": 1
+        },
+        "prose-writing/references/narrative-craft.md": {
+          "sha256": "3f1e8601db9de30cb1601757f05a4280f5049941070209bec696c976a9eefe21",
+          "count": 1
+        },
+        "prose-writing/references/genre-promises.md": {
+          "sha256": "b0eeb87862539b2c76fab0f2497afc2ca7df778d123207dc8880a6e01a93557a",
+          "count": 1
+        },
+        "suspense-writing/SKILL.md": {
+          "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5",
+          "count": 1
+        }
+      }
+    }
+  ],
+  "frozen_db_blocks": [
+    {
+      "key": "prose-writing/SKILL.md",
+      "sha256": "ccd22858290df7940f5df8e90d5819b213bd916925bca55c9f81950be0e1bda4"
+    },
+    {
+      "key": "prose-writing/references/narrative-craft.md",
+      "sha256": "3f1e8601db9de30cb1601757f05a4280f5049941070209bec696c976a9eefe21"
+    },
+    {
+      "key": "prose-writing/references/genre-promises.md",
+      "sha256": "b0eeb87862539b2c76fab0f2497afc2ca7df778d123207dc8880a6e01a93557a"
+    },
+    {
+      "key": "suspense-writing/SKILL.md",
+      "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5"
+    }
+  ],
+  "exact_block_match": true,
+  "public_model_evidence_status": "not_exposed",
+  "public_actual_identity": null,
+  "limits": [
+    "Same production chapter function through isolated fixture, not release of product HTTP gate",
+    "Fake fixed output is not literary quality evidence",
+    "Legacy method_roles detector looks for old probe marker; empty array does not establish final raw roles",
+    "No authoritative candidate adoption performed"
+  ]
+}

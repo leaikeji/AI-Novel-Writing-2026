@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from .backend.assistant_context import create_ai_novel_page_context_middleware
+from .backend.writing_skills.load_policy import create_managed_method_middleware
+from .backend.writing_skills.middleware import create_released_native_writing_middleware
 from .backend.app import pawapp
 from .backend.tools import (
     novel_get_context,
@@ -25,6 +27,15 @@ class AINovelWorldPlugin:
             create_ai_novel_page_context_middleware,
             priority=80,
         )
+        # Exact novel-workbench scope only. The factory returns None for other
+        # agents, chats, sessions, missing server tickets and ordinary scopes.
+        api.register_middleware(
+            create_released_native_writing_middleware,
+            priority=75,
+        )
+        # No-op without a service-owned, live per-request binding. Registration
+        # alone does not activate a button/native/semantic release gate.
+        api.register_middleware(create_managed_method_middleware, priority=70)
         api.register_skill_provider(
             PLUGIN_ROOT / "skills",
             enabled_by_default=False,

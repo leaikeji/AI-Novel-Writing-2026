@@ -133,6 +133,59 @@ async def get_novel_effective_model(request: Request) -> ModelAudit:
         ) from error
 
 
+async def get_chapter_effective_model(request: Request) -> ModelAudit | None:
+    """Managed actions look up durable identity before reading model state.
+
+    Payload inspection only defers a read. The existing Pydantic request and
+    server-owned entry service still validate and authorize the actual action.
+    """
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("writing_action") is not None:
+        return None
+    from .writing_skills.button import CHAPTER_CAPABILITIES
+    from .writing_skills.load_policy import public_entry_released
+
+    if public_entry_released(CHAPTER_CAPABILITIES):
+        return None
+    return await get_novel_effective_model(request)
+
+
+async def get_creative_effective_model(request: Request) -> ModelAudit | None:
+    """Defer creative model lookup until a managed action is durably claimed."""
+
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("writing_action") is not None:
+        return None
+    if isinstance(payload, dict):
+        from .writing_skills.creative import creative_button_released
+
+        snapshot = payload.get("input_snapshot")
+        if creative_button_released(
+            str(payload.get("kind") or ""),
+            snapshot if isinstance(snapshot, dict) else None,
+        ):
+            return None
+    return await get_novel_effective_model(request)
+
+
+async def get_character_profile_legacy_effective_model(
+    request: Request,
+) -> ModelAudit | None:
+    """Read a model only when the server has explicitly closed this managed gate."""
+
+    from .writing_skills.creative import creative_button_released
+
+    if creative_button_released("character_profile_completion"):
+        return None
+    return await get_novel_effective_model(request)
+
+
 def get_novel_effective_model_probe(request: Request) -> EffectiveModelProbe:
     """Return a public postflight probe bound to the current host app."""
 

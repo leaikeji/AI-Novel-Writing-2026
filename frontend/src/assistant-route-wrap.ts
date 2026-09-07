@@ -28,6 +28,10 @@ import type { AssistantSelectionController } from "./assistant-selection-control
 import { createAssistantSelectionToolbar } from "./assistant-selection-toolbar";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import { NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
+import {
+  createNativeWritingMethodNotice,
+  type NativeWritingMethodRuntime,
+} from "./writing-skills/native";
 
 
 export type AssistantRouteReactRuntime = QwenPawReactRuntime;
@@ -99,6 +103,7 @@ export interface AssistantRouteWrapOptions {
   getSelectedAgentId?: () => string | null;
   getCurrentSessionId?: () => string | null;
   contextRefCoordinator?: AssistantContextRefCoordinator;
+  nativeWritingMethodRuntime?: NativeWritingMethodRuntime;
   selectionController?: AssistantSelectionController;
   selectionEditReviewHost?: SelectionEditReviewHostComponent;
 }
@@ -286,6 +291,9 @@ export function createAssistantRouteWrap(
         } : undefined,
       )
     : null;
+  const NativeWritingMethodNotice = options.nativeWritingMethodRuntime
+    ? createNativeWritingMethodNotice(React)
+    : null;
 
   function AssistantContextStatusBar() {
     const [status, setStatus] = React.useState(() => contextRuntime.getStatus());
@@ -396,8 +404,17 @@ export function createAssistantRouteWrap(
 
       React.useEffect(() => {
         contextRuntime.setHostBinding(selectedAgentId, currentSessionId);
-        if (!workbenchActive) contextRuntime.clear();
+        if (!workbenchActive) {
+          contextRuntime.clear();
+          options.nativeWritingMethodRuntime?.clear();
+        }
       }, [workbenchActive, selectedAgentId, currentSessionId]);
+
+      React.useEffect(() => {
+        // A native result belongs to one exact novel/document surface. Do not
+        // carry its receipt across a book or chapter switch.
+        options.nativeWritingMethodRuntime?.clear();
+      }, [routeSession.route?.novelId, routeSession.route?.documentId]);
 
       React.useEffect(() => {
         if (!workbenchActive || !options.contextRefCoordinator) return undefined;
@@ -489,7 +506,14 @@ export function createAssistantRouteWrap(
           preferredWidth: assistantPreference.preferredWidth,
           statusBar: creativeCenterActive
             ? h(CreativeCenterAssistantStatusBar)
-            : h(AssistantContextStatusBar),
+            : h(
+                "div",
+                { className: "anw-assistant-status-stack" },
+                h(AssistantContextStatusBar),
+                NativeWritingMethodNotice && options.nativeWritingMethodRuntime
+                  ? h(NativeWritingMethodNotice, { runtime: options.nativeWritingMethodRuntime })
+                  : null,
+              ),
         }),
         workbenchActive && AssistantSelectionToolbar ? h(AssistantSelectionToolbar) : null,
       );

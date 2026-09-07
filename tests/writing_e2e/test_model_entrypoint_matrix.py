@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from backend.model_runtime import ModelAudit
+from backend.writing_skills.load_policy import PublicLoadCapabilities
 
 from ._host_stub import FakeSession, import_app, import_creative_api, reply
 
@@ -78,6 +79,13 @@ async def test_creative_entrypoint_applies_one_model_evidence_policy(
     """The same public-evidence verdict controls candidate persistence."""
 
     api = import_creative_api(monkeypatch)
+    from backend.writing_skills import creative
+
+    monkeypatch.setattr(
+        creative,
+        "CREATION_HELPER_CAPABILITIES",
+        PublicLoadCapabilities(),
+    )
     job_id = uuid4()
     complete_calls: list[dict[str, object]] = []
     fail_calls: list[dict[str, object]] = []
@@ -220,6 +228,9 @@ async def test_chapter_body_creates_candidate_only_after_evidence_and_never_adop
     """A body reply reaches candidate completion, not the adoption transaction."""
 
     app = import_app(monkeypatch)
+    from backend.writing_skills import button
+
+    monkeypatch.setattr(button, "CHAPTER_CAPABILITIES", PublicLoadCapabilities())
     document_id = uuid4()
     novel_id = uuid4()
     timeline_id = uuid4()
@@ -300,6 +311,9 @@ async def test_chapter_body_returns_structured_retryable_length_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = import_app(monkeypatch)
+    from backend.writing_skills import button
+
+    monkeypatch.setattr(button, "CHAPTER_CAPABILITIES", PublicLoadCapabilities())
     document_id = uuid4()
     novel_id = uuid4()
     timeline_id = uuid4()

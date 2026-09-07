@@ -1,0 +1,77 @@
+{
+  "schema_version": "s58-chapter-transport-evidence/1",
+  "date": "2026-09-07",
+  "fixture": "tests/writing_skills/fixtures/chapter_transport",
+  "host": "ai-novel-s58-qwenpaw-test",
+  "http_port": 55472,
+  "database": "ai_novel_s58_test",
+  "document_id": "891ce317-a1af-4c13-a223-9c385f86a27b",
+  "action_id": "c809248b-e8e8-4a96-a1c1-044a59e2b531",
+  "frozen_dispatch": {
+    "plan": {
+      "task": "chapter_body",
+      "reasons": [
+        "author_generic_only"
+      ],
+      "selected": [],
+      "genre_state": "excluded",
+      "source_hash": "e2efe8a81290a449b7be7907738beaa79b9c9578a1b51b852afa55885b04c1c9",
+      "excluded_ids": [],
+      "primary_skill": "prose-writing",
+      "schema_version": "skill-invocation/1",
+      "unresolved_ids": [],
+      "catalog_version": "6561a4d89e94edc25e7e60d5ce1a440cfd8d2c2e42f4bb58e40913cba0d13525",
+      "mechanism_state": "excluded"
+    },
+    "state": "dispatched",
+    "blocks": [
+      {
+        "key": "prose-writing/SKILL.md",
+        "sha256": "ccd22858290df7940f5df8e90d5819b213bd916925bca55c9f81950be0e1bda4"
+      },
+      {
+        "key": "prose-writing/references/narrative-craft.md",
+        "sha256": "3f1e8601db9de30cb1601757f05a4280f5049941070209bec696c976a9eefe21"
+      },
+      {
+        "key": "prose-writing/references/genre-promises.md",
+        "sha256": "b0eeb87862539b2c76fab0f2497afc2ca7df778d123207dc8880a6e01a93557a"
+      }
+    ],
+    "job_ref": "chapter:fb8e1ec4-7d46-4fb5-aece-4247b0177607",
+    "dispatch_id": "83f3958f-501c-4f5c-8a03-c580b0580e1b"
+  },
+  "provider_receipt": {
+    "ordinal": 2,
+    "model": "s58-fake-model",
+    "method_marker_count": 0,
+    "primary_heading_count": 1,
+    "method_roles": [],
+    "tools": [],
+    "tool_choice": null,
+    "input_hash": "e8d25cec15c95d8e46f5727aa59c133db0b717a09ff92ec601f8422378760c7d",
+    "approved_block_matches": {
+      "prose-writing/SKILL.md": {
+        "sha256": "ccd22858290df7940f5df8e90d5819b213bd916925bca55c9f81950be0e1bda4",
+        "count": 1
+      },
+      "prose-writing/references/narrative-craft.md": {
+        "sha256": "3f1e8601db9de30cb1601757f05a4280f5049941070209bec696c976a9eefe21",
+        "count": 1
+      },
+      "prose-writing/references/genre-promises.md": {
+        "sha256": "b0eeb87862539b2c76fab0f2497afc2ca7df778d123207dc8880a6e01a93557a",
+        "count": 1
+      }
+    }
+  },
+  "total_provider_receipts_at_observation": 2,
+  "exact_block_match": true,
+  "job_state": "ready",
+  "public_actual_identity": null,
+  "limits": [
+    "Initial HTTP response output unavailable; verified persisted ready job and raw fake-provider receipt without repeating POST",
+    "Isolated real QwenPaw transport using service-owned fixture capability, not product HTTP gate release",
+    "Fixed synthetic prose is not writing-quality evidence; no candidate adoption"
+  ]
+}

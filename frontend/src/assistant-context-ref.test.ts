@@ -82,6 +82,7 @@ function workbenchRoute(overrides: Partial<RouteSessionSnapshot> = {}): RouteSes
 function successRef(revision: number, suffix = "1"): CreatedAssistantContextRef {
   return {
     contextRef: `ctx_${"a".repeat(42)}${suffix}`,
+    writingActionId: "00000000-0000-4000-8000-000000000058",
     contextRevision: revision,
     expiresAt: new Date(NOW + 5 * 60_000).toISOString(),
     payloadCharacters: 800,
@@ -104,12 +105,14 @@ describe("assistant context_ref coordinator", () => {
       const createRef = vi.fn(async (input) => successRef(
         input.snapshot.contextRevision,
       ));
+      const onWritingActionBound = vi.fn();
       const coordinator = createAssistantContextRefCoordinator({
         runtime,
         getRouteSession: () => workbenchRoute({ state: "workbench-session" }),
         createRef,
         tabInstance: "anw-tab-test-1",
         now: () => NOW,
+        onWritingActionBound,
       });
 
       coordinator.start();
@@ -139,6 +142,15 @@ describe("assistant context_ref coordinator", () => {
         sessionId: "session-1",
       });
       expect(first).toEqual({ context_ref: successRef(0).contextRef });
+      expect(onWritingActionBound).toHaveBeenCalledTimes(1);
+      expect(onWritingActionBound).toHaveBeenCalledWith({
+        actionId: "00000000-0000-4000-8000-000000000058",
+        contextRef: successRef(0).contextRef,
+        sessionId: "session-1",
+        novelId: "novel-1",
+        documentId: "document-1",
+        tabInstance: "anw-tab-test-1",
+      });
       expect(coordinator.requestPatch({
         selectedAgent: "ai-novel-writer",
         sessionId: "session-1",

@@ -1,0 +1,167 @@
+{
+  "schema_version": "s58-outline-remaining-product-buttons-evidence/1",
+  "observed_at": "2026-09-07T14:49:25+08:00",
+  "scope": {
+    "environment": "isolated-qwenpaw-2.1.0",
+    "base_url": "http://127.0.0.1:54385",
+    "data_class": "synthetic-test-only",
+    "novel_id": "f1b25dac-32a6-407b-949f-eb2b23cb4626",
+    "novel_title": "雾宅来信",
+    "outline_draft_id": "bf228eac-81c6-4631-8c3f-c92e81810a30"
+  },
+  "buttons": [
+    {
+      "kind": "outline_characters",
+      "action_id": "9948a7cf-8c7e-4ae7-95cc-338b3920ce7f",
+      "dispatch_id": "00bd616f-e7ce-472c-a85b-6d7b7c0898bb",
+      "job_id": "33367c81-33e7-458e-9087-1aa730b96d66",
+      "dispatch_state": "dispatched",
+      "job_state": "ready",
+      "job_input_hash": "524e7d89a31f3213bdf06b5d769b675c799ad8249c6e1cce9f8dd4a0a1348403",
+      "method_packet_sha256": "0f15c652a95196c2d4014bb9df15c9b56208fd33dcab6fc897ea118cb696d4d6",
+      "result_observation": "four editable character drafts, including one main and three supporting characters",
+      "method_receipt_text": "本次已装载到请求：人物塑造与人物弧线 · 悬疑写作",
+      "provider_observation": {
+        "new_receipts": 1,
+        "input_hash": "1dc6bc70bf614afa0a8fe7ca223786bf6707a25a749aae425526d95c405f50c0",
+        "tools": [],
+        "tool_choice": null,
+        "primary_heading_counts": {
+          "novel-direction": 0,
+          "story-foundation": 0,
+          "character-craft": 1,
+          "chapter-outline": 0,
+          "style-review": 0,
+          "prose-writing": 0
+        },
+        "approved_block_matches": {
+          "character-craft/SKILL.md": {
+            "sha256": "a12d9e0d496e1d4c507b9d90bd85f3337670c0b8f66b582be2a5984d7b97452e",
+            "count": 1
+          },
+          "character-craft/references/character-dynamics.md": {
+            "sha256": "207b380db08a4f29784659fadeec7c72a7a1696232a6ba015dd47ac94e2b0d08",
+            "count": 1
+          },
+          "suspense-writing/SKILL.md": {
+            "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5",
+            "count": 1
+          }
+        }
+      }
+    },
+    {
+      "kind": "outline_plot",
+      "action_id": "10bc5374-8c17-47b7-83bd-b53628465405",
+      "dispatch_id": "e22b39a7-0b71-469a-a5e6-fbf6acb2510f",
+      "job_id": "d8ff3b76-57d0-4392-ae47-6410b7170a33",
+      "dispatch_state": "dispatched",
+      "job_state": "ready",
+      "job_input_hash": "45cbdfc457ea71948ac679b8c63497b08136e45050f8f95cfc46d0013ab34cd7",
+      "method_packet_sha256": "42a17553aa3157c5bbcade4692f930300b6739ff46334d6960a8de9c1bf28d91",
+      "result_observation": "the plot candidate was applied and displayed in the story plot editor",
+      "method_receipt_text": "本次已装载到请求：故事设定总表与总体架构 · 悬疑写作",
+      "provider_observation": {
+        "new_receipts": 1,
+        "input_hash": "c79ed4722579d232bf78f5bd594945c0b19dd9f46abaf8d321499aebd56bae00",
+        "tools": [],
+        "tool_choice": null,
+        "primary_heading_counts": {
+          "novel-direction": 0,
+          "story-foundation": 1,
+          "character-craft": 0,
+          "chapter-outline": 0,
+          "style-review": 0,
+          "prose-writing": 0
+        },
+        "approved_block_matches": {
+          "story-foundation/SKILL.md": {
+            "sha256": "3295af62c986114b421720e2c4e4d191d76ba628a2551ce33c32c84918e50ec9",
+            "count": 1
+          },
+          "story-foundation/references/story-architecture.md": {
+            "sha256": "83757f93f4f08a38eb11a6c621edb0d455832d8035a8bfe1de88e9ee51c7b0c6",
+            "count": 1
+          },
+          "suspense-writing/SKILL.md": {
+            "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5",
+            "count": 1
+          },
+          "suspense-writing/references/mystery-mechanisms.md": {
+            "sha256": "a9291722876f80410808c77ea6ac9e8cc932685cabe6acd1115a3c9b929923a1",
+            "count": 1
+          }
+        }
+      }
+    },
+    {
+      "kind": "outline_highlight",
+      "action_id": "15f9f29c-6ead-46bf-b35f-b7127e626823",
+      "dispatch_id": "a88aaa1c-87ae-49ee-acdc-7876f54a0651",
+      "job_id": "bc97c877-956c-4109-acc0-86189bcb2684",
+      "dispatch_state": "dispatched",
+      "job_state": "ready",
+      "job_input_hash": "2b3cd695f00c9c74f1f0546dad0b6889a290a09f1265e36d7afacde7583349a1",
+      "method_packet_sha256": "b0fa18630e88fbadab725d5d5b6fbbf06d4e8dead97727c5d2ae34ef80ae9146",
+      "result_observation": "the 64-character highlight candidate was applied and displayed",
+      "method_receipt_text": "本次已装载到请求：故事设定总表与总体架构 · 悬疑写作",
+      "provider_observation": {
+        "new_receipts": 1,
+        "input_hash": "5ec77741d39422c8c7655e84ca0c567114efddbc34be5cc8b034e974615146ff",
+        "tools": [],
+        "tool_choice": null,
+        "primary_heading_counts": {
+          "novel-direction": 0,
+          "story-foundation": 1,
+          "character-craft": 0,
+          "chapter-outline": 0,
+          "style-review": 0,
+          "prose-writing": 0
+        },
+        "approved_block_matches": {
+          "story-foundation/SKILL.md": {
+            "sha256": "3295af62c986114b421720e2c4e4d191d76ba628a2551ce33c32c84918e50ec9",
+            "count": 1
+          },
+          "story-foundation/references/story-architecture.md": {
+            "sha256": "83757f93f4f08a38eb11a6c621edb0d455832d8035a8bfe1de88e9ee51c7b0c6",
+            "count": 1
+          },
+          "suspense-writing/SKILL.md": {
+            "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5",
+            "count": 1
+          },
+          "suspense-writing/references/mystery-mechanisms.md": {
+            "sha256": "a9291722876f80410808c77ea6ac9e8cc932685cabe6acd1115a3c9b929923a1",
+            "count": 1
+          }
+        }
+      }
+    }
+  ],
+  "shared_observation": {
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "public_actual_model_evidence": "not_exposed",
+    "generation_contract_version": "follow-agent-effective-v6",
+    "semantic_enabled": false,
+    "each_button_used_a_fresh_action": true,
+    "each_button_was_measured_after_a_fresh_provider_restart": true,
+    "each_result_was_visible_before_the_next_step": true,
+    "screenshots": "observed inline only; no screenshot file persisted"
+  },
+  "claim_boundary": {
+    "proven": "the isolated product outline character, plot and highlight buttons each create one managed action, make one model request, inject the task primary and suspense category methods exactly according to the frozen packet, expose no tools, apply the candidate, and show the frozen author-facing receipt",
+    "not_proven": [
+      "literary quality improvement",
+      "chapter outline or storyline recommendation buttons",
+      "review, selection edit, or character profile buttons",
+      "native chat routing",
+      "semantic routing",
+      "provider billing or token usage",
+      "full G-BUTTON or G-FULL"
+    ]
+  }
+}

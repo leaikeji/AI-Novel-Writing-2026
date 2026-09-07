@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -11,17 +12,12 @@ from urllib.request import Request, urlopen
 
 
 AGENT_ID = "ai-novel-writer"
-SKILLS = [
-    "novel-direction",
-    "story-foundation",
-    "character-craft",
-    "chapter-outline",
-    "scene-craft",
-    "dialogue-craft",
-    "prose-writing",
-    "continuity-check",
-    "style-review",
-]
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from backend.writing_skills.catalog import published_skill_ids
+
+SKILLS = sorted(published_skill_ids(ROOT / "skills"))
 TOOLS = [
     "novel_get_context",
     "novel_get_document",
@@ -45,6 +41,17 @@ def desired_agent_payload() -> dict[str, object]:
         ),
         "language": "zh",
     }
+
+
+def skill_enable_plan(*, created: bool, previous: dict[str, bool] | None) -> list[str]:
+    """Caller supplies a frozen pre-install public snapshot under install lock."""
+    if previous is not None and any(type(value) is not bool for value in previous.values()):
+        raise ValueError("invalid previous Skill state")
+    if created:
+        return list(SKILLS)
+    return [name for name in SKILLS if previous is not None and (
+        name not in previous or previous[name] is True
+    )]
 
 
 def request_json(
@@ -71,7 +78,44 @@ def request_json(
         return json.load(response)
 
 
-def configure() -> dict[str, object]:
+def capture_skill_state() -> dict[str, object]:
+    """Public pre-install snapshot; absence and disabled are different states."""
+    agents = request_json("/api/agents")
+    if not isinstance(agents, dict) or not isinstance(agents.get("agents"), list):
+        raise RuntimeError("invalid public Agent inventory")
+    exists = any(item.get("id") == AGENT_ID for item in agents["agents"] if isinstance(item, dict))
+    available = request_json("/api/skills", agent_id=AGENT_ID) if exists else []
+    if not isinstance(available, list):
+        raise RuntimeError("invalid public Skill inventory")
+    previous: dict[str, bool] = {}
+    for item in available:
+        if not isinstance(item, dict) or item.get("source") != "plugin:ai-novel-world-2026":
+            continue
+        name = item.get("name")
+        enabled = item.get("enabled")
+        if not isinstance(name, str) or not name or type(enabled) is not bool or name in previous:
+            raise RuntimeError("invalid public Skill state")
+        previous[name] = enabled
+    return {"schema": "skill-enable-state/1", "base_url": BASE_URL,
+            "agent_id": AGENT_ID, "skills": previous}
+
+
+def load_previous_skill_state(path: Path) -> dict[str, bool]:
+    if path.stat().st_size > 65536:
+        raise ValueError("previous Skill state too large")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(value, dict) or set(value) != {"schema", "base_url", "agent_id", "skills"}
+            or value["schema"] != "skill-enable-state/1" or value["base_url"] != BASE_URL
+            or value["agent_id"] != AGENT_ID or not isinstance(value["skills"], dict)):
+        raise ValueError("previous Skill state scope mismatch")
+    previous = value["skills"]
+    if any(not isinstance(name, str) or not name or type(enabled) is not bool
+           for name, enabled in previous.items()):
+        raise ValueError("invalid previous Skill state")
+    return previous
+
+
+def configure(*, previous_skill_state: dict[str, bool] | None = None) -> dict[str, object]:
     agents = request_json("/api/agents")
     assert isinstance(agents, dict)
     agent_ids = {item["id"] for item in agents.get("agents", [])}
@@ -104,12 +148,23 @@ def configure() -> dict[str, object]:
     if missing:
         raise RuntimeError(f"plugin Skills missing from {AGENT_ID}: {missing}")
 
+    # Existing explicit disabled choices survive upgrades. Newly added modules
+    # may be enabled only with the installer's pre-upgrade public inventory.
+    enable_ids = skill_enable_plan(created=created, previous=previous_skill_state)
+    disable_ids = sorted(name for name in SKILLS if previous_skill_state is not None
+                         and previous_skill_state.get(name) is False)
+    if disable_ids:
+        disabled = request_json("/api/skills/batch-disable", method="POST",
+                                body=disable_ids, agent_id=AGENT_ID)
+        if (not isinstance(disabled, dict) or any(
+                disabled.get("results", {}).get(name, {}).get("success") is not True for name in disable_ids)):
+            raise RuntimeError("failed to restore disabled novel Skills")
     enabled = request_json(
         "/api/skills/batch-enable",
         method="POST",
-        body=SKILLS,
+        body=enable_ids,
         agent_id=AGENT_ID,
-    )
+    ) if enable_ids else {"results": {}}
     assert isinstance(enabled, dict)
     failed = {
         name: result
@@ -194,20 +249,30 @@ def configure() -> dict[str, object]:
             "专属模型或全局默认模型"
         )
 
+    final_skills = request_json("/api/skills", agent_id=AGENT_ID)
+    final_enabled = {str(item["name"]) for item in final_skills
+                     if isinstance(item, dict) and item.get("name") in SKILLS and item.get("enabled") is True}
+    if not set(enable_ids) <= final_enabled or set(disable_ids) & final_enabled:
+        raise RuntimeError("public Skill enablement readback mismatch")
     return {
         "agent_id": AGENT_ID,
         "created": created,
         "effective_model": active_llm,
-        "enabled_skills": SKILLS,
+        "requested_enable_skills": enable_ids,
+        "enabled_skills": sorted(final_enabled),
         "enabled_tools": TOOLS,
         "system_prompt_files": system_prompt_files,
     }
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--previous-skill-state", type=Path)
+    args = parser.parse_args()
     try:
-        print(json.dumps(configure(), ensure_ascii=False, indent=2))
-    except (AssertionError, HTTPError, URLError, TimeoutError, RuntimeError) as error:
+        previous = load_previous_skill_state(args.previous_skill_state) if args.previous_skill_state else None
+        print(json.dumps(configure(previous_skill_state=previous), ensure_ascii=False, indent=2))
+    except (AssertionError, OSError, ValueError, HTTPError, URLError, TimeoutError, RuntimeError) as error:
         print(f"Novel Agent configuration failed: {error}", file=sys.stderr)
         raise SystemExit(1) from error
 

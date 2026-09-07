@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 from backend.database import get_database_url
 from backend.models import Base
 import backend.creative_data_models  # noqa: F401  # register additive metadata
+import backend.writing_skills.models  # noqa: F401  # additive dispatch evidence
 
 
 config = context.config

@@ -1,0 +1,138 @@
+{
+  "schema_version": "plan58-review-button-evidence/1",
+  "observed_at": "2026-09-07T15:37:00+08:00",
+  "environment": {
+    "qwenpaw_version": "2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "qwenpaw_origin": "http://127.0.0.1:54385",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "database_port": 55471,
+    "transport": "loopback fake OpenAI fixture",
+    "long_lived_origin_touched": false
+  },
+  "scope": {
+    "novel_id": "3f2a6e14-07a5-4656-924a-b622d775b01b",
+    "document_id": "891ce317-a1af-4c13-a223-9c385f86a27b",
+    "genre": "悬疑",
+    "draft_version": 3,
+    "content_hash": "d5538334d1bb9774b04ff5ec89f760d4dd5a382e7826ec040d12eb4ad31154b7",
+    "visible_character_count": 1000,
+    "synthetic_only": true
+  },
+  "action": {
+    "action_id": "e4845d8d-e096-4fe9-a4c1-8164a303f017",
+    "dispatch_id": "d2063c51-e891-460b-b9be-5e8e04d9be17",
+    "dispatch_state": "dispatched",
+    "job_id": "32793b77-bd80-4bee-981d-c809310172a3",
+    "job_ref": "creative:32793b77-bd80-4bee-981d-c809310172a3",
+    "job_state": "ready",
+    "kind": "review",
+    "client_input_hash": "444dd43b3919f4574423881f06f5cb92883a244a8de2e43a74cd3dabcf2cfa75",
+    "route_request_key": "ffd96a90e3e834098c3a6a48c48a6c2e54191023c5efcf0ea42310b4b70a9cf2",
+    "job_input_hash": "36d2a1de806e9a0a106b118794552f30384faf904dba19463dd8741e5fef3813",
+    "method_input_hash": "2369a56ad99527f90325ab4aa29e001b7905f9235f17f6e65d3aac8e6cf780a9",
+    "route_source_version": "d9593eb18659c10673a14924dad7ee12017ab3aa0a8b0170ddace1c16a18f906",
+    "route_visibility_key": "698348fe21749ca2d1030884d116f909a9714d7d63e93db9f370dc3d7e2e7c5e"
+  },
+  "method_plan": {
+    "catalog_version": "6561a4d89e94edc25e7e60d5ce1a440cfd8d2c2e42f4bb58e40913cba0d13525",
+    "source_hash": "a46b4d73dcc138958444bb0478d5549c375b14d807bf9b1957d4beea740c9d67",
+    "primary_skill": "style-review",
+    "selected_ids": [
+      "suspense-writing"
+    ],
+    "genre_state": "resolved",
+    "mechanism_state": "not_applicable",
+    "estimated_tokens": 3748,
+    "blocks": [
+      {
+        "skill_id": "style-review",
+        "path": "SKILL.md",
+        "sha256": "ec384359a799edffb0453c0d83fba1c20af0655700350d743cadeabe775d08f1"
+      },
+      {
+        "skill_id": "style-review",
+        "path": "references/revision-passes.md",
+        "sha256": "fa91d17ff584730dbb77cb82490c93a87ef9eaf2d2dea3d6112f4169f7a505f2"
+      },
+      {
+        "skill_id": "suspense-writing",
+        "path": "SKILL.md",
+        "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5"
+      },
+      {
+        "skill_id": "suspense-writing",
+        "path": "references/mystery-mechanisms.md",
+        "sha256": "a9291722876f80410808c77ea6ac9e8cc932685cabe6acd1115a3c9b929923a1"
+      }
+    ]
+  },
+  "provider_observation": {
+    "receipt_count_after_click": 1,
+    "receipt_count_after_recovery_get": 1,
+    "model": "s58-fake-model",
+    "provider_message_hash": "53731737b5f50b5dddb930d02f77179d4170fa45d9fc26f31a2a45093fd3ee9f",
+    "tools": [],
+    "tool_choice": null,
+    "exact_block_counts": {
+      "style-review/SKILL.md": 1,
+      "style-review/references/revision-passes.md": 1,
+      "suspense-writing/SKILL.md": 1,
+      "suspense-writing/references/mystery-mechanisms.md": 1
+    },
+    "other_primary_heading_counts": {
+      "novel-direction": 0,
+      "story-foundation": 0,
+      "character-craft": 0,
+      "chapter-outline": 0,
+      "prose-writing": 0
+    }
+  },
+  "job_snapshot": {
+    "bound_draft_version": 3,
+    "bound_content_hash": "d5538334d1bb9774b04ff5ec89f760d4dd5a382e7826ec040d12eb4ad31154b7",
+    "writing_retrieval_present": true,
+    "writing_context_present": true,
+    "writing_context_schema": "writing-context-snapshot/2"
+  },
+  "model_evidence": {
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "reported_actual": null,
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "usage_status": "not_exposed",
+    "verification_reason": "public_usage_not_exposed_pre_post_match",
+    "private_usage_buffer_used": false
+  },
+  "ui_observation": {
+    "real_product_button_clicked": "AI 审稿",
+    "confirmation_dialog_seen": true,
+    "result_modal_seen": true,
+    "result_summary": "正文证据链基本清楚，但有一处人物已知信息越界。",
+    "method_receipt_text": "本次已装载到请求：分层审稿与文风修订 · 悬疑写作",
+    "receipt_action_id": "e4845d8d-e096-4fe9-a4c1-8164a303f017",
+    "receipt_remained_author_visible_after_modal_close": true,
+    "persistent_screenshot_created": false
+  },
+  "recovery": {
+    "method": "GET",
+    "path_shape": "/documents/{document_id}/writing-method-actions/{action_id}",
+    "returned_same_job_id": true,
+    "returned_ready_dispatched": true,
+    "redispatched_model": false
+  },
+  "verification": {
+    "backend_writing_skills_pytest_exit_code": 0,
+    "frontend_test_files": 152,
+    "frontend_tests": 1356,
+    "frontend_typecheck_exit_code": 0,
+    "frontend_build_modules": 194,
+    "plugin_package_exit_code": 0
+  },
+  "limits": [
+    "隔离假模型只证明产品按钮、稳定动作、真实装载字节、空工具、结果封套和只读恢复链，不证明文学质量提升。",
+    "宿主没有公开actual模型或usage，证据保持not_exposed，未用回环观察值倒填权威字段。",
+    "本证据只裁决审稿确定性按钮子门禁，不放行选区编辑、人物卡、原生聊天、语义增强或完整G-BUTTON/G-FULL。"
+  ]
+}

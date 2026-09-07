@@ -31,6 +31,7 @@ export interface CreateAssistantContextRefInput {
 
 export interface CreatedAssistantContextRef {
   contextRef: string;
+  writingActionId: string;
   expiresAt: string;
   contextRevision: number;
   payloadCharacters: number;
@@ -58,6 +59,14 @@ export interface AssistantContextRefCoordinatorOptions {
     fieldId: string;
     contextRevision: number;
   }) => boolean;
+  onWritingActionBound?: (input: {
+    actionId: string;
+    contextRef: string;
+    sessionId: string;
+    novelId: string;
+    documentId?: string;
+    tabInstance: string;
+  }) => void;
 }
 
 
@@ -295,6 +304,14 @@ export function createAssistantContextRefCoordinator(
         return null;
       }
       const contextRef = ready.contextRef;
+      options.onWritingActionBound?.({
+        actionId: ready.writingActionId,
+        contextRef,
+        sessionId: input.sessionId ?? "",
+        novelId: ready.binding.novelId,
+        documentId: ready.binding.documentId,
+        tabInstance,
+      });
       ready = null;
       options.runtime.setPreparation("settling");
       schedule(options.runtime.getStatus(), true);
@@ -303,6 +320,7 @@ export function createAssistantContextRefCoordinator(
     getReadyRef() {
       return ready ? {
         contextRef: ready.contextRef,
+        writingActionId: ready.writingActionId,
         expiresAt: ready.expiresAt,
         contextRevision: ready.contextRevision,
         payloadCharacters: ready.payloadCharacters,

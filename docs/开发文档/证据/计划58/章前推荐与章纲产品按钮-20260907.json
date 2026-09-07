@@ -1,0 +1,102 @@
+{
+  "schema_version": "s58-product-button-evidence/1",
+  "observed_at": "2026-09-07T15:14:00+08:00",
+  "runtime": {
+    "qwenpaw_version": "2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "qwenpaw_loopback_url": "http://127.0.0.1:54385",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "provider": "loopback fixture only",
+    "provider_model": "s58-fake / s58-fake-model",
+    "long_lived_18088_touched": false
+  },
+  "synthetic_scope": {
+    "novel_id": "f1b25dac-32a6-407b-949f-eb2b23cb4626",
+    "novel_title": "雾宅来信",
+    "genre": "悬疑",
+    "subgenre": "悬疑探案",
+    "chapter_creation_draft_id": "ccf4e218-f070-40d5-a2e8-10b89723a51b",
+    "storyline_id": "4d6e9cb8-ed9e-4429-9f6e-1d31c918afac",
+    "formal_chapter_created": false
+  },
+  "skill_enablement": {
+    "enabled_project_skills": 10,
+    "golden_finger_writing_enabled": false,
+    "suspense_writing_enabled": true
+  },
+  "checks": [
+    {
+      "kind": "chapter_storyline_recommendation",
+      "action_id": "315b0041-7455-4560-8225-a2bb0cc2d6d2",
+      "dispatch_id": "a4370d87-ebb4-475b-9ba4-2dbf9fa0d236",
+      "job_id": "cad89b2f-5072-4cc8-a355-fe883f387555",
+      "dispatch_state": "dispatched",
+      "job_state": "ready",
+      "job_input_hash": "7ea717f08520cbb763d36ae76a47926616bb1865e4114c0fe907ad7fede7b236",
+      "method_input_hash": "209d9d632dc041342c8c99cc347cf8cf4dda41256c5a128c3468ac7abc4b36c2",
+      "primary_skill": "chapter-outline",
+      "selected_ids": ["suspense-writing"],
+      "provider_receipts_after_fixture_restart": 1,
+      "provider_message_hash": "228fcf08b4a249d87b8896d924c94ec94677377bc9dd7bd9dbda49fab369386c",
+      "tools": [],
+      "tool_choice": null,
+      "exact_block_counts": {
+        "chapter-outline/SKILL.md": 1,
+        "chapter-outline/references/chapter-architecture.md": 1,
+        "suspense-writing/SKILL.md": 1,
+        "suspense-writing/references/mystery-mechanisms.md": 1
+      },
+      "ui_result": "作者可见推荐候选，并在选择后回填死者来信主线",
+      "ui_receipt": "本次已装载到请求：章节大纲与场景链 · 悬疑写作"
+    },
+    {
+      "kind": "chapter_outline",
+      "action_id": "51e6cc19-38e3-4c70-ae83-24265a95ead2",
+      "dispatch_id": "d1b36e78-eb07-450c-a881-96b2225167dd",
+      "job_id": "c28fce10-740b-4408-936e-50995c9920e3",
+      "dispatch_state": "dispatched",
+      "job_state": "ready",
+      "job_input_hash": "8ac19e02d6c1dc8087b7abe9a221c27c02db7fb361881416bb6dff6f1fc6d70b",
+      "method_input_hash": "921a24c3e114014c5814db36ca4d07e3fe35141d9f8197d9bbd824824d43f912",
+      "primary_skill": "chapter-outline",
+      "selected_ids": ["suspense-writing"],
+      "provider_receipts_after_fixture_restart": 1,
+      "provider_message_hash": "42be9af4cf60efb555e5051486d1aebf6be840aa205b10b537704003093d6e22",
+      "tools": [],
+      "tool_choice": null,
+      "exact_block_counts": {
+        "chapter-outline/SKILL.md": 1,
+        "chapter-outline/references/chapter-architecture.md": 1,
+        "suspense-writing/SKILL.md": 1,
+        "suspense-writing/references/mystery-mechanisms.md": 1
+      },
+      "ui_result": "章名死者来信和290个可见字符的章纲已回填章节草稿",
+      "ui_receipt": "本次已装载到请求：章节大纲与场景链 · 悬疑写作"
+    }
+  ],
+  "method_block_sha256": {
+    "chapter-outline/SKILL.md": "42c559cddf300d67230203301c8a27ad464fa8d069eaac495c4ff7280b8dd56c",
+    "chapter-outline/references/chapter-architecture.md": "3398d9599b468a8c7b5c593ca244af83d5f2a7c870233517f63c234995022718",
+    "suspense-writing/SKILL.md": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5",
+    "suspense-writing/references/mystery-mechanisms.md": "a9291722876f80410808c77ea6ac9e8cc932685cabe6acd1115a3c9b929923a1"
+  },
+  "recovery_check": {
+    "method": "GET by exact novel, tab and action",
+    "storyline_result": "ready/dispatched",
+    "outline_result": "ready/dispatched",
+    "provider_receipts_before": 1,
+    "provider_receipts_after": 1,
+    "redispatched": false
+  },
+  "public_model_evidence": {
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "execution_evidence": null,
+    "interpretation": "not_exposed; fixture observation is not promoted to authoritative provider evidence"
+  },
+  "limitations": [
+    "This verifies deterministic method loading and product wiring, not literary quality.",
+    "The chapter-creation draft was synthetic and no formal chapter was created.",
+    "Native chat, semantic routing, review, selection edit and character-profile buttons are not covered by this evidence."
+  ]
+}

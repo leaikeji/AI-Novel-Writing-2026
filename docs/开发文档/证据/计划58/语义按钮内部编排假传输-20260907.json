@@ -1,0 +1,123 @@
+{
+  "schema_version": "plan58-semantic-button-internal-orchestration/1",
+  "observed_at": "2026-09-07T20:35:00+08:00",
+  "status": "technical_fake_transport_pass_public_release_closed",
+  "scope": {
+    "entries": [
+      "chapter_body",
+      "managed_creative_buttons"
+    ],
+    "server_internal_injection_only": true,
+    "frontend_semantic_available": false,
+    "public_api_default": "semantic_mode=auto returns 409 before model, catalog or chat IO",
+    "real_provider_calls": 0,
+    "long_lived_18088_touched": false
+  },
+  "contracts": {
+    "state_sequence": "claimed -> routing_started -> route_ready -> assembled -> dispatch_started -> dispatched",
+    "semantic_call_limit": 1,
+    "semantic_tool_limit": 0,
+    "semantic_transport_retry_limit": 1,
+    "same_agent": "ai-novel-writer",
+    "same_configured_model_recheck": "before raw call and after reply",
+    "recursive_binding": "rejected",
+    "unobserved_middleware": "rejected",
+    "remote_uncertain": "dispatch becomes unknown; writing generation is not started and same action is not replayed",
+    "packet_evidence": "content-free status, auxiliary_calls and semantic decision hash participate in method_input_hash",
+    "legacy_packet_hash": "unchanged when semantic_evidence is absent"
+  },
+  "source_hashes": {
+    "semantic.py": "cc8a15a8c3befab5ced7ccb3f3d231677b30e6b7f3db3d2911ca3167d9f2e07d",
+    "semantic_runtime.py": "799c6edb20cab5f32dd9d3d257af3e26bc9e971ee9b4ea5dd946b4d870bc19a0",
+    "semantic_orchestration.py": "408040c2e4abdd1ebde5dc31b7db4e832b72c94a34289235fd414aae08b7cd5c",
+    "load_policy.py": "74db31e244638b0343ce80a9aded9a6f75f29e3d61a348265e8156437fe09b2e",
+    "contracts.py": "de558610551aff534258f909065d44a6dc6884d5681929c0c0702b4f7eb17f8e",
+    "chapter_transport_fixture.py": "f086e0a63f59a0315c983af79df3dfbf0e66860cba61a963bd3966c1385291ce",
+    "fake_openai.py": "7bef1de2067ce4483d1c29301f4676d13ee2b48eb34857e5e9206443a0ed06bd"
+  },
+  "isolated_public_host": {
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "qwenpaw_version": "2.1.0",
+    "origin": "http://127.0.0.1:54385",
+    "fixture": "s58-chapter-transport",
+    "document_id": "891ce317-a1af-4c13-a223-9c385f86a27b",
+    "action_id": "aa8d90ae-bd12-45b0-8630-2819fd59255b",
+    "dispatch_id": "2f98a1b8-a7f9-4a82-96de-9c22c5d37d1c",
+    "job_id": "ab4808b7-753a-41e8-8eff-9e0bec154b62",
+    "http_status": 200,
+    "job_state": "ready",
+    "dispatch_state": "dispatched",
+    "selected_ids": [
+      "suspense-writing"
+    ],
+    "semantic_enabled": true,
+    "auxiliary_calls": 1,
+    "method_input_hash": "9084533555baa596778b997b63f96796161c07f0c6eef095a1393c36789baf18",
+    "provider_receipts": [
+      {
+        "ordinal": 1,
+        "purpose": "semantic_route",
+        "model": "s58-fake-model",
+        "tools": [],
+        "tool_choice": null,
+        "primary_method_heading_count": 0,
+        "approved_method_block_matches": 0,
+        "input_hash": "83eba10328f41f33ff62ee07535e5e0e284d0d9d0bf9041c73947658c406ff56"
+      },
+      {
+        "ordinal": 2,
+        "purpose": "chapter_generation",
+        "model": "s58-fake-model",
+        "tools": [],
+        "tool_choice": null,
+        "prose_writing_heading_count": 1,
+        "exact_block_counts": {
+          "prose-writing/SKILL.md": 1,
+          "prose-writing/references/narrative-craft.md": 1,
+          "prose-writing/references/genre-promises.md": 1,
+          "suspense-writing/SKILL.md": 1
+        },
+        "input_hash": "dd09cb7c192e28a33e459f8c43c376fc68e920b9c3b4c682636c27861657fad5"
+      }
+    ],
+    "same_action_replay": "same job and dispatch; receipt count remained 2",
+    "restored_after_probe": {
+      "enabled_skill_count": 10,
+      "suspense-writing": true,
+      "golden-finger-writing": false,
+      "fake_provider_mode": "character-profile",
+      "fake_provider_receipts": 0
+    },
+    "limits": [
+      "loopback fake provider only; no literary-quality result",
+      "fixture-only server gate; formal product HTTP endpoint remains closed",
+      "semantic actual identity and billed usage are not exposed as a separate durable product receipt"
+    ]
+  },
+  "verification": {
+    "pure_semantic_middleware_and_orchestration": "37 passed",
+    "chapter_http_semantic_cases": "3 passed against isolated PostgreSQL, including deterministic baseline",
+    "creative_http_semantic_cases": "2 passed against isolated PostgreSQL",
+    "writing_skills_suite": "321 passed against 127.0.0.1:55471/ai_novel_s58_test",
+    "full_backend": "pass: reached 100 percent with exit code 0",
+    "frontend_full": "154 files, 1365 tests passed",
+    "frontend_typecheck": "pass",
+    "frontend_build": "pass: 196 modules transformed",
+    "skill_qwenpaw_and_model_contracts": "146 passed",
+    "plugin_package": "pass; five semantic and policy source files match the packaged copies byte-for-byte",
+    "intermediate_failures_not_counted": [
+      "the first pure refactor run exposed a missing local unresolved binding; fixed before all passing runs",
+      "one isolated database command omitted the postgres username and was rejected before tests; corrected run passed",
+      "one frontend command targeted a directory without package.json and did not start tests; corrected at repository root",
+      "one root frontend command lacked Node in PATH and stopped at typecheck; corrected with the bundled workspace Node"
+    ]
+  },
+  "release_decision": {
+    "semantic_technical_core": "pass_fake_transport",
+    "G_BUTTON": "pass_isolated_deterministic_buttons",
+    "G_SEMANTIC_BUTTON": "blocked_pending_separately_approved_real_model_budget_and_S/E-B/short-generation_results",
+    "G_SEMANTIC_NATIVE": "blocked",
+    "G_NATIVE": "blocked",
+    "G_FULL": "blocked"
+  }
+}

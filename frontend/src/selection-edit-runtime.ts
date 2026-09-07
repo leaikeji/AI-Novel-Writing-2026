@@ -38,6 +38,7 @@ import {
   type SelectionEditReviewSurfaceAction,
 } from "./selection-edit-review-surface";
 import type { CreativeGenerationRecord } from "./types";
+import type { WritingMethodStatus } from "./writing-skills/contracts";
 import {
   retrievalSummaryFromJob,
   type RetrievalSummaryV1,
@@ -49,6 +50,7 @@ const MULTILINE_FIELD_PATTERN = /(body|outline|description|personality|identity|
 
 
 export interface SelectionEditGenerationClient {
+  readonly currentStatus?: WritingMethodStatus | null;
   start(
     payload: StartCreativeGenerationPayload,
     signal?: AbortSignal,
@@ -100,6 +102,10 @@ export type SelectionEditReviewHostComponent = (
 export interface SelectionRetrievalStatusSnapshot {
   readonly summary: RetrievalSummaryV1 | null;
   readonly novelId?: string;
+}
+
+export interface SelectionMethodStatusSnapshot {
+  readonly status: WritingMethodStatus | null;
 }
 
 
@@ -210,8 +216,12 @@ export class SelectionEditRuntime {
   private readonly coordinator = createSelectionEditReviewCoordinator();
   private active?: ActiveSelectionEdit;
   private retrievalSummary: RetrievalSummaryV1 | null = null;
+  private methodStatus: WritingMethodStatus | null = null;
   private readonly retrievalListeners = new Set<(
     snapshot: SelectionRetrievalStatusSnapshot,
+  ) => void>();
+  private readonly methodListeners = new Set<(
+    snapshot: SelectionMethodStatusSnapshot,
   ) => void>();
   private disposed = false;
 
@@ -251,6 +261,18 @@ export class SelectionEditRuntime {
     this.assertActive();
     this.retrievalListeners.add(listener);
     return () => this.retrievalListeners.delete(listener);
+  }
+
+  getWritingMethodStatus(): SelectionMethodStatusSnapshot {
+    return { status: this.methodStatus };
+  }
+
+  subscribeWritingMethodStatus(
+    listener: (snapshot: SelectionMethodStatusSnapshot) => void,
+  ): () => void {
+    this.assertActive();
+    this.methodListeners.add(listener);
+    return () => this.methodListeners.delete(listener);
   }
 
   async start(
@@ -326,6 +348,7 @@ export class SelectionEditRuntime {
     this.active?.abort?.abort();
     this.active = active;
     this.publishRetrievalSummary(null);
+    this.publishMethodStatus(null);
     const prepared = this.coordinator.dispatch({
       type: "prepare",
       identity: {
@@ -397,6 +420,7 @@ export class SelectionEditRuntime {
     this.active?.abort?.abort();
     this.active = undefined;
     this.retrievalListeners.clear();
+    this.methodListeners.clear();
     this.coordinator.dispose();
   }
 
@@ -406,6 +430,7 @@ export class SelectionEditRuntime {
   ): Promise<void | AssistantSelectionEditorTaskStartResult> {
     const generation = ++active.generation;
     this.publishRetrievalSummary(null);
+    this.publishMethodStatus(null);
     active.abort?.abort();
     const abort = new AbortController();
     active.abort = abort;
@@ -415,6 +440,7 @@ export class SelectionEditRuntime {
       const job = await this.generationClient.start(payload, abort.signal);
       if (!this.isCurrent(active, generation)) return job.id ? { jobId: job.id } : undefined;
       this.publishRetrievalSummary(retrievalSummaryFromJob(job));
+      this.publishMethodStatus(job.writing_method ?? this.generationClient.currentStatus ?? null);
       active.jobId = job.id;
       const bindingInput = {
         selectionId: active.record.selectionId,
@@ -456,6 +482,7 @@ export class SelectionEditRuntime {
       this.coordinator.dispatch({ type: "generation-ready", result: job.output_json });
       return { jobId: job.id };
     } catch (reason) {
+      this.publishMethodStatus(this.generationClient.currentStatus ?? this.methodStatus);
       if (!this.isCurrent(active, generation)) return active.jobId ? { jobId: active.jobId } : undefined;
       if (abort.signal.aborted || this.coordinator.getState().phase === "discarded") {
         return active.jobId ? { jobId: active.jobId } : undefined;
@@ -651,6 +678,12 @@ export class SelectionEditRuntime {
     for (const listener of this.retrievalListeners) listener(snapshot);
   }
 
+  private publishMethodStatus(status: WritingMethodStatus | null): void {
+    this.methodStatus = status;
+    const snapshot = this.getWritingMethodStatus();
+    for (const listener of this.methodListeners) listener(snapshot);
+  }
+
   private assertActive(): void {
     if (this.disposed) throw new Error("selection edit runtime is disposed");
   }
@@ -666,8 +699,10 @@ export function createSelectionEditReviewHost(
   return function SelectionEditReviewHost(props: SelectionEditReviewHostProps): unknown {
     const [state, setState] = React.useState(() => runtime.getState());
     const [retrieval, setRetrieval] = React.useState(() => runtime.getRetrievalStatus());
+    const [method, setMethod] = React.useState(() => runtime.getWritingMethodStatus());
     React.useEffect(() => runtime.subscribe(setState), []);
     React.useEffect(() => runtime.subscribeRetrievalStatus(setRetrieval), []);
+    React.useEffect(() => runtime.subscribeWritingMethodStatus(setMethod), []);
     const identity = activeIdentity(state);
     const fieldIds = typeof props.fieldIds === "string" ? [props.fieldIds] : props.fieldIds;
     const active = Boolean(identity && fieldIds.includes(identity.target.fieldId)
@@ -695,6 +730,7 @@ export function createSelectionEditReviewHost(
           onReturnFocus: (target: { fieldId: string }) => runtime.focusSource(target.fieldId),
           retrievalSummary: retrieval.summary,
           retrievalNovelId: retrieval.novelId,
+          writingMethodStatus: method.status,
         })
         : null,
     );

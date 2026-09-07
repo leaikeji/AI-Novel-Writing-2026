@@ -892,6 +892,20 @@ def offline_install_stopped_candidate(
     )
 
 
+def save_preinstall_skill_state() -> Path:
+    """Keep a recoverable, public-only enablement snapshot before replacement."""
+    from scripts import configure_qwenpaw_novel_agent as configuration
+
+    configuration.BASE_URL = BASE_URL
+    state = configuration.capture_skill_state()
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="ai-novel-skill-state-",
+                                     suffix=".json", delete=False) as output:
+        json.dump(state, output, ensure_ascii=False, sort_keys=True)
+        path = Path(output.name)
+    print(f"Pre-install Skill state (retain for recovery): {path}")
+    return path
+
+
 def install() -> None:
     validate_install_intent()
     pnpm = pnpm_bin()
@@ -902,12 +916,14 @@ def install() -> None:
     run(sys.executable, "-m", "pytest", environ=test_environment())
     run(sys.executable, str(ROOT / "scripts" / "package_plugin.py"))
     require_live_tts_flags_disabled()
+    previous_skill_state = save_preinstall_skill_state()
     hot_install_packaged_plugin()
     migrate_installed_plugin()
     provision_installed_embedding_secret_store()
     bootstrap_installed_digest_keyring()
     provision_installed_validation_token()
-    run(sys.executable, str(ROOT / "scripts" / "configure_qwenpaw_novel_agent.py"))
+    run(sys.executable, str(ROOT / "scripts" / "configure_qwenpaw_novel_agent.py"),
+        "--previous-skill-state", str(previous_skill_state))
     run(
         "docker",
         "exec",

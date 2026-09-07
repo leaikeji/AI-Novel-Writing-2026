@@ -1,12 +1,12 @@
 # 写作 Skill 自动路由与可扩展分类接入优化计划
 
-状态：V1.2 复查修订方案，待用户批准施工；本轮按“同意，请优化计划”修订本文及导航。未实现、未部署本计划，不授权修改模型、调用真实 Provider、迁移数据库、重装插件或提交／推送 Git。
+状态：V1.3 施工复核修订，已获用户“提交git，然后用目标模式开始施工”授权，2026-09-05进入W0共同合同与实现阶段。V1.2规划基线已提交为747a4b6；目标模式已启动。V1.3依据独立复核把解析器夹具与真实入口证据分开，不扩大已授权施工范围。确定性按钮门禁已在隔离环境通过；语义按钮内部编排及公开中间件路径已通过fake技术验证但正式入口仍默认关闭。2026-09-07用户进一步明确批准本文最多40次辅助路由＋8次短生成真实模型预算，并要求按真实写作验收、不得临时乱取书名；本轮统一使用既有隔离测试作品《雾宅来信》及冻结事实。首轮真实S组16/20、正式模块precision 92.31%／recall 85.71%，未过门禁；6次短生成也暴露长度、事实与协议污染反例，人工可采用性为0/6。候选关系／提示已优化，关系与metadata逐字段漂移、目录版本、方法包身份及历史冻结恢复反例已通过329项写作Skill回归，但新版本尚未获得同哈希完整真实重跑，语义入口继续关闭。独立二次复核裁决仅`G-BUTTON`（隔离确定性按钮）通过，`G-SEMANTIC-BUTTON/G-NATIVE/G-SEMANTIC-NATIVE/G-FULL`均阻断。长期数据库迁移／安装继续遵守各自阶段条件；用户已于2026-09-07明确授权提交并Push当前候选，授权不等于放行受阻入口或长期迁移。
 
 原始日期：2026-09-03；V1.2修订：2026-09-05（Asia/Shanghai）。前置：计划57的两份分类／机制 Skill 已由作者批准并在专用 Agent 启用，但所有入口自动装载尚未完成。
 
 V1.1已落实五项复查结论：路由调用前持久化防重复；路由与生成共用任务资料白名单；单独验证辅助调用的工具／递归／次数边界；题材与机制分别判断；共同基础、按钮、原生聊天和语义增强分别设门禁。旧版草案在本文直接修正，不另建冗余流程副本。
 
-V1.2追加落实三项复查结论：稳定动作身份先于可变输入指纹查重；受管请求以服务端方法清单为唯一装载依据；确定性样本、语义样本与各入口实测分别计分。沿用原施工架构与40次辅助路由＋8次短生成预算，不新建另一套路由或评测流程。
+V1.2追加落实三项复查结论：稳定动作身份先于可变输入指纹查重；受管请求以服务端方法清单为唯一装载依据；确定性样本、语义样本与各入口实测分别计分。V1.3进一步把确定性解析器合同（D-R）与真实产品入口投影（D-E）拆开计分：合成`SourceItem`不能证明产品有同名权威来源；缺少可信机制事实时必须保持`unresolved`，不得扫正文关键词补成金手指命中。沿用原施工架构与40次辅助路由＋8次短生成预算，不新建另一套路由或评测流程。
 
 ## 1. 目标与作者体验
 
@@ -45,7 +45,7 @@ V1.2追加落实三项复查结论：稳定动作身份先于可变输入指纹�
 
 技术推断：可复用项目领域服务、公开 PawApp 调用和 Middleware 建立统一路由。但原生当前请求装载、历史隔离、请求级无工具辅助调用仍待公开合同实测。第7节按能力拆分门禁，不用一个尚未验证的原生能力阻断全部按钮工作，也不把推断写成已实现事实。
 
-### 待批准的新决策
+### 本轮已批准的设计决策（运行发布另过门禁）
 
 1. **可扩展模块替代固定两类清单。** 计划23的“最多一个分类入口”和计划57的“本次两个模块”不再作为未来分类总数上限；继续保留避免分类×任务复制矩阵的原则。
 2. **题材与机制独立判定，语义按需补选。** 确定性规则已解决所有相关维度、可复用结果或没有足够资料时零辅助调用；命中“悬疑”不能替代对金手指等机制的判断。仍有可判断的未决维度时，才考虑一次可见辅助判断，仍用本任务冻结的 `ai-novel-writer` 有效模型。
@@ -153,6 +153,8 @@ V1.2追加落实三项复查结论：稳定动作身份先于可变输入指纹�
 
 语义仅处理第5.2节的未决项，输入为同一有界资料投影与候选声明，不加载全部方法正文。它是增强能力，不是确定性分类、装配或按钮交付的前置依赖。
 
+施工现状（2026-09-07）：按钮共享编排已接入服务端内部调用器，正式HTTP入口没有注入该调用器，目录仍返回`semantic_available=false`，前端仍固定`semantic_mode=off`。fake路径已验证`routing_started`、一次模型轮次、零工具、递归拒绝、调用前后配置复核、不可变决策哈希及远端不确定时停止正文派发；这只通过技术管线，不等于S组、E-B或`G-SEMANTIC-BUTTON`通过。原生语义仍未接入。
+
 - 使用同一冻结有效模型和公开调用适配器，不新增选择器、不换模型。**新 session 本身不构成隔离证据**：必须通过公开合同实现本请求 `tools=none` 等效能力、禁止通用Skill再次路由、禁用自动工具循环／重试，并验证无历史继承。不能为此临时停用共享Agent的工具或修改其全局配置。
 - 可信 `purpose=writing_skill_routing` 与递归防护由服务端内部请求上下文建立、按请求传播和清理；不能相信小说文字、客户端字段或session名称。它只跳过路由自身的重复路由，不跳过身份和范围校验。公开合同无法保证时，对应 `G-SEMANTIC-*` 不通过，保持该入口确定性可用。
 - 返回受限 `skill_ids / reference_keys / evidence_refs / unresolved_dimensions`，允许空集合。确定性校验器检查目录ID、来源、任务、排除和预算；未知ID／无依据项拒绝。自报置信度不作为通过依据，路由JSON不进入正文。
@@ -204,7 +206,7 @@ V1.2追加落实三项复查结论：稳定动作身份先于可变输入指纹�
 
 现有job锁只保护最终输入hash之后的部分，不能直接覆盖新增的路由调用。顺序固定为：身份与动作所属范围核验 → 按稳定动作ID查重 → 新动作才冻结白名单资料及配置并原子认领 → 确定性／可选语义选择 → 复查来源与撤销状态 → 装配方法并计算最终输入hash → 在原job锁下创建／复用任务 → 原模型调用。动作已存在时先遵守第8节复用／冲突规则，不能用最新目录或模型重算key后重新认领。
 
-继续／重放已有job时读取原快照，不重新用最新目录选择；旧快照没有方法证据则标 `legacy_unrecorded`，不伪造已装载记录。升级方法需要新输入和新候选。原有任务的验证重试如仍存在，复用同一方法packet并另计调用次数；本计划不顺手修改其策略。
+继续／重放已有job时读取原快照，不重新用最新目录选择；旧快照没有方法证据则标 `legacy_unrecorded`，不伪造已装载记录。升级方法需要新输入和新候选。正文长度验证重试使用新的稳定action／dispatch／job并另计正文调用次数，但只有直属父job确为同范围、同章纲版本、同方法偏好的长度失败时才复用父packet；字数反馈留在新job和生成Prompt，不进入路由来源hash。重试前仍须核验当前资料投影、模型、目录和主方法字节，变化即拒绝，不能把旧授权或旧配置沿用到新请求。
 
 ### 7.2 原生工作台：当前请求可控才接入
 
@@ -298,13 +300,14 @@ V1.2追加落实三项复查结论：稳定动作身份先于可变输入指纹�
 
 | 验收组 | 样本与运行方式 | 独立通过条件 |
 | --- | --- | --- |
-| D：确定性选择 | 20题明确分类／明确机制／排除／机械任务／无资料；预期辅助调用0 | 20/20符合预标集合与调用策略；工程合同及安全负例全部通过 |
+| D-R：确定性解析器合同 | 20题明确分类／明确机制／排除／机械任务／无资料；使用冻结的合成投影，预期辅助调用0 | 20/20符合预标集合与调用策略；工程合同及安全负例全部通过；只证明resolver，不证明产品入口存在同名来源 |
+| D-E：真实入口投影 | 同一批任务语义改由各真实按钮／原生入口的服务端白名单投影产生；不得由测试直接构造生产中不存在的`mechanism`来源 | 题材、排除和任务适用性逐项符合预标；只有真实存在且获准的显式机制来源才允许确定性选入。当前没有可信机制来源时，预期状态必须是`unresolved`且金手指不得被选入；20/20并有零关键词偷判、零越权来源 |
 | S：语义判断 | 20题均有获准资料但存在需理解的未决项；每个正式模块至少4个语义正例、4个语义排除例，至少4题混合／隐含机制、至少2题测试未来模块，覆盖可重叠 | **只在S组**计算微平均precision≥95%、recall≥90%、完整集合正确≥18/20；两正式模块分别recall≥90%，正确拒绝的空集单列；实际成功返回不足18题不得通过 |
 | E-B／E-N：入口接入 | 从S组预先选8个覆盖正例、排除、混合、未来模块的场景，按钮／原生各用新测试动作实调8次；显式记录模型、版本、入口和字节证据 | 每个入口8/8符合预标可接受集合、方法装配与调用合同；分别裁决，不能只重放缓存代替另一入口执行 |
 
 S组失败／超时／不确定仍留在20题分母；正例遗漏计FN、无依据选择计FP，执行失败即使恰好空集也不算集合正确。预期辅助调用却跳过时计失败，不把该题降为D组。多个可接受集合须预先登记，并用冻结规则计算。题材命中但漏掉明确机制、禁用／越权／机械任务误触发、清单外装载为关键错误，要求0。
 
-总体40题成绩仅作摘要；D组高分不能补S组低分，S组通过也不能代替E-B／E-N。阈值只衡量路由，不证明文学质量。原生与按钮共享确定性输入／冻结语义结果时须完全一致；真实语义调用按预标可接受集合判定，不要求随机解释措辞逐字一致。测试第三模块只存在于受信fixture，不进入正式包。
+总体40题成绩仅作摘要；D-R高分不能替代D-E真实入口，也不能补S组低分，S组通过也不能代替E-B／E-N。D-E把缺失机制事实诚实标为`unresolved`属于正确结果，但这只允许发布“按明确分类确定性调用”，不能宣称“已按隐含情节自动调用金手指”；后者必须由通过门禁的语义分支完成。阈值只衡量路由，不证明文学质量。原生与按钮共享确定性输入／冻结语义结果时须完全一致；真实语义调用按预标可接受集合判定，不要求随机解释措辞逐字一致。测试第三模块只存在于受信fixture，不进入正式包。
 
 ### 10.2 预算与失败处理
 
@@ -320,7 +323,7 @@ UI覆盖1920×1080、2560×1440及390×844窄屏：状态不挤正文、详情�
 
 ## 11. 子代理并行施工设计
 
-**本轮计划修订不并行：**尚未批准施工，主代理单一修改本文与导航。以下设计只在用户批准实施后生效，工作包ID仅属于本计划；技术包获准执行不自动授权真实模型额度、长期迁移、部署或Git。
+**施工组织：**用户已批准目标模式施工，以下工作包按就绪依赖执行。W0共同合同由主代理串行冻结，之后按本文PAR包并行；工作包ID仅属于本计划，技术包不自动授权真实模型额度、长期迁移或部署。
 
 唯一集成责任人：执行本计划的主代理。每波最多两个写入子代理；主代理独占公共合同、schema／迁移、共享入口、Agent状态、运行环境和最终集成。门禁只阻断自己的依赖分支，例如 `G-NATIVE` 失败不阻断已就绪的按钮包。所有子包共同非目标：不改TTS、不处理旧项目Data、不覆盖当前用户／其他任务改动、不改上游核心／私有接口、不自行调用真实模型、迁移、部署、切模型、提交或推送。
 
@@ -344,7 +347,17 @@ UI覆盖1920×1080、2560×1440及390×844窄屏：状态不挤正文、详情�
 | W5集成退出 | `S58-GATE-RELEASE` GATE/SER | 主代理：新 `tests/writing_skills/test_entrypoints.py`、`test_lifecycle.py`、`test_end_to_end.py`；必要的既有测试由主代理独占；版本与计划58证据／导航 | 先增量、全量、打包，再隔离安装／卸载、三视口和回退；按`G-BUTTON/G-NATIVE/G-SEMANTIC-*`逐项发布，只有全部通过才裁决`G-FULL` |
 | W6可选偏好 | `S58-SER-PREFERENCE` SER/MUTEX | 另行获准后主代理：`backend/writing_skills/models.py`、`persistence.py`、`api.py`；下一份 `backend/migrations/versions/<执行时revision>_writing_method_preference.py`；新 `frontend/src/writing-skills/preferences.ts`、`preferences.test.ts`；最小接 `frontend/src/index.ts`；新 `tests/writing_skills/test_preferences.py` | 不阻断核心自动调用；CAS、跨设备、启停交集、升级保留和恢复通过后才宣称小说级偏好持久化 |
 
+W4场景冻结与纯技术管线补充（主代理SER冻结场景，语义实现按原`S58-PAR-SEMANTIC`文件所有权）：第十九轮已新增`tests/writing_skills/fixtures/routing_scenarios.json`与`test_evaluation_contract.py`，在任何真实语义运行前冻结D／S各20题及E-B／E-N各8题。D-R解析器夹具20/20、辅助调用0；独立复核后不再把它称为D-E产品入口通过。D-E必须逐真实入口运行服务端投影；当前无权威机制来源时，机制题应冻结为`unresolved`，不能由测试注入或关键词扫描替代。`semantic.py`及其测试已用依赖注入fake验证未决维合并为一次、空工具、无自动重试／递归、取消／超时／unknown不冒充成功、候选与证据越界失败关闭；fake oracle的S组20次不计真实质量分。生产runtime虽已有纯适配器候选，但尚未接入口，真实预算仍属于`S58-INT-SEMANTIC`，没有因纯测试通过而启用。
+
 只读范围：分配模块相关现有代码、计划20/23/28/52/57及ADR、公开QwenPaw文档／声明、既有方法文件；研究仓库只读已有采用记录／候选元数据，不重新处理正文。禁止范围：所有未分配文件、TTS／音频／重模型、真实用户正文与故事账本、QwenPaw核心／私有模块、旧项目Data和私密配置。
+
+2026-09-05精确接线补充（主代理独占，不扩展产品范围）：DISPATCH模型通过既有`backend/migrations/env.py`增量注册而非制造`backend/models.py`循环引用；LIFECYCLE在已汇合`catalog.py`中读取发布者所有的`backend/writing_skills/approved-capabilities.json`，`pyproject.toml`仅声明其随Python包携带。发布索引已逐项对照S57外部采用记录中的方法／参考哈希，新routing哈希属于本计划工程合同；运行时不从模块声明自行批准。此索引不复制小说或研究全文。
+
+LIFECYCLE接线补充：主代理独占`scripts/qwenpaw_lab_plugin.py`中安装前公开Skill启停快照及configure参数传递，原TTS／迁移／密钥流程不改。隔离实测发现hot-install会清除现有启用状态，必须在替换前保存可恢复快照；不能在替换后读取全停用状态冒充作者原选择。测试探针源码归W0 `tests/writing_skills/fixtures/`，只允许回环假模型和独立测试容器，不能打入正式PawApp。
+
+同轮集成所有权补充：主代理新增`tests/writing_skills/__init__.py`隔离同名测试；公开探针允许同证据目录的`public_contract_probe.py`（仅假模型、零网络、公开SDK）。0041／0042导致的现有head契约回归只调整六份原先干净的测试：`tests/long_novel/test_visible_character_count_migration.py`、`tests/narration/test_migrations.py`、`test_schema_readiness.py`、`test_voice_product_schema_postgres.py`、`tests/story_ledger/test_query_index_migration.py`、`test_single_contract_migration.py`；保留历史链与旧版本拒绝，不改各领域业务。
+
+W3正文HTTP接线细化（主代理SER/MUTEX，非新范围）：`S58-INT-BUTTON`新增拥有`backend/writing_skills/button.py`、`backend/generation_dependencies.py`中的正文延迟模型读取依赖、`tests/writing_skills/test_button_http.py`；复用既有领域job和输出，不另造任务服务。输入检索前必须完成持久化稳定动作认领，准备结束后仅允许一次fenced冻结；`S58-SER-DISPATCH`的唯一迁移owner负责新增`20260905_0042_writing_skill_input_claim.py`及`test_pending_claim.py`，不改已执行0041。待准备只保存identity/scope，不能装载方法或关联job；失败／取消保留去重标识，不自动重试。正文发布门禁保持关闭；HTTP／DB假传输、隔离真实宿主、客户端重传展示分别验收，前一项通过不代替后一项。
 
 共享锁：`MUTEX-SCHEMA`（models／migration）、`MUTEX-CONTRACT`（DTO/API/types）、`MUTEX-ENTRY`（共享入口）、`MUTEX-AGENT`（提示／安装／模型状态）、`MUTEX-RUNTIME`（长期18088／数据库／浏览器）、`MUTEX-BUILD`（build／锁文件）、`MUTEX-GIT`（暂存／提交／推送），均由主代理持有并与其他任务协调。发现未预期同文件改动立即停对应写入包；不得用覆盖或事后大冲突代替隔离。
 
@@ -355,6 +368,28 @@ UI覆盖1920×1080、2560×1440及390×844窄屏：状态不挤正文、详情�
 Python包至少执行 `.venv/bin/python -m pytest -o addopts='' <该包列出的测试文件> -q`；前端包至少执行 `pnpm --dir frontend exec vitest run <该包列出的测试文件>` 和 `pnpm --dir frontend typecheck`。涉及打包／安装、schema或入口的主代理包再执行第12节相应命令。子代理返回实际命令、退出码、失败／skip和diff摘要，不以口头“通过”代替证据。
 
 ## 12. 验证命令、发布与退出条件
+
+W3界面与只读恢复接线细化（主代理SER/MUTEX）：`S58-INT-BUTTON`同时独占`frontend/src/writing-skills/chapter.ts`、`chapter.test.ts`及现有`chapter-workflow.ts`；复用UI-core的状态格式和防倒退逻辑，不另造方法选择器。`S58-SER-DISPATCH`在既有`api.py/persistence.py`提供公开目录、按dispatch精确读取及丢失POST响应后的按action只读恢复，所有GET不得生成。正文范围先由服务端核验，浏览器仅保存动作/范围/输入指纹，切章节撤销旧回调；刷新GET恢复，克隆新标签页不复用旧tab标识。复用`tests/writing_skills/test_button_http.py`验范围/零模型调用；浏览器假响应夹具仅在`tests/writing_skills/fixtures/status_ui/`，安装到既有S58隔离宿主，测后卸载。fixture的真实React显示、只读恢复及三视口结果不能代替完整正文工作台、实际正文HTTP模型链或G-BUTTON。集成责任人为主代理，所有权与禁触范围保持第11节不变。
+
+W3实际传输夹具细化（同一主代理SER/MUTEX）：`S58-INT-BUTTON`拥有`tests/writing_skills/fixtures/chapter_transport/`及既有`fake_openai.py`的正文响应/完整块计数扩展。夹具在S58专用测试库和合成作品内调用同一正文编排函数，只接受隔离假模型；测试能力由服务端显式传入，不增加客户端开关、不修改上游，也不打开产品能力常量。冻结方法块与回环接收字节逐项比对；通用模式、自动分类、同动作重传/冲突分开记录。公开模型actual/usage缺失必须保留未暴露，不能用夹具接收值倒填权威模型证据。当前装配夹具不作为完整工作台或正式产品HTTP发布证明。
+
+W3组件集成补证（同一主代理SER/MUTEX）：新增`frontend/src/writing-skills/chapter-panel.test.ts`由`S58-INT-BUTTON`独占，直接执行真实`ChapterWorkflowPanel`回调，使用有界Hook替身与假API，不替换生产逻辑。覆盖双击、离开后返回同章、准备正文期间切章、错误保存目标、模型查询后旧确认、迟到候选与丢失响应只读恢复；测试通过不能代替真实React浏览器或正式PawApp端到端。访问代次必须撤销旧弹窗回调，而非仅比较document_id；每个异步前置完成后重新核对范围，再读取章纲、派发或采用。不会以切页面宣称已取消服务端正在执行的请求。
+
+W3冻结证据展示细化（同一主代理SER/MUTEX，不并行，原因是共享API/类型/正文组件接线）：`S58-INT-BUTTON`新增独占`backend/writing_skills/evidence.py`、`tests/writing_skills/test_evidence.py`、`frontend/src/writing-skills/details.ts`、`details.test.ts`、`history.ts`，沿用既有`api.py`、`test_button_http.py`、`contracts.ts`、`status.ts`与`chapter-workflow.ts`所有权。状态详情只由冻结packet提取名称、版本、文件哈希、参考数与依据字段码，禁止读当前安装包补历史。显式历史GET按当前章节授权、不可变job引用和方法hash核验，允许作者从新tab查看指定job历史；这不是原action恢复，不放宽实时动作的同tab约束，也不创建本地动作票据。旧快照无引用显示`legacy_unrecorded`；损坏引用显示`evidence_unavailable`，不返回原文、投影或当前版本替代。汇合顺序为后端派生摘要/范围拒绝→前端严格解析/冻结防倒退→历史懒加载→隔离真实页面只读验收；验收命令同本节，加显式S58测试库HTTP负向用例，证据写入施工记录第十轮。无迁移、共享Agent模型切换、正式小说写入或Skill正文变更；唯一集成责任人仍为主代理。
+
+W3正文长度重试与产品门禁补充（同一主代理SER/MUTEX）：`S58-INT-BUTTON`继续独占`backend/writing_skills/button.py`、`projection.py`、`contracts.py`、`backend/services.py`、`schemas.py`、`frontend/src/writing-skills/chapter.ts`、`chapter-workflow.ts`及对应测试。`retry_of_action_id`只表达直属父动作证据，不参与业务路由key或生成内容hash；客户端不能凭该ID授予复用权限。产品正文按钮常量只有在固定QwenPaw 2.1.x公开middleware的当前请求注入、I/O前工具限制和无未观察装载路径均经隔离实证后才能打开；该值不得用于原生分支。真实工作台必须先观察失败前零模型调用，再以新动作完成一次模型请求、冻结字节逐块匹配、详情/历史可查及正式正文失败不变，证据写入施工记录第十一轮。此子链通过只释放章节正文确定性按钮，不代替其他按钮或完整`G-BUTTON`。
+
+W3建书辅助按钮补充（同一主代理SER/MUTEX）：`S58-INT-BUTTON`新增独占`backend/writing_skills/primary.py`、`creative.py`、`frontend/src/writing-skills/creation.ts`及对应测试，并最小修改既有`creative_api.py`、`creative_schemas.py`、`creative_services.py`、`generation_dependencies.py`、`creative-center.ts`和`types.ts`。服务端冻结任务→主要Skill映射，建书模板与命名均使用`novel-direction`，只读取`creation_draft`精确版本；稳定动作必须先于模型、目录和任何外部调用认领，job与dispatch在同一事务关联。浏览器只保存动作票据，未知状态只允许GET恢复；模板结果立即写回草稿，命名结果最迟在作者关闭／继续时写回，重开不应再调用模型。固定QwenPaw 2.1.x隔离页须分别点击模板与命名一次，验证每次新增恰好一条回环收据、冻结主要方法块各出现一次、其他主要Skill为零、工具为空并保留公开actual/usage未暴露。该子链通过不放行封面、章纲、审稿、选区、人物或完整`G-BUTTON`；证据写入施工记录第十二轮。
+
+W3全书大纲按钮补充（同一主代理SER/MUTEX）：`S58-INT-BUTTON`复用建书按钮的受管创作客户端和服务端稳定动作编排，新增大纲精确`novel`范围适配；业务job仍绑定`outline`草稿及精确version，不把小说ID代替草稿版本。`outline_background/characters/plot/highlight`的主要Skill按冻结映射分别选择`story-foundation/character-craft/story-foundation/story-foundation`，分类模块仍由同一目录与确定性路由选择。旧不带`writing_action`的客户端兼容只在服务端明确关闭门禁时使用；目录故障不得静默发出旧模型请求。完成或失败后界面只显示本动作返回的冻结方法回执，不能用当前目录重释历史；已打开的旧前端页面不会热替换代码，升级验证必须重新载入页面。每个大纲按钮须各自通过一次真实产品点击、单一回环收据、精确主要／分类块计数、空工具、结果采用、只读恢复和作者可见回执；一个步骤通过不放行另外三个。背景按钮证据记录于施工第十三轮，人物／情节／亮点记录于第十四轮；四个大纲步骤均通过各自的确定性按钮子门禁，但不放行章纲、推荐、审稿、选区、人物卡或完整`G-BUTTON`。
+
+W3章节创建辅助按钮补充（同一主代理SER/MUTEX）：`S58-INT-BUTTON`继续复用受管创作客户端和稳定动作编排，`chapter_storyline_recommendation/chapter_outline`业务job绑定`ChapterCreationDraft`精确ID、所属小说及version，恢复票据同时冻结任务、草稿和version。两任务主要Skill均为`chapter-outline`，分类模块仍由结构化题材确定性选择；目录异常不得发旧请求，只有服务端明确关闭门禁才兼容旧客户端。未知状态只GET恢复；明确失败或已完成但未过260—500字验收时才允许新action。候选写回当前草稿后清除票据，未确认推荐在作者确认／取消前保留恢复能力。两按钮已在第十五轮分别通过真实产品点击、单一回环收据、精确主要／分类块、空工具、结果回填、只读恢复和作者可见回执；不放行审稿、选区、人物卡、原生、语义或完整`G-BUTTON`。
+
+W3审稿按钮补充（同一主代理SER/MUTEX）：`S58-INT-BUTTON`将现有`review`绑定当前document、所属novel、`draft_version`及`content_hash`，并由服务端核对正文、字数、题材、当前章纲和期望。稳定action必须先于原有写作检索／Context V4及目录读取；冻结后的同一准备输入用于方法投影、job哈希和最终Prompt，变化时停止而不拼接。主要Skill为`style-review`，分类模块仅从服务端核对的结构化`genre/subgenre`确定性选择；前端恢复票据冻结正文ID、版本和哈希，unknown只GET恢复，明确failed由作者再次点击才创建新action。目录异常不发旧模型请求，服务端明确关闭门禁时才保留旧入口。第十六轮已通过真实产品点击、单一回环收据、四个精确方法块、空工具、结果弹窗、只读恢复和作者可见回执；只裁决审稿确定性按钮子链，不放行选区、人物卡、原生、语义或完整`G-BUTTON`。
+
+W3章节正文选区补充（同一主代理SER/MUTEX）：`S58-INT-BUTTON`只把`selection_edit`的`chapter.body`纳入受管装载；人物卡、设定字段和其他实体选区继续走旧兼容链，不能以正文选区通过冒充全选区矩阵。服务端在目录及模型读取前核验正文所属小说、working copy精确version／完整正文hash、JavaScript UTF-16选区切片及选区前后各1500字符；题材只接受服务端核对后的`genre/subgenre`。`review`操作主要Skill为`style-review`，其余六种操作为`prose-writing`，分类模块仍由统一resolver选择。浏览器票据冻结document、version、完整hash、selection_id和operation；同输入并发只发一个POST，丢失POST响应只GET恢复。模型结果必须进入V2 Diff候选，作者明确接受后才沿原CAS路径应用，不能自动改正文；界面保留本动作冻结方法回执。第十七轮已实点`polish`一次并看到Diff、精确通用／悬疑块各一次、空工具、GET恢复无重发及正文完整未变；其他六种operation只由同一合同自动化覆盖，未宣称逐一实点。该证据只裁决章节正文选区确定性按钮子链，不放行人物卡／非正文选区、原生、语义或完整`G-BUTTON/G-FULL`。
+
+W3人物卡补全按钮补充（同一主代理SER/MUTEX）：`S58-INT-BUTTON`将现有`character_profile_completion`接入同一受管创作动作，但不接受浏览器提交完整人物资料。状态接口只公开当前服务端快照的`input_hash`；动作只携带该hash，服务端在模型和目录前重新构建正式人物、大纲、已确认事实与正式章节证据并精确核验，随后才冻结生成输入。任务主要Skill为`character-craft`，分类模块只从服务端小说`genre/subgenre`确定性选择。旧`/character-profile-completion/generate`继续接受精确当前全快照作为明确关闭门禁时的兼容入口；目录故障不静默回退发模型请求。浏览器票据绑定小说、tab、任务与快照hash，同输入并发只发一个POST，丢失响应只GET恢复。第十八轮已真实点击一次并得到默认未选的单条候选，应用按钮为禁用；`character-craft`正文／指定参考与`suspense-writing`正文各精确1次、工具为空，页面显示冻结回执，GET恢复未重发，正式人物卡version和personality保持不变。关系网继续作为事实抽取排除。该证据只裁决人物卡补全确定性按钮子门禁；D/S/E正式样本、原生、语义及完整`G-BUTTON/G-FULL`仍未通过。
 
 批准后使用项目解释器（兼容Python3.11，范围`>=3.11,<3.14`），基础命令：
 

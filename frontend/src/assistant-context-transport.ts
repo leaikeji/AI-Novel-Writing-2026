@@ -15,6 +15,7 @@ export interface AssistantContextRefHttpClientOptions {
 
 interface AssistantContextRefResponse {
   contextRef: string;
+  writingActionId: string;
   expiresAt: string;
   contextRevision: number;
   payloadCharacters: number;
@@ -22,6 +23,7 @@ interface AssistantContextRefResponse {
 
 
 const CONTEXT_REF_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 
 function parseCreatedRef(value: unknown): CreatedAssistantContextRef {
@@ -31,6 +33,8 @@ function parseCreatedRef(value: unknown): CreatedAssistantContextRef {
   const candidate = value as Partial<AssistantContextRefResponse>;
   if (typeof candidate.contextRef !== "string"
     || !CONTEXT_REF_PATTERN.test(candidate.contextRef)
+    || typeof candidate.writingActionId !== "string"
+    || !UUID_PATTERN.test(candidate.writingActionId)
     || typeof candidate.expiresAt !== "string"
     || !Number.isFinite(Date.parse(candidate.expiresAt))
     || !Number.isSafeInteger(candidate.contextRevision)
@@ -41,6 +45,7 @@ function parseCreatedRef(value: unknown): CreatedAssistantContextRef {
   }
   return {
     contextRef: candidate.contextRef,
+    writingActionId: candidate.writingActionId,
     expiresAt: candidate.expiresAt,
     contextRevision: candidate.contextRevision,
     payloadCharacters: candidate.payloadCharacters,

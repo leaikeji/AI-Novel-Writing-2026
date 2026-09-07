@@ -1,0 +1,117 @@
+{
+  "schema_version": "plan58-real-writing-retry/1",
+  "title": "雾宅来信",
+  "agent_id": "ai-novel-writer",
+  "effective_model": {
+    "provider_id": "minimax-cn",
+    "model_id": "MiniMax-M3"
+  },
+  "http_requests": 2,
+  "automatic_retries": 0,
+  "formal_novel_mutation": false,
+  "results": [
+    {
+      "sample_id": "M-SUSPENSE-RETRY",
+      "source_sample_id": "M-SUSPENSE",
+      "title": "雾宅来信",
+      "selected_capabilities": [
+        "suspense-writing"
+      ],
+      "method_input_hash": "fb88b2de1ef78f0aefc864e8b6d4677cf55ba76e627f737be728a9c14b414403",
+      "task_sha256": "6a741ecdeeb6b5048f3912f9181b08c53e68242fa0e53101807a632ee3128481",
+      "previous_output_sha256": "b0a1f333765f3e07e6ba28b91a4d873c7f70a5695d2324bbe163ae6ecc2bc6a8",
+      "prompt_sha256": "42d3b18aa66c3f76571f649982c26263580f053551188068e8ad2f15e2eeb38c",
+      "output_sha256": "82d60e5c12879475f6b8d8dfe241a7e8f3c1e8510aa3bc87cb91dc8a773d887b",
+      "visible_characters": 1009,
+      "checks": {
+        "length_650_850": false,
+        "no_book_title": true,
+        "no_known_invented_names": true,
+        "clean_protocol": true,
+        "water_alarm": true,
+        "dead_person_signed_out": false
+      },
+      "model_identity_ok": true,
+      "transport": {
+        "session_id": "plan58-real-writing-M-SUSPENSE-RETRY-26c4f049-57b3-413b-a7e1-666e0e8f7714",
+        "event_count": 226,
+        "statuses": [
+          "created",
+          "in_progress",
+          "in_progress",
+          "completed",
+          "completed"
+        ],
+        "content_types": {
+          "text": 1
+        },
+        "tool_markers": 0,
+        "errors": [],
+        "usage": {
+          "provider_id": "minimax-cn",
+          "model_name": "MiniMax-M3",
+          "prompt_tokens": 0,
+          "completion_tokens": 673,
+          "total_tokens": 673
+        }
+      },
+      "status": "failed",
+      "output": "林澈把伞尖的水拧进排水沟，顺手推开档案室那扇漆皮剥落的铁门。地下二层的灯管有两根在频闪，她没去看，先把署名死者的那封新来信摊在核对台上。\n\n纸张是 A4，信头印着局里旧版抬头，时间戳落在昨夜。笔迹和上一封几乎一致——她用指腹压过去，墨痕微微凸起，复印笔迹的可能性不高。第三页右下角有一串手写内部编号，她翻到卷宗编号对照表前，比对三次：纸张批次属于去年第三季度报废替换下来的尾货，本该早已送销，这种纸现在只剩三楼老打印室最后一刀。\n\n她拿出手机准备拍下编号，屏幕先跳出周栩的消息——日志拿到了，在门口。林澈把信纸夹回塑封袋，起身往楼梯口走了两步，又折回桌下抽出一本空白笔记，把编号、纸张批次和当前时间逐项记下，才上去接人。\n\n周栩把硬壳文件夹递过来，呼吸还有点急：\"日志是孟队让我转交的，但他扣下了另一本。\"林澈翻开文件夹，里头是三天的进出登记和两次内部会议纪要，纸张倒是崭新。孟青山从楼梯拐角出现，皮鞋敲在水泥地上，目光先落在那个文件夹上。\n\n\"林澈，停职期间档案室不在你的权限内。\"孟青山把文件夹往自己这侧抽了半寸，\"日志我可以借你，但原件必须留下。\"\n\n林澈没松手：\"我只需要核对纸张批次和这封信的编号，不会动原件。\"\n\n\"核对也需要权限。\"孟青山抬了抬下巴，\"你现在的权限只到一层接待室。\"\n\n林澈把文件夹往自己这侧压了压：\"许遥交出的就诊记录已经在核对台上，那是我目前唯一能用的线索。你不让我进档案室，我就只能在接待室里猜。\"\n\n孟青山的手指在文件夹边缘敲了两下，最终松开：\"半小时。周栩陪你，复印可以，原件不能带出。\"他转身往楼梯走，又回头补了一句，\"别碰那本旧卷。\"\n\n周栩推复印机过来时，林澈已经蹲回核对台底下，把塑封袋里的信纸重新摊平。她要看的不是内容，是右下角那串手写编号——刚才记得太急，需要再确认纸张背面的透光痕迹。\n\n复印机嗡嗡启动，日光灯又闪了一下。地下二层深处传来一阵低沉的嗡响，不像空调，更像什么金属箱体在震。墙角红色水位报警灯亮起，数字屏跳到\"地下一层 0.18m\"。\n\n周栩低声骂了一句：\"雨太大，市政排水跟不上。\"\n\n林澈没应。她盯着数字屏看了两秒，把手伸向孟青山不让碰的那本旧卷：\"帮我把日志翻到 17 号那一页。\"周栩打开文件夹，借阅登记上蓝黑墨水写着一行字：\n\n\"林澈 借 案卷 2024-0317 17:42\"\n\n签收人那栏是空白，时间是昨天傍晚——正是死者最后一次在局里露面的时段。\n\n林澈的手悬在旧卷封面上方，没有落下。水位数字跳成了 0.21m。"
+    },
+    {
+      "sample_id": "H-MIXED-RETRY",
+      "source_sample_id": "H-MIXED",
+      "title": "雾宅来信",
+      "selected_capabilities": [
+        "suspense-writing",
+        "golden-finger-writing"
+      ],
+      "method_input_hash": "608a5ebbb9f32e7cca010022411c8a73c4c731574d35ab14317155ab2e5316e1",
+      "task_sha256": "e85fdb418d87634fb71330010c7eace53615b595acc444d3b7687a226f703b8b",
+      "previous_output_sha256": "f7ea5d5c34be0e862db6fcff07fe20c0cf5ff2b787d26e019f0ebee5d826bf0a",
+      "prompt_sha256": "9ba264862c8fc4c55703b3e7448234dd78b94c2fd5ae356152be2602cdd7d544",
+      "output_sha256": "b79256933cd0b985d7d20fda769046934ce129eff6d3a6d978f3264f2dda6f34",
+      "visible_characters": 1145,
+      "checks": {
+        "length_650_850": false,
+        "no_book_title": true,
+        "no_known_invented_names": false,
+        "clean_protocol": true,
+        "water_alarm": true,
+        "dead_person_signed_out": true,
+        "uses_image": true,
+        "exposure_cost": true
+      },
+      "model_identity_ok": true,
+      "transport": {
+        "session_id": "plan58-real-writing-H-MIXED-RETRY-3f818960-a601-45a1-a96f-3579ce6836b6",
+        "event_count": 339,
+        "statuses": [
+          "created",
+          "in_progress",
+          "in_progress",
+          "completed",
+          "completed"
+        ],
+        "content_types": {
+          "text": 1
+        },
+        "tool_markers": 0,
+        "errors": [],
+        "usage": {
+          "provider_id": "minimax-cn",
+          "model_name": "MiniMax-M3",
+          "prompt_tokens": 0,
+          "completion_tokens": 819,
+          "total_tokens": 819
+        }
+      },
+      "status": "failed",
+      "output": "林澈翻过手表，金属壳映出档案室日光灯惨白的光。十一点四十七。她在铁桌角站定，闭眼等那道画面照例落下。\n\n没有声音。从来没有。画面亮起的瞬间，她已经学会只记骨骼——许遥穿着透明雨衣，胶鞋糊着黄泥，推开一扇标\"地库 B-2\"的铁门。她往身后看了一眼，画面在那一眼上断了。\n\n林澈睁眼，掏出手机拍下值班表上的门禁排班。值夜保安十一点换岗，地库 B-2 区此刻本该无人。许遥上周交出的就诊记录还压在她桌上，墨渍未干——那个女人此刻正冒雨穿过半个旧城，来到警局后院的地下档案区。她去做什么？\n\n她把来信摊开。八十克静电复印纸，邮政5 号封，寄件人栏写着本市老城某胡同——王栎案死者生前的旧地址。笔迹经比对确实出自死者生前笔记本。问题在于：死者三年前火化、户籍注销、卷宗封存。这封信不可能是他寄的，除非有人模仿笔迹、使用旧地址，伪造一封死人的来信。\n\n她拨通周栩的电话。\"你到哪儿了？\"\n\n\"刚拐进巷子。\"周栩声音发喘，\"日志我带着——地库今晚有异常响动，十一 点二十 左右。\"\n\n\"门禁呢？\"\n\n\"系统显示有一张临时通行卡激活过，持卡人登记信息是空的，只剩工号段。\"\n\n林澈抬头看向挂钟。十一点五十三。她把电话夹在肩颈之间，翻开周栩冲进来递来的值班日志。字迹潦草：\"23:18听见地库 B 区卷宗架有响动，持手电下查，门锁完好，未见异常。\"\n\n门锁完好。画面里许遥推门时，门没上锁。日志说她避开了值班巡逻，或者保安根本没看见。\n\n\"林姐，你现在不能查。\"孟青山的声音从走廊尽头压过来，不紧不慢，\"你的停职处分今天下午刚下发，档案室属停职人员禁入区域。你今晚出现，本身就是违纪。\"\n\n林澈合上日志。孟青山的影子先一步投进门里。\"我只想核对死者当年的卷宗——\"\n\n\"明天有正式翻卷审批。\"孟青山站在门口，没让路，\"你今晚的出现在我手里，我现在可以上报，也可以留到明天。你自己选。\"\n\n她瞥一眼走廊尽头——周栩还停在拐角，没走过来。画面里许遥的身影还烫在她脑子里。她知道：从她踏进档案室那一刻起，已经被人盯上了。她主动核验画面的那一刻起，更换了代价。\n\n林澈把日志推回周栩手里，转身往出口走。经过门口，孟青山侧了侧身，目光跟着她。走廊里周栩压低咳嗽，她没回头——卷宗架上那份关键证据不能由她亲手抽走，但许遥今晚的地库之行，很可能已经把某个东西藏进了档案里。她必须在孟青山的视线彻底锁死之前，让别人替她拿到它。\n\n走到大厅，脚下突然一凉。地砖缝里渗出浑浊的黄水，最底层的牛皮纸箱已经湿了边角。\n\n\"水位报警！\"值班员从侧门冲出，手里攥着对讲机，\"后院排水管爆了！\"\n\n林澈回头，看见档案室门口已经积起浅浅一层水渍。孟青山还站在门口，脸色第一次变了。\n\n周栩这时走过来，把一只牛皮纸封塞进她手里。封皮上印着死者王栎案的卷宗编号，签出日期写着——今晚二十三点整。借阅人栏空着，只有签出时打的电子章戳。"
+    }
+  ],
+  "limitations": [
+    "该运行是失败候选的显式新动作，不是同action自动重发。",
+    "字符、协议和指定关键词由程序检查；文学质量仍需人工复核。"
+  ]
+}

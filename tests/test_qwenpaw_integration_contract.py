@@ -133,6 +133,10 @@ def test_page_context_uses_the_public_middleware_contract() -> None:
     assert "api.register_middleware(" in source
     assert "create_ai_novel_page_context_middleware" in source
     assert "priority=80" in source
+    assert "create_released_native_writing_middleware" in source
+    assert "priority=75" in source
+    assert "create_managed_method_middleware" in source
+    assert "priority=70" in source
     assert "api.register_runtime_hook(" not in source
     assert "class AINovelPageContextHook(HookBase)" in context_source
     assert "class AINovelPageContextMiddleware(MiddlewareBase)" in context_source
@@ -423,6 +427,17 @@ def test_agent_configuration_never_writes_a_model_setting() -> None:
             "GET",
         )
         assert method == "GET"
+
+
+def test_skill_upgrade_preserves_disabled_and_requires_prior_inventory():
+    configure = load_script("configure_qwenpaw_novel_agent")
+    assert configure.skill_enable_plan(created=False, previous=None) == []
+    assert configure.skill_enable_plan(created=True, previous=None) == configure.SKILLS
+    disabled, enabled, *new = configure.SKILLS
+    result = configure.skill_enable_plan(created=False, previous={disabled: False, enabled: True})
+    assert disabled not in result and set(result) == {enabled, *new}
+    with pytest.raises(ValueError):
+        configure.skill_enable_plan(created=False, previous={disabled: "false"})
 
 
 def test_existing_agent_is_refreshed_after_plugin_reinstall(monkeypatch) -> None:
@@ -2091,6 +2106,7 @@ def test_install_waits_for_expected_runtime_before_final_verify(
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
     events: list[str] = []
+    monkeypatch.setattr(lab, "save_preinstall_skill_state", lambda: events.append("skill-state") or Path("/tmp/test-skill-state.json"))
     monkeypatch.setattr(lab, "pnpm_bin", lambda: "pnpm")
     monkeypatch.setattr(lab, "pnpm_environment", lambda _pnpm: {})
     monkeypatch.setattr(lab, "run", lambda *_args, **_kwargs: "")
@@ -2140,6 +2156,7 @@ def test_install_waits_for_expected_runtime_before_final_verify(
 
     assert events == [
         "disabled-preflight",
+        "skill-state",
         "hot-install",
         "migrate",
         "embedding-secret-store",
@@ -2155,6 +2172,7 @@ def test_install_runs_pytest_in_disabled_tts_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    monkeypatch.setattr(lab, "save_preinstall_skill_state", lambda: Path("/tmp/test-skill-state.json"))
     monkeypatch.setenv(lab.TTS_RUNTIME_EXPECTATION_ENV, "ready")
     monkeypatch.setenv(lab.TTS_PRODUCT_EXPECTATION_ENV, "disabled")
     monkeypatch.setenv(lab.TTS_VALIDATION_EXPECTATION_ENV, "ready")

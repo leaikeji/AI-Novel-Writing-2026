@@ -62,6 +62,7 @@ export interface CharacterProfileCompletionStatusRecord {
   readonly eligible: boolean;
   readonly state: CharacterProfileCompletionState;
   readonly stale: boolean;
+  readonly input_hash?: string;
   readonly source_summary: CharacterProfileCompletionSourceSummary;
   readonly job: CharacterProfileCompletionJobSummary | null;
   readonly candidates: readonly CharacterProfileCompletionCandidate[];

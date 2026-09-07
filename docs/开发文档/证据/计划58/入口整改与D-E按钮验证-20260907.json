@@ -1,0 +1,136 @@
+{
+  "schema_version": "plan58-entry-remediation-and-d-e/1",
+  "observed_at": "2026-09-07T18:10:12+08:00",
+  "environment": {
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "qwenpaw_version": "2.1.0",
+    "origin": "http://127.0.0.1:54385",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "long_lived_18088_touched": false,
+    "real_provider_calls": 0
+  },
+  "package_install": {
+    "public_command_result": "Plugin 'AI小说世界2026' installed and loaded (hot reload)",
+    "health": "ready",
+    "database": "connected",
+    "installed_hash_matches": {
+      "backend/app.py": "051e2e62c30ec60daab82323fceecfcd03d0c49ee11dfece2aafb1f79b8c47cd",
+      "backend/creative_api.py": "a85c2a15e52e14bed2639c0fb848d10181aadfddde11ccaedb9f756cc9c8e0b8",
+      "frontend/dist/index.js": "d74c631d410d7c3409e889adec584697747893c666cdfd7093d2c23031cfbff0"
+    },
+    "public_skill_state_restored": {
+      "enabled_count": 10,
+      "suspense-writing": true,
+      "golden-finger-writing": false,
+      "effective_provider": "s58-fake",
+      "effective_model": "s58-fake-model"
+    }
+  },
+  "live_http_negative_checks": [
+    {
+      "case": "legacy chapter-storyline request without writing_action",
+      "status": 409,
+      "type": "managed_writing_action_required"
+    },
+    {
+      "case": "legacy character-profile endpoint while managed gate is released",
+      "status": 409,
+      "type": "managed_writing_action_required"
+    },
+    {
+      "case": "managed chapter-storyline request carrying browser novel/storyline objects",
+      "status": 422,
+      "type": "request_validation_rejected"
+    }
+  ],
+  "provider_observation": {
+    "fixture_process_unchanged": true,
+    "receipt_count_in_prior_profile_evidence": 1,
+    "receipt_count_after_negative_checks": 1,
+    "negative_check_new_receipts": 0,
+    "receipt_count_after_positive_managed_request": 2,
+    "positive_request_new_receipts": 1,
+    "receipt_count_after_recovery_get": 2
+  },
+  "positive_managed_request": {
+    "kind": "character_profile_completion",
+    "action_id": "44444444-4444-4444-8444-444444444444",
+    "dispatch_id": "27f9d58f-395b-4605-9597-95876ff53110",
+    "job_id": "9861e7ed-fabc-4036-a592-084447cee726",
+    "http_status": 201,
+    "job_state": "ready",
+    "dispatch_state": "dispatched",
+    "primary_skill": "character-craft",
+    "selected_ids": [
+      "suspense-writing"
+    ],
+    "method_input_hash": "d63ffdc6c33c0ed4ec7cdeca792048476f7a9d6789815adfb772a02b7b5a11a6",
+    "semantic_enabled": false,
+    "auxiliary_calls": 0,
+    "tools": [],
+    "tool_choice": null,
+    "exact_method_counts": {
+      "character-craft/SKILL.md": 1,
+      "character-craft/references/character-dynamics.md": 1,
+      "suspense-writing/SKILL.md": 1
+    },
+    "recovery": "GET returned the same ready job and dispatched method receipt without another provider request",
+    "authoritative_character_changed": false
+  },
+  "d_e_button_projection": {
+    "test_file_sha256": "ef4e08874e22690e9708768e2a612be89fe86920e304cad531059f22cb8e0c8e",
+    "command": ".venv/bin/python -m pytest -q tests/writing_skills/test_entry_projection_evaluation.py tests/writing_skills/test_projection.py tests/writing_skills/test_resolver.py",
+    "result": "51 passed",
+    "button_scenarios": "16/16",
+    "properties": [
+      "saved genre and subgenre may deterministically select suspense-writing",
+      "mechanism phrases in plot or task prose remain content and do not become mechanism facts",
+      "author required_ids with author_request evidence may explicitly select golden-finger-writing when available",
+      "generic_only, exclusions and non-applicable pre-book tasks remain empty",
+      "D06, D07, D14 and D15 remain outside the released button-generation projection and are not counted as button passes"
+    ]
+  },
+  "browser_smoke": {
+    "route": "/apps/ai-novel-world-2026",
+    "title": "QwenPaw Console",
+    "result": "creative center rendered and the real chapter-storyline recommendation button completed after current package install",
+    "console_errors": 0,
+    "positive_product_click": {
+      "novel_id": "f1b25dac-32a6-407b-949f-eb2b23cb4626",
+      "chapter_creation_draft_id": "ccf4e218-f070-40d5-a2e8-10b89723a51b",
+      "button_sequence": "新建章节 -> AI智能推荐线路 -> 确定推荐",
+      "action_id": "69533b48-e16d-481e-b459-26f0a99f1247",
+      "dispatch_id": "af90e703-da87-47dd-b97b-d7fb71d15116",
+      "job_id": "aedb690f-70c0-40e4-a484-69ea14851222",
+      "job_state": "ready",
+      "dispatch_state": "dispatched",
+      "method_input_hash": "b77206d3f8a5f83ee031daf37a9a39ec442e46a7d80ab48c6fc056c2235ab9e5",
+      "primary_skill": "chapter-outline",
+      "selected_ids": [
+        "suspense-writing"
+      ],
+      "visible_receipt": "本次已装载到请求：章节大纲与场景链 · 悬疑写作",
+      "provider_receipts": 1,
+      "tools": [],
+      "tool_choice": null,
+      "exact_method_counts": {
+        "chapter-outline/SKILL.md": 1,
+        "chapter-outline/references/chapter-architecture.md": 1,
+        "suspense-writing/SKILL.md": 1,
+        "suspense-writing/references/mystery-mechanisms.md": 1
+      },
+      "recommendation_adopted": false,
+      "formal_chapter_created": false
+    },
+    "fixture_restored_after_check": "character-profile mode with zero receipts"
+  },
+  "decision": {
+    "D_R": "pass_resolver_fixture_only",
+    "D_E_BUTTON": "pass_16_of_16_released_button_cases",
+    "D_E_NATIVE": "blocked_no_released_native_projection",
+    "G_BUTTON": "pass_isolated_deterministic_buttons",
+    "G_SEMANTIC_BUTTON": "blocked_pending_explicit_real-model-budget-and-S/E-B-results",
+    "G_NATIVE": "blocked_by_public_per-send-task-and-history-isolation_contract",
+    "G_FULL": "blocked"
+  }
+}

@@ -18,6 +18,7 @@ import re
 import secrets
 from threading import RLock
 from typing import Any
+from uuid import UUID, uuid4
 
 from .assistant_context import (
     MAX_CONTEXT_CHARACTERS,
@@ -127,6 +128,7 @@ class ContextRefBinding:
 @dataclass(frozen=True)
 class ContextRefCreated:
     context_ref: str = field(repr=False)
+    writing_action_id: UUID
     expires_at: datetime
     context_revision: int
     payload_characters: int
@@ -153,6 +155,17 @@ class ContextRefLeaseResult:
         repr=False,
         compare=False,
     )
+    _writing_action_id: UUID | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _runtime_app: Any | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _tab_instance: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def accepted(self) -> bool:
@@ -164,6 +177,22 @@ class ContextRefLeaseResult:
             return None
         value = json.loads(self._serialized_snapshot)
         return value if isinstance(value, dict) else None
+
+    @property
+    def writing_action_id(self) -> UUID | None:
+        """Server-generated per-send identity; never accepted from request data."""
+
+        return self._writing_action_id
+
+    @property
+    def runtime_app(self) -> Any | None:
+        """Public ASGI app captured by this PawApp's preparation endpoint."""
+
+        return self._runtime_app
+
+    @property
+    def tab_instance(self) -> str | None:
+        return self._tab_instance
 
     def diagnostic(self) -> ContextRefLeaseDiagnostic:
         return ContextRefLeaseDiagnostic(
@@ -199,11 +228,13 @@ class _ValidatedSnapshot:
 @dataclass
 class _ContextRefEntry:
     binding: ContextRefBinding
+    writing_action_id: UUID
     serialized_snapshot: str = field(repr=False)
     created_at: datetime
     expires_at: datetime
     context_revision: int
     payload_characters: int
+    runtime_app: Any | None = field(default=None, repr=False, compare=False)
     lease_session_id: str | None = None
     lease_agent_id: str | None = None
     lease_expires_at: datetime | None = None
@@ -990,11 +1021,13 @@ class AssistantContextRefRegistry:
         *,
         clock: Callable[[], datetime] | None = None,
         token_factory: Callable[[], str] | None = None,
+        action_factory: Callable[[], UUID] | None = None,
     ) -> None:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._token_factory = token_factory or (
             lambda: secrets.token_urlsafe(CONTEXT_REF_RANDOM_BYTES)
         )
+        self._action_factory = action_factory or uuid4
         self._lock = RLock()
         self._entries: OrderedDict[str, _ContextRefEntry] = OrderedDict()
         self._owner_rates: dict[str, deque[datetime]] = defaultdict(deque)
@@ -1011,6 +1044,7 @@ class AssistantContextRefRegistry:
         binding: ContextRefBinding,
         snapshot: Mapping[str, object],
         request_body_size: int | None = None,
+        runtime_app: Any | None = None,
     ) -> ContextRefCreated:
         """Validate and store one immutable snapshot.
 
@@ -1064,21 +1098,27 @@ class AssistantContextRefRegistry:
                 self._evicted_total += 1
 
             context_ref = self._new_context_ref_locked()
+            writing_action_id = self._action_factory()
+            if not isinstance(writing_action_id, UUID):
+                raise RuntimeError("writing action generator did not return UUID")
             expires_at = min(
                 now + CONTEXT_REF_MAX_TTL,
                 validated.expires_at,
             )
             self._entries[context_ref] = _ContextRefEntry(
                 binding=binding,
+                writing_action_id=writing_action_id,
                 serialized_snapshot=validated.serialized,
                 created_at=now,
                 expires_at=expires_at,
                 context_revision=validated.context_revision,
                 payload_characters=validated.payload_characters,
+                runtime_app=runtime_app,
             )
             self._created_total += 1
             return ContextRefCreated(
                 context_ref=context_ref,
+                writing_action_id=writing_action_id,
                 expires_at=expires_at,
                 context_revision=validated.context_revision,
                 payload_characters=validated.payload_characters,
@@ -1192,6 +1232,9 @@ class AssistantContextRefRegistry:
             expires_at=entry.expires_at,
             lease_expires_at=entry.lease_expires_at,
             _serialized_snapshot=serialized,
+            _writing_action_id=entry.writing_action_id,
+            _runtime_app=entry.runtime_app,
+            _tab_instance=entry.binding.tab_instance,
         )
 
     def diagnostics(self) -> ContextRefRegistryDiagnostic:

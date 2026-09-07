@@ -84,3 +84,35 @@ async def test_novel_effective_model_maps_unavailable_public_contract_to_503(
 
     assert captured.value.status_code == 503
     assert captured.value.detail["type"] == "generation_model_unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "dependency_name",
+    ["get_chapter_effective_model", "get_creative_effective_model"],
+)
+async def test_managed_action_defers_model_read_until_durable_claim(
+    monkeypatch, dependency_name: str,
+) -> None:
+    dependencies = _import_generation_dependencies(monkeypatch)
+    body = b'{"writing_action":{"action_id":"ignored-by-dependency"}}'
+    delivered = False
+
+    async def receive():
+        nonlocal delivered
+        if delivered:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        delivered = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "app": FastAPI(),
+            "method": "POST",
+            "path": "/test",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive=receive,
+    )
+    assert await getattr(dependencies, dependency_name)(request) is None

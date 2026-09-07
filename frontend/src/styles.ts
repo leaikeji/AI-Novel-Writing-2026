@@ -634,6 +634,13 @@ export function ensureNovelStyles(): void {
     .anw-assistant-pane .qwenpaw-sender-actions-list > :nth-child(2) { min-width:0; flex:1 1 0; }
     .anw-assistant-pane .qwenpaw-sender-actions-list > :nth-child(2) > :nth-child(2) { min-width:40px; flex:1 1 0; }
     .anw-assistant-context-status-slot { position:absolute; z-index:4; top:0; right:0; left:0; box-sizing:border-box; height:88px; border-bottom:1px solid #eceef1; padding-right:54px; background:rgba(255,255,255,.98); }
+    .anw-assistant-context-status-slot:has(.anw-writing-method-status) { height:auto; max-height:min(58vh,420px); overflow-y:auto; border-bottom-color:#dfe2e6; box-shadow:0 10px 28px rgba(25,31,41,.12); scrollbar-width:thin; }
+    .anw-assistant-status-stack { min-width:0; }
+    .anw-assistant-status-stack > .anw-assistant-context-status { box-sizing:border-box; height:88px; }
+    .anw-assistant-context-status-slot .anw-writing-method-status { box-sizing:border-box; border-top:1px solid #eceef1; padding:10px 10px 11px 14px; color:#5f646d; background:rgba(255,255,255,.99); font-size:11px; }
+    .anw-assistant-context-status-slot .anw-writing-method-status p { margin:4px 0; }
+    .anw-assistant-context-status-slot .anw-writing-method-status details { margin-top:6px; }
+    .anw-assistant-context-status-slot .anw-writing-method-status summary { color:#4b5058; font-weight:650; }
     .anw-assistant-context-status { display:grid; height:100%; align-content:center; gap:4px; overflow:hidden; padding:9px 48px 9px 14px; color:#6d727a; }
     .anw-assistant-context-status-main { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
     .anw-assistant-context-status-main strong { min-width:0; overflow:hidden; color:#2f3339; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }

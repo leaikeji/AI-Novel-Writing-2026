@@ -1,0 +1,48 @@
+{
+  "schema_version": "plan58-real-semantic-probe/1",
+  "run_at": "2026-09-07T21:17:01+08:00",
+  "scenario_id": "S01",
+  "session_id": "plan58-real-route-S01-42c4ee48-7274-49d8-8ff8-89ff7d69d0e5",
+  "fixture_sha256": "fa69772eb6b8f571844f14115186fc18a6334e8ec6efa94f30f261e3a29e97ea",
+  "prompt_sha256": "e6436b5dc03a55a7368ac28d3d870a1445a77ee247a07c897b6a7c04e62ba659",
+  "prompt_characters": 1623,
+  "response_sha256": "1e7dc187942646f4bfbd2e5311ffff2910e8c8d8aaf417ef52afa91fa4c948f0",
+  "expected": ["suspense-writing"],
+  "observed": ["suspense-writing"],
+  "response": {
+    "schema_version": "semantic-route-response/1",
+    "decisions": [
+      {
+        "skill_id": "golden-finger-writing",
+        "decision": "reject",
+        "evidence_refs": ["source.0"]
+      },
+      {
+        "skill_id": "suspense-writing",
+        "decision": "select",
+        "evidence_refs": ["source.0"]
+      }
+    ]
+  },
+  "transport": {
+    "http_endpoint": "POST /api/console/chat",
+    "event_count": 14,
+    "completed": true,
+    "model_rounds": 1,
+    "transport_attempts": 1,
+    "tool_markers": 0,
+    "content_types": {"text": 1}
+  },
+  "actual_model": {
+    "provider_id": "minimax-cn",
+    "model_id": "MiniMax-M3",
+    "prompt_tokens_reported": 0,
+    "completion_tokens_reported": 59,
+    "total_tokens_reported": 59
+  },
+  "verdict": "pass",
+  "limitations": [
+    "该探针验证公开真实模型响应与严格路由合同，不等同于候选插件已安装到长期宿主",
+    "QwenPaw公开usage把prompt_tokens报告为0，原样保存且不推算实际计费"
+  ]
+}

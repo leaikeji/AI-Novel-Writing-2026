@@ -78,6 +78,7 @@ import {
 import {
   ChapterNarrationWorkflowError,
   startChapterNarrationWorkflow,
+  resumeChapterNarrationWorkflow,
   type ChapterNarrationWorkflowProgress,
   type StableChapterNarrationSource,
 } from "./narration/chapter-narration-workflow";
@@ -109,6 +110,7 @@ import {
 } from "./narration/script-review-panel";
 import { continueApprovedScriptProduction } from "./narration/script-review-continue";
 import type {
+  NarrationEditionResource,
   NarrationWorkflowResource,
 } from "./narration/chapter-contracts";
 import {
@@ -315,6 +317,26 @@ function narrationFailureMessage(reason: unknown): string {
   return reason instanceof Error && reason.message.trim()
     ? reason.message
     : "章节朗读操作失败；正文和既有朗读版本均未被覆盖。";
+}
+
+function narrationEditionStatus(edition: NarrationEditionResource): string {
+  if (edition.state === "ready") return "本章朗读已经准备完成。";
+  if (edition.state !== "partial_ready") {
+    return "朗读版本已建立，点击播放会优先准备所选句段。";
+  }
+  const activeCount = edition.pending_segment_count
+    + edition.queued_segment_count
+    + edition.rendering_segment_count;
+  const base = `已有 ${edition.ready_segment_count}/${edition.segment_count} 句可播放`;
+  if (activeCount > 0) {
+    return `${base}，${activeCount} 句正在制作${edition.failed_segment_count > 0
+      ? `，${edition.failed_segment_count} 句生成失败`
+      : ""}。`;
+  }
+  if (edition.failed_segment_count > 0) {
+    return `${base}，${edition.failed_segment_count} 句生成失败；可查看失败详情。`;
+  }
+  return `${base}。`;
 }
 
 
@@ -1162,11 +1184,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           setNarrationStatus(
             snapshot.workingCopyDiverged
               ? "正文已修改；音频继续播放旧稿，需要时可显式更新朗读。"
-              : edition.state === "ready"
-              ? "本章朗读已经准备完成。"
-              : edition.state === "partial_ready"
-                ? `已有 ${edition.ready_segment_count}/${edition.segment_count} 句可播放，其余句段继续制作。`
-                : "朗读版本已建立，点击播放会优先准备所选句段。",
+              : narrationEditionStatus(edition),
           );
           setNarrationError(null);
         } else if (snapshot.phase === "error" && snapshot.error && !isAbortFailure(snapshot.error)) {
@@ -1185,13 +1203,57 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     narrationSessionRef.current?.dispose();
     narrationSessionRef.current = session;
     setNarrationSnapshot(session.readSnapshot());
-    void session.load().catch((reason: unknown) => {
+    const recoveryController = new AbortController();
+    void session.load().then(async () => {
+      if (!narrationGate.canPrepareVoices
+        || recoveryController.signal.aborted
+        || narrationSessionRef.current !== session
+        || narrationActionAbortRef.current !== null) return;
+      narrationActionAbortRef.current = recoveryController;
+      // The initial lookup also owns the action slot. Do not expose a second
+      // create button while the persisted command is still being discovered.
+      setNarrationBusy(true);
+      try {
+        const workflow = await resumeChapterNarrationWorkflow({
+          novelId: activeNovel.id,
+          documentId: activeDocument.id,
+          generation,
+          currentRequestId: session.readSnapshot().bundle?.edition.request_id,
+          signal: recoveryController.signal,
+          isGenerationCurrent: (documentId, expectedGeneration) => (
+            narrationSessionRef.current === session
+            && documentRef.current?.id === documentId
+            && documentGenerationRef.current === expectedGeneration
+          ),
+          onRestoring: () => { setNarrationBusy(true); setNarrationError(null); },
+          onProgress: (progress) => {
+            if (recoveryController.signal.aborted) return;
+            setNarrationStatus(progress.message);
+            if (progress.workflow) setNarrationWorkflow(progress.workflow);
+          },
+        });
+        if (workflow) await presentNarrationWorkflow(
+          workflow, session, activeNovel.id, activeDocument.id, generation, recoveryController,
+        );
+      } finally {
+        if (narrationActionAbortRef.current === recoveryController) {
+          narrationActionAbortRef.current = null;
+          setNarrationBusy(false);
+        }
+      }
+    }).catch((reason: unknown) => {
       if (
         narrationSessionRef.current === session
+        && !recoveryController.signal.aborted
         && !isAbortFailure(reason)
       ) setNarrationError(narrationFailureMessage(reason));
     });
     return () => {
+      recoveryController.abort("chapter narration session disposed");
+      if (narrationActionAbortRef.current === recoveryController) {
+        narrationActionAbortRef.current = null;
+        setNarrationBusy(false);
+      }
       if (narrationSessionRef.current === session) {
         narrationSessionRef.current = null;
       }
@@ -1406,52 +1468,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         || documentRef.current?.id !== activeDocument.id
         || documentGenerationRef.current !== generation
       ) return;
-      setNarrationWorkflow(result.workflow);
-      if (result.workflow.workflow_state === "review_required") {
-        if (!result.workflow.script_version_id) {
-          throw new Error("复核请求缺少脚本版本标识，已拒绝继续生产。");
-        }
-        const review = await getNarrationScriptVersionForEdition(
-          result.workflow.script_version_id,
-          {
-            novel_id: activeNovel.id,
-            document_id: activeDocument.id,
-            revision_id: result.workflow.source_revision_id,
-            source_content_hash: result.workflow.source_content_hash,
-          },
-          controller.signal,
-        );
-        if (
-          controller.signal.aborted
-          || documentRef.current?.id !== activeDocument.id
-          || documentGenerationRef.current !== generation
-        ) return;
-        setScriptReview(review);
-        setScriptReviewRequestId(result.workflow.request_id);
-        setScriptReviewOpen(true);
-        setNarrationStatus(
-          review.blocker_count > 0
-            ? `人物识别发现 ${review.blocker_count} 个阻塞；音频尚未生成。`
-            : "脚本等待作者复核；音频尚未生成。",
-        );
-        return;
-      }
-      if (["failed", "cancelled"].includes(result.workflow.workflow_state)) {
-        throw new Error(
-          result.workflow.workflow_state === "failed"
-            ? "朗读制作失败；正文和既有朗读版本均未被覆盖。"
-            : "朗读制作已取消。",
-        );
-      }
-      if (!result.workflow.edition_id) {
-        throw new Error("朗读请求没有建立 Edition，已拒绝显示可播放状态。");
-      }
-      setScriptReview(null);
-      setScriptReviewRequestId(null);
-      await session.load(result.workflow.edition_id);
-      if (!controller.signal.aborted) {
-        setNarrationStatus("朗读版本已建立；可从任一句或任一段开始准备并播放。");
-      }
+      await presentNarrationWorkflow(
+        result.workflow, session, activeNovel.id, activeDocument.id, generation, controller,
+      );
     } catch (reason) {
       if (!controller.signal.aborted && !isAbortFailure(reason)) {
         setNarrationError(narrationFailureMessage(reason));
@@ -1463,6 +1482,49 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       }
     }
   };
+
+  async function presentNarrationWorkflow(
+    workflow: NarrationWorkflowResource,
+    session: ChapterNarrationSession,
+    novelId: string,
+    documentId: string,
+    generation: number,
+    controller: AbortController,
+  ): Promise<void> {
+    const current = () => !controller.signal.aborted
+      && narrationSessionRef.current === session
+      && documentRef.current?.id === documentId
+      && documentGenerationRef.current === generation;
+    if (!current()) return;
+    setNarrationWorkflow(workflow);
+    if (workflow.workflow_state === "review_required") {
+      if (!workflow.script_version_id) {
+        throw new Error("复核请求缺少脚本版本标识，已拒绝继续生产。");
+      }
+      const review = await getNarrationScriptVersionForEdition(workflow.script_version_id, {
+        novel_id: novelId, document_id: documentId,
+        revision_id: workflow.source_revision_id, source_content_hash: workflow.source_content_hash,
+      }, controller.signal);
+      if (!current()) return;
+      setScriptReview(review);
+      setScriptReviewRequestId(workflow.request_id);
+      setScriptReviewOpen(true);
+      setNarrationStatus(review.blocker_count > 0
+        ? `人物识别发现 ${review.blocker_count} 个阻塞；音频尚未生成。`
+        : "脚本等待作者复核；音频尚未生成。");
+      return;
+    }
+    if (["failed", "cancelled"].includes(workflow.workflow_state)) {
+      throw new Error(workflow.workflow_state === "failed"
+        ? "朗读制作失败；正文和既有朗读版本均未被覆盖。"
+        : "朗读制作已取消。");
+    }
+    if (!workflow.edition_id) throw new Error("朗读请求没有建立 Edition，已拒绝显示可播放状态。");
+    setScriptReview(null);
+    setScriptReviewRequestId(null);
+    await session.load(workflow.edition_id);
+    if (current()) setNarrationStatus("朗读版本已建立；可从任一句或任一段开始准备并播放。");
+  }
 
   const reportPlaybackResult = (result: ChapterNarrationSessionPlayResult): void => {
     if (result.status === "completed") {

@@ -1,0 +1,11 @@
+{
+  "id": "s58-method-probe",
+  "name": "S58 isolated method transport probe",
+  "version": "0.0.1",
+  "type": "app",
+  "description": "Test fixture only; no external model or novel data",
+  "author": "AI小说世界2026 tests",
+  "entry": {"backend": "plugin.py"},
+  "dependencies": [],
+  "qwenpaw_version": {"min": "2.1.0", "max": "2.2.0"}
+}

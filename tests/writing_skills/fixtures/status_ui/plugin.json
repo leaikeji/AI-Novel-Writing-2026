@@ -1,0 +1,12 @@
+{
+  "id": "s58-method-ui",
+  "name": "S58 isolated UI fixture",
+  "version": "0.0.1",
+  "type": "app",
+  "description": "Isolated fake UI only; no model or novel data",
+  "author": "AI小说世界2026 tests",
+  "entry": {"backend": "plugin.py", "frontend": "frontend/index.js"},
+  "dependencies": [],
+  "meta": {"pawapp": {"category": "productivity", "icon": "🧪", "entry_page": "/apps/s58-method-ui", "launch_scope": "page"}},
+  "qwenpaw_version": {"min": "2.1.0", "max": "2.2.0"}
+}

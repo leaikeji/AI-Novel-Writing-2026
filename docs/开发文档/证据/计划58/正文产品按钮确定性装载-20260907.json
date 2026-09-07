@@ -1,0 +1,101 @@
+{
+  "schema_version": "s58-product-button-evidence/1",
+  "observed_at": "2026-09-07T13:15:00+08:00",
+  "scope": {
+    "environment": "isolated-qwenpaw-2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "base_url": "http://127.0.0.1:55472",
+    "novel_id": "3f2a6e14-07a5-4656-924a-b622d775b01b",
+    "document_id": "891ce317-a1af-4c13-a223-9c385f86a27b",
+    "data_class": "synthetic-test-only"
+  },
+  "preflight_failure": {
+    "action_id": "01f8f4a2-2982-49f2-b0b0-b0c3603152e1",
+    "dispatch_id": "5e521cf8-0678-4960-919e-63f03e7dafa9",
+    "state": "failed",
+    "error_code": "managed_chapter_failed",
+    "failure": "WritingPosition lacked document_revision_id required by Context V4",
+    "provider_receipts_before": 3,
+    "provider_receipts_after": 3,
+    "formal_body_changed": false
+  },
+  "repair": {
+    "contract": "WritingPosition.document_revision_id is optional for historical/manual construction and resolved from DocumentWorkingCopy.base_revision_id for database-backed requests",
+    "context_snapshot": "StoryPositionV3 now freezes the same document_revision_id",
+    "skills_restored_after_hot_install": {
+      "enabled_count": 10,
+      "golden_finger_writing_enabled": false,
+      "effective_provider_id": "s58-fake",
+      "effective_model_id": "s58-fake-model"
+    }
+  },
+  "successful_action": {
+    "action_id": "b8ca87ed-33af-4fb7-af91-90c3356e5d0b",
+    "dispatch_id": "2a9774af-2c9d-484c-b9a2-fc924f7f7675",
+    "job_id": "0def00c5-5a55-4abe-895d-0127952c9a79",
+    "dispatch_state": "dispatched",
+    "job_state": "ready",
+    "validation_state": "meets_target",
+    "output_visible_character_count": 1000,
+    "requested_provider_id": "s58-fake",
+    "requested_model_id": "s58-fake-model",
+    "actual_provider_id": null,
+    "actual_model_id": null,
+    "public_actual_model_evidence": "not_exposed",
+    "method_input_hash": "910bb315821384095d05661d80950041bc07863236c1fd442d61273b90e8d07a",
+    "catalog_version": "6561a4d89e94edc25e7e60d5ce1a440cfd8d2c2e42f4bb58e40913cba0d13525",
+    "semantic_enabled": false,
+    "auxiliary_calls": 0
+  },
+  "provider_observation": {
+    "receipts_before": 3,
+    "receipts_after": 4,
+    "new_receipts": 1,
+    "new_receipt_ordinal": 4,
+    "model": "s58-fake-model",
+    "tools": [],
+    "tool_choice": null,
+    "primary_heading_count": 1,
+    "approved_block_matches": {
+      "prose-writing/SKILL.md": {
+        "sha256": "ccd22858290df7940f5df8e90d5819b213bd916925bca55c9f81950be0e1bda4",
+        "count": 1
+      },
+      "prose-writing/references/narrative-craft.md": {
+        "sha256": "3f1e8601db9de30cb1601757f05a4280f5049941070209bec696c976a9eefe21",
+        "count": 1
+      },
+      "prose-writing/references/genre-promises.md": {
+        "sha256": "b0eeb87862539b2c76fab0f2497afc2ca7df778d123207dc8880a6e01a93557a",
+        "count": 1
+      },
+      "suspense-writing/SKILL.md": {
+        "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5",
+        "count": 1
+      }
+    }
+  },
+  "author_ui_observation": {
+    "method_selector": "自动选择写作方法",
+    "semantic_copy": "语义补选未启用",
+    "completion_copy": "s58-fake / s58-fake-model 正文生成完成 · 1000 字",
+    "loaded_methods": [
+      "小说正文写作",
+      "悬疑写作"
+    ],
+    "details_visible": true,
+    "history_record_status": "recorded"
+  },
+  "claim_boundary": {
+    "proven": "isolated product chapter-body button can deterministically inject frozen approved method bytes exactly once and preserve queryable evidence",
+    "not_proven": [
+      "literary quality improvement",
+      "other creative buttons",
+      "native chat routing",
+      "semantic routing",
+      "provider usage or billing",
+      "full G-BUTTON or G-FULL"
+    ]
+  }
+}

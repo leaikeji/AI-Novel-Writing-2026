@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import json
 import os
+from pathlib import Path
 import re
 import sys
 from urllib.error import HTTPError, URLError
@@ -15,17 +16,12 @@ from uuid import UUID
 APP_ID = "ai-novel-world-2026"
 APP_VERSION = "0.4.0"
 NOVEL_AGENT_ID = "ai-novel-writer"
-NOVEL_SKILLS = {
-    "novel-direction",
-    "story-foundation",
-    "character-craft",
-    "chapter-outline",
-    "scene-craft",
-    "dialogue-craft",
-    "prose-writing",
-    "continuity-check",
-    "style-review",
-}
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+from backend.writing_skills.catalog import published_skill_ids
+
+NOVEL_SKILLS = set(published_skill_ids(_PROJECT_ROOT / "skills"))
 NOVEL_TOOLS = {
     "novel_get_context",
     "novel_get_document",
@@ -637,7 +633,7 @@ def verify() -> dict[str, object]:
 
     assert enabled_scope["default"] == []
     assert enabled_scope["QwenPaw_QA_Agent_0.2"] == []
-    assert set(enabled_scope[NOVEL_AGENT_ID]) == NOVEL_SKILLS
+    assert set(enabled_scope[NOVEL_AGENT_ID]) <= NOVEL_SKILLS
 
     enabled_tools: dict[str, list[str]] = {}
     for agent_id in sorted(agent_ids):

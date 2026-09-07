@@ -103,7 +103,7 @@ class _GenerationSession:
 
     def get(self, model, entity_id):
         if model is Novel and entity_id == self.novel_id:
-            return SimpleNamespace(id=entity_id)
+            return SimpleNamespace(id=entity_id, genre="", subgenre="")
         return None
 
     def scalar(self, _query):

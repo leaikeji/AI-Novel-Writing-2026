@@ -21,6 +21,11 @@ import {
   SelectionEditRuntime,
   createSelectionEditReviewHost,
 } from "./selection-edit-runtime";
+import { SelectionEditMethodGenerationClient } from "./writing-skills/selection";
+import {
+  createNativeWritingMethodHttpTransport,
+  createNativeWritingMethodRuntime,
+} from "./writing-skills/native";
 import { CreativeCenterEntry } from "./creative-center-entry";
 import { NovelLibraryPage } from "./creative-center";
 import { NovelWorkbench } from "./workbench-v2";
@@ -49,6 +54,7 @@ const selectionEditRuntime = new SelectionEditRuntime({
   contextRuntime: assistantContextRuntime,
   registry: assistantSelectionRegistry,
   transactions: assistantEditTransactions,
+  generationClient: new SelectionEditMethodGenerationClient(),
   copyText: (text) => navigator.clipboard.writeText(text),
   confirmExit: (prompt) => window.confirm(prompt),
   onAssistantFallback: (selectionId, operation) => {
@@ -74,6 +80,9 @@ const assistantProposalCoordinator = new AssistantProposalCoordinator({
   registry: assistantSelectionRegistry,
   transactions: assistantEditTransactions,
 });
+const nativeWritingMethodRuntime = createNativeWritingMethodRuntime({
+  transport: createNativeWritingMethodHttpTransport(),
+});
 const assistantContextRefCoordinator = createAssistantContextRefCoordinator({
   runtime: assistantContextRuntime,
   getRouteSession: activeWorkbenchRouteSession,
@@ -81,6 +90,7 @@ const assistantContextRefCoordinator = createAssistantContextRefCoordinator({
   bindSelectionForSend: (input) => (
     assistantSelectionController.bindSelectionForSend(input)
   ),
+  onWritingActionBound: (input) => nativeWritingMethodRuntime.bind(input),
 });
 registerAssistantRequestPayload({
   pluginId: APP_ID,
@@ -114,6 +124,7 @@ registerAssistantRouteWrap({
   Workbench: NovelWorkbench,
   CreativeCenter: NovelLibraryPage,
   contextRefCoordinator: assistantContextRefCoordinator,
+  nativeWritingMethodRuntime,
   selectionController: assistantSelectionController,
   selectionEditReviewHost: SelectionEditReviewHost,
 });

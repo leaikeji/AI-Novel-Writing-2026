@@ -61,6 +61,18 @@ import {
   type OutlineGenerationKind,
 } from "./outline-workflow";
 import {
+  OutlineMethodClient,
+  outlineMethodCatalog,
+} from "./writing-skills/outline";
+import {
+  ChapterCreativeMethodClient,
+  chapterCreativeMethodCatalog,
+  type ChapterCreativeMethodKind,
+} from "./writing-skills/chapter-creative";
+import { writingPageTabId } from "./writing-skills/creative-client";
+import type { WritingMethodStatus } from "./writing-skills/contracts";
+import { createWritingMethodReceiptNotice } from "./writing-skills/status";
+import {
   chapterDisplayTitle,
   chapterTitleForStorage,
   chapterTitleName,
@@ -221,6 +233,7 @@ const NarrationReadingPage = createNarrationReadingPage(React);
 const CharacterVoiceCardPanel = createCharacterVoiceCardPanel(React);
 const NovelSemanticIndexCard = createNovelSemanticIndexCard(React, host.antd);
 const RetrievalStatusNotice = createRetrievalStatusNotice(React);
+const WritingMethodReceiptNotice = createWritingMethodReceiptNotice(React);
 const StoryTimelineWorkspace = createStoryTimelineWorkspace(React, host.antd);
 const StoryLedgerWorkspace = createStoryLedgerWorkspace(React);
 
@@ -721,6 +734,9 @@ function OutlineWizard({
   const [retrievalSummary, setRetrievalSummary] = React.useState(
     null as RetrievalSummaryV1 | null,
   );
+  const [writingMethodStatus, setWritingMethodStatus] = React.useState(
+    null as WritingMethodStatus | null,
+  );
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [characterIndex, setCharacterIndex] = React.useState(-1);
   const [characterForm, setCharacterForm] = React.useState({
@@ -839,26 +855,72 @@ function OutlineWizard({
     kind: OutlineGenerationKind,
     intent: OutlineGenerationIntent,
     explorationDirection?: ReturnType<typeof outlineGenerationTarget>["explorationDirection"],
-  ): Promise<CreativeGenerationRecord> => {
-    const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-      method: "POST",
-      body: JSON.stringify({
-        scope_type: "outline",
-        scope_id: base.id,
-        novel_id: novel.id,
+  ): Promise<{
+    job: CreativeGenerationRecord;
+    methodClient: OutlineMethodClient | null;
+  }> => {
+    setWritingMethodStatus(null);
+    const inputSnapshot = {
+      schema_version: "outline-generation-request-v1",
+      intent,
+      expected_outline_version: base.version,
+      ...(explorationDirection ? { exploration_direction: explorationDirection } : {}),
+    } as const;
+    let methodClient: OutlineMethodClient | null = null;
+    try {
+      const catalog = await outlineMethodCatalog(
+        novel.id,
+        base.id,
+        base.version,
         kind,
-        force_new: true,
-        input_snapshot: {
-          schema_version: "outline-generation-request-v1",
-          intent,
-          expected_outline_version: base.version,
-          ...(explorationDirection ? { exploration_direction: explorationDirection } : {}),
-        },
-      }),
-    });
+        writingPageTabId(),
+      );
+      methodClient = new OutlineMethodClient(
+        catalog,
+        apiRequest,
+        window.sessionStorage,
+      );
+    } catch {
+      throw new Error("大纲写作方法目录暂不可用，未发送新的模型请求");
+    }
+    let job: CreativeGenerationRecord;
+    try {
+      if (methodClient.managedAvailable) {
+        const recovered = methodClient.hasRecoveryTicket
+          ? await methodClient.recover()
+          : null;
+        job = (recovered ?? await methodClient.start({
+          kind,
+          expected_scope_version: base.version,
+          input_snapshot: inputSnapshot,
+          force_new: true,
+        })) as CreativeGenerationRecord;
+      } else {
+        job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+          method: "POST",
+          body: JSON.stringify({
+            scope_type: "outline",
+            scope_id: base.id,
+            novel_id: novel.id,
+            kind,
+            force_new: true,
+            input_snapshot: inputSnapshot,
+          }),
+        });
+      }
+    } catch (error) {
+      setWritingMethodStatus(methodClient.currentStatus);
+      throw error;
+    }
+    if (job.kind !== kind || job.scope_id !== base.id) {
+      throw new Error("大纲生成结果与当前任务范围不匹配");
+    }
+    if (job.state !== "ready") {
+      throw new Error(job.failure_message || "模型生成失败");
+    }
+    setWritingMethodStatus(job.writing_method ?? null);
     setRetrievalSummary(retrievalSummaryFromJob(job));
-    if (job.state !== "ready") throw new Error(job.failure_message || "模型生成失败");
-    return job;
+    return { job, methodClient };
   };
 
   const hasContentForStep = (current: OutlineDraftRecord, targetStep: number): boolean => targetStep === 1
@@ -888,19 +950,21 @@ function OutlineWizard({
   const generateAndApply = async (targetStep: number, source: OutlineDraftRecord): Promise<OutlineDraftRecord> => {
     const target = outlineGenerationTarget(targetStep);
     const hasExistingContent = hasContentForStep(source, targetStep);
-    const job = await generate(
+    const generated = await generate(
       source,
       target.kind,
       "fresh",
       hasExistingContent ? target.explorationDirection : undefined,
     );
-    return apiRequest<OutlineDraftRecord>(
-      `/creative-generations/${job.id}/apply-outline`,
+    const updated = await apiRequest<OutlineDraftRecord>(
+      `/creative-generations/${generated.job.id}/apply-outline`,
       {
         method: "POST",
         body: JSON.stringify({ expected_version: source.version }),
       },
     );
+    generated.methodClient?.clearRecovery();
+    return updated;
   };
 
   const requestGeneration = async (targetStep: number) => {
@@ -1400,6 +1464,7 @@ function OutlineWizard({
         novelId: novel.id,
         compact: true,
       }),
+      h(WritingMethodReceiptNotice, { status: writingMethodStatus }),
       loading
         ? h(
             "div",
@@ -1629,6 +1694,9 @@ function ChapterCreationWizard({
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [outlineTaskModelLabel, setOutlineTaskModelLabel] = React.useState("");
   const [recommendationTaskModelLabel, setRecommendationTaskModelLabel] = React.useState("");
+  const [writingMethodStatus, setWritingMethodStatus] = React.useState(
+    null as WritingMethodStatus | null,
+  );
   const [outlineRetrievalSummary, setOutlineRetrievalSummary] = React.useState(
     null as RetrievalSummaryV1 | null,
   );
@@ -1650,6 +1718,12 @@ function ChapterCreationWizard({
   const requestGenerationRef = React.useRef(0);
   const activePreparationScopeRef = React.useRef(null as ChapterPreparationRequestScope | null);
   const preparationAbortRef = React.useRef(null as AbortController | null);
+  const recommendationMethodClientRef = React.useRef(
+    null as ChapterCreativeMethodClient | null,
+  );
+  const outlineMethodClientRef = React.useRef(
+    null as ChapterCreativeMethodClient | null,
+  );
 
   const chapterDocuments = canonicalChapterDocuments(novel);
   const volumeScopeKey = [...volumes]
@@ -1700,6 +1774,9 @@ function ChapterCreationWizard({
     setInnerError("");
     setReboundNotice("");
     setOutlineRetrievalSummary(null);
+    setWritingMethodStatus(null);
+    recommendationMethodClientRef.current = null;
+    outlineMethodClientRef.current = null;
     draftKeyRef.current = window.sessionStorage.getItem(`anw-chapter-draft:${novel.id}`) || "";
   }, [novel.id]);
 
@@ -1713,6 +1790,9 @@ function ChapterCreationWizard({
     setInnerError("");
     setReboundNotice("");
     setOutlineRetrievalSummary(null);
+    setWritingMethodStatus(null);
+    recommendationMethodClientRef.current = null;
+    outlineMethodClientRef.current = null;
   }, [open]);
 
   React.useEffect(() => {
@@ -1922,6 +2002,76 @@ function ChapterCreationWizard({
     }
   };
 
+  const requestChapterCreative = async (
+    base: ChapterCreationDraftRecord,
+    kind: ChapterCreativeMethodKind,
+    inputSnapshot: Readonly<Record<string, unknown>>,
+  ): Promise<{
+    job: CreativeGenerationRecord;
+    methodClient: ChapterCreativeMethodClient;
+  }> => {
+    setWritingMethodStatus(null);
+    let methodClient: ChapterCreativeMethodClient;
+    try {
+      const catalog = await chapterCreativeMethodCatalog(
+        novel.id,
+        base.id,
+        base.version,
+        kind,
+        writingPageTabId(),
+      );
+      methodClient = new ChapterCreativeMethodClient(
+        catalog,
+        apiRequest,
+        window.sessionStorage,
+      );
+    } catch {
+      throw new Error("章节写作方法目录暂不可用，未发送新的模型请求");
+    }
+    if (kind === "chapter_storyline_recommendation") {
+      recommendationMethodClientRef.current = methodClient;
+    } else {
+      outlineMethodClientRef.current = methodClient;
+    }
+    let raw: Awaited<ReturnType<ChapterCreativeMethodClient["start"]>>;
+    try {
+      if (methodClient.managedAvailable) {
+        raw = methodClient.hasRecoveryTicket
+          ? await methodClient.recover()
+          : await methodClient.start({
+              kind,
+              expected_scope_version: base.version,
+              input_snapshot: inputSnapshot,
+              force_new: true,
+            });
+      } else {
+        raw = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
+          method: "POST",
+          body: JSON.stringify({
+            scope_type: "chapter_creation",
+            scope_id: base.id,
+            novel_id: novel.id,
+            kind,
+            force_new: true,
+            input_snapshot: inputSnapshot,
+          }),
+        }) as typeof raw;
+      }
+    } catch (error) {
+      setWritingMethodStatus(methodClient.currentStatus);
+      throw error;
+    }
+    setWritingMethodStatus(raw.writing_method ?? methodClient.currentStatus);
+    if (raw.state === "method_pending") {
+      throw new Error("原章节写作任务仍在处理中，请稍后查询，不能重复生成");
+    }
+    const job = raw as CreativeGenerationRecord;
+    if (job.kind !== kind || job.scope_id !== base.id || job.novel_id !== novel.id) {
+      throw new Error("章节生成结果与当前草稿范围不匹配");
+    }
+    return { job, methodClient };
+  };
+
   const recommendStorylines = async () => {
     if (!draft || recommending || generating) return;
     setRecommendConfirmOpen(false);
@@ -1930,32 +2080,32 @@ function ChapterCreationWizard({
     try {
       const currentModel = await getGenerationModelStatus();
       setRecommendationTaskModelLabel(generationModelLabel(currentModel));
-      const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-        method: "POST",
-        body: JSON.stringify({
-          scope_type: "chapter_creation",
-          scope_id: draft.id,
-          novel_id: novel.id,
-          kind: "chapter_storyline_recommendation",
-          force_new: true,
-          input_snapshot: {
-            novel: { title: novel.title, genre: novel.genre, subgenre: novel.subgenre, main_plot: novel.main_plot },
-            chapter_number: chapterNumber,
-            storylines: storylines.map((item: StorylineRecord) => ({ id: item.id, type: item.storyline_type, title: item.title, description: item.description, status: item.status, progress: item.progress })),
-            previous_chapter: previousChapter
-              ? { title: chapterDisplayTitle(chapterNumber - 1, previousChapter.title), ending: previousChapter.content_markdown.slice(-1800) }
-              : null,
-          },
-        }),
-      });
+      const { job, methodClient } = await requestChapterCreative(
+        draft,
+        "chapter_storyline_recommendation",
+        {
+          novel: { title: novel.title, genre: novel.genre, subgenre: novel.subgenre, main_plot: novel.main_plot },
+          chapter_number: chapterNumber,
+          storylines: storylines.map((item: StorylineRecord) => ({ id: item.id, type: item.storyline_type, title: item.title, description: item.description, status: item.status, progress: item.progress })),
+          previous_chapter: previousChapter
+            ? { title: chapterDisplayTitle(chapterNumber - 1, previousChapter.title), ending: previousChapter.content_markdown.slice(-1800) }
+            : null,
+        },
+      );
       setRecommendationTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
-      if (job.state !== "ready") throw new Error(job.failure_message || "模型线路推荐失败");
+      if (job.state !== "ready") {
+        if (job.state === "failed") methodClient.clearRecovery();
+        throw new Error(job.failure_message || "模型线路推荐失败");
+      }
       const allowed = new Set(storylines.map((item: StorylineRecord) => item.id));
       let ids = (job.output_json?.storyline_ids || []).map(String).filter((id: string) => allowed.has(id));
       if (!ids.length) {
         ids = storylines.filter((item: StorylineRecord) => item.status === "active" && item.storyline_type === "main").slice(0, 2).map((item: StorylineRecord) => item.id);
       }
-      if (!ids.length) throw new Error("当前没有可推荐的线路，请先在线索页创建线路");
+      if (!ids.length) {
+        methodClient.clearRecovery();
+        throw new Error("当前没有可推荐的线路，请先在线索页创建线路");
+      }
       const reason = String(job.output_json?.reason || "这条线路最适合承接上一章结尾，并推动当前章节的核心冲突。").trim();
       setRecommendationOptions(ids.slice(0, 3).map((id: string) => ({ id, reason })));
       setPendingRecommendationId("");
@@ -1987,15 +2137,10 @@ function ChapterCreationWizard({
       setOutlineTaskModelLabel(generationModelLabel(currentModel));
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
-          const job = await apiRequest<CreativeGenerationRecord>("/creative-generations", {
-            method: "POST",
-            body: JSON.stringify({
-              scope_type: "chapter_creation",
-              scope_id: saved.id,
-              novel_id: novel.id,
-              kind: "chapter_outline",
-              force_new: true,
-              input_snapshot: {
+          const { job, methodClient } = await requestChapterCreative(
+            saved,
+            "chapter_outline",
+            {
                 novel: {
                   title: novel.title,
                   genre: novel.genre,
@@ -2020,24 +2165,32 @@ function ChapterCreationWizard({
                   : null,
                 rewrite_attempt: attempt,
                 rewrite_requirement: attempt > 1 ? "上次章纲未达到260—500字或内容被截断，请完整重写，不能续写残句。" : "",
-              },
-            }),
-          });
+            },
+          );
           setOutlineRetrievalSummary(retrievalSummaryFromJob(job));
           setOutlineTaskModelLabel(job.state === "ready" ? completedGenerationModelLabel(job) : generationModelAuditLabel(job));
           if (job.state !== "ready") {
+            if (job.state === "failed") methodClient.clearRecovery();
             throw new Error(job.failure_message || "模型章纲生成失败");
           }
           const nextOutline = String(job.output_json?.outline_text || "").trim();
           const outlineCharacterCount = visibleCount(nextOutline);
           if (outlineCharacterCount < 260 || outlineCharacterCount > 500) {
-            throw new Error(`第 ${attempt} 次章纲为 ${outlineCharacterCount} 字，未通过260—500字验收`);
+            lastFailure = new Error(`第 ${attempt} 次章纲为 ${outlineCharacterCount} 字，未通过260—500字验收`);
+            methodClient.clearRecovery();
+            continue;
           }
           generatedOutline = nextOutline;
           generatedTitle = chapterTitleName(String(job.output_json?.title || job.output_json?.chapter_title || ""));
           break;
         } catch (reason) {
           lastFailure = reason;
+          const methodState = outlineMethodClientRef.current?.currentStatus?.state;
+          if (methodState === "failed") {
+            outlineMethodClientRef.current?.clearRecovery();
+            continue;
+          }
+          if (methodState) throw reason;
         }
       }
       if (!generatedOutline) throw lastFailure;
@@ -2045,6 +2198,7 @@ function ChapterCreationWizard({
       setOutlineText(generatedOutline);
       const updated = await persist(saved, 5, { title: generatedTitle, outline_text: generatedOutline });
       setDraft(updated);
+      outlineMethodClientRef.current?.clearRecovery();
     } catch (reason) {
       const message = readableError(reason, "模型章纲生成失败");
       setInnerError(message);
@@ -2347,6 +2501,7 @@ function ChapterCreationWizard({
         { className: "mb-chapter-wizard" },
         reboundNotice ? h(Alert, { type: "info", showIcon: true, closable: true, message: reboundNotice, onClose: () => setReboundNotice("") }) : null,
         innerError ? h(Alert, { type: "error", showIcon: true, closable: true, message: innerError, onClose: () => setInnerError("") }) : null,
+        h(WritingMethodReceiptNotice, { status: writingMethodStatus }),
         wizardSteps,
         stepBody,
       ),
@@ -2412,7 +2567,7 @@ function ChapterCreationWizard({
         footer: null,
         className: "anw-modal mb-chapter-recommend-results",
         title: "AI为您推荐以下线路",
-        onCancel: () => { setRecommendationOptions([]); setPendingRecommendationId(""); },
+        onCancel: () => { recommendationMethodClientRef.current?.clearRecovery(); setRecommendationOptions([]); setPendingRecommendationId(""); },
       },
       h("p", null, recommendationTaskModelLabel ? `任务模型：${recommendationTaskModelLabel}` : "请选择其中一个线路继续"),
       h("div", { className: "mb-chapter-choice-list" }, ...recommendationOptions.map((option: { id: string; reason: string }, index: number) => {
@@ -2430,12 +2585,13 @@ function ChapterCreationWizard({
         );
       })),
       h("div", { className: "mb-chapter-confirm-actions" },
-        h(Button, { size: "large", onClick: () => { setRecommendationOptions([]); setPendingRecommendationId(""); } }, "取消"),
+        h(Button, { size: "large", onClick: () => { recommendationMethodClientRef.current?.clearRecovery(); setRecommendationOptions([]); setPendingRecommendationId(""); } }, "取消"),
         h(Button, { size: "large", className: "anw-primary-button", disabled: !pendingRecommendationId, onClick: () => {
           const selected = storylines.find((item: StorylineRecord) => item.id === pendingRecommendationId);
           if (!selected) return;
           setSelectedStorylineIds([selected.id]);
           setExpandedGroups([selected.storyline_type]);
+          recommendationMethodClientRef.current?.clearRecovery();
           setRecommendationOptions([]);
           setPendingRecommendationId("");
           Modal.success({ className: "anw-modal", content: `✅ 已为您选择「${selected.title}」线路`, okText: "确定" });

@@ -237,6 +237,33 @@ describe("SelectionEditReviewSurface reviewing state", () => {
     });
   });
 
+  it("shows the frozen writing-method receipt beside the selection candidate", () => {
+    const harness = createReactHarness();
+    const Surface = createSelectionEditReviewSurface(harness.React);
+    const status = {
+      schema_version: "writing-method-status/1",
+      action_id: "11111111-1111-4111-8111-111111111111",
+      dispatch_id: "22222222-2222-4222-8222-222222222222",
+      state: "dispatched",
+      selected_ids: ["suspense-writing"],
+      omitted_ids: [],
+      method_input_hash: "a".repeat(64),
+      semantic_enabled: false,
+      auxiliary_calls: 0,
+      job_ref: "creative:33333333-3333-4333-8333-333333333333",
+    } as const;
+    const tree = harness.render(Surface, {
+      state: reviewState(),
+      onAction: vi.fn(),
+      writingMethodStatus: status,
+    });
+    const receipt = findAll(tree, (element) => (
+      typeof element.type === "function"
+      && element.props.status === status
+    ));
+    expect(receipt).toHaveLength(1);
+  });
+
   it.each([
     ["polish", "AI 润色审阅"],
     ["rewrite", "AI 改写审阅"],
