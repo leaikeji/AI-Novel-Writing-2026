@@ -35,6 +35,7 @@ from ..models import (
 )
 from .adapters import AdapterUnavailableError, MossNanoTTSAdapter
 from .audio_pipeline import (
+    audio_validation_failure_evidence,
     AudioFormatError,
     AudioPipelineError,
     AudioQualityError,
@@ -1731,32 +1732,7 @@ class NarrationSegmentWorker:
             return "non_retryable", "RENDER_INPUT_INVALID"
         return "retryable", "WORKER_UNEXPECTED_FAILURE"
 
-    @staticmethod
-    def _failure_evidence(error: BaseException) -> dict[str, object] | None:
-        """Return a bounded, text-free diagnostic for audio validation failures."""
-
-        if not isinstance(error, (AudioFormatError, AudioQualityError)):
-            return None
-        reasons = {
-            "synthesis WAV is empty or not bytes": "WAV_EMPTY_OR_NOT_BYTES",
-            "synthesis WAV exceeds the bounded input size": "WAV_INPUT_TOO_LARGE",
-            "synthesis WAV must contain uncompressed PCM": "WAV_NOT_PCM",
-            "synthesis WAV container is corrupt": "WAV_CONTAINER_CORRUPT",
-            "synthesis WAV must be 48 kHz stereo signed 16-bit PCM": "WAV_FORMAT_MISMATCH",
-            "synthesis WAV PCM payload is empty or truncated": "WAV_PAYLOAD_EMPTY_OR_TRUNCATED",
-            "synthesis WAV frame count differs from its payload": "WAV_FRAME_COUNT_MISMATCH",
-            "synthesis WAV duration is outside segment bounds": "WAV_DURATION_OUT_OF_BOUNDS",
-            "synthesis WAV sample count is inconsistent": "WAV_SAMPLE_COUNT_MISMATCH",
-            "synthesis WAV is silent or below the speech floor": "WAV_SILENT",
-            "synthesis WAV exceeds the clipping limit": "WAV_CLIPPING_LIMIT_EXCEEDED",
-            "synthesis WAV duration drift exceeds the frozen limit": "WAV_DURATION_DRIFT",
-            "synthesis WAV duration is implausible for short Chinese text": "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
-            "audio processing changed the segment duration": "POSTPROCESS_DURATION_CHANGED",
-        }
-        return {
-            "schema_version": "narration-audio-validation-failure/1",
-            "reason_code": reasons.get(str(error), "AUDIO_VALIDATION_UNKNOWN"),
-        }
+    _failure_evidence = staticmethod(audio_validation_failure_evidence)
 
     async def run_once(self) -> WorkerOutcome:
         lease = await asyncio.to_thread(self._scheduler.claim_next_segment)

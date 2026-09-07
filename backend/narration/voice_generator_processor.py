@@ -26,7 +26,11 @@ from ..models import (
     VoiceRightsRecord,
 )
 from . import schemas as wire
-from .audio_pipeline import process_synthesis_wav
+from .audio_pipeline import (
+    AudioPipelineError,
+    audio_validation_failure_evidence,
+    process_synthesis_wav,
+)
 from .contracts import (
     NanoDecodeParametersV2,
     NarrationRequestScope,
@@ -438,10 +442,32 @@ class SqlAlchemyVoiceGeneratorRepository:
             return
         now = datetime.now(UTC)
         if job.state == "cancelled":
-            row.state = VoiceGeneratorCommandState.CANCELLED.value
-            row.failure_code = None
+            # The published lifecycle only permits cancellation before Nano
+            # validation. A late executor cancellation invalidates the work;
+            # it must not attempt an illegal backwards/terminal transition.
+            late = row.state in {
+                VoiceGeneratorCommandState.UNLOADING_VOICE_GENERATOR.value,
+                VoiceGeneratorCommandState.VALIDATING_WITH_NANO.value,
+            }
+            row.state = (
+                VoiceGeneratorCommandState.SUPERSEDED.value if late
+                else VoiceGeneratorCommandState.CANCELLED.value
+            )
+            row.failure_code = "VOICE_GENERATOR_JOB_CANCELLED" if late else None
         else:
-            row.state = VoiceGeneratorCommandState.FAILED_STORAGE.value
+            # An expired generation is not a storage failure. Match the
+            # persisted phase so the existing trigger can commit recovery
+            # together with the job and release its active slot.
+            row.state = {
+                VoiceGeneratorCommandState.WAITING_FOR_HEAVY_RUNTIME.value:
+                    VoiceGeneratorCommandState.FAILED_RUNTIME_UNAVAILABLE.value,
+                VoiceGeneratorCommandState.GENERATING_VOICE.value:
+                    VoiceGeneratorCommandState.FAILED_GENERATION.value,
+                VoiceGeneratorCommandState.UNLOADING_VOICE_GENERATOR.value:
+                    VoiceGeneratorCommandState.FAILED_STORAGE.value,
+                VoiceGeneratorCommandState.VALIDATING_WITH_NANO.value:
+                    VoiceGeneratorCommandState.FAILED_NANO_VALIDATION.value,
+            }[row.state]
             row.failure_code = job.error_code or "VOICE_GENERATOR_JOB_TERMINATED"
         row.progress_current = 6
         row.completed_at = now
@@ -865,6 +891,7 @@ class VoiceGeneratorProcessor:
                 "HOST_NOT_READY", "VoiceGenerator host is not ready", retryable=True
             )
         receipt = await self._host.create(work.host_request)
+        transport_retries = 0
         while not receipt.terminal:
             state = await asyncio.to_thread(
                 self._repository.heartbeat_and_job_state, work
@@ -874,7 +901,17 @@ class VoiceGeneratorProcessor:
             elif state != "running":
                 raise JobFenceError("VoiceGenerator job left running state")
             await asyncio.sleep(self._poll_seconds)
-            receipt = await self._host.get(work.host_request)
+            try:
+                receipt = await self._host.get(work.host_request)
+            except VoiceGeneratorRuntimeError as error:
+                # A missing poll response does not mean the durable native
+                # request stopped. Recover that exact identity, never POST a
+                # second generation. Bound retries for the whole generation,
+                # keeping the job fence/cancellation check on every attempt.
+                if error.code != "HOST_UNREACHABLE" or not error.retryable or transport_retries >= 2:
+                    raise
+                transport_retries += 1
+                continue
         projected = command_state_for_host_receipt(receipt)
         if projected is VoiceGeneratorCommandState.CANCELLED:
             await asyncio.to_thread(
@@ -953,6 +990,11 @@ class VoiceGeneratorProcessor:
             generator_result = await self._generate(work)
             if generator_result is None:
                 return
+            await asyncio.to_thread(
+                self._repository.advance,
+                work,
+                VoiceGeneratorCommandState.UNLOADING_VOICE_GENERATOR,
+            )
             failure_state = VoiceGeneratorCommandState.FAILED_STORAGE
             failure_code = "VOICE_GENERATOR_STORAGE_FAILED"
             generated_asset_id = uuid5(work.command_id, "generated-reference-asset")
@@ -968,15 +1010,10 @@ class VoiceGeneratorProcessor:
             await asyncio.to_thread(
                 self._repository.advance,
                 work,
-                VoiceGeneratorCommandState.UNLOADING_VOICE_GENERATOR,
-            )
-            await asyncio.to_thread(
-                self._repository.advance,
-                work,
                 VoiceGeneratorCommandState.VALIDATING_WITH_NANO,
             )
             failure_state = VoiceGeneratorCommandState.FAILED_NANO_VALIDATION
-            failure_code = "VOICE_GENERATOR_VALIDATION_FAILED"
+            failure_code = "VOICE_GENERATOR_VALIDATION_INPUT_INVALID"
             validation_text = _VALIDATION_TEXT[work.language]
             validation_key = self._digest_keyring.active
             validation_input_digest = private_text_digest(
@@ -1009,14 +1046,18 @@ class VoiceGeneratorProcessor:
                     actual_sha256=generator_result.audio_digest,
                 ),
             )
+            failure_code = "NANO_SYNTHESIS_FAILED"
             nano_result = await self._validate_with_nano(work, nano_request)
             nano_model_fingerprint = _require_production_nano_result(nano_result)
+            failure_code = "NANO_AUDIO_PROCESSING_FAILED"
             processed = await asyncio.to_thread(
                 process_synthesis_wav,
                 nano_result.audio_bytes,
                 spoken_text=validation_text,
             )
             validation_asset_id = uuid5(work.command_id, "nano-validation-asset")
+            failure_state = VoiceGeneratorCommandState.FAILED_STORAGE
+            failure_code = "VOICE_GENERATOR_STORAGE_FAILED"
             validation = await asyncio.to_thread(
                 self._storage.publish_media,
                 [processed.wav_bytes],
@@ -1026,6 +1067,7 @@ class VoiceGeneratorProcessor:
                 extension="wav",
                 max_bytes=MAX_VALIDATION_AUDIO_BYTES,
             )
+            failure_code = "VOICE_GENERATOR_PUBLICATION_FAILED"
             await asyncio.to_thread(
                 self._repository.publish,
                 work,
@@ -1061,13 +1103,18 @@ class VoiceGeneratorProcessor:
                 state=failure_state,
                 failure_code=error.code,
             )
-        except BaseException:
+        except BaseException as error:
             current = await asyncio.to_thread(
                 self._repository.heartbeat_and_job_state, work
             )
             if current == "cancel_requested":
                 await asyncio.to_thread(self._repository.acknowledge_cancel, work)
                 return
+            evidence = audio_validation_failure_evidence(error)
+            if evidence is not None:
+                failure_code = f"NANO_{evidence['reason_code']}"
+            elif isinstance(error, AudioPipelineError):
+                failure_code = "NANO_AUDIO_PROCESSING_FAILED"
             await asyncio.to_thread(
                 self._repository.fail,
                 work,

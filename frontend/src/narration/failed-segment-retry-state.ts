@@ -101,6 +101,8 @@ export function failedSegmentRetryReasonMessage(reasonCode: string | null): stri
       return "后台任务尚未进入可手动重试状态，请等待当前任务结束。";
     case "LATEST_ATTEMPT_NOT_COMPLETE":
       return "最近一次合成仍在收尾，请稍后再试。";
+    case "LATEST_MANUAL_ATTEMPT_NON_RETRYABLE":
+      return "本句已按相同音色和参数重试，仍未通过音频校验；请更换声音或调整正文后更新朗读。";
     case "VOICE_RIGHTS_UNAVAILABLE":
       return "当前绑定音色暂不可用于合成，请先检查音色版本。";
     case "AGGREGATE_FULL_FAILURE_STATE_INVALID":

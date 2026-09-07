@@ -240,6 +240,9 @@ describe("failed-segment retry state", () => {
     expect(failedSegmentRetryReasonMessage("FANOUT_NOT_ALL_FAILED")).toContain(
       "暂不能重试",
     );
+    expect(failedSegmentRetryReasonMessage("LATEST_MANUAL_ATTEMPT_NON_RETRYABLE")).toContain(
+      "更换声音或调整正文",
+    );
     expect(failedSegmentRetryReasonMessage("UNKNOWN_FUTURE_REASON")).toBe(
       "当前句段暂不满足安全重试条件。",
     );

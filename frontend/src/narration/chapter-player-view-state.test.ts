@@ -214,6 +214,39 @@ describe("chapter player view state", () => {
     expect(view.generation.failedCount).toBe(1);
   });
 
+  it("distinguishes a terminal failed playback gap from a segment still being prepared", () => {
+    const blocked: NarrationPlayerState = Object.freeze({
+      ...playerState(),
+      phase: "blocked",
+      currentSegmentId: SEGMENT_1,
+      currentOrdinal: 0,
+      failure: Object.freeze({
+        code: "FAILED_GAP",
+        message: "segment is unavailable",
+        retryable: false,
+        segmentId: SEGMENT_2,
+        ordinal: 1,
+      }),
+    });
+    const failed = deriveChapterPlayerView({
+      contentPhase: "ready",
+      sourceKind: "current",
+      playerState: blocked,
+      segmentIds: [SEGMENT_1, SEGMENT_2],
+      segmentStates: ["ready", "failed"],
+    });
+    const pending = deriveChapterPlayerView({
+      contentPhase: "ready",
+      sourceKind: "current",
+      playerState: blocked,
+      segmentIds: [SEGMENT_1, SEGMENT_2],
+      segmentStates: ["ready", "rendering"],
+    });
+
+    expect(failed.playbackLabel).toBe("下一句生成失败");
+    expect(pending.playbackLabel).toBe("等待可播放句段");
+  });
+
   it("never substitutes a current profile name for a legacy Edition identity", () => {
     const identity = voiceIdentity(true);
     const view = deriveChapterPlayerView({

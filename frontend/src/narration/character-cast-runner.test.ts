@@ -76,6 +76,29 @@ function plan(
 
 
 describe("character cast command runner", () => {
+  it("does not label safe official reuse as unfinished manual work", () => {
+    expect(characterCastUiStatus(plan({
+      state: "ready_applied_with_warnings",
+      items: [{ ...plan().items[0]!, state: "assigned" }],
+      warnings: [{ code: "CHARACTER_CAST_OFFICIAL_POOL_REUSED", target_key: "narrator", message: "音色已用尽，允许复用。" }],
+    }))).toMatchObject({
+      phase: "warning",
+      message: "整书智能配音已完成；部分声音按现有设置保留或复用。",
+    });
+  });
+
+  it("counts blocked targets rather than diagnostic warnings as unfinished", () => {
+    expect(characterCastUiStatus(plan({
+      state: "ready_applied_with_warnings",
+      warnings: [
+        { code: "CAST_PLAN_MODEL_FAILED", target_key: "narrator", message: "分析失败。" },
+        { code: "CHARACTER_CAST_OFFICIAL_COLLISION_UNRESOLVED", target_key: "narrator", message: "原音色保留。" },
+      ],
+    }))).toMatchObject({
+      message: "已应用可用配音；1 个目标未完成，可重新规划或手动选择。",
+    });
+  });
+
   it("advances exactly one server target at a time until the command is terminal", async () => {
     const intermediate = plan({ state: "analyzing" });
     const completed = plan({ state: "ready_applied" });

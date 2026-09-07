@@ -522,6 +522,10 @@ export function createCharacterVoiceGenerator(
       errorMessage: null,
     }));
     const mountedRef = React.useRef(true);
+    const pollingRef = React.useRef<AbortController | null>(null);
+    const [pollRevision, setPollRevision] = React.useState(0);
+    const scopeRef = React.useRef(scope);
+    scopeRef.current = scope;
     React.useEffect(() => {
       mountedRef.current = true;
       return () => { mountedRef.current = false; };
@@ -569,6 +573,11 @@ export function createCharacterVoiceGenerator(
       return () => controller.abort();
     }, [props.capabilityEnabled, props.characterId, scope]);
 
+    React.useEffect(() => () => {
+      pollingRef.current?.abort();
+      pollingRef.current = null;
+    }, [scope, scoped.command?.commandId]);
+
     React.useEffect(() => {
       const command = scoped.command;
       const interval = props.refreshIntervalMs ?? 2_000;
@@ -578,13 +587,17 @@ export function createCharacterVoiceGenerator(
         || command === null
         || command.terminal
       ) return;
-      const controller = new AbortController();
       const timer = globalThis.setTimeout(() => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || pollingRef.current !== null) return;
+        const controller = new AbortController();
+        pollingRef.current = controller;
         setLocal((current) => current.scope === scope
           ? { ...current, busyAction: "refresh", errorMessage: null }
           : current);
-        void props.onRefreshGeneration(command.commandId, controller.signal).then(publish).catch((reason: unknown) => {
+        void props.onRefreshGeneration(command.commandId, controller.signal).then((next) => {
+          if (!controller.signal.aborted && scopeRef.current === scope
+            && pollingRef.current === controller) publish(next);
+        }).catch((reason: unknown) => {
           if (controller.signal.aborted || !mountedRef.current) return;
           setLocal({
             scope,
@@ -593,15 +606,16 @@ export function createCharacterVoiceGenerator(
             busyAction: null,
             errorMessage: actionError(reason),
           });
+        }).finally(() => {
+          if (pollingRef.current === controller) pollingRef.current = null;
+          if (mountedRef.current && !controller.signal.aborted) setPollRevision((value) => value + 1);
         });
       }, interval);
-      return () => {
-        controller.abort();
-        globalThis.clearTimeout(timer);
-      };
+      return () => globalThis.clearTimeout(timer);
     }, [
       props.capabilityEnabled,
       props.refreshIntervalMs,
+      pollRevision,
       scope,
       scoped.busyAction,
       scoped.command?.commandId,
@@ -654,11 +668,11 @@ export function createCharacterVoiceGenerator(
         } else {
           next = command;
         }
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || scopeRef.current !== scope) return;
         if (next) publish(next);
         else setLocal({ scope, loadPhase: "ready", command: null, busyAction: null, errorMessage: null });
       } catch (reason: unknown) {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || scopeRef.current !== scope) return;
         setLocal({
           ...scoped,
           loadPhase: action === "reload" ? "error" : scoped.loadPhase,

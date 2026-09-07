@@ -105,6 +105,7 @@ function createHarness() {
   };
   return {
     React,
+    unmount() { effects.forEach((effect) => effect?.cleanup?.()); },
     render<Props>(Component: (props: Props) => unknown, props: Props): unknown {
       stateIndex = 0;
       refIndex = 0;
@@ -246,6 +247,81 @@ function baseProps(changes: Partial<GenericVoicePackProps> = {}): GenericVoicePa
 }
 
 describe("generic voice pack projections", () => {
+  it("polls delayed responses across busy renders and stops on cancellation or unmount", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      const pending = deferred<GenericVoicePackLoadResult>();
+      const signals: AbortSignal[] = [];
+      const onRefreshCommand = vi.fn((_id: string, signal: AbortSignal) => {
+        signals.push(signal);
+        return pending.promise;
+      });
+      const onChanged = vi.fn();
+      const props = baseProps({ initialPack: pack(), initialCommand: command(),
+        refreshIntervalMs: 10, onRefreshCommand, onChanged });
+      const Component = createGenericVoicePack(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      harness.render(Component, props);
+      expect(signals[0]?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onRefreshCommand).toHaveBeenCalledTimes(1);
+      pending.resolve(result());
+      await vi.advanceTimersByTimeAsync(0);
+      let tree = harness.render(Component, props);
+      expect(onChanged).toHaveBeenCalledTimes(1);
+      (findButton(tree, "停止后续准备").props.onClick as () => void)();
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(0);
+      tree = harness.render(Component, props);
+      expect(textContent(tree)).toContain("继续准备");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onRefreshCommand).toHaveBeenCalledTimes(1);
+    } finally { harness.unmount(); vi.useRealTimers(); }
+  });
+
+  it("aborts an in-flight poll on unmount and ignores even an abort-insensitive response", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      const pending = deferred<GenericVoicePackLoadResult>();
+      let signal: AbortSignal | undefined;
+      const onChanged = vi.fn();
+      const props = baseProps({ initialPack: pack(), initialCommand: command(), refreshIntervalMs: 10,
+        onChanged, onRefreshCommand: (_id, currentSignal) => { signal = currentSignal; return pending.promise; } });
+      const Component = createGenericVoicePack(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      harness.unmount();
+      expect(signal?.aborted).toBe(true);
+      pending.resolve(result());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onChanged).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("clears a failed poll and schedules another bounded refresh", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      const onRefreshCommand = vi.fn().mockRejectedValueOnce(new Error("连接中断"))
+        .mockResolvedValueOnce(result());
+      const props = baseProps({ initialPack: pack(), initialCommand: command(), refreshIntervalMs: 10,
+        onRefreshCommand });
+      const Component = createGenericVoicePack(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      const failed = harness.render(Component, props);
+      expect(textContent(failed)).toContain("连接中断");
+      await vi.advanceTimersByTimeAsync(10);
+      // Identical command timestamps still permit the next poll after busy renders.
+      expect(onRefreshCommand).toHaveBeenCalledTimes(2);
+    } finally { harness.unmount(); vi.useRealTimers(); }
+  });
+
   it("labels group-dialogue fallbacks as one voice instead of a chorus", () => {
     expect(genericVoicePackSlotDisplayLabel({
       slotKey: "crowd_male",

@@ -56,3 +56,9 @@
 - 若需回退，先停止 QwenPaw，使用本记录备份与保留 maintenance root 复核数据库状态；已有 `0040` 记录时优先关闭新增能力并恢复兼容插件，不强制降 schema。只有确认可以无损降级时，才以 schema owner 执行 `0040 → 0039` 并恢复旧插件和完整卷备份。
 
 最终裁决：`TTS55-LIVE-RELEASE=PASS`。
+
+## 6. 2026-09-03 计划 56 只读复核补记
+
+第 5 节“已删除隔离媒体目录与临时 JSON／日志”的表述未被当前文件状态支持：`/private/tmp/tts55-real-media.j0uWv6` 仍存在，约 79 MiB，且仍有精确 `tts55-*` 临时文件。`/private/tmp/tts55-listening/06-crowd-male.wav` 的 hash 与本轮作者通过记录一致。原发布证据保留，但不能继续据此宣称临时文件已全部清理。后续先保全声音与可恢复证据，再按精确清单处理；本次复核没有删除文件。
+
+正式库当前为 `0040`，generic pack 与 preparation command 仍各 0 条；官方整书选角 command 已有 1 条 `ready_applied_with_warnings`，不由单条状态推导完整验收通过。统一收尾与当前授权边界见[计划 56](../../56-TTS全链最终收尾与目标模式执行计划.md)。

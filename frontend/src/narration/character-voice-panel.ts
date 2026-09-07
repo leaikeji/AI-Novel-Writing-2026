@@ -89,6 +89,7 @@ export interface CharacterVoiceOption {
   readonly versionNumber: number;
   readonly language: string;
   readonly sourceType: VoiceSourceType;
+  readonly sourceLabel: string;
 }
 
 
@@ -240,7 +241,9 @@ export function characterVoiceOptions(
       || !voiceSourceEvidenceIsUsable(version)
       || !isCharacterVoiceCapabilityActionable(
         capabilities,
-        SOURCE_CAPABILITIES[version.source_type],
+        version.activation_basis === "experimental_machine_validated"
+          ? "nano_advanced_tuning"
+          : SOURCE_CAPABILITIES[version.source_type],
       )) continue;
     options.push({
       key: voiceOptionKey(profile.profile_id, version.version_id),
@@ -250,6 +253,8 @@ export function characterVoiceOptions(
       versionNumber: version.version_number,
       language: version.language,
       sourceType: version.source_type,
+      sourceLabel: version.activation_basis === "experimental_machine_validated"
+        ? "高级调音" : SOURCE_LABELS[version.source_type],
     });
   }
   return options.sort((left, right) => (
@@ -639,6 +644,15 @@ export function createCharacterVoicePanel(
     const currentProfile = currentUnavailable
       ? state.profiles.find((profile) => profile.profile_id === state.draft.profileId)
       : undefined;
+    // A source hidden by this private-only picker is not an unusable voice.
+    // Recheck full eligibility before making that distinction; revoked or
+    // otherwise invalid official versions must still show as unavailable.
+    const currentInOtherPicker = currentUnavailable
+      && props.allowedSourceTypes !== undefined
+      && characterVoiceOptions(state.profiles, props.novelId, props.capabilities)
+        .some((option) => option.key === selectedKey);
+    const privateOnly = props.allowedSourceTypes !== undefined
+      && !props.allowedSourceTypes.includes("preset");
     const blockMessage = capabilityBlockMessage(props);
 
     return h(
@@ -733,26 +747,28 @@ export function createCharacterVoicePanel(
                 value: selectedKey,
                 disabled: fieldsDisabled || options.length === 0,
                 onChange: onVoiceChange,
-                "aria-invalid": currentUnavailable || selectedKey === "",
+                "aria-invalid": (currentUnavailable && !currentInOtherPicker) || selectedKey === "",
               },
               selectedKey === ""
                 ? h("option", { value: "", disabled: true }, "请选择可用音色")
                 : null,
               currentUnavailable
                 ? h("option", { value: selectedKey, disabled: true },
-                  `${currentProfile?.name ?? "当前音色"}（来源身份、本地可用、锁定、质量或来源能力已不可用）`,
+                  currentInOtherPicker
+                    ? `${currentProfile?.name ?? "当前音色"}（请在上方官方音色列表更换）`
+                    : `${currentProfile?.name ?? "当前音色"}（当前不可用）`,
                 )
                 : null,
               ...options.map((option) => h(
                 "option",
                 { key: option.key, value: option.key },
-                `${option.profileName} · v${option.versionNumber} · ${SOURCE_LABELS[option.sourceType]}`,
+                `${option.profileName} · v${option.versionNumber} · ${option.sourceLabel}`,
               )),
               ),
               h("p", { className: "anw-character-voice-panel__hint" },
-                options.length
-                  ? "这里只列出来源身份已核验、本地可用、已锁定、质量已接受且来源能力已开放的不可变版本。"
-                  : "当前没有满足来源身份、本地可用、锁定、质量与来源能力门禁的可选音色。",
+                privateOnly
+                  ? options.length ? "选择已就绪的私人音色。" : "尚无可选私人音色。"
+                  : options.length ? "选择已就绪的音色。" : "尚无可选音色。",
               ),
             )
             : h("p", { className: "anw-character-voice-panel__hint" },

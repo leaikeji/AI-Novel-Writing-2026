@@ -8,6 +8,7 @@ single-concurrency VoiceGenerator/Nano scheduler can process them safely.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4, uuid5
 
@@ -33,7 +34,9 @@ from . import schemas as wire
 from .contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID, NarrationRequestScope
 from .generic_voice_generation import (
     GENERIC_VOICE_JOB_KIND,
+    GenericVoiceDesign,
     GenericVoiceGenerationService,
+    _design_fingerprint,
 )
 from .jobs import (
     JobFenceError,
@@ -78,6 +81,7 @@ SessionFactory = Callable[[], Session]
 GENERIC_RESOURCE_CLASS = "moss-nano"
 GENERIC_PACK_RUNTIME_UNAVAILABLE = "GENERIC_VOICE_PACK_RUNTIME_UNAVAILABLE"
 GENERIC_PACK_GENERATION_FAILED = "GENERIC_VOICE_PACK_GENERATION_FAILED"
+_PACK_MUTATION_LOCK = uuid5(LOCAL_WORKSPACE_ID, "generic-voice-pack:zh-CN").int % (2**63)
 
 
 def _public_slot_category(category: str) -> str:
@@ -101,6 +105,38 @@ def _transaction(factory: SessionFactory, operation):
         except BaseException:
             session.rollback()
             raise
+
+
+def _lock_pack_mutations(session: Session) -> None:
+    # There is no pack row to lock for the first build.  Serialize the short
+    # workspace mutation before taking job -> command -> pack -> slot locks.
+    session.execute(select(func.pg_advisory_xact_lock(_PACK_MUTATION_LOCK)))
+
+
+def _build_identity(idempotency_key: str) -> UUID:
+    # Preserve identities already published by 0040.  Internal namespaces may
+    # exceed the public header limit; only the resulting UUID is persisted.
+    return uuid5(LOCAL_WORKSPACE_ID, f"generic-voice-pack-build/1:{idempotency_key}")
+
+
+def _validate_build_key(idempotency_key: str) -> None:
+    if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
+        raise ValueError("generic voice build idempotency key is invalid")
+
+
+def _pack_for_update(session: Session, pack_id: UUID) -> GenericVoicePackVersion:
+    pack = session.scalar(
+        select(GenericVoicePackVersion)
+        .where(
+            GenericVoicePackVersion.id == pack_id,
+            GenericVoicePackVersion.workspace_id == LOCAL_WORKSPACE_ID,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if pack is None:
+        raise NarrationNotFound("generic voice pack not found")
+    return pack
 
 
 def _latest_pack(session: Session) -> GenericVoicePackVersion | None:
@@ -277,7 +313,9 @@ def _cancel_active_pack_work(
         )
     )
     for job in jobs:
-        job.state = "cancel_requested" if job.state == "running" else "cancelled"
+        job.state = (
+            "cancel_requested" if job.state in {"running", "cancel_requested"} else "cancelled"
+        )
         job.updated_at = now
     commands = tuple(
         session.scalars(
@@ -390,139 +428,221 @@ class SqlAlchemyGenericVoicePackService:
         return _transaction(self._session_factory, operation)
 
     def build(self, *, idempotency_key: str) -> wire.GenericVoicePackLoadResource:
-        if not idempotency_key or len(idempotency_key) > 128:
-            raise ValueError("generic voice build idempotency key is invalid")
+        _validate_build_key(idempotency_key)
 
         def operation(session: Session):
-            # The Pack Version is also the public build-command identity.  A
-            # deterministic UUID makes the HTTP Idempotency-Key durable without
-            # introducing a second, semantically duplicate parent-command table.
-            pack_id = uuid5(
-                LOCAL_WORKSPACE_ID,
-                f"generic-voice-pack-build/1:{idempotency_key}",
-            )
-            replay = session.get(GenericVoicePackVersion, pack_id)
-            if replay is not None:
-                if replay.workspace_id != LOCAL_WORKSPACE_ID:
-                    raise InvalidNarrationState("generic voice pack scope changed")
-                return self._load_resource(session, pack=replay)
-            latest = _latest_pack(session)
-            if latest is not None and latest.state in {
-                "building",
-                "ready_to_activate",
-                "active",
-            }:
-                return self._load_resource(session, pack=latest)
-            version_number = 1 if latest is None else latest.version_number + 1
-            catalog = self._designs.catalog
-            now = datetime.now(UTC)
-            pack = GenericVoicePackVersion(
-                id=pack_id,
-                owner_id=LOCAL_OWNER_ID,
-                workspace_id=LOCAL_WORKSPACE_ID,
-                language="zh-CN",
-                catalog_id=catalog.catalog_id,
-                taxonomy_sha256=catalog.taxonomy_sha256,
-                design_catalog_sha256=catalog.catalog_sha256,
-                version_number=version_number,
-                predecessor_version_id=(latest.id if latest is not None else None),
-                state="building",
-                slot_total=24,
-                validated_slot_count=0,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(pack)
-            session.flush()
-            from .voice_pool import load_voice_pool_catalog
-
-            labels = {item.slot_key: item for item in load_voice_pool_catalog().slots}
-            predecessor_slots = (
-                {
-                    row.slot_key: row
-                    for row in _slots(session, latest.id)
-                }
-                if latest is not None
-                else {}
-            )
-            reused_count = 0
-            for position, design in enumerate(self._designs.catalog.slots):
-                draft = session.scalar(
-                    select(GenericVoiceDesignDraft).where(
-                        GenericVoiceDesignDraft.workspace_id == LOCAL_WORKSPACE_ID,
-                        GenericVoiceDesignDraft.fingerprint == design.design_fingerprint,
-                    )
-                )
-                if draft is None:
-                    parameters = EXPECTED_AUDIO_PARAMETERS.wire_payload()
-                    draft = GenericVoiceDesignDraft(
-                        id=uuid4(),
-                        owner_id=LOCAL_OWNER_ID,
-                        workspace_id=LOCAL_WORKSPACE_ID,
-                        language="zh-CN",
-                        slot_key=design.slot_key,
-                        instruction=design.instruction,
-                        instruction_digest=design.instruction_sha256,
-                        seed=design.seed,
-                        parameters_json=parameters,
-                        parameters_digest=canonical_sha256(parameters),
-                        runtime_identity_json=EXPECTED_RUNTIME_IDENTITY.wire_payload(),
-                        runtime_fingerprint=EXPECTED_RUNTIME_FINGERPRINT,
-                        fingerprint=design.design_fingerprint,
-                        created_at=now,
-                    )
-                    session.add(draft)
-                    session.flush()
-                label = labels[design.slot_key]
-                predecessor = predecessor_slots.get(design.slot_key)
-                can_reuse = (
-                    predecessor is not None
-                    and predecessor.state in {"validated", "reused"}
-                    and predecessor.design_fingerprint == design.design_fingerprint
-                    and predecessor.voice_profile_id is not None
-                    and predecessor.voice_version_id is not None
-                    and predecessor.rights_approved
-                    and predecessor.quality_approved
-                )
-                if can_reuse:
-                    reused_count += 1
-                session.add(
-                    GenericVoicePackVersionSlot(
-                        id=uuid4(),
-                        pack_version_id=pack.id,
-                        workspace_id=LOCAL_WORKSPACE_ID,
-                        slot_key=design.slot_key,
-                        label=label.label,
-                        category=_public_slot_category(label.category),
-                        position=position,
-                        state="reused" if can_reuse else "pending",
-                        design_draft_id=draft.id,
-                        design_fingerprint=design.design_fingerprint,
-                        generation_command_id=(
-                            predecessor.generation_command_id if can_reuse else None
-                        ),
-                        voice_profile_id=(
-                            predecessor.voice_profile_id if can_reuse else None
-                        ),
-                        voice_version_id=(
-                            predecessor.voice_version_id if can_reuse else None
-                        ),
-                        rights_approved=can_reuse,
-                        quality_approved=can_reuse,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-            session.flush()
-            pack.validated_slot_count = reused_count
-            if reused_count == pack.slot_total:
-                pack.state = "active"
-                pack.activated_at = now
-            else:
-                _enqueue_next_slot(session, pack)
-            return self._load_resource(session, pack=pack)
+            _lock_pack_mutations(session)
+            return self._build_in_session(session, pack_id=_build_identity(idempotency_key))
 
         return _transaction(self._session_factory, operation)
+
+    def _build_in_session(
+        self, session: Session, *, pack_id: UUID, replacement_slot_key: str | None = None
+    ) -> wire.GenericVoicePackLoadResource:
+        replay = session.get(GenericVoicePackVersion, pack_id)
+        if replay is not None:
+            if replay.workspace_id != LOCAL_WORKSPACE_ID:
+                raise InvalidNarrationState("generic voice pack scope changed")
+            return self._load_resource(session, pack=replay)
+        latest = _latest_pack(session)
+        if latest is not None and latest.state in {
+            "building",
+            "ready_to_activate",
+            "active",
+        }:
+            return self._load_resource(session, pack=latest)
+        version_number = 1 if latest is None else latest.version_number + 1
+        catalog = self._designs.catalog
+        now = datetime.now(UTC)
+        pack = GenericVoicePackVersion(
+            id=pack_id,
+            owner_id=LOCAL_OWNER_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            language="zh-CN",
+            catalog_id=catalog.catalog_id,
+            taxonomy_sha256=catalog.taxonomy_sha256,
+            design_catalog_sha256=catalog.catalog_sha256,
+            version_number=version_number,
+            predecessor_version_id=(latest.id if latest is not None else None),
+            state="building",
+            slot_total=24,
+            validated_slot_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(pack)
+        session.flush()
+        from .voice_pool import load_voice_pool_catalog
+
+        labels = {item.slot_key: item for item in load_voice_pool_catalog().slots}
+        predecessor_slots = (
+            {
+                row.slot_key: row
+                for row in _slots(session, latest.id)
+            }
+            if latest is not None
+            else {}
+        )
+        predecessor_drafts = {
+            draft.id: draft
+            for draft in session.scalars(select(GenericVoiceDesignDraft).where(
+                GenericVoiceDesignDraft.id.in_(
+                    tuple(row.design_draft_id for row in predecessor_slots.values())
+                )
+            ))
+        }
+        used_seeds = {design.seed for design in catalog.slots} | {
+            draft.seed for draft in predecessor_drafts.values()
+        }
+        reused_count = 0
+        for position, design in enumerate(self._designs.catalog.slots):
+            predecessor = predecessor_slots.get(design.slot_key)
+            previous_draft = (
+                predecessor_drafts.get(predecessor.design_draft_id)
+                if predecessor is not None else None
+            )
+            if previous_draft is not None and latest.design_catalog_sha256 == catalog.catalog_sha256:
+                previous_design = replace(
+                    design,
+                    seed=previous_draft.seed,
+                    design_fingerprint=_design_fingerprint(
+                        catalog_id=catalog.catalog_id,
+                        taxonomy_sha256=catalog.taxonomy_sha256,
+                        slot_key=design.slot_key,
+                        seed=previous_draft.seed,
+                        instruction_sha256=design.instruction_sha256,
+                    ),
+                )
+                if (
+                    previous_draft.workspace_id != LOCAL_WORKSPACE_ID
+                    or previous_draft.slot_key != design.slot_key
+                    or previous_draft.language != design.language
+                    or previous_draft.instruction_digest != design.instruction_sha256
+                    or previous_draft.runtime_fingerprint != EXPECTED_RUNTIME_FINGERPRINT
+                    or previous_draft.parameters_digest != canonical_sha256(EXPECTED_AUDIO_PARAMETERS.wire_payload())
+                    or previous_draft.fingerprint != previous_design.design_fingerprint
+                    or predecessor.design_fingerprint != previous_design.design_fingerprint
+                ):
+                    raise InvalidNarrationState("generic voice predecessor design changed")
+                # Technical retries and accepted sibling slots retain the exact
+                # immutable draft, including a previously regenerated seed.
+                design = previous_design
+            if design.slot_key == replacement_slot_key or (
+                predecessor is not None and predecessor.state == "rejected"
+            ):
+                # An author-rejected candidate needs a new design even when
+                # resumed via build/retry. A technical failure keeps its seed.
+                used_seeds.update(session.scalars(select(GenericVoiceDesignDraft.seed).where(
+                    GenericVoiceDesignDraft.workspace_id == LOCAL_WORKSPACE_ID,
+                    GenericVoiceDesignDraft.slot_key == design.slot_key,
+                )))
+                design = self._replacement_design(design, pack_id=pack_id, used_seeds=used_seeds)
+            draft = session.scalar(
+                select(GenericVoiceDesignDraft).where(
+                    GenericVoiceDesignDraft.workspace_id == LOCAL_WORKSPACE_ID,
+                    GenericVoiceDesignDraft.fingerprint == design.design_fingerprint,
+                )
+            )
+            if draft is None:
+                parameters = EXPECTED_AUDIO_PARAMETERS.wire_payload()
+                draft = GenericVoiceDesignDraft(
+                    id=uuid4(),
+                    owner_id=LOCAL_OWNER_ID,
+                    workspace_id=LOCAL_WORKSPACE_ID,
+                    language="zh-CN",
+                    slot_key=design.slot_key,
+                    instruction=design.instruction,
+                    instruction_digest=design.instruction_sha256,
+                    seed=design.seed,
+                    parameters_json=parameters,
+                    parameters_digest=canonical_sha256(parameters),
+                    runtime_identity_json=EXPECTED_RUNTIME_IDENTITY.wire_payload(),
+                    runtime_fingerprint=EXPECTED_RUNTIME_FINGERPRINT,
+                    fingerprint=design.design_fingerprint,
+                    created_at=now,
+                )
+                session.add(draft)
+                session.flush()
+            label = labels[design.slot_key]
+            can_reuse = (
+                predecessor is not None
+                and predecessor.state in {"validated", "reused"}
+                and predecessor.design_fingerprint == design.design_fingerprint
+                and predecessor.voice_profile_id is not None
+                and predecessor.voice_version_id is not None
+                and predecessor.rights_approved
+                and predecessor.quality_approved
+            )
+            if can_reuse:
+                reused_count += 1
+            session.add(
+                GenericVoicePackVersionSlot(
+                    id=uuid4(),
+                    pack_version_id=pack.id,
+                    workspace_id=LOCAL_WORKSPACE_ID,
+                    slot_key=design.slot_key,
+                    label=label.label,
+                    category=_public_slot_category(label.category),
+                    position=position,
+                    state="reused" if can_reuse else "pending",
+                    design_draft_id=draft.id,
+                    design_fingerprint=design.design_fingerprint,
+                    generation_command_id=(
+                        predecessor.generation_command_id if can_reuse else None
+                    ),
+                    voice_profile_id=(
+                        predecessor.voice_profile_id if can_reuse else None
+                    ),
+                    voice_version_id=(
+                        predecessor.voice_version_id if can_reuse else None
+                    ),
+                    reference_audio_sha256=(
+                        predecessor.reference_audio_sha256 if can_reuse else None
+                    ),
+                    validation_audio_sha256=(
+                        predecessor.validation_audio_sha256 if can_reuse else None
+                    ),
+                    rights_approved=can_reuse,
+                    quality_approved=can_reuse,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        session.flush()
+        pack.validated_slot_count = reused_count
+        if reused_count == pack.slot_total:
+            pack.state = "active"
+            pack.activated_at = now
+        else:
+            _enqueue_next_slot(session, pack)
+        return self._load_resource(session, pack=pack)
+
+    def _replacement_design(
+        self, design: GenericVoiceDesign, *, pack_id: UUID, used_seeds: set[int]
+    ) -> GenericVoiceDesign:
+        counter = 0
+        while True:
+            seed = int(canonical_sha256({
+                "schema_version": "generic-voice-regeneration-seed/1",
+                "command_id": str(pack_id),
+                "slot_key": design.slot_key,
+                "counter": counter,
+            }), 16) % (2**63)
+            if seed not in used_seeds:
+                break
+            counter += 1
+        used_seeds.add(seed)
+        return replace(
+            design,
+            seed=seed,
+            design_fingerprint=_design_fingerprint(
+                catalog_id=self._designs.catalog.catalog_id,
+                taxonomy_sha256=self._designs.catalog.taxonomy_sha256,
+                slot_key=design.slot_key,
+                seed=seed,
+                instruction_sha256=design.instruction_sha256,
+            ),
+        )
 
     def retry(self, command_id: UUID) -> wire.GenericVoicePackLoadResource:
         # A failed or superseded candidate is immutable; retry creates a fresh
@@ -534,6 +654,7 @@ class SqlAlchemyGenericVoicePackService:
 
     def cancel(self, command_id: UUID) -> wire.GenericVoicePackLoadResource:
         def operation(session: Session):
+            _lock_pack_mutations(session)
             exists = session.scalar(
                 select(GenericVoicePackVersion.id).where(
                     GenericVoicePackVersion.id == command_id,
@@ -544,16 +665,7 @@ class SqlAlchemyGenericVoicePackService:
                 raise NarrationNotFound("generic voice build command not found")
             now = datetime.now(UTC)
             _cancel_active_pack_work(session, pack_id=command_id, now=now)
-            pack = session.scalar(
-                select(GenericVoicePackVersion)
-                .where(
-                    GenericVoicePackVersion.id == command_id,
-                    GenericVoicePackVersion.workspace_id == LOCAL_WORKSPACE_ID,
-                )
-                .with_for_update()
-            )
-            if pack is None:
-                raise NarrationNotFound("generic voice build command not found")
+            pack = _pack_for_update(session, command_id)
             if pack.state == "superseded":
                 return self._load_resource(session, pack=pack)
             if pack.state != "building":
@@ -571,75 +683,92 @@ class SqlAlchemyGenericVoicePackService:
         expected_pack_version_id: UUID | None,
         idempotency_key: str,
     ) -> wire.GenericVoicePackLoadResource:
-        current = self.get_load_resource().pack
-        if expected_pack_version_id is not None and current.pack_version_id != expected_pack_version_id:
-            raise InvalidNarrationState("generic voice pack version changed")
-        # Rejecting an active slot first ensures the old pack cannot be used by
-        # new chapters while its successor is incomplete.
-        if current.pack_version_id is not None and current.state == "active":
-            self.reject(
-                slot_key=slot_key,
-                expected_pack_version_id=current.pack_version_id,
+        _validate_build_key(idempotency_key)
+        self._designs.design_for(slot_key)
+        pack_id = _build_identity(f"generic-regenerate:{slot_key}:{idempotency_key}")
+
+        def operation(session: Session):
+            _lock_pack_mutations(session)
+            replay = session.get(GenericVoicePackVersion, pack_id)
+            if replay is not None:
+                if replay.workspace_id != LOCAL_WORKSPACE_ID or (
+                    expected_pack_version_id is not None
+                    and replay.predecessor_version_id != expected_pack_version_id
+                ):
+                    raise InvalidNarrationState("generic voice regeneration input changed")
+                return self._load_resource(session, pack=replay)
+            current = _latest_pack(session)
+            if expected_pack_version_id is not None and (
+                current is None or current.id != expected_pack_version_id
+            ):
+                raise InvalidNarrationState("generic voice pack version changed")
+            if current is not None:
+                self._reject_in_session(session, slot_key=slot_key, pack_id=current.id)
+            # Retirement and successor creation are one atomic author action.
+            # This also invalidates the selected slot of a partial/failed pack.
+            return self._build_in_session(
+                session, pack_id=pack_id, replacement_slot_key=slot_key
             )
-        return self.build(
-            idempotency_key=f"generic-regenerate:{slot_key}:{idempotency_key}"
-        )
+
+        return _transaction(self._session_factory, operation)
 
     def reject(
-        self,
-        *,
-        slot_key: str,
-        expected_pack_version_id: UUID,
+        self, *, slot_key: str, expected_pack_version_id: UUID
     ) -> wire.GenericVoicePackLoadResource:
         def operation(session: Session):
-            exists = session.scalar(
-                select(GenericVoicePackVersion.id).where(
-                    GenericVoicePackVersion.id == expected_pack_version_id,
-                    GenericVoicePackVersion.workspace_id == LOCAL_WORKSPACE_ID,
-                )
+            _lock_pack_mutations(session)
+            pack = self._reject_in_session(
+                session, slot_key=slot_key, pack_id=expected_pack_version_id
             )
-            if exists is None:
-                raise NarrationNotFound("generic voice pack not found")
-            now = datetime.now(UTC)
-            _cancel_active_pack_work(
-                session,
-                pack_id=expected_pack_version_id,
-                now=now,
-            )
-            pack = session.scalar(
-                select(GenericVoicePackVersion)
-                .where(
-                    GenericVoicePackVersion.id == expected_pack_version_id,
-                    GenericVoicePackVersion.workspace_id == LOCAL_WORKSPACE_ID,
-                )
-                .with_for_update()
-            )
-            if pack is None:
-                raise NarrationNotFound("generic voice pack not found")
-            slot = session.scalar(
-                select(GenericVoicePackVersionSlot)
-                .where(
-                    GenericVoicePackVersionSlot.pack_version_id == pack.id,
-                    GenericVoicePackVersionSlot.slot_key == slot_key,
-                )
-                .with_for_update()
-            )
-            if slot is None:
-                raise NarrationNotFound("generic voice slot not found")
-            if slot.state == "rejected":
-                return self._load_resource(session, pack=pack)
-            slot.state = "rejected"
-            slot.failure_code = "GENERIC_VOICE_PACK_SLOT_REJECTED"
-            slot.updated_at = now
-            pack.state = (
-                "retired_for_new_use" if pack.state == "active" else "rejected"
-            )
-            pack.failure_code = "GENERIC_VOICE_PACK_SLOT_REJECTED"
-            pack.retired_at = now if pack.state == "retired_for_new_use" else None
-            pack.updated_at = now
             return self._load_resource(session, pack=pack)
 
         return _transaction(self._session_factory, operation)
+
+    def _reject_in_session(
+        self, session: Session, *, slot_key: str, pack_id: UUID
+    ) -> GenericVoicePackVersion:
+        exists = session.scalar(
+            select(GenericVoicePackVersion.id).where(
+                GenericVoicePackVersion.id == pack_id,
+                GenericVoicePackVersion.workspace_id == LOCAL_WORKSPACE_ID,
+            )
+        )
+        if exists is None:
+            raise NarrationNotFound("generic voice pack not found")
+        now = datetime.now(UTC)
+        _cancel_active_pack_work(
+            session,
+            pack_id=pack_id,
+            now=now,
+        )
+        pack = _pack_for_update(session, pack_id)
+        slot = session.scalar(
+            select(GenericVoicePackVersionSlot)
+            .where(
+                GenericVoicePackVersionSlot.pack_version_id == pack.id,
+                GenericVoicePackVersionSlot.slot_key == slot_key,
+            )
+            .with_for_update()
+        )
+        if slot is None:
+            raise NarrationNotFound("generic voice slot not found")
+        if slot.state == "rejected":
+            return pack
+        latest = _latest_pack(session)
+        if latest is None or latest.id != pack.id:
+            raise InvalidNarrationState("generic voice pack version changed")
+        slot.state = "rejected"
+        slot.failure_code = "GENERIC_VOICE_PACK_SLOT_REJECTED"
+        slot.updated_at = now
+        pack.state = (
+            "retired_for_new_use"
+            if pack.state in {"active", "retired_for_new_use"}
+            else "rejected"
+        )
+        pack.failure_code = "GENERIC_VOICE_PACK_SLOT_REJECTED"
+        pack.retired_at = now if pack.state == "retired_for_new_use" else None
+        pack.updated_at = now
+        return pack
 
     def active_pack_ready(self) -> bool:
         return _transaction(
@@ -902,12 +1031,11 @@ class SqlAlchemyGenericVoiceRepository:
         return _transaction(self._session_factory, operation)
 
     def acknowledge_cancel(self, work: VoiceGeneratorWorkItem) -> None:
-        _transaction(
-            self._session_factory,
-            lambda session: acknowledge_cancel(
-                session, scope=self._scope, fence=work.lease.fence
-            ),
-        )
+        def operation(session: Session):
+            acknowledge_cancel(session, scope=self._scope, fence=work.lease.fence)
+            self.terminalize_job_in_session(session, job_id=work.lease.fence.job_id)
+
+        _transaction(self._session_factory, operation)
 
     def record_host_terminal(
         self, work: VoiceGeneratorWorkItem, receipt: HostGenerationReceipt
@@ -925,7 +1053,6 @@ class SqlAlchemyGenericVoiceRepository:
         del state
 
         def operation(session: Session):
-            row = self._command(session, work.lease.fence.job_id, for_update=True)
             fail_attempt(
                 session,
                 scope=self._scope,
@@ -933,37 +1060,48 @@ class SqlAlchemyGenericVoiceRepository:
                 classification=classification,
                 error_code=failure_code,
             )
-            now = datetime.now(UTC)
-            row.state = "failed"
-            row.failure_code = GENERIC_PACK_GENERATION_FAILED
-            row.progress_current = 2
-            row.completed_at = now
-            row.updated_at = now
-            slot = session.get(GenericVoicePackVersionSlot, _slot_id(session, row))
-            pack = session.get(GenericVoicePackVersion, row.pack_version_id)
-            if slot is not None:
-                slot.state = "failed"
-                slot.failure_code = GENERIC_PACK_GENERATION_FAILED
-                slot.updated_at = now
-            if pack is not None:
-                pack.state = "failed"
-                pack.failure_code = GENERIC_PACK_GENERATION_FAILED
-                pack.updated_at = now
+            self.terminalize_job_in_session(session, job_id=work.lease.fence.job_id)
 
         _transaction(self._session_factory, operation)
 
     def terminalize_job_in_session(self, session: Session, *, job_id: UUID) -> None:
-        row = self._command(session, job_id, for_update=True)
-        if row.state in {"ready", "failed", "cancelled", "superseded"}:
-            return
-        job = session.get(BackgroundJob, job_id)
+        # Scheduler recovery and normal failures use the same monotonic
+        # projection, with the same job -> command -> pack -> slot lock order.
+        job = session.scalar(
+            select(BackgroundJob)
+            .where(BackgroundJob.id == job_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if job is None or job.state not in {"failed", "dead_letter", "cancelled"}:
             return
+        row = self._command(session, job_id, for_update=True)
+        if row.state == "ready":
+            return
+        now = datetime.now(UTC)
         row.state = "cancelled" if job.state == "cancelled" else "failed"
         row.failure_code = None if job.state == "cancelled" else GENERIC_PACK_GENERATION_FAILED
         row.progress_current = 2
-        row.completed_at = datetime.now(UTC)
-        row.updated_at = datetime.now(UTC)
+        row.completed_at = row.completed_at or now
+        row.updated_at = now
+        pack = _pack_for_update(session, row.pack_version_id)
+        slot = session.scalar(
+            select(GenericVoicePackVersionSlot)
+            .where(
+                GenericVoicePackVersionSlot.pack_version_id == row.pack_version_id,
+                GenericVoicePackVersionSlot.slot_key == row.slot_key,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if pack.state != "building" or slot is None or slot.generation_command_id != row.id:
+            return
+        slot.state = "failed"
+        slot.failure_code = row.failure_code
+        slot.updated_at = now
+        pack.state = "superseded" if job.state == "cancelled" else "failed"
+        pack.failure_code = row.failure_code
+        pack.updated_at = now
 
     def publish(
         self,
@@ -971,6 +1109,7 @@ class SqlAlchemyGenericVoiceRepository:
         prepared: PreparedVoiceGeneratorPublication,
     ) -> None:
         def operation(session: Session):
+            _lock_pack_mutations(session)
             if work.lease.resource_fence is None:
                 raise InvalidNarrationState("generic voice lease lacks resource fence")
             context = lock_result_publish_fences(
@@ -981,8 +1120,12 @@ class SqlAlchemyGenericVoiceRepository:
             )
             row = self._command(session, work.lease.fence.job_id, for_update=True)
             draft = session.get(GenericVoiceDesignDraft, row.design_draft_id)
-            pack = session.get(GenericVoicePackVersion, row.pack_version_id)
-            slot = session.get(GenericVoicePackVersionSlot, _slot_id(session, row))
+            pack = _pack_for_update(session, row.pack_version_id)
+            slot = session.scalar(
+                select(GenericVoicePackVersionSlot)
+                .where(GenericVoicePackVersionSlot.id == _slot_id(session, row))
+                .with_for_update()
+            )
             if draft is None or pack is None or slot is None:
                 raise InvalidNarrationState("generic voice publication scope changed")
             if (

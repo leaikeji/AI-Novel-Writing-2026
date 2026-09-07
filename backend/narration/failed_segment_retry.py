@@ -366,6 +366,15 @@ def _group(
         )
         if attempt is None or attempt.completed_at is None:
             reason = reason or "LATEST_ATTEMPT_NOT_COMPLETE"
+        elif (
+            attempt.retry_kind == "manual"
+            and attempt.error_classification == "non_retryable"
+        ):
+            # One explicit author retry remains useful for transient executor or
+            # model variance. If that manual attempt reaches the same terminal
+            # safety classification, repeating the identical frozen request is
+            # no longer a recovery action and must not create an endless loop.
+            reason = reason or "LATEST_MANUAL_ATTEMPT_NON_RETRYABLE"
     try:
         for voice_version_id in sorted({row.voice_version_id for row in fanout}, key=str):
             require_usable_voice(

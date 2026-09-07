@@ -208,6 +208,7 @@ function capabilities(overrides: Partial<Record<FeatureCapability["key"], boolea
     "preset_voice_source",
     "reference_clone",
     "voice_generator",
+    "nano_advanced_tuning",
   ] as const;
   return {
     schema_version: NARRATION_CAPABILITY_SCHEMA_VERSION,
@@ -412,6 +413,22 @@ function setup(
 
 
 describe("character voice eligibility", () => {
+  it("gates validated Nano experiments on Nano tuning, not the unrelated VoiceGenerator", () => {
+    const experiment = profile({}, {
+      source_type: "generated",
+      activation_basis: "experimental_machine_validated",
+      validation_basis: "machine_validated",
+      quality_state: "accepted",
+    });
+    const choices = characterVoiceOptions([experiment], NOVEL_ID,
+      capabilities({ voice_generator: false, nano_advanced_tuning: true }), ["generated"]);
+    expect(choices).toHaveLength(1);
+    expect(choices[0].sourceLabel).toBe("高级调音");
+    expect(characterVoiceOptions([experiment], NOVEL_ID,
+      capabilities({ voice_generator: true, nano_advanced_tuning: false }), ["generated"]))
+      .toHaveLength(0);
+  });
+
   it("only exposes current locked, accepted, rights-active and capability-enabled versions", () => {
     const accepted = profile();
     const revoked = profile(
@@ -540,6 +557,21 @@ describe("character voice eligibility", () => {
 
 
 describe("CharacterVoicePanel", () => {
+  it.each([false, true])("distinguishes a filtered official voice from unavailable rights (revoked=%s)", async (revoked) => {
+    const current = profile({}, revoked ? {
+      rights: { ...voiceVersion().rights, state: "revoked" },
+    } : {});
+    const api = apiFor(binding(), [current]);
+    const runtime = setup(api, defaultProps({ allowedSourceTypes: ["generated", "uploaded"] }));
+    const tree = await runtime.load();
+    const select = findAll(tree, (element) => element.type === "select")[0];
+    expect(select.props["aria-invalid"]).toBe(revoked);
+    expect(textContent(tree)).toContain(revoked ? "（当前不可用）" : "请在上方官方音色列表更换");
+    expect(textContent(tree)).toContain("尚无可选私人音色。");
+    expect(findButton(tree, "保存人物声音").props.disabled).toBe(true);
+    expect(api.putCharacterVoiceBinding).not.toHaveBeenCalled();
+  });
+
   it("renders native keyboard controls, live status and honest historical impact", async () => {
     const runtime = setup(apiFor());
     const tree = await runtime.load();

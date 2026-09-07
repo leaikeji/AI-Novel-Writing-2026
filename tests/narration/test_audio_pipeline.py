@@ -12,8 +12,10 @@ import wave
 import pytest
 
 from backend.narration.audio_pipeline import (
+    AUDIO_PIPELINE_VERSION,
     AudioFormatError,
     AudioPipelineError,
+    AudioPipelinePolicy,
     AudioQualityError,
     ShortChineseDurationPolicy,
     inspect_pcm_wav,
@@ -38,12 +40,13 @@ def _wav_bytes(
     sample_width: int = 2,
     amplitude: int = 6_000,
     constant: int | None = None,
+    frequency_hz: int = 440,
 ) -> bytes:
     frame_count = round(sample_rate * duration_ms / 1000)
     samples = array("h")
     for index in range(frame_count):
         value = constant if constant is not None else round(
-            amplitude * math.sin(2 * math.pi * 440 * index / sample_rate)
+            amplitude * math.sin(2 * math.pi * frequency_hz * index / sample_rate)
         )
         for _channel in range(channels):
             samples.append(value)
@@ -84,9 +87,40 @@ def test_pcm_pipeline_is_deterministic_normalized_and_seam_safe() -> None:
     assert first.duration_ms == 500
     assert first.sample_rate_hz == 48_000
     assert first.channels == 2
-    assert abs(first.output_inspection.rms_dbfs + 20.0) < 0.1
+    assert AUDIO_PIPELINE_VERSION == "narration-audio-pipeline/2"
+    assert abs(first.output_inspection.integrated_loudness_lufs + 18.0) < 0.1
     assert first.output_inspection.peak_dbfs <= -1.0
+    assert first.loudness_target_limited is False
     assert _edge_samples(first.wav_bytes) == ((0, 0), (0, 0))
+
+
+def test_pcm_pipeline_equalizes_perceived_loudness_across_frequency_profiles() -> None:
+    low_voice = process_synthesis_wav(_wav_bytes(frequency_hz=180))
+    bright_voice = process_synthesis_wav(_wav_bytes(frequency_hz=3_200))
+
+    assert abs(low_voice.output_inspection.integrated_loudness_lufs + 18.0) < 0.1
+    assert abs(bright_voice.output_inspection.integrated_loudness_lufs + 18.0) < 0.1
+    assert abs(low_voice.output_inspection.rms_dbfs - bright_voice.output_inspection.rms_dbfs) > 1.0
+
+
+def test_pcm_pipeline_reports_when_gain_guard_prevents_loudness_target() -> None:
+    processed = process_synthesis_wav(
+        _wav_bytes(amplitude=300),
+        policy=AudioPipelinePolicy(maximum_gain_db=0.0),
+    )
+
+    assert processed.loudness_target_limited is True
+    assert processed.applied_gain_db == pytest.approx(0.0, abs=0.001)
+    assert processed.output_inspection.integrated_loudness_lufs < -18.0
+
+
+def test_pcm_pipeline_can_raise_a_clean_quiet_voice_to_the_loudness_target() -> None:
+    processed = process_synthesis_wav(_wav_bytes(amplitude=600))
+
+    assert processed.loudness_target_limited is False
+    assert 6.0 < processed.applied_gain_db <= 18.0
+    assert abs(processed.output_inspection.integrated_loudness_lufs + 18.0) < 0.1
+    assert processed.output_inspection.peak_dbfs <= -1.0
 
 
 @pytest.mark.parametrize(

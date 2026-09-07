@@ -260,6 +260,7 @@ export function createChapterNarrationPanel(
       ?? props.segmentStates;
     const segmentStates = observableSegmentStates(props.segments, observedStates);
     const failedItems = props.failedSegments?.items ?? [];
+    const hasRetryableFailure = failedItems.some((item) => item.retryable);
     const retryBusySegmentIds = new Set(props.retryBusySegmentIds ?? []);
     const focusedRetryItemStillVisible = props.retryFocusSegmentId !== null
       && props.retryFocusSegmentId !== undefined
@@ -376,7 +377,13 @@ export function createChapterNarrationPanel(
             "div",
             { className: "anw-chapter-narration-failures__header" },
             h("strong", null, `失败句段（${failedItems.length}）`),
-            h("span", null, "只重试失败音频，不修改正文、人物绑定或既有朗读版本。"),
+            h(
+              "span",
+              null,
+              hasRetryableFailure
+                ? "只重试失败音频，不修改正文、人物绑定或既有朗读版本。"
+                : "这些句段已停止重复合成；更换声音或调整正文后再更新朗读。",
+            ),
           ),
           h(
             "ul",

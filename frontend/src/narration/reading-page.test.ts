@@ -466,6 +466,50 @@ describe("reading page controller and navigation", () => {
     expect(onSectionChange).toHaveBeenCalledWith("narrator");
   });
 
+  it("keeps loaded section content during refresh and a network failure, but not a scope change", async () => {
+    const harness = createReactHarness();
+    const getOverview = vi.fn(async () => overviewFixture());
+    const api: ReadingPageApi = {
+      getOverview,
+      listScopeOverrides: vi.fn(async () => scopeList()),
+      putSettings: vi.fn(),
+      putScopeOverride: vi.fn(),
+    };
+    let context: ReadingSectionRenderContext | undefined;
+    const renderSectionContent = (_section: unknown, current: ReadingSectionRenderContext) => {
+      context = current;
+      return harness.React.createElement("section", { "data-drawer-fixture": true }, "保持人物声音抽屉");
+    };
+    const Page = createReadingPage(harness.React, api);
+    const props = { novelId: NOVEL_ID, initialSection: "characters" as const, renderSectionContent };
+    harness.render(Page, props);
+    harness.flushEffects();
+    await Promise.resolve();
+    await Promise.resolve();
+    const before = harness.render(Page, props);
+    expect(textContent(before)).toContain("保持人物声音抽屉");
+    let rejectPending!: (reason: Error) => void;
+    const pending = new Promise<NarrationOverviewResponse>((_resolve, reject) => {
+      rejectPending = reject;
+    });
+    getOverview.mockImplementationOnce(() => pending);
+    context!.onRefresh();
+    harness.render(Page, props);
+    harness.flushEffects();
+    expect(textContent(harness.render(Page, props))).toContain("保持人物声音抽屉");
+    rejectPending(new Error("network unavailable"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    const failed = harness.render(Page, props);
+    expect(textContent(failed)).toContain("保持人物声音抽屉");
+    expect(textContent(failed)).toContain("刷新最新配置");
+    // Do not flash old novel data even for the render before effects run.
+    const switched = harness.render(Page, { ...props, novelId: OTHER_NOVEL_ID });
+    expect(textContent(switched)).not.toContain("保持人物声音抽屉");
+    expect(switched.props.className).toContain("is-loading");
+  });
+
   it("fails closed when either response belongs to another novel", async () => {
     const harness = createReactHarness();
     const api: ReadingPageApi = {

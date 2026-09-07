@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from backend.narration.services import IdempotencyConflict, NarrationCasConflict
+from backend.narration.services import IdempotencyConflict, InvalidNarrationState, NarrationCasConflict
 from backend.narration.voice_preparation import (
     VOICE_PREPARATION_BINDING_DRIFTED,
     VOICE_PREPARATION_CONTINUATION_LEASE,
@@ -340,6 +340,53 @@ def test_state_taxonomies_are_monotonic_and_fail_closed() -> None:
             VoicePreparationItemState.READY_APPLIED,
             VoicePreparationItemState.GENERATING,
         )
+
+
+@pytest.mark.parametrize("error,state,code", [
+    (InvalidNarrationState("character already has an active VoiceGenerator command"),
+     VoicePreparationCommandState.FAILED, "VOICE_PREPARATION_TARGET_FAILED"),
+    (NarrationCasConflict("character voice binding changed"),
+     VoicePreparationCommandState.SUPERSEDED, "VOICE_PREPARATION_BINDING_DRIFTED"),
+])
+def test_child_reservation_conflict_is_terminal_without_stealing_or_overwriting(
+    error: Exception, state: VoicePreparationCommandState, code: str,
+) -> None:
+    from unittest.mock import Mock
+    generator = FakeVoiceGenerator()
+    generator.reserve = Mock(side_effect=error)
+    service, repo, _, fallback, continuation, _ = _service(
+        targets=(_target(MAIN_ID),), preflight=_preflight(MAIN_ID),
+        voice_generator=generator,
+    )
+    command = service.create(_request()).command_id
+    result = service.reserve_next_pending(novel_id=NOVEL_ID, command_id=command)
+    assert result.state is state
+    assert result.failure_code == code
+    assert result.completed_at is not None
+    assert result.items[0].voice_generator_command_id is None
+    assert generator.cancelled == []
+    assert continuation.calls == [] and fallback.calls == []
+    assert service.advance(novel_id=NOVEL_ID, command_id=command) == result
+    assert generator.reserve.call_count == 1
+
+
+def test_reconciler_recovers_orphan_queued_item_even_with_other_pending_targets() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from backend.narration.voice_preparation_service import SqlAlchemyVoicePreparationService
+    domain = Mock()
+    domain.get.return_value = SimpleNamespace(
+        chapter_ready=False,
+        items=[
+            SimpleNamespace(state=VoicePreparationItemState.QUEUED, voice_generator_command_id=None),
+            SimpleNamespace(state=VoicePreparationItemState.PENDING, voice_generator_command_id=None),
+        ],
+    )
+    adapter = SimpleNamespace(_domain=domain)
+    SqlAlchemyVoicePreparationService.reconcile_once(
+        adapter, novel_id=NOVEL_ID, command_id=CHILD_ID,  # type: ignore[arg-type]
+    )
+    domain.advance.assert_called_once_with(novel_id=NOVEL_ID, command_id=CHILD_ID)
 
 
 def test_speaker_digest_uses_only_order_coordinates_kind_and_stable_identity() -> None:

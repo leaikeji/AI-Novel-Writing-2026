@@ -1370,8 +1370,8 @@ class VoicePreparationService:
         *,
         now: datetime,
     ) -> VoicePreparationCommand:
-        child = self._voice_generator.reserve(
-            VoiceGeneratorReserveRequest(
+        try:
+            child = self._voice_generator.reserve(VoiceGeneratorReserveRequest(
                 novel_id=command.novel_id,
                 character_id=item.character_id,
                 expected_binding_version=item.expected_binding_version,
@@ -1379,8 +1379,37 @@ class VoicePreparationService:
                 idempotency_key=_derived_key(
                     "voice-prepare-character", command.command_id, item.character_id
                 ),
+            ))
+        except (NarrationCasConflict, InvalidNarrationState) as error:
+            # A separate entry point may already own this character's command,
+            # or its binding changed since the parent snapshot. Do not leave a
+            # durable QUEUED item with no child forever, steal that command, or
+            # silently refresh the author's CAS baseline.
+            drifted = isinstance(error, NarrationCasConflict)
+            target = (
+                VoicePreparationCommandState.SUPERSEDED if drifted
+                else VoicePreparationCommandState.FAILED
             )
-        )
+            continuation = command.continuation_state
+            if command.document_id is not None and command.narration_request_id is None:
+                continuation = (
+                    VoicePreparationContinuationState.SUPERSEDED if drifted
+                    else VoicePreparationContinuationState.FAILED
+                )
+            ensure_command_transition(command.state, target)
+            return self._save_latest(command, replace(
+                command,
+                state=target,
+                continuation_state=continuation,
+                continuation_fence=None,
+                continuation_lease_expires_at=None,
+                failure_code=(
+                    VOICE_PREPARATION_BINDING_DRIFTED if drifted
+                    else VOICE_PREPARATION_TARGET_FAILED
+                ),
+                completed_at=now,
+                updated_at=now,
+            ))
         return self._publish_child(command, item, child, now=now)
 
     def _advance_active_item(

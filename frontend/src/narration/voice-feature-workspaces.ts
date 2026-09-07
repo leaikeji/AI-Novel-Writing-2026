@@ -60,6 +60,7 @@ export interface NanoAdvancedWorkspaceProps {
   readonly onChanged: () => void;
   readonly fixedCharacter?: VoiceFeatureCharacter;
   readonly presentation?: "standalone" | "embedded";
+  readonly refreshVersion?: number;
 }
 
 
@@ -224,10 +225,11 @@ export function selectNanoExperimentForTarget(
 
 
 type NanoLoadState =
-  | { readonly phase: "loading" }
-  | { readonly phase: "error"; readonly message: string }
+  | { readonly phase: "loading"; readonly scopeKey: string }
+  | { readonly phase: "error"; readonly scopeKey: string; readonly message: string }
   | {
     readonly phase: "ready";
+    readonly scopeKey: string;
     readonly profiles: readonly VoiceProfileResource[];
     readonly bindings: readonly CharacterVoiceBindingResource[];
     readonly experiments: readonly NanoVoiceExperimentResource[];
@@ -244,49 +246,84 @@ export function createNanoAdvancedWorkspace(
   return function NanoAdvancedWorkspace(props: NanoAdvancedWorkspaceProps): unknown {
     const enabled = capabilityEnabled(props.overview, "nano_advanced_tuning");
     const [selectedTargetKey, setTargetKey] = React.useState("narrator");
+    const targetKey = props.fixedCharacter?.characterId ?? selectedTargetKey;
+    const scopeKey = `${props.novelId}:${targetKey}`;
     const [reloadVersion, setReloadVersion] = React.useState(0);
-    const [state, setState] = React.useState<NanoLoadState>({ phase: "loading" });
-    const [experiment, setExperiment] = React.useState<NanoVoiceExperimentResource | null>(null);
+    const [loadedState, setState] = React.useState<NanoLoadState>({ phase: "loading", scopeKey });
+    const state: NanoLoadState = loadedState.scopeKey === scopeKey
+      ? loadedState : { phase: "loading", scopeKey };
+    const [experiment, setExperiment] = React.useState<Readonly<{
+      scopeKey: string;
+      resource: NanoVoiceExperimentResource;
+    }> | null>(null);
     const [busyAction, setBusyAction] = React.useState<NanoAdvancedTuningBusyAction | null>(null);
     const [operationError, setOperationError] = React.useState<string | null>(null);
+    const [loadError, setLoadError] = React.useState<string | null>(null);
+    const [pollError, setPollError] = React.useState<string | null>(null);
+    const [pollRevision, setPollRevision] = React.useState(0);
+    // Stable component-local request fence; no additional runtime hook contract.
+    const [requests] = React.useState(() => ({
+      scopeKey, active: true, basePresetId: null as OfficialPresetId | null,
+      operation: null as AbortController | null,
+    }));
+    requests.scopeKey = scopeKey;
+
+    React.useEffect(() => {
+      requests.active = true;
+      setBusyAction(null);
+      setExperiment(null);
+      setOperationError(null);
+      setLoadError(null);
+      setPollError(null);
+      return () => {
+        requests.active = false;
+        requests.operation?.abort();
+        requests.operation = null;
+      };
+    }, [scopeKey, enabled]);
 
     React.useEffect(() => {
       if (!enabled) {
-        setState({ phase: "error", message: capabilityMessage(props.overview, "nano_advanced_tuning") });
+        setState({ phase: "error", scopeKey, message: capabilityMessage(props.overview, "nano_advanced_tuning") });
         return;
       }
       const controller = new AbortController();
-      setState({ phase: "loading" });
+      setLoadError(null);
+      setState((current) => current.scopeKey === scopeKey && current.phase === "ready"
+        ? current : { phase: "loading", scopeKey });
       void Promise.all([
         api.listProfiles({ novelId: props.novelId, includeLibrary: true, signal: controller.signal }),
         api.listBindings(props.novelId, controller.signal),
         api.listExperiments(props.novelId, controller.signal),
       ]).then(([profiles, bindings, experiments]) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || requests.scopeKey !== scopeKey) return;
         if (bindings.novel_id !== props.novelId || experiments.novel_id !== props.novelId) {
           throw new Error("高级调音返回了其他作品范围，已停止显示。");
         }
         setState({
           phase: "ready",
+          scopeKey,
           profiles: profiles.items,
           bindings: bindings.items,
           experiments: experiments.items,
         });
       }).catch((reason: unknown) => {
-        if (!controller.signal.aborted) {
-          setState({ phase: "error", message: errorMessage(reason, "无法加载高级调音。") });
+        if (!controller.signal.aborted && requests.scopeKey === scopeKey) {
+          const message = errorMessage(reason, "无法加载高级调音。");
+          setLoadError(message);
+          setState((current) => current.scopeKey === scopeKey && current.phase === "ready"
+            ? current : { phase: "error", scopeKey, message });
         }
       });
       return () => controller.abort();
     }, [
       enabled,
-      props.novelId,
+      scopeKey,
       props.overview.settings.version,
-      props.fixedCharacter?.characterId ?? null,
+      props.refreshVersion ?? 0,
       reloadVersion,
     ]);
 
-    const targetKey = props.fixedCharacter?.characterId ?? selectedTargetKey;
     const selectedCharacter = props.fixedCharacter ?? (
       targetKey === "narrator"
         ? null
@@ -309,10 +346,14 @@ export function createNanoAdvancedWorkspace(
         )
       : null;
     const basePresetId = officialBasePreset(selectedVoice);
-    const matchingExperiment = experiment ?? (
+    requests.basePresetId = basePresetId;
+    const matchingExperiment = (
       state.phase === "ready" && basePresetId !== null
         ? selectNanoExperimentForTarget(
-          state.experiments,
+          [
+            ...(experiment?.scopeKey === scopeKey ? [experiment.resource] : []),
+            ...state.experiments,
+          ],
           {
             basePresetId,
             targetKind: selectedCharacter === null ? "narrator" : "character",
@@ -322,11 +363,12 @@ export function createNanoAdvancedWorkspace(
         )
         : null
     );
-    const currentSettingsVersion = matchingExperiment?.current_settings?.version
-      ?? props.overview.settings.version;
+    // An experiment is history, not an authority for a newer author's selection.
+    // Keep CAS from the same current settings/binding snapshot as the shown base.
+    const currentSettingsVersion = props.overview.settings.version;
     const currentBindingVersion = selectedCharacter === null
       ? null
-      : matchingExperiment?.current_character_binding?.version ?? selectedBinding?.version ?? null;
+      : selectedBinding?.version ?? null;
     const target = {
       kind: selectedCharacter === null ? "narrator" as const : "character" as const,
       characterId: selectedCharacter?.characterId ?? null,
@@ -336,7 +378,7 @@ export function createNanoAdvancedWorkspace(
 
     React.useEffect(() => {
       if (
-        matchingExperiment === null
+        !enabled || busyAction !== null || pollError !== null || matchingExperiment === null
         || !["pending", "running"].includes(matchingExperiment.state)
       ) return;
       const controller = new AbortController();
@@ -346,12 +388,19 @@ export function createNanoAdvancedWorkspace(
           matchingExperiment.command_id,
           controller.signal,
         ).then((next) => {
-          if (controller.signal.aborted) return;
-          setExperiment(next);
-          if (!["pending", "running"].includes(next.state)) props.onChanged();
+          if (controller.signal.aborted || requests.scopeKey !== scopeKey) return;
+          if (next.novel_id !== props.novelId || next.command_id !== matchingExperiment.command_id
+            || next.base_preset_id !== basePresetId || next.target_kind !== target.kind
+            || next.character_id !== target.characterId) throw new Error("高级调音状态不属于当前目标。");
+          setExperiment({ scopeKey, resource: next });
+          setPollRevision((value) => value + 1);
+          if (!["pending", "running"].includes(next.state)) {
+            setReloadVersion((value) => value + 1);
+            props.onChanged();
+          }
         }).catch((reason: unknown) => {
           if (!controller.signal.aborted) {
-            setOperationError(errorMessage(reason, "无法刷新高级调音状态。"));
+            setPollError(errorMessage(reason, "无法刷新高级调音状态。"));
           }
         });
       }, 1_000);
@@ -359,27 +408,43 @@ export function createNanoAdvancedWorkspace(
         controller.abort();
         globalThis.clearTimeout(timer);
       };
-    }, [props.novelId, matchingExperiment?.command_id, matchingExperiment?.state]);
+    }, [enabled, scopeKey, basePresetId, matchingExperiment?.command_id, matchingExperiment?.state, pollRevision, pollError, busyAction]);
 
     const run = async (
       action: NanoAdvancedTuningBusyAction,
-      operation: () => Promise<NanoVoiceExperimentResource | void>,
+      operation: (signal: AbortSignal) => Promise<NanoVoiceExperimentResource | void>,
     ): Promise<void> => {
+      if (!enabled || !requests.active || requests.operation !== null || basePresetId === null
+        || requests.scopeKey !== scopeKey || requests.basePresetId !== basePresetId) return;
+      const controller = new AbortController();
+      requests.operation = controller;
+      const stillCurrent = (): boolean => !controller.signal.aborted && requests.active
+        && requests.scopeKey === scopeKey && requests.basePresetId === basePresetId;
       setBusyAction(action);
       setOperationError(null);
       try {
-        const result = await operation();
-        if (result) setExperiment(result);
+        const result = await operation(controller.signal);
+        if (!stillCurrent()) return;
+        if (result && (result.novel_id !== props.novelId || result.base_preset_id !== basePresetId
+          || result.target_kind !== target.kind || result.character_id !== target.characterId)) {
+          throw new Error("高级调音结果不属于当前目标。");
+        }
+        setExperiment(result ? { scopeKey, resource: result } : null);
+        setPollError(null);
+        setReloadVersion((value) => value + 1);
         props.onChanged();
       } catch (reason: unknown) {
-        setOperationError(errorMessage(reason, "高级调音操作失败，原音色未改变。"));
+        if (stillCurrent()) setOperationError(errorMessage(reason, "高级调音操作失败，原音色未改变。"));
       } finally {
-        setBusyAction(null);
+        if (requests.operation === controller) {
+          requests.operation = null;
+          if (requests.active && requests.scopeKey === scopeKey) setBusyAction(null);
+        }
       }
     };
 
     const create = (command: NanoAdvancedExperimentCommand): void => {
-      void run("create", () => api.createExperiment(
+      void run("create", (signal) => api.createExperiment(
         props.novelId,
         {
           contract_version: "nano-voice-experiment-request/1",
@@ -403,22 +468,24 @@ export function createNanoAdvancedWorkspace(
           },
         },
         createFeatureIdempotencyKey("nano-experiment"),
+        signal,
       ));
     };
 
     const apply = (command: NanoAdvancedApplyCommand): void => {
-      void run("apply", () => api.applyExperiment(
+      void run("apply", (signal) => api.applyExperiment(
         props.novelId,
         command.commandId,
         {
           expected_settings_version: command.expectedSettingsVersion,
           expected_binding_version: command.expectedBindingVersion,
         },
+        signal,
       ));
     };
 
     const restore = (command: NanoOfficialVoiceRestoreCommand): void => {
-      void run("restore", async () => {
+      void run("restore", async (signal) => {
         const result = await api.selectOfficialVoice(
           props.novelId,
           {
@@ -429,11 +496,11 @@ export function createNanoAdvancedWorkspace(
             expected_binding_version: command.expectedBindingVersion,
           },
           createOfficialVoiceUseIdempotencyKey(),
+          signal,
         );
         if (!result.selection_still_current) {
           throw new Error("音色已在其他位置更新；官方音色没有覆盖你的新选择。");
         }
-        setExperiment(null);
       });
     };
 
@@ -488,6 +555,14 @@ export function createNanoAdvancedWorkspace(
           h("button", { type: "button", onClick: () => setReloadVersion((value) => value + 1) }, "重试"),
         )
         : null,
+      enabled && state.phase === "ready" && loadError !== null
+        ? h("div", { role: "alert" }, loadError,
+          h("button", { type: "button", onClick: () => setReloadVersion((value) => value + 1) }, "重试加载"))
+        : null,
+      enabled && pollError !== null
+        ? h("div", { role: "alert" }, pollError,
+          h("button", { type: "button", onClick: () => setPollError(null) }, "重试刷新状态"))
+        : null,
       enabled && state.phase === "ready" && basePresetId === null
         ? h("p", { className: "anw-reading-gate-notice", role: "status" },
           "当前目标还没有可识别的官方基础音色。请先在“官方音色”或“人物配音”区域选择一个官方音色。",
@@ -495,6 +570,8 @@ export function createNanoAdvancedWorkspace(
         : null,
       enabled && state.phase === "ready" && basePresetId !== null
         ? h(Panel, {
+          key: scopeKey,
+          draftScopeKey: scopeKey,
           capabilityEnabled: true,
           basePresetId,
           basePresetDisplayName: officialPresetDisplayName(state.profiles, basePresetId),

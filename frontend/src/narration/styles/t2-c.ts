@@ -380,7 +380,7 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     justify-items: end;
-    overflow: hidden;
+    overflow: clip;
   }
 
   .anw-character-voice-drawer-layer[hidden] {
@@ -407,7 +407,9 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
     min-width: 0;
     min-height: 0;
     max-height: 100%;
-    overflow: hidden;
+    /* Only the body may scroll. Hidden also allows focus-driven scrolling,
+       which can move the header above the viewport when a field is focused. */
+    overflow: clip;
     color: var(--anw-text, #343844);
     background: var(--anw-card, #fff);
     box-shadow: -18px 0 48px rgba(20, 24, 32, .18);

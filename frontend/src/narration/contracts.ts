@@ -2786,6 +2786,8 @@ export function parseVoicePreparationResource(
   return Object.freeze({
     contractVersion: "narration-voice-preparation/1",
     commandId: item.command_id as string,
+    novelId: item.novel_id as string,
+    documentId: item.document_id as string | null,
     state,
     serverNow: item.server_now as string,
     progressCurrent,

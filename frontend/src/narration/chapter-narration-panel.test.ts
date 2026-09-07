@@ -731,6 +731,8 @@ describe("chapter narration panel", () => {
       onRetryFailedSegment,
     }));
     expect(textContent(root)).toContain("为避免覆盖正在使用的音频，暂不能重试");
+    expect(textContent(root)).toContain("这些句段已停止重复合成");
+    expect(textContent(root)).not.toContain("只重试失败音频");
     const blocked = findAll(
       root,
       (item) => item.type === "button" && textContent(item) === "暂不可重试",

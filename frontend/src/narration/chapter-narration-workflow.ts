@@ -2,11 +2,14 @@ import {
   createVoicePreparationCommand,
   createNarrationWorkflow,
   getVoicePreparationCommand,
+  listVoicePreparationCommands,
+  resumeVoicePreparationCommand,
   getNarrationSettings,
   getNarrationWorkflow,
 } from "./api";
 import type {
   NarrationSettingsResource,
+  VoicePreparationSnapshot,
 } from "./contracts";
 import type {
   NarrationWorkflowIntent,
@@ -18,7 +21,11 @@ import { createNarrationActionUuid } from "./idempotency-key";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const DEFAULT_POLL_SCHEDULE_MS = Object.freeze([250, 500, 1_000, 2_000]);
-const DEFAULT_POLL_TIMEOUT_MS = 30_000;
+// A real chapter request can legitimately wait behind VoiceGenerator or another
+// heavy local model before Nano publishes the first playable segment. Keep the
+// UI attached to that persisted request instead of presenting a false failure
+// after 30 seconds and inviting the author to create duplicate work.
+const DEFAULT_POLL_TIMEOUT_MS = 10 * 60_000;
 
 
 export interface StableChapterNarrationSource {
@@ -67,20 +74,18 @@ export interface ChapterNarrationWorkflowDependencies {
   readonly getWorkflow: typeof getNarrationWorkflow;
   readonly createVoicePreparation: typeof createVoicePreparationCommand;
   readonly getVoicePreparation: typeof getVoicePreparationCommand;
+  readonly listVoicePreparations: typeof listVoicePreparationCommands;
+  readonly resumeVoicePreparation: typeof resumeVoicePreparationCommand;
   readonly createActionId: () => string;
   readonly delay: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly now: () => number;
 }
 
 
-export interface StartChapterNarrationWorkflowOptions {
+export interface ChapterNarrationWorkflowScope {
   readonly novelId: string;
   readonly documentId: string;
   readonly generation: number;
-  readonly intent: Exclude<NarrationWorkflowIntent, "analyze_only">;
-  readonly forceReview: boolean;
-  readonly automaticVoicePreparationEnabled?: boolean;
-  readonly saveStableSource: () => Promise<StableChapterNarrationSource>;
   readonly isGenerationCurrent: (documentId: string, generation: number) => boolean;
   readonly onProgress?: (progress: ChapterNarrationWorkflowProgress) => void;
   readonly signal?: AbortSignal;
@@ -89,6 +94,17 @@ export interface StartChapterNarrationWorkflowOptions {
   readonly dependencies?: Partial<ChapterNarrationWorkflowDependencies>;
 }
 
+export interface StartChapterNarrationWorkflowOptions extends ChapterNarrationWorkflowScope {
+  readonly intent: Exclude<NarrationWorkflowIntent, "analyze_only">;
+  readonly forceReview: boolean;
+  readonly automaticVoicePreparationEnabled?: boolean;
+  readonly saveStableSource: () => Promise<StableChapterNarrationSource>;
+}
+
+export interface ResumeChapterNarrationWorkflowOptions extends ChapterNarrationWorkflowScope {
+  readonly currentRequestId?: string | null;
+  readonly onRestoring?: () => void;
+}
 
 function abortError(message: string): DOMException {
   return new DOMException(message, "AbortError");
@@ -123,6 +139,8 @@ const DEFAULT_DEPENDENCIES: ChapterNarrationWorkflowDependencies = Object.freeze
   getWorkflow: getNarrationWorkflow,
   createVoicePreparation: createVoicePreparationCommand,
   getVoicePreparation: getVoicePreparationCommand,
+  listVoicePreparations: listVoicePreparationCommands,
+  resumeVoicePreparation: resumeVoicePreparationCommand,
   createActionId: defaultActionId,
   delay: defaultDelay,
   now: () => Date.now(),
@@ -134,7 +152,7 @@ function fail(code: ChapterNarrationWorkflowErrorCode, message: string): never {
 }
 
 
-function assertCurrent(options: StartChapterNarrationWorkflowOptions): void {
+function assertCurrent(options: ChapterNarrationWorkflowScope): void {
   if (options.signal?.aborted) throw abortError("workflow aborted");
   let current = false;
   try {
@@ -146,14 +164,11 @@ function assertCurrent(options: StartChapterNarrationWorkflowOptions): void {
 }
 
 
-function validateOptions(options: StartChapterNarrationWorkflowOptions): void {
+function validateOptions(options: ChapterNarrationWorkflowScope): void {
   if (!UUID_PATTERN.test(options.novelId)) fail("INVALID_INPUT", "novelId 无效。");
   if (!UUID_PATTERN.test(options.documentId)) fail("INVALID_INPUT", "documentId 无效。");
   if (!Number.isSafeInteger(options.generation) || options.generation < 0) {
     fail("INVALID_INPUT", "generation 无效。");
-  }
-  if (options.intent !== "create" && options.intent !== "update") {
-    fail("INVALID_INPUT", "章节生产只允许 create 或 update intent。");
   }
   const schedule = options.pollScheduleMs ?? DEFAULT_POLL_SCHEDULE_MS;
   if (
@@ -171,7 +186,7 @@ function validateOptions(options: StartChapterNarrationWorkflowOptions): void {
 
 function validateSource(
   source: StableChapterNarrationSource,
-  options: StartChapterNarrationWorkflowOptions,
+  options: ChapterNarrationWorkflowScope,
 ): void {
   if (source.documentId.toLowerCase() !== options.documentId.toLowerCase()) {
     fail("STALE_GENERATION", "保存屏障返回了其他章节。");
@@ -229,7 +244,7 @@ function progressMessage(workflow: NarrationWorkflowResource): string {
 
 
 function publish(
-  options: StartChapterNarrationWorkflowOptions,
+  options: ChapterNarrationWorkflowScope,
   step: ChapterNarrationWorkflowProgress["step"],
   message: string,
   workflow: NarrationWorkflowResource | null,
@@ -242,6 +257,9 @@ export async function startChapterNarrationWorkflow(
   options: StartChapterNarrationWorkflowOptions,
 ): Promise<ChapterNarrationWorkflowResult> {
   validateOptions(options);
+  if (options.intent !== "create" && options.intent !== "update") {
+    fail("INVALID_INPUT", "章节生产只允许 create 或 update intent。");
+  }
   assertCurrent(options);
   const dependencies: ChapterNarrationWorkflowDependencies = {
     ...DEFAULT_DEPENDENCIES,
@@ -277,7 +295,7 @@ export async function startChapterNarrationWorkflow(
     let workflow: NarrationWorkflowResource;
     if (options.automaticVoicePreparationEnabled === true && !options.forceReview) {
       publish(options, "voices", "正在分析本章人物并准备声音。", null);
-      let preparation = await dependencies.createVoicePreparation(
+      const preparation = await dependencies.createVoicePreparation(
         options.novelId,
         {
           contract_version: "narration-voice-preparation-request/1",
@@ -290,43 +308,7 @@ export async function startChapterNarrationWorkflow(
         `chapter-voice-prepare:${actionId.toLowerCase()}`,
         controller.signal,
       );
-      const preparationStartedAt = dependencies.now();
-      let preparationAttempt = 0;
-      while (preparation.narrationRequestId === null) {
-        if (preparation.terminal) {
-          fail(
-            "VOICE_PREPARATION_FAILED",
-            preparation.failureCode === null
-              ? "人物声音准备未能继续创建章节朗读，请重新点击智能朗读。"
-              : `人物声音准备未完成（${preparation.failureCode}）。`,
-          );
-        }
-        if (dependencies.now() - preparationStartedAt >= 60 * 60 * 1_000) {
-          fail("WORKFLOW_TIMEOUT", "人物声音仍在后台准备，可稍后重新点击智能朗读恢复进度。");
-        }
-        publish(
-          options,
-          "voices",
-          `正在准备人物声音 ${preparation.progressCurrent}/${preparation.progressTotal}。`,
-          null,
-        );
-        const schedule = options.pollScheduleMs ?? DEFAULT_POLL_SCHEDULE_MS;
-        await dependencies.delay(
-          schedule[Math.min(preparationAttempt, schedule.length - 1)],
-          controller.signal,
-        );
-        preparationAttempt += 1;
-        assertCurrent(options);
-        preparation = await dependencies.getVoicePreparation(
-          options.novelId,
-          preparation.commandId,
-          controller.signal,
-        );
-      }
-      workflow = await dependencies.getWorkflow(
-        preparation.narrationRequestId,
-        controller.signal,
-      );
+      workflow = await waitForPreparedWorkflow(options, dependencies, preparation, controller.signal);
     } else {
       publish(options, "request", "正在建立不可变正文快照与朗读脚本。", null);
       workflow = await dependencies.createWorkflow(
@@ -342,43 +324,103 @@ export async function startChapterNarrationWorkflow(
         controller.signal,
       );
     }
-    assertCurrent(options);
-    publish(
-      options,
-      actionable(workflow) ? "actionable" : "waiting",
-      progressMessage(workflow),
-      workflow,
-    );
-
-    const schedule = options.pollScheduleMs ?? DEFAULT_POLL_SCHEDULE_MS;
-    const timeout = options.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
-    const startedAt = dependencies.now();
-    let attempt = 0;
-    while (!actionable(workflow)) {
-      if (dependencies.now() - startedAt >= timeout) {
-        fail(
-          "WORKFLOW_TIMEOUT",
-          "首个可播放句段尚未准备完成，可稍后重试；已保存正文不会丢失。",
-        );
-      }
-      await dependencies.delay(
-        schedule[Math.min(attempt, schedule.length - 1)],
-        controller.signal,
-      );
-      attempt += 1;
-      assertCurrent(options);
-      workflow = await dependencies.getWorkflow(workflow.request_id, controller.signal);
-      assertCurrent(options);
-      publish(
-        options,
-        actionable(workflow) ? "actionable" : "waiting",
-        progressMessage(workflow),
-        workflow,
-      );
-    }
+    workflow = await waitForActionableWorkflow(options, dependencies, workflow, controller.signal);
     return Object.freeze({ source, settings, workflow });
   } finally {
     options.signal?.removeEventListener("abort", abortFromParent);
     controller.abort("workflow finished");
+  }
+}
+
+async function waitForPreparedWorkflow(
+  options: ChapterNarrationWorkflowScope,
+  dependencies: ChapterNarrationWorkflowDependencies,
+  initial: VoicePreparationSnapshot,
+  signal: AbortSignal,
+): Promise<NarrationWorkflowResource> {
+  let preparation = initial;
+  const startedAt = dependencies.now();
+  let attempt = 0;
+  while (true) {
+    assertCurrent(options);
+    if (preparation.commandId !== initial.commandId
+      || preparation.novelId !== options.novelId.toLowerCase()
+      || preparation.documentId !== options.documentId.toLowerCase()) {
+      fail("INVALID_INPUT", "人物声音准备返回了其他作品、章节或命令。");
+    }
+    if (preparation.narrationRequestId !== null) {
+      return dependencies.getWorkflow(preparation.narrationRequestId, signal);
+    }
+    if (preparation.terminal) {
+      fail("VOICE_PREPARATION_FAILED", preparation.failureCode === null
+        ? "人物声音准备未能继续创建章节朗读，请重新点击智能朗读。"
+        : `人物声音准备未完成（${preparation.failureCode}）。`);
+    }
+    if (dependencies.now() - startedAt >= 60 * 60 * 1_000) {
+      fail("WORKFLOW_TIMEOUT", "人物声音仍在后台准备，可稍后重新打开章节恢复进度。");
+    }
+    publish(options, "voices", `正在准备人物声音 ${preparation.progressCurrent}/${preparation.progressTotal}。`, null);
+    const schedule = options.pollScheduleMs ?? DEFAULT_POLL_SCHEDULE_MS;
+    await dependencies.delay(schedule[Math.min(attempt++, schedule.length - 1)], signal);
+    assertCurrent(options);
+    preparation = await dependencies.getVoicePreparation(options.novelId, initial.commandId, signal);
+  }
+}
+
+async function waitForActionableWorkflow(
+  options: ChapterNarrationWorkflowScope,
+  dependencies: ChapterNarrationWorkflowDependencies,
+  initial: NarrationWorkflowResource,
+  signal: AbortSignal,
+): Promise<NarrationWorkflowResource> {
+  let workflow = initial;
+  const startedAt = dependencies.now();
+  let attempt = 0;
+  while (true) {
+    assertCurrent(options);
+    publish(options, actionable(workflow) ? "actionable" : "waiting", progressMessage(workflow), workflow);
+    if (actionable(workflow)) return workflow;
+    if (dependencies.now() - startedAt >= (options.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS)) {
+      fail("WORKFLOW_TIMEOUT", "首个可播放句段尚未准备完成，可稍后重试；已保存正文不会丢失。");
+    }
+    const schedule = options.pollScheduleMs ?? DEFAULT_POLL_SCHEDULE_MS;
+    await dependencies.delay(schedule[Math.min(attempt++, schedule.length - 1)], signal);
+    assertCurrent(options);
+    workflow = await dependencies.getWorkflow(initial.request_id, signal);
+  }
+}
+
+/** Restore only an existing chapter command; never save text or create work. */
+export async function resumeChapterNarrationWorkflow(
+  options: ResumeChapterNarrationWorkflowOptions,
+): Promise<NarrationWorkflowResource | null> {
+  validateOptions(options);
+  assertCurrent(options);
+  const dependencies = { ...DEFAULT_DEPENDENCIES, ...options.dependencies };
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", abortFromParent, { once: true });
+  try {
+    const commands = await dependencies.listVoicePreparations(options.novelId, controller.signal);
+    assertCurrent(options);
+    // The list is newest-first. Never revive an older command underneath a
+    // newer cancelled/failed action. A completed preparation may still own a
+    // review-required request without an Edition, and must remain findable.
+    const command = commands.find((item) => item.novelId === options.novelId.toLowerCase()
+      && item.documentId === options.documentId.toLowerCase());
+    if (!command || ["cancelled", "failed", "superseded"].includes(command.state)
+      || (command.terminal && command.narrationRequestId === null)
+      || (command.narrationRequestId !== null && command.narrationRequestId === options.currentRequestId)) return null;
+    options.onRestoring?.();
+    publish(options, "voices", "正在恢复本章人物声音准备进度。", null);
+    const resumed = command.terminal ? command
+      : await dependencies.resumeVoicePreparation(options.novelId, command.commandId, controller.signal);
+    assertCurrent(options);
+    if (resumed.commandId !== command.commandId) fail("INVALID_INPUT", "恢复返回了其他人物声音命令。");
+    const workflow = await waitForPreparedWorkflow(options, dependencies, resumed, controller.signal);
+    return await waitForActionableWorkflow(options, dependencies, workflow, controller.signal);
+  } finally {
+    options.signal?.removeEventListener("abort", abortFromParent);
+    controller.abort("workflow recovery finished");
   }
 }

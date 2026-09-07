@@ -585,6 +585,7 @@ def test_http_media_requires_scope_headers_and_forwards_range_conditions() -> No
         "manifest_revision": 4,
         "voice_preview_id": None,
         "generic_voice_slot_id": None,
+        "voice_version_id": None,
         "method": "GET",
         "range_header": "bytes=0-2",
         "if_range": f'"{"1" * 64}"',
@@ -626,3 +627,28 @@ def test_http_media_requires_scope_headers_and_forwards_range_conditions() -> No
     assert head.status_code == 416 and head.content == b""
     assert head.headers["content-range"] == "bytes */3"
     assert backend.media_calls[-1]["method"] == "HEAD"
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_dedicated_preview_version_header_is_exact_and_exclusive(method: str) -> None:
+    backend = FakeBackend()
+    client = _client(backend)
+    path = f"/media-assets/{ASSET_ID}/content"
+    version_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    auth = {"X-Narration-Voice-Version-Id": str(version_id)}
+    response = client.request(method, path, headers=auth)
+    assert response.status_code == 200
+    assert response.content == (b"abc" if method == "GET" else b"")
+    assert "X-Narration-Voice-Version-Id" in response.headers["vary"]
+    assert backend.media_calls[-1]["voice_version_id"] == version_id
+    assert backend.media_calls[-1]["voice_preview_id"] is None
+    count = len(backend.media_calls)
+    for other in (
+        {"X-Narration-Edition-Id": str(EDITION_ID)},
+        {"X-Narration-Edition-Id": str(EDITION_ID), "X-Narration-Manifest-Revision": "4"},
+        {"X-Narration-Voice-Preview-Id": str(VOICE_PREVIEW_ID)},
+        {"X-Narration-Generic-Voice-Slot-Id": str(GENERIC_VOICE_SLOT_ID)},
+        {"X-Narration-Voice-Version-Id": "invalid"},
+    ):
+        assert client.request(method, path, headers={**auth, **other}).status_code == 422
+    assert len(backend.media_calls) == count

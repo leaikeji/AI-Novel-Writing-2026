@@ -115,6 +115,8 @@ export interface NanoAdvancedTuningPanelProps {
   readonly target: NanoAdvancedTuningTarget;
   readonly experiment?: NanoExperimentSnapshot | null;
   readonly initialDraft?: NanoAdvancedTuningDraft;
+  /** Workspace identity may preserve parameter edits while changing the base voice. */
+  readonly draftScopeKey?: string;
   readonly busyAction?: NanoAdvancedTuningBusyAction | null;
   readonly errorMessage?: string | null;
   readonly className?: string;
@@ -405,6 +407,7 @@ export function nanoOfficialVoiceRestoreCommand(
 }
 
 function draftScope(props: NanoAdvancedTuningPanelProps): string {
+  if (props.draftScopeKey !== undefined) return props.draftScopeKey;
   return [
     props.basePresetId,
     props.target.kind,

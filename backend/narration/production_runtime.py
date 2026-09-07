@@ -78,7 +78,7 @@ from .pronunciations import (
     SqlAlchemyNarrationCacheRuntime,
 )
 from .scheduler import NarrationJobScheduler, SchedulerConfig
-from .services import canonical_sha256
+from .services import SqlAlchemyNarrationStore, canonical_sha256
 from .storage import NarrationStorage, StorageError
 from .runtime import SidecarMossNanoTTSAdapter
 from .transcoding import (
@@ -1462,6 +1462,20 @@ def _resolve_current_generic_voice_slot_media(
     return resolve_generic_voice_slot_media(session, slot_id, asset_id)
 
 
+def _resolve_current_voice_version_media(
+    session: Session,
+    version_id: UUID,
+    asset_id: UUID,
+) -> MediaAsset:
+    if _voice_product_port is None:
+        raise VoicePreviewNotFound("voice version media is unavailable")
+    from .voice_version_media import resolve_voice_version_media
+
+    return resolve_voice_version_media(
+        SqlAlchemyNarrationStore(session), version_id, asset_id
+    )
+
+
 async def _run_production(
     values: Mapping[str, str],
     storage: NarrationStorage,
@@ -2111,6 +2125,7 @@ async def launch_narration_production_runtime(
                 resolve_generic_voice_slot_media=(
                     _resolve_current_generic_voice_slot_media
                 ),
+                resolve_voice_version_media=_resolve_current_voice_version_media,
             )
             install_playback_api_backend_factory(playback_factory)
             _playback_factory = playback_factory

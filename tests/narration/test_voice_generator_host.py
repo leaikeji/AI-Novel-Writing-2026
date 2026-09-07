@@ -42,7 +42,11 @@ from scripts.tts.voice_generator.host_server import (
     parse_generation_request,
     read_bearer_token,
 )
-from scripts.tts.voice_generator.native_runtime import _strict_runtime_python
+from scripts.tts.voice_generator.native_runtime import (
+    CODEC_TIMEOUT_SECONDS,
+    GENERATOR_TIMEOUT_SECONDS,
+    _strict_runtime_python,
+)
 from scripts.tts.voice_generator.native_worker import (
     MAX_GENERATED_AUDIO_FRAMES,
     MIN_GENERATED_AUDIO_FRAMES,
@@ -57,6 +61,11 @@ REQUEST_ID = UUID("9a80a7ee-83f5-4e3e-8e8c-59ed092d9a98")
 def test_product_audio_frame_bounds_follow_delayed_generation_budget() -> None:
     assert MIN_GENERATED_AUDIO_FRAMES == 25
     assert MAX_GENERATED_AUDIO_FRAMES == 240
+
+
+def test_native_stage_timeouts_cover_real_mps_generation_without_unbounding_codec() -> None:
+    assert GENERATOR_TIMEOUT_SECONDS == 360.0
+    assert CODEC_TIMEOUT_SECONDS == 180.0
 
 
 def test_worker_preserves_stable_audio_validation_failure_code(tmp_path: Path) -> None:

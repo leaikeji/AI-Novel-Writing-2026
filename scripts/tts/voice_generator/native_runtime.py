@@ -35,7 +35,12 @@ from scripts.tts.voice_generator.product_adapters import (
 )
 
 
-GENERATOR_TIMEOUT_SECONDS: Final = 180.0
+# MPS generation on the supported 16 GiB host normally finishes in roughly
+# three minutes, but real character prompts can cross the old 180 s boundary
+# while still making progress.  The host already exposes progress and retains
+# its memory/cancellation fences, so allow one bounded six-minute generation
+# stage instead of killing healthy work at the normal-performance edge.
+GENERATOR_TIMEOUT_SECONDS: Final = 360.0
 CODEC_TIMEOUT_SECONDS: Final = 180.0
 CRITICAL_GRACE_SECONDS: Final = 20.0
 RECOVERY_TIMEOUT_SECONDS: Final = 60.0

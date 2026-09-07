@@ -1091,7 +1091,7 @@ export function createOfficialVoiceLibrary(
         },
         liveMessage,
       ),
-      useState.phase === "conflict" && props.onConflictRefresh !== undefined
+      (useState.phase === "conflict" || props.loadError) && props.onConflictRefresh !== undefined
         ? h(
           "button",
           {

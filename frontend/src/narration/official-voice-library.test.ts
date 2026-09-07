@@ -739,6 +739,20 @@ describe("official voice library component", () => {
     }
   });
 
+  it("offers one refresh action after a catalog read failure without attempting a binding", () => {
+    const harness = createHarness();
+    const Library = createOfficialVoiceLibrary(harness.React);
+    const onConflictRefresh = vi.fn();
+    const props = baseProps({ loadError: "目录服务暂不可用", onConflictRefresh });
+    harness.render(Library, props);
+    const tree = harness.render(Library, props);
+    const refresh = findAll(tree, (element) => classIncludes(element, "anw-official-voice-library__refresh"));
+    expect(refresh).toHaveLength(1);
+    (refresh[0].props.onClick as () => void)();
+    expect(onConflictRefresh).toHaveBeenCalledOnce();
+    expect(findAll(tree, (element) => element.props.type === "radio")).toHaveLength(0);
+  });
+
   it("ships 44px touch targets, narrow-screen stacking, focus, and reduced-motion rules", () => {
     expect(OFFICIAL_VOICE_LIBRARY_STYLE_ID).toBe("anw-official-voice-library-styles");
     expect(OFFICIAL_VOICE_LIBRARY_STYLES).toMatch(/min-height:\s*44px/u);

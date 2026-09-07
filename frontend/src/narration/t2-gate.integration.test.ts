@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as previewPlayback from "./voice-preview-playback";
 
 import {
   CAPABILITY_KEYS,
@@ -650,6 +651,30 @@ describe("T2-GATE narration composition", () => {
     expect(characterRoster.props.capabilities).toBe(overview.capabilities);
     expect(characterRoster.props.authorization).toBe(overview.authorization);
     expect(characterRoster.props.renderConfigurator).toEqual(expect.any(Function));
+    const playDedicated = vi.spyOn(previewPlayback, "playVoiceVersionPreview")
+      .mockResolvedValue(undefined);
+    const dedicatedVersion = {
+      ...voiceProfile().versions[0]!,
+      source_type: "generated" as const,
+      activation_basis: "character_one_click_generation" as const,
+      preview_asset: {
+        asset_id: "123e4567-e89b-42d3-a456-426614174099",
+        content_path: "/media-assets/123e4567-e89b-42d3-a456-426614174099/content",
+        mime_type: "audio/wav",
+        byte_size: 4,
+        duration_ms: 1000,
+        checksum_sha256: "a".repeat(64),
+      },
+    };
+    const previewCurrent = characterRoster.props.onPreviewVoice as (
+      character: { characterId: string; characterName: string },
+      profile: VoiceProfileResource,
+      version: VoiceProfileResource["versions"][number],
+    ) => Promise<void>;
+    await previewCurrent({ characterId: CHARACTER_ID, characterName: "林岚" }, voiceProfile(), dedicatedVersion);
+    expect(playDedicated).toHaveBeenCalledWith(
+      dedicatedVersion.version_id, dedicatedVersion.preview_asset, expect.any(AbortSignal),
+    );
     const characterWorkspace = findAll(
       characterTree,
       (element) => componentName(element) === "VoiceSourceWorkspace",
@@ -850,7 +875,11 @@ describe("T2-GATE narration composition", () => {
   it("uses the workspace binding only for the initial projection, then refreshes after a write", async () => {
     const overview = overviewWithVoiceActions();
     const harness = createReactHarness({ dependencyAware: true });
-    const getBinding = vi.fn(async () => characterBinding({ version: 4 }));
+    let resolveBinding!: (binding: CharacterVoiceBindingResource) => void;
+    const pendingBinding = new Promise<CharacterVoiceBindingResource>((resolve) => {
+      resolveBinding = resolve;
+    });
+    const getBinding = vi.fn(() => pendingBinding);
     const loadOverview = vi.fn(async () => overview);
     const officialVoiceApi = {
       getCharacterVoiceBinding: getBinding,
@@ -903,19 +932,29 @@ describe("T2-GATE narration composition", () => {
     const official = tree.props.officialVoiceContent as FakeElement;
     (official.props.onChanged as () => void)();
     tree = harness.render(Card, props);
+    // The current configurator and advanced subtree survive pending refreshes.
+    expect(componentName(tree)).toBe("CharacterVoiceConfigurator");
+    const advancedType = (tree.props.advancedContent as FakeElement).type;
     harness.flushEffects();
+    expect(componentName(harness.render(Card, props))).toBe("CharacterVoiceConfigurator");
+    await settle();
+    tree = harness.render(Card, props);
+    expect(componentName(tree)).toBe("CharacterVoiceConfigurator");
+    expect((tree.props.advancedContent as FakeElement).type).toBe(advancedType);
+    resolveBinding(characterBinding({ version: 4 }));
     await settle();
     harness.render(Card, props);
     harness.flushEffects();
     await settle();
     tree = harness.render(Card, props);
     expect(getBinding).toHaveBeenCalledTimes(1);
-    expect(loadOverview).toHaveBeenCalledTimes(1);
+    expect(loadOverview).not.toHaveBeenCalled();
     expect(officialVoiceApi.listVoiceProfiles).toHaveBeenCalledTimes(1);
     expect(tree.props.currentVoice).toMatchObject({
       phase: "resolved",
       name: "温暖青年女声",
     });
+    expect((tree.props.advancedContent as FakeElement).type).toBe(advancedType);
   });
 
   it("projects a missing workspace binding as version-zero unset without another read", async () => {
@@ -1060,7 +1099,7 @@ describe("T2-GATE narration composition", () => {
       expect.any(AbortSignal),
     );
     expect(result).toEqual({
-      voiceName: "Xiaoyu",
+      voiceName: "温暖青年女声",
       presetId: "onnx.Xiaoyu",
       selectionStillCurrent: false,
     });

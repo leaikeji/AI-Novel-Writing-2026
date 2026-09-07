@@ -281,6 +281,7 @@ class PlaybackApiBackend(Protocol):
         manifest_revision: int | None,
         voice_preview_id: UUID | None,
         generic_voice_slot_id: UUID | None,
+        voice_version_id: UUID | None = None,
         method: str,
         range_header: str | None,
         if_range: str | None,
@@ -291,6 +292,7 @@ class PlaybackApiBackend(Protocol):
 PlaybackApiBackendFactory = Callable[[Session], PlaybackApiBackend]
 VoicePreviewMediaResolver = Callable[[Session, UUID, UUID], MediaAsset]
 GenericVoiceSlotMediaResolver = Callable[[Session, UUID, UUID], MediaAsset]
+VoiceVersionMediaResolver = Callable[[Session, UUID, UUID], MediaAsset]
 
 
 PlaybackApiFault = NarrationProductionApiFault
@@ -408,6 +410,7 @@ class SqlAlchemyPlaybackApiBackend:
         can_promote_jobs: Callable[[], bool] | None = None,
         resolve_voice_preview_media: VoicePreviewMediaResolver | None = None,
         resolve_generic_voice_slot_media: GenericVoiceSlotMediaResolver | None = None,
+        resolve_voice_version_media: VoiceVersionMediaResolver | None = None,
     ) -> None:
         self.session = session
         self.storage = storage
@@ -416,6 +419,7 @@ class SqlAlchemyPlaybackApiBackend:
         )
         self._resolve_voice_preview_media = resolve_voice_preview_media
         self._resolve_generic_voice_slot_media = resolve_generic_voice_slot_media
+        self._resolve_voice_version_media = resolve_voice_version_media
 
     def get_manifest(
         self, edition_id: UUID, manifest_revision: int | None
@@ -577,6 +581,7 @@ class SqlAlchemyPlaybackApiBackend:
         manifest_revision: int | None,
         voice_preview_id: UUID | None,
         generic_voice_slot_id: UUID | None,
+        voice_version_id: UUID | None = None,
         method: str,
         range_header: str | None,
         if_range: str | None,
@@ -584,9 +589,10 @@ class SqlAlchemyPlaybackApiBackend:
     ) -> PlaybackMediaRead:
         preview_branch = voice_preview_id is not None
         generic_branch = generic_voice_slot_id is not None
+        version_branch = voice_version_id is not None
         edition_branch = edition_id is not None or manifest_revision is not None
         edition_complete = edition_id is not None and manifest_revision is not None
-        if sum((preview_branch, generic_branch, edition_complete)) != 1 or (
+        if sum((preview_branch, generic_branch, version_branch, edition_complete)) != 1 or (
             edition_branch and not edition_complete
         ):
             raise PlaybackApiFault(
@@ -611,6 +617,15 @@ class SqlAlchemyPlaybackApiBackend:
                 )
             assert generic_voice_slot_id is not None
             asset = resolver(self.session, generic_voice_slot_id, asset_id)
+        elif version_branch:
+            resolver = self._resolve_voice_version_media
+            if resolver is None:
+                raise PlaybackApiFault(
+                    PlaybackApiErrorCode.BACKEND_NOT_INSTALLED,
+                    "专属音色试听媒体后端尚未就绪。",
+                )
+            assert voice_version_id is not None
+            asset = resolver(self.session, voice_version_id, asset_id)
         else:
             if edition_id is None or manifest_revision is None:
                 raise PlaybackApiFault(
@@ -649,6 +664,7 @@ def build_playback_api_backend_factory(
     can_promote_jobs: Callable[[], bool] | None = None,
     resolve_voice_preview_media: VoicePreviewMediaResolver | None = None,
     resolve_generic_voice_slot_media: GenericVoiceSlotMediaResolver | None = None,
+    resolve_voice_version_media: VoiceVersionMediaResolver | None = None,
 ) -> PlaybackApiBackendFactory:
     if type(storage) is not NarrationStorage:
         raise TypeError("playback backend factory requires NarrationStorage")
@@ -662,6 +678,8 @@ def build_playback_api_backend_factory(
         resolve_generic_voice_slot_media
     ):
         raise TypeError("generic voice slot media resolver must be callable")
+    if resolve_voice_version_media is not None and not callable(resolve_voice_version_media):
+        raise TypeError("voice version media resolver must be callable")
 
     def factory(session: Session) -> PlaybackApiBackend:
         return SqlAlchemyPlaybackApiBackend(
@@ -670,6 +688,7 @@ def build_playback_api_backend_factory(
             can_promote_jobs=can_promote_jobs,
             resolve_voice_preview_media=resolve_voice_preview_media,
             resolve_generic_voice_slot_media=resolve_generic_voice_slot_media,
+            resolve_voice_version_media=resolve_voice_version_media,
         )
 
     return factory
@@ -976,6 +995,7 @@ def _media_response(
         "X-Narration-Edition-Id, X-Narration-Manifest-Revision, "
         "X-Narration-Voice-Preview-Id, "
         "X-Narration-Generic-Voice-Slot-Id, "
+        "X-Narration-Voice-Version-Id, "
         "Range, If-Range, If-None-Match"
     )
     if decision.status not in {200, 206, 304, 416}:
@@ -1054,6 +1074,7 @@ def _read_media(
     manifest_revision: int | None,
     voice_preview_id: UUID | None,
     generic_voice_slot_id: UUID | None,
+    voice_version_id: UUID | None = None,
     range_header: str | None,
     if_range: str | None,
     if_none_match: str | None,
@@ -1061,9 +1082,10 @@ def _read_media(
 ) -> Response:
     preview_branch = voice_preview_id is not None
     generic_branch = generic_voice_slot_id is not None
+    version_branch = voice_version_id is not None
     edition_branch = edition_id is not None or manifest_revision is not None
     edition_complete = edition_id is not None and manifest_revision is not None
-    if sum((preview_branch, generic_branch, edition_complete)) != 1 or (
+    if sum((preview_branch, generic_branch, version_branch, edition_complete)) != 1 or (
         edition_branch and not edition_complete
     ):
         _raise_http(
@@ -1079,6 +1101,7 @@ def _read_media(
             manifest_revision=manifest_revision,
             voice_preview_id=voice_preview_id,
             generic_voice_slot_id=generic_voice_slot_id,
+            voice_version_id=voice_version_id,
             method=method,
             range_header=range_header,
             if_range=if_range,
@@ -1118,6 +1141,9 @@ def get_media_content(
     generic_voice_slot_id: CanonicalUuid | None = Header(
         default=None, alias="X-Narration-Generic-Voice-Slot-Id"
     ),
+    voice_version_id: CanonicalUuid | None = Header(
+        default=None, alias="X-Narration-Voice-Version-Id"
+    ),
     range_header: str | None = Header(default=None, alias="Range"),
     if_range: str | None = Header(default=None, alias="If-Range"),
     if_none_match: str | None = Header(default=None, alias="If-None-Match"),
@@ -1131,6 +1157,7 @@ def get_media_content(
         manifest_revision=manifest_revision,
         voice_preview_id=voice_preview_id,
         generic_voice_slot_id=generic_voice_slot_id,
+        voice_version_id=voice_version_id,
         range_header=range_header,
         if_range=if_range,
         if_none_match=if_none_match,
@@ -1154,6 +1181,9 @@ def head_media_content(
     generic_voice_slot_id: CanonicalUuid | None = Header(
         default=None, alias="X-Narration-Generic-Voice-Slot-Id"
     ),
+    voice_version_id: CanonicalUuid | None = Header(
+        default=None, alias="X-Narration-Voice-Version-Id"
+    ),
     range_header: str | None = Header(default=None, alias="Range"),
     if_range: str | None = Header(default=None, alias="If-Range"),
     if_none_match: str | None = Header(default=None, alias="If-None-Match"),
@@ -1167,6 +1197,7 @@ def head_media_content(
         manifest_revision=manifest_revision,
         voice_preview_id=voice_preview_id,
         generic_voice_slot_id=generic_voice_slot_id,
+        voice_version_id=voice_version_id,
         range_header=range_header,
         if_range=if_range,
         if_none_match=if_none_match,
@@ -1184,6 +1215,7 @@ __all__ = [
     "PlaybackApiFault",
     "PlaybackMediaRead",
     "GenericVoiceSlotMediaResolver",
+    "VoiceVersionMediaResolver",
     "PlaybackProgressResource",
     "PlaybackProgressResponse",
     "VoicePreviewMediaResolver",

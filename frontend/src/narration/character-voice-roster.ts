@@ -101,6 +101,8 @@ interface PreviewState {
 
 interface FocusableElement {
   focus(options?: FocusOptions): void;
+  closest?(selector: string): unknown;
+  getClientRects?(): ArrayLike<unknown>;
 }
 
 
@@ -117,6 +119,8 @@ interface ButtonEvent {
 interface DrawerKeyboardEvent {
   readonly key: string;
   readonly shiftKey?: boolean;
+  readonly isComposing?: boolean;
+  readonly nativeEvent?: { readonly isComposing?: boolean };
   readonly target: unknown;
   preventDefault(): void;
   stopPropagation(): void;
@@ -140,6 +144,16 @@ const FOCUSABLE_SELECTOR = [
   "details > summary",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
+
+
+function visibleFocusables(drawer: DrawerElement | null): FocusableElement[] {
+  return Array.from(drawer?.querySelectorAll(FOCUSABLE_SELECTOR) ?? []).filter((element) => (
+    !element.closest?.('[hidden], [inert], [aria-hidden="true"]')
+    // Closed details keep their children mounted to preserve unfinished edits.
+    // Those children have no rendered rectangles and must not define Tab edges.
+    && element.getClientRects?.().length !== 0
+  ));
+}
 
 
 function capabilityByKey(
@@ -240,7 +254,11 @@ export function buildCharacterVoiceRosterRows(
       version,
       voiceName: configured ? profile?.name ?? "绑定音色不可用" : "尚未配置",
       sourceGroup: group,
-      sourceLabel: configured ? sourceLabel(group, version?.source_type ?? null) : null,
+      sourceLabel: configured
+        ? version?.activation_basis === "experimental_machine_validated"
+          ? "高级调音"
+          : sourceLabel(group, version?.source_type ?? null)
+        : null,
       sourceType: version?.source_type ?? null,
       statusLabel: configured && version === null ? "需要处理" : null,
       previewAvailable: Boolean(
@@ -348,7 +366,7 @@ export function createCharacterVoiceRoster(
     React.useEffect(() => {
       if (!drawerOpen) return;
       queueMicrotask(() => {
-        const first = drawerRef.current?.querySelectorAll(FOCUSABLE_SELECTOR)[0];
+        const first = visibleFocusables(drawerRef.current)[0];
         first?.focus({ preventScroll: true });
       });
     }, [drawerOpen, selectedCharacterId]);
@@ -377,6 +395,7 @@ export function createCharacterVoiceRoster(
 
     const trapDrawerFocus = (event: DrawerKeyboardEvent): void => {
       if (!drawerOpen) return;
+      if (event.isComposing || event.nativeEvent?.isComposing) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -384,7 +403,7 @@ export function createCharacterVoiceRoster(
         return;
       }
       if (event.key !== "Tab") return;
-      const focusables = Array.from(drawerRef.current?.querySelectorAll(FOCUSABLE_SELECTOR) ?? []);
+      const focusables = visibleFocusables(drawerRef.current);
       if (focusables.length === 0) {
         event.preventDefault();
         drawerRef.current?.focus();

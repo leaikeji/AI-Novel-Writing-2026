@@ -95,6 +95,7 @@ import {
 import {
   playGenericVoiceSlotPreview,
   playReadyVoicePreview,
+  playVoiceVersionPreview,
 } from "./voice-preview-playback";
 import {
   createReadingPage,
@@ -117,6 +118,7 @@ import {
 import {
   createNanoAdvancedWorkspace,
   createPrivateVoiceLifecycleWorkspace,
+  officialPresetDisplayName,
 } from "./voice-feature-workspaces";
 import {
   createVoicePreparation,
@@ -565,7 +567,9 @@ export function createNarrationReadingPage(
 
     React.useEffect(() => {
       const controller = new AbortController();
-      setRosterState({ phase: "loading", bindings: [], message: null });
+      setRosterState((current) => current.phase === "ready"
+        ? { ...current, message: null }
+        : { phase: "loading", bindings: [], message: null });
       void characterRosterApi.listBindings(props.novelId, controller.signal).then((bindings) => {
         if (controller.signal.aborted) return;
         if (bindings.novel_id !== props.novelId) {
@@ -583,15 +587,15 @@ export function createNarrationReadingPage(
         });
       }).catch((reason: unknown) => {
         if (!controller.signal.aborted) {
-          setRosterState({
-            phase: "error",
-            bindings: [],
+          setRosterState((current) => ({
+            phase: current.phase === "ready" ? "ready" : "error",
+            bindings: current.phase === "ready" ? current.bindings : [],
             message: overviewErrorMessage(reason),
-          });
+          }));
         }
       });
       return () => controller.abort();
-    }, [props.novelId]);
+    }, [props.novelId, props.context.overview]);
 
     React.useEffect(() => {
       castRunnerRef.current?.abort();
@@ -675,6 +679,9 @@ export function createNarrationReadingPage(
           : h(
             "div",
             null,
+            rosterState.message
+              ? h("p", { role: "alert" }, rosterState.message)
+              : null,
             props.context.voiceProfilesError
               ? h("p", { role: "alert" }, props.context.voiceProfilesError)
               : null,
@@ -763,6 +770,17 @@ export function createNarrationReadingPage(
                 return;
               }
               if (version.source_type === "generated") {
+                if (version.activation_basis === "character_one_click_generation") {
+                  if (version.preview_asset === null) {
+                    throw new Error("专属音色试听暂不可用，请刷新音色状态后重试。");
+                  }
+                  await playVoiceVersionPreview(
+                    version.version_id,
+                    version.preview_asset,
+                    new AbortController().signal,
+                  );
+                  return;
+                }
                 const experiments = await listNanoVoiceExperimentsApi(props.novelId);
                 const ready = experiments.items.find((item) => (
                   item.version_id === version.version_id
@@ -1117,6 +1135,7 @@ export function createCharacterVoiceCardPanel(
       h(NanoAdvancedWorkspace, {
         novelId: advancedProps.novelId,
         overview: advancedProps.overview,
+        refreshVersion: advancedProps.profileRefreshVersion,
         characters: [{
           characterId: advancedProps.characterId,
           characterName: advancedProps.characterName,
@@ -1232,10 +1251,11 @@ export function createCharacterVoiceCardPanel(
 
     React.useEffect(() => {
       if (state.phase !== "ready") return;
-      if (state.voiceBindingPhase !== "loading" && state.voiceProfilesPhase !== "loading") return;
+      if (profileRefreshVersion === 0
+        && state.voiceBindingPhase !== "loading" && state.voiceProfilesPhase !== "loading") return;
       const controller = new AbortController();
       const projectionKey = state.projectionKey;
-      if (state.voiceBindingPhase === "loading") {
+      if (state.voiceBindingPhase === "loading" || profileRefreshVersion > 0) {
         void getBinding(
           props.novelId,
           props.characterId,
@@ -1259,7 +1279,7 @@ export function createCharacterVoiceCardPanel(
             : current);
         });
       }
-      if (state.voiceProfilesPhase === "loading") {
+      if (state.voiceProfilesPhase === "loading" || profileRefreshVersion > 0) {
         void getProfiles({
           novelId: props.novelId,
           includeLibrary: true,
@@ -1283,7 +1303,7 @@ export function createCharacterVoiceCardPanel(
         });
       }
       return () => controller.abort();
-    }, [state.phase === "ready" ? state.projectionKey : null]);
+    }, [state.phase === "ready" ? state.projectionKey : null, profileRefreshVersion]);
 
     if (state.projectionKey !== projectionKey) {
       return h(
@@ -1350,7 +1370,6 @@ export function createCharacterVoiceCardPanel(
           };
     const publishChanged = (): void => {
       setProfileRefreshVersion((value) => value + 1);
-      setReloadVersion((value) => value + 1);
       props.onChanged?.();
     };
     const matchAndUse = async (signal: AbortSignal) => {
@@ -1377,7 +1396,7 @@ export function createCharacterVoiceCardPanel(
           throw new NarrationContractError("character_voice_match", "response scope mismatch");
         }
         return {
-          voiceName: matched.selected_preset_id.replace(/^onnx\./, ""),
+          voiceName: officialPresetDisplayName(state.profiles, matched.selected_preset_id),
           presetId: matched.selected_preset_id,
           selectionStillCurrent: matched.selection_still_current,
         };
@@ -1420,7 +1439,7 @@ export function createCharacterVoiceCardPanel(
         const selection = officialVoiceSelectionResult(response);
         assertOfficialVoiceSelectionResult(selection, officialPresetId, target);
         return {
-          voiceName: response.profile.name || presetId.replace(/^onnx\./, ""),
+          voiceName: response.profile.name || "官方音色",
           presetId,
           selectionStillCurrent: selection.selectionStillCurrent,
         };

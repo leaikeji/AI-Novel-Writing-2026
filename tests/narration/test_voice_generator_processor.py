@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+from unittest.mock import AsyncMock, Mock
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -24,14 +27,18 @@ from backend.narration.voice_generator_runtime import (
     EXPECTED_RUNTIME_FINGERPRINT,
     EXPECTED_RUNTIME_IDENTITY,
     HostGenerationReceipt,
+    HostGenerationStatus,
     VoiceGeneratorHostHealth,
     VoiceGeneratorHostRequest,
+    VoiceGeneratorRuntimeError,
 )
 from backend.narration.voice_generator_service import VoiceGeneratorCommandState
 from backend.narration.runtime import (
     EXPECTED_PRODUCTION_MODEL_FINGERPRINT,
     SidecarRuntimeError,
 )
+from backend.narration.audio_pipeline import AudioQualityError
+from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
 
 
 def _lease() -> JobLease:
@@ -329,3 +336,117 @@ async def test_terminal_host_failure_is_persisted_before_it_is_projected() -> No
     assert getattr(failure.value, "code", None) == "GENERATOR_PROCESS_FAILED"
     assert len(repository.host_terminals) == 1
     assert repository.host_terminals[0].status.value == "failed"
+
+
+async def _polling_host(errors: list[Exception]):
+    terminal = await _FailedHost().create(_work().host_request)
+    active = replace(
+        terminal, status=HostGenerationStatus.GENERATING,
+        terminal=False, cancellable=True, retryable=False,
+        failure_code=None, completed_at=None,
+    )
+    host = _FailedHost()
+    host.create = AsyncMock(return_value=active)
+    host.get = AsyncMock(side_effect=[*errors, terminal])
+    host.cancel = AsyncMock()
+    return host
+
+
+@pytest.mark.asyncio
+async def test_missing_poll_responses_retry_same_native_request_with_job_heartbeats() -> None:
+    repository = _Repository()
+    processor = _processor(repository, _Nano(), poll=0)
+    host = await _polling_host([
+        VoiceGeneratorRuntimeError("HOST_UNREACHABLE", "timeout", retryable=True),
+        VoiceGeneratorRuntimeError("HOST_UNREACHABLE", "timeout", retryable=True),
+    ])
+    processor._host = host
+    with pytest.raises(VoiceGeneratorRuntimeError) as failure:
+        await processor._generate(_work())
+    assert failure.value.code == "GENERATOR_PROCESS_FAILED"
+    assert host.create.await_count == 1
+    assert host.get.await_count == 3
+    assert all(call.args == (_work().host_request,) for call in host.get.await_args_list)
+    assert repository.heartbeats == 3
+    assert len(repository.host_terminals) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code,retryable,count", [
+    ("HOST_UNREACHABLE", True, 3),
+    ("HOST_UNREACHABLE", False, 1),
+    ("RESPONSE_SIZE_INVALID", True, 1),
+])
+async def test_host_poll_recovery_is_bounded_and_never_retries_invalid_evidence(
+    code: str, retryable: bool, count: int,
+) -> None:
+    repository = _Repository()
+    processor = _processor(repository, _Nano(), poll=0)
+    host = await _polling_host([
+        VoiceGeneratorRuntimeError(code, "unavailable", retryable=retryable)
+        for _ in range(4)
+    ])
+    processor._host = host
+    with pytest.raises(VoiceGeneratorRuntimeError) as failure:
+        await processor._generate(_work())
+    assert failure.value.code == code
+    assert host.get.await_count == count
+    assert host.create.await_count == 1
+    assert repository.host_terminals == []
+
+
+@pytest.mark.asyncio
+async def test_lost_job_fence_stops_poll_recovery_before_another_host_read() -> None:
+    repository = _Repository(["running", "failed"])
+    processor = _processor(repository, _Nano(), poll=0)
+    host = await _polling_host([
+        VoiceGeneratorRuntimeError("HOST_UNREACHABLE", "timeout", retryable=True),
+    ])
+    processor._host = host
+    with pytest.raises(JobFenceError):
+        await processor._generate(_work())
+    assert host.get.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage,expected_state,expected_code", [
+    ("duration", "failed_nano_validation", "NANO_SHORT_CHINESE_DURATION_IMPLAUSIBLE"),
+    ("unknown_audio", "failed_nano_validation", "NANO_AUDIO_VALIDATION_UNKNOWN"),
+    ("storage", "failed_storage", "VOICE_GENERATOR_STORAGE_FAILED"),
+    ("publication", "failed_storage", "VOICE_GENERATOR_PUBLICATION_FAILED"),
+])
+async def test_validation_and_publication_failures_keep_bounded_stage_evidence(
+    monkeypatch: pytest.MonkeyPatch, stage: str, expected_state: str, expected_code: str
+) -> None:
+    repository = _Repository()
+    repository.advance = Mock()
+    repository.publish = Mock(side_effect=RuntimeError("private SQL statement"))
+    processor = _processor(repository, _Nano())
+    processor._digest_keyring = TEST_DIGEST_KEYRING
+    processor._generate = AsyncMock(return_value=SimpleNamespace(
+        audio_bytes=b"reference", audio_digest=hashlib.sha256(b"reference").hexdigest(),
+    ))
+    processor._storage = SimpleNamespace(publish_media=Mock(
+        side_effect=[object(), OSError("private storage path")] if stage == "storage" else None,
+        return_value=object(),
+    ))
+    monkeypatch.setattr(
+        "backend.narration.voice_generator_processor._require_production_nano_result",
+        lambda _result: "b" * 64,
+    )
+    processing = Mock(return_value=SimpleNamespace(
+        wav_bytes=b"validation", actual_sha256="c" * 64,
+        duration_ms=4000, sample_rate_hz=48000, channels=2,
+    ))
+    if stage in {"duration", "unknown_audio"}:
+        processing.side_effect = AudioQualityError(
+            "synthesis WAV duration is implausible for short Chinese text"
+            if stage == "duration" else "private novel text and token"
+        )
+    monkeypatch.setattr("backend.narration.voice_generator_processor.process_synthesis_wav", processing)
+
+    await processor.process(_lease())
+
+    assert repository.failures == [(VoiceGeneratorCommandState(expected_state), expected_code)]
+    assert repository.publish.call_count == (1 if stage == "publication" else 0)
+    assert "private" not in repr(repository.failures)

@@ -295,6 +295,16 @@ async function settle(): Promise<void> {
 
 
 describe("character voice roster projection", () => {
+  it("does not label a tuned official voice as a newly generated dedicated voice", () => {
+    const tuned = officialVersion({
+      source_type: "generated", activation_basis: "experimental_machine_validated",
+      validation_basis: "machine_validated", quality_state: "accepted",
+    });
+    const rows = buildCharacterVoiceRosterRows(NOVEL_ID, characters, [binding(CHARACTER_A)], [profile(tuned)]);
+    expect(rows[0].sourceLabel).toBe("高级调音");
+    expect(rows[0].sourceGroup).toBe("private");
+  });
+
   it("shows configured gaps and exact official/private source groups without leaking another novel", () => {
     const generated = officialVersion({
       version_id: "99999999-9999-4999-8999-999999999999",
@@ -471,6 +481,38 @@ describe("CharacterVoiceRoster", () => {
     expect(onConfigureCharacter).not.toHaveBeenCalled();
   });
 
+  it("traps focus using visible controls after a disclosure is collapsed and respects IME Escape", async () => {
+    const harness = createHarness();
+    const Roster = createCharacterVoiceRoster(harness.React);
+    const drawerProps = props({ renderConfigurator: () => "配置" });
+    let tree = harness.render(Roster, drawerProps);
+    (findButton(tree, "更换").props.onClick as (event: unknown) => void)({ currentTarget: { focus: vi.fn() } });
+    tree = harness.render(Roster, drawerProps);
+    const dialog = findAll(tree, (element) => element.props.role === "dialog")[0];
+    const first = { focus: vi.fn(), getClientRects: () => [{}] };
+    const lastSummary = { focus: vi.fn(), getClientRects: () => [{}] };
+    const collapsedChild = { focus: vi.fn(), getClientRects: () => [] };
+    const inertChild = { focus: vi.fn(), getClientRects: () => [{}], closest: () => ({}) };
+    (dialog.props.ref as (value: unknown) => void)({
+      focus: vi.fn(), querySelectorAll: () => [first, lastSummary, collapsedChild, inertChild],
+    });
+    await settle();
+    const key = dialog.props.onKeyDown as (event: unknown) => void;
+    const preventDefault = vi.fn();
+    key({ key: "Tab", target: lastSummary, preventDefault, stopPropagation: vi.fn() });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(first.focus).toHaveBeenCalled();
+    key({ key: "Tab", shiftKey: true, target: first, preventDefault, stopPropagation: vi.fn() });
+    expect(lastSummary.focus).toHaveBeenCalled();
+    expect(collapsedChild.focus).not.toHaveBeenCalled();
+    expect(inertChild.focus).not.toHaveBeenCalled();
+    key({ key: "Escape", nativeEvent: { isComposing: true }, target: lastSummary,
+      preventDefault, stopPropagation: vi.fn() });
+    tree = harness.render(Roster, drawerProps);
+    const layer = findAll(tree, (element) => element.props.className === "anw-character-voice-drawer-layer")[0];
+    expect(layer.props.hidden).toBe(false);
+  });
+
   it("has narrow-screen wrapping, 44px targets and visible keyboard focus", () => {
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 768px)");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("min-height: 44px");
@@ -480,8 +522,8 @@ describe("CharacterVoiceRoster", () => {
   });
 
   it("constrains the drawer to one viewport and gives its body the only vertical scrollbar", () => {
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer-layer \{[\s\S]*?grid-template-rows: minmax\(0, 1fr\);[\s\S]*?overflow: hidden;/);
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer \{[\s\S]*?min-height: 0;[\s\S]*?max-height: 100%;[\s\S]*?overflow: hidden;/);
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer-layer \{[^}]*grid-template-rows: minmax\(0, 1fr\);[^}]*overflow: clip;/);
+    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer \{[^}]*min-height: 0;[^}]*max-height: 100%;[^}]*overflow: clip;/);
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toMatch(/\.anw-character-voice-drawer__body \{[\s\S]*?min-height: 0;[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("scrollbar-gutter: stable");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-drawer__body::-webkit-scrollbar-thumb");

@@ -1293,6 +1293,79 @@ async def test_idle_release_unloads_then_next_synthesis_warms_again(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("release_kind", ["heavy", "idle"])
+@pytest.mark.parametrize("outcome", ["success", "failed", "cancelled"])
+async def test_planned_model_release_fences_concurrent_lease_renewal(
+    tmp_path: Path, release_kind: str, outcome: str,
+) -> None:
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+
+    class PausedLifecycle(RecordingLifecycle):
+        async def restart_after_poison(
+            self, reason_code: str, *, previous_generation: int | None = None,
+        ) -> None:
+            entered.set()
+            await resume.wait()
+            if outcome == "failed":
+                raise SidecarRuntimeError("SIDECAR_RESTART_FAILED", "restart failed")
+            await super().restart_after_poison(
+                reason_code, previous_generation=previous_generation,
+            )
+
+    with running_server() as (server, state):
+        lifecycle = PausedLifecycle()
+        lifecycle.state = state
+        adapter = adapter_for(tmp_path, server, lifecycle=lifecycle)
+        old_lease = await adapter.activate()
+        await adapter.warmup()
+        last_activity = adapter._last_model_activity_at
+        assert last_activity is not None
+        release = asyncio.create_task(
+            adapter.release_model_for_heavy_runtime()
+            if release_kind == "heavy"
+            else adapter.release_model_if_idle(300, now=last_activity + 300)
+        )
+        renewal = None
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=3)
+            assert adapter.worker_lease_active is False
+            renewal = asyncio.create_task(adapter.renew_lease())
+            # Run the renewal while the restart is deliberately parked between
+            # the old lease's release and the new lease's acquisition.
+            await asyncio.sleep(0)
+            assert not renewal.done(), "planned unload must not invalidate the worker"
+            if outcome == "cancelled":
+                release.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await release
+            else:
+                resume.set()
+                if outcome == "failed":
+                    with pytest.raises(SidecarRuntimeError, match="restart failed"):
+                        await asyncio.wait_for(release, timeout=3)
+                else:
+                    await asyncio.wait_for(release, timeout=3)
+            if outcome == "success":
+                assert await asyncio.wait_for(renewal, timeout=3) == adapter.lease_generation
+                assert adapter.lease_generation != old_lease
+                assert adapter.model_loaded is False
+                assert adapter.worker_lease_active is True
+            else:
+                with pytest.raises(SidecarRuntimeError) as error:
+                    await asyncio.wait_for(renewal, timeout=3)
+                assert error.value.code == "WORKER_LEASE_INACTIVE"
+                assert adapter.worker_lease_active is False
+        finally:
+            resume.set()
+            tasks = [release] + ([renewal] if renewal is not None else [])
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_adapter_activate_renew_warmup_and_deactivate_is_inert(
     tmp_path: Path,
 ) -> None:
@@ -1457,6 +1530,52 @@ async def test_reference_audio_uses_inline_bytes_and_actual_hash(tmp_path: Path)
         result = await adapter.synthesize(synthesis_request(reference=reference_wav()))
 
         assert result.actual_output_sha256 == hashlib.sha256(result.audio_bytes).hexdigest()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duration_ms", [12_720, 19_200])
+async def test_full_generated_reference_within_producer_bound_is_accepted(
+    tmp_path: Path, duration_ms: int
+) -> None:
+    from backend.narration.voice_generator_runtime import MAX_GENERATED_AUDIO_MILLISECONDS
+    from backend.narration.sidecar_server import MAX_REFERENCE_DURATION_SECONDS
+
+    assert MAX_REFERENCE_DURATION_SECONDS * 1000 == MAX_GENERATED_AUDIO_MILLISECONDS
+    payload = pcm_wav(frames=48 * duration_ms)
+    reference = ReferenceAudioInput(payload, hashlib.sha256(payload).hexdigest())
+    with running_server() as (server, _):
+        adapter = adapter_for(tmp_path, server)
+        await adapter.activate()
+        await adapter.warmup()
+        result = await adapter.synthesize(synthesis_request(reference=reference))
+        assert result.actual_output_sha256 == hashlib.sha256(result.audio_bytes).hexdigest()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_kind", ["duration", "trailing"])
+async def test_reference_rejection_retains_request_identity_without_poisoning(
+    tmp_path: Path, invalid_kind: str
+) -> None:
+    payload = (
+        pcm_wav(frames=48 * 19_200 + 1)
+        if invalid_kind == "duration"
+        else pcm_wav() + b"x"
+    )
+    reference = ReferenceAudioInput(payload, hashlib.sha256(payload).hexdigest())
+    lifecycle = RecordingLifecycle()
+    with running_server() as (server, state):
+        adapter = adapter_for(tmp_path, server, lifecycle=lifecycle)
+        await adapter.activate()
+        await adapter.warmup()
+        with pytest.raises(SidecarRuntimeError) as caught:
+            await adapter.synthesize(synthesis_request(reference=reference))
+        assert caught.value.code == (
+            "REFERENCE_DURATION_INVALID" if invalid_kind == "duration"
+            else "REFERENCE_TRAILING_OR_TRUNCATED"
+        )
+        assert not state.poisoned and not state.active
+        assert lifecycle.reasons == []
+        await adapter.synthesize(synthesis_request())
 
 
 @pytest.mark.asyncio

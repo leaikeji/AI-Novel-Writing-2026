@@ -352,6 +352,43 @@ describe("Nano advanced tuning panel", () => {
       ...NARRATOR_TARGET,
     });
   });
+
+  it("preserves workspace parameter edits across base changes but submits the new base and CAS", () => {
+    const harness = createHarness();
+    const Panel = createNanoAdvancedTuningPanel(harness.React);
+    const props = baseProps({ draftScopeKey: "novel-a:narrator" });
+    let tree = harness.render(Panel, props);
+    (findInput(tree, "anw-nano-tuning-seed").props.onChange as (event: ValueChangeEvent) => void)({ target: { value: "987654321" } });
+    const next = { ...props, basePresetId: "onnx.Zhiming", basePresetDisplayName: "CN 说书",
+      target: { ...NARRATOR_TARGET, expectedSettingsVersion: 8 } };
+    tree = harness.render(Panel, next);
+    expect(findInput(tree, "anw-nano-tuning-seed").props.value).toBe("987654321");
+    (findButton(tree, "创建并使用").props.onClick as () => void)();
+    expect(props.onCreateExperiment).toHaveBeenCalledWith(expect.objectContaining({
+      basePresetId: "onnx.Zhiming", expectedSettingsVersion: 8,
+      parameters: expect.objectContaining({ seed: "987654321" }),
+    }));
+  });
+
+  it.each(["novel-b:narrator", "novel-a:another-character"])("clears edits on workspace scope change to %s", (draftScopeKey) => {
+    const harness = createHarness();
+    const Panel = createNanoAdvancedTuningPanel(harness.React);
+    const props = baseProps({ draftScopeKey: "novel-a:narrator" });
+    let tree = harness.render(Panel, props);
+    (findInput(tree, "anw-nano-tuning-seed").props.onChange as (event: ValueChangeEvent) => void)({ target: { value: "987654321" } });
+    tree = harness.render(Panel, { ...props, draftScopeKey });
+    expect(findInput(tree, "anw-nano-tuning-seed").props.value).toBe("1234");
+  });
+
+  it("keeps the standalone panel's existing base-scoped reset behavior", () => {
+    const harness = createHarness();
+    const Panel = createNanoAdvancedTuningPanel(harness.React);
+    const props = baseProps();
+    let tree = harness.render(Panel, props);
+    (findInput(tree, "anw-nano-tuning-seed").props.onChange as (event: ValueChangeEvent) => void)({ target: { value: "987654321" } });
+    tree = harness.render(Panel, { ...props, basePresetId: "onnx.Zhiming" });
+    expect(findInput(tree, "anw-nano-tuning-seed").props.value).toBe("1234");
+  });
 });
 
 describe("Nano advanced tuning styles", () => {

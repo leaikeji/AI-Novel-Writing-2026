@@ -453,6 +453,19 @@ def _latest_preview_asset_id(
     ``VoicePreview`` rows and leave the legacy version field untouched.
     """
 
+    # Dedicated voices already own an immutable Nano validation publication.
+    # Do not fabricate an expiring VoicePreview or synthesize again to audition it.
+    if version.source_type == "generated" and version.activation_basis == "character_one_click_generation":
+        if version.preview_asset_id is None:
+            return None
+        from .voice_version_media import resolve_voice_version_media
+
+        try:
+            asset = resolve_voice_version_media(store, version.id, version.preview_asset_id, at=at)
+        except NarrationServiceError:
+            return None
+        return asset.id
+
     candidates = store.find_all(
         VoicePreview,
         profile_id=profile.id,

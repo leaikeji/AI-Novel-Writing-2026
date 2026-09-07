@@ -5,8 +5,11 @@ import hashlib
 import io
 import os
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID, uuid4
+from threading import Barrier
+from uuid import UUID, uuid4, uuid5
 import wave
 
 import pytest
@@ -27,11 +30,13 @@ from backend.models import (
     VoiceProfileVersion,
 )
 from backend.narration.contracts import (
+    LOCAL_WORKSPACE_ID,
     NarrationRequestScope,
     SynthesisRequest,
     SynthesisResult,
 )
-from backend.narration.jobs import claim_next_job
+from backend.narration.jobs import JobFenceError, JobLease, claim_next_job
+from backend.narration import generic_voice_pack_service as pack_module
 from backend.narration.generic_voice_pack_service import (
     SqlAlchemyGenericVoicePackService,
     SqlAlchemyGenericVoiceRepository,
@@ -39,9 +44,11 @@ from backend.narration.generic_voice_pack_service import (
 )
 from backend.narration.generic_voice_generation import GENERIC_VOICE_JOB_KIND
 from backend.narration.runtime import EXPECTED_PRODUCTION_MODEL_FINGERPRINT
-from backend.narration.services import NarrationNotFound
+from backend.narration.scheduler import NarrationJobScheduler, SchedulerConfig
+from backend.narration.services import InvalidNarrationState, NarrationNotFound
 from backend.narration.storage import NarrationStorage
 from backend.narration.voice_generator_processor import VoiceGeneratorProcessor
+from backend.narration.voice_generator_service import VoiceGeneratorCommandState
 from backend.narration.voice_generator_runtime import (
     EXPECTED_RUNTIME_FINGERPRINT,
     EXPECTED_RUNTIME_IDENTITY,
@@ -453,3 +460,339 @@ def test_reject_is_monotonic_and_fences_the_current_slot_job(
             job_kinds=(GENERIC_VOICE_JOB_KIND,),
             lease_seconds=900,
         ) is None
+
+
+def _claim_generic(factory: SessionFactory) -> JobLease:
+    with factory() as session:
+        lease = claim_next_job(
+            session,
+            scope=NarrationRequestScope.fixed_local(),
+            lease_owner=f"tts56-pool:{uuid4()}",
+            resource_classes=("moss-nano",),
+            job_kinds=(GENERIC_VOICE_JOB_KIND,),
+            lease_seconds=900,
+        )
+        assert lease is not None
+        session.commit()
+        return lease
+
+
+def _processor(factory: SessionFactory, tmp_path: Path) -> VoiceGeneratorProcessor:
+    models = tmp_path / "models"
+    media = tmp_path / "media"
+    models.mkdir(exist_ok=True)
+    media.mkdir(exist_ok=True)
+    return VoiceGeneratorProcessor(
+        repository=SqlAlchemyGenericVoiceRepository(factory),  # type: ignore[arg-type]
+        host=_Host(),
+        nano_adapter=_Nano(),  # type: ignore[arg-type]
+        storage=NarrationStorage(models_root=models, media_root=media),
+        digest_keyring=TEST_DIGEST_KEYRING,
+        poll_seconds=0.01,
+    )
+
+
+def _draft_seeds(factory: SessionFactory, pack_id: UUID) -> dict[str, int]:
+    with factory() as session:
+        return dict(session.execute(
+            select(GenericVoicePackVersionSlot.slot_key, GenericVoiceDesignDraft.seed)
+            .join(GenericVoiceDesignDraft, GenericVoiceDesignDraft.id == GenericVoicePackVersionSlot.design_draft_id)
+            .where(GenericVoicePackVersionSlot.pack_version_id == pack_id)
+        ).all())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_path", ["worker_failure", "lease_expired", "legacy_failed_child"])
+async def test_failed_job_closes_pack_and_retry_reuses_validated_slot(
+    generic_pack_pg: tuple[Connection, SessionFactory], tmp_path: Path, failure_path: str
+) -> None:
+    _connection, factory = generic_pack_pg
+    service = SqlAlchemyGenericVoicePackService(factory)
+    original = service.build(idempotency_key=f"tts56-recovery-{failure_path}")
+    await _processor(factory, tmp_path).process(_claim_generic(factory))
+    before = service.get_load_resource()
+    accepted = next(slot for slot in before.pack.slots if slot.state == "validated")
+    lease = _claim_generic(factory)
+    repository = SqlAlchemyGenericVoiceRepository(factory)
+    work = repository.load_and_mark_generating(lease)
+    if failure_path == "worker_failure":
+        repository.fail(
+            work, state=VoiceGeneratorCommandState.FAILED_GENERATION,
+            failure_code="HOST_TEMPORARILY_UNAVAILABLE", classification="retryable",
+        )
+    else:
+        with factory() as session:
+            attempt = session.get(BackgroundJobAttempt, lease.fence.attempt_id)
+            assert attempt is not None
+            attempt.lease_until = datetime.now(UTC) - timedelta(seconds=1)
+            if failure_path == "legacy_failed_child":
+                command = session.scalar(select(GenericVoiceGenerationCommand).where(
+                    GenericVoiceGenerationCommand.background_job_id == lease.fence.job_id
+                ))
+                assert command is not None
+                command.state = "failed"
+                command.completed_at = datetime.now(UTC)
+            session.commit()
+        scheduler = NarrationJobScheduler(
+            factory,
+            config=SchedulerConfig(lease_owner="tts56-recovery", job_kinds=(GENERIC_VOICE_JOB_KIND,)),
+            terminalizers={GENERIC_VOICE_JOB_KIND: repository.terminalize_job_in_session},
+        )
+        scheduler.maintain_once()
+    failed = service.get_load_resource()
+    assert failed.pack.state == "failed"
+    assert failed.command is not None and failed.command.terminal and failed.command.retryable
+    assert failed.pack.prepared_slots == 1
+    assert sum(slot.state == "failed" for slot in failed.pack.slots) == 1
+    with factory() as session:
+        repository.terminalize_job_in_session(session, job_id=lease.fence.job_id)
+        session.commit()
+    successor = service.retry(original.command.command_id)
+    assert successor.pack.pack_version_id != original.pack.pack_version_id
+    assert _draft_seeds(factory, successor.pack.pack_version_id) == _draft_seeds(factory, original.pack.pack_version_id)
+    reused = next(slot for slot in successor.pack.slots if slot.slot_key == accepted.slot_key)
+    assert reused.state == "reused" and reused.voice_version_id == accepted.voice_version_id
+    with factory() as session:
+        repository.terminalize_job_in_session(session, job_id=lease.fence.job_id)
+        session.commit()
+    assert service.get_load_resource().pack.state == "building"
+
+
+def test_cancelled_running_job_does_not_revive_after_late_failure(
+    generic_pack_pg: tuple[Connection, SessionFactory],
+) -> None:
+    _connection, factory = generic_pack_pg
+    service = SqlAlchemyGenericVoicePackService(factory)
+    original = service.build(idempotency_key="tts56-running-cancel")
+    repository = SqlAlchemyGenericVoiceRepository(factory)
+    work = repository.load_and_mark_generating(_claim_generic(factory))
+    service.cancel(original.command.command_id)
+    service.cancel(original.command.command_id)
+    with factory() as session:
+        assert session.get(BackgroundJob, work.lease.fence.job_id).state == "cancel_requested"
+    repository.acknowledge_cancel(work)
+    with pytest.raises(JobFenceError):
+        repository.fail(work, state=VoiceGeneratorCommandState.FAILED_GENERATION, failure_code="LATE_FAILURE")
+    cancelled = service.get_build_resource(original.command.command_id)
+    assert cancelled.pack.state == "superseded" and cancelled.command.state == "cancelled"
+    successor = service.build(idempotency_key="tts56-resume-cancelled")
+    with factory() as session:
+        repository.terminalize_job_in_session(session, job_id=work.lease.fence.job_id)
+        session.commit()
+    assert service.get_load_resource().pack.pack_version_id == successor.pack.pack_version_id
+    assert service.get_load_resource().pack.state == "building"
+
+
+@pytest.mark.asyncio
+async def test_active_regeneration_is_atomic_bounded_and_replayable(
+    generic_pack_pg: tuple[Connection, SessionFactory], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _connection, factory = generic_pack_pg
+    service = SqlAlchemyGenericVoicePackService(factory)
+    original = service.build(idempotency_key="tts56-active-original")
+    processor = _processor(factory, tmp_path)
+    for _ in range(24):
+        await processor.process(_claim_generic(factory))
+    active = service.get_load_resource().pack
+    assert active.state == "active" and service.active_pack_ready()
+    target = active.slots[0]
+    expected = active.pack_version_id
+    old_seeds = _draft_seeds(factory, expected)
+
+    def fail_enqueue(*_args, **_kwargs):
+        raise RuntimeError("injected successor enqueue failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pack_module, "_enqueue_next_slot", fail_enqueue)
+        with pytest.raises(RuntimeError, match="injected successor"):
+            service.regenerate(slot_key=target.slot_key, expected_pack_version_id=expected,
+                               idempotency_key="tts56-atomic-regeneration")
+    unchanged = service.get_load_resource().pack
+    assert unchanged.state == "active" and unchanged.pack_version_id == expected
+    assert unchanged.slots[0].state == "validated"
+    assert service.active_pack_ready()
+    with pytest.raises(ValueError):
+        service.regenerate(slot_key=target.slot_key, expected_pack_version_id=expected, idempotency_key="a" * 129)
+    assert service.get_load_resource().pack.state == "active"
+
+    key = "a" * 128
+    successor = service.regenerate(slot_key=target.slot_key, expected_pack_version_id=expected, idempotency_key=key)
+    new_seeds = _draft_seeds(factory, successor.pack.pack_version_id)
+    assert 0 <= new_seeds[target.slot_key] <= 2**63 - 1
+    assert new_seeds[target.slot_key] not in set(old_seeds.values())
+    assert {k: v for k, v in new_seeds.items() if k != target.slot_key} == {
+        k: v for k, v in old_seeds.items() if k != target.slot_key
+    }
+    assert successor.pack.prepared_slots == 23
+    assert successor.pack.slots[0].state == "generating"
+    assert service.get_build_resource(original.command.command_id).pack.state == "retired_for_new_use"
+    for old, new in zip(active.slots[1:], successor.pack.slots[1:], strict=True):
+        assert new.state == "reused" and new.voice_version_id == old.voice_version_id
+    with factory() as session:
+        rows = tuple(session.scalars(select(GenericVoicePackVersionSlot).where(
+            GenericVoicePackVersionSlot.pack_version_id == successor.pack.pack_version_id,
+            GenericVoicePackVersionSlot.state == "reused",
+        )))
+        assert len(rows) == 23
+        assert all(row.reference_audio_sha256 and row.validation_audio_sha256 for row in rows)
+    replay = service.regenerate(slot_key=target.slot_key, expected_pack_version_id=expected, idempotency_key=key)
+    assert replay.pack.pack_version_id == successor.pack.pack_version_id
+    assert _draft_seeds(factory, replay.pack.pack_version_id) == new_seeds
+    await processor.process(_claim_generic(factory))
+    replay = service.regenerate(slot_key=target.slot_key, expected_pack_version_id=expected, idempotency_key=key)
+    assert replay.pack.state == "active" and replay.pack.pack_version_id == successor.pack.pack_version_id
+    assert replay.pack.slots[0].voice_version_id != target.voice_version_id
+    with factory() as session:
+        version = session.get(VoiceProfileVersion, replay.pack.slots[0].voice_version_id)
+        assert version.seed == new_seeds[target.slot_key]
+    with pytest.raises(InvalidNarrationState):
+        service.regenerate(slot_key=target.slot_key, expected_pack_version_id=replay.pack.pack_version_id,
+                           idempotency_key=key)
+    with pytest.raises(InvalidNarrationState):
+        service.regenerate(slot_key=target.slot_key, expected_pack_version_id=expected,
+                           idempotency_key="tts56-stale-cas")
+    assert service.active_pack_ready()
+
+    second = service.regenerate(slot_key=target.slot_key, expected_pack_version_id=replay.pack.pack_version_id,
+                                idempotency_key="tts56-second-explicit-regeneration")
+    second_seed = _draft_seeds(factory, second.pack.pack_version_id)[target.slot_key]
+    assert second_seed not in {old_seeds[target.slot_key], new_seeds[target.slot_key]}
+    repository = SqlAlchemyGenericVoiceRepository(factory)
+    work = repository.load_and_mark_generating(_claim_generic(factory))
+    assert work.seed == work.host_request.seed == second_seed
+    repository.fail(work, state=VoiceGeneratorCommandState.FAILED_GENERATION, failure_code="HOST_FAILURE")
+    retry = service.retry(second.command.command_id)
+    assert _draft_seeds(factory, retry.pack.pack_version_id)[target.slot_key] == second_seed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pack_state", ["building", "failed"])
+async def test_regenerate_partial_pack_replaces_target_not_accepted_siblings(
+    generic_pack_pg: tuple[Connection, SessionFactory], tmp_path: Path, pack_state: str
+) -> None:
+    _connection, factory = generic_pack_pg
+    service = SqlAlchemyGenericVoicePackService(factory)
+    service.build(idempotency_key=f"tts56-partial-{pack_state}")
+    processor = _processor(factory, tmp_path)
+    for _ in range(2):
+        await processor.process(_claim_generic(factory))
+    if pack_state == "failed":
+        repo = SqlAlchemyGenericVoiceRepository(factory)
+        work = repo.load_and_mark_generating(_claim_generic(factory))
+        repo.fail(work, state=VoiceGeneratorCommandState.FAILED_GENERATION, failure_code="HOST_FAILURE")
+    original = service.get_load_resource().pack
+    assert original.state == pack_state
+    target, kept = original.slots[:2]
+    successor = service.regenerate(slot_key=target.slot_key, expected_pack_version_id=original.pack_version_id,
+                                   idempotency_key=f"tts56-partial-replace-{pack_state}")
+    assert successor.pack.pack_version_id != original.pack_version_id
+    assert successor.pack.prepared_slots == 1
+    assert successor.pack.slots[0].state == "generating"
+    assert successor.pack.slots[0].voice_version_id is None
+    assert successor.pack.slots[1].state == "reused"
+    assert successor.pack.slots[1].voice_version_id == kept.voice_version_id
+    await processor.process(_claim_generic(factory))
+    assert service.get_load_resource().pack.slots[0].voice_version_id != target.voice_version_id
+
+
+@pytest.mark.asyncio
+async def test_explicit_reject_then_continue_changes_only_rejected_seed(
+    generic_pack_pg: tuple[Connection, SessionFactory], tmp_path: Path,
+) -> None:
+    _connection, factory = generic_pack_pg
+    service = SqlAlchemyGenericVoicePackService(factory)
+    service.build(idempotency_key="tts56-reject-continue-original")
+    processor = _processor(factory, tmp_path)
+    for _ in range(2):
+        await processor.process(_claim_generic(factory))
+    original = service.get_load_resource().pack
+    target = original.slots[0]
+    original_seeds = _draft_seeds(factory, original.pack_version_id)
+    service.reject(slot_key=target.slot_key, expected_pack_version_id=original.pack_version_id)
+    successor = service.retry(original.pack_version_id)
+    seeds = _draft_seeds(factory, successor.pack.pack_version_id)
+    assert seeds[target.slot_key] != original_seeds[target.slot_key]
+    assert successor.pack.slots[1].state == "reused"
+    assert seeds[original.slots[1].slot_key] == original_seeds[original.slots[1].slot_key]
+    assert service.retry(original.pack_version_id).pack.pack_version_id == successor.pack.pack_version_id
+    await processor.process(_claim_generic(factory))
+    assert service.get_load_resource().pack.slots[0].voice_version_id != target.voice_version_id
+
+
+@pytest.mark.parametrize("same_key", [True, False])
+def test_concurrent_first_builds_return_one_durable_command(same_key: bool) -> None:
+    # This test needs committed visibility and an exclusive disposable database,
+    # not the single-connection savepoint fixture.  Clean only these exact IDs.
+    engine = create_engine(
+        _live_url(), pool_pre_ping=True,
+        connect_args={"options": "-c statement_timeout=15000 -c lock_timeout=10000"},
+    )
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    keys = [f"tts56-concurrent:{uuid4()}", f"tts56-concurrent:{uuid4()}"]
+    if same_key:
+        keys[1] = keys[0]
+    ids = tuple(uuid5(LOCAL_WORKSPACE_ID, f"generic-voice-pack-build/1:{key}") for key in keys)
+    with engine.connect() as connection:
+        assert_database_at_repository_head(connection)
+        assert connection.scalar(select(text("count(*)")).select_from(GenericVoicePackVersion)) == 0, (
+            "concurrent generic-pack test requires an exclusively assigned empty disposable database"
+        )
+    barrier = Barrier(2)
+
+    def build(key: str):
+        barrier.wait(timeout=10)
+        return SqlAlchemyGenericVoicePackService(factory).build(idempotency_key=key)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(build, keys))
+        assert results[0].command.command_id == results[1].command.command_id
+        with factory() as session:
+            assert session.scalar(select(text("count(*)")).select_from(GenericVoicePackVersion)) == 1
+            assert session.scalar(select(text("count(*)")).select_from(GenericVoiceGenerationCommand)) == 1
+        repository = SqlAlchemyGenericVoiceRepository(factory)
+        work = repository.load_and_mark_generating(_claim_generic(factory))
+        race = Barrier(2)
+
+        def cancel_or_fail(action: str) -> str:
+            race.wait(timeout=10)
+            try:
+                if action == "cancel":
+                    SqlAlchemyGenericVoicePackService(factory).cancel(results[0].command.command_id)
+                else:
+                    repository.fail(work, state=VoiceGeneratorCommandState.FAILED_GENERATION,
+                                    failure_code="CONCURRENT_HOST_FAILURE")
+                return "completed"
+            except (InvalidNarrationState, JobFenceError):
+                # The other action won its authoritative fence.
+                return "fenced"
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = list(executor.map(cancel_or_fail, ("cancel", "fail")))
+        assert "completed" in outcomes
+        with factory() as session:
+            cancellation_pending = session.get(BackgroundJob, work.lease.fence.job_id).state == "cancel_requested"
+        if cancellation_pending:
+            repository.acknowledge_cancel(work)
+        settled = SqlAlchemyGenericVoicePackService(factory).get_load_resource()
+        assert settled.command.terminal and settled.pack.state in {"failed", "superseded"}
+    finally:
+        with factory() as session:
+            commands = tuple(session.scalars(select(GenericVoiceGenerationCommand).where(
+                GenericVoiceGenerationCommand.pack_version_id.in_(ids)
+            )))
+            jobs = tuple(command.background_job_id for command in commands)
+            drafts = tuple(session.scalars(select(GenericVoicePackVersionSlot.design_draft_id).where(
+                GenericVoicePackVersionSlot.pack_version_id.in_(ids)
+            )))
+            assert all(command.state in {"queued", "cancelled", "failed"}
+                       and command.voice_version_id is None for command in commands)
+            session.execute(text("SET LOCAL session_replication_role=replica"))
+            session.execute(delete(GenericVoicePackVersionSlot).where(GenericVoicePackVersionSlot.pack_version_id.in_(ids)))
+            session.execute(delete(GenericVoiceGenerationCommand).where(GenericVoiceGenerationCommand.pack_version_id.in_(ids)))
+            session.execute(delete(BackgroundJobAttempt).where(BackgroundJobAttempt.job_id.in_(jobs)))
+            session.execute(delete(BackgroundJob).where(BackgroundJob.id.in_(jobs)))
+            session.execute(delete(GenericVoicePackVersion).where(GenericVoicePackVersion.id.in_(ids)))
+            session.execute(delete(GenericVoiceDesignDraft).where(GenericVoiceDesignDraft.id.in_(drafts)))
+            session.commit()
+        engine.dispose()

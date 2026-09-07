@@ -59,10 +59,13 @@ export function characterCastUiStatus(
     return { ...common, phase: "applied", message: "整书智能配音已完成并应用。" };
   }
   if (plan.state === "ready_applied_with_warnings") {
+    const blockedTargets = plan.items.filter((item) => item.state === "blocked").length;
     return {
       ...common,
       phase: "warning",
-      message: `已完成可安全应用的配音；${plan.warnings.length} 项需手动处理。`,
+      message: blockedTargets > 0
+        ? `已应用可用配音；${blockedTargets} 个目标未完成，可重新规划或手动选择。`
+        : "整书智能配音已完成；部分声音按现有设置保留或复用。",
     };
   }
   if (plan.state === "ready_unapplied") {

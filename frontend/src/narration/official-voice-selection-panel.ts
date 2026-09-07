@@ -292,10 +292,18 @@ export function createOfficialVoiceSelectionPanel(
     props: OfficialVoiceSelectionPanelProps,
   ): unknown {
     const [reloadVersion, setReloadVersion] = React.useState(0);
-    const [state, setState] = React.useState<LoadState>({ phase: "loading" });
     const scope = props.target.kind === "character"
       ? `${props.novelId}:character:${props.target.characterId}`
       : `${props.novelId}:narrator`;
+    const [loaded, setLoaded] = React.useState<LoadState & { readonly scope: string }>({
+      phase: "loading", scope,
+    });
+    const scopeRef = React.useRef(scope);
+    scopeRef.current = scope;
+    const loadAbortRef = React.useRef<AbortController | null>(null);
+    // A target switch must hide the previous target before effects run. Within
+    // one target, revalidation must not unmount the focused radio or its list.
+    const state: LoadState = loaded.scope === scope ? loaded : { phase: "loading" };
     const projectionBindingVersion = props.projection?.phase === "ready"
       ? props.projection.binding?.version ?? null
       : null;
@@ -308,12 +316,14 @@ export function createOfficialVoiceSelectionPanel(
 
     React.useEffect(() => {
       const controller = new AbortController();
-      setState({ phase: "loading" });
+      loadAbortRef.current = controller;
+      setLoaded((current) => current.scope === scope && current.phase === "ready"
+        ? current : { phase: "loading", scope });
       if (props.projection?.phase === "loading") {
         return () => controller.abort();
       }
       if (props.projection?.phase === "error") {
-        setState({ phase: "error", message: props.projection.message });
+        setLoaded({ phase: "error", message: props.projection.message, scope });
         return () => controller.abort();
       }
       const bindingRequest = props.projection?.phase === "ready"
@@ -337,26 +347,30 @@ export function createOfficialVoiceSelectionPanel(
         profilesRequest,
         bindingRequest,
       ]).then(([catalogWire, profileList, binding]) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || scopeRef.current !== scope) return;
         const catalog = officialVoiceCatalogFromWire(catalogWire);
-        setState({
-          phase: "ready",
-          catalog,
-          profiles: profileList.items,
-          binding,
-          activePresetId: activeOfficialPresetId(
-            props.settings,
+        setLoaded((current) => current.scope === scope && current.phase === "ready"
+          && (current.settingsVersion > props.settings.version
+            || (current.bindingVersion ?? -1) > (binding?.version ?? -1))
+          ? current : {
+            phase: "ready",
+            scope,
+            catalog,
+            profiles: profileList.items,
             binding,
-            props.target,
-            profileList.items,
-          ),
-          settingsVersion: props.settings.version,
-          targetLanguage: binding?.language ?? props.settings.values.language,
-          bindingVersion: binding?.version ?? null,
-        });
+            activePresetId: activeOfficialPresetId(
+              props.settings,
+              binding,
+              props.target,
+              profileList.items,
+            ),
+            settingsVersion: props.settings.version,
+            targetLanguage: binding?.language ?? props.settings.values.language,
+            bindingVersion: binding?.version ?? null,
+          });
       }).catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({ phase: "error", message: errorMessage(reason) });
+        if (controller.signal.aborted || scopeRef.current !== scope) return;
+        setLoaded({ phase: "error", message: errorMessage(reason), scope });
       });
       return () => controller.abort();
     }, [
@@ -426,7 +440,10 @@ export function createOfficialVoiceSelectionPanel(
         signal,
       ),
       onApplied: (result: OfficialVoiceSelectionResult) => {
-        setState((current) => current.phase === "ready"
+        if (scopeRef.current !== scope) return;
+        // An older in-flight read must not replace the authoritative receipt.
+        loadAbortRef.current?.abort();
+        setLoaded((current) => current.scope === scope && current.phase === "ready"
           ? {
             ...current,
             activePresetId: result.presetId,

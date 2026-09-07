@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createVoicePreviewPlayback,
   fetchGenericVoiceSlotObjectUrl,
+  fetchVoiceVersionObjectUrl,
   fetchVoicePreviewObjectUrl,
   type VoicePreviewPlaybackReactRuntime,
 } from "./voice-preview-playback";
@@ -43,6 +44,26 @@ function preview(path = `/media-assets/${ASSET_ID}/content`): VoicePreviewResour
 
 
 describe("voice preview controlled playback", () => {
+  it("reads dedicated validation audio only with its exact version scope and validates bytes", async () => {
+    const host = { fetch: vi.fn(async () => new Response(
+      new Blob(["WAVE"], { type: "audio/wav" }),
+      { status: 200, headers: { "Content-Type": "audio/wav", "Content-Length": "4" } },
+    )) };
+    const objectUrls = { createObjectURL: vi.fn(() => "blob:dedicated"), revokeObjectURL: vi.fn() };
+    const asset = preview().asset!;
+    await expect(fetchVoiceVersionObjectUrl(VERSION_ID, asset, { host, objectUrls }))
+      .resolves.toBe("blob:dedicated");
+    expect(host.fetch).toHaveBeenCalledWith(`/ai-novel-world-2026/media-assets/${ASSET_ID}/content`, {
+      method: "GET",
+      headers: { Accept: "audio/wav", "X-Narration-Voice-Version-Id": VERSION_ID },
+      signal: undefined,
+    });
+    await expect(fetchVoiceVersionObjectUrl("invalid", asset, { host, objectUrls })).rejects.toThrow();
+    await expect(fetchVoiceVersionObjectUrl(VERSION_ID, { ...asset, byte_size: 5 }, { host, objectUrls }))
+      .rejects.toThrow("大小");
+    expect(objectUrls.createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
   it("loads a persisted generic slot preview with only the slot authorization header", async () => {
     const host = {
       fetch: vi.fn(async () => new Response(

@@ -128,18 +128,19 @@ export async function fetchVoicePreviewObjectUrl(
 }
 
 
-/** Load one persisted generic-slot validation asset through its narrow scope header. */
-export async function fetchGenericVoiceSlotObjectUrl(
-  slotId: string,
+/** Persisted validation audio still requires an exact scope, never a bare asset URL. */
+async function fetchScopedVoiceObjectUrl(
+  scopeId: string,
   asset: MediaAssetLink,
+  header: "X-Narration-Generic-Voice-Slot-Id" | "X-Narration-Voice-Version-Id",
   options: {
     readonly host?: VoicePreviewHost;
     readonly objectUrls?: VoicePreviewObjectUrlApi;
     readonly signal?: AbortSignal;
   } = {},
 ): Promise<string> {
-  if (!CANONICAL_UUID.test(slotId)) {
-    throw new VoicePreviewPlaybackError("通用音色槽位标识无效。");
+  if (!CANONICAL_UUID.test(scopeId)) {
+    throw new VoicePreviewPlaybackError("试听音色范围标识无效。");
   }
   const path = mediaPath(asset);
   const host = options.host ?? window.QwenPaw.host;
@@ -148,7 +149,7 @@ export async function fetchGenericVoiceSlotObjectUrl(
     method: "GET",
     headers: {
       Accept: asset.mime_type,
-      "X-Narration-Generic-Voice-Slot-Id": slotId,
+      [header]: scopeId,
     },
     signal: options.signal,
   });
@@ -158,6 +159,24 @@ export async function fetchGenericVoiceSlotObjectUrl(
   const blob = await response.blob();
   assertMediaResponse(response, asset, blob);
   return objectUrls.createObjectURL(blob);
+}
+
+
+export function fetchGenericVoiceSlotObjectUrl(
+  slotId: string,
+  asset: MediaAssetLink,
+  options: { readonly host?: VoicePreviewHost; readonly objectUrls?: VoicePreviewObjectUrlApi; readonly signal?: AbortSignal } = {},
+): Promise<string> {
+  return fetchScopedVoiceObjectUrl(slotId, asset, "X-Narration-Generic-Voice-Slot-Id", options);
+}
+
+
+export function fetchVoiceVersionObjectUrl(
+  versionId: string,
+  asset: MediaAssetLink,
+  options: { readonly host?: VoicePreviewHost; readonly objectUrls?: VoicePreviewObjectUrlApi; readonly signal?: AbortSignal } = {},
+): Promise<string> {
+  return fetchScopedVoiceObjectUrl(versionId, asset, "X-Narration-Voice-Version-Id", options);
 }
 
 
@@ -212,6 +231,15 @@ export async function playGenericVoiceSlotPreview(
   signal: AbortSignal,
 ): Promise<void> {
   await playObjectUrl(fetchGenericVoiceSlotObjectUrl(slotId, asset, { signal }), signal);
+}
+
+
+export async function playVoiceVersionPreview(
+  versionId: string,
+  asset: MediaAssetLink,
+  signal: AbortSignal,
+): Promise<void> {
+  await playObjectUrl(fetchVoiceVersionObjectUrl(versionId, asset, { signal }), signal);
 }
 
 

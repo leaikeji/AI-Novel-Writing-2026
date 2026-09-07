@@ -18,8 +18,25 @@ import sys
 import wave
 
 
-AUDIO_PIPELINE_VERSION = "narration-audio-pipeline/1"
+AUDIO_PIPELINE_VERSION = "narration-audio-pipeline/2"
 SHORT_CHINESE_DURATION_POLICY_VERSION = "nano-short-chinese-duration/2"
+
+# ITU-R BS.1770 K-weighting coefficients for the pipeline's fixed 48 kHz rate.
+# Keeping them local and frozen avoids adding a native DSP dependency to the
+# Sidecar while still measuring programme loudness instead of raw PCM energy.
+_K_WEIGHTING_SHELF_B = (
+    1.53512485958697,
+    -2.69169618940638,
+    1.19839281085285,
+)
+_K_WEIGHTING_SHELF_A = (1.0, -1.69065929318241, 0.73248077421585)
+_K_WEIGHTING_HIGHPASS_B = (1.0, -2.0, 1.0)
+_K_WEIGHTING_HIGHPASS_A = (1.0, -1.99004745483398, 0.99007225036621)
+_LOUDNESS_OFFSET_DB = -0.691
+_LOUDNESS_ABSOLUTE_GATE_LUFS = -70.0
+_LOUDNESS_RELATIVE_GATE_DB = -10.0
+_LOUDNESS_BLOCK_MS = 400
+_LOUDNESS_HOP_MS = 100
 
 _HAN_CODEPOINT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _SHORT_CHINESE_PUNCTUATION = frozenset(
@@ -37,6 +54,34 @@ class AudioFormatError(AudioPipelineError):
 
 class AudioQualityError(AudioPipelineError):
     """The decoded samples fail a frozen quality boundary."""
+
+
+def audio_validation_failure_evidence(error: BaseException) -> dict[str, object] | None:
+    """Return the shared bounded diagnostic, never arbitrary exception text."""
+
+    if not isinstance(error, (AudioFormatError, AudioQualityError)):
+        return None
+    reasons = {
+        "synthesis WAV is empty or not bytes": "WAV_EMPTY_OR_NOT_BYTES",
+        "synthesis WAV exceeds the bounded input size": "WAV_INPUT_TOO_LARGE",
+        "synthesis WAV must contain uncompressed PCM": "WAV_NOT_PCM",
+        "synthesis WAV container is corrupt": "WAV_CONTAINER_CORRUPT",
+        "synthesis WAV must be 48 kHz stereo signed 16-bit PCM": "WAV_FORMAT_MISMATCH",
+        "synthesis WAV PCM payload is empty or truncated": "WAV_PAYLOAD_EMPTY_OR_TRUNCATED",
+        "synthesis WAV frame count differs from its payload": "WAV_FRAME_COUNT_MISMATCH",
+        "synthesis WAV duration is outside segment bounds": "WAV_DURATION_OUT_OF_BOUNDS",
+        "synthesis WAV sample count is inconsistent": "WAV_SAMPLE_COUNT_MISMATCH",
+        "synthesis WAV is silent or below the speech floor": "WAV_SILENT",
+        "synthesis WAV exceeds the clipping limit": "WAV_CLIPPING_LIMIT_EXCEEDED",
+        "synthesis WAV duration drift exceeds the frozen limit": "WAV_DURATION_DRIFT",
+        "synthesis WAV duration is implausible for short Chinese text": "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+        "synthesis WAV has no measurable programme loudness": "WAV_LOUDNESS_UNMEASURABLE",
+        "audio processing changed the segment duration": "POSTPROCESS_DURATION_CHANGED",
+    }
+    return {
+        "schema_version": "narration-audio-validation-failure/1",
+        "reason_code": reasons.get(str(error), "AUDIO_VALIDATION_UNKNOWN"),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +128,8 @@ class AudioPipelinePolicy:
     maximum_input_bytes: int = 96 * 1024 * 1024
     silence_rms_dbfs: float = -55.0
     maximum_clipped_fraction: float = 0.001
-    target_rms_dbfs: float = -20.0
-    maximum_gain_db: float = 6.0
+    target_loudness_lufs: float = -18.0
+    maximum_gain_db: float = 18.0
     peak_limit_dbfs: float = -1.0
     seam_fade_ms: int = 3
     maximum_duration_drift_ms: int = 40
@@ -116,8 +161,8 @@ class AudioPipelinePolicy:
             raise AudioPipelineError("silence threshold must be between -120 and 0 dBFS")
         if not 0.0 <= self.maximum_clipped_fraction <= 1.0:
             raise AudioPipelineError("clipping fraction must be between zero and one")
-        if not -60.0 <= self.target_rms_dbfs < 0.0:
-            raise AudioPipelineError("target RMS must be between -60 and 0 dBFS")
+        if not -60.0 <= self.target_loudness_lufs < 0.0:
+            raise AudioPipelineError("target loudness must be between -60 and 0 LUFS")
         if not 0.0 <= self.maximum_gain_db <= 24.0:
             raise AudioPipelineError("maximum gain must be between zero and 24 dB")
         if not -12.0 <= self.peak_limit_dbfs < 0.0:
@@ -138,6 +183,7 @@ class AudioInspection:
     duration_ms: int
     peak_dbfs: float
     rms_dbfs: float
+    integrated_loudness_lufs: float
     clipped_sample_count: int
     clipped_fraction: float
     actual_sha256: str
@@ -154,6 +200,7 @@ class ProcessedPcmWav:
     input_inspection: AudioInspection
     output_inspection: AudioInspection
     applied_gain_db: float
+    loudness_target_limited: bool
     seam_fade_ms: int
     processing_fingerprint: str
 
@@ -189,6 +236,111 @@ def _dbfs(value: float) -> float:
     if value <= 0:
         return -120.0
     return max(-120.0, 20.0 * math.log10(value / 32768.0))
+
+
+def _integrated_loudness_lufs(
+    samples: array[int],
+    *,
+    sample_rate_hz: int,
+    channels: int,
+) -> float:
+    """Measure gated K-weighted programme loudness without native dependencies."""
+
+    if sample_rate_hz != 48_000:
+        raise AudioPipelineError("programme loudness coefficients require 48 kHz PCM")
+    frame_count = len(samples) // channels
+    hop_frames = round(sample_rate_hz * _LOUDNESS_HOP_MS / 1000)
+    block_hops = _LOUDNESS_BLOCK_MS // _LOUDNESS_HOP_MS
+    # Direct-form state is kept in fixed channel arrays. Avoiding a new state
+    # object for every sample keeps this bounded pass cheap for long segments.
+    shelf_x1 = [0.0] * channels
+    shelf_x2 = [0.0] * channels
+    shelf_y1 = [0.0] * channels
+    shelf_y2 = [0.0] * channels
+    highpass_x1 = [0.0] * channels
+    highpass_x2 = [0.0] * channels
+    highpass_y1 = [0.0] * channels
+    highpass_y2 = [0.0] * channels
+    hop_square_sums: list[tuple[float, int]] = []
+    square_sum = 0.0
+    frames_in_hop = 0
+
+    sb0, sb1, sb2 = _K_WEIGHTING_SHELF_B
+    _sa0, sa1, sa2 = _K_WEIGHTING_SHELF_A
+    hb0, hb1, hb2 = _K_WEIGHTING_HIGHPASS_B
+    _ha0, ha1, ha2 = _K_WEIGHTING_HIGHPASS_A
+    for frame in range(frame_count):
+        offset = frame * channels
+        for channel in range(channels):
+            sample = samples[offset + channel] / 32768.0
+            shelf = (
+                sb0 * sample
+                + sb1 * shelf_x1[channel]
+                + sb2 * shelf_x2[channel]
+                - sa1 * shelf_y1[channel]
+                - sa2 * shelf_y2[channel]
+            )
+            shelf_x2[channel] = shelf_x1[channel]
+            shelf_x1[channel] = sample
+            shelf_y2[channel] = shelf_y1[channel]
+            shelf_y1[channel] = shelf
+            weighted = (
+                hb0 * shelf
+                + hb1 * highpass_x1[channel]
+                + hb2 * highpass_x2[channel]
+                - ha1 * highpass_y1[channel]
+                - ha2 * highpass_y2[channel]
+            )
+            highpass_x2[channel] = highpass_x1[channel]
+            highpass_x1[channel] = shelf
+            highpass_y2[channel] = highpass_y1[channel]
+            highpass_y1[channel] = weighted
+            square_sum += weighted * weighted
+        frames_in_hop += 1
+        if frames_in_hop == hop_frames:
+            hop_square_sums.append((square_sum, frames_in_hop))
+            square_sum = 0.0
+            frames_in_hop = 0
+    if frames_in_hop:
+        hop_square_sums.append((square_sum, frames_in_hop))
+
+    block_energies: list[float] = []
+    for start in range(max(0, len(hop_square_sums) - block_hops + 1)):
+        window = hop_square_sums[start : start + block_hops]
+        window_frames = sum(item[1] for item in window)
+        if window_frames != hop_frames * block_hops:
+            continue
+        block_energies.append(sum(item[0] for item in window) / window_frames)
+    if not block_energies:
+        total_frames = sum(item[1] for item in hop_square_sums)
+        if total_frames:
+            block_energies.append(
+                sum(item[0] for item in hop_square_sums) / total_frames
+            )
+
+    absolutely_gated = [
+        energy
+        for energy in block_energies
+        if energy > 0.0
+        and _LOUDNESS_OFFSET_DB + 10.0 * math.log10(energy)
+        >= _LOUDNESS_ABSOLUTE_GATE_LUFS
+    ]
+    if not absolutely_gated:
+        return -120.0
+    ungated_loudness = _LOUDNESS_OFFSET_DB + 10.0 * math.log10(
+        sum(absolutely_gated) / len(absolutely_gated)
+    )
+    relative_gate = ungated_loudness + _LOUDNESS_RELATIVE_GATE_DB
+    relatively_gated = [
+        energy
+        for energy in absolutely_gated
+        if _LOUDNESS_OFFSET_DB + 10.0 * math.log10(energy) >= relative_gate
+    ]
+    return max(
+        -120.0,
+        _LOUDNESS_OFFSET_DB
+        + 10.0 * math.log10(sum(relatively_gated) / len(relatively_gated)),
+    )
 
 
 def _decode_pcm_wav(
@@ -250,6 +402,14 @@ def _decode_pcm_wav(
         duration_ms=duration_ms,
         peak_dbfs=round(_dbfs(float(peak)), 6),
         rms_dbfs=round(_dbfs(rms), 6),
+        integrated_loudness_lufs=round(
+            _integrated_loudness_lufs(
+                samples,
+                sample_rate_hz=sample_rate,
+                channels=channels,
+            ),
+            6,
+        ),
         clipped_sample_count=clipped_count,
         clipped_fraction=round(clipped_fraction, 9),
         actual_sha256=hashlib.sha256(wav_bytes).hexdigest(),
@@ -264,8 +424,24 @@ def inspect_pcm_wav(
     expected_duration_ms: int | None = None,
 ) -> AudioInspection:
     _samples, inspection = _decode_pcm_wav(wav_bytes, policy)
+    _validate_inspection(
+        inspection,
+        policy=policy,
+        expected_duration_ms=expected_duration_ms,
+    )
+    return inspection
+
+
+def _validate_inspection(
+    inspection: AudioInspection,
+    *,
+    policy: AudioPipelinePolicy,
+    expected_duration_ms: int | None,
+) -> None:
     if inspection.rms_dbfs <= policy.silence_rms_dbfs:
         raise AudioQualityError("synthesis WAV is silent or below the speech floor")
+    if inspection.integrated_loudness_lufs <= _LOUDNESS_ABSOLUTE_GATE_LUFS:
+        raise AudioQualityError("synthesis WAV has no measurable programme loudness")
     if inspection.clipped_fraction > policy.maximum_clipped_fraction:
         raise AudioQualityError("synthesis WAV exceeds the clipping limit")
     if expected_duration_ms is not None:
@@ -277,7 +453,6 @@ def inspect_pcm_wav(
         )
         if abs(inspection.duration_ms - expected_duration_ms) > allowed_drift:
             raise AudioQualityError("synthesis WAV duration drift exceeds the frozen limit")
-    return inspection
 
 
 def short_chinese_duration_limit_ms(
@@ -366,17 +541,19 @@ def process_synthesis_wav(
             spoken_text,
             input_inspection.duration_ms,
         )
-    inspect_pcm_wav(
-        wav_bytes,
+    _validate_inspection(
+        input_inspection,
         policy=policy,
         expected_duration_ms=expected_duration_ms,
     )
-    rms_linear = 32768.0 * (10.0 ** (input_inspection.rms_dbfs / 20.0))
-    target_rms = 32768.0 * (10.0 ** (policy.target_rms_dbfs / 20.0))
     peak_linear = 32768.0 * (10.0 ** (policy.peak_limit_dbfs / 20.0))
     current_peak = 32768.0 * (10.0 ** (input_inspection.peak_dbfs / 20.0))
+    loudness_gain = 10.0 ** (
+        (policy.target_loudness_lufs - input_inspection.integrated_loudness_lufs)
+        / 20.0
+    )
     gain = min(
-        target_rms / max(rms_linear, 1.0),
+        loudness_gain,
         peak_linear / max(current_peak, 1.0),
         10.0 ** (policy.maximum_gain_db / 20.0),
     )
@@ -420,6 +597,7 @@ def process_synthesis_wav(
         input_inspection=input_inspection,
         output_inspection=output_inspection,
         applied_gain_db=round(applied_gain_db, 6),
+        loudness_target_limited=gain < loudness_gain - 1e-12,
         seam_fade_ms=policy.seam_fade_ms,
         processing_fingerprint=audio_processing_fingerprint(policy),
     )
@@ -438,6 +616,7 @@ __all__ = [
     "SHORT_CHINESE_DURATION_POLICY_VERSION",
     "ShortChineseDurationPolicy",
     "audio_processing_fingerprint",
+    "audio_validation_failure_evidence",
     "inspect_pcm_wav",
     "process_synthesis_wav",
     "short_chinese_duration_limit_ms",

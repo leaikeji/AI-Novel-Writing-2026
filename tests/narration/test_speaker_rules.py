@@ -466,6 +466,60 @@ def test_split_adjacent_cues_match_t3b_materialized_segment_shape(
     assert decision.issue_codes == ()
 
 
+@pytest.mark.parametrize(
+    ("source_text", "cue_before", "cue_after", "expected_character"),
+    [
+        ("“他戴手套了吗？”", "沈川蹲下来，没有碰他的书包。", "", CHARACTER_SHEN),
+        ("“今晚少的，不是一个人。”", "", "林晚念完，抬头看向二楼。", CHARACTER_LIN),
+    ],
+)
+def test_common_adjacent_novel_cues_resolve_saved_characters(
+    source_text: str,
+    cue_before: str,
+    cue_after: str,
+    expected_character: UUID,
+) -> None:
+    decision = attribute_speaker_local(
+        SpeakerRuleContext(
+            segment_kind=SegmentKind.DIALOGUE,
+            source_text=source_text,
+            cue_before=cue_before,
+            cue_after=cue_after,
+        ),
+        aliases=_standard_aliases(),
+    )
+
+    assert decision.speaker.character_id == expected_character
+    assert decision.confidence is ConfidenceLevel.HIGH
+    assert decision.issue_codes == ()
+
+
+@pytest.mark.parametrize(
+    ("cue_before", "expected_label"),
+    [
+        ("一个八岁左右的男孩抱着书包，指向巷口：", "一个八岁左右的男孩"),
+        ("巷口卖豆浆的年轻女人收起雨棚，接过话：", "巷口卖豆浆的年轻女人"),
+    ],
+)
+def test_common_adjacent_anonymous_cues_preserve_explicit_label(
+    cue_before: str,
+    expected_label: str,
+) -> None:
+    decision = attribute_speaker_local(
+        SpeakerRuleContext(
+            segment_kind=SegmentKind.DIALOGUE,
+            source_text="“我看见了。”",
+            cue_before=cue_before,
+        ),
+        aliases=_standard_aliases(),
+    )
+
+    assert decision.speaker.kind is SpeakerKind.UNKNOWN
+    assert decision.unresolved_kind is SpeakerKind.ANONYMOUS
+    assert decision.unresolved_label == expected_label
+    assert "W_NEW_ANONYMOUS_SPEAKER" in decision.issue_codes
+
+
 def test_alias_with_internal_space_and_bare_dao_cue_resolves_exactly() -> None:
     aliases = _aliases(_alias_record(CHARACTER_LIN, "王 小明"))
     decision = attribute_speaker_local(

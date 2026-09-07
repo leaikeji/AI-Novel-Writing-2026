@@ -9,6 +9,7 @@ import pytest
 
 from backend.models import (
     BackgroundJob,
+    BackgroundJobAttempt,
     BackgroundManualRetryCommand,
     NarrationEditionSegment,
     NarrationEditionState,
@@ -120,6 +121,42 @@ def test_partial_failure_projection_and_reset_preserve_aggregate_state() -> None
     assert renders[0].audio_validation_json == {}
     assert rows[0].render_state == "queued" and rows[0].failure_code is None
     assert job.state == "failed"  # jobs.manual_retry owns this independent edge
+
+
+def test_repeated_manual_non_retryable_failure_stops_identical_retry_loop() -> None:
+    store, _foundation_rows, request, edition, renders, rows = _foundation()
+    job = _fail(store, rows[0], renders[0])
+    request.state = "partial_ready"
+    edition.state = "partial_ready"
+    job.attempt_count = 2
+    store.add(
+        BackgroundJobAttempt(
+            id=uuid4(),
+            job_id=job.id,
+            attempt_number=2,
+            retry_kind="manual",
+            manual_retry_command_id=uuid4(),
+            completed_at=NOW,
+            error_classification="non_retryable",
+            error_code="NANO_AUDIO_INVALID",
+        )
+    )
+
+    projection = project_failed_segment_retries(store, edition_id=edition.id)
+
+    assert projection.items[0].retryable is False
+    assert (
+        projection.items[0].retry_reason_code
+        == "LATEST_MANUAL_ATTEMPT_NON_RETRYABLE"
+    )
+    with pytest.raises(
+        InvalidNarrationState,
+        match="LATEST_MANUAL_ATTEMPT_NON_RETRYABLE",
+    ):
+        plan_failed_segment_retry(
+            store,
+            _command(request, edition.id, rows[0].segment_id),
+        )
 
 
 def test_partial_failure_without_any_ready_segment_remains_retryable() -> None:

@@ -66,7 +66,10 @@ MAX_JSON_BYTES: Final = 64 * 1024
 MAX_MULTIPART_BYTES: Final = 13 * 1024 * 1024
 MAX_AUDIO_BYTES: Final = 16 * 1024 * 1024
 MAX_REFERENCE_BYTES: Final = 12 * 1024 * 1024
-MAX_REFERENCE_DURATION_SECONDS: Final = 12.5
+# VoiceGenerator's frozen 256-step output contains at most 240 codec frames
+# (80 ms each). Keep its complete, hash-verified reference; the separate
+# third-party upload normalization policy remains capped at 12 seconds.
+MAX_REFERENCE_DURATION_SECONDS: Final = 240 * 0.08
 MAX_TEXT_CHARS: Final = 4_000
 MIN_TOKEN_CHARS: Final = 32
 MAX_TOKEN_CHARS: Final = 128
@@ -138,6 +141,7 @@ class SidecarProtocolError(RuntimeError):
         self.status = status
         self.retryable = retryable
         self.poison = poison
+        self.request_id: str | None = None
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -759,6 +763,22 @@ def _parse_metadata(body: bytes, reference: tuple[str, bytes] | None) -> ParsedS
         ),
     )
     request_id = _request_uuid(row["request_id"])
+    try:
+        return _validate_metadata(row, reference, request_id=request_id)
+    except SidecarProtocolError as error:
+        # The envelope and canonical UUID are already valid. Preserve their
+        # correlation even when audio/parameters fail validation; never turn a
+        # normal rejection into an unrelated worker identity failure.
+        error.request_id = request_id
+        raise
+
+
+def _validate_metadata(
+    row: dict[str, object],
+    reference: tuple[str, bytes] | None,
+    *,
+    request_id: str,
+) -> ParsedSynthesisRequest:
     if row["scope_fingerprint"] != LOCAL_SCOPE_FINGERPRINT:
         raise SidecarProtocolError("SCOPE_MISMATCH", "scope fingerprint mismatch", status=HTTPStatus.FORBIDDEN)
     requested = row["requested_model_fingerprint_sha256"]
@@ -1902,7 +1922,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
         except SidecarProtocolError as error:
             self._schedule_drain_if_needed()
-            self._error(error, request_id)
+            self._error(error, request_id or error.request_id)
 
     def _ready_payload(self, request_id: str) -> Mapping[str, object]:
         with self.state.lock:

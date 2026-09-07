@@ -103,6 +103,7 @@ function createHarness() {
   };
   return {
     React,
+    unmount() { effects.forEach((effect) => effect?.cleanup?.()); },
     render<Props>(Component: (props: Props) => unknown, props: Props): unknown {
       stateIndex = 0;
       refIndex = 0;
@@ -291,6 +292,82 @@ describe("character voice generator state", () => {
 });
 
 describe("character voice generator panel", () => {
+  it("keeps delayed polls alive through rerenders and ignores them after switching character scope", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      let resolve!: (value: CharacterVoiceGenerationSnapshot) => void;
+      const pending = new Promise<CharacterVoiceGenerationSnapshot>((done) => { resolve = done; });
+      const signals: AbortSignal[] = [];
+      const onCommandChanged = vi.fn();
+      const props = baseProps({ initialCommand: snapshot("generating_voice"), refreshIntervalMs: 10,
+        onCommandChanged, onRefreshGeneration: (_id, signal) => { signals.push(signal); return pending; } });
+      const Component = createCharacterVoiceGenerator(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      expect(signals[0]?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(signals).toHaveLength(1);
+      harness.render(Component, { ...props, characterId: "10000000-0000-4000-8000-000000000002", initialCommand: null });
+      expect(signals[0]?.aborted).toBe(true);
+      resolve(snapshot("ready_applied"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onCommandChanged).not.toHaveBeenCalled();
+    } finally { harness.unmount(); vi.useRealTimers(); }
+  });
+
+  it("polls unchanged server timestamps again and aborts an outstanding request on unmount", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      const signals: AbortSignal[] = [];
+      const onRefreshGeneration = vi.fn((_id: string, signal: AbortSignal) => {
+        signals.push(signal);
+        return signals.length === 1 ? Promise.resolve(snapshot("generating_voice"))
+          : new Promise<CharacterVoiceGenerationSnapshot>(() => undefined);
+      });
+      const props = baseProps({ initialCommand: snapshot("generating_voice"), refreshIntervalMs: 10,
+        onRefreshGeneration });
+      const Component = createCharacterVoiceGenerator(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      expect(onRefreshGeneration).toHaveBeenCalledTimes(2);
+      expect(signals[1]?.aborted).toBe(false);
+      harness.unmount();
+      expect(signals[1]?.aborted).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("continues after a delayed response and stops polling a cancelled command", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      let resolve!: (value: CharacterVoiceGenerationSnapshot) => void;
+      const pending = new Promise<CharacterVoiceGenerationSnapshot>((done) => { resolve = done; });
+      const onRefreshGeneration = vi.fn(() => pending);
+      const props = baseProps({ initialCommand: snapshot("generating_voice"), refreshIntervalMs: 10,
+        onRefreshGeneration });
+      const Component = createCharacterVoiceGenerator(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      resolve(snapshot("generating_voice"));
+      await vi.advanceTimersByTimeAsync(0);
+      const tree = harness.render(Component, props);
+      const cancel = findAll(tree, (element) => element.type === "button"
+        && textContent(element).includes("取消"))[0];
+      expect(cancel).toBeDefined();
+      await (cancel.props.onClick as () => Promise<void>)();
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onRefreshGeneration).toHaveBeenCalledTimes(1);
+    } finally { harness.unmount(); vi.useRealTimers(); }
+  });
+
   it("is fail-closed when capability is omitted", () => {
     const harness = createHarness();
     const Panel = createCharacterVoiceGenerator(harness.React);

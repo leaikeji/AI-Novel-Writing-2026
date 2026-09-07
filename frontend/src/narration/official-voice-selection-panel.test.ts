@@ -10,6 +10,7 @@ import {
   type CharacterVoiceBindingResource,
   type OfficialVoiceSelectionResponse,
   type VoiceProfileResource,
+  type OfficialPresetCatalogResponse,
 } from "./contracts";
 import {
   activeOfficialPresetId,
@@ -19,7 +20,9 @@ import {
   officialVoiceSelectionResult,
   officialVoiceSelectionWireRequest,
   type OfficialVoiceSelectionPanelApi,
+  type OfficialVoiceSelectionPanelProps,
 } from "./official-voice-selection-panel";
+import type { OfficialVoiceSelectionResult } from "./official-voice-library";
 
 
 const NOVEL_ID = "11111111-1111-4111-8111-111111111111";
@@ -43,6 +46,8 @@ function createEffectHarness() {
   const refs: Array<{ current: unknown }> = [];
   let stateIndex = 0;
   let refIndex = 0;
+  let effectIndex = 0;
+  const effectSlots: Array<{ deps: readonly unknown[]; cleanup?: () => void }> = [];
   let effects: Array<() => void | (() => void)> = [];
   const React = {
     createElement(type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]): FakeElement {
@@ -63,8 +68,16 @@ function createEffectHarness() {
         },
       ];
     },
-    useEffect(effect: () => void | (() => void), _dependencies: readonly unknown[]): void {
-      effects.push(effect);
+    useEffect(effect: () => void | (() => void), dependencies: readonly unknown[]): void {
+      const index = effectIndex++;
+      const previous = effectSlots[index];
+      if (previous && dependencies.length === previous.deps.length
+        && dependencies.every((value, i) => Object.is(value, previous.deps[i]))) return;
+      effects.push(() => {
+        previous?.cleanup?.();
+        const cleanup = effect();
+        effectSlots[index] = { deps: dependencies, cleanup: typeof cleanup === "function" ? cleanup : undefined };
+      });
     },
     useRef<T>(initial: T): { current: T } {
       const index = refIndex++;
@@ -77,6 +90,7 @@ function createEffectHarness() {
     render<Props>(Component: (props: Props) => unknown, props: Props): FakeElement {
       stateIndex = 0;
       refIndex = 0;
+      effectIndex = 0;
       effects = [];
       return Component(props) as FakeElement;
     },
@@ -146,6 +160,91 @@ function officialProfile(
 
 
 describe("official voice selection panel adapters", () => {
+  function setupRefresh() {
+    const harness = createEffectHarness();
+    const reads: Array<{ resolve: (value: OfficialPresetCatalogResponse) => void; signal?: AbortSignal }> = [];
+    const api = {
+      listOfficialVoicePresets: vi.fn((signal?: AbortSignal) => new Promise<OfficialPresetCatalogResponse>((resolve) => {
+        reads.push({ resolve, signal });
+      })),
+      listVoiceProfiles: vi.fn(), getCharacterVoiceBinding: vi.fn(), selectOfficialVoice: vi.fn(),
+      createOfficialVoicePreview: vi.fn(), getVoicePreview: vi.fn(),
+    } satisfies OfficialVoiceSelectionPanelApi;
+    const Panel = createOfficialVoiceSelectionPanel(harness.React, api);
+    const binding = { novel_id: NOVEL_ID, character_id: CHARACTER_ID, version: 7,
+      profile_id: PROFILE_ID, version_id: VERSION_ID, language: "zh-CN" } as CharacterVoiceBindingResource;
+    const profiles = [officialProfile("explicit_official_preset_selection")];
+    const props: OfficialVoiceSelectionPanelProps = {
+      novelId: NOVEL_ID, settings: settings(),
+      target: { kind: "character", characterId: CHARACTER_ID, characterName: "林岚" },
+      capabilities: { items: [] } as unknown as NarrationCapabilities,
+      authorization: {} as NarrationAuthorizationState,
+      projection: { phase: "ready", binding, profiles },
+    };
+    const resolve = async (index: number) => {
+      reads[index].resolve({ schema_version: "moss-tts-official-preset-catalog/1.0", items: [] } as unknown as OfficialPresetCatalogResponse);
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    return { harness, Panel, props, reads, resolve, binding, profiles };
+  }
+
+  it("keeps the same catalog subtree while a character projection refreshes", async () => {
+    const { harness, Panel, props, reads, resolve, binding, profiles } = setupRefresh();
+    harness.render(Panel, props);
+    harness.flushEffects();
+    await resolve(0);
+    const ready = harness.render(Panel, props);
+    const pendingProps = { ...props, projection: { phase: "loading" as const } };
+    harness.render(Panel, pendingProps);
+    harness.flushEffects();
+    const pending = harness.render(Panel, pendingProps);
+    expect(pending.type).toBe(ready.type);
+    expect(pending.props.catalog).toBe(ready.props.catalog);
+    expect(pending.props.loading).toBe(false);
+    const refreshedProps = { ...props, projection: { phase: "ready" as const, binding: { ...binding, version: 8 }, profiles } };
+    harness.render(Panel, refreshedProps);
+    harness.flushEffects();
+    expect(reads).toHaveLength(2);
+    expect(harness.render(Panel, refreshedProps).props.catalog).toBe(ready.props.catalog);
+    await resolve(1);
+    expect(harness.render(Panel, refreshedProps).props.target).toMatchObject({ expectedBindingVersion: 8 });
+  });
+
+  it("does not roll back a successful receipt with an older in-flight or parent projection", async () => {
+    const { harness, Panel, props, reads, resolve, binding, profiles } = setupRefresh();
+    harness.render(Panel, props); harness.flushEffects(); await resolve(0);
+    const changed = { ...props, projection: { phase: "ready" as const, binding, profiles: [...profiles] } };
+    const panel = harness.render(Panel, changed); harness.flushEffects();
+    (panel.props.onApplied as (result: OfficialVoiceSelectionResult) => void)({
+      presetId: "onnx.Zhiming", settingsVersion: 3, bindingVersion: 8,
+    } as OfficialVoiceSelectionResult);
+    expect(reads[1].signal?.aborted).toBe(true);
+    await resolve(1);
+    const olderParent = { ...changed, projection: { phase: "ready" as const, binding, profiles: [...profiles] } };
+    harness.render(Panel, olderParent); harness.flushEffects(); await resolve(2);
+    const current = harness.render(Panel, olderParent);
+    expect(current.props.activePresetId).toBe("onnx.Zhiming");
+    expect(current.props.target).toMatchObject({ expectedBindingVersion: 8 });
+  });
+
+  it("hides old target data before effects and ignores late responses and callbacks", async () => {
+    const { harness, Panel, props, resolve } = setupRefresh();
+    harness.render(Panel, props); harness.flushEffects(); await resolve(0);
+    const old = harness.render(Panel, props);
+    const next = { ...props, novelId: COMMAND_ID };
+    expect(harness.render(Panel, next).props.catalog).toBeNull();
+    (old.props.onApplied as (result: OfficialVoiceSelectionResult) => void)({
+      presetId: "onnx.Zhiming", settingsVersion: 99, bindingVersion: 99,
+    } as OfficialVoiceSelectionResult);
+    harness.flushEffects();
+    const third = { ...next, novelId: VERSION_ID };
+    harness.render(Panel, third); harness.flushEffects();
+    await resolve(1);
+    expect(harness.render(Panel, third).props.catalog).toBeNull();
+    await resolve(2);
+    expect(harness.render(Panel, third).props.target).toMatchObject({ expectedBindingVersion: 7 });
+  });
+
   it("queues, polls, and plays an official preview without applying a binding", async () => {
     const previewId = "66666666-6666-4666-8666-666666666666";
     const queued = {

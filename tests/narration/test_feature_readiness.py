@@ -9,6 +9,7 @@ import pytest
 from backend.narration import schemas as wire
 from backend.narration.feature_readiness import (
     FEATURE_READINESS_SCHEMA_VERSION,
+    GENERIC_VOICE_PACK_NOT_READY,
     MANAGED_CAPABILITY_KEYS,
     NarrationFeatureDependencies,
     NarrationFeatureReadinessProvider,
@@ -257,7 +258,7 @@ def test_initial_and_starting_snapshots_are_strict_fail_closed_copies() -> None:
         (
             "generic_voice_active_pack_ready",
             frozenset({AUTOMATIC_GENERIC}),
-            TTS_PROCESSOR_UNAVAILABLE,
+            GENERIC_VOICE_PACK_NOT_READY,
         ),
     ),
 )

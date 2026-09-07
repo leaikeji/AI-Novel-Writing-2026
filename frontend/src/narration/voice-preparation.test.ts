@@ -101,6 +101,7 @@ function createHarness() {
   };
   return {
     React,
+    unmount() { effects.forEach((effect) => effect?.cleanup?.()); },
     render<Props>(Component: (props: Props) => unknown, props: Props): unknown {
       stateIndex = 0;
       refIndex = 0;
@@ -131,6 +132,8 @@ function snapshot(
   return {
     contractVersion: VOICE_PREPARATION_CONTRACT_VERSION,
     commandId: COMMAND_ID,
+    novelId: "11111111-1111-4111-8111-111111111111",
+    documentId: null,
     state: "preparing",
     serverNow: NOW,
     progressCurrent: 2,
@@ -229,6 +232,60 @@ describe("voice preparation state", () => {
 });
 
 describe("voice preparation component", () => {
+  it("keeps a delayed poll alive across busy renders, then allows cancellation", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      const pending = deferred<VoicePreparationSnapshot>();
+      let signal: AbortSignal | undefined;
+      const onRefresh = vi.fn((_id: string, nextSignal: AbortSignal) => {
+        signal = nextSignal;
+        return pending.promise;
+      });
+      const props = baseProps({ initialCommand: snapshot(), refreshIntervalMs: 10, onRefresh });
+      const Component = createVoicePreparation(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      pending.resolve(snapshot());
+      await vi.advanceTimersByTimeAsync(0);
+      const tree = harness.render(Component, props);
+      const cancel = findAll(tree, (element) => element.type === "button"
+        && textContent(element).includes("取消后续准备"))[0];
+      expect(cancel).toBeDefined();
+      (cancel.props.onClick as () => void)();
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(0);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+    } finally { harness.unmount(); vi.useRealTimers(); }
+  });
+
+  it("aborts pending polling on unmount without publishing its late result", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      const pending = deferred<VoicePreparationSnapshot>();
+      let signal: AbortSignal | undefined;
+      const onCommandChanged = vi.fn();
+      const props = baseProps({ initialCommand: snapshot(), refreshIntervalMs: 10, onCommandChanged,
+        onRefresh: (_id, nextSignal) => { signal = nextSignal; return pending.promise; } });
+      const Component = createVoicePreparation(harness.React);
+      harness.render(Component, props);
+      await vi.advanceTimersByTimeAsync(10);
+      harness.render(Component, props);
+      harness.unmount();
+      expect(signal?.aborted).toBe(true);
+      pending.resolve(snapshot());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onCommandChanged).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("fails closed when the capability is omitted", () => {
     const harness = createHarness();
     const Component = createVoicePreparation(harness.React);

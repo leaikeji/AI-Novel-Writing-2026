@@ -452,7 +452,12 @@ export function createReadingPage(
 
     React.useEffect(() => {
       const controller = new AbortController();
-      setLoadState({ phase: "loading" });
+      // Revalidation must not unmount an open voice drawer or its unsaved fields.
+      // A different novel still gets a clean, fail-closed initial load.
+      setLoadState((current) => current.phase === "ready"
+        && current.overview.novel_id === props.novelId
+        ? current
+        : { phase: "loading" });
       setOperation(EMPTY_OPERATION);
       const profilesRequest = api.listVoiceProfiles
         ? api.listVoiceProfiles(props.novelId, controller.signal)
@@ -488,10 +493,12 @@ export function createReadingPage(
         });
       }).catch((reason: unknown) => {
         if (controller.signal.aborted) return;
-        setLoadState({
-          phase: "error",
-          message: apiErrorMessage(reason, "无法加载朗读设置，请稍后重试。"),
-        });
+        const message = apiErrorMessage(reason, "无法刷新朗读设置，已保留当前页面，请重试。");
+        setLoadState((current) => current.phase === "ready"
+          && current.overview.novel_id === props.novelId
+          ? current
+          : { phase: "error", message });
+        setOperation({ saving: false, kind: "error", message });
       });
       return () => controller.abort();
     }, [props.novelId, reloadVersion]);
@@ -507,7 +514,8 @@ export function createReadingPage(
       props.onSectionChange?.(section);
     };
 
-    if (loadState.phase === "loading") {
+    if (loadState.phase === "loading" || (loadState.phase === "ready"
+      && loadState.overview.novel_id !== props.novelId)) {
       return h(
         "main",
         {

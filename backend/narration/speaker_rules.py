@@ -36,7 +36,7 @@ from .script_contracts import (
 )
 
 
-LOCAL_SPEAKER_RULESET_VERSION: Final = "local-speaker-rules/2"
+LOCAL_SPEAKER_RULESET_VERSION: Final = "local-speaker-rules/3"
 
 _SPEECH_VERBS = (
     "开口说道",
@@ -58,6 +58,7 @@ _SPEECH_VERBS = (
     "耳语",
     "嘀咕",
     "暗道",
+    "念完",
     "说",
     "问",
     "喊",
@@ -86,6 +87,12 @@ _DELIVERY_MODIFIERS = (
     "齐声",
 )
 _ACTION_VERBS = (
+    "抱着书包",
+    "收起雨棚",
+    "接过话",
+    "蹲下来",
+    "蹲下",
+    "指向",
     "笑了一下",
     "皱眉",
     "点头",

@@ -867,8 +867,7 @@ class SqlAlchemyVoicePreparationService:
     def reconcile_once(self, *, novel_id: UUID, command_id: UUID) -> VoicePreparationCommand:
         current = self._domain.get(novel_id=novel_id, command_id=command_id)
         has_child_to_poll = any(
-            item.voice_generator_command_id is not None
-            and item.state
+            item.state
             in {VoicePreparationItemState.QUEUED, VoicePreparationItemState.GENERATING}
             for item in current.items
         )

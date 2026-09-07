@@ -2400,9 +2400,9 @@ class VoiceProductService:
                 profile = _required_profile(
                     session, preview.profile_id, for_update=False
                 )
-                from .voices import _media_link
+                from .voices import voice_preview_media_link
 
-                asset_link = _media_link(
+                asset_link = voice_preview_media_link(
                     SqlAlchemyNarrationStore(session),
                     profile,
                     preview.result_asset_id,

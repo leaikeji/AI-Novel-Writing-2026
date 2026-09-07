@@ -862,6 +862,27 @@ def test_preview_media_resolver_requires_ready_unexpired_exact_asset() -> None:
     assert resolve_voice_preview_media(
         session, preview_id, asset_id  # type: ignore[arg-type]
     ) is asset
+    # The successful GET projection must use the same shared media publisher as
+    # profile and generic-pack resources; a stale import used to fail only once
+    # synthesis reached READY (queued API tests never exercised this branch).
+    profile = VoiceProfile(
+        id=preview.profile_id, owner_id=SCOPE.owner_id,
+        workspace_id=SCOPE.workspace_id, novel_id=None,
+    )
+    projection_session = SimpleNamespace(
+        scalar=lambda statement: (
+            profile if statement.column_descriptions[0]["entity"] is VoiceProfile else asset
+        ),
+        get=lambda model, row_id: asset if model is MediaAsset and row_id == asset.id else None,
+    )
+    resource = product.VoiceProductService._preview_resource(
+        projection_session, preview, at=NOW,
+    )
+    assert resource.status.value == "ready"
+    assert resource.job_id is None
+    assert resource.asset is not None
+    assert resource.asset.asset_id == asset_id
+    assert resource.asset.checksum_sha256 == digest
     preview.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     with pytest.raises(VoicePreviewNotFound):
         resolve_voice_preview_media(

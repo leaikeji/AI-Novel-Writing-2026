@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import UUID, uuid4
 import wave
+import time
 
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
@@ -15,6 +16,7 @@ from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.models import (
+    BackgroundJob,
     MediaAsset,
     ModelRunRecord,
     Novel,
@@ -31,7 +33,7 @@ from backend.narration.contracts import (
     SynthesisRequest,
     SynthesisResult,
 )
-from backend.narration.jobs import claim_next_job
+from backend.narration.jobs import claim_next_job, reconcile_expired_attempts, request_cancel
 from backend.narration.official_presets import OFFICIAL_PRESETS
 from backend.narration.official_voice_selection import OfficialVoiceSelectionService
 from backend.narration.runtime import EXPECTED_PRODUCTION_MODEL_FINGERPRINT
@@ -393,6 +395,60 @@ def test_generator_work_item_is_idempotently_recoverable_after_dispatch_crash(
     assert resumed.host_request.instruction_digest == hashlib.sha256(
         resumed.host_request.instruction.encode("utf-8")
     ).hexdigest()
+
+
+@pytest.mark.parametrize("phase,failed_state", [
+    ("waiting_for_heavy_runtime", "failed_runtime_unavailable"),
+    ("generating_voice", "failed_generation"),
+    ("unloading_voice_generator", "failed_storage"),
+    ("validating_with_nano", "failed_nano_validation"),
+])
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_expired_generator_recovery_obeys_phase_trigger_and_releases_slot(
+    vg_pg_runtime: tuple[Connection, SessionFactory],
+    phase: str, failed_state: str, cancelled: bool,
+) -> None:
+    _, factory = vg_pg_runtime
+    novel_id, character_id = _seed(factory)
+    service, command_id, job_id = _reserve_and_analyze(factory, novel_id, character_id)
+    repository = SqlAlchemyVoiceGeneratorRepository(factory, digest_keyring=TEST_DIGEST_KEYRING)
+    with factory() as session:
+        lease = claim_next_job(
+            session, scope=SCOPE, lease_owner=f"expired-vg:{uuid4()}",
+            novel_ids=(novel_id,), job_kinds=("narration.voice_generate",),
+            resource_classes=("moss-nano",), lease_seconds=1,
+        )
+        assert lease is not None
+        row = session.get(VoiceGeneratorCommand, command_id)
+        assert row is not None
+        for state in ("generating_voice", "unloading_voice_generator", "validating_with_nano"):
+            if row.state == phase:
+                break
+            row.state = state
+            session.flush()
+        if cancelled:
+            request_cancel(session, scope=SCOPE, job_id=job_id, actor="author", reason_code="USER_CANCELLED")
+        session.commit()
+    # Real database time; no production clock override or trigger bypass.
+    time.sleep(1.1)
+    with factory() as session:
+        reconciled = reconcile_expired_attempts(session, scope=SCOPE, novel_ids=(novel_id,))
+        assert len(reconciled) == 1
+        repository.terminalize_job_in_session(session, job_id=job_id)
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        expected = (
+            "superseded" if cancelled and phase in {"unloading_voice_generator", "validating_with_nano"}
+            else "cancelled" if cancelled else failed_state
+        )
+        row = session.get(VoiceGeneratorCommand, command_id)
+        assert row.state == expected
+        assert row.voice_version_id is None and row.applied_binding_version is None
+        job = session.get(BackgroundJob, job_id)
+        assert job.state in {"dead_letter", "failed", "cancelled"}
+        session.commit()
+    # A new normal reservation can use the same character after recovery.
+    _, successor, _ = _reserve_and_analyze(factory, novel_id, character_id)
+    assert successor != command_id
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,8 @@ export interface VoicePreparationTargetSummary {
 export interface VoicePreparationSnapshot {
   readonly contractVersion: typeof VOICE_PREPARATION_CONTRACT_VERSION;
   readonly commandId: string;
+  readonly novelId: string;
+  readonly documentId: string | null;
   readonly state: VoicePreparationState;
   readonly serverNow: string;
   readonly progressCurrent: number;
@@ -425,6 +427,8 @@ export function createVoicePreparation(
     }));
     const mountedRef = React.useRef(true);
     const actionLockRef = React.useRef(false);
+    const pollingRef = React.useRef<AbortController | null>(null);
+    const [pollRevision, setPollRevision] = React.useState(0);
 
     React.useEffect(() => {
       mountedRef.current = true;
@@ -459,6 +463,11 @@ export function createVoicePreparation(
 
     React.useEffect(() => loadLatest("load"), [props.capabilityEnabled]);
 
+    React.useEffect(() => () => {
+      pollingRef.current?.abort();
+      pollingRef.current = null;
+    }, [local.command?.commandId]);
+
     React.useEffect(() => {
       const command = local.command;
       const interval = props.refreshIntervalMs ?? 2_000;
@@ -468,12 +477,15 @@ export function createVoicePreparation(
         || command === null
         || command.terminal
       ) return;
-      const controller = new AbortController();
       const timer = globalThis.setTimeout(() => {
         if (!mountedRef.current || actionLockRef.current) return;
+        const controller = new AbortController();
+        pollingRef.current = controller;
         actionLockRef.current = true;
         setLocal((current) => ({ ...current, busyAction: "refresh", errorMessage: null }));
-        void props.onRefresh(command.commandId, controller.signal).then(publish).catch((reason: unknown) => {
+        void props.onRefresh(command.commandId, controller.signal).then((next) => {
+          if (!controller.signal.aborted && pollingRef.current === controller) publish(next);
+        }).catch((reason: unknown) => {
           if (controller.signal.aborted || !mountedRef.current) return;
           setLocal((current) => ({
             ...current,
@@ -481,14 +493,16 @@ export function createVoicePreparation(
             busyAction: null,
             errorMessage: actionError(reason),
           }));
-        }).finally(() => { actionLockRef.current = false; });
+        }).finally(() => {
+          if (pollingRef.current === controller) pollingRef.current = null;
+          actionLockRef.current = false;
+          if (mountedRef.current && !controller.signal.aborted) setPollRevision((value) => value + 1);
+        });
       }, interval);
-      return () => {
-        controller.abort();
-        globalThis.clearTimeout(timer);
-      };
+      return () => globalThis.clearTimeout(timer);
     }, [
       props.refreshIntervalMs,
+      pollRevision,
       local.busyAction,
       local.command?.commandId,
       local.command?.state,

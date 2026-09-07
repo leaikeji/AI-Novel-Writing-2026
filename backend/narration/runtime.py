@@ -1075,6 +1075,7 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
         self._on_demand_warmup_enabled = False
         self._control_lock = asyncio.Lock()
         self._lease_lock = asyncio.Lock()
+        self._model_release_lock = asyncio.Lock()
         self._synthesis_lock = asyncio.Lock()
         self._restart_lock = asyncio.Lock()
 
@@ -1592,7 +1593,9 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
     async def renew_lease(self) -> int:
         """Renew the active lease; never silently reacquire an invalid token."""
 
-        async with self._lease_lock:
+        # A planned unload replaces the lease without replacing this adapter.
+        # Wait for that entire transition, not merely its individual HTTP calls.
+        async with self._model_release_lock, self._lease_lock:
             worker_token = self._worker_token
             lease_generation = self._lease_generation
             if worker_token is None or lease_generation is None:
@@ -2259,23 +2262,9 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
                 or current - last_activity < float(idle_seconds)
             ):
                 return False
-            previous_generation = self._generation
-            await self.deactivate()
-            # ONNX Runtime may retain native allocator arenas even after all
-            # sessions are dropped.  Replace the already-inert Sidecar process
-            # so those pages are actually returned to the host.
-            await self._lifecycle.restart_after_poison(
-                "IDLE_MODEL_RELEASE",
-                previous_generation=previous_generation,
+            await self._release_model_with_cold_lease(
+                "IDLE_MODEL_RELEASE", "SIDECAR_UNAVAILABLE",
             )
-            await self.activate()
-            health = await self.health()
-            if health.status is AdapterHealthStatus.UNAVAILABLE:
-                raise SidecarRuntimeError(
-                    health.reason_code or "SIDECAR_UNAVAILABLE",
-                    "Sidecar did not return after idle unload",
-                )
-            self._on_demand_warmup_enabled = True
             return True
 
     async def release_model_for_heavy_runtime(self) -> None:
@@ -2288,18 +2277,31 @@ class SidecarMossNanoTTSAdapter(MossNanoTTSAdapter):
         """
 
         async with self._synthesis_lock:
+            await self._release_model_with_cold_lease(
+                "HEAVY_RUNTIME_MODEL_RELEASE", "HEAVY_RUNTIME_MODEL_RELEASE_FAILED",
+            )
+
+    async def _release_model_with_cold_lease(
+        self, reason_code: str, failure_code: str,
+    ) -> None:
+        """Keep renewal outside the planned gap; caller owns synthesis lock."""
+
+        # Lock order: synthesis -> model release -> lease.  Holding lease_lock
+        # here would deadlock deactivate/activate, which each acquire it.
+        async with self._model_release_lock:
             previous_generation = self._generation
             await self.deactivate()
+            # Replace the unloaded process to return retained native arenas.
             await self._lifecycle.restart_after_poison(
-                "HEAVY_RUNTIME_MODEL_RELEASE",
+                reason_code,
                 previous_generation=previous_generation,
             )
             await self.activate()
             health = await self.health()
             if self.model_loaded or health.status is AdapterHealthStatus.UNAVAILABLE:
                 raise SidecarRuntimeError(
-                    health.reason_code or "HEAVY_RUNTIME_MODEL_RELEASE_FAILED",
-                    "Sidecar did not remain unloaded for the heavy runtime",
+                    health.reason_code or failure_code,
+                    "Sidecar did not remain unloaded after model release",
                 )
             self._on_demand_warmup_enabled = True
 

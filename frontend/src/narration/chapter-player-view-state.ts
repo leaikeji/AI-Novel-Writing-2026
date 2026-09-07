@@ -417,7 +417,22 @@ export function deriveChapterPlayerView(
     input.segmentIds.length,
     lastManifestSegment?.audio?.duration_ms,
   );
-  const playbackLabel = playbackPhase === "idle" && playbackEnded
+  const failureOrdinal = input.playerState?.failure?.ordinal;
+  const blockedOnFailedSegment = playbackPhase === "blocked"
+    && input.playerState?.failure?.code === "FAILED_GAP"
+    && failureOrdinal !== null
+    && failureOrdinal !== undefined
+    && Number.isSafeInteger(failureOrdinal)
+    && failureOrdinal >= 0
+    && failureOrdinal < input.segmentIds.length
+    && states?.[failureOrdinal] === "failed";
+  const playbackLabel = blockedOnFailedSegment
+    ? currentOrdinal !== null
+      && currentOrdinal !== undefined
+      && failureOrdinal > currentOrdinal
+      ? "下一句生成失败"
+      : "当前句段生成失败"
+    : playbackPhase === "idle" && playbackEnded
     ? PLAYBACK_LABELS.ended
     : playbackPhase === "idle" && currentSentence !== null
     ? `上次停在第 ${currentSentence} 段`

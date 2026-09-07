@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from dataclasses import replace
 import os
 from types import SimpleNamespace
 from typing import Callable, Iterator
@@ -15,6 +16,7 @@ from backend.models import Novel, NovelCharacter
 from backend.narration.voice_generator_service import SqlAlchemyVoiceGeneratorService
 from backend.narration.voice_preparation import VoicePreparationCreateRequest
 from backend.narration.voice_preparation_service import SqlAlchemyVoicePreparationService
+from backend.narration.services import InvalidNarrationState, NarrationCasConflict
 from tests.narration.current_schema_gate import assert_database_at_repository_head
 from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
 
@@ -189,3 +191,44 @@ def test_whole_book_create_normalizes_legacy_role_and_replays_timestamp(
     assert resource.current_target.character_id == character_id
     assert resource.current_target.role_type == "main"
     assert resource.state == "reserved"
+
+
+@pytest.mark.parametrize("drifted", [False, True])
+def test_child_reservation_conflict_releases_durable_parent_activity_slot(
+    preparation_pg: tuple[Connection, SessionFactory],
+    monkeypatch: pytest.MonkeyPatch,
+    drifted: bool,
+) -> None:
+    _connection, factory = preparation_pg
+    novel_id, _character_id = _seed(factory)
+    monkeypatch.setattr(
+        "backend.narration.voice_preparation_service.service_for_session",
+        lambda _session: _WorkspaceService(),
+    )
+    generator = SqlAlchemyVoiceGeneratorService(factory, digest_keyring=TEST_DIGEST_KEYRING)
+
+    def conflict(**_kwargs):
+        raise (NarrationCasConflict if drifted else InvalidNarrationState)(
+            "another entry point changed or reserved this character"
+        )
+
+    monkeypatch.setattr(generator, "reserve", conflict)
+    service = SqlAlchemyVoicePreparationService(factory, policy=object(), voice_generator=generator)
+    request = VoicePreparationCreateRequest(
+        novel_id=novel_id, document_id=None, expected_draft_version=None,
+        expected_content_hash=None, expected_settings_version=None,
+        idempotency_key="tts56-conflict-parent", actor="local-owner", explicit_requested_at=NOW,
+    )
+    first = service.create(request)
+    service.reserve_next_pending(novel_id=novel_id, command_id=first.command_id)
+    stored = service.get_resource(novel_id=novel_id, command_id=first.command_id)
+    assert stored.state == ("superseded" if drifted else "failed")
+    assert stored.failure_code == (
+        "VOICE_PREPARATION_BINDING_DRIFTED" if drifted else "VOICE_PREPARATION_TARGET_FAILED"
+    )
+    assert stored.terminal
+    # The partial command remains auditable, but its active unique index must
+    # not prevent a fresh author request from taking a current snapshot.
+    successor = service.create(replace(request, idempotency_key="tts56-conflict-successor"))
+    assert successor.command_id != first.command_id
+    assert service.get_resource(novel_id=novel_id, command_id=successor.command_id).state == "reserved"
