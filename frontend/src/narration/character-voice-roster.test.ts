@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildCharacterVoiceRosterRows,
-  characterVoiceBatchAvailability,
   createCharacterVoiceRoster,
   type CharacterVoiceRosterProps,
   type CharacterVoiceRosterReactRuntime,
@@ -128,14 +127,12 @@ function capabilities(overrides: Partial<Record<FeatureCapability["key"], boolea
     "narration_product",
     "reading_settings",
     "preset_voice_source",
-    "character_voice_matching",
-    "character_cast_planning",
     "reference_clone",
-    "voice_generator",
+    "voice_design",
   ] as const;
   return {
     schema_version: NARRATION_CAPABILITY_SCHEMA_VERSION,
-    items: keys.map((key) => feature(key, overrides[key] ?? key !== "voice_generator")),
+    items: keys.map((key) => feature(key, overrides[key] ?? key !== "voice_design")),
   };
 }
 
@@ -162,7 +159,7 @@ const authorization: NarrationAuthorizationState = {
 
 
 function officialVersion(changes: Partial<VoiceProfileVersionResource> = {}): VoiceProfileVersionResource {
-  const evidence = OFFICIAL_PRESET_EVIDENCE.find((item) => item.presetId === "onnx.Lingyu");
+  const evidence = OFFICIAL_PRESET_EVIDENCE.find((item) => item.presetId === "qwen.WarmFemale");
   if (!evidence) throw new Error("official fixture missing");
   return {
     schema_version: NARRATION_VOICE_SCHEMA_VERSION,
@@ -171,9 +168,9 @@ function officialVersion(changes: Partial<VoiceProfileVersionResource> = {}): Vo
     version_number: 1,
     source_type: "preset",
     state: "locked",
-    provider_id: "moss",
-    model_id: "nano",
-    model_revision: "rev-1",
+    provider_id: "qwen-tts",
+    model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+    model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
     preset_key: evidence.presetId,
     language: "zh-CN",
     fingerprint: "a".repeat(64),
@@ -196,18 +193,18 @@ function officialVersion(changes: Partial<VoiceProfileVersionResource> = {}): Vo
       risk_flags: [],
     },
     official_preset: {
-      schema_version: "moss-tts-official-preset-provenance/1.0",
-      repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
-      revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-      manifest_path: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
-      manifest_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestSha256,
+      schema_version: "qwen-tts-preset-provenance/1",
+      catalog_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
       preset_id: evidence.presetId,
-      manifest_voice: evidence.manifestVoice,
-      prompt_codes_sha256: evidence.promptCodesSha256,
-      prompt_frame_count: evidence.promptFrameCount,
-      prompt_quantizer_count: evidence.promptQuantizerCount,
+      local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+      local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+      provider_voice_ids: {
+        local_qwen3_tts: evidence.localVoiceId,
+        "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": evidence.aliyunPlusVoiceId,
+        "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": evidence.aliyunFlashVoiceId,
+      },
       model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
-      provenance_fingerprint_sha256: evidence.provenanceFingerprintSha256,
+      provenance_fingerprint_sha256: "a".repeat(64),
     },
     reference_asset_id: null,
     preview_asset: {
@@ -281,7 +278,6 @@ function props(changes: Partial<CharacterVoiceRosterProps> = {}): CharacterVoice
     capabilities: capabilities(),
     authorization,
     onConfigureCharacter: vi.fn(),
-    onSmartCast: vi.fn(),
     ...changes,
   };
 }
@@ -295,27 +291,17 @@ async function settle(): Promise<void> {
 
 
 describe("character voice roster projection", () => {
-  it("does not label a tuned official voice as a newly generated dedicated voice", () => {
-    const tuned = officialVersion({
-      source_type: "generated", activation_basis: "experimental_machine_validated",
-      validation_basis: "machine_validated", quality_state: "accepted",
-    });
-    const rows = buildCharacterVoiceRosterRows(NOVEL_ID, characters, [binding(CHARACTER_A)], [profile(tuned)]);
-    expect(rows[0].sourceLabel).toBe("高级调音");
-    expect(rows[0].sourceGroup).toBe("private");
-  });
-
   it("shows configured gaps and exact official/private source groups without leaking another novel", () => {
     const generated = officialVersion({
       version_id: "99999999-9999-4999-8999-999999999999",
       profile_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      source_type: "generated",
+      source_type: "uploaded",
       preset_key: null,
       official_preset: null,
-      activation_basis: "character_one_click_generation",
-      validation_basis: "machine_validated",
+      activation_basis: "preview_confirmed",
+      validation_basis: "human_accepted",
       quality_state: "accepted",
-      rights: { ...officialVersion().rights, source_kind: "voice_generator" },
+      rights: { ...officialVersion().rights, source_kind: "user_upload" },
       preview_asset: null,
     });
     const privateProfile = {
@@ -354,7 +340,7 @@ describe("character voice roster projection", () => {
 
 
 describe("CharacterVoiceRoster", () => {
-  it("renders the compact roster with one global action and two row actions", () => {
+  it("renders the compact roster with manual character configuration", () => {
     const onPreviewVoice = vi.fn();
     const harness = createHarness();
     const Roster = createCharacterVoiceRoster(harness.React);
@@ -368,7 +354,7 @@ describe("CharacterVoiceRoster", () => {
     expect(textContent(tree)).not.toContain("尚未绑定声音");
     expect(findAll(tree, (element) => textContent(element) === "未配置")).toHaveLength(0);
     expect(findAll(tree, (element) => textContent(element) === "已配置")).toHaveLength(0);
-    expect(findButton(tree, "智能配音全书")).toBeDefined();
+    expect(textContent(tree)).not.toContain("智能配音全书");
     expect(findAll(tree, (element) => (
       element.type === "button" && textContent(element) === "更换"
     ))).toHaveLength(2);
@@ -386,52 +372,15 @@ describe("CharacterVoiceRoster", () => {
       .every((button) => button.props.type === "button")).toBe(true);
   });
 
-  it("starts one persistent whole-book command instead of looping character writes", async () => {
-    const onSmartCast = vi.fn(async () => undefined);
-    const harness = createHarness();
-    const Roster = createCharacterVoiceRoster(harness.React);
-    const tree = harness.render(Roster, props({ onSmartCast }));
-
-    const start = findButton(tree, "智能配音全书").props.onClick as () => void;
-    start();
-    start();
-    await settle();
-
-    expect(onSmartCast).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows durable cast progress and disables duplicate starts", () => {
-    const onSmartCast = vi.fn();
+  it("fails closed for permission gaps", () => {
     const harness = createHarness();
     const Roster = createCharacterVoiceRoster(harness.React);
     const tree = harness.render(Roster, props({
-      onSmartCast,
-      castStatus: {
-        phase: "analyzing",
-        progressCurrent: 2,
-        progressTotal: 7,
-        message: "正在分析第 3 位目标",
-      },
-    }));
-
-    const action = findButton(tree, "智能配音 2/7");
-    expect(action.props.disabled).toBe(true);
-    expect(textContent(tree)).toContain("正在分析第 3 位目标");
-  });
-
-  it("fails closed for permission/capability gaps", () => {
-    expect(characterVoiceBatchAvailability(props({
       authorization: { ...authorization, can_configure: false },
-    }), 1)).toEqual({ enabled: false, reason: "当前身份只能查看，不能修改人物配音。" });
-
-    const harness = createHarness();
-    const Roster = createCharacterVoiceRoster(harness.React);
-    const tree = harness.render(Roster, props({
-      capabilities: capabilities({ character_cast_planning: false }),
     }));
 
-    expect(findButton(tree, "智能配音全书").props.disabled).toBe(true);
-    expect(textContent(tree)).toContain("智能配音当前不可用（FEATURE_NOT_RELEASED）");
+    expect(findButton(tree, "更换").props.disabled).toBe(true);
+    expect(textContent(tree)).toContain("当前人物声音设置为只读");
   });
 
   it("opens an accessible drawer, keeps it mounted when closed and restores focus", async () => {

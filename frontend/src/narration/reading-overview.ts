@@ -61,10 +61,10 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   T4_GATE_REQUIRED: "等待合成与播放器阶段门禁通过",
   T5_GATE_REQUIRED: "等待高级音色阶段门禁通过",
   VOICE_SOURCE_NOT_APPROVED: "尚无通过授权与质量验收的试听音色",
-  OFFICIAL_PRESET_CATALOG_NOT_RELEASED: "固定官方 ONNX 音色目录尚未完成技术发布",
-  OFFICIAL_PRESET_MANIFEST_MISSING: "固定官方 ONNX manifest 缺失",
-  OFFICIAL_PRESET_MANIFEST_HASH_MISMATCH: "固定官方 ONNX manifest 校验失败",
-  OFFICIAL_PRESET_MODEL_FINGERPRINT_MISMATCH: "固定官方 ONNX 模型指纹不一致",
+  OFFICIAL_PRESET_CATALOG_NOT_RELEASED: "Qwen 官方音色目录尚未完成技术发布",
+  OFFICIAL_PRESET_MANIFEST_MISSING: "Qwen 官方音色目录缺失",
+  OFFICIAL_PRESET_MANIFEST_HASH_MISMATCH: "Qwen 官方音色目录校验失败",
+  OFFICIAL_PRESET_MODEL_FINGERPRINT_MISMATCH: "Qwen 模型指纹不一致",
   OFFICIAL_PRESET_RUNTIME_UNAVAILABLE: "官方预设本地推理运行时尚未就绪",
   REFERENCE_CLONE_PRODUCT_GATE_HOLD: "参考录音克隆仍处于产品门禁保留状态",
   CLOUD_CONSENT_FLOW_NOT_READY: "云端最小化分析授权流程尚未就绪",
@@ -315,7 +315,7 @@ export function createReadingOverview(
           "div",
           { className: "anw-reading-empty", "data-reading-empty": "true" },
           h("h3", null, "还没有朗读配置"),
-          h("p", null, "可从 18 个官方音色中直接选择旁白，再为正式人物一键匹配或手动配置声音。"),
+          h("p", null, "可从 Qwen 官方音色中选择旁白，再为人物手动配置声音。"),
           h(
             "button",
             {
@@ -331,7 +331,7 @@ export function createReadingOverview(
       h(
         "div",
         { className: "anw-reading-status-grid" },
-        statusCard(h, "Nano Runtime", model.runtimeLabel, model.runtimeDetail),
+        statusCard(h, "Qwen TTS", model.runtimeLabel, model.runtimeDetail),
         statusCard(h, "正文分析", model.privacyLabel, `云端授权：${state.overview.authorization.cloud_consent.state}`),
         statusCard(h, "脚本复核", model.reviewPolicyLabel, model.reviewLabel),
         statusCard(h, "当前旁白", model.narratorLabel),

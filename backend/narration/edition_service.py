@@ -2,7 +2,7 @@
 
 The pure orchestration function assumes a caller-owned short transaction.  The
 SQLAlchemy service below supplies that unit of work.  Every operation in this
-module is database/local-rule work; Nano, FFmpeg, files, and network calls are
+module is database/local-rule work; TTS Provider, FFmpeg, files, and network calls are
 strictly outside this boundary.
 """
 
@@ -20,10 +20,6 @@ from ..models import (
     BackgroundJob,
     CharacterVoiceBinding,
     Document,
-    GenericVoicePackVersion,
-    GenericVoicePackVersionSlot,
-    GenericVoicePool,
-    GenericVoiceSlot,
     NarrationEdition,
     NarrationEditionSegment,
     NarrationEditionState,
@@ -39,8 +35,6 @@ from ..models import (
 
 from .contracts import (
     LOCAL_OWNER_ACTOR_ID,
-    LOCAL_OWNER_ID,
-    LOCAL_WORKSPACE_ID,
     NarrationRequestScope,
 )
 from .authority_locks import (
@@ -96,6 +90,11 @@ from .snapshots import (
     SETTINGS_SNAPSHOT_SCHEMA_VERSION,
     create_settings_snapshot,
     create_tts_snapshot,
+)
+from .tts_selection import (
+    selection_fingerprint,
+    selection_from_settings_snapshot,
+    tokenizer_fingerprint,
 )
 
 
@@ -556,62 +555,6 @@ def project_edition(
     )
 
 
-def _require_active_generic_slot(
-    store: NarrationStore,
-    *,
-    novel_id: UUID,
-    slot: GenericVoiceSlot,
-    expected_pool_id: UUID | None = None,
-) -> GenericVoicePool:
-    pool = require_row(
-        store.get(GenericVoicePool, slot.pool_id, for_update=True),
-        label="generic voice pool",
-    )
-    if expected_pool_id is not None and pool.id != expected_pool_id:
-        raise NarrationScopeMismatch("generic voice target differs from its pool")
-    if (
-        pool.novel_id != novel_id
-        or pool.status != "active"
-        or pool.source_pack_version_id is None
-        or pool.language != "zh-CN"
-        or type(slot.enabled) is not bool
-        or not slot.enabled
-    ):
-        raise NarrationScopeMismatch("generic voice slot is no longer usable")
-    pack = require_row(
-        store.get(
-            GenericVoicePackVersion,
-            pool.source_pack_version_id,
-            for_update=True,
-        ),
-        label="generic voice source pack",
-    )
-    if (
-        pack.workspace_id != LOCAL_WORKSPACE_ID
-        or pack.language != pool.language
-        or pack.state != "active"
-        or pack.validated_slot_count != 24
-    ):
-        raise NarrationScopeMismatch("generic voice source pack is no longer active")
-    source_slots = store.find_all(
-        GenericVoicePackVersionSlot,
-        pack_version_id=pack.id,
-        slot_key=slot.slot_key,
-        for_update=True,
-    )
-    if (
-        len(source_slots) != 1
-        or source_slots[0].voice_version_id != slot.voice_version_id
-        or source_slots[0].state not in {"validated", "reused"}
-        or not source_slots[0].rights_approved
-        or not source_slots[0].quality_approved
-    ):
-        raise NarrationScopeMismatch(
-            "generic voice slot differs from its active source pack"
-        )
-    return pool
-
-
 def _voice_resolution(
     store: NarrationStore,
     *,
@@ -627,8 +570,6 @@ def _voice_resolution(
             "a production Edition segment requires one resolved voice target"
         )
 
-    slot_id: UUID | None = None
-    workspace_library_voice = False
     authority: dict[str, object]
     if target.kind is CastingTargetKind.PROFILE:
         resolved = settings_snapshot.snapshot_json.get("resolved_settings")
@@ -686,54 +627,9 @@ def _voice_resolution(
             label="anonymous speaker voice version",
         )
         profile_id = voice.profile_id
-        slot_id = anonymous.slot_id
-        if slot_id is not None:
-            slot = require_row(
-                store.get(GenericVoiceSlot, slot_id, for_update=True),
-                label="anonymous generic voice slot",
-            )
-            if slot.voice_version_id != voice_version_id:
-                raise NarrationScopeMismatch(
-                    "anonymous binding differs from its generic slot"
-                )
-            _require_active_generic_slot(
-                store,
-                novel_id=novel_id,
-                slot=slot,
-            )
-            workspace_library_voice = True
         authority = {
             "kind": "anonymous_binding",
             "anonymous_speaker_id": str(anonymous.id),
-        }
-    elif target.kind is CastingTargetKind.GENERIC_SLOT:
-        slot = require_row(
-            store.get(GenericVoiceSlot, target.slot_id, for_update=True),
-            label="generic voice slot",
-        )
-        if segment.speaker_kind not in {"anonymous", "group", "unknown"}:
-            raise NarrationScopeMismatch(
-                "generic voice slots are limited to non-character speakers"
-            )
-        pool = _require_active_generic_slot(
-            store,
-            novel_id=novel_id,
-            slot=slot,
-            expected_pool_id=target.pool_id,
-        )
-        voice_version_id = slot.voice_version_id
-        voice = require_row(
-            store.get(VoiceProfileVersion, voice_version_id, for_update=True),
-            label="generic slot voice version",
-        )
-        profile_id = voice.profile_id
-        slot_id = slot.id
-        workspace_library_voice = True
-        authority = {
-            "kind": "generic_slot",
-            "pool_id": str(pool.id),
-            "pool_version": pool.version_number,
-            "slot_id": str(slot.id),
         }
     else:  # pragma: no cover - enum exhaustiveness guard
         raise InvalidNarrationState("unsupported casting target")
@@ -748,25 +644,13 @@ def _voice_resolution(
         store.get(VoiceProfile, profile_id, for_update=True),
         label="resolved voice profile",
     )
-    if workspace_library_voice:
-        if (
-            profile.novel_id is not None
-            or profile.owner_id != LOCAL_OWNER_ID
-            or profile.workspace_id != LOCAL_WORKSPACE_ID
-            or voice.activation_basis != "generic_voice_pack_generation"
-            or voice.validation_basis != "machine_validated"
-        ):
-            raise NarrationScopeMismatch(
-                "generic slot voice is outside the validated workspace library"
-            )
-    elif profile.novel_id != novel_id:
+    if profile.novel_id != novel_id:
         raise NarrationScopeMismatch("resolved voice profile belongs to another novel")
     resolution = {
         "contract_version": NARRATION_EDITION_RESOLUTION_VERSION,
         "casting": canonical_payload(segment.casting_json),
         "profile_id": str(profile_id),
         "voice_version_id": str(voice_version_id),
-        "slot_id": str(slot_id) if slot_id else None,
         "authority": authority,
         "voice_identity": {
             "profile_id": str(profile_id),
@@ -781,7 +665,6 @@ def _voice_resolution(
         ordinal=segment.ordinal,
         profile_id=profile_id,
         voice_version_id=voice_version_id,
-        slot_id=slot_id,
         resolution_json=resolution,
         gap_after_ms=segment.pause_after_ms,
     )
@@ -907,9 +790,7 @@ def _continue_request(
         label="narration request",
     )
     if command.expected_speaker_digest is not None:
-        # Import locally to keep the foundational workflow independent unless
-        # the Plan 55 continuation fence is explicitly requested.
-        from .voice_preparation import FrozenSpeakerSegment, speaker_summary_digest
+        from .speaker_digest import FrozenSpeakerSegment, speaker_summary_digest
 
         frozen_segments = tuple(
             FrozenSpeakerSegment(
@@ -961,7 +842,7 @@ def produce_approved_request(
     """Create the unique production graph for an already-approved candidate.
 
     The caller owns one short database transaction.  This function performs no
-    model, network, file, Sidecar, or FFmpeg call and is shared by automatic
+    model, network, file, Provider, or FFmpeg call and is shared by automatic
     approval and the explicit owner-review path.
     """
 
@@ -1061,6 +942,15 @@ def produce_approved_request(
             "reviewable request already owns an Edition"
         )
 
+    try:
+        tts_selection = selection_from_settings_snapshot(
+            settings_snapshot.snapshot_json
+        )
+    except ValueError as error:
+        raise InvalidNarrationState(
+            "narration settings snapshot has an invalid TTS Provider selection"
+        ) from error
+
     authority_lock = lock_voice_authorities(
         store,
         mutex=mutex,
@@ -1092,8 +982,8 @@ def produce_approved_request(
             script_version_id=contract.script_version_id,
             settings_snapshot_id=settings_snapshot.id,
             pronunciation_profile_id=(pronunciation.id if pronunciation else None),
-            tts_fingerprint=policy.tts_fingerprint,
-            tokenizer_fingerprint=policy.tokenizer_fingerprint,
+            tts_fingerprint=selection_fingerprint(tts_selection),
+            tokenizer_fingerprint=tokenizer_fingerprint(tts_selection),
             normalizer_fingerprint=policy.normalizer_fingerprint,
             postprocess_fingerprint=policy.postprocess_fingerprint,
             buffer_policy_version=policy.buffer_policy_version,

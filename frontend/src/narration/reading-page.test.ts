@@ -144,7 +144,7 @@ function capability(key: typeof CAPABILITY_KEYS[number]): FeatureCapability {
       required_gate: "T2-GATE",
     };
   }
-  if (key === "voice_generator") {
+  if (key === "voice_design") {
     return {
       key,
       state: "unavailable",
@@ -246,7 +246,7 @@ function overviewFixture(): NarrationOverviewResponse {
     runtime: {
       technical_enabled: false,
       lifecycle_status: "disabled",
-      sidecar_reachable: false,
+      provider_reachable: false,
       model_ready: false,
       product_visible: false,
       protocol_version: "1.1",
@@ -285,7 +285,7 @@ function overviewFixture(): NarrationOverviewResponse {
       },
       {
         source_type: "generated",
-        capability: "voice_generator",
+        capability: "voice_design",
         available: false,
         reason_code: "VOICE_GENERATOR_NO_GO",
         accepted_mime_types: [],

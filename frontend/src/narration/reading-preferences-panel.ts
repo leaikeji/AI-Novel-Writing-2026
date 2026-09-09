@@ -12,6 +12,15 @@ import type {
   UpdateNarrationPlaybackPreferencesRequest,
   UpdateNarrationSettingsRequest,
 } from "./contracts";
+import {
+  createDefaultTTSProviderSelection,
+  selectAliyunTTSModel,
+  selectTTSProvider,
+  TTS_PROVIDER_PRESENTATIONS,
+  type AliyunTTSModelId,
+  type TTSProviderId,
+  type TTSProviderSelection,
+} from "./tts-provider";
 
 
 export const SUPPORTED_READING_LANGUAGES = ["zh-CN", "en", "ja-JP"] as const;
@@ -71,6 +80,7 @@ export interface ReadingBasePreferencesDraft {
   readonly language: string;
   readonly textRules: NarrationTextRules;
   readonly timing: NarrationTimingSettings;
+  readonly ttsProvider: TTSProviderSelection;
 }
 
 
@@ -163,10 +173,18 @@ function blockedReason(props: ReadingPreferencesPanelProps): string | null {
 export function readingBasePreferencesFromSettings(
   settings: NarrationSettingsResource,
 ): ReadingBasePreferencesDraft {
+  const savedProvider = settings.values.tts_provider;
   return {
     language: settings.values.language,
     textRules: settings.values.text_rules,
     timing: settings.values.timing,
+    ttsProvider: savedProvider
+      ? {
+        schemaVersion: "narration-tts-provider-selection/1",
+        providerId: savedProvider.provider_id,
+        aliyunModelId: savedProvider.aliyun_model_id,
+      }
+      : createDefaultTTSProviderSelection(),
   };
 }
 
@@ -208,6 +226,10 @@ export function buildReadingBaseSettingsRequest(
       language: draft.language,
       text_rules: draft.textRules,
       timing: draft.timing,
+      tts_provider: {
+        provider_id: draft.ttsProvider.providerId,
+        aliyun_model_id: draft.ttsProvider.aliyunModelId,
+      },
     },
   };
 }
@@ -301,7 +323,10 @@ function responseMatchesBase(
     && resource.version > baselineVersion
     && resource.values.language === draft.language
     && JSON.stringify(resource.values.text_rules) === JSON.stringify(draft.textRules)
-    && JSON.stringify(resource.values.timing) === JSON.stringify(draft.timing);
+    && JSON.stringify(resource.values.timing) === JSON.stringify(draft.timing)
+    && JSON.stringify(
+      readingBasePreferencesFromSettings(resource).ttsProvider,
+    ) === JSON.stringify(draft.ttsProvider);
 }
 
 
@@ -455,6 +480,7 @@ export function createReadingPreferencesPanel(
 
     const reason = blockedReason(props);
     const pausePreset = pausePresetForTiming(baseDraft.timing);
+    const providerPresentation = TTS_PROVIDER_PRESENTATIONS[baseDraft.ttsProvider.providerId];
     const operationNode = operation.failure
       ? h("div", { className: "anw-reading-preferences-panel__error", role: "alert" },
         h("p", null, operation.failure.message),
@@ -555,6 +581,49 @@ export function createReadingPreferencesPanel(
         h("p", null, "这些选项不会改写正文或历史 Edition。"),
       ),
       h("span", { className: baseDirty ? "is-unsaved" : "" }, baseDirty ? "有未保存更改" : "已同步"),
+    ),
+    h("fieldset", { disabled },
+      h("legend", null, "语音生成位置"),
+      ...(["local_qwen3_tts", "aliyun_qwen_audio_tts"] as const).map((providerId) => {
+        const presentation = TTS_PROVIDER_PRESENTATIONS[providerId];
+        return h("label", {
+          key: providerId,
+          className: baseDraft.ttsProvider.providerId === providerId ? "is-selected" : "",
+        },
+        h("input", {
+          type: "radio",
+          name: `${prefix}-tts-provider`,
+          value: providerId,
+          checked: baseDraft.ttsProvider.providerId === providerId,
+          onChange: () => setBaseDraft((current) => ({
+            ...current,
+            ttsProvider: selectTTSProvider(current.ttsProvider, providerId as TTSProviderId),
+          })),
+        }),
+        h("span", null, presentation.label),
+        h("small", null, `${presentation.privacyNotice} ${presentation.costNotice}`),
+        );
+      }),
+      baseDraft.ttsProvider.providerId === "aliyun_qwen_audio_tts"
+        ? h("label", { className: "anw-reading-preferences-panel__select" },
+          h("span", null, "云端模型"),
+          h("select", {
+            value: baseDraft.ttsProvider.aliyunModelId,
+            onChange: (event: ValueChangeEvent) => setBaseDraft((current) => ({
+              ...current,
+              ttsProvider: selectAliyunTTSModel(
+                current.ttsProvider,
+                event.target.value as AliyunTTSModelId,
+              ),
+            })),
+          },
+          h("option", { value: "qwen-audio-3.0-tts-plus" }, "Plus（优先质量）"),
+          h("option", { value: "qwen-audio-3.0-tts-flash" }, "Flash（优先延迟）"),
+          ),
+          h("small", null, "真正调用前还需单独确认作品级云端 TTS 授权；失败不会自动切到本地。"),
+        )
+        : null,
+      h("p", { role: "note" }, `当前选择：${providerPresentation.modelLabel}`),
     ),
     h("fieldset", { disabled },
       h("legend", null, "语言与正文"),

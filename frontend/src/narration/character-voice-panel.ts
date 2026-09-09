@@ -158,7 +158,7 @@ const SOURCE_LABELS: Readonly<Record<VoiceSourceType, string>> = {
 const SOURCE_CAPABILITIES: Readonly<Record<VoiceSourceType, CapabilityKey>> = {
   preset: "preset_voice_source",
   uploaded: "reference_clone",
-  generated: "voice_generator",
+  generated: "voice_design",
 };
 
 
@@ -241,9 +241,7 @@ export function characterVoiceOptions(
       || !voiceSourceEvidenceIsUsable(version)
       || !isCharacterVoiceCapabilityActionable(
         capabilities,
-        version.activation_basis === "experimental_machine_validated"
-          ? "nano_advanced_tuning"
-          : SOURCE_CAPABILITIES[version.source_type],
+        SOURCE_CAPABILITIES[version.source_type],
       )) continue;
     options.push({
       key: voiceOptionKey(profile.profile_id, version.version_id),
@@ -253,8 +251,7 @@ export function characterVoiceOptions(
       versionNumber: version.version_number,
       language: version.language,
       sourceType: version.source_type,
-      sourceLabel: version.activation_basis === "experimental_machine_validated"
-        ? "高级调音" : SOURCE_LABELS[version.source_type],
+      sourceLabel: SOURCE_LABELS[version.source_type],
     });
   }
   return options.sort((left, right) => (

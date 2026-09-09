@@ -30,8 +30,17 @@ coverage/
 playwright-report/
 test-results/
 
+# Local model weights and caches (Qwen TTS models live outside this repository)
+models/
+tts_runtime/models/
+*.safetensors
+*.gguf
+pytorch_model*.bin
+model*.onnx
+
 # Local database safety snapshots
 audit/db-backups/
+audit/qwen-tts/backups/
 docs/开发文档/证据/关系网P0优化-2026-08-25/pre-relationship-cleanup.dump
 docs/开发文档/证据/助手计划V2验证-2026-08-25/pre-a3a4-install.dump
 docs/开发文档/证据/角色卡性格补全/pre-cpc-0016-20260826.dump

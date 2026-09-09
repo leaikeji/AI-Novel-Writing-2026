@@ -105,6 +105,7 @@ from .services import (
 from .snapshots import (
     SETTINGS_SNAPSHOT_SCHEMA_VERSION,
     CreateSettingsSnapshot,
+    resolve_tts_cloud_profile,
     snapshot_payload,
 )
 
@@ -1241,6 +1242,12 @@ class SqlAlchemyScriptApiBackend:
             ),
             settings,
             overrides,
+            cloud_profile=resolve_tts_cloud_profile(
+                self.store,
+                settings.settings_json,
+                owner_id=LOCAL_OWNER_ID,
+                workspace_id=LOCAL_WORKSPACE_ID,
+            ),
         )
         fingerprints = {canonical_sha256(payload)}
         resolved = payload.get("resolved_settings")

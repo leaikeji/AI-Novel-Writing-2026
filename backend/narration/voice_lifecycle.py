@@ -195,7 +195,7 @@ class PrivateVoiceLifecycleService:
                         blocked_reason = blocked_reason or "VOICE_DELETE_UNSAFE_EVIDENCE"
                     if deletion_impact is None:
                         impact = {
-                            "schema_version": "private-voice-deletion-impact/2",
+                            "schema_version": "private-voice-deletion-impact/3",
                             "profile_id": str(profile.id),
                             "novel_id": str(novel_id),
                             "profile_version": profile.version,
@@ -203,7 +203,6 @@ class PrivateVoiceLifecycleService:
                             "current_narrator_count": 0,
                             "character_binding_count": 0,
                             "anonymous_speaker_count": 0,
-                            "generic_slot_count": 0,
                             "historical_edition_count": 0,
                             "render_count": 0,
                             "export_count": 0,

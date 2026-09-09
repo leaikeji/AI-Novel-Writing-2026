@@ -43,7 +43,6 @@ from .official_presets import (
     require_official_preset,
     validate_official_version_evidence,
 )
-from .nano_experiments import validate_nano_experiment_version_evidence
 from .services import (
     InvalidNarrationState,
     NarrationCasConflict,
@@ -69,7 +68,6 @@ _MIME_PARAMETER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _METADATA_MAX_BYTES: Final = 64 * 1024
 _MULTIPART_ENVELOPE_ALLOWANCE: Final = 64 * 1024
 _PayloadModel = TypeVar("_PayloadModel", bound=BaseModel)
-
 VOICE_SETTINGS_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
     {
         NarrationSettingsOperation.LIST_VOICE_PROFILES,
@@ -155,7 +153,7 @@ class VoiceProfileCreationReceiptPort(Protocol):
 class VoiceProductPort(Protocol):
     """Narrow production seam for source/preview sagas.
 
-    Upload normalization, filesystem publication, and Nano execution must be
+    Upload normalization, filesystem publication, and Qwen execution must be
     owned by this port outside the request-scoped settings transaction.  Its DB
     phases use independent short transactions; callers must therefore exclude
     uploaded-version creation from the generic settings transaction wrapper
@@ -323,13 +321,9 @@ def _required_rights(
     ):
         raise NarrationScopeMismatch("voice rights are outside the profile scope")
     expected_kinds = {
-        "preset": {"official_preset", "preset_catalog"},
+        "preset": "official_preset",
         "uploaded": "user_upload",
-        "generated": (
-            {"official_preset"}
-            if version.activation_basis == "experimental_machine_validated"
-            else {"voice_generator"}
-        ),
+        "generated": set(),
     }.get(version.source_type)
     if expected_kinds is None or rights.source_kind not in (
         expected_kinds if isinstance(expected_kinds, set) else {expected_kinds}
@@ -337,12 +331,7 @@ def _required_rights(
         raise InvalidNarrationState("voice source and rights provenance disagree")
     if rights.source_kind == "official_preset":
         try:
-            validator = (
-                validate_nano_experiment_version_evidence
-                if version.source_type == "generated"
-                else validate_official_version_evidence
-            )
-            validator(
+            validate_official_version_evidence(
                 version,
                 rights,
                 expected_model_fingerprint=(
@@ -447,24 +436,11 @@ def _latest_preview_asset_id(
 ) -> UUID | None:
     """Return only a durable, unexpired preview publication.
 
-    ``VoiceProfileVersion.preview_asset_id`` predates asynchronous Nano
-    previews and cannot safely represent a particular expiring execution.
+    ``VoiceProfileVersion.preview_asset_id`` predates asynchronous previews and
+    cannot safely represent a particular expiring execution.
     Product projections therefore derive the link from immutable
     ``VoicePreview`` rows and leave the legacy version field untouched.
     """
-
-    # Dedicated voices already own an immutable Nano validation publication.
-    # Do not fabricate an expiring VoicePreview or synthesize again to audition it.
-    if version.source_type == "generated" and version.activation_basis == "character_one_click_generation":
-        if version.preview_asset_id is None:
-            return None
-        from .voice_version_media import resolve_voice_version_media
-
-        try:
-            asset = resolve_voice_version_media(store, version.id, version.preview_asset_id, at=at)
-        except NarrationServiceError:
-            return None
-        return asset.id
 
     candidates = store.find_all(
         VoicePreview,
@@ -539,9 +515,6 @@ def voice_profile_resource(
         if version.created_at is None:
             raise InvalidNarrationState("voice version timestamp is absent")
         versions.append(
-            # New official preset versions publish exact pinned provenance.
-            # Legacy preset_catalog rows remain readable without pretending
-            # they carry the new manifest evidence.
             wire.VoiceProfileVersionResource(
                 version_id=version.id,
                 profile_id=profile.id,
@@ -612,19 +585,6 @@ def list_voice_profiles(
     # audit and historical Edition evidence.  Its media rows are deliberately
     # no longer publishable, so it must not poison the active selection list.
     scoped = [row for row in scoped if row.status != "unavailable"]
-    # Generic pack voices are system-library implementation assets.  They are
-    # only selectable through a complete, active GenericVoicePool projection;
-    # publishing them in the ordinary profile picker would expose incomplete
-    # candidates and invite scope-invalid narrator/character bindings.
-    scoped = [
-        row
-        for row in scoped
-        if row.current_version_id is None
-        or (
-            (current := store.get(VoiceProfileVersion, row.current_version_id)) is None
-            or current.activation_basis != "generic_voice_pack_generation"
-        )
-    ]
     if novel_id is None:
         selected = [row for row in scoped if include_library and row.novel_id is None]
     else:
@@ -637,7 +597,7 @@ def list_voice_profiles(
 
 
 def list_official_presets() -> wire.OfficialPresetCatalogResponse:
-    """Return all 18 pinned presets without prompt codes or audio locators."""
+    """Return the small provider-aware Qwen preset catalog."""
 
     return wire.OfficialPresetCatalogResponse(
         items=[
@@ -651,7 +611,7 @@ def list_official_presets() -> wire.OfficialPresetCatalogResponse:
                 validation_tier=official_preset_validation_tier(preset.preset_id),
                 language_scope=preset.language,
                 selectable_now=True,
-                previewable_now=True,
+                previewable_now=False,
                 renderable_existing=True,
                 provenance=preset.provenance(),
             )
@@ -1081,15 +1041,15 @@ def _source_unavailable(source_type: wire.VoiceSourceType) -> NarrationApiFault:
     capability, message = {
         wire.VoiceSourceType.PRESET: (
             wire.CapabilityKey.PRESET_VOICE_SOURCE,
-            "官方预设目录与当前 Nano 模型还未完成一致性接线。",
+            "Qwen 内置音色目录当前不可用。",
         ),
         wire.VoiceSourceType.UPLOADED: (
             wire.CapabilityKey.REFERENCE_CLONE,
             "参考录音克隆仍处于产品门禁 HOLD。",
         ),
         wire.VoiceSourceType.GENERATED: (
-            wire.CapabilityKey.VOICE_GENERATOR,
-            "文字描述生成音色当前不可用。",
+            wire.CapabilityKey.VOICE_DESIGN,
+            "Qwen 文字描述音色设计当前不可用。",
         ),
     }[source_type]
     return NarrationApiFault(

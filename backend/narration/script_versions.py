@@ -12,8 +12,6 @@ from ..models import (
     CharacterVoiceBinding,
     Document,
     DocumentRevision,
-    GenericVoicePool,
-    GenericVoiceSlot,
     NarrationRequest,
     NarrationRequestSource,
     NarrationScene,
@@ -25,7 +23,6 @@ from ..models import (
     NovelCharacter,
     VoiceProfile,
     VoiceProfileVersion,
-    VoiceCastingRule,
 )
 
 from .contracts import (
@@ -37,7 +34,7 @@ from .contracts import (
     issue_severity,
 )
 from .aliases import CHARACTER_ALIAS_NORMALIZATION_VERSION
-from .casting import CASTING_RESOLVER_VERSION, automatic_generic_casting_rule_id
+from .casting import CASTING_RESOLVER_VERSION
 from .expression import EXPRESSION_RULESET_VERSION
 from .scenes import SCENE_RULESET_VERSION
 from .snapshots import SETTINGS_SNAPSHOT_SCHEMA_VERSION
@@ -75,7 +72,6 @@ from .script_contracts import (
     script_contract_to_dict,
     script_immutable_hash,
     script_immutable_payload,
-    speaker_target_hash,
     utf16_length,
 )
 from .script_review import (
@@ -113,6 +109,17 @@ SCRIPT_ANALYZER_FINGERPRINT = canonical_sha256(
         "pipeline": SCRIPT_ANALYZER_VERSION,
         "script_contract": NARRATION_SCRIPT_CONTRACT_VERSION,
         "casting": CASTING_RESOLVER_VERSION,
+    }
+)
+HISTORICAL_SCRIPT_ANALYZER_FINGERPRINTS: Final[frozenset[str]] = frozenset(
+    {
+        canonical_sha256(
+            {
+                "pipeline": SCRIPT_ANALYZER_VERSION,
+                "script_contract": NARRATION_SCRIPT_CONTRACT_VERSION,
+                "casting": "narration-casting-resolver/1",
+            }
+        )
     }
 )
 SCRIPT_RULES_FINGERPRINT = canonical_sha256(
@@ -662,29 +669,6 @@ def _verify_casting_target(
                 "anonymous casting target relation is not usable"
             )
         return
-    if target.kind is CastingTargetKind.GENERIC_SLOT:
-        pool = require_row(
-            store.get(GenericVoicePool, target.pool_id),
-            label="generic voice pool",
-        )
-        slot = require_row(
-            store.get(GenericVoiceSlot, target.slot_id),
-            label="generic voice slot",
-        )
-        if (
-            pool.novel_id != novel_id
-            or slot.pool_id != pool.id
-        ):
-            raise NarrationScopeMismatch(
-                "generic casting pool/slot relation is not authorized"
-            )
-        if historical_read:
-            return
-        if pool.status != "active" or not slot.enabled:
-            raise NarrationScopeMismatch(
-                "generic casting pool/slot relation is not usable"
-            )
-        return
     profile = require_row(
         store.get(VoiceProfile, target.profile_id), label="voice profile"
     )
@@ -737,46 +721,6 @@ def _settings_snapshot_narrator_profile(
             "settings narrator profile/version is outside fixed local scope"
         )
     return profile_id
-
-
-def _is_server_automatic_pool_decision(
-    store: NarrationStore,
-    *,
-    novel_id: UUID,
-    casting: CastingDecision,
-    historical_read: bool,
-) -> bool:
-    """Recognize the reconstructible Plan 55 pool rule, never a DB rule."""
-
-    if (
-        casting.origin is not CastingDecisionOrigin.CASTING_RULE
-        or casting.rule_id is None
-        or casting.rule_version != 1
-        or casting.final_target is None
-        or casting.final_target.kind is not CastingTargetKind.GENERIC_SLOT
-        or casting.final_target.pool_id is None
-        or store.get(VoiceCastingRule, casting.rule_id) is not None
-    ):
-        return False
-    pool_id = casting.final_target.pool_id
-    if not casting.candidate_targets or any(
-        target.kind is not CastingTargetKind.GENERIC_SLOT
-        or target.pool_id != pool_id
-        for target in casting.candidate_targets
-    ):
-        return False
-    pool = store.get(GenericVoicePool, pool_id)
-    if (
-        pool is None
-        or pool.novel_id != novel_id
-        or (not historical_read and pool.status != "active")
-    ):
-        return False
-    return casting.rule_id == automatic_generic_casting_rule_id(
-        novel_id=novel_id,
-        pool_id=pool.id,
-        pool_version=pool.version_number,
-    )
 
 
 def _settings_snapshot_authority(
@@ -873,7 +817,11 @@ def _build_script_authority_for_candidate(
     historical_read: bool = False,
 ) -> ScriptAuthorityContext:
     require_local_novel(store, candidate.novel_id)
-    if candidate.analyzer_fingerprint != SCRIPT_ANALYZER_FINGERPRINT:
+    analyzer_registered = candidate.analyzer_fingerprint == SCRIPT_ANALYZER_FINGERPRINT or (
+        historical_read
+        and candidate.analyzer_fingerprint in HISTORICAL_SCRIPT_ANALYZER_FINGERPRINTS
+    )
+    if not analyzer_registered:
         raise InvalidNarrationState(
             "script analyzer fingerprint is outside the T3 server registry"
         )
@@ -1024,45 +972,19 @@ def _build_script_authority_for_candidate(
             character_ids.add(character_id)
 
         casting = segment.casting
-        automatic_pool_decision = _is_server_automatic_pool_decision(
-            store,
-            novel_id=candidate.novel_id,
-            casting=casting,
-            historical_read=historical_read,
-        )
-        if (
-            casting.origin is CastingDecisionOrigin.MANUAL_OVERRIDE
-            or (
-                casting.origin is CastingDecisionOrigin.CASTING_RULE
-                and not automatic_pool_decision
-            )
-        ):
+        if casting.origin in {
+            CastingDecisionOrigin.MANUAL_OVERRIDE,
+            CastingDecisionOrigin.CASTING_RULE,
+        }:
             raise InvalidNarrationState(
                 "casting rule/manual authority remains HOLD until exact replay evidence exists"
             )
         if speaker.kind is SpeakerKind.GROUP:
-            if not automatic_pool_decision or speaker.group_key is None:
+            if speaker.group_key is None:
                 raise InvalidNarrationState(
-                    "group speaker authority requires the server automatic pool"
+                    "group speaker authority requires a stable group key"
                 )
-            casting_rule_records.add(
-                CastingRuleAuthorityRecord(
-                    decision=casting,
-                    segment_id=segment.segment_id,
-                    source_local_hash=segment.local_hash,
-                    speaker_target_hash=speaker_target_hash(speaker, casting),
-                )
-            )
             group_keys.add(speaker.group_key)
-        elif automatic_pool_decision:
-            casting_rule_records.add(
-                CastingRuleAuthorityRecord(
-                    decision=casting,
-                    segment_id=segment.segment_id,
-                    source_local_hash=segment.local_hash,
-                    speaker_target_hash=speaker_target_hash(speaker, casting),
-                )
-            )
         for target in casting.candidate_targets:
             _verify_casting_target(
                 store,
@@ -2693,6 +2615,7 @@ __all__ = [
     "ParentReviewClassification",
     "ReserveScriptIdentity",
     "SCRIPT_ANALYZER_FINGERPRINT",
+    "HISTORICAL_SCRIPT_ANALYZER_FINGERPRINTS",
     "SCRIPT_ANALYZER_VERSION",
     "SCRIPT_RULES_FINGERPRINT",
     "ScriptSceneInput",

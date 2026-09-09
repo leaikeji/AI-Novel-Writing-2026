@@ -22,6 +22,7 @@ import {
   type ReadingPreferencesPanelProps,
   type ReadingPreferencesReactRuntime,
 } from "./reading-preferences-panel";
+import { createDefaultTTSProviderSelection } from "./tts-provider";
 
 
 interface FakeElement {
@@ -208,6 +209,10 @@ function settings(input: {
         playback_rate: input.rate ?? 1,
         volume: input.volume ?? 1,
       },
+      tts_provider: {
+        provider_id: "local_qwen3_tts",
+        aliyun_model_id: "qwen-audio-3.0-tts-plus",
+      },
     },
     updated_at: "2026-08-29T10:00:00Z",
   };
@@ -241,6 +246,7 @@ describe("reading preferences requests", () => {
       language: "en",
       textRules: { ...resource.values.text_rules, read_author_notes: true },
       timing: READING_PAUSE_PRESETS.compact,
+      ttsProvider: createDefaultTTSProviderSelection(),
     });
     expect(base.values.playback).toEqual(resource.values.playback);
     expect(base.values.language).toBe("en");

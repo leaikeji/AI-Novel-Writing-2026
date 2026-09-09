@@ -1,38 +1,9 @@
 import { apiErrorMessage } from "../api";
 import {
-  applyCharacterVoiceGeneratorCommand,
-  advanceCharacterCastPlan,
-  cancelCharacterVoiceGeneratorCommand,
-  createCharacterCastPlan,
-  createCharacterVoiceGeneratorCommand,
-  createOfficialVoicePreview,
-  getCharacterVoiceGeneratorCommand,
   getCharacterVoiceBinding,
-  getCharacterCastPlan,
-  getVoicePreview,
   getNarrationOverview,
   listCharacterVoiceBindings,
-  listCharacterCastPlans,
-  listCharacterVoiceGeneratorCommands,
   listVoiceProfiles,
-  listNanoVoiceExperiments,
-  matchCharacterOfficialVoice,
-  retryCharacterVoiceGeneratorCommand,
-  retryCharacterCastPlan,
-  selectOfficialVoice,
-  buildGenericVoicePack,
-  cancelGenericVoicePackBuild,
-  cancelVoicePreparationCommand,
-  createVoicePreparationCommand,
-  getGenericVoicePack,
-  getGenericVoicePackBuildCommand,
-  getVoicePreparationCommand,
-  listVoicePreparationCommands,
-  regenerateGenericVoicePackSlot,
-  rejectGenericVoicePackSlot,
-  retryGenericVoicePackBuild,
-  retryVoicePreparationCommand,
-  resumeVoicePreparationCommand,
 } from "./api";
 import {
   createCachePanel,
@@ -50,53 +21,20 @@ import {
   createCharacterVoiceRoster,
   type CharacterVoiceRosterReactRuntime,
 } from "./character-voice-roster";
-import {
-  activeCharacterCastPlan,
-  characterCastUiStatus,
-  continueCharacterCastPlan,
-  primaryTimelineId,
-} from "./character-cast-runner";
-import {
-  createCharacterVoiceGenerator,
-  type CharacterVoiceGenerationSnapshot,
-  type CharacterVoiceGeneratorReactRuntime,
-} from "./character-voice-generator";
 import type {
   CharacterVoiceBindingPolicy,
-  CharacterVoiceGeneratorCommandResource,
   CharacterVoiceBindingResource,
-  CharacterCastPlanResource,
   NarrationOverviewResponse,
-  MediaAssetLink,
-  OfficialPresetId,
   VoiceProfileResource,
 } from "./contracts";
 import { NarrationContractError } from "./contracts";
-import { listStoryTimelines } from "../story-timeline/api";
 import type { PronunciationPanelReactRuntime } from "./pronunciation-panel";
 import {
   createOfficialVoiceSelectionPanel,
-  createAndPlayOfficialVoicePreview,
-  officialVoiceSelectionResult,
   type CharacterVoiceBindingProjection,
   type OfficialVoiceSelectionPanelApi,
   type OfficialVoiceSelectionPanelProjection,
 } from "./official-voice-selection-panel";
-import {
-  OfficialVoiceUseConflictError,
-  OfficialVoiceUseResponseError,
-  createOfficialVoiceUseIdempotencyKey,
-} from "./official-voice-use-state";
-import { createNarrationIdempotencyKey } from "./idempotency-key";
-import {
-  assertOfficialVoiceSelectionResult,
-  type OfficialVoiceSelectionTarget,
-} from "./official-voice-library";
-import {
-  playGenericVoiceSlotPreview,
-  playReadyVoicePreview,
-  playVoiceVersionPreview,
-} from "./voice-preview-playback";
 import {
   createReadingPage,
   type ReadingPageProps,
@@ -109,25 +47,11 @@ import type { ReadingRulesReactRuntime } from "./reading-rules-panel";
 import { createReadingRulesWorkspace } from "./reading-rules-workspace";
 import { createReadingStatus } from "./reading-status";
 import type { ReadingSectionKey } from "./reading-overview";
-import { capabilityFor } from "./reading-overview";
 import {
   createVoiceSourceWorkspace,
   type VoiceSourceWorkspaceApi,
   type VoiceSourceWorkspaceReactRuntime,
 } from "./voice-source-workspace";
-import {
-  createNanoAdvancedWorkspace,
-  createPrivateVoiceLifecycleWorkspace,
-  officialPresetDisplayName,
-} from "./voice-feature-workspaces";
-import {
-  createVoicePreparation,
-  type VoicePreparationReactRuntime,
-} from "./voice-preparation";
-import {
-  createGenericVoicePack,
-  type GenericVoicePackReactRuntime,
-} from "./generic-voice-pack";
 
 
 export interface NarrationCharacterSummary {
@@ -170,9 +94,7 @@ export interface CharacterVoiceCardInitialBinding {
 }
 
 
-export interface CharacterVoiceCardPanelDependencies {
-  readonly matchCharacterOfficialVoice?: typeof matchCharacterOfficialVoice;
-}
+export interface CharacterVoiceCardPanelDependencies {}
 
 
 export interface NarrationReadingPageDependencies {
@@ -181,33 +103,6 @@ export interface NarrationReadingPageDependencies {
   readonly officialVoiceApi?: OfficialVoiceSelectionPanelApi;
   readonly characterRosterApi?: Readonly<{
     listBindings: typeof listCharacterVoiceBindings;
-  }>;
-  readonly matchCharacterOfficialVoice?: typeof matchCharacterOfficialVoice;
-  readonly listNanoVoiceExperiments?: typeof listNanoVoiceExperiments;
-  readonly characterCastApi?: Readonly<{
-    listPlans: typeof listCharacterCastPlans;
-    createPlan: typeof createCharacterCastPlan;
-    getPlan: typeof getCharacterCastPlan;
-    advancePlan: typeof advanceCharacterCastPlan;
-    retryPlan: typeof retryCharacterCastPlan;
-    listTimelines: typeof listStoryTimelines;
-  }>;
-  readonly voicePreparationApi?: Readonly<{
-    list: typeof listVoicePreparationCommands;
-    create: typeof createVoicePreparationCommand;
-    get: typeof getVoicePreparationCommand;
-    resume: typeof resumeVoicePreparationCommand;
-    retry: typeof retryVoicePreparationCommand;
-    cancel: typeof cancelVoicePreparationCommand;
-  }>;
-  readonly genericVoicePackApi?: Readonly<{
-    get: typeof getGenericVoicePack;
-    build: typeof buildGenericVoicePack;
-    getCommand: typeof getGenericVoicePackBuildCommand;
-    retry: typeof retryGenericVoicePackBuild;
-    cancel: typeof cancelGenericVoicePackBuild;
-    regenerate: typeof regenerateGenericVoicePackSlot;
-    reject: typeof rejectGenericVoicePackSlot;
   }>;
 }
 
@@ -219,10 +114,7 @@ type NarrationReactRuntime = ReadingPageReactRuntime
   & CachePanelReactRuntime
   & ReadingRulesReactRuntime
   & CharacterVoiceRosterReactRuntime
-  & CharacterVoiceConfiguratorReactRuntime
-  & CharacterVoiceGeneratorReactRuntime
-  & VoicePreparationReactRuntime
-  & GenericVoicePackReactRuntime;
+  & CharacterVoiceConfiguratorReactRuntime;
 
 
 interface CharacterVoiceSectionProps {
@@ -288,13 +180,9 @@ function currentVoiceSummary(
   }
   const sourceLabel = version.source_type === "preset"
     ? "官方音色"
-    : version.activation_basis === "character_one_click_generation"
-      ? "人物专属音色"
-      : version.activation_basis === "experimental_machine_validated"
-        ? "Nano 高级调音"
-        : version.source_type === "uploaded"
-          ? "参考录音音色"
-          : "生成音色";
+    : version.source_type === "uploaded"
+      ? "参考录音音色"
+      : "旧音色不可用";
   return Object.freeze({
     kind: "resolved",
     name: profile.name,
@@ -404,50 +292,6 @@ function assertCharacterVoiceBindingScope(
 }
 
 
-function isAbortLike(reason: unknown): boolean {
-  return typeof reason === "object"
-    && reason !== null
-    && "name" in reason
-    && reason.name === "AbortError";
-}
-
-
-function matchedVoiceErrorMessage(reason: unknown): string {
-  if (reason instanceof OfficialVoiceUseConflictError) {
-    return "人物声音又发生了变化，请刷新后重试。";
-  }
-  if (reason instanceof OfficialVoiceUseResponseError || reason instanceof NarrationContractError) {
-    return "服务端返回的声音身份与当前人物不一致，已停止应用。";
-  }
-  return overviewErrorMessage(reason);
-}
-
-
-function characterVoiceGeneratorSnapshot(
-  command: CharacterVoiceGeneratorCommandResource,
-): CharacterVoiceGenerationSnapshot {
-  return {
-    contractVersion: command.contract_version,
-    commandId: command.command_id,
-    draftId: command.draft_id,
-    characterId: command.character_id,
-    state: command.state,
-    progressPercent: Math.round(
-      (command.progress_current / command.progress_total) * 100,
-    ),
-    cancellable: command.cancellable,
-    retryable: command.retryable,
-    terminal: command.terminal,
-    failureCode: command.failure_code,
-    generatedVersionId: command.voice_version_id,
-    selectionStillCurrent: command.selection_still_current,
-    currentBindingVersion: command.current_character_binding.version,
-    createdAt: command.created_at,
-    updatedAt: command.updated_at,
-  };
-}
-
-
 function overviewErrorMessage(reason: unknown): string {
   return apiErrorMessage(reason, "无法加载人物声音权限，请稍后重试。");
 }
@@ -465,7 +309,6 @@ export function createNarrationReadingPage(
     getNarrationOverview,
     dependencies.voiceWorkspaceApi,
     dependencies.officialVoiceApi,
-    { matchCharacterOfficialVoice: dependencies.matchCharacterOfficialVoice },
   );
   const VoiceSourceWorkspace = createVoiceSourceWorkspace(
     React,
@@ -478,44 +321,8 @@ export function createNarrationReadingPage(
   const CachePanel = createCachePanel(React);
   const ReadingRulesWorkspace = createReadingRulesWorkspace(React);
   const ReadingStatus = createReadingStatus(React);
-  const NanoAdvancedWorkspace = createNanoAdvancedWorkspace(React);
-  const PrivateVoiceLifecycleWorkspace = createPrivateVoiceLifecycleWorkspace(React);
-  const VoicePreparation = createVoicePreparation(React);
-  const GenericVoicePack = createGenericVoicePack(React);
   const characterRosterApi = dependencies.characterRosterApi ?? {
     listBindings: listCharacterVoiceBindings,
-  };
-  const listNanoVoiceExperimentsApi = dependencies.listNanoVoiceExperiments
-    ?? listNanoVoiceExperiments;
-  const characterCastApi = dependencies.characterCastApi ?? {
-    listPlans: listCharacterCastPlans,
-    createPlan: createCharacterCastPlan,
-    getPlan: getCharacterCastPlan,
-    advancePlan: advanceCharacterCastPlan,
-    retryPlan: retryCharacterCastPlan,
-    listTimelines: listStoryTimelines,
-  };
-  const voicePreparationApi = dependencies.voicePreparationApi ?? {
-    list: listVoicePreparationCommands,
-    create: createVoicePreparationCommand,
-    get: getVoicePreparationCommand,
-    resume: resumeVoicePreparationCommand,
-    retry: retryVoicePreparationCommand,
-    cancel: cancelVoicePreparationCommand,
-  };
-  const genericVoicePackApi = dependencies.genericVoicePackApi ?? {
-    get: getGenericVoicePack,
-    build: buildGenericVoicePack,
-    getCommand: getGenericVoicePackBuildCommand,
-    retry: retryGenericVoicePackBuild,
-    cancel: cancelGenericVoicePackBuild,
-    regenerate: regenerateGenericVoicePackSlot,
-    reject: rejectGenericVoicePackSlot,
-  };
-  const officialPreviewApi = {
-    createOfficialVoicePreview: dependencies.officialVoiceApi?.createOfficialVoicePreview
-      ?? createOfficialVoicePreview,
-    getVoicePreview: dependencies.officialVoiceApi?.getVoicePreview ?? getVoicePreview,
   };
   function CharacterVoiceSection(props: CharacterVoiceSectionProps): unknown {
     const scopedCharacters = props.characters.filter(
@@ -526,44 +333,7 @@ export function createNarrationReadingPage(
       bindings: readonly CharacterVoiceBindingResource[];
       message: string | null;
     }>>({ phase: "loading", bindings: [], message: null });
-    const [castPlan, setCastPlan] = React.useState<CharacterCastPlanResource | null>(null);
-    const [castRestoreError, setCastRestoreError] = React.useState<string | null>(null);
-    const castRunnerRef = React.useRef<AbortController | null>(null);
     const overview = props.context.overview;
-    const castCapability = capabilityFor(overview, "character_cast_planning");
-    const castAvailable = castCapability.state === "enabled"
-      && castCapability.visible
-      && castCapability.actionable
-      && overview.authorization.can_configure;
-    const preparationCapability = capabilityFor(
-      overview,
-      "automatic_character_voice_generation",
-    );
-    const preparationAvailable = preparationCapability.state === "enabled"
-      && preparationCapability.visible
-      && preparationCapability.actionable;
-
-    const refreshRoster = (): void => {
-      props.context.onRefresh();
-    };
-
-    const continueCastPlan = async (
-      initial: CharacterCastPlanResource,
-      controller: AbortController,
-    ): Promise<CharacterCastPlanResource> => {
-      const current = await continueCharacterCastPlan({
-        novelId: props.novelId,
-        initial,
-        api: characterCastApi,
-        signal: controller.signal,
-        onUpdate: setCastPlan,
-      });
-      if (
-        !controller.signal.aborted
-        && (current.state === "ready_applied" || current.state === "ready_applied_with_warnings")
-      ) refreshRoster();
-      return current;
-    };
 
     React.useEffect(() => {
       const controller = new AbortController();
@@ -597,78 +367,6 @@ export function createNarrationReadingPage(
       return () => controller.abort();
     }, [props.novelId, props.context.overview]);
 
-    React.useEffect(() => {
-      castRunnerRef.current?.abort();
-      if (!castAvailable) {
-        setCastPlan(null);
-        setCastRestoreError(null);
-        return undefined;
-      }
-      const controller = new AbortController();
-      castRunnerRef.current = controller;
-      setCastRestoreError(null);
-      void characterCastApi.listPlans(props.novelId, controller.signal)
-        .then(async (plans) => {
-          if (controller.signal.aborted) return;
-          const restored = activeCharacterCastPlan(plans.items) ?? plans.items[0] ?? null;
-          setCastPlan(restored);
-          if (restored !== null && !restored.terminal) {
-            await continueCastPlan(restored, controller);
-          }
-        })
-        .catch((reason: unknown) => {
-          if (controller.signal.aborted || isAbortLike(reason)) return;
-          setCastPlan(null);
-          setCastRestoreError(apiErrorMessage(
-            reason,
-            "无法恢复上次的智能配音进度；可重新点击“智能配音全书”继续。",
-          ));
-        });
-      return () => {
-        controller.abort();
-        if (castRunnerRef.current === controller) castRunnerRef.current = null;
-      };
-    }, [props.novelId, castAvailable]);
-
-    const runSmartCast = async (): Promise<void> => {
-      castRunnerRef.current?.abort();
-      const controller = new AbortController();
-      castRunnerRef.current = controller;
-      setCastRestoreError(null);
-      try {
-        let initial: CharacterCastPlanResource;
-        if (castPlan !== null && !castPlan.terminal) {
-          initial = castPlan;
-        } else if (castPlan?.state === "failed" && castPlan.retryable) {
-          initial = await characterCastApi.retryPlan(
-            props.novelId,
-            castPlan.command_id,
-            controller.signal,
-          );
-        } else {
-          const timelines = await characterCastApi.listTimelines(
-            props.novelId,
-            controller.signal,
-          );
-          initial = await characterCastApi.createPlan(
-            props.novelId,
-            {
-              contract_version: "character-cast-plan-request/1",
-              timeline_id: primaryTimelineId(timelines, props.novelId),
-              mode: "fill_and_deduplicate",
-            },
-            createNarrationIdempotencyKey("character-cast-plan"),
-            controller.signal,
-          );
-        }
-        if (controller.signal.aborted) return;
-        setCastPlan(initial);
-        await continueCastPlan(initial, controller);
-      } finally {
-        if (castRunnerRef.current === controller) castRunnerRef.current = null;
-      }
-    };
-
     return h(
       "div",
       { className: "anw-narration-character-section" },
@@ -685,57 +383,6 @@ export function createNarrationReadingPage(
             props.context.voiceProfilesError
               ? h("p", { role: "alert" }, props.context.voiceProfilesError)
               : null,
-            h(VoicePreparation, {
-              key: `voice-preparation:${props.novelId}`,
-              capabilityEnabled: preparationAvailable,
-              canConfigure: overview.authorization.can_configure,
-              presentation: "card",
-              onLoadLatest: async (signal: AbortSignal) => {
-                const commands = await voicePreparationApi.list(
-                  props.novelId,
-                  signal,
-                );
-                const current = commands.find((command) => !command.terminal)
-                  ?? commands[0]
-                  ?? null;
-                if (current === null || current.terminal || !preparationAvailable) {
-                  return current;
-                }
-                const resumed = await voicePreparationApi.resume(
-                  props.novelId,
-                  current.commandId,
-                  signal,
-                );
-                if (resumed.terminal && !signal.aborted) {
-                  queueMicrotask(refreshRoster);
-                }
-                return resumed;
-              },
-              onStart: () => voicePreparationApi.create(
-                props.novelId,
-                {
-                  contract_version: "narration-voice-preparation-request/1",
-                  mode: "prepare_missing_dedicated",
-                  document_id: null,
-                  expected_draft_version: null,
-                  expected_content_hash: null,
-                  expected_settings_version: null,
-                },
-                createNarrationIdempotencyKey("voice-preparation"),
-              ),
-              onRefresh: (commandId: string, signal: AbortSignal) => (
-                voicePreparationApi.get(props.novelId, commandId, signal)
-              ),
-              onRetry: (commandId: string) => (
-                voicePreparationApi.retry(props.novelId, commandId)
-              ),
-              onCancel: (commandId: string) => (
-                voicePreparationApi.cancel(props.novelId, commandId)
-              ),
-              onCommandChanged: (command: { readonly terminal: boolean }) => {
-                if (command.terminal) refreshRoster();
-              },
-            }),
             h(CharacterVoiceRoster, {
             novelId: props.novelId,
             characters: scopedCharacters,
@@ -743,60 +390,7 @@ export function createNarrationReadingPage(
             profiles: props.context.voiceProfiles,
             capabilities: overview.capabilities,
             authorization: overview.authorization,
-            castStatus: characterCastUiStatus(castPlan) ?? (castRestoreError === null
-              ? null
-              : {
-                phase: "failed" as const,
-                progressCurrent: 0,
-                progressTotal: 0,
-                message: castRestoreError,
-                retryable: false,
-              }),
-            onSmartCast: runSmartCast,
             onConfigureCharacter: () => undefined,
-            onPreviewVoice: async (
-              _character: { readonly characterId: string; readonly characterName: string },
-              _profile: VoiceProfileResource,
-              version: VoiceProfileResource["versions"][number],
-            ) => {
-              if (version.source_type === "preset" && version.preset_key) {
-                await createAndPlayOfficialVoicePreview(
-                  officialPreviewApi,
-                  { play: playReadyVoicePreview },
-                  props.novelId,
-                  version.preset_key as OfficialPresetId,
-                  new AbortController().signal,
-                );
-                return;
-              }
-              if (version.source_type === "generated") {
-                if (version.activation_basis === "character_one_click_generation") {
-                  if (version.preview_asset === null) {
-                    throw new Error("专属音色试听暂不可用，请刷新音色状态后重试。");
-                  }
-                  await playVoiceVersionPreview(
-                    version.version_id,
-                    version.preview_asset,
-                    new AbortController().signal,
-                  );
-                  return;
-                }
-                const experiments = await listNanoVoiceExperimentsApi(props.novelId);
-                const ready = experiments.items.find((item) => (
-                  item.version_id === version.version_id
-                  && item.preview?.status === "ready"
-                ));
-                if (ready?.preview === null || ready?.preview === undefined) {
-                  throw new Error("当前高级调音试听已过期，请重新创建并使用。");
-                }
-                await playReadyVoicePreview(
-                  ready.preview,
-                  new AbortController().signal,
-                );
-                return;
-              }
-              throw new Error("当前人物音色没有可播放的临时试听。");
-            },
             renderConfigurator: (character: {
               readonly characterId: string;
               readonly characterName: string;
@@ -821,7 +415,7 @@ export function createNarrationReadingPage(
                     language: binding.language,
                     version: binding.version,
                   },
-                onChanged: refreshRoster,
+                onChanged: props.context.onRefresh,
               });
             },
             }),
@@ -869,7 +463,7 @@ export function createNarrationReadingPage(
             ? h("small", null, `${currentVoice.sourceLabel} · ${currentVoice.languageLabel}`)
             : props.context.voiceProfilesError !== null
               ? h("small", { role: "alert" }, props.context.voiceProfilesError)
-              : h("small", null, "从 18 个官方音色中直接选择，不需要先试听。"),
+              : h("small", null, "从 Qwen 官方音色中直接选择，不需要先试听。"),
         ),
         h(
           "div",
@@ -927,22 +521,16 @@ export function createNarrationReadingPage(
         });
       }
       if (section === "advanced-tuning") {
-        return h(NanoAdvancedWorkspace, {
-          novelId: props.novelId,
-          overview,
-          characters: props.characters
-            .filter((character) => character.novelId === props.novelId),
-          onChanged: context.onRefresh,
-        });
+        return h(
+          "p",
+          { className: "anw-reading-section-note" },
+          "Qwen TTS 通过自然语言指令控制语气和表达方式。",
+        );
       }
       if (section === "private-voices") {
         const privateSourceCreationAvailable = overview.voice_sources.some((source) => (
           source.available && source.source_type === "uploaded"
         ));
-        const genericPoolCapability = capabilityFor(overview, "generic_voice_pool");
-        const genericPoolAvailable = genericPoolCapability.state === "enabled"
-          && genericPoolCapability.visible
-          && genericPoolCapability.actionable;
         return h(
           "div",
           { className: "anw-narration-private-stack" },
@@ -956,49 +544,6 @@ export function createNarrationReadingPage(
               onProfileLocked: context.onRefresh,
             })
             : null,
-          h(PrivateVoiceLifecycleWorkspace, {
-            novelId: props.novelId,
-            overview,
-            onChanged: context.onRefresh,
-          }),
-          h(GenericVoicePack, {
-            capabilityEnabled: genericPoolAvailable,
-            canConfigure: overview.authorization.can_configure,
-            onLoadLatest: (signal: AbortSignal) => genericVoicePackApi.get(signal),
-            onRefreshCommand: (
-              commandId: string,
-              signal: AbortSignal,
-            ) => genericVoicePackApi.getCommand(commandId, signal),
-            onBuild: () => genericVoicePackApi.build(
-              createNarrationIdempotencyKey("generic-voice-pack"),
-            ),
-            onRetry: (commandId: string) => genericVoicePackApi.retry(commandId),
-            onCancel: (commandId: string) => genericVoicePackApi.cancel(commandId),
-            onRegenerateSlot: (slotKey: string, expectedPackVersionId: string | null) => {
-              if (expectedPackVersionId === null) {
-                return Promise.reject(new Error("通用音色包版本尚未建立。"));
-              }
-              return genericVoicePackApi.regenerate(
-                slotKey,
-                { expected_pack_version_id: expectedPackVersionId },
-                createNarrationIdempotencyKey("generic-voice-regenerate"),
-              );
-            },
-            onRejectSlot: (slotKey: string, expectedPackVersionId: string) => (
-              genericVoicePackApi.reject(
-                slotKey,
-                { expected_pack_version_id: expectedPackVersionId },
-              )
-            ),
-            onPreviewSlot: async (slotId: string, previewAsset: MediaAssetLink) => {
-              const controller = new AbortController();
-              await playGenericVoiceSlotPreview(
-                slotId,
-                previewAsset,
-                controller.signal,
-              );
-            },
-          }),
           h(CachePanel, {
             novelId: props.novelId,
             capabilities: overview.capabilities,
@@ -1096,20 +641,15 @@ export function createCharacterVoiceCardPanel(
   loadOverview: typeof getNarrationOverview = getNarrationOverview,
   voiceWorkspaceApi?: VoiceSourceWorkspaceApi,
   officialVoiceApi?: OfficialVoiceSelectionPanelApi,
-  dependencies: CharacterVoiceCardPanelDependencies = {},
+  _dependencies: CharacterVoiceCardPanelDependencies = {},
 ): (props: CharacterVoiceCardPanelProps) => unknown {
   const h = React.createElement;
   const CharacterVoiceConfigurator = createCharacterVoiceConfigurator(React);
   const CharacterVoicePanel = createCharacterVoicePanel(React);
-  const CharacterVoiceGenerator = createCharacterVoiceGenerator(React);
   const VoiceSourceWorkspace = createVoiceSourceWorkspace(React, voiceWorkspaceApi);
   const OfficialVoiceSelectionPanel = createOfficialVoiceSelectionPanel(React, officialVoiceApi);
-  const NanoAdvancedWorkspace = createNanoAdvancedWorkspace(React);
   const getBinding = officialVoiceApi?.getCharacterVoiceBinding ?? getCharacterVoiceBinding;
   const getProfiles = officialVoiceApi?.listVoiceProfiles ?? listVoiceProfiles;
-  const selectOfficialVoiceApi = officialVoiceApi?.selectOfficialVoice ?? selectOfficialVoice;
-  const matchCharacterOfficialVoiceApi = dependencies.matchCharacterOfficialVoice
-    ?? matchCharacterOfficialVoice;
 
   interface CharacterVoiceAdvancedPanelProps {
     readonly novelId: string;
@@ -1132,21 +672,6 @@ export function createCharacterVoiceCardPanel(
         className: "anw-character-voice-advanced-stack",
         "data-character-voice-scope": scopeKey,
       },
-      h(NanoAdvancedWorkspace, {
-        novelId: advancedProps.novelId,
-        overview: advancedProps.overview,
-        refreshVersion: advancedProps.profileRefreshVersion,
-        characters: [{
-          characterId: advancedProps.characterId,
-          characterName: advancedProps.characterName,
-        }],
-        fixedCharacter: {
-          characterId: advancedProps.characterId,
-          characterName: advancedProps.characterName,
-        },
-        presentation: "embedded",
-        onChanged: advancedProps.onProfileChanged,
-      }),
       h(VoiceSourceWorkspace, {
         novelId: advancedProps.novelId,
         capabilities: advancedProps.overview.capabilities,
@@ -1162,7 +687,7 @@ export function createCharacterVoiceCardPanel(
         capabilities: advancedProps.overview.capabilities,
         authorization: advancedProps.overview.authorization,
         presentation: "embedded",
-        allowedSourceTypes: ["uploaded", "generated"],
+        allowedSourceTypes: ["uploaded"],
         profileRefreshVersion: advancedProps.profileRefreshVersion,
         onSaved: advancedProps.onVoiceSaved,
         onReturnFocus: advancedProps.onReturnFocus,
@@ -1332,15 +857,6 @@ export function createCharacterVoiceCardPanel(
         ),
       );
     }
-    const matchCapability = capabilityFor(state.overview, "character_voice_matching");
-    const matchEnabled = matchCapability.state === "enabled"
-      && matchCapability.visible
-      && matchCapability.actionable
-      && state.overview.authorization.can_configure;
-    const generatorCapability = capabilityFor(state.overview, "voice_generator");
-    const generatorEnabled = generatorCapability.state === "enabled"
-      && generatorCapability.visible
-      && generatorCapability.actionable;
     const currentVoice = state.voiceBindingPhase === "ready"
       ? currentCharacterVoiceSummary(state.binding, state.profiles)
       : null;
@@ -1372,176 +888,6 @@ export function createCharacterVoiceCardPanel(
       setProfileRefreshVersion((value) => value + 1);
       props.onChanged?.();
     };
-    const matchAndUse = async (signal: AbortSignal) => {
-      try {
-        const binding = await getBinding(props.novelId, props.characterId, signal);
-        assertCharacterVoiceBindingScope(binding, props.novelId, props.characterId);
-        const matched = await matchCharacterOfficialVoiceApi(
-          props.novelId,
-          props.characterId,
-          {
-            contract_version: "character-voice-match-request/1",
-            timeline_id: null,
-            character_instance_id: null,
-            expected_binding_version: binding.version,
-          },
-          createOfficialVoiceUseIdempotencyKey(),
-          signal,
-        );
-        if (
-          matched.character_id !== props.characterId
-          || matched.current_character_binding.novel_id !== props.novelId
-          || matched.current_character_binding.character_id !== props.characterId
-        ) {
-          throw new NarrationContractError("character_voice_match", "response scope mismatch");
-        }
-        return {
-          voiceName: officialPresetDisplayName(state.profiles, matched.selected_preset_id),
-          presetId: matched.selected_preset_id,
-          selectionStillCurrent: matched.selection_still_current,
-        };
-      } catch (reason: unknown) {
-        if (isAbortLike(reason)) throw reason;
-        throw new Error(matchedVoiceErrorMessage(reason));
-      }
-    };
-    const useMatched = async (presetId: string, signal: AbortSignal) => {
-      try {
-        const [latestOverview, latestBinding] = await Promise.all([
-          loadOverview(props.novelId, signal),
-          getBinding(props.novelId, props.characterId, signal),
-        ]);
-        if (latestOverview.novel_id !== props.novelId) {
-          throw new NarrationContractError("narration_overview", "response scope mismatch");
-        }
-        assertCharacterVoiceBindingScope(latestBinding, props.novelId, props.characterId);
-        const officialPresetId = presetId as OfficialPresetId;
-        const target: OfficialVoiceSelectionTarget = {
-          kind: "character",
-          characterId: props.characterId,
-          characterName: props.characterName,
-          targetLanguage: latestBinding.language,
-          expectedSettingsVersion: latestOverview.settings.version,
-          expectedBindingVersion: latestBinding.version,
-        };
-        const response = await selectOfficialVoiceApi(
-          props.novelId,
-          {
-            preset_id: officialPresetId,
-            target_kind: "character",
-            character_id: props.characterId,
-            expected_settings_version: latestOverview.settings.version,
-            expected_binding_version: latestBinding.version,
-          },
-          createOfficialVoiceUseIdempotencyKey(),
-          signal,
-        );
-        const selection = officialVoiceSelectionResult(response);
-        assertOfficialVoiceSelectionResult(selection, officialPresetId, target);
-        return {
-          voiceName: response.profile.name || "官方音色",
-          presetId,
-          selectionStillCurrent: selection.selectionStillCurrent,
-        };
-      } catch (reason: unknown) {
-        if (isAbortLike(reason)) throw reason;
-        throw new Error(matchedVoiceErrorMessage(reason));
-      }
-    };
-    const generatorContent = state.voiceBindingPhase !== "ready" || state.binding === null
-      ? undefined
-      : h(CharacterVoiceGenerator, {
-        presentation: "embedded",
-        capabilityEnabled: generatorEnabled,
-        canConfigure: state.overview.authorization.can_configure,
-        characterId: props.characterId,
-        characterName: props.characterName,
-        expectedBindingVersion: state.binding.version,
-        workspaceSelection: {
-          timelineId: null,
-          characterInstanceId: null,
-        },
-        onLoadLatest: async (
-          characterId: string,
-          signal: AbortSignal,
-        ) => {
-          const commands = await listCharacterVoiceGeneratorCommands(
-            props.novelId,
-            characterId,
-            signal,
-          );
-          return commands.items[0]
-            ? characterVoiceGeneratorSnapshot(commands.items[0])
-            : null;
-        },
-        onStartGeneration: async (command: {
-          readonly characterId: string;
-          readonly workspaceSelection: {
-            readonly timelineId: string | null;
-            readonly characterInstanceId: string | null;
-          };
-          readonly expectedBindingVersion: number;
-        }) => characterVoiceGeneratorSnapshot(
-          await createCharacterVoiceGeneratorCommand(
-            props.novelId,
-            command.characterId,
-            {
-              contract_version: "character-voice-generation-request/1",
-              timeline_id: command.workspaceSelection.timelineId,
-              character_instance_id: command.workspaceSelection.characterInstanceId,
-              expected_binding_version: command.expectedBindingVersion,
-              seed: null,
-            },
-            createOfficialVoiceUseIdempotencyKey(),
-          ),
-        ),
-        onRefreshGeneration: async (
-          commandId: string,
-          signal: AbortSignal,
-        ) => characterVoiceGeneratorSnapshot(
-          await getCharacterVoiceGeneratorCommand(
-            props.novelId,
-            commandId,
-            signal,
-          ),
-        ),
-        onCancelGeneration: async (commandId: string) => (
-          characterVoiceGeneratorSnapshot(
-            await cancelCharacterVoiceGeneratorCommand(
-              props.novelId,
-              commandId,
-            ),
-          )
-        ),
-        onRetryGeneration: async (commandId: string) => {
-          const binding = await getCharacterVoiceBinding(
-            props.novelId,
-            props.characterId,
-          );
-          return characterVoiceGeneratorSnapshot(
-            await retryCharacterVoiceGeneratorCommand(
-              props.novelId,
-              commandId,
-              { expected_binding_version: binding.version },
-            ),
-          );
-        },
-        onUseGeneratedVoice: async (command: {
-          readonly commandId: string;
-          readonly expectedBindingVersion: number;
-        }) => characterVoiceGeneratorSnapshot(
-          await applyCharacterVoiceGeneratorCommand(
-            props.novelId,
-            command.commandId,
-            { expected_binding_version: command.expectedBindingVersion },
-          ),
-        ),
-        onCommandChanged: (command: CharacterVoiceGenerationSnapshot) => {
-          if (command.state === "ready_applied") {
-            publishChanged();
-          }
-        },
-      });
     const officialVoiceContent = h(OfficialVoiceSelectionPanel, {
         novelId: props.novelId,
         settings: state.overview.settings,
@@ -1585,15 +931,9 @@ export function createCharacterVoiceCardPanel(
               : undefined,
       },
       canConfigure: state.overview.authorization.can_configure,
-      matchEnabled,
-      matchDisabledReason: matchEnabled
-        ? null
-        : matchCapability.reason_code
-          ? `智能匹配暂不可用（${matchCapability.reason_code}）。`
-          : "智能匹配暂不可用。",
-      onMatchOfficialVoice: matchAndUse,
-      onUseMatchedOfficialVoice: useMatched,
-      generatorContent,
+      showMatch: false,
+      matchEnabled: false,
+      matchDisabledReason: "Qwen 轻量版本只保留手动选择官方音色。",
       officialVoiceContent,
       advancedContent,
       className: "anw-narration-character-card-panel",

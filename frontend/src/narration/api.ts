@@ -34,18 +34,12 @@ import {
   REFERENCE_UPLOAD_MIME_TYPES,
   parseCharacterVoiceBindingListResponse,
   parseCharacterVoiceBindingResource,
-  parseCharacterCastPlanListResource,
-  parseCharacterCastPlanResource,
-  parseCharacterVoiceMatchResource,
-  parseCharacterVoiceGeneratorCommandListResource,
-  parseCharacterVoiceGeneratorCommandResource,
-  parseNanoVoiceExperimentListResource,
-  parseNanoVoiceExperimentResource,
   parseNarrationApiErrorDetail,
   parseNarrationCacheCleanupPreview,
   parseNarrationCacheCleanupResult,
   parseNarrationCacheStatus,
   parseNarrationCloudConsent,
+  parseNarrationCloudTTSConsent,
   parseNarrationOverviewResponse,
   parseNarrationScopeOverrideListResponse,
   parseNarrationScopeOverrideResource,
@@ -54,9 +48,6 @@ import {
   parseOfficialVoiceSelectionResponse,
   parsePrivateVoiceDeletionRequestResource,
   parsePrivateVoiceLifecycleResource,
-  parseVoicePreparationListResource,
-  parseVoicePreparationResource,
-  parseGenericVoicePackLoadResource,
   parsePronunciationProfileResource,
   parseVoicePreviewResource,
   parseVoiceProfileListResponse,
@@ -67,21 +58,8 @@ import {
 import type {
   CharacterVoiceBindingListResponse,
   CharacterVoiceBindingResource,
-  CharacterCastPlanListResource,
-  CharacterCastPlanResource,
-  CharacterVoiceMatchRequest,
-  CharacterVoiceMatchResource,
-  ApplyCharacterVoiceGeneratorCommandRequest,
-  CharacterVoiceGeneratorCommandListResource,
-  CharacterVoiceGeneratorCommandResource,
-  CreateCharacterVoiceGeneratorCommandRequest,
-  CreateCharacterCastPlanRequest,
-  RetryCharacterVoiceGeneratorCommandRequest,
-  ApplyNanoVoiceExperimentRequest,
-  CreateNanoVoiceExperimentRequest,
-  NanoVoiceExperimentListResource,
-  NanoVoiceExperimentResource,
   CreateNarrationCloudConsentRequest,
+  CreateNarrationCloudTTSConsentRequest,
   CreatePresetVoiceVersionRequest,
   CreateVoicePreviewRequest,
   CreateVoiceProfileRequest,
@@ -92,6 +70,7 @@ import type {
   NarrationCacheCleanupResult,
   NarrationCacheStatus,
   NarrationCloudConsent,
+  NarrationCloudTTSConsent,
   NarrationOverviewResponse,
   NarrationScopeKind,
   NarrationScopeOverrideListResponse,
@@ -111,6 +90,7 @@ import type {
   PutNarrationScopeOverrideRequest,
   PutPronunciationProfileRequest,
   RevokeNarrationCloudConsentRequest,
+  RevokeNarrationCloudTTSConsentRequest,
   UpdateNarrationSettingsRequest,
   UpdateNarrationPlaybackPreferencesRequest,
   UpdateVoiceProfileRequest,
@@ -120,10 +100,6 @@ import type {
   VoiceProfileResource,
   VoiceProfileVersionResource,
   VoiceCastingRulesResource,
-  CreateVoicePreparationRequest,
-  VoicePreparationSnapshot,
-  GenericVoicePackLoadResult,
-  RejectGenericVoiceSlotRequest,
 } from "./contracts";
 
 type ResponseParser<T> = (value: unknown) => T;
@@ -361,6 +337,45 @@ export function revokeNarrationCloudConsent(
   );
 }
 
+export function getNarrationCloudTTSConsent(
+  novelId: string,
+  signal?: AbortSignal,
+): Promise<NarrationCloudTTSConsent> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cloud-tts-consents/current`,
+    parseNarrationCloudTTSConsent,
+    { signal },
+  );
+}
+
+export function createNarrationCloudTTSConsent(
+  novelId: string,
+  payload: CreateNarrationCloudTTSConsentRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<NarrationCloudTTSConsent> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cloud-tts-consents`,
+    parseNarrationCloudTTSConsent,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
+  );
+}
+
+export function revokeNarrationCloudTTSConsent(
+  novelId: string,
+  payload: RevokeNarrationCloudTTSConsentRequest,
+  signal?: AbortSignal,
+): Promise<NarrationCloudTTSConsent> {
+  return parsedRequest(
+    `/novels/${pathSegment(novelId)}/narration-cloud-tts-consents/current`,
+    parseNarrationCloudTTSConsent,
+    jsonInit("DELETE", payload, signal),
+  );
+}
+
 export function listVoiceProfiles(
   options: { readonly novelId?: string; readonly includeLibrary?: boolean; readonly signal?: AbortSignal } = {},
 ): Promise<VoiceProfileListResponse> {
@@ -483,446 +498,7 @@ export function createOfficialVoicePreview(
   );
 }
 
-export async function listNanoVoiceExperiments(
-  novelId: string,
-  signal?: AbortSignal,
-): Promise<NanoVoiceExperimentListResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/nano-voice-experiments`,
-    parseNanoVoiceExperimentListResource,
-    { signal },
-  );
-  if (result.novel_id !== novelId) {
-    throw new NarrationContractError("nano_voice_experiments.novel_id", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function createNanoVoiceExperiment(
-  novelId: string,
-  payload: CreateNanoVoiceExperimentRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal,
-): Promise<NanoVoiceExperimentResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/nano-voice-experiments`,
-    parseNanoVoiceExperimentResource,
-    {
-      ...jsonInit("POST", payload, signal),
-      headers: idempotencyHeaders(idempotencyKey),
-    },
-  );
-  if (result.novel_id !== novelId) {
-    throw new NarrationContractError("nano_voice_experiment.novel_id", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function getNanoVoiceExperiment(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<NanoVoiceExperimentResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/nano-voice-experiments/${pathSegment(commandId)}`,
-    parseNanoVoiceExperimentResource,
-    { signal },
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("nano_voice_experiment", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function applyNanoVoiceExperiment(
-  novelId: string,
-  commandId: string,
-  payload: ApplyNanoVoiceExperimentRequest,
-  signal?: AbortSignal,
-): Promise<NanoVoiceExperimentResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/nano-voice-experiments/${pathSegment(commandId)}/binding`,
-    parseNanoVoiceExperimentResource,
-    jsonInit("PUT", payload, signal),
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("nano_voice_experiment", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function matchCharacterOfficialVoice(
-  novelId: string,
-  characterId: string,
-  payload: CharacterVoiceMatchRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal,
-): Promise<CharacterVoiceMatchResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/official-voice-match`,
-    parseCharacterVoiceMatchResource,
-    {
-      ...jsonInit("POST", payload, signal),
-      headers: idempotencyHeaders(idempotencyKey),
-    },
-  );
-  if (
-    result.character_id !== characterId
-    || result.current_character_binding.character_id !== characterId
-    || result.current_character_binding.novel_id !== novelId
-  ) {
-    throw new NarrationContractError("character_voice_match.character_id", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function listCharacterCastPlans(
-  novelId: string,
-  signal?: AbortSignal,
-): Promise<CharacterCastPlanListResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/character-cast-plans`,
-    parseCharacterCastPlanListResource,
-    { signal },
-  );
-  if (result.novel_id !== novelId) {
-    throw new NarrationContractError("character_cast_plans.novel_id", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function createCharacterCastPlan(
-  novelId: string,
-  payload: CreateCharacterCastPlanRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal,
-): Promise<CharacterCastPlanResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/character-cast-plans`,
-    parseCharacterCastPlanResource,
-    {
-      ...jsonInit("POST", payload, signal),
-      headers: idempotencyHeaders(idempotencyKey),
-    },
-  );
-  if (result.novel_id !== novelId || result.timeline_id !== payload.timeline_id) {
-    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function getCharacterCastPlan(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<CharacterCastPlanResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/character-cast-plans/${pathSegment(commandId)}`,
-    parseCharacterCastPlanResource,
-    { signal },
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function advanceCharacterCastPlan(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<CharacterCastPlanResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/character-cast-plans/${pathSegment(commandId)}/advance`,
-    parseCharacterCastPlanResource,
-    { method: "POST", signal },
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function retryCharacterCastPlan(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<CharacterCastPlanResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/character-cast-plans/${pathSegment(commandId)}/retry`,
-    parseCharacterCastPlanResource,
-    { method: "POST", signal },
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("character_cast_plan", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function listCharacterVoiceGeneratorCommands(
-  novelId: string,
-  characterId: string,
-  signal?: AbortSignal,
-): Promise<CharacterVoiceGeneratorCommandListResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/voice-generator-commands`,
-    parseCharacterVoiceGeneratorCommandListResource,
-    { signal },
-  );
-  if (result.novel_id !== novelId || result.character_id !== characterId) {
-    throw new NarrationContractError("character_voice_generations", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function createCharacterVoiceGeneratorCommand(
-  novelId: string,
-  characterId: string,
-  payload: CreateCharacterVoiceGeneratorCommandRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal,
-): Promise<CharacterVoiceGeneratorCommandResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/characters/${pathSegment(characterId)}/voice-generator-commands`,
-    parseCharacterVoiceGeneratorCommandResource,
-    {
-      ...jsonInit("POST", payload, signal),
-      headers: idempotencyHeaders(idempotencyKey),
-    },
-  );
-  if (result.novel_id !== novelId || result.character_id !== characterId) {
-    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function getCharacterVoiceGeneratorCommand(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<CharacterVoiceGeneratorCommandResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}`,
-    parseCharacterVoiceGeneratorCommandResource,
-    { signal },
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function cancelCharacterVoiceGeneratorCommand(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<CharacterVoiceGeneratorCommandResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}/cancel`,
-    parseCharacterVoiceGeneratorCommandResource,
-    { method: "POST", signal },
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function retryCharacterVoiceGeneratorCommand(
-  novelId: string,
-  commandId: string,
-  payload: RetryCharacterVoiceGeneratorCommandRequest,
-  signal?: AbortSignal,
-): Promise<CharacterVoiceGeneratorCommandResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}/retry`,
-    parseCharacterVoiceGeneratorCommandResource,
-    jsonInit("POST", payload, signal),
-  );
-  // Retry creates a new durable command with a fresh command ID. The source
-  // command remains the path authority; only the novel scope is stable across
-  // the response.
-  if (result.novel_id !== novelId) {
-    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function applyCharacterVoiceGeneratorCommand(
-  novelId: string,
-  commandId: string,
-  payload: ApplyCharacterVoiceGeneratorCommandRequest,
-  signal?: AbortSignal,
-): Promise<CharacterVoiceGeneratorCommandResource> {
-  const result = await parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-generator-commands/${pathSegment(commandId)}/binding`,
-    parseCharacterVoiceGeneratorCommandResource,
-    jsonInit("PUT", payload, signal),
-  );
-  if (result.novel_id !== novelId || result.command_id !== commandId) {
-    throw new NarrationContractError("character_voice_generation", "response scope mismatch");
-  }
-  return result;
-}
-
-export async function listVoicePreparationCommands(
-  novelId: string,
-  signal?: AbortSignal,
-): Promise<readonly VoicePreparationSnapshot[]> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-preparation-commands`,
-    parseVoicePreparationListResource,
-    { signal },
-  );
-}
-
-export async function createVoicePreparationCommand(
-  novelId: string,
-  payload: CreateVoicePreparationRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal,
-): Promise<VoicePreparationSnapshot> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-preparation-commands`,
-    parseVoicePreparationResource,
-    {
-      ...jsonInit("POST", payload, signal),
-      headers: idempotencyHeaders(idempotencyKey),
-    },
-  );
-}
-
-export async function getVoicePreparationCommand(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<VoicePreparationSnapshot> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}`,
-    parseVoicePreparationResource,
-    { signal },
-  );
-}
-
-export async function resumeVoicePreparationCommand(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<VoicePreparationSnapshot> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}/resume`,
-    parseVoicePreparationResource,
-    { method: "POST", signal },
-  );
-}
-
-export async function retryVoicePreparationCommand(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<VoicePreparationSnapshot> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}/retry`,
-    parseVoicePreparationResource,
-    { method: "POST", signal },
-  );
-}
-
-export async function cancelVoicePreparationCommand(
-  novelId: string,
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<VoicePreparationSnapshot> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/voice-preparation-commands/${pathSegment(commandId)}/cancel`,
-    parseVoicePreparationResource,
-    { method: "POST", signal },
-  );
-}
-
-export async function getGenericVoicePack(
-  signal?: AbortSignal,
-): Promise<GenericVoicePackLoadResult> {
-  return parsedRequest(
-    "/voice-library/generic-pack",
-    parseGenericVoicePackLoadResource,
-    { signal },
-  );
-}
-
-export async function buildGenericVoicePack(
-  idempotencyKey: string,
-  signal?: AbortSignal,
-): Promise<GenericVoicePackLoadResult> {
-  return parsedRequest(
-    "/voice-library/generic-pack/build-commands",
-    parseGenericVoicePackLoadResource,
-    { method: "POST", headers: idempotencyHeaders(idempotencyKey), signal },
-  );
-}
-
-export async function getGenericVoicePackBuildCommand(
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<GenericVoicePackLoadResult> {
-  return parsedRequest(
-    `/voice-library/generic-pack/build-commands/${pathSegment(commandId)}`,
-    parseGenericVoicePackLoadResource,
-    { signal },
-  );
-}
-
-export async function retryGenericVoicePackBuild(
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<GenericVoicePackLoadResult> {
-  return parsedRequest(
-    `/voice-library/generic-pack/build-commands/${pathSegment(commandId)}/retry`,
-    parseGenericVoicePackLoadResource,
-    { method: "POST", signal },
-  );
-}
-
-export async function cancelGenericVoicePackBuild(
-  commandId: string,
-  signal?: AbortSignal,
-): Promise<GenericVoicePackLoadResult> {
-  return parsedRequest(
-    `/voice-library/generic-pack/build-commands/${pathSegment(commandId)}/cancel`,
-    parseGenericVoicePackLoadResource,
-    { method: "POST", signal },
-  );
-}
-
-export async function regenerateGenericVoicePackSlot(
-  slotKey: string,
-  payload: RejectGenericVoiceSlotRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal,
-): Promise<GenericVoicePackLoadResult> {
-  return parsedRequest(
-    `/voice-library/generic-pack/slots/${pathSegment(slotKey)}/regenerate`,
-    parseGenericVoicePackLoadResource,
-    {
-      ...jsonInit("POST", payload, signal),
-      headers: idempotencyHeaders(idempotencyKey),
-    },
-  );
-}
-
-export async function rejectGenericVoicePackSlot(
-  slotKey: string,
-  payload: RejectGenericVoiceSlotRequest,
-  signal?: AbortSignal,
-): Promise<GenericVoicePackLoadResult> {
-  return parsedRequest(
-    `/voice-library/generic-pack/slots/${pathSegment(slotKey)}/reject`,
-    parseGenericVoicePackLoadResource,
-    jsonInit("POST", payload, signal),
-  );
-}
-
-export async function getPrivateVoiceLifecycle(
+ export async function getPrivateVoiceLifecycle(
   novelId: string,
   signal?: AbortSignal,
 ): Promise<PrivateVoiceLifecycleResource> {

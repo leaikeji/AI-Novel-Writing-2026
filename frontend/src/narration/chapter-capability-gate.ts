@@ -22,7 +22,6 @@ export interface ChapterNarrationCapabilityGate {
   readonly visible: boolean;
   readonly canLoadSession: boolean;
   readonly canProduce: boolean;
-  readonly canPrepareVoices: boolean;
   readonly reasonCode: string | null;
   readonly blockedCapability: CapabilityKey | null;
 }
@@ -41,7 +40,6 @@ export function retainEquivalentChapterNarrationCapabilityGate(
   const equivalent = current.visible === next.visible
     && current.canLoadSession === next.canLoadSession
     && current.canProduce === next.canProduce
-    && current.canPrepareVoices === next.canPrepareVoices
     && current.reasonCode === next.reasonCode
     && current.blockedCapability === next.blockedCapability;
   return equivalent ? current : next;
@@ -69,7 +67,7 @@ function isActionable(capability: FeatureCapability | undefined): boolean {
 
 
 /**
- * A ready Sidecar is not a product release gate. The chapter editor consumes
+ * A ready Provider is not a product release gate. The chapter editor consumes
  * the same authoritative capability matrix as the book reading settings and
  * fails closed when the complete player/production chain is not enabled.
  */
@@ -88,7 +86,6 @@ export function deriveChapterNarrationCapabilityGate(
     visible: Boolean(product?.visible && (editor?.visible || player?.visible)),
     canLoadSession: playerBlocker === null,
     canProduce: productionBlocker === null,
-    canPrepareVoices: isActionable(byKey.get("automatic_character_voice_generation")),
     reasonCode: blocked?.reason_code ?? (blocker === null ? null : "CAPABILITY_DISABLED"),
     blockedCapability: blocker,
   });

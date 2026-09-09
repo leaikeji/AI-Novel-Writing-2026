@@ -13,11 +13,11 @@ import json
 import re
 from typing import Final, Mapping
 
-from .character_voice_matching import (
+from .voice_brief import (
     CharacterVoiceLanguage,
-    CharacterVoiceMatchingError,
     CharacterVoicePresentation,
     CharacterVoiceTexture,
+    VoiceBriefError,
 )
 
 
@@ -51,10 +51,8 @@ _EVIDENCE_PATH = re.compile(
 )
 
 
-def _invalid(message: str) -> CharacterVoiceMatchingError:
-    # Reuse the existing typed exception boundary while keeping a narrator-
-    # specific stable code for HTTP/service integration.
-    return CharacterVoiceMatchingError(NARRATOR_VOICE_BRIEF_INVALID, message)
+def _invalid(message: str) -> VoiceBriefError:
+    return VoiceBriefError(NARRATOR_VOICE_BRIEF_INVALID, message)
 
 
 def _exact_enum(enum_type: type, value: object, *, field_name: str):

@@ -169,7 +169,7 @@ def novel(novel_id: UUID | None = None) -> Novel:
 def active_rights(
     *,
     novel_id: UUID | None,
-    source_kind: str = "preset_catalog",
+    source_kind: str = "user_upload",
     source_identifier: str = "private://must-not-leak",
 ) -> VoiceRightsRecord:
     return VoiceRightsRecord(
@@ -196,16 +196,15 @@ def seeded_profile(
     store: MemoryStore,
     book: Novel,
     *,
-    source_type: str = "preset",
+    source_type: str = "uploaded",
     version_state: str = "draft",
     profile_status: str = "draft",
 ) -> tuple[VoiceProfile, VoiceProfileVersion, VoiceRightsRecord]:
     rights = active_rights(
         novel_id=book.id,
         source_kind={
-            "preset": "preset_catalog",
+            "preset": "official_preset",
             "uploaded": "user_upload",
-            "generated": "voice_generator",
         }[source_type],
     )
     profile = VoiceProfile(
@@ -230,15 +229,15 @@ def seeded_profile(
         version_number=1,
         source_type=source_type,
         state=version_state,
-        provider_id="moss",
-        model_id="moss-tts-nano",
+        provider_id="qwen-tts",
+        model_id="mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
         model_revision="test-only-metadata",
         preset_key="unapproved-test-preset" if source_type == "preset" else None,
         reference_asset_id=uuid4() if source_type == "uploaded" else None,
         preview_asset_id=None,
         rights_record_id=rights.id,
-        description_digest_key_id="private-key" if source_type == "generated" else None,
-        description_digest=SHA_A if source_type == "generated" else None,
+        description_digest_key_id=None,
+        description_digest=None,
         language="zh-CN",
         seed=None,
         parameters_json={},
@@ -366,52 +365,9 @@ def test_profile_listing_never_leaks_another_novel() -> None:
     store.add(book_a)
     store.add(book_b)
     library = create_profile(store, None, key="profile-library", name="私人音色库")
-    generic_library = create_profile(
-        store,
-        None,
-        key="profile-generic-library",
-        name="通用角色音色 · 中性青年",
-    )
-    generic_profile = store.get(VoiceProfile, generic_library.profile_id)
-    assert generic_profile is not None
-    generic_rights = active_rights(
-        novel_id=None,
-        source_kind="voice_generator",
-        source_identifier="local://generic-voice/test/neutral_young",
-    )
-    generic_version = VoiceProfileVersion(
-        id=uuid4(),
-        profile_id=generic_profile.id,
-        owner_id=LOCAL_OWNER_ID,
-        workspace_id=LOCAL_WORKSPACE_ID,
-        version_number=1,
-        source_type="generated",
-        state="locked",
-        provider_id="local-native-host",
-        model_id="OpenMOSS-Team/MOSS-VoiceGenerator",
-        model_revision="test-only-metadata",
-        preset_key=None,
-        reference_asset_id=uuid4(),
-        preview_asset_id=None,
-        rights_record_id=generic_rights.id,
-        description_digest_key_id="sha256-public-v1",
-        description_digest=SHA_A,
-        language="zh-CN",
-        seed=1,
-        parameters_json={},
-        fingerprint=SHA_A,
-        quality_state="accepted",
-        activation_basis="generic_voice_pack_generation",
-        validation_basis="machine_validated",
-        locked_actor=None,
-        locked_at=None,
-        created_at=NOW,
-    )
-    generic_profile.current_version_id = generic_version.id
-    generic_profile.status = "active"
-    store.add(generic_rights)
-    store.add(generic_version)
     local = create_profile(store, book_a, key="profile-book-a", name="甲作品")
+    unavailable, _, _ = seeded_profile(store, book_a)
+    unavailable.status = "unavailable"
     create_profile(store, book_b, key="profile-book-b", name="乙作品")
     deleted = create_profile(
         store,
@@ -425,6 +381,14 @@ def test_profile_listing_never_leaks_another_novel() -> None:
     assert {item.profile_id for item in list_voice_profiles(
         store, novel_id=book_a.id, include_library=True
     ).items} == {library.profile_id, local.profile_id}
+    assert unavailable.id not in {
+        item.profile_id
+        for item in list_voice_profiles(
+            store,
+            novel_id=book_a.id,
+            include_library=True,
+        ).items
+    }
     assert [item.profile_id for item in list_voice_profiles(
         store, novel_id=book_a.id, include_library=False
     ).items] == [local.profile_id]
@@ -737,7 +701,7 @@ def test_preset_and_authorized_upload_remain_fail_closed_without_persisting_rows
             profile_id=profile.profile_id,
                 payload=wire.CreatePresetVoiceVersionRequest(
                     expected_profile_version=1,
-                    preset_id="onnx.Lingyu",
+                    preset_id="qwen.WarmFemale",
             ),
             idempotency_key="preset-key-0001",
         ))
@@ -811,13 +775,13 @@ def test_every_official_preset_reaches_product_service_dispatch() -> None:
         profile_id=profile.profile_id,
         payload=wire.CreatePresetVoiceVersionRequest(
             expected_profile_version=1,
-            preset_id="onnx.Trump",
+                preset_id="qwen.ClearMale",
         ),
         idempotency_key="preset-scope-0001",
     ))
 
     assert result is not None
-    assert product.preset_calls == ["onnx.Trump"]
+    assert product.preset_calls == ["qwen.ClearMale"]
     assert tuple(store.rows[VoiceProfileVersion]) == before_rows[VoiceProfileVersion]
     assert tuple(store.rows[VoiceRightsRecord]) == before_rows[VoiceRightsRecord]
 
@@ -936,7 +900,7 @@ def test_handler_dispatches_official_selection_only_through_independent_port() -
     book = novel()
     store.add(book)
     payload = wire.OfficialVoiceSelectionRequest(
-        preset_id="onnx.Trump",
+        preset_id="qwen.ClearMale",
         target_kind="narrator",
         expected_settings_version=0,
     )

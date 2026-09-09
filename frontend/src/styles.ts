@@ -1,5 +1,3 @@
-import { VOICE_PREPARATION_STYLES } from "./narration/styles/voice-preparation";
-
 const STYLE_ID = "ai-novel-world-2026-ui";
 
 
@@ -7,7 +5,7 @@ export function ensureNovelStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ID;
-  style.textContent = `${VOICE_PREPARATION_STYLES}\n` + `
+  style.textContent = `
     :root {
       --anw-orange: #ff7043;
       --anw-orange-strong: #ff5d2a;

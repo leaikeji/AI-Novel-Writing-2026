@@ -189,6 +189,26 @@ def test_existing_target_collision_is_fail_closed(storage: NarrationStorage) -> 
     assert not list(storage.media.path.rglob("*.part"))
 
 
+def test_publish_or_verify_media_re_adopts_exact_crash_remnant(
+    storage: NarrationStorage,
+) -> None:
+    payload = b"same immutable recovery bytes"
+    asset_id = uuid4()
+    published = _publish(storage, payload, asset_id=asset_id)
+
+    recovered = storage.publish_or_verify_media(
+        (payload,),
+        asset_id=asset_id,
+        expected_sha256=published.actual_sha256,
+        expected_size=published.byte_size,
+        extension="wav",
+        max_bytes=1024,
+    )
+
+    assert recovered == published
+    assert not list(storage.media.path.rglob("*.part"))
+
+
 def test_identical_bytes_have_asset_scoped_paths_and_independent_gc(
     storage: NarrationStorage,
 ) -> None:

@@ -12,7 +12,7 @@ import sys
 import wave
 
 
-SCHEMA_VERSION = "moss-tts-audio-inspection/1.0"
+SCHEMA_VERSION = "qwen-tts-audio-inspection/1"
 DEFAULT_SILENCE_THRESHOLD_DBFS = -50.0
 READ_FRAMES = 65_536
 

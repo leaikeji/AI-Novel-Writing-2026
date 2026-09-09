@@ -8,8 +8,8 @@ installed through QwenPaw's public runtime API, force-reinstalled, uninstalled
 through the public DELETE endpoint, and installed again.
 
 This runner never invokes the repository Compose project or the legacy lab
-helper because both own long-lived project resources.  It also never starts a
-MOSS-TTS Sidecar, mounts model/token paths, or prints command output.
+helper because both own long-lived project resources. It also never starts a
+TTS provider runtime, mounts model/token paths, or prints command output.
 """
 
 from __future__ import annotations
@@ -45,7 +45,6 @@ except ModuleNotFoundError:  # direct execution from scripts/tts
 
 APP_ID = "ai-novel-world-2026"
 APP_VERSION = "0.4.0"
-TTS_PROTOCOL_VERSION = "moss-tts-sidecar/1.1"
 
 CANDIDATE_TREE_MAX_ENTRIES = 8192
 CANDIDATE_TREE_MAX_FILES = 4096
@@ -94,17 +93,14 @@ NOVEL_TOOLS = frozenset(
 )
 
 EXPECTED_DISABLED_NARRATION = {
-    "technical_enabled": False,
+    "product_requested": False,
     "lifecycle_status": "disabled",
-    "sidecar_reachable": False,
-    "model_ready": False,
-    "model_loaded": False,
-    "idle_unload_seconds": None,
-    "product_visible": False,
-    "protocol_version": TTS_PROTOCOL_VERSION,
-    "worker_generation": None,
-    "lease_generation": None,
-    "model_fingerprint_sha256": None,
+    "playback_installed": False,
+    "digest_keyring_loaded": False,
+    "production_backend_installed": False,
+    "worker_running": False,
+    "reference_clone_ready": False,
+    "provider_selection_fingerprint_sha256": None,
     "reason_code": None,
 }
 
@@ -116,6 +112,7 @@ EXPECTED_DISABLED_NARRATION_PRODUCTION = {
     "production_backend_installed": False,
     "worker_running": False,
     "reference_clone_ready": False,
+    "provider_selection_fingerprint_sha256": None,
     "reason_code": None,
 }
 
@@ -228,6 +225,7 @@ class GateConfig:
     candidate_migration_head: str = ""
     startup_timeout_seconds: int = 180
     registry_timeout_seconds: int = 45
+    candidate_skill_ids: frozenset[str] = NOVEL_SKILLS
 
 
 @dataclass(frozen=True)
@@ -791,6 +789,37 @@ finally:
 """.strip()
 
 
+def candidate_published_skill_ids(candidate: Path) -> frozenset[str]:
+    """Validate the frozen publisher index, never infer approval from the host."""
+    project_root = str(Path(__file__).resolve().parents[2])
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    from backend.writing_skills.catalog import load_catalog
+    from backend.writing_skills.contracts import ApprovalRecord
+
+    root = candidate / "skills"
+    approval_path = candidate / "backend/writing_skills/approved-capabilities.json"
+    try:
+        # Pre-catalog candidates containing only the nine base tasks remain valid.
+        records = json.loads(approval_path.read_text(encoding="utf-8")) if approval_path.exists() else []
+        if not isinstance(records, list):
+            raise ValueError("invalid approval index")
+        approvals = tuple(ApprovalRecord.model_validate(record) for record in records)
+        approved_ids = frozenset(record.skill_id for record in approvals)
+        catalog = load_catalog(root, approvals, approved_ids)
+        loaded_ids = frozenset(item.declaration.skill_id for item in catalog.capabilities)
+        if catalog.rejected or loaded_ids != approved_ids:
+            raise ValueError("incomplete approved catalog")
+        expected = NOVEL_SKILLS | loaded_ids
+        actual = frozenset(child.name for child in root.iterdir()
+                           if child.is_dir() and (child / "SKILL.md").is_file())
+        if actual != expected:
+            raise ValueError("unexpected or missing packaged skill")
+        return expected
+    except (OSError, ValueError) as error:
+        raise GateError("CANDIDATE_SKILL_CATALOG_INVALID") from error
+
+
 def validate_candidate(candidate: Path) -> tuple[Path, str, str]:
     """Validate that an immutable, complete 0.4.0 candidate was supplied."""
 
@@ -817,7 +846,7 @@ def validate_candidate(candidate: Path) -> tuple[Path, str, str]:
         "alembic.ini",
         "frontend/dist/index.js",
         "backend/app.py",
-        "backend/narration/pawapp_runtime.py",
+        "backend/narration/providers/local.py",
     ) + tuple(f"skills/{name}/SKILL.md" for name in sorted(NOVEL_SKILLS))
     for relative in required:
         path = candidate / relative
@@ -837,6 +866,8 @@ def validate_candidate(candidate: Path) -> tuple[Path, str, str]:
     }
     if tool_names != NOVEL_TOOLS:
         raise GateError("CANDIDATE_TOOL_CONTRACT_MISMATCH")
+
+    candidate_published_skill_ids(candidate)
 
     try:
         migration_identity = inspect_candidate_migrations(candidate)
@@ -858,6 +889,7 @@ def build_dry_run_plan(config: GateConfig, names: ResourceNames) -> dict[str, ob
         "candidate": {
             "plugin": f"{APP_ID}@{APP_VERSION}",
             "migration_head": config.candidate_migration_head,
+            "published_skill_ids": sorted(config.candidate_skill_ids),
             "staging": "docker-cp-to-qwenpaw-container-layer",
             "container_path": "/gate/candidate",
             "host_copy_detached_after_staging": True,
@@ -1738,11 +1770,12 @@ class LifecycleGate:
         if not snapshot.agent_ids:
             raise GateError("NO_NATIVE_AGENT_AVAILABLE")
         for agent_id in snapshot.agent_ids:
-            if set(snapshot.skills_by_agent[agent_id]) != NOVEL_SKILLS:
+            if set(snapshot.skills_by_agent[agent_id]) != self.config.candidate_skill_ids:
                 raise GateError("PLUGIN_SKILL_REGISTRY_INVALID")
             if set(snapshot.tools_by_agent[agent_id]) != NOVEL_TOOLS:
                 raise GateError("PLUGIN_TOOL_REGISTRY_INVALID")
         self.evidence.checks["installed-registry"] = snapshot.as_dict()
+        self.evidence.checks["expected-published-skill-ids"] = sorted(self.config.candidate_skill_ids)
         return snapshot
 
     def _verify_t4_routes_disabled_without_token(self) -> None:
@@ -2167,7 +2200,11 @@ class LifecycleGate:
         try:
             return status, json.loads(raw.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as error:
-            raise GateError("HTTP_RESPONSE_NOT_JSON") from error
+            self.evidence.checks["http-invalid-json"] = {
+                "method": method, "path": path, "status": status,
+                "response_bytes": len(raw), "response_sha256": _sha256_bytes(raw),
+            }
+            raise GateError("HTTP_RESPONSE_NOT_JSON", f"{method} {path} status={status}") from error
 
     def _http_bytes(
         self,
@@ -2326,6 +2363,9 @@ def _validated_config(arguments: argparse.Namespace) -> tuple[GateConfig, str]:
     run_id = arguments.run_id or uuid.uuid4().hex[:12]
     create_resource_names(run_id)
     candidate, candidate_digest, candidate_head = validate_candidate(arguments.candidate)
+    candidate_skill_ids = candidate_published_skill_ids(candidate)
+    if _candidate_tree_sha256(candidate) != candidate_digest:
+        raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
     if arguments.startup_timeout_seconds < 30 or arguments.startup_timeout_seconds > 900:
         raise GateError("STARTUP_TIMEOUT_OUT_OF_RANGE")
     if arguments.registry_timeout_seconds < 10 or arguments.registry_timeout_seconds > 300:
@@ -2347,6 +2387,7 @@ def _validated_config(arguments: argparse.Namespace) -> tuple[GateConfig, str]:
             candidate_migration_head=candidate_head,
             startup_timeout_seconds=arguments.startup_timeout_seconds,
             registry_timeout_seconds=arguments.registry_timeout_seconds,
+            candidate_skill_ids=candidate_skill_ids,
         ),
         candidate_digest,
     )

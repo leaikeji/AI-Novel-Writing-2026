@@ -5,8 +5,6 @@ import { T2_F_NARRATION_SETTINGS_PANEL_STYLES } from "./styles/t2-f";
 import { T2_G_NARRATION_READING_RULES_STYLES } from "./styles/t2-g";
 import { T4_CHAPTER_NARRATION_STYLES } from "./styles/t4-chapter";
 import { OFFICIAL_VOICE_LIBRARY_STYLES } from "./styles/voice-library";
-import { NANO_ADVANCED_TUNING_STYLES } from "./styles/nano-advanced-tuning";
-import { CHARACTER_VOICE_GENERATOR_STYLES } from "./styles/character-voice-generator";
 import { VOICE_LIFECYCLE_STYLES } from "./styles/voice-lifecycle";
 
 
@@ -21,8 +19,6 @@ export const NARRATION_STYLES = [
   T2_G_NARRATION_READING_RULES_STYLES,
   T4_CHAPTER_NARRATION_STYLES,
   OFFICIAL_VOICE_LIBRARY_STYLES,
-  NANO_ADVANCED_TUNING_STYLES,
-  CHARACTER_VOICE_GENERATOR_STYLES,
   VOICE_LIFECYCLE_STYLES,
   String.raw`
     .anw-narration-character-section,

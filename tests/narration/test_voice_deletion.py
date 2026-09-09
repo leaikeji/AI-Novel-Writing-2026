@@ -58,7 +58,6 @@ def test_impact_payload_exposes_consequences_without_private_text() -> None:
         current_narrator_count=1,
         character_binding_count=2,
         anonymous_speaker_count=0,
-        generic_slot_count=0,
         edition_ids=(uuid4(),),
         render_ids=(uuid4(),),
         export_count=1,
@@ -75,7 +74,7 @@ def test_impact_payload_exposes_consequences_without_private_text() -> None:
     assert payload["external_backup_status"] == "unmanaged"
     assert payload["asset_count"] == 1
     assert payload["reference_count"] == 6
-    assert payload["schema_version"] == "private-voice-deletion-impact/2"
+    assert payload["schema_version"] == "private-voice-deletion-impact/3"
     assert "description" not in payload
 
 
@@ -89,7 +88,7 @@ def _request_row(*, now: datetime, state: str, failure_code: str | None = None):
         expected_profile_version=2,
         impact_digest="a" * 64,
         impact_snapshot_json={
-            "schema_version": "private-voice-deletion-impact/2",
+            "schema_version": "private-voice-deletion-impact/3",
             "reference_count": 2,
             "asset_count": 1,
             "total_bytes": 42,

@@ -127,7 +127,7 @@ function officialProfile(
       version_number: 1,
       source_type: "preset",
       state: "locked",
-      provider_id: "moss-tts-nano-onnx",
+      provider_id: "qwen-tts",
       model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
       model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
       preset_key: EVIDENCE.presetId,
@@ -141,18 +141,18 @@ function officialProfile(
         source_kind: "official_preset",
       },
       official_preset: {
-        schema_version: "moss-tts-official-preset-provenance/1.0",
-        repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
-        revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-        manifest_path: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
-        manifest_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestSha256,
+        schema_version: "qwen-tts-preset-provenance/1",
+        catalog_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
         preset_id: EVIDENCE.presetId,
-        manifest_voice: EVIDENCE.manifestVoice,
-        prompt_codes_sha256: EVIDENCE.promptCodesSha256,
-        prompt_frame_count: EVIDENCE.promptFrameCount,
-        prompt_quantizer_count: EVIDENCE.promptQuantizerCount,
+        local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+        local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+        provider_voice_ids: {
+          local_qwen3_tts: EVIDENCE.localVoiceId,
+          "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": EVIDENCE.aliyunPlusVoiceId,
+          "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": EVIDENCE.aliyunFlashVoiceId,
+        },
         model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
-        provenance_fingerprint_sha256: EVIDENCE.provenanceFingerprintSha256,
+        provenance_fingerprint_sha256: "a".repeat(64),
       },
     }],
   } as unknown as VoiceProfileResource;
@@ -182,7 +182,7 @@ describe("official voice selection panel adapters", () => {
       projection: { phase: "ready", binding, profiles },
     };
     const resolve = async (index: number) => {
-      reads[index].resolve({ schema_version: "moss-tts-official-preset-catalog/1.0", items: [] } as unknown as OfficialPresetCatalogResponse);
+      reads[index].resolve({ schema_version: "qwen-tts-preset-catalog/1", items: [] } as unknown as OfficialPresetCatalogResponse);
       for (let i = 0; i < 5; i++) await Promise.resolve();
     };
     return { harness, Panel, props, reads, resolve, binding, profiles };
@@ -216,14 +216,14 @@ describe("official voice selection panel adapters", () => {
     const changed = { ...props, projection: { phase: "ready" as const, binding, profiles: [...profiles] } };
     const panel = harness.render(Panel, changed); harness.flushEffects();
     (panel.props.onApplied as (result: OfficialVoiceSelectionResult) => void)({
-      presetId: "onnx.Zhiming", settingsVersion: 3, bindingVersion: 8,
+      presetId: "qwen.ClearMale", settingsVersion: 3, bindingVersion: 8,
     } as OfficialVoiceSelectionResult);
     expect(reads[1].signal?.aborted).toBe(true);
     await resolve(1);
     const olderParent = { ...changed, projection: { phase: "ready" as const, binding, profiles: [...profiles] } };
     harness.render(Panel, olderParent); harness.flushEffects(); await resolve(2);
     const current = harness.render(Panel, olderParent);
-    expect(current.props.activePresetId).toBe("onnx.Zhiming");
+    expect(current.props.activePresetId).toBe("qwen.ClearMale");
     expect(current.props.target).toMatchObject({ expectedBindingVersion: 8 });
   });
 
@@ -234,7 +234,7 @@ describe("official voice selection panel adapters", () => {
     const next = { ...props, novelId: COMMAND_ID };
     expect(harness.render(Panel, next).props.catalog).toBeNull();
     (old.props.onApplied as (result: OfficialVoiceSelectionResult) => void)({
-      presetId: "onnx.Zhiming", settingsVersion: 99, bindingVersion: 99,
+      presetId: "qwen.ClearMale", settingsVersion: 99, bindingVersion: 99,
     } as OfficialVoiceSelectionResult);
     harness.flushEffects();
     const third = { ...next, novelId: VERSION_ID };

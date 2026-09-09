@@ -1,8 +1,7 @@
-"""Atomic narrator/character selection of pinned official Nano voices.
+"""Atomic narrator/character selection of pinned Qwen voices.
 
-The service owns one short database transaction.  It never calls Nano or
-publishes media; official provenance, rights and version construction remain
-owned by :mod:`voice_product`.
+The service owns one short database transaction. It never calls a TTS Provider
+or publishes media.
 """
 
 from __future__ import annotations
@@ -41,20 +40,22 @@ from .services import (
     require_local_novel,
 )
 from .settings import NarrationSettingsUpdate, update_settings
-from .voice_product import (
+from .official_voice_records import (
     CanonicalOfficialPresetVoice,
-    _complete_receipt,
-    _db_now,
-    _reserve_receipt,
-    _stable_uuid,
     ensure_canonical_official_preset_voice,
+)
+from .voice_receipts import (
+    complete_voice_action_receipt as _complete_receipt,
+    database_now as _db_now,
+    reserve_voice_action_receipt as _reserve_receipt,
+    stable_voice_action_uuid as _stable_uuid,
 )
 from .voices import voice_profile_resource
 
 
 OFFICIAL_VOICE_SELECTION_OPERATION: Final = "official_preset_selection"
 OFFICIAL_VOICE_SELECTION_ACTOR: Final = "local-owner"
-DEFAULT_NARRATOR_PRESET_ID: Final = "onnx.Junhao"
+DEFAULT_NARRATOR_PRESET_ID: Final = "qwen.WarmFemale"
 _IDEMPOTENCY_KEY: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 
 SessionFactory = Callable[[], Session]

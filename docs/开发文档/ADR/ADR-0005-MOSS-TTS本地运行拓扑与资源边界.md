@@ -1,6 +1,6 @@
 # ADR-0005：MOSS-TTS 本地运行拓扑与资源边界
 
-状态：**🟢 已由 T0-GATE 条件接纳。正式运行拓扑冻结为 Linux/arm64 Compose 私网 Sidecar；长期运行环境已于 2026-08-28 接入 6 个中文官方音色的 Nano 产品链。2026-08-29 计划 33 的 18 项直用、播放体验与删除候选完全保留该 Sidecar 边界，但因新 bundle 隔离安装被 Docker Engine 启动故障阻断，尚未切换长期环境。VoiceGenerator 在当前 M4/16 GiB 继续隐藏；私人音色删除在持久对账 worker 完成前保持 fail-closed。**
+状态：**历史决策，已于 2026-09-08 被 [ADR-0010](./ADR-0010-Qwen-TTS双Provider与可替换本地运行时.md) 替代。以下内容保留其当时实现与验收事实，不再指导现行 TTS 施工。**
 
 决策日期：2026-08-26（Asia/Shanghai）。
 

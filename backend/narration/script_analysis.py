@@ -21,10 +21,6 @@ from ..models import (
     CharacterVoiceBinding,
     Document,
     DocumentRevision,
-    GenericVoicePackVersion,
-    GenericVoicePackVersionSlot,
-    GenericVoicePool,
-    GenericVoiceSlot,
     NarrationRequest,
     NarrationRequestSource,
     NarrationSettingsSnapshot,
@@ -47,21 +43,11 @@ from .casting import (
     CastingAttributes,
     CastingInventory,
     CastingRequest,
-    CastingRuleAction,
-    CastingRuleSnapshot,
     CastingScopeKind,
     CharacterBindingSnapshot,
-    GenericPoolSnapshot,
-    GenericSlotSnapshot,
     NarratorSelectionSnapshot,
     VoiceVersionSnapshot,
-    automatic_generic_casting_rule_id,
     resolve_casting,
-)
-from .anonymous_speakers import (
-    AnonymousReuseBasis,
-    AnonymousScopeAuthority,
-    materialize_anonymous_identity,
 )
 from .contracts import (
     LOCAL_OWNER_ID,
@@ -105,7 +91,6 @@ from .script_contracts import (
     AnonymousScopeKind,
     SpeakerKind,
     SpeakerRef,
-    derive_group_key,
     initial_materialized_state,
     script_immutable_payload,
 )
@@ -149,217 +134,7 @@ from .speaker_rules import (
     attribute_speaker_local,
     build_resolved_speaker_index,
 )
-from .voice_pool import load_voice_pool_catalog
 from .voices import _rights_state
-
-
-_GENERIC_CASTING_EVIDENCE_VERSION = "generic-casting-evidence/1"
-
-
-def _generic_slot_shape(
-    *, slot_key: str, category: str
-) -> tuple[
-    tuple[wire.CastingSpeakerKind, ...],
-    tuple[wire.CastingGender, ...],
-    tuple[wire.CastingAgeBand, ...],
-    tuple[wire.CastingContextKind, ...],
-    bool,
-]:
-    """Derive casting metadata from the one frozen taxonomy category.
-
-    Keeping this mechanical avoids introducing a second age/gender catalog.
-    Unknown or malformed categories fail closed instead of guessing.
-    """
-
-    if category.startswith("female_"):
-        genders = (wire.CastingGender.FEMALE,)
-    elif category.startswith("male_"):
-        genders = (wire.CastingGender.MALE,)
-    elif category.startswith("neutral_"):
-        genders = (wire.CastingGender.NEUTRAL,)
-    else:
-        raise InvalidNarrationState("generic voice category has an unknown gender")
-
-    age_bands: tuple[wire.CastingAgeBand, ...]
-    if category.endswith("_child"):
-        age_bands = (wire.CastingAgeBand.CHILD,)
-    elif category.endswith("_teen"):
-        age_bands = (wire.CastingAgeBand.TEEN,)
-    elif category.endswith("_young_adult"):
-        age_bands = (wire.CastingAgeBand.YOUNG_ADULT,)
-    elif category.endswith("_middle_aged"):
-        age_bands = (wire.CastingAgeBand.MIDDLE_AGED,)
-    elif category.endswith("_elderly"):
-        age_bands = (wire.CastingAgeBand.ELDERLY,)
-    elif category.endswith(("_announcer", "_group")):
-        age_bands = ()
-    else:
-        raise InvalidNarrationState("generic voice category has an unknown age band")
-
-    if category.endswith("_group"):
-        speaker_kinds = (
-            wire.CastingSpeakerKind.GROUP,
-            wire.CastingSpeakerKind.UNKNOWN,
-        )
-        context_kinds = (wire.CastingContextKind.GROUP,)
-    elif category.endswith("_announcer"):
-        speaker_kinds = (
-            wire.CastingSpeakerKind.CHARACTER,
-            wire.CastingSpeakerKind.ANONYMOUS,
-            wire.CastingSpeakerKind.UNKNOWN,
-        )
-        context_kinds = (wire.CastingContextKind.BROADCAST,)
-    else:
-        speaker_kinds = (
-            wire.CastingSpeakerKind.CHARACTER,
-            wire.CastingSpeakerKind.ANONYMOUS,
-            wire.CastingSpeakerKind.UNKNOWN,
-        )
-        context_kinds = ()
-    return (
-        speaker_kinds,
-        genders,
-        age_bands,
-        context_kinds,
-        slot_key == "neutral_young",
-    )
-
-
-def _generic_pool_snapshot(
-    store: NarrationStore, *, novel_id: UUID
-) -> GenericPoolSnapshot | None:
-    pools = store.find_all(
-        GenericVoicePool,
-        novel_id=novel_id,
-        status="active",
-        order_by=("version_number",),
-    )
-    if not pools:
-        return None
-    if len(pools) != 1:
-        raise InvalidNarrationState("multiple active generic voice pools exist")
-    pool = pools[0]
-    if pool.language != "zh-CN" or pool.source_pack_version_id is None:
-        return None
-    pack = store.get(GenericVoicePackVersion, pool.source_pack_version_id)
-    if (
-        pack is None
-        or pack.workspace_id != LOCAL_WORKSPACE_ID
-        or pack.language != "zh-CN"
-        or pack.state != "active"
-        or pack.validated_slot_count != 24
-    ):
-        return None
-    catalog = load_voice_pool_catalog()
-    catalog_by_key = {item.slot_key: item for item in catalog.slots}
-    pool_slots = store.find_all(
-        GenericVoiceSlot,
-        pool_id=pool.id,
-        order_by=("position",),
-    )
-    pack_slots = store.find_all(
-        GenericVoicePackVersionSlot,
-        pack_version_id=pack.id,
-        order_by=("position",),
-    )
-    if (
-        len(pool_slots) != 24
-        or len(pack_slots) != 24
-        or [row.position for row in pool_slots] != list(range(24))
-        or [row.position for row in pack_slots] != list(range(24))
-        or {row.slot_key for row in pool_slots} != set(catalog_by_key)
-        or {row.slot_key for row in pack_slots} != set(catalog_by_key)
-    ):
-        return None
-    source_by_key = {row.slot_key: row for row in pack_slots}
-    snapshots: list[GenericSlotSnapshot] = []
-    for row in pool_slots:
-        source = source_by_key[row.slot_key]
-        if (
-            not row.enabled
-            or source.voice_version_id != row.voice_version_id
-            or source.state not in {"validated", "reused"}
-            or not source.rights_approved
-            or not source.quality_approved
-        ):
-            return None
-        version = require_row(
-            store.get(VoiceProfileVersion, row.voice_version_id),
-            label="generic voice version",
-        )
-        voice = _voice_snapshot(
-            store,
-            novel_id=novel_id,
-            profile_id=version.profile_id,
-            version_id=row.voice_version_id,
-        )
-        if voice is None or voice.blocker_codes(novel_id=novel_id):
-            return None
-        catalog_slot = catalog_by_key[row.slot_key]
-        speaker_kinds, genders, ages, contexts, neutral = _generic_slot_shape(
-            slot_key=row.slot_key,
-            category=catalog_slot.category,
-        )
-        snapshots.append(
-            GenericSlotSnapshot(
-                pool_id=pool.id,
-                slot_id=row.id,
-                slot_key=row.slot_key,
-                position=row.position,
-                enabled=True,
-                state=wire.GenericVoiceSlotState.READY,
-                rights_approved=True,
-                quality_approved=True,
-                production_ready=True,
-                voice=voice,
-                speaker_kinds=speaker_kinds,
-                genders=genders,
-                age_bands=ages,
-                context_kinds=contexts,
-                neutral_fallback=neutral,
-            )
-        )
-    return GenericPoolSnapshot(
-        novel_id=novel_id,
-        pool_id=pool.id,
-        version=pool.version_number,
-        state=wire.GenericVoicePoolState.READY,
-        ready_slot_count=24,
-        rights_approved_slot_count=24,
-        quality_approved_slot_count=24,
-        production_ready_slot_count=24,
-        slots=tuple(snapshots),
-    )
-
-
-def _automatic_generic_rule(
-    *, novel_id: UUID, pool: GenericPoolSnapshot
-) -> CastingRuleSnapshot:
-    assert pool.pool_id is not None
-    return CastingRuleSnapshot(
-        novel_id=novel_id,
-        rule_id=automatic_generic_casting_rule_id(
-            novel_id=novel_id,
-            pool_id=pool.pool_id,
-            pool_version=pool.version,
-        ),
-        version=1,
-        priority=-10_000,
-        enabled=True,
-        condition=wire.VoiceCastingCondition(
-            speaker_kinds=[
-                wire.CastingSpeakerKind.CHARACTER,
-                wire.CastingSpeakerKind.ANONYMOUS,
-                wire.CastingSpeakerKind.GROUP,
-            ],
-            genders=[],
-            age_bands=[],
-            context_kinds=[],
-            role_tags=[],
-        ),
-        action=CastingRuleAction.AUTOMATIC_POOL,
-        pool_id=pool.pool_id,
-    )
 
 
 def _anonymous_identity(row: AnonymousSpeaker) -> AnonymousSpeakerIdentity:
@@ -757,7 +532,6 @@ def _casting_inventory(
                 ),
             )
         )
-    generic_pool = _generic_pool_snapshot(store, novel_id=novel_id)
     anonymous_bindings: list[AnonymousBindingSnapshot] = []
     for row in store.find_all(
         AnonymousSpeaker,
@@ -776,17 +550,6 @@ def _casting_inventory(
             profile_id=version.profile_id,
             version_id=version.id,
         )
-        slot = None
-        pool_version = None
-        pool_active = None
-        if row.slot_id is not None:
-            if generic_pool is None:
-                continue
-            slot = generic_pool.slot(row.slot_id)
-            if slot is None or slot.voice is None or slot.voice.version_id != version.id:
-                continue
-            pool_version = generic_pool.version
-            pool_active = True
         anonymous_bindings.append(
             AnonymousBindingSnapshot(
                 novel_id=novel_id,
@@ -794,22 +557,13 @@ def _casting_inventory(
                 profile_id=version.profile_id,
                 version_id=version.id,
                 voice=voice,
-                slot=slot,
-                pool_version=pool_version,
-                pool_active=pool_active,
             )
         )
-    rules = (
-        (_automatic_generic_rule(novel_id=novel_id, pool=generic_pool),)
-        if generic_pool is not None
-        else ()
-    )
     return CastingInventory(
         narrator_selections=narrator_selections,
         character_bindings=tuple(bindings),
         anonymous_bindings=tuple(anonymous_bindings),
-        rules=rules,
-        generic_pool=generic_pool,
+        rules=(),
     )
 
 
@@ -1001,7 +755,6 @@ def _inherit_manual_overrides(
                     context.settings.casting.same_scene_voice_deduplication
                 ),
                 used_voice_version_ids=frozenset(),
-                used_slot_ids=frozenset(),
             ),
             inventory,
         )
@@ -1104,9 +857,8 @@ def _resolved_non_character_records(
     novel_id: UUID,
     chapter_id: UUID,
     scene_id: UUID,
-    extra: tuple[ResolvedSpeakerLabel, ...] = (),
 ) -> tuple[ResolvedSpeakerLabel, ...]:
-    records = list(extra)
+    records: list[ResolvedSpeakerLabel] = []
     for row in store.find_all(
         AnonymousSpeaker,
         novel_id=novel_id,
@@ -1133,86 +885,6 @@ def _resolved_non_character_records(
             )
         )
     return tuple(records)
-
-
-def _materialize_explicit_anonymous_speaker(
-    store: NarrationStore,
-    *,
-    novel_id: UUID,
-    chapter_id: UUID,
-    label: str,
-    attributes: CastingAttributes,
-) -> AnonymousSpeaker:
-    normalized = normalize_character_alias(label)
-    for row in store.find_all(
-        AnonymousSpeaker,
-        novel_id=novel_id,
-        lifecycle_state="active",
-        order_by=("id",),
-    ):
-        if (
-            row.promoted_character_id is None
-            and row.scope_kind == "chapter"
-            and row.scope_id == chapter_id
-            and normalize_character_alias(row.display_name) == normalized
-        ):
-            return row
-    evidence_hash = canonical_sha256(
-        {
-            "schema_version": _GENERIC_CASTING_EVIDENCE_VERSION,
-            "novel_id": str(novel_id),
-            "chapter_id": str(chapter_id),
-            "normalized_label": normalized,
-        }
-    )
-    seed = materialize_anonymous_identity(
-        authority=AnonymousScopeAuthority(
-            novel_id=novel_id,
-            chapter_ids=frozenset({chapter_id}),
-        ),
-        scope_kind=AnonymousScopeKind.CHAPTER,
-        scope_id=chapter_id,
-        source_label=label,
-        evidence_hash=evidence_hash,
-        display_name=unicodedata.normalize("NFC", label),
-        confidence=ConfidenceLevel.HIGH,
-        reuse_basis=AnonymousReuseBasis.EXPLICIT_ALIAS,
-        explicit_aliases=(label,),
-    )
-    existing = store.get(AnonymousSpeaker, seed.identity.anonymous_speaker_id)
-    if existing is not None:
-        if _anonymous_identity(existing) != seed.identity:
-            raise NarrationScopeMismatch(
-                "derived anonymous speaker identity collides with persisted authority"
-            )
-        return existing
-    row = AnonymousSpeaker(
-        id=seed.identity.anonymous_speaker_id,
-        novel_id=novel_id,
-        stable_key_algorithm=seed.identity.stable_key_algorithm,
-        stable_key=seed.identity.stable_key,
-        display_name=seed.identity.display_name,
-        scope_kind=seed.identity.scope_kind.value,
-        scope_id=seed.identity.scope_id,
-        inferred_json={
-            "schema_version": _GENERIC_CASTING_EVIDENCE_VERSION,
-            "source": "explicit_dialogue_cue",
-            "source_label": label,
-            "evidence_hash": evidence_hash,
-            "gender": attributes.gender.value,
-            "age_band": attributes.age_band.value,
-            "context_kind": (
-                attributes.context_kind.value if attributes.context_kind else None
-            ),
-        },
-        confidence=seed.identity.confidence.value,
-        slot_id=None,
-        voice_version_id=None,
-        lifecycle_state="active",
-    )
-    store.add(row)
-    store.flush()
-    return row
 
 
 def _materialize_contract(
@@ -1257,14 +929,8 @@ def _materialize_contract(
     used_voice_ids: dict[UUID, set[UUID]] = {
         scene.scene_id: set() for scene in scenes
     }
-    used_slot_ids: dict[UUID, set[UUID]] = {
-        scene.scene_id: set() for scene in scenes
-    }
-    assigned_by_speaker: dict[UUID, dict[tuple[str, str], tuple[UUID, UUID | None]]] = {
+    assigned_by_speaker: dict[UUID, dict[tuple[str, str], UUID]] = {
         scene.scene_id: {} for scene in scenes
-    }
-    group_records: dict[UUID, list[ResolvedSpeakerLabel]] = {
-        scene.scene_id: [] for scene in scenes
     }
     anonymous_identities: dict[UUID, AnonymousSpeakerIdentity] = {}
     segments: list[SegmentContract] = []
@@ -1318,7 +984,6 @@ def _materialize_contract(
             novel_id=context.request.novel_id,
             chapter_id=context.document.id,
             scene_id=scene_id,
-            extra=tuple(group_records[scene_id]),
         )
         resolved_index = build_resolved_speaker_index(
             resolved_records,
@@ -1330,65 +995,6 @@ def _materialize_contract(
             resolved_speakers=resolved_index,
         )
         speaker_label: str | None = None
-        if (
-            inventory.generic_pool is not None
-            and speaker.speaker.kind is SpeakerKind.UNKNOWN
-            and speaker.unresolved_label is not None
-            and speaker.unresolved_kind in {SpeakerKind.ANONYMOUS, SpeakerKind.GROUP}
-        ):
-            speaker_label = speaker.unresolved_label
-            preliminary = _explicit_casting_attributes(
-                label=speaker_label,
-                segment_kind=source_segment.segment_kind,
-                speaker_kind=speaker.unresolved_kind,
-            )
-            if speaker.unresolved_kind is SpeakerKind.ANONYMOUS:
-                anonymous = _materialize_explicit_anonymous_speaker(
-                    store,
-                    novel_id=context.request.novel_id,
-                    chapter_id=context.document.id,
-                    label=speaker_label,
-                    attributes=preliminary,
-                )
-                anonymous_identities[anonymous.id] = _anonymous_identity(anonymous)
-            else:
-                evidence_hash = canonical_sha256(
-                    {
-                        "schema_version": _GENERIC_CASTING_EVIDENCE_VERSION,
-                        "scene_id": str(scene_id),
-                        "label": normalize_character_alias(speaker_label),
-                    }
-                )
-                group_ref = SpeakerRef(
-                    SpeakerKind.GROUP,
-                    group_key=derive_group_key(
-                        novel_id=context.request.novel_id,
-                        scene_id=scene_id,
-                        label=speaker_label,
-                        evidence_hash=evidence_hash,
-                    ),
-                )
-                record = ResolvedSpeakerLabel(speaker_label, group_ref)
-                if record not in group_records[scene_id]:
-                    group_records[scene_id].append(record)
-            resolved_records = _resolved_non_character_records(
-                store,
-                novel_id=context.request.novel_id,
-                chapter_id=context.document.id,
-                scene_id=scene_id,
-                extra=tuple(group_records[scene_id]),
-            )
-            resolved_index = build_resolved_speaker_index(
-                resolved_records,
-                allowed_speakers=frozenset(
-                    record.speaker for record in resolved_records
-                ),
-            )
-            speaker = attribute_speaker_local(
-                rule_context,
-                aliases=aliases,
-                resolved_speakers=resolved_index,
-            )
         if speaker.speaker.character_id is not None:
             scene_characters[scene_id].add(speaker.speaker.character_id)
         anonymous_row = None
@@ -1419,12 +1025,9 @@ def _materialize_contract(
         )
         speaker_key = (speaker.speaker.kind.value, str(identity_value))
         used_voices = set(used_voice_ids[scene_id])
-        used_slots = set(used_slot_ids[scene_id])
         previous_assignment = assigned_by_speaker[scene_id].get(speaker_key)
         if previous_assignment is not None:
-            used_voices.discard(previous_assignment[0])
-            if previous_assignment[1] is not None:
-                used_slots.discard(previous_assignment[1])
+            used_voices.discard(previous_assignment)
         casting = resolve_casting(
             CastingRequest(
                 novel_id=context.request.novel_id,
@@ -1440,50 +1043,14 @@ def _materialize_contract(
                     context.settings.casting.same_scene_voice_deduplication
                 ),
                 used_voice_version_ids=frozenset(used_voices),
-                used_slot_ids=frozenset(used_slots),
             ),
             inventory,
         )
         if casting.resolved_voice is not None:
             used_voice_ids[scene_id].add(casting.resolved_voice.version_id)
-            if casting.resolved_voice.slot_id is not None:
-                used_slot_ids[scene_id].add(casting.resolved_voice.slot_id)
             assigned_by_speaker[scene_id][speaker_key] = (
-                casting.resolved_voice.version_id,
-                casting.resolved_voice.slot_id,
+                casting.resolved_voice.version_id
             )
-            if (
-                anonymous_row is not None
-                and casting.resolved_voice.slot_id is not None
-                and anonymous_row.voice_version_id is None
-                and inventory.generic_pool is not None
-            ):
-                slot = inventory.generic_pool.slot(casting.resolved_voice.slot_id)
-                if slot is None or slot.voice is None:
-                    raise InvalidNarrationState(
-                        "resolved anonymous generic slot disappeared"
-                    )
-                anonymous_row.slot_id = slot.slot_id
-                anonymous_row.voice_version_id = slot.voice.version_id
-                binding = AnonymousBindingSnapshot(
-                    novel_id=context.request.novel_id,
-                    anonymous_speaker_id=anonymous_row.id,
-                    profile_id=slot.voice.profile_id,
-                    version_id=slot.voice.version_id,
-                    voice=slot.voice,
-                    slot=slot,
-                    pool_version=inventory.generic_pool.version,
-                    pool_active=True,
-                )
-                inventory = replace(
-                    inventory,
-                    anonymous_bindings=tuple(
-                        item
-                        for item in inventory.anonymous_bindings
-                        if item.anonymous_speaker_id != anonymous_row.id
-                    )
-                    + (binding,),
-                )
         expression = classify_expression(
             ExpressionContext(
                 segment_kind=source_segment.segment_kind,

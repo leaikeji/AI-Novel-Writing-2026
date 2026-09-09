@@ -37,6 +37,7 @@ export interface CharacterVoiceConfiguratorProps {
   readonly characterName: string;
   readonly currentVoice: CharacterVoiceConfiguratorCurrentVoice;
   readonly canConfigure: boolean;
+  readonly showMatch?: boolean;
   readonly matchEnabled: boolean;
   readonly matchDisabledReason?: string | null;
   readonly onMatchOfficialVoice?: (
@@ -270,8 +271,10 @@ export function createCharacterVoiceConfigurator(
           role: current.tone === "is-error" ? "alert" : undefined,
         }, current.message),
       ),
-      h(
-        "section",
+      props.showMatch === false
+        ? null
+        : h(
+          "section",
         { className: "anw-character-voice-configurator__match", "aria-labelledby": `${prefix}-match` },
         h("div", null,
           h("h3", { id: `${prefix}-match` }, "智能匹配官方音色"),
@@ -304,7 +307,7 @@ export function createCharacterVoiceConfigurator(
             onClick: () => runMatch(state.presetId),
           }, state.phase === "running" ? "使用中…" : "使用此音色")
           : null,
-      ),
+        ),
       props.generatorContent === undefined
         ? null
         : props.generatorContent,

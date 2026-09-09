@@ -20,12 +20,9 @@ import {
   parseNarrationOverviewResponse,
   parseNarrationScopeOverrideListResponse,
   parseNarrationSettingsResource,
-  parseGenericVoicePackLoadResource,
-  parseVoicePreviewResource,
   parseVoiceCastingRulesResource,
   parseVoiceProfileResource,
   voiceSourceEvidenceIsUsable,
-  voiceActivationEvidenceIsUsable,
 } from "./contracts";
 
 const NOVEL_ID = "10000000-0000-4000-8000-000000000001";
@@ -39,37 +36,35 @@ function officialCatalog(
   evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = OFFICIAL_PRESET_EVIDENCE,
 ) {
   return {
-    schema_version: "moss-tts-official-preset-catalog/2.0",
-    items: evidenceRows.map((evidence, index) => {
-      const presetLanguage = index < 6 ? "zh-CN" : index < 11 ? "en" : "ja-JP";
+    schema_version: "qwen-tts-preset-catalog/1",
+    items: evidenceRows.map((evidence) => {
+      const female = evidence.presetId === "qwen.WarmFemale";
       return {
         preset_id: evidence.presetId,
-        display_name: evidence.manifestVoice,
-        group: "Official",
-        language: presetLanguage,
+        display_name: female ? "温暖女声" : "明亮男声",
+        group: female ? "中文女声" : "中文男声",
+        language: "zh-CN",
         local_use_status: "available",
         commercial_distribution_status: "not_evaluated",
-        validation_tier: ["Junhao", "Zhiming", "Xiaoyu"].includes(evidence.manifestVoice)
-          ? "canonical_chapter_verified"
-          : "pinned_catalog_unreviewed",
-        language_scope: presetLanguage,
+        validation_tier: "canonical_chapter_verified",
+        language_scope: "zh-CN",
         selectable_now: true,
-        previewable_now: true,
+        previewable_now: false,
         renderable_existing: true,
         usage_notice: "private_local_writing_tool",
         provenance: {
-          schema_version: "moss-tts-official-preset-provenance/1.0",
-          repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
-          revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-          manifest_path: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
-          manifest_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestSha256,
+          schema_version: "qwen-tts-preset-provenance/1",
+          catalog_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
           preset_id: evidence.presetId,
-          manifest_voice: evidence.manifestVoice,
-          prompt_codes_sha256: evidence.promptCodesSha256,
-          prompt_frame_count: evidence.promptFrameCount,
-          prompt_quantizer_count: evidence.promptQuantizerCount,
+          local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+          local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+          provider_voice_ids: {
+            local_qwen3_tts: evidence.localVoiceId,
+            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": evidence.aliyunPlusVoiceId,
+            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": evidence.aliyunFlashVoiceId,
+          },
           model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
-          provenance_fingerprint_sha256: evidence.provenanceFingerprintSha256,
+          provenance_fingerprint_sha256: "a".repeat(64),
         },
       };
     }),
@@ -123,7 +118,7 @@ function capabilities() {
     cache_cleanup: "T2_GATE_REQUIRED",
     preset_voice_source: "OFFICIAL_PRESET_RUNTIME_UNAVAILABLE",
     reference_clone: "REFERENCE_CLONE_PRODUCT_GATE_HOLD",
-    voice_generator: "VOICE_GENERATOR_NO_GO",
+    voice_design: "QWEN_VOICE_DESIGN_NOT_RELEASED",
   };
   return {
     schema_version: NARRATION_CAPABILITY_SCHEMA_VERSION,
@@ -135,9 +130,7 @@ function capabilities() {
         "product_player",
         "editor_production",
         "reference_clone",
-        "automatic_generic_casting",
         "automatic_speaker_detection",
-        "voice_generator",
       ].includes(key),
       actionable: false,
       reason_code: reasons[key] ?? "GATE_REQUIRED",
@@ -208,9 +201,9 @@ function lockedVersion() {
     version_number: 1,
     source_type: "uploaded",
     state: "locked",
-    provider_id: "moss-nano",
-    model_id: "MOSS-TTS-Nano-100M-ONNX",
-    model_revision: "frozen-revision",
+    provider_id: "qwen-tts",
+    model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+    model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
     preset_key: null,
     language: "zh-CN",
     fingerprint: "c".repeat(64),
@@ -245,20 +238,39 @@ function profile() {
 }
 
 describe("narration T2 wire contract", () => {
-  it("accepts exactly all 18 pinned presets and rejects outer catalog drift", () => {
+  it("rejects retired MOSS rights and activation evidence", () => {
+    for (const sourceKind of ["voice_generator", "preset_catalog"] as const) {
+      expect(() => parseVoiceProfileResource({
+        ...profile(),
+        versions: [{
+          ...lockedVersion(),
+          rights: { ...rights(), source_kind: sourceKind },
+        }],
+      })).toThrow(NarrationContractError);
+    }
+    for (const activationBasis of [
+      "character_one_click_generation",
+      "generic_voice_pack_generation",
+      "experimental_machine_validated",
+    ] as const) {
+      expect(() => parseVoiceProfileResource({
+        ...profile(),
+        versions: [{ ...lockedVersion(), activation_basis: activationBasis }],
+      })).toThrow(NarrationContractError);
+    }
+  });
+
+  it("accepts the exact Qwen catalog and rejects outer catalog drift", () => {
     const parsed = parseOfficialPresetCatalogResponse(officialCatalog());
-    expect(parsed.items).toHaveLength(18);
+    expect(parsed.items).toHaveLength(2);
     expect(parsed.items.map((item) => item.preset_id)).toEqual(OFFICIAL_PRESET_IDS);
-    expect(parsed.items.map((item) => item.preset_id)).toContain("onnx.Xiaoyu");
-    expect(parsed.items.map((item) => item.preset_id)).toContain("onnx.Trump");
-    expect(OFFICIAL_PRESET_IDS).toHaveLength(18);
-    expect(OFFICIAL_PRESET_IDS).toContain("onnx.Trump");
+    expect(OFFICIAL_PRESET_IDS).toEqual(["qwen.WarmFemale", "qwen.ClearMale"]);
     expect(parsed.items.every((item) => item.local_use_status === "available")).toBe(true);
     expect(parsed.items.every((item) => item.commercial_distribution_status === "not_evaluated")).toBe(true);
 
     const incomplete = officialCatalog();
     incomplete.items.pop();
-    expect(() => parseOfficialPresetCatalogResponse(incomplete)).toThrow(/exact 18-item/);
+    expect(() => parseOfficialPresetCatalogResponse(incomplete)).toThrow(/complete pinned Qwen catalog/);
 
     const leakedCodes = officialCatalog();
     Object.assign(leakedCodes.items[0].provenance, { prompt_audio_codes: [[1, 2]] });
@@ -267,18 +279,17 @@ describe("narration T2 wire contract", () => {
     const replaced = JSON.parse(JSON.stringify(officialCatalog())) as {
       items: Array<{
         preset_id: string;
-        provenance: { preset_id: string; manifest_voice: string };
+        provenance: { preset_id: string };
       }>;
     };
-    replaced.items[3]!.preset_id = "onnx.FilteredReplacement";
-    replaced.items[3]!.provenance.preset_id = "onnx.FilteredReplacement";
-    replaced.items[3]!.provenance.manifest_voice = "FilteredReplacement";
-    expect(() => parseOfficialPresetCatalogResponse(replaced)).toThrow(/pinned catalog order/);
+    replaced.items[1]!.preset_id = "qwen.FilteredReplacement";
+    replaced.items[1]!.provenance.preset_id = "qwen.FilteredReplacement";
+    expect(() => parseOfficialPresetCatalogResponse(replaced)).toThrow(/exact Qwen preset id/);
 
     const wrongManifest = JSON.parse(JSON.stringify(officialCatalog())) as {
-      items: Array<{ provenance: { manifest_sha256: string } }>;
+      items: Array<{ provenance: { local_model_id: string } }>;
     };
-    for (const item of wrongManifest.items) item.provenance.manifest_sha256 = "9".repeat(64);
+    for (const item of wrongManifest.items) item.provenance.local_model_id = "Wrong/Repository";
     expect(() => parseOfficialPresetCatalogResponse(wrongManifest)).toThrow(/pinned evidence/);
 
     const wrongOrder = officialCatalog();
@@ -286,34 +297,35 @@ describe("narration T2 wire contract", () => {
     expect(() => parseOfficialPresetCatalogResponse(wrongOrder)).toThrow(/pinned catalog order/);
 
     const evidenceFields = [
-      "prompt_codes_sha256",
-      "prompt_frame_count",
-      "prompt_quantizer_count",
+      "local_model_id",
+      "local_model_revision",
       "model_fingerprint_sha256",
-      "provenance_fingerprint_sha256",
     ] as const;
     for (const field of evidenceFields) {
       const drifted = JSON.parse(JSON.stringify(officialCatalog())) as {
         items: Array<{ provenance: Record<string, unknown> }>;
       };
-      drifted.items[3]!.provenance[field] = field.includes("count") ? 999 : "8".repeat(64);
+      drifted.items[1]!.provenance[field] = field === "local_model_id"
+        ? "Wrong/Repository"
+        : field === "local_model_revision"
+          ? "9".repeat(40)
+          : "8".repeat(64);
       expect(() => parseOfficialPresetCatalogResponse(drifted), field).toThrow(/pinned evidence/);
     }
 
     for (const [field, value] of [
-      ["repository", "Wrong/Repository"],
-      ["revision", "9".repeat(40)],
-      ["manifest_path", "wrong_manifest.json"],
+      ["catalog_id", "wrong-provider-map/1"],
+      ["provider_voice_ids", {}],
     ] as const) {
       const drifted = JSON.parse(JSON.stringify(officialCatalog())) as {
         items: Array<{ provenance: Record<string, unknown> }>;
       };
-      drifted.items[4]!.provenance[field] = value;
-      expect(() => parseOfficialPresetCatalogResponse(drifted), field).toThrow(/pinned evidence/);
+      drifted.items[0]!.provenance[field] = value;
+      expect(() => parseOfficialPresetCatalogResponse(drifted), field).toThrow();
     }
 
-    const xiaoyu = parsed.items.find((item) => item.preset_id === "onnx.Xiaoyu")!;
-    expect(xiaoyu.preset_id).toBe("onnx.Xiaoyu");
+    const warm = parsed.items.find((item) => item.preset_id === "qwen.WarmFemale")!;
+    expect(warm.preset_id).toBe("qwen.WarmFemale");
     for (const preset of parsed.items) {
       expect(voiceSourceEvidenceIsUsable({
         ...lockedVersion(),
@@ -340,40 +352,15 @@ describe("narration T2 wire contract", () => {
       quality_state: "accepted" as const,
       activation_basis: "preview_confirmed" as const,
       validation_basis: "human_accepted" as const,
-      preset_key: xiaoyu.preset_id,
+      preset_key: warm.preset_id,
       rights: {
         ...rights(),
         state: "active" as const,
         source_kind: "official_preset" as const,
         purpose: "private_novel_narration" as const,
       },
-      official_preset: { ...xiaoyu.provenance, prompt_frame_count: 999 },
+      official_preset: { ...warm.provenance, provider_voice_ids: {} },
       reference_asset_id: null,
-    })).toBe(false);
-
-    const experimental = {
-      ...lockedVersion(),
-      source_type: "generated" as const,
-      state: "locked" as const,
-      quality_state: "accepted" as const,
-      activation_basis: "experimental_machine_validated" as const,
-      validation_basis: "machine_validated" as const,
-      preset_key: xiaoyu.preset_id,
-      rights: {
-        ...rights(),
-        state: "active" as const,
-        source_kind: "official_preset" as const,
-        purpose: "private_novel_narration" as const,
-      },
-      official_preset: xiaoyu.provenance,
-      reference_asset_id: null,
-      description_available: false,
-    };
-    expect(voiceSourceEvidenceIsUsable(experimental)).toBe(true);
-    expect(voiceActivationEvidenceIsUsable(experimental)).toBe(true);
-    expect(voiceSourceEvidenceIsUsable({
-      ...experimental,
-      official_preset: { ...xiaoyu.provenance, prompt_frame_count: 999 },
     })).toBe(false);
   });
   it("accepts exact default settings and rejects response drift", () => {
@@ -382,6 +369,35 @@ describe("narration T2 wire contract", () => {
       ...settingsResource(),
       owner_id: "client-must-not-see-this",
     })).toThrow(NarrationContractError);
+  });
+
+  it("accepts server-owned cloud channel evidence without breaking local settings", () => {
+    const base = settingsResource();
+    const local = {
+      ...base,
+      values: {
+        ...base.values,
+        tts_provider: {
+          provider_id: "local_qwen3_tts",
+          aliyun_model_id: "qwen-audio-3.0-tts-plus",
+          cloud_profile_id: null as string | null,
+          cloud_profile_version: null as number | null,
+          cloud_protocol: null as "qwen_audio_native_http/1" | null,
+          cloud_actual_model_id: null as string | null,
+          cloud_base_url_fingerprint: null as string | null,
+          cloud_verification_fingerprint: null as string | null,
+        },
+      },
+    };
+    expect(
+      parseNarrationSettingsResource(local).values.tts_provider?.provider_id,
+    ).toBe("local_qwen3_tts");
+
+    const partial = structuredClone(local);
+    partial.values.tts_provider.cloud_profile_id = PROFILE_ID;
+    expect(() => parseNarrationSettingsResource(partial)).toThrow(
+      /local TTS selection cannot carry a cloud profile binding/,
+    );
   });
 
   it("keeps scope override lists inside one novel and unique scope", () => {
@@ -464,10 +480,10 @@ describe("narration T2 wire contract", () => {
       runtime: {
         technical_enabled: false,
         lifecycle_status: "disabled",
-        sidecar_reachable: false,
+        provider_reachable: false,
         model_ready: false,
         product_visible: false,
-        protocol_version: "moss-tts-sidecar/1.1",
+        protocol_version: "qwen-tts-local-runtime/1",
         model_fingerprint_sha256: null,
         reason_code: "RUNTIME_DISABLED",
       },
@@ -503,9 +519,9 @@ describe("narration T2 wire contract", () => {
         },
         {
           source_type: "generated",
-          capability: "voice_generator",
+          capability: "voice_design",
           available: false,
-          reason_code: "VOICE_GENERATOR_NO_GO",
+          reason_code: "QWEN_VOICE_DESIGN_NOT_RELEASED",
           accepted_mime_types: [],
           maximum_bytes: null,
         },
@@ -515,42 +531,6 @@ describe("narration T2 wire contract", () => {
     const parsed = parseNarrationOverviewResponse(overview);
     expect(parsed.capabilities.items).toHaveLength(CAPABILITY_KEYS.length);
     expect(parsed.voice_sources.every((source) => !source.available)).toBe(true);
-
-    const legacy = structuredClone(overview) as unknown as {
-      capabilities: {
-        schema_version: string;
-        items: Array<{ key: string }>;
-      };
-    };
-    legacy.capabilities.schema_version = "narration-capabilities/3";
-    legacy.capabilities.items = legacy.capabilities.items.filter(
-      (entry) => entry.key !== "automatic_character_voice_generation",
-    );
-    const parsedLegacy = parseNarrationOverviewResponse(legacy);
-    expect(parsedLegacy.capabilities.schema_version).toBe(NARRATION_CAPABILITY_SCHEMA_VERSION);
-    expect(parsedLegacy.capabilities.items).toHaveLength(CAPABILITY_KEYS.length);
-    expect(parsedLegacy.capabilities.items.find(
-      (entry) => entry.key === "automatic_character_voice_generation",
-    )).toEqual({
-      key: "automatic_character_voice_generation",
-      state: "unavailable",
-      visible: false,
-      actionable: false,
-      reason_code: "AUTOMATIC_CHARACTER_VOICE_GENERATION_UNAVAILABLE",
-      required_gate: null,
-    });
-
-    const incompleteLegacy = structuredClone(legacy);
-    incompleteLegacy.capabilities.items.pop();
-    expect(() => parseNarrationOverviewResponse(incompleteLegacy)).toThrow(/every capability/);
-
-    const futureCapabilityInLegacy = structuredClone(legacy);
-    const futureCapability = overview.capabilities.items.find(
-      (entry) => entry.key === "automatic_character_voice_generation",
-    );
-    if (!futureCapability) throw new Error("missing future capability fixture");
-    futureCapabilityInLegacy.capabilities.items.push(structuredClone(futureCapability));
-    expect(() => parseNarrationOverviewResponse(futureCapabilityInLegacy)).toThrow(/expected one of/);
 
     const missing = structuredClone(overview);
     missing.capabilities.items.pop();
@@ -569,7 +549,7 @@ describe("narration T2 wire contract", () => {
     const runtime = falseRuntime.runtime as {
       technical_enabled: boolean;
       lifecycle_status: string;
-      sidecar_reachable: boolean;
+      provider_reachable: boolean;
       model_ready: boolean;
       product_visible: boolean;
       model_fingerprint_sha256: string | null;
@@ -577,7 +557,7 @@ describe("narration T2 wire contract", () => {
     };
     runtime.technical_enabled = true;
     runtime.lifecycle_status = "ready";
-    runtime.sidecar_reachable = true;
+    runtime.provider_reachable = true;
     runtime.model_ready = true;
     runtime.product_visible = true;
     runtime.model_fingerprint_sha256 = "e".repeat(64);
@@ -664,121 +644,6 @@ describe("narration T2 wire contract", () => {
     expect(() => parseVoiceProfileResource(crossed)).toThrow(/asset path\/id mismatch/);
   });
 
-  it("accepts machine-validated Nano versions backed by an official preset", () => {
-    const preset = officialCatalog().items[1]!;
-    const experimentalVersion = {
-      ...lockedVersion(),
-      source_type: "generated",
-      preset_key: preset.preset_id,
-      quality_state: "accepted",
-      activation_basis: "experimental_machine_validated",
-      validation_basis: "machine_validated",
-      rights: {
-        ...rights(),
-        source_kind: "official_preset",
-        voice_cloning: false,
-        subject_consent_recorded: false,
-      },
-      official_preset: preset.provenance,
-      reference_asset_id: null,
-      description_available: false,
-      locked_at: null,
-    };
-    const experimentalProfile = {
-      ...profile(),
-      versions: [experimentalVersion],
-    };
-    expect(
-      parseVoiceProfileResource(experimentalProfile).versions[0]!.activation_basis,
-    ).toBe("experimental_machine_validated");
-    expect(() => parseVoiceProfileResource({
-      ...experimentalProfile,
-      versions: [{ ...experimentalVersion, validation_basis: "pending" }],
-    })).toThrow(/preset_key source mismatch/);
-  });
-
-  it("accepts machine-validated generic pack library voices", () => {
-    const genericVersion = {
-      ...lockedVersion(),
-      source_type: "generated",
-      preset_key: null,
-      quality_state: "accepted",
-      activation_basis: "generic_voice_pack_generation",
-      validation_basis: "machine_validated",
-      rights: {
-        ...rights(),
-        source_kind: "voice_generator",
-        source_identifier_sha256: "e".repeat(64),
-      },
-      official_preset: null,
-      reference_asset_id: CHARACTER_ID,
-      description_available: true,
-      locked_at: null,
-    };
-    const genericProfile = {
-      ...profile(),
-      novel_id: null,
-      versions: [genericVersion],
-    };
-
-    const parsed = parseVoiceProfileResource(genericProfile);
-
-    expect(parsed.versions[0]!.activation_basis).toBe("generic_voice_pack_generation");
-    expect(voiceSourceEvidenceIsUsable(parsed.versions[0]!)).toBe(true);
-    expect(voiceActivationEvidenceIsUsable(parsed.versions[0]!)).toBe(true);
-  });
-
-  it("publishes preview audio only in ready state", () => {
-    const ready = {
-      contract_version: NARRATION_SETTINGS_API_VERSION,
-      preview_id: CHARACTER_ID,
-      profile_id: PROFILE_ID,
-      version_id: VERSION_ID,
-      status: "ready",
-      job_id: null,
-      asset: mediaAsset(),
-      temporary: true,
-      expires_at: "2026-08-26T12:10:00Z",
-      failure_code: null,
-    };
-    expect(parseVoicePreviewResource(ready).temporary).toBe(true);
-    expect(() => parseVoicePreviewResource({ ...ready, status: "running" })).toThrow(/non-ready preview/);
-  });
-
-  it("requires a scoped media publication for every validated generic slot", () => {
-    const payload = {
-      pack: {
-        contract_version: "generic-voice-pack/1",
-        language: "zh-CN",
-        pack_version_id: PROFILE_ID,
-        state: "building",
-        prepared_slots: 1,
-        total_slots: 24,
-        slots: [{
-          slot_id: CHARACTER_ID,
-          slot_key: "male_child_bright",
-          label: "男童·明亮",
-          category: "child",
-          state: "validated",
-          preview_available: true,
-          preview_asset: mediaAsset(),
-          voice_profile_id: PROFILE_ID,
-          voice_version_id: VERSION_ID,
-          failure_code: null,
-        }],
-        failure_code: null,
-        updated_at: NOW,
-      },
-      command: null,
-    };
-    expect(parseGenericVoicePackLoadResource(payload).pack.slots[0]?.slotId)
-      .toBe(CHARACTER_ID);
-    const missingAsset = structuredClone(payload);
-    missingAsset.pack.slots[0]!.preview_asset = null as never;
-    expect(() => parseGenericVoicePackLoadResource(missingAsset))
-      .toThrow(/preview asset mismatch|lacks preview publication/);
-  });
-
   it("keeps unset character bindings empty and version zero", () => {
     const unset = {
       contract_version: NARRATION_SETTINGS_API_VERSION,
@@ -836,8 +701,6 @@ describe("narration T2 wire contract", () => {
         },
         target: {
           kind: "require_review",
-          pool_id: null,
-          slot_key: null,
           profile_id: null,
           version_id: null,
         },
@@ -860,8 +723,8 @@ describe("narration T2 wire contract", () => {
       retryable: false,
       field: null,
       current_version: null,
-      capability: "voice_generator",
-    }).capability).toBe("voice_generator");
+      capability: "voice_design",
+    }).capability).toBe("voice_design");
 
     const cleanup = {
       contract_version: NARRATION_SETTINGS_API_VERSION,

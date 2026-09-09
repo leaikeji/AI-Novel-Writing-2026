@@ -1,9 +1,9 @@
-"""Fenced MOSS-TTS-Nano segment worker.
+"""Fenced Provider-neutral narration segment worker.
 
 Database work is deliberately split into short transactions.  Synthesis,
 audio processing, FFmpeg, reference-media reads, and immutable file publication
 run after the claim transaction has committed.  The final transaction locks
-both the job and Nano resource generations before making media reachable.
+both the job and inference resource generations before making media reachable.
 """
 
 from __future__ import annotations
@@ -31,30 +31,31 @@ from ..models import (
     NarrationRequest,
     NarrationSegment,
     NarrationSegmentRender,
+    NarrationSettingsSnapshot,
     VoiceProfileVersion,
 )
-from .adapters import AdapterUnavailableError, MossNanoTTSAdapter
+from . import schemas as wire
 from .audio_pipeline import (
     audio_validation_failure_evidence,
     AudioFormatError,
     AudioPipelineError,
     AudioQualityError,
     ProcessedPcmWav,
-    process_synthesis_wav,
+    process_provider_synthesis_wav,
 )
 from .contracts import (
-    ContractError,
-    NanoDecodeParametersV2,
     NarrationRequestScope,
-    PRODUCTION_NANO_MAX_NEW_FRAMES,
-    PRODUCTION_NANO_SAMPLE_MODES,
     ReferenceAudioInput,
-    SynthesisRequest,
+    TTSAudioFormat,
+    TTSSynthesisRequest,
+    TTSSynthesisResult,
+    TTSVoiceInput,
+    TTSVoiceKind,
 )
 from .digest_keyring import DigestKeyring, HmacDigestKey
 from .disk_guard import NarrationDiskGuardError
 from .editions import advance_edition_segment_state
-from .fingerprints import model_fingerprint_sha256
+from .fingerprints import canonical_json_bytes
 from .jobs import (
     FailureResult,
     JobFenceError,
@@ -72,20 +73,8 @@ from .manifest import (
     append_manifest_revision,
     publish_manifest,
 )
-from .nano_experiments import (
-    NanoDecodeParametersV3,
-    validate_nano_experiment_version_evidence,
-)
-from .official_presets import (
-    OFFICIAL_PRESET_MAX_NEW_FRAMES,
-    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
-    OFFICIAL_PRESET_REPOSITORY,
-    OFFICIAL_PRESET_REVISION,
-    OFFICIAL_PRESET_RUNTIME_INITIAL_SEED,
-    OFFICIAL_PRESET_SAMPLE_MODE,
-    OFFICIAL_PRESET_VERSION_SCHEMA_VERSION,
-    validate_official_preset_provenance,
-)
+from .providers.base import TTSProviderError
+from .official_presets import require_official_preset
 from .publication import (
     ModelRunSuccessEvidence,
     RenderAudioEvidence,
@@ -96,11 +85,9 @@ from .progress import initialize_initial_document_edition
 from .requests import advance_request_state
 from .renders import (
     CreateRender,
-    SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION,
     compute_render_fingerprint,
     render_job_input_hash,
 )
-from .runtime import canonical_sidecar_synthesis_metadata
 from .scheduler import NarrationJobScheduler, SessionFactory
 from .services import (
     InvalidNarrationState,
@@ -116,7 +103,8 @@ from .storage import (
     StorageRootChanged,
     UnsafeStoragePath,
 )
-from .synthesis_policy import resolve_effective_synthesis_policy
+from .tts_execution import TTSExecutionService
+from .tts_selection import selection_fingerprint, selection_from_settings_snapshot
 from .transcoding import (
     DEFAULT_TRANSCODING_POLICY,
     TranscodedSegment,
@@ -125,11 +113,6 @@ from .transcoding import (
     TranscodingUnavailable,
     TranscodingValidationError,
     transcode_segment,
-)
-from .voice_generator_runtime import (
-    EXPECTED_AUDIO_PARAMETERS as VOICE_GENERATOR_AUDIO_PARAMETERS,
-    EXPECTED_RUNTIME_IDENTITY as VOICE_GENERATOR_RUNTIME_IDENTITY,
-    VOICE_GENERATOR_REVISION,
 )
 
 
@@ -144,7 +127,8 @@ WorkerStatus = Literal[
 ]
 
 MODEL_INPUT_DIGEST_SCHEMA_VERSION = "narration-model-input-digest/1"
-MODEL_INPUT_DIGEST_PURPOSE = "moss-nano-segment-synthesis"
+MODEL_INPUT_DIGEST_PURPOSE = "qwen-tts-segment-synthesis"
+QWEN_VOICE_PARAMETERS_SCHEMA_VERSION = "qwen-tts-voice/1"
 AUDIO_VALIDATION_FAILURE_REASON_CODES: Final[frozenset[str]] = frozenset(
     {
         "AUDIO_VALIDATION_UNKNOWN",
@@ -169,11 +153,11 @@ AUDIO_VALIDATION_FAILURE_REASON_CODES: Final[frozenset[str]] = frozenset(
 def derive_model_input_digest(
     key: HmacDigestKey,
     *,
-    sidecar_metadata: bytes,
+    provider_metadata: bytes,
 ) -> tuple[str, str]:
-    """HMAC the exact Sidecar metadata with explicit domain separation."""
+    """HMAC the exact Provider request metadata with domain separation."""
 
-    if type(key) is not HmacDigestKey or type(sidecar_metadata) is not bytes:
+    if type(key) is not HmacDigestKey or type(provider_metadata) is not bytes:
         raise WorkerContractError("model input digest requires canonical metadata")
     domain = (
         MODEL_INPUT_DIGEST_SCHEMA_VERSION.encode("ascii")
@@ -181,7 +165,7 @@ def derive_model_input_digest(
         + MODEL_INPUT_DIGEST_PURPOSE.encode("ascii")
         + b"\0"
     )
-    return key.key_id, key.digest(domain + sidecar_metadata)
+    return key.key_id, key.digest(domain + provider_metadata)
 
 
 class WorkerContractError(RuntimeError):
@@ -209,12 +193,14 @@ class SegmentWorkItem:
     request_id: UUID
     novel_id: UUID
     text: str = field(repr=False)
-    voice: str
-    seed: int
-    sample_mode: str
-    max_new_frames: int
-    requested_provider_id: str | None
-    requested_model_id: str
+    selection: wire.TTSProviderSelection
+    language: str
+    voice_kind: TTSVoiceKind
+    provider_voice_id: str
+    seed: int | None
+    instruction: str | None = field(repr=False)
+    requested_provider_id: str
+    requested_model_id: str | None
     requested_revision: str | None
     expected_model_fingerprint: str
     expected_postprocess_fingerprint: str
@@ -222,7 +208,6 @@ class SegmentWorkItem:
     input_digest_key_id: str
     input_digest: str
     reference_media: ReferenceMedia | None = field(default=None, repr=False)
-    decode_parameters: NanoDecodeParametersV2 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,145 +235,94 @@ class WorkerOutcome:
     error_code: str | None = None
 
 
-def _validated_nano_experiment_decode_parameters(
-    *,
+def _qwen_voice_parameters(
     voice: VoiceProfileVersion,
-    rights: object,
-    render_model_fingerprint: str,
-) -> NanoDecodeParametersV2:
-    """Project validated experiment evidence into the Sidecar v2 contract."""
+    selection: wire.TTSProviderSelection | None = None,
+) -> tuple[TTSVoiceKind, str, str | None]:
+    """Validate the only voice parameter shape accepted by the Qwen worker."""
 
-    if render_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256:
-        raise WorkerSecurityError("Nano experiment render model identity changed")
-    try:
-        validate_nano_experiment_version_evidence(
-            voice,
-            rights,
-            expected_model_fingerprint=render_model_fingerprint,
-        )
-        parameters = voice.parameters_json
-        assert type(parameters) is dict
-        complete_parameters = NanoDecodeParametersV3.from_payload(
-            parameters.get("decode_parameters")
-        )
-    except (AssertionError, TypeError, ValueError) as error:
-        raise WorkerSecurityError(
-            "Nano experiment version evidence changed"
-        ) from error
-    return complete_parameters.sidecar_decode_parameters()
-
-
-def _validated_voice_generator_decode_parameters(
-    *,
-    voice: VoiceProfileVersion,
-    rights: object,
-    render_model_fingerprint: str,
-) -> NanoDecodeParametersV2:
-    """Validate a VoiceGenerator reference before Nano voice cloning.
-
-    VoiceGenerator versions and Nano parameter experiments deliberately share
-    ``source_type=generated`` but have disjoint provenance. Do not project a
-    private generated reference through the official-preset experiment
-    validator: its model identity belongs to VoiceGenerator and its Nano
-    rendering authority is the immutable reference asset.
-    """
-
-    if render_model_fingerprint != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256:
-        raise WorkerSecurityError("VoiceGenerator render model identity changed")
     parameters = voice.parameters_json
-    character_parameter_keys = {
+    if type(parameters) is not dict:
+        raise WorkerContractError("voice parameters must be an object")
+    allowed_keys = {
         "schema_version",
-        "draft_fingerprint",
-        "runtime_identity",
-        "generator_parameters",
-        "nano_parameters_digest",
+        "voice_kind",
+        "provider_voice_id",
+        "provider_voice_ids",
+        "instruction",
+        "official_preset",
     }
-    generic_parameter_keys = {
-        "schema_version",
-        "design_fingerprint",
-    }
-    character_generated = (
-        type(parameters) is dict
-        and set(parameters) == character_parameter_keys
-        and parameters.get("schema_version") == "voice-generator-version/1"
-        and parameters.get("runtime_identity")
-        == dict(VOICE_GENERATOR_RUNTIME_IDENTITY.wire_payload())
-        and parameters.get("generator_parameters")
-        == dict(VOICE_GENERATOR_AUDIO_PARAMETERS.wire_payload())
-        and type(parameters.get("draft_fingerprint")) is str
-        and len(parameters["draft_fingerprint"]) == 64
-        and type(parameters.get("nano_parameters_digest")) is str
-        and len(parameters["nano_parameters_digest"]) == 64
-        and voice.activation_basis == "character_one_click_generation"
-    )
-    generic_generated = (
-        type(parameters) is dict
-        and set(parameters) == generic_parameter_keys
-        and parameters.get("schema_version") == "generic-voice-version/1"
-        and type(parameters.get("design_fingerprint")) is str
-        and len(parameters["design_fingerprint"]) == 64
-        and voice.activation_basis == "generic_voice_pack_generation"
-    )
-    rights_identifier = getattr(rights, "source_identifier", None)
-    rights_identifier_valid = (
-        type(rights_identifier) is str
-        and (
-            (
-                character_generated
-                and rights_identifier.startswith("local://voice-generator/")
-            )
-            or (
-                generic_generated
-                and rights_identifier.startswith("local://generic-voice/")
-            )
-        )
-    )
     if (
-        not (character_generated or generic_generated)
-        or voice.source_type != "generated"
-        or voice.provider_id != "local-native-host"
-        or voice.model_id != "OpenMOSS-Team/MOSS-VoiceGenerator"
-        or voice.model_revision != VOICE_GENERATOR_REVISION
-        or voice.preset_key is not None
-        or voice.reference_asset_id is None
-        or voice.language not in {"zh-CN", "en", "ja-JP"}
-        or type(voice.seed) is not int
-        or not 0 <= voice.seed <= 2**63 - 1
-        or voice.state != "locked"
-        or voice.quality_state != "accepted"
-        or voice.validation_basis != "machine_validated"
-        or voice.model_run_id is None
-        or voice.locked_actor is not None
-        or voice.locked_at is not None
-        or type(voice.fingerprint) is not str
-        or len(voice.fingerprint) != 64
-        or type(voice.description_digest_key_id) is not str
-        or not voice.description_digest_key_id
-        or type(voice.description_digest) is not str
-        or len(voice.description_digest) != 64
-        or getattr(rights, "source_kind", None) != "voice_generator"
-        or not rights_identifier_valid
-        or getattr(rights, "notice_version", None)
-        != "voice-generator-private-use/1"
-        or getattr(rights, "purpose", None) != "private_novel_narration"
-        or getattr(rights, "commercial_use", None) is not False
-        or getattr(rights, "redistribution", None) is not False
-        or getattr(rights, "voice_cloning", None) is not False
-        or getattr(rights, "subject_consent_reference", None) is not None
-        or getattr(rights, "expires_at", None) is not None
-        or getattr(rights, "risk_flags_json", None) != []
-        or getattr(rights, "owner_id", None) != voice.owner_id
-        or getattr(rights, "workspace_id", None) != voice.workspace_id
+        set(parameters) - allowed_keys
+        or parameters.get("schema_version") != QWEN_VOICE_PARAMETERS_SCHEMA_VERSION
     ):
-        raise WorkerSecurityError("VoiceGenerator version evidence changed")
-    return NanoDecodeParametersV2()
+        raise WorkerContractError("voice parameters do not use the Qwen TTS schema")
+    try:
+        voice_kind = TTSVoiceKind(parameters.get("voice_kind"))
+    except (TypeError, ValueError) as error:
+        raise WorkerContractError("voice kind is invalid") from error
+    provider_voice_id = parameters.get("provider_voice_id")
+    provider_voice_ids = parameters.get("provider_voice_ids")
+    if provider_voice_ids is not None:
+        if type(provider_voice_ids) is not dict or any(
+            type(key) is not str or type(value) is not str
+            for key, value in provider_voice_ids.items()
+        ):
+            raise WorkerContractError("Provider voice map is invalid")
+        if voice.preset_key is None:
+            raise WorkerSecurityError("Qwen preset voice evidence is inconsistent")
+        try:
+            preset = require_official_preset(voice.preset_key)
+        except ValueError as error:
+            raise WorkerSecurityError("Qwen preset is not in the pinned catalog") from error
+        if (
+            provider_voice_ids != preset.provider_voice_ids
+            or parameters.get("official_preset") != preset.provenance()
+        ):
+            raise WorkerSecurityError("Qwen preset Provider mapping changed")
+        active_selection = selection or wire.TTSProviderSelection()
+        provider_key = active_selection.provider_id
+        if provider_key == "aliyun_qwen_audio_tts":
+            provider_key = f"{provider_key}:{active_selection.aliyun_model_id}"
+        provider_voice_id = provider_voice_ids.get(provider_key)
+    if (
+        type(provider_voice_id) is not str
+        or not provider_voice_id
+        or provider_voice_id != provider_voice_id.strip()
+        or len(provider_voice_id) > 240
+    ):
+        raise WorkerContractError("Provider voice ID is invalid")
+    instruction = parameters.get("instruction")
+    if instruction is not None and (
+        type(instruction) is not str
+        or not instruction
+        or instruction != instruction.strip()
+        or len(instruction) > 2_000
+    ):
+        raise WorkerContractError("voice instruction is invalid")
+    if voice_kind is TTSVoiceKind.PRESET:
+        if (
+            voice.source_type != "preset"
+            or voice.reference_asset_id is not None
+            or voice.preset_key is None
+        ):
+            raise WorkerSecurityError("Qwen preset voice evidence is inconsistent")
+    elif voice_kind is TTSVoiceKind.REFERENCE_CLONE:
+        if voice.source_type not in {"uploaded", "generated"} or voice.reference_asset_id is None:
+            raise WorkerSecurityError("Qwen reference voice evidence is inconsistent")
+    elif (
+        voice.source_type != "generated"
+        or voice.reference_asset_id is not None
+        or voice.preset_key is not None
+    ):
+        raise WorkerSecurityError("Qwen designed voice evidence is inconsistent")
+    return voice_kind, provider_voice_id, instruction
 
 
 @dataclass(frozen=True, slots=True)
 class NarrationWorkerConfig:
     actor: str
     heartbeat_seconds: float = 30.0
-    default_max_new_frames: int = PRODUCTION_NANO_MAX_NEW_FRAMES
     max_reference_bytes: int = 25 * 1024 * 1024
 
     def validate(self) -> None:
@@ -404,13 +338,6 @@ class NarrationWorkerConfig:
         ):
             raise ValueError("worker heartbeat interval is outside its bounded range")
         if (
-            type(self.default_max_new_frames) is not int
-            or not 1
-            <= self.default_max_new_frames
-            <= PRODUCTION_NANO_MAX_NEW_FRAMES
-        ):
-            raise ValueError("worker default_max_new_frames is invalid")
-        if (
             type(self.max_reference_bytes) is not int
             or not 1 <= self.max_reference_bytes <= 256 * 1024 * 1024
         ):
@@ -419,7 +346,7 @@ class NarrationWorkerConfig:
 
 class WorkerRepository(Protocol):
     def load_and_mark_running(
-        self, lease: JobLease, *, default_max_new_frames: int, actor: str
+        self, lease: JobLease, *, actor: str
     ) -> SegmentWorkItem: ...
 
     def heartbeat_and_read_state(self, lease: JobLease) -> str: ...
@@ -488,8 +415,8 @@ class SqlAlchemyNarrationWorkerRepository:
         job = session.scalar(statement.execution_options(populate_existing=True))
         if job is None:
             raise NarrationScopeMismatch("render job is outside fixed local scope")
-        if job.job_kind != "narration.segment_render" or job.resource_class != "moss-nano":
-            raise WorkerSecurityError("claimed job is not a Nano segment render")
+        if job.job_kind != "narration.segment_render" or job.resource_class != "qwen-tts":
+            raise WorkerSecurityError("claimed job is not a Qwen TTS segment render")
         return job
 
     def _work_rows(
@@ -619,7 +546,7 @@ class SqlAlchemyNarrationWorkerRepository:
         )
 
     def load_and_mark_running(
-        self, lease: JobLease, *, default_max_new_frames: int, actor: str
+        self, lease: JobLease, *, actor: str
     ) -> SegmentWorkItem:
         def operation(session: Session) -> SegmentWorkItem:
             job = self._job(session, lease, for_update=True)
@@ -634,7 +561,7 @@ class SqlAlchemyNarrationWorkerRepository:
             segment = rows.segment
             voice = rows.voice
             store = SqlAlchemyNarrationStore(session)
-            _profile, usable_voice, rights = require_usable_voice(
+            _profile, usable_voice, _rights = require_usable_voice(
                 store, voice.id, novel_id=edition.novel_id
             )
             if usable_voice.id != voice.id:
@@ -679,152 +606,52 @@ class SqlAlchemyNarrationWorkerRepository:
             elif render.state != "rendering":
                 raise InvalidNarrationState("render row is no longer in flight")
 
-            parameters = voice.parameters_json
-            if type(parameters) is not dict:
-                raise WorkerContractError("voice parameters must be an object")
-            decode_parameters: NanoDecodeParametersV2 | None = None
-            generated_reference = False
-            character_voice_generator_reference = False
-            if voice.source_type == "preset":
-                if (
-                    rights.source_kind != "official_preset"
-                    or voice.provider_id != "local-sidecar"
-                    or voice.model_id != OFFICIAL_PRESET_REPOSITORY
-                    or voice.model_revision != OFFICIAL_PRESET_REVISION
-                    or voice.reference_asset_id is not None
-                    or render.model_fingerprint
-                    != OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
-                    or parameters.get("schema_version")
-                    != OFFICIAL_PRESET_VERSION_SCHEMA_VERSION
-                    or set(parameters)
-                    - {
-                        "schema_version",
-                        "official_preset",
-                        "sample_mode",
-                        "max_new_frames",
-                    }
-                ):
-                    raise WorkerSecurityError(
-                        "official preset version/runtime identity changed"
-                    )
-                try:
-                    official_preset = validate_official_preset_provenance(
-                        parameters.get("official_preset")
-                    )
-                except ValueError as error:
-                    raise WorkerSecurityError(
-                        "official preset provenance disagrees with pinned manifest"
-                    ) from error
-                if voice.preset_key != official_preset.preset_id:
-                    raise WorkerSecurityError("official preset ID mapping changed")
-                if (
-                    voice.seed != OFFICIAL_PRESET_RUNTIME_INITIAL_SEED
-                    or parameters.get("sample_mode")
-                    != OFFICIAL_PRESET_SAMPLE_MODE
-                    or parameters.get("max_new_frames")
-                    != OFFICIAL_PRESET_MAX_NEW_FRAMES
-                ):
-                    raise WorkerSecurityError(
-                        "official preset decode parameters differ from the pinned runtime"
-                    )
-            elif voice.source_type == "uploaded":
-                if rights.source_kind != "user_upload":
-                    raise WorkerSecurityError("uploaded voice provenance changed")
-            elif voice.source_type == "generated":
-                if parameters.get("schema_version") in {
-                    "voice-generator-version/1",
-                    "generic-voice-version/1",
-                }:
-                    decode_parameters = _validated_voice_generator_decode_parameters(
-                        voice=voice,
-                        rights=rights,
-                        render_model_fingerprint=render.model_fingerprint,
-                    )
-                    generated_reference = True
-                    character_voice_generator_reference = (
-                        parameters.get("schema_version")
-                        == "voice-generator-version/1"
-                    )
-                else:
-                    decode_parameters = _validated_nano_experiment_decode_parameters(
-                        voice=voice,
-                        rights=rights,
-                        render_model_fingerprint=render.model_fingerprint,
-                    )
-            else:
-                raise WorkerContractError("voice source is not renderable")
-            configured_frames = parameters.get("max_new_frames", default_max_new_frames)
-            if (
-                type(configured_frames) is not int
-                or not 1 <= configured_frames <= PRODUCTION_NANO_MAX_NEW_FRAMES
-            ):
-                raise WorkerContractError("voice max_new_frames is outside the worker bound")
-            sample_mode = parameters.get("sample_mode", "fixed")
-            if generated_reference:
-                configured_frames = PRODUCTION_NANO_MAX_NEW_FRAMES
-                sample_mode = "full"
-            if (
-                type(sample_mode) is not str
-                or sample_mode not in PRODUCTION_NANO_SAMPLE_MODES
-            ):
-                raise WorkerContractError("voice sample_mode is invalid")
-            raw_decode_parameters = parameters.get("decode_parameters")
-            if raw_decode_parameters is not None and decode_parameters is None:
-                try:
-                    decode_parameters = NanoDecodeParametersV2.from_wire_payload(
-                        raw_decode_parameters
-                    )
-                except ContractError as error:
-                    raise WorkerContractError(
-                        "voice advanced decode parameters are invalid"
-                    ) from error
-                if sample_mode != "full":
-                    raise WorkerContractError(
-                        "voice advanced decode parameters require full mode"
-                    )
-            base_seed = voice.seed if voice.seed is not None else 0
-            effective_policy = resolve_effective_synthesis_policy(
-                spoken_text=segment.spoken_text,
-                segment_kind=segment.segment_kind,
-                speaker_kind=segment.speaker_kind,
-                language=voice.language,
-                preset_key=voice.preset_key,
-                base_seed=base_seed,
-                base_sample_mode=sample_mode,
-                base_max_new_frames=configured_frames,
+            snapshot = session.get(
+                NarrationSettingsSnapshot,
+                edition.settings_snapshot_id,
             )
-            sample_mode = effective_policy.effective_sample_mode
-            configured_frames = effective_policy.effective_max_new_frames
-            seed = effective_policy.effective_seed
-            canonical_input = render.canonical_input_json
-            if type(canonical_input) is not dict:
-                raise WorkerSecurityError("render canonical input is malformed")
-            synthesis_style = canonical_input.get(
-                "synthesis_style_and_parameters"
-            )
-            if type(synthesis_style) is not dict:
-                raise WorkerSecurityError("render synthesis policy is malformed")
-            expected_effective_policy = effective_policy.evidence_payload()
-            if effective_policy.applied:
-                if (
-                    canonical_input.get("schema_version")
-                    != SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION
-                    or synthesis_style.get("effective_synthesis_policy")
-                    != expected_effective_policy
-                    or canonical_input.get("deterministic_seed") != seed
-                ):
-                    raise WorkerSecurityError(
-                        "render short-attribution policy differs from worker resolution"
-                    )
-            elif (
-                canonical_input.get("schema_version")
-                == SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION
-                or "effective_synthesis_policy" in synthesis_style
+            if (
+                snapshot is None
+                or snapshot.owner_id != job.owner_id
+                or snapshot.workspace_id != job.workspace_id
+                or snapshot.novel_id != job.novel_id
+                or snapshot.fingerprint != request.settings_fingerprint
+            ):
+                raise WorkerSecurityError("render settings snapshot is inconsistent")
+            try:
+                selection = selection_from_settings_snapshot(snapshot.snapshot_json)
+            except ValueError as error:
+                raise WorkerContractError(
+                    "render TTS Provider selection is invalid"
+                ) from error
+            if (
+                selection_fingerprint(selection) != render.model_fingerprint
+                or render.model_fingerprint != edition.tts_fingerprint
             ):
                 raise WorkerSecurityError(
-                    "render carries an unexpected short-attribution policy"
+                    "render TTS Provider selection fingerprint changed"
                 )
-            voice_key = voice.preset_key or str(voice.id)
+            voice_kind, provider_voice_id, instruction = _qwen_voice_parameters(
+                voice,
+                selection,
+            )
+            if (
+                voice.provider_id not in {None, "qwen-tts"}
+                and voice.provider_id != selection.provider_id
+            ):
+                raise WorkerSecurityError("voice belongs to another TTS Provider")
+            requested_model_id = (
+                selection.aliyun_model_id
+                if selection.provider_id == "aliyun_qwen_audio_tts"
+                else voice.model_id
+            )
+            if (
+                selection.provider_id == "aliyun_qwen_audio_tts"
+                and voice.provider_id != "qwen-tts"
+                and voice.model_id is not None
+                and voice.model_id != requested_model_id
+            ):
+                raise WorkerSecurityError("voice belongs to another TTS model")
             reference: ReferenceMedia | None = None
             if voice.reference_asset_id is not None:
                 asset = session.get(MediaAsset, voice.reference_asset_id)
@@ -848,58 +675,43 @@ class SqlAlchemyNarrationWorkerRepository:
                     byte_size=asset.byte_size,
                     content_type=asset.mime_type,
                 )
-                if character_voice_generator_reference:
-                    expected_validation_parameters_digest = canonical_sha256(
-                        {
-                            "schema_version": (
-                                "voice-generator-nano-validation-parameters/1"
-                            ),
-                            "seed": voice.seed,
-                            "sample_mode": "full",
-                            "max_new_frames": PRODUCTION_NANO_MAX_NEW_FRAMES,
-                            "decode_parameters": dict(
-                                NanoDecodeParametersV2().wire_payload()
-                            ),
-                            "reference_sha256": asset.content_hash,
-                        }
-                    )
-                    if (
-                        parameters.get("nano_parameters_digest")
-                        != expected_validation_parameters_digest
-                    ):
-                        raise WorkerSecurityError(
-                            "VoiceGenerator Nano validation evidence changed"
-                        )
             request_parameters = {
-                "schema_version": "narration-worker-synthesis/1",
+                "schema_version": "qwen-tts-worker-synthesis/1",
                 "render_fingerprint": render.render_fingerprint,
                 "voice_version_id": str(voice.id),
                 "voice_fingerprint": voice.fingerprint,
-                "sample_mode": sample_mode,
-                "max_new_frames": configured_frames,
-                "seed": seed,
+                "selection": selection.model_dump(mode="json"),
+                "language": voice.language,
+                "voice_kind": voice_kind.value,
+                "provider_voice_id": provider_voice_id,
+                "seed": voice.seed,
+                "instruction": instruction,
             }
-            if decode_parameters is not None:
-                request_parameters["decode_parameters"] = dict(
-                    decode_parameters.wire_payload()
-                )
-            sidecar_metadata = canonical_sidecar_synthesis_metadata(
-                request_id=lease.fence.attempt_id,
-                scope=self._scope,
-                requested_model_fingerprint_sha256=render.model_fingerprint,
-                text=segment.spoken_text,
-                voice=voice_key,
-                seed=seed,
-                sample_mode=sample_mode,
-                max_new_frames=configured_frames,
-                decode_parameters=decode_parameters,
-                reference_content_type=(reference.content_type if reference else None),
-                reference_actual_sha256=(reference.actual_sha256 if reference else None),
-                reference_size_bytes=(reference.byte_size if reference else None),
+            provider_metadata = canonical_json_bytes(
+                {
+                    **request_parameters,
+                    "request_id": str(lease.fence.attempt_id),
+                    "scope": {
+                        "owner_id": str(self._scope.owner_id),
+                        "workspace_id": str(self._scope.workspace_id),
+                        "app_id": self._scope.app_id,
+                        "is_local_only": self._scope.is_local_only,
+                    },
+                    "text": segment.spoken_text,
+                    "reference_content_type": (
+                        reference.content_type if reference else None
+                    ),
+                    "reference_actual_sha256": (
+                        reference.actual_sha256 if reference else None
+                    ),
+                    "reference_size_bytes": (
+                        reference.byte_size if reference else None
+                    ),
+                }
             )
             input_digest_key_id, input_digest = derive_model_input_digest(
                 self._digest_keyring.active,
-                sidecar_metadata=sidecar_metadata,
+                provider_metadata=provider_metadata,
             )
             session.flush()
             return SegmentWorkItem(
@@ -910,13 +722,14 @@ class SqlAlchemyNarrationWorkerRepository:
                 request_id=request.id,
                 novel_id=edition.novel_id,
                 text=segment.spoken_text,
-                voice=voice_key,
-                seed=seed,
-                sample_mode=sample_mode,
-                max_new_frames=configured_frames,
-                decode_parameters=decode_parameters,
-                requested_provider_id=voice.provider_id,
-                requested_model_id=voice.model_id or "OpenMOSS-Team/MOSS-TTS",
+                selection=selection,
+                language=voice.language,
+                voice_kind=voice_kind,
+                provider_voice_id=provider_voice_id,
+                seed=voice.seed,
+                instruction=instruction,
+                requested_provider_id=selection.provider_id,
+                requested_model_id=requested_model_id,
                 requested_revision=voice.model_revision,
                 expected_model_fingerprint=render.model_fingerprint,
                 expected_postprocess_fingerprint=render.postprocess_fingerprint,
@@ -981,7 +794,7 @@ class SqlAlchemyNarrationWorkerRepository:
             ModelRunRecord(
                 attempt_id=work.lease.fence.attempt_id,
                 requested_provider_id=work.requested_provider_id,
-                requested_model_id=work.requested_model_id,
+                requested_model_id=work.requested_model_id or "provider-selected",
                 requested_revision=work.requested_revision,
                 actual_provider_id=None,
                 actual_model_id=None,
@@ -1228,7 +1041,7 @@ class SqlAlchemyNarrationWorkerRepository:
                 BackgroundJob.owner_id == self._scope.owner_id,
                 BackgroundJob.workspace_id == self._scope.workspace_id,
                 BackgroundJob.job_kind == "narration.segment_render",
-                BackgroundJob.resource_class == "moss-nano",
+                BackgroundJob.resource_class == "qwen-tts",
             )
             .with_for_update()
             .execution_options(populate_existing=True)
@@ -1423,7 +1236,7 @@ class SqlAlchemyNarrationWorkerRepository:
         if failure_evidence is not None:
             if (
                 classification != "non_retryable"
-                or error_code != "NANO_AUDIO_INVALID"
+                or error_code != "TTS_AUDIO_INVALID"
                 or type(failure_evidence) is not dict
                 or set(failure_evidence) != {"schema_version", "reason_code"}
                 or failure_evidence.get("schema_version")
@@ -1535,7 +1348,7 @@ class NarrationSegmentWorker:
         *,
         scheduler: NarrationJobScheduler,
         repository: WorkerRepository,
-        adapter: MossNanoTTSAdapter,
+        execution: TTSExecutionService,
         storage: NarrationStorage,
         transcode: Callable[[ProcessedPcmWav], TranscodedSegment],
         config: NarrationWorkerConfig,
@@ -1546,7 +1359,7 @@ class NarrationSegmentWorker:
             raise TypeError("worker requires a callable transcoder")
         self._scheduler = scheduler
         self._repository = repository
-        self._adapter = adapter
+        self._execution = execution
         self._storage = storage
         self._transcode = transcode
         self._config = config
@@ -1583,20 +1396,32 @@ class NarrationSegmentWorker:
         )
 
     async def _synthesize(self, work: SegmentWorkItem) -> object:
-        request = SynthesisRequest(
+        reference = (
+            await asyncio.to_thread(self._reference_input, work.reference_media)
+            if work.selection.provider_id == "local_qwen3_tts"
+            else None
+        )
+        request = TTSSynthesisRequest(
             request_id=work.lease.fence.attempt_id,
             scope=NarrationRequestScope.fixed_local(),
             text=work.text,
-            voice=work.voice,
-            seed=work.seed,
-            sample_mode=work.sample_mode,
-            max_new_frames=work.max_new_frames,
-            decode_parameters=work.decode_parameters,
-            reference_audio=await asyncio.to_thread(
-                self._reference_input, work.reference_media
+            language=work.language,
+            voice=TTSVoiceInput(
+                kind=work.voice_kind,
+                provider_voice_id=work.provider_voice_id,
+                reference_audio=reference,
             ),
+            seed=work.seed,
+            instruction=work.instruction,
+            audio_format=TTSAudioFormat.WAV,
         )
-        task = asyncio.create_task(self._adapter.synthesize(request))
+        task = asyncio.create_task(
+            self._execution.synthesize(
+                novel_id=work.novel_id,
+                selection=work.selection,
+                request=request,
+            )
+        )
         cancellation_sent = False
         try:
             while True:
@@ -1611,7 +1436,10 @@ class NarrationSegmentWorker:
                     )
                     if state == "cancel_requested" and not cancellation_sent:
                         cancellation_sent = True
-                        await self._adapter.cancel(request.request_id)
+                        await self._execution.cancel(
+                            selection=work.selection,
+                            request_id=request.request_id,
+                        )
                     elif state not in {"running", "cancel_requested"}:
                         task.cancel()
                         try:
@@ -1620,11 +1448,14 @@ class NarrationSegmentWorker:
                             pass
                         raise JobFenceError("job became terminal during synthesis")
         except asyncio.CancelledError:
-            # PawApp shutdown must not leave a shielded Sidecar request running
+            # PawApp shutdown must not leave a shielded Provider request running
             # after the local worker task has disappeared.
             if not task.done():
                 try:
-                    await self._adapter.cancel(request.request_id)
+                    await self._execution.cancel(
+                        selection=work.selection,
+                        request_id=request.request_id,
+                    )
                 finally:
                     task.cancel()
             try:
@@ -1634,19 +1465,23 @@ class NarrationSegmentWorker:
             raise
 
     def _prepare(self, work: SegmentWorkItem, synthesis: object) -> PreparedRender:
-        from .contracts import SynthesisResult
-
-        if type(synthesis) is not SynthesisResult:
-            raise WorkerContractError("Nano returned an invalid result type")
+        if type(synthesis) is not TTSSynthesisResult:
+            raise WorkerContractError("TTS Provider returned an invalid result type")
         if synthesis.request_id != work.lease.fence.attempt_id:
-            raise WorkerSecurityError("Nano result belongs to another attempt")
-        actual_model_fingerprint = model_fingerprint_sha256(
-            synthesis.model_fingerprint
-        )
-        if actual_model_fingerprint != work.expected_model_fingerprint:
-            raise WorkerSecurityError("Nano model fingerprint changed during synthesis")
-        processed = process_synthesis_wav(
+            raise WorkerSecurityError("TTS result belongs to another attempt")
+        identity = synthesis.model_identity
+        if identity.provider_id.value != work.selection.provider_id:
+            raise WorkerSecurityError("TTS result belongs to another Provider")
+        if (
+            work.requested_model_id is not None
+            and identity.model_id != work.requested_model_id
+        ):
+            raise WorkerSecurityError("TTS result belongs to another requested model")
+        processed = process_provider_synthesis_wav(
             synthesis.audio_bytes,
+            declared_sample_rate_hz=synthesis.sample_rate_hz,
+            declared_channels=synthesis.channels,
+            declared_sample_width_bytes=synthesis.sample_width_bytes,
             spoken_text=work.text,
         )
         transcoded = self._transcode(processed)
@@ -1660,12 +1495,12 @@ class NarrationSegmentWorker:
             raise WorkerSecurityError(
                 "transcoded audio differs from the Edition postprocess fingerprint"
             )
-        # Capacity may change while Nano and FFmpeg are running.  Recheck on
+        # Capacity may change while Provider inference and FFmpeg are running. Recheck on
         # the same worker thread immediately before the first physical media
         # publication; the scheduler-side guard only protects job claiming.
         if self._disk_guard is not None:
             self._disk_guard()
-        master = self._storage.publish_media(
+        master = self._storage.publish_or_verify_media(
             (transcoded.master.audio_bytes,),
             asset_id=render_asset_id(work.render_id, "master"),
             expected_sha256=transcoded.master.actual_sha256,
@@ -1673,7 +1508,7 @@ class NarrationSegmentWorker:
             extension=transcoded.master.extension,
             max_bytes=DEFAULT_TRANSCODING_POLICY.maximum_master_bytes,
         )
-        playback = self._storage.publish_media(
+        playback = self._storage.publish_or_verify_media(
             (transcoded.playback.audio_bytes,),
             asset_id=render_asset_id(work.render_id, "playback"),
             expected_sha256=transcoded.playback.actual_sha256,
@@ -1694,12 +1529,14 @@ class NarrationSegmentWorker:
             ),
             model=ModelRunSuccessEvidence(
                 requested_provider_id=work.requested_provider_id,
-                requested_model_id=work.requested_model_id,
+                requested_model_id=work.requested_model_id or "provider-selected",
                 requested_revision=work.requested_revision,
-                actual_provider_id=work.requested_provider_id,
-                actual_model_id=synthesis.model_fingerprint.model_name,
-                actual_revision=synthesis.model_fingerprint.model_revision,
-                model_fingerprint=actual_model_fingerprint,
+                actual_provider_id=identity.provider_id.value,
+                actual_model_id=identity.model_id,
+                actual_revision=identity.model_revision,
+                # The persisted render identity is the frozen Provider selection
+                # fingerprint, not a claim about one Provider artifact tree.
+                model_fingerprint=work.expected_model_fingerprint,
                 parameters_digest=work.parameters_digest,
                 input_digest_key_id=work.input_digest_key_id,
                 input_digest=work.input_digest,
@@ -1718,12 +1555,15 @@ class NarrationSegmentWorker:
             return "retryable", error.code
         if isinstance(error, (UnsafeStoragePath, StorageRootChanged)):
             return "security_failure", "STORAGE_IDENTITY_FAILURE"
-        if isinstance(error, AdapterUnavailableError):
-            return "retryable", "NANO_ADAPTER_UNAVAILABLE"
+        if isinstance(error, TTSProviderError):
+            return (
+                "retryable" if error.retryable else "non_retryable",
+                error.code,
+            )
         if isinstance(error, TranscodingUnavailable):
             return "retryable", "TRANSCODER_UNAVAILABLE"
         if isinstance(error, (AudioFormatError, AudioQualityError)):
-            return "non_retryable", "NANO_AUDIO_INVALID"
+            return "non_retryable", "TTS_AUDIO_INVALID"
         if isinstance(error, (TranscodingValidationError, PublicationValidationError)):
             return "non_retryable", "AUDIO_PUBLICATION_INVALID"
         if isinstance(error, (TranscodingError, StorageError, OSError)):
@@ -1769,7 +1609,6 @@ class NarrationSegmentWorker:
             work = await asyncio.to_thread(
                 self._repository.load_and_mark_running,
                 lease,
-                default_max_new_frames=self._config.default_max_new_frames,
                 actor=self._config.actor,
             )
             if self._disk_guard is not None:
@@ -1897,7 +1736,7 @@ class NarrationSegmentWorker:
         claims still open their own short transactions.  A temporary database
         outage is reported through ``on_error`` and retried after the bounded
         idle delay; cancellation of this coroutine propagates into the active
-        Sidecar request through ``_synthesize``.
+        Provider request through ``_synthesize``.
         """
 
         if type(stop_event) is not asyncio.Event:

@@ -83,7 +83,7 @@ function feature(
       "cache_cleanup",
     ].includes(key),
     actionable: false,
-    reason_code: key === "generic_voice_pool"
+    reason_code: key === "voice_design"
       ? "GENERIC_VOICE_ASSETS_UNAVAILABLE"
       : "T2_GATE_REQUIRED",
     required_gate: "T2-GATE",
@@ -125,7 +125,7 @@ function overviewFixture(
     runtime: {
       technical_enabled: false,
       lifecycle_status: "disabled",
-      sidecar_reachable: false,
+      provider_reachable: false,
       model_ready: false,
       product_visible: false,
       protocol_version: "moss-tts-sidecar/1.1",
@@ -198,7 +198,7 @@ function overviewFixture(
       },
       {
         source_type: "generated",
-        capability: "voice_generator",
+        capability: "voice_design",
         available: false,
         reason_code: "T2_GATE_REQUIRED",
         accepted_mime_types: [],
@@ -258,7 +258,7 @@ describe("reading status model", () => {
         ...base.runtime,
         technical_enabled: true,
         lifecycle_status: "ready",
-        sidecar_reachable: true,
+        provider_reachable: true,
         model_ready: true,
         product_visible: true,
         model_fingerprint_sha256: "a".repeat(64),

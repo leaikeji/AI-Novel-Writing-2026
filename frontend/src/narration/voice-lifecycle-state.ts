@@ -5,7 +5,7 @@ import type {
 } from "./contracts";
 
 export const PRIVATE_VOICE_DELETION_CONTRACT_VERSION = "private-voice-deletion/2" as const;
-export const PRIVATE_VOICE_DELETION_IMPACT_VERSION = "private-voice-deletion-impact/2" as const;
+export const PRIVATE_VOICE_DELETION_IMPACT_VERSION = "private-voice-deletion-impact/3" as const;
 export const UNREFERENCED_VOICE_UNDO_SECONDS = 30 as const;
 
 export type PrivateVoiceDeletionCommand =
@@ -44,7 +44,6 @@ export interface VoiceDeletionImpactSnapshot {
   readonly currentNarratorCount: number;
   readonly characterBindingCount: number;
   readonly anonymousSpeakerCount: number;
-  readonly genericSlotCount: number;
   readonly historicalEditionCount: number;
   readonly renderCount: number;
   readonly exportCount: number;
@@ -195,7 +194,6 @@ function validRequestForProfile(
     request.impact.currentNarratorCount,
     request.impact.characterBindingCount,
     request.impact.anonymousSpeakerCount,
-    request.impact.genericSlotCount,
     request.impact.historicalEditionCount,
     request.impact.renderCount,
     request.impact.exportCount,
@@ -237,7 +235,6 @@ function validRequestForProfile(
       request.impact.currentNarratorCount
       + request.impact.characterBindingCount
       + request.impact.anonymousSpeakerCount
-      + request.impact.genericSlotCount
     )
     && request.impact.historicalReferenceCount === (
       request.impact.historicalEditionCount
@@ -489,7 +486,6 @@ export function voiceDeletionImpactFromResource(
     currentNarratorCount: resource.current_narrator_count,
     characterBindingCount: resource.character_binding_count,
     anonymousSpeakerCount: resource.anonymous_speaker_count,
-    genericSlotCount: resource.generic_slot_count,
     historicalEditionCount: resource.historical_edition_count,
     renderCount: resource.render_count,
     exportCount: resource.export_count,

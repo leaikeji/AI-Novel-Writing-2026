@@ -133,7 +133,6 @@ const DEFAULT_API: ScriptReviewPanelApi = {
 const ISSUE_LABELS: Readonly<Record<ScriptIssueCode, string>> = {
   W_SPEAKER_MEDIUM_CONFIDENCE: "说话人判断为中等置信度",
   W_NEW_ANONYMOUS_SPEAKER: "发现新的匿名人物",
-  W_GENERIC_VOICE_FALLBACK: "使用了通用音色回退",
   W_MANUAL_OVERRIDE_INHERITED: "继承了作者的历史人工修正",
   W_PRONUNCIATION_SOFT_FALLBACK: "发音规则使用了安全回退",
   W_CLOUD_ASSISTED_USED: "该句使用了已授权的云端辅助",

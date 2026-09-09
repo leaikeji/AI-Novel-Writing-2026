@@ -6,7 +6,7 @@ import {
   resumeChapterNarrationWorkflow,
   type ChapterNarrationWorkflowDependencies,
 } from "./chapter-narration-workflow";
-import type { NarrationSettingsResource, VoicePreparationSnapshot } from "./contracts";
+import type { NarrationSettingsResource } from "./contracts";
 import type { NarrationWorkflowResource } from "./chapter-contracts";
 
 
@@ -84,54 +84,11 @@ function workflow(
 }
 
 
-function preparation(
-  state: VoicePreparationSnapshot["state"],
-  narrationRequestId: string | null,
-): VoicePreparationSnapshot {
-  const terminal = ["ready", "ready_with_warnings", "failed", "cancelled", "superseded"]
-    .includes(state);
-  return {
-    contractVersion: "narration-voice-preparation/1",
-    commandId: "99999999-9999-4999-8999-999999999999",
-    novelId: NOVEL_ID,
-    documentId: DOCUMENT_ID,
-    state,
-    serverNow: "2026-09-03T00:00:00Z",
-    progressCurrent: narrationRequestId === null ? 1 : 2,
-    progressTotal: 2,
-    preflightRequestId: REQUEST_ID,
-    preflightScriptVersionId: SCRIPT_ID,
-    chapterReady: narrationRequestId !== null,
-    backgroundRemaining: 0,
-    continuationState: narrationRequestId === null ? "pending" : "created",
-    narrationRequestId,
-    currentTarget: null,
-    preserved: [],
-    generated: [],
-    fallback: [],
-    failed: [],
-    cancellable: !terminal,
-    retryable: false,
-    terminal,
-    failureCode: null,
-    updatedAt: "2026-09-03T00:00:00Z",
-  };
-}
-
-
 function dependencies(overrides: Partial<ChapterNarrationWorkflowDependencies> = {}) {
   return {
     getSettings: vi.fn(async () => settings()),
     createWorkflow: vi.fn(async () => workflow("queued", EDITION_ID)),
     getWorkflow: vi.fn(async () => workflow("queued", EDITION_ID)),
-    createVoicePreparation: vi.fn(async () => {
-      throw new Error("unexpected voice preparation call");
-    }),
-    getVoicePreparation: vi.fn(async () => {
-      throw new Error("unexpected voice preparation poll");
-    }),
-    listVoicePreparations: vi.fn(async () => [] as readonly VoicePreparationSnapshot[]),
-    resumeVoicePreparation: vi.fn(async () => preparation("preparing", null)),
     createActionId: () => ACTION_ID,
     delay: vi.fn(async () => undefined),
     now: () => 0,
@@ -159,138 +116,52 @@ function options(deps: ChapterNarrationWorkflowDependencies) {
 
 
 describe("resumeChapterNarrationWorkflow", () => {
-  it("刷新后按小说和章节恢复活动命令，不保存或新建任何任务", async () => {
-    const active = preparation("preparing", null);
+  it("刷新后只恢复已知朗读请求，不保存或新建任务", async () => {
     const deps = dependencies({
-      listVoicePreparations: vi.fn(async () => [
-        { ...active, documentId: REVISION_ID },
-        { ...active, novelId: REVISION_ID },
-        { ...active, documentId: null }, active,
-      ]),
-      getVoicePreparation: vi.fn(async () => preparation("ready", REQUEST_ID)),
       getWorkflow: vi.fn(async () => workflow("partial_ready", EDITION_ID)),
     });
     const input = options(deps);
     const progress = vi.fn();
     const onRestoring = vi.fn();
-    const result = await resumeChapterNarrationWorkflow({ ...input, onRestoring, onProgress: progress });
+    const result = await resumeChapterNarrationWorkflow({
+      ...input,
+      currentRequestId: REQUEST_ID,
+      onRestoring,
+      onProgress: progress,
+    });
     expect(result?.edition_id).toBe(EDITION_ID);
     expect(onRestoring).toHaveBeenCalledOnce();
-    expect(deps.resumeVoicePreparation).toHaveBeenCalledWith(NOVEL_ID, active.commandId, expect.any(AbortSignal));
-    expect(deps.getVoicePreparation).toHaveBeenCalledOnce();
+    expect(deps.getWorkflow).toHaveBeenCalledWith(REQUEST_ID, expect.any(AbortSignal));
     expect(input.saveStableSource).not.toHaveBeenCalled();
     expect(deps.getSettings).not.toHaveBeenCalled();
-    expect(deps.createVoicePreparation).not.toHaveBeenCalled();
     expect(deps.createWorkflow).not.toHaveBeenCalled();
-    expect(progress.mock.calls.some(([value]) => value.step === "voices")).toBe(true);
+    expect(progress.mock.calls.some(([value]) => value.step === "waiting")).toBe(true);
   });
 
-  it.each(["ready", "failed", "cancelled", "superseded"] as const)("不复活%s终态或其他章命令", async (state) => {
-    const deps = dependencies({ listVoicePreparations: vi.fn(async () => [
-      preparation(state, null),
-      { ...preparation("preparing", null), documentId: REVISION_ID },
-    ]) });
-    expect(await resumeChapterNarrationWorkflow(options(deps))).toBeNull();
-    expect(deps.resumeVoicePreparation).not.toHaveBeenCalled();
-    expect(deps.createVoicePreparation).not.toHaveBeenCalled();
-  });
-
-  it("已加载同一续接Edition时不再拉起后台恢复", async () => {
-    const deps = dependencies({ listVoicePreparations: vi.fn(async () => [preparation("preparing", REQUEST_ID)]) });
-    expect(await resumeChapterNarrationWorkflow({ ...options(deps), currentRequestId: REQUEST_ID })).toBeNull();
-    expect(deps.resumeVoicePreparation).not.toHaveBeenCalled();
-  });
-
-  it("准备结束后直接找回服务端请求，不重新等待非本章人物", async () => {
-    const ready = { ...preparation("preparing", REQUEST_ID), backgroundRemaining: 4 };
-    const deps = dependencies({
-      listVoicePreparations: vi.fn(async () => [ready]),
-      resumeVoicePreparation: vi.fn(async () => ready),
-      getWorkflow: vi.fn(async () => workflow("review_required")),
-    });
-    expect((await resumeChapterNarrationWorkflow(options(deps)))?.workflow_state).toBe("review_required");
-    expect(deps.getVoicePreparation).not.toHaveBeenCalled();
-    expect(deps.createWorkflow).not.toHaveBeenCalled();
-  });
-
-  it("准备已完成但仍待脚本复核时，刷新仍找回请求", async () => {
-    const deps = dependencies({
-      listVoicePreparations: vi.fn(async () => [preparation("ready", REQUEST_ID)]),
-      getWorkflow: vi.fn(async () => workflow("review_required")),
-    });
-    expect((await resumeChapterNarrationWorkflow(options(deps)))?.workflow_state).toBe("review_required");
-    expect(deps.resumeVoicePreparation).not.toHaveBeenCalled();
-    expect(deps.createWorkflow).not.toHaveBeenCalled();
-  });
-
-  it("最新动作已取消时不找回更早的已完成请求", async () => {
-    const deps = dependencies({ listVoicePreparations: vi.fn(async () => [
-      preparation("cancelled", null), preparation("ready", REQUEST_ID),
-    ]) });
+  it("没有已知请求时不猜测、不新建", async () => {
+    const deps = dependencies();
     expect(await resumeChapterNarrationWorkflow(options(deps))).toBeNull();
     expect(deps.getWorkflow).not.toHaveBeenCalled();
+    expect(deps.createWorkflow).not.toHaveBeenCalled();
   });
 
-  it("恢复期间失败仍保留失败，不静默新建或覆盖", async () => {
-    const deps = dependencies({
-      listVoicePreparations: vi.fn(async () => [preparation("preparing", null)]),
-      getVoicePreparation: vi.fn(async () => ({ ...preparation("failed", null), failureCode: "VOICE_FAILED" })),
-    });
-    await expect(resumeChapterNarrationWorkflow(options(deps))).rejects.toMatchObject({ code: "VOICE_PREPARATION_FAILED" });
-    expect(deps.createVoicePreparation).not.toHaveBeenCalled();
-  });
-
-  it("切章Abort拒绝旧列表结果，不对旧章节恢复", async () => {
+  it("切章 Abort 拒绝旧请求响应", async () => {
     const controller = new AbortController();
-    const deps = dependencies({ listVoicePreparations: vi.fn(async () => {
-      controller.abort(); return [preparation("preparing", null)];
-    }) });
-    await expect(resumeChapterNarrationWorkflow({ ...options(deps), signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
-    expect(deps.resumeVoicePreparation).not.toHaveBeenCalled();
-  });
-
-  it("恢复响应换章或换命令时fail closed", async () => {
     const deps = dependencies({
-      listVoicePreparations: vi.fn(async () => [preparation("preparing", null)]),
-      resumeVoicePreparation: vi.fn(async () => ({ ...preparation("preparing", null), documentId: REVISION_ID })),
+      getWorkflow: vi.fn(async () => {
+        controller.abort();
+        return workflow("rendering", EDITION_ID);
+      }),
     });
-    await expect(resumeChapterNarrationWorkflow(options(deps))).rejects.toMatchObject({ code: "INVALID_INPUT" });
-    expect(deps.getWorkflow).not.toHaveBeenCalled();
+    await expect(resumeChapterNarrationWorkflow({
+      ...options(deps),
+      currentRequestId: REQUEST_ID,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 
 describe("startChapterNarrationWorkflow", () => {
-  it("一次智能朗读先准备人物声音并复用服务端续接的正式请求", async () => {
-    const createVoicePreparation = vi.fn(async () => preparation("preparing", null));
-    const getVoicePreparation = vi.fn(async () => preparation("ready", REQUEST_ID));
-    const deps = dependencies({
-      createVoicePreparation,
-      getVoicePreparation,
-      getWorkflow: vi.fn(async () => workflow("partial_ready", EDITION_ID)),
-    });
-
-    const result = await startChapterNarrationWorkflow({
-      ...options(deps),
-      automaticVoicePreparationEnabled: true,
-      pollScheduleMs: [1],
-    });
-
-    expect(createVoicePreparation).toHaveBeenCalledWith(
-      NOVEL_ID,
-      expect.objectContaining({
-        document_id: DOCUMENT_ID,
-        expected_draft_version: 9,
-        expected_content_hash: HASH,
-        expected_settings_version: 3,
-      }),
-      `chapter-voice-prepare:${ACTION_ID}`,
-      expect.any(AbortSignal),
-    );
-    expect(getVoicePreparation).toHaveBeenCalledTimes(1);
-    expect(deps.createWorkflow).not.toHaveBeenCalled();
-    expect(result.workflow.request_id).toBe(REQUEST_ID);
-  });
-
   it("完成保存屏障后才读取设置并创建严格作用域请求", async () => {
     const order: string[] = [];
     const deps = dependencies({

@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FAILED_SEGMENT_RETRY_CONTRACT_VERSION } from "./chapter-contracts";
 import {
+  FAILED_SEGMENT_RETRY_BATCH_LIMIT,
   createFailedSegmentRetryController,
   failedSegmentRetryReasonMessage,
+  retryableFailedSegmentRepresentatives,
+  summarizeFailedSegments,
 } from "./failed-segment-retry-state";
 
 
@@ -73,6 +76,27 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+
+function generatedUuid(prefix: "3" | "4" | "5", index: number): string {
+  return `${prefix}0000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+}
+
+
+function retryItems(count: number) {
+  return Object.freeze(Array.from({ length: count }, (_, index) => {
+    const segmentId = generatedUuid("3", index);
+    return Object.freeze({
+      segment_id: segmentId,
+      ordinal: index,
+      failure_code: index === 0 ? "SHORT_CHINESE_DURATION_IMPLAUSIBLE" : "LEASE_EXPIRED",
+      retryable: true,
+      retry_reason_code: null,
+      job_id: generatedUuid("4", index),
+      fanout_segment_ids: Object.freeze([segmentId]),
+    });
+  }));
 }
 
 
@@ -246,5 +270,127 @@ describe("failed-segment retry state", () => {
     expect(failedSegmentRetryReasonMessage("UNKNOWN_FUTURE_REASON")).toBe(
       "当前句段暂不满足安全重试条件。",
     );
+  });
+
+  it("groups quality failures and deduplicates retry representatives by job and fanout", () => {
+    const first = projection().items[0];
+    const duplicate = Object.freeze({
+      ...first,
+      segment_id: SEGMENT_B,
+      ordinal: 1,
+    });
+    const quality = Object.freeze({
+      ...first,
+      segment_id: generatedUuid("3", 9),
+      ordinal: 2,
+      job_id: generatedUuid("4", 9),
+      fanout_segment_ids: Object.freeze([generatedUuid("3", 9)]),
+      failure_code: "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+    });
+    const items = [first, duplicate, quality];
+
+    expect(retryableFailedSegmentRepresentatives(items).map((item) => item.segment_id)).toEqual([
+      SEGMENT_A,
+      quality.segment_id,
+    ]);
+    expect(summarizeFailedSegments(items)).toEqual({
+      recoverableCount: 2,
+      audioQualityCount: 1,
+      blockedCount: 0,
+      retryableGroupCount: 2,
+      retryableSegmentCount: 3,
+    });
+  });
+
+  it("serializes bulk recovery into 100-item batches and refreshes CAS after every batch", async () => {
+    const items = retryItems(FAILED_SEGMENT_RETRY_BATCH_LIMIT + 1);
+    const remaining = Object.freeze([items[items.length - 1]!]);
+    const getProjection = vi.fn()
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, { items }))
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, {
+        request_version: 5,
+        manifest_revision: 8,
+        items: remaining,
+      }))
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, {
+        request_version: 6,
+        manifest_revision: 9,
+        items: Object.freeze([]),
+      }));
+    const retry = vi.fn((
+      _editionId: string,
+      request: { readonly segment_ids: readonly string[] },
+    ) => Promise.resolve(Object.freeze({
+      ...response(),
+      accepted_segment_ids: request.segment_ids,
+      affected_segment_ids: request.segment_ids,
+      commands: request.segment_ids.map((segmentId, index) => Object.freeze({
+        command_id: generatedUuid("5", index),
+        job_id: generatedUuid("4", index),
+        affected_segment_ids: Object.freeze([segmentId]),
+      })),
+    })));
+    const controller = createFailedSegmentRetryController({
+      getProjection,
+      retry,
+      afterAccepted: vi.fn().mockResolvedValue(undefined),
+      createIdempotencyKey: vi.fn()
+        .mockReturnValueOnce("retry-batch-0001")
+        .mockReturnValueOnce("retry-batch-0002"),
+      formatFailure: (reason) => reason instanceof Error ? reason.message : "失败",
+    });
+    await controller.load({
+      editionId: EDITION_A,
+      requestId: REQUEST_A,
+      documentGeneration: 1,
+      manifestRevision: 7,
+    });
+    await controller.retryAll();
+
+    expect(retry).toHaveBeenCalledTimes(2);
+    expect(retry.mock.calls[0]?.[1].segment_ids).toHaveLength(100);
+    expect(retry.mock.calls[0]?.[1]).toMatchObject({
+      expected_request_version: 4,
+      expected_manifest_revision: 7,
+    });
+    expect(retry.mock.calls[1]?.[1]).toMatchObject({
+      segment_ids: [remaining[0].segment_id],
+      expected_request_version: 5,
+      expected_manifest_revision: 8,
+    });
+    expect(controller.readSnapshot()).toMatchObject({
+      phase: "ready",
+      projection: { request_version: 6, items: [] },
+      statusMessage: "全部可重试句段已经恢复，可继续播放。",
+    });
+  });
+
+  it("stops bulk recovery on the first error instead of blindly continuing", async () => {
+    const items = retryItems(FAILED_SEGMENT_RETRY_BATCH_LIMIT + 1);
+    const getProjection = vi.fn()
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, { items }))
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, { items }));
+    const retry = vi.fn().mockRejectedValue(new Error("provider unavailable"));
+    const controller = createFailedSegmentRetryController({
+      getProjection,
+      retry,
+      afterAccepted: vi.fn(),
+      createIdempotencyKey: () => "retry-batch-0001",
+      formatFailure: (reason) => reason instanceof Error ? reason.message : "失败",
+    });
+    await controller.load({
+      editionId: EDITION_A,
+      requestId: REQUEST_A,
+      documentGeneration: 1,
+      manifestRevision: 7,
+    });
+    await controller.retryAll();
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(controller.readSnapshot()).toMatchObject({
+      phase: "ready",
+      errorMessage: "provider unavailable",
+      busySegmentIds: [],
+    });
   });
 });

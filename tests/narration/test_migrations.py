@@ -12,33 +12,21 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from backend.models import (
-    Base,
-    CharacterCastPlanCommand,
-    CharacterCastPlanItem,
-    GenericVoiceDesignDraft,
-    GenericVoiceGenerationCommand,
-    GenericVoicePackVersion,
-    GenericVoicePackVersionSlot,
-    VoicePreparationCommand,
-    VoicePreparationItem,
-)
+from backend.models import Base
 from backend.narration.contracts import (
     BLOCKER_CODES,
     LOCAL_OWNER_ID,
     LOCAL_WORKSPACE_ID,
     WARNING_CODES,
 )
-from backend.narration.schema_readiness import (
-    automatic_voice_preparation_schema_ready,
-    character_cast_schema_ready,
-)
 
 
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260905_0042"
+HEAD_REVISION = "20260909_0050"
+RETIRED_MOSS_TTS_REVISION = "20260909_0049"
+RETIRED_SCOPE_GUARD_REVISION = "20260909_0050"
 AUTOMATIC_VOICE_PREPARATION_REVISION = "20260903_0040"
 WORKING_COPY_COUNT_REVISION = "20260902_0039"
 STORY_LEDGER_SINGLE_CONTRACT_REVISION = "20260902_0038"
@@ -122,6 +110,14 @@ AUTOMATIC_VOICE_PREPARATION_MIGRATION = (
     ROOT
     / "backend/migrations/versions/20260903_0040_automatic_voice_preparation_and_generic_pack.py"
 )
+RETIRED_MOSS_TTS_MIGRATION = (
+    ROOT
+    / "backend/migrations/versions/20260909_0049_retired_moss_tts_cleanup.py"
+)
+RETIRED_SCOPE_GUARD_MIGRATION = (
+    ROOT
+    / "backend/migrations/versions/20260909_0050_retired_scope_guard_cleanup.py"
+)
 EXPECTED_NEW_TABLES = {
     "narration_requests", "narration_request_sources", "novel_narration_settings",
     "narration_settings_snapshots", "narration_scope_overrides", "narration_cloud_consents",
@@ -144,6 +140,22 @@ EXPECTED_NEW_TABLES = {
     "generic_voice_design_drafts", "generic_voice_generation_commands",
 }
 FOUNDATION_TABLES = EXPECTED_NEW_TABLES - {"narration_script_review_actions"}
+RETIRED_TTS_TABLES = {
+    "nano_voice_experiment_commands",
+    "voice_design_drafts",
+    "voice_generator_commands",
+    "voice_generator_run_evidence",
+    "character_cast_plan_commands",
+    "character_cast_plan_items",
+    "voice_preparation_commands",
+    "voice_preparation_items",
+    "generic_voice_pack_versions",
+    "generic_voice_pack_version_slots",
+    "generic_voice_design_drafts",
+    "generic_voice_generation_commands",
+    "generic_voice_pools",
+    "generic_voice_slots",
+}
 
 
 def _script_directory() -> ScriptDirectory:
@@ -153,7 +165,13 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260905_0041"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == RETIRED_MOSS_TTS_REVISION
+    assert scripts.get_revision(RETIRED_MOSS_TTS_REVISION).down_revision == "20260909_0048"
+    assert scripts.get_revision("20260909_0048").down_revision == "20260909_0047"
+    assert scripts.get_revision("20260909_0045").down_revision == "20260908_0044"
+    assert scripts.get_revision("20260908_0044").down_revision == "20260908_0043"
+    assert scripts.get_revision("20260908_0043").down_revision == "20260905_0042"
+    assert scripts.get_revision("20260905_0042").down_revision == "20260905_0041"
     assert scripts.get_revision("20260905_0041").down_revision == AUTOMATIC_VOICE_PREPARATION_REVISION
     assert (
         scripts.get_revision(AUTOMATIC_VOICE_PREPARATION_REVISION).down_revision
@@ -392,40 +410,10 @@ def test_character_cast_migration_is_linear_io_free_and_fail_closed() -> None:
         assert marker in source
 
 
-def test_character_cast_orm_matches_the_frozen_0036_authority() -> None:
-    assert CharacterCastPlanCommand.__tablename__ == "character_cast_plan_commands"
-    assert CharacterCastPlanItem.__tablename__ == "character_cast_plan_items"
-    assert {column.name for column in CharacterCastPlanCommand.__table__.columns} == {
-        "id", "owner_id", "workspace_id", "novel_id", "timeline_id", "mode",
-        "idempotency_key", "request_hash", "state", "character_catalog_version",
-        "settings_version", "catalog_fingerprint", "workspace_digest",
-        "settings_digest", "bindings_digest", "progress_current", "progress_total",
-        "warnings_json", "failure_code", "created_at", "updated_at", "completed_at",
-    }
-    assert {column.name for column in CharacterCastPlanItem.__table__.columns} == {
-        "id", "command_id", "novel_id", "position", "priority_rank", "target_key",
-        "target_kind", "character_id", "character_name", "role_type",
-        "expected_binding_version", "workspace_digest", "state", "attempt",
-        "lease_fence", "lease_expires_at", "brief_schema_version", "brief_json",
-        "model_evidence_json", "model_evidence_digest", "language",
-        "selected_preset_key", "score_milli", "profile_id", "voice_version_id",
-        "voice_source_type", "current_preset_key", "voice_action_command_id",
-        "warning_code", "failure_code", "created_at", "updated_at",
-    }
-    item_foreign_keys = {
-        constraint.name for constraint in CharacterCastPlanItem.__table__.foreign_key_constraints
-    }
-    assert {
-        "fk_character_cast_plan_item_command_scope",
-        "fk_character_cast_plan_item_character_scope",
-        "fk_character_cast_plan_item_voice_version",
-        "fk_character_cast_plan_item_action_command",
-    } <= item_foreign_keys
-    command_indexes = {index.name for index in CharacterCastPlanCommand.__table__.indexes}
-    assert {
-        "ix_character_cast_plan_scope_created",
-        "uq_character_cast_plan_active",
-    } <= command_indexes
+def test_character_cast_orm_is_retired_but_0036_history_is_preserved() -> None:
+    assert {"character_cast_plan_commands", "character_cast_plan_items"}.isdisjoint(
+        Base.metadata.tables
+    )
 
 
 def test_automatic_voice_preparation_migration_is_linear_io_free_and_fail_closed() -> None:
@@ -458,28 +446,44 @@ def test_automatic_voice_preparation_migration_is_linear_io_free_and_fail_closed
         assert marker in source
 
 
-def test_automatic_voice_preparation_orm_matches_0040_authority() -> None:
-    assert VoicePreparationCommand.__tablename__ == "voice_preparation_commands"
-    assert VoicePreparationItem.__tablename__ == "voice_preparation_items"
-    assert GenericVoicePackVersion.__tablename__ == "generic_voice_pack_versions"
-    assert GenericVoicePackVersionSlot.__tablename__ == "generic_voice_pack_version_slots"
-    assert GenericVoiceDesignDraft.__tablename__ == "generic_voice_design_drafts"
-    assert GenericVoiceGenerationCommand.__tablename__ == "generic_voice_generation_commands"
-    assert {
-        "preflight_request_id",
-        "preflight_script_version_id",
-        "continuation_idempotency_key",
-        "narration_request_id",
-        "chapter_ready",
-        "lease_fence",
-    } <= {column.name for column in VoicePreparationCommand.__table__.columns}
-    assert {
-        "pack_version_id",
-        "design_draft_id",
-        "generator_model_run_id",
-        "nano_model_run_id",
-        "voice_version_id",
-    } <= {column.name for column in GenericVoiceGenerationCommand.__table__.columns}
+def test_automatic_voice_preparation_orm_is_retired_but_0040_history_is_preserved() -> None:
+    assert RETIRED_TTS_TABLES.isdisjoint(Base.metadata.tables)
+
+
+def test_retired_moss_tts_cleanup_is_linear_forward_only_and_fail_closed() -> None:
+    source = RETIRED_MOSS_TTS_MIGRATION.read_text(encoding="utf-8")
+    for forbidden in ("from backend.models", "create_engine", "requests.", "subprocess"):
+        assert forbidden not in source
+    for marker in (
+        'revision = "20260909_0049"',
+        'down_revision = "20260909_0048"',
+        "plan62_old_versions",
+        "plan62_media_asset_is_shared",
+        "plan62_old_job_still_active",
+        "DROP TABLE voice_generator_commands",
+        "DROP TABLE generic_voice_slots",
+        "DROP TABLE character_cast_plan_commands",
+        "ALTER TABLE narration_edition_segments DROP COLUMN slot_id",
+        "SET resource_class='qwen-tts'",
+        "retired MOSS TTS cleanup is forward-only",
+    ):
+        assert marker in source
+
+
+def test_retired_scope_guard_cleanup_is_exact_fix_forward() -> None:
+    source = RETIRED_SCOPE_GUARD_MIGRATION.read_text(encoding="utf-8")
+    for forbidden in ("from backend.models", "create_engine", "requests.", "subprocess"):
+        assert forbidden not in source
+    for marker in (
+        'revision = "20260909_0050"',
+        'down_revision = "20260909_0049"',
+        "pg_get_functiondef",
+        "plan62_scope_guard_shape_changed",
+        "plan62_scope_guard_retired_reference_remains",
+        "EXECUTE rewritten",
+        "retired scope guard cleanup is forward-only",
+    ):
+        assert marker in source
 
 
 def test_failed_segment_retry_downgrade_restores_guards_without_retry_evidence(
@@ -613,9 +617,11 @@ def test_script_review_action_migration_is_fix_forward_and_io_free() -> None:
 
 
 def test_metadata_contains_the_complete_foundation_without_native_enums() -> None:
-    assert EXPECTED_NEW_TABLES <= set(Base.metadata.tables)
-    assert len(EXPECTED_NEW_TABLES) == 55
-    for table_name in EXPECTED_NEW_TABLES:
+    expected_current_tables = EXPECTED_NEW_TABLES - RETIRED_TTS_TABLES
+    assert expected_current_tables <= set(Base.metadata.tables)
+    assert RETIRED_TTS_TABLES.isdisjoint(Base.metadata.tables)
+    assert len(expected_current_tables) == 41
+    for table_name in expected_current_tables:
         for column in Base.metadata.tables[table_name].columns:
             assert column.type.__class__.__name__ not in {"ENUM", "Enum"}
 
@@ -2060,7 +2066,6 @@ def test_live_character_cast_migration_round_trip_in_isolated_schema() -> None:
             "character_cast_plan_commands",
             "character_cast_plan_items",
         } <= set(inspect(engine).get_table_names(schema=schema))
-        assert character_cast_schema_ready(engine)
 
         command.downgrade(config, VOICE_GENERATOR_REVISION)
         assert "character_cast_plan_commands" not in inspect(engine).get_table_names(
@@ -2068,7 +2073,6 @@ def test_live_character_cast_migration_round_trip_in_isolated_schema() -> None:
         )
 
         command.upgrade(config, CHARACTER_CAST_REVISION)
-        assert character_cast_schema_ready(engine)
     finally:
         engine.dispose()
         if old_database_url is None:
@@ -2117,7 +2121,6 @@ def test_live_automatic_voice_preparation_migration_round_trip_in_isolated_schem
             "generic_voice_design_drafts",
             "generic_voice_generation_commands",
         } <= set(inspect(engine).get_table_names(schema=schema))
-        assert automatic_voice_preparation_schema_ready(engine)
 
         command.downgrade(config, WORKING_COPY_COUNT_REVISION)
         assert "voice_preparation_commands" not in inspect(engine).get_table_names(
@@ -2125,7 +2128,6 @@ def test_live_automatic_voice_preparation_migration_round_trip_in_isolated_schem
         )
 
         command.upgrade(config, AUTOMATIC_VOICE_PREPARATION_REVISION)
-        assert automatic_voice_preparation_schema_ready(engine)
     finally:
         engine.dispose()
         if old_database_url is None:

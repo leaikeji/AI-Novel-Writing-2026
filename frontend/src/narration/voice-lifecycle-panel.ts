@@ -76,7 +76,6 @@ function impactRows(
     { label: "当前旁白", value: `${impact.currentNarratorCount}` },
     { label: "人物绑定", value: `${impact.characterBindingCount}` },
     { label: "匿名说话人", value: `${impact.anonymousSpeakerCount}` },
-    { label: "通用角色槽位", value: `${impact.genericSlotCount}` },
     { label: "历史朗读版本", value: `${impact.historicalEditionCount}` },
     { label: "已渲染音频", value: `${impact.renderCount}` },
     { label: "导出记录", value: `${impact.exportCount}` },

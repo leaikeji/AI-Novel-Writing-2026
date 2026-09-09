@@ -55,10 +55,10 @@ RUN /app/venv/bin/python -m pip install --no-cache-dir --timeout 600 --retries 5
     && rm /tmp/ai-novel-world-2026-requirements.txt \
     && install -d -m 0555 /opt/ai-novel-world/narration-model-metadata
 
-# Reuse the exact fixed LGPL-narrow toolchain from the existing TTS Sidecar
-# build graph.  This adds no model runtime and does not overwrite QwenPaw core;
-# the PawApp only needs ffmpeg/ffprobe to validate and publish returned audio.
+# Keep the fixed LGPL-narrow toolchain independent of either TTS Provider. This
+# adds no model runtime and does not overwrite QwenPaw core; the PawApp only
+# needs ffmpeg/ffprobe to validate and publish returned audio.
 COPY --from=narration-ffmpeg-builder /opt/ffmpeg /opt/ffmpeg
 
 ENV PATH=/opt/ffmpeg/bin:$PATH \
-    MOSS_FFMPEG_BUILD_ID=ffmpeg-9.0.1-lgpl-narrow-linux-arm64-v1
+    NARRATION_FFMPEG_BUILD_ID=ffmpeg-9.0.1-lgpl-narrow-linux-arm64-v1

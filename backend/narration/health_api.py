@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 from typing import Annotated, Literal
 from uuid import UUID
@@ -11,7 +11,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-from .pawapp_runtime import get_ready_narration_adapter
 from .production_runtime import (
     PRODUCT_ENABLE_ENV,
     VALIDATION_ENABLE_ENV,
@@ -23,7 +22,6 @@ from .production_runtime import (
     release_validation_segment_claim_gate,
 )
 from .release_gate import require_narration_t4_http_access
-from .runtime import SidecarRuntimeError
 
 
 def _canonical_uuid(value: object) -> object:
@@ -39,16 +37,6 @@ def _canonical_uuid(value: object) -> object:
 
 
 CanonicalUuid = Annotated[UUID, BeforeValidator(_canonical_uuid)]
-
-
-class ValidationObservationResource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    model_ready: bool = Field(strict=True)
-    worker_ready: bool = Field(strict=True)
-    active_syntheses: int = Field(ge=0, le=1, strict=True)
-    queued_jobs: int = Field(ge=0, le=0, strict=True)
-    observed_at: datetime
 
 
 class ValidationSegmentClaimGateArmRequest(BaseModel):
@@ -155,48 +143,6 @@ router = APIRouter(
 )
 
 
-@router.get(
-    "/novels/{novel_id}/documents/{document_id}/narration-validation-observation",
-    response_model=ValidationObservationResource,
-)
-async def read_validation_observation(
-    novel_id: CanonicalUuid,
-    document_id: CanonicalUuid,
-    response: Response,
-    _scope: ValidationRuntimeScope = Depends(_require_exact_validation_scope),
-) -> ValidationObservationResource:
-    del _scope
-    adapter = get_ready_narration_adapter()
-    if adapter is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "VALIDATION_OBSERVATION_UNAVAILABLE",
-                "message": "朗读验证观测暂不可用。",
-            },
-            headers={"Cache-Control": "no-store"},
-        )
-    try:
-        metrics = await adapter.observe_validation_metrics()
-    except (SidecarRuntimeError, OSError, TimeoutError) as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "VALIDATION_OBSERVATION_UNAVAILABLE",
-                "message": "朗读验证观测暂不可用。",
-            },
-            headers={"Cache-Control": "no-store"},
-        ) from error
-    response.headers["Cache-Control"] = "no-store"
-    return ValidationObservationResource(
-        model_ready=metrics.model_ready,
-        worker_ready=metrics.worker_ready,
-        active_syntheses=metrics.active_syntheses,
-        queued_jobs=metrics.queued_jobs,
-        observed_at=datetime.now(timezone.utc),
-    )
-
-
 _CLAIM_GATE_PATH = (
     "/novels/{novel_id}/documents/{document_id}"
     "/narration-validation-segment-claim-gate"
@@ -279,7 +225,6 @@ async def release_validation_segment_claim_gate_state(
 
 
 __all__ = [
-    "ValidationObservationResource",
     "ValidationSegmentClaimGateArmRequest",
     "ValidationSegmentClaimGateReleaseRequest",
     "ValidationSegmentClaimGateResource",

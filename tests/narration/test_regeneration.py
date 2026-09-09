@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from backend.narration import regeneration as regeneration_module
 from backend.models import (
     BackgroundJob,
     Document,
@@ -188,7 +189,6 @@ def _clone_projection_target(
             script_version_id=source.script_version_id,
             segment_id=source_row.segment_id,
             ordinal=source_row.ordinal,
-            slot_id=source_row.slot_id,
             profile_id=source_row.profile_id,
             voice_version_id=source_row.voice_version_id,
             resolution_json=dict(source_row.resolution_json),
@@ -545,7 +545,9 @@ def test_progress_restores_exact_segment_on_new_manifest_revision_only() -> None
         )
 
 
-def test_history_projection_is_read_only_and_fences_rights_and_working_copy() -> None:
+def test_history_projection_is_read_only_and_fences_rights_and_working_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store, foundation, edition, renders, _rows = _ready_foundation()
     novel, document, revision = foundation[:3]
     edition.created_at = NOW
@@ -567,11 +569,24 @@ def test_history_projection_is_read_only_and_fences_rights_and_working_copy() ->
         expected_version=0,
         actor="owner",
     )
+    original_require_usable_voice = regeneration_module.require_usable_voice
+    projection_lock_modes: list[bool] = []
+
+    def record_voice_check(*args: object, **kwargs: object):
+        projection_lock_modes.append(bool(kwargs.get("for_update", True)))
+        return original_require_usable_voice(*args, **kwargs)
+
+    monkeypatch.setattr(
+        regeneration_module,
+        "require_usable_voice",
+        record_voice_check,
+    )
 
     history = project_document_edition_history(
         store, document_id=document.id, profile_id="default"
     )
 
+    assert projection_lock_modes and not any(projection_lock_modes)
     assert history.pointer_version == pointer.version == 1
     assert history.current_edition_id == edition.id
     assert len(history.editions) == 1

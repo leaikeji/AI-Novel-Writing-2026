@@ -37,7 +37,7 @@ MIGRATION = (
 )
 REVISION = "20260827_0021"
 DOWN_REVISION = "20260827_0020"
-HEAD_REVISION = "20260905_0042"
+HEAD_REVISION = "20260909_0050"
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USER = "tts_test"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -62,7 +62,11 @@ def _index_names(table_name: str) -> set[str]:
 def test_voice_product_revision_is_followed_by_official_preset_and_retry_head() -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260905_0041"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260909_0049"
+    assert scripts.get_revision("20260909_0049").down_revision == "20260909_0048"
+    assert scripts.get_revision("20260909_0045").down_revision == "20260908_0044"
+    assert scripts.get_revision("20260908_0044").down_revision == "20260908_0043"
+    assert scripts.get_revision("20260908_0043").down_revision == "20260905_0042"
     assert scripts.get_revision("20260905_0041").down_revision == "20260903_0040"
     assert scripts.get_revision("20260903_0040").down_revision == "20260902_0039"
     assert scripts.get_revision("20260902_0039").down_revision == "20260902_0038"
@@ -487,8 +491,8 @@ def _insert_library_uploaded_version(connection, *, wrong_source_class: bool = F
             "(id,profile_id,owner_id,workspace_id,version_number,source_type,state,"
             " provider_id,model_id,model_revision,reference_asset_id,rights_record_id,"
             " language,parameters_json,fingerprint,quality_state) "
-            "VALUES (:id,:profile,:owner,:workspace,1,'uploaded','draft','moss',"
-            " 'OpenMOSS-Team/MOSS-TTS-Nano','schema-test',:reference,:rights,"
+            "VALUES (:id,:profile,:owner,:workspace,1,'uploaded','draft','qwen-tts',"
+            " 'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit','schema-test',:reference,:rights,"
             " 'zh-CN','{}'::jsonb,:fingerprint,'pending')"
         ),
         {

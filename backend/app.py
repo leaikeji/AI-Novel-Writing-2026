@@ -66,21 +66,13 @@ from .novel_workspace_service import (
 )
 from .writing_eval_api import router as writing_eval_router
 from .character_workspace.api import router as character_workspace_router
-from .narration.pawapp_runtime import (
-    launch_narration_runtime,
-    narration_runtime_status,
-    stop_narration_runtime,
-)
 from .narration.health_api import router as narration_health_router
+from .narration.cloud_profiles_api import build_tts_cloud_profiles_router
+from .narration.cloud_profiles_runtime import build_cloud_profile_service
 from .narration import schemas as narration_wire
 from .narration.disk_guard import DISK_SPACE_INSUFFICIENT
 from .narration.narration_api import router as narration_production_router
-from .narration.voice_features_api import router as narration_voice_features_router
 from .narration.feature_readiness import NARRATION_FEATURE_READINESS_PROVIDER
-from .narration.official_presets import (
-    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
-)
-from .narration.official_voice_selection import OfficialVoiceSelectionService
 from .narration.playback_api import router as narration_playback_router
 from .narration.production_runtime import (
     PRODUCT_ENABLE_ENV,
@@ -90,7 +82,6 @@ from .narration.production_runtime import (
     current_narration_cache_runtime,
     current_narration_production_policy,
     current_validation_runtime_scope,
-    current_voice_product_port,
     launch_narration_production_runtime,
     narration_feature_readiness_status,
     narration_production_runtime_status,
@@ -119,7 +110,8 @@ from .narration.release_gate import (
     install_narration_t4_http_access_policy,
     uninstall_narration_t4_http_access_policy,
 )
-from .narration.voice_product import SqlAlchemyVoiceActionReceiptPort
+from .narration.voice_receipts import SqlAlchemyVoiceActionReceiptPort
+from .narration.official_voice_selection import OfficialVoiceSelectionService
 from .narration.validation_access import validation_request_scope_authorized
 from .schemas import (
     AdoptCandidateRequest,
@@ -181,6 +173,9 @@ from .services import (
 
 pawapp = PawApp(name="AI小说世界2026", app_id=APP_ID)
 router = APIRouter()
+tts_cloud_profiles_router = build_tts_cloud_profiles_router(
+    lambda _request: build_cloud_profile_service()
+)
 
 
 def _reported_actual_ids(
@@ -211,7 +206,7 @@ router.include_router(narration_health_router)
 router.include_router(narration_script_router)
 router.include_router(narration_production_router)
 router.include_router(narration_playback_router)
-router.include_router(narration_voice_features_router)
+router.include_router(tts_cloud_profiles_router)
 router.include_router(writing_eval_router)
 router.include_router(embedding_router)
 router.include_router(story_state_router)
@@ -253,20 +248,11 @@ def _t4_product_release_runtime_ready() -> bool:
     ):
         return False
     reference_clone = os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false")
-    if reference_clone not in {"true", "false"} or (
-        reference_clone == "true" and current_voice_product_port() is None
-    ):
+    if reference_clone != "false":
         return False
-    technical = narration_runtime_status()
     production = narration_production_runtime_status()
     return (
-        technical.get("technical_enabled") is True
-        and technical.get("lifecycle_status") == "ready"
-        and technical.get("sidecar_reachable") is True
-        and technical.get("model_ready") is True
-        and technical.get("product_visible") is True
-        and technical.get("reason_code") is None
-        and production.get("product_requested") is True
+        production.get("product_requested") is True
         and production.get("lifecycle_status") == "ready"
         and production.get("playback_installed") is True
         and production.get("digest_keyring_loaded") is True
@@ -285,20 +271,11 @@ def _t4_hidden_validation_runtime_ready() -> bool:
     ):
         return False
     reference_clone = os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false")
-    if reference_clone not in {"true", "false"} or (
-        reference_clone == "true" and current_voice_product_port() is None
-    ):
+    if reference_clone != "false":
         return False
-    technical = narration_runtime_status()
     production = narration_production_runtime_status()
     return (
-        technical.get("technical_enabled") is True
-        and technical.get("lifecycle_status") == "ready"
-        and technical.get("sidecar_reachable") is True
-        and technical.get("model_ready") is True
-        and technical.get("product_visible") is False
-        and technical.get("reason_code") is None
-        and production.get("product_requested") is True
+        production.get("product_requested") is True
         and production.get("lifecycle_status") == "ready"
         and production.get("playback_installed") is True
         and production.get("digest_keyring_loaded") is True
@@ -354,28 +331,10 @@ def _build_fixed_local_owner_narration_backend(
     product_ready = _t4_product_release_runtime_ready() or (
         request is not None and _narration_t4_http_access_allowed(request)
     )
-    reference_clone_requested = (
-        os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false") == "true"
-    )
-    voice_product = current_voice_product_port()
-    production_policy = current_narration_production_policy()
-    official_presets_ready = (
-        product_ready
-        and voice_product is not None
-        and production_policy is not None
-        and production_policy.tts_fingerprint
-        == OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
-    )
-    reference_clone_ready = (
-        official_presets_ready
-        and reference_clone_requested
-    )
-    if product_ready and not official_presets_ready:
-        product_ready = False
     base_capabilities = (
         t4_product_capabilities(
-            reference_clone_released=reference_clone_ready,
-            official_presets_released=official_presets_ready,
+            reference_clone_released=False,
+            official_presets_released=True,
         )
         if product_ready
         else t2_settings_capabilities()
@@ -393,12 +352,13 @@ def _build_fixed_local_owner_narration_backend(
     return build_narration_settings_backend(
         session,
         authorization=FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION,
+        runtime_status_provider=narration_production_runtime_status,
         profile_creation_receipts=SqlAlchemyVoiceActionReceiptPort(session),
         cache_runtime=current_narration_cache_runtime(),
-        voice_product=(voice_product if official_presets_ready else None),
+        voice_product=None,
         official_voice_selection=(
             OfficialVoiceSelectionService(lambda: Session(get_engine()))
-            if official_presets_ready
+            if product_ready
             else None
         ),
         capabilities=capabilities,
@@ -434,15 +394,7 @@ async def _launch_narration_runtime() -> None:
                 _NARRATION_SCRIPT_BACKEND_FACTORY,
             )
             try:
-                await launch_narration_runtime()
-                try:
-                    await launch_narration_production_runtime()
-                except BaseException:
-                    try:
-                        await stop_narration_production_runtime()
-                    finally:
-                        await stop_narration_runtime()
-                    raise
+                await launch_narration_production_runtime()
             except BaseException:
                 uninstall_script_api_backend_factory(
                     _NARRATION_SCRIPT_BACKEND_FACTORY,
@@ -466,21 +418,18 @@ async def _stop_narration_runtime() -> None:
         await stop_narration_production_runtime()
     finally:
         try:
-            await stop_narration_runtime()
+            uninstall_script_api_backend_factory(
+                _NARRATION_SCRIPT_BACKEND_FACTORY,
+            )
         finally:
             try:
-                uninstall_script_api_backend_factory(
-                    _NARRATION_SCRIPT_BACKEND_FACTORY,
+                uninstall_narration_settings_backend_factory(
+                    _NARRATION_SETTINGS_BACKEND_FACTORY,
                 )
             finally:
-                try:
-                    uninstall_narration_settings_backend_factory(
-                        _NARRATION_SETTINGS_BACKEND_FACTORY,
-                    )
-                finally:
-                    uninstall_narration_t4_http_access_policy(
-                        _NARRATION_T4_HTTP_ACCESS_POLICY,
-                    )
+                uninstall_narration_t4_http_access_policy(
+                    _NARRATION_T4_HTTP_ACCESS_POLICY,
+                )
 
 
 @pawapp.on_uninstall
@@ -496,21 +445,18 @@ async def _uninstall_narration_runtime(*, plugin_id: str | None = None) -> None:
             await stop_narration_production_runtime()
         finally:
             try:
-                await stop_narration_runtime()
+                uninstall_script_api_backend_factory(
+                    _NARRATION_SCRIPT_BACKEND_FACTORY,
+                )
             finally:
                 try:
-                    uninstall_script_api_backend_factory(
-                        _NARRATION_SCRIPT_BACKEND_FACTORY,
+                    uninstall_narration_settings_backend_factory(
+                        _NARRATION_SETTINGS_BACKEND_FACTORY,
                     )
                 finally:
-                    try:
-                        uninstall_narration_settings_backend_factory(
-                            _NARRATION_SETTINGS_BACKEND_FACTORY,
-                        )
-                    finally:
-                        uninstall_narration_t4_http_access_policy(
-                            _NARRATION_T4_HTTP_ACCESS_POLICY,
-                        )
+                    uninstall_narration_t4_http_access_policy(
+                        _NARRATION_T4_HTTP_ACCESS_POLICY,
+                    )
 
 
 def _raise_domain(error: Exception) -> None:
@@ -609,7 +555,7 @@ def health() -> dict[str, object]:
         "selection_edit_operations": list(SELECTION_EDIT_OPERATIONS),
         "vector_retrieval_enabled": semantic_retrieval_enabled(),
         "embedding_runtime": embedding_runtime_status(),
-        "narration": narration_runtime_status(),
+        "narration": narration_production_runtime_status(),
         "narration_production": narration_production_runtime_status(),
         "narration_features": narration_feature_readiness_status(),
     }

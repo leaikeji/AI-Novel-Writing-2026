@@ -101,8 +101,6 @@ SCRIPT_VERSION_ID = UUID("55555555-5555-4555-8555-555555555555")
 CHARACTER_ID = UUID("66666666-6666-4666-8666-666666666666")
 PROFILE_ID = UUID("77777777-7777-4777-8777-777777777777")
 BINDING_ID = UUID("88888888-8888-4888-8888-888888888888")
-POOL_ID = UUID("99999999-9999-4999-8999-999999999999")
-SLOT_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 
 
 def _fixture() -> dict[str, object]:
@@ -1118,55 +1116,6 @@ def test_casting_authority_rejects_individually_valid_cross_paired_ids() -> None
             source_text="夜🌙。",
         )
 
-    second_pool_id = uuid4()
-    second_slot_id = uuid4()
-    forged_slot = CastingTargetRef(
-        CastingTargetKind.GENERIC_SLOT,
-        pool_id=POOL_ID,
-        slot_id=second_slot_id,
-    )
-    slot_script = _make_contract(
-        casting=CastingDecision(
-            candidate_targets=(forged_slot,),
-            final_target=forged_slot,
-            origin=CastingDecisionOrigin.CASTING_RULE,
-            rule_id=uuid4(),
-            rule_version=1,
-        )
-    )
-    authorized_slots = frozenset(
-        {
-            CastingTargetRef(
-                CastingTargetKind.GENERIC_SLOT,
-                pool_id=POOL_ID,
-                slot_id=SLOT_ID,
-            ),
-            CastingTargetRef(
-                CastingTargetKind.GENERIC_SLOT,
-                pool_id=second_pool_id,
-                slot_id=second_slot_id,
-            ),
-        }
-    )
-    with pytest.raises(ScriptContractError, match="target relation.*authority"):
-        validate_authorized_references(
-            slot_script,
-            replace(
-                _authority(slot_script),
-                casting_targets=authorized_slots,
-            ),
-        )
-    with pytest.raises(ScriptContractError, match="target relation.*authority"):
-        _script_contract_from_dict(
-            script_contract_to_dict(slot_script),
-            authority=replace(
-                _authority(slot_script),
-                casting_targets=authorized_slots,
-            ),
-            source_text="夜🌙。",
-        )
-
-
 def test_casting_authority_rejects_wrong_rule_version_pair() -> None:
     rule_id = uuid4()
     profile_target = CastingTargetRef(
@@ -1923,7 +1872,7 @@ def test_content_hash_exclusions_are_explicit_and_do_not_create_a_second_hash() 
     assert approved.immutable_hash == script.immutable_hash
 
     issue = ScriptIssueContract(
-        "W_GENERIC_VOICE_FALLBACK",
+        "W_MANUAL_OVERRIDE_INHERITED",
         ReviewIssueSeverity.WARNING,
         segment_id=script.segments[0].segment_id,
         evidence_summary="使用通用声音 A",

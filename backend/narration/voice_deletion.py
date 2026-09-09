@@ -24,7 +24,6 @@ from ..models import (
     AnonymousSpeaker,
     BackgroundJob,
     CharacterVoiceBinding,
-    GenericVoiceSlot,
     MediaAsset,
     NarrationEdition,
     NarrationEditionSegment,
@@ -117,7 +116,6 @@ class VoiceDeletionImpact:
     current_narrator_count: int
     character_binding_count: int
     anonymous_speaker_count: int
-    generic_slot_count: int
     edition_ids: tuple[UUID, ...]
     render_ids: tuple[UUID, ...]
     export_count: int
@@ -131,7 +129,6 @@ class VoiceDeletionImpact:
             self.current_narrator_count
             + self.character_binding_count
             + self.anonymous_speaker_count
-            + self.generic_slot_count
         )
 
     @property
@@ -163,7 +160,7 @@ class VoiceDeletionImpact:
 
     def payload(self) -> dict[str, object]:
         return {
-            "schema_version": "private-voice-deletion-impact/2",
+            "schema_version": "private-voice-deletion-impact/3",
             "profile_id": str(self.profile_id),
             "novel_id": str(self.novel_id),
             "profile_version": self.profile_version,
@@ -171,7 +168,6 @@ class VoiceDeletionImpact:
             "current_narrator_count": self.current_narrator_count,
             "character_binding_count": self.character_binding_count,
             "anonymous_speaker_count": self.anonymous_speaker_count,
-            "generic_slot_count": self.generic_slot_count,
             "historical_edition_count": len(self.edition_ids),
             "render_count": len(self.render_ids),
             "export_count": self.export_count,
@@ -496,12 +492,6 @@ def compute_voice_deletion_impact(
             AnonymousSpeaker,
             AnonymousSpeaker.voice_version_id.in_(version_ids),
         ),
-        generic_slot_count=_count(
-            session,
-            GenericVoiceSlot,
-            GenericVoiceSlot.voice_version_id.in_(version_ids),
-            GenericVoiceSlot.enabled.is_(True),
-        ),
         edition_ids=ordered_editions,
         render_ids=render_ids,
         export_count=(
@@ -611,7 +601,6 @@ def _request_snapshot(
                 "current_narrator_count",
                 "character_binding_count",
                 "anonymous_speaker_count",
-                "generic_slot_count",
                 "historical_edition_count",
                 "render_count",
                 "export_count",
@@ -1654,12 +1643,6 @@ class VoiceDeletionService:
             .with_for_update()
         ):
             speaker.voice_version_id = None
-        for slot in session.scalars(
-            select(GenericVoiceSlot)
-            .where(GenericVoiceSlot.voice_version_id.in_(version_ids))
-            .with_for_update()
-        ):
-            slot.enabled = False
         if impact.edition_ids:
             for edition in session.scalars(
                 select(NarrationEdition)

@@ -90,8 +90,8 @@ def locked_voice_version() -> dict[str, object]:
         "version_number": 1,
         "source_type": "uploaded",
         "state": "locked",
-        "provider_id": "moss-nano",
-        "model_id": "MOSS-TTS-Nano-100M-ONNX",
+        "provider_id": "qwen-tts",
+        "model_id": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
         "model_revision": "frozen-revision",
         "preset_key": None,
         "language": "zh-CN",
@@ -132,9 +132,8 @@ def test_capability_baseline_is_complete_and_fail_closed() -> None:
     assert all(not item.actionable for item in matrix.items)
     assert matrix.item(wire.CapabilityKey.READING_SETTINGS).state is wire.CapabilityState.HOLD
     assert matrix.item(wire.CapabilityKey.REFERENCE_CLONE).visible is False
-    assert matrix.item(wire.CapabilityKey.VOICE_GENERATOR).visible is False
-    assert matrix.item(wire.CapabilityKey.GENERIC_VOICE_POOL).reason_code == (
-        "GENERIC_VOICE_ASSETS_UNAVAILABLE"
+    assert matrix.item(wire.CapabilityKey.VOICE_DESIGN).reason_code == (
+        "QWEN_VOICE_DESIGN_NOT_RELEASED"
     )
 
 
@@ -362,36 +361,10 @@ def test_voice_version_and_profile_freeze_locked_identity() -> None:
         wire.VoiceProfileResource.model_validate(invalid_profile)
 
 
-def test_generic_pack_voice_version_is_a_machine_validated_library_voice() -> None:
-    generic = locked_voice_version()
-    generic.update(
-        {
-            "source_type": "generated",
-            "preset_key": None,
-            "quality_state": "accepted",
-            "activation_basis": "generic_voice_pack_generation",
-            "validation_basis": "machine_validated",
-            "rights": {
-                **generic["rights"],
-                "source_kind": "voice_generator",
-                "source_identifier_sha256": "e" * 64,
-            },
-            "official_preset": None,
-            "reference_asset_id": uuid4(),
-            "description_available": True,
-            "locked_at": None,
-        }
-    )
-
-    parsed = wire.VoiceProfileVersionResource.model_validate(generic)
-
-    assert parsed.activation_basis is wire.VoiceActivationBasis.GENERIC_VOICE_PACK_GENERATION
-
-
 def test_official_voice_selection_request_has_one_exact_target_shape() -> None:
     narrator = wire.OfficialVoiceSelectionRequest.model_validate(
         {
-            "preset_id": "onnx.Junhao",
+            "preset_id": "qwen.WarmFemale",
             "target_kind": "narrator",
             "character_id": None,
             "expected_settings_version": 0,
@@ -402,7 +375,7 @@ def test_official_voice_selection_request_has_one_exact_target_shape() -> None:
 
     character = wire.OfficialVoiceSelectionRequest.model_validate(
         {
-            "preset_id": "onnx.Arisa",
+            "preset_id": "qwen.ClearMale",
             "target_kind": "character",
             "character_id": CHARACTER_ID,
             "expected_settings_version": 3,
@@ -421,7 +394,7 @@ def test_official_voice_selection_request_has_one_exact_target_shape() -> None:
         )
     with pytest.raises(ValidationError, match="absent from the pinned"):
         wire.OfficialVoiceSelectionRequest.model_validate(
-            {**narrator.model_dump(mode="python"), "preset_id": "onnx.Unknown"}
+            {**narrator.model_dump(mode="python"), "preset_id": "qwen.Unknown"}
         )
 
     wrong_parent = locked_voice_version()
@@ -503,8 +476,6 @@ def test_casting_rule_resource_cannot_forge_target_shape() -> None:
         },
         "target": {
             "kind": "require_review",
-            "pool_id": None,
-            "slot_key": None,
             "profile_id": None,
             "version_id": None,
         },
@@ -515,8 +486,6 @@ def test_casting_rule_resource_cannot_forge_target_shape() -> None:
         wire.VoiceCastingTarget.model_validate(
             {
                 "kind": "require_review",
-                "pool_id": None,
-                "slot_key": None,
                 "profile_id": PROFILE_ID,
                 "version_id": VOICE_VERSION_ID,
             }
@@ -547,9 +516,9 @@ def test_media_links_never_expose_filesystem_or_supplier_urls() -> None:
 def test_voice_source_capability_mapping_cannot_open_no_go_source() -> None:
     base = {
         "source_type": "generated",
-        "capability": "voice_generator",
+        "capability": "voice_design",
         "available": False,
-        "reason_code": "VOICE_GENERATOR_NO_GO",
+        "reason_code": "QWEN_VOICE_DESIGN_NOT_RELEASED",
         "accepted_mime_types": [],
         "maximum_bytes": None,
     }
@@ -581,9 +550,9 @@ def test_overview_cache_cleanup_projection_cannot_exceed_global_gate() -> None:
         ),
         wire.VoiceSourceAvailability(
             source_type="generated",
-            capability="voice_generator",
+                capability="voice_design",
             available=False,
-            reason_code="VOICE_GENERATOR_NO_GO",
+                reason_code="QWEN_VOICE_DESIGN_NOT_RELEASED",
             accepted_mime_types=[],
             maximum_bytes=None,
         ),
@@ -591,10 +560,10 @@ def test_overview_cache_cleanup_projection_cannot_exceed_global_gate() -> None:
     runtime = wire.NarrationRuntimeStatus(
         technical_enabled=False,
         lifecycle_status="disabled",
-        sidecar_reachable=False,
+        provider_reachable=False,
         model_ready=False,
         product_visible=False,
-        protocol_version="moss-tts-sidecar/1.1",
+        protocol_version="qwen-tts-local-runtime/1",
         model_fingerprint_sha256=None,
         reason_code="RUNTIME_DISABLED",
     )
@@ -626,65 +595,13 @@ def test_product_visible_runtime_must_be_ready() -> None:
         wire.NarrationRuntimeStatus(
             technical_enabled=True,
             lifecycle_status="starting",
-            sidecar_reachable=True,
+            provider_reachable=True,
             model_ready=True,
             product_visible=True,
-            protocol_version="moss-tts-sidecar/1.1",
+            protocol_version="qwen-tts-local-runtime/1",
             model_fingerprint_sha256="d" * 64,
             reason_code=None,
         )
-
-
-def test_ready_generic_pool_requires_all_24_approved_slots() -> None:
-    slot = lambda index: {
-        "slot_key": f"slot-{index}",
-        "label": f"声音 {index}",
-        "category": "adult_female",
-        "state": "ready",
-        "voice_version_id": uuid4(),
-        "enabled": True,
-        "priority": index,
-        "reason_code": None,
-    }
-    pool = {
-        "contract_version": wire.NARRATION_SETTINGS_API_VERSION,
-        "novel_id": NOVEL_ID,
-        "pool_id": uuid4(),
-        "state": "ready",
-        "version": 1,
-        "required_slot_count": 24,
-        "ready_slot_count": 24,
-        "rights_approved_slot_count": 24,
-        "quality_approved_slot_count": 24,
-        "production_ready_slot_count": 24,
-        "slots": [slot(index) for index in range(24)],
-        "reason_codes": [],
-    }
-    assert wire.GenericVoicePoolResource.model_validate(pool).state is wire.GenericVoicePoolState.READY
-
-    with pytest.raises(ValidationError, match="ready pool requires 24"):
-        wire.GenericVoicePoolResource.model_validate(
-            {**pool, "production_ready_slot_count": 0}
-        )
-
-    with pytest.raises(ValidationError, match="enabled voice"):
-        wire.GenericVoicePoolResource.model_validate(
-            {
-                **pool,
-                "slots": [{**slot(0), "enabled": False}]
-                + [slot(index) for index in range(1, 24)],
-            }
-        )
-
-    missing = {
-        **pool,
-        "pool_id": None,
-        "state": "missing",
-        "version": 0,
-        "reason_codes": ["GENERIC_VOICE_ASSETS_UNAVAILABLE"],
-    }
-    with pytest.raises(ValidationError, match="missing pool cannot claim"):
-        wire.GenericVoicePoolResource.model_validate(missing)
 
 
 def test_cache_cleanup_result_cannot_claim_source_or_referenced_deletion() -> None:
@@ -764,6 +681,9 @@ def test_router_freezes_all_t2_paths_and_methods() -> None:
         ("PUT", "/novels/{novel_id}/narration-scope-overrides/{scope_kind}/{scope_id}"),
         ("POST", "/novels/{novel_id}/narration-cloud-consents"),
         ("DELETE", "/novels/{novel_id}/narration-cloud-consents/current"),
+        ("GET", "/novels/{novel_id}/narration-cloud-tts-consents/current"),
+        ("POST", "/novels/{novel_id}/narration-cloud-tts-consents"),
+        ("DELETE", "/novels/{novel_id}/narration-cloud-tts-consents/current"),
         ("GET", "/voice-presets"),
         ("POST", "/novels/{novel_id}/official-voice-previews"),
         ("POST", "/novels/{novel_id}/official-voice-selections"),
@@ -780,8 +700,6 @@ def test_router_freezes_all_t2_paths_and_methods() -> None:
         ("GET", "/novels/{novel_id}/character-voice-bindings"),
         ("GET", "/novels/{novel_id}/characters/{character_id}/voice-binding"),
         ("PUT", "/novels/{novel_id}/characters/{character_id}/voice-binding"),
-        ("GET", "/novels/{novel_id}/generic-voice-pools"),
-        ("GET", "/novels/{novel_id}/casting-rules"),
         ("GET", "/novels/{novel_id}/pronunciation-profile"),
         ("PUT", "/novels/{novel_id}/pronunciation-profile"),
         ("GET", "/novels/{novel_id}/narration-cache"),
@@ -888,6 +806,59 @@ def test_cloud_consent_routes_require_idempotency_and_exact_cas_target() -> None
         expected_version=1,
     )
     assert revoke_command.expected_version == 1
+
+
+def test_cloud_tts_consent_routes_are_separate_and_model_scoped() -> None:
+    consent_id = uuid4()
+    active = {
+        "consent_id": consent_id,
+        "version": 1,
+        "state": "active",
+        "purpose": "narration_tts_synthesis",
+        "data_scope": "narration_text_and_selected_voice_reference",
+        "notice_version": "narration-cloud-tts-consent/1",
+        "provider_id": "aliyun_qwen_audio_tts",
+        "model_id": "qwen-audio-3.0-tts-plus",
+        "confirmed_at": NOW,
+        "revoked_at": None,
+    }
+    backend = _FakeBackend(active)
+    create_body = {
+        "notice_version": "narration-cloud-tts-consent/1",
+        "data_scope": "narration_text_and_selected_voice_reference",
+        "provider_id": "aliyun_qwen_audio_tts",
+        "model_id": "qwen-audio-3.0-tts-plus",
+        "confirmed": True,
+    }
+    with client_for(backend) as client:
+        current = client.get(
+            f"/novels/{NOVEL_ID}/narration-cloud-tts-consents/current"
+        )
+        created = client.post(
+            f"/novels/{NOVEL_ID}/narration-cloud-tts-consents",
+            headers={"Idempotency-Key": "cloud-tts-consent-0001"},
+            json=create_body,
+        )
+        backend.result = {**active, "version": 2, "state": "revoked", "revoked_at": NOW}
+        revoked = client.request(
+            "DELETE",
+            f"/novels/{NOVEL_ID}/narration-cloud-tts-consents/current",
+            json={"consent_id": str(consent_id), "expected_version": 1},
+        )
+
+    assert current.status_code == 200
+    assert created.status_code == 201
+    assert revoked.status_code == 200
+    get_command, create_command, revoke_command = backend.commands
+    assert get_command.operation is settings_api.NarrationSettingsOperation.GET_CLOUD_TTS_CONSENT
+    assert create_command.idempotency_key == "cloud-tts-consent-0001"
+    assert create_command.payload == wire.CreateNarrationCloudTTSConsentRequest(
+        **create_body
+    )
+    assert revoke_command.payload == wire.RevokeNarrationCloudTTSConsentRequest(
+        consent_id=consent_id,
+        expected_version=1,
+    )
 
 
 def test_router_normalizes_request_validation_without_echoing_private_text() -> None:

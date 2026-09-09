@@ -22,6 +22,7 @@ import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
 import { navigateNovelSurface } from "./novel-surface-navigation";
 import { createEmbeddingConfigPage } from "./embedding";
+import { createTtsCloudConfigPage } from "./narration/cloud-config";
 import {
   CreationMethodClient,
   creationMethodCatalog,
@@ -35,6 +36,7 @@ const React = host.React;
 const h = React.createElement;
 const NovelCoverView = createNovelCoverView(React);
 const EmbeddingConfigPage = createEmbeddingConfigPage(React, host.antd);
+const TtsCloudConfigPage = createTtsCloudConfigPage(React, host.antd);
 const {
   Alert,
   Button,
@@ -72,8 +74,64 @@ const {
 
 
 const CREATION_DRAFT_KEY = "ai-novel-world-2026:creation-draft-key";
-type LibraryView = "center" | "private-library" | "embedding-settings";
+type LibraryView = "center" | "private-library" | "embedding-settings" | "tts-cloud-settings";
 type TemplateTab = "system" | "custom";
+
+
+type LocalTtsRuntimeStatus = {
+  state: "loading" | "ready" | "unavailable";
+  label: string;
+  detail?: string;
+};
+
+
+function TtsModelSettingsPage(props: { onBack: () => void }) {
+  const [localRuntimeStatus, setLocalRuntimeStatus] = React.useState({
+    state: "loading",
+    label: "正在检查本地模型…",
+  } as LocalTtsRuntimeStatus);
+
+  React.useEffect(() => {
+    let active = true;
+    void apiRequest<unknown>("/health").then((payload) => {
+      if (!active) return;
+      const root = payload && typeof payload === "object"
+        ? payload as Record<string, unknown>
+        : {};
+      const narration = root.narration && typeof root.narration === "object"
+        ? root.narration as Record<string, unknown>
+        : {};
+      const ready = narration.lifecycle_status === "ready"
+        && narration.product_requested === true
+        && narration.reason_code == null;
+      setLocalRuntimeStatus(ready
+        ? {
+            state: "ready",
+            label: "运行正常",
+            detail: "本地 Qwen3-TTS 已可供作品朗读选择，不消耗云端额度。",
+          }
+        : {
+            state: "unavailable",
+            label: "当前不可用",
+            detail: "本地模型当前未就绪；云端渠道配置仍可保存，但不会自动代替本地模型。",
+          });
+    }).catch(() => {
+      if (active) {
+        setLocalRuntimeStatus({
+          state: "unavailable",
+          label: "状态读取失败",
+          detail: "暂时无法读取本地模型状态，请稍后刷新或到作品朗读页检查。",
+        });
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  return h(TtsCloudConfigPage, {
+    onBack: props.onBack,
+    localRuntimeStatus,
+  });
+}
 
 
 const ASSET_META: Record<PrivateAssetType, { label: string; singular: string; placeholder: string }> = {
@@ -170,7 +228,11 @@ function workbenchUrl(novelId: string, section?: CreativeCenterWorkbenchSection)
 
 function initialLibraryView(): LibraryView {
   const view = new URLSearchParams(window.location.search).get("view");
-  return view === "private-library" || view === "embedding-settings" ? view : "center";
+  return view === "private-library"
+    || view === "embedding-settings"
+    || view === "tts-cloud-settings"
+    ? view
+    : "center";
 }
 
 
@@ -1594,6 +1656,9 @@ export function NovelLibraryPage() {
       ),
     );
   }
+  if (view === "tts-cloud-settings") {
+    return h(TtsModelSettingsPage, { onBack: () => changeView("center") });
+  }
 
   return h(
     "main",
@@ -1607,6 +1672,7 @@ export function NovelLibraryPage() {
         { className: "mb-center-actions", "aria-label": "创作中心功能" },
         h(CenterAction, { icon: DatabaseOutlined, label: "私有库", onClick: () => changeView("private-library") }),
         h(CenterAction, { icon: RobotOutlined, label: "向量模型接入", onClick: () => changeView("embedding-settings") }),
+        h(CenterAction, { icon: SoundOutlined, label: "语音模型接入", onClick: () => changeView("tts-cloud-settings") }),
       ),
       error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
       loading

@@ -39,6 +39,27 @@ def test_secret_store_encrypts_and_round_trips(tmp_path: Path) -> None:
     assert not record.exists()
 
 
+def test_secret_store_namespaces_cannot_read_each_other(tmp_path: Path) -> None:
+    root = tmp_path / "root.key"
+    records = tmp_path / "records"
+    root.write_bytes(os.urandom(32))
+    records.mkdir(mode=0o700)
+    root.chmod(0o600)
+    embedding = EmbeddingSecretStore(root_key_path=root, records_dir=records)
+    tts = EmbeddingSecretStore(
+        root_key_path=root,
+        records_dir=records,
+        namespace="tts-cloud",
+    )
+
+    stored = tts.put("tts-secret-value-1234")
+
+    assert stored.credential_ref.startswith("tts-cloud/")
+    assert tts.get(stored.credential_ref) == "tts-secret-value-1234"
+    with pytest.raises(EmbeddingSecretError, match="credential reference is invalid"):
+        embedding.get(stored.credential_ref)
+
+
 def test_secret_store_provision_is_private_and_idempotent(tmp_path: Path) -> None:
     root = tmp_path / "private" / "root.key"
     records = tmp_path / "private" / "records"

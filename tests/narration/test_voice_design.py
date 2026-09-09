@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.narration.character_voice_matching import (
+from backend.narration.voice_brief import (
     CharacterVoiceBrief,
     CharacterVoiceLanguage,
     CharacterVoicePresentation,

@@ -82,7 +82,7 @@ from tests.narration.test_domain_services import (
     _script_segments,
     _seed_document,
 )
-from tests.narration.test_foundation_integration import POSTPROCESS_FINGERPRINT
+POSTPROCESS_FINGERPRINT = "d" * 64
 
 
 ROOT = Path(__file__).resolve().parents[2]

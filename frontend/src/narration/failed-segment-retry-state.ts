@@ -1,7 +1,82 @@
 import type {
+  FailedNarrationSegmentRetryItem,
   FailedNarrationSegmentsProjection,
   RetryFailedNarrationSegmentsResponse,
 } from "./chapter-contracts";
+
+
+export const FAILED_SEGMENT_RETRY_BATCH_LIMIT = 100;
+
+
+export type FailedSegmentFailureGroup = "recoverable" | "audio-quality" | "blocked";
+
+
+export interface FailedSegmentRetrySummary {
+  readonly recoverableCount: number;
+  readonly audioQualityCount: number;
+  readonly blockedCount: number;
+  readonly retryableGroupCount: number;
+  readonly retryableSegmentCount: number;
+}
+
+
+const AUDIO_QUALITY_FAILURE_CODES = new Set([
+  "AUDIO_PUBLICATION_INVALID",
+  "AUDIO_VALIDATION_UNKNOWN",
+  "POSTPROCESS_DURATION_CHANGED",
+  "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+  "TTS_AUDIO_INVALID",
+  "WAV_CLIPPING_LIMIT_EXCEEDED",
+  "WAV_DURATION_DRIFT",
+  "WAV_DURATION_OUT_OF_BOUNDS",
+]);
+
+
+export function failedSegmentFailureGroup(
+  item: FailedNarrationSegmentRetryItem,
+): FailedSegmentFailureGroup {
+  if (AUDIO_QUALITY_FAILURE_CODES.has(item.failure_code)) return "audio-quality";
+  return item.retryable ? "recoverable" : "blocked";
+}
+
+
+function fanoutSignature(item: FailedNarrationSegmentRetryItem): string {
+  return [...item.fanout_segment_ids].sort().join(",");
+}
+
+
+export function retryableFailedSegmentRepresentatives(
+  items: readonly FailedNarrationSegmentRetryItem[],
+): readonly FailedNarrationSegmentRetryItem[] {
+  const seenJobIds = new Set<string>();
+  const seenFanouts = new Set<string>();
+  const representatives: FailedNarrationSegmentRetryItem[] = [];
+  [...items].sort((left, right) => left.ordinal - right.ordinal).forEach((item) => {
+    if (!item.retryable) return;
+    const fanout = fanoutSignature(item);
+    if (seenJobIds.has(item.job_id) || seenFanouts.has(fanout)) return;
+    seenJobIds.add(item.job_id);
+    seenFanouts.add(fanout);
+    representatives.push(item);
+  });
+  return Object.freeze(representatives);
+}
+
+
+export function summarizeFailedSegments(
+  items: readonly FailedNarrationSegmentRetryItem[],
+): FailedSegmentRetrySummary {
+  const counts = { recoverable: 0, "audio-quality": 0, blocked: 0 };
+  items.forEach((item) => { counts[failedSegmentFailureGroup(item)] += 1; });
+  const representatives = retryableFailedSegmentRepresentatives(items);
+  return Object.freeze({
+    recoverableCount: counts.recoverable,
+    audioQualityCount: counts["audio-quality"],
+    blockedCount: counts.blocked,
+    retryableGroupCount: representatives.length,
+    retryableSegmentCount: new Set(representatives.flatMap((item) => item.fanout_segment_ids)).size,
+  });
+}
 
 
 export interface FailedSegmentRetryScope {
@@ -60,6 +135,7 @@ export interface FailedSegmentRetryControllerDependencies {
 export interface FailedSegmentRetryController {
   load(scope: FailedSegmentRetryScope): Promise<void>;
   retrySegment(segmentId: string): Promise<void>;
+  retryAll(): Promise<void>;
   reset(reason?: string): void;
   readSnapshot(): FailedSegmentRetrySnapshot;
   dispose(): void;
@@ -247,6 +323,104 @@ implements FailedSegmentRetryController {
           scope.editionId,
           controller.signal,
         );
+        if (projectionMatchesScope(candidate, scope)) fresh = candidate;
+      } catch {
+        fresh = null;
+      }
+      if (!this.isCurrent(sequence, controller)) return;
+      this.activeAbort = null;
+      this.publish({
+        phase: fresh ? "ready" : "error",
+        scope,
+        projection: fresh,
+        busySegmentIds: [],
+        statusMessage: null,
+        errorMessage: this.dependencies.formatFailure(reason),
+      });
+    }
+  }
+
+  async retryAll(): Promise<void> {
+    this.assertActive();
+    const current = this.snapshot;
+    const scope = current.scope;
+    let projection = current.projection;
+    if (current.phase !== "ready" || !scope || !projection) return;
+    const initial = retryableFailedSegmentRepresentatives(projection.items);
+    if (initial.length === 0) return;
+
+    const pendingJobs = new Set(initial.map((item) => item.job_id));
+    const pendingFanouts = new Set(initial.map(fanoutSignature));
+    const sequence = this.beginOperation("failed-segment bulk retry superseded");
+    const controller = this.requireActiveAbort();
+    let acceptedGroupCount = 0;
+    try {
+      while (pendingJobs.size > 0 || pendingFanouts.size > 0) {
+        const remaining = retryableFailedSegmentRepresentatives(projection.items).filter(
+          (item) => pendingJobs.has(item.job_id) || pendingFanouts.has(fanoutSignature(item)),
+        );
+        if (remaining.length === 0) break;
+        const batch = remaining.slice(0, FAILED_SEGMENT_RETRY_BATCH_LIMIT);
+        const busySegmentIds = [...new Set(batch.flatMap((item) => item.fanout_segment_ids))];
+        this.publish({
+          phase: "submitting",
+          scope,
+          projection,
+          busySegmentIds,
+          statusMessage: `正在恢复第 ${acceptedGroupCount + 1}–${acceptedGroupCount + batch.length} 组失败音频…`,
+          errorMessage: null,
+        });
+        const response = await this.dependencies.retry(
+          scope.editionId,
+          {
+            segment_ids: batch.map((item) => item.segment_id),
+            expected_request_version: projection.request_version,
+            expected_manifest_revision: projection.manifest_revision,
+          },
+          this.dependencies.createIdempotencyKey(),
+          controller.signal,
+        );
+        if (!this.isCurrent(sequence, controller)) return;
+        if (response.request_id !== projection.request_id) {
+          throw new Error("失败句段批量重试响应与当前请求不一致。");
+        }
+        const acceptedIds = new Set(response.accepted_segment_ids);
+        if (
+          acceptedIds.size !== batch.length
+          || batch.some((item) => !acceptedIds.has(item.segment_id))
+        ) {
+          throw new Error("失败句段批量重试响应未完整接受当前批次。");
+        }
+        batch.forEach((item) => {
+          pendingJobs.delete(item.job_id);
+          pendingFanouts.delete(fanoutSignature(item));
+        });
+        acceptedGroupCount += batch.length;
+        await this.dependencies.afterAccepted(response, scope, controller.signal);
+        if (!this.isCurrent(sequence, controller)) return;
+        const fresh = await this.dependencies.getProjection(scope.editionId, controller.signal);
+        if (!this.isCurrent(sequence, controller)) return;
+        if (!projectionMatchesScope(fresh, scope)) {
+          throw new Error("批量重试后的失败句段投影与当前章节朗读版本不一致。");
+        }
+        projection = fresh;
+      }
+      this.activeAbort = null;
+      this.publish({
+        phase: "ready",
+        scope,
+        projection,
+        busySegmentIds: [],
+        statusMessage: projection.items.length > 0
+          ? `批量恢复已完成，仍有 ${projection.items.length} 个失败句段需要处理。`
+          : "全部可重试句段已经恢复，可继续播放。",
+        errorMessage: null,
+      });
+    } catch (reason) {
+      if (!this.isCurrent(sequence, controller) || isAbort(reason)) return;
+      let fresh: FailedNarrationSegmentsProjection | null = null;
+      try {
+        const candidate = await this.dependencies.getProjection(scope.editionId, controller.signal);
         if (projectionMatchesScope(candidate, scope)) fresh = candidate;
       } catch {
         fresh = null;

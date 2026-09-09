@@ -1,8 +1,9 @@
 """Deterministic, database-free validation and seam-safe PCM processing.
 
-MOSS-TTS-Nano returns a bounded 48 kHz stereo PCM WAV.  This module validates
-the complete container and samples before applying one frozen gain/fade policy.
-It performs no database, filesystem, subprocess, or network operation.
+Qwen TTS Provider output is normalized at this boundary to the existing
+48 kHz stereo media contract.  The module validates complete containers and
+samples before applying one frozen gain/fade policy.  It performs no database,
+filesystem, subprocess, or network operation.
 """
 
 from __future__ import annotations
@@ -19,11 +20,12 @@ import wave
 
 
 AUDIO_PIPELINE_VERSION = "narration-audio-pipeline/2"
-SHORT_CHINESE_DURATION_POLICY_VERSION = "nano-short-chinese-duration/2"
+TTS_AUDIO_NORMALIZATION_VERSION = "qwen-tts-audio-normalization/1"
+SHORT_CHINESE_DURATION_POLICY_VERSION = "qwen-tts-short-chinese-duration/1"
 
 # ITU-R BS.1770 K-weighting coefficients for the pipeline's fixed 48 kHz rate.
 # Keeping them local and frozen avoids adding a native DSP dependency to the
-# Sidecar while still measuring programme loudness instead of raw PCM energy.
+# Provider adapter while still measuring programme loudness instead of raw PCM energy.
 _K_WEIGHTING_SHELF_B = (
     1.53512485958697,
     -2.69169618940638,
@@ -67,6 +69,8 @@ def audio_validation_failure_evidence(error: BaseException) -> dict[str, object]
         "synthesis WAV must contain uncompressed PCM": "WAV_NOT_PCM",
         "synthesis WAV container is corrupt": "WAV_CONTAINER_CORRUPT",
         "synthesis WAV must be 48 kHz stereo signed 16-bit PCM": "WAV_FORMAT_MISMATCH",
+        "synthesis WAV metadata differs from the Provider result": "WAV_METADATA_MISMATCH",
+        "synthesis WAV Provider format is unsupported": "WAV_FORMAT_MISMATCH",
         "synthesis WAV PCM payload is empty or truncated": "WAV_PAYLOAD_EMPTY_OR_TRUNCATED",
         "synthesis WAV frame count differs from its payload": "WAV_FRAME_COUNT_MISMATCH",
         "synthesis WAV duration is outside segment bounds": "WAV_DURATION_OUT_OF_BOUNDS",
@@ -86,7 +90,7 @@ def audio_validation_failure_evidence(error: BaseException) -> dict[str, object]
 
 @dataclass(frozen=True, slots=True)
 class ShortChineseDurationPolicy:
-    """Conservative duration ceiling for short, Chinese-only Nano inputs.
+    """Conservative duration ceiling for short Chinese TTS outputs.
 
     The fixed onset allowance avoids treating a short pause or ordinary model
     startup prosody as a failure.  The per-codepoint allowance is deliberately
@@ -499,7 +503,7 @@ def validate_synthesis_duration_for_text(
     *,
     policy: ShortChineseDurationPolicy = DEFAULT_SHORT_CHINESE_DURATION_POLICY,
 ) -> None:
-    """Fail closed when a short Chinese Nano result has implausible duration."""
+    """Fail closed when a short Chinese TTS result has implausible duration."""
 
     if type(duration_ms) is not int or duration_ms <= 0:
         raise AudioPipelineError("synthesis duration must be a positive exact integer")
@@ -526,6 +530,100 @@ def _encode_pcm_wav(
             encoded.byteswap()
         writer.writeframes(encoded.tobytes())
     return output.getvalue()
+
+
+def _normalize_provider_pcm_wav(
+    wav_bytes: bytes,
+    *,
+    declared_sample_rate_hz: int,
+    declared_channels: int,
+    declared_sample_width_bytes: int,
+    policy: AudioPipelinePolicy,
+) -> bytes:
+    """Normalize the two frozen Qwen Provider WAV shapes to the media shape."""
+
+    policy.validate()
+    declared = (
+        declared_sample_rate_hz,
+        declared_channels,
+        declared_sample_width_bytes,
+    )
+    if any(type(value) is not int or value <= 0 for value in declared):
+        raise AudioFormatError("synthesis WAV metadata differs from the Provider result")
+    if type(wav_bytes) is not bytes or not wav_bytes:
+        raise AudioFormatError("synthesis WAV is empty or not bytes")
+    if len(wav_bytes) > policy.maximum_input_bytes:
+        raise AudioFormatError("synthesis WAV exceeds the bounded input size")
+    try:
+        with wave.open(BytesIO(wav_bytes), "rb") as reader:
+            if reader.getcomptype() != "NONE":
+                raise AudioFormatError("synthesis WAV must contain uncompressed PCM")
+            actual = (
+                reader.getframerate(),
+                reader.getnchannels(),
+                reader.getsampwidth(),
+            )
+            declared_frames = reader.getnframes()
+            frames = reader.readframes(declared_frames + 1)
+    except AudioPipelineError:
+        raise
+    except (EOFError, ValueError, wave.Error) as error:
+        raise AudioFormatError("synthesis WAV container is corrupt") from error
+    if actual != declared:
+        raise AudioFormatError("synthesis WAV metadata differs from the Provider result")
+    if actual == (policy.sample_rate_hz, policy.channels, policy.sample_width_bytes):
+        return wav_bytes
+    if actual != (24_000, 1, 2) or policy.sample_rate_hz != 48_000 or policy.channels != 2:
+        raise AudioFormatError("synthesis WAV Provider format is unsupported")
+    if not frames or len(frames) % 2:
+        raise AudioFormatError("synthesis WAV PCM payload is empty or truncated")
+    samples = array("h")
+    samples.frombytes(frames)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if len(samples) != declared_frames:
+        raise AudioFormatError("synthesis WAV frame count differs from its payload")
+
+    # Linear 2x interpolation preserves duration and avoids a new native DSP
+    # dependency.  Stereo duplication keeps the established media/transcoding
+    # contract stable while the Provider boundary remains 24 kHz mono.
+    normalized = array("h")
+    for index, sample in enumerate(samples):
+        following = samples[index + 1] if index + 1 < len(samples) else sample
+        midpoint = round((sample + following) / 2)
+        normalized.extend((sample, sample, midpoint, midpoint))
+    return _encode_pcm_wav(
+        normalized,
+        sample_rate_hz=policy.sample_rate_hz,
+        channels=policy.channels,
+    )
+
+
+def process_provider_synthesis_wav(
+    wav_bytes: bytes,
+    *,
+    declared_sample_rate_hz: int,
+    declared_channels: int,
+    declared_sample_width_bytes: int,
+    policy: AudioPipelinePolicy = DEFAULT_AUDIO_PIPELINE_POLICY,
+    expected_duration_ms: int | None = None,
+    spoken_text: str | None = None,
+) -> ProcessedPcmWav:
+    """Validate Provider metadata, normalize Qwen WAV, and run the media policy."""
+
+    normalized = _normalize_provider_pcm_wav(
+        wav_bytes,
+        declared_sample_rate_hz=declared_sample_rate_hz,
+        declared_channels=declared_channels,
+        declared_sample_width_bytes=declared_sample_width_bytes,
+        policy=policy,
+    )
+    return process_synthesis_wav(
+        normalized,
+        policy=policy,
+        expected_duration_ms=expected_duration_ms,
+        spoken_text=spoken_text,
+    )
 
 
 def process_synthesis_wav(
@@ -614,11 +712,13 @@ __all__ = [
     "DEFAULT_SHORT_CHINESE_DURATION_POLICY",
     "ProcessedPcmWav",
     "SHORT_CHINESE_DURATION_POLICY_VERSION",
+    "TTS_AUDIO_NORMALIZATION_VERSION",
     "ShortChineseDurationPolicy",
     "audio_processing_fingerprint",
     "audio_validation_failure_evidence",
     "inspect_pcm_wav",
     "process_synthesis_wav",
+    "process_provider_synthesis_wav",
     "short_chinese_duration_limit_ms",
     "validate_synthesis_duration_for_text",
 ]

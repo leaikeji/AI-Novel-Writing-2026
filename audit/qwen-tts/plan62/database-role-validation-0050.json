@@ -1,0 +1,48 @@
+{
+  "acl": {
+    "api_any_raw_dml": false,
+    "api_protected_raw_dml": false,
+    "future_objects_fail_closed": true,
+    "public_routine_execute": false,
+    "worker_any_raw_dml": false,
+    "worker_protected_raw_dml": false
+  },
+  "admin_role": "ai_novel",
+  "alembic_head": "20260909_0050",
+  "authenticated_roles": {
+    "ai_novel_api": true,
+    "ai_novel_migrator": true,
+    "ai_novel_worker": true
+  },
+  "database": "ai_novel_world_2026",
+  "maintenance_step": "validate-20260909_0050",
+  "managed_roles": [
+    "ai_novel_schema_owner",
+    "ai_novel_migrator",
+    "ai_novel_api",
+    "ai_novel_worker"
+  ],
+  "ownership": {
+    "application_relations": "ai_novel_schema_owner",
+    "application_routines": "ai_novel_schema_owner",
+    "application_types": "ai_novel_schema_owner",
+    "database": "ai_novel_schema_owner",
+    "extension_members_external": true,
+    "public_schema": "ai_novel_schema_owner"
+  },
+  "production_role_switch": "HOLD",
+  "protected_table_count": 59,
+  "public_relation_count": 109,
+  "public_routine_count": 215,
+  "runtime_passfiles": {
+    "bootstrap_requires_independent_mountpoints": true,
+    "distinct_paths": true,
+    "password_bytes": 32,
+    "regular_mode_0600": true,
+    "single_link": true
+  },
+  "schema_version": "t1-g-database-roles/1",
+  "security_definer_count": 0,
+  "status": "PASS",
+  "worker_business_procedures_present": false
+}

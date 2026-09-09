@@ -27,7 +27,7 @@ export {
 } from "./styles/t2-d";
 
 
-type PrivateVoiceSourceType = Exclude<VoiceSourceType, "preset">;
+type PrivateVoiceSourceType = Extract<VoiceSourceType, "uploaded">;
 
 
 const SOURCE_DEFINITIONS: Readonly<Record<PrivateVoiceSourceType, {
@@ -40,14 +40,9 @@ const SOURCE_DEFINITIONS: Readonly<Record<PrivateVoiceSourceType, {
     label: "上传参考录音",
     description: "仅处理作者有权用于声音克隆的 WAV 或 FLAC 私人录音。",
   },
-  generated: {
-    capability: "voice_generator",
-    label: "文字描述生成",
-    description: "需要独立 VoiceGenerator 能力；Nano 本身不提供文字造音色。",
-  },
 });
 
-const SOURCE_ORDER: readonly PrivateVoiceSourceType[] = ["uploaded", "generated"];
+const SOURCE_ORDER: readonly PrivateVoiceSourceType[] = ["uploaded"];
 
 export type VoiceSourceWorkflowStatus =
   | "idle"
@@ -189,8 +184,7 @@ export function createVoiceSourcePanelModel(
         && selectedVersion.official_preset !== null
         && selectedVersion.official_preset.preset_id === selectedVersion.preset_key
       : selectedVersion.source_type === "uploaded"
-        ? selectedVersion.rights.source_kind === "user_upload"
-        : selectedVersion.rights.source_kind === "voice_generator";
+        && selectedVersion.rights.source_kind === "user_upload";
   const profileCanChange = profile !== null
     && !["archived", "unavailable"].includes(profile.status);
   const selectedSourceCard = selectedVersion === null

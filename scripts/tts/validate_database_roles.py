@@ -35,6 +35,8 @@ SUPPORTED_HEADS = (
     "20260902_0038",
     "20260902_0039",
     "20260903_0040",
+    "20260909_0049",
+    "20260909_0050",
 )
 VALIDATION_STEPS = MappingProxyType(
     {
@@ -45,6 +47,8 @@ VALIDATION_STEPS = MappingProxyType(
         "validate-20260902_0038": "20260902_0038",
         "validate-20260902_0039": "20260902_0039",
         "validate-20260903_0040": "20260903_0040",
+        "validate-20260909_0049": "20260909_0049",
+        "validate-20260909_0050": "20260909_0050",
     }
 )
 
@@ -145,6 +149,27 @@ _PROTECTED_TABLES_0036 = tuple(
 _PROTECTED_TABLES_0040 = tuple(
     sorted((*_PROTECTED_TABLES_0036, *_PROTECTED_TABLES_ADDED_BY_0040))
 )
+_RETIRED_TTS_TABLES_0049 = frozenset(
+    {
+        "character_cast_plan_commands",
+        "character_cast_plan_items",
+        "generic_voice_design_drafts",
+        "generic_voice_generation_commands",
+        "generic_voice_pack_version_slots",
+        "generic_voice_pack_versions",
+        "generic_voice_pools",
+        "generic_voice_slots",
+        "nano_voice_experiment_commands",
+        "voice_design_drafts",
+        "voice_generator_commands",
+        "voice_generator_run_evidence",
+        "voice_preparation_commands",
+        "voice_preparation_items",
+    }
+)
+_PROTECTED_TABLES_0049 = tuple(
+    table for table in _PROTECTED_TABLES_0040 if table not in _RETIRED_TTS_TABLES_0049
+)
 
 PROTECTED_TABLES_BY_HEAD = MappingProxyType(
     {
@@ -155,9 +180,11 @@ PROTECTED_TABLES_BY_HEAD = MappingProxyType(
         "20260902_0038": _PROTECTED_TABLES_0036,
         "20260902_0039": _PROTECTED_TABLES_0036,
         "20260903_0040": _PROTECTED_TABLES_0040,
+        "20260909_0049": _PROTECTED_TABLES_0049,
+        "20260909_0050": _PROTECTED_TABLES_0049,
     }
 )
-CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260903_0040"]
+CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260909_0050"]
 
 # These character-domain tables are not part of TTS authority. Keeping the
 # reviewed reasons next to the prefix audit makes a future character/voice
@@ -178,7 +205,6 @@ _TTS_AUTHORITY_PREFIXES = (
     "background_",
     "character_",
     "document_narration_",
-    "generic_voice_",
     "media_",
     "model_run_",
     "nano_",
@@ -193,8 +219,6 @@ _TTS_AUTHORITY_EXACT_TABLES = frozenset(
         "anonymous_speakers",
         "asset_tombstones",
         "document_narration_state",
-        "generic_voice_pools",
-        "generic_voice_slots",
         "model_run_records",
         "novel_narration_settings",
         "pronunciation_entries",

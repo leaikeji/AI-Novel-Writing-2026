@@ -2,7 +2,7 @@
 
 The caller owns one short database transaction.  This module only resolves
 authoritative ready-cache hits, idempotently enqueues cache misses, and creates
-the pending render rows required by workers.  It never calls Nano, FFmpeg, the
+the pending render rows required by workers.  It never calls a TTS Provider, FFmpeg, the
 filesystem, or a network service.
 """
 
@@ -48,7 +48,7 @@ from .services import (
 
 
 SEGMENT_RENDER_JOB_KIND = "narration.segment_render"
-SEGMENT_RENDER_RESOURCE_CLASS = "moss-nano"
+SEGMENT_RENDER_RESOURCE_CLASS = "qwen-tts"
 
 
 class RenderJobQueue(Protocol):

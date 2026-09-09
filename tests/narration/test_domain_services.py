@@ -67,14 +67,12 @@ from backend.narration.renders import (
     CreateRender,
     LEGACY_RENDER_CANONICAL_INPUT_VERSION,
     LEGACY_RENDER_CANONICAL_INPUT_V2_VERSION,
-    SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION,
     compute_render_fingerprint,
     create_or_reuse_render,
     derive_render_identity,
     publish_render_ready,
     render_job_input_hash,
 )
-from backend.narration import synthesis_policy
 from backend.narration.requests import (
     CreateNarrationRequest,
     RequestSource,
@@ -209,7 +207,7 @@ class MemoryNarrationStore:
             or attempt.lease_generation != job_fence.lease_generation
             or type(resource_fence) is not ResourceFence
             or resource_fence != self.resource_fences.get(job.id)
-            or resource_fence.resource_key != "moss-nano:inference"
+            or resource_fence.resource_key != "qwen-tts:inference"
             or attempt.completed_at is not None
             or job.state != "running"
             or job.request_id != request_id
@@ -515,7 +513,7 @@ def _approved_foundation(
     frozen_segments = _script_segments()
     issues = (
         ReviewIssue(
-            code="W_GENERIC_VOICE_FALLBACK",
+            code="W_MANUAL_OVERRIDE_INHERITED",
             severity=ReviewIssueSeverity.WARNING,
             evidence_digest=SHA_C,
             segment_id=frozen_segments[0].segment_id,
@@ -754,7 +752,7 @@ def _publication_context(
             fence=resource_fence,
             lease_until=lease_until,
         ),
-        resource_class="moss-nano",
+        resource_class="qwen-tts",
         checked_at=NOW,
         _session=session,
         _transaction=transaction,
@@ -781,7 +779,7 @@ def _seed_render_job(
             render_fingerprint=edition_segment.render_fingerprint,
         ),
         idempotency_key=f"render-job-{marker}-{uuid4()}",
-        resource_class="moss-nano",
+        resource_class="qwen-tts",
         base_priority=0,
         state="running",
         max_attempts=3,
@@ -802,7 +800,7 @@ def _seed_render_job(
     store.add(job)
     store.add(attempt)
     resource_fence = ResourceFence(
-        resource_key="moss-nano:inference",
+        resource_key="qwen-tts:inference",
         lease_owner="worker-1",
         lease_token=uuid4(),
         lease_generation=marker + 1,
@@ -1020,138 +1018,6 @@ def test_render_input_v3_reuses_audio_across_segment_identity_and_timeline_chang
     segment.spoken_text += "不同"
     changed_fingerprint, _changed_payload = derive_render_identity(store, **identity)
     assert changed_fingerprint != first_fingerprint
-
-
-def test_short_attribution_policy_uses_v4_without_invalidating_normal_v3(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = MemoryNarrationStore()
-    novel, _document, _revision, _request, edition, segments, _renders, voice, _rights = (
-        _edition_with_ready_renders(store)
-    )
-    segment = segments[0]
-    voice.preset_key = "onnx.Zhiming"
-    voice.seed = 0
-    voice.parameters_json = {"sample_mode": "fixed", "max_new_frames": 375}
-    identity = {
-        "novel_id": novel.id,
-        "segment": segment,
-        "voice_version_id": voice.id,
-        "pronunciation_profile_id": edition.pronunciation_profile_id,
-        "tts_fingerprint": edition.tts_fingerprint,
-        "tokenizer_fingerprint": edition.tokenizer_fingerprint,
-        "normalizer_fingerprint": edition.normalizer_fingerprint,
-        "postprocess_fingerprint": edition.postprocess_fingerprint,
-        "digest_key": TEST_DIGEST_KEY,
-    }
-
-    segment.spoken_text = "林晚说道："
-    monkeypatch.setattr(
-        synthesis_policy,
-        "ACTIVE_SHORT_ATTRIBUTION_STRATEGY",
-        "disabled",
-    )
-    old_fingerprint, old_payload = derive_render_identity(store, **identity)
-    assert old_payload["schema_version"] == "narration-render-input/3"
-
-    monkeypatch.setattr(
-        synthesis_policy,
-        "ACTIVE_SHORT_ATTRIBUTION_STRATEGY",
-        "fixed_seed_1",
-    )
-    fixed_fingerprint, fixed_payload = derive_render_identity(store, **identity)
-
-    assert fixed_fingerprint != old_fingerprint
-    assert fixed_payload["schema_version"] == SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION
-    assert fixed_payload["deterministic_seed"] == 1
-    assert fixed_payload["synthesis_style_and_parameters"][
-        "effective_synthesis_policy"
-    ]["strategy"] == "fixed_seed_1"
-    assert derive_render_identity(
-        store,
-        **identity,
-        canonical_input_version="narration-render-input/3",
-    ) == (old_fingerprint, old_payload)
-
-    segment.spoken_text = "沈川说道。"
-    period_fingerprint, period_payload = derive_render_identity(store, **identity)
-    assert period_fingerprint not in {old_fingerprint, fixed_fingerprint}
-    assert period_payload["schema_version"] == (
-        SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION
-    )
-    assert period_payload["synthesis_style_and_parameters"][
-        "effective_synthesis_policy"
-    ]["trigger_kind"] == "zh_narrator_said_period"
-
-    segment.spoken_text = "站台上的灯忽然闪了一次，四周仍然没有人影。"
-    active_normal = derive_render_identity(store, **identity)
-    monkeypatch.setattr(
-        synthesis_policy,
-        "ACTIVE_SHORT_ATTRIBUTION_STRATEGY",
-        "disabled",
-    )
-    disabled_normal = derive_render_identity(store, **identity)
-    assert active_normal == disabled_normal
-    assert active_normal[1]["schema_version"] == "narration-render-input/3"
-
-
-def test_historical_v3_short_render_is_readable_but_cannot_be_resynthesized(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = MemoryNarrationStore()
-    novel, _document, _revision, request, edition, segments, renders, voice, _rights = (
-        _edition_with_ready_renders(store)
-    )
-    segment = segments[0]
-    edition_segment = store.find_all(
-        NarrationEditionSegment, edition_id=edition.id, order_by=("ordinal",)
-    )[0]
-    voice.preset_key = "onnx.Zhiming"
-    voice.seed = 0
-    voice.parameters_json = {"sample_mode": "fixed", "max_new_frames": 375}
-    segment.spoken_text = "沈川说道："
-    old_fingerprint, old_payload = derive_render_identity(
-        store,
-        novel_id=novel.id,
-        segment=segment,
-        voice_version_id=voice.id,
-        pronunciation_profile_id=edition.pronunciation_profile_id,
-        tts_fingerprint=edition.tts_fingerprint,
-        tokenizer_fingerprint=edition.tokenizer_fingerprint,
-        normalizer_fingerprint=edition.normalizer_fingerprint,
-        postprocess_fingerprint=edition.postprocess_fingerprint,
-        canonical_input_version="narration-render-input/3",
-        digest_key=TEST_DIGEST_KEY,
-    )
-    edition_segment.render_fingerprint = old_fingerprint
-    renders[0].render_fingerprint = old_fingerprint
-    renders[0].canonical_input_json = old_payload
-    monkeypatch.setattr(
-        synthesis_policy,
-        "ACTIVE_SHORT_ATTRIBUTION_STRATEGY",
-        "fixed_seed_1",
-    )
-    command = CreateRender(
-        edition_segment_id=edition_segment.id,
-        digest_keyring=TEST_DIGEST_KEYRING,
-    )
-
-    assert compute_render_fingerprint(store, command) == old_fingerprint
-    cached, reused = create_or_reuse_render(store, command)
-    assert cached is renders[0] and reused is True
-
-    store.rows[NarrationSegmentRender].remove(renders[0])
-    job, _context = _seed_render_job(
-        store,
-        request=request,
-        marker=221,
-        edition_segment=edition_segment,
-    )
-    with pytest.raises(InvalidNarrationState, match="cannot be newly synthesized"):
-        create_or_reuse_render(
-            store,
-            replace(command, source_job_id=job.id),
-        )
 
 
 def test_legacy_render_input_v1_remains_reproducible_without_cross_version_reuse() -> None:

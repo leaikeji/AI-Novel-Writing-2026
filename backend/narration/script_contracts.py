@@ -109,7 +109,6 @@ class SpeakerKind(str, Enum):
 class CastingTargetKind(str, Enum):
     CHARACTER_BINDING = "character_binding"
     ANONYMOUS_BINDING = "anonymous_binding"
-    GENERIC_SLOT = "generic_slot"
     PROFILE = "profile"
 
 
@@ -590,14 +589,6 @@ class CastingTargetRef:
                 True,
                 False,
                 False,
-                False,
-            ),
-            CastingTargetKind.GENERIC_SLOT: (
-                False,
-                False,
-                False,
-                True,
-                True,
                 False,
             ),
             CastingTargetKind.PROFILE: (

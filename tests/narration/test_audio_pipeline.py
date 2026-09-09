@@ -19,6 +19,7 @@ from backend.narration.audio_pipeline import (
     AudioQualityError,
     ShortChineseDurationPolicy,
     inspect_pcm_wav,
+    process_provider_synthesis_wav,
     process_synthesis_wav,
     short_chinese_duration_limit_ms,
 )
@@ -147,6 +148,44 @@ def test_pcm_pipeline_rejects_large_duration_drift() -> None:
     payload = _wav_bytes(duration_ms=500)
     with pytest.raises(AudioQualityError, match="duration drift"):
         inspect_pcm_wav(payload, expected_duration_ms=900)
+
+
+def test_qwen_provider_pcm_is_normalized_to_existing_media_contract() -> None:
+    source = _wav_bytes(sample_rate=24_000, channels=1)
+
+    processed = process_provider_synthesis_wav(
+        source,
+        declared_sample_rate_hz=24_000,
+        declared_channels=1,
+        declared_sample_width_bytes=2,
+        expected_duration_ms=500,
+    )
+
+    assert processed.duration_ms == 500
+    assert processed.sample_rate_hz == 48_000
+    assert processed.channels == 2
+    assert processed.sample_width_bytes == 2
+    assert _edge_samples(processed.wav_bytes) == ((0, 0), (0, 0))
+
+
+def test_qwen_provider_pcm_rejects_declared_metadata_mismatch() -> None:
+    with pytest.raises(AudioFormatError, match="metadata differs"):
+        process_provider_synthesis_wav(
+            _wav_bytes(sample_rate=24_000, channels=1),
+            declared_sample_rate_hz=48_000,
+            declared_channels=1,
+            declared_sample_width_bytes=2,
+        )
+
+
+def test_qwen_provider_pcm_rejects_unapproved_audio_shape() -> None:
+    with pytest.raises(AudioFormatError, match="Provider format is unsupported"):
+        process_provider_synthesis_wav(
+            _wav_bytes(sample_rate=44_100, channels=1),
+            declared_sample_rate_hz=44_100,
+            declared_channels=1,
+            declared_sample_width_bytes=2,
+        )
 
 
 @pytest.mark.parametrize(

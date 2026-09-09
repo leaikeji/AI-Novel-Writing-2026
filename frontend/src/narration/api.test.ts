@@ -5,6 +5,7 @@ import {
   NarrationApiError,
   buildUploadedVoiceVersionFormData,
   createNarrationCloudConsent,
+  createNarrationCloudTTSConsent,
   createOfficialVoicePreview,
   createPresetVoiceVersion,
   createNarrationWorkflow,
@@ -15,6 +16,7 @@ import {
   getNarrationEdition,
   getNarrationEditionVoiceIdentities,
   getNarrationSettings,
+  getNarrationCloudTTSConsent,
   getNarrationWorkflow,
   listOfficialVoicePresets,
   selectOfficialVoice,
@@ -23,6 +25,7 @@ import {
   putNarrationSettings,
   putNarrationPlaybackPreferences,
   revokeNarrationCloudConsent,
+  revokeNarrationCloudTTSConsent,
   retryFailedNarrationSegments,
   switchNarrationEdition,
 } from "./api";
@@ -53,37 +56,35 @@ function officialCatalog(
   evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = OFFICIAL_PRESET_EVIDENCE,
 ) {
   return {
-    schema_version: "moss-tts-official-preset-catalog/2.0",
-    items: evidenceRows.map((evidence, index) => {
-      const presetLanguage = index < 6 ? "zh-CN" : index < 11 ? "en" : "ja-JP";
+    schema_version: "qwen-tts-preset-catalog/1",
+    items: evidenceRows.map((evidence) => {
+      const female = evidence.presetId === "qwen.WarmFemale";
       return {
         preset_id: evidence.presetId,
-        display_name: evidence.manifestVoice,
-        group: "Official",
-        language: presetLanguage,
+        display_name: female ? "温暖女声" : "明亮男声",
+        group: female ? "中文女声" : "中文男声",
+        language: "zh-CN",
         local_use_status: "available",
         commercial_distribution_status: "not_evaluated",
-        validation_tier: ["Junhao", "Zhiming", "Xiaoyu"].includes(evidence.manifestVoice)
-          ? "canonical_chapter_verified"
-          : "pinned_catalog_unreviewed",
-        language_scope: presetLanguage,
+        validation_tier: "canonical_chapter_verified",
+        language_scope: "zh-CN",
         selectable_now: true,
-        previewable_now: true,
+        previewable_now: false,
         renderable_existing: true,
         usage_notice: "private_local_writing_tool",
         provenance: {
-          schema_version: "moss-tts-official-preset-provenance/1.0",
-          repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
-          revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-          manifest_path: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
-          manifest_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestSha256,
+          schema_version: "qwen-tts-preset-provenance/1",
+          catalog_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
           preset_id: evidence.presetId,
-          manifest_voice: evidence.manifestVoice,
-          prompt_codes_sha256: evidence.promptCodesSha256,
-          prompt_frame_count: evidence.promptFrameCount,
-          prompt_quantizer_count: evidence.promptQuantizerCount,
+          local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+          local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+          provider_voice_ids: {
+            local_qwen3_tts: evidence.localVoiceId,
+            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": evidence.aliyunPlusVoiceId,
+            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": evidence.aliyunFlashVoiceId,
+          },
           model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
-          provenance_fingerprint_sha256: evidence.provenanceFingerprintSha256,
+          provenance_fingerprint_sha256: "a".repeat(64),
         },
       };
     }),
@@ -166,9 +167,9 @@ function uploadedVersion() {
     version_number: 1,
     source_type: "uploaded",
     state: "preview_ready",
-    provider_id: "moss-nano",
-    model_id: "MOSS-TTS-Nano-100M-ONNX",
-    model_revision: "frozen-revision",
+    provider_id: "qwen-tts",
+    model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+    model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
     preset_key: null,
     language: "zh-CN",
     fingerprint: "a".repeat(64),
@@ -419,26 +420,28 @@ afterEach(() => {
 });
 
 describe("narration settings API client", () => {
-  it("loads the exact 18-item pinned preset catalog and sends exact preset_id", async () => {
+  it("loads the exact Qwen preset catalog and sends exact preset_id", async () => {
     const catalog = officialCatalog();
     fetchMock.mockResolvedValueOnce(response(catalog));
 
     const loaded = await listOfficialVoicePresets();
-    expect(loaded.items).toHaveLength(18);
-    expect(loaded.items.map((item) => item.preset_id)).toContain("onnx.Trump");
-    expect(loaded.items.map((item) => item.preset_id)).toContain("onnx.Xiaoyu");
+    expect(loaded.items).toHaveLength(2);
+    expect(loaded.items.map((item) => item.preset_id)).toEqual([
+      "qwen.WarmFemale",
+      "qwen.ClearMale",
+    ]);
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/ai-novel-world-2026/voice-presets",
       expect.objectContaining({ headers: expect.objectContaining({ Accept: "application/json" }) }),
     );
 
-    const preset = catalog.items[3];
+    const preset = catalog.items[1]!;
     const created = {
       ...uploadedVersion(),
       source_type: "preset",
-      provider_id: "moss-tts-nano-onnx",
-      model_id: preset.provenance.repository,
-      model_revision: preset.provenance.revision,
+      provider_id: "qwen-tts",
+      model_id: preset.provenance.local_model_id,
+      model_revision: preset.provenance.local_model_revision,
       preset_key: preset.preset_id,
       language: preset.language,
       rights: {
@@ -454,20 +457,20 @@ describe("narration settings API client", () => {
     fetchMock.mockResolvedValueOnce(response(created));
     await createPresetVoiceVersion(
       PROFILE_ID,
-      { expected_profile_version: 1, preset_id: "onnx.Xiaoyu" },
+      { expected_profile_version: 1, preset_id: "qwen.ClearMale" },
       "preset-request-0001",
     );
     const [path, init] = fetchMock.mock.calls[1];
     expect(path).toBe(`/ai-novel-world-2026/voice-profiles/${PROFILE_ID}/versions/preset`);
     expect(JSON.parse(String(init?.body))).toEqual({
       expected_profile_version: 1,
-      preset_id: "onnx.Xiaoyu",
+      preset_id: "qwen.ClearMale",
     });
 
     const incomplete = officialCatalog();
     incomplete.items.pop();
     fetchMock.mockResolvedValueOnce(response(incomplete));
-    await expect(listOfficialVoicePresets()).rejects.toThrow(/exact 18-item/);
+    await expect(listOfficialVoicePresets()).rejects.toThrow(/complete pinned Qwen catalog/);
   });
 
   it("sends one official narrator selection command and validates its frozen result", async () => {
@@ -476,9 +479,9 @@ describe("narration settings API client", () => {
       ...uploadedVersion(),
       source_type: "preset",
       state: "locked",
-      provider_id: "local-sidecar",
-      model_id: preset.provenance.repository,
-      model_revision: preset.provenance.revision,
+      provider_id: "qwen-tts",
+      model_id: preset.provenance.local_model_id,
+      model_revision: preset.provenance.local_model_revision,
       preset_key: preset.preset_id,
       language: preset.language,
       quality_state: "pending",
@@ -536,7 +539,7 @@ describe("narration settings API client", () => {
     const selected = await selectOfficialVoice(
       NOVEL_ID,
       {
-        preset_id: "onnx.Junhao",
+        preset_id: "qwen.WarmFemale",
         target_kind: "narrator",
         character_id: null,
         expected_settings_version: 0,
@@ -550,7 +553,7 @@ describe("narration settings API client", () => {
     expect(path).toBe(`/ai-novel-world-2026/novels/${NOVEL_ID}/official-voice-selections`);
     expect((init?.headers as Record<string, string>)["Idempotency-Key"]).toBe("official-select-0001");
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      preset_id: "onnx.Junhao",
+      preset_id: "qwen.WarmFemale",
       target_kind: "narrator",
       expected_settings_version: 0,
     });
@@ -571,7 +574,7 @@ describe("narration settings API client", () => {
     const replayed = await selectOfficialVoice(
       NOVEL_ID,
       {
-        preset_id: "onnx.Junhao",
+        preset_id: "qwen.WarmFemale",
         target_kind: "narrator",
         character_id: null,
         expected_settings_version: 0,
@@ -736,6 +739,52 @@ describe("narration settings API client", () => {
       consent_id: consentId,
       expected_version: 1,
     });
+  });
+
+  it("keeps cloud TTS consent on separate model-scoped routes", async () => {
+    const consentId = "10000000-0000-4000-8000-000000000019";
+    const active = {
+      consent_id: consentId,
+      version: 1,
+      state: "active",
+      purpose: "narration_tts_synthesis",
+      data_scope: "narration_text_and_selected_voice_reference",
+      notice_version: "narration-cloud-tts-consent/1",
+      provider_id: "aliyun_qwen_audio_tts",
+      model_id: "qwen-audio-3.0-tts-plus",
+      confirmed_at: NOW,
+      revoked_at: null,
+    };
+    fetchMock.mockResolvedValue(response(active));
+    await getNarrationCloudTTSConsent(NOVEL_ID);
+    fetchMock.mockResolvedValue(response(active, 201));
+    await createNarrationCloudTTSConsent(
+      NOVEL_ID,
+      {
+        notice_version: "narration-cloud-tts-consent/1",
+        data_scope: "narration_text_and_selected_voice_reference",
+        provider_id: "aliyun_qwen_audio_tts",
+        model_id: "qwen-audio-3.0-tts-plus",
+        confirmed: true,
+      },
+      "cloud-tts-consent-0001",
+    );
+    fetchMock.mockResolvedValue(response({
+      ...active,
+      version: 2,
+      state: "revoked",
+      revoked_at: NOW,
+    }));
+    await revokeNarrationCloudTTSConsent(
+      NOVEL_ID,
+      { consent_id: consentId, expected_version: 1 },
+    );
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("narration-cloud-tts-consents/current");
+    expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({
+      "Idempotency-Key": "cloud-tts-consent-0001",
+    });
+    expect(fetchMock.mock.calls[2][1]?.method).toBe("DELETE");
   });
 
   it("builds exactly metadata and binary reference parts", () => {
@@ -924,7 +973,7 @@ describe("chapter narration production API client", () => {
         voice_version_id: CHAPTER_VOICE_VERSION_ID,
         display_name: "小雨",
         source_type: "preset",
-        preset_id: "onnx.Xiaoyu",
+        preset_id: "qwen.WarmFemale",
         resolution_contract_version: "narration-edition-resolution/2",
         legacy_fallback: false,
       }],

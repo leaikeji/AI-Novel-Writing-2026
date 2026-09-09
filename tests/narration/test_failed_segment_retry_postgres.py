@@ -71,7 +71,7 @@ from tests.narration.test_domain_services import (
     SHA_C,
     _script_segments,
 )
-from tests.narration.test_foundation_integration import POSTPROCESS_FINGERPRINT
+POSTPROCESS_FINGERPRINT = "d" * 64
 from tests.narration.test_publication_postgres import _seed_scope_foundation
 from tests.narration.current_schema_gate import assert_database_at_repository_head
 

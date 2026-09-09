@@ -118,7 +118,7 @@ function voiceSources(
     },
     {
       source_type: "generated",
-      capability: "voice_generator",
+      capability: "voice_design",
       available: false,
       reason_code: "VOICE_GENERATOR_NO_GO",
       accepted_mime_types: [],
@@ -313,7 +313,7 @@ describe("T2-D voice source panel", () => {
           actionable: false,
           reason_code: "REFERENCE_CLONE_PRODUCT_GATE_HOLD",
         },
-        voice_generator: {
+        voice_design: {
           state: "unavailable",
           visible: false,
           actionable: false,
@@ -326,7 +326,7 @@ describe("T2-D voice source panel", () => {
       selectedVersionId: null,
     });
     expect(model.visibleCards).toEqual([]);
-    expect(model.cards.map((card) => card.sourceType)).toEqual(["uploaded", "generated"]);
+    expect(model.cards.map((card) => card.sourceType)).toEqual(["uploaded"]);
     expect(model.actions).toEqual({
       canCreateProfile: false,
       canPreview: false,
@@ -663,7 +663,7 @@ describe("T2-D voice source panel", () => {
             actionable: false,
             reason_code: "REFERENCE_CLONE_PRODUCT_GATE_HOLD",
           },
-          voice_generator: {
+          voice_design: {
             state: "unavailable",
             visible: false,
             actionable: false,

@@ -170,18 +170,18 @@ function officialProvenance(presetId: string) {
   const evidence = OFFICIAL_PRESET_EVIDENCE.find((item) => item.presetId === presetId);
   if (!evidence) throw new Error(`missing official preset fixture: ${presetId}`);
   return {
-    schema_version: "moss-tts-official-preset-provenance/1.0" as const,
-    repository: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
-    revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-    manifest_path: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
-    manifest_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestSha256,
+    schema_version: "qwen-tts-preset-provenance/1" as const,
+    catalog_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
     preset_id: evidence.presetId,
-    manifest_voice: evidence.manifestVoice,
-    prompt_codes_sha256: evidence.promptCodesSha256,
-    prompt_frame_count: evidence.promptFrameCount,
-    prompt_quantizer_count: evidence.promptQuantizerCount,
+    local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+    local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+    provider_voice_ids: {
+      local_qwen3_tts: evidence.localVoiceId,
+      "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": evidence.aliyunPlusVoiceId,
+      "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": evidence.aliyunFlashVoiceId,
+    },
     model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
-    provenance_fingerprint_sha256: evidence.provenanceFingerprintSha256,
+    provenance_fingerprint_sha256: "a".repeat(64),
   };
 }
 
@@ -207,12 +207,11 @@ function capabilities(overrides: Partial<Record<FeatureCapability["key"], boolea
     "reading_settings",
     "preset_voice_source",
     "reference_clone",
-    "voice_generator",
-    "nano_advanced_tuning",
+    "voice_design",
   ] as const;
   return {
     schema_version: NARRATION_CAPABILITY_SCHEMA_VERSION,
-    items: keys.map((key) => capability(key, overrides[key] ?? key !== "voice_generator")),
+    items: keys.map((key) => capability(key, overrides[key] ?? key !== "voice_design")),
   };
 }
 
@@ -248,10 +247,10 @@ function voiceVersion(
     version_number: 3,
     source_type: "preset",
     state: "locked",
-    provider_id: "moss",
-    model_id: "nano",
-    model_revision: "rev-1",
-    preset_key: "onnx.Lingyu",
+    provider_id: "qwen-tts",
+    model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+    model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+    preset_key: "qwen.WarmFemale",
     language: "zh-CN",
     fingerprint: "a".repeat(64),
     quality_state: "accepted",
@@ -272,7 +271,7 @@ function voiceVersion(
       expires_at: null,
       risk_flags: [],
     },
-    official_preset: officialProvenance("onnx.Lingyu"),
+    official_preset: officialProvenance("qwen.WarmFemale"),
     reference_asset_id: null,
     preview_asset: null,
     description_available: false,
@@ -413,22 +412,6 @@ function setup(
 
 
 describe("character voice eligibility", () => {
-  it("gates validated Nano experiments on Nano tuning, not the unrelated VoiceGenerator", () => {
-    const experiment = profile({}, {
-      source_type: "generated",
-      activation_basis: "experimental_machine_validated",
-      validation_basis: "machine_validated",
-      quality_state: "accepted",
-    });
-    const choices = characterVoiceOptions([experiment], NOVEL_ID,
-      capabilities({ voice_generator: false, nano_advanced_tuning: true }), ["generated"]);
-    expect(choices).toHaveLength(1);
-    expect(choices[0].sourceLabel).toBe("高级调音");
-    expect(characterVoiceOptions([experiment], NOVEL_ID,
-      capabilities({ voice_generator: true, nano_advanced_tuning: false }), ["generated"]))
-      .toHaveLength(0);
-  });
-
   it("only exposes current locked, accepted, rights-active and capability-enabled versions", () => {
     const accepted = profile();
     const revoked = profile(
@@ -457,7 +440,7 @@ describe("character voice eligibility", () => {
     )).toEqual([]);
   });
 
-  it("keeps Trump and Xiaoyu official presets bindable while rejecting legacy preset_catalog evidence", () => {
+  it("keeps Trump and Xiaoyu official presets bindable while rejecting invalid manifest evidence", () => {
     const trump = profile(
       {
         profile_id: PROFILE_B_ID,
@@ -467,9 +450,9 @@ describe("character voice eligibility", () => {
       {
         profile_id: PROFILE_B_ID,
         version_id: VERSION_B_ID,
-        preset_key: "onnx.Trump",
+        preset_key: "qwen.ClearMale",
         language: "en",
-        official_preset: officialProvenance("onnx.Trump"),
+        official_preset: officialProvenance("qwen.ClearMale"),
       },
     );
     const xiaoyu = profile(
@@ -481,16 +464,8 @@ describe("character voice eligibility", () => {
       {
         profile_id: PROFILE_C_ID,
         version_id: VERSION_C_ID,
-        preset_key: "onnx.Xiaoyu",
-        official_preset: officialProvenance("onnx.Xiaoyu"),
-      },
-    );
-    const legacy = profile(
-      { name: "历史 preset_catalog 记录" },
-      {
-        preset_key: "warm-young-female",
-        rights: { ...voiceVersion().rights, source_kind: "preset_catalog" },
-        official_preset: null,
+        preset_key: "qwen.WarmFemale",
+        official_preset: officialProvenance("qwen.WarmFemale"),
       },
     );
     const wrongFixedIdentity = profile(
@@ -503,14 +478,14 @@ describe("character voice eligibility", () => {
         profile_id: "55555555-5555-4555-8555-555555555557",
         version_id: "77777777-7777-4777-8777-777777777779",
         official_preset: {
-          ...officialProvenance("onnx.Lingyu"),
+          ...officialProvenance("qwen.WarmFemale"),
           model_fingerprint_sha256: "9".repeat(64),
         },
       },
     );
 
     expect(characterVoiceOptions(
-      [trump, xiaoyu, legacy, wrongFixedIdentity],
+      [trump, xiaoyu, wrongFixedIdentity],
       NOVEL_ID,
       capabilities(),
     ).map((item) => item.profileName)).toEqual([

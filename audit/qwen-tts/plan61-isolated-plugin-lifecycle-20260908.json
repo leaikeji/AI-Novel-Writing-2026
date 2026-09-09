@@ -1,0 +1,31 @@
+{
+  "checks": {
+    "candidate-migration-head": "20260908_0044",
+    "candidate-tree-sha256": "9c34f3ca52dca344a5f97c3b182047953a490c97815cf487d4300b690751a1a5",
+    "command:docker-server-available": {
+      "returncode": 1,
+      "stderr_sha256": "46e1ccdd45117d2684b07f168d48a283ff5202611ec041e9001b4d6535bbebe9",
+      "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "failure-context": {
+      "detail": "docker-server-available"
+    },
+    "failure-diagnostics": {}
+  },
+  "cleanup": {
+    "already_absent": [],
+    "broad_cleanup_used": false,
+    "failures": [],
+    "removed_exact_resources": [],
+    "status": "passed"
+  },
+  "failure_code": "COMMAND_FAILED",
+  "gate": "T1-GATE-INSTALL",
+  "mode": "real",
+  "phases": [
+    "preflight"
+  ],
+  "run_id": "q61cloud1",
+  "schema_version": 1,
+  "status": "failed"
+}

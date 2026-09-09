@@ -3,7 +3,7 @@
 This module is the single T2 domain dispatcher behind the frozen HTTP facade.
 It keeps product capability gates separate from technical runtime health, uses
 the Novel row as the mutable settings/consent aggregate lock, and never calls
-the Sidecar or a cloud model.  The SQLAlchemy adapter owns the short database
+the local Provider or a cloud model. The SQLAlchemy adapter owns the short database
 transaction for one command; external cache cleanup keeps its separately
 fenced T1-E transaction protocol.
 """
@@ -41,7 +41,6 @@ from ..models import (
 
 from . import schemas as wire
 from .contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
-from .pawapp_runtime import narration_runtime_status
 from .pronunciations import (
     CacheRuntimeUnavailable,
     NarrationCacheRuntime,
@@ -71,7 +70,6 @@ from .settings_api import (
     NarrationSettingsApiCommand,
     NarrationSettingsOperation,
 )
-from .voice_pool import GenericCastingUnavailable, VoicePoolHandlers
 from .voices import (
     OfficialVoiceSelectionPort,
     VoiceProductPort,
@@ -87,8 +85,16 @@ _BOUNDED_DECIMAL: Final = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,17})?$")
 _CLOUD_PURPOSE: Final = "narration_speaker_analysis"
 _CLOUD_DATA_SCOPE: Final = "uncertain_segments_with_minimal_context"
 _CLOUD_NOTICE_VERSION: Final = "narration-cloud-consent/1"
+_CLOUD_TTS_PURPOSE: Final = "narration_tts_synthesis"
+_CLOUD_TTS_DATA_SCOPE: Final = "narration_text_and_selected_voice_reference"
+_CLOUD_TTS_NOTICE_VERSION: Final = "narration-cloud-tts-consent/1"
+_CLOUD_TTS_PROVIDER_ID: Final = "aliyun_qwen_audio_tts"
 _CONSENT_ACTOR: Final = "local-owner"
-_RUNTIME_PROTOCOL_FALLBACK: Final = "moss-tts-sidecar/1.1"
+_RUNTIME_PROTOCOL_FALLBACK: Final = "qwen-tts-provider/1"
+
+
+def _disabled_runtime_status() -> Mapping[str, object]:
+    return {"product_requested": False, "lifecycle_status": "disabled"}
 
 
 READING_PRIVACY_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
@@ -101,6 +107,9 @@ READING_PRIVACY_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = froze
         NarrationSettingsOperation.PUT_SCOPE_OVERRIDE,
         NarrationSettingsOperation.CREATE_CLOUD_CONSENT,
         NarrationSettingsOperation.REVOKE_CLOUD_CONSENT,
+        NarrationSettingsOperation.GET_CLOUD_TTS_CONSENT,
+        NarrationSettingsOperation.CREATE_CLOUD_TTS_CONSENT,
+        NarrationSettingsOperation.REVOKE_CLOUD_TTS_CONSENT,
         NarrationSettingsOperation.LIST_CHARACTER_VOICE_BINDINGS,
         NarrationSettingsOperation.GET_CHARACTER_VOICE_BINDING,
         NarrationSettingsOperation.PUT_CHARACTER_VOICE_BINDING,
@@ -116,6 +125,7 @@ _MUTATION_CAPABILITY: Final[dict[NarrationSettingsOperation, wire.CapabilityKey]
     NarrationSettingsOperation.PUT_PLAYBACK_PREFERENCES: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.PUT_SCOPE_OVERRIDE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.CREATE_CLOUD_CONSENT: wire.CapabilityKey.CLOUD_ASSISTED_ANALYSIS,
+    NarrationSettingsOperation.CREATE_CLOUD_TTS_CONSENT: wire.CapabilityKey.NARRATION_SYNTHESIS,
     NarrationSettingsOperation.CREATE_VOICE_PROFILE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.PUT_VOICE_PROFILE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.ARCHIVE_VOICE_PROFILE: wire.CapabilityKey.READING_SETTINGS,
@@ -137,7 +147,7 @@ _TRANSACTIONAL_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
     and operation
     not in {
         # Product voice operations own their own short transactions because
-        # normalization/publication and Nano work must never run while the
+        # normalization/publication and model work must never run while the
         # request-scoped settings transaction is open.
         NarrationSettingsOperation.CREATE_UPLOADED_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
@@ -200,8 +210,8 @@ def t2_settings_capabilities() -> wire.NarrationCapabilities:
     """Open only the product shell and settings proven by T2-GATE.
 
     Runtime synthesis, playback, voice sources, automatic casting, cloud analysis,
-    VoiceGenerator, and cache cleanup retain their independently audited holds.
-    Technical Sidecar health never changes this product matrix implicitly.
+    retired voice runtimes, and cache cleanup retain their independently audited holds.
+    Technical Provider health never changes this product matrix implicitly.
     """
 
     return _released_capabilities(
@@ -223,8 +233,8 @@ def t4_product_capabilities(
 
     The flag is owned by the PawApp integration and defaults to false.  Runtime
     health never calls this function or upgrades the matrix implicitly.  Voice
-    sources, generic casting, cloud and VoiceGenerator keep their own independent
-    holds.  Minimal cache cleanup is part of the finite T4 product chain, while
+    sources, cloud analysis, and Qwen voice design keep their own independent
+    holds. Minimal cache cleanup is part of the finite T4 product chain, while
     its runtime-projected nested capability remains an independent fail-closed
     execution gate.
     """
@@ -245,7 +255,6 @@ def t4_product_capabilities(
         enabled = enabled | frozenset(
             {
                 wire.CapabilityKey.PRESET_VOICE_SOURCE,
-                wire.CapabilityKey.VOICE_PREVIEW,
             }
         )
     return _released_capabilities(enabled)
@@ -274,10 +283,9 @@ _READ_ONLY_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
         NarrationSettingsOperation.GET_VOICE_PREVIEW,
         NarrationSettingsOperation.LIST_CHARACTER_VOICE_BINDINGS,
         NarrationSettingsOperation.GET_CHARACTER_VOICE_BINDING,
-        NarrationSettingsOperation.GET_GENERIC_VOICE_POOL,
-        NarrationSettingsOperation.GET_CASTING_RULES,
         NarrationSettingsOperation.GET_PRONUNCIATION_PROFILE,
         NarrationSettingsOperation.GET_CACHE_STATUS,
+        NarrationSettingsOperation.GET_CLOUD_TTS_CONSENT,
     }
 )
 _CONFIGURE_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
@@ -287,6 +295,8 @@ _CONFIGURE_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozenset(
         NarrationSettingsOperation.PUT_SCOPE_OVERRIDE,
         NarrationSettingsOperation.CREATE_CLOUD_CONSENT,
         NarrationSettingsOperation.REVOKE_CLOUD_CONSENT,
+        NarrationSettingsOperation.CREATE_CLOUD_TTS_CONSENT,
+        NarrationSettingsOperation.REVOKE_CLOUD_TTS_CONSENT,
         NarrationSettingsOperation.PUT_CHARACTER_VOICE_BINDING,
         NarrationSettingsOperation.PUT_PRONUNCIATION_PROFILE,
         NarrationSettingsOperation.PREVIEW_CACHE_CLEANUP,
@@ -543,6 +553,7 @@ def default_narration_settings_values() -> wire.NarrationSettingsValues:
             unknown_speaker_action=wire.UnknownSpeakerAction.BLOCK,
         ),
         playback=wire.NarrationPlaybackPreferences(playback_rate=1.0, volume=1.0),
+        tts_provider=wire.TTSProviderSelection(),
     )
 
 
@@ -736,17 +747,36 @@ def _current_consent_row(
     rows = store.find_all(
         NarrationCloudConsentRow,
         novel_id=novel_id,
+        purpose=_CLOUD_PURPOSE,
         order_by=("confirmed_at", "id"),
         for_update=for_update,
     )
-    if any(
-        row.purpose != _CLOUD_PURPOSE or row.data_scope != _CLOUD_DATA_SCOPE
-        for row in rows
-    ):
-        raise InvalidNarrationState("cloud consent purpose or data scope drifted")
+    if any(row.data_scope != _CLOUD_DATA_SCOPE for row in rows):
+        raise InvalidNarrationState("cloud consent evidence drifted")
     active = [row for row in rows if row.revoked_at is None]
     if len(active) > 1:
         raise InvalidNarrationState("multiple active cloud consents are ambiguous")
+    return active[0] if active else (rows[-1] if rows else None)
+
+
+def _current_cloud_tts_consent_row(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    for_update: bool = False,
+) -> NarrationCloudConsentRow | None:
+    rows = store.find_all(
+        NarrationCloudConsentRow,
+        novel_id=novel_id,
+        purpose=_CLOUD_TTS_PURPOSE,
+        order_by=("confirmed_at", "id"),
+        for_update=for_update,
+    )
+    if any(row.data_scope != _CLOUD_TTS_DATA_SCOPE for row in rows):
+        raise InvalidNarrationState("cloud TTS consent evidence drifted")
+    active = [row for row in rows if row.revoked_at is None]
+    if len(active) > 1:
+        raise InvalidNarrationState("multiple active cloud TTS consents are ambiguous")
     return active[0] if active else (rows[-1] if rows else None)
 
 
@@ -781,6 +811,71 @@ def cloud_consent_resource(
         confirmed_at=row.confirmed_at,
         revoked_at=row.revoked_at,
     )
+
+
+def cloud_tts_consent_resource(
+    row: NarrationCloudConsentRow | None,
+) -> wire.NarrationCloudTTSConsent:
+    if row is None:
+        return wire.NarrationCloudTTSConsent(
+            consent_id=None,
+            version=0,
+            state=wire.CloudConsentState.NOT_GRANTED,
+            notice_version=None,
+            provider_id=None,
+            model_id=None,
+            confirmed_at=None,
+            revoked_at=None,
+        )
+    if (
+        row.purpose != _CLOUD_TTS_PURPOSE
+        or row.data_scope != _CLOUD_TTS_DATA_SCOPE
+        or row.confirmed_at is None
+        or row.confirmed_actor != _CONSENT_ACTOR
+        or row.provider_id != _CLOUD_TTS_PROVIDER_ID
+        or row.model_id not in {
+            "qwen-audio-3.0-tts-plus",
+            "qwen-audio-3.0-tts-flash",
+        }
+    ):
+        raise InvalidNarrationState("cloud TTS consent evidence drifted")
+    revoked = row.revoked_at is not None
+    return wire.NarrationCloudTTSConsent(
+        consent_id=row.id,
+        version=2 if revoked else 1,
+        state=wire.CloudConsentState.REVOKED if revoked else wire.CloudConsentState.ACTIVE,
+        notice_version=row.notice_version,
+        provider_id=row.provider_id,
+        model_id=row.model_id,
+        confirmed_at=row.confirmed_at,
+        revoked_at=row.revoked_at,
+    )
+
+
+def require_active_cloud_tts_consent(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    model_id: str,
+) -> wire.NarrationCloudTTSConsent:
+    current = _current_cloud_tts_consent_row(store, novel_id=novel_id)
+    if current is None or current.revoked_at is not None:
+        raise NarrationApiFault(
+            wire.NarrationErrorCode.CLOUD_CONSENT_REQUIRED,
+            "使用云端朗读前必须单独确认正文与所选音色资料的发送授权。",
+            capability=wire.CapabilityKey.NARRATION_SYNTHESIS,
+        )
+    projected = cloud_tts_consent_resource(current)
+    if (
+        projected.notice_version != _CLOUD_TTS_NOTICE_VERSION
+        or projected.model_id != model_id
+    ):
+        raise NarrationApiFault(
+            wire.NarrationErrorCode.CLOUD_CONSENT_REQUIRED,
+            "云端朗读模型或授权告知已变化，请重新确认。",
+            capability=wire.CapabilityKey.NARRATION_SYNTHESIS,
+        )
+    return projected
 
 
 def _require_active_cloud_consent(store: NarrationStore, novel_id: UUID) -> None:
@@ -1100,6 +1195,78 @@ def revoke_cloud_consent(
     return cloud_consent_resource(row)
 
 
+def create_cloud_tts_consent(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    request: wire.CreateNarrationCloudTTSConsentRequest,
+    idempotency_key: str,
+) -> wire.NarrationCloudTTSConsent:
+    require_local_novel(store, novel_id, for_update=True)
+    key = _required_idempotency_key(idempotency_key)
+    row_id = uuid5(
+        NAMESPACE_URL,
+        f"ai-novel-world-2026/narration/cloud-tts-consent/{novel_id}/{key}",
+    )
+    existing = store.get(NarrationCloudConsentRow, row_id, for_update=True)
+    if existing is not None:
+        if existing.novel_id != novel_id:
+            raise NarrationScopeMismatch("cloud TTS consent identity left its novel")
+        if (
+            existing.purpose != _CLOUD_TTS_PURPOSE
+            or existing.data_scope != request.data_scope
+            or existing.notice_version != request.notice_version
+            or existing.provider_id != request.provider_id
+            or existing.model_id != request.model_id
+        ):
+            raise IdempotencyConflict("cloud TTS consent key names another payload")
+        return cloud_tts_consent_resource(existing)
+    current = _current_cloud_tts_consent_row(
+        store,
+        novel_id=novel_id,
+        for_update=True,
+    )
+    if current is not None and current.revoked_at is None:
+        raise InvalidNarrationState("an active cloud TTS consent already exists")
+    row = NarrationCloudConsentRow(
+        id=row_id,
+        novel_id=novel_id,
+        purpose=_CLOUD_TTS_PURPOSE,
+        data_scope=_CLOUD_TTS_DATA_SCOPE,
+        notice_version=_CLOUD_TTS_NOTICE_VERSION,
+        provider_id=_CLOUD_TTS_PROVIDER_ID,
+        model_id=request.model_id,
+        confirmed_actor=_CONSENT_ACTOR,
+        confirmed_at=utc_now(),
+        revoked_at=None,
+    )
+    store.add(row)
+    store.flush()
+    return cloud_tts_consent_resource(row)
+
+
+def revoke_cloud_tts_consent(
+    store: NarrationStore,
+    *,
+    novel_id: UUID,
+    request: wire.RevokeNarrationCloudTTSConsentRequest,
+) -> wire.NarrationCloudTTSConsent:
+    require_local_novel(store, novel_id, for_update=True)
+    row = store.get(NarrationCloudConsentRow, request.consent_id, for_update=True)
+    if row is None:
+        raise NarrationNotFound("cloud TTS consent not found")
+    if row.novel_id != novel_id:
+        raise NarrationScopeMismatch("cloud TTS consent belongs to another novel")
+    current = cloud_tts_consent_resource(row)
+    if current.version != request.expected_version:
+        raise NarrationCasConflict("cloud TTS consent version changed")
+    if row.revoked_at is not None:
+        return current
+    row.revoked_at = utc_now()
+    store.flush()
+    return cloud_tts_consent_resource(row)
+
+
 def _binding_impact(
     store: NarrationStore,
     *,
@@ -1353,11 +1520,11 @@ def narration_runtime_resource(
     *,
     product_visible_allowed: bool = False,
 ) -> wire.NarrationRuntimeStatus:
-    technical = snapshot.get("technical_enabled") is True
-    reachable = snapshot.get("sidecar_reachable") is True
-    model_ready = snapshot.get("model_ready") is True
+    technical = snapshot.get("product_requested") is True
+    reachable = snapshot.get("worker_running") is True
+    model_ready = reachable
     raw_lifecycle = snapshot.get("lifecycle_status")
-    fingerprint = snapshot.get("model_fingerprint_sha256")
+    fingerprint = snapshot.get("provider_selection_fingerprint_sha256")
     if type(fingerprint) is not str or not re.fullmatch(r"[a-f0-9]{64}", fingerprint):
         fingerprint = None
     raw_reason = snapshot.get("reason_code")
@@ -1370,8 +1537,8 @@ def narration_runtime_resource(
         "stopping": wire.RuntimeLifecycleStatus.STOPPING,
     }
     lifecycle = lifecycle_map.get(raw_lifecycle) if type(raw_lifecycle) is str else None
-    protocol = snapshot.get("protocol_version")
-    protocol_matches = protocol == _RUNTIME_PROTOCOL_FALLBACK
+    protocol = _RUNTIME_PROTOCOL_FALLBACK
+    protocol_matches = True
     if lifecycle is wire.RuntimeLifecycleStatus.READY and not (
         technical
         and reachable
@@ -1414,11 +1581,11 @@ def narration_runtime_resource(
     return wire.NarrationRuntimeStatus(
         technical_enabled=technical,
         lifecycle_status=lifecycle,
-        sidecar_reachable=reachable,
+        provider_reachable=reachable,
         model_ready=model_ready,
         product_visible=(
             product_visible_allowed
-            and snapshot.get("product_visible") is True
+            and snapshot.get("product_requested") is True
             and lifecycle is wire.RuntimeLifecycleStatus.READY
             and model_ready
         ),
@@ -1434,7 +1601,7 @@ def _voice_sources(
     definitions = (
         (wire.VoiceSourceType.PRESET, wire.CapabilityKey.PRESET_VOICE_SOURCE),
         (wire.VoiceSourceType.UPLOADED, wire.CapabilityKey.REFERENCE_CLONE),
-        (wire.VoiceSourceType.GENERATED, wire.CapabilityKey.VOICE_GENERATOR),
+        (wire.VoiceSourceType.GENERATED, wire.CapabilityKey.VOICE_DESIGN),
     )
     items: list[wire.VoiceSourceAvailability] = []
     for source_type, key in definitions:
@@ -1608,7 +1775,7 @@ class NarrationSettingsBackend:
         *,
         authorization: NarrationRequestAuthorization = DENY_NARRATION_AUTHORIZATION,
         capabilities: wire.NarrationCapabilities | None = None,
-        runtime_status_provider: RuntimeStatusProvider = narration_runtime_status,
+        runtime_status_provider: RuntimeStatusProvider = _disabled_runtime_status,
         cache_runtime: NarrationCacheRuntime | None = None,
         profile_creation_receipts: VoiceProfileCreationReceiptPort | None = None,
         voice_product: VoiceProductPort | None = None,
@@ -1625,7 +1792,6 @@ class NarrationSettingsBackend:
             voice_product=voice_product,
             official_voice_selection=official_voice_selection,
         )
-        self.voice_pool = VoicePoolHandlers(store)
         self.pronunciation_handler = PronunciationSettingsHandler(
             store,
             cache_runtime=self.cache_runtime,
@@ -1643,18 +1809,6 @@ class NarrationSettingsBackend:
             return self.voice_handler.dispatch(command)
         if self.pronunciation_handler.handles(command.operation):
             return self.pronunciation_handler.dispatch(command)
-        try:
-            novel_id = _required_novel_id(command)
-            if command.operation is NarrationSettingsOperation.GET_GENERIC_VOICE_POOL:
-                return self.voice_pool.get_pool(novel_id)
-            if command.operation is NarrationSettingsOperation.GET_CASTING_RULES:
-                return self.voice_pool.get_casting_rules(novel_id)
-        except GenericCastingUnavailable as error:
-            raise NarrationApiFault(
-                wire.NarrationErrorCode.GENERIC_VOICE_POOL_UNAVAILABLE,
-                "自动通用选角尚未通过后续门禁。",
-                capability=wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
-            ) from error
         raise AssertionError(f"unowned narration operation: {command.operation.value}")
 
     def _dispatch_reading(self, command: NarrationSettingsApiCommand) -> object:
@@ -1704,6 +1858,24 @@ class NarrationSettingsBackend:
                 novel_id=novel_id,
                 request=_payload(command, wire.RevokeNarrationCloudConsentRequest),
             )
+        if operation is NarrationSettingsOperation.GET_CLOUD_TTS_CONSENT:
+            require_local_novel(self.store, novel_id)
+            return cloud_tts_consent_resource(
+                _current_cloud_tts_consent_row(self.store, novel_id=novel_id)
+            )
+        if operation is NarrationSettingsOperation.CREATE_CLOUD_TTS_CONSENT:
+            return create_cloud_tts_consent(
+                self.store,
+                novel_id=novel_id,
+                request=_payload(command, wire.CreateNarrationCloudTTSConsentRequest),
+                idempotency_key=_required_idempotency_key(command.idempotency_key),
+            )
+        if operation is NarrationSettingsOperation.REVOKE_CLOUD_TTS_CONSENT:
+            return revoke_cloud_tts_consent(
+                self.store,
+                novel_id=novel_id,
+                request=_payload(command, wire.RevokeNarrationCloudTTSConsentRequest),
+            )
         if operation is NarrationSettingsOperation.GET_CHARACTER_VOICE_BINDING:
             if command.character_id is None:
                 raise NarrationServiceError("character binding command is incomplete")
@@ -1736,7 +1908,6 @@ class NarrationSettingsBackend:
                 can_confirm_voice_rights=self.authorization.can_confirm_voice_rights,
                 cloud_consent=consent,
             )
-            pool = self.voice_pool.get_pool(novel_id)
             try:
                 cache = self.cache_runtime.status(novel_id)
             except (NarrationServiceError, OSError):
@@ -1765,7 +1936,7 @@ class NarrationSettingsBackend:
                 coverage=narration_coverage(
                     self.store,
                     novel_id=novel_id,
-                    generic_ready_slot_count=pool.ready_slot_count,
+                    generic_ready_slot_count=0,
                 ),
                 voice_sources=_voice_sources(self.capabilities),
                 cache=cache,
@@ -1794,7 +1965,7 @@ def build_narration_settings_backend(
     *,
     authorization: NarrationRequestAuthorization = DENY_NARRATION_AUTHORIZATION,
     capabilities: wire.NarrationCapabilities | None = None,
-    runtime_status_provider: RuntimeStatusProvider = narration_runtime_status,
+    runtime_status_provider: RuntimeStatusProvider = _disabled_runtime_status,
     cache_runtime: NarrationCacheRuntime | None = None,
     profile_creation_receipts: VoiceProfileCreationReceiptPort | None = None,
     voice_product: VoiceProductPort | None = None,
@@ -1818,12 +1989,6 @@ _DISPATCH_OPERATION_GROUPS: Final = (
     READING_PRIVACY_OPERATIONS,
     VoiceSettingsHandler.operations,
     PronunciationSettingsHandler.operations,
-    frozenset(
-        {
-            NarrationSettingsOperation.GET_GENERIC_VOICE_POOL,
-            NarrationSettingsOperation.GET_CASTING_RULES,
-        }
-    ),
 )
 
 
@@ -1856,7 +2021,9 @@ __all__ = [
     "TransactionalNarrationSettingsBackend",
     "build_narration_settings_backend",
     "cloud_consent_resource",
+    "cloud_tts_consent_resource",
     "create_cloud_consent",
+    "create_cloud_tts_consent",
     "default_narration_settings_values",
     "get_character_voice_binding",
     "get_narration_settings",
@@ -1867,7 +2034,9 @@ __all__ = [
     "put_character_voice_binding",
     "put_narration_settings",
     "put_scope_override",
+    "require_active_cloud_tts_consent",
     "revoke_cloud_consent",
+    "revoke_cloud_tts_consent",
     "t2_settings_capabilities",
     "t4_product_capabilities",
 ]

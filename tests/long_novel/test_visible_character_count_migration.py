@@ -12,7 +12,7 @@ from backend.services import visible_character_count
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260902_0039"
 DOWN_REVISION = "20260902_0038"
-HEAD_REVISION = "20260905_0042"
+HEAD_REVISION = "20260909_0050"
 MIGRATION = (
     ROOT
     / "backend/migrations/versions/20260902_0039_working_copy_visible_count.py"
@@ -26,7 +26,11 @@ def _scripts() -> ScriptDirectory:
 def test_visible_character_count_revision_is_the_only_linear_head() -> None:
     scripts = _scripts()
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260905_0041"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260909_0049"
+    assert scripts.get_revision("20260909_0049").down_revision == "20260909_0048"
+    assert scripts.get_revision("20260909_0045").down_revision == "20260908_0044"
+    assert scripts.get_revision("20260908_0044").down_revision == "20260908_0043"
+    assert scripts.get_revision("20260908_0043").down_revision == "20260905_0042"
     assert scripts.get_revision("20260905_0041").down_revision == "20260903_0040"
     assert scripts.get_revision("20260903_0040").down_revision == REVISION
     assert scripts.get_revision(REVISION).down_revision == DOWN_REVISION

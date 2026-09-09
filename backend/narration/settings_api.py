@@ -50,6 +50,9 @@ class NarrationSettingsOperation(str, Enum):
     PUT_SCOPE_OVERRIDE = "put_scope_override"
     CREATE_CLOUD_CONSENT = "create_cloud_consent"
     REVOKE_CLOUD_CONSENT = "revoke_cloud_consent"
+    GET_CLOUD_TTS_CONSENT = "get_cloud_tts_consent"
+    CREATE_CLOUD_TTS_CONSENT = "create_cloud_tts_consent"
+    REVOKE_CLOUD_TTS_CONSENT = "revoke_cloud_tts_consent"
     LIST_OFFICIAL_PRESETS = "list_official_presets"
     CREATE_OFFICIAL_VOICE_PREVIEW = "create_official_voice_preview"
     SELECT_OFFICIAL_VOICE = "select_official_voice"
@@ -66,8 +69,6 @@ class NarrationSettingsOperation(str, Enum):
     LIST_CHARACTER_VOICE_BINDINGS = "list_character_voice_bindings"
     GET_CHARACTER_VOICE_BINDING = "get_character_voice_binding"
     PUT_CHARACTER_VOICE_BINDING = "put_character_voice_binding"
-    GET_GENERIC_VOICE_POOL = "get_generic_voice_pool"
-    GET_CASTING_RULES = "get_casting_rules"
     GET_PRONUNCIATION_PROFILE = "get_pronunciation_profile"
     PUT_PRONUNCIATION_PROFILE = "put_pronunciation_profile"
     GET_CACHE_STATUS = "get_cache_status"
@@ -147,7 +148,6 @@ NARRATION_ERROR_HTTP_STATUS: Final[dict[wire.NarrationErrorCode, int]] = {
     wire.NarrationErrorCode.PREVIEW_FAILED: status.HTTP_502_BAD_GATEWAY,
     wire.NarrationErrorCode.CLOUD_CONSENT_REQUIRED: status.HTTP_412_PRECONDITION_FAILED,
     wire.NarrationErrorCode.CLOUD_CONSENT_REVOKED: status.HTTP_412_PRECONDITION_FAILED,
-    wire.NarrationErrorCode.GENERIC_VOICE_POOL_UNAVAILABLE: status.HTTP_409_CONFLICT,
     wire.NarrationErrorCode.UNSUPPORTED_MEDIA_TYPE: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
     wire.NarrationErrorCode.PAYLOAD_TOO_LARGE: status.HTTP_413_CONTENT_TOO_LARGE,
     wire.NarrationErrorCode.VALIDATION_FAILED: status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -530,6 +530,73 @@ def narration_cloud_consent_revoke(
             expected_version=payload.expected_version,
         ),
         wire.NarrationCloudConsent,
+    )
+
+
+@router.get(
+    "/novels/{novel_id}/narration-cloud-tts-consents/current",
+    response_model=wire.NarrationCloudTTSConsent,
+)
+def narration_cloud_tts_consent_get(
+    novel_id: UUID,
+    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
+) -> wire.NarrationCloudTTSConsent:
+    return _run(
+        backend,
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.GET_CLOUD_TTS_CONSENT,
+            novel_id=novel_id,
+        ),
+        wire.NarrationCloudTTSConsent,
+    )
+
+
+@router.post(
+    "/novels/{novel_id}/narration-cloud-tts-consents",
+    response_model=wire.NarrationCloudTTSConsent,
+    status_code=status.HTTP_201_CREATED,
+)
+def narration_cloud_tts_consent_create(
+    novel_id: UUID,
+    payload: wire.CreateNarrationCloudTTSConsentRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_HEADER_PATTERN,
+    ),
+    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
+) -> wire.NarrationCloudTTSConsent:
+    return _run(
+        backend,
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.CREATE_CLOUD_TTS_CONSENT,
+            novel_id=novel_id,
+            payload=payload,
+            idempotency_key=idempotency_key,
+        ),
+        wire.NarrationCloudTTSConsent,
+    )
+
+
+@router.delete(
+    "/novels/{novel_id}/narration-cloud-tts-consents/current",
+    response_model=wire.NarrationCloudTTSConsent,
+)
+def narration_cloud_tts_consent_revoke(
+    novel_id: UUID,
+    payload: wire.RevokeNarrationCloudTTSConsentRequest,
+    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
+) -> wire.NarrationCloudTTSConsent:
+    return _run(
+        backend,
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.REVOKE_CLOUD_TTS_CONSENT,
+            novel_id=novel_id,
+            payload=payload,
+            expected_version=payload.expected_version,
+        ),
+        wire.NarrationCloudTTSConsent,
     )
 
 
@@ -927,42 +994,6 @@ def character_voice_binding_put(
             payload=payload,
         ),
         wire.CharacterVoiceBindingResource,
-    )
-
-
-@router.get(
-    "/novels/{novel_id}/generic-voice-pools",
-    response_model=wire.GenericVoicePoolResource,
-)
-def generic_voice_pool_get(
-    novel_id: UUID,
-    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
-) -> wire.GenericVoicePoolResource:
-    return _run(
-        backend,
-        NarrationSettingsApiCommand(
-            operation=NarrationSettingsOperation.GET_GENERIC_VOICE_POOL,
-            novel_id=novel_id,
-        ),
-        wire.GenericVoicePoolResource,
-    )
-
-
-@router.get(
-    "/novels/{novel_id}/casting-rules",
-    response_model=wire.VoiceCastingRulesResource,
-)
-def casting_rules_get(
-    novel_id: UUID,
-    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
-) -> wire.VoiceCastingRulesResource:
-    return _run(
-        backend,
-        NarrationSettingsApiCommand(
-            operation=NarrationSettingsOperation.GET_CASTING_RULES,
-            novel_id=novel_id,
-        ),
-        wire.VoiceCastingRulesResource,
     )
 
 

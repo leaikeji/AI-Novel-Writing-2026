@@ -171,6 +171,40 @@ def _api_cases() -> list[ApiCase]:
             wire.RevokeNarrationCloudConsentRequest,
         ),
         ApiCase(
+            "cloud-tts-consent-get",
+            settings_api.NarrationSettingsOperation.GET_CLOUD_TTS_CONSENT,
+            "GET",
+            f"/novels/{NOVEL_ID}/narration-cloud-tts-consents/current",
+            command_fields={"novel_id": NOVEL_ID},
+        ),
+        ApiCase(
+            "cloud-tts-consent-create",
+            settings_api.NarrationSettingsOperation.CREATE_CLOUD_TTS_CONSENT,
+            "POST",
+            f"/novels/{NOVEL_ID}/narration-cloud-tts-consents",
+            {
+                "headers": idempotency,
+                "json": {
+                    "notice_version": "narration-cloud-tts-consent/1",
+                    "data_scope": "narration_text_and_selected_voice_reference",
+                    "provider_id": "aliyun_qwen_audio_tts",
+                    "model_id": "qwen-audio-3.0-tts-plus",
+                    "confirmed": True,
+                },
+            },
+            {"novel_id": NOVEL_ID, "idempotency_key": "tts-api-case-0001"},
+            wire.CreateNarrationCloudTTSConsentRequest,
+        ),
+        ApiCase(
+            "cloud-tts-consent-revoke",
+            settings_api.NarrationSettingsOperation.REVOKE_CLOUD_TTS_CONSENT,
+            "DELETE",
+            f"/novels/{NOVEL_ID}/narration-cloud-tts-consents/current",
+            {"json": {"consent_id": str(CONSENT_ID), "expected_version": 1}},
+            {"novel_id": NOVEL_ID, "expected_version": 1},
+            wire.RevokeNarrationCloudTTSConsentRequest,
+        ),
+        ApiCase(
             "official-presets-list",
             settings_api.NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
             "GET",
@@ -184,7 +218,7 @@ def _api_cases() -> list[ApiCase]:
             {
                 "headers": idempotency,
                 "json": {
-                    "preset_id": "onnx.Junhao",
+                    "preset_id": "qwen.WarmFemale",
                     "target_kind": "narrator",
                     "character_id": None,
                     "expected_settings_version": 0,
@@ -205,7 +239,7 @@ def _api_cases() -> list[ApiCase]:
             f"/novels/{NOVEL_ID}/official-voice-previews",
             {
                 "headers": idempotency,
-                "json": {"preset_id": "onnx.Junhao"},
+                "json": {"preset_id": "qwen.WarmFemale"},
             },
             {
                 "novel_id": NOVEL_ID,
@@ -264,7 +298,7 @@ def _api_cases() -> list[ApiCase]:
                 "headers": idempotency,
                 "json": {
                     "expected_profile_version": 1,
-                    "preset_id": "onnx.Lingyu",
+                    "preset_id": "qwen.ClearMale",
                 },
             },
             {"profile_id": PROFILE_ID, "idempotency_key": "tts-api-case-0001"},
@@ -378,20 +412,6 @@ def _api_cases() -> list[ApiCase]:
             wire.PutCharacterVoiceBindingRequest,
         ),
         ApiCase(
-            "generic-pool-get",
-            settings_api.NarrationSettingsOperation.GET_GENERIC_VOICE_POOL,
-            "GET",
-            f"/novels/{NOVEL_ID}/generic-voice-pools",
-            command_fields={"novel_id": NOVEL_ID},
-        ),
-        ApiCase(
-            "casting-rules-get",
-            settings_api.NarrationSettingsOperation.GET_CASTING_RULES,
-            "GET",
-            f"/novels/{NOVEL_ID}/casting-rules",
-            command_fields={"novel_id": NOVEL_ID},
-        ),
-        ApiCase(
             "pronunciation-get",
             settings_api.NarrationSettingsOperation.GET_PRONUNCIATION_PROFILE,
             "GET",
@@ -439,7 +459,7 @@ def _api_cases() -> list[ApiCase]:
             wire.ExecuteNarrationCacheCleanupRequest,
         ),
     ]
-    assert len(cases) == 31
+    assert len(cases) == 32
     assert {case.operation for case in cases} == set(
         settings_api.NarrationSettingsOperation
     )
@@ -529,7 +549,7 @@ def test_voice_source_unavailable_reason_is_stable_on_http_surface() -> None:
             headers={"Idempotency-Key": "preset-scope-0001"},
             json={
                 "expected_profile_version": 1,
-                "preset_id": "onnx.Junhao",
+                "preset_id": "qwen.WarmFemale",
             },
         )
 
@@ -700,7 +720,7 @@ def test_upload_rejects_missing_boundary_oversize_and_missing_idempotency_before
     assert backend.commands == []
 
 
-def test_no_go_surface_has_no_synthesis_player_or_voice_generator_route() -> None:
+def test_surface_has_no_removed_tts_mode_routes() -> None:
     operations = {
         (method, route.path)
         for route in settings_api.router.routes
@@ -708,11 +728,13 @@ def test_no_go_surface_has_no_synthesis_player_or_voice_generator_route() -> Non
     }
     paths = {path for _, path in operations}
 
-    assert len(operations) == 31
+    assert len(operations) == 32
     assert all("synthesis" not in path for path in paths)
     assert all("player" not in path for path in paths)
     assert all("voice-generator" not in path for path in paths)
     assert all("automatic-speaker" not in path for path in paths)
+    assert all("generic-voice" not in path for path in paths)
+    assert all("casting-rules" not in path for path in paths)
 
 
 def test_narration_gate_router_and_factory_are_installed_by_pawapp_lifecycle() -> None:
@@ -724,7 +746,8 @@ def test_narration_gate_router_and_factory_are_installed_by_pawapp_lifecycle() -
         "install_narration_settings_backend_factory(",
         "uninstall_narration_settings_backend_factory(",
         "profile_creation_receipts=SqlAlchemyVoiceActionReceiptPort(session)",
-        "voice_product=(voice_product if official_presets_ready else None)",
+        "voice_product=None",
+        "runtime_status_provider=narration_production_runtime_status",
         "def _t4_product_release_runtime_ready()",
         "install_narration_t4_http_access_policy(",
         "uninstall_narration_t4_http_access_policy(",
@@ -737,18 +760,17 @@ def test_narration_gate_router_and_factory_are_installed_by_pawapp_lifecycle() -
     )
     assert "authorization=FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION" in source
     assert "t4_product_capabilities(" in source
-    assert "reference_clone_released=reference_clone_ready" in source
-    assert "official_presets_released=official_presets_ready" in source
-    assert "== OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256" in source
-    assert 'os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false") == "true"' in source
+    assert "reference_clone_released=False" in source
+    assert "official_presets_released=True" in source
+    assert "OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256" not in source
+    assert 'os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false")' in source
     assert "else t2_settings_capabilities()" in source
     assert 'os.environ.get(PRODUCT_ENABLE_ENV, "false") != "true"' in source
     assert 'os.environ.get(VALIDATION_ENABLE_ENV, "false") != "false"' in source
     compose = Path("compose.yaml").read_text(encoding="utf-8")
     assert '"127.0.0.1:18088:8088"' in compose
 
-
-def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
+def test_qwen_gate_factory_uses_one_production_runtime_and_keeps_legacy_voice_modes_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from backend.narration.privacy import (
@@ -771,15 +793,6 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
     async def fake_get_ctx() -> None:
         return None
 
-    class FakeHookBase:
-        pass
-
-    class FakeHookResult:
-        pass
-
-    class FakePhase:
-        PRE_EXECUTE = "pre_execute"
-
     qwenpaw_module = ModuleType("qwenpaw")
     qwenpaw_module.__path__ = []  # type: ignore[attr-defined]
     pawapp_module = ModuleType("qwenpaw.pawapp")
@@ -788,10 +801,10 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
     runtime_module = ModuleType("qwenpaw.runtime")
     runtime_module.__path__ = []  # type: ignore[attr-defined]
     hooks_module = ModuleType("qwenpaw.runtime.hooks")
-    hooks_module.HookBase = FakeHookBase  # type: ignore[attr-defined]
-    hooks_module.HookResult = FakeHookResult  # type: ignore[attr-defined]
+    hooks_module.HookBase = type("HookBase", (), {})  # type: ignore[attr-defined]
+    hooks_module.HookResult = type("HookResult", (), {})  # type: ignore[attr-defined]
     phases_module = ModuleType("qwenpaw.runtime.phases")
-    phases_module.Phase = FakePhase  # type: ignore[attr-defined]
+    phases_module.Phase = type("Phase", (), {"PRE_EXECUTE": "pre_execute"})  # type: ignore[attr-defined]
     qwenpaw_module.pawapp = pawapp_module  # type: ignore[attr-defined]
     qwenpaw_module.runtime = runtime_module  # type: ignore[attr-defined]
     runtime_module.hooks = hooks_module  # type: ignore[attr-defined]
@@ -816,368 +829,59 @@ def test_t2_gate_factory_runtime_binding_is_fixed_local_and_minimally_enabled(
         return expected_backend
 
     monkeypatch.setattr(backend_app, "build_narration_settings_backend", fake_build)
-    expected_cache_runtime = object()
-    monkeypatch.setattr(
-        backend_app,
-        "current_narration_cache_runtime",
-        lambda: expected_cache_runtime,
-    )
     session = cast(Session, object())
 
-    try:
-        actual = backend_app._build_fixed_local_owner_narration_backend(session)
+    actual = backend_app._build_fixed_local_owner_narration_backend(session)
+    assert actual is expected_backend
+    assert captured["authorization"] is FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION
+    assert captured["runtime_status_provider"] is (
+        backend_app.narration_production_runtime_status
+    )
+    assert captured["voice_product"] is None
+    assert captured["official_voice_selection"] is None
+    baseline = backend_app.t2_settings_capabilities()
+    assert captured["capabilities"].item(
+        wire.CapabilityKey.NARRATION_SYNTHESIS
+    ) == baseline.item(wire.CapabilityKey.NARRATION_SYNTHESIS)
 
-        assert actual is expected_backend
-        assert captured["session"] is session
-        assert captured["authorization"] is FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION
-        assert captured["cache_runtime"] is expected_cache_runtime
-        assert isinstance(
-            captured["profile_creation_receipts"],
-            backend_app.SqlAlchemyVoiceActionReceiptPort,
-        )
-        assert captured["voice_product"] is None
-        capabilities = captured["capabilities"]
-        assert isinstance(capabilities, wire.NarrationCapabilities)
-        baseline = wire.t2_hold_capabilities()
-        managed_keys = {
-            wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
-            wire.CapabilityKey.CHARACTER_CAST_PLANNING,
-            wire.CapabilityKey.NANO_ADVANCED_TUNING,
-            wire.CapabilityKey.PRIVATE_VOICE_DELETION,
-            wire.CapabilityKey.VOICE_GENERATOR,
-            wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
-            wire.CapabilityKey.GENERIC_VOICE_POOL,
-            wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
-        }
+    ready = {
+        "product_requested": True,
+        "lifecycle_status": "ready",
+        "playback_installed": True,
+        "digest_keyring_loaded": True,
+        "production_backend_installed": True,
+        "worker_running": True,
+        "provider_selection_fingerprint_sha256": "d" * 64,
+        "reason_code": None,
+    }
+    monkeypatch.setattr(
+        backend_app,
+        "narration_production_runtime_status",
+        lambda: dict(ready),
+    )
+    monkeypatch.setenv("AI_NOVEL_TTS_PRODUCT_ENABLED", "true")
+    captured.clear()
+    assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
+    released = captured["capabilities"]
+    assert released.item(
+        wire.CapabilityKey.NARRATION_SYNTHESIS
+    ).state is wire.CapabilityState.ENABLED
+    for key in (
+        wire.CapabilityKey.VOICE_PREVIEW,
+        wire.CapabilityKey.REFERENCE_CLONE,
+        wire.CapabilityKey.VOICE_DESIGN,
+    ):
+        assert released.item(key).actionable is False
+    assert released.item(wire.CapabilityKey.PRESET_VOICE_SOURCE).actionable is True
+    assert captured["voice_product"] is None
+    assert isinstance(
+        captured["official_voice_selection"],
+        backend_app.OfficialVoiceSelectionService,
+    )
 
-        def with_managed_readiness(
-            source: wire.NarrationCapabilities,
-        ) -> wire.NarrationCapabilities:
-            readiness = backend_app.NARRATION_FEATURE_READINESS_PROVIDER.snapshot()
-            return wire.NarrationCapabilities(
-                items=[
-                    (
-                        readiness.item(item.key)
-                        if item.key in managed_keys
-                        else item.model_copy(deep=True)
-                    )
-                    for item in source.items
-                ]
-            )
-
-        for key in wire.CapabilityKey:
-            item = capabilities.item(key)
-            if key in {
-                wire.CapabilityKey.NARRATION_PRODUCT,
-                wire.CapabilityKey.READING_SETTINGS,
-            }:
-                assert item.state is wire.CapabilityState.ENABLED
-                assert item.visible and item.actionable
-                assert item.reason_code is None and item.required_gate is None
-            elif key in {
-                wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
-                wire.CapabilityKey.CHARACTER_CAST_PLANNING,
-                wire.CapabilityKey.NANO_ADVANCED_TUNING,
-                wire.CapabilityKey.PRIVATE_VOICE_DELETION,
-                wire.CapabilityKey.VOICE_GENERATOR,
-                wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
-                wire.CapabilityKey.GENERIC_VOICE_POOL,
-                wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
-            }:
-                assert item == (
-                    backend_app.NARRATION_FEATURE_READINESS_PROVIDER
-                    .snapshot()
-                    .item(key)
-                )
-            else:
-                assert item == baseline.item(key)
-
-        ready_technical = {
-            "technical_enabled": True,
-            "lifecycle_status": "ready",
-            "sidecar_reachable": True,
-            "model_ready": True,
-            "product_visible": True,
-            "reason_code": None,
-        }
-        ready_production = {
-            "product_requested": True,
-            "lifecycle_status": "ready",
-            "playback_installed": True,
-            "digest_keyring_loaded": True,
-            "production_backend_installed": True,
-            "worker_running": True,
-            "reason_code": None,
-        }
-        monkeypatch.setattr(
-            backend_app,
-            "narration_runtime_status",
-            lambda: dict(ready_technical),
-        )
-        production_status = dict(ready_production)
-        monkeypatch.setattr(
-            backend_app,
-            "narration_production_runtime_status",
-            lambda: dict(production_status),
-        )
-
-        monkeypatch.setenv("AI_NOVEL_TTS_VALIDATION_ENABLED", "true")
-        monkeypatch.setattr(
-            backend_app,
-            "current_voice_product_port",
-            lambda: object(),
-        )
-        monkeypatch.setattr(
-            backend_app,
-            "current_narration_production_policy",
-            lambda: type(
-                "Policy",
-                (),
-                {
-                    "tts_fingerprint": (
-                        backend_app.OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256
-                    )
-                },
-            )(),
-        )
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        hidden_capabilities = captured["capabilities"]
-        assert isinstance(hidden_capabilities, wire.NarrationCapabilities)
-        hidden_baseline = backend_app.t2_settings_capabilities()
-        for key in wire.CapabilityKey:
-            expected_item = (
-                backend_app.NARRATION_FEATURE_READINESS_PROVIDER.snapshot().item(key)
-                if key in managed_keys
-                else hidden_baseline.item(key)
-            )
-            assert hidden_capabilities.item(key) == expected_item
-        assert captured["voice_product"] is None
-        assert backend_app._narration_t4_http_access_allowed(
-            backend_app.Request(
-                {
-                    "type": "http",
-                    "method": "GET",
-                    "path": "/",
-                    "headers": [],
-                }
-            )
-        ) is False
-        ready_technical["product_visible"] = False
-        monkeypatch.setattr(
-            backend_app,
-            "validation_route_token_authorized",
-            lambda value: value == "v" * 43,
-        )
-        validation_scope = object()
-        monkeypatch.setattr(
-            backend_app,
-            "current_validation_runtime_scope",
-            lambda: validation_scope,
-        )
-        monkeypatch.setattr(
-            backend_app,
-            "_validation_request_scope_allowed",
-            lambda _request, scope: scope is validation_scope,
-        )
-        authorized_validation = backend_app.Request(
-            {
-                "type": "http",
-                "method": "GET",
-                "path": "/",
-                "headers": [
-                    (
-                        backend_app.VALIDATION_TOKEN_HEADER.lower().encode("ascii"),
-                        ("v" * 43).encode("ascii"),
-                    )
-                ],
-            }
-        )
-        assert backend_app._narration_t4_http_access_allowed(
-            authorized_validation
-        ) is True
-        production_status["reason_code"] = "DISK_SPACE_INSUFFICIENT"
-        assert backend_app._narration_t4_http_access_allowed(
-            authorized_validation
-        ) is True
-        production_status["reason_code"] = "STORAGE_IDENTITY_FAILURE"
-        assert backend_app._narration_t4_http_access_allowed(
-            authorized_validation
-        ) is False
-        production_status["reason_code"] = None
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(
-            session,
-            authorized_validation,
-        ) is expected_backend
-        validation_capabilities = captured["capabilities"]
-        assert isinstance(validation_capabilities, wire.NarrationCapabilities)
-        assert validation_capabilities.item(
-            wire.CapabilityKey.NARRATION_SYNTHESIS
-        ).state is wire.CapabilityState.ENABLED
-        assert validation_capabilities.item(
-            wire.CapabilityKey.PRODUCT_PLAYER
-        ).actionable is True
-        duplicate_validation = backend_app.Request(
-            {
-                "type": "http",
-                "method": "GET",
-                "path": "/",
-                "headers": [
-                    (
-                        backend_app.VALIDATION_TOKEN_HEADER.lower().encode("ascii"),
-                        ("v" * 43).encode("ascii"),
-                    ),
-                    (
-                        backend_app.VALIDATION_TOKEN_HEADER.lower().encode("ascii"),
-                        ("v" * 43).encode("ascii"),
-                    ),
-                ],
-            }
-        )
-        assert backend_app._narration_t4_http_access_allowed(
-            duplicate_validation
-        ) is False
-        ready_technical["product_visible"] = True
-        monkeypatch.delenv("AI_NOVEL_TTS_VALIDATION_ENABLED", raising=False)
-
-        monkeypatch.setenv("AI_NOVEL_TTS_PRODUCT_ENABLED", "true")
-        production_status["worker_running"] = False
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        assert captured["capabilities"] == with_managed_readiness(
-            backend_app.t2_settings_capabilities()
-        )
-        production_status["worker_running"] = True
-        monkeypatch.setattr(
-            backend_app,
-            "current_voice_product_port",
-            lambda: None,
-        )
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        released = captured["capabilities"]
-        assert isinstance(released, wire.NarrationCapabilities)
-        assert released == with_managed_readiness(
-            backend_app.t2_settings_capabilities()
-        )
-        assert captured["voice_product"] is None
-
-        expected_voice_product = object()
-        monkeypatch.setattr(
-            backend_app,
-            "current_voice_product_port",
-            lambda: expected_voice_product,
-        )
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        released = captured["capabilities"]
-        assert isinstance(released, wire.NarrationCapabilities)
-        product_keys = {
-            wire.CapabilityKey.NARRATION_PRODUCT,
-            wire.CapabilityKey.READING_SETTINGS,
-            wire.CapabilityKey.NARRATION_SYNTHESIS,
-            wire.CapabilityKey.PRODUCT_PLAYER,
-            wire.CapabilityKey.EDITOR_PRODUCTION,
-            wire.CapabilityKey.AUTOMATIC_SPEAKER_DETECTION,
-            wire.CapabilityKey.PRESET_VOICE_SOURCE,
-            wire.CapabilityKey.VOICE_PREVIEW,
-            wire.CapabilityKey.CACHE_CLEANUP,
-        }
-        for key in wire.CapabilityKey:
-            item = released.item(key)
-            if key in product_keys:
-                assert item.state is wire.CapabilityState.ENABLED
-                assert item.visible and item.actionable
-                assert item.reason_code is None and item.required_gate is None
-            elif key in managed_keys:
-                assert item == (
-                    backend_app.NARRATION_FEATURE_READINESS_PROVIDER
-                    .snapshot()
-                    .item(key)
-                )
-            else:
-                assert item == baseline.item(key)
-
-        monkeypatch.setenv("AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED", "true")
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        assert captured["voice_product"] is expected_voice_product
-        voice_released = captured["capabilities"]
-        assert isinstance(voice_released, wire.NarrationCapabilities)
-        for key in {
-            *product_keys,
-            wire.CapabilityKey.REFERENCE_CLONE,
-            wire.CapabilityKey.VOICE_PREVIEW,
-        }:
-            item = voice_released.item(key)
-            assert item.state is wire.CapabilityState.ENABLED
-            assert item.visible and item.actionable
-
-        monkeypatch.setenv("AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED", "TRUE")
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        invalid_voice_flag = captured["capabilities"]
-        assert isinstance(invalid_voice_flag, wire.NarrationCapabilities)
-        assert invalid_voice_flag.item(
-            wire.CapabilityKey.REFERENCE_CLONE
-        ) == baseline.item(wire.CapabilityKey.REFERENCE_CLONE)
-
-        monkeypatch.setenv("AI_NOVEL_TTS_PRODUCT_ENABLED", "TRUE")
-        captured.clear()
-        assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
-        invalid_flag = captured["capabilities"]
-        assert isinstance(invalid_flag, wire.NarrationCapabilities)
-        assert invalid_flag == with_managed_readiness(wire.NarrationCapabilities(
-            items=[
-                (
-                    wire.FeatureCapability(
-                        key=item.key,
-                        state=wire.CapabilityState.ENABLED,
-                        visible=True,
-                        actionable=True,
-                        reason_code=None,
-                        required_gate=None,
-                    )
-                    if item.key
-                    in {
-                        wire.CapabilityKey.NARRATION_PRODUCT,
-                        wire.CapabilityKey.READING_SETTINGS,
-                    }
-                    else item.model_copy(deep=True)
-                )
-                for item in baseline.items
-            ]
-        ))
-
-        lifecycle_calls: list[tuple[str, object]] = []
-
-        def fake_install(factory: object) -> None:
-            lifecycle_calls.append(("install", factory))
-
-        def fake_uninstall(factory: object) -> None:
-            lifecycle_calls.append(("uninstall", factory))
-
-        async def failing_launch() -> None:
-            raise RuntimeError("sidecar launch failed")
-
-        monkeypatch.setattr(
-            backend_app,
-            "install_narration_settings_backend_factory",
-            fake_install,
-        )
-        monkeypatch.setattr(
-            backend_app,
-            "uninstall_narration_settings_backend_factory",
-            fake_uninstall,
-        )
-        monkeypatch.setattr(backend_app, "launch_narration_runtime", failing_launch)
-
-        with pytest.raises(RuntimeError, match="sidecar launch failed"):
-            asyncio.run(backend_app._launch_narration_runtime())
-        assert lifecycle_calls == [
-            ("install", backend_app._NARRATION_SETTINGS_BACKEND_FACTORY),
-            ("uninstall", backend_app._NARRATION_SETTINGS_BACKEND_FACTORY),
-        ]
-    finally:
-        sys.modules.pop("backend.app", None)
+    monkeypatch.setenv("AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED", "true")
+    captured.clear()
+    assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
+    assert captured["capabilities"].item(
+        wire.CapabilityKey.NARRATION_SYNTHESIS
+    ).actionable is False

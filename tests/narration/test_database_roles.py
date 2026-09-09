@@ -153,6 +153,8 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "20260902_0038": 67,
         "20260902_0039": 67,
         "20260903_0040": 73,
+        "20260909_0049": 59,
+        "20260909_0050": 59,
     }
     for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
         assert (
@@ -206,7 +208,25 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "character_cast_plan_commands",
         "character_cast_plan_items",
     }
-    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260903_0040"]
+    assert set(PROTECTED_TABLES_BY_HEAD["20260903_0040"]) - set(
+        PROTECTED_TABLES_BY_HEAD["20260909_0049"]
+    ) == {
+        "character_cast_plan_commands",
+        "character_cast_plan_items",
+        "generic_voice_design_drafts",
+        "generic_voice_generation_commands",
+        "generic_voice_pack_version_slots",
+        "generic_voice_pack_versions",
+        "generic_voice_pools",
+        "generic_voice_slots",
+        "nano_voice_experiment_commands",
+        "voice_design_drafts",
+        "voice_generator_commands",
+        "voice_generator_run_evidence",
+        "voice_preparation_commands",
+        "voice_preparation_items",
+    }
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260909_0050"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:
@@ -217,12 +237,12 @@ def test_sql_and_python_protected_table_contracts_match() -> None:
     assert "GRANT " not in executable_sql
 
 
-def test_current_protected_tables_are_72_orm_tables_plus_alembic_system_table() -> None:
+def test_current_protected_tables_are_58_orm_tables_plus_alembic_system_table() -> None:
     orm_tables = set(Base.metadata.tables)
     protected_tables = set(CURRENT_PROTECTED_TABLES)
 
     assert protected_tables - orm_tables == {"alembic_version"}
-    assert len(protected_tables - {"alembic_version"}) == 72
+    assert len(protected_tables - {"alembic_version"}) == 58
     assert protected_tables - {"alembic_version"} <= orm_tables
 
 
@@ -310,6 +330,9 @@ def test_bootstrap_contract_never_embeds_runtime_passwords() -> None:
     assert "/run/ai-novel-db-auth/worker/.pgpass" in sql_source
     assert "mountpoint -q" in shell_source
     assert "PASSWORD NULL" in sql_source
+    assert "bootstrap-20260909_0049" in shell_source
+    assert "bootstrap-20260909_0050" in shell_source
+    assert "upgrade-20260909_0050" in migration_source
     assert "upgrade-20260903_0040" in migration_source
     assert "downgrade-20260902_0038" in migration_source
     assert "downgrade-20260830_0035" in migration_source

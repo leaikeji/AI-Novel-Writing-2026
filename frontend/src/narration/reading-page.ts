@@ -251,7 +251,7 @@ export function narratorOptionsForNovel(
 const NARRATOR_SOURCE_CAPABILITIES: Readonly<Record<VoiceSourceType, FeatureCapability["key"]>> = {
   preset: "preset_voice_source",
   uploaded: "reference_clone",
-  generated: "voice_generator",
+  generated: "voice_design",
 };
 
 

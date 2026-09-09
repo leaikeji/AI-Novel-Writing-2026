@@ -2,9 +2,9 @@
 
 The scheduler is intentionally small: retry promotion, expired-attempt
 reconciliation, and one fair claim are each committed before the caller starts
-Nano, FFmpeg, filesystem, or network work.  The existing job service remains
+TTS Provider, FFmpeg, filesystem, or network work.  The existing job service remains
 the sole authority for priority aging, leases, fencing, and the single
-``moss-nano:inference`` resource slot.
+``qwen-tts:inference`` resource slot.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class JobKindClaimGate(Protocol):
 class SchedulerConfig:
     lease_owner: str
     executor_key: str = "narration-worker"
-    resource_classes: tuple[str, ...] = ("moss-nano",)
+    resource_classes: tuple[str, ...] = ("qwen-tts",)
     job_kinds: tuple[str, ...] = ("narration.segment_render",)
     novel_ids: tuple[UUID, ...] | None = None
     document_ids: tuple[UUID, ...] | None = None
@@ -344,7 +344,7 @@ class NarrationJobScheduler:
         return result
 
     def claim_next_typed_job(self) -> ScheduledJob | None:
-        """Claim one fair configured Nano job and preserve its dispatch kind."""
+        """Claim one fair configured TTS job and preserve its dispatch kind."""
 
         return self._claim_next_typed_job()
 

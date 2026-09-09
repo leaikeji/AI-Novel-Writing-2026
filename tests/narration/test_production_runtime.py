@@ -13,7 +13,6 @@ import pytest_asyncio
 from sqlalchemy import create_engine, text
 
 from backend.narration.digest_keyring import DigestKeyringError
-from backend.narration.runtime import EXPECTED_PRODUCTION_MODEL_FINGERPRINT
 from backend.narration.transcoding import TranscodingUnavailable
 from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
 import backend.narration.narration_api as narration_api
@@ -61,7 +60,7 @@ def _environment(
         "AI_NOVEL_TTS_MEDIA_ROOT": str(media),
         "AI_NOVEL_TTS_FFMPEG_PATH": str(tmp_path / "ffmpeg"),
         "AI_NOVEL_TTS_FFPROBE_PATH": str(tmp_path / "ffprobe"),
-        "MOSS_FFMPEG_BUILD_ID": "ffmpeg-9.0.1-lgpl-narrow-linux-arm64-v1",
+        "NARRATION_FFMPEG_BUILD_ID": "ffmpeg-9.0.1-lgpl-narrow-linux-arm64-v1",
     }
     if validation:
         token_directory = tmp_path / "validation-token"
@@ -114,7 +113,7 @@ async def production_owner():
 
 
 @pytest.mark.asyncio
-async def test_database_probe_accepts_minimum_and_known_linear_descendant(
+async def test_database_probe_requires_qwen_resource_migration(
     production_owner,
 ) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -130,13 +129,7 @@ async def test_database_probe_accepts_minimum_and_known_linear_descendant(
 
     with engine.begin() as connection:
         connection.execute(
-            text("update alembic_version set version_num = '20260829_0033'")
-        )
-    production_owner._verify_database(engine)
-
-    with engine.begin() as connection:
-        connection.execute(
-            text("update alembic_version set version_num = '20260827_0018'")
+            text("update alembic_version set version_num = '20260905_0042'")
         )
     with pytest.raises(
         production_owner.NarrationProductionRuntimeError,
@@ -178,9 +171,10 @@ async def test_disabled_without_storage_performs_no_io(
         "playback_installed": False,
         "digest_keyring_loaded": False,
         "production_backend_installed": False,
-        "worker_running": False,
-        "reference_clone_ready": False,
-        "reason_code": None,
+            "worker_running": False,
+            "reference_clone_ready": False,
+            "provider_selection_fingerprint_sha256": None,
+            "reason_code": None,
     }
 
 
@@ -199,7 +193,7 @@ async def test_reference_clone_flag_cannot_bypass_the_product_gate(
     status = production_owner.narration_production_runtime_status()
     assert status["lifecycle_status"] == "configuration_error"
     assert status["playback_installed"] is False
-    assert status["reason_code"] == "TTS_PRODUCT_CONFIGURATION_INVALID"
+    assert status["reason_code"] == "TTS_PROVIDER_DISABLED"
 
 
 @pytest.mark.asyncio
@@ -233,7 +227,7 @@ async def test_limited_validation_rejects_reference_clone_until_its_own_gate(
     assert status["lifecycle_status"] == "configuration_error"
     assert status["playback_installed"] is False
     assert status["reference_clone_ready"] is False
-    assert status["reason_code"] == "TTS_PRODUCT_CONFIGURATION_INVALID"
+    assert status["reason_code"] == "TTS_PROVIDER_DISABLED"
 
 
 @pytest.mark.asyncio
@@ -491,7 +485,7 @@ async def test_playback_only_never_reads_keyring_or_starts_worker(
 
 
 @pytest.mark.asyncio
-async def test_missing_keyring_fails_closed_before_database_adapter_or_worker(
+async def test_missing_keyring_fails_closed_before_database_provider_or_worker(
     production_owner,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -510,11 +504,6 @@ async def test_missing_keyring_fails_closed_before_database_adapter_or_worker(
         production_owner,
         "get_engine",
         lambda: calls.append("database"),
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "get_ready_narration_adapter",
-        lambda: calls.append("adapter"),
     )
     await production_owner.launch_narration_production_runtime(
         _environment(tmp_path, product=True)
@@ -550,13 +539,7 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
 ) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     worker_instances: list[object] = []
-    adapter_calls: list[str] = []
     scheduler_kwargs: list[dict[str, object]] = []
-
-    class Adapter:
-        async def model_fingerprint(self):  # type: ignore[no-untyped-def]
-            adapter_calls.append("model_fingerprint")
-            return EXPECTED_PRODUCTION_MODEL_FINGERPRINT
 
     class Worker:
         def __init__(self, **kwargs: object) -> None:
@@ -588,20 +571,6 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
         lambda **_kwargs: None,
     )
 
-    async def ready_immediately(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(
-        production_owner,
-        "wait_narration_runtime_initialized",
-        ready_immediately,
-    )
-    adapter = Adapter()
-    monkeypatch.setattr(
-        production_owner,
-        "get_ready_narration_adapter",
-        lambda: adapter,
-    )
     def scheduler_factory(*_args: object, **kwargs: object) -> _IdleScheduler:
         scheduler_kwargs.append(kwargs)
         return _IdleScheduler()
@@ -622,16 +591,6 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
         lambda **_kwargs: (lambda _audio: None),
     )
     monkeypatch.setattr(production_owner, "NarrationSegmentWorker", Worker)
-    monkeypatch.setattr(
-        production_owner,
-        "VoiceProductService",
-        lambda *_args, **_kwargs: object(),
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "VoicePreviewProcessor",
-        lambda **_kwargs: object(),
-    )
 
     await production_owner.launch_narration_production_runtime(
         _environment(tmp_path, product=product, validation=validation)
@@ -645,7 +604,6 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
 
     status = production_owner.narration_production_runtime_status()
     cache_runtime = production_owner.current_narration_cache_runtime()
-    assert adapter_calls == ["model_fingerprint"]
     assert len(worker_instances) == 1
     assert len(scheduler_kwargs) == 1
     assert (
@@ -658,6 +616,10 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
     assert cache_runtime.cleanup_capability.visible is True
     assert cache_runtime.cleanup_capability.actionable is True
     assert callable(worker_instances[0].kwargs["disk_guard"])
+    assert isinstance(
+        worker_instances[0].kwargs["execution"],
+        production_owner.TTSExecutionService,
+    )
     assert status["digest_keyring_loaded"] is True
     assert status["production_backend_installed"] is True
     assert status["worker_running"] is True
@@ -680,35 +642,6 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
         "lifecycle_status"
     ] == "disabled"
     engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_cold_on_demand_adapter_uses_frozen_expected_model_identity(
-    production_owner,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class ColdAdapter:
-        expected_model_fingerprint = EXPECTED_PRODUCTION_MODEL_FINGERPRINT
-
-        async def model_fingerprint(self):  # type: ignore[no-untyped-def]
-            return None
-
-    adapter = ColdAdapter()
-    monkeypatch.setattr(
-        production_owner,
-        "get_ready_narration_adapter",
-        lambda: adapter,
-    )
-
-    current_task = asyncio.current_task()
-    assert current_task is not None
-    resolved = await production_owner._resolve_ready_sidecar(
-        {},
-        asyncio.Event(),
-        current_task,
-    )
-
-    assert resolved == (adapter, EXPECTED_PRODUCTION_MODEL_FINGERPRINT)
 
 
 @pytest.mark.asyncio
@@ -738,132 +671,7 @@ async def test_ready_runtime_health_exposes_only_stable_disk_guard_reason(
 
 
 @pytest.mark.asyncio
-async def test_reference_clone_runtime_publishes_one_port_and_uses_shared_fair_dispatch(
-    production_owner,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    adapter = object()
-    product_port = object()
-    scheduler_configs: list[object] = []
-    preview_processors: list[dict[str, object]] = []
-
-    class FingerprintedAdapter:
-        async def model_fingerprint(self):  # type: ignore[no-untyped-def]
-            return EXPECTED_PRODUCTION_MODEL_FINGERPRINT
-
-    adapter = FingerprintedAdapter()
-
-    class PreviewRepository:
-        def terminalize_job_in_session(self, _session, *, job_id):  # type: ignore[no-untyped-def]
-            return job_id is not None
-
-    class Scheduler:
-        def maintain_once(self) -> None:
-            return None
-
-        def claim_next_typed_job(self):  # type: ignore[no-untyped-def]
-            return None
-
-    class SegmentWorker:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        async def process(self, _lease: object) -> None:
-            raise AssertionError("idle shared dispatcher fabricated a segment lease")
-
-    class PreviewProcessor:
-        def __init__(self, **kwargs: object) -> None:
-            preview_processors.append(kwargs)
-
-        async def process(self, _lease: object) -> None:
-            raise AssertionError("idle shared dispatcher fabricated a preview lease")
-
-    monkeypatch.setattr(
-        production_owner,
-        "load_digest_keyring",
-        lambda _path: TEST_DIGEST_KEYRING,
-    )
-    monkeypatch.setattr(production_owner, "get_engine", lambda: engine)
-    monkeypatch.setattr(production_owner, "_verify_database", lambda _engine: None)
-    monkeypatch.setattr(
-        production_owner,
-        "_verify_validation_runtime_scope",
-        lambda _engine, _scope: None,
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "validate_fixed_toolchain",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "get_ready_narration_adapter",
-        lambda: adapter,
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "SqlAlchemyNarrationWorkerRepository",
-        lambda *_args, **_kwargs: _SegmentRepositoryStub(),
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "SqlAlchemyVoicePreviewRepository",
-        lambda *_args, **_kwargs: PreviewRepository(),
-    )
-
-    def build_scheduler(*_args: object, **kwargs: object) -> Scheduler:
-        scheduler_configs.append(kwargs["config"])
-        assert "narration.segment_render" in kwargs["terminalizers"]
-        assert "narration.voice_preview" in kwargs["terminalizers"]
-        assert kwargs["job_kind_claim_gate"] is None
-        return Scheduler()
-
-    monkeypatch.setattr(production_owner, "NarrationJobScheduler", build_scheduler)
-    monkeypatch.setattr(
-        production_owner,
-        "FixedFfmpegTranscoder",
-        lambda **_kwargs: (lambda _audio: None),
-    )
-    monkeypatch.setattr(production_owner, "NarrationSegmentWorker", SegmentWorker)
-    monkeypatch.setattr(production_owner, "VoicePreviewProcessor", PreviewProcessor)
-    monkeypatch.setattr(
-        production_owner,
-        "VoiceProductService",
-        lambda *_args, **_kwargs: product_port,
-    )
-
-    environment = _environment(tmp_path, product=True, validation=False)
-    environment["AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED"] = "true"
-    await production_owner.launch_narration_production_runtime(environment)
-    await _wait_until(
-        lambda: production_owner.narration_production_runtime_status()[
-            "lifecycle_status"
-        ]
-        == "ready"
-    )
-
-    assert production_owner.current_voice_product_port() is product_port
-    assert production_owner.narration_production_runtime_status()[
-        "reference_clone_ready"
-    ] is True
-    assert len(preview_processors) == 1
-    assert len(scheduler_configs) == 1
-    assert scheduler_configs[0].job_kinds == (  # type: ignore[attr-defined]
-        "narration.segment_render",
-        "narration.voice_preview",
-    )
-    assert scheduler_configs[0].novel_ids is None  # type: ignore[attr-defined]
-    assert scheduler_configs[0].document_ids is None  # type: ignore[attr-defined]
-
-    await production_owner.stop_narration_production_runtime()
-    assert production_owner.current_voice_product_port() is None
-    engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_unusable_fixed_toolchain_fails_before_adapter_backend_or_worker(
+async def test_unusable_fixed_toolchain_fails_before_provider_backend_or_worker(
     production_owner,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -887,11 +695,6 @@ async def test_unusable_fixed_toolchain_fails_before_adapter_backend_or_worker(
         "validate_fixed_toolchain",
         unavailable_toolchain,
     )
-    monkeypatch.setattr(
-        production_owner,
-        "get_ready_narration_adapter",
-        lambda: calls.append("adapter"),
-    )
     await production_owner.launch_narration_production_runtime(
         _environment(tmp_path, product=True)
     )
@@ -907,127 +710,4 @@ async def test_unusable_fixed_toolchain_fails_before_adapter_backend_or_worker(
     assert status["production_backend_installed"] is False
     assert status["worker_running"] is False
     assert status["reason_code"] == "TTS_PRODUCTION_START_FAILED"
-    engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_adapter_lease_loss_detaches_and_rebuilds_one_worker_cycle(
-    production_owner,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    model_calls: list[str] = []
-    worker_adapters: list[object] = []
-    launches = 0
-
-    class Adapter:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        async def model_fingerprint(self):  # type: ignore[no-untyped-def]
-            model_calls.append(self.name)
-            return EXPECTED_PRODUCTION_MODEL_FINGERPRINT
-
-    first = Adapter("first")
-    second = Adapter("second")
-    current: list[Adapter | None] = [None]
-
-    class Worker:
-        def __init__(self, **kwargs: object) -> None:
-            worker_adapters.append(kwargs["adapter"])
-
-        async def run_until_stopped(
-            self,
-            stop_event: asyncio.Event,
-            **_kwargs: object,
-        ) -> None:
-            await stop_event.wait()
-
-    async def relaunch(*_args: object, **_kwargs: object) -> None:
-        nonlocal launches
-        launches += 1
-        current[0] = first if launches == 1 else second
-
-    async def initialized(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(
-        production_owner,
-        "load_digest_keyring",
-        lambda _path: TEST_DIGEST_KEYRING,
-    )
-    monkeypatch.setattr(production_owner, "get_engine", lambda: engine)
-    monkeypatch.setattr(production_owner, "_verify_database", lambda _engine: None)
-    monkeypatch.setattr(
-        production_owner,
-        "validate_fixed_toolchain",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(production_owner, "launch_narration_runtime", relaunch)
-    monkeypatch.setattr(
-        production_owner,
-        "wait_narration_runtime_initialized",
-        initialized,
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "narration_runtime_status",
-        lambda: {
-            "lifecycle_status": "ready" if current[0] is not None else "unavailable",
-            "reason_code": None,
-        },
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "get_ready_narration_adapter",
-        lambda: current[0],
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "NarrationJobScheduler",
-        lambda *_args, **_kwargs: _IdleScheduler(),
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "SqlAlchemyNarrationWorkerRepository",
-        lambda *_args, **_kwargs: _SegmentRepositoryStub(),
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "FixedFfmpegTranscoder",
-        lambda **_kwargs: (lambda _audio: None),
-    )
-    monkeypatch.setattr(production_owner, "NarrationSegmentWorker", Worker)
-    monkeypatch.setattr(
-        production_owner,
-        "VoiceProductService",
-        lambda *_args, **_kwargs: object(),
-    )
-    monkeypatch.setattr(
-        production_owner,
-        "VoicePreviewProcessor",
-        lambda **_kwargs: object(),
-    )
-    monkeypatch.setattr(production_owner, "SIDECAR_RETRY_SECONDS", 0.01)
-
-    await production_owner.launch_narration_production_runtime(
-        _environment(tmp_path, product=True)
-    )
-    await _wait_until(lambda: len(worker_adapters) == 1)
-    assert production_owner.narration_production_runtime_status()[
-        "lifecycle_status"
-    ] == "ready"
-
-    current[0] = None
-    await _wait_until(lambda: len(worker_adapters) == 2)
-
-    assert worker_adapters == [first, second]
-    assert model_calls == ["first", "second"]
-    assert launches == 2
-    status = production_owner.narration_production_runtime_status()
-    assert status["lifecycle_status"] == "ready"
-    assert status["production_backend_installed"] is True
-    assert status["worker_running"] is True
-    await production_owner.stop_narration_production_runtime()
     engine.dispose()

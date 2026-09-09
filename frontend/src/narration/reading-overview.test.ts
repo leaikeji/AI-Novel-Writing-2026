@@ -84,14 +84,6 @@ function capability(key: typeof CAPABILITY_KEYS[number]): FeatureCapability {
       reason_code: "T2_GATE_REQUIRED",
       required_gate: "T2-GATE",
     },
-    generic_voice_pool: {
-      key,
-      state: "unavailable",
-      visible: true,
-      actionable: false,
-      reason_code: "GENERIC_VOICE_ASSETS_UNAVAILABLE",
-      required_gate: "T2-E",
-    },
     cache_cleanup: {
       key,
       state: "hold",
@@ -100,13 +92,13 @@ function capability(key: typeof CAPABILITY_KEYS[number]): FeatureCapability {
       reason_code: "T2_GATE_REQUIRED",
       required_gate: "T2-GATE",
     },
-    voice_generator: {
+    voice_design: {
       key,
       state: "unavailable",
       visible: false,
       actionable: false,
-      reason_code: "VOICE_GENERATOR_NO_GO",
-      required_gate: "T5-GATE",
+      reason_code: "QWEN_VOICE_DESIGN_NOT_RELEASED",
+      required_gate: "QWEN-TTS",
     },
   };
   return definitions[key] ?? {
@@ -151,7 +143,7 @@ function overviewFixture(): NarrationOverviewResponse {
     runtime: {
       technical_enabled: false,
       lifecycle_status: "disabled",
-      sidecar_reachable: false,
+      provider_reachable: false,
       model_ready: false,
       product_visible: false,
       protocol_version: "1.1",
@@ -224,7 +216,7 @@ function overviewFixture(): NarrationOverviewResponse {
       },
       {
         source_type: "generated",
-        capability: "voice_generator",
+        capability: "voice_design",
         available: false,
         reason_code: "VOICE_GENERATOR_NO_GO",
         accepted_mime_types: [],
@@ -304,7 +296,7 @@ describe("reading overview surface", () => {
     expect(buttons).toHaveLength(3);
     expect(buttons.every((button) => button.props.disabled === true)).toBe(true);
     expect(textContent(tree)).toContain("等待声音设置阶段门禁通过（T2_GATE_REQUIRED）");
-    expect(textContent(tree)).toContain("18 个官方音色");
+    expect(textContent(tree)).toContain("Qwen 官方音色");
     expect(textContent(tree)).not.toContain("有明确授权且已锁定");
     expect(textContent(tree)).not.toContain("文字生成音色");
     expect(onNavigate).not.toHaveBeenCalled();

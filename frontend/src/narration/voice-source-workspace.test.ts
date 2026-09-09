@@ -143,7 +143,7 @@ function capability(key: FeatureCapability["key"]): FeatureCapability {
   if (key === "preset_voice_source") {
     return { key, state: "hold", visible: true, actionable: false, reason_code: "OFFICIAL_PRESET_RUNTIME_UNAVAILABLE", required_gate: "T5-GATE" };
   }
-  if (key === "voice_generator") {
+  if (key === "voice_design") {
     return { key, state: "unavailable", visible: false, actionable: false, reason_code: "VOICE_GENERATOR_NO_GO", required_gate: "T5-GATE" };
   }
   return { key, state: "hold", visible: false, actionable: false, reason_code: "NOT_IN_T4_VOICE_SCOPE", required_gate: "T5-GATE" };
@@ -196,7 +196,7 @@ const voiceSources: readonly VoiceSourceAvailability[] = [
   },
   {
     source_type: "generated",
-    capability: "voice_generator",
+    capability: "voice_design",
     available: false,
     reason_code: "VOICE_GENERATOR_NO_GO",
     accepted_mime_types: [],

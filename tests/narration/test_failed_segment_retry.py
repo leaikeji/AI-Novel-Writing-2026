@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from backend.narration import failed_segment_retry as failed_segment_retry_module
 from backend.models import (
     BackgroundJob,
     BackgroundJobAttempt,
@@ -86,14 +87,29 @@ def _command(request: NarrationRequest, edition_id, *segment_ids, revision=None)
     )
 
 
-def test_partial_failure_projection_and_reset_preserve_aggregate_state() -> None:
+def test_partial_failure_projection_and_reset_preserve_aggregate_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store, _foundation_rows, request, edition, renders, rows = _foundation()
     job = _fail(store, rows[0], renders[0])
     request.state = "partial_ready"
     edition.state = "partial_ready"
+    original_require_usable_voice = failed_segment_retry_module.require_usable_voice
+    projection_lock_modes: list[bool] = []
+
+    def record_voice_check(*args: object, **kwargs: object):
+        projection_lock_modes.append(bool(kwargs.get("for_update", True)))
+        return original_require_usable_voice(*args, **kwargs)
+
+    monkeypatch.setattr(
+        failed_segment_retry_module,
+        "require_usable_voice",
+        record_voice_check,
+    )
 
     projection = project_failed_segment_retries(store, edition_id=edition.id)
 
+    assert projection_lock_modes and not any(projection_lock_modes)
     assert projection.contract_version == FAILED_SEGMENT_RETRY_CONTRACT_VERSION
     assert projection.request_version == request.version
     assert projection.manifest_revision is None

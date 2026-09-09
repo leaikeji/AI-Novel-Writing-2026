@@ -652,7 +652,10 @@ def project_document_edition_history(
         try:
             for voice_version_id in sorted({row.voice_version_id for row in rows}, key=str):
                 require_usable_voice(
-                    store, voice_version_id, novel_id=edition.novel_id
+                    store,
+                    voice_version_id,
+                    novel_id=edition.novel_id,
+                    for_update=False,
                 )
         except VoiceRightsUnavailable:
             rights_available = False

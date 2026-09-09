@@ -663,7 +663,7 @@ export function createVoiceSourceWorkspace(
               : current.phase,
             workflow,
             message: workflow.status === "preview_running"
-              ? "MOSS-TTS-Nano 正在生成临时试听…"
+              ? "Qwen TTS 正在生成临时试听…"
               : workflow.status === "preview_queued"
                 ? "试听已排队，正在等待本地模型资源…"
                 : current.message,
@@ -973,7 +973,7 @@ export function createVoiceSourceWorkspace(
         h("div", { className: "anw-voice-workspace__section-heading" },
           h("div", null,
             h("h3", { id: `${prefix}-preview-heading` }, "3. 试听、确认并锁定"),
-            h("p", null, "先选择候选版本并生成真实 Nano 试听；播放后仍需单独勾选质量确认。"),
+            h("p", null, "先选择候选版本并生成真实 Qwen TTS 试听；播放后仍需单独勾选质量确认。"),
           ),
         ),
         sourceVersions.length === 0

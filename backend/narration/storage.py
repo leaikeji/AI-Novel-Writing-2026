@@ -205,7 +205,7 @@ class NarrationStorage:
         return self._open_read(self.models, relative_path)
 
     def reject_model_write(self, _relative_path: str) -> None:
-        raise ModelRootReadOnly("moss-models is owned by the model lifecycle and read-only here")
+        raise ModelRootReadOnly("Qwen model assets are lifecycle-owned and read-only here")
 
     def _open_read(
         self,
@@ -613,6 +613,39 @@ class NarrationStorage:
             return os.fstat(fd)
         finally:
             os.close(fd)
+
+    def publish_or_verify_media(
+        self,
+        chunks: Iterable[bytes],
+        *,
+        asset_id: UUID,
+        expected_sha256: str,
+        expected_size: int,
+        extension: str,
+        max_bytes: int,
+    ) -> PublishedFile:
+        """Publish new bytes or re-adopt an exact immutable crash remnant."""
+
+        try:
+            return self.publish_media(
+                chunks,
+                asset_id=asset_id,
+                expected_sha256=expected_sha256,
+                expected_size=expected_size,
+                extension=extension,
+                max_bytes=max_bytes,
+            )
+        except TargetCollision:
+            asset_key = asset_id.hex
+            relative_path = (
+                f"assets/{asset_key[:2]}/{asset_key}/{expected_sha256}.{extension}"
+            )
+            return self.verify_existing_media(
+                relative_path,
+                expected_sha256=expected_sha256,
+                expected_size=expected_size,
+                max_bytes=max_bytes,
+            )
 
     def verify_existing_media(
         self,

@@ -44,6 +44,8 @@ from backend.narration.services import (
     NarrationCasConflict,
     StaleNarrationInput,
 )
+from backend.narration.tts_selection import selection_fingerprint
+from backend.narration import schemas as wire
 from tests.narration.test_domain_services import (
     MemoryNarrationStore,
     _seed_render_assets,
@@ -88,7 +90,7 @@ class MemoryRenderQueue:
                 render_fingerprint=values["render_fingerprint"],
             ),
             idempotency_key=f"memory-render-{uuid4()}",
-            resource_class="moss-nano",
+            resource_class="qwen-tts",
             base_priority=values["base_priority"],
             state="queued",
             max_attempts=values["max_attempts"],
@@ -144,6 +146,10 @@ def test_generation_creates_one_approved_edition_and_fenced_render_candidates() 
     assert request.completed_at is None
     editions = store.find_all(NarrationEdition, request_id=request.id)
     assert len(editions) == 1 and result.edition_id == editions[0].id
+    assert editions[0].tts_fingerprint == selection_fingerprint(
+        wire.TTSProviderSelection()
+    )
+    assert editions[0].tts_fingerprint != POLICY.tts_fingerprint
     segments = store.find_all(
         NarrationEditionSegment,
         edition_id=editions[0].id,

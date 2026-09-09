@@ -148,19 +148,18 @@ const ZERO_SHA = "0".repeat(64);
 
 
 function capability(key: typeof CAPABILITY_KEYS[number]): FeatureCapability {
-  if (key === "voice_generator") {
+  if (key === "voice_design") {
     return {
       key,
       state: "unavailable",
       visible: false,
       actionable: false,
-      reason_code: "VOICE_GENERATOR_NO_GO",
-      required_gate: "T5-GATE",
+      reason_code: "QWEN_VOICE_DESIGN_NOT_RELEASED",
+      required_gate: "QWEN-TTS",
     };
   }
   const visible = key === "narration_product"
     || key === "reading_settings"
-    || key === "generic_voice_pool"
     || key === "preset_voice_source"
     || key === "cache_cleanup";
   return {
@@ -168,9 +167,7 @@ function capability(key: typeof CAPABILITY_KEYS[number]): FeatureCapability {
     state: key === "narration_product" || key === "reading_settings" ? "hold" : "unavailable",
     visible,
     actionable: false,
-    reason_code: key === "generic_voice_pool"
-      ? "GENERIC_VOICE_ASSETS_UNAVAILABLE"
-      : "T2_GATE_REQUIRED",
+    reason_code: "T2_GATE_REQUIRED",
     required_gate: "T2-GATE",
   };
 }
@@ -212,7 +209,7 @@ function overviewFixture(): NarrationOverviewResponse {
     runtime: {
       technical_enabled: false,
       lifecycle_status: "disabled",
-      sidecar_reachable: false,
+      provider_reachable: false,
       model_ready: false,
       product_visible: false,
       protocol_version: "1.1",
@@ -285,7 +282,7 @@ function overviewFixture(): NarrationOverviewResponse {
       },
       {
         source_type: "generated",
-        capability: "voice_generator",
+        capability: "voice_design",
         available: false,
         reason_code: "VOICE_GENERATOR_NO_GO",
         accepted_mime_types: [],

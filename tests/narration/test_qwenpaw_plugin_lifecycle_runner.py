@@ -5,6 +5,7 @@ import base64
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +57,7 @@ def candidate(tmp_path: Path) -> Path:
         "alembic.ini": "[alembic]\nscript_location = backend/migrations\n",
         "frontend/dist/index.js": "export {};\n",
         "backend/app.py": "",
-        "backend/narration/pawapp_runtime.py": "",
+        "backend/narration/providers/local.py": "",
         (
             "backend/migrations/versions/"
             "20260823_0001_fixture.py"
@@ -381,6 +382,8 @@ class _InstalledContractGate:
         *,
         production: dict[str, object] | None = None,
         route_cache_control: str | None = "no-store",
+        expected_skills: frozenset[str] | None = None,
+        registered_skills: frozenset[str] | None = None,
     ) -> object:
         names = runner.create_resource_names("abcd1234")
         config = runner.GateConfig(
@@ -389,10 +392,11 @@ class _InstalledContractGate:
             candidate,
             None,
             runner.REAL_CONFIRMATION,
+            candidate_skill_ids=runner.NOVEL_SKILLS if expected_skills is None else expected_skills,
         )
         snapshot = runner.RegistrySnapshot(
             ("default",),
-            {"default": tuple(sorted(runner.NOVEL_SKILLS))},
+            {"default": tuple(sorted(runner.NOVEL_SKILLS if registered_skills is None else registered_skills))},
             {"default": tuple(sorted(runner.NOVEL_TOOLS))},
         )
 
@@ -477,6 +481,65 @@ class _InstalledContractGate:
         return InstalledGate()
 
 
+def _copy_approved_skills(candidate: Path) -> frozenset[str]:
+    relative = "backend/writing_skills/approved-capabilities.json"
+    target = candidate / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(PROJECT_ROOT / relative, target)
+    approvals = json.loads(target.read_text(encoding="utf-8"))
+    for approval in approvals:
+        skill_id = approval["skill_id"]
+        shutil.copytree(PROJECT_ROOT / "skills" / skill_id, candidate / "skills" / skill_id)
+    return frozenset(approval["skill_id"] for approval in approvals)
+
+
+def test_candidate_skill_inventory_uses_frozen_approved_catalog(runner: ModuleType, candidate: Path) -> None:
+    approved = _copy_approved_skills(candidate)
+    assert runner.candidate_published_skill_ids(candidate) == runner.NOVEL_SKILLS | approved
+    runner.validate_candidate(candidate)
+
+
+@pytest.mark.parametrize("variant", ["missing_index", "missing_skill", "changed_asset", "unapproved_extra", "bad_index"])
+def test_candidate_skill_inventory_rejects_invalid_publication(
+    runner: ModuleType, candidate: Path, variant: str,
+) -> None:
+    approved = _copy_approved_skills(candidate)
+    approval_path = candidate / "backend/writing_skills/approved-capabilities.json"
+    skill_path = candidate / "skills" / sorted(approved)[0] / "SKILL.md"
+    if variant == "missing_index":
+        approval_path.unlink()
+    elif variant == "missing_skill":
+        skill_path.unlink()
+    elif variant == "changed_asset":
+        skill_path.write_text("changed content", encoding="utf-8")
+    elif variant == "bad_index":
+        approval_path.write_text("{}", encoding="utf-8")
+    else:
+        extra = candidate / "skills" / "unapproved-extra"
+        extra.mkdir()
+        (extra / "SKILL.md").write_text("unapproved", encoding="utf-8")
+    with pytest.raises(runner.GateError, match="CANDIDATE_SKILL_CATALOG_INVALID"):
+        runner.validate_candidate(candidate)
+
+
+@pytest.mark.parametrize("variant", ["exact", "missing", "extra"])
+def test_installed_registry_matches_frozen_approved_inventory(
+    runner: ModuleType, candidate: Path, variant: str,
+) -> None:
+    approved = _copy_approved_skills(candidate)
+    expected = runner.candidate_published_skill_ids(candidate)
+    actual = expected if variant == "exact" else (
+        expected - approved if variant == "missing" else expected | {"unapproved-extra"}
+    )
+    gate = _InstalledContractGate.build(runner, candidate, expected_skills=expected, registered_skills=actual)
+    if variant == "exact":
+        gate._verify_installed_contract()
+        assert gate.evidence.checks["expected-published-skill-ids"] == sorted(expected)
+    else:
+        with pytest.raises(runner.GateError, match="PLUGIN_SKILL_REGISTRY_INVALID"):
+            gate._verify_installed_contract()
+
+
 def test_installed_contract_requires_full_disabled_production_shape_and_routes(
     runner: ModuleType,
     candidate: Path,
@@ -500,6 +563,20 @@ def test_installed_contract_requires_full_disabled_production_shape_and_routes(
         }
         for route_class, _path in runner.T4_DISABLED_ROUTE_PROBES
     }
+
+
+def test_non_json_failure_records_status_without_response_contents(
+    runner: ModuleType, candidate: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = _InstalledContractGate.build(runner, candidate)
+    private_body = b"internal error with confidential response details"
+    monkeypatch.setattr(gate, "_raw_http_bytes", lambda *args, **kwargs: (500, private_body))
+    with pytest.raises(runner.GateError, match="HTTP_RESPONSE_NOT_JSON"):
+        gate._raw_http_json("POST", f"/api/{runner.APP_ID}/novels")
+    evidence = gate.evidence.checks["http-invalid-json"]
+    assert evidence["status"] == 500
+    assert evidence["response_sha256"] == runner._sha256_bytes(private_body)
+    assert private_body.decode() not in json.dumps(evidence)
 
 
 @pytest.mark.parametrize("variant", ["playback_only", "missing_reference_clone"])

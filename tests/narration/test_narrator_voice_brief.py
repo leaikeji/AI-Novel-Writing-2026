@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from backend.narration.character_voice_matching import CharacterVoiceMatchingError
+from backend.narration.voice_brief import VoiceBriefError
 from backend.narration.narrator_voice_brief import (
     NARRATOR_VOICE_BRIEF_INVALID,
     NarratorVoiceBrief,
@@ -77,7 +77,7 @@ def test_narrator_brief_rejects_extra_coercion_and_out_of_scope_evidence(
     payload = _valid_payload()
     mutate(payload)
 
-    with pytest.raises(CharacterVoiceMatchingError) as caught:
+    with pytest.raises(VoiceBriefError) as caught:
         parse_narrator_voice_brief(payload)
 
     assert caught.value.code == NARRATOR_VOICE_BRIEF_INVALID

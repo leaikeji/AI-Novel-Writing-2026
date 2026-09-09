@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import unicodedata
 
-from .character_voice_matching import (
+from .voice_brief import (
     CharacterVoiceBrief,
     CharacterVoiceLanguage,
 )

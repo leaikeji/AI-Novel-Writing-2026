@@ -290,7 +290,6 @@
           "enum": [
             "character_binding",
             "anonymous_binding",
-            "generic_slot",
             "profile"
           ]
         },
@@ -765,7 +764,6 @@
           "enum": [
             "W_SPEAKER_MEDIUM_CONFIDENCE",
             "W_NEW_ANONYMOUS_SPEAKER",
-            "W_GENERIC_VOICE_FALLBACK",
             "W_MANUAL_OVERRIDE_INHERITED",
             "W_PRONUNCIATION_SOFT_FALLBACK",
             "W_CLOUD_ASSISTED_USED",

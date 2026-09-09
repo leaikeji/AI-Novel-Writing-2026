@@ -93,7 +93,7 @@ export function buildReadingStatusModel(
   }
   const runtimeReady = overview.runtime.lifecycle_status === "ready"
     && overview.runtime.technical_enabled
-    && overview.runtime.sidecar_reachable
+    && overview.runtime.provider_reachable
     && overview.runtime.model_ready
     && overview.runtime.model_fingerprint_sha256 !== null;
   const diskTotal = overview.cache.disk_total_bytes;

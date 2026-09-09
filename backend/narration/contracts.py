@@ -10,28 +10,16 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from types import MappingProxyType
-from typing import Final, Mapping
+from typing import Final
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 NARRATION_SCOPE_CONTRACT_VERSION: Final = "narration-scope/1"
 NARRATION_REVIEW_TAXONOMY_VERSION: Final = "narration-review-taxonomy/1"
-MOSS_NANO_ADAPTER_CONTRACT_VERSION: Final = "moss-nano-tts-adapter/1"
-MOSS_NANO_DECODE_PARAMETERS_V2: Final = "moss-nano-decode-parameters/2"
-VOICE_DESIGN_ADAPTER_CONTRACT_VERSION: Final = "moss-voice-design-adapter/1"
-MODEL_FINGERPRINT_SCHEMA_VERSION: Final = "moss-model-fingerprint/1"
+TTS_PROVIDER_CONTRACT_VERSION: Final = "qwen-tts-provider/1"
+TTS_MODEL_FINGERPRINT_SCHEMA_VERSION: Final = "qwen-tts-model-fingerprint/1"
 EDITION_FINGERPRINT_SCHEMA_VERSION: Final = "narration-edition-fingerprint/1"
 RENDER_FINGERPRINT_SCHEMA_VERSION: Final = "narration-render-fingerprint/1"
 APP_ID: Final = "ai-novel-world-2026"
-PRODUCTION_NANO_MAX_NEW_FRAMES: Final = 375
-PRODUCTION_NANO_MAX_SEED: Final = 2**63 - 1
-PRODUCTION_NANO_SAMPLE_MODES: Final[frozenset[str]] = frozenset(
-    {"greedy", "fixed", "full"}
-)
-NANO_TEMPERATURE_MILLI_RANGE: Final = (100, 2_000)
-NANO_TOP_P_MILLI_RANGE: Final = (1, 1_000)
-NANO_TOP_K_RANGE: Final = (1, 100)
-NANO_AUDIO_REPETITION_PENALTY_MILLI_RANGE: Final = (1_000, 2_000)
 
 LOCAL_OWNER_ID: Final = UUID("29cf94d9-a5c9-54ec-912c-5dfff8738c4c")
 LOCAL_WORKSPACE_ID: Final = UUID("f0e2e632-bc99-52d2-9916-bb906aa4da6e")
@@ -49,9 +37,21 @@ class UnknownTaxonomyCodeError(ContractError):
     """Raised for a code outside the exact frozen taxonomy."""
 
 
-class AdapterKind(str, Enum):
-    MOSS_NANO_TTS = "moss_nano_tts"
-    VOICE_DESIGN = "voice_design"
+class TTSProviderId(str, Enum):
+    """Stable product-facing Provider identities."""
+
+    LOCAL_QWEN3_TTS = "local_qwen3_tts"
+    ALIYUN_QWEN_AUDIO_TTS = "aliyun_qwen_audio_tts"
+
+
+class TTSVoiceKind(str, Enum):
+    PRESET = "preset"
+    REFERENCE_CLONE = "reference_clone"
+    DESIGNED = "designed"
+
+
+class TTSAudioFormat(str, Enum):
+    WAV = "wav"
 
 
 class AdapterHealthStatus(str, Enum):
@@ -73,6 +73,22 @@ class CancelDisposition(str, Enum):
     UNSUPPORTED = "unsupported"
 
 
+TTS_PROVIDER_ERROR_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "TTS_PROVIDER_DISABLED",
+        "TTS_PROVIDER_UNAVAILABLE",
+        "TTS_PROVIDER_AUTH_FAILED",
+        "TTS_PROVIDER_RATE_LIMITED",
+        "TTS_PROVIDER_TIMEOUT",
+        "TTS_PROVIDER_RESPONSE_INVALID",
+        "TTS_PROVIDER_CANCELLED",
+        "TTS_PROVIDER_CONSENT_REQUIRED",
+        "TTS_VOICE_UNAVAILABLE",
+        "TTS_MODEL_IDENTITY_MISMATCH",
+    }
+)
+
+
 class ConfidenceLevel(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
@@ -88,7 +104,6 @@ class ReviewIssueSeverity(str, Enum):
 WARNING_CODES: Final[tuple[str, ...]] = (
     "W_SPEAKER_MEDIUM_CONFIDENCE",
     "W_NEW_ANONYMOUS_SPEAKER",
-    "W_GENERIC_VOICE_FALLBACK",
     "W_MANUAL_OVERRIDE_INHERITED",
     "W_PRONUNCIATION_SOFT_FALLBACK",
     "W_CLOUD_ASSISTED_USED",
@@ -198,115 +213,6 @@ class ReviewIssue:
 
 
 @dataclass(frozen=True, slots=True)
-class AdapterCapabilities:
-    adapter_kind: AdapterKind
-    supports_warmup: bool
-    supports_synthesis: bool
-    supports_cancel: bool
-    cancellation_granularity: CancellationGranularity
-    supports_reference_audio: bool
-    supports_streaming_response_bytes: bool
-    supports_voice_design: bool
-    max_inference_concurrency: int
-    product_visible: bool = False
-    production_ready: bool = False
-    is_test_double: bool = False
-    supports_nano_decode_parameters: bool = False
-
-    def __post_init__(self) -> None:
-        if type(self.adapter_kind) is not AdapterKind:
-            raise ContractError("adapter_kind must be an AdapterKind value")
-        if type(self.cancellation_granularity) is not CancellationGranularity:
-            raise ContractError(
-                "cancellation_granularity must be a CancellationGranularity value"
-            )
-        for name in (
-            "supports_warmup",
-            "supports_synthesis",
-            "supports_cancel",
-            "supports_reference_audio",
-            "supports_streaming_response_bytes",
-            "supports_voice_design",
-            "supports_nano_decode_parameters",
-            "product_visible",
-            "production_ready",
-            "is_test_double",
-        ):
-            if type(getattr(self, name)) is not bool:
-                raise ContractError(f"{name} must be an exact boolean")
-        if type(self.max_inference_concurrency) is not int:
-            raise ContractError("max_inference_concurrency must be an exact integer")
-        if self.max_inference_concurrency < 0:
-            raise ContractError("max_inference_concurrency must be non-negative")
-        if not self.supports_cancel and self.cancellation_granularity is not CancellationGranularity.NONE:
-            raise ContractError("cancel granularity must be none when cancel is unsupported")
-        if self.supports_cancel and self.cancellation_granularity is CancellationGranularity.NONE:
-            raise ContractError("supported cancellation requires an explicit granularity")
-        if self.adapter_kind is AdapterKind.MOSS_NANO_TTS and self.supports_voice_design:
-            raise ContractError("Nano TTS adapter cannot claim voice design")
-        if self.supports_nano_decode_parameters and (
-            self.adapter_kind is not AdapterKind.MOSS_NANO_TTS
-            or not self.supports_synthesis
-        ):
-            raise ContractError(
-                "Nano decode parameters require a synthesizing Nano TTS adapter"
-            )
-        if self.adapter_kind is AdapterKind.VOICE_DESIGN and self.supports_synthesis:
-            raise ContractError("Voice design adapter cannot claim narration synthesis")
-        if self.is_test_double and (self.product_visible or self.production_ready):
-            raise ContractError("test doubles can never be product-visible or production-ready")
-        if self.product_visible and not self.production_ready:
-            raise ContractError("a product-visible adapter must be production-ready")
-
-
-@dataclass(frozen=True, slots=True)
-class ModelFingerprint:
-    adapter_contract_version: str
-    model_name: str
-    model_revision: str
-    artifact_tree_sha256: str
-    runtime_name: str
-    runtime_version: str
-    execution_backend: str
-    protocol_version: str
-    deployment_topology: str
-    parameters: Mapping[str, str | int | bool | None] = field(default_factory=dict)
-    schema_version: str = MODEL_FINGERPRINT_SCHEMA_VERSION
-
-    def __post_init__(self) -> None:
-        if self.schema_version != MODEL_FINGERPRINT_SCHEMA_VERSION:
-            raise ContractError("unknown model fingerprint schema version")
-        for name in (
-            "adapter_contract_version",
-            "model_name",
-            "model_revision",
-            "runtime_name",
-            "runtime_version",
-            "execution_backend",
-            "protocol_version",
-            "deployment_topology",
-        ):
-            _ensure_nonempty(getattr(self, name), field_name=name)
-        _ensure_sha256(self.artifact_tree_sha256, field_name="artifact_tree_sha256")
-        if not isinstance(self.parameters, Mapping):
-            raise ContractError("parameters must be a mapping")
-        frozen_parameters: dict[str, str | int | bool | None] = {}
-        for key, value in self.parameters.items():
-            _ensure_nonempty(key, field_name="parameters key")
-            if value is not None and type(value) not in {str, int, bool}:
-                raise ContractError(
-                    "model fingerprint parameter values must be scalar "
-                    "str, int, bool, or null"
-                )
-            frozen_parameters[key] = value
-        object.__setattr__(
-            self,
-            "parameters",
-            MappingProxyType(frozen_parameters),
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class AdapterHealth:
     status: AdapterHealthStatus
     capabilities_sha256: str
@@ -329,6 +235,226 @@ class AdapterHealth:
 
 
 @dataclass(frozen=True, slots=True)
+class TTSProviderCapabilities:
+    provider_id: TTSProviderId
+    supports_synthesis: bool
+    supports_presets: bool
+    supports_reference_clone: bool
+    supports_voice_design: bool
+    supports_instructions: bool
+    supports_streaming_first_audio: bool
+    supports_warmup: bool
+    supports_cancel: bool
+    cancellation_granularity: CancellationGranularity
+    max_inference_concurrency: int
+    product_visible: bool = False
+    production_ready: bool = False
+    is_test_double: bool = False
+    contract_version: str = TTS_PROVIDER_CONTRACT_VERSION
+
+    def __post_init__(self) -> None:
+        if type(self.provider_id) is not TTSProviderId:
+            raise ContractError("provider_id must be a TTSProviderId value")
+        if self.contract_version != TTS_PROVIDER_CONTRACT_VERSION:
+            raise ContractError("unknown TTS Provider contract version")
+        for name in (
+            "supports_synthesis",
+            "supports_presets",
+            "supports_reference_clone",
+            "supports_voice_design",
+            "supports_instructions",
+            "supports_streaming_first_audio",
+            "supports_warmup",
+            "supports_cancel",
+            "product_visible",
+            "production_ready",
+            "is_test_double",
+        ):
+            if type(getattr(self, name)) is not bool:
+                raise ContractError(f"{name} must be an exact boolean")
+        if type(self.cancellation_granularity) is not CancellationGranularity:
+            raise ContractError(
+                "cancellation_granularity must be a CancellationGranularity value"
+            )
+        if isinstance(self.max_inference_concurrency, bool) or not isinstance(
+            self.max_inference_concurrency, int
+        ):
+            raise ContractError("max_inference_concurrency must be an exact integer")
+        if self.max_inference_concurrency < 0:
+            raise ContractError("max_inference_concurrency must be non-negative")
+        if self.supports_cancel != (
+            self.cancellation_granularity is not CancellationGranularity.NONE
+        ):
+            raise ContractError("cancel support and granularity disagree")
+        if self.is_test_double and (self.product_visible or self.production_ready):
+            raise ContractError(
+                "test doubles can never be product-visible or production-ready"
+            )
+        if self.product_visible and not self.production_ready:
+            raise ContractError("a product-visible Provider must be production-ready")
+
+
+@dataclass(frozen=True, slots=True)
+class TTSModelIdentity:
+    provider_id: TTSProviderId
+    model_id: str
+    model_revision: str
+    runtime_id: str
+    runtime_version: str
+    quantization: str
+    artifact_tree_sha256: str
+    schema_version: str = TTS_MODEL_FINGERPRINT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if type(self.provider_id) is not TTSProviderId:
+            raise ContractError("provider_id must be a TTSProviderId value")
+        if self.schema_version != TTS_MODEL_FINGERPRINT_SCHEMA_VERSION:
+            raise ContractError("unknown TTS model fingerprint schema version")
+        for name in (
+            "model_id",
+            "model_revision",
+            "runtime_id",
+            "runtime_version",
+            "quantization",
+        ):
+            _ensure_nonempty(getattr(self, name), field_name=name)
+        _ensure_sha256(
+            self.artifact_tree_sha256,
+            field_name="artifact_tree_sha256",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TTSVoiceInput:
+    kind: TTSVoiceKind
+    provider_voice_id: str
+    reference_audio: "ReferenceAudioInput | None" = field(default=None, repr=False)
+    reference_text: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not TTSVoiceKind:
+            raise ContractError("voice kind must be a TTSVoiceKind value")
+        _ensure_nonempty(self.provider_voice_id, field_name="provider_voice_id")
+        if self.kind is TTSVoiceKind.REFERENCE_CLONE:
+            if self.reference_text is not None:
+                _ensure_nonempty(self.reference_text, field_name="reference_text")
+            if self.reference_audio is None and self.reference_text is not None:
+                raise ContractError("reference_text requires reference audio")
+        elif self.reference_audio is not None or self.reference_text is not None:
+            raise ContractError("only reference clone may carry reference material")
+
+
+@dataclass(frozen=True, slots=True)
+class TTSSynthesisRequest:
+    request_id: UUID
+    scope: NarrationRequestScope
+    text: str = field(repr=False)
+    language: str
+    voice: TTSVoiceInput
+    seed: int | None = None
+    instruction: str | None = field(default=None, repr=False)
+    audio_format: TTSAudioFormat = TTSAudioFormat.WAV
+
+    def __post_init__(self) -> None:
+        self.scope.ensure_fixed_local()
+        _ensure_nonempty(self.text, field_name="text")
+        _ensure_nonempty(self.language, field_name="language")
+        if type(self.voice) is not TTSVoiceInput:
+            raise ContractError("voice must use the frozen TTS voice contract")
+        if self.seed is not None and (
+            type(self.seed) is not int or not 0 <= self.seed <= 2**63 - 1
+        ):
+            raise ContractError("seed must be null or a non-negative signed 64-bit integer")
+        if self.instruction is not None:
+            _ensure_nonempty(self.instruction, field_name="instruction")
+        if type(self.audio_format) is not TTSAudioFormat:
+            raise ContractError("audio_format must be a TTSAudioFormat value")
+
+
+@dataclass(frozen=True, slots=True)
+class TTSSynthesisResult:
+    request_id: UUID
+    audio_bytes: bytes = field(repr=False)
+    actual_output_sha256: str
+    sample_rate_hz: int
+    channels: int
+    sample_width_bytes: int
+    model_identity: TTSModelIdentity
+    content_type: str = "audio/wav"
+
+    def __post_init__(self) -> None:
+        if not self.audio_bytes:
+            raise ContractError("synthesis output cannot be empty")
+        _ensure_sha256(self.actual_output_sha256, field_name="actual_output_sha256")
+        if hashlib.sha256(self.audio_bytes).hexdigest() != self.actual_output_sha256:
+            raise ContractError("actual_output_sha256 does not match returned bytes")
+        if min(self.sample_rate_hz, self.channels, self.sample_width_bytes) <= 0:
+            raise ContractError("audio format values must be positive")
+        if type(self.model_identity) is not TTSModelIdentity:
+            raise ContractError("model_identity must use the frozen TTS model contract")
+        if self.content_type != "audio/wav":
+            raise ContractError("the current TTS Provider contract returns WAV only")
+
+
+@dataclass(frozen=True, slots=True)
+class TTSVoicePreparationRequest:
+    request_id: UUID
+    scope: NarrationRequestScope
+    preview_text: str = field(repr=False)
+    language: str
+    description: str | None = field(default=None, repr=False)
+    reference_audio: "ReferenceAudioInput | None" = field(default=None, repr=False)
+    reference_text: str | None = field(default=None, repr=False)
+    seed: int | None = None
+
+    def __post_init__(self) -> None:
+        self.scope.ensure_fixed_local()
+        _ensure_nonempty(self.preview_text, field_name="preview_text")
+        _ensure_nonempty(self.language, field_name="language")
+        has_design = self.description is not None
+        has_clone = self.reference_audio is not None
+        if has_design == has_clone:
+            raise ContractError(
+                "voice preparation requires exactly one of description or reference audio"
+            )
+        if self.description is not None:
+            _ensure_nonempty(self.description, field_name="description")
+            if self.reference_text is not None:
+                raise ContractError("voice design cannot carry reference_text")
+        elif self.reference_text is not None:
+            _ensure_nonempty(self.reference_text, field_name="reference_text")
+        if self.seed is not None and (
+            type(self.seed) is not int or not 0 <= self.seed <= 2**63 - 1
+        ):
+            raise ContractError("seed must be null or a non-negative signed 64-bit integer")
+
+
+@dataclass(frozen=True, slots=True)
+class TTSVoicePreparationResult:
+    request_id: UUID
+    provider_voice_id: str
+    preview_audio_bytes: bytes = field(repr=False)
+    actual_output_sha256: str
+    model_identity: TTSModelIdentity
+    voice_kind: TTSVoiceKind
+
+    def __post_init__(self) -> None:
+        _ensure_nonempty(self.provider_voice_id, field_name="provider_voice_id")
+        if not self.preview_audio_bytes:
+            raise ContractError("voice preparation preview cannot be empty")
+        _ensure_sha256(self.actual_output_sha256, field_name="actual_output_sha256")
+        if hashlib.sha256(self.preview_audio_bytes).hexdigest() != self.actual_output_sha256:
+            raise ContractError("actual_output_sha256 does not match preview bytes")
+        if type(self.model_identity) is not TTSModelIdentity:
+            raise ContractError("model_identity must use the frozen TTS model contract")
+        if self.voice_kind not in {
+            TTSVoiceKind.REFERENCE_CLONE,
+            TTSVoiceKind.DESIGNED,
+        }:
+            raise ContractError("voice preparation result must be cloned or designed")
+
+
+@dataclass(frozen=True, slots=True)
 class ReferenceAudioInput:
     audio_bytes: bytes = field(repr=False)
     actual_sha256: str
@@ -342,185 +468,6 @@ class ReferenceAudioInput:
             raise ContractError("reference audio actual_sha256 does not match bytes")
         if self.content_type not in {"audio/wav", "audio/flac"}:
             raise ContractError("reference audio content_type is not allowed")
-
-
-@dataclass(frozen=True, slots=True)
-class NanoDecodeParametersV2:
-    """Canonical advanced sampling values consumed by Nano ``full`` mode.
-
-    Fractional values use integer thousandths so version, HMAC, ModelRun and
-    render fingerprints never depend on non-canonical JSON floats.  The
-    official ``fixed`` path intentionally does not carry this object because
-    its sampler values are compiled into the fixed ONNX graph.
-    """
-
-    text_temperature_milli: int = 1_000
-    text_top_p_milli: int = 1_000
-    text_top_k: int = 50
-    audio_temperature_milli: int = 800
-    audio_top_p_milli: int = 950
-    audio_top_k: int = 25
-    audio_repetition_penalty_milli: int = 1_200
-    schema_version: str = MOSS_NANO_DECODE_PARAMETERS_V2
-
-    def __post_init__(self) -> None:
-        if self.schema_version != MOSS_NANO_DECODE_PARAMETERS_V2:
-            raise ContractError("unknown Nano decode parameter contract")
-        for field_name in (
-            "text_temperature_milli",
-            "text_top_p_milli",
-            "text_top_k",
-            "audio_temperature_milli",
-            "audio_top_p_milli",
-            "audio_top_k",
-            "audio_repetition_penalty_milli",
-        ):
-            if type(getattr(self, field_name)) is not int:
-                raise ContractError(f"{field_name} must be an exact integer")
-        if not NANO_TEMPERATURE_MILLI_RANGE[0] <= self.text_temperature_milli <= NANO_TEMPERATURE_MILLI_RANGE[1]:
-            raise ContractError("text_temperature_milli is outside the Nano bound")
-        if not NANO_TEMPERATURE_MILLI_RANGE[0] <= self.audio_temperature_milli <= NANO_TEMPERATURE_MILLI_RANGE[1]:
-            raise ContractError("audio_temperature_milli is outside the Nano bound")
-        if not NANO_TOP_P_MILLI_RANGE[0] <= self.text_top_p_milli <= NANO_TOP_P_MILLI_RANGE[1]:
-            raise ContractError("text_top_p_milli is outside the Nano bound")
-        if not NANO_TOP_P_MILLI_RANGE[0] <= self.audio_top_p_milli <= NANO_TOP_P_MILLI_RANGE[1]:
-            raise ContractError("audio_top_p_milli is outside the Nano bound")
-        if not NANO_TOP_K_RANGE[0] <= self.text_top_k <= NANO_TOP_K_RANGE[1]:
-            raise ContractError("text_top_k is outside the Nano bound")
-        if not NANO_TOP_K_RANGE[0] <= self.audio_top_k <= NANO_TOP_K_RANGE[1]:
-            raise ContractError("audio_top_k is outside the Nano bound")
-        if not (
-            NANO_AUDIO_REPETITION_PENALTY_MILLI_RANGE[0]
-            <= self.audio_repetition_penalty_milli
-            <= NANO_AUDIO_REPETITION_PENALTY_MILLI_RANGE[1]
-        ):
-            raise ContractError(
-                "audio_repetition_penalty_milli is outside the Nano bound"
-            )
-
-    def wire_payload(self) -> Mapping[str, str | int]:
-        return MappingProxyType(
-            {
-                "schema_version": self.schema_version,
-                "text_temperature_milli": self.text_temperature_milli,
-                "text_top_p_milli": self.text_top_p_milli,
-                "text_top_k": self.text_top_k,
-                "audio_temperature_milli": self.audio_temperature_milli,
-                "audio_top_p_milli": self.audio_top_p_milli,
-                "audio_top_k": self.audio_top_k,
-                "audio_repetition_penalty_milli": self.audio_repetition_penalty_milli,
-            }
-        )
-
-    @classmethod
-    def from_wire_payload(cls, value: object) -> "NanoDecodeParametersV2":
-        expected_keys = {
-            "schema_version",
-            "text_temperature_milli",
-            "text_top_p_milli",
-            "text_top_k",
-            "audio_temperature_milli",
-            "audio_top_p_milli",
-            "audio_top_k",
-            "audio_repetition_penalty_milli",
-        }
-        if type(value) is not dict or set(value) != expected_keys:
-            raise ContractError("Nano decode parameter shape is invalid")
-        return cls(
-            schema_version=value["schema_version"],
-            text_temperature_milli=value["text_temperature_milli"],
-            text_top_p_milli=value["text_top_p_milli"],
-            text_top_k=value["text_top_k"],
-            audio_temperature_milli=value["audio_temperature_milli"],
-            audio_top_p_milli=value["audio_top_p_milli"],
-            audio_top_k=value["audio_top_k"],
-            audio_repetition_penalty_milli=value[
-                "audio_repetition_penalty_milli"
-            ],
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SynthesisRequest:
-    request_id: UUID
-    scope: NarrationRequestScope
-    text: str = field(repr=False)
-    voice: str
-    seed: int
-    sample_mode: str
-    max_new_frames: int
-    decode_parameters: NanoDecodeParametersV2 | None = None
-    reference_audio: ReferenceAudioInput | None = field(default=None, repr=False)
-
-    def __post_init__(self) -> None:
-        self.scope.ensure_fixed_local()
-        _ensure_nonempty(self.text, field_name="text")
-        _ensure_nonempty(self.voice, field_name="voice")
-        _ensure_nonempty(self.sample_mode, field_name="sample_mode")
-        if type(self.seed) is not int or not 0 <= self.seed <= PRODUCTION_NANO_MAX_SEED:
-            raise ContractError("seed is outside the Nano runtime bound")
-        if self.max_new_frames <= 0:
-            raise ContractError("max_new_frames must be positive")
-        if self.decode_parameters is not None:
-            if type(self.decode_parameters) is not NanoDecodeParametersV2:
-                raise ContractError("decode_parameters must use the Nano v2 contract")
-            if self.sample_mode != "full":
-                raise ContractError(
-                    "advanced Nano decode parameters are effective only in full mode"
-                )
-
-
-@dataclass(frozen=True, slots=True)
-class SynthesisResult:
-    request_id: UUID
-    audio_bytes: bytes = field(repr=False)
-    actual_output_sha256: str
-    sample_rate_hz: int
-    channels: int
-    sample_width_bytes: int
-    model_fingerprint: ModelFingerprint
-    worker_generation: int
-    content_type: str = "audio/wav"
-
-    def __post_init__(self) -> None:
-        if not self.audio_bytes:
-            raise ContractError("synthesis output cannot be empty")
-        _ensure_sha256(self.actual_output_sha256, field_name="actual_output_sha256")
-        if hashlib.sha256(self.audio_bytes).hexdigest() != self.actual_output_sha256:
-            raise ContractError("actual_output_sha256 does not match returned bytes")
-        if min(self.sample_rate_hz, self.channels, self.sample_width_bytes, self.worker_generation) <= 0:
-            raise ContractError("audio format and worker_generation must be positive")
-        if self.content_type != "audio/wav":
-            raise ContractError("Nano synthesis result must be audio/wav")
-
-
-@dataclass(frozen=True, slots=True)
-class VoiceDesignRequest:
-    request_id: UUID
-    scope: NarrationRequestScope
-    description: str = field(repr=False)
-    preview_text: str = field(repr=False)
-    seed: int
-
-    def __post_init__(self) -> None:
-        self.scope.ensure_fixed_local()
-        _ensure_nonempty(self.description, field_name="description")
-        _ensure_nonempty(self.preview_text, field_name="preview_text")
-
-
-@dataclass(frozen=True, slots=True)
-class VoiceDesignResult:
-    request_id: UUID
-    candidate_audio_bytes: bytes = field(repr=False)
-    actual_output_sha256: str
-    model_fingerprint: ModelFingerprint
-
-    def __post_init__(self) -> None:
-        if not self.candidate_audio_bytes:
-            raise ContractError("voice design output cannot be empty")
-        _ensure_sha256(self.actual_output_sha256, field_name="actual_output_sha256")
-        if hashlib.sha256(self.candidate_audio_bytes).hexdigest() != self.actual_output_sha256:
-            raise ContractError("actual_output_sha256 does not match candidate bytes")
 
 
 def _ensure_nonempty(value: str, *, field_name: str) -> None:

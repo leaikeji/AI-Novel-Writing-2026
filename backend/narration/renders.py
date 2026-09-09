@@ -18,7 +18,6 @@ from ..models import (
 )
 
 from .fingerprints import render_fingerprint
-from .contracts import PRODUCTION_NANO_MAX_NEW_FRAMES
 from .digest_keyring import (
     DigestKeyring,
     HmacDigestKey,
@@ -41,19 +40,16 @@ from .services import (
     require_usable_voice,
     utc_now,
 )
-from .synthesis_policy import resolve_effective_synthesis_policy
 
 
 LEGACY_RENDER_CANONICAL_INPUT_VERSION = "narration-render-input/1"
 LEGACY_RENDER_CANONICAL_INPUT_V2_VERSION = "narration-render-input/2"
 RENDER_CANONICAL_INPUT_VERSION = "narration-render-input/3"
-SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION = "narration-render-input/4"
 SUPPORTED_RENDER_CANONICAL_INPUT_VERSIONS = frozenset(
     {
         LEGACY_RENDER_CANONICAL_INPUT_VERSION,
         LEGACY_RENDER_CANONICAL_INPUT_V2_VERSION,
         RENDER_CANONICAL_INPUT_VERSION,
-        SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION,
     }
 )
 
@@ -208,7 +204,7 @@ def derive_render_identity(
 ) -> tuple[str, dict[str, object]]:
     """Derive audio identity from persisted production inputs.
 
-    v2, v3 and v4 intentionally exclude segment identity, source mapping hashes, and
+    v2 and v3 intentionally exclude segment identity, source mapping hashes, and
     timeline pauses.  Those values still receive strict validation and remain
     authoritative Edition/Manifest provenance, but they do not change the
     synthesized waveform and therefore must not defeat cross-Edition reuse.
@@ -249,37 +245,8 @@ def derive_render_identity(
     voice_parameters = voice.parameters_json
     if type(voice_parameters) is not dict:
         raise InvalidNarrationState("voice synthesis parameters must be an object")
-    base_seed = voice.seed if voice.seed is not None else 0
-    effective_policy = resolve_effective_synthesis_policy(
-        spoken_text=segment.spoken_text,
-        segment_kind=segment.segment_kind,
-        speaker_kind=segment.speaker_kind,
-        language=voice.language,
-        preset_key=voice.preset_key,
-        base_seed=base_seed,
-        base_sample_mode=voice_parameters.get("sample_mode", "fixed"),
-        base_max_new_frames=voice_parameters.get(
-            "max_new_frames", PRODUCTION_NANO_MAX_NEW_FRAMES
-        ),
-    )
-    resolved_input_version = canonical_input_version
-    if resolved_input_version is None:
-        resolved_input_version = (
-            SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION
-            if effective_policy.applied
-            else RENDER_CANONICAL_INPUT_VERSION
-        )
-    if (
-        resolved_input_version == SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION
-        and not effective_policy.applied
-    ):
-        raise InvalidNarrationState(
-            "render input v4 requires an applied short-attribution policy"
-        )
-    if resolved_input_version in {
-        RENDER_CANONICAL_INPUT_VERSION,
-        SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION,
-    }:
+    resolved_input_version = canonical_input_version or RENDER_CANONICAL_INPUT_VERSION
+    if resolved_input_version == RENDER_CANONICAL_INPUT_VERSION:
         if type(digest_key) is not HmacDigestKey:
             raise InvalidNarrationState(
                 "privacy-safe render input requires a server-owned HMAC digest key"
@@ -306,13 +273,6 @@ def derive_render_identity(
         "emotion": segment.emotion,
         "expression": segment.expression,
     }
-    deterministic_seed = voice.seed
-    if resolved_input_version == SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION:
-        evidence = effective_policy.evidence_payload()
-        if evidence is None:
-            raise InvalidNarrationState("render input v4 policy evidence is absent")
-        synthesis_parameters["effective_synthesis_policy"] = evidence
-        deterministic_seed = effective_policy.effective_seed
     value = RenderCanonicalInput(
         segment_id=segment.id,
         canonical_spoken_text_hash=canonical_sha256(
@@ -337,7 +297,7 @@ def derive_render_identity(
         pause_after_ms=require_exact_int(
             segment.pause_after_ms, field="segment pause_after_ms", minimum=0
         ),
-        deterministic_seed=deterministic_seed,
+        deterministic_seed=voice.seed,
         postprocess_fingerprint=postprocess_fingerprint,
     )
     payload = value.payload(schema_version=resolved_input_version)
@@ -348,13 +308,7 @@ def _edition_render_identity(
     store: NarrationStore,
     edition_segment_id: UUID,
     digest_keyring: DigestKeyring,
-) -> tuple[
-    NarrationEdition,
-    NarrationEditionSegment,
-    str,
-    dict[str, object],
-    bool,
-]:
+) -> tuple[NarrationEdition, NarrationEditionSegment, str, dict[str, object]]:
     if type(digest_keyring) is not DigestKeyring:
         raise InvalidNarrationState("render identity requires a digest keyring")
     row = require_row(
@@ -374,7 +328,6 @@ def _edition_render_identity(
         "normalizer_fingerprint": edition.normalizer_fingerprint,
         "postprocess_fingerprint": edition.postprocess_fingerprint,
     }
-    historical_policy_fallback = False
     if row.render_digest_key_id is None:
         # NULL predates the key-id column.  Try the later naked-SHA v2 shape
         # first, then the original v1 provenance-heavy shape.  Neither legacy
@@ -397,26 +350,11 @@ def _edition_render_identity(
             digest_key=digest_key,
             **identity_args,
         )
-        if (
-            row.render_fingerprint != fingerprint
-            and payload.get("schema_version")
-            == SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION
-        ):
-            # A pre-policy v3 Edition remains reproducible and readable.  New
-            # Editions use v4 for matching short attributions, so this fallback
-            # never permits a fresh v3 cache key to masquerade as the fix.
-            fingerprint, payload = derive_render_identity(
-                store,
-                canonical_input_version=RENDER_CANONICAL_INPUT_VERSION,
-                digest_key=digest_key,
-                **identity_args,
-            )
-            historical_policy_fallback = True
     if row.render_fingerprint != fingerprint:
         raise InvalidNarrationState(
             "Edition render fingerprint differs from server derivation"
         )
-    return edition, row, fingerprint, payload, historical_policy_fallback
+    return edition, row, fingerprint, payload
 
 
 def compute_render_fingerprint(store: NarrationStore, command: CreateRender) -> str:
@@ -473,7 +411,6 @@ def _source_job_matches_request_render(
                 derived_row,
                 derived_fingerprint,
                 derived_payload,
-                _derived_historical_policy_fallback,
             ) = _edition_render_identity(
                 store,
                 candidate.id,
@@ -492,13 +429,7 @@ def _source_job_matches_request_render(
 def create_or_reuse_render(
     store: NarrationStore, command: CreateRender
 ) -> tuple[NarrationSegmentRender, bool]:
-    (
-        edition,
-        row,
-        fingerprint,
-        payload,
-        historical_policy_fallback,
-    ) = _edition_render_identity(
+    edition, row, fingerprint, payload = _edition_render_identity(
         store, command.edition_segment_id, command.digest_keyring
     )
     request = require_generation_request(
@@ -529,10 +460,6 @@ def create_or_reuse_render(
                     "ready cache must be resolved before enqueueing another render job"
                 )
             return existing, True
-        if historical_policy_fallback:
-            raise InvalidNarrationState(
-                "historical v3 short-attribution render cannot resume under v4 policy"
-            )
         if existing.state not in {"pending", "rendering"}:
             raise InvalidNarrationState("terminal non-ready render cannot be reused")
         if existing.request_id != request.id:
@@ -543,10 +470,6 @@ def create_or_reuse_render(
             raise InvalidNarrationState(
                 "in-flight render belongs to another source job"
             )
-    if historical_policy_fallback:
-        raise InvalidNarrationState(
-            "historical v3 short-attribution render cannot be newly synthesized"
-        )
     if command.source_job_id is None:
         raise InvalidNarrationState("render cache miss requires a source job")
     if row.render_digest_key_id != command.digest_keyring.active_key_id:
@@ -556,7 +479,7 @@ def create_or_reuse_render(
     job = require_row(store.get(BackgroundJob, command.source_job_id), label="render job")
     if (
         job.job_kind != "narration.segment_render"
-        or job.resource_class != "moss-nano"
+        or job.resource_class != "qwen-tts"
         or job.request_id != request.id
         or job.novel_id != edition.novel_id
         or job.owner_id != request.owner_id
@@ -645,10 +568,10 @@ def publish_render_ready(
     if type(job_fence) is not JobFence or job_fence.job_id != render.source_job_id:
         raise InvalidNarrationState("render result fence names another source job")
     if (
-        publication_context.resource_class != "moss-nano"
-        or resource_fence.resource_key != "moss-nano:inference"
+        publication_context.resource_class != "qwen-tts"
+        or resource_fence.resource_key != "qwen-tts:inference"
     ):
-        raise InvalidNarrationState("render result requires the mapped MOSS-Nano resource fence")
+        raise InvalidNarrationState("render result requires the mapped Qwen TTS resource fence")
     _master_link, master = _ready_asset(store, render, "master")
     _playback_link, playback = _ready_asset(store, render, "playback")
     for field, value in (
@@ -690,7 +613,6 @@ __all__ = [
     "LEGACY_RENDER_CANONICAL_INPUT_VERSION",
     "LEGACY_RENDER_CANONICAL_INPUT_V2_VERSION",
     "RENDER_CANONICAL_INPUT_VERSION",
-    "SHORT_POLICY_RENDER_CANONICAL_INPUT_VERSION",
     "RenderCanonicalInput",
     "SUPPORTED_RENDER_CANONICAL_INPUT_VERSIONS",
     "compute_render_fingerprint",

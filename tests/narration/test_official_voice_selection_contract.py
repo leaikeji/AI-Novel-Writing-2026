@@ -31,7 +31,7 @@ from backend.narration.official_presets import (
     official_preset_canonical_version_id,
     validate_official_version_evidence,
 )
-from backend.narration.voice_product import build_official_preset_version_rows
+from backend.narration.official_voice_records import build_official_preset_version_rows
 from tests.narration.current_schema_gate import assert_database_at_repository_head
 
 
@@ -59,31 +59,34 @@ def test_canonical_identity_is_stable_per_novel_and_separates_inputs() -> None:
         owner_id=LOCAL_OWNER_ID,
         workspace_id=LOCAL_WORKSPACE_ID,
         novel_id=novel_id,
-        preset_id="onnx.Junhao",
+        preset_id="qwen.WarmFemale",
     )
     assert OFFICIAL_PRESET_IDENTITY_CONTRACT_VERSION == (
-        "moss-tts-official-preset-identity/1.0"
+        "qwen-tts-preset-identity/1"
     )
-    assert profile_id == UUID("1e95c5fc-ef66-5377-b182-e33f360fd600")
-    assert official_preset_canonical_version_id(
+    version_id = official_preset_canonical_version_id(
         profile_id=profile_id,
-        preset_id="onnx.Junhao",
-    ) == UUID("9ba88ec3-5c26-58f1-915d-a6985a2e3a47")
+        preset_id="qwen.WarmFemale",
+    )
+    assert version_id == official_preset_canonical_version_id(
+        profile_id=profile_id,
+        preset_id="qwen.WarmFemale",
+    )
     assert official_preset_canonical_profile_id(
         owner_id=LOCAL_OWNER_ID,
         workspace_id=LOCAL_WORKSPACE_ID,
         novel_id=UUID("21111111-2222-4333-8444-555555555555"),
-        preset_id="onnx.Junhao",
+        preset_id="qwen.WarmFemale",
     ) != profile_id
     assert official_preset_canonical_profile_id(
         owner_id=LOCAL_OWNER_ID,
         workspace_id=LOCAL_WORKSPACE_ID,
         novel_id=novel_id,
-        preset_id="onnx.Zhiming",
+        preset_id="qwen.ClearMale",
     ) != profile_id
 
 
-def test_identity_functions_cover_all_eighteen_pinned_presets() -> None:
+def test_identity_functions_cover_all_pinned_qwen_presets() -> None:
     novel_id = UUID("11111111-2222-4333-8444-555555555555")
     pairs = []
     for preset in OFFICIAL_PRESETS:
@@ -102,9 +105,9 @@ def test_identity_functions_cover_all_eighteen_pinned_presets() -> None:
                 ),
             )
         )
-    assert len(pairs) == 18
-    assert len({profile for profile, _version in pairs}) == 18
-    assert len({version for _profile, version in pairs}) == 18
+    assert len(pairs) == len(OFFICIAL_PRESETS)
+    assert len({profile for profile, _version in pairs}) == len(OFFICIAL_PRESETS)
+    assert len({version for _profile, version in pairs}) == len(OFFICIAL_PRESETS)
 
 
 def test_orm_freezes_truthful_activation_and_immutable_command_shape() -> None:
@@ -183,12 +186,12 @@ def test_shared_official_validator_rejects_model_parameters_and_rights_drift() -
         owner_id=LOCAL_OWNER_ID,
         workspace_id=LOCAL_WORKSPACE_ID,
         novel_id=uuid4(),
-        name="Junhao",
+        name="Warm Female",
         status="active",
     )
     version_id = official_preset_canonical_version_id(
         profile_id=profile.id,
-        preset_id="onnx.Junhao",
+        preset_id="qwen.WarmFemale",
     )
     rows = build_official_preset_version_rows(
         profile=profile,
@@ -219,7 +222,7 @@ def test_shared_official_validator_rejects_model_parameters_and_rights_drift() -
             )
         setattr(rows.version, field, original)
     original_source = rows.rights.source_identifier
-    rows.rights.source_identifier = "fixture:onnx.Junhao"
+    rows.rights.source_identifier = "fixture:qwen.WarmFemale"
     with pytest.raises(ValueError):
         validate_official_version_evidence(
             rows.version,
@@ -267,11 +270,11 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                     owner_id=LOCAL_OWNER_ID,
                     workspace_id=LOCAL_WORKSPACE_ID,
                     novel_id=novel_id,
-                    preset_id="onnx.Junhao",
+                    preset_id="qwen.WarmFemale",
                 )
                 version_id = official_preset_canonical_version_id(
                     profile_id=profile_id,
-                    preset_id="onnx.Junhao",
+                    preset_id="qwen.WarmFemale",
                 )
                 now = datetime.now(timezone.utc)
                 session.add(
@@ -287,7 +290,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                     owner_id=LOCAL_OWNER_ID,
                     workspace_id=LOCAL_WORKSPACE_ID,
                     novel_id=novel_id,
-                    name="Junhao",
+                    name="Warm Female",
                     status="active",
                 )
                 session.add(profile)
@@ -373,7 +376,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                     operation="official_preset_selection",
                     target_kind="narrator",
                     target_character_id=None,
-                    preset_key="onnx.Junhao",
+                    preset_key="qwen.WarmFemale",
                     request_hash=request_hash,
                     state="reserved",
                 )
@@ -414,7 +417,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                                 novel_id=novel_id,
                                 operation="official_preset_selection",
                                 target_kind="narrator",
-                                preset_key="onnx.Junhao",
+                                preset_key="qwen.WarmFemale",
                                 request_hash="e" * 64,
                                 state="completed",
                                 profile_id=profile_id,

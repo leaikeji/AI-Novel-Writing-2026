@@ -127,7 +127,7 @@ describe("chapter player view state", () => {
       currentTimeBasis: "chapter",
       playableDurationMs: 3_100,
       playableDurationLabel: "0:03",
-      voiceSummary: "林晚的雨夜声线 · 高级调音",
+      voiceSummary: "林晚的雨夜声线 · 设计音色",
     });
     expect(view.generation).toMatchObject({
       state: "partial",

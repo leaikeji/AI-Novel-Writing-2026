@@ -18,8 +18,6 @@ from ..models import (
     AnonymousSpeaker,
     CharacterVoiceBinding,
     Document,
-    GenericVoicePool,
-    GenericVoiceSlot,
     NarrationRequest,
     NarrationSettingsSnapshot,
     Novel,
@@ -92,8 +90,6 @@ _RESOURCE_ORDER: tuple[type[Any], ...] = (
     NovelCharacter,
     CharacterVoiceBinding,
     AnonymousSpeaker,
-    GenericVoicePool,
-    GenericVoiceSlot,
     VoiceProfileVersion,
     VoiceProfile,
     VoiceRightsRecord,
@@ -299,7 +295,7 @@ def _collect_graph(
         )
         ids[CharacterVoiceBinding].add(binding.id)
 
-    # First-level rows expose the remaining pool/slot and voice-version edges.
+    # First-level rows expose the remaining voice-version edges.
     for binding_id in sorted(ids[CharacterVoiceBinding], key=str):
         binding = require_row(
             store.get(CharacterVoiceBinding, binding_id),
@@ -317,14 +313,8 @@ def _collect_graph(
         )
         if anonymous.promoted_character_id is not None:
             ids[NovelCharacter].add(anonymous.promoted_character_id)
-        if anonymous.slot_id is not None:
-            ids[GenericVoiceSlot].add(anonymous.slot_id)
         if anonymous.voice_version_id is not None:
             ids[VoiceProfileVersion].add(anonymous.voice_version_id)
-    for slot_id in sorted(ids[GenericVoiceSlot], key=str):
-        slot = require_row(store.get(GenericVoiceSlot, slot_id), label="generic slot")
-        ids[GenericVoicePool].add(slot.pool_id)
-        ids[VoiceProfileVersion].add(slot.voice_version_id)
 
     # Direct PROFILE targets resolve through the profile's current immutable
     # version.  Narrator settings also carry an exact frozen version, already
@@ -371,9 +361,6 @@ def _collect_target(
         ids[NovelCharacter].add(target.character_id)
     elif kind is CastingTargetKind.ANONYMOUS_BINDING:
         ids[AnonymousSpeaker].add(target.anonymous_speaker_id)
-    elif kind is CastingTargetKind.GENERIC_SLOT:
-        ids[GenericVoicePool].add(target.pool_id)
-        ids[GenericVoiceSlot].add(target.slot_id)
     elif kind is CastingTargetKind.PROFILE:
         direct_profile_ids.add(target.profile_id)
     else:  # pragma: no cover - contract enum exhaustiveness

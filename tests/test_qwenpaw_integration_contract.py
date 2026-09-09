@@ -4,10 +4,8 @@ import json
 import os
 from pathlib import Path
 import re
-import socket
 import subprocess
 import sys
-import tempfile
 import textwrap
 
 import pytest
@@ -21,55 +19,6 @@ PACKAGED_TTS_PUBLIC_FILES = frozenset(
         "manage_digest_keyring.py",
     }
 )
-HOST_ONLY_TTS_AUDIT_PATHS = frozenset(
-    {
-        "scripts/tts/chapter_e2e_browser_observer.py",
-        "scripts/tts/chapter_e2e_collector.py",
-        "scripts/tts/chapter_e2e_controller_build.py",
-        "scripts/tts/chapter_e2e_controller_evidence.py",
-        "scripts/tts/chapter_e2e_controller_host.py",
-        "scripts/tts/chapter_e2e_controller_lifecycle.py",
-        "scripts/tts/chapter_e2e_controller_signer.py",
-        "scripts/tts/chapter_e2e_controller_trust.py",
-        "scripts/tts/chapter_e2e_executor.py",
-        "scripts/tts/chapter_e2e_listening.py",
-        "scripts/tts/chapter_e2e_metric_chain.py",
-        "scripts/tts/chapter_e2e_operator_envelope.py",
-        "scripts/tts/chapter_e2e_probe_request.py",
-        "scripts/tts/chapter_e2e_probes.py",
-        "scripts/tts/chapter_e2e_readiness.py",
-        "scripts/tts/chapter_e2e_runtime_audit.py",
-        "scripts/tts/chapter_e2e_runtime_observer.py",
-        "scripts/tts/diagnose_nano_short_text.py",
-        "scripts/tts/generate_nano_strategy_preview.py",
-        "scripts/tts/nano_short_regression.py",
-        "scripts/tts/run_nano_short_regression.py",
-        "scripts/tts/controller_node_runtime.py",
-        "scripts/tts/controller_ssh_askpass.sh",
-        "scripts/tts/provision_validation_token.py",
-        "scripts/tts/local_chapter_e2e_container.py",
-        "scripts/tts/run_chapter_e2e_real.py",
-        "scripts/tts/run_local_chapter_e2e.py",
-        "scripts/tts/run_local_operator_report.py",
-        "scripts/tts/trust/controller_allowed_signers",
-        "scripts/tts/trust/controller_trust_policy.json",
-        "scripts/tts/validate_chapter_e2e.py",
-        "scripts/tts/verify_chapter_e2e_teardown.py",
-        "tests/fixtures/narration/chapter-e2e-v2.json",
-        "tests/fixtures/narration/chapter-e2e-v3.json",
-        "tests/fixtures/narration/short-attribution-regression-v1.json",
-    }
-)
-HOST_ONLY_CONTROLLER_MODULES = frozenset(
-    path.removesuffix(".py").replace("/", ".")
-    for path in HOST_ONLY_TTS_AUDIT_PATHS
-    if path.endswith(".py")
-)
-HOST_ONLY_CONTROLLER_MODULE_BASENAMES = frozenset(
-    module.rsplit(".", 1)[-1] for module in HOST_ONLY_CONTROLLER_MODULES
-)
-
-
 def load_script(name: str):
     path = ROOT / "scripts" / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)
@@ -77,23 +26,6 @@ def load_script(name: str):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def imported_python_modules(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    imported: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module:
-                imported.add(module)
-            if module == "scripts.tts":
-                imported.update(f"{module}.{alias.name}" for alias in node.names)
-            if node.level and not module:
-                imported.update(alias.name for alias in node.names)
-    return imported
 
 
 def test_chat_wrapper_is_surface_gated_and_uses_public_route_api() -> None:
@@ -170,10 +102,11 @@ def test_narration_runtime_uses_only_public_pawapp_lifecycle_contracts() -> None
     ]
     assert [argument.arg for argument in uninstall.args.kwonlyargs] == ["plugin_id"]
     assert [ast.unparse(value) for value in uninstall.args.kw_defaults] == ["None"]
-    assert "await launch_narration_runtime()" in ast.unparse(startup)
-    assert "await stop_narration_runtime()" in ast.unparse(shutdown)
-    assert "await stop_narration_runtime()" in ast.unparse(uninstall)
-    assert '"narration": narration_runtime_status()' in app_source
+    assert "await launch_narration_production_runtime()" in ast.unparse(startup)
+    assert "await stop_narration_production_runtime()" in ast.unparse(shutdown)
+    assert "await stop_narration_production_runtime()" in ast.unparse(uninstall)
+    assert "await launch_narration_runtime()" not in app_source
+    assert '"narration": narration_production_runtime_status()' in app_source
 
     register_method = next(
         item
@@ -336,8 +269,8 @@ def test_public_pawapp_register_delegates_lifecycle_hooks_to_plugin_api() -> Non
         async def stop():
             lifecycle_calls.append("stop")
 
-        app.launch_narration_runtime = launch
-        app.stop_narration_runtime = stop
+        app.launch_narration_production_runtime = launch
+        app.stop_narration_production_runtime = stop
 
         async def exercise():
             await next(item for item in api.startup if item["priority"] == 100)["callback"]()
@@ -348,14 +281,13 @@ def test_public_pawapp_register_delegates_lifecycle_hooks_to_plugin_api() -> Non
         assert lifecycle_calls == ["launch", "stop", "stop"]
 
         narration = {
-            "technical_enabled": True,
+            "product_requested": True,
             "lifecycle_status": "ready",
-            "sidecar_reachable": True,
-            "model_ready": True,
-            "product_visible": False,
+            "production_backend_installed": True,
+            "worker_running": True,
         }
         app.database_status = lambda: {"connected": True}
-        app.narration_runtime_status = lambda: narration
+        app.narration_production_runtime_status = lambda: narration
         health = app.health()
         assert health["status"] == "ready"
         assert health["narration"] is narration
@@ -366,7 +298,7 @@ def test_public_pawapp_register_delegates_lifecycle_hooks_to_plugin_api() -> Non
                     "shutdown": len(api.shutdown),
                     "uninstall": len(api.uninstall),
                     "lifecycle_calls": lifecycle_calls,
-                    "product_visible": health["narration"]["product_visible"],
+                    "worker_running": health["narration"]["worker_running"],
                 },
                 sort_keys=True,
             )
@@ -385,7 +317,7 @@ def test_public_pawapp_register_delegates_lifecycle_hooks_to_plugin_api() -> Non
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
         "lifecycle_calls": ["launch", "stop", "stop"],
-        "product_visible": False,
+        "worker_running": True,
         "shutdown": 2,
         "startup": 2,
         "uninstall": 1,
@@ -654,7 +586,7 @@ def test_verifier_checks_complete_official_catalog() -> None:
 
     verifier = load_script("verify_qwenpaw_lab")
     payload = {
-        "schema_version": "moss-tts-official-preset-catalog/2.0",
+        "schema_version": "qwen-tts-preset-catalog/1",
         "items": [
             {
                 "preset_id": preset.preset_id,
@@ -666,7 +598,7 @@ def test_verifier_checks_complete_official_catalog() -> None:
                 "validation_tier": official_preset_validation_tier(preset.preset_id),
                 "language_scope": preset.language,
                 "selectable_now": True,
-                "previewable_now": True,
+                "previewable_now": False,
                 "renderable_existing": True,
                 "usage_notice": "private_local_writing_tool",
                 "provenance": preset.provenance(),
@@ -683,16 +615,17 @@ def test_verifier_checks_complete_official_catalog() -> None:
     result = verifier.verify_official_preset_catalog()
 
     assert result["metadata_only"] is True
-    assert result["preset_count"] == 18
-    assert "onnx.Trump" in result["preset_ids"]
-    assert "onnx.Xiaoyu" in result["preset_ids"]
+    assert result["preset_count"] == 2
+    assert result["preset_ids"] == ["qwen.WarmFemale", "qwen.ClearMale"]
 
     payload["items"][0]["audio_file"] = "must-not-leak.wav"
     with pytest.raises(AssertionError):
         verifier.verify_official_preset_catalog()
     del payload["items"][0]["audio_file"]
     payload["items"] = [
-        item for item in payload["items"] if item["preset_id"] != "onnx.Junhao"
+        item
+        for item in payload["items"]
+        if item["preset_id"] != "qwen.WarmFemale"
     ]
     with pytest.raises(AssertionError):
         verifier.verify_official_preset_catalog()
@@ -1288,6 +1221,7 @@ def test_install_does_not_migrate_or_configure_after_hot_install_failure(
         "hot_install_packaged_plugin",
         lambda: (_ for _ in ()).throw(RuntimeError("public CLI reported failure")),
     )
+    monkeypatch.setattr(lab, "save_preinstall_skill_state", lambda: None)
     monkeypatch.setattr(lab, "require_live_tts_flags_disabled", lambda: None)
     migrated: list[bool] = []
     verified: list[bool] = []
@@ -1909,15 +1843,19 @@ def test_product_reload_force_recreates_qwenpaw_then_waits_for_health(
     ]
 
 
-def test_compose_default_topology_orders_database_tts_and_qwenpaw() -> None:
+def test_compose_uses_native_qwen_tts_without_a_managed_sidecar() -> None:
     source = (ROOT / "compose.yaml").read_text(encoding="utf-8")
 
     assert "profiles:" not in source
     qwenpaw = source.split("  qwenpaw:\n", 1)[1].split("\n  postgres:\n", 1)[0]
     assert "    depends_on:\n" in qwenpaw
     assert "      postgres:\n        condition: service_healthy\n" in qwenpaw
-    assert "      tts-sidecar:\n        condition: service_healthy\n" in qwenpaw
-    assert qwenpaw.count("        restart: true\n") == 2
+    assert "tts-sidecar" not in source
+    assert "moss-models" not in source
+    assert "MOSS_TTS_" not in source
+    assert qwenpaw.count("        restart: true\n") == 1
+    assert "QWEN_TTS_LOCAL_URL:" in qwenpaw
+    assert "target: /run/secrets/qwen-tts-local-token" in qwenpaw
     for volume_name in ("qwenpaw-data", "qwenpaw-secrets", "qwenpaw-backups"):
         assert (
             f"  {volume_name}:\n"
@@ -2349,35 +2287,23 @@ def test_packager_and_installer_provision_embedding_secret_store(
     ]
 
 
-def test_packager_keeps_local_t4k_executor_out_of_product_payload() -> None:
+def test_packager_copies_only_public_tts_maintenance_commands() -> None:
     source = (ROOT / "scripts" / "package_plugin.py").read_text(encoding="utf-8")
 
-    # The neutral T4-K executor remains a fixed repository-side audit tool for
-    # the local author/operator.  It is deliberately not PawApp payload.
-    assert (ROOT / "scripts/tts/run_chapter_e2e_real.py").is_file()
-    for fixture_name in ("chapter-e2e-v2.json", "chapter-e2e-v3.json"):
-        assert (ROOT / "tests/fixtures/narration" / fixture_name).is_file()
-    for relative_path in HOST_ONLY_TTS_AUDIT_PATHS:
-        assert f'copy_file("{relative_path}")' not in source
-    assert "validation-token" not in source
     assert 'copy_tree("scripts/tts")' not in source
-    assert 'copy_tree("scripts/tts/controller-node")' not in source
+    for filename in PACKAGED_TTS_PUBLIC_FILES:
+        assert f'copy_file("scripts/tts/{filename}")' in source
 
 
 @pytest.mark.parametrize(
     "relative_path",
-    sorted(
-        HOST_ONLY_TTS_AUDIT_PATHS
-        | {
-            "scripts/tts/controller-node/src/observer.mjs",
-            "scripts/tts/trust/controller_future_policy.json",
-            "controller-authority/agent.sock",
-            "controller-authority/controller_ed25519",
-            "controller-authority/controller_ed25519.pub",
-        }
+    (
+        "controller-authority/agent.sock",
+        "controller-authority/controller_ed25519",
+        "controller-authority/controller_ed25519.pub",
     ),
 )
-def test_packager_rejects_host_only_t4k_audit_paths(
+def test_packager_rejects_private_controller_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     relative_path: str,
@@ -2391,44 +2317,9 @@ def test_packager_rejects_host_only_t4k_audit_paths(
 
     with pytest.raises(
         packager.UnsafePackageInput,
-        match="PACKAGE_OUTPUT_HOST_ONLY_FORBIDDEN",
+        match="PACKAGE_OUTPUT_FORBIDDEN_PATH",
     ):
         packager._audit_output()
-
-
-def test_packager_rejects_an_empty_controller_node_tree(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    packager = load_script("package_plugin")
-    output_root = tmp_path / "output"
-    (output_root / "scripts/tts/controller-node").mkdir(parents=True)
-    monkeypatch.setattr(packager, "OUTPUT", output_root)
-
-    with pytest.raises(
-        packager.UnsafePackageInput,
-        match="PACKAGE_OUTPUT_HOST_ONLY_FORBIDDEN",
-    ):
-        packager._audit_output()
-
-
-def test_packager_rejects_a_controller_agent_socket(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    packager = load_script("package_plugin")
-    with tempfile.TemporaryDirectory(prefix="anw-t4k-", dir="/tmp") as directory:
-        output_root = Path(directory)
-        agent_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            agent_socket.bind(str(output_root / "agent.sock"))
-            monkeypatch.setattr(packager, "OUTPUT", output_root)
-            with pytest.raises(
-                packager.UnsafePackageInput,
-                match="PACKAGE_OUTPUT_HOST_ONLY_FORBIDDEN",
-            ):
-                packager._audit_output()
-        finally:
-            agent_socket.close()
 
 
 def test_packager_fails_closed_for_sensitive_files_and_symlinks(
@@ -2532,20 +2423,7 @@ def test_packager_rejects_embedded_prompt_codes(
         packager._audit_output()
 
 
-def test_repo_side_t4k_entrypoints_bootstrap_their_project_root() -> None:
-    for relative_path in (
-        "scripts/tts/run_chapter_e2e_real.py",
-        "scripts/tts/chapter_e2e_readiness.py",
-        "scripts/tts/chapter_e2e_collector.py",
-        "scripts/tts/chapter_e2e_listening.py",
-        "scripts/tts/verify_chapter_e2e_teardown.py",
-    ):
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
-        assert "Path(__file__).resolve().parents[2]" in source
-        assert "sys.path.insert(0" in source
-
-
-def test_product_package_excludes_host_side_t4k_audit_tools() -> None:
+def test_product_package_contains_only_public_tts_maintenance_tools() -> None:
     packaged = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "package_plugin.py")],
         cwd=ROOT,
@@ -2560,14 +2438,6 @@ def test_product_package_excludes_host_side_t4k_audit_tools() -> None:
     )
     assert packaged.returncode == 0, packaged.stderr
     package_root = ROOT / "build" / "ai-novel-world-2026"
-    for relative_path in HOST_ONLY_TTS_AUDIT_PATHS:
-        assert not (package_root / relative_path).exists()
-    assert not (package_root / "scripts/tts/controller-node").exists()
-    assert not (package_root / "scripts/tts/trust").exists()
-    for fixture_name in ("chapter-e2e-v2.json", "chapter-e2e-v3.json"):
-        assert not (
-            package_root / "tests/fixtures/narration" / fixture_name
-        ).exists()
     assert not tuple(package_root.rglob("agent.sock"))
     assert not tuple(package_root.rglob("controller_ed25519"))
     assert not tuple(package_root.rglob("controller_ed25519.pub"))
@@ -2580,21 +2450,6 @@ def test_product_package_excludes_host_side_t4k_audit_tools() -> None:
         if path.is_file()
     )
     assert packaged_tts_files == PACKAGED_TTS_PUBLIC_FILES
-
-    # Audit the complete Python import closure introduced by the only two TTS
-    # scripts allowed in product payload.  Repository-side T4-K tools must not
-    # be pulled back in through either entrypoint.
-    for python_path in packaged_tts_root.rglob("*.py"):
-        imported = imported_python_modules(python_path)
-        assert not {
-            module
-            for module in imported
-            if module in HOST_ONLY_CONTROLLER_MODULE_BASENAMES
-            or any(
-                module == forbidden or module.startswith(f"{forbidden}.")
-                for forbidden in HOST_ONLY_CONTROLLER_MODULES
-            )
-        }, python_path.relative_to(package_root).as_posix()
 
 
 def test_packager_excludes_python_cache_artifacts() -> None:

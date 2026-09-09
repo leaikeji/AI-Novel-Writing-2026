@@ -20,6 +20,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 from backend.writing_skills.catalog import published_skill_ids
+from backend.narration.official_presets import (
+    CANONICAL_CHAPTER_VERIFIED_PRESET_IDS,
+    OFFICIAL_PRESET_IDS,
+    OFFICIAL_PRESETS_BY_ID,
+)
 
 NOVEL_SKILLS = set(published_skill_ids(_PROJECT_ROOT / "skills"))
 NOVEL_TOOLS = {
@@ -56,10 +61,6 @@ EXPECTED_TTS_REFERENCE_CLONE = os.environ.get(
     "QWENPAW_EXPECT_TTS_REFERENCE_CLONE",
     "disabled",
 )
-TTS_PROTOCOL_VERSION = "moss-tts-sidecar/1.1"
-TTS_MODEL_FINGERPRINT_SHA256 = (
-    "3c76f3e9e1381699c5555287cf66eeb023632d0c3ee94adc6d8ae1b1d455fd7d"
-)
 TTS_VALIDATION_NOVEL_ID = os.environ.get(
     "AI_NOVEL_TTS_VALIDATION_NOVEL_ID",
     "",
@@ -76,35 +77,6 @@ HIDDEN_TTS_NOT_FOUND = {
         "message": "找不到请求的朗读资源。",
     }
 }
-OFFICIAL_PRESET_IDS = (
-    "onnx.Junhao",
-    "onnx.Zhiming",
-    "onnx.Weiguo",
-    "onnx.Xiaoyu",
-    "onnx.Yuewen",
-    "onnx.Lingyu",
-    "onnx.Trump",
-    "onnx.Ava",
-    "onnx.Bella",
-    "onnx.Adam",
-    "onnx.Nathan",
-    "onnx.Soyo",
-    "onnx.Saki",
-    "onnx.Mortis",
-    "onnx.Umiri",
-    "onnx.Mei",
-    "onnx.Anon",
-    "onnx.Arisa",
-)
-CANONICAL_CHAPTER_VERIFIED_PRESET_IDS = frozenset(
-    {"onnx.Junhao", "onnx.Zhiming", "onnx.Xiaoyu"}
-)
-OFFICIAL_PRESET_REPOSITORY = "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX"
-OFFICIAL_PRESET_REVISION = "f52645cb467506d8e18e746ddd59482685b74e58"
-OFFICIAL_PRESET_MANIFEST_PATH = "browser_poc_manifest.json"
-OFFICIAL_PRESET_MANIFEST_SHA256 = (
-    "097d80e993dc29f0bae427590b4f77084a161cb578b50d82c29f455d5faa9eee"
-)
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
 _T2_CAPABILITY_ROWS = (
@@ -152,20 +124,12 @@ _T2_CAPABILITY_ROWS = (
         "T2-D",
     ),
     (
-        "generic_voice_pool",
+        "voice_design",
         "unavailable",
         True,
         False,
-        "GENERIC_VOICE_ASSETS_UNAVAILABLE",
-        "T2-E",
-    ),
-    (
-        "automatic_generic_casting",
-        "unavailable",
-        False,
-        False,
-        "GENERIC_VOICE_POOL_UNAVAILABLE",
-        "T2-E",
+        "QWEN_VOICE_DESIGN_NOT_RELEASED",
+        "QWEN-TTS",
     ),
     (
         "automatic_speaker_detection",
@@ -183,39 +147,7 @@ _T2_CAPABILITY_ROWS = (
         "CLOUD_CONSENT_FLOW_NOT_READY",
         "T2-G",
     ),
-    (
-        "voice_generator",
-        "unavailable",
-        False,
-        False,
-        "VOICE_GENERATOR_NO_GO",
-        "T5-GATE",
-    ),
     ("cache_cleanup", "hold", True, False, "T2_GATE_REQUIRED", "T2-F"),
-    (
-        "character_voice_matching",
-        "unavailable",
-        True,
-        False,
-        "TTS_FEATURE_STARTING",
-        "TTS35-CORE",
-    ),
-    (
-        "character_cast_planning",
-        "unavailable",
-        True,
-        False,
-        "TTS_FEATURE_STARTING",
-        "TTS47-CAST",
-    ),
-    (
-        "nano_advanced_tuning",
-        "unavailable",
-        True,
-        False,
-        "TTS_FEATURE_STARTING",
-        "TTS35-CORE",
-    ),
     (
         "private_voice_deletion",
         "unavailable",
@@ -224,17 +156,9 @@ _T2_CAPABILITY_ROWS = (
         "TTS_FEATURE_STARTING",
         "TTS35-CORE",
     ),
-    (
-        "automatic_character_voice_generation",
-        "unavailable",
-        False,
-        False,
-        "TTS_FEATURE_STARTING",
-        "TTS55-CHARACTER",
-    ),
 )
 T2_CAPABILITY_MATRIX = {
-    "schema_version": "narration-capabilities/4",
+    "schema_version": "narration-capabilities/5",
     "items": [
         {
             "key": key,
@@ -366,18 +290,13 @@ def verify_official_preset_catalog() -> dict[str, object]:
     assert response.status == 200
     assert isinstance(response.payload, dict)
     assert set(response.payload) == {"schema_version", "items"}
-    assert response.payload.get("schema_version") == (
-        "moss-tts-official-preset-catalog/2.0"
-    )
+    assert response.payload.get("schema_version") == "qwen-tts-preset-catalog/1"
     items = response.payload.get("items")
     assert isinstance(items, list)
     assert [item.get("preset_id") for item in items if isinstance(item, dict)] == list(
         OFFICIAL_PRESET_IDS
     )
-    assert len(items) == len(OFFICIAL_PRESET_IDS) == 18
-    assert {"onnx.Xiaoyu", "onnx.Trump", "onnx.Arisa"}.issubset(
-        OFFICIAL_PRESET_IDS
-    )
+    assert len(items) == len(OFFICIAL_PRESET_IDS) == 2
 
     item_keys = {
         "preset_id",
@@ -396,15 +315,11 @@ def verify_official_preset_catalog() -> dict[str, object]:
     }
     provenance_keys = {
         "schema_version",
-        "repository",
-        "revision",
-        "manifest_path",
-        "manifest_sha256",
+        "catalog_id",
         "preset_id",
-        "manifest_voice",
-        "prompt_codes_sha256",
-        "prompt_frame_count",
-        "prompt_quantizer_count",
+        "local_model_id",
+        "local_model_revision",
+        "provider_voice_ids",
         "model_fingerprint_sha256",
         "provenance_fingerprint_sha256",
     }
@@ -419,7 +334,7 @@ def verify_official_preset_catalog() -> dict[str, object]:
         )
         assert item.get("language_scope") == item.get("language")
         assert item.get("selectable_now") is True
-        assert item.get("previewable_now") is True
+        assert item.get("previewable_now") is False
         assert item.get("renderable_existing") is True
         assert item.get("usage_notice") == "private_local_writing_tool"
         assert all(
@@ -428,30 +343,22 @@ def verify_official_preset_catalog() -> dict[str, object]:
         )
         provenance = item.get("provenance")
         assert isinstance(provenance, dict) and set(provenance) == provenance_keys
-        assert provenance.get("schema_version") == (
-            "moss-tts-official-preset-provenance/1.0"
-        )
-        assert provenance.get("repository") == OFFICIAL_PRESET_REPOSITORY
-        assert provenance.get("revision") == OFFICIAL_PRESET_REVISION
-        assert provenance.get("manifest_path") == OFFICIAL_PRESET_MANIFEST_PATH
-        assert provenance.get("manifest_sha256") == OFFICIAL_PRESET_MANIFEST_SHA256
+        assert provenance.get("schema_version") == "qwen-tts-preset-provenance/1"
         assert provenance.get("preset_id") == item.get("preset_id")
-        assert provenance.get("manifest_voice") == str(item.get("preset_id"))[5:]
-        assert provenance.get("prompt_quantizer_count") == 16
-        assert (
-            isinstance(provenance.get("prompt_frame_count"), int)
-            and not isinstance(provenance.get("prompt_frame_count"), bool)
-            and provenance["prompt_frame_count"] > 0
-        )
+        preset = OFFICIAL_PRESETS_BY_ID[str(item.get("preset_id"))]
+        assert provenance == preset.provenance()
+        provider_voice_ids = provenance.get("provider_voice_ids")
+        assert isinstance(provider_voice_ids, dict)
+        assert set(provider_voice_ids) == {
+            "local_qwen3_tts",
+            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus",
+            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash",
+        }
         for key in (
-            "prompt_codes_sha256",
             "model_fingerprint_sha256",
             "provenance_fingerprint_sha256",
         ):
             _assert_sha256(provenance.get(key))
-        assert provenance.get("model_fingerprint_sha256") == (
-            TTS_MODEL_FINGERPRINT_SHA256
-        )
     return {
         "schema_version": response.payload["schema_version"],
         "metadata_only": True,
@@ -548,58 +455,59 @@ def verify() -> dict[str, object]:
     assert health.get("selection_edit_operations") == SELECTION_EDIT_OPERATIONS
     narration = health.get("narration")
     assert isinstance(narration, dict)
-    assert narration.get("product_visible") is (EXPECTED_TTS_PRODUCT == "ready")
-    assert narration.get("protocol_version") == TTS_PROTOCOL_VERSION
+    assert set(narration) == {
+        "product_requested",
+        "lifecycle_status",
+        "playback_installed",
+        "digest_keyring_loaded",
+        "production_backend_installed",
+        "worker_running",
+        "reference_clone_ready",
+        "provider_selection_fingerprint_sha256",
+        "reason_code",
+    }
+    assert narration.get("product_requested") is (
+        EXPECTED_TTS_PRODUCT == "ready" or EXPECTED_TTS_VALIDATION == "ready"
+    )
     if EXPECTED_TTS_RUNTIME == "disabled":
         assert narration == {
-            "technical_enabled": False,
+            "product_requested": False,
             "lifecycle_status": "disabled",
-            "sidecar_reachable": False,
-            "model_ready": False,
-            "model_loaded": False,
-            "product_visible": False,
-            "idle_unload_seconds": None,
-            "protocol_version": TTS_PROTOCOL_VERSION,
-            "worker_generation": None,
-            "lease_generation": None,
-            "model_fingerprint_sha256": None,
+            "playback_installed": False,
+            "digest_keyring_loaded": False,
+            "production_backend_installed": False,
+            "worker_running": False,
+            "reference_clone_ready": False,
+            "provider_selection_fingerprint_sha256": None,
             "reason_code": None,
         }
     else:
-        assert narration.get("technical_enabled") is True
         assert narration.get("lifecycle_status") == "ready"
-        assert narration.get("sidecar_reachable") is True
-        assert narration.get("model_ready") is True
-        assert isinstance(narration.get("model_loaded"), bool)
-        idle_unload_seconds = narration.get("idle_unload_seconds")
-        assert (
-            isinstance(idle_unload_seconds, int)
-            and not isinstance(idle_unload_seconds, bool)
-            and idle_unload_seconds > 0
+        assert narration.get("playback_installed") is True
+        assert narration.get("digest_keyring_loaded") is True
+        assert narration.get("production_backend_installed") is True
+        assert narration.get("worker_running") is True
+        _assert_sha256(narration.get("provider_selection_fingerprint_sha256"))
+        assert narration.get("reference_clone_ready") is (
+            EXPECTED_TTS_REFERENCE_CLONE == "ready"
         )
-        assert narration.get("model_fingerprint_sha256") == (
-            TTS_MODEL_FINGERPRINT_SHA256
-        )
-        lease_generation = narration.get("lease_generation")
-        assert (
-            isinstance(lease_generation, int)
-            and not isinstance(lease_generation, bool)
-            and lease_generation > 0
-        )
-        worker_generation = narration.get("worker_generation")
-        if narration.get("model_loaded") is True:
-            assert (
-                isinstance(worker_generation, int)
-                and not isinstance(worker_generation, bool)
-                and worker_generation > 0
-            )
-        else:
-            assert worker_generation is None
         assert narration.get("reason_code") is None
 
     narration_production = health.get("narration_production")
     assert isinstance(narration_production, dict)
-    assert narration_production == expected_narration_production()
+    production_without_selection = dict(narration_production)
+    production_selection_fingerprint = production_without_selection.pop(
+        "provider_selection_fingerprint_sha256",
+        None,
+    )
+    assert production_without_selection == expected_narration_production()
+    if EXPECTED_TTS_RUNTIME == "ready":
+        _assert_sha256(production_selection_fingerprint)
+        assert production_selection_fingerprint == narration.get(
+            "provider_selection_fingerprint_sha256"
+        )
+    else:
+        assert production_selection_fingerprint is None
     tts_http_contracts = verify_tts_http_contracts()
 
     agent_payload = get_json("/api/agents")

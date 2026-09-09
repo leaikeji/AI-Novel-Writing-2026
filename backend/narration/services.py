@@ -32,7 +32,6 @@ from .official_presets import (
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
     validate_official_version_evidence,
 )
-from .nano_experiments import validate_nano_experiment_version_evidence
 
 
 T = TypeVar("T")
@@ -294,76 +293,11 @@ def voice_activation_evidence_is_usable(
         and version.locked_actor is None
         and version.locked_at is None
     )
-    machine_validated = (
-        version.source_type == "generated"
-        and rights.source_kind == "official_preset"
-        and version.activation_basis == "experimental_machine_validated"
-        and version.validation_basis == "machine_validated"
-        and version.quality_state == "accepted"
-        and version.model_run_id is not None
-        and version.locked_actor is None
-        and version.locked_at is None
-    )
-    character_generated = (
-        version.source_type == "generated"
-        and rights.source_kind == "voice_generator"
-        and version.activation_basis == "character_one_click_generation"
-        and version.validation_basis == "machine_validated"
-        and version.quality_state == "accepted"
-        and version.model_run_id is not None
-        and version.reference_asset_id is not None
-        and version.description_digest_key_id is not None
-        and version.description_digest is not None
-        and version.preset_key is None
-        and version.model_id == "OpenMOSS-Team/MOSS-VoiceGenerator"
-        and version.model_revision
-        == "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4"
-        and version.locked_actor is None
-        and version.locked_at is None
-        and rights.purpose == "private_novel_narration"
-        and not rights.commercial_use
-        and not rights.redistribution
-        and not rights.voice_cloning
-        and rights.subject_consent_reference is None
-    )
-    generic_generated = (
-        version.source_type == "generated"
-        and rights.source_kind == "voice_generator"
-        and version.activation_basis == "generic_voice_pack_generation"
-        and version.validation_basis == "machine_validated"
-        and version.quality_state == "accepted"
-        and version.model_run_id is not None
-        and version.reference_asset_id is not None
-        and version.description_digest_key_id is not None
-        and version.description_digest is not None
-        and version.preset_key is None
-        and version.model_id == "OpenMOSS-Team/MOSS-VoiceGenerator"
-        and version.model_revision
-        == "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4"
-        and version.locked_actor is None
-        and version.locked_at is None
-        and rights.purpose == "private_novel_narration"
-        and not rights.commercial_use
-        and not rights.redistribution
-        and not rights.voice_cloning
-        and rights.subject_consent_reference is None
-    )
-    if not (
-        human_confirmed
-        or official_direct
-        or machine_validated
-        or character_generated
-        or generic_generated
-    ):
+    if not (human_confirmed or official_direct):
         return False
     if rights.source_kind == "official_preset":
         try:
-            validator = (
-                validate_nano_experiment_version_evidence
-                if machine_validated
-                else validate_official_version_evidence
-            )
-            validator(
+            validate_official_version_evidence(
                 version,
                 rights,
                 expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
@@ -379,16 +313,17 @@ def require_usable_voice(
     *,
     novel_id: UUID,
     at: datetime | None = None,
+    for_update: bool = True,
 ) -> tuple[VoiceProfile, VoiceProfileVersion, VoiceRightsRecord]:
-    """Recheck current locked voice scope and conservative negative rights history."""
+    """Recheck voice scope and rights, locking only for mutation callers."""
 
     now = at or utc_now()
     version = require_row(
-        store.get(VoiceProfileVersion, voice_version_id, for_update=True),
+        store.get(VoiceProfileVersion, voice_version_id, for_update=for_update),
         label="voice version",
     )
     profile = require_row(
-        store.get(VoiceProfile, version.profile_id, for_update=True),
+        store.get(VoiceProfile, version.profile_id, for_update=for_update),
         label="voice profile",
     )
     if profile.owner_id != LOCAL_OWNER_ID or profile.workspace_id != LOCAL_WORKSPACE_ID:
@@ -402,7 +337,11 @@ def require_usable_voice(
     if version.state != "locked":
         raise VoiceRightsUnavailable("voice version is not locked")
     rights = require_row(
-        store.get(VoiceRightsRecord, version.rights_record_id, for_update=True),
+        store.get(
+            VoiceRightsRecord,
+            version.rights_record_id,
+            for_update=for_update,
+        ),
         label="voice rights record",
     )
     if rights.owner_id != profile.owner_id or rights.workspace_id != profile.workspace_id:
@@ -420,7 +359,7 @@ def require_usable_voice(
         for event in store.find_all(
             VoiceRightsEvent,
             rights_record_id=rights.id,
-            for_update=True,
+            for_update=for_update,
         )
     ):
         raise VoiceRightsUnavailable("voice rights have negative history")

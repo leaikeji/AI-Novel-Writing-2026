@@ -329,7 +329,7 @@ def _render_and_job(
         or job.novel_id != context.edition.novel_id
         or job.request_id != context.request.id
         or job.job_kind != "narration.segment_render"
-        or job.resource_class != "moss-nano"
+        or job.resource_class != "qwen-tts"
         or job.request_allows_render is not True
         or len(source_matches) != 1
     ):
@@ -381,6 +381,7 @@ def _group(
                 store,
                 voice_version_id,
                 novel_id=context.edition.novel_id,
+                for_update=False,
             )
     except VoiceRightsUnavailable:
         reason = reason or "VOICE_RIGHTS_UNAVAILABLE"

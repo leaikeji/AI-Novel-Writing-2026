@@ -1,7 +1,7 @@
-"""Atomic, fail-closed readiness for TTS35 and VoiceGenerator features.
+"""Atomic, fail-closed readiness for retained private-voice deletion.
 
 The provider deliberately performs no I/O and knows nothing about Alembic,
-storage paths, Sidecar clients, workers, or HTTP.  Their owners publish one
+storage paths, Provider clients, workers, or HTTP. Their owners publish one
 strict dependency snapshot after completing their own probes.  This keeps one
 process-local readiness authority usable by the settings overview, route
 guards, and runtime health without duplicating probe logic.
@@ -35,24 +35,9 @@ TTS_FEATURE_STARTING: Final = "TTS_FEATURE_STARTING"
 TTS_DATABASE_SCHEMA_OUTDATED: Final = "TTS_DATABASE_SCHEMA_OUTDATED"
 TTS_STORAGE_UNAVAILABLE: Final = "TTS_STORAGE_UNAVAILABLE"
 TTS_DIGEST_KEYRING_UNAVAILABLE: Final = "TTS_DIGEST_KEYRING_UNAVAILABLE"
-TTS_SIDECAR_UNAVAILABLE: Final = "TTS_SIDECAR_UNAVAILABLE"
 TTS_PROCESSOR_UNAVAILABLE: Final = "TTS_PROCESSOR_UNAVAILABLE"
-GENERIC_VOICE_PACK_NOT_READY: Final = "GENERIC_VOICE_PACK_NOT_READY"
 TTS_DELETION_RECONCILER_UNAVAILABLE: Final = (
     "TTS_DELETION_RECONCILER_UNAVAILABLE"
-)
-TTS_CHARACTER_WORKSPACE_UNAVAILABLE: Final = (
-    "TTS_CHARACTER_WORKSPACE_UNAVAILABLE"
-)
-TTS_NOVEL_AGENT_UNAVAILABLE: Final = "TTS_NOVEL_AGENT_UNAVAILABLE"
-TTS_VOICE_GENERATOR_HOST_UNAVAILABLE: Final = (
-    "TTS_VOICE_GENERATOR_HOST_UNAVAILABLE"
-)
-TTS_VOICE_GENERATOR_IDENTITY_MISMATCH: Final = (
-    "TTS_VOICE_GENERATOR_IDENTITY_MISMATCH"
-)
-TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE: Final = (
-    "TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE"
 )
 TTS_FEATURE_STOPPING: Final = "TTS_FEATURE_STOPPING"
 TTS_FEATURE_CRASHED: Final = "TTS_FEATURE_CRASHED"
@@ -64,29 +49,15 @@ STABLE_REASON_CODES: Final[frozenset[str]] = frozenset(
         TTS_DATABASE_SCHEMA_OUTDATED,
         TTS_STORAGE_UNAVAILABLE,
         TTS_DIGEST_KEYRING_UNAVAILABLE,
-        TTS_SIDECAR_UNAVAILABLE,
         TTS_PROCESSOR_UNAVAILABLE,
-        GENERIC_VOICE_PACK_NOT_READY,
         TTS_DELETION_RECONCILER_UNAVAILABLE,
-        TTS_CHARACTER_WORKSPACE_UNAVAILABLE,
-        TTS_NOVEL_AGENT_UNAVAILABLE,
-        TTS_VOICE_GENERATOR_HOST_UNAVAILABLE,
-        TTS_VOICE_GENERATOR_IDENTITY_MISMATCH,
-        TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE,
         TTS_FEATURE_STOPPING,
         TTS_FEATURE_CRASHED,
     }
 )
 
 MANAGED_CAPABILITY_KEYS: Final[tuple[wire.CapabilityKey, ...]] = (
-    wire.CapabilityKey.CHARACTER_VOICE_MATCHING,
-    wire.CapabilityKey.CHARACTER_CAST_PLANNING,
-    wire.CapabilityKey.NANO_ADVANCED_TUNING,
     wire.CapabilityKey.PRIVATE_VOICE_DELETION,
-    wire.CapabilityKey.VOICE_GENERATOR,
-    wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION,
-    wire.CapabilityKey.GENERIC_VOICE_POOL,
-    wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING,
 )
 
 _SAFE_REASON = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
@@ -107,46 +78,13 @@ class NarrationFeatureReadinessStaleUpdate(NarrationFeatureReadinessError):
 
 @dataclass(frozen=True, slots=True)
 class NarrationFeatureDependencies:
-    """Strict results supplied by the owners of the underlying dependencies.
-
-    ``schema_ready`` represents the shared schema-readiness sentinel.  The
-    provider never compares revision strings or walks the migration graph.
-    Sidecar protocol and model identity stay separate so either probe can
-    independently revoke advanced tuning.
-    """
+    """Readiness inputs for the retained deletion workflow."""
 
     schema_ready: bool = False
-    character_cast_schema_ready: bool = False
-    voice_generator_schema_ready: bool = False
-    character_workspace_ready: bool = False
-    novel_agent_ready: bool = False
-    official_preset_catalog_ready: bool = False
-    official_casting_baseline_ready: bool = False
-    official_binding_service_ready: bool = False
-    official_batch_binding_service_ready: bool = False
     storage_ready: bool = False
     digest_keyring_ready: bool = False
-    sidecar_protocol_ready: bool = False
-    sidecar_model_fingerprint_ready: bool = False
-    nano_experiment_processor_ready: bool = False
-    background_scheduler_ready: bool = False
     exact_asset_plan_service_ready: bool = False
     deletion_reconciler_ready: bool = False
-    voice_generator_host_protocol_ready: bool = False
-    voice_generator_model_identity_ready: bool = False
-    voice_generator_codec_identity_ready: bool = False
-    voice_generator_heavy_lock_ready: bool = False
-    voice_generator_processor_ready: bool = False
-    voice_generator_reconciler_ready: bool = False
-    automatic_voice_preparation_schema_ready: bool = False
-    voice_preparation_processor_ready: bool = False
-    voice_preparation_reconciler_ready: bool = False
-    narration_continuation_service_ready: bool = False
-    generic_voice_pack_service_ready: bool = False
-    generic_voice_processor_ready: bool = False
-    generic_voice_projection_service_ready: bool = False
-    generic_voice_resolver_ready: bool = False
-    generic_voice_active_pack_ready: bool = False
 
     def __post_init__(self) -> None:
         for dependency in fields(self):
@@ -241,105 +179,12 @@ class NarrationFeatureReadinessSnapshot(BaseModel):
 _DEPENDENCY_MATRIX: Final[
     dict[wire.CapabilityKey, tuple[tuple[str, str], ...]]
 ] = {
-    wire.CapabilityKey.CHARACTER_VOICE_MATCHING: (
-        ("schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
-        ("character_workspace_ready", TTS_CHARACTER_WORKSPACE_UNAVAILABLE),
-        ("novel_agent_ready", TTS_NOVEL_AGENT_UNAVAILABLE),
-        # The frozen C0 contract has no separate catalog/binding reason.  Both
-        # are parts of the deterministic matching processor boundary.
-        ("official_preset_catalog_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("official_casting_baseline_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("official_binding_service_ready", TTS_PROCESSOR_UNAVAILABLE),
-    ),
-    wire.CapabilityKey.CHARACTER_CAST_PLANNING: (
-        ("character_cast_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
-        ("character_workspace_ready", TTS_CHARACTER_WORKSPACE_UNAVAILABLE),
-        ("novel_agent_ready", TTS_NOVEL_AGENT_UNAVAILABLE),
-        ("official_preset_catalog_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("official_casting_baseline_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("official_batch_binding_service_ready", TTS_PROCESSOR_UNAVAILABLE),
-    ),
-    wire.CapabilityKey.NANO_ADVANCED_TUNING: (
-        ("schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
-        ("storage_ready", TTS_STORAGE_UNAVAILABLE),
-        ("digest_keyring_ready", TTS_DIGEST_KEYRING_UNAVAILABLE),
-        ("sidecar_protocol_ready", TTS_SIDECAR_UNAVAILABLE),
-        ("sidecar_model_fingerprint_ready", TTS_SIDECAR_UNAVAILABLE),
-        ("nano_experiment_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("background_scheduler_ready", TTS_PROCESSOR_UNAVAILABLE),
-    ),
     wire.CapabilityKey.PRIVATE_VOICE_DELETION: (
         ("schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
         ("storage_ready", TTS_STORAGE_UNAVAILABLE),
         ("digest_keyring_ready", TTS_DIGEST_KEYRING_UNAVAILABLE),
         ("exact_asset_plan_service_ready", TTS_PROCESSOR_UNAVAILABLE),
-        (
-            "deletion_reconciler_ready",
-            TTS_DELETION_RECONCILER_UNAVAILABLE,
-        ),
-    ),
-    wire.CapabilityKey.VOICE_GENERATOR: (
-        ("voice_generator_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
-        ("character_workspace_ready", TTS_CHARACTER_WORKSPACE_UNAVAILABLE),
-        ("novel_agent_ready", TTS_NOVEL_AGENT_UNAVAILABLE),
-        ("storage_ready", TTS_STORAGE_UNAVAILABLE),
-        ("digest_keyring_ready", TTS_DIGEST_KEYRING_UNAVAILABLE),
-        ("sidecar_protocol_ready", TTS_SIDECAR_UNAVAILABLE),
-        ("sidecar_model_fingerprint_ready", TTS_SIDECAR_UNAVAILABLE),
-        ("nano_experiment_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("background_scheduler_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("exact_asset_plan_service_ready", TTS_PROCESSOR_UNAVAILABLE),
         ("deletion_reconciler_ready", TTS_DELETION_RECONCILER_UNAVAILABLE),
-        (
-            "voice_generator_host_protocol_ready",
-            TTS_VOICE_GENERATOR_HOST_UNAVAILABLE,
-        ),
-        (
-            "voice_generator_model_identity_ready",
-            TTS_VOICE_GENERATOR_IDENTITY_MISMATCH,
-        ),
-        (
-            "voice_generator_codec_identity_ready",
-            TTS_VOICE_GENERATOR_IDENTITY_MISMATCH,
-        ),
-        ("voice_generator_heavy_lock_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("voice_generator_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
-        (
-            "voice_generator_reconciler_ready",
-            TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE,
-        ),
-    ),
-    wire.CapabilityKey.AUTOMATIC_CHARACTER_VOICE_GENERATION: (
-        ("automatic_voice_preparation_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
-        ("character_workspace_ready", TTS_CHARACTER_WORKSPACE_UNAVAILABLE),
-        ("novel_agent_ready", TTS_NOVEL_AGENT_UNAVAILABLE),
-        ("voice_generator_host_protocol_ready", TTS_VOICE_GENERATOR_HOST_UNAVAILABLE),
-        ("voice_generator_model_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
-        ("voice_generator_codec_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
-        ("voice_generator_heavy_lock_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("voice_generator_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("voice_generator_reconciler_ready", TTS_VOICE_GENERATOR_RECONCILER_UNAVAILABLE),
-        ("voice_preparation_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("voice_preparation_reconciler_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("narration_continuation_service_ready", TTS_PROCESSOR_UNAVAILABLE),
-    ),
-    wire.CapabilityKey.GENERIC_VOICE_POOL: (
-        ("automatic_voice_preparation_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
-        ("storage_ready", TTS_STORAGE_UNAVAILABLE),
-        ("digest_keyring_ready", TTS_DIGEST_KEYRING_UNAVAILABLE),
-        ("voice_generator_host_protocol_ready", TTS_VOICE_GENERATOR_HOST_UNAVAILABLE),
-        ("voice_generator_model_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
-        ("voice_generator_codec_identity_ready", TTS_VOICE_GENERATOR_IDENTITY_MISMATCH),
-        ("voice_generator_heavy_lock_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("generic_voice_pack_service_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("generic_voice_processor_ready", TTS_PROCESSOR_UNAVAILABLE),
-    ),
-    wire.CapabilityKey.AUTOMATIC_GENERIC_CASTING: (
-        ("automatic_voice_preparation_schema_ready", TTS_DATABASE_SCHEMA_OUTDATED),
-        ("generic_voice_pack_service_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("generic_voice_projection_service_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("generic_voice_resolver_ready", TTS_PROCESSOR_UNAVAILABLE),
-        ("generic_voice_active_pack_ready", GENERIC_VOICE_PACK_NOT_READY),
     ),
 }
 
@@ -649,7 +494,6 @@ __all__ = [
     "NarrationFeatureReadinessStaleUpdate",
     "NarrationFeatureReadinessTransitionError",
     "STABLE_REASON_CODES",
-    "TTS_CHARACTER_WORKSPACE_UNAVAILABLE",
     "TTS_DATABASE_SCHEMA_OUTDATED",
     "TTS_DELETION_RECONCILER_UNAVAILABLE",
     "TTS_DIGEST_KEYRING_UNAVAILABLE",
@@ -657,8 +501,6 @@ __all__ = [
     "TTS_FEATURE_DISABLED",
     "TTS_FEATURE_STARTING",
     "TTS_FEATURE_STOPPING",
-    "TTS_NOVEL_AGENT_UNAVAILABLE",
     "TTS_PROCESSOR_UNAVAILABLE",
-    "TTS_SIDECAR_UNAVAILABLE",
     "TTS_STORAGE_UNAVAILABLE",
 ]

@@ -1,6 +1,6 @@
 # PostgreSQL 运行角色隔离底座
 
-状态：**计划 53 已接入显式 one-shot maintenance overlay，计划 54 已用同一 schema-owner 链完成长期 `0037 → 0038` 并补齐精确 `0038 → 0037` 恢复门禁；它不是普通 Compose 启动项，API／worker 正式连接切换仍为 HOLD。**
+状态：**计划 53 已接入显式 one-shot maintenance overlay；计划 62 已把 bootstrap、schema-owner migrator 和 validator 的精确门禁扩展到 `20260909_0050`。它不是普通 Compose 启动项，API／worker 正式连接切换仍为 HOLD。**
 
 `bootstrap.sh` 是可由一次性 Compose service 调用的幂等入口。它只接受无密码连接元数据，管理员密码通过管理员自己的 `PGPASSFILE` 读取；三个运行密码分别只写入下列独立挂载，文件固定为 `0600`：
 
@@ -14,7 +14,7 @@
 
 三条路径分别位于 `ai-novel-2026-db-migrator-auth`、`ai-novel-2026-db-api-auth`、`ai-novel-2026-db-worker-auth`。当前 migrator service 只挂 migrator 卷；validator 只读挂三卷；bootstrap 是唯一同时可写挂载三卷的 service。API／worker 卷当前不挂入 QwenPaw，因为运行连接切换尚未批准，也没有受审窄写过程。不能把任一密码复制到 `.env`、数据库 URL、Compose command 或日志。
 
-每次只能使用 `docker compose ... run --rm -T <one-service>` 显式运行一个 service，不得使用 profile-wide `up`。`AI_NOVEL_MAINTENANCE_STEP` 是代码级单步授权：bootstrap 支持至 `bootstrap-20260902_0039`；validator 使用与显式 head 相等的 `validate-<head>`；migrator 新增长篇字数列的精确 `upgrade-20260902_0039`／`downgrade-20260902_0038`，并保留已审历史步骤。不匹配的 service 会在连接数据库前失败。
+每次只能使用 `docker compose ... run --rm -T <one-service>` 显式运行一个 service，不得使用 profile-wide `up`。`AI_NOVEL_MAINTENANCE_STEP` 是代码级单步授权：bootstrap 支持精确的 `bootstrap-20260909_0049`／`bootstrap-20260909_0050` 及已审历史 head；validator 使用与显式 head 相等的 `validate-<head>`；migrator 支持精确的 `upgrade-20260909_0050` 及已审历史步骤。`0050` 为前向清理，不提供 downgrade；需要恢复时使用计划 62 的数据库 dump、媒体清单和旧安装快照。不匹配的 service 会在连接数据库前失败。
 
 计划 54 已执行的 `0037 → 0038` 串行顺序：
 
@@ -26,7 +26,7 @@
 
 若 0038 候选必须回退，先备份、停止 QwenPaw 并确认当前 head 恰为 0038，再使用 `downgrade-20260902_0037` + `migrate-as-owner.sh downgrade 20260902_0037`；随后以 0037 bootstrap／validator 复验并恢复精确旧候选。该动作只用于恢复，不允许形成 0037／0038 双运行轨道。
 
-角色校验只接受以下四个已审计 head，不会从仓库、脚本默认值或数据库自身猜测期望版本：
+角色校验只接受下列显式已审计 head，不会从仓库、脚本默认值或数据库自身猜测期望版本：
 
 | 显式 `--expected-head` | 保护表数量 | 用途 |
 | --- | ---: | --- |
@@ -36,8 +36,11 @@
 | `20260902_0037` | 67 | 计划 51 账本候选历史发布验证；只新增索引，不增加保护表 |
 | `20260902_0038` | 67 | 当前单一故事账本契约；删除等值列，不增加保护表 |
 | `20260902_0039` | 67 | 长篇工作副本可见字数列；不增加保护表 |
+| `20260903_0040` | 73 | 历史通用音色池、人物准备与选角表基线 |
+| `20260909_0049` | 59 | 计划 62 删除退役 MOSS／通用池数据结构后的基线 |
+| `20260909_0050` | 59 | 清理共享 scope guard 退役引用，不增加表 |
 
-`protected-tables.sql` 保存当前 `0039` 的 67 表全集；其中 66 张是 ORM 业务表，`alembic_version` 是唯一系统表。`0036`、`0037`、`0038` 与 `0039` 的保护表集合相等：0037 只增加账本分页索引，0038 只收缩等值列和约束，0039 只增加 working copy 字数列。0034／0035 旧版本集合是该全集的严格子集。SQL 通过 catalog join 只处理目标库中已存在的表；迁移至候选 head 后必须重新执行 bootstrap 并要求对应表集通过。验证器还会拒绝未进入保护清单、也没有非 TTS 理由 allowlist 的 `narration_*`、`voice_*`、`character_*`、媒体和后台任务权威表。
+`protected-tables.sql` 保存当前 `0050` 的 59 表全集；其中 58 张是 ORM 业务表，`alembic_version` 是唯一系统表。历史 head 使用验证器内冻结的对应集合；`0049` 删除 14 张退役专用表，`0050` 只清理共享函数，不改变表集合。SQL 通过 catalog join 只处理目标库中已存在的表；迁移至候选 head 后必须重新执行 bootstrap 并要求对应表集通过。验证器还会拒绝未进入保护清单、也没有非 TTS 理由 allowlist 的 `narration_*`、`voice_*`、`character_*`、媒体和后台任务权威表。
 
 测试环境同样必须显式设置 `TTS_ROLE_TEST_EXPECTED_HEAD`；未设置时 PostgreSQL 集成用例保持跳过，不回退到隐含默认值。此矩阵只扩充读取验证覆盖，不向 API、worker、`PUBLIC` 或任何其他主体授予新权限。
 

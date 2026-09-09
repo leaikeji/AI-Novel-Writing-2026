@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
@@ -15,6 +16,7 @@ from ..models import (
     NarrationScopeOverride,
     NarrationSettingsSnapshot,
     NovelNarrationSettings,
+    TTSCloudProfile,
 )
 from ..services import content_hash as document_content_hash
 from ..services import markdown_to_text
@@ -23,6 +25,7 @@ from .contracts import (
     NARRATION_REVIEW_TAXONOMY_VERSION,
     NarrationRequestScope,
 )
+from . import schemas as wire
 from .services import (
     IdempotencyConflict,
     InvalidNarrationState,
@@ -210,10 +213,79 @@ class CreateSettingsSnapshot:
     scope: NarrationRequestScope = NarrationRequestScope.fixed_local()
 
 
+def resolve_tts_cloud_profile(
+    store: NarrationStore,
+    settings_json: dict[str, object],
+    *,
+    owner_id: UUID,
+    workspace_id: UUID,
+) -> TTSCloudProfile | None:
+    """Resolve the active cloud channel only when the saved selection needs it."""
+
+    raw_selection = settings_json.get("tts_provider", {})
+    selection = wire.TTSProviderSelection.model_validate(raw_selection)
+    if selection.provider_id != "aliyun_qwen_audio_tts":
+        return None
+    profile = store.find_one(
+        TTSCloudProfile,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        lifecycle_state="active",
+    )
+    if profile is None or profile.credential_ref is None:
+        raise InvalidNarrationState("active cloud TTS profile is unavailable")
+    if profile.quality_test_state != "passed":
+        raise InvalidNarrationState("active cloud TTS quality model is not verified")
+    if (
+        selection.aliyun_model_id == "qwen-audio-3.0-tts-flash"
+        and (profile.speed_model_id is None or profile.speed_test_state != "passed")
+    ):
+        raise InvalidNarrationState("active cloud TTS speed model is unavailable")
+    return profile
+
+
+def _snapshot_settings(
+    settings_json: dict[str, object],
+    cloud_profile: TTSCloudProfile | None,
+) -> dict[str, object]:
+    frozen = canonical_payload(settings_json)
+    raw_selection = frozen.get("tts_provider", {})
+    selection = wire.TTSProviderSelection.model_validate(raw_selection)
+    if selection.provider_id != "aliyun_qwen_audio_tts":
+        return frozen
+    if cloud_profile is None:
+        raise InvalidNarrationState("cloud TTS selection has no active profile")
+    if cloud_profile.verification_fingerprint is None:
+        raise InvalidNarrationState("cloud TTS profile has no verification fingerprint")
+    actual_model_id = (
+        cloud_profile.quality_model_id
+        if selection.aliyun_model_id == "qwen-audio-3.0-tts-plus"
+        else cloud_profile.speed_model_id
+    )
+    if actual_model_id is None:
+        raise InvalidNarrationState("cloud TTS model slot is unavailable")
+    enriched = selection.model_copy(
+        update={
+            "cloud_profile_id": cloud_profile.id,
+            "cloud_profile_version": cloud_profile.version,
+            "cloud_protocol": cloud_profile.protocol,
+            "cloud_actual_model_id": actual_model_id,
+            "cloud_base_url_fingerprint": hashlib.sha256(
+                cloud_profile.base_url.encode("utf-8")
+            ).hexdigest(),
+            "cloud_verification_fingerprint": cloud_profile.verification_fingerprint,
+        }
+    )
+    frozen["tts_provider"] = enriched.model_dump(mode="json")
+    return frozen
+
+
 def snapshot_payload(
     command: CreateSettingsSnapshot,
     settings: NovelNarrationSettings,
     overrides: list[NarrationScopeOverride],
+    *,
+    cloud_profile: TTSCloudProfile | None = None,
 ) -> dict[str, object]:
     return {
         "schema_version": SETTINGS_SNAPSHOT_SCHEMA_VERSION,
@@ -229,7 +301,7 @@ def snapshot_payload(
             "narrator_version_id": (
                 str(settings.narrator_version_id) if settings.narrator_version_id else None
             ),
-            "settings": canonical_payload(settings.settings_json),
+            "settings": _snapshot_settings(settings.settings_json, cloud_profile),
             "scope_overrides": [
                 {
                     "scope_kind": row.scope_kind,
@@ -263,7 +335,18 @@ def create_settings_snapshot(
         order_by=("scope_kind", "scope_id"),
         for_update=True,
     )
-    payload = snapshot_payload(command, settings, overrides)
+    cloud_profile = resolve_tts_cloud_profile(
+        store,
+        settings.settings_json,
+        owner_id=command.scope.owner_id,
+        workspace_id=command.scope.workspace_id,
+    )
+    payload = snapshot_payload(
+        command,
+        settings,
+        overrides,
+        cloud_profile=cloud_profile,
+    )
     fingerprint = canonical_sha256(payload)
     existing = store.find_one(
         NarrationSettingsSnapshot,
@@ -297,5 +380,6 @@ __all__ = [
     "TTS_SNAPSHOT_SOURCE",
     "create_settings_snapshot",
     "create_tts_snapshot",
+    "resolve_tts_cloud_profile",
     "snapshot_payload",
 ]

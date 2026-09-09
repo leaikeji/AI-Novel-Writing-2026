@@ -24,23 +24,27 @@ from backend.models import (
     NarrationManifest,
     NarrationRequest,
 )
-from backend.narration.adapters import FakeMossNanoTTSAdapter
+from backend.narration import schemas as wire
 from backend.narration.audio_pipeline import (
     AudioFormatError,
     AudioQualityError,
     ProcessedPcmWav,
 )
 from backend.narration.contracts import (
+    CancelDisposition,
     ContractError,
-    NanoDecodeParametersV2,
     NarrationRequestScope,
     ReferenceAudioInput,
-    SynthesisRequest,
-    SynthesisResult,
+    TTSModelIdentity,
+    TTSProviderId,
+    TTSSynthesisRequest,
+    TTSSynthesisResult,
+    TTSVoiceInput,
+    TTSVoiceKind,
 )
 from backend.narration.digest_keyring import HmacDigestKey
 from backend.narration.disk_guard import NarrationDiskGuardError
-from backend.narration.fingerprints import model_fingerprint_sha256
+from backend.narration.fingerprints import canonical_json_bytes
 from backend.narration.jobs import FailureResult, JobFence, JobFenceError, JobLease
 from backend.narration.manifest import (
     INITIAL_BUFFER_POLICY,
@@ -48,27 +52,9 @@ from backend.narration.manifest import (
     PublishManifest,
     publish_manifest,
 )
-from backend.narration.nano_experiments import (
-    NANO_EXPERIMENT_MAX_NEW_FRAMES,
-    NANO_EXPERIMENT_SAMPLE_MODE,
-    NanoDecodeParametersV3,
-)
-from backend.narration.official_presets import (
-    OFFICIAL_PRESET_MANIFEST_PATH,
-    OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
-    OFFICIAL_PRESET_REPOSITORY,
-    OFFICIAL_PRESET_REVISION,
-    OFFICIAL_PRESET_RIGHTS_POLICY_VERSION,
-    require_official_preset,
-)
+from backend.narration.providers.base import TTSProviderError
 from backend.narration.progress import initialize_initial_document_edition
 from backend.narration.resource_locks import ResourceFence
-from backend.narration.runtime import canonical_sidecar_synthesis_metadata
-from backend.narration.voice_generator_runtime import (
-    EXPECTED_AUDIO_PARAMETERS as VOICE_GENERATOR_AUDIO_PARAMETERS,
-    EXPECTED_RUNTIME_IDENTITY as VOICE_GENERATOR_RUNTIME_IDENTITY,
-    VOICE_GENERATOR_REVISION,
-)
 from backend.narration.scheduler import (
     NarrationJobScheduler,
     SchedulerConfig,
@@ -98,225 +84,99 @@ from tests.narration.test_domain_services import (
 NOW = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
 
 
-def _nano_experiment_voice_evidence() -> tuple[SimpleNamespace, SimpleNamespace]:
-    preset = require_official_preset("onnx.Zhiming")
-    owner_id = uuid4()
-    workspace_id = uuid4()
-    complete_parameters = NanoDecodeParametersV3(
-        seed=9_876,
-        text_temperature_milli=1_250,
-        text_top_p_milli=875,
-        text_top_k=41,
-        audio_temperature_milli=925,
-        audio_top_p_milli=825,
-        audio_top_k=19,
-        audio_repetition_penalty_milli=1_350,
-    )
-    voice = SimpleNamespace(
-        id=uuid4(),
-        profile_id=uuid4(),
-        owner_id=owner_id,
-        workspace_id=workspace_id,
-        source_type="generated",
-        provider_id="local-sidecar",
-        model_id=OFFICIAL_PRESET_REPOSITORY,
-        model_revision=OFFICIAL_PRESET_REVISION,
-        preset_key=preset.preset_id,
-        reference_asset_id=None,
-        language=preset.language,
-        seed=complete_parameters.seed,
-        state="locked",
-        quality_state="accepted",
-        activation_basis="experimental_machine_validated",
-        validation_basis="machine_validated",
-        model_run_id=uuid4(),
-        locked_actor=None,
-        locked_at=None,
-        fingerprint="a" * 64,
-        parameters_json={
-            "schema_version": "narration-nano-experiment-version/1",
-            "official_preset": preset.provenance(),
-            "sample_mode": NANO_EXPERIMENT_SAMPLE_MODE,
-            "max_new_frames": NANO_EXPERIMENT_MAX_NEW_FRAMES,
-            "decode_parameters": dict(complete_parameters.canonical_payload()),
+def _qwen_voice(**changes: object) -> SimpleNamespace:
+    values: dict[str, object] = {
+        "source_type": "preset",
+        "reference_asset_id": None,
+        "preset_key": "Vivian",
+        "parameters_json": {
+            "schema_version": "qwen-tts-voice/1",
+            "voice_kind": "preset",
+            "provider_voice_id": "Vivian",
         },
-    )
-    rights = SimpleNamespace(
-        owner_id=owner_id,
-        workspace_id=workspace_id,
-        source_kind="official_preset",
-        source_identifier=(
-            f"hf://{OFFICIAL_PRESET_REPOSITORY}@{OFFICIAL_PRESET_REVISION}/"
-            f"{OFFICIAL_PRESET_MANIFEST_PATH}#{preset.preset_id}"
-        ),
-        notice_version=OFFICIAL_PRESET_RIGHTS_POLICY_VERSION,
-        purpose="private_novel_narration",
-        commercial_use=False,
-        redistribution=False,
-        voice_cloning=False,
-        subject_consent_reference=None,
-        expires_at=None,
-        risk_flags_json=["COMMERCIAL_DISTRIBUTION_NOT_EVALUATED"],
-        confirmed_actor="owner",
-        confirmed_at=NOW,
-    )
-    return voice, rights
-
-
-def test_worker_projects_validated_nano_experiment_into_sidecar_parameters() -> None:
-    voice, rights = _nano_experiment_voice_evidence()
-
-    decoded = worker_module._validated_nano_experiment_decode_parameters(  # noqa: SLF001
-        voice=voice,
-        rights=rights,
-        render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
-    )
-
-    assert dict(decoded.wire_payload()) == {
-        "schema_version": "moss-nano-decode-parameters/2",
-        "text_temperature_milli": 1_250,
-        "text_top_p_milli": 875,
-        "text_top_k": 41,
-        "audio_temperature_milli": 925,
-        "audio_top_p_milli": 825,
-        "audio_top_k": 19,
-        "audio_repetition_penalty_milli": 1_350,
     }
+    values.update(changes)
+    return SimpleNamespace(**values)
 
 
-def test_worker_rejects_nano_experiment_evidence_drift() -> None:
-    voice, rights = _nano_experiment_voice_evidence()
-    voice.seed += 1
+def test_worker_accepts_only_qwen_voice_parameter_shape() -> None:
+    voice = _qwen_voice()
 
-    with pytest.raises(
-        worker_module.WorkerSecurityError,
-        match="version evidence changed",
-    ):
-        worker_module._validated_nano_experiment_decode_parameters(  # noqa: SLF001
-            voice=voice,
-            rights=rights,
-            render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
-        )
-
-    voice.seed -= 1
-    with pytest.raises(
-        worker_module.WorkerSecurityError,
-        match="render model identity changed",
-    ):
-        worker_module._validated_nano_experiment_decode_parameters(  # noqa: SLF001
-            voice=voice,
-            rights=rights,
-            render_model_fingerprint="b" * 64,
-        )
+    assert worker_module._qwen_voice_parameters(voice) == (  # noqa: SLF001
+        TTSVoiceKind.PRESET,
+        "Vivian",
+        None,
+    )
 
 
-def _voice_generator_voice_evidence() -> tuple[SimpleNamespace, SimpleNamespace]:
-    owner_id = uuid4()
-    workspace_id = uuid4()
-    voice = SimpleNamespace(
-        id=uuid4(),
-        profile_id=uuid4(),
-        owner_id=owner_id,
-        workspace_id=workspace_id,
-        source_type="generated",
-        provider_id="local-native-host",
-        model_id="OpenMOSS-Team/MOSS-VoiceGenerator",
-        model_revision=VOICE_GENERATOR_REVISION,
-        preset_key=None,
-        reference_asset_id=uuid4(),
-        language="zh-CN",
-        seed=104_729,
-        state="locked",
-        quality_state="accepted",
-        activation_basis="character_one_click_generation",
-        validation_basis="machine_validated",
-        model_run_id=uuid4(),
-        locked_actor=None,
-        locked_at=None,
-        fingerprint="a" * 64,
-        description_digest_key_id="vg40-test-key",
-        description_digest="b" * 64,
+def test_worker_resolves_provider_specific_qwen_preset_voice() -> None:
+    from backend.narration.official_presets import require_official_preset
+
+    preset = require_official_preset("qwen.WarmFemale")
+    voice = _qwen_voice(
+        preset_key=preset.preset_id,
         parameters_json={
-            "schema_version": "voice-generator-version/1",
-            "draft_fingerprint": "c" * 64,
-            "runtime_identity": dict(
-                VOICE_GENERATOR_RUNTIME_IDENTITY.wire_payload()
-            ),
-            "generator_parameters": dict(
-                VOICE_GENERATOR_AUDIO_PARAMETERS.wire_payload()
-            ),
-            "nano_parameters_digest": "d" * 64,
+            "schema_version": "qwen-tts-voice/1",
+            "voice_kind": "preset",
+            "provider_voice_ids": preset.provider_voice_ids,
+            "official_preset": preset.provenance(),
         },
     )
-    rights = SimpleNamespace(
-        owner_id=owner_id,
-        workspace_id=workspace_id,
-        source_kind="voice_generator",
-        source_identifier=f"local://voice-generator/{uuid4()}",
-        notice_version="voice-generator-private-use/1",
-        purpose="private_novel_narration",
-        commercial_use=False,
-        redistribution=False,
-        voice_cloning=False,
-        subject_consent_reference=None,
-        expires_at=None,
-        risk_flags_json=[],
-    )
-    return voice, rights
+
+    assert worker_module._qwen_voice_parameters(  # noqa: SLF001
+        voice,
+        wire.TTSProviderSelection(provider_id="local_qwen3_tts"),
+    ) == (TTSVoiceKind.PRESET, "Serena", None)
+    assert worker_module._qwen_voice_parameters(  # noqa: SLF001
+        voice,
+        wire.TTSProviderSelection(
+            provider_id="aliyun_qwen_audio_tts",
+            aliyun_model_id="qwen-audio-3.0-tts-plus",
+        ),
+    ) == (TTSVoiceKind.PRESET, "longanlingxin", None)
+    assert worker_module._qwen_voice_parameters(  # noqa: SLF001
+        voice,
+        wire.TTSProviderSelection(
+            provider_id="aliyun_qwen_audio_tts",
+            aliyun_model_id="qwen-audio-3.0-tts-flash",
+        ),
+    ) == (TTSVoiceKind.PRESET, "longanhuan_v3.6", None)
 
 
 @pytest.mark.parametrize(
-    "activation_basis",
-    ("character_one_click_generation", "generic_voice_pack_generation"),
+    "parameters",
+    (
+        {
+            "schema_version": "moss-nano-decode-parameters/2",
+            "voice_kind": "preset",
+            "provider_voice_id": "Vivian",
+        },
+        {
+            "schema_version": "qwen-tts-voice/1",
+            "voice_kind": "preset",
+            "provider_voice_id": "Vivian",
+            "sample_mode": "full",
+        },
+        {
+            "schema_version": "qwen-tts-voice/1",
+            "voice_kind": "preset",
+            "provider_voice_id": "Vivian",
+            "max_new_frames": 375,
+        },
+        {
+            "schema_version": "qwen-tts-voice/1",
+            "voice_kind": "preset",
+            "provider_voice_id": "Vivian",
+            "decode_parameters": {},
+        },
+    ),
 )
-def test_worker_projects_validated_voice_generator_reference_to_nano(
-    activation_basis: str,
+def test_worker_rejects_legacy_moss_nano_voice_parameters(
+    parameters: dict[str, object],
 ) -> None:
-    voice, rights = _voice_generator_voice_evidence()
-    voice.activation_basis = activation_basis
-    if activation_basis == "generic_voice_pack_generation":
-        voice.parameters_json = {
-            "schema_version": "generic-voice-version/1",
-            "design_fingerprint": "e" * 64,
-        }
-        rights.source_identifier = f"local://generic-voice/{uuid4()}/male_child_bright"
-
-    decoded = worker_module._validated_voice_generator_decode_parameters(  # noqa: SLF001
-        voice=voice,
-        rights=rights,
-        render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
-    )
-
-    assert decoded == NanoDecodeParametersV2()
-
-
-def test_worker_rejects_generic_voice_with_character_parameter_shape() -> None:
-    voice, rights = _voice_generator_voice_evidence()
-    voice.activation_basis = "generic_voice_pack_generation"
-
-    with pytest.raises(
-        worker_module.WorkerSecurityError,
-        match="version evidence changed",
-    ):
-        worker_module._validated_voice_generator_decode_parameters(  # noqa: SLF001
-            voice=voice,
-            rights=rights,
-            render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
-        )
-
-
-def test_worker_rejects_voice_generator_evidence_drift() -> None:
-    voice, rights = _voice_generator_voice_evidence()
-    voice.parameters_json["runtime_identity"] = {"schema_version": "changed"}
-
-    with pytest.raises(
-        worker_module.WorkerSecurityError,
-        match="version evidence changed",
-    ):
-        worker_module._validated_voice_generator_decode_parameters(  # noqa: SLF001
-            voice=voice,
-            rights=rights,
-            render_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+    with pytest.raises(WorkerContractError, match="Qwen TTS schema"):
+        worker_module._qwen_voice_parameters(  # noqa: SLF001
+            _qwen_voice(parameters_json=parameters)
         )
 
 
@@ -657,70 +517,51 @@ def test_initial_pointer_waits_until_manifest_has_a_playable_range() -> None:
 
 def _model_input_metadata(**changes: object) -> bytes:
     values: dict[str, object] = {
-        "request_id": uuid4(),
-        "scope": NarrationRequestScope.fixed_local(),
-        "requested_model_fingerprint_sha256": "a" * 64,
+        "request_id": str(uuid4()),
+        "provider_id": "local_qwen3_tts",
+        "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
         "text": "不要把这句私密台词写入日志。",
-        "voice": "narrator-young-female",
+        "language": "zh-CN",
+        "voice_kind": "preset",
+        "provider_voice_id": "Vivian",
         "seed": 7,
-        "sample_mode": "fixed",
-        "max_new_frames": 375,
         "reference_content_type": "audio/wav",
         "reference_actual_sha256": "b" * 64,
         "reference_size_bytes": 8192,
     }
     values.update(changes)
-    return canonical_sidecar_synthesis_metadata(**values)  # type: ignore[arg-type]
+    return canonical_json_bytes(values)
 
 
-def test_model_input_hmac_covers_every_sidecar_metadata_field() -> None:
+def test_model_input_hmac_covers_every_provider_metadata_field() -> None:
     key = HmacDigestKey("worker-audit-test-v1", b"worker-audit-test-key-material-0001")
     base = _model_input_metadata()
-    key_id, digest = derive_model_input_digest(key, sidecar_metadata=base)
+    key_id, digest = derive_model_input_digest(key, provider_metadata=base)
 
     assert key_id == key.key_id
     assert len(digest) == 64
     assert digest != hashlib.sha256(base).hexdigest()
     for change in (
         {"request_id": uuid4()},
-        {"requested_model_fingerprint_sha256": "c" * 64},
+        {"provider_id": "aliyun_qwen_audio_tts"},
+        {"model_id": "qwen-audio-3.0-tts-plus"},
         {"text": "另一句台词。"},
-        {"voice": "narrator-middle-aged-female"},
+        {"language": "en-US"},
+        {"voice_kind": "designed"},
+        {"provider_voice_id": "character-1"},
         {"seed": 8},
-        {"sample_mode": "greedy"},
-        {"max_new_frames": 374},
         {"reference_content_type": "audio/flac"},
         {"reference_actual_sha256": "d" * 64},
         {"reference_size_bytes": 8193},
     ):
         assert derive_model_input_digest(
             key,
-            sidecar_metadata=_model_input_metadata(**change),
+            provider_metadata=_model_input_metadata(**change),
         )[1] != digest
     other_key = HmacDigestKey(
         "worker-audit-test-v2", b"worker-audit-test-key-material-0002"
     )
-    assert derive_model_input_digest(other_key, sidecar_metadata=base)[1] != digest
-
-
-@pytest.mark.parametrize(
-    "change",
-    (
-        {"seed": -1},
-        {"seed": 2**63},
-        {"seed": True},
-        {"sample_mode": "narration-segment"},
-        {"sample_mode": "preview"},
-        {"max_new_frames": 376},
-        {"max_new_frames": 4096},
-    ),
-)
-def test_sidecar_metadata_rejects_values_outside_frozen_nano_runtime(
-    change: dict[str, object],
-) -> None:
-    with pytest.raises(ContractError):
-        _model_input_metadata(**change)
-
+    assert derive_model_input_digest(other_key, provider_metadata=base)[1] != digest
 
 def test_private_worker_payloads_are_redacted_from_repr() -> None:
     lease = _lease()
@@ -740,12 +581,14 @@ def test_private_worker_payloads_are_redacted_from_repr() -> None:
         request_id=uuid4(),
         novel_id=uuid4(),
         text=private_text,
-        voice="private-voice",
+        selection=wire.TTSProviderSelection(),
+        language="zh-CN",
+        voice_kind=TTSVoiceKind.REFERENCE_CLONE,
+        provider_voice_id="private-voice",
         seed=1,
-        sample_mode="fixed",
-        max_new_frames=100,
-        requested_provider_id="local",
-        requested_model_id="moss",
+        instruction=None,
+        requested_provider_id="local_qwen3_tts",
+        requested_model_id="Qwen/Qwen3-TTS-12Hz-1.7B-Base",
         requested_revision=None,
         expected_model_fingerprint="a" * 64,
         expected_postprocess_fingerprint="3" * 64,
@@ -759,15 +602,17 @@ def test_private_worker_payloads_are_redacted_from_repr() -> None:
         audio_bytes=audio,
         actual_sha256=hashlib.sha256(audio).hexdigest(),
     )
-    synthesis = SynthesisRequest(
+    synthesis = TTSSynthesisRequest(
         request_id=lease.fence.attempt_id,
         scope=NarrationRequestScope.fixed_local(),
         text=private_text,
-        voice="private-voice",
+        language="zh-CN",
+        voice=TTSVoiceInput(
+            kind=TTSVoiceKind.REFERENCE_CLONE,
+            provider_voice_id="private-voice",
+            reference_audio=reference_input,
+        ),
         seed=1,
-        sample_mode="fixed",
-        max_new_frames=100,
-        reference_audio=reference_input,
     )
 
     combined = repr(work) + repr(reference) + repr(reference_input) + repr(synthesis)
@@ -793,39 +638,65 @@ def _wav_bytes(*, silent: bool = False, duration_ms: int = 120) -> bytes:
     return output.getvalue()
 
 
-class ControlledAdapter(FakeMossNanoTTSAdapter):
+class ControlledExecution:
     def __init__(
         self,
         *,
         silent: bool = False,
         delay_seconds: float = 0.0,
         duration_ms: int = 120,
+        error: TTSProviderError | None = None,
     ) -> None:
-        super().__init__()
         self.silent = silent
         self.delay_seconds = delay_seconds
         self.duration_ms = duration_ms
+        self.error = error
         self.cancel_calls: list[object] = []
+        self.calls: list[
+            tuple[object, wire.TTSProviderSelection, TTSSynthesisRequest]
+        ] = []
+        self.identity = TTSModelIdentity(
+            provider_id=TTSProviderId.LOCAL_QWEN3_TTS,
+            model_id="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+            model_revision="test-revision",
+            runtime_id="mlx-audio",
+            runtime_version="test-runtime",
+            quantization="bf16",
+            artifact_tree_sha256="a" * 64,
+        )
 
-    async def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
+    async def synthesize(
+        self,
+        *,
+        novel_id: object,
+        selection: wire.TTSProviderSelection,
+        request: TTSSynthesisRequest,
+    ) -> TTSSynthesisResult:
+        self.calls.append((novel_id, selection, request))
+        if self.error is not None:
+            raise self.error
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
-        fingerprint = await self.model_fingerprint()
         payload = _wav_bytes(silent=self.silent, duration_ms=self.duration_ms)
-        return SynthesisResult(
+        return TTSSynthesisResult(
             request_id=request.request_id,
             audio_bytes=payload,
             actual_output_sha256=hashlib.sha256(payload).hexdigest(),
             sample_rate_hz=48_000,
             channels=2,
             sample_width_bytes=2,
-            model_fingerprint=fingerprint,
-            worker_generation=1,
+            model_identity=self.identity,
         )
 
-    async def cancel(self, request_id: object) -> object:
+    async def cancel(
+        self,
+        *,
+        selection: wire.TTSProviderSelection,
+        request_id: object,
+    ) -> CancelDisposition:
+        assert selection.provider_id == self.identity.provider_id.value
         self.cancel_calls.append(request_id)
-        return await super().cancel(request_id)  # type: ignore[arg-type]
+        return CancelDisposition.REQUESTED
 
 
 class FakeScheduler:
@@ -869,10 +740,9 @@ class FakeRepository:
         self.claim_failures: list[tuple[str, str]] = []
 
     def load_and_mark_running(
-        self, lease: JobLease, *, default_max_new_frames: int, actor: str
+        self, lease: JobLease, *, actor: str
     ) -> SegmentWorkItem:
         assert lease == self.work.lease
-        assert default_max_new_frames == 375
         assert actor == "test-worker"
         if self.load_error is not None:
             raise self.load_error
@@ -934,7 +804,7 @@ class FakeRepository:
 
 def _lease() -> JobLease:
     resource = ResourceFence(
-        resource_key="moss-nano:inference",
+        resource_key="qwen-tts:inference",
         lease_owner="test-worker",
         lease_token=uuid4(),
         lease_generation=1,
@@ -955,8 +825,7 @@ def _lease() -> JobLease:
     )
 
 
-async def _work(adapter: ControlledAdapter, lease: JobLease) -> SegmentWorkItem:
-    fingerprint = await adapter.model_fingerprint()
+async def _work(execution: ControlledExecution, lease: JobLease) -> SegmentWorkItem:
     return SegmentWorkItem(
         lease=lease,
         render_id=uuid4(),
@@ -965,14 +834,16 @@ async def _work(adapter: ControlledAdapter, lease: JobLease) -> SegmentWorkItem:
         request_id=uuid4(),
         novel_id=uuid4(),
         text="第一句测试台词。",
-        voice="narrator-young-female",
+        selection=wire.TTSProviderSelection(),
+        language="zh-CN",
+        voice_kind=TTSVoiceKind.PRESET,
+        provider_voice_id="Vivian",
         seed=7,
-        sample_mode="fixed",
-        max_new_frames=375,
-        requested_provider_id="local-sidecar",
-        requested_model_id=fingerprint.model_name,
-        requested_revision=fingerprint.model_revision,
-        expected_model_fingerprint=model_fingerprint_sha256(fingerprint),
+        instruction=None,
+        requested_provider_id="local_qwen3_tts",
+        requested_model_id=execution.identity.model_id,
+        requested_revision=execution.identity.model_revision,
+        expected_model_fingerprint="a" * 64,
         expected_postprocess_fingerprint="3" * 64,
         parameters_digest="1" * 64,
         input_digest_key_id="render-fingerprint-v1",
@@ -1013,14 +884,14 @@ def _transcode(processed: ProcessedPcmWav) -> TranscodedSegment:
 async def _worker(
     tmp_path: Path,
     *,
-    adapter: ControlledAdapter,
+    execution: ControlledExecution,
     repository: FakeRepository,
     disk_guard: Callable[[], None] | None = None,
 ) -> NarrationSegmentWorker:
     return NarrationSegmentWorker(
         scheduler=FakeScheduler(repository.work.lease),  # type: ignore[arg-type]
         repository=repository,
-        adapter=adapter,
+        execution=execution,  # type: ignore[arg-type]
         storage=_storage(tmp_path),
         transcode=_transcode,
         config=NarrationWorkerConfig(
@@ -1035,10 +906,10 @@ async def _worker(
 async def test_worker_success_keeps_external_work_between_claim_and_fenced_publish(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(work)
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
 
     outcome = await worker.run_once()
 
@@ -1051,14 +922,26 @@ async def test_worker_success_keeps_external_work_between_claim_and_fenced_publi
     published = repository.published[0]
     assert published.audio.master.actual_sha256 == published.audio.playback.actual_sha256
     assert published.model.model_fingerprint == work.expected_model_fingerprint
+    assert published.model.actual_provider_id == execution.identity.provider_id.value
+    assert published.model.actual_model_id == execution.identity.model_id
+    assert published.model.actual_revision == execution.identity.model_revision
+    assert len(execution.calls) == 1
+    novel_id, selection, request = execution.calls[0]
+    assert novel_id == work.novel_id
+    assert selection == work.selection
+    assert request.language == work.language
+    assert request.voice.kind is TTSVoiceKind.PRESET
+    assert request.voice.provider_voice_id == work.provider_voice_id
+    assert request.voice.reference_audio is None
+    assert request.text == work.text
 
 
 @pytest.mark.asyncio
 async def test_worker_low_disk_before_synthesis_remains_retryable_and_publishes_nothing(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(work, failure_state="retry_wait")
 
     def low_disk() -> None:
@@ -1066,7 +949,7 @@ async def test_worker_low_disk_before_synthesis_remains_retryable_and_publishes_
 
     worker = await _worker(
         tmp_path,
-        adapter=adapter,
+        execution=execution,
         repository=repository,
         disk_guard=low_disk,
     )
@@ -1087,8 +970,8 @@ async def test_worker_low_disk_before_synthesis_remains_retryable_and_publishes_
 async def test_worker_rechecks_disk_before_physical_publication(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(work, failure_state="retry_wait")
     checks = 0
     events: list[str] = []
@@ -1102,7 +985,7 @@ async def test_worker_rechecks_disk_before_physical_publication(
 
     worker = await _worker(
         tmp_path,
-        adapter=adapter,
+        execution=execution,
         repository=repository,
         disk_guard=disk_changes_after_synthesis,
     )
@@ -1132,14 +1015,14 @@ async def test_worker_rechecks_disk_before_physical_publication(
 async def test_worker_honours_cancel_after_segment_boundary_without_publication(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter(delay_seconds=0.03)
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution(delay_seconds=0.03)
+    work = await _work(execution, _lease())
     repository = FakeRepository(
         work,
         read_states=["cancel_requested"],
         heartbeat_states=["cancel_requested"],
     )
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
 
     outcome = await worker.run_once()
 
@@ -1148,28 +1031,87 @@ async def test_worker_honours_cancel_after_segment_boundary_without_publication(
     assert repository.cancelled == 1
     assert repository.published == []
     assert repository.failures == []
-    assert adapter.cancel_calls == [work.lease.fence.attempt_id]
+    assert execution.cancel_calls == [work.lease.fence.attempt_id]
 
 
 @pytest.mark.asyncio
-async def test_invalid_nano_audio_is_non_retryable_and_never_published(
+async def test_invalid_provider_audio_is_non_retryable_and_never_published(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter(silent=True)
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution(silent=True)
+    work = await _work(execution, _lease())
     repository = FakeRepository(work, failure_state="failed")
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
 
     outcome = await worker.run_once()
 
     assert outcome.status == "failed"
-    assert outcome.error_code == "NANO_AUDIO_INVALID"
-    assert repository.failures == [("non_retryable", "NANO_AUDIO_INVALID")]
+    assert outcome.error_code == "TTS_AUDIO_INVALID"
+    assert repository.failures == [("non_retryable", "TTS_AUDIO_INVALID")]
     assert repository.failure_evidence == [
         {
             "schema_version": "narration-audio-validation-failure/1",
             "reason_code": "WAV_SILENT",
         }
+    ]
+    assert repository.published == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "failure_state", "expected_classification"),
+    (
+        (
+            TTSProviderError("TTS_PROVIDER_TIMEOUT", retryable=True),
+            "retry_wait",
+            "retryable",
+        ),
+        (
+            TTSProviderError("TTS_VOICE_UNAVAILABLE", retryable=False),
+            "failed",
+            "non_retryable",
+        ),
+    ),
+)
+async def test_worker_persists_only_stable_provider_error_code(
+    tmp_path: Path,
+    error: TTSProviderError,
+    failure_state: str,
+    expected_classification: str,
+) -> None:
+    execution = ControlledExecution(error=error)
+    work = replace(
+        await _work(execution, _lease()),
+        text="不得写入错误证据的私密正文",
+    )
+    repository = FakeRepository(work, failure_state=failure_state)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
+
+    outcome = await worker.run_once()
+
+    assert outcome.status == failure_state
+    assert outcome.error_code == error.code
+    assert repository.failures == [(expected_classification, error.code)]
+    assert "私密正文" not in repr(repository.failures)
+    assert repository.published == []
+
+
+@pytest.mark.asyncio
+async def test_worker_rejects_result_from_another_requested_model(
+    tmp_path: Path,
+) -> None:
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
+    execution.identity = replace(execution.identity, model_id="another-qwen-model")
+    repository = FakeRepository(work, failure_state="failed")
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
+
+    outcome = await worker.run_once()
+
+    assert outcome.status == "failed"
+    assert outcome.error_code == "WORKER_SECURITY_FAILURE"
+    assert repository.failures == [
+        ("security_failure", "WORKER_SECURITY_FAILURE")
     ]
     assert repository.published == []
 
@@ -1270,7 +1212,7 @@ def test_repository_rejects_noncanonical_failure_evidence_before_transaction(
         repository.fail(
             SimpleNamespace(),  # type: ignore[arg-type]
             classification="non_retryable",
-            error_code="NANO_AUDIO_INVALID",
+            error_code="TTS_AUDIO_INVALID",
             failure_evidence=failure_evidence,
         )
 
@@ -1278,8 +1220,8 @@ def test_repository_rejects_noncanonical_failure_evidence_before_transaction(
 @pytest.mark.parametrize(
     ("classification", "error_code"),
     (
-        ("retryable", "NANO_AUDIO_INVALID"),
-        ("security_failure", "NANO_AUDIO_INVALID"),
+        ("retryable", "TTS_AUDIO_INVALID"),
+        ("security_failure", "TTS_AUDIO_INVALID"),
         ("non_retryable", "RENDER_INPUT_INVALID"),
         ("non_retryable", "AUDIO_PUBLICATION_INVALID"),
     ),
@@ -1369,10 +1311,10 @@ async def test_short_chinese_duration_runaway_is_non_retryable_and_never_publish
     spoken_text: str,
     duration_ms: int,
 ) -> None:
-    adapter = ControlledAdapter(duration_ms=duration_ms)
-    work = replace(await _work(adapter, _lease()), text=spoken_text)
+    execution = ControlledExecution(duration_ms=duration_ms)
+    work = replace(await _work(execution, _lease()), text=spoken_text)
     repository = FakeRepository(work, failure_state="failed")
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
     transcode_calls = 0
 
     def should_not_transcode(_processed: ProcessedPcmWav) -> TranscodedSegment:
@@ -1384,8 +1326,8 @@ async def test_short_chinese_duration_runaway_is_non_retryable_and_never_publish
     outcome = await worker.run_once()
 
     assert outcome.status == "failed"
-    assert outcome.error_code == "NANO_AUDIO_INVALID"
-    assert repository.failures == [("non_retryable", "NANO_AUDIO_INVALID")]
+    assert outcome.error_code == "TTS_AUDIO_INVALID"
+    assert repository.failures == [("non_retryable", "TTS_AUDIO_INVALID")]
     assert repository.failure_evidence == [
         {
             "schema_version": "narration-audio-validation-failure/1",
@@ -1401,10 +1343,10 @@ async def test_short_chinese_duration_runaway_is_non_retryable_and_never_publish
 async def test_retryable_failure_surfaces_retry_wait_without_reusing_result(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(work, failure_state="retry_wait")
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
 
     def unavailable(_processed: ProcessedPcmWav) -> TranscodedSegment:
         from backend.narration.transcoding import TranscodingUnavailable
@@ -1423,10 +1365,10 @@ async def test_retryable_failure_surfaces_retry_wait_without_reusing_result(
 async def test_postprocess_fingerprint_mismatch_fails_closed_before_asset_publication(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(work, failure_state="failed")
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
 
     def mismatched_transcode(processed: ProcessedPcmWav) -> TranscodedSegment:
         return replace(
@@ -1451,13 +1393,13 @@ async def test_postprocess_fingerprint_mismatch_fails_closed_before_asset_public
 async def test_late_result_with_stale_dual_fence_is_discarded_not_failed(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(
         work,
         publish_error=JobFenceError("resource generation changed"),
     )
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
 
     outcome = await worker.run_once()
 
@@ -1469,13 +1411,13 @@ async def test_late_result_with_stale_dual_fence_is_discarded_not_failed(
 
 @pytest.mark.asyncio
 async def test_idle_worker_performs_no_external_or_repository_work(tmp_path: Path) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(work)
     worker = NarrationSegmentWorker(
         scheduler=FakeScheduler(None),  # type: ignore[arg-type]
         repository=repository,
-        adapter=adapter,
+        execution=execution,
         storage=_storage(tmp_path),
         transcode=_transcode,
         config=NarrationWorkerConfig(actor="test-worker"),
@@ -1492,14 +1434,14 @@ async def test_idle_worker_performs_no_external_or_repository_work(tmp_path: Pat
 async def test_work_item_load_failure_is_fenced_instead_of_leaking_running_claim(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(
         work,
         load_error=InvalidNarrationState("render provenance drifted"),
         failure_state="failed",
     )
-    worker = await _worker(tmp_path, adapter=adapter, repository=repository)
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
 
     outcome = await worker.run_once()
 
@@ -1529,7 +1471,7 @@ class FakeSession:
         self.rollbacks += 1
 
 
-def test_scheduler_commits_maintenance_separately_and_claims_only_moss_nano(
+def test_scheduler_commits_maintenance_separately_and_claims_only_qwen_tts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from backend.narration import scheduler as scheduler_module
@@ -1570,7 +1512,7 @@ def test_scheduler_commits_maintenance_separately_and_claims_only_moss_nano(
     assert len(maintenance.promoted_job_ids) == 1
     assert maintenance.reconciled_attempts == ()
     assert lease == claimed
-    assert observed["resource_classes"] == ("moss-nano",)
+    assert observed["resource_classes"] == ("qwen-tts",)
     assert observed["job_kinds"] == ("narration.segment_render",)
     assert observed["novel_ids"] is None
     assert observed["document_ids"] is None
@@ -1641,7 +1583,7 @@ def test_scheduler_applies_same_validation_scope_to_all_mutating_paths(
     for name in ("promote", "reconcile", "claim"):
         assert observed[name]["novel_ids"] == (novel_id,)
         assert observed[name]["document_ids"] == (document_id,)
-        assert observed[name]["resource_classes"] == ("moss-nano",)
+        assert observed[name]["resource_classes"] == ("qwen-tts",)
         assert observed[name]["job_kinds"] == ("narration.segment_render",)
 
 
@@ -2082,14 +2024,14 @@ def test_scheduler_rejects_ambiguous_job_kind_filters(
 async def test_worker_loop_runs_maintenance_and_stops_without_an_extra_process(
     tmp_path: Path,
 ) -> None:
-    adapter = ControlledAdapter()
-    work = await _work(adapter, _lease())
+    execution = ControlledExecution()
+    work = await _work(execution, _lease())
     repository = FakeRepository(work)
     scheduler = FakeScheduler(None)
     worker = NarrationSegmentWorker(
         scheduler=scheduler,  # type: ignore[arg-type]
         repository=repository,
-        adapter=adapter,
+        execution=execution,
         storage=_storage(tmp_path),
         transcode=_transcode,
         config=NarrationWorkerConfig(actor="test-worker"),

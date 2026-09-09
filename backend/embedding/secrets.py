@@ -74,11 +74,26 @@ class EmbeddingSecretStore:
     mount.  This service never creates or rotates the root key implicitly.
     """
 
-    def __init__(self, *, root_key_path: Path, records_dir: Path) -> None:
+    def __init__(
+        self,
+        *,
+        root_key_path: Path,
+        records_dir: Path,
+        namespace: str = "embedding",
+    ) -> None:
         if not root_key_path.is_absolute() or not records_dir.is_absolute():
             raise EmbeddingSecretError("SECRET_PATH_INVALID", "secret paths must be absolute")
+        if (
+            not namespace
+            or len(namespace) > 64
+            or not namespace.replace("-", "").replace("_", "").isalnum()
+        ):
+            raise EmbeddingSecretError(
+                "SECRET_NAMESPACE_INVALID", "credential namespace is invalid"
+            )
         self._root_key_path = root_key_path
         self._records_dir = records_dir
+        self._namespace = namespace
 
     @classmethod
     def provision(cls, *, root_key_path: Path, records_dir: Path) -> bool:
@@ -216,7 +231,7 @@ class EmbeddingSecretStore:
             raise EmbeddingSecretError(
                 "SECRET_VALUE_INVALID", "API Key 格式无效，请检查后重新输入"
             )
-        credential_ref = f"embedding/{uuid4()}"
+        credential_ref = f"{self._namespace}/{uuid4()}"
         nonce = os.urandom(12)
         ciphertext = AESGCM(self._key()).encrypt(
             nonce, value.encode("utf-8"), credential_ref.encode("utf-8")
@@ -308,9 +323,8 @@ class EmbeddingSecretStore:
         except OSError as error:
             raise EmbeddingSecretError("SECRET_DELETE_FAILED", "credential record delete failed") from error
 
-    @staticmethod
-    def _record_id(credential_ref: str) -> str:
-        prefix = "embedding/"
+    def _record_id(self, credential_ref: str) -> str:
+        prefix = f"{self._namespace}/"
         if not credential_ref.startswith(prefix):
             raise EmbeddingSecretError("SECRET_REFERENCE_INVALID", "credential reference is invalid")
         record_id = credential_ref[len(prefix) :]

@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
 from ..models import (
-    GenericVoicePool,
-    GenericVoiceSlot,
     NarrationEdition,
     NarrationEditionSegment,
     NarrationScript,
@@ -60,6 +58,9 @@ def _freeze_resolution_identity(
 
     frozen = canonical_payload(resolution_json)
     frozen["contract_version"] = NARRATION_EDITION_RESOLUTION_VERSION
+    frozen.pop("pool_id", None)
+    frozen.pop("pool_version", None)
+    frozen.pop("slot_id", None)
     frozen["profile_id"] = str(profile.id)
     frozen["voice_version_id"] = str(voice.id)
     frozen["voice_identity"] = {
@@ -80,7 +81,6 @@ class EditionSegmentInput:
     voice_version_id: UUID
     resolution_json: dict[str, object]
     gap_after_ms: int = 0
-    slot_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,17 +209,6 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
             profile=profile,
             voice=voice,
         )
-        if item.slot_id is not None:
-            slot = require_row(store.get(GenericVoiceSlot, item.slot_id), label="voice slot")
-            pool = require_row(store.get(GenericVoicePool, slot.pool_id), label="voice pool")
-            if (
-                pool.novel_id != command.novel_id
-                or pool.status != "active"
-                or type(slot.enabled) is not bool
-                or not slot.enabled
-                or slot.voice_version_id != voice.id
-            ):
-                raise NarrationScopeMismatch("Edition voice slot does not resolve to this voice")
         render_fingerprint_value, _canonical_input = derive_render_identity(
             store,
             novel_id=command.novel_id,
@@ -238,7 +227,6 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
             {
                 "segment_id": str(item.segment_id),
                 "ordinal": item.ordinal,
-                "slot_id": str(item.slot_id) if item.slot_id else None,
                 "profile_id": str(item.profile_id),
                 "voice_version_id": str(item.voice_version_id),
                 "render_fingerprint": render_fingerprint_value,
@@ -292,7 +280,6 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
             (
                 item.segment_id,
                 item.ordinal,
-                item.slot_id,
                 item.profile_id,
                 item.voice_version_id,
                 frozen_resolutions[item.segment_id],
@@ -306,7 +293,6 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
             (
                 item.segment_id,
                 item.ordinal,
-                item.slot_id,
                 item.profile_id,
                 item.voice_version_id,
                 item.resolution_json,
@@ -352,7 +338,6 @@ def create_edition(store: NarrationStore, command: CreateEdition) -> NarrationEd
                 script_version_id=version.id,
                 segment_id=item.segment_id,
                 ordinal=item.ordinal,
-                slot_id=item.slot_id,
                 profile_id=item.profile_id,
                 voice_version_id=item.voice_version_id,
                 resolution_json=frozen_resolutions[item.segment_id],

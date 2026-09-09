@@ -33,13 +33,17 @@ from backend.narration.privacy import (
     READING_PRIVACY_OPERATIONS,
     TransactionalNarrationSettingsBackend,
     cloud_consent_resource,
+    cloud_tts_consent_resource,
     create_cloud_consent,
+    create_cloud_tts_consent,
     default_narration_settings_values,
     get_narration_settings,
     list_character_voice_bindings,
     narration_coverage,
     narration_runtime_resource,
+    require_active_cloud_tts_consent,
     revoke_cloud_consent,
+    revoke_cloud_tts_consent,
     t2_settings_capabilities,
     t4_product_capabilities,
 )
@@ -306,13 +310,10 @@ def test_hold_overview_is_truthful_and_all_mutation_stays_blocked() -> None:
     backend = authorized_backend(
         store,
         runtime_status_provider=lambda: {
-            "technical_enabled": True,
+            "product_requested": True,
             "lifecycle_status": "ready",
-            "sidecar_reachable": True,
-            "model_ready": True,
-            "product_visible": True,
-            "protocol_version": "moss-tts-sidecar/1.1",
-            "model_fingerprint_sha256": "b" * 64,
+            "worker_running": True,
+            "provider_selection_fingerprint_sha256": "b" * 64,
         },
     )
     overview = backend.dispatch(
@@ -347,13 +348,10 @@ def test_hold_overview_is_truthful_and_all_mutation_stays_blocked() -> None:
 def test_t4_overview_product_visibility_matches_the_complete_release_chain() -> None:
     store = MemoryStore(novel(), character())
     ready_snapshot = {
-        "technical_enabled": True,
+        "product_requested": True,
         "lifecycle_status": "ready",
-        "sidecar_reachable": True,
-        "model_ready": True,
-        "product_visible": True,
-        "protocol_version": "moss-tts-sidecar/1.1",
-        "model_fingerprint_sha256": "b" * 64,
+        "worker_running": True,
+        "provider_selection_fingerprint_sha256": "b" * 64,
     }
     backend = authorized_backend(
         store,
@@ -381,13 +379,10 @@ def test_t2_overview_does_not_propagate_a_product_visible_runtime_snapshot() -> 
         store,
         capabilities=t2_settings_capabilities(),
         runtime_status_provider=lambda: {
-            "technical_enabled": True,
+            "product_requested": True,
             "lifecycle_status": "ready",
-            "sidecar_reachable": True,
-            "model_ready": True,
-            "product_visible": True,
-            "protocol_version": "moss-tts-sidecar/1.1",
-            "model_fingerprint_sha256": "b" * 64,
+            "worker_running": True,
+            "provider_selection_fingerprint_sha256": "b" * 64,
         },
     )
 
@@ -500,6 +495,90 @@ def test_consent_revoke_requires_configure_permission_but_not_cloud_capability()
     )
     revoked = configure_backend.dispatch(command)
     assert revoked.state is wire.CloudConsentState.REVOKED
+
+
+def test_cloud_tts_consent_is_independent_and_locked_to_selected_model() -> None:
+    store = MemoryStore(novel())
+    analysis = create_cloud_consent(
+        store,
+        novel_id=NOVEL_ID,
+        request=consent_request(),
+        idempotency_key="analysis-consent-0001",
+    )
+    tts = create_cloud_tts_consent(
+        store,
+        novel_id=NOVEL_ID,
+        request=wire.CreateNarrationCloudTTSConsentRequest(
+            notice_version="narration-cloud-tts-consent/1",
+            data_scope="narration_text_and_selected_voice_reference",
+            provider_id="aliyun_qwen_audio_tts",
+            model_id="qwen-audio-3.0-tts-plus",
+            confirmed=True,
+        ),
+        idempotency_key="cloud-tts-consent-0001",
+    )
+
+    assert analysis.purpose == "narration_speaker_analysis"
+    assert tts.purpose == "narration_tts_synthesis"
+    assert require_active_cloud_tts_consent(
+        store,
+        novel_id=NOVEL_ID,
+        model_id="qwen-audio-3.0-tts-plus",
+    ) == tts
+    with pytest.raises(NarrationApiFault) as stale_model:
+        require_active_cloud_tts_consent(
+            store,
+            novel_id=NOVEL_ID,
+            model_id="qwen-audio-3.0-tts-flash",
+        )
+    assert stale_model.value.code is wire.NarrationErrorCode.CLOUD_CONSENT_REQUIRED
+
+    revoked = revoke_cloud_tts_consent(
+        store,
+        novel_id=NOVEL_ID,
+        request=wire.RevokeNarrationCloudTTSConsentRequest(
+            consent_id=tts.consent_id,
+            expected_version=1,
+        ),
+    )
+    assert revoked.state is wire.CloudConsentState.REVOKED
+    assert cloud_consent_resource(
+        next(
+            row
+            for row in store.rows[NarrationCloudConsentRow]
+            if row.id == analysis.consent_id
+        )
+    ).state is wire.CloudConsentState.ACTIVE
+    assert cloud_tts_consent_resource(
+        next(
+            row
+            for row in store.rows[NarrationCloudConsentRow]
+            if row.id == tts.consent_id
+        )
+    ).state is wire.CloudConsentState.REVOKED
+
+
+def test_cloud_tts_consent_lookup_rejects_data_scope_drift() -> None:
+    row = NarrationCloudConsentRow(
+        id=uuid4(),
+        novel_id=NOVEL_ID,
+        purpose="narration_tts_synthesis",
+        data_scope="unexpected_scope",
+        notice_version="narration-cloud-tts-consent/1",
+        provider_id="aliyun_qwen_audio_tts",
+        model_id="qwen-audio-3.0-tts-plus",
+        confirmed_actor="local-owner",
+        confirmed_at=NOW,
+        revoked_at=None,
+    )
+    store = MemoryStore(novel(), row)
+
+    with pytest.raises(InvalidNarrationState, match="TTS consent evidence drifted"):
+        require_active_cloud_tts_consent(
+            store,
+            novel_id=NOVEL_ID,
+            model_id="qwen-audio-3.0-tts-plus",
+        )
 
 
 def test_voice_profile_lock_requires_asset_and_rights_permissions_before_store_access() -> None:
@@ -1306,64 +1385,46 @@ def test_overview_coverage_counts_only_currently_usable_character_voices() -> No
         ({"lifecycle_status": ["ready"]}, "unavailable", "RUNTIME_STATUS_UNAVAILABLE"),
         (
             {
-                "technical_enabled": True,
+                "product_requested": True,
                 "lifecycle_status": "ready",
-                "sidecar_reachable": True,
-                "model_ready": True,
-                "protocol_version": "moss-tts-sidecar/1.1",
-                "model_fingerprint_sha256": "bad",
+                "worker_running": True,
+                "provider_selection_fingerprint_sha256": "bad",
             },
             "unavailable",
             "RUNTIME_READY_EVIDENCE_INVALID",
         ),
         (
             {
-                "technical_enabled": True,
+                "product_requested": True,
                 "lifecycle_status": "ready",
-                "sidecar_reachable": True,
-                "model_ready": True,
-                "protocol_version": "moss-tts-sidecar/1.1",
-                "model_fingerprint_sha256": "d" * 64,
-                "reason_code": ["SIDECAR_FAILED"],
+                "worker_running": True,
+                "provider_selection_fingerprint_sha256": "d" * 64,
+                "reason_code": ["PROVIDER_FAILED"],
             },
             "unavailable",
             "RUNTIME_READY_EVIDENCE_INVALID",
         ),
         (
             {
-                "technical_enabled": True,
+                "product_requested": True,
                 "lifecycle_status": "ready",
-                "sidecar_reachable": True,
-                "model_ready": True,
-                "model_fingerprint_sha256": "d" * 64,
-            },
-            "unavailable",
-            "RUNTIME_PROTOCOL_MISMATCH",
-        ),
-        (
-            {
-                "technical_enabled": True,
-                "lifecycle_status": "ready",
-                "sidecar_reachable": True,
-                "model_ready": True,
-                "protocol_version": "moss-tts-sidecar/1.1",
-                "model_fingerprint_sha256": "d" * 64,
-                "reason_code": "SIDECAR_FAILED",
+                "worker_running": True,
+                "provider_selection_fingerprint_sha256": "d" * 64,
+                "reason_code": "TTS_PROVIDER_DISABLED",
             },
             "unavailable",
             "RUNTIME_READY_EVIDENCE_INVALID",
         ),
         (
             {
-                "technical_enabled": True,
+                "product_requested": True,
                 "lifecycle_status": "unavailable",
-                "sidecar_reachable": True,
-                "model_ready": True,
-                "model_fingerprint_sha256": "d" * 64,
-                "reason_code": "SIDECAR_FAILED",
+                "worker_running": True,
+                "provider_selection_fingerprint_sha256": "d" * 64,
+                "reason_code": "TTS_PROVIDER_DISABLED",
             },
             "unavailable",
-            "SIDECAR_FAILED",
+            "TTS_PROVIDER_DISABLED",
         ),
         ({"lifecycle_status": "disabled"}, "disabled", "TTS_RUNTIME_DISABLED"),
     ],
@@ -1380,18 +1441,15 @@ def test_runtime_projection_is_secret_free_and_fail_closed(
     if expected != "ready":
         assert resource.model_fingerprint_sha256 is None
         assert resource.model_ready is False
-        assert resource.sidecar_reachable is False
+        assert resource.provider_reachable is False
 
 
 def test_runtime_projection_requires_both_release_and_ready_evidence_for_product() -> None:
     ready = {
-        "technical_enabled": True,
+        "product_requested": True,
         "lifecycle_status": "ready",
-        "sidecar_reachable": True,
-        "model_ready": True,
-        "product_visible": True,
-        "protocol_version": "moss-tts-sidecar/1.1",
-        "model_fingerprint_sha256": "d" * 64,
+        "worker_running": True,
+        "provider_selection_fingerprint_sha256": "d" * 64,
     }
 
     assert narration_runtime_resource(ready).product_visible is False
@@ -1402,7 +1460,7 @@ def test_runtime_projection_requires_both_release_and_ready_evidence_for_product
     unavailable = {
         **ready,
         "lifecycle_status": "unavailable",
-        "reason_code": "SIDECAR_FAILED",
+        "reason_code": "TTS_PROVIDER_DISABLED",
     }
     assert (
         narration_runtime_resource(
@@ -1412,19 +1470,14 @@ def test_runtime_projection_requires_both_release_and_ready_evidence_for_product
         is False
     )
 
-
-def test_dispatcher_owns_exact_31_operations_and_preserves_specific_holds() -> None:
+def test_dispatcher_owns_exact_operations_and_preserves_specific_holds() -> None:
     owned = (
         READING_PRIVACY_OPERATIONS
         | VoiceSettingsHandler.operations
         | PronunciationSettingsHandler.operations
-        | {
-            NarrationSettingsOperation.GET_GENERIC_VOICE_POOL,
-            NarrationSettingsOperation.GET_CASTING_RULES,
-        }
     )
     assert owned == set(NarrationSettingsOperation)
-    assert len(owned) == 31
+    assert len(owned) == 32
 
     store = MemoryStore(novel())
     blocked = authorized_backend(store)

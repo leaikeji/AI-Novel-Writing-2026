@@ -132,7 +132,7 @@ export async function fetchVoicePreviewObjectUrl(
 async function fetchScopedVoiceObjectUrl(
   scopeId: string,
   asset: MediaAssetLink,
-  header: "X-Narration-Generic-Voice-Slot-Id" | "X-Narration-Voice-Version-Id",
+  header: "X-Narration-Voice-Version-Id",
   options: {
     readonly host?: VoicePreviewHost;
     readonly objectUrls?: VoicePreviewObjectUrlApi;
@@ -159,15 +159,6 @@ async function fetchScopedVoiceObjectUrl(
   const blob = await response.blob();
   assertMediaResponse(response, asset, blob);
   return objectUrls.createObjectURL(blob);
-}
-
-
-export function fetchGenericVoiceSlotObjectUrl(
-  slotId: string,
-  asset: MediaAssetLink,
-  options: { readonly host?: VoicePreviewHost; readonly objectUrls?: VoicePreviewObjectUrlApi; readonly signal?: AbortSignal } = {},
-): Promise<string> {
-  return fetchScopedVoiceObjectUrl(slotId, asset, "X-Narration-Generic-Voice-Slot-Id", options);
 }
 
 
@@ -222,15 +213,6 @@ export async function playReadyVoicePreview(
   signal: AbortSignal,
 ): Promise<void> {
   await playObjectUrl(fetchVoicePreviewObjectUrl(preview, { signal }), signal);
-}
-
-
-export async function playGenericVoiceSlotPreview(
-  slotId: string,
-  asset: MediaAssetLink,
-  signal: AbortSignal,
-): Promise<void> {
-  await playObjectUrl(fetchGenericVoiceSlotObjectUrl(slotId, asset, { signal }), signal);
 }
 
 

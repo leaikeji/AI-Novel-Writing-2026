@@ -22,7 +22,6 @@ from ..models import (
     CharacterVoiceBinding,
     Document,
     DocumentRevision,
-    GenericVoiceSlot,
     NarrationRequest,
     NarrationScene,
     NarrationScript,
@@ -81,6 +80,7 @@ from .script_contracts import (
     speaker_target_hash,
 )
 from .script_versions import (
+    HISTORICAL_SCRIPT_ANALYZER_FINGERPRINTS,
     SCRIPT_ANALYZER_FINGERPRINT,
     SCRIPT_RULES_FINGERPRINT,
     ScriptVersionAllocation,
@@ -208,8 +208,6 @@ def _casting_target_payload(target: CastingTargetRef) -> dict[str, object]:
             if target.anonymous_speaker_id
             else None
         ),
-        "pool_id": str(target.pool_id) if target.pool_id else None,
-        "slot_id": str(target.slot_id) if target.slot_id else None,
         "profile_id": str(target.profile_id) if target.profile_id else None,
     }
 
@@ -465,12 +463,6 @@ def _require_final_voice_usable(
             label="anonymous speaker binding",
         )
         voice_version_id = anonymous.voice_version_id
-    elif target.kind is CastingTargetKind.GENERIC_SLOT:
-        slot = require_row(
-            store.get(GenericVoiceSlot, target.slot_id),
-            label="generic voice slot",
-        )
-        voice_version_id = slot.voice_version_id
     else:
         profile = require_row(
             store.get(VoiceProfile, target.profile_id),
@@ -507,8 +499,16 @@ def _review_authority(
     """Rebuild the narrow manual-review authority from persisted rows."""
 
     require_local_novel(store, candidate.novel_id)
+    historical_approved = (
+        candidate.state is ScriptVersionState.APPROVED
+        and candidate.approval is not None
+    )
+    analyzer_registered = candidate.analyzer_fingerprint == SCRIPT_ANALYZER_FINGERPRINT or (
+        historical_approved
+        and candidate.analyzer_fingerprint in HISTORICAL_SCRIPT_ANALYZER_FINGERPRINTS
+    )
     if (
-        candidate.analyzer_fingerprint != SCRIPT_ANALYZER_FINGERPRINT
+        not analyzer_registered
         or candidate.rules_fingerprint != SCRIPT_RULES_FINGERPRINT
         or candidate.requested_model_fingerprint is not None
         or candidate.actual_model_fingerprint is not None

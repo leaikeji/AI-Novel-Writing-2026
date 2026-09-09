@@ -58,15 +58,6 @@ export interface CharacterVoiceRosterRow {
 }
 
 
-export interface CharacterCastUiStatus {
-  readonly phase: "idle" | "reserved" | "analyzing" | "applied" | "warning" | "unapplied" | "failed";
-  readonly progressCurrent: number;
-  readonly progressTotal: number;
-  readonly message: string;
-  readonly retryable?: boolean;
-}
-
-
 export interface CharacterVoiceRosterProps {
   readonly novelId: string;
   readonly characters: readonly CharacterVoiceRosterCharacter[];
@@ -75,8 +66,6 @@ export interface CharacterVoiceRosterProps {
   readonly capabilities: NarrationCapabilities;
   readonly authorization: NarrationAuthorizationState;
   readonly className?: string;
-  readonly castStatus?: CharacterCastUiStatus | null;
-  readonly onSmartCast?: () => void | Promise<void>;
   readonly onConfigureCharacter: (characterId: string) => void;
   readonly renderConfigurator?: (
     character: CharacterVoiceRosterCharacter,
@@ -125,14 +114,6 @@ interface DrawerKeyboardEvent {
   preventDefault(): void;
   stopPropagation(): void;
 }
-
-
-const REQUIRED_CAST_CAPABILITIES = [
-  "narration_product",
-  "reading_settings",
-  "preset_voice_source",
-  "character_cast_planning",
-] as const satisfies readonly CapabilityKey[];
 
 
 const FOCUSABLE_SELECTOR = [
@@ -255,9 +236,7 @@ export function buildCharacterVoiceRosterRows(
       voiceName: configured ? profile?.name ?? "绑定音色不可用" : "尚未配置",
       sourceGroup: group,
       sourceLabel: configured
-        ? version?.activation_basis === "experimental_machine_validated"
-          ? "高级调音"
-          : sourceLabel(group, version?.source_type ?? null)
+        ? sourceLabel(group, version?.source_type ?? null)
         : null,
       sourceType: version?.source_type ?? null,
       statusLabel: configured && version === null ? "需要处理" : null,
@@ -270,30 +249,6 @@ export function buildCharacterVoiceRosterRows(
       ),
     };
   });
-}
-
-
-export function characterVoiceBatchAvailability(
-  props: Pick<
-    CharacterVoiceRosterProps,
-    "authorization" | "capabilities" | "onSmartCast"
-  >,
-  _unconfiguredCount: number,
-): { readonly enabled: boolean; readonly reason: string } {
-  if (!props.authorization.can_read) return { enabled: false, reason: "当前身份无权查看人物配音。" };
-  if (!props.authorization.can_configure) return { enabled: false, reason: "当前身份只能查看，不能修改人物配音。" };
-  const blocked = REQUIRED_CAST_CAPABILITIES.find((key) => (
-    !capabilityIsActionable(props.capabilities, key)
-  ));
-  if (blocked) {
-    const reasonCode = capabilityByKey(props.capabilities, blocked)?.reason_code;
-    return {
-      enabled: false,
-      reason: `智能配音当前不可用${reasonCode ? `（${reasonCode}）` : ""}。`,
-    };
-  }
-  if (!props.onSmartCast) return { enabled: false, reason: "整书智能配音服务尚未接入。" };
-  return { enabled: true, reason: "保留合理的现有声音，只补空缺并处理官方音色撞声。" };
 }
 
 
@@ -314,22 +269,6 @@ function actionError(reason: unknown): string {
 }
 
 
-function castIsRunning(status: CharacterCastUiStatus | null | undefined): boolean {
-  return status?.phase === "reserved" || status?.phase === "analyzing";
-}
-
-
-function castActionLabel(status: CharacterCastUiStatus | null | undefined): string {
-  if (castIsRunning(status)) {
-    return status && status.progressTotal > 0
-      ? `智能配音 ${status.progressCurrent}/${status.progressTotal}`
-      : "正在智能配音…";
-  }
-  if (status?.phase === "failed" && status.retryable) return "重试智能配音";
-  return "智能配音全书";
-}
-
-
 export function createCharacterVoiceRoster(
   React: CharacterVoiceRosterReactRuntime,
 ): (props: CharacterVoiceRosterProps) => unknown {
@@ -343,12 +282,9 @@ export function createCharacterVoiceRoster(
       props.profiles,
     );
     const [previewStates, setPreviewStates] = React.useState<Readonly<Record<string, PreviewState>>>({});
-    const [castError, setCastError] = React.useState<string | null>(null);
-    const [castStarting, setCastStarting] = React.useState(false);
     const [drawerOpen, setDrawerOpen] = React.useState(false);
     const [selectedCharacterId, setSelectedCharacterId] = React.useState<string | null>(null);
     const mountedRef = React.useRef(true);
-    const castStartingRef = React.useRef(false);
     const drawerRef = React.useRef<DrawerElement | null>(null);
     const openerRef = React.useRef<FocusableElement | null>(null);
     React.useEffect(() => {
@@ -356,7 +292,6 @@ export function createCharacterVoiceRoster(
       return () => { mountedRef.current = false; };
     }, []);
     const unconfigured = rows.filter((row) => !row.configured);
-    const castAvailability = characterVoiceBatchAvailability(props, unconfigured.length);
     const configureEnabled = configurationIsActionable(props);
     const statusId = `anw-character-voice-roster-${props.novelId}-status`;
     const selectedCharacter = selectedCharacterId === null
@@ -423,26 +358,6 @@ export function createCharacterVoiceRoster(
       }
     };
 
-    const runSmartCast = (): void => {
-      if (
-        !castAvailability.enabled
-        || castStartingRef.current
-        || castIsRunning(props.castStatus)
-        || !props.onSmartCast
-      ) return;
-      castStartingRef.current = true;
-      setCastStarting(true);
-      setCastError(null);
-      void Promise.resolve(props.onSmartCast())
-        .catch((reason: unknown) => {
-          if (mountedRef.current) setCastError(actionError(reason));
-        })
-        .finally(() => {
-          castStartingRef.current = false;
-          if (mountedRef.current) setCastStarting(false);
-        });
-    };
-
     const runPreview = async (
       character: CharacterVoiceRosterCharacter,
       profile: VoiceProfileResource,
@@ -478,11 +393,6 @@ export function createCharacterVoiceRoster(
         h("p", { className: "anw-character-voice-roster__empty" }, "当前身份无权查看人物配音。"),
       );
     }
-    const castStatusMessage = castError
-      ?? props.castStatus?.message
-      ?? castAvailability.reason;
-    const castStatusIsError = castError !== null || props.castStatus?.phase === "failed";
-
     return h(
       "section",
       {
@@ -495,23 +405,13 @@ export function createCharacterVoiceRoster(
           h("h2", { id: `${statusId}-heading` }, "人物配音"),
           h("p", null, `${rows.length} 位人物 · ${unconfigured.length} 位待配置`),
         ),
-        h("button", {
-          type: "button",
-          className: "anw-character-voice-roster__batch",
-          disabled: !castAvailability.enabled || castStarting || castIsRunning(props.castStatus),
-          onClick: runSmartCast,
-          "aria-describedby": statusId,
-        }, castStarting ? "正在启动…" : castActionLabel(props.castStatus)),
       ),
       h("p", {
         id: statusId,
-        className: [
-          "anw-character-voice-roster__status",
-          castStatusIsError ? "is-error" : "",
-        ].filter(Boolean).join(" "),
-        role: castStatusIsError ? "alert" : "status",
+        className: "anw-character-voice-roster__status",
+        role: "status",
         "aria-live": "polite",
-      }, castStatusMessage),
+      }, configureEnabled ? "为每位人物选择 Qwen 官方音色或已授权的私人音色。" : "当前人物声音设置为只读。"),
       rows.length === 0
         ? h("p", { className: "anw-character-voice-roster__empty", role: "status" },
           "当前作品还没有可配置声音的人物。请先在人物卡中新建人物。",
@@ -557,16 +457,18 @@ export function createCharacterVoiceRoster(
               }, previewState.message)
               : null,
             h("div", { className: "anw-character-voice-roster__actions" },
-              h("button", {
-                type: "button",
-                disabled: !previewEnabled,
-                title: previewEnabled ? "试听当前声音" : "当前声音暂无可试听音频",
-                onClick: () => {
-                  if (row.profile && row.version && previewEnabled) {
-                    void runPreview(character, row.profile, row.version);
-                  }
-                },
-              }, previewState?.phase === "running" ? "准备中…" : "试听"),
+              props.onPreviewVoice
+                ? h("button", {
+                  type: "button",
+                  disabled: !previewEnabled,
+                  title: previewEnabled ? "试听当前声音" : "当前声音暂无可试听音频",
+                  onClick: () => {
+                    if (row.profile && row.version && previewEnabled) {
+                      void runPreview(character, row.profile, row.version);
+                    }
+                  },
+                }, previewState?.phase === "running" ? "准备中…" : "试听")
+                : null,
               h("button", {
                 type: "button",
                 disabled: !configureEnabled,

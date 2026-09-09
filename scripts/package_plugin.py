@@ -55,48 +55,7 @@ _SECRET_MARKERS = (
     re.compile(rb'(?i)["\']?(?:prompt_audio_codes|prompt_codes)["\']?\s*[:=]'),
 )
 _MAX_AUDIT_FILE_BYTES = 64 * 1024 * 1024
-_HOST_ONLY_EXACT_PATHS = frozenset(
-    {
-        "scripts/tts/chapter_e2e_browser_observer.py",
-        "scripts/tts/chapter_e2e_collector.py",
-        "scripts/tts/chapter_e2e_controller_build.py",
-        "scripts/tts/chapter_e2e_controller_evidence.py",
-        "scripts/tts/chapter_e2e_controller_host.py",
-        "scripts/tts/chapter_e2e_controller_lifecycle.py",
-        "scripts/tts/chapter_e2e_controller_signer.py",
-        "scripts/tts/chapter_e2e_controller_trust.py",
-        "scripts/tts/chapter_e2e_executor.py",
-        "scripts/tts/chapter_e2e_listening.py",
-        "scripts/tts/chapter_e2e_metric_chain.py",
-        "scripts/tts/chapter_e2e_operator_envelope.py",
-        "scripts/tts/chapter_e2e_probe_request.py",
-        "scripts/tts/chapter_e2e_probes.py",
-        "scripts/tts/chapter_e2e_readiness.py",
-        "scripts/tts/chapter_e2e_runtime_audit.py",
-        "scripts/tts/chapter_e2e_runtime_observer.py",
-        "scripts/tts/diagnose_nano_short_text.py",
-        "scripts/tts/generate_nano_strategy_preview.py",
-        "scripts/tts/nano_short_regression.py",
-        "scripts/tts/run_nano_short_regression.py",
-        "scripts/tts/controller_node_runtime.py",
-        "scripts/tts/controller_ssh_askpass.sh",
-        "scripts/tts/provision_validation_token.py",
-        "scripts/tts/local_chapter_e2e_container.py",
-        "scripts/tts/run_chapter_e2e_real.py",
-        "scripts/tts/run_local_chapter_e2e.py",
-        "scripts/tts/run_local_operator_report.py",
-        "scripts/tts/validate_chapter_e2e.py",
-        "scripts/tts/verify_chapter_e2e_teardown.py",
-        "tests/fixtures/narration/chapter-e2e-v2.json",
-        "tests/fixtures/narration/chapter-e2e-v3.json",
-        "tests/fixtures/narration/short-attribution-regression-v1.json",
-    }
-)
-_HOST_ONLY_PREFIXES = (
-    "scripts/tts/controller-node/",
-    "scripts/tts/trust/controller_",
-)
-_HOST_ONLY_BASENAMES = frozenset(
+_FORBIDDEN_OUTPUT_BASENAMES = frozenset(
     {
         "agent.sock",
         "controller_ed25519",
@@ -118,19 +77,12 @@ def _forbidden_name(path: Path) -> bool:
     )
 
 
-def _host_only_output_path(path: Path) -> bool:
+def _forbidden_output_path(path: Path) -> bool:
     try:
         relative = path.relative_to(OUTPUT).as_posix()
     except ValueError:
         return True
-    return (
-        relative in _HOST_ONLY_EXACT_PATHS
-        or path.name in _HOST_ONLY_BASENAMES
-        or any(
-            relative == prefix.removesuffix("/") or relative.startswith(prefix)
-            for prefix in _HOST_ONLY_PREFIXES
-        )
-    )
+    return path.name in _FORBIDDEN_OUTPUT_BASENAMES
 
 
 def _assert_safe_regular_file(path: Path) -> None:
@@ -171,14 +123,14 @@ def _audit_output() -> None:
         current = Path(current_root)
         for directory_name in tuple(directory_names):
             directory = current / directory_name
-            if _host_only_output_path(directory):
-                raise UnsafePackageInput("PACKAGE_OUTPUT_HOST_ONLY_FORBIDDEN")
+            if _forbidden_output_path(directory):
+                raise UnsafePackageInput("PACKAGE_OUTPUT_FORBIDDEN_PATH")
             if directory.is_symlink():
                 raise UnsafePackageInput("PACKAGE_OUTPUT_NOT_REGULAR")
         for file_name in file_names:
             path = current / file_name
-            if _host_only_output_path(path):
-                raise UnsafePackageInput("PACKAGE_OUTPUT_HOST_ONLY_FORBIDDEN")
+            if _forbidden_output_path(path):
+                raise UnsafePackageInput("PACKAGE_OUTPUT_FORBIDDEN_PATH")
             try:
                 metadata = path.lstat()
             except OSError as error:

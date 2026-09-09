@@ -11,7 +11,11 @@ import {
   type ChapterPlayerLayoutMode,
 } from "./chapter-player-view-state";
 import type { EditionHistoryItem } from "./edition-history";
-import { failedSegmentRetryReasonMessage } from "./failed-segment-retry-state";
+import {
+  failedSegmentFailureGroup,
+  failedSegmentRetryReasonMessage,
+  summarizeFailedSegments,
+} from "./failed-segment-retry-state";
 import type { NarrationPlayerPhase, NarrationPlayerState } from "./narration-player";
 import type { ManifestSegmentV2, SegmentRenderStatus } from "./playback-contracts";
 import type { ScriptReviewSegmentResource } from "./script-contracts";
@@ -71,6 +75,7 @@ export interface ChapterNarrationPanelProps {
   readonly onSelectEdition: (editionId: string) => void;
   readonly onOpenReview?: () => void;
   readonly onRetryFailedSegment?: (segmentId: string) => void;
+  readonly onRetryAllFailedSegments?: () => void;
   readonly reviewTriggerRef?: {
     readonly current: { focus(): void } | null;
   };
@@ -261,6 +266,7 @@ export function createChapterNarrationPanel(
     const segmentStates = observableSegmentStates(props.segments, observedStates);
     const failedItems = props.failedSegments?.items ?? [];
     const hasRetryableFailure = failedItems.some((item) => item.retryable);
+    const failureSummary = summarizeFailedSegments(failedItems);
     const retryBusySegmentIds = new Set(props.retryBusySegmentIds ?? []);
     const focusedRetryItemStillVisible = props.retryFocusSegmentId !== null
       && props.retryFocusSegmentId !== undefined
@@ -376,13 +382,49 @@ export function createChapterNarrationPanel(
           h(
             "div",
             { className: "anw-chapter-narration-failures__header" },
-            h("strong", null, `失败句段（${failedItems.length}）`),
-            h(
-              "span",
-              null,
-              hasRetryableFailure
-                ? "只重试失败音频，不修改正文、人物绑定或既有朗读版本。"
-                : "这些句段已停止重复合成；更换声音或调整正文后再更新朗读。",
+            h("div", null,
+              h("strong", null, `失败句段（${failedItems.length}）`),
+              h(
+                "span",
+                null,
+                hasRetryableFailure
+                  ? "只重试失败音频，不修改正文、人物绑定或既有朗读版本。"
+                  : "这些句段已停止重复合成；更换声音或调整正文后再更新朗读。",
+              ),
+            ),
+            failureSummary.retryableGroupCount > 0
+              ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-chapter-narration-retry-button",
+                  disabled: props.retrySubmitting === true
+                    || props.onRetryAllFailedSegments === undefined,
+                  onClick: () => props.onRetryAllFailedSegments?.(),
+                },
+                props.retrySubmitting
+                  ? "正在恢复可重试句段…"
+                  : `恢复全部可重试句段（${failureSummary.retryableGroupCount} 组）`,
+              )
+              : null,
+          ),
+          h(
+            "dl",
+            {
+              className: "anw-chapter-narration-failures__summary",
+              "aria-label": "失败句段分类汇总",
+            },
+            h("div", { "data-failure-group": "recoverable" },
+              h("dt", null, "可恢复"),
+              h("dd", null, failureSummary.recoverableCount),
+            ),
+            h("div", { "data-failure-group": "audio-quality" },
+              h("dt", null, "音频质量"),
+              h("dd", null, failureSummary.audioQualityCount),
+            ),
+            h("div", { "data-failure-group": "blocked" },
+              h("dt", null, "暂不可重试"),
+              h("dd", null, failureSummary.blockedCount),
             ),
           ),
           h(
@@ -390,6 +432,7 @@ export function createChapterNarrationPanel(
             { className: "anw-chapter-narration-failures__list" },
             ...failedItems.map((item) => {
               const source = props.segments[item.ordinal];
+              const failureGroup = failedSegmentFailureGroup(item);
               const descriptionId = `anw-failed-segment-${item.segment_id}`;
               const groupBusy = retryBusySegmentIds.has(item.segment_id);
               const disabled = !item.retryable
@@ -402,11 +445,17 @@ export function createChapterNarrationPanel(
                   className: `anw-chapter-narration-failure ${groupBusy ? "is-busy" : ""}`,
                   "data-segment-id": item.segment_id,
                   "data-failure-code": item.failure_code,
+                  "data-failure-group": failureGroup,
                 },
                 h(
                   "div",
                   { className: "anw-chapter-narration-failure__copy" },
                   h("strong", null, `第 ${item.ordinal + 1} 句 · ${source?.speaker_label ?? "章节朗读"}`),
+                  h("span", { className: "anw-chapter-narration-failure__category" },
+                    failureGroup === "recoverable"
+                      ? "可恢复"
+                      : failureGroup === "audio-quality" ? "音频质量" : "暂不可重试",
+                  ),
                   h(
                     "span",
                     { title: source?.source_text ?? item.failure_code },
@@ -416,7 +465,9 @@ export function createChapterNarrationPanel(
                     "small",
                     { id: descriptionId },
                     item.retryable
-                      ? item.fanout_segment_ids.length > 1
+                      ? failureGroup === "audio-quality"
+                        ? "音频质量校验未通过；可安全重试一次，若仍失败请更换声音或调整朗读分段。"
+                        : item.fanout_segment_ids.length > 1
                         ? `此音频被 ${item.fanout_segment_ids.length} 句共用，重试会同步重试 ${item.fanout_segment_ids.length} 句。`
                         : "重试只会重新合成本句音频。"
                       : failedSegmentRetryReasonMessage(item.retry_reason_code),

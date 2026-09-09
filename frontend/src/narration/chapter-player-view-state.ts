@@ -340,10 +340,7 @@ function voiceSourceLabel(identity: NarrationEditionVoiceIdentity): string {
   if (identity.legacy_fallback) return "历史音色标识";
   if (identity.source_type === "preset") return "官方预设";
   if (identity.source_type === "uploaded") return "上传音色";
-  // CORE currently persists Nano advanced tuning as a generated version.  It
-  // must not be presented as a VoiceGenerator-created character voice before
-  // the separately gated VG pipeline exists and freezes a distinct identity.
-  if (identity.source_type === "generated") return "高级调音";
+  if (identity.source_type === "generated") return "设计音色";
   return "冻结声音";
 }
 

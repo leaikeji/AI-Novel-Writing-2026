@@ -1205,8 +1205,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     setNarrationSnapshot(session.readSnapshot());
     const recoveryController = new AbortController();
     void session.load().then(async () => {
-      if (!narrationGate.canPrepareVoices
-        || recoveryController.signal.aborted
+      if (recoveryController.signal.aborted
         || narrationSessionRef.current !== session
         || narrationActionAbortRef.current !== null) return;
       narrationActionAbortRef.current = recoveryController;
@@ -1446,7 +1445,6 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         generation,
         intent,
         forceReview: false,
-        automaticVoicePreparationEnabled: liveGate.canPrepareVoices,
         signal: controller.signal,
         saveStableSource: saveStableNarrationSource,
         isGenerationCurrent: (documentId, expectedGeneration) => (
@@ -2069,6 +2067,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const retryFailedNarrationSegment = (segmentId: string) => {
     setFailedSegmentRetryFocusId(segmentId);
     void failedSegmentRetryControllerRef.current?.retrySegment(segmentId);
+  };
+
+  const retryAllFailedNarrationSegments = () => {
+    void failedSegmentRetryControllerRef.current?.retryAll();
   };
 
   const refreshNovel = async (): Promise<NovelRecord | null> => {
@@ -2947,6 +2949,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           },
           onSelectEdition: selectNarrationEdition,
           onRetryFailedSegment: retryFailedNarrationSegment,
+          onRetryAllFailedSegments: retryAllFailedNarrationSegments,
           onOpenReview: openNarrationReview,
           reviewTriggerRef: scriptReviewTriggerRef,
           retryTriggerRef: failedSegmentRetryTriggerRef,

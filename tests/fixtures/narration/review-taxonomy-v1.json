@@ -30,11 +30,6 @@
       "meaning": "a stable anonymous-speaker candidate is new and has no detected conflict"
     },
     {
-      "code": "W_GENERIC_VOICE_FALLBACK",
-      "severity": "warning",
-      "meaning": "a permitted generic voice is used instead of a dedicated voice"
-    },
-    {
       "code": "W_MANUAL_OVERRIDE_INHERITED",
       "severity": "warning",
       "meaning": "a manual override is inherited from a uniquely verified earlier segment"

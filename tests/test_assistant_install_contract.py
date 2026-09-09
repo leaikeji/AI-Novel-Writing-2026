@@ -161,17 +161,14 @@ class VerifyApi:
                     self.verifier.SELECTION_EDIT_OPERATIONS
                 ),
                 "narration": {
-                    "technical_enabled": False,
+                    "product_requested": False,
                     "lifecycle_status": "disabled",
-                    "sidecar_reachable": False,
-                    "model_ready": False,
-                    "model_loaded": False,
-                    "product_visible": False,
-                    "idle_unload_seconds": None,
-                    "protocol_version": self.verifier.TTS_PROTOCOL_VERSION,
-                    "worker_generation": None,
-                    "lease_generation": None,
-                    "model_fingerprint_sha256": None,
+                    "playback_installed": False,
+                    "digest_keyring_loaded": False,
+                    "production_backend_installed": False,
+                    "worker_running": False,
+                    "reference_clone_ready": False,
+                    "provider_selection_fingerprint_sha256": None,
                     "reason_code": None,
                 },
                 "narration_production": {
@@ -383,24 +380,22 @@ def test_verifier_accepts_ready_hidden_validation_pipeline_without_visibility(
             return payload
         assert isinstance(payload, dict)
         return {
-            **payload,
-            "narration": {
-                "technical_enabled": True,
-                "lifecycle_status": "ready",
-                "sidecar_reachable": True,
-                "model_ready": True,
-                "model_loaded": True,
-                "product_visible": False,
-                "idle_unload_seconds": 300,
-                "protocol_version": verifier.TTS_PROTOCOL_VERSION,
-                "worker_generation": 7,
-                "lease_generation": 7,
-                "model_fingerprint_sha256": (
-                    verifier.TTS_MODEL_FINGERPRINT_SHA256
-                ),
-                "reason_code": None,
+                **payload,
+                "narration": {
+                    "product_requested": True,
+                    "lifecycle_status": "ready",
+                    "playback_installed": True,
+                    "digest_keyring_loaded": True,
+                    "production_backend_installed": True,
+                    "worker_running": True,
+                    "reference_clone_ready": False,
+                    "provider_selection_fingerprint_sha256": "a" * 64,
+                    "reason_code": None,
+                },
+            "narration_production": {
+                **verifier.expected_narration_production(),
+                "provider_selection_fingerprint_sha256": "a" * 64,
             },
-            "narration_production": verifier.expected_narration_production(),
         }
 
     monkeypatch.setattr(verifier, "get_json", get_json)
@@ -437,5 +432,6 @@ def test_verifier_accepts_ready_hidden_validation_pipeline_without_visibility(
 
     result = verifier.verify()
 
-    assert result["narration"]["product_visible"] is False
+    assert result["narration"]["product_requested"] is True
+    assert result["narration"]["lifecycle_status"] == "ready"
     assert result["narration_production"]["worker_running"] is True

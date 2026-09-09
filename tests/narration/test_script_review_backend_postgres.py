@@ -230,7 +230,7 @@ def _create_voice(
         owner_id=LOCAL_OWNER_ID,
         workspace_id=LOCAL_WORKSPACE_ID,
         novel_id=novel_id,
-        source_kind="preset_catalog",
+        source_kind="official_preset",
         source_identifier=f"preset:t4-rc-backend:{marker}:{uuid4()}",
         notice_version="voice-rights/1",
         purpose="narration",

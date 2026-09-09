@@ -12,26 +12,20 @@ from typing import Any, Final, Mapping
 from uuid import UUID
 
 from .contracts import (
-    AdapterCapabilities,
     EDITION_FINGERPRINT_SCHEMA_VERSION,
-    MODEL_FINGERPRINT_SCHEMA_VERSION,
-    ModelFingerprint,
     NARRATION_SCOPE_CONTRACT_VERSION,
     NarrationRequestScope,
     RENDER_FINGERPRINT_SCHEMA_VERSION,
-)
-
-ADAPTER_CAPABILITIES_FINGERPRINT_SCHEMA_VERSION: Final = (
-    "narration-adapter-capabilities-fingerprint/2"
+    TTS_MODEL_FINGERPRINT_SCHEMA_VERSION,
+    TTSModelIdentity,
 )
 
 SUPPORTED_FINGERPRINT_SCHEMA_VERSIONS: Final = frozenset(
     {
         NARRATION_SCOPE_CONTRACT_VERSION,
-        MODEL_FINGERPRINT_SCHEMA_VERSION,
         EDITION_FINGERPRINT_SCHEMA_VERSION,
         RENDER_FINGERPRINT_SCHEMA_VERSION,
-        ADAPTER_CAPABILITIES_FINGERPRINT_SCHEMA_VERSION,
+        TTS_MODEL_FINGERPRINT_SCHEMA_VERSION,
     }
 )
 
@@ -79,26 +73,22 @@ def scope_fingerprint(scope: NarrationRequestScope) -> str:
     )
 
 
-def model_fingerprint_sha256(fingerprint: ModelFingerprint) -> str:
-    payload = {
-        "adapter_contract_version": fingerprint.adapter_contract_version,
-        "model_name": fingerprint.model_name,
-        "model_revision": fingerprint.model_revision,
-        "artifact_tree_sha256": fingerprint.artifact_tree_sha256,
-        "runtime_name": fingerprint.runtime_name,
-        "runtime_version": fingerprint.runtime_version,
-        "execution_backend": fingerprint.execution_backend,
-        "protocol_version": fingerprint.protocol_version,
-        "deployment_topology": fingerprint.deployment_topology,
-        "parameters": fingerprint.parameters,
-    }
-    return canonical_fingerprint(MODEL_FINGERPRINT_SCHEMA_VERSION, payload)
+def tts_model_identity_sha256(identity: TTSModelIdentity) -> str:
+    """Hash the complete Qwen Provider identity without a legacy DTO bridge."""
 
-
-def capabilities_fingerprint(capabilities: AdapterCapabilities) -> str:
+    if type(identity) is not TTSModelIdentity:
+        raise FingerprintContractError("TTS model identity uses an invalid contract")
     return canonical_fingerprint(
-        ADAPTER_CAPABILITIES_FINGERPRINT_SCHEMA_VERSION,
-        asdict(capabilities),
+        TTS_MODEL_FINGERPRINT_SCHEMA_VERSION,
+        {
+            "provider_id": identity.provider_id.value,
+            "model_id": identity.model_id,
+            "model_revision": identity.model_revision,
+            "runtime_id": identity.runtime_id,
+            "runtime_version": identity.runtime_version,
+            "quantization": identity.quantization,
+            "artifact_tree_sha256": identity.artifact_tree_sha256,
+        },
     )
 
 

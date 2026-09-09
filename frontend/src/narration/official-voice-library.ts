@@ -13,7 +13,7 @@ import type { OfficialPresetCatalogResponse } from "./contracts";
 
 
 export const OFFICIAL_VOICE_CATALOG_SCHEMA_VERSION = (
-  "moss-tts-official-preset-catalog/2.0"
+  "qwen-tts-preset-catalog/1"
 ) as const;
 export const OFFICIAL_VOICE_SELECTION_CONTRACT_VERSION = (
   "official-voice-selection/1.0"
@@ -21,24 +21,8 @@ export const OFFICIAL_VOICE_SELECTION_CONTRACT_VERSION = (
 
 
 export const OFFICIAL_VOICE_PRESET_IDS = Object.freeze([
-  "onnx.Junhao",
-  "onnx.Zhiming",
-  "onnx.Weiguo",
-  "onnx.Xiaoyu",
-  "onnx.Yuewen",
-  "onnx.Lingyu",
-  "onnx.Trump",
-  "onnx.Ava",
-  "onnx.Bella",
-  "onnx.Adam",
-  "onnx.Nathan",
-  "onnx.Soyo",
-  "onnx.Saki",
-  "onnx.Mortis",
-  "onnx.Umiri",
-  "onnx.Mei",
-  "onnx.Anon",
-  "onnx.Arisa",
+  "qwen.WarmFemale",
+  "qwen.ClearMale",
 ] as const);
 
 
@@ -51,15 +35,11 @@ export type OfficialVoiceValidationTier =
 
 export interface OfficialVoiceProvenance {
   readonly schemaVersion: string;
-  readonly repository: string;
-  readonly revision: string;
-  readonly manifestPath: string;
-  readonly manifestSha256: string;
+  readonly catalogId: string;
   readonly presetId: string;
-  readonly manifestVoice: string;
-  readonly promptCodesSha256: string;
-  readonly promptFrameCount: number;
-  readonly promptQuantizerCount: number;
+  readonly localModelId: string;
+  readonly localModelRevision: string;
+  readonly providerVoiceIds: Readonly<Record<string, string>>;
   readonly modelFingerprintSha256: string;
   readonly provenanceFingerprintSha256: string;
 }
@@ -111,15 +91,11 @@ export function officialVoiceCatalogFromWire(
       usageNotice: item.usage_notice,
       provenance: Object.freeze({
         schemaVersion: item.provenance.schema_version,
-        repository: item.provenance.repository,
-        revision: item.provenance.revision,
-        manifestPath: item.provenance.manifest_path,
-        manifestSha256: item.provenance.manifest_sha256,
+        catalogId: item.provenance.catalog_id,
         presetId: item.provenance.preset_id,
-        manifestVoice: item.provenance.manifest_voice,
-        promptCodesSha256: item.provenance.prompt_codes_sha256,
-        promptFrameCount: item.provenance.prompt_frame_count,
-        promptQuantizerCount: item.provenance.prompt_quantizer_count,
+        localModelId: item.provenance.local_model_id,
+        localModelRevision: item.provenance.local_model_revision,
+        providerVoiceIds: Object.freeze({ ...item.provenance.provider_voice_ids }),
         modelFingerprintSha256: item.provenance.model_fingerprint_sha256,
         provenanceFingerprintSha256: item.provenance.provenance_fingerprint_sha256,
       }),
@@ -244,7 +220,7 @@ export type OfficialVoiceLibraryModel =
   | {
     readonly status: "ready";
     readonly groups: readonly OfficialVoiceLibraryGroupModel[];
-    readonly itemCount: 18;
+    readonly itemCount: number;
     readonly message: string;
   }
   | {
@@ -291,22 +267,22 @@ const IDLE_PREVIEW_STATE: PreviewState = Object.freeze({
 });
 
 
-const LANGUAGE_ORDER: readonly OfficialVoiceLanguageScope[] = ["zh-CN", "en", "ja-JP"];
+const LANGUAGE_ORDER: readonly OfficialVoiceLanguageScope[] = ["zh-CN"];
 const LANGUAGE_LABELS: Readonly<Record<OfficialVoiceLanguageScope, string>> = Object.freeze({
   "zh-CN": "中文",
   en: "English",
   "ja-JP": "日本語",
 });
 const LANGUAGE_COUNTS: Readonly<Record<OfficialVoiceLanguageScope, number>> = Object.freeze({
-  "zh-CN": 6,
-  en: 5,
-  "ja-JP": 7,
+  "zh-CN": 2,
+  en: 0,
+  "ja-JP": 0,
 });
-const VERIFIED_PRESET_IDS = new Set(["onnx.Junhao", "onnx.Zhiming", "onnx.Xiaoyu"]);
+const VERIFIED_PRESET_IDS = new Set(OFFICIAL_VOICE_PRESET_IDS);
 const EXPECTED_LANGUAGE_BY_PRESET: Readonly<Record<OfficialVoicePresetId, OfficialVoiceLanguageScope>> = (
-  Object.freeze(Object.fromEntries(OFFICIAL_VOICE_PRESET_IDS.map((presetId, index) => [
+  Object.freeze(Object.fromEntries(OFFICIAL_VOICE_PRESET_IDS.map((presetId) => [
     presetId,
-    index < 6 ? "zh-CN" : index < 11 ? "en" : "ja-JP",
+    "zh-CN",
   ])) as Record<OfficialVoicePresetId, OfficialVoiceLanguageScope>)
 );
 
@@ -371,9 +347,9 @@ function catalogIntegrityIssue(catalog: OfficialVoiceCatalog): string | null {
       || typeof item.previewableNow !== "boolean"
       || typeof item.renderableExisting !== "boolean"
       || item.provenance?.presetId !== item.presetId
-      || item.provenance.repository.trim() === ""
-      || item.provenance.revision.trim() === ""
-      || item.provenance.manifestPath.trim() === ""
+      || item.provenance.catalogId !== "qwen-provider-voice-map/1"
+      || item.provenance.localModelId.trim() === ""
+      || item.provenance.localModelRevision.trim() === ""
       || item.provenance.provenanceFingerprintSha256.trim() === ""
     ) return "官方音色目录身份或顺序校验失败，已停止展示可操作卡片。";
     const expectedTier = VERIFIED_PRESET_IDS.has(item.presetId)
@@ -438,8 +414,8 @@ export function createOfficialVoiceLibraryModel(
   return Object.freeze({
     status: "ready",
     groups: Object.freeze(groups),
-    itemCount: 18,
-    message: "18 个固定官方音色已加载；试听可选，使用不需要额外确认。",
+    itemCount: OFFICIAL_VOICE_PRESET_IDS.length,
+    message: "Qwen 内置音色已加载；可直接用于本地或云端生成。",
   });
 }
 
@@ -927,9 +903,9 @@ export function createOfficialVoiceLibrary(
                 ),
               h("div", null, h("dt", null, "Preset ID"), h("dd", null, item.presetId)),
               h("div", null, h("dt", null, "来源语言"), h("dd", null, item.language)),
-              h("div", null, h("dt", null, "固定来源"), h("dd", null, item.provenance.repository)),
-              h("div", null, h("dt", null, "模型 revision"), h("dd", null, item.provenance.revision)),
-              h("div", null, h("dt", null, "Manifest"), h("dd", null, item.provenance.manifestPath)),
+              h("div", null, h("dt", null, "本地模型"), h("dd", null, item.provenance.localModelId)),
+              h("div", null, h("dt", null, "模型 revision"), h("dd", null, item.provenance.localModelRevision)),
+              h("div", null, h("dt", null, "映射目录"), h("dd", null, item.provenance.catalogId)),
               h(
                 "div",
                 null,

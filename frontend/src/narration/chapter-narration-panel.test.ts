@@ -625,6 +625,7 @@ describe("chapter narration panel", () => {
 
   it("shows failed sentences only when present and dispatches a keyboard-native retry", () => {
     const onRetryFailedSegment = vi.fn();
+    const onRetryAllFailedSegments = vi.fn();
     const retryTriggerRef = { current: null };
     const Panel = createChapterNarrationPanel(React);
     const withoutFailures = Panel(props());
@@ -636,6 +637,7 @@ describe("chapter narration panel", () => {
     const root = Panel(props({
       failedSegments: failedSegments(),
       onRetryFailedSegment,
+      onRetryAllFailedSegments,
       retryFocusSegmentId: SEGMENT_1,
       retryTriggerRef,
     }));
@@ -654,6 +656,21 @@ describe("chapter narration panel", () => {
     });
     (buttons[0]?.props.onClick as () => void)();
     expect(onRetryFailedSegment).toHaveBeenCalledWith(SEGMENT_1);
+    const retryAll = findAll(
+      root,
+      (item) => item.type === "button"
+        && textContent(item) === "恢复全部可重试句段（1 组）",
+    )[0];
+    expect(retryAll.props).toMatchObject({ type: "button", disabled: false });
+    (retryAll.props.onClick as () => void)();
+    expect(onRetryAllFailedSegments).toHaveBeenCalledTimes(1);
+    const summary = findAll(
+      root,
+      (item) => item.props["aria-label"] === "失败句段分类汇总",
+    )[0];
+    expect(textContent(summary)).toContain("可恢复2");
+    expect(textContent(summary)).toContain("音频质量0");
+    expect(textContent(summary)).toContain("暂不可重试0");
   });
 
   it("disables the whole fanout group while busy and re-enables it after an announced error", () => {
@@ -739,5 +756,32 @@ describe("chapter narration panel", () => {
     );
     expect(blocked).toHaveLength(2);
     expect(blocked.every((button) => button.props.disabled === true)).toBe(true);
+    expect(textContent(root)).toContain("暂不可重试2");
+    expect(textContent(root)).not.toContain("恢复全部可重试句段");
+  });
+
+  it("separates audio-quality failures from ordinary recoverable failures", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const qualityProjection = Object.freeze({
+      ...failedSegments(),
+      items: Object.freeze([
+        Object.freeze({
+          ...failedSegments().items[0],
+          failure_code: "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+        }),
+      ]),
+    });
+    const root = Panel(props({
+      failedSegments: qualityProjection,
+      onRetryFailedSegment: vi.fn(),
+      onRetryAllFailedSegments: vi.fn(),
+    }));
+
+    expect(textContent(root)).toContain("音频质量1");
+    expect(textContent(root)).toContain("可安全重试一次");
+    expect(findAll(
+      root,
+      (item) => item.props["data-failure-group"] === "audio-quality",
+    ).length).toBeGreaterThan(0);
   });
 });
