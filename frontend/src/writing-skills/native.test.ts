@@ -16,6 +16,11 @@ const BINDING: NativeWritingActionBinding = {
   documentId: "55555555-5555-4555-8555-555555555555",
   tabInstance: "anw-tab-test",
 };
+const DRAFT_ID = "66666666-6666-4666-8666-666666666666";
+const DRAFT_BINDING: NativeWritingActionBinding = {
+  actionId: ACTION_A, sessionId: "session-1", tabInstance: "anw-tab-test",
+  scopeKind: "creation_draft", scopeId: DRAFT_ID, creationDraftId: DRAFT_ID,
+};
 
 function response(actionId = ACTION_A, state = "dispatched") {
   return {
@@ -34,6 +39,140 @@ function response(actionId = ACTION_A, state = "dispatched") {
 }
 
 describe("native writing method status runtime", () => {
+  it("reads a creation receipt through its own scope without sending a novel request", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => response());
+    const signal = new AbortController().signal;
+    await createNativeWritingMethodHttpTransport(
+      async <T,>(path: string, init?: RequestInit): Promise<T> => await request(path, init) as T,
+    ).read(DRAFT_BINDING, signal);
+    expect(request).toHaveBeenCalledExactlyOnceWith(
+      `/creation-drafts/${DRAFT_ID}/native-writing-actions/${ACTION_A}?tab_id=anw-tab-test`, { signal },
+    );
+  });
+
+  it("restores a creation receipt in the same tab without inventing a novel identity", async () => {
+    vi.useFakeTimers();
+    try {
+      const values = new Map([["anw.native-writing-method.last-action.v1", JSON.stringify(DRAFT_BINDING)]]);
+      const read = vi.fn(async () => response());
+      const runtime = createNativeWritingMethodRuntime({ transport: { read }, delaysMs: [0],
+        storage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); }, removeItem: key => { values.delete(key); } },
+        expectedTabInstance: DRAFT_BINDING.tabInstance,
+      });
+      await vi.runAllTimersAsync();
+      expect(read).toHaveBeenCalledOnce();
+      expect(runtime.getSnapshot().binding).toEqual(DRAFT_BINDING);
+      runtime.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([
+    { ...DRAFT_BINDING, scopeId: ACTION_B },
+    { ...DRAFT_BINDING, novelId: BINDING.novelId },
+    { ...DRAFT_BINDING, scopeKind: "unknown" },
+    { ...BINDING, creationDraftId: DRAFT_ID },
+  ])("drops a mixed, unknown or mismatched stored scope %#", async (binding) => {
+    vi.useFakeTimers();
+    try {
+      const removeItem = vi.fn();
+      const read = vi.fn(async () => response());
+      const runtime = createNativeWritingMethodRuntime({ transport: { read }, delaysMs: [0],
+        storage: { getItem: () => JSON.stringify(binding), setItem: vi.fn(), removeItem },
+        expectedTabInstance: binding.tabInstance,
+      });
+      await vi.runAllTimersAsync();
+      expect(read).not.toHaveBeenCalled();
+      expect(removeItem).toHaveBeenCalledOnce();
+      expect(runtime.getSnapshot().binding).toBeNull();
+      runtime.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("restores a durable receipt only in the same tab", async () => {
+    vi.useFakeTimers();
+    try {
+      const values = new Map<string, string>([[
+        "anw.native-writing-method.last-action.v1",
+        JSON.stringify(BINDING),
+      ]]);
+      const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => { values.set(key, value); },
+        removeItem: (key: string) => { values.delete(key); },
+      };
+      const read = vi.fn(async () => response());
+      const runtime = createNativeWritingMethodRuntime({
+        transport: { read },
+        delaysMs: [0],
+        storage,
+        expectedTabInstance: BINDING.tabInstance,
+      });
+      await vi.runAllTimersAsync();
+      expect(read).toHaveBeenCalledOnce();
+      expect(runtime.getSnapshot().status?.state).toBe("dispatched");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("persists on bind so refresh recovery does not wait for the first GET", async () => {
+    vi.useFakeTimers();
+    try {
+      const values = new Map<string, string>();
+      const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => { values.set(key, value); },
+        removeItem: (key: string) => { values.delete(key); },
+      };
+      const firstRead = vi.fn(() => new Promise<unknown>(() => undefined));
+      const first = createNativeWritingMethodRuntime({
+        transport: { read: firstRead },
+        delaysMs: [0],
+        storage,
+        expectedTabInstance: BINDING.tabInstance,
+      });
+      first.bind(BINDING);
+      expect(JSON.parse(values.get("anw.native-writing-method.last-action.v1") ?? "null"))
+        .toEqual(BINDING);
+      first.dispose();
+
+      const recoveredRead = vi.fn(async () => response());
+      const recovered = createNativeWritingMethodRuntime({
+        transport: { read: recoveredRead },
+        delaysMs: [0],
+        storage,
+        expectedTabInstance: BINDING.tabInstance,
+      });
+      await vi.runAllTimersAsync();
+      expect(recoveredRead).toHaveBeenCalledOnce();
+      expect(recovered.getSnapshot().status?.state).toBe("dispatched");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("drops a copied receipt after a duplicated tab rotates identity", async () => {
+    vi.useFakeTimers();
+    try {
+      const values = new Map<string, string>([[
+        "anw.native-writing-method.last-action.v1",
+        JSON.stringify(BINDING),
+      ]]);
+      const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => { values.set(key, value); },
+        removeItem: (key: string) => { values.delete(key); },
+      };
+      const read = vi.fn(async () => response());
+      const runtime = createNativeWritingMethodRuntime({
+        transport: { read },
+        delaysMs: [0],
+        storage,
+        expectedTabInstance: "anw-tab-another",
+      });
+      await vi.runAllTimersAsync();
+      expect(read).not.toHaveBeenCalled();
+      expect(runtime.getSnapshot().binding).toBeNull();
+      expect(values.size).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("stays silent for ordinary chat when no native action is claimed", async () => {
     vi.useFakeTimers();
     try {

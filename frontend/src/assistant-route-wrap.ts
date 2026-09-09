@@ -406,15 +406,33 @@ export function createAssistantRouteWrap(
         contextRuntime.setHostBinding(selectedAgentId, currentSessionId);
         if (!workbenchActive) {
           contextRuntime.clear();
-          options.nativeWritingMethodRuntime?.clear();
         }
       }, [workbenchActive, selectedAgentId, currentSessionId]);
 
       React.useEffect(() => {
-        // A native result belongs to one exact novel/document surface. Do not
-        // carry its receipt across a book or chapter switch.
-        options.nativeWritingMethodRuntime?.clear();
-      }, [routeSession.route?.novelId, routeSession.route?.documentId]);
+        const nativeRuntime = options.nativeWritingMethodRuntime;
+        const binding = nativeRuntime?.getSnapshot().binding;
+        if (!nativeRuntime || !binding) return;
+        const route = routeSession.route;
+        const sameSurface = workbenchActive
+          && route !== null
+          && (!selectedAgentId || selectedAgentId === "ai-novel-writer")
+          && route.novelId === binding.novelId
+          && route.documentId === binding.documentId
+          && (!currentSessionId || currentSessionId === binding.sessionId)
+          && (!options.contextRefCoordinator
+            || options.contextRefCoordinator.getTabInstance() === binding.tabInstance);
+        // Preserve a same-tab refresh long enough for its read-only GET
+        // recovery, but never carry the receipt across Agent/session/scope or
+        // a duplicated tab whose tab identity was rotated.
+        if (!sameSurface) nativeRuntime.clear();
+      }, [
+        workbenchActive,
+        selectedAgentId,
+        currentSessionId,
+        routeSession.route?.novelId,
+        routeSession.route?.documentId,
+      ]);
 
       React.useEffect(() => {
         if (!workbenchActive || !options.contextRefCoordinator) return undefined;

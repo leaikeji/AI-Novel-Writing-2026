@@ -1,0 +1,40 @@
+{
+  "export": {
+    "id": "bb4b0863-c3be-4266-9a12-ffd717568a29",
+    "export_format": "text",
+    "state": "ready",
+    "content_hash": "8bcbdb1584ba97550894ec6acd7a98d05a5e802bbd00168549e78a0428069967",
+    "storage_path": "",
+    "metadata_json": {
+      "chapters": [
+        {
+          "title": "第1章 门廊来信",
+          "document_id": "ba96cc98-1301-432a-8b40-6c72bff7c32b",
+          "visible_character_count": 1880
+        },
+        {
+          "title": "第2章 登记里的空白",
+          "document_id": "a7edfb54-699e-452f-bb82-c920c27a601b",
+          "visible_character_count": 1852
+        }
+      ],
+      "novel_title": "雾宅来信",
+      "volume_count": 1,
+      "chapter_count": 2,
+      "ungrouped_chapter_count": 0,
+      "visible_character_count": 3732
+    }
+  },
+  "outline_attempts": [
+    {
+      "id": "9d7f12eb-b5bf-4fb4-9f62-d2fd7c24469c",
+      "rewrite_attempt": 1,
+      "rewrite_requirement": ""
+    },
+    {
+      "id": "c3486446-2a0c-463c-905c-3224c17ef1b7",
+      "rewrite_attempt": 2,
+      "rewrite_requirement": "上次章纲未达到260—500字或内容被截断，请完整重写，不能续写残句。"
+    }
+  ]
+}

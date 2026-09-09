@@ -20,6 +20,7 @@ from .assistant_context_registry import (
     ContextRefCreateErrorCode,
 )
 from .database import get_session
+from .creative_services import get_novel_creation_draft
 from .services import NotFoundError, get_document, get_novel
 
 
@@ -27,10 +28,14 @@ router = APIRouter()
 assistant_context_registry = AssistantContextRefRegistry()
 
 
-_REQUIRED_CREATE_KEYS = frozenset(
+_REQUIRED_NOVEL_CREATE_KEYS = frozenset(
     {"ownerToken", "tabInstance", "agentId", "novelId", "snapshot"},
 )
-_OPTIONAL_CREATE_KEYS = frozenset({"documentId", "sessionId"})
+_OPTIONAL_NOVEL_CREATE_KEYS = frozenset({"documentId", "sessionId"})
+_REQUIRED_CREATION_CREATE_KEYS = frozenset({
+    "ownerToken", "tabInstance", "agentId", "scopeKind", "scopeId", "snapshot",
+})
+_OPTIONAL_CREATION_CREATE_KEYS = frozenset({"sessionId"})
 
 
 async def _bounded_body(request: Request) -> bytes:
@@ -61,9 +66,16 @@ def _safe_create_payload(raw: bytes) -> Mapping[str, Any]:
             detail={"type": "assistant_context_rejected", "reason": "invalid-request"},
         )
     keys = set(value)
-    if not _REQUIRED_CREATE_KEYS <= keys or not keys <= (
-        _REQUIRED_CREATE_KEYS | _OPTIONAL_CREATE_KEYS
-    ):
+    novel_shape = (
+        _REQUIRED_NOVEL_CREATE_KEYS <= keys
+        and keys <= _REQUIRED_NOVEL_CREATE_KEYS | _OPTIONAL_NOVEL_CREATE_KEYS
+    )
+    creation_shape = (
+        _REQUIRED_CREATION_CREATE_KEYS <= keys
+        and keys <= _REQUIRED_CREATION_CREATE_KEYS | _OPTIONAL_CREATION_CREATE_KEYS
+        and value.get("scopeKind") == "creation_draft"
+    )
+    if not (novel_shape or creation_shape):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"type": "assistant_context_rejected", "reason": "invalid-request"},
@@ -87,7 +99,7 @@ def _optional_string(payload: Mapping[str, Any], key: str) -> str | None:
     return _required_string(payload, key)
 
 
-def _verify_local_scope(
+def _verify_local_novel_scope(
     session: Session,
     *,
     novel_id: str,
@@ -107,6 +119,34 @@ def _verify_local_scope(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"type": "assistant_context_scope_unavailable"},
         ) from None
+
+
+def _verify_local_creation_scope(
+    session: Session,
+    *,
+    draft_id: str,
+    snapshot: Mapping[str, Any],
+) -> None:
+    try:
+        draft = get_novel_creation_draft(session, UUID(draft_id))
+    except (ValueError, NotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"type": "assistant_context_scope_unavailable"},
+        ) from None
+    snapshot_draft = snapshot.get("creationDraft")
+    if (
+        not isinstance(snapshot_draft, Mapping)
+        or snapshot_draft.get("id") != draft["id"]
+        or snapshot_draft.get("version") != draft["version"]
+        or snapshot_draft.get("step") != draft["step"]
+        or snapshot_draft.get("state") != draft["state"]
+        or draft["state"] != "draft"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": "assistant_context_scope_changed"},
+        )
 
 
 def _creation_error(error: ContextRefCreateError) -> HTTPException:
@@ -138,24 +178,37 @@ async def assistant_contexts_create(
             detail={"type": "assistant_context_rejected", "reason": "invalid-request"},
         )
 
+    creation_scope = payload.get("scopeKind") == "creation_draft"
     binding = ContextRefBinding(
         owner_token=_required_string(payload, "ownerToken"),
         tab_instance=_required_string(payload, "tabInstance"),
         agent_id=_required_string(payload, "agentId"),
-        novel_id=_required_string(payload, "novelId"),
-        document_id=_optional_string(payload, "documentId"),
+        novel_id=None if creation_scope else _required_string(payload, "novelId"),
+        document_id=None if creation_scope else _optional_string(payload, "documentId"),
         session_id=_optional_string(payload, "sessionId"),
+        creation_draft_id=(
+            _required_string(payload, "scopeId") if creation_scope else None
+        ),
     )
     if binding.agent_id != TARGET_AGENT_ID:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"type": "assistant_context_rejected", "reason": "invalid-binding"},
         )
-    _verify_local_scope(
-        session,
-        novel_id=binding.novel_id,
-        document_id=binding.document_id,
-    )
+    if creation_scope:
+        assert binding.creation_draft_id is not None
+        _verify_local_creation_scope(
+            session,
+            draft_id=binding.creation_draft_id,
+            snapshot=snapshot,
+        )
+    else:
+        assert binding.novel_id is not None
+        _verify_local_novel_scope(
+            session,
+            novel_id=binding.novel_id,
+            document_id=binding.document_id,
+        )
 
     try:
         created = assistant_context_registry.create(

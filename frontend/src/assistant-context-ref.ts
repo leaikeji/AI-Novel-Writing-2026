@@ -22,11 +22,69 @@ export interface AssistantContextRefBinding {
 }
 
 
-export interface CreateAssistantContextRefInput {
+export interface CreationDraftAssistantContextV1 {
+  schemaVersion: "creation-draft-assistant-context/1";
+  contextRevision: number;
+  capturedAt: string;
+  expiresAt: string;
+  agentId: typeof NOVEL_ASSISTANT_TARGET_AGENT_ID;
+  sessionId?: string;
+  creationDraft: {
+    id: string;
+    version: number;
+    step: number;
+    state: "draft";
+  };
+  page: {
+    section: "creation";
+    view: "novel-creation-wizard";
+    step: number;
+  };
+  editing?: {
+    focusedFieldId?: string;
+    fields: Array<{
+      id: string;
+      label: string;
+      value: string;
+      dirty: boolean;
+      truncated: boolean;
+      characterCount: number;
+      persistence: "explicit-save";
+    }>;
+  };
+  budget: {
+    maxCharacters: number;
+    usedCharacters: number;
+    truncated: boolean;
+    omittedFieldIds: string[];
+  };
+}
+
+
+export interface NovelCreateAssistantContextRefInput {
   binding: AssistantContextRefBinding;
   snapshot: NovelAssistantContextV2;
   serialized: string;
 }
+
+
+export interface CreationDraftCreateAssistantContextRefInput {
+  binding: {
+    ownerToken: string;
+    tabInstance: string;
+    agentId: typeof NOVEL_ASSISTANT_TARGET_AGENT_ID;
+    scopeKind: "creation_draft";
+    scopeId: string;
+    sessionId?: string;
+  };
+  snapshot: CreationDraftAssistantContextV1;
+  serialized: string;
+}
+
+
+export type CreateAssistantContextRefInput =
+  | NovelCreateAssistantContextRefInput
+  | CreationDraftCreateAssistantContextRefInput;
 
 
 export interface CreatedAssistantContextRef {
@@ -83,6 +141,63 @@ export interface AssistantContextRefCoordinator {
 }
 
 
+export interface AssistantTabInstanceStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+
+const TAB_INSTANCE_STORAGE_KEY = "anw.assistant-context.tab-instance.v1";
+const TAB_INSTANCE_PATTERN = /^anw-tab-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+
+function browserNavigationType(): string | null {
+  if (typeof performance === "undefined" || typeof performance.getEntriesByType !== "function") {
+    return null;
+  }
+  const entry = performance.getEntriesByType("navigation")[0] as { type?: unknown } | undefined;
+  return typeof entry?.type === "string" ? entry.type : null;
+}
+
+
+/**
+ * Keep one tab identity across a hard refresh, while rotating it for a newly
+ * opened or duplicated tab even when the browser copied sessionStorage.
+ */
+export function createAssistantTabInstance(options: {
+  storage?: AssistantTabInstanceStorage | null;
+  navigationType?: string | null;
+  createId?: () => string;
+} = {}): string {
+  const storage = options.storage === undefined
+    ? (typeof sessionStorage === "undefined" ? null : sessionStorage)
+    : options.storage;
+  const navigationType = options.navigationType === undefined
+    ? browserNavigationType()
+    : options.navigationType;
+  if (navigationType === "reload") {
+    try {
+      const stored = storage?.getItem(TAB_INSTANCE_STORAGE_KEY);
+      if (stored && TAB_INSTANCE_PATTERN.test(stored)) return stored;
+    } catch {
+      // Storage is only a refresh aid; a fresh scoped identity is safe.
+    }
+  }
+  const createId = options.createId ?? (() => {
+    if (typeof globalThis.crypto?.randomUUID !== "function") {
+      throw new Error("crypto.randomUUID is required for the workbench tab instance");
+    }
+    return `anw-tab-${globalThis.crypto.randomUUID()}`;
+  });
+  const created = createId();
+  if (!TAB_INSTANCE_PATTERN.test(created)) {
+    throw new Error("invalid workbench tab instance");
+  }
+  try { storage?.setItem(TAB_INSTANCE_STORAGE_KEY, created); } catch { /* best-effort */ }
+  return created;
+}
+
+
 interface ReadyAssistantContextRef extends CreatedAssistantContextRef {
   binding: AssistantContextRefBinding;
   selection?: {
@@ -97,10 +212,7 @@ interface ReadyAssistantContextRef extends CreatedAssistantContextRef {
 
 
 function defaultTabInstance(): string {
-  if (typeof globalThis.crypto?.randomUUID !== "function") {
-    throw new Error("crypto.randomUUID is required for the workbench tab instance");
-  }
-  return `anw-tab-${globalThis.crypto.randomUUID()}`;
+  return createAssistantTabInstance();
 }
 
 

@@ -1,0 +1,77 @@
+{
+  "working_copy": {
+    "draft_version": 5,
+    "base_revision_id": "1b83d5c3-29a8-4143-bfa4-1f7b2f40ea79",
+    "has_manual_edit": false,
+    "has_original": true
+  },
+  "revisions": [
+    {
+      "id": "337670df-d316-473a-8df0-5b0e93a0fadd",
+      "revision_number": 1,
+      "parent_revision_id": null,
+      "restored_from_revision_id": null,
+      "source": "initial",
+      "content_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "has_manual_edit": false
+    },
+    {
+      "id": "72d9f1e7-f98b-4060-a8cd-2e56451084a7",
+      "revision_number": 2,
+      "parent_revision_id": "337670df-d316-473a-8df0-5b0e93a0fadd",
+      "restored_from_revision_id": null,
+      "source": "ai_candidate_adopt",
+      "content_hash": "478a4a8745ddcf45ea21d8123a4eae06617ae93e0e151eb3207006dd23b28548",
+      "has_manual_edit": false
+    },
+    {
+      "id": "da2de459-ae80-407c-9494-e3c1ff3f7e2c",
+      "revision_number": 3,
+      "parent_revision_id": "72d9f1e7-f98b-4060-a8cd-2e56451084a7",
+      "restored_from_revision_id": null,
+      "source": "manual_checkpoint",
+      "content_hash": "478a4a8745ddcf45ea21d8123a4eae06617ae93e0e151eb3207006dd23b28548",
+      "has_manual_edit": false
+    },
+    {
+      "id": "3208484d-16e0-4c52-9855-260d161d094d",
+      "revision_number": 4,
+      "parent_revision_id": "da2de459-ae80-407c-9494-e3c1ff3f7e2c",
+      "restored_from_revision_id": null,
+      "source": "pre_restore_checkpoint",
+      "content_hash": "1478aa162f01cbc365ea8a57fb87925b38879c3b586165e08163add869fc8c03",
+      "has_manual_edit": true
+    },
+    {
+      "id": "1b83d5c3-29a8-4143-bfa4-1f7b2f40ea79",
+      "revision_number": 5,
+      "parent_revision_id": "3208484d-16e0-4c52-9855-260d161d094d",
+      "restored_from_revision_id": "72d9f1e7-f98b-4060-a8cd-2e56451084a7",
+      "source": "manual_restore",
+      "content_hash": "478a4a8745ddcf45ea21d8123a4eae06617ae93e0e151eb3207006dd23b28548",
+      "has_manual_edit": false
+    }
+  ],
+  "outline_jobs": [
+    {
+      "id": "9d7f12eb-b5bf-4fb4-9f62-d2fd7c24469c",
+      "attempt": 1,
+      "created_at": "2026-09-07T17:33:38.08336+00:00",
+      "output_json": {
+        "title": "近三日进出登记",
+        "outline_text": "林澈与许宁按上一章列出的三条待查，优先核查近三日进出登记。两人先各自闭门回忆，再把各自的门廊与二楼出入记忆逐条写在登记册边栏。许宁凭修复师的职业习惯，指出门廊木地板的鞋印与登记栏里的鞋码并不一致；林澈翻查登记册，发现某一时段登记栏空白，窗外雨痕却显示这段时间门曾被推开。林澈据此列出两种可能：登记员漏记，或有人刻意不登。两人把登记册逐页拍照、封存，同时把空白时段对应的鞋印与窗台水渍另作一份采样。林澈不指认任何人，只在笔记本上写下下一项待查：空白时段里，究竟是漏记还是有人未登。"
+      },
+      "duration_ms": "2893"
+    },
+    {
+      "id": "c3486446-2a0c-463c-905c-3224c17ef1b7",
+      "attempt": 1,
+      "created_at": "2026-09-07T17:33:41.275591+00:00",
+      "output_json": {
+        "title": "登记里的空白",
+        "outline_text": "林澈取出任职三年的进出登记册，与许宁在书房分坐两侧，各自先凭记忆回放封路前一周的到访者、投送与钥匙交接，再与登记条目逐行对照：日期、签名、事由、来去时间。核对发现封路前三天共出现两段空白——一段未填来访事由，另一段签名潦草到无法辨认，但页边确有同一支笔补描的迹象。两人暂不指认任何人，只把空白页与同册其他页的墨色并排比对，许宁凭手感指出补描墨迹偏新、压痕浅于周围。两人据此将空白成因拆为两种可能：登记员漏记，或有人事后补描，二者目前都无定论。林澈在册页空白处加贴空白签条留底，原页不改动、不标注。最后，他平静地提出下一项待查：钥匙领取与归还记录中是否存在与这两段空白时段重叠的领取人，并约许宁次日先核对钥匙簿。"
+      },
+      "duration_ms": "2933"
+    }
+  ]
+}

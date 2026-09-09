@@ -1,0 +1,133 @@
+{
+  "creative_jobs": [
+    {
+      "id": "f5bae151-00ae-4403-b82e-4db9eae7b34e",
+      "kind": "novel_template",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "203e96f4-981c-4652-94fe-398b9273f6ee",
+      "kind": "outline_background",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "4acdae99-522d-4e31-b060-1bfa8dee3e39",
+      "kind": "outline_characters",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "d32d2cbe-6dbe-413e-8bd8-f12348c74738",
+      "kind": "outline_plot",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "bc0bd62b-a7e1-4f2d-90e9-f36f23416407",
+      "kind": "outline_highlight",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "265e9425-308b-4fe3-88c0-1009bf2676e3",
+      "kind": "chapter_storyline_recommendation",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "b9b09f6f-c1a2-4292-83d7-80d4c492ac7e",
+      "kind": "chapter_outline",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "2461de29-6bd2-42cc-871d-8332a965b32c",
+      "kind": "review",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "9d7f12eb-b5bf-4fb4-9f62-d2fd7c24469c",
+      "kind": "chapter_outline",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    },
+    {
+      "id": "c3486446-2a0c-463c-905c-3224c17ef1b7",
+      "kind": "chapter_outline",
+      "state": "ready",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3",
+      "actual_provider_id": null,
+      "actual_model_id": null
+    }
+  ],
+  "body_jobs": [
+    {
+      "id": "6159fbae-cb0d-4f05-8772-d9d9665eee83",
+      "document_id": "ba96cc98-1301-432a-8b40-6c72bff7c32b",
+      "state": "ready",
+      "attempt": 1,
+      "output_visible_character_count": 1880,
+      "validation_state": "meets_target"
+    },
+    {
+      "id": "4b6daaea-9623-4042-bd0f-755351499def",
+      "document_id": "a7edfb54-699e-452f-bb82-c920c27a601b",
+      "state": "ready",
+      "attempt": 1,
+      "output_visible_character_count": 1852,
+      "validation_state": "meets_target"
+    }
+  ],
+  "intelligence_jobs": [
+    {
+      "id": "414d6212-6871-4e0d-9caf-696afcc038a4",
+      "document_id": "ba96cc98-1301-432a-8b40-6c72bff7c32b",
+      "state": "partially_accepted",
+      "attempt": 1,
+      "requested_provider_id": "minimax-cn",
+      "requested_model_id": "MiniMax-M3"
+    }
+  ],
+  "active_story_facts": 2
+}

@@ -1,0 +1,100 @@
+{
+  "schema_version": "plan58-native-workbench-evidence/1",
+  "observed_at": "2026-09-07T23:54:16+08:00",
+  "recorded_at": "2026-09-08T00:00:00+08:00",
+  "environment": {
+    "qwenpaw_version": "2.1.0",
+    "qwenpaw_container": "ai-novel-s58-qwenpaw-test",
+    "qwenpaw_origin": "http://127.0.0.1:54385",
+    "database_container": "ai-novel-s58-dispatch-test",
+    "database_origin": "127.0.0.1:55471/ai_novel_s58_test",
+    "transport": "loopback fake OpenAI fixture",
+    "model": "s58-fake-model",
+    "long_lived_origin_touched": false,
+    "real_model_calls_added": 0
+  },
+  "installed_candidate": {
+    "plugin_sha256": "ef73d9e985282625d6d63d03d37f31be45ff5e16d9a7e0e4f3d5cb70e2eb1a12",
+    "middleware_sha256": "5b08181fc4dd24570736d3b55f46f01ec5d6f22fd53a7e83ff1af32c8bdd944b",
+    "native_domain_sha256": "c2e2c789b5087e6e864861361ed98a1535c4d827b4ec57ffcec1c0d8c2eb6f4a",
+    "package_and_installed_hashes_matched": true
+  },
+  "scope": {
+    "kind": "novel",
+    "novel_id": "fc111c69-e915-428d-a52b-5fd26b589b20",
+    "novel_title": "《雾宅来信》",
+    "document_id": "7651ac9a-dbd3-46fa-9721-1711493ceb11",
+    "document_title": "第1章",
+    "genre": "悬疑",
+    "synthetic_only": true
+  },
+  "suspense_enabled_send": {
+    "user_text": "帮我续写《雾宅来信》的下一段：林澈核对来信纸张批次与卷宗借阅记录，保持暴雨封路、死者来信、尚不知道篡改者身份，不新增人物，不提前揭晓幕后者。",
+    "action_id": "5ed0a3f9-ff71-41b4-9444-dbd1531d0dad",
+    "dispatch_id": "4c6e0c7c-2e00-444c-a2c7-51885c329d48",
+    "dispatch_state": "dispatched",
+    "job_ref": "native:5ed0a3f9-ff71-41b4-9444-dbd1531d0dad",
+    "primary_skill": "prose-writing",
+    "selected_ids": [
+      "suspense-writing"
+    ],
+    "provider_receipt_ordinal": 6,
+    "provider_exact_block_counts": {
+      "prose-writing/SKILL.md": 1,
+      "prose-writing/references/narrative-craft.md": 1,
+      "prose-writing/references/genre-promises.md": 1,
+      "suspense-writing/SKILL.md": 1
+    },
+    "tools": [],
+    "ui_receipt": "本次已装载到请求：小说正文写作 · 悬疑写作",
+    "same_tab_reload_restored_receipt": true,
+    "provider_calls_added_by_reload": 0
+  },
+  "ordinary_chat_negative": {
+    "user_text": "《雾宅来信》当前页面是哪一章？只回答页面信息，不要续写。",
+    "native_dispatch_created": false,
+    "native_receipt_cleared_after_bounded_polling": true,
+    "provider_receipt_ordinal": 7,
+    "managed_method_blocks": 0,
+    "ordinary_host_tools_remained_available": true
+  },
+  "disabled_category_fallback": {
+    "skill_disabled_via_public_api": "suspense-writing",
+    "user_text": "接着写《雾宅来信》的下一段：林澈继续核对现有证据，不新增人物，不揭晓幕后者。",
+    "action_id": "717f78eb-05d7-412f-ada1-415cb0d5a3fb",
+    "dispatch_id": "41131a7c-e3ee-4ec2-b731-ba0505a4c639",
+    "dispatch_state": "dispatched",
+    "job_ref": "native:717f78eb-05d7-412f-ada1-415cb0d5a3fb",
+    "primary_skill": "prose-writing",
+    "selected_ids": [],
+    "provider_receipt_ordinal": 9,
+    "provider_exact_block_counts": {
+      "prose-writing/SKILL.md": 1,
+      "prose-writing/references/narrative-craft.md": 1,
+      "prose-writing/references/genre-promises.md": 1
+    },
+    "suspense_block_count": 0,
+    "tools": [],
+    "ui_receipt": "本次已装载到请求：小说正文写作",
+    "skill_restored_via_public_api": true
+  },
+  "skill_state_after_test": {
+    "enabled_count": 10,
+    "suspense-writing": true,
+    "golden-finger-writing": false
+  },
+  "verification": {
+    "backend_regression_exit_code": 0,
+    "frontend_test_files": 155,
+    "frontend_tests": 1377,
+    "frontend_typecheck_exit_code": 0,
+    "git_diff_check_exit_code": 0,
+    "invalid_backend_attempt_before_retry": "isolated database URL omitted the postgres username and failed before database fixtures; not counted as a pass"
+  },
+  "limits": [
+    "This proves only deterministic native loading for a bound novel workbench on the isolated QwenPaw 2.1.0 host.",
+    "The loopback fake model proves request bytes, zero managed tools, durable dispatch and UI recovery; it does not prove literary quality.",
+    "creation_draft native scope, semantic native routing, real-model E-N, narrow-screen product evidence and long-lived install/uninstall remain unverified.",
+    "G-NATIVE, G-SEMANTIC-NATIVE and G-FULL therefore remain blocked."
+  ]
+}

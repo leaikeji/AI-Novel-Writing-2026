@@ -366,7 +366,18 @@ describe("assistant route wrap", () => {
     const nativeRuntime = {
       bind: vi.fn(),
       clear,
-      getSnapshot: vi.fn(() => ({ binding: null, status: null, checking: false, error: null })),
+      getSnapshot: vi.fn(() => ({
+        binding: {
+          actionId: "11111111-1111-4111-8111-111111111111",
+          sessionId: "session-1",
+          novelId: "novel-1",
+          documentId: "document-1",
+          tabInstance: "tab-instance",
+        },
+        status: null,
+        checking: true,
+        error: null,
+      })),
       subscribe: vi.fn(() => vi.fn()),
       dispose: vi.fn(),
     };
@@ -378,22 +389,32 @@ describe("assistant route wrap", () => {
       eventTarget: null,
       createResizeObserver: () => null,
       createAssistantPane: () => () => "assistant",
+      useSelectedAgent: () => ({ id: NOVEL_ASSISTANT_TARGET_AGENT_ID }),
+      useCurrentSession: () => ({ id: "session-1" }),
+      contextRefCoordinator: {
+        start: vi.fn(() => vi.fn()),
+        refresh: vi.fn(),
+        requestPatch: vi.fn(() => null),
+        getReadyRef: vi.fn(() => null),
+        getTabInstance: vi.fn(() => "tab-instance"),
+        dispose: vi.fn(),
+      },
       nativeWritingMethodRuntime: nativeRuntime,
     });
     const Component = wrap(() => "native-chat") as () => unknown;
 
     React.render(Component);
     React.flushEffects();
-    expect(clear).toHaveBeenCalledTimes(1);
+    expect(clear).not.toHaveBeenCalled();
 
     React.render(Component);
     React.flushEffects();
-    expect(clear).toHaveBeenCalledTimes(1);
+    expect(clear).not.toHaveBeenCalled();
 
     route = workbenchRoute("document-2");
     React.render(Component);
     React.flushEffects();
-    expect(clear).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledOnce();
   });
 
   it("uses the public session getter when the host session hook is temporarily null", () => {

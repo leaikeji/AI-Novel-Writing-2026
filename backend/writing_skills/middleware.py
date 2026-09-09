@@ -1,11 +1,10 @@
-"""Public native-chat middleware core; production activation remains closed.
+"""Public native-chat middleware for the deterministic workbench branch.
 
 The adapter accepts only a server-owned preparation callback.  It observes the
 current ``on_reply`` input, never conversation history or a client-declared
 Skill id, and delegates the raw model/tool boundary to the same frozen method
-policy used by managed buttons.  A production factory must still provide a
-durable native action claim and public catalog revalidation before registering
-this middleware.
+policy used by managed buttons. The released factory still fails closed unless
+every native-specific public capability is present.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
-from uuid import UUID
 
 from ..assistant_context import MiddlewareBase
 from .load_policy import (
@@ -21,10 +19,18 @@ from .load_policy import (
     ManagedMethodPolicy,
     ManagedRequestBinding,
     MethodPolicyViolation,
+    PublicLoadCapabilities,
 )
 
 
 MAX_NATIVE_USER_INPUT_CHARACTERS = 20_000
+NATIVE_CAPABILITIES = PublicLoadCapabilities(
+    current_request_injection=True,
+    pre_io_tool_control=True,
+    no_unobserved_load_path=True,
+    no_history_retention=True,
+    compression_isolation=True,
+)
 
 
 @dataclass(frozen=True)
@@ -46,12 +52,24 @@ _SELECTION_OPERATIONS = (
     (("请审查", "审查", "请检查", "检查", "请评审", "评审"), "review"),
 )
 _REVIEW_PREFIXES = ("请审查", "审查", "请检查", "检查", "请评审", "评审")
-_WRITE_PREFIXES = ("请续写", "续写", "请写", "写一", "创作", "请创作", "生成正文", "请生成正文")
+_WRITE_PREFIXES = (
+    "续写", "接着写", "继续写", "往下写", "写一", "写这", "创作", "生成正文",
+)
 _DESIGN_PREFIXES = ("请设计", "设计", "请规划", "规划", "请完善", "完善", "请补全", "补全")
+_POLITE_PREFIXES = ("麻烦你帮我", "麻烦帮我", "可以请你", "我想让你", "请你帮我", "请帮我", "帮我", "请你", "麻烦你", "请")
+_CUSTOM_SELECTION_PREFIXES = (
+    "按我的要求修改", "按下面要求修改", "按以下要求修改", "根据我的要求修改",
+    "调整这段", "修改这段",
+)
 
 
 def _starts_with_any(text: str, prefixes: tuple[str, ...]) -> bool:
     compact = text.lstrip(" \t\r\n，。；：:！!")
+    for _ in range(2):
+        polite = next((item for item in _POLITE_PREFIXES if compact.startswith(item)), None)
+        if polite is None:
+            break
+        compact = compact[len(polite):].lstrip(" \t\r\n，。；：:！!")
     return any(compact.startswith(prefix) for prefix in prefixes)
 
 
@@ -79,6 +97,13 @@ def native_task_route(snapshot: Mapping[str, object], user_text: str) -> NativeT
                     primary_skill="style-review" if operation == "review" else "prose-writing",
                     operation=operation,
                 )
+        if _starts_with_any(user_text, _CUSTOM_SELECTION_PREFIXES):
+            return NativeTaskRoute(
+                task="selection_edit",
+                intent="write",
+                primary_skill="prose-writing",
+                operation="custom",
+            )
     if _starts_with_any(user_text, _REVIEW_PREFIXES) and view in {
         "chapter-editor",
         "chapter-outline-editor",
@@ -94,6 +119,11 @@ def native_task_route(snapshot: Mapping[str, object], user_text: str) -> NativeT
     ):
         return NativeTaskRoute(task="chapter_outline", intent="fresh", primary_skill="chapter-outline")
     if view == "novel-outline" and _starts_with_any(user_text, _DESIGN_PREFIXES):
+        return NativeTaskRoute(task="direction", intent="fresh", primary_skill="novel-direction")
+    if view == "novel-creation-wizard" and (
+        _starts_with_any(user_text, _WRITE_PREFIXES)
+        or _starts_with_any(user_text, _DESIGN_PREFIXES)
+    ):
         return NativeTaskRoute(task="direction", intent="fresh", primary_skill="novel-direction")
     if view == "character-editor" and (
         _starts_with_any(user_text, _WRITE_PREFIXES)
@@ -111,7 +141,6 @@ def native_task_route(snapshot: Mapping[str, object], user_text: str) -> NativeT
 class NativePreparedAction:
     """One already-claimed action supplied by the project domain service."""
 
-    action_id: UUID
     policy: ManagedMethodPolicy
     verify_current: Callable[[], Awaitable[None]]
     mark_dispatch_started: Callable[[], Awaitable[None]]
@@ -171,13 +200,17 @@ def create_native_writing_middleware(
 ) -> "NativeWritingMethodMiddleware | None":
     """Build the native adapter from a leased server ticket.
 
-    Production registration does not pass ``released=True`` while ``G-NATIVE``
-    is blocked.  The keyword exists for isolated public-contract tests only;
-    no request or model field can set it.
+    ``released`` is server-owned and no request/model field can set it. Even a
+    released registration remains inert if the public capability gate is
+    incomplete.
     """
 
     del agent_config
     if not released:
+        return None
+    try:
+        NATIVE_CAPABILITIES.require("native")
+    except MethodPolicyViolation:
         return None
     request = getattr(ctx, "request", None)
     request_context = getattr(request, "request_context", None)
@@ -371,6 +404,7 @@ class NativeWritingMethodMiddleware(MiddlewareBase):
 
 __all__ = [
     "MAX_NATIVE_USER_INPUT_CHARACTERS",
+    "NATIVE_CAPABILITIES",
     "NativePreparedAction",
     "NativeTaskRoute",
     "NativeWritingMethodMiddleware",

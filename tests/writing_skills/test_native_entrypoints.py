@@ -10,12 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.assistant_context import Msg, TextBlock
+import backend.writing_skills.middleware as middleware_module
 from backend.writing_skills.contracts import (
     MethodBlock,
     SkillInjectionPacketV1,
     SkillInvocationPlanV1,
 )
 from backend.writing_skills.load_policy import ManagedMethodPolicy, MethodPolicyViolation
+from backend.writing_skills.load_policy import PublicLoadCapabilities
 from backend.writing_skills.middleware import (
     NativePreparedAction,
     NativeWritingMethodMiddleware,
@@ -25,11 +27,14 @@ from backend.writing_skills.middleware import (
     native_task_route,
 )
 from backend.assistant_context_registry import AssistantContextRefRegistry, ContextRefBinding
-from backend.models import Novel
+from backend.models import Novel, NovelCreationDraft
 from backend.writing_skills import button
 from backend.writing_skills.catalog import published_skill_ids
 from backend.writing_skills.models import WritingSkillDispatch
-from backend.writing_skills.api import native_writing_action_result
+from backend.writing_skills.api import (
+    native_creation_writing_action_result,
+    native_writing_action_result,
+)
 from backend.writing_skills.native import (
     NativeActionReplay,
     NativeModelConfig,
@@ -78,7 +83,6 @@ def prepared(events: list[object]) -> NativePreparedAction:
         events.append(("failed", uncertain))
 
     return NativePreparedAction(
-        action_id=ACTION_ID,
         policy=method_policy(),
         verify_current=verify_current,
         mark_dispatch_started=mark_started,
@@ -107,6 +111,21 @@ def test_released_factory_has_no_client_release_switch():
     )
 
 
+def test_released_factory_fails_closed_when_native_public_gate_is_incomplete(monkeypatch):
+    monkeypatch.setattr(
+        middleware_module,
+        "NATIVE_CAPABILITIES",
+        PublicLoadCapabilities(
+            current_request_injection=True,
+            pre_io_tool_control=True,
+            no_unobserved_load_path=True,
+            no_history_retention=True,
+            compression_isolation=False,
+        ),
+    )
+    assert create_released_native_writing_middleware(SimpleNamespace(), None) is None
+
+
 @pytest.mark.parametrize("text", [
     "《雾宅来信》",
     "《雾宅来信》现在一共有多少章？",
@@ -133,6 +152,17 @@ def test_explicit_real_writing_request_maps_by_current_view_not_title():
     )
 
 
+@pytest.mark.parametrize("text", [
+    "帮我续写这一章，保持事实不变。",
+    "接着写一段，把调查推进到档案室。",
+    "麻烦你往下写，但不要提前揭晓真相。",
+])
+def test_natural_explicit_writing_phrases_cannot_escape_managed_route(text):
+    route = native_task_route({"page": {"view": "chapter-editor"}}, text)
+    assert route is not None
+    assert (route.task, route.primary_skill) == ("chapter_body", "prose-writing")
+
+
 def test_selection_operation_and_review_are_explicit_and_fail_closed():
     selected = {"page": {"view": "chapter-editor"}, "selection": {"id": "sel-1"}}
     route = native_task_route(selected, "请润色这段，让动作更清楚。")
@@ -143,6 +173,30 @@ def test_selection_operation_and_review_are_explicit_and_fail_closed():
     )
     assert review is not None and review.task == "review" and review.primary_skill == "style-review"
     assert native_task_route(selected, "帮我看看这一段。") is None
+    custom = native_task_route(selected, "请按我的要求修改这段：压低旁白解释感。")
+    assert custom is not None
+    assert (custom.task, custom.operation) == ("selection_edit", "custom")
+
+
+def test_creation_wizard_design_request_uses_direction_without_a_fake_novel():
+    route = native_task_route(
+        {
+            "page": {
+                "section": "creation",
+                "view": "novel-creation-wizard",
+                "step": 2,
+            },
+            "creationDraft": {
+                "id": "draft-1",
+                "version": 1,
+                "step": 2,
+                "state": "draft",
+            },
+        },
+        "帮我完善当前创作思路的核心冲突。",
+    )
+    assert route is not None
+    assert (route.task, route.primary_skill) == ("direction", "novel-direction")
 
 
 def test_current_modal_owns_the_native_task_over_the_page_beneath_it():
@@ -256,7 +310,6 @@ async def test_evidence_write_failure_does_not_mask_native_model_failure():
 
     async def prepare(_user_text: str):
         return NativePreparedAction(
-            action_id=base.action_id,
             policy=base.policy,
             verify_current=base.verify_current,
             mark_dispatch_started=base.mark_dispatch_started,
@@ -625,3 +678,122 @@ async def test_native_factory_uses_leased_server_action_and_is_closed_by_default
             WritingSkillDispatch.action_id == created.writing_action_id
         ))
         assert row is not None and row.state == "dispatched" and row.entry == "native"
+
+
+@pytest.mark.asyncio
+async def test_native_factory_supports_exact_creation_draft_scope(native_harness):
+    now = datetime(2026, 9, 8, 0, 10, tzinfo=timezone.utc)
+    draft_id = uuid4()
+    with Session(native_harness["engine"]) as session:
+        session.add(NovelCreationDraft(
+            id=draft_id,
+            draft_key=f"s58-native-creation-{draft_id}",
+            step=2,
+            state="draft",
+            version=3,
+            data_json={
+                "idea": "暴雨封路后，刑警收到死者来信。",
+                "genre": "悬疑",
+                "subgenre": "刑侦",
+            },
+        ))
+        session.commit()
+    snapshot = {
+        "schemaVersion": "creation-draft-assistant-context/1",
+        "contextRevision": 3,
+        "capturedAt": now.isoformat(),
+        "expiresAt": (now + timedelta(minutes=5)).isoformat(),
+        "agentId": "ai-novel-writer",
+        "sessionId": "native-session-58",
+        "creationDraft": {
+            "id": str(draft_id),
+            "version": 3,
+            "step": 2,
+            "state": "draft",
+        },
+        "page": {
+            "section": "creation",
+            "view": "novel-creation-wizard",
+            "step": 2,
+        },
+        "editing": {
+            "fields": [{
+                "id": "creation.idea",
+                "label": "创作思路",
+                "value": "暴雨封路后，刑警收到死者来信。",
+                "dirty": False,
+                "truncated": False,
+                "characterCount": 17,
+                "persistence": "explicit-save",
+            }],
+        },
+        "budget": {
+            "maxCharacters": 24_000,
+            "usedCharacters": 600,
+            "truncated": False,
+            "omittedFieldIds": [],
+        },
+    }
+    registry = AssistantContextRefRegistry(clock=lambda: now)
+    created = registry.create(
+        binding=ContextRefBinding(
+            owner_token="owner_token_native_58",
+            tab_instance="anw-tab-native-58",
+            agent_id="ai-novel-writer",
+            novel_id=None,
+            session_id="native-session-58",
+            creation_draft_id=str(draft_id),
+        ),
+        snapshot=snapshot,
+        runtime_app=native_harness["app"],
+    )
+    ctx = SimpleNamespace(
+        agent_id="ai-novel-writer",
+        root_agent_id="ai-novel-writer",
+        session_id="native-session-58",
+        request=SimpleNamespace(
+            agent_id="ai-novel-writer",
+            session_id="native-session-58",
+            request_context={"context_ref": created.context_ref},
+        ),
+    )
+    middleware = create_native_writing_middleware(
+        ctx,
+        None,
+        released=True,
+        registry=registry,
+        session_factory=lambda: Session(native_harness["engine"]),
+        model_probe_override=native_harness["model_probe"],
+    )
+    assert middleware is not None
+    text = "帮我完善当前创作思路的核心冲突，不要提前给出真相。"
+
+    async def reply():
+        async def model():
+            return "创作方向建议"
+
+        assert await middleware.on_model_call(
+            None, {"messages": [], "tools": []}, model
+        ) == "创作方向建议"
+        yield "建议事件"
+
+    assert [event async for event in middleware.on_reply(
+        None, {"inputs": text}, reply
+    )] == ["建议事件"]
+    with Session(native_harness["engine"]) as session:
+        row = session.scalar(select(WritingSkillDispatch).where(
+            WritingSkillDispatch.action_id == created.writing_action_id
+        ))
+        assert row is not None
+        assert row.scope_kind == "creation_draft"
+        assert row.scope_id == draft_id and row.novel_id is None
+        assert row.method_packet["plan"]["primary_skill"] == "novel-direction"
+        assert row.method_packet["plan"]["selected"][0]["skill_id"] == "suspense-writing"
+        status = native_creation_writing_action_result(
+            draft_id=draft_id,
+            action_id=created.writing_action_id,
+            tab_id="anw-tab-native-58",
+            session=session,
+        )
+        assert status.state == "dispatched"
+        assert status.selected_ids == ("suspense-writing",)

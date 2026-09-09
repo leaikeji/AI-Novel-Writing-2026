@@ -6,7 +6,10 @@ import {
 } from "./contracts";
 import { registerAssistantRouteWrap } from "./assistant-route-wrap";
 import { registerAssistantRequestPayload } from "./assistant-request-payload";
-import { createAssistantContextRefCoordinator } from "./assistant-context-ref";
+import {
+  createAssistantContextRefCoordinator,
+  createAssistantTabInstance,
+} from "./assistant-context-ref";
 import { createAssistantContextRefHttpClient } from "./assistant-context-transport";
 import { assistantContextRuntime } from "./assistant-context-runtime";
 import {
@@ -80,13 +83,16 @@ const assistantProposalCoordinator = new AssistantProposalCoordinator({
   registry: assistantSelectionRegistry,
   transactions: assistantEditTransactions,
 });
+const assistantTabInstance = createAssistantTabInstance();
 const nativeWritingMethodRuntime = createNativeWritingMethodRuntime({
   transport: createNativeWritingMethodHttpTransport(),
+  expectedTabInstance: assistantTabInstance,
 });
 const assistantContextRefCoordinator = createAssistantContextRefCoordinator({
   runtime: assistantContextRuntime,
   getRouteSession: activeWorkbenchRouteSession,
   createRef: createAssistantContextRefHttpClient(),
+  tabInstance: assistantTabInstance,
   bindSelectionForSend: (input) => (
     assistantSelectionController.bindSelectionForSend(input)
   ),

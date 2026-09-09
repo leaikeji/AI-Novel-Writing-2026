@@ -1,7 +1,7 @@
 """Durable deterministic preparation for one native writing send.
 
-This module does not register itself with QwenPaw.  The production factory is
-kept closed until the public native page, status and lifecycle gates pass.
+This module does not register itself with QwenPaw; the public middleware
+factory owns the explicit native capability gate.
 """
 
 from __future__ import annotations
@@ -15,11 +15,13 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..embedding.chunking import estimate_token_count
-from ..models import Document, Novel
+from ..models import Document, Novel, NovelCreationDraft
 from .button import current_catalog
 from .composer import compose_writing_request
 from .contracts import (
     ActionIdentity,
+    FIXED_LOCAL_OWNER_ID,
+    FIXED_LOCAL_WORKSPACE_ID,
     FrozenRouteRequest,
     MethodPreferences,
     Scope,
@@ -97,7 +99,52 @@ def _scope_and_labels(
     )
 
 
+def _creation_scope_and_labels(
+    session: Session,
+    *,
+    draft_id: UUID,
+    expected_version: int,
+    expected_step: int,
+    tab_id: str,
+) -> tuple[Scope, str, str]:
+    draft = session.get(NovelCreationDraft, draft_id)
+    if (
+        draft is None
+        or draft.state != "draft"
+        or draft.version != expected_version
+        or draft.step != expected_step
+    ):
+        raise PermissionError("native creation draft scope is unavailable")
+    data = draft.data_json if isinstance(draft.data_json, Mapping) else {}
+    genre = data.get("genre", "")
+    subgenre = data.get("subgenre", "")
+    if not isinstance(genre, str) or not isinstance(subgenre, str):
+        raise PermissionError("native creation draft classification is invalid")
+    return (
+        Scope(
+            owner_id=FIXED_LOCAL_OWNER_ID,
+            workspace_id=FIXED_LOCAL_WORKSPACE_ID,
+            kind="creation_draft",
+            scope_id=draft.id,
+            tab_id=tab_id,
+        ),
+        genre,
+        subgenre,
+    )
+
+
 def _authorize(session: Session, scope: Scope) -> None:
+    if scope.kind == "creation_draft":
+        draft = session.get(NovelCreationDraft, scope.scope_id)
+        if (
+            draft is None
+            or draft.state != "draft"
+            or scope.owner_id != FIXED_LOCAL_OWNER_ID
+            or scope.workspace_id != FIXED_LOCAL_WORKSPACE_ID
+            or scope.document_id is not None
+        ):
+            raise PermissionError("native creation draft scope changed")
+        return
     current, _, _ = _scope_and_labels(
         session,
         novel_id=scope.scope_id,
@@ -134,24 +181,47 @@ async def prepare_native_action(
     route = native_task_route(snapshot, user_text)
     if route is None:
         return None
+    raw_draft = snapshot.get("creationDraft")
+    creation_scope = isinstance(raw_draft, Mapping)
     try:
-        novel_id = UUID(str(snapshot["novel"]["id"]))
-        raw_document = snapshot.get("document")
-        document_id = (
-            UUID(str(raw_document["id"]))
-            if isinstance(raw_document, Mapping) and raw_document.get("id")
-            else None
-        )
+        if creation_scope:
+            draft_id = UUID(str(raw_draft["id"]))
+            draft_version = int(raw_draft["version"])
+            draft_step = int(raw_draft["step"])
+            novel_id = None
+            document_id = None
+        else:
+            novel_id = UUID(str(snapshot["novel"]["id"]))
+            raw_document = snapshot.get("document")
+            document_id = (
+                UUID(str(raw_document["id"]))
+                if isinstance(raw_document, Mapping) and raw_document.get("id")
+                else None
+            )
+            draft_id = None
+            draft_version = 0
+            draft_step = 0
     except (KeyError, TypeError, ValueError, AttributeError):
         raise PermissionError("native writing snapshot scope is invalid") from None
 
     with session_factory() as session:
-        scope, genre, subgenre = _scope_and_labels(
-            session,
-            novel_id=novel_id,
-            document_id=document_id,
-            tab_id=tab_id,
-        )
+        if creation_scope:
+            assert draft_id is not None
+            scope, genre, subgenre = _creation_scope_and_labels(
+                session,
+                draft_id=draft_id,
+                expected_version=draft_version,
+                expected_step=draft_step,
+                tab_id=tab_id,
+            )
+        else:
+            assert novel_id is not None
+            scope, genre, subgenre = _scope_and_labels(
+                session,
+                novel_id=novel_id,
+                document_id=document_id,
+                tab_id=tab_id,
+            )
         projection = native_projection(
             scope,
             snapshot,
@@ -248,12 +318,23 @@ async def prepare_native_action(
         nonlocal current
         with session_factory() as session:
             _authorize(session, scope)
-            _, fresh_genre, fresh_subgenre = _scope_and_labels(
-                session,
-                novel_id=novel_id,
-                document_id=document_id,
-                tab_id=tab_id,
-            )
+            if creation_scope:
+                assert draft_id is not None
+                _, fresh_genre, fresh_subgenre = _creation_scope_and_labels(
+                    session,
+                    draft_id=draft_id,
+                    expected_version=draft_version,
+                    expected_step=draft_step,
+                    tab_id=tab_id,
+                )
+            else:
+                assert novel_id is not None
+                _, fresh_genre, fresh_subgenre = _scope_and_labels(
+                    session,
+                    novel_id=novel_id,
+                    document_id=document_id,
+                    tab_id=tab_id,
+                )
             found = lookup_action(
                 session,
                 identity,
@@ -320,7 +401,6 @@ async def prepare_native_action(
                 pass
 
     return NativePreparedAction(
-        action_id=action_id,
         policy=ManagedMethodPolicy(packet),
         verify_current=verify_current,
         mark_dispatch_started=mark_dispatch_started,

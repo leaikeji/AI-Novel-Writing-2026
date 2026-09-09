@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createAssistantContextRefCoordinator,
+  createAssistantTabInstance,
   type CreatedAssistantContextRef,
 } from "./assistant-context-ref";
 import { NovelAssistantContextRuntime } from "./assistant-context-runtime";
@@ -11,6 +12,34 @@ import type { RouteSessionSnapshot } from "./workbench-route";
 
 const NOW = Date.parse("2026-08-25T10:00:00.000Z");
 const OWNER = "owner_token_0000000000000001";
+
+
+describe("assistant tab identity", () => {
+  it("reuses the identity only for a reload of the same tab", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+    };
+    const first = "anw-tab-11111111-1111-4111-8111-111111111111";
+    const duplicate = "anw-tab-22222222-2222-4222-8222-222222222222";
+    expect(createAssistantTabInstance({
+      storage,
+      navigationType: "navigate",
+      createId: () => first,
+    })).toBe(first);
+    expect(createAssistantTabInstance({
+      storage,
+      navigationType: "reload",
+      createId: () => { throw new Error("reload must reuse the existing identity"); },
+    })).toBe(first);
+    expect(createAssistantTabInstance({
+      storage,
+      navigationType: "navigate",
+      createId: () => duplicate,
+    })).toBe(duplicate);
+  });
+});
 
 
 function bodyAdapter(value: () => string): EditableFieldAdapter {

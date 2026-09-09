@@ -36,6 +36,7 @@ CONTEXT_REF_MAX_PROCESS = 64
 CONTEXT_REF_OWNER_RATE_LIMIT = 30
 CONTEXT_REF_OWNER_RATE_WINDOW = timedelta(minutes=1)
 CONTEXT_SCHEMA_VERSION = 2
+CREATION_DRAFT_CONTEXT_SCHEMA = "creation-draft-assistant-context/1"
 CONTEXT_SNAPSHOT_MAX_TTL = timedelta(minutes=20)
 CONTEXT_MAX_CLOCK_SKEW = timedelta(seconds=60)
 SELECTION_CONTEXT_MAX_CHARACTERS = 1_500
@@ -120,9 +121,10 @@ class ContextRefBinding:
     owner_token: str
     tab_instance: str
     agent_id: str
-    novel_id: str
+    novel_id: str | None
     document_id: str | None = None
     session_id: str | None = None
+    creation_draft_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -306,6 +308,16 @@ def _only_keys(
 
 
 def _valid_binding(binding: ContextRefBinding, *, lease: bool) -> bool:
+    novel_scope = (
+        _bounded_string(binding.novel_id, 1, 200, stripped=True)
+        and binding.creation_draft_id is None
+        and _optional_bounded_string(binding.document_id)
+    )
+    creation_scope = (
+        binding.novel_id is None
+        and _bounded_string(binding.creation_draft_id, 1, 200, stripped=True)
+        and binding.document_id is None
+    )
     return (
         isinstance(binding, ContextRefBinding)
         and isinstance(binding.owner_token, str)
@@ -313,8 +325,7 @@ def _valid_binding(binding: ContextRefBinding, *, lease: bool) -> bool:
         and isinstance(binding.tab_instance, str)
         and bool(_TOKEN_PATTERN.fullmatch(binding.tab_instance))
         and binding.agent_id == TARGET_AGENT_ID
-        and _bounded_string(binding.novel_id, 1, 200, stripped=True)
-        and _optional_bounded_string(binding.document_id)
+        and (novel_scope or creation_scope)
         and _optional_bounded_string(binding.session_id)
         and (not lease or binding.session_id is not None)
     )
@@ -788,11 +799,108 @@ def _validate_story_ledger_context(value: object) -> bool:
     )
 
 
+def _validate_creation_draft_snapshot(
+    snapshot: Mapping[str, object],
+    binding: ContextRefBinding,
+    now: datetime,
+) -> _ValidatedSnapshot:
+    if not _only_keys(
+        snapshot,
+        required=frozenset({
+            "schemaVersion", "contextRevision", "capturedAt", "expiresAt",
+            "agentId", "creationDraft", "page", "budget",
+        }),
+        optional=frozenset({"sessionId", "editing"}),
+    ):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_SNAPSHOT)
+    revision = snapshot.get("contextRevision")
+    captured_at = _parse_timestamp(snapshot.get("capturedAt"))
+    expires_at = _parse_timestamp(snapshot.get("expiresAt"))
+    if (
+        snapshot.get("schemaVersion") != CREATION_DRAFT_CONTEXT_SCHEMA
+        or not _safe_integer(revision)
+        or captured_at is None
+        or expires_at is None
+        or expires_at <= captured_at
+        or captured_at > now + CONTEXT_MAX_CLOCK_SKEW
+        or expires_at - captured_at > CONTEXT_SNAPSHOT_MAX_TTL
+        or expires_at <= now
+    ):
+        raise ContextRefCreateError(
+            ContextRefCreateErrorCode.UNSUPPORTED_SCHEMA
+            if snapshot.get("schemaVersion") != CREATION_DRAFT_CONTEXT_SCHEMA
+            else ContextRefCreateErrorCode.INVALID_TIME_WINDOW
+        )
+    if snapshot.get("agentId") != binding.agent_id:
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
+    snapshot_session = snapshot.get("sessionId")
+    if (
+        ("sessionId" in snapshot and not _bounded_string(
+            snapshot_session, 1, 200, stripped=True
+        ))
+        or snapshot_session != binding.session_id
+    ):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
+    draft = snapshot.get("creationDraft")
+    if (
+        not isinstance(draft, Mapping)
+        or not _only_keys(
+            draft,
+            required=frozenset({"id", "version", "step", "state"}),
+        )
+        or draft.get("id") != binding.creation_draft_id
+        or not _bounded_string(draft.get("id"), 1, 200, stripped=True)
+        or not _safe_integer(draft.get("version"))
+        or draft.get("version", 0) < 1
+        or not _safe_integer(draft.get("step"))
+        or draft.get("step", 7) > 6
+        or draft.get("state") != "draft"
+    ):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
+    page = snapshot.get("page")
+    if (
+        not isinstance(page, Mapping)
+        or not _only_keys(page, required=frozenset({"section", "view", "step"}))
+        or page.get("section") != "creation"
+        or page.get("view") != "novel-creation-wizard"
+        or page.get("step") != draft.get("step")
+    ):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_SNAPSHOT)
+    if "editing" in snapshot and not _validate_editing(snapshot.get("editing")):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_SNAPSHOT)
+    if not _validate_budget(snapshot.get("budget")):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BUDGET)
+    try:
+        serialized = json.dumps(
+            dict(snapshot), ensure_ascii=False, separators=(",", ":"),
+            sort_keys=True, allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        raise ContextRefCreateError(
+            ContextRefCreateErrorCode.INVALID_SNAPSHOT
+        ) from None
+    payload_characters = _utf16_length(serialized)
+    if payload_characters > MAX_CONTEXT_CHARACTERS:
+        raise ContextRefCreateError(ContextRefCreateErrorCode.CONTEXT_TOO_LARGE)
+    return _ValidatedSnapshot(
+        serialized=serialized,
+        expires_at=expires_at,
+        context_revision=revision,
+        payload_characters=payload_characters,
+    )
+
+
 def _validate_snapshot(
     snapshot: Mapping[str, object],
     binding: ContextRefBinding,
     now: datetime,
 ) -> _ValidatedSnapshot:
+    if snapshot.get("schemaVersion") == CREATION_DRAFT_CONTEXT_SCHEMA:
+        if binding.creation_draft_id is None or binding.novel_id is not None:
+            raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
+        return _validate_creation_draft_snapshot(snapshot, binding, now)
+    if binding.novel_id is None or binding.creation_draft_id is not None:
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
     if not isinstance(snapshot, Mapping) or not _only_keys(
         snapshot,
         required=frozenset(
@@ -985,11 +1093,17 @@ def _canonical_request_size(
         "ownerToken": binding.owner_token,
         "tabInstance": binding.tab_instance,
         "agentId": binding.agent_id,
-        "novelId": binding.novel_id,
         "snapshot": json.loads(serialized_snapshot),
     }
-    if binding.document_id is not None:
-        envelope["documentId"] = binding.document_id
+    if binding.creation_draft_id is not None:
+        envelope.update({
+            "scopeKind": "creation_draft",
+            "scopeId": binding.creation_draft_id,
+        })
+    else:
+        envelope["novelId"] = binding.novel_id
+        if binding.document_id is not None:
+            envelope["documentId"] = binding.document_id
     if binding.session_id is not None:
         envelope["sessionId"] = binding.session_id
     return len(
@@ -1168,6 +1282,7 @@ class AssistantContextRefRegistry:
                 novel_id=stored.novel_id,
                 document_id=stored.document_id,
                 session_id=session_id,
+                creation_draft_id=stored.creation_draft_id,
             )
             return self._lease_locked(context_ref, runtime_binding, now)
 
@@ -1343,6 +1458,7 @@ class AssistantContextRefRegistry:
             and stored.agent_id == binding.agent_id
             and stored.novel_id == binding.novel_id
             and stored.document_id == binding.document_id
+            and stored.creation_draft_id == binding.creation_draft_id
         )
 
     def _invalid_lease_locked(self) -> ContextRefLeaseResult:

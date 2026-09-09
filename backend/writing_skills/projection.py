@@ -93,17 +93,27 @@ def native_projection(
     term from the title or prose is promoted to a mechanism source.
     """
 
-    if scope.kind != "novel":
-        raise ValueError("native projection requires novel scope")
     novel = snapshot.get("novel")
+    draft = snapshot.get("creationDraft")
     document = snapshot.get("document")
-    if not isinstance(novel, Mapping) or str(scope.scope_id) != str(novel.get("id")):
-        raise ValueError("native novel scope mismatch")
-    if scope.document_id is not None and (
-        not isinstance(document, Mapping)
-        or str(scope.document_id) != str(document.get("id"))
-    ):
-        raise ValueError("native document scope mismatch")
+    if scope.kind == "creation_draft":
+        if (
+            not isinstance(draft, Mapping)
+            or str(scope.scope_id) != str(draft.get("id"))
+            or scope.document_id is not None
+            or novel is not None
+        ):
+            raise ValueError("native creation draft scope mismatch")
+    elif scope.kind == "novel":
+        if not isinstance(novel, Mapping) or str(scope.scope_id) != str(novel.get("id")):
+            raise ValueError("native novel scope mismatch")
+        if scope.document_id is not None and (
+            not isinstance(document, Mapping)
+            or str(scope.document_id) != str(document.get("id"))
+        ):
+            raise ValueError("native document scope mismatch")
+    else:
+        raise ValueError("unsupported native scope")
     if not isinstance(user_text, str) or not user_text.strip():
         raise ValueError("native current user text is required")
     if not isinstance(genre, str) or not isinstance(subgenre, str):
@@ -126,6 +136,7 @@ def native_projection(
     stable_page = {
         "context_revision": snapshot.get("contextRevision"),
         "page": snapshot.get("page"),
+        "creation_draft": snapshot.get("creationDraft"),
         "document": snapshot.get("document"),
         "selection": snapshot.get("selection"),
         "genre": genre,

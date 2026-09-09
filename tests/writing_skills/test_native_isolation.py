@@ -1,6 +1,4 @@
 import hashlib
-from uuid import UUID
-
 import pytest
 
 from backend.assistant_context import Msg, TextBlock
@@ -47,7 +45,6 @@ def prepared(events: list[object]) -> NativePreparedAction:
         events.append(("failed", uncertain))
 
     return NativePreparedAction(
-        action_id=UUID("00000000-0000-4000-8000-000000000058"),
         policy=ManagedMethodPolicy(packet),
         verify_current=verify,
         mark_dispatch_started=started,

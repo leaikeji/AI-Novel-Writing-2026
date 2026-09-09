@@ -1,0 +1,28 @@
+[
+  {
+    "id": "6a514f1b-c5f4-4f23-a74a-19be4472bccd",
+    "type": "character_state",
+    "subject": "林澈",
+    "predicate": "列出门廊来信三条待查：信封从何进入门廊；邮戳日期、寄出路径与现存物件如何核验；雾宅近期进出登记是否完整、是否有缺",
+    "object": "三条待查事项",
+    "status": "active",
+    "source_revision": "1862112e-1e26-4e1c-a378-3e14358d0449",
+    "source_document": "ba96cc98-1301-432a-8b40-6c72bff7c32b",
+    "character_instance_id": "4dead762-ad4d-4b7c-a748-37be7fa6230c",
+    "storyline_id": null,
+    "story_sequence": 1
+  },
+  {
+    "id": "ceb1492e-6ade-41ca-a482-d935ad00f8c8",
+    "type": "storyline_event",
+    "subject": "林澈与许宁",
+    "predicate": "分别独立记录门廊来信外观、周边环境与封口胶状况，并整理三条待查事项",
+    "object": "信封来源、邮戳与进出登记",
+    "status": "active",
+    "source_revision": "1862112e-1e26-4e1c-a378-3e14358d0449",
+    "source_document": "ba96cc98-1301-432a-8b40-6c72bff7c32b",
+    "character_instance_id": null,
+    "storyline_id": "e37c60c8-dcde-40fa-aead-a4453350f562",
+    "story_sequence": 1
+  }
+]

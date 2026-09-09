@@ -107,6 +107,50 @@ def valid_payload(
     }
 
 
+def valid_creation_payload(
+    *,
+    now: datetime | None = None,
+    session_id: str = "session-1",
+) -> dict[str, object]:
+    captured_at = now or datetime.now(timezone.utc)
+    return {
+        "schemaVersion": "creation-draft-assistant-context/1",
+        "contextRevision": 2,
+        "capturedAt": captured_at.isoformat(),
+        "expiresAt": (captured_at + timedelta(minutes=10)).isoformat(),
+        "agentId": TARGET_AGENT_ID,
+        "sessionId": session_id,
+        "creationDraft": {
+            "id": "creation-draft-1",
+            "version": 3,
+            "step": 2,
+            "state": "draft",
+        },
+        "page": {
+            "section": "creation",
+            "view": "novel-creation-wizard",
+            "step": 2,
+        },
+        "editing": {
+            "fields": [{
+                "id": "creation.idea",
+                "label": "创作思路",
+                "value": "暴雨封路，刑警收到死者来信。",
+                "dirty": True,
+                "truncated": False,
+                "characterCount": 16,
+                "persistence": "explicit-save",
+            }],
+        },
+        "budget": {
+            "maxCharacters": MAX_CONTEXT_CHARACTERS,
+            "usedCharacters": 500,
+            "truncated": False,
+            "omittedFieldIds": [],
+        },
+    }
+
+
 def test_hook_uses_public_pre_execute_contract_and_injects_only_this_turn() -> None:
     payload = valid_payload()
     ctx = FakeHookContext(json.dumps(payload, ensure_ascii=False))
@@ -250,6 +294,51 @@ def test_public_middleware_factory_prepends_role_user_context() -> None:
     assert observed_scopes[0].selection_id == payload["selection"]["id"]
     assert observed_scopes[0].selection_character_count == 5
     assert current_assistant_workspace_scope() is None
+
+
+def test_creation_draft_context_is_user_data_without_novel_tool_scope() -> None:
+    payload = valid_creation_payload()
+    registry = AssistantContextRefRegistry()
+    created = registry.create(
+        binding=ContextRefBinding(
+            owner_token="owner_token_0000000000000001",
+            tab_instance="tab_instance_000000000000001",
+            agent_id=TARGET_AGENT_ID,
+            novel_id=None,
+            session_id="session-1",
+            creation_draft_id="creation-draft-1",
+        ),
+        snapshot=payload,
+    )
+    ctx = FakeHookContext(None)
+    ctx.request.request_context = {CONTEXT_REF_REQUEST_KEY: created.context_ref}
+    middleware = create_ai_novel_page_context_middleware(
+        ctx,
+        None,
+        registry=registry,
+    )
+    assert middleware is not None
+    observed: list[object] = []
+    scopes: list[object] = []
+
+    async def next_handler():
+        observed.extend(input_kwargs["inputs"])
+        scopes.append(current_assistant_workspace_scope())
+        yield "assistant-event"
+
+    input_kwargs = {"inputs": ["original-user-message"]}
+
+    async def consume() -> list[object]:
+        assert middleware is not None
+        return [event async for event in middleware.on_reply(
+            None, input_kwargs, next_handler
+        )]
+
+    assert asyncio.run(consume()) == ["assistant-event"]
+    assert "ai-novel-creation-draft-context" in str(
+        getattr(observed[0], "content")
+    )
+    assert scopes == [None]
 
 
 def test_middleware_scope_token_never_crosses_stream_contexts() -> None:

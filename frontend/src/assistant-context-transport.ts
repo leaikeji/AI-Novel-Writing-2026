@@ -63,19 +63,27 @@ export function createAssistantContextRefHttpClient(
   const request: AssistantApiRequest = options.request
     ?? ((path, init) => apiRequest<unknown>(path, init));
   return async (input, signal) => {
+    const binding = input.binding;
     const response = await request("/assistant-contexts", {
       method: "POST",
       signal,
       body: JSON.stringify({
-        ownerToken: input.binding.ownerToken,
-        tabInstance: input.binding.tabInstance,
-        agentId: input.binding.agentId,
-        novelId: input.binding.novelId,
-        ...(input.binding.documentId
-          ? { documentId: input.binding.documentId }
-          : {}),
-        ...(input.binding.sessionId
-          ? { sessionId: input.binding.sessionId }
+        ownerToken: binding.ownerToken,
+        tabInstance: binding.tabInstance,
+        agentId: binding.agentId,
+        ...("scopeKind" in binding
+          ? {
+              scopeKind: "creation_draft",
+              scopeId: binding.scopeId,
+            }
+          : {
+              novelId: binding.novelId,
+              ...(binding.documentId
+                ? { documentId: binding.documentId }
+                : {}),
+            }),
+        ...(binding.sessionId
+          ? { sessionId: binding.sessionId }
           : {}),
         snapshot: input.snapshot,
       }),

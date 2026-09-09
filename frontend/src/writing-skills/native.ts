@@ -8,13 +8,25 @@ import {
 import { createWritingMethodReceiptNotice } from "./status";
 
 
-export interface NativeWritingActionBinding {
+interface NativeWritingActionIdentity {
   readonly actionId: string;
   readonly sessionId: string;
-  readonly novelId: string;
-  readonly documentId?: string;
   readonly tabInstance: string;
 }
+
+export type NativeWritingActionBinding = NativeWritingActionIdentity & ({
+  readonly scopeKind?: "novel";
+  readonly scopeId?: never;
+  readonly creationDraftId?: never;
+  readonly novelId: string;
+  readonly documentId?: string;
+} | {
+  readonly scopeKind: "creation_draft";
+  readonly scopeId: string;
+  readonly creationDraftId: string;
+  readonly novelId?: never;
+  readonly documentId?: never;
+});
 
 
 export interface NativeWritingMethodSnapshot {
@@ -61,6 +73,9 @@ function sameBinding(
 ): boolean {
   return left.actionId === right.actionId
     && left.sessionId === right.sessionId
+    && left.scopeKind === right.scopeKind
+    && left.scopeId === right.scopeId
+    && left.creationDraftId === right.creationDraftId
     && left.novelId === right.novelId
     && left.documentId === right.documentId
     && left.tabInstance === right.tabInstance;
@@ -84,6 +99,7 @@ export function createNativeWritingMethodRuntime(options: {
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
   storage?: NativeWritingMethodStorage | null;
   storageKey?: string;
+  expectedTabInstance?: string;
 }): NativeWritingMethodRuntime {
   const delays = options.delaysMs ?? DEFAULT_DELAYS_MS;
   const setTimer = options.setTimer ?? defaultTimer;
@@ -101,19 +117,38 @@ export function createNativeWritingMethodRuntime(options: {
       if (typeof value.actionId !== "string"
         || !/^[0-9a-f-]{36}$/i.test(value.actionId)
         || typeof value.sessionId !== "string" || !value.sessionId || value.sessionId.length > 240
-        || typeof value.novelId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.novelId)
-        || (value.documentId !== undefined
-          && (typeof value.documentId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.documentId)))
-        || typeof value.tabInstance !== "string" || !value.tabInstance || value.tabInstance.length > 160) {
+        || typeof value.tabInstance !== "string" || !value.tabInstance || value.tabInstance.length > 160
+        || (options.expectedTabInstance !== undefined
+          && value.tabInstance !== options.expectedTabInstance)) {
         storage?.removeItem(storageKey);
         return null;
       }
-      return Object.freeze({
+      const identity = {
         actionId: value.actionId,
         sessionId: value.sessionId,
+        tabInstance: value.tabInstance,
+      };
+      if (value.scopeKind === "creation_draft") {
+        if (typeof value.scopeId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.scopeId)
+          || value.creationDraftId !== value.scopeId
+          || value.novelId !== undefined || value.documentId !== undefined) {
+          storage?.removeItem(storageKey);
+          return null;
+        }
+        return Object.freeze({ ...identity, scopeKind: "creation_draft", scopeId: value.scopeId, creationDraftId: value.scopeId });
+      }
+      if ((value.scopeKind !== undefined && value.scopeKind !== "novel")
+        || typeof value.novelId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.novelId)
+        || value.scopeId !== undefined || value.creationDraftId !== undefined
+        || (value.documentId !== undefined
+          && (typeof value.documentId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.documentId)))) {
+        storage?.removeItem(storageKey);
+        return null;
+      }
+      return Object.freeze({ ...identity,
+        ...(value.scopeKind ? { scopeKind: value.scopeKind } : {}),
         novelId: value.novelId,
         ...(value.documentId ? { documentId: value.documentId } : {}),
-        tabInstance: value.tabInstance,
       });
     } catch {
       try { storage?.removeItem(storageKey); } catch { /* storage is best-effort UI recovery only */ }
@@ -164,7 +199,10 @@ export function createNativeWritingMethodRuntime(options: {
         // Native middleware claims an eligible action before model/catalog
         // preparation. A few early misses cover the request race; continuing
         // to poll an ordinary chat message would create misleading activity.
-        if (snapshot.status === null && attempt >= 3) update({ checking: false });
+        if (snapshot.status === null && attempt >= 3) {
+          try { storage?.removeItem(storageKey); } catch { /* best-effort */ }
+          update({ checking: false });
+        }
         else schedule(binding, attempt + 1, token);
         return;
       }
@@ -207,6 +245,12 @@ export function createNativeWritingMethodRuntime(options: {
       cancel();
       try { storage?.removeItem(storageKey); } catch { /* best-effort */ }
       snapshot = Object.freeze({ binding, status: null, checking: true, error: null });
+      try {
+        storage?.setItem(storageKey, JSON.stringify(binding));
+      } catch {
+        // A failed browser write cannot weaken the server-side action claim;
+        // it only disables refresh recovery for this send.
+      }
       for (const listener of listeners) listener(snapshot);
       schedule(binding, 0, generation);
     },
@@ -241,9 +285,12 @@ export function createNativeWritingMethodHttpTransport(
     async read(binding, signal) {
       const query = new URLSearchParams({ tab_id: binding.tabInstance });
       if (binding.documentId) query.set("document_id", binding.documentId);
+      const scopePath = binding.scopeKind === "creation_draft"
+        ? `/creation-drafts/${encodeURIComponent(binding.creationDraftId)}`
+        : `/novels/${encodeURIComponent(binding.novelId)}`;
       try {
         return await request<unknown>(
-          `/novels/${encodeURIComponent(binding.novelId)}/native-writing-actions/${encodeURIComponent(binding.actionId)}?${query.toString()}`,
+          `${scopePath}/native-writing-actions/${encodeURIComponent(binding.actionId)}?${query.toString()}`,
           { signal },
         );
       } catch (reason) {

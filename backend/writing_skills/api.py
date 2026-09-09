@@ -227,6 +227,58 @@ def _read_native_action(
     return claim
 
 
+def _read_native_creation_action(
+    session: Session,
+    draft_id: UUID,
+    action_id: UUID,
+    tab_id: str,
+):
+    from ..models import NovelCreationDraft
+    from .contracts import (
+        FIXED_LOCAL_OWNER_ID,
+        FIXED_LOCAL_WORKSPACE_ID,
+        Scope,
+    )
+
+    scope = Scope(
+        owner_id=FIXED_LOCAL_OWNER_ID,
+        workspace_id=FIXED_LOCAL_WORKSPACE_ID,
+        kind="creation_draft",
+        scope_id=draft_id,
+        tab_id=tab_id,
+    )
+    identity = ActionIdentity(
+        owner_id=scope.owner_id,
+        workspace_id=scope.workspace_id,
+        entry="native",
+        action_id=action_id,
+    )
+
+    def authorize(current_session: Session, current_scope) -> None:
+        draft = current_session.get(NovelCreationDraft, current_scope.scope_id)
+        if (
+            current_scope != scope
+            or draft is None
+            or draft.state != "draft"
+        ):
+            raise ValueError("native creation draft scope changed")
+
+    try:
+        claim = read_action(session, identity, scope, authorize=authorize)
+    except Exception as error:
+        from ..services import ValidationError
+
+        if isinstance(error, (ValidationError, ValueError)):
+            raise HTTPException(
+                404,
+                "native writing action not found in current scope",
+            ) from None
+        raise
+    if claim is None:
+        raise HTTPException(404, "native writing action not found in current scope")
+    return claim
+
+
 @router.get("/writing-skill-dispatches/{dispatch_id}", response_model=MethodStatus)
 def writing_method_status(dispatch_id: UUID, action_id: UUID, document_id: UUID,
                           tab_id: str = Query(min_length=1, max_length=160),
@@ -299,6 +351,23 @@ def native_writing_action_result(
             tab_id,
             document_id,
         )
+    )
+
+
+@router.get(
+    "/creation-drafts/{draft_id}/native-writing-actions/{action_id}",
+    response_model=MethodStatus,
+)
+def native_creation_writing_action_result(
+    draft_id: UUID,
+    action_id: UUID,
+    tab_id: str = Query(min_length=1, max_length=160),
+    session: Session = Depends(get_session),
+):
+    """Read one server-ticketed creation-draft action without dispatching."""
+
+    return method_status(
+        _read_native_creation_action(session, draft_id, action_id, tab_id)
     )
 
 

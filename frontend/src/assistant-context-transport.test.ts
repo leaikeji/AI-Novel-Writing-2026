@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { CreateAssistantContextRefInput } from "./assistant-context-ref";
+import type { CreationDraftCreateAssistantContextRefInput, NovelCreateAssistantContextRefInput } from "./assistant-context-ref";
 import { createAssistantContextRefHttpClient } from "./assistant-context-transport";
 
 
-function input(): CreateAssistantContextRefInput {
+function input(): NovelCreateAssistantContextRefInput {
   const snapshot = {
     schemaVersion: 2 as const,
     contextRevision: 9,
@@ -37,6 +37,38 @@ function input(): CreateAssistantContextRefInput {
 
 
 describe("assistant context_ref HTTP transport", () => {
+  it("posts a creation draft scope without inventing a novel or document binding", async () => {
+    const value: CreationDraftCreateAssistantContextRefInput = {
+      binding: {
+        ownerToken: "owner_token_0000000000000001",
+        tabInstance: "anw_tab_000000000000000000001",
+        agentId: "ai-novel-writer",
+        scopeKind: "creation_draft",
+        scopeId: "00000000-0000-4000-8000-000000000061",
+      },
+      snapshot: {
+        schemaVersion: "creation-draft-assistant-context/1",
+        contextRevision: 1,
+        capturedAt: "2026-09-08T10:00:00Z",
+        expiresAt: "2026-09-08T10:05:00Z",
+        agentId: "ai-novel-writer",
+        creationDraft: { id: "00000000-0000-4000-8000-000000000061", version: 1, step: 1, state: "draft" },
+        page: { section: "creation", view: "novel-creation-wizard", step: 1 },
+        budget: { maxCharacters: 24_000, usedCharacters: 0, truncated: false, omittedFieldIds: [] },
+      },
+      serialized: "not sent",
+    };
+    const request = vi.fn(async (_path: string, _init?: RequestInit): Promise<unknown> => ({
+      contextRef: "C".repeat(43),
+      writingActionId: "00000000-0000-4000-8000-000000000062",
+      expiresAt: "2026-09-08T10:05:00Z", contextRevision: 1, payloadCharacters: 0,
+    }));
+    await createAssistantContextRefHttpClient({ request })(value, new AbortController().signal);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
+      ...value.binding, snapshot: value.snapshot,
+    });
+  });
+
   it("posts only the approved binding and snapshot through the PawApp API", async () => {
     const request = vi.fn(async (_path: string, _init?: RequestInit): Promise<unknown> => ({
       contextRef: "A".repeat(43),

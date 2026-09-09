@@ -20,6 +20,7 @@ from backend.database import get_session
 NOW = datetime(2026, 8, 25, 10, 0, tzinfo=timezone.utc)
 NOVEL_ID = uuid4()
 DOCUMENT_ID = uuid4()
+DRAFT_ID = uuid4()
 
 
 def snapshot(*, with_document: bool = True) -> dict[str, object]:
@@ -63,6 +64,58 @@ def body(*, document_id: str | None = str(DOCUMENT_ID)) -> dict[str, object]:
     if document_id is not None:
         value["documentId"] = document_id
     return value
+
+
+def creation_snapshot() -> dict[str, object]:
+    return {
+        "schemaVersion": "creation-draft-assistant-context/1",
+        "contextRevision": 3,
+        "capturedAt": NOW.isoformat(),
+        "expiresAt": (NOW + timedelta(minutes=10)).isoformat(),
+        "agentId": "ai-novel-writer",
+        "sessionId": "session-1",
+        "creationDraft": {
+            "id": str(DRAFT_ID),
+            "version": 4,
+            "step": 2,
+            "state": "draft",
+        },
+        "page": {
+            "section": "creation",
+            "view": "novel-creation-wizard",
+            "step": 2,
+        },
+        "editing": {
+            "focusedFieldId": "creation.idea",
+            "fields": [{
+                "id": "creation.idea",
+                "label": "创作思路",
+                "value": "暴雨封路，刑警收到死者来信。",
+                "dirty": True,
+                "truncated": False,
+                "characterCount": 16,
+                "persistence": "explicit-save",
+            }],
+        },
+        "budget": {
+            "maxCharacters": 24_000,
+            "usedCharacters": 500,
+            "truncated": False,
+            "omittedFieldIds": [],
+        },
+    }
+
+
+def creation_body() -> dict[str, object]:
+    return {
+        "ownerToken": "owner_token_0000000000000001",
+        "tabInstance": "tab_instance_000000000000001",
+        "agentId": "ai-novel-writer",
+        "scopeKind": "creation_draft",
+        "scopeId": str(DRAFT_ID),
+        "sessionId": "session-1",
+        "snapshot": creation_snapshot(),
+    }
 
 
 def ledger_snapshot() -> dict[str, object]:
@@ -133,6 +186,16 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         lambda _session, document_id: {
             "id": str(document_id),
             "novel_id": str(NOVEL_ID),
+        },
+    )
+    monkeypatch.setattr(
+        assistant_api,
+        "get_novel_creation_draft",
+        lambda _session, draft_id: {
+            "id": str(draft_id),
+            "version": 4,
+            "step": 2,
+            "state": "draft",
         },
     )
     app = FastAPI()
@@ -207,6 +270,41 @@ def test_each_prepared_send_gets_a_new_action_but_ref_retry_keeps_identity(
     assert first_lease.accepted and retry_lease.accepted
     assert first_lease.writing_action_id == retry_lease.writing_action_id
     assert str(first_lease.writing_action_id) == first["writingActionId"]
+
+
+def test_endpoint_accepts_creation_draft_without_a_fake_novel(
+    client: TestClient,
+) -> None:
+    response = client.post("/assistant-contexts", json=creation_body())
+
+    assert response.status_code == 201
+    leased = assistant_api.assistant_context_registry.lease_for_runtime(
+        response.json()["contextRef"],
+        agent_id="ai-novel-writer",
+        session_id="session-1",
+    )
+    assert leased.accepted
+    assert leased.snapshot is not None
+    assert "novel" not in leased.snapshot
+    assert leased.snapshot["creationDraft"]["id"] == str(DRAFT_ID)
+
+
+@pytest.mark.parametrize("mutation", ["fake-novel", "wrong-version", "mixed-scope"])
+def test_endpoint_rejects_invalid_creation_draft_scope(
+    client: TestClient,
+    mutation: str,
+) -> None:
+    payload = creation_body()
+    if mutation == "fake-novel":
+        payload["snapshot"]["novel"] = {"id": str(NOVEL_ID), "title": "伪造小说"}
+    elif mutation == "wrong-version":
+        payload["snapshot"]["creationDraft"]["version"] = 5
+    else:
+        payload["novelId"] = str(NOVEL_ID)
+
+    response = client.post("/assistant-contexts", json=payload)
+
+    assert response.status_code in {409, 422}
 
 
 def test_endpoint_accepts_the_frozen_story_ledger_context(

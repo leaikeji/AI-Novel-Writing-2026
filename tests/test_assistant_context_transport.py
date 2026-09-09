@@ -117,6 +117,85 @@ def valid_snapshot(
     return snapshot
 
 
+def creation_binding(
+    *,
+    session_id: str | None = "session-1",
+) -> ContextRefBinding:
+    return ContextRefBinding(
+        owner_token=OWNER_TOKEN,
+        tab_instance=TAB_INSTANCE,
+        agent_id=TARGET_AGENT_ID,
+        novel_id=None,
+        session_id=session_id,
+        creation_draft_id="creation-draft-1",
+    )
+
+
+def valid_creation_snapshot(
+    scope: ContextRefBinding | None = None,
+    *,
+    now: datetime = NOW,
+) -> dict[str, object]:
+    current = scope or creation_binding()
+    value: dict[str, object] = {
+        "schemaVersion": "creation-draft-assistant-context/1",
+        "contextRevision": 2,
+        "capturedAt": now.isoformat(),
+        "expiresAt": (now + timedelta(minutes=10)).isoformat(),
+        "agentId": current.agent_id,
+        "creationDraft": {
+            "id": current.creation_draft_id,
+            "version": 3,
+            "step": 2,
+            "state": "draft",
+        },
+        "page": {
+            "section": "creation",
+            "view": "novel-creation-wizard",
+            "step": 2,
+        },
+        "editing": {
+            "fields": [{
+                "id": "creation.idea",
+                "label": "创作思路",
+                "value": "当前建书思路",
+                "dirty": True,
+                "truncated": False,
+                "characterCount": 6,
+                "persistence": "explicit-save",
+            }],
+        },
+        "budget": {
+            "maxCharacters": MAX_CONTEXT_CHARACTERS,
+            "usedCharacters": 400,
+            "truncated": False,
+            "omittedFieldIds": [],
+        },
+    }
+    if current.session_id is not None:
+        value["sessionId"] = current.session_id
+    return value
+
+
+def test_creation_draft_ref_is_separate_from_novel_scope() -> None:
+    registry = AssistantContextRefRegistry(clock=MutableClock())
+    scope = creation_binding()
+    created = registry.create(binding=scope, snapshot=valid_creation_snapshot(scope))
+
+    leased = registry.lease_for_runtime(
+        created.context_ref,
+        agent_id=TARGET_AGENT_ID,
+        session_id="session-1",
+    )
+
+    assert leased.accepted
+    assert leased.snapshot is not None
+    assert "novel" not in leased.snapshot
+    assert leased.snapshot["creationDraft"]["id"] == "creation-draft-1"
+    mismatched = replace(scope, novel_id="novel-1", creation_draft_id=None)
+    assert not registry.lease(created.context_ref, binding=mismatched).accepted
+
+
 def story_ledger_context(scope: ContextRefBinding) -> dict[str, object]:
     value: dict[str, object] = {
         "schema_version": "story-ledger-assistant-context/1",
