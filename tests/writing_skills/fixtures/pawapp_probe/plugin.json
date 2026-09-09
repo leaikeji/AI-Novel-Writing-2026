@@ -7,5 +7,5 @@
   "author": "AI小说世界2026 tests",
   "entry": {"backend": "plugin.py"},
   "dependencies": [],
-  "qwenpaw_version": {"min": "2.1.0", "max": "2.2.0"}
+  "qwenpaw_version": {"min": "2.1.0", "max": "2.3.0"}
 }

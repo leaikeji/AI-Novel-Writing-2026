@@ -162,8 +162,8 @@ class VerifyApi:
                 ),
                 "narration": {
                     "product_requested": False,
-                    "lifecycle_status": "disabled",
-                    "playback_installed": False,
+                    "lifecycle_status": "playback_only",
+                    "playback_installed": True,
                     "digest_keyring_loaded": False,
                     "production_backend_installed": False,
                     "worker_running": False,

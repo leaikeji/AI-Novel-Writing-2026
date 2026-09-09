@@ -16,7 +16,7 @@ def test_manifest_is_a_version_bounded_pawapp() -> None:
     assert manifest["id"] == "ai-novel-world-2026"
     assert manifest["version"] == EXPECTED_VERSION
     assert manifest["type"] == "app"
-    assert manifest["qwenpaw_version"] == {"min": "2.1.0", "max": "2.2.0"}
+    assert manifest["qwenpaw_version"] == {"min": "2.1.0", "max": "2.3.0"}
     assert manifest["meta"]["pawapp"]["entry_page"] == (
         "/apps/ai-novel-world-2026"
     )

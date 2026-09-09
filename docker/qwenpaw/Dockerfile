@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
-ARG QWENPAW_BASE_IMAGE=agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0@sha256:847fa1b01969492587fcf9b01f28fef97cb4039de92148c08c49486b94b3d912
+ARG QWENPAW_BASE_IMAGE=agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.2.0@sha256:c9cd6a8d2b7bd2fbee36415709e153a7b478302e2ee1a57a5768dbcb2ef457e6
 ARG PYTHON_BASE=python:3.11.16-slim-bookworm@sha256:0bee7276f83efd4a1ee05bbbf4281d95ed28e079220a9457f25a93e3f1e3c31b
 
 FROM ${PYTHON_BASE} AS narration-ffmpeg-builder

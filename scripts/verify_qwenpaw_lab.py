@@ -471,15 +471,8 @@ def verify() -> dict[str, object]:
     )
     if EXPECTED_TTS_RUNTIME == "disabled":
         assert narration == {
-            "product_requested": False,
-            "lifecycle_status": "disabled",
-            "playback_installed": False,
-            "digest_keyring_loaded": False,
-            "production_backend_installed": False,
-            "worker_running": False,
-            "reference_clone_ready": False,
+            **expected_narration_production(),
             "provider_selection_fingerprint_sha256": None,
-            "reason_code": None,
         }
     else:
         assert narration.get("lifecycle_status") == "ready"

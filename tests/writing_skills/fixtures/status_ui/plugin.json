@@ -8,5 +8,5 @@
   "entry": {"backend": "plugin.py", "frontend": "frontend/index.js"},
   "dependencies": [],
   "meta": {"pawapp": {"category": "productivity", "icon": "🧪", "entry_page": "/apps/s58-method-ui", "launch_scope": "page"}},
-  "qwenpaw_version": {"min": "2.1.0", "max": "2.2.0"}
+  "qwenpaw_version": {"min": "2.1.0", "max": "2.3.0"}
 }

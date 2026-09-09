@@ -1386,6 +1386,61 @@ def test_runtime_waiter_polls_public_health_until_ready_topology(
     assert request_timeouts == [pytest.approx(2.0), pytest.approx(1.8)]
 
 
+def test_runtime_waiter_retries_transient_pawapp_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    monkeypatch.setenv(lab.TTS_RUNTIME_EXPECTATION_ENV, "disabled")
+    monkeypatch.setenv(lab.TTS_PRODUCT_EXPECTATION_ENV, "disabled")
+    clock = [30.0]
+    monkeypatch.setattr(lab.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        lab.time,
+        "sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    health = {
+        "narration": {
+            "product_requested": False,
+            "lifecycle_status": "playback_only",
+            "playback_installed": True,
+            "digest_keyring_loaded": False,
+            "production_backend_installed": False,
+            "worker_running": False,
+            "reference_clone_ready": False,
+            "provider_selection_fingerprint_sha256": None,
+            "reason_code": None,
+        },
+        "narration_production": {
+            "product_requested": False,
+            "lifecycle_status": "playback_only",
+            "playback_installed": True,
+            "digest_keyring_loaded": False,
+            "production_backend_installed": False,
+            "worker_running": False,
+            "reference_clone_ready": False,
+            "provider_selection_fingerprint_sha256": None,
+            "reason_code": None,
+        },
+    }
+    responses = iter(
+        (
+            lab.HTTPError("http://127.0.0.1/health", 404, "Not Found", {}, None),
+            health,
+        )
+    )
+
+    def read_health(*, timeout_seconds: float) -> dict[str, object]:
+        response = next(responses)
+        if isinstance(response, lab.HTTPError):
+            raise response
+        return response
+
+    monkeypatch.setattr(lab, "read_public_plugin_health", read_health)
+
+    assert lab.wait_until_expected_tts_runtime() is health
+
+
 def test_runtime_waiter_times_out_with_last_observed_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2104,6 +2159,52 @@ def test_install_waits_for_expected_runtime_before_final_verify(
         "runtime-ready",
         "verify",
     ]
+
+
+def test_install_uses_provided_frozen_skill_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+    state = tmp_path / "skill-state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "schema": "skill-enable-state/1",
+                "base_url": lab.BASE_URL,
+                "agent_id": "ai-novel-writer",
+                "skills": {"novel-planning": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        lab,
+        "save_preinstall_skill_state",
+        lambda: pytest.fail("live replacement-host state must not be captured"),
+    )
+    monkeypatch.setattr(lab, "validate_install_intent", lambda: None)
+    monkeypatch.setattr(lab, "pnpm_bin", lambda: "pnpm")
+    monkeypatch.setattr(lab, "pnpm_environment", lambda _pnpm: {})
+    monkeypatch.setattr(lab, "run", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(lab, "require_live_tts_flags_disabled", lambda: None)
+    monkeypatch.setattr(lab, "hot_install_packaged_plugin", lambda: None)
+    monkeypatch.setattr(lab, "migrate_installed_plugin", lambda: None)
+    monkeypatch.setattr(lab, "provision_installed_embedding_secret_store", lambda: None)
+    monkeypatch.setattr(lab, "bootstrap_installed_digest_keyring", lambda: None)
+    monkeypatch.setattr(lab, "provision_installed_validation_token", lambda: None)
+    monkeypatch.setattr(lab, "reload_installed_plugin", lambda: None)
+    monkeypatch.setattr(lab, "wait_until_expected_tts_runtime", lambda: None)
+    monkeypatch.setattr(lab, "verify", lambda: None)
+
+    lab.install(state.resolve())
+
+
+def test_select_preinstall_skill_state_rejects_relative_path() -> None:
+    lab = load_script("qwenpaw_lab_plugin")
+
+    with pytest.raises(RuntimeError, match="absolute path"):
+        lab.select_preinstall_skill_state(Path("skill-state.json"))
 
 
 def test_install_runs_pytest_in_disabled_tts_environment(

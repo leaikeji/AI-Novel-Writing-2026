@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
@@ -376,7 +377,19 @@ def narration_matches_expected_topology(
     expected: str,
     expected_product: str = "disabled",
     expected_validation: str = "disabled",
+    expected_reference: str = "disabled",
 ) -> bool:
+    expected_pipeline = (
+        "ready"
+        if expected_product == "ready" or expected_validation == "ready"
+        else "disabled"
+    )
+    if narration_production_matches_expected_topology(
+        narration,
+        expected=expected_pipeline,
+        expected_reference=expected_reference,
+    ):
+        return True
     if expected == "disabled":
         return (
             narration.get("technical_enabled") is False
@@ -419,8 +432,10 @@ def narration_production_matches_expected_topology(
     expected: str,
     expected_reference: str = "disabled",
 ) -> bool:
+    normalized = dict(production)
+    normalized.pop("provider_selection_fingerprint_sha256", None)
     if expected == "disabled":
-        return production == {
+        return normalized == {
             "product_requested": False,
             "lifecycle_status": "playback_only",
             "playback_installed": True,
@@ -430,7 +445,7 @@ def narration_production_matches_expected_topology(
             "reference_clone_ready": False,
             "reason_code": None,
         }
-    return production == {
+    return normalized == {
         "product_requested": True,
         "lifecycle_status": "ready",
         "playback_installed": True,
@@ -495,7 +510,16 @@ def wait_until_expected_tts_runtime(
                 f"within {timeout_seconds:g}s; last narration state: "
                 f"{last_narration!r}; last production state: {last_production!r}"
             )
-        health = read_public_plugin_health(timeout_seconds=min(5.0, remaining))
+        try:
+            health = read_public_plugin_health(timeout_seconds=min(5.0, remaining))
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            time.sleep(min(poll_interval_seconds, remaining))
+            continue
+        except (TimeoutError, URLError):
+            time.sleep(min(poll_interval_seconds, remaining))
+            continue
         narration = health.get("narration")
         if not isinstance(narration, dict):
             raise RuntimeError(
@@ -515,6 +539,7 @@ def wait_until_expected_tts_runtime(
                 expected=expected,
                 expected_product=expected_product,
                 expected_validation=expected_validation,
+                expected_reference=expected_reference,
             )
             and narration_production_matches_expected_topology(
                 production,
@@ -906,7 +931,31 @@ def save_preinstall_skill_state() -> Path:
     return path
 
 
-def install() -> None:
+def select_preinstall_skill_state(provided: Path | None) -> Path:
+    """Use a frozen old-host snapshot when the replacement host cannot expose it."""
+
+    if provided is None:
+        return save_preinstall_skill_state()
+    if not provided.is_absolute():
+        raise RuntimeError("--previous-skill-state must be an absolute path")
+    try:
+        if provided.is_symlink():
+            raise RuntimeError("--previous-skill-state must not be a symlink")
+        resolved = provided.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError("--previous-skill-state is unavailable") from error
+    if not resolved.is_file():
+        raise RuntimeError("--previous-skill-state must be a regular file")
+
+    from scripts import configure_qwenpaw_novel_agent as configuration
+
+    configuration.BASE_URL = BASE_URL
+    configuration.load_previous_skill_state(resolved)
+    print(f"Pre-install Skill state (provided frozen snapshot): {resolved}")
+    return resolved
+
+
+def install(previous_skill_state: Path | None = None) -> None:
     validate_install_intent()
     pnpm = pnpm_bin()
     pnpm_environ = pnpm_environment(pnpm)
@@ -916,7 +965,7 @@ def install() -> None:
     run(sys.executable, "-m", "pytest", environ=test_environment())
     run(sys.executable, str(ROOT / "scripts" / "package_plugin.py"))
     require_live_tts_flags_disabled()
-    previous_skill_state = save_preinstall_skill_state()
+    previous_skill_state = select_preinstall_skill_state(previous_skill_state)
     hot_install_packaged_plugin()
     migrate_installed_plugin()
     provision_installed_embedding_secret_store()
@@ -1169,7 +1218,8 @@ def uninstall(confirm: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("install")
+    install_parser = subparsers.add_parser("install")
+    install_parser.add_argument("--previous-skill-state", type=Path)
     subparsers.add_parser("verify")
     maintenance_parser = subparsers.add_parser("offline-install-stopped")
     maintenance_parser.add_argument("--candidate", required=True, type=Path)
@@ -1186,7 +1236,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.command == "install":
-        install()
+        install(args.previous_skill_state)
     elif args.command == "verify":
         verify()
     elif args.command == "offline-install-stopped":
