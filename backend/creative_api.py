@@ -14,6 +14,8 @@ from .character_profile_services import (
     CharacterProfileValidationError,
     normalize_character_profile_output,
 )
+from .narration.novel_deletion import delete_novel_with_narration
+from .narration.production_runtime import current_narration_cache_runtime
 from .creative_authority import AuthorityIdempotencyConflict
 from .creative_schemas import (
     ApplyOutlineGenerationRequest,
@@ -375,10 +377,22 @@ def novels_delete(
     novel_id: UUID,
     expected_version: int = Query(ge=1),
     session: Session = Depends(get_session),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     try:
-        delete_novel(session, novel_id, expected_version=expected_version)
-        return {"deleted": True}
+        narration_runtime = current_narration_cache_runtime()
+        if narration_runtime is None:
+            delete_novel(session, novel_id, expected_version=expected_version)
+            return {
+                "deleted": True,
+                "media_cleanup_pending": False,
+                "deleted_media_count": 0,
+                "deleted_document_ids": [],
+            }
+        return delete_novel_with_narration(
+            narration_runtime,
+            novel_id,
+            expected_version=expected_version,
+        )
     except Exception as error:
         session.rollback()
         _raise(error)

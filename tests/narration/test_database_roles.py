@@ -155,6 +155,7 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "20260903_0040": 73,
         "20260909_0049": 59,
         "20260909_0050": 59,
+        "20260910_0051": 60,
     }
     for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
         assert (
@@ -226,7 +227,10 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "voice_preparation_commands",
         "voice_preparation_items",
     }
-    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260909_0050"]
+    assert set(PROTECTED_TABLES_BY_HEAD["20260910_0051"]) - set(
+        PROTECTED_TABLES_BY_HEAD["20260909_0050"]
+    ) == {"novel_deletion_audits"}
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260910_0051"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:
@@ -237,12 +241,12 @@ def test_sql_and_python_protected_table_contracts_match() -> None:
     assert "GRANT " not in executable_sql
 
 
-def test_current_protected_tables_are_58_orm_tables_plus_alembic_system_table() -> None:
+def test_current_protected_tables_are_59_orm_tables_plus_alembic_system_table() -> None:
     orm_tables = set(Base.metadata.tables)
     protected_tables = set(CURRENT_PROTECTED_TABLES)
 
     assert protected_tables - orm_tables == {"alembic_version"}
-    assert len(protected_tables - {"alembic_version"}) == 58
+    assert len(protected_tables - {"alembic_version"}) == 59
     assert protected_tables - {"alembic_version"} <= orm_tables
 
 
@@ -332,7 +336,9 @@ def test_bootstrap_contract_never_embeds_runtime_passwords() -> None:
     assert "PASSWORD NULL" in sql_source
     assert "bootstrap-20260909_0049" in shell_source
     assert "bootstrap-20260909_0050" in shell_source
+    assert "bootstrap-20260910_0051" in shell_source
     assert "upgrade-20260909_0050" in migration_source
+    assert "upgrade-20260910_0051" in migration_source
     assert "upgrade-20260903_0040" in migration_source
     assert "downgrade-20260902_0038" in migration_source
     assert "downgrade-20260830_0035" in migration_source

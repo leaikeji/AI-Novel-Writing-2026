@@ -24,7 +24,8 @@ from backend.narration.contracts import (
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260909_0050"
+HEAD_REVISION = "20260910_0051"
+NOVEL_DELETION_REVISION = "20260910_0051"
 RETIRED_MOSS_TTS_REVISION = "20260909_0049"
 RETIRED_SCOPE_GUARD_REVISION = "20260909_0050"
 AUTOMATIC_VOICE_PREPARATION_REVISION = "20260903_0040"
@@ -118,6 +119,10 @@ RETIRED_SCOPE_GUARD_MIGRATION = (
     ROOT
     / "backend/migrations/versions/20260909_0050_retired_scope_guard_cleanup.py"
 )
+NOVEL_DELETION_MIGRATION = (
+    ROOT
+    / "backend/migrations/versions/20260910_0051_novel_deletion_authorization.py"
+)
 EXPECTED_NEW_TABLES = {
     "narration_requests", "narration_request_sources", "novel_narration_settings",
     "narration_settings_snapshots", "narration_scope_overrides", "narration_cloud_consents",
@@ -165,7 +170,8 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == RETIRED_MOSS_TTS_REVISION
+    assert scripts.get_revision(HEAD_REVISION).down_revision == RETIRED_SCOPE_GUARD_REVISION
+    assert scripts.get_revision(RETIRED_SCOPE_GUARD_REVISION).down_revision == RETIRED_MOSS_TTS_REVISION
     assert scripts.get_revision(RETIRED_MOSS_TTS_REVISION).down_revision == "20260909_0048"
     assert scripts.get_revision("20260909_0048").down_revision == "20260909_0047"
     assert scripts.get_revision("20260909_0045").down_revision == "20260908_0044"
@@ -270,6 +276,31 @@ def test_revision_is_the_only_linear_head() -> None:
     assert scripts.get_revision(EXECUTION_SAFETY_REVISION).down_revision == MEDIA_SAFETY_REVISION
     assert scripts.get_revision(MEDIA_SAFETY_REVISION).down_revision == REVISION
     assert scripts.get_revision(REVISION).down_revision == DOWN_REVISION
+
+
+def test_whole_novel_deletion_migration_keeps_fk_and_trigger_guards_scoped() -> None:
+    source = NOVEL_DELETION_MIGRATION.read_text(encoding="utf-8")
+
+    assert "novel_deletion_audits" in source
+    assert "narration_novel_deletion_authorized" in source
+    assert "current_setting(" in source
+    assert "state='purging'" in source
+    assert "DISABLE TRIGGER" not in source
+    assert "session_replication_role" not in source
+    assert "fk_background_manual_retry_claimed_attempt" in source
+    assert "fk_background_job_attempt_manual_retry_command" in source
+    assert 'ondelete="RESTRICT"' not in source
+    for table_name in {
+        "asset_tombstones",
+        "document_revisions",
+        "documents",
+        "media_assets",
+        "narration_requests",
+        "narration_scope_overrides",
+        "voice_profiles",
+        "volumes",
+    }:
+        assert f'"{table_name}"' in source
 
 
 def test_voice_preview_retry_migration_is_narrow_fix_forward_and_io_free() -> None:

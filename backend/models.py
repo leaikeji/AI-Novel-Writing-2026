@@ -676,6 +676,54 @@ class NovelCreationDraft(Base):
     )
 
 
+class NovelDeletionAudit(Base):
+    """Durable scope and frozen media identities for one whole-novel delete."""
+
+    __tablename__ = "novel_deletion_audits"
+    __table_args__ = (
+        CheckConstraint(
+            "expected_version >= 1", name="ck_novel_deletion_expected_version"
+        ),
+        CheckConstraint(
+            "title_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_novel_deletion_title_hash",
+        ),
+        CheckConstraint(
+            "media_count >= 0 AND media_bytes >= 0",
+            name="ck_novel_deletion_media_totals",
+        ),
+        CheckConstraint(
+            "state IN ('purging','database_deleted','completed','media_cleanup_failed')",
+            name="ck_novel_deletion_state",
+        ),
+        Index(
+            "ix_novel_deletion_audits_novel_created", "novel_id", "created_at"
+        ),
+        Index("ix_novel_deletion_audits_state", "state", "updated_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    expected_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    media_manifest_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    media_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    media_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    confirmed_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(96))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    database_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    media_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class PrivateAsset(Base):
     __tablename__ = "private_assets"
     __table_args__ = (Index("ix_private_assets_type_archived", "asset_type", "archived"),)
@@ -2702,7 +2750,6 @@ class BackgroundManualRetryCommand(Base):
         ForeignKey(
             "background_job_attempts.id",
             name="fk_background_manual_retry_claimed_attempt",
-            ondelete="RESTRICT",
             deferrable=True,
             initially="DEFERRED",
         ),
@@ -2758,7 +2805,6 @@ class BackgroundJobAttempt(Base):
         ForeignKey(
             "background_manual_retry_commands.id",
             name="fk_background_job_attempt_manual_retry_command",
-            ondelete="RESTRICT",
             deferrable=True,
             initially="DEFERRED",
         ),

@@ -211,6 +211,7 @@ case "$AI_NOVEL_MAINTENANCE_STEP" in
     bootstrap-20260903_0040) expected_alembic_head=20260903_0040 ;;
     bootstrap-20260909_0049) expected_alembic_head=20260909_0049 ;;
     bootstrap-20260909_0050) expected_alembic_head=20260909_0050 ;;
+    bootstrap-20260910_0051) expected_alembic_head=20260910_0051 ;;
     *) fail "maintenance step does not authorize database-role bootstrap" ;;
 esac
 

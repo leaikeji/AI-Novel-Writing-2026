@@ -18,6 +18,7 @@ import {
   PrivateAssetType,
 } from "./types";
 import { rememberWorkbenchRoute } from "./workbench-route";
+import { clearRecoveryDraft } from "./recovery";
 import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
 import { navigateNovelSurface } from "./novel-surface-navigation";
@@ -1593,6 +1594,7 @@ export function NovelLibraryPage() {
   const [activeNovelId, setActiveNovelId] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
+  const [notice, setNotice] = React.useState("");
   const [wizardOpen, setWizardOpen] = React.useState(false);
 
   const reload = React.useCallback(async () => {
@@ -1632,8 +1634,20 @@ export function NovelLibraryPage() {
       okButtonProps: { danger: true },
       async onOk() {
         try {
-          await apiRequest(`/novels/${novel.id}?expected_version=${novel.version}`, { method: "DELETE" });
+          const result = await apiRequest<{
+            deleted: boolean;
+            media_cleanup_pending?: boolean;
+            deleted_document_ids?: string[];
+          }>(`/novels/${novel.id}?expected_version=${novel.version}`, { method: "DELETE" });
+          const recoveryCleanup = await Promise.allSettled(
+            (result.deleted_document_ids || []).map((documentId) => clearRecoveryDraft(documentId)),
+          );
           await reload();
+          setNotice(result.media_cleanup_pending
+            ? "作品已删除，但有部分朗读媒体需等待后续清理。"
+            : recoveryCleanup.some((item) => item.status === "rejected")
+              ? "作品已删除，但当前浏览器的部分恢复稿未能清理。"
+              : "");
         } catch (reason) {
           setError(readableError(reason, "删除作品失败"));
         }
@@ -1675,6 +1689,7 @@ export function NovelLibraryPage() {
         h(CenterAction, { icon: SoundOutlined, label: "语音模型接入", onClick: () => changeView("tts-cloud-settings") }),
       ),
       error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
+      notice ? h(Alert, { type: "warning", showIcon: true, closable: true, message: notice, onClose: () => setNotice("") }) : null,
       loading
         ? h("div", { className: "mb-center-loading" }, h(Spin), "正在载入作品…")
         : activeNovel

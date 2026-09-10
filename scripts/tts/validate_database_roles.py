@@ -37,6 +37,7 @@ SUPPORTED_HEADS = (
     "20260903_0040",
     "20260909_0049",
     "20260909_0050",
+    "20260910_0051",
 )
 VALIDATION_STEPS = MappingProxyType(
     {
@@ -49,6 +50,7 @@ VALIDATION_STEPS = MappingProxyType(
         "validate-20260903_0040": "20260903_0040",
         "validate-20260909_0049": "20260909_0049",
         "validate-20260909_0050": "20260909_0050",
+        "validate-20260910_0051": "20260910_0051",
     }
 )
 
@@ -170,6 +172,9 @@ _RETIRED_TTS_TABLES_0049 = frozenset(
 _PROTECTED_TABLES_0049 = tuple(
     table for table in _PROTECTED_TABLES_0040 if table not in _RETIRED_TTS_TABLES_0049
 )
+_PROTECTED_TABLES_0051 = tuple(
+    sorted((*_PROTECTED_TABLES_0049, "novel_deletion_audits"))
+)
 
 PROTECTED_TABLES_BY_HEAD = MappingProxyType(
     {
@@ -182,9 +187,10 @@ PROTECTED_TABLES_BY_HEAD = MappingProxyType(
         "20260903_0040": _PROTECTED_TABLES_0040,
         "20260909_0049": _PROTECTED_TABLES_0049,
         "20260909_0050": _PROTECTED_TABLES_0049,
+        "20260910_0051": _PROTECTED_TABLES_0051,
     }
 )
-CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260909_0050"]
+CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260910_0051"]
 
 # These character-domain tables are not part of TTS authority. Keeping the
 # reviewed reasons next to the prefix audit makes a future character/voice
