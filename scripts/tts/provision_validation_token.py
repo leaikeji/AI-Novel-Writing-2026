@@ -261,11 +261,6 @@ class DockerContainerTokenPort:
     ) -> None:
         allowed_targets = {
             (QWENPAW_CONTAINER, CONTAINER_TOKEN_DIRECTORY, CONTAINER_TOKEN_FILE),
-            (
-                QWENPAW_CONTAINER,
-                "/app/working.secret/ai-novel-world-2026/voice-generator",
-                "/app/working.secret/ai-novel-world-2026/voice-generator/token",
-            ),
         }
         if (container, token_directory, token_file) not in allowed_targets:
             raise TokenProvisionError("CONTAINER_TOKEN_TARGET_INVALID")
