@@ -1,6 +1,6 @@
 import type { QwenPawReactRuntime } from "../assistant-pane";
 import type { RetrievalSummaryV1 } from "./contracts";
-import { retrievalSummaryPresentation, semanticIndexSettingsPath } from "./presentation";
+import { retrievalSummaryPresentation } from "./presentation";
 import { ensureRetrievalStatusStyles } from "./styles";
 
 
@@ -26,6 +26,7 @@ export function createRetrievalStatusNotice(
     React.useEffect(() => ensureRetrievalStatusStyles(), []);
     if (!props.summary) return null;
     const presentation = retrievalSummaryPresentation(props.summary);
+    if (!presentation) return null;
     return h(
       "section",
       {
@@ -43,14 +44,7 @@ export function createRetrievalStatusNotice(
       },
       h("span", { className: "anw-retrieval-status__title" }, presentation.title),
       h("span", { className: "anw-retrieval-status__description" }, presentation.description),
-      h(
-        "a",
-        {
-          className: "anw-retrieval-status__link",
-          href: semanticIndexSettingsPath(props.novelId),
-        },
-        "管理语义索引",
-      ),
+
     );
   };
 }

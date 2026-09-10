@@ -2173,22 +2173,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       }
     }
     setSaveVolumeOpen(false);
-    Modal.confirm({
-      className: "anw-modal anw-save-confirm",
-      title: "确认",
-      width: 520,
-      centered: true,
-      content: h("div", { className: "anw-save-confirm-copy" },
-        h("strong", null, "💡 保存提示："),
-        h("p", null, "1. 角色记忆将同步更新到角色表"),
-        h("p", null, "2. 退场的角色将自动删除其记忆"),
-        h("p", null, "3. 保存后将同步最新进展，请确认内容无误。"),
-        h("b", null, "确定要保存章节内容吗？"),
-      ),
-      okText: "确定",
-      cancelText: "取消",
-      onOk: () => saveChapterToVolume(volumeId, continueWriting),
-    });
+    void saveChapterToVolume(volumeId, continueWriting);
   };
 
   const restore = async (revisionId: string, preview: RestorePreviewRecord) => {

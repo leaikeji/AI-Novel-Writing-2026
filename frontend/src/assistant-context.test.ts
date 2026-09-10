@@ -11,7 +11,7 @@ import {
 import { NovelAssistantContextStore } from "./assistant-context-store";
 import { NovelAssistantContextRuntime } from "./assistant-context-runtime";
 import type { AIApplyMeta, EditableFieldAdapter } from "./assistant-fields";
-import { buildStoryLedgerAssistantContext } from "./story-ledger/assistant-context";
+import { legacyLedgerContextFixture, accountLegacyLedgerFixtureBudget } from "./story-ledger/assistant-context.fixture";
 
 
 function validContext(): NovelAssistantContextV2 {
@@ -86,35 +86,6 @@ function validContext(): NovelAssistantContextV2 {
 }
 
 
-function validLedgerContext() {
-  const timeline = {
-    mode: "single",
-    timeline_id: "timeline-1",
-    timeline_name: "主线",
-    narrative_cutoff: null,
-  } as const;
-  return buildStoryLedgerAssistantContext({
-    novel: { id: "novel-1", title: "潮声替我说晚安" },
-    snapshotToken: "ledger-snapshot/1:novel-1:9",
-    timeline,
-    filters: { factTypes: ["character_state"], reviewOnly: true },
-    summary: {
-      schema_version: "story-ledger-summary/1",
-      novel_id: "novel-1",
-      ledger_snapshot_token: "ledger-snapshot/1:novel-1:9",
-      story_ledger_version: 9,
-      timeline,
-      filter_sha256: "a".repeat(64),
-      total: 2,
-      by_fact_type: { character_state: 2 },
-      by_effective_state: { current: 1, superseded: 1 },
-      by_health: { conflict: 1, ok: 1 },
-      review_required: 1,
-    },
-  });
-}
-
-
 describe("NovelAssistantContextV2 frozen wire contract", () => {
   it("accepts a complete chapter modal snapshot without coercion", () => {
     const context = validContext();
@@ -140,7 +111,7 @@ describe("NovelAssistantContextV2 frozen wire contract", () => {
   });
 
   it("accepts only a bounded strict ledger envelope on the ledger page", () => {
-    const ledger = validLedgerContext();
+    const ledger = legacyLedgerContextFixture();
     const context: NovelAssistantContextV2 = {
       ...validContext(),
       page: { section: "ledger", view: "story-ledger" },
@@ -152,10 +123,11 @@ describe("NovelAssistantContextV2 frozen wire contract", () => {
     };
     expect(validateNovelAssistantContextV2(context).ok).toBe(true);
 
-    const leaked = {
+    const leaked = accountLegacyLedgerFixtureBudget({
       ...ledger,
+      budget: { ...ledger.budget },
       source_excerpt: "不允许进入原生助手",
-    };
+    });
     expect(validateNovelAssistantContextV2({ ...context, ledger: leaked })).toEqual({
       ok: false,
       reason: "invalid-ledger",

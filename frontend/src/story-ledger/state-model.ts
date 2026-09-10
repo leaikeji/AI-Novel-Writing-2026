@@ -21,23 +21,6 @@ export const FACT_HEALTH_LABELS: Readonly<Record<StoryLedgerFactHealth, string>>
   ambiguous: "不确定",
 };
 
-export const FACT_EFFECTIVE_REASON_LABELS: Readonly<Record<string, string>> = {
-  active_and_selected: "当前投影已采用",
-  active_not_selected: "当前投影未采用",
-  after_narrative_cutoff: "晚于当前叙事位置",
-  incoming_supersedes: "已有替代事实",
-  source_binding_invalid: "来源绑定已失效",
-  source_revision_mismatch: "来源版本不匹配",
-  commit_batch_reverted: "所属同步批次已撤销",
-  lifecycle_inactive: "事实生命周期已结束",
-};
-
-export const FACT_HEALTH_REASON_LABELS: Readonly<Record<string, string>> = {
-  same_slot_conflict: "同一状态槽存在多个候选值",
-  projection_ambiguous: "无法确定唯一投影",
-  reference_missing: "关联对象已不存在",
-};
-
 export interface StoryLedgerFactStateItem {
   readonly id: string;
   readonly dimension: string | null;

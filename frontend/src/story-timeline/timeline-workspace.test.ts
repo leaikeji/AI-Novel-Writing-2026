@@ -138,16 +138,14 @@ async function renderWorkspace(
   return { Component, harness, root };
 }
 
-describe("story timeline context and ledger hand-off", () => {
+describe("story timeline context and snapshot synchronization", () => {
   it("uses the only active timeline without rendering a persistent selector", async () => {
     const onTimelineContextChange = vi.fn();
-    const onOpenLedger = vi.fn();
     const rendered = await renderWorkspace({
       novelId: "novel-1",
       initialStoryLedgerVersion: 7,
       characters: [{ id: "character-root", name: "林舟" }],
       onTimelineContextChange,
-      onOpenLedger,
     }, { timelineResource: singleTimeline });
 
     expect(findAll(rendered.root, (element) => element.props.role === "tablist")).toHaveLength(0);
@@ -158,11 +156,7 @@ describe("story timeline context and ledger hand-off", () => {
       timelineName: "主线",
     });
 
-    (findButton(rendered.root, "查看本线账本").props.onClick as () => void)();
-    expect(onOpenLedger).toHaveBeenCalledWith({
-      section: "ledger",
-      ledger_timeline: "timeline-main",
-    });
+    expect(textContent(rendered.root)).not.toContain("查看本线账本");
   });
 
   it("exposes a complete roving tab contract and publishes explicit multi-line selection", async () => {
@@ -218,25 +212,6 @@ describe("story timeline context and ledger hand-off", () => {
     const end = rendered.harness.render(rendered.Component, props);
     const endTabs = findAll(end, (element) => element.props.role === "tab");
     expect(endTabs[1]?.props.tabIndex).toBe(0);
-  });
-
-  it("deep-links the explicitly selected timeline into the frozen ledger filter", async () => {
-    const onOpenLedger = vi.fn();
-    const props: StoryTimelineWorkspaceProps = {
-      novelId: "novel-1",
-      initialStoryLedgerVersion: 7,
-      currentTimelineId: "timeline-branch",
-      characters: [],
-      onOpenLedger,
-    };
-    const rendered = await renderWorkspace(props);
-
-    (findButton(rendered.root, "查看本线账本").props.onClick as () => void)();
-
-    expect(onOpenLedger).toHaveBeenCalledWith({
-      section: "ledger",
-      ledger_timeline: "timeline-branch",
-    });
   });
 
   it("synchronizes CAS from refresh and later authoritative props, then reports mutation", async () => {
@@ -362,7 +337,7 @@ describe("story timeline context and ledger hand-off", () => {
     expect((findAll(root, (element) => element.type === "input")[0]?.props.value)).toBe("保留的分支名");
     const alert = findAll(root, (element) => element.type === "alert")[0];
     expect(alert?.props.type).toBe("warning");
-    expect(alert?.props.message).toBe("时间线或账本已更新");
+    expect(alert?.props.message).toBe("故事状态已更新");
     expect(onLedgerSnapshotChange).toHaveBeenCalledWith({
       ledger_snapshot_token: null,
       story_ledger_version: 11,

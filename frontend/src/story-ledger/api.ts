@@ -5,11 +5,8 @@ import type {
   StoryFactCorrectionCommandV1,
   StoryFactCorrectionResultV1,
   StoryLedgerBatchImpactPreview,
-  StoryLedgerFactDetail,
   StoryLedgerFactImpactPreview,
-  StoryLedgerFactPage,
   StoryLedgerFilters,
-  StoryLedgerPageQuery,
   StoryLedgerReadScope,
   StoryLedgerSourceExcerpt,
   StoryLedgerSummary,
@@ -57,31 +54,6 @@ export function loadStoryLedgerSummary(
   return apiRequest<StoryLedgerSummary>(withQuery(
     `/novels/${pathId(scope.novelId)}/story-ledger/summary`,
     ledgerQuery(scope, filters),
-  ), { signal });
-}
-
-export function loadStoryLedgerFacts(
-  scope: StoryLedgerReadScope,
-  page: StoryLedgerPageQuery = {},
-  signal?: AbortSignal,
-): Promise<StoryLedgerFactPage> {
-  const query = ledgerQuery(scope, page);
-  if (page.cursor) query.set("cursor", page.cursor);
-  if (page.limit !== undefined) query.set("limit", String(page.limit));
-  return apiRequest<StoryLedgerFactPage>(withQuery(
-    `/novels/${pathId(scope.novelId)}/story-ledger/facts`,
-    query,
-  ), { signal });
-}
-
-export function loadStoryLedgerFactDetail(
-  scope: StoryLedgerReadScope,
-  factId: string,
-  signal?: AbortSignal,
-): Promise<StoryLedgerFactDetail> {
-  return apiRequest<StoryLedgerFactDetail>(withQuery(
-    `/novels/${pathId(scope.novelId)}/story-ledger/facts/${pathId(factId)}`,
-    ledgerQuery(scope),
   ), { signal });
 }
 

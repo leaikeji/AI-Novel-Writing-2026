@@ -1458,6 +1458,53 @@ def _validate_target_timeline_scope(
         )
 
 
+def _story_fact_stable_entity() -> Any:
+    return func.coalesce(
+        cast(StoryFact.character_instance_id, String),
+        cast(StoryFact.relationship_id, String),
+        cast(StoryFact.storyline_id, String),
+        cast(StoryFact.foreshadow_id, String),
+        cast(StoryFact.character_id, String),
+        StoryFact.subject,
+    )
+
+
+def _complete_fact_group_ids(
+    *, novel_id: UUID, predicates: Sequence[Any], cap: int,
+) -> Any:
+    """Keep a same-position projection group only when all its rows fit.
+
+    Both windows run inside the authorized SQL scope. Only lightweight IDs
+    reach Python, and a group crossing the fixed row boundary is omitted whole.
+    """
+    ordered = (
+        select(
+            StoryFact.id.label("fact_id"),
+            StoryFact.fact_type.label("fact_type"),
+            _story_fact_stable_entity().label("stable_entity"),
+            StoryFact.dimension.label("dimension"),
+            StoryFact.predicate.label("predicate"),
+            StoryFact.story_sequence.label("story_sequence"),
+            func.row_number().over(order_by=(
+                case((StoryFact.story_sequence.is_(None), 1), else_=0),
+                StoryFact.story_sequence.desc(),
+                StoryFact.created_at.desc(),
+                StoryFact.id.desc(),
+            )).label("selection_rank"),
+        )
+        .where(StoryFact.novel_id == novel_id, *predicates)
+        .subquery()
+    )
+    complete = select(
+        ordered.c.fact_id,
+        func.max(ordered.c.selection_rank).over(partition_by=(
+            ordered.c.fact_type, ordered.c.stable_entity,
+            ordered.c.dimension, ordered.c.predicate, ordered.c.story_sequence,
+        )).label("group_last_rank"),
+    ).subquery()
+    return select(complete.c.fact_id).where(complete.c.group_last_rank <= cap)
+
+
 def _select_story_facts(
     session: Session,
     *,
@@ -1533,6 +1580,11 @@ def _select_story_facts(
                 StoryFact.novel_id == novel_id,
                 StoryFact.schema_version == "story-fact/2",
                 or_(*scope_predicates),
+                StoryFact.id.in_(_complete_fact_group_ids(
+                    novel_id=novel_id,
+                    predicates=(StoryFact.schema_version == "story-fact/2", or_(*scope_predicates)),
+                    cap=MAX_FACT_CANDIDATES,
+                )),
             )
             .order_by(*fact_order)
             .limit(MAX_FACT_CANDIDATES)
@@ -1587,14 +1639,7 @@ def _select_story_facts(
     if not effective_ids:
         return (), (), {}, max(0, scoped_fact_count - len(candidate_rows))
 
-    stable_entity = func.coalesce(
-        cast(StoryFact.character_instance_id, String),
-        cast(StoryFact.relationship_id, String),
-        cast(StoryFact.storyline_id, String),
-        cast(StoryFact.foreshadow_id, String),
-        cast(StoryFact.character_id, String),
-        StoryFact.subject,
-    )
+    stable_entity = _story_fact_stable_entity()
     ranked = (
         select(
             StoryFact.id.label("fact_id"),
@@ -1621,7 +1666,16 @@ def _select_story_facts(
     raw_projected_ids = tuple(
         session.scalars(
             select(ranked.c.fact_id)
-            .where(ranked.c.projection_rank == 1)
+            .where(
+                ranked.c.projection_rank == 1,
+                ranked.c.fact_id.in_(_complete_fact_group_ids(
+                    novel_id=novel_id,
+                    predicates=(StoryFact.id.in_(
+                        select(ranked.c.fact_id).where(ranked.c.projection_rank == 1)
+                    ),),
+                    cap=MAX_FINAL_FACTS,
+                )),
+            )
             .order_by(ranked.c.story_sequence.desc(), ranked.c.fact_id.desc())
             .limit(MAX_FINAL_FACTS)
         )
@@ -1672,8 +1726,10 @@ def _select_story_facts(
             .where(
                 StoryEventLink.novel_id == novel_id,
                 StoryEventLink.link_type == "contradicts",
-                StoryEventLink.source_fact_id.in_(final_ids),
-                StoryEventLink.target_fact_id.in_(final_ids),
+                or_(
+                    StoryEventLink.source_fact_id.in_(final_ids),
+                    StoryEventLink.target_fact_id.in_(final_ids),
+                ),
             )
             .order_by(StoryEventLink.id)
             .limit(MAX_FACT_CANDIDATES + 1)
@@ -1686,9 +1742,63 @@ def _select_story_facts(
             candidate_count=len(contradiction_rows),
             reason="fact conflict evidence exceeds the proven selection boundary",
         )
+    external_ids = {
+        endpoint
+        for link in contradiction_rows
+        for endpoint in (link.source_fact_id, link.target_fact_id)
+        if endpoint not in final_ids
+    }
+    excluded_boundary_ids: set[UUID] = set()
+    if external_ids:
+        # A contradiction remains relevant when its other endpoint was omitted
+        # by either cap. Verify that endpoint against the same scope/authority,
+        # then omit the selected side instead of pretending it has no conflict.
+        peer_rows = tuple(session.execute(
+            select(
+                StoryFact.id.label("id"),
+                StoryFact.source_revision_id.label("source_revision_id"),
+                StoryFact.status.label("status"),
+                StoryFact.story_sequence.label("story_sequence"),
+            ).where(
+                StoryFact.novel_id == novel_id,
+                StoryFact.schema_version == "story-fact/2",
+                StoryFact.id.in_(external_ids),
+                StoryFact.story_sequence.is_not(None),
+                or_(*scope_predicates),
+            ).limit(MAX_FACT_CANDIDATES + 1)
+        ))
+        if len(peer_rows) > MAX_FACT_CANDIDATES:
+            raise _selection_incomplete(
+                "story_fact_conflict_peers", cap=MAX_FACT_CANDIDATES,
+                candidate_count=len(peer_rows),
+                reason="external conflict evidence exceeds the proven selection boundary",
+            )
+        peer_supersedes = tuple(session.scalars(
+            select(StoryEventLink).where(
+                StoryEventLink.novel_id == novel_id,
+                StoryEventLink.link_type == "supersedes",
+                StoryEventLink.target_fact_id.in_(external_ids),
+            ).limit(MAX_FACT_CANDIDATES + 1)
+        ))
+        if len(peer_supersedes) > MAX_FACT_CANDIDATES:
+            raise _selection_incomplete(
+                "story_fact_supersedes", cap=MAX_FACT_CANDIDATES,
+                candidate_count=len(peer_supersedes),
+                reason="external conflict authority exceeds the proven selection boundary",
+            )
+        effective_peers, _ = _load_effective_story_fact_rows(session, peer_rows, peer_supersedes)
+        effective_peer_ids = {peer.id for peer in effective_peers}
+        for link in contradiction_rows:
+            if link.source_fact_id in effective_peer_ids:
+                excluded_boundary_ids.add(link.target_fact_id)
+            if link.target_fact_id in effective_peer_ids:
+                excluded_boundary_ids.add(link.source_fact_id)
+        final_ids = tuple(value for value in final_ids if value not in excluded_boundary_ids)
+        validated_facts = tuple(fact for fact in validated_facts if fact.id in final_ids)
     try:
         event_links = tuple(
             StoryEventLinkRecord.model_validate(item) for item in contradiction_rows
+            if item.source_fact_id in final_ids and item.target_fact_id in final_ids
         )
     except ValueError as error:
         raise _selection_incomplete(

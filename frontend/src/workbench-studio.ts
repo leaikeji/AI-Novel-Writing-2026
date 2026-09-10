@@ -50,7 +50,6 @@ import type { SelectionRange, SelectionSnapshot } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import { outlineCompletionPatch } from "./outline-completion";
 import {
-  isLinkedOutlineCharacter,
   outlineCharacterReferenceLabel,
 } from "./outline-character-reference";
 import { compressCover, generateSystemCover } from "./cover-utils";
@@ -113,16 +112,11 @@ import {
 import {
   activeWorkbenchRoute,
   isWorkbenchSettingsTab,
-  normalizeWorkbenchLedgerRoute,
-  rememberWorkbenchLedgerLocation,
   rememberWorkbenchLocation,
   rememberWorkbenchRoleView,
   replaceWorkbenchHistoryUrl,
-  workbenchLedgerPath,
-  workbenchLedgerRouteFromSearch,
   workbenchSettingsPath,
   type WorkbenchSettingsTab,
-  type WorkbenchLedgerRoute,
 } from "./workbench-route";
 import { createNovelSemanticIndexCard } from "./embedding";
 import {
@@ -140,9 +134,7 @@ import {
   type TimelineIndexResource,
 } from "./story-timeline";
 import {
-  buildStoryLedgerAssistantContextFromWorkspace,
   correctStoryLedgerFact,
-  createStoryLedgerWorkspace,
   isAbortLike,
   loadStoryLedgerBatchImpactPreview,
   loadStoryLedgerFactImpactPreview,
@@ -150,8 +142,6 @@ import {
   loadStoryLedgerSummary,
   revertStoryLedgerBatch,
   type StoryLedgerBatchImpactPreview,
-  type StoryLedgerFilters,
-  type StoryLedgerWorkspaceContext,
 } from "./story-ledger";
 import {
   createCharacterWorkspaceDialog,
@@ -235,11 +225,10 @@ const NovelSemanticIndexCard = createNovelSemanticIndexCard(React, host.antd);
 const RetrievalStatusNotice = createRetrievalStatusNotice(React);
 const WritingMethodReceiptNotice = createWritingMethodReceiptNotice(React);
 const StoryTimelineWorkspace = createStoryTimelineWorkspace(React, host.antd);
-const StoryLedgerWorkspace = createStoryLedgerWorkspace(React);
 
 
 export type WorkbenchSection = "chapters" | "outline" | "roles" | "clues" | "settings" | "reading";
-export type StudioWorkbenchSection = WorkbenchSection | "ledger";
+export type StudioWorkbenchSection = WorkbenchSection;
 
 interface CharacterWorkspacePickerState {
   readonly character: NovelCharacterRecord;
@@ -257,20 +246,7 @@ export const WORKBENCH_SECTIONS: readonly StudioWorkbenchSection[] = [
   "clues",
   "settings",
   "reading",
-  "ledger",
 ] as const;
-
-
-export function studioSectionFromSearch(
-  search: string,
-  fallback: WorkbenchSection,
-  storedSection?: StudioWorkbenchSection,
-): StudioWorkbenchSection {
-  const querySection = new URLSearchParams(search).get("section");
-  if (querySection === "ledger") return "ledger";
-  if (querySection) return fallback;
-  return storedSection === "ledger" ? "ledger" : fallback;
-}
 
 
 export function studioDomainLoadIsCurrent(
@@ -287,36 +263,6 @@ export function studioOverlayVisibleWidth(
 ): number | null {
   if (!layout?.assistantOverlay) return null;
   return Math.max(0, layout.containerWidth - layout.assistantWidth);
-}
-
-
-export function studioLedgerFiltersFromRoute(
-  route: WorkbenchLedgerRoute,
-): StoryLedgerFilters {
-  return {
-    ...(route.factType ? { factTypes: [route.factType] } : {}),
-    ...(route.effectiveState ? { effectiveState: route.effectiveState } : {}),
-    ...(route.health ? { health: route.health } : {}),
-    ...(route.sourceDocumentId ? { sourceDocumentId: route.sourceDocumentId } : {}),
-  };
-}
-
-
-export function studioLedgerRouteFromContext(
-  context: StoryLedgerWorkspaceContext,
-  fallbackTimelineId: string | null = null,
-): WorkbenchLedgerRoute {
-  const factTypes = context.filters.factTypes ?? [];
-  return normalizeWorkbenchLedgerRoute({
-    factId: context.selectedFactId ?? undefined,
-    timelineId: context.timeline?.timeline_id ?? fallbackTimelineId ?? undefined,
-    factType: factTypes.length === 1
-      ? factTypes[0] as WorkbenchLedgerRoute["factType"]
-      : undefined,
-    effectiveState: context.filters.effectiveState ?? undefined,
-    health: context.filters.health ?? undefined,
-    sourceDocumentId: context.filters.sourceDocumentId ?? undefined,
-  });
 }
 
 
@@ -496,21 +442,11 @@ export function studioAssistantPageEnvelope(
   novel: Pick<NovelRecord, "id" | "title">,
   section: StudioWorkbenchSection,
   roleView: "list" | "graph" = "list",
-  ledgerContext?: NovelAssistantContextEnvelope["ledger"],
 ): NovelAssistantContextEnvelope | null {
   const base = {
     agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
     novel: { id: novel.id, title: novel.title },
   };
-  if (section === "ledger") {
-    if (!ledgerContext) return null;
-    return {
-      ...base,
-      page: { section: "ledger", view: "story-ledger" },
-      entity: { type: "novel", id: novel.id, title: novel.title },
-      ledger: ledgerContext,
-    };
-  }
   if (section === "outline") {
     return {
       ...base,
@@ -678,7 +614,6 @@ function sectionIcon(section: StudioWorkbenchSection): any {
     clues: BulbOutlined,
     settings: SettingOutlined,
     reading: SoundOutlined,
-    ledger: BookOutlined,
   }[section];
 }
 
@@ -691,7 +626,6 @@ function sectionLabel(section: StudioWorkbenchSection): string {
     clues: "线索",
     settings: "设定",
     reading: "朗读",
-    ledger: "账本",
   }[section];
 }
 
@@ -1375,7 +1309,7 @@ function OutlineWizard({
             h(
               "div",
               { className: "mb-outline-heading-row" },
-              h("div", null, h("h3", null, "人物规划引用"), h("span", null, "已关联人物复用“角色”中的正式人物卡；未关联草案在完成大纲时才会新建正式卡")),
+              h("div", null, h("h3", null, "人物规划")),
               h(Button, {
                 icon: h(ReloadOutlined),
                 disabled: generating,
@@ -1586,17 +1520,7 @@ function OutlineWizard({
                 } }, "改名后新建"),
               ),
             ),
-          }) : isLinkedOutlineCharacter(draftRef.current?.characters[characterIndex]) ? h(Alert, {
-            type: "info",
-            showIcon: true,
-            message: "已关联“角色”中的正式人物卡",
-            description: "这里仅保存大纲规划，不覆盖正式人物资料；章节同步进展只会回填到已关联的正式人物卡。",
-          }) : h(Alert, {
-            type: "info",
-            showIcon: true,
-            message: "尚未关联正式人物卡",
-            description: "完成大纲时可关联同名正式人物；没有匹配项的人物草案会新建为正式人物卡。",
-          }),
+          }) : null,
           h(
             "div",
             { className: "mb-form-grid mb-form-grid-three" },
@@ -2636,21 +2560,8 @@ export function StudioProjectView({
 }: StudioProps) {
   const overlayVisibleWidth = studioOverlayVisibleWidth(assistantWorkspaceLayout);
   const activeRoute = activeWorkbenchRoute();
-  const storedLedgerRoute = activeRoute?.novelId === novel.id
-    && activeRoute.section === "ledger"
-    ? activeRoute.ledger ?? {}
-    : {};
-  const querySection = new URLSearchParams(window.location.search).get("section");
-  const initialLedgerRoute = querySection === "ledger"
-    ? workbenchLedgerRouteFromSearch(window.location.search)
-    : normalizeWorkbenchLedgerRoute(storedLedgerRoute);
-  const initialStudioSection = studioSectionFromSearch(
-    window.location.search,
-    section,
-    activeRoute?.novelId === novel.id ? activeRoute.section : undefined,
-  );
   const querySettingsTab = new URLSearchParams(window.location.search).get("settings_tab");
-  const initialSettingsTab: WorkbenchSettingsTab = initialStudioSection === "settings"
+  const initialSettingsTab: WorkbenchSettingsTab = section === "settings"
     && isWorkbenchSettingsTab(querySettingsTab)
     ? querySettingsTab
     : activeRoute?.novelId === novel.id
@@ -2660,26 +2571,19 @@ export function StudioProjectView({
       : "template";
   const [busy, setBusy] = React.useState(false);
   const [studioSection, setStudioSection] = React.useState(
-    initialStudioSection as StudioWorkbenchSection,
-  );
-  const [ledgerRoute, setLedgerRoute] = React.useState(
-    initialLedgerRoute as WorkbenchLedgerRoute,
+    section,
   );
   const [storyTimelines, setStoryTimelines] = React.useState(
     [] as StoryTimelineRecord[],
   );
-  const [storyTimelinesReady, setStoryTimelinesReady] = React.useState(false);
   const [currentTimelineId, setCurrentTimelineId] = React.useState(
-    initialLedgerRoute.timelineId ?? null as string | null,
+    null as string | null,
   );
   const [ledgerSnapshot, setLedgerSnapshot] = React.useState({
     ledger_snapshot_token: null,
     story_ledger_version: novel.story_ledger_version,
   } as StoryTimelineLedgerSnapshot);
   const [ledgerRefreshKey, setLedgerRefreshKey] = React.useState(0);
-  const [storyLedgerContext, setStoryLedgerContext] = React.useState(
-    null as StoryLedgerWorkspaceContext | null,
-  );
   const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
   const [generationModelStatusError, setGenerationModelStatusError] = React.useState(false);
   const [characters, setCharacters] = React.useState([] as NovelCharacterRecord[]);
@@ -2764,11 +2668,9 @@ export function StudioProjectView({
   const externalSectionRef = React.useRef({ novelId: novel.id, section });
   const domainLoadGenerationRef = React.useRef(0);
   const domainLoadAbortRef = React.useRef(null as AbortController | null);
-  const ledgerRouteRef = React.useRef(ledgerRoute) as StudioMutableRef<WorkbenchLedgerRoute>;
   const ledgerSnapshotRef = React.useRef(
     ledgerSnapshot,
   ) as StudioMutableRef<StoryTimelineLedgerSnapshot>;
-  ledgerRouteRef.current = ledgerRoute;
   ledgerSnapshotRef.current = ledgerSnapshot;
 
   const characterFormRef = React.useRef(characterForm) as StudioMutableRef<typeof characterForm>;
@@ -2924,21 +2826,6 @@ export function StudioProjectView({
     focus: () => focusAssistantControl(id),
   });
 
-  const replaceLedgerLocation = React.useCallback((next: WorkbenchLedgerRoute): void => {
-    const normalized = normalizeWorkbenchLedgerRoute(next);
-    if (JSON.stringify(normalized) !== JSON.stringify(ledgerRouteRef.current)) {
-      ledgerRouteRef.current = normalized;
-      setLedgerRoute(normalized);
-    }
-    setStudioSection("ledger");
-    rememberWorkbenchLedgerLocation(novel.id, normalized);
-    replaceWorkbenchHistoryUrl(
-      window.history,
-      window.location.href,
-      workbenchLedgerPath(novel.id, normalized),
-    );
-  }, [novel.id]);
-
   const changeSettingsTab = (next: WorkbenchSettingsTab): void => {
     setSettingsTab(next);
     rememberWorkbenchLocation(novel.id, {
@@ -2951,21 +2838,6 @@ export function StudioProjectView({
       workbenchSettingsPath(novel.id, next),
     );
   };
-
-  const handleStoryLedgerContextChange = React.useCallback(
-    (context: StoryLedgerWorkspaceContext): void => {
-      setStoryLedgerContext(context);
-      if (!context.summary) return;
-      const next = studioLedgerRouteFromContext(
-        context,
-        ledgerRouteRef.current.timelineId ?? null,
-      );
-      if (JSON.stringify(next) !== JSON.stringify(ledgerRouteRef.current)) {
-        replaceLedgerLocation(next);
-      }
-    },
-    [replaceLedgerLocation],
-  );
 
   const observeLedgerSnapshot = React.useCallback(
     (next: StoryTimelineLedgerSnapshot): void => {
@@ -3026,17 +2898,6 @@ export function StudioProjectView({
     [novel.id, novel.story_ledger_version],
   );
 
-  const ledgerAssistantContext = storyLedgerContext
-    && storyLedgerContext.summary?.novel_id === novel.id
-    ? buildStoryLedgerAssistantContextFromWorkspace({
-        novel: { id: novel.id, title: novel.title },
-        context: storyLedgerContext,
-      })
-    : null;
-  const ledgerAssistantFingerprint = ledgerAssistantContext
-    ? JSON.stringify(ledgerAssistantContext)
-    : "";
-
   React.useEffect(() => {
     const previous = externalSectionRef.current;
     const novelChanged = previous.novelId !== novel.id;
@@ -3044,22 +2905,7 @@ export function StudioProjectView({
     externalSectionRef.current = { novelId: novel.id, section };
     if (novelChanged) {
       const nextActiveRoute = activeWorkbenchRoute();
-      const nextQuerySection = new URLSearchParams(window.location.search).get("section");
-      const nextRoute = nextQuerySection === "ledger"
-        ? workbenchLedgerRouteFromSearch(window.location.search)
-        : normalizeWorkbenchLedgerRoute(
-            nextActiveRoute?.novelId === novel.id
-              && nextActiveRoute.section === "ledger"
-              ? nextActiveRoute.ledger ?? {}
-              : {},
-          );
-      ledgerRouteRef.current = nextRoute;
-      setLedgerRoute(nextRoute);
-      setStudioSection(studioSectionFromSearch(
-        window.location.search,
-        section,
-        nextActiveRoute?.novelId === novel.id ? nextActiveRoute.section : undefined,
-      ));
+      setStudioSection(section);
       const nextSettingsTab = new URLSearchParams(window.location.search).get("settings_tab");
       setSettingsTab(
         nextActiveRoute?.novelId === novel.id
@@ -3070,14 +2916,12 @@ export function StudioProjectView({
             ? nextSettingsTab
             : "template",
       );
-      setCurrentTimelineId(nextRoute.timelineId ?? null);
+      setCurrentTimelineId(null);
       setStoryTimelines([]);
-      setStoryTimelinesReady(false);
       setCharacters([]);
       setRelationships([]);
       setStorylines([]);
       setForeshadows([]);
-      setStoryLedgerContext(null);
       setLedgerSnapshot({
         ledger_snapshot_token: null,
         story_ledger_version: novel.story_ledger_version,
@@ -3109,9 +2953,6 @@ export function StudioProjectView({
     const selected = active.find(
       (timeline: StoryTimelineRecord) => timeline.id === currentTimelineId,
     )
-      ?? active.find(
-        (timeline: StoryTimelineRecord) => timeline.id === ledgerRouteRef.current.timelineId,
-      )
       ?? active.find((timeline: StoryTimelineRecord) => timeline.is_primary)
       ?? active[0]
       ?? null;
@@ -3150,7 +2991,6 @@ export function StudioProjectView({
       novel,
       studioSection,
       roleTab,
-      ledgerAssistantContext ?? undefined,
     );
     if (!envelope) return;
     const mounted = mountStudioAssistantScope(
@@ -3163,7 +3003,6 @@ export function StudioProjectView({
     );
     return () => mounted.dispose();
   }, [
-    ledgerAssistantFingerprint,
     novel.id,
     novel.title,
     roleTab,
@@ -3601,11 +3440,9 @@ export function StudioProjectView({
         .then((resource) => {
           if (!isCurrent()) return;
           setStoryTimelines([...resource.items]);
-          setStoryTimelinesReady(true);
         })
         .catch((reason) => {
           if (!isCurrent() || isAbortLike(reason)) return;
-          setStoryTimelinesReady(true);
           failures.push(readableError(reason, "加载时间线失败"));
         }),
     ]);
@@ -4500,7 +4337,6 @@ export function StudioProjectView({
             null,
             h("span", { className: "mb-role-overview-eyebrow" }, "正式人物档案"),
             h("h2", null, "人物卡"),
-            h("p", null, "统一维护基础资料、当前线设定、状态与经历及声音；大纲只引用这里的正式人物。"),
           ),
           h(
             "div",
@@ -4608,9 +4444,6 @@ export function StudioProjectView({
 
   const templateEntries = Object.entries(novel.template_data || {}).filter(([key]) => !key.startsWith("cover_"));
   const foreshadowStatusLabel: Record<string, string> = { planned: "待埋设", active: "进行中", resolved: "已解决", dropped: "已放弃" };
-  const activeStoryTimelines = storyTimelines.filter(
-    (timeline: StoryTimelineRecord) => timeline.lifecycle_state === "active",
-  );
   const renderSettings = () => settingsTab === "template"
     ? h(
         "div",
@@ -4653,13 +4486,6 @@ export function StudioProjectView({
             snapshot: StoryTimelineLedgerSnapshot,
             _source: StoryTimelineLedgerSnapshotSource,
           ) => observeLedgerSnapshot(snapshot),
-          onOpenLedger: ({ ledger_timeline: timelineId }: {
-            section: "ledger";
-            ledger_timeline: string;
-          }) => replaceLedgerLocation({
-            ...ledgerRouteRef.current,
-            timelineId,
-          }),
           onOpenCharacterCard: ({ characterId, timelineId, instanceId }: {
             characterId: string;
             timelineId: string;
@@ -4673,40 +4499,6 @@ export function StudioProjectView({
           },
         })
       : h(NovelSemanticIndexCard, { novelId: novel.id, novelTitle: novel.title });
-
-  const renderLedger = () => {
-    if (!storyTimelinesReady || (activeStoryTimelines.length > 0 && !currentTimelineId)) {
-      return h(
-        "div",
-        { className: "mb-large-empty", role: "status", "aria-live": "polite" },
-        h(Spin),
-        h("span", null, "正在确定账本时间线…"),
-      );
-    }
-    return h(StoryLedgerWorkspace, {
-      novelId: novel.id,
-      timelineId: currentTimelineId,
-      narrativeCutoff: null,
-      snapshotToken: ledgerSnapshot.ledger_snapshot_token,
-      initialFactId: ledgerRoute.factId ?? null,
-      initialFilters: studioLedgerFiltersFromRoute(ledgerRoute),
-      timelineOptions: activeStoryTimelines.map((timeline: StoryTimelineRecord) => ({
-        id: timeline.id,
-        name: timeline.name,
-      })),
-      onTimelineChange: (timelineId: string) => {
-        setCurrentTimelineId(timelineId);
-        replaceLedgerLocation({ ...ledgerRouteRef.current, timelineId });
-      },
-      onSnapshotChange: (snapshotToken: string, storyLedgerVersion: number) => {
-        observeLedgerSnapshot({
-          ledger_snapshot_token: snapshotToken,
-          story_ledger_version: storyLedgerVersion,
-        });
-      },
-      onContextChange: handleStoryLedgerContextChange,
-    });
-  };
 
   const narrationScopeTargets: ReadingScopeTarget[] = novel.tree.flatMap(
     (volume: VolumeRecord) => {
@@ -4803,9 +4595,7 @@ export function StudioProjectView({
           ? renderClues()
           : studioSection === "settings"
             ? renderSettings()
-            : studioSection === "ledger"
-              ? renderLedger()
-              : renderReading();
+            : renderReading();
   const characterPickerInstances = characterWorkspacePicker
     ? characterWorkspacePicker.instances.filter(
         (instance: CharacterInstanceRecord) =>
@@ -4852,14 +4642,6 @@ export function StudioProjectView({
                 className: studioSection === item ? "is-active" : "",
                 "aria-current": studioSection === item ? "page" : undefined,
                 onClick: () => {
-                  if (item === "ledger") {
-                    replaceLedgerLocation({
-                      ...ledgerRouteRef.current,
-                      timelineId: currentTimelineId
-                        ?? ledgerRouteRef.current.timelineId,
-                    });
-                    return;
-                  }
                   setStudioSection(item);
                   onSectionChange(item);
                 },
@@ -5106,7 +4888,6 @@ export function StudioProjectView({
         STUDIO_SELECTION_REVIEW_FIELD_GROUPS.character,
         "mb-character-selection-review-host",
         h("div", { className: "mb-form-stack" },
-          h(Alert, { type: "info", showIcon: true, message: "创建后将自动建立主时间线档案，详细资料在正式人物卡中统一维护。" }),
           field("角色类型", h(Select, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType), value: characterForm.role_type, options: [{ label: "主角", value: "main" }, { label: "配角", value: "supporting" }], onChange: (value: "main" | "supporting") => changeCharacterFieldValue("role_type", value, STUDIO_ASSISTANT_FIELD_IDS.characterRoleType) })),
           field("人物姓名", h(Input, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterName), value: characterForm.name, onChange: (event: any) => changeCharacterFieldValue("name", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterName) })),
           field("公共小传", h(Input.TextArea, { ...assistantControlProps(characterAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.characterDescription), rows: 5, value: characterForm.description, onChange: (event: any) => changeCharacterFieldValue("description", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.characterDescription) })),

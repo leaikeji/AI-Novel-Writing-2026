@@ -125,16 +125,7 @@ export interface StoryLedgerSummary {
   readonly review_required: number;
 }
 
-export interface StoryLedgerFactPage {
-  readonly schema_version: "story-ledger-page/1";
-  readonly novel_id: string;
-  readonly ledger_snapshot_token: string;
-  readonly story_ledger_version: number;
-  readonly timeline: StoryLedgerTimelineContext;
-  readonly filter_sha256: string;
-  readonly items: readonly StoryLedgerFactItem[];
-  readonly next_cursor: string | null;
-}
+
 
 export interface StoryLedgerFactDetail {
   readonly schema_version: "story-ledger-fact-detail/1";
@@ -246,10 +237,7 @@ export interface StoryLedgerReadScope {
   readonly snapshotToken?: string | null;
 }
 
-export interface StoryLedgerPageQuery extends StoryLedgerFilters {
-  readonly cursor?: string | null;
-  readonly limit?: number;
-}
+
 
 export interface StoryFactCorrectionCommandV1 {
   readonly schema_version: "story-fact-correction/1";

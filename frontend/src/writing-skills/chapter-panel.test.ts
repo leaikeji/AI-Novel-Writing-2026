@@ -138,18 +138,17 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     expect(JSON.parse(String(bodyCalls()[0][1].body)).writing_action.action_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(changed).toHaveBeenCalledTimes(1);
     expect(errors).not.toHaveBeenCalled();
-  });
-  it("sends the author's per-action generic choice without adding method fields to chapter content", async () => {
-    const select = hooks.nodes.find(node => node.props["aria-label"] === "本次写作方法")!;
-    expect(select.props.disabled).toBe(false);
-    (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "generic_only" } });
     render();
+    expect(hooks.nodes.some(node => node.children.includes("查询原任务"))).toBe(false);
+  });
+  it("automatically selects methods without adding controls or fields to chapter content", async () => {
+    expect(hooks.nodes.some(node => node.props["aria-label"] === "本次写作方法")).toBe(false);
     const prompt = await confirm(); (prompt.onOk as () => void)(); await flush();
     const body = JSON.parse(String(bodyCalls()[0][1].body));
     expect(body).not.toHaveProperty("method_mode");
-    expect(body.writing_action.preferences).toEqual({ mode: "generic_only", semantic_mode: "off" });
+    expect(body.writing_action.preferences).toEqual({ mode: "auto", semantic_mode: "off" });
     render(OTHER); await flush(); render();
-    expect(hooks.nodes.find(node => node.props["aria-label"] === "本次写作方法")?.props.value).toBe("auto");
+    expect(hooks.nodes.some(node => node.props["aria-label"] === "本次写作方法")).toBe(false);
   });
   it("links automatic length rewrites to the prior action while keeping the method choice", async () => {
     const original = bodyReply;
@@ -176,11 +175,9 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     expect(second.preferences).toEqual(first.preferences);
     expect(changed).toHaveBeenCalledTimes(1);
   });
-  it("visibly disables method selection when the server keeps the managed branch closed", async () => {
+  it("preserves the server's closed branch without exposing method configuration", async () => {
     catalogGate = false; render(OTHER); await flush(); render();
-    expect(hooks.nodes.find(node => node.props["aria-label"] === "本次写作方法")?.props.disabled).toBe(true);
-    expect(hooks.nodes.some(node => node.children.some(child => typeof child === "string"
-      && child.includes("自动方法入口未开放")))).toBe(true);
+    expect(hooks.nodes.some(node => node.props["aria-label"] === "本次写作方法")).toBe(false);
     expect(bodyCalls()).toHaveLength(0);
   });
   it("rejects an old confirmation after switching chapters, including returning to the same chapter", async () => {

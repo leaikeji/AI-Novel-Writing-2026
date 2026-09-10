@@ -79,13 +79,13 @@ function renderFactImpact(
 ): StoryLedgerElementNode {
   const h = React.createElement;
   if (props.impactLoading) {
-    return h("section", { className: "anw-character-correction-impact", role: "status" }, h("h4", null, "影响预览"), h("p", null, "正在读取当前账本快照的实际影响…"));
+    return h("section", { className: "anw-character-correction-impact", role: "status" }, h("h4", null, "影响预览"), h("p", null, "正在检查受影响的内容…"));
   }
   if (props.impactError) {
     return h("section", { className: "anw-character-correction-impact" }, h("h4", null, "影响预览"), h("p", { role: "alert" }, props.impactError));
   }
   if (!props.impact) {
-    return h("section", { className: "anw-character-correction-impact" }, h("h4", null, "影响预览"), h("p", null, "提交前将按当前账本快照读取实际影响。"));
+    return h("section", { className: "anw-character-correction-impact" }, h("h4", null, "影响预览"), h("p", null, "提交前将检查受影响的内容。"));
   }
   const impact = props.impact;
   return h(

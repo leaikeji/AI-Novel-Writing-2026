@@ -196,7 +196,7 @@ export function renderCharacterFactHistory(
       ? h("div", { className: "anw-character-workspace-meta", role: "status", "aria-live": "polite" }, "正在读取同步批次的实际影响…")
       : null,
     props.loading
-      ? h("div", { className: "anw-character-workspace-empty", role: "status" }, "正在读取事实账本…")
+      ? h("div", { className: "anw-character-workspace-empty", role: "status" }, "正在读取人物经历…")
       : items.length === 0
         ? h("div", { className: "anw-character-workspace-empty" }, "当前筛选下没有事实。")
         : h(

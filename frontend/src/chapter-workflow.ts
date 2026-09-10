@@ -70,7 +70,6 @@ import {
   createWritingMethodReceiptNotice,
   createWritingMethodStatusNotice,
 } from "./writing-skills/status";
-import { createChapterMethodHistory } from "./writing-skills/history";
 import { ReviewMethodClient, reviewMethodCatalog } from "./writing-skills/review";
 import {
   createRetrievalStatusNotice,
@@ -107,7 +106,6 @@ const TextArea = Input.TextArea;
 const RetrievalStatusNotice = createRetrievalStatusNotice(React);
 const WritingMethodStatusNotice = createWritingMethodStatusNotice(React);
 const WritingMethodReceiptNotice = createWritingMethodReceiptNotice(React);
-const ChapterMethodHistoryNotice = createChapterMethodHistory(React);
 
 
 interface ChapterWorkflowProps {
@@ -699,9 +697,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [reviewMethodStatus, setReviewMethodStatus] = React.useState(
     null as WritingMethodStatus | null,
   );
-  const [reviewMethodNames, setReviewMethodNames] = React.useState(
-    {} as Readonly<Record<string, string>>,
-  );
   const reviewMethodClientRef = React.useRef(null as ReviewMethodClient | null);
   const [bodyRetrievalSummary, setBodyRetrievalSummary] = React.useState(
     null as RetrievalSummaryV1 | null,
@@ -712,8 +707,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const methodReadyRef = React.useRef(null as Promise<ChapterMethodClient | null> | null);
   const bodySubmissionRef = React.useRef(null as string | null);
   const [methodSnapshot, setMethodSnapshot] = React.useState(null as WritingMethodSnapshot | null);
-  const [methodNames, setMethodNames] = React.useState({} as Readonly<Record<string, string>>);
-  const [methodMode, setMethodMode] = React.useState("auto" as "auto" | "generic_only");
   const [methodAvailability, setMethodAvailability] = React.useState("loading" as "loading" | "available" | "legacy" | "unavailable");
   // A return to the same document is a new visit; old modal callbacks stay revoked.
   const chapterVisit = React.useMemo(() => ({ active: false }), [novel.id, document.id]);
@@ -731,12 +724,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     methodClientRef.current = null;
     bodySubmissionRef.current = null;
     setMethodSnapshot(null);
-    setMethodNames({});
-    setMethodMode("auto");
     setMethodAvailability("loading");
     const ready = Promise.resolve().then(() => chapterMethodCatalog(document.id, novel.id, writingPageTabId())).then(catalog => {
       if (!active) throw new Error("章节已切换，写作方法目录结果已隔离");
-      setMethodNames(catalog.displayNames);
       setMethodAvailability(!catalog.catalogAvailable ? "unavailable" : catalog.available ? "available" : "legacy");
       client = new ChapterMethodClient(catalog.binding, snapshot => {
         if (active) setMethodSnapshot(snapshot);
@@ -780,7 +770,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setReviewJob(null);
     reviewMethodClientRef.current = null;
     setReviewMethodStatus(null);
-    setReviewMethodNames({});
     setBodyRetrievalSummary(null);
     setBusyAction("");
     setActiveGenerationModel(null);
@@ -966,7 +955,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
 
   const openAssetPicker = async () => {
     if (!chapterVisit.active) return;
-    setMethodMode("auto"); // A fresh author action starts with the published default.
     setBusyAction("assets-load");
     try {
       await loadAssets();
@@ -1064,7 +1052,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
             force_new: true,
             asset_ids: assetIds,
           };
-          const job = methodClient?.managedAvailable ? await methodClient.start({ ...input, method_mode: methodMode,
+          const job = methodClient?.managedAvailable ? await methodClient.start({ ...input, method_mode: "auto",
             ...(retryOfActionId ? { retry_of_action_id: retryOfActionId } : {}) }) : await apiRequest<GenerationJobRecord>(
             `/documents/${document.id}/generation-jobs/body`,
             {
@@ -1166,9 +1154,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
         h("p", null, "生成开始后请勿重复发起；失败时系统会保留正式正文不变。"),
         h("p", null, "若完整正文未进入字数硬范围，系统最多自动整章重写两次（本次最多 3 次模型调用）。"),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
-        h("p", null, methodClientRef.current?.managedAvailable
-          ? `本次写作方法：${methodMode === "generic_only" ? "仅通用" : "自动选择"}；语义补选未启用。`
-          : "自动方法入口未开放；本次使用原写作流程，不承诺分类方法已装载。"),
         h("p", null, "若多次出现生成失败，请检查当前有效模型连接。"),
         h("b", null, "确定继续生成吗？"),
       ),
@@ -1314,7 +1299,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       setSelectedIntelligenceItemIds([]);
       setIntelligenceOpen(true);
       onStatus(
-        `${completedGenerationModelLabel(proposal)} 已生成 ${proposal.items.length} 条同步候选 · 请选择后应用，尚未写入故事账本或关系网`,
+        `${completedGenerationModelLabel(proposal)} 已生成 ${proposal.items.length} 条同步候选 · 请选择要采用的变化`,
       );
     } catch (reason) {
       onError(errorMessage(reason, "同步进展失败"));
@@ -1419,7 +1404,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           writingPageTabId(),
         );
         requireChapterVisit();
-        setReviewMethodNames(catalog.displayNames);
         methodClient = new ReviewMethodClient(
           catalog,
           apiRequest,
@@ -1629,14 +1613,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       novelId: novel.id,
       compact: true,
     }),
-    methodSnapshot ? h(WritingMethodStatusNotice, { snapshot: methodSnapshot, displayNames: methodNames }) : null,
+    methodSnapshot ? h(WritingMethodStatusNotice, { snapshot: methodSnapshot }) : null,
     !reviewOpen && reviewMethodStatus
       ? h(WritingMethodReceiptNotice, {
           status: reviewMethodStatus,
-          displayNames: reviewMethodNames,
         })
       : null,
-    methodSnapshot?.action ? h(Button, {
+    methodSnapshot?.action && (methodSnapshot.error || ["claimed", "routing_started", "route_ready", "assembled", "dispatch_started", "unknown"].includes(methodSnapshot.status?.state ?? "unknown")) ? h(Button, {
       loading: methodSnapshot.loading,
       onClick: async () => {
         if (!chapterVisit.active) return;
@@ -1690,17 +1673,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       onCancel: () => setAssetPickerOpen(false),
       footer: [h(Button, { key: "skip", onClick: () => confirmGenerateBody([]) }, "跳过"), h(Button, { key: "generate", type: "primary", onClick: () => confirmGenerateBody(selectedAssetIds) }, `确定选择${selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ""}`)],
     }, h("section", { className: "anw-asset-picker" },
-      field("本次写作方法", h("select", {
-        "aria-label": "本次写作方法", value: methodMode, disabled: methodAvailability !== "available",
-        style: { maxWidth: "100%", padding: "8px 12px", borderRadius: "6px" },
-        onChange: (event: { target: { value: string } }) => {
-          if (event.target.value === "auto" || event.target.value === "generic_only") setMethodMode(event.target.value);
-        },
-      }, h("option", { value: "auto" }, "自动选择写作方法"), h("option", { value: "generic_only" }, "本次仅通用")),
-      methodAvailability === "available" ? "仅影响本次生成；语义补选未启用。"
-        : methodAvailability === "loading" ? "正在确认入口能力…"
-        : methodAvailability === "legacy" ? "自动方法入口未开放；保留原写作流程，不承诺分类方法已装载。"
-        : "方法目录暂不可用；可查询原任务，不能降级发起新生成。"),
       h("p", { className: "anw-asset-picker-copy" }, "AI 将重点展示选中的内容到生成结果中"),
       h("div", { className: "anw-asset-search-row" }, h(Input, { value: assetSearch, prefix: h(SearchOutlined), placeholder: "搜索私有库素材", onChange: (event: any) => setAssetSearch(event.target.value) }), h(Button, { type: "link", icon: h(PlusOutlined), onClick: () => setQuickAssetOpen(true) }, "快速添加私有素材")),
       h(Tabs, { activeKey: assetTab, onChange: (key: string) => setAssetTab(key as PrivateAssetType), items: ASSET_TABS.map((tab) => ({
@@ -1737,7 +1709,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       const maximumCount = job.maximum_visible_character_count;
       return h("article", { key: job.id, className: `anw-history-card${candidate?.id === featuredCandidateId ? " is-featured" : ""}` },
         h("header", null, h("div", null, h("strong", null, `第 ${job.attempt || 1} 次生成`), h("span", null, formatDate(job.completed_at || job.created_at))), h(Tag, { color: stateColor(state) }, stateLabel(state))),
-        h(ChapterMethodHistoryNotice, { key: `${document.id}:${job.id}`, documentId: document.id, jobId: job.id }),
         h("div", { className: "anw-history-meta" },
           h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`),
           h("span", null, maximumCount ? `验收 ${minimumCount}–${maximumCount} 字` : `验收不少于 ${minimumCount} 字`),
@@ -1785,7 +1756,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       !selectedProposal
         ? h(Empty, { description: "本章还没有同步记录；完成正文后点击“同步进展”生成候选" })
         : intelligenceGroups.length === 0
-        ? h(Empty, { description: "本章未发现需要同步的新进展；故事账本和关系网没有被修改" })
+        ? h(Empty, { description: "本章没有新的故事变化" })
         : h(
             "div",
             { className: "anw-intelligence-groups" },
@@ -1842,6 +1813,6 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       centered: true,
       footer: [h(Button, { key: "close", type: "primary", onClick: closeReview }, "关闭")],
       onCancel: closeReview,
-    }, reviewJob ? h("div", { className: "anw-review-result" }, h(WritingMethodReceiptNotice, { status: reviewMethodStatus, displayNames: reviewMethodNames }), h(RetrievalStatusNotice, { summary: retrievalSummaryFromJob(reviewJob), novelId: novel.id }), h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "模型已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
+    }, reviewJob ? h("div", { className: "anw-review-result" }, h(WritingMethodReceiptNotice, { status: reviewMethodStatus }), h(RetrievalStatusNotice, { summary: retrievalSummaryFromJob(reviewJob), novelId: novel.id }), h(Alert, { type: reviewJob.output_json?.passed ? "success" : "warning", showIcon: true, message: reviewJob.output_json?.passed ? "本章通过基础审阅" : "本章存在需要修改的问题", description: String(reviewJob.output_json?.summary || "模型已完成本章审阅。") }), reviewIssues.length ? h("div", { className: "anw-review-issues" }, ...reviewIssues.map((issue, index) => h(Card, { key: `${issue.type}-${index}`, size: "small" }, h("header", null, h(Tag, { color: issue.severity === "P0" || issue.severity === "P1" ? "error" : "warning" }, issue.severity || "P2"), h("strong", null, issue.type || "正文问题")), issue.evidence ? h("p", null, h("b", null, "原文依据："), issue.evidence) : null, issue.suggestion ? h("p", null, h("b", null, "修改建议："), issue.suggestion) : null))) : h(Empty, { description: "未发现需要单列的问题" })) : h(Empty, { description: "暂无审稿结果" })),
   );
 }

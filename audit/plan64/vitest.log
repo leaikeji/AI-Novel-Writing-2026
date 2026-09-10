@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /Users/liujia/Documents/AI小说世界2026
+
+
+ Test Files  146 passed (146)
+      Tests  1270 passed (1270)
+   Start at  01:46:33
+   Duration  4.06s (transform 8.65s, setup 0ms, import 11.22s, tests 6.68s, environment 12ms)
+

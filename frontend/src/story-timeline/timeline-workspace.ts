@@ -10,7 +10,6 @@ import {
   type CharacterRootSummary,
   type StoryTimelineCharacterCardTarget,
   type StoryTimelineContext,
-  type StoryTimelineLedgerDeepLink,
   type StoryTimelineLedgerSnapshot,
   type StoryTimelineLedgerSnapshotSource,
   type StoryTimelineRecord,
@@ -52,7 +51,6 @@ export interface StoryTimelineWorkspaceProps {
     snapshot: StoryTimelineLedgerSnapshot,
     source: StoryTimelineLedgerSnapshotSource,
   ) => void;
-  readonly onOpenLedger?: (target: StoryTimelineLedgerDeepLink) => void;
   readonly onOpenCharacterCard?: (target: StoryTimelineCharacterCardTarget) => void;
 }
 
@@ -282,7 +280,7 @@ export function createStoryTimelineWorkspace(
           if (generation !== refreshGenerationRef.current || controller.signal.aborted) return;
           observeSnapshot(refreshedSnapshot, "refresh");
         }
-        if (options.announce) setStatusMessage("时间线与账本快照已刷新");
+        if (options.announce) setStatusMessage("时间线已刷新");
       } catch (reason) {
         if (generation !== refreshGenerationRef.current || isAbortLike(reason)) return;
         setError({
@@ -372,7 +370,7 @@ export function createStoryTimelineWorkspace(
           }
           setError({
             kind: "conflict",
-            title: "时间线或账本已更新",
+            title: "故事状态已更新",
             detail: "已刷新时间线范围。你输入的分支名已保留，请核对后重试。",
           });
           await refresh({ preserveError: true });
@@ -451,14 +449,6 @@ export function createStoryTimelineWorkspace(
       activateTimeline(next, true);
     };
 
-    const openLedger = (): void => {
-      if (!selectedTimeline) return;
-      props.onOpenLedger?.({
-        section: "ledger",
-        ledger_timeline: selectedTimeline.id,
-      });
-    };
-
     const selectedTabId = selectedTimeline
       ? `${baseId}-tab-${safeDomSegment(selectedTimeline.id)}`
       : null;
@@ -491,10 +481,6 @@ export function createStoryTimelineWorkspace(
                 : "普通写作自动使用主线，无需增加任何步骤。"),
             ),
             h("div", { className: "anw-timeline-header-actions" },
-              h(Button, {
-                disabled: !selectedTimeline || !props.onOpenLedger,
-                onClick: openLedger,
-              }, "查看本线账本"),
               h(Button, { onClick: () => void refresh({ announce: true }) }, "刷新"),
               h(Button, {
                 disabled: !selectedTimeline,

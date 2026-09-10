@@ -61,9 +61,7 @@ export function CharacterProfileCompletionPanel({
   const [writingMethodStatus, setWritingMethodStatus] = React.useState(
     null as WritingMethodStatus | null,
   );
-  const [writingMethodNames, setWritingMethodNames] = React.useState(
-    {} as Readonly<Record<string, string>>,
-  );
+
   const [selection, dispatchSelection] = React.useReducer(
     reduceCharacterProfileCompletionSelection,
     undefined,
@@ -97,7 +95,6 @@ export function CharacterProfileCompletionPanel({
   React.useEffect(() => {
     setStatus(null);
     setWritingMethodStatus(null);
-    setWritingMethodNames({});
     dispatchSelection({ type: "clear-selections" });
     void loadStatus();
   }, [loadStatus, novelId]);
@@ -119,7 +116,6 @@ export function CharacterProfileCompletionPanel({
         if (!client.hasRecoveryTicket) return;
         const recovered = await client.recover();
         if (!active) return;
-        setWritingMethodNames(catalog.displayNames);
         setWritingMethodStatus(recovered.writing_method);
       } catch {
         // A stale or foreign ticket is not permission to create a new action.
@@ -169,7 +165,6 @@ export function CharacterProfileCompletionPanel({
               novelId,
               writingPageTabId(),
             );
-            setWritingMethodNames(catalog.displayNames);
             let next: CharacterProfileCompletionApiStatus | null;
             if (catalog.available) {
               if (!catalog.catalogAvailable) {
@@ -344,7 +339,6 @@ export function CharacterProfileCompletionPanel({
     ),
     h(WritingMethodReceiptNotice, {
       status: writingMethodStatus,
-      displayNames: writingMethodNames,
     }),
     h(
       Modal,

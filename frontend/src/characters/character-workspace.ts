@@ -626,7 +626,7 @@ export function createCharacterWorkspaceDialog(
           || impact.story_ledger_version !== workspace.story_ledger_version
           || impact.timeline.timeline_id !== workspace.selected_timeline.id
         ) {
-          setCorrectionImpactError("影响预览与当前人物或账本快照不匹配，请关闭后重新打开。");
+          setCorrectionImpactError("影响预览与当前人物状态不匹配，请关闭后重新打开。");
           setCorrectionObjectText(fact.object_text);
           setCorrectionReason("");
           return;
@@ -667,7 +667,7 @@ export function createCharacterWorkspaceDialog(
         || correctionImpact.fact_id !== correctionFact.id
         || correctionImpact.story_ledger_version !== workspace.story_ledger_version
       ) {
-        setCorrectionError("必须先取得与当前账本快照一致的真实影响预览。");
+        setCorrectionError("请先获取当前修改的影响预览。");
         return;
       }
       const payload = {
@@ -766,7 +766,7 @@ export function createCharacterWorkspaceDialog(
           || impact.story_ledger_version !== workspace.story_ledger_version
           || impact.timeline.timeline_id !== workspace.selected_timeline.id
         ) {
-          setHistoryError("撤销影响预览与当前人物或账本快照不匹配，请刷新后重试。");
+          setHistoryError("撤销预览与当前人物状态不匹配，请刷新后重试。");
           return;
         }
         setBatchImpact(impact);
@@ -864,7 +864,7 @@ export function createCharacterWorkspaceDialog(
           || source.story_ledger_version !== workspace.story_ledger_version
           || source.timeline.timeline_id !== workspace.selected_timeline.id
         ) {
-          setSourceError("来源摘录与当前人物或账本快照不匹配，请关闭后重新打开。");
+          setSourceError("来源摘录与当前人物状态不匹配，请关闭后重新打开。");
           return;
         }
         setSourcePayload(source);
@@ -1514,7 +1514,7 @@ export function createCharacterWorkspaceDialog(
             "span",
             { className: "anw-character-workspace-meta" },
             activeTab === "growth"
-              ? "状态与经历来自故事账本，仅供查看。"
+              ? null
               : activeTab === "voice"
                 ? dirty
                   ? "其他栏目还有未保存修改；下方撤销和保存只处理人物卡字段。"

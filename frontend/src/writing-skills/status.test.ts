@@ -34,69 +34,51 @@ function snapshot(state = "assembled"): WritingMethodSnapshot {
   };
 }
 
-describe("writing method status presentation", () => {
-  it("keeps selected, assembled, and dispatched meanings separate", () => {
-    expect(writingMethodPresentation(status("route_ready")).title).toContain("已选择");
-    expect(writingMethodPresentation(status("assembled")).title).toBe("方法内容已组装");
-    expect(writingMethodPresentation(status("dispatch_started")).title).toBe("写作请求正在派发");
-    expect(writingMethodPresentation(status("dispatched"), { "suspense-writing": "悬疑" }).title)
-      .toBe("本次已装载到请求：悬疑");
-  });
+describe("actionable generation notices", () => {
+  it.each(["claimed", "routing_started", "route_ready", "assembled", "dispatch_started", "dispatched", "cancelled"])(
+    "keeps automatic method processing silent for %s", state => {
+      expect(writingMethodPresentation(status(state))).toBeNull();
+      expect(createWritingMethodReceiptNotice(React)({ status: status(state) })).toBeNull();
+      expect(createWritingMethodStatusNotice(React)({ snapshot: snapshot(state) })).toBeNull();
+    },
+  );
 
-  it("never presents an omitted future module as loaded", () => {
-    const view = writingMethodPresentation(status("dispatched"), { "future-module": "未来模块" });
-    expect(view.methodNames).toEqual(["suspense-writing"]);
-    expect(view.omittedNames).toEqual(["未来模块"]);
-    expect(view.title).not.toContain("未来模块");
-  });
-
-  it("defaults semantic off and explains unknown without a retry button", () => {
-    expect(writingMethodPresentation(null).semanticText).toContain("未启用");
-    expect(writingMethodPresentation(null).semanticText).toContain("0 次");
-    const view = writingMethodPresentation(status("unknown"));
-    expect(view.tone).toBe("warning");
-    expect(view.description).toContain("不能自动重试");
-    const Notice = createWritingMethodStatusNotice(React);
-    expect(text(Notice({ snapshot: snapshot("unknown") }))).toContain("不能自动重试");
-  });
-
-  it("renders a keyboard-native details control and narrow-width wrapping outside正文", () => {
-    const Notice = createWritingMethodStatusNotice(React);
-    const root = Notice({ snapshot: snapshot() }) as Element;
-    expect(root.type).toBe("section");
-    expect(root.props.style).toMatchObject({ minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere", whiteSpace: "normal" });
-    const live = root.children[0] as Element;
-    expect(live.props).toMatchObject({ role: "status", "aria-live": "polite" });
-    const details = root.children[1] as Element;
-    expect(details.type).toBe("details");
-    expect((details.children[0] as Element).type).toBe("summary");
-    expect((details.children[1] as Element).props).toMatchObject({ tabIndex: 0 });
-    expect(text(root)).toContain("查看写作方法记录");
-    expect(root.props).not.toHaveProperty("dangerouslySetInnerHTML");
-  });
-
-  it("uses dynamic display names as text, without a fixed category list", () => {
-    const Notice = createWritingMethodStatusNotice(React);
-    const tree = Notice({ snapshot: snapshot("dispatched"), displayNames: { "suspense-writing": "<script>not html</script>" } });
-    expect(text(tree)).toContain("<script>not html</script>");
-    expect(JSON.stringify(tree)).not.toContain("dangerouslySetInnerHTML");
-  });
-
-  it("renders a frozen button receipt without consulting the live catalog", () => {
+  it.each([
+    ["failed", "请查看任务失败原因"],
+    ["unknown", "不能自动重试"],
+    ["stale", "请核对当前资料"],
+  ])("preserves the action needed for %s without technical records", (state, action) => {
     const Receipt = createWritingMethodReceiptNotice(React);
-    const root = Receipt({ status: status("dispatched") }) as Element;
-    expect(root.props["aria-label"]).toBe("本次写作方法");
-    expect(text(root)).toContain("本次已装载到请求");
-    expect(text(root)).toContain("查看写作方法记录");
-    expect(text(root)).toContain("记录编号");
+    const root = Receipt({ status: status(state) }) as Element;
+    expect(text(root)).toContain(action);
+    expect(root.props).toMatchObject({ role: "status", "aria-live": "polite", "aria-label": "生成状态" });
+    expect(root.props.style).toMatchObject({ minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere", whiteSpace: "normal" });
+    const encoded = JSON.stringify(root);
+    for (const value of ["button", "details", "summary", "dangerouslySetInnerHTML", D, "a".repeat(64), "future-module", "<script>", "语义", "方法摘要"]) {
+      expect(encoded).not.toContain(value);
+    }
   });
 
-  it("does not display prior-action success for a new action or a read failure", () => {
+  it("does not show prior-action failure for a new action", () => {
     const Notice = createWritingMethodStatusNotice(React);
-    const stale = { ...snapshot("dispatched"), status: { ...status("dispatched"), action_id: D } };
-    expect(text(Notice({ snapshot: stale }))).not.toContain("本次已装载到请求");
-    const failed = { ...snapshot("dispatched"), error: "status_unavailable" as const };
-    expect(text(Notice({ snapshot: failed }))).toContain("方法状态暂时无法确认");
+    expect(Notice({ snapshot: { ...snapshot("unknown"), status: { ...status("unknown"), action_id: D } } })).toBeNull();
     expect(Notice({ snapshot: { ...snapshot(), action: null, status: null } })).toBeNull();
+  });
+
+  it.each([
+    { error: "status_unavailable" as const },
+    { error: "transport_unavailable" as const },
+    { connected: false },
+  ])("preserves uncertain-result protection on read or transport failure %#", patch => {
+    const Notice = createWritingMethodStatusNotice(React);
+    const root = Notice({ snapshot: { ...snapshot("dispatched"), ...patch } });
+    expect(text(root)).toContain("生成状态暂时无法确认");
+    expect(text(root)).toContain("不能自动重试");
+    expect(JSON.stringify(root)).not.toContain("button");
+  });
+
+  it("does not manufacture a status when no evidence exists", () => {
+    expect(writingMethodPresentation(null)).toBeNull();
+    expect(createWritingMethodReceiptNotice(React)({ status: null })).toBeNull();
   });
 });

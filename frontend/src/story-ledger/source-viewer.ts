@@ -28,7 +28,7 @@ export function renderStoryLedgerSourceViewer(
     "aside",
     {
       id: props.dialogId,
-      className: "anw-character-source-viewer anw-story-ledger-source-viewer",
+      className: "anw-character-source-viewer",
       role: "dialog",
       "aria-modal": true,
       "aria-labelledby": props.titleId,

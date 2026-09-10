@@ -13,7 +13,7 @@ from typing import Any, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import and_, case, func, or_, select, text
+from sqlalchemy import JSON, and_, case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
@@ -3238,6 +3238,56 @@ def _story_time_invents_calendar_year(
     return bool(proposed_years - source_years)
 
 
+def _story_fact_identity(fact: StoryFactV2 | StoryFact) -> dict[str, Any]:
+    """Compare validated meaning and provenance, independent of row metadata."""
+    return StoryFactV2.model_validate(fact).model_dump(
+        mode="json",
+        exclude={"id", "event_fingerprint", "status", "created_at"},
+    )
+
+
+def _find_matching_story_fact(
+    session: Session,
+    candidate: StoryFactV2,
+) -> StoryFact | None:
+    identity = _story_fact_identity(candidate)
+    fact = session.scalar(
+        select(StoryFact)
+        .where(
+            StoryFact.novel_id == candidate.novel_id,
+            StoryFact.event_fingerprint == candidate.event_fingerprint,
+        )
+        .with_for_update()
+    )
+    if fact is not None:
+        if _story_fact_identity(fact) != identity:
+            raise ValidationError("故事事实指纹与内容不一致，不能自动合并")
+        return fact
+
+    # Old hashes included display metadata but omitted subject/predicate/details.
+    # Match the complete meaning in SQL so an old row can be reused even after a
+    # label changes, without rewriting history or loading a chapter's fact body.
+    predicates = []
+    for field, value in identity.items():
+        column = getattr(StoryFact, field)
+        if field == "story_time_json" and value is None:
+            predicates.append(or_(column.is_(None), column == JSON.NULL))
+        else:
+            if field.endswith("_id") and value is not None:
+                value = UUID(value)
+            predicates.append(column == value)
+    fact = session.scalar(
+        select(StoryFact)
+        .where(*predicates)
+        .order_by(StoryFact.created_at, StoryFact.id)
+        .limit(1)
+        .with_for_update()
+    )
+    if fact is not None and _story_fact_identity(fact) == identity:
+        return fact
+    return None
+
+
 def _typed_story_fact_candidate(
     *,
     proposal: IntelligenceProposal,
@@ -3301,28 +3351,8 @@ def _typed_story_fact_candidate(
     visibility = str(payload.get("visibility") or "author")
     if visibility not in {"author", "reader", "all"}:
         visibility = "author"
-    fingerprint_material = {
-        "novel_id": str(proposal.novel_id),
-        "source_revision_id": str(proposal.chapter_revision_id),
-        "source_start": payload.get("source_start"),
-        "source_end": payload.get("source_end"),
-        "timeline_id": payload.get("timeline_id"),
-        "fact_type": fact_type,
-        "dimension": payload.get("dimension"),
-        "event_kind": payload.get("event_kind"),
-        "entity": entity,
-        "object": object_text,
-    }
-    fingerprint = content_hash(
-        json.dumps(
-            fingerprint_material,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-    )
     try:
-        return StoryFactV2.model_validate(
+        candidate = StoryFactV2.model_validate(
             {
             "id": uuid4(),
             "novel_id": proposal.novel_id,
@@ -3346,13 +3376,22 @@ def _typed_story_fact_candidate(
             "visibility_json": {"scope": visibility},
             "source_start": payload.get("source_start"),
             "source_end": payload.get("source_end"),
-            "event_fingerprint": fingerprint,
+            "event_fingerprint": "0" * 64,
             "status": "active",
             "created_at": datetime.now(timezone.utc),
             }
         )
     except PydanticValidationError as error:
         raise ValidationError("候选情报不符合 StoryFact v2 类型契约") from error
+    fingerprint = content_hash(
+        json.dumps(
+            {"schema_version": "story-fact-identity/1", "fact": _story_fact_identity(candidate)},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return candidate.model_copy(update={"event_fingerprint": fingerprint})
 
 
 def _record_incremental_relationship_revision(
@@ -3809,13 +3848,9 @@ def commit_intelligence_items(
         candidate = _typed_story_fact_candidate(
             proposal=proposal, revision=revision, item=item, payload=payload
         )
-        fact = session.scalar(
-            select(StoryFact)
-            .where(
-                StoryFact.novel_id == proposal.novel_id,
-                StoryFact.event_fingerprint == candidate.event_fingerprint,
-            )
-            .with_for_update()
+        fact = _find_matching_story_fact(
+            session,
+            candidate,
         )
         if fact is None:
             if relationship is not None and relationship_created:

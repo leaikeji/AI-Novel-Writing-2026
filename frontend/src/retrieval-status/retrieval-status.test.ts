@@ -5,7 +5,6 @@ import {
   parseRetrievalSummary,
   retrievalSummaryPresentation,
   retrievalSummaryFromJob,
-  semanticIndexSettingsPath,
   type RetrievalSummaryV1,
 } from ".";
 
@@ -47,30 +46,38 @@ describe("retrieval-summary/1", () => {
   });
 
   it.each([
-    [HYBRID, "本次使用了混合检索"],
-    [{ ...HYBRID, outcome: "degraded", mode: "lexical_only", reason_code: "provider_unavailable", hit_count: 3 }, "向量不可用，已自动使用本地检索"],
-    [{ ...HYBRID, outcome: "no_hit", mode: "context_only", reason_code: "no_hit", hit_count: 0 }, "没有找到额外相关内容"],
-    [{ ...HYBRID, outcome: "not_run", mode: "context_only", reason_code: "not_authorized", hit_count: 0, index_state: "not_authorized" }, "本次未运行额外检索"],
-  ] as const)("uses author-facing language for %#", (summary, title) => {
-    expect(retrievalSummaryPresentation(summary).title).toBe(title);
-  });
-
-  it("renders an aria-live status and keyboard-native management deep link", () => {
+    HYBRID,
+    { ...HYBRID, mode: "lexical_only", hit_count: 3 },
+    { ...HYBRID, outcome: "degraded", mode: "lexical_only", reason_code: "provider_unavailable", hit_count: 3 },
+    { ...HYBRID, outcome: "degraded", mode: "lexical_only", reason_code: "index_outdated", hit_count: 3 },
+    { ...HYBRID, outcome: "no_hit", mode: "context_only", reason_code: "no_hit", hit_count: 0 },
+    { ...HYBRID, outcome: "not_run", mode: "context_only", reason_code: "not_authorized", hit_count: 0, index_state: "not_authorized" },
+    { ...HYBRID, outcome: "not_run", mode: "context_only", reason_code: "index_building", hit_count: 0, index_state: "building" },
+  ] as const)("keeps successful retrieval and automatic fallback silent %#", summary => {
     const React = {
       createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props, children }),
       useEffect: vi.fn(),
     };
-    const Notice = createRetrievalStatusNotice(React);
-    const root = Notice({ summary: HYBRID, novelId: "novel / 1" }) as {
+    expect(retrievalSummaryPresentation(summary)).toBeNull();
+    expect(createRetrievalStatusNotice(React)({ summary, novelId: "novel / 1" })).toBeNull();
+  });
+
+  it.each([
+    [{ ...HYBRID, outcome: "failed", mode: "context_only", reason_code: "provider_unavailable", hit_count: 0 }, "部分参考资料未能读取"],
+    [{ ...HYBRID, outcome: "degraded", mode: "context_only", reason_code: "index_outdated", hit_count: 0, index_state: "outdated" }, "部分参考资料尚未更新"],
+  ] as const)("shows actionable missing or outdated reference warnings without management links %#", (summary, title) => {
+    const React = {
+      createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props, children }),
+      useEffect: vi.fn(),
+    };
+    const root = createRetrievalStatusNotice(React)({ summary, novelId: "novel / 1" }) as {
       props: Record<string, unknown>;
       children: Array<{ type: string; props: Record<string, unknown> }>;
     };
     expect(root.props).toMatchObject({ role: "status", "aria-live": "polite" });
-    expect(textContent(root)).toContain("本次使用了混合检索");
-    expect(root.children[root.children.length - 1]).toMatchObject({
-      type: "a",
-      props: { href: semanticIndexSettingsPath("novel / 1") },
-    });
-    expect(semanticIndexSettingsPath("novel / 1")).toContain("settings_tab=semantic-index");
+    expect(textContent(root)).toContain(title);
+    expect(textContent(root)).toContain("请核对生成内容");
+    expect(root.children.some(child => child.type === "a" || child.type === "button")).toBe(false);
+    expect(textContent(root)).not.toMatch(/语义|向量|管理|索引/);
   });
 });

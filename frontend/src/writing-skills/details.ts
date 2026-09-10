@@ -50,16 +50,3 @@ export function parseMethodDetails(value: unknown): MethodDetails | null {
   return Object.freeze({ schema_version: "writing-method-details/1", primary_skill: data.primary_skill,
     methods: Object.freeze(methods), reasons, estimated_tokens: Number(data.estimated_tokens) });
 }
-
-const BASIS = { primary: "主任务方法", explicit: "作者明确指定", deterministic: "明确分类或机制匹配", semantic: "语义判断" };
-const REASONS: Record<string, string> = {
-  author_generic_only: "作者选择本次仅通用", task_not_applicable: "当前任务不适用分类方法",
-  source_projection_truncated: "输入投影已截断", unresolved_requires_semantic_evidence: "隐式情节尚需语义证据（未启用补选）",
-};
-export function methodDetailLines(details: MethodDetails): readonly string[] {
-  return [
-    ...details.methods.map(m => `${m.display_name}（${m.skill_id}） · ${m.version ? `版本 ${m.version}` : "版本未记录"} · ${BASIS[m.basis]} · ${m.reference_count} 份参考${m.evidence_refs.length ? ` · 依据字段：${m.evidence_refs.join("、")}` : ""} · 正文摘要 ${m.body_sha256}`),
-    ...details.reasons.map(reason => `选择/降级说明：${REASONS[reason] ?? reason}`),
-    `方法估算 ${details.estimated_tokens} tokens；不是 Provider 实际用量。`,
-  ];
-}

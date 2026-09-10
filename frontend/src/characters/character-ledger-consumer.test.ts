@@ -306,7 +306,7 @@ describe("character story-ledger consumer", () => {
 
     let drawer = findAll(root, (element) => element.props.className === "anw-character-drawer anw-character-correction")[0];
     expect(onLoadFactImpact).toHaveBeenCalledWith("fact-1", expect.any(AbortSignal));
-    expect(textContent(drawer)).toContain("正在读取当前账本快照的实际影响");
+    expect(textContent(drawer)).toContain("正在检查受影响的内容");
     expect(findButton(drawer, "创建替代事实").props.disabled).toBe(true);
 
     pending.resolve(storyFactImpact({

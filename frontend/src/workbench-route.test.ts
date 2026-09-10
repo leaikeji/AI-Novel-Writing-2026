@@ -4,8 +4,6 @@ import {
   isCreativeCenterRouteSession,
   isNovelWorkbenchRouteSession,
   workbenchSettingsPath,
-  workbenchLedgerPath,
-  workbenchLedgerRouteFromSearch,
   replaceWorkbenchHistoryUrl,
   RouteSessionLocation,
   RouteSessionStateMachine,
@@ -335,50 +333,70 @@ describe("RouteSessionStateMachine", () => {
     });
   });
 
-  it("restores a validated ledger deep link and ignores invalid optional fields", () => {
+  it("opens retired ledger links in chapters without losing the book or session", () => {
     const harness = createHarness(
-      `/chat/session-1?novel_workbench=1&novel_id=novel-1&section=ledger&ledger_fact=${FACT_ID}&ledger_timeline=${TIMELINE_ID}&ledger_type=character_state&ledger_state=current&ledger_health=conflict&ledger_source_document=${DOCUMENT_ID}`,
+      `/chat/session-1?novel_workbench=1&novel_id=novel-1&document_id=${DOCUMENT_ID}&section=ledger&ledger_fact=${FACT_ID}&ledger_timeline=${TIMELINE_ID}&ledger_type=character_state`,
     );
     const explicit = harness.machine.resolve();
+    expect(explicit.state).toBe("workbench-session");
     expect(explicit.route).toMatchObject({
-      section: "ledger",
-      ledger: {
-        factId: FACT_ID,
-        timelineId: TIMELINE_ID,
-        factType: "character_state",
-        effectiveState: "current",
-        health: "conflict",
-        sourceDocumentId: DOCUMENT_ID,
-      },
+      novelId: "novel-1",
+      documentId: DOCUMENT_ID,
+      chatPath: "/chat/session-1",
+      ownerToken: OWNER_ONE,
     });
+    expect(explicit.route).not.toHaveProperty("section");
+    expect(explicit.route).not.toHaveProperty("ledger");
 
     harness.navigate("/chat/session-1");
-    expect(harness.machine.resolve().route).toMatchObject(explicit.route!);
-
-    harness.navigate(
-      "/chat/session-1?novel_workbench=1&novel_id=novel-1&section=ledger&ledger_fact=not-a-uuid&ledger_type=unknown&ledger_health=broken",
-    );
-    const invalid = harness.machine.resolve();
-    expect(invalid.route).toMatchObject({ section: "ledger", ledger: {} });
+    expect(harness.machine.resolve().route).toEqual(explicit.route);
+    expect(harness.storage.dump().join("\n")).not.toContain("ledger");
   });
 
-  it("serializes only the frozen ledger route fields", () => {
-    const path = workbenchLedgerPath("novel-1", {
-      factId: FACT_ID,
-      timelineId: "invalid",
-      factType: "world_state",
-      health: "ok",
-    });
-    const url = new URL(path, "https://qwenpaw.test");
+  it("migrates a retired ledger cache to chapters and preserves matching ownership", () => {
+    const harness = createHarness("/chat/session-1");
+    harness.storage.setItem("ai-novel-world-2026.workbench-route", JSON.stringify({
+      storageVersion: 1,
+      state: "workbench-session",
+      novelId: "novel-1",
+      documentId: DOCUMENT_ID,
+      chatPath: "/chat/session-1",
+      ownerToken: OWNER_ONE,
+      roleView: "graph",
+      section: "ledger",
+      ledger: { factId: FACT_ID, timelineId: TIMELINE_ID },
+    }));
 
-    expect(url.searchParams.get("section")).toBe("ledger");
-    expect(url.searchParams.get("ledger_fact")).toBe(FACT_ID);
-    expect(url.searchParams.has("ledger_timeline")).toBe(false);
-    expect(workbenchLedgerRouteFromSearch(url.search)).toEqual({
-      factId: FACT_ID,
-      factType: "world_state",
-      health: "ok",
+    const restored = harness.machine.resolve();
+    expect(restored.state).toBe("workbench-session");
+    expect(restored.route).toMatchObject({
+      novelId: "novel-1",
+      documentId: DOCUMENT_ID,
+      chatPath: "/chat/session-1",
+      ownerToken: OWNER_ONE,
+      roleView: "graph",
     });
+    expect(restored.route).not.toHaveProperty("section");
+    expect(restored.route).not.toHaveProperty("ledger");
+    expect(harness.storage.dump().join("\n")).not.toContain("ledger");
+  });
+
+  it.each([
+    { ownerToken: "invalid", chatPath: "/chat/session-1" },
+    { ownerToken: OWNER_ONE, chatPath: "/chat/other-session" },
+  ])("does not restore retired ledger caches with invalid ownership or another session", (ownership) => {
+    const harness = createHarness("/chat/session-1");
+    harness.storage.setItem("ai-novel-world-2026.workbench-route", JSON.stringify({
+      storageVersion: 1,
+      state: "workbench-session",
+      novelId: "novel-1",
+      ...ownership,
+      section: "ledger",
+      ledger: { factId: FACT_ID },
+    }));
+
+    expect(harness.machine.resolve().state).toBe("ordinary-chat");
+    expect(harness.storage.dump()).toEqual([]);
   });
 
   it.each(["advanced-tuning", "private-voices"] as const)(

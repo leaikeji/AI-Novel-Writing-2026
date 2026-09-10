@@ -1,13 +1,3 @@
-import {
-  STORY_LEDGER_EFFECTIVE_STATES,
-  STORY_LEDGER_FACT_TYPES,
-  STORY_LEDGER_HEALTH_STATES,
-  type StoryLedgerFactEffectiveState,
-  type StoryLedgerFactHealth,
-  type StoryLedgerFactType,
-} from "./story-ledger/contracts";
-
-
 const WORKBENCH_ROUTE_KEY = "ai-novel-world-2026.workbench-route";
 const WORKBENCH_ROUTE_STORAGE_VERSION = 1;
 const CHAT_ROOT_PATH = "/chat";
@@ -25,19 +15,6 @@ export const WORKBENCH_ROUTE_SECTIONS = [
 
 
 export type WorkbenchRouteSection = typeof WORKBENCH_ROUTE_SECTIONS[number];
-
-
-export type WorkbenchStoredSection = WorkbenchRouteSection | "ledger";
-
-
-export interface WorkbenchLedgerRoute {
-  factId?: string;
-  timelineId?: string;
-  factType?: StoryLedgerFactType;
-  effectiveState?: StoryLedgerFactEffectiveState;
-  health?: StoryLedgerFactHealth;
-  sourceDocumentId?: string;
-}
 
 
 export const WORKBENCH_READING_PANELS = [
@@ -81,10 +58,9 @@ export interface WorkbenchRouteState {
   documentId?: string;
   chatPath?: string;
   roleView?: "list" | "graph";
-  section?: WorkbenchStoredSection;
+  section?: WorkbenchRouteSection;
   readingPanel?: WorkbenchReadingPanel;
   settingsTab?: WorkbenchSettingsTab;
-  ledger?: WorkbenchLedgerRoute;
 }
 
 
@@ -136,10 +112,9 @@ interface ExplicitWorkbenchRoute {
   novelId: string;
   documentId?: string;
   roleView?: "list" | "graph";
-  section?: WorkbenchStoredSection;
+  section?: WorkbenchRouteSection;
   readingPanel?: WorkbenchReadingPanel;
   settingsTab?: WorkbenchSettingsTab;
-  ledger?: WorkbenchLedgerRoute;
 }
 
 
@@ -149,9 +124,6 @@ export interface WorkbenchLocationUpdate {
   readingPanel?: WorkbenchReadingPanel;
   settingsTab?: WorkbenchSettingsTab;
 }
-
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 
 const ORDINARY_CHAT_SNAPSHOT: RouteSessionSnapshot = {
@@ -198,11 +170,6 @@ export function isWorkbenchRouteSection(value: unknown): value is WorkbenchRoute
 }
 
 
-export function isWorkbenchStoredSection(value: unknown): value is WorkbenchStoredSection {
-  return value === "ledger" || isWorkbenchRouteSection(value);
-}
-
-
 export function isWorkbenchReadingPanel(value: unknown): value is WorkbenchReadingPanel {
   return typeof value === "string"
     && (WORKBENCH_READING_PANELS as readonly string[]).includes(value);
@@ -216,97 +183,17 @@ export function isWorkbenchSettingsTab(value: unknown): value is WorkbenchSettin
 
 
 function routePageLocation(
-  section: WorkbenchStoredSection | undefined,
+  section: WorkbenchRouteSection | undefined,
   readingPanel: WorkbenchReadingPanel | undefined,
-  ledger?: WorkbenchLedgerRoute,
   settingsTab?: WorkbenchSettingsTab,
-): Pick<WorkbenchRouteState, "section" | "readingPanel" | "settingsTab" | "ledger"> {
+): Pick<WorkbenchRouteState, "section" | "readingPanel" | "settingsTab"> {
   if (!section) return {};
-  if (section === "ledger") return { section, ledger: { ...(ledger ?? {}) } };
   if (section === "settings") return settingsTab ? { section, settingsTab } : { section };
   if (section !== "reading") return { section };
   return {
     section,
     readingPanel: readingPanel ?? "overview",
   };
-}
-
-
-function oneOf<T extends readonly string[]>(
-  value: string | null,
-  choices: T,
-): T[number] | undefined {
-  return value && choices.includes(value as T[number])
-    ? value as T[number]
-    : undefined;
-}
-
-
-function uuidQueryValue(query: URLSearchParams, key: string): string | undefined {
-  const value = nonEmptyQueryValue(query, key);
-  return value && UUID_PATTERN.test(value) ? value : undefined;
-}
-
-
-export function workbenchLedgerRouteFromSearch(search: string): WorkbenchLedgerRoute {
-  const query = new URLSearchParams(search);
-  return compactLedgerRoute({
-    factId: uuidQueryValue(query, "ledger_fact"),
-    timelineId: uuidQueryValue(query, "ledger_timeline"),
-    factType: oneOf(query.get("ledger_type"), STORY_LEDGER_FACT_TYPES),
-    effectiveState: oneOf(query.get("ledger_state"), STORY_LEDGER_EFFECTIVE_STATES),
-    health: oneOf(query.get("ledger_health"), STORY_LEDGER_HEALTH_STATES),
-    sourceDocumentId: uuidQueryValue(query, "ledger_source_document"),
-  });
-}
-
-
-export function normalizeWorkbenchLedgerRoute(
-  value: WorkbenchLedgerRoute,
-): WorkbenchLedgerRoute {
-  const optionalUuid = (candidate: string | undefined): string | undefined => (
-    candidate && UUID_PATTERN.test(candidate) ? candidate : undefined
-  );
-  return compactLedgerRoute({
-    factId: optionalUuid(value.factId),
-    timelineId: optionalUuid(value.timelineId),
-    factType: oneOf(value.factType ?? null, STORY_LEDGER_FACT_TYPES),
-    effectiveState: oneOf(value.effectiveState ?? null, STORY_LEDGER_EFFECTIVE_STATES),
-    health: oneOf(value.health ?? null, STORY_LEDGER_HEALTH_STATES),
-    sourceDocumentId: optionalUuid(value.sourceDocumentId),
-  });
-}
-
-
-function compactLedgerRoute(value: WorkbenchLedgerRoute): WorkbenchLedgerRoute {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined),
-  ) as WorkbenchLedgerRoute;
-}
-
-
-export function workbenchLedgerPath(
-  novelId: string,
-  ledger: WorkbenchLedgerRoute = {},
-): string {
-  const normalized = normalizeWorkbenchLedgerRoute(ledger);
-  const query = new URLSearchParams({
-    novel_workbench: "1",
-    novel_id: novelId,
-    section: "ledger",
-  });
-  const values: readonly [string, string | undefined][] = [
-    ["ledger_fact", normalized.factId],
-    ["ledger_timeline", normalized.timelineId],
-    ["ledger_type", normalized.factType],
-    ["ledger_state", normalized.effectiveState],
-    ["ledger_health", normalized.health],
-    ["ledger_source_document", normalized.sourceDocumentId],
-  ];
-  for (const [key, value] of values) {
-    if (value) query.set(key, value);
-  }
-  return `/chat?${query.toString()}`;
 }
 
 
@@ -334,7 +221,7 @@ function explicitWorkbenchRoute(
   if (query.get("novel_workbench") === "1" && novelId) {
     const queryRoleView = query.get("role_view");
     const querySection = query.get("section");
-    const section = isWorkbenchStoredSection(querySection) && querySection !== "chapters"
+    const section = isWorkbenchRouteSection(querySection) && querySection !== "chapters"
       ? querySection
       : undefined;
     const readingPanel = section === "reading" && isWorkbenchReadingPanel(
@@ -356,7 +243,6 @@ function explicitWorkbenchRoute(
       ...routePageLocation(
         section,
         readingPanel,
-        section === "ledger" ? workbenchLedgerRouteFromSearch(location.search) : undefined,
         settingsTab,
       ),
     };
@@ -385,44 +271,13 @@ function optionalRoleView(value: unknown): value is "list" | "graph" | undefined
 }
 
 
-function validLedgerRoute(value: unknown): value is WorkbenchLedgerRoute {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Record<string, unknown>;
-  const keys = Object.keys(candidate);
-  if (keys.some((key) => ![
-    "factId",
-    "timelineId",
-    "factType",
-    "effectiveState",
-    "health",
-    "sourceDocumentId",
-  ].includes(key))) return false;
-  const optionalUuid = (entry: unknown): boolean => entry === undefined
-    || (typeof entry === "string" && UUID_PATTERN.test(entry));
-  return optionalUuid(candidate.factId)
-    && optionalUuid(candidate.timelineId)
-    && optionalUuid(candidate.sourceDocumentId)
-    && (candidate.factType === undefined
-      || oneOf(String(candidate.factType), STORY_LEDGER_FACT_TYPES) !== undefined)
-    && (candidate.effectiveState === undefined
-      || oneOf(String(candidate.effectiveState), STORY_LEDGER_EFFECTIVE_STATES) !== undefined)
-    && (candidate.health === undefined
-      || oneOf(String(candidate.health), STORY_LEDGER_HEALTH_STATES) !== undefined);
-}
-
-
 function validStoredPageLocation(candidate: Record<string, unknown>): boolean {
   if (candidate.section === undefined) {
     return candidate.readingPanel === undefined
       && candidate.settingsTab === undefined
       && candidate.ledger === undefined;
   }
-  if (!isWorkbenchStoredSection(candidate.section) || candidate.section === "chapters") return false;
-  if (candidate.section === "ledger") {
-    return candidate.readingPanel === undefined
-      && candidate.settingsTab === undefined
-      && validLedgerRoute(candidate.ledger);
-  }
+  if (!isWorkbenchRouteSection(candidate.section) || candidate.section === "chapters") return false;
   if (candidate.ledger !== undefined) return false;
   if (candidate.section === "settings") {
     return candidate.readingPanel === undefined
@@ -468,9 +323,7 @@ function secureOwnerToken(): string {
 
 
 function cloneRoute(route: OwnedWorkbenchRouteState): OwnedWorkbenchRouteState {
-  return route.ledger
-    ? { ...route, ledger: { ...route.ledger } }
-    : { ...route };
+  return { ...route };
 }
 
 
@@ -546,7 +399,6 @@ export class RouteSessionStateMachine {
         ...routePageLocation(
           explicit.section,
           explicit.readingPanel,
-          explicit.ledger,
           explicit.settingsTab,
         ),
         ownerToken,
@@ -574,7 +426,6 @@ export class RouteSessionStateMachine {
         ...routePageLocation(
           activeRoute.section,
           activeRoute.readingPanel,
-          activeRoute.ledger,
           activeRoute.settingsTab,
         ),
         ownerToken: activeRoute.ownerToken,
@@ -594,7 +445,6 @@ export class RouteSessionStateMachine {
       ...routePageLocation(
         stored.section,
         stored.readingPanel,
-        stored.ledger,
         stored.settingsTab,
       ),
       ownerToken: stored.ownerToken,
@@ -621,7 +471,6 @@ export class RouteSessionStateMachine {
       ...routePageLocation(
         activeRoute?.section,
         activeRoute?.readingPanel,
-        activeRoute?.ledger,
         activeRoute?.settingsTab,
       ),
       ownerToken,
@@ -661,7 +510,6 @@ export class RouteSessionStateMachine {
       ...routePageLocation(
         active.route.section,
         active.route.readingPanel,
-        active.route.ledger,
         active.route.settingsTab,
       ),
       ownerToken: active.route.ownerToken,
@@ -701,36 +549,10 @@ export class RouteSessionStateMachine {
       ...routePageLocation(
         section,
         readingPanel,
-        undefined,
         section === "settings" && isWorkbenchSettingsTab(update.settingsTab)
           ? update.settingsTab
           : undefined,
       ),
-      ownerToken,
-    });
-  }
-
-  rememberLedgerLocation(
-    novelId: string,
-    ledger: WorkbenchLedgerRoute = {},
-  ): RouteSessionSnapshot {
-    const normalizedNovelId = novelId.trim();
-    if (!normalizedNovelId) return this.toOrdinaryChat();
-
-    const active = this.resolve();
-    const activeRoute = active.route?.novelId === normalizedNovelId
-      ? active.route
-      : null;
-    const ownerToken = activeRoute?.ownerToken ?? this.newOwnerToken();
-    if (!ownerToken) return this.toOrdinaryChat();
-    const state = activeRoute && active.state === "workbench-session"
-      ? "workbench-session"
-      : "workbench-no-session";
-    return this.persistWorkbench(state, {
-      novelId: normalizedNovelId,
-      chatPath: activeRoute?.chatPath,
-      roleView: activeRoute?.roleView,
-      ...routePageLocation("ledger", undefined, normalizeWorkbenchLedgerRoute(ledger)),
       ownerToken,
     });
   }
@@ -764,6 +586,17 @@ export class RouteSessionStateMachine {
 
     try {
       const parsed: unknown = JSON.parse(value);
+      // Retired ledger pages retain their book/session ownership while opening
+      // chapters. No ledger filters survive into the current route contract.
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const candidate = parsed as Record<string, unknown>;
+        if (candidate.section === "ledger") {
+          const migrated = { ...candidate };
+          delete migrated.section;
+          delete migrated.ledger;
+          if (isStoredWorkbenchRoute(migrated)) return migrated;
+        }
+      }
       if (isStoredWorkbenchRoute(parsed)) return parsed;
     } catch {
       // Invalid data is cleared below instead of being trusted as an owner.
@@ -837,14 +670,6 @@ export function rememberWorkbenchLocation(
   update: WorkbenchLocationUpdate,
 ): void {
   browserStateMachine().rememberLocation(novelId, update);
-}
-
-
-export function rememberWorkbenchLedgerLocation(
-  novelId: string,
-  ledger: WorkbenchLedgerRoute = {},
-): void {
-  browserStateMachine().rememberLedgerLocation(novelId, ledger);
 }
 
 

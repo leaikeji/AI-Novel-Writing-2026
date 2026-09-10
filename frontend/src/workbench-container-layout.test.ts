@@ -45,11 +45,10 @@ describe("workbench container responsive shell", () => {
 
   it("raises every full-workbench overlay above the host sticky sidebar without outranking host modals", () => {
     expect(styleSource).toContain(".anw-workbench-frame:has(.anw-character-workspace-backdrop)");
-    expect(styleSource).toContain(".anw-workbench-frame:has(.anw-story-ledger-modal-layer)");
     expect(styleSource).toContain(".anw-workbench-frame:has(.anw-character-voice-drawer-layer:not([hidden])) { z-index:900;");
   });
 
-  it("has a no-page-overflow path for every pre-ledger workbench section", () => {
+  it("has a no-page-overflow path for every workbench section", () => {
     for (const section of ["chapters", "outline", "roles", "clues", "settings", "reading"]) {
       expect(studioSource).toContain(`"${section}"`);
     }

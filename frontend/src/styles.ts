@@ -600,14 +600,9 @@ export function ensureNovelStyles(): void {
     .anw-save-volume-list > button:not(.qwenpaw-btn) span { color:#9a9ea5; font-size:12px; }
     html body .qwenpaw-modal-root .qwenpaw-modal.anw-save-volume-modal .anw-save-volume-list > .qwenpaw-btn { height:50px; border:0!important; color:#666b72!important; background:#f6f6f7!important; box-shadow:none!important; }
     html body .qwenpaw-modal-root .qwenpaw-modal.anw-save-volume-modal .anw-save-volume-list > .anw-save-and-next-button.qwenpaw-btn { min-height:44px; color:#ef7046!important; border:1px solid #ffd3c2!important; border-radius:9px!important; background:#fff7f2!important; font-weight:650; }
-    .anw-save-confirm-copy { display:grid; gap:6px; color:#72767e; line-height:1.65; }
-    .anw-save-confirm-copy strong { color:#3c4046; }
-    .anw-save-confirm-copy p { margin:0; }
-    .anw-save-confirm-copy b { margin-top:6px; color:#34373c; }
 
     .anw-workbench-frame { --anw-chapter-tree-width:270px; --mb-workbench-rail-width:clamp(260px,19vw,320px); --mb-workbench-main-min:640px; --mb-workbench-gap:clamp(18px,1.5vw,28px); --mb-workbench-padding:24px; --mb-panel-body-padding:24px 28px 44px; position:relative; isolation:isolate; display:flex; width:100%; height:100%; min-height:0; overflow:hidden; background:var(--anw-canvas); }
     .anw-workbench-frame:has(.anw-character-workspace-backdrop),
-    .anw-workbench-frame:has(.anw-story-ledger-modal-layer),
     .anw-workbench-frame:has(.anw-character-voice-drawer-layer:not([hidden])) { z-index:900; }
     .anw-workbench-frame[data-assistant-density="comfortable"] { --anw-chapter-tree-width:286px; }
     .anw-workbench-frame[data-assistant-density="compact"] { --anw-chapter-tree-width:240px; --mb-workbench-rail-width:260px; --mb-workbench-main-min:0px; --mb-workbench-gap:18px; --mb-workbench-padding:18px; }
@@ -1737,9 +1732,7 @@ export function ensureNovelStyles(): void {
     .mb-top-tabs.is-settings > button.is-active::after { display:none; }
     .mb-role-list { display:grid; gap:18px; }
     .mb-role-overview { display:flex; align-items:center; justify-content:space-between; gap:28px; border:1px solid #eee7e3; border-radius:14px; padding:22px 24px; background:linear-gradient(135deg,#fffaf7 0%,#fff 58%,#f7f9ff 100%); box-shadow:0 8px 26px rgba(31,41,55,.045); }
-    .mb-role-overview h2,.mb-role-overview p { margin:0; }
-    .mb-role-overview h2 { margin-top:3px; color:#30343b; font-size:23px; }
-    .mb-role-overview p { max-width:680px; margin-top:7px; color:#747983; font-size:13px; line-height:1.7; }
+    .mb-role-overview h2 { margin:3px 0 0; color:#30343b; font-size:23px; }
     .mb-role-overview-eyebrow { color:#f06e43; font-size:11px; font-weight:750; letter-spacing:.12em; }
     .mb-role-overview-metrics { display:flex; flex:0 0 auto; align-items:center; gap:10px; }
     .mb-role-overview-metrics>span { display:grid; min-width:72px; gap:2px; border:1px solid rgba(224,226,231,.86); border-radius:10px; padding:9px 12px; color:#8c9098; background:rgba(255,255,255,.82); text-align:center; font-size:11px; }
@@ -2118,7 +2111,6 @@ export function ensureNovelStyles(): void {
       }
       .mb-role-overview { align-items:stretch; flex-direction:column; gap:16px; border-radius:10px; padding:18px 16px; }
       .mb-role-overview h2 { font-size:21px; }
-      .mb-role-overview p { font-size:12px; }
       .mb-role-overview-metrics { width:100%; }
       .mb-role-overview-metrics>span { min-width:0; padding:8px 6px; }
       .mb-role-section { padding:16px 14px 18px; }

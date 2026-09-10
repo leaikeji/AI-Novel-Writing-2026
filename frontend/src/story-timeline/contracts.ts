@@ -81,9 +81,3 @@ export type StoryTimelineLedgerSnapshotSource =
   | "mutation"
   | "refresh"
   | "conflict";
-
-/** Frozen internal deep-link keys consumed by the W3c workbench integrator. */
-export interface StoryTimelineLedgerDeepLink {
-  readonly section: "ledger";
-  readonly ledger_timeline: string;
-}

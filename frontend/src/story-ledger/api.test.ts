@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   correctStoryLedgerFact,
-  loadStoryLedgerFacts,
   loadStoryLedgerFactSource,
   loadStoryLedgerSummary,
   revertStoryLedgerBatch,
@@ -15,37 +14,6 @@ function response(payload: unknown): Response {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("story ledger API", () => {
-  it("encodes a normalized bounded page request and forwards AbortSignal", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(response({ schema_version: "story-ledger-page/1" }));
-    vi.stubGlobal("window", { QwenPaw: { host: { fetch: fetchMock } } });
-    const controller = new AbortController();
-
-    await loadStoryLedgerFacts({
-      novelId: "novel 1",
-      timelineId: "timeline-1",
-      narrativeCutoff: 8,
-      snapshotToken: "snapshot-token",
-    }, {
-      limit: 40,
-      cursor: "cursor-token",
-      factTypes: ["world_state", "character_state"],
-      health: "conflict",
-      reviewOnly: true,
-    }, controller.signal);
-
-    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const parsed = new URL(path, "https://local.invalid");
-    expect(parsed.pathname).toBe("/ai-novel-world-2026/novels/novel%201/story-ledger/facts");
-    expect(parsed.searchParams.getAll("fact_type")).toEqual(["character_state", "world_state"]);
-    expect(parsed.searchParams.get("timeline_id")).toBe("timeline-1");
-    expect(parsed.searchParams.get("narrative_cutoff")).toBe("8");
-    expect(parsed.searchParams.get("snapshot_token")).toBe("snapshot-token");
-    expect(parsed.searchParams.get("cursor")).toBe("cursor-token");
-    expect(parsed.searchParams.get("limit")).toBe("40");
-    expect(parsed.searchParams.get("review_only")).toBe("true");
-    expect(init.signal).toBe(controller.signal);
-  });
-
   it("keeps summary and source on the same explicit snapshot scope", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ schema_version: "story-ledger-summary/1" }))
