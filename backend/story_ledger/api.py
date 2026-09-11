@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ..database import get_session
+from ..novel_lifecycle_errors import NovelLifecycleError
 from .contracts import (
     LedgerBatchImpactPreview,
     LedgerFactDetail,
@@ -40,7 +41,12 @@ EntityType = Literal[
 ]
 
 
-def _raise(error: StoryLedgerError) -> None:
+def _raise(error: StoryLedgerError | NovelLifecycleError) -> None:
+    if isinstance(error, NovelLifecycleError):
+        raise HTTPException(
+            error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     if error.code in {
         StoryLedgerErrorCode.NOVEL_NOT_FOUND,
         StoryLedgerErrorCode.FACT_NOT_FOUND,
@@ -133,7 +139,7 @@ def story_ledger_summary(
                 review_only=review_only,
             ),
         )
-    except StoryLedgerError as error:
+    except (StoryLedgerError, NovelLifecycleError) as error:
         _raise(error)
         raise
 
@@ -181,7 +187,7 @@ def story_ledger_facts(
                 review_only=review_only,
             ),
         )
-    except StoryLedgerError as error:
+    except (StoryLedgerError, NovelLifecycleError) as error:
         _raise(error)
         raise
 
@@ -206,7 +212,7 @@ def story_ledger_fact_detail(
             narrative_cutoff=narrative_cutoff,
             snapshot_token=snapshot_token,
         )
-    except StoryLedgerError as error:
+    except (StoryLedgerError, NovelLifecycleError) as error:
         _raise(error)
         raise
 
@@ -231,7 +237,7 @@ def story_ledger_fact_source(
             narrative_cutoff=narrative_cutoff,
             snapshot_token=snapshot_token,
         )
-    except StoryLedgerError as error:
+    except (StoryLedgerError, NovelLifecycleError) as error:
         _raise(error)
         raise
 
@@ -256,7 +262,7 @@ def story_ledger_fact_impact_preview(
             narrative_cutoff=narrative_cutoff,
             snapshot_token=snapshot_token,
         )
-    except StoryLedgerError as error:
+    except (StoryLedgerError, NovelLifecycleError) as error:
         _raise(error)
         raise
 
@@ -281,7 +287,7 @@ def story_ledger_batch_impact_preview(
             narrative_cutoff=narrative_cutoff,
             snapshot_token=snapshot_token,
         )
-    except StoryLedgerError as error:
+    except (StoryLedgerError, NovelLifecycleError) as error:
         _raise(error)
         raise
 

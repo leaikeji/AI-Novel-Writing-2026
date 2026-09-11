@@ -18,7 +18,6 @@ import {
   PrivateAssetType,
 } from "./types";
 import { rememberWorkbenchRoute } from "./workbench-route";
-import { clearRecoveryDraft } from "./recovery";
 import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
 import { navigateNovelSurface } from "./novel-surface-navigation";
@@ -30,6 +29,12 @@ import {
   creationPageTabId,
 } from "./writing-skills/creation";
 import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
+import {
+  createRecycleBinPage,
+  lifecycleNoticeFromResult,
+  publishNovelLifecycleNotice,
+  recycleNovel,
+} from "./recycle-bin";
 
 
 const host = window.QwenPaw.host;
@@ -38,6 +43,7 @@ const h = React.createElement;
 const NovelCoverView = createNovelCoverView(React);
 const EmbeddingConfigPage = createEmbeddingConfigPage(React, host.antd);
 const TtsCloudConfigPage = createTtsCloudConfigPage(React, host.antd);
+const RecycleBinPage = createRecycleBinPage(React, host.antd, host.antdIcons);
 const {
   Alert,
   Button,
@@ -75,7 +81,7 @@ const {
 
 
 const CREATION_DRAFT_KEY = "ai-novel-world-2026:creation-draft-key";
-type LibraryView = "center" | "private-library" | "embedding-settings" | "tts-cloud-settings";
+type LibraryView = "center" | "private-library" | "embedding-settings" | "tts-cloud-settings" | "recycle-bin";
 type TemplateTab = "system" | "custom";
 
 
@@ -232,6 +238,7 @@ function initialLibraryView(): LibraryView {
   return view === "private-library"
     || view === "embedding-settings"
     || view === "tts-cloud-settings"
+    || view === "recycle-bin"
     ? view
     : "center";
 }
@@ -281,15 +288,15 @@ function CenterAction(props: { icon: any; label: string; onClick: () => void }) 
 function NovelCard(props: {
   novel: NovelSummary;
   onOpen: (section?: CreativeCenterWorkbenchSection) => void;
-  onDelete: () => void;
+  onRecycle: () => void;
 }) {
-  const { novel, onOpen, onDelete } = props;
+  const { novel, onOpen, onRecycle } = props;
   const tools = [
     [FileTextOutlined, "大纲", "outline"],
     [TeamOutlined, "角色", "roles"],
     [ClockCircleOutlined, "线索", "clues"],
     [SoundOutlined, "朗读", "reading"],
-    [DeleteOutlined, "删除", "delete"],
+    [DeleteOutlined, "移入回收站", "recycle"],
   ] as const;
   return h(
     "article",
@@ -326,7 +333,7 @@ function NovelCard(props: {
         {
           key: label,
           type: "button",
-          onClick: () => target === "delete" ? onDelete() : onOpen(target),
+          onClick: () => target === "recycle" ? onRecycle() : onOpen(target),
         },
         h(Icon),
         h("span", null, label),
@@ -1624,32 +1631,22 @@ export function NovelLibraryPage() {
     navigateNovelSurface(workbenchUrl(novelId, section));
   };
 
-  const deleteNovel = (novel: NovelSummary) => {
+  const recycleCurrentNovel = (novel: NovelSummary) => {
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
-      title: `删除《${novel.title}》`,
-      content: "作品、分卷、章节和创作资料都会一起删除，此操作不可撤销。",
-      okText: "确认删除",
+      title: `将《${novel.title}》移入回收站`,
+      content: "作品会从创作中心隐藏，正文、版本和媒体将继续保留，可随时从回收站恢复。",
+      okText: "移入回收站",
       cancelText: "取消",
-      okButtonProps: { danger: true },
       async onOk() {
         try {
-          const result = await apiRequest<{
-            deleted: boolean;
-            media_cleanup_pending?: boolean;
-            deleted_document_ids?: string[];
-          }>(`/novels/${novel.id}?expected_version=${novel.version}`, { method: "DELETE" });
-          const recoveryCleanup = await Promise.allSettled(
-            (result.deleted_document_ids || []).map((documentId) => clearRecoveryDraft(documentId)),
-          );
+          const result = await recycleNovel(novel.id, novel.version);
+          publishNovelLifecycleNotice(lifecycleNoticeFromResult(novel.id, result));
           await reload();
-          setNotice(result.media_cleanup_pending
-            ? "作品已删除，但有部分朗读媒体需等待后续清理。"
-            : recoveryCleanup.some((item) => item.status === "rejected")
-              ? "作品已删除，但当前浏览器的部分恢复稿未能清理。"
-              : "");
+          setNotice("作品已移入回收站，本地未同步稿与作品数据均已保留。");
         } catch (reason) {
-          setError(readableError(reason, "删除作品失败"));
+          setError(readableError(reason, "移入回收站失败"));
+          throw reason;
         }
       },
     });
@@ -1673,6 +1670,17 @@ export function NovelLibraryPage() {
   if (view === "tts-cloud-settings") {
     return h(TtsModelSettingsPage, { onBack: () => changeView("center") });
   }
+  if (view === "recycle-bin") {
+    return h(RecycleBinPage, {
+      onBack: () => changeView("center"),
+      onRestored: async (novelId: string, message: string) => {
+        changeView("center");
+        await reload();
+        setActiveNovelId(novelId);
+        setNotice(message);
+      },
+    });
+  }
 
   return h(
     "main",
@@ -1687,6 +1695,7 @@ export function NovelLibraryPage() {
         h(CenterAction, { icon: DatabaseOutlined, label: "私有库", onClick: () => changeView("private-library") }),
         h(CenterAction, { icon: RobotOutlined, label: "向量模型接入", onClick: () => changeView("embedding-settings") }),
         h(CenterAction, { icon: SoundOutlined, label: "语音模型接入", onClick: () => changeView("tts-cloud-settings") }),
+        h(CenterAction, { icon: DeleteOutlined, label: "回收站", onClick: () => changeView("recycle-bin") }),
       ),
       error ? h(Alert, { type: "error", showIcon: true, closable: true, message: error, onClose: () => setError("") }) : null,
       notice ? h(Alert, { type: "warning", showIcon: true, closable: true, message: notice, onClose: () => setNotice("") }) : null,
@@ -1699,7 +1708,7 @@ export function NovelLibraryPage() {
               h(NovelCard, {
                 novel: activeNovel,
                 onOpen: (section?: CreativeCenterWorkbenchSection) => openNovel(activeNovel.id, section),
-                onDelete: () => deleteNovel(activeNovel),
+                onRecycle: () => recycleCurrentNovel(activeNovel),
               }),
               h(
                 "div",

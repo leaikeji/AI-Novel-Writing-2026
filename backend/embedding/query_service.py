@@ -16,6 +16,8 @@ from sqlalchemy import String, and_, cast, exists, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
+from ..novel_lifecycle import require_active_novel
+
 from ..creative_data_models import (
     EmbeddingGeneration,
     EmbeddingGenerationNovel,
@@ -434,6 +436,8 @@ def execute_bounded_retrieval(
 ) -> BoundedRetrievalExecution:
     """Query capped channels, batch-hydrate, then load only final-hit neighbors."""
 
+    if isinstance(session, Session):
+        require_active_novel(session, request.scope.novel_id)
     base_policy = policy or writing_retrieval_policy_v3()
     effective_policy = base_policy.model_copy(
         update={

@@ -16,6 +16,7 @@ from ..creative_authority import (
     AuthorityValidationError,
 )
 from ..database import get_session
+from ..novel_lifecycle_errors import NovelLifecycleError
 from ..services import NotFoundError, ValidationError
 from ..story_state.contracts import StoryStateError
 from ..story_state.revisions import (
@@ -63,7 +64,12 @@ class CharacterWorkspaceSaveRequestV2(_StrictWriteModel):
     profile: CharacterInstanceProfileV1 | CharacterInstanceProfileV2 | None = None
 
 
-def _raise_workspace_error(error: CharacterWorkspaceError) -> None:
+def _raise_workspace_error(error: CharacterWorkspaceError | NovelLifecycleError) -> None:
+    if isinstance(error, NovelLifecycleError):
+        raise HTTPException(
+            error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     status_code = (
         status.HTTP_404_NOT_FOUND
         if error.code
@@ -103,7 +109,7 @@ def character_workspace_get(
             character_instance_id=character_instance_id,
             narrative_cutoff=narrative_cutoff,
         )
-    except CharacterWorkspaceError as error:
+    except (CharacterWorkspaceError, NovelLifecycleError) as error:
         _raise_workspace_error(error)
         raise
     return workspace.model_dump(mode="json")
@@ -147,7 +153,7 @@ def character_facts_get(
             cursor=cursor,
             limit=limit,
         )
-    except CharacterWorkspaceError as error:
+    except (CharacterWorkspaceError, NovelLifecycleError) as error:
         _raise_workspace_error(error)
         raise
     return page.model_dump(mode="json")
@@ -177,6 +183,11 @@ def _raise_write_error(
     request: CharacterWorkspaceSaveRequestV2,
     error: Exception,
 ) -> None:
+    if isinstance(error, NovelLifecycleError):
+        raise HTTPException(
+            error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     current = _current_workspace(session, novel_id, character_id, request)
     field_errors: dict[str, str] = {}
     message = str(error)
@@ -286,7 +297,7 @@ def character_archive_impact_get(
 
     try:
         impact = service_for_session(session).archive_impact(novel_id, character_id)
-    except CharacterWorkspaceError as error:
+    except (CharacterWorkspaceError, NovelLifecycleError) as error:
         _raise_workspace_error(error)
         raise
     return impact.model_dump(mode="json")

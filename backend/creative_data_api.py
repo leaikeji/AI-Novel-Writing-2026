@@ -24,6 +24,8 @@ from .creative_authority import (
     save_settings,
 )
 from .database import get_session
+from .novel_lifecycle import require_active_novel
+from .novel_lifecycle_errors import NovelLifecycleError
 from .private_library import (
     PrivateLibraryConflictError,
     PrivateLibraryIdempotencyConflict,
@@ -93,6 +95,11 @@ class BindingPut(_Strict):
 
 
 def _raise(error: Exception) -> None:
+    if isinstance(error, NovelLifecycleError):
+        raise HTTPException(
+            error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     if isinstance(error, (AuthorityNotFoundError, PrivateLibraryNotFoundError)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     if isinstance(
@@ -112,6 +119,13 @@ def _raise(error: Exception) -> None:
     if isinstance(error, (AuthorityValidationError, PrivateLibraryValidationError)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
     raise error
+
+
+def _require_active(session: Session, novel_id: UUID) -> None:
+    try:
+        require_active_novel(session, novel_id)
+    except NovelLifecycleError as error:
+        _raise(error)
 
 
 def _outline_payload(value: object) -> dict[str, object] | None:
@@ -152,6 +166,7 @@ def _setting_payload(value: object) -> dict[str, object] | None:
 
 @router.get("/novels/{novel_id}/outline")
 def outline_get(novel_id: UUID, session: Session = Depends(get_session)) -> dict[str, object] | None:
+    _require_active(session, novel_id)
     return _outline_payload(get_outline(session, novel_id))
 
 
@@ -159,6 +174,7 @@ def outline_get(novel_id: UUID, session: Session = Depends(get_session)) -> dict
 def outline_patch(
     novel_id: UUID, request: OutlinePatch, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active(session, novel_id)
     try:
         save_outline(
             session, novel_id, expected_head_version=request.expected_head_version,
@@ -179,6 +195,7 @@ def outline_patch(
 def outline_restore(
     novel_id: UUID, request: RestoreRequest, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active(session, novel_id)
     try:
         restore_outline(
             session, novel_id, request.revision_id,
@@ -197,6 +214,7 @@ def outline_history(
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
+    _require_active(session, novel_id)
     return [
         {
             "id": str(item.id), "revision_number": item.revision_number,
@@ -213,6 +231,7 @@ def outline_history(
 
 @router.get("/novels/{novel_id}/story-settings")
 def settings_get(novel_id: UUID, session: Session = Depends(get_session)) -> dict[str, object] | None:
+    _require_active(session, novel_id)
     return _setting_payload(get_settings(session, novel_id))
 
 
@@ -220,6 +239,7 @@ def settings_get(novel_id: UUID, session: Session = Depends(get_session)) -> dic
 def settings_patch(
     novel_id: UUID, request: SettingPatch, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active(session, novel_id)
     try:
         save_settings(
             session, novel_id, expected_head_version=request.expected_head_version,
@@ -237,6 +257,7 @@ def settings_patch(
 def settings_restore(
     novel_id: UUID, request: RestoreRequest, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active(session, novel_id)
     try:
         restore_settings(
             session, novel_id, request.revision_id,
@@ -255,6 +276,7 @@ def settings_history(
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
+    _require_active(session, novel_id)
     return [
         {
             "id": str(item.id), "revision_number": item.revision_number,
@@ -328,6 +350,7 @@ def _binding_payload(item: object) -> dict[str, object]:
 def bindings_get(
     novel_id: UUID, session: Session = Depends(get_session)
 ) -> list[dict[str, object]]:
+    _require_active(session, novel_id)
     try:
         return [_binding_payload(item) for item in list_novel_bindings(session, novel_id)]
     except Exception as error:
@@ -338,6 +361,7 @@ def bindings_get(
 def bindings_put(
     novel_id: UUID, request: BindingPut, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active(session, novel_id)
     try:
         result = replace_novel_bindings(
             session, novel_id,

@@ -27,7 +27,7 @@ from ...creative_data_models import (
     SemanticSource,
     SemanticSourceRefresh,
 )
-from ...models import BackgroundJob
+from ...models import BackgroundJob, Novel
 from .contracts import (
     PendingSourceSpec,
     PublicationAuthority,
@@ -612,6 +612,10 @@ def gc_obsolete_active_generation_data(
     taken, so this helper cannot cross generation or authority boundaries.
     """
 
+    if novel_id is not None:
+        from ...novel_lifecycle import lock_active_novel
+
+        lock_active_novel(session, novel_id)
     if not 1 <= source_limit <= MAX_GC_SOURCES_PER_RUN:
         raise RefreshServiceError(
             "gc_limit_invalid",
@@ -691,6 +695,12 @@ def gc_obsolete_active_generation_data(
     candidate_statement = select(SemanticSource.id).where(
         SemanticSource.generation_id == generation_id,
         SemanticSource.status.in_(("invalid", "retired")),
+        exists(
+            select(Novel.id).where(
+                Novel.id == SemanticSource.novel_id,
+                Novel.recycled_at.is_(None),
+            )
+        ),
         ~has_active_refresh,
         ~has_active_execution_reference,
         ~participates_in_mixed_batch,

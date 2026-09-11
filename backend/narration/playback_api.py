@@ -27,6 +27,8 @@ from pydantic import (
 )
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
+from ..novel_lifecycle_errors import NovelRecycledError
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from ..database import DatabaseNotConfigured, get_session
@@ -722,6 +724,15 @@ def _fault_from_error(error: Exception) -> PlaybackApiFault:
 
 
 def _raise_http(error: Exception) -> None:
+    if isinstance(error, NovelRecycledError):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={
+                "type": "novel_recycled",
+                "code": "novel_recycled",
+                "message": "小说已移入回收站",
+            },
+        ) from error
     fault = _fault_from_error(error)
     raise HTTPException(
         status_code=PLAYBACK_API_ERROR_HTTP_STATUS[fault.code],

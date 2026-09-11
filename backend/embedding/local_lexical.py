@@ -19,6 +19,8 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
+from ..novel_lifecycle import require_active_novel
+
 from ..creative_data_models import (
     NovelAssetBinding,
     NovelOutlineHead,
@@ -967,13 +969,20 @@ def search_local_authority(
     """
 
     with session.no_autoflush:
-        novel = session.scalar(
-            select(Novel).where(
-                Novel.id == request.novel_id,
-                Novel.owner_id == request.owner_id,
-                Novel.workspace_id == request.workspace_id,
+        if isinstance(session, Session):
+            novel = require_active_novel(session, request.novel_id)
+        else:  # deterministic narrow unit fakes
+            novel = session.scalar(
+                select(Novel).where(
+                    Novel.id == request.novel_id,
+                    Novel.owner_id == request.owner_id,
+                    Novel.workspace_id == request.workspace_id,
+                )
             )
-        )
+            if novel is not None and getattr(novel, "recycled_at", None) is not None:
+                from ..novel_lifecycle_errors import NovelRecycledError
+
+                raise NovelRecycledError("小说已移入回收站")
         if (
             novel is None
             or novel.id != request.novel_id

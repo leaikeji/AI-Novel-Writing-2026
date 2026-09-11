@@ -28,6 +28,7 @@ from ..creative_data_models import (
     StoryTimeline,
 )
 from ..models import Document, DocumentRevision, Novel
+from ..novel_lifecycle import lock_active_novel
 
 from .contracts import StoryTimeV1
 from .persistence import _iso
@@ -264,14 +265,7 @@ def save_revision_timeline_mapping(
 ) -> dict[str, object]:
     """Append a mapping revision and move its CAS head in one transaction."""
 
-    novel = session.scalar(
-        select(Novel).where(Novel.id == novel_id).with_for_update()
-    )
-    if novel is None:
-        raise MappingServiceError(
-            MappingServiceErrorCode.NOVEL_NOT_FOUND,
-            "novel was not found",
-        )
+    novel = lock_active_novel(session, novel_id)
     key = _validate_operation_key(operation_key)
     _, source_revision = _document_and_revision(
         session, novel_id, document_id, revision_id

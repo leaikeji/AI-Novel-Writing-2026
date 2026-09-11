@@ -39,6 +39,7 @@ from .services import (
     NarrationCasConflict,
     NarrationScopeMismatch,
     NarrationStore,
+    require_local_novel,
     require_row,
 )
 
@@ -136,10 +137,7 @@ def lock_request_document_mutex(
     )
     if document.novel_id != request.novel_id:
         raise NarrationScopeMismatch("request/document novel relation changed")
-    novel = require_row(
-        store.get(Novel, request.novel_id, for_update=True),
-        label="novel",
-    )
+    novel = require_local_novel(store, request.novel_id, for_update=True)
     if (
         novel.owner_id != request.owner_id
         or novel.workspace_id != request.workspace_id

@@ -269,6 +269,20 @@ class CompleteVersionedRequest(BaseModel):
     expected_version: int = Field(ge=1)
 
 
+class NovelLifecycleActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1, strict=True)
+    idempotency_key: str = Field(min_length=1, max_length=120)
+
+
+class PurgeRecycledNovelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1, strict=True)
+    confirmation_text: Literal["确认删除"]
+
+
 class CreatePrivateAssetRequest(BaseModel):
     asset_type: str = Field(pattern="^(plot|writing_style|vocabulary|idea)$")
     title: str = Field(min_length=1, max_length=240)

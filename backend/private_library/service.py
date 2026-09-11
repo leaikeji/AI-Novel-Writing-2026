@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 
 from ..creative_data_models import NovelAssetBinding, PrivateAssetVersion
 from ..models import AssetPreset, AssetPresetItem, Novel, PrivateAsset
+from ..novel_lifecycle import lock_active_novel, require_active_novel
+from ..novel_lifecycle_errors import NovelRecycledError
 
 from .contracts import (
     PRIVATE_ASSET_SNAPSHOT_VERSION,
@@ -36,6 +38,17 @@ from .hashing import canonical_hash
 
 
 PRIVATE_ASSET_TYPES = frozenset({"plot", "writing_style", "vocabulary", "idea"})
+
+
+def _require_active_novel(session: Session, novel_id: UUID) -> Novel:
+    if type(session).__module__.startswith("sqlalchemy."):
+        return require_active_novel(session, novel_id)
+    novel = session.get(Novel, novel_id)
+    if novel is None:
+        raise PrivateLibraryNotFoundError(f"novel {novel_id} not found")
+    if getattr(novel, "recycled_at", None) is not None:
+        raise NovelRecycledError("小说已移入回收站")
+    return novel
 
 
 def _now() -> datetime:
@@ -525,10 +538,7 @@ def replace_preset_items(
 
 
 def _lock_novel(session: Session, novel_id: UUID) -> Novel:
-    novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
-    if novel is None:
-        raise PrivateLibraryNotFoundError(f"novel {novel_id} not found")
-    return novel
+    return lock_active_novel(session, novel_id)
 
 
 def _active_bindings(session: Session, novel_id: UUID) -> list[NovelAssetBinding]:
@@ -709,8 +719,7 @@ def _binding_views_from_rows(
 def list_novel_bindings(session: Session, novel_id: UUID) -> list[BindingView]:
     """Return fixed bindings and update hints without changing any pointer."""
 
-    if session.get(Novel, novel_id) is None:
-        raise PrivateLibraryNotFoundError(f"novel {novel_id} not found")
+    _require_active_novel(session, novel_id)
     rows = _active_bindings(session, novel_id)
     selections = [
         VersionSelection(
@@ -811,8 +820,7 @@ def build_generation_asset_snapshot(
     This function never adds, deletes, flushes or commits ORM rows.
     """
 
-    if session.get(Novel, novel_id) is None:
-        raise PrivateLibraryNotFoundError(f"novel {novel_id} not found")
+    _require_active_novel(session, novel_id)
     snapshot: list[dict[str, Any]] = []
     for ordinal, selection in enumerate(direct_selections):
         asset, version = _version_pair(

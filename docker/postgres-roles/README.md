@@ -1,6 +1,6 @@
 # PostgreSQL 运行角色隔离底座
 
-状态：**计划 53 已接入显式 one-shot maintenance overlay；计划 65 已把 bootstrap、schema-owner migrator 和 validator 的精确门禁扩展到 `20260910_0051`。它不是普通 Compose 启动项，API／worker 正式连接切换仍为 HOLD。**
+状态：**计划 53 已接入显式 one-shot maintenance overlay；计划 67 已把 bootstrap、schema-owner migrator 和 validator 的精确门禁扩展到 `20260911_0053`。它不是普通 Compose 启动项。**
 
 `bootstrap.sh` 是可由一次性 Compose service 调用的幂等入口。它只接受无密码连接元数据，管理员密码通过管理员自己的 `PGPASSFILE` 读取；三个运行密码分别只写入下列独立挂载，文件固定为 `0600`：
 
@@ -14,7 +14,7 @@
 
 三条路径分别位于 `ai-novel-2026-db-migrator-auth`、`ai-novel-2026-db-api-auth`、`ai-novel-2026-db-worker-auth`。当前 migrator service 只挂 migrator 卷；validator 只读挂三卷；bootstrap 是唯一同时可写挂载三卷的 service。API／worker 卷当前不挂入 QwenPaw，因为运行连接切换尚未批准，也没有受审窄写过程。不能把任一密码复制到 `.env`、数据库 URL、Compose command 或日志。
 
-每次只能使用 `docker compose ... run --rm -T <one-service>` 显式运行一个 service，不得使用 profile-wide `up`。`AI_NOVEL_MAINTENANCE_STEP` 是代码级单步授权：bootstrap 支持精确的 `bootstrap-20260909_0049`／`bootstrap-20260909_0050`／`bootstrap-20260910_0051` 及已审历史 head；validator 使用与显式 head 相等的 `validate-<head>`；migrator 支持精确的 `upgrade-20260909_0050`／`upgrade-20260910_0051` 及已审历史步骤。`0050` 与 `0051` 均为前向迁移，不提供 downgrade；需要恢复时使用对应计划的数据库 dump、媒体备份和旧安装快照。不匹配的 service 会在连接数据库前失败。
+每次只能使用 `docker compose ... run --rm -T <one-service>` 显式运行一个 service，不得使用 profile-wide `up`。`AI_NOVEL_MAINTENANCE_STEP` 是代码级单步授权：bootstrap 支持精确的 `bootstrap-20260909_0049`／`bootstrap-20260909_0050`／`bootstrap-20260910_0051`／`bootstrap-20260910_0052`／`bootstrap-20260911_0053` 及已审历史 head；validator 使用与显式 head 相等的 `validate-<head>`；migrator 支持精确的 `upgrade-20260909_0050`／`upgrade-20260910_0051`／`upgrade-20260910_0052`／`upgrade-20260911_0053` 及已审历史步骤。`0050` 至 `0053` 均为前向迁移，不提供 downgrade；需要恢复时使用对应计划的数据库 dump、媒体备份和旧安装快照。不匹配的 service 会在连接数据库前失败。
 
 计划 54 已执行的 `0037 → 0038` 串行顺序：
 
@@ -40,8 +40,10 @@
 | `20260909_0049` | 59 | 计划 62 删除退役 MOSS／通用池数据结构后的基线 |
 | `20260909_0050` | 59 | 清理共享 scope guard 退役引用，不增加表 |
 | `20260910_0051` | 60 | 整书删除事务授权与脱敏删除审计；新增 1 张保护表 |
+| `20260910_0052` | 61 | 小说回收状态与不可变生命周期事件；新增 1 张保护表 |
+| `20260911_0053` | 61 | 整书销毁审计绑定备份回执摘要；无新增表 |
 
-`protected-tables.sql` 保存当前 `0051` 的 60 表全集；其中 59 张是 ORM 业务／审计表，`alembic_version` 是唯一系统表。历史 head 使用验证器内冻结的对应集合；`0049` 删除 14 张退役专用表，`0050` 只清理共享函数，`0051` 新增脱敏整书删除审计表。SQL 通过 catalog join 只处理目标库中已存在的表；迁移至候选 head 后必须重新执行 bootstrap 并要求对应表集通过。验证器还会拒绝未进入保护清单、也没有非 TTS 理由 allowlist 的 `narration_*`、`voice_*`、`character_*`、媒体和后台任务权威表。
+`protected-tables.sql` 保存当前 `0053` 的 61 表全集；其中 60 张是 ORM 业务／审计表，`alembic_version` 是唯一系统表。历史 head 使用验证器内冻结的对应集合；`0049` 删除 14 张退役专用表，`0050` 只清理共享函数，`0051` 新增脱敏整书删除审计表，`0052` 新增不可变生命周期事件表，`0053` 只增加备份回执摘要证据列。SQL 通过 catalog join 只处理目标库中已存在的表；迁移至候选 head 后必须重新执行 bootstrap 并要求对应表集通过。验证器还会拒绝未进入保护清单、也没有非 TTS 理由 allowlist 的 `narration_*`、`voice_*`、`character_*`、媒体和后台任务权威表。
 
 测试环境同样必须显式设置 `TTS_ROLE_TEST_EXPECTED_HEAD`；未设置时 PostgreSQL 集成用例保持跳过，不回退到隐含默认值。此矩阵只扩充读取验证覆盖，不向 API、worker、`PUBLIC` 或任何其他主体授予新权限。
 

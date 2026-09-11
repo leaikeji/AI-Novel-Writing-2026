@@ -50,6 +50,11 @@ class _ReadOnlySession:
         entity = statement.column_descriptions[0].get("entity")
         return _Rows(self._rows.get(entity, []))
 
+    def scalar(self, statement: Any) -> Any | None:
+        entity = statement.column_descriptions[0].get("entity")
+        objects = self._objects.get(entity, {})
+        return next(iter(objects.values()), None)
+
     def add(self, _item: object) -> None:  # pragma: no cover - hard failure path
         raise AssertionError("creative read service must not add rows")
 
@@ -285,7 +290,7 @@ def test_intelligence_prompt_explicitly_allows_empty_items() -> None:
         version=1,
     )
     session = _ReadOnlySession(
-        objects=[proposal, document, revision],
+        objects=[_novel(novel_id), proposal, document, revision],
         rows={StoryFact: [], NovelCharacter: [], Volume: [volume], Document: [document]},
     )
 

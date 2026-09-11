@@ -20,6 +20,7 @@ from ..creative_data_models import (
 )
 from ..database import get_engine
 from ..narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
+from ..models import Novel
 from .api import SECRET_DIR_ENV, SECRET_ROOT_ENV
 from .secrets import EmbeddingSecretStore
 from .worker import execute_embedding_batch
@@ -76,9 +77,11 @@ def semantic_retrieval_enabled() -> bool:
                 session.scalar(
                     select(func.count())
                     .select_from(EmbeddingGenerationNovel)
+                    .join(Novel, Novel.id == EmbeddingGenerationNovel.novel_id)
                     .where(
                         EmbeddingGenerationNovel.generation_id == generation.id,
                         EmbeddingGenerationNovel.state == "ready",
+                        Novel.recycled_at.is_(None),
                     )
                 )
                 or 0

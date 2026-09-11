@@ -32,6 +32,7 @@ from ..models import (
     NovelCharacter,
     StoryFact,
 )
+from ..novel_lifecycle import require_active_novel
 
 from .contracts import (
     CharacterContinuityKind,
@@ -98,16 +99,7 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def _require_novel(session: Session, novel_id: UUID, *, for_update: bool) -> Novel:
-    statement = select(Novel).where(Novel.id == novel_id)
-    if for_update:
-        statement = statement.with_for_update()
-    novel = session.scalar(statement)
-    if novel is None:
-        raise StoryStatePersistenceError(
-            PersistenceErrorCode.NOVEL_NOT_FOUND,
-            "novel was not found in the requested scope",
-        )
-    return novel
+    return require_active_novel(session, novel_id, for_update=for_update)
 
 
 def _lock_ledger(

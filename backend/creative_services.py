@@ -71,6 +71,8 @@ from .models import (
     Volume,
 )
 from .model_execution import ModelEvidencePolicyError, candidate_actual_identity
+from .novel_lifecycle import lock_active_novel, require_active_novel
+from .novel_lifecycle_errors import NovelRecycledError
 from .retrieval_summary import retrieval_summary
 from .private_library import UsagePolicy, create_asset, get_asset, update_asset
 from .relationship_contracts import (
@@ -90,7 +92,6 @@ from .services import (
     _new_document,
     _normalize_role_constraints,
     _require_document,
-    _require_novel,
     _revision_payload,
     content_hash,
     get_document,
@@ -206,12 +207,29 @@ def _next_position(session: Session, model: Any, novel_id: UUID) -> int:
 
 
 def _lock_novel(session: Session, novel_id: UUID) -> Novel:
-    novel = session.scalar(
-        select(Novel).where(Novel.id == novel_id).with_for_update()
-    )
+    return lock_active_novel(session, novel_id)
+
+
+def _require_novel(session: Session, novel_id: UUID) -> Novel:
+    if type(session).__module__.startswith("sqlalchemy."):
+        return require_active_novel(session, novel_id)
+    novel = session.get(Novel, novel_id)
     if novel is None:
         raise NotFoundError(f"novel {novel_id} not found")
+    if getattr(novel, "recycled_at", None) is not None:
+        raise NovelRecycledError("小说已移入回收站")
     return novel
+
+
+def _require_active_document(
+    session: Session, document_id: UUID, *, lock_novel: bool = False
+) -> Document:
+    document = _require_document(session, document_id)
+    if lock_novel:
+        lock_active_novel(session, document.novel_id)
+    else:
+        require_active_novel(session, document.novel_id)
+    return document
 
 
 def _story_fact_source_exists(
@@ -874,9 +892,7 @@ def _character_payload(
 def complete_outline_draft(
     session: Session, novel_id: UUID, *, expected_version: int
 ) -> dict[str, Any]:
-    novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
+    novel = _lock_novel(session, novel_id)
     ledger_before = novel.story_ledger_version
     draft = session.scalar(
         select(OutlineDraft).where(OutlineDraft.novel_id == novel_id).with_for_update()
@@ -1269,11 +1285,7 @@ def update_novel_character(
     description: str,
     details: dict[str, Any],
 ) -> dict[str, Any]:
-    novel = session.scalar(
-        select(Novel).where(Novel.id == novel_id).with_for_update()
-    )
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
+    novel = _lock_novel(session, novel_id)
     character = session.scalar(
         select(NovelCharacter)
         .where(NovelCharacter.id == character_id, NovelCharacter.novel_id == novel_id)
@@ -4849,9 +4861,7 @@ def build_chapter_creation_generation_snapshot(
         raise ValidationError("章节辅助生成类型无效")
     if draft.state != "draft" or draft.volume_id is None:
         raise ValidationError("章节草稿不在可生成状态")
-    novel = session.get(Novel, draft.novel_id)
-    if novel is None:
-        raise NotFoundError("章节草稿小说不存在")
+    novel = _require_novel(session, draft.novel_id)
     volumes = session.scalars(
         select(Volume).where(Volume.novel_id == novel.id)
     ).all()
@@ -5036,7 +5046,7 @@ def prepare_creative_generation(
     if novel_id:
         _require_novel(session, novel_id)
     if document_id:
-        document = _require_document(session, document_id)
+        document = _require_active_document(session, document_id)
         if novel_id and document.novel_id != novel_id:
             raise ValidationError("生成文档不属于当前小说")
     if kind == "selection_edit":
@@ -5051,9 +5061,7 @@ def prepare_creative_generation(
             document_id=document_id,
         )
         if novel_id is not None:
-            novel = session.get(Novel, novel_id)
-            if novel is None:
-                raise NotFoundError("选区编辑小说不存在")
+            novel = _require_novel(session, novel_id)
             # These server-owned labels are visible to both the method router
             # and the final generation prompt. The strict client snapshot does
             # not accept them, so an author cannot forge classification.
@@ -5115,9 +5123,9 @@ def prepare_creative_generation(
     if kind in OUTLINE_GENERATION_KINDS:
         if novel_id is None:
             raise ValidationError("大纲生成缺少小说范围")
-        novel = session.get(Novel, novel_id)
+        novel = _require_novel(session, novel_id)
         draft = session.get(OutlineDraft, scope_id)
-        if novel is None or draft is None:
+        if draft is None:
             raise NotFoundError("大纲生成范围不存在")
         input_snapshot = build_outline_generation_snapshot(
             novel,
@@ -5207,7 +5215,11 @@ def start_creative_generation(
                 ):
                     raise ValidationError("method dispatch creation scope mismatch")
                 return
-            novel = current_session.get(Novel, novel_id) if novel_id is not None else None
+            novel = (
+                require_active_novel(current_session, novel_id)
+                if novel_id is not None
+                else None
+            )
             if (
                 novel is None
                 or scope.kind != "novel"
@@ -5708,6 +5720,13 @@ def complete_creative_generation(
     output_text: str = "",
     output_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    job_hint = session.get(CreativeGenerationJob, job_id)
+    if job_hint is None:
+        raise NotFoundError(f"creative generation job {job_id} not found")
+    if job_hint.novel_id is not None:
+        lock_active_novel(session, job_hint.novel_id)
+    elif job_hint.document_id is not None:
+        _require_active_document(session, job_hint.document_id, lock_novel=True)
     job = session.scalar(
         select(CreativeGenerationJob)
         .where(CreativeGenerationJob.id == job_id)
@@ -5779,6 +5798,13 @@ def fail_creative_generation(
     actual_model_id: str | None = None,
     model_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    job_hint = session.get(CreativeGenerationJob, job_id)
+    if job_hint is None:
+        raise NotFoundError(f"creative generation job {job_id} not found")
+    if job_hint.novel_id is not None:
+        lock_active_novel(session, job_hint.novel_id)
+    elif job_hint.document_id is not None:
+        _require_active_document(session, job_hint.document_id, lock_novel=True)
     job = session.scalar(
         select(CreativeGenerationJob)
         .where(CreativeGenerationJob.id == job_id)
@@ -5814,11 +5840,15 @@ def list_creative_generations(
         raise ValidationError("selection_id 只能查询 selection_edit 任务")
     if kind == "selection_edit":
         if scope_type == "document":
-            _require_document(session, scope_id)
+            _require_active_document(session, scope_id)
         elif scope_type == "novel":
             _require_novel(session, scope_id)
         else:
             raise ValidationError("选区编辑恢复查询必须绑定当前小说或正文")
+    elif scope_type == "document":
+        _require_active_document(session, scope_id)
+    elif scope_type == "novel":
+        _require_novel(session, scope_id)
     query = select(CreativeGenerationJob).where(
         CreativeGenerationJob.scope_type == scope_type,
         CreativeGenerationJob.scope_id == scope_id,
@@ -5907,9 +5937,7 @@ def update_novel_settings(
     cover_mode: str | None = None,
     cover_image_data: str | None = None,
 ) -> dict[str, Any]:
-    novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
+    novel = _lock_novel(session, novel_id)
     if novel.version != expected_version:
         raise EntityConflictError(get_novel(session, novel_id))
     serialized = json.dumps(template_data, ensure_ascii=False, separators=(",", ":"))

@@ -468,7 +468,7 @@ def test_review_required_request_without_pointer_fails_closed() -> None:
     assert _counts(store) == baseline
 
 
-def test_unrelated_voice_blocker_is_preserved_and_repointed_to_child_segment() -> None:
+def test_switching_to_verified_narrator_clears_stale_character_voice_blocker() -> None:
     store, _novel, _document, _revision, _character, request, parent, casting = (
         _review_seed(
             "林晚说道：“走吧。”",
@@ -504,9 +504,9 @@ def test_unrelated_voice_blocker_is_preserved_and_repointed_to_child_segment() -
         for issue in result.contract.issues
         if issue.segment_id == corrected.segment_id
     ]
-    assert [issue.code for issue in target_issues] == ["B_VOICE_MISSING"]
+    assert target_issues == []
     assert all(issue.segment_id != target.segment_id for issue in result.contract.issues)
-    assert result.contract.blocker_count == 1
+    assert result.contract.blocker_count == 0
 
 
 def test_two_sequential_corrections_use_same_request_and_manual_parent_chain() -> None:

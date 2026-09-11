@@ -18,6 +18,8 @@ from .assistant_workspace_service import (
     get_assistant_workspace_context,
 )
 from .database import get_engine
+from .models import Document
+from .novel_lifecycle import require_active_novel
 from .services import get_document, get_novel_context, search_novel
 
 
@@ -238,6 +240,8 @@ async def novel_get_context(
     """
     factory = sessionmaker(bind=get_engine(), expire_on_commit=False)
     with factory() as session:
+        if type(session).__module__.startswith("sqlalchemy."):
+            require_active_novel(session, UUID(novel_id))
         payload = get_novel_context(
             session,
             UUID(novel_id),
@@ -255,7 +259,17 @@ async def novel_get_document(document_id: str) -> str:
     """
     factory = sessionmaker(bind=get_engine(), expire_on_commit=False)
     with factory() as session:
-        payload = get_document(session, UUID(document_id))
+        document_uuid = UUID(document_id)
+        document = (
+            session.get(Document, document_uuid)
+            if hasattr(session, "get")
+            else None
+        )
+        if document is None:
+            payload = get_document(session, document_uuid)
+        else:
+            require_active_novel(session, document.novel_id)
+            payload = get_document(session, document_uuid)
     return _json(payload)
 
 
@@ -269,5 +283,7 @@ async def novel_search(novel_id: str, query: str, limit: int = 20) -> str:
     """
     factory = sessionmaker(bind=get_engine(), expire_on_commit=False)
     with factory() as session:
+        if type(session).__module__.startswith("sqlalchemy."):
+            require_active_novel(session, UUID(novel_id))
         payload = search_novel(session, UUID(novel_id), query, limit=limit)
     return _json(payload)

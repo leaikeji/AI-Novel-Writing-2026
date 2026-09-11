@@ -35,6 +35,8 @@ from .models import (
     Storyline,
     Volume,
 )
+from .novel_lifecycle import require_active_novel
+from .novel_lifecycle_errors import NovelRecycledError
 from .services import NotFoundError, ValidationError, _document_payload
 from .volume_chapter_titles import (
     bound_contract_title,
@@ -616,9 +618,14 @@ def get_assistant_workspace_context(
     if not owner_scope.owner_id or novel_id not in owner_scope.novel_ids:
         raise WorkspaceScopeError()
 
-    novel = session.get(Novel, novel_id)
-    if novel is None:
-        raise WorkspaceScopeError()
+    if type(session).__module__.startswith("sqlalchemy."):
+        novel = require_active_novel(session, novel_id)
+    else:
+        novel = session.get(Novel, novel_id)
+        if novel is None:
+            raise WorkspaceScopeError()
+        if getattr(novel, "recycled_at", None) is not None:
+            raise NovelRecycledError("小说已移入回收站")
 
     document: Document | None = None
     if document_id is not None:

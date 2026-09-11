@@ -40,6 +40,8 @@ from ..models import (
     VoiceProfileVersion,
     VoiceReferenceAssetLink,
 )
+from ..novel_lifecycle import lock_active_novel, require_active_novel
+from ..novel_lifecycle_errors import NovelLifecycleNotFound
 from .contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
 from .digest_keyring import DigestKeyring
 from .media import MediaConflict, MediaPolicyError, finalize_voice_deletion_asset_in_session
@@ -279,15 +281,14 @@ def _require_local_novel(
 ) -> Novel:
     if type(novel_id) is not UUID:
         raise ValueError("novel_id must be an exact UUID")
-    statement = select(Novel).where(Novel.id == novel_id)
-    if for_update:
-        statement = statement.with_for_update()
-    novel = session.scalar(statement.execution_options(populate_existing=True))
-    if novel is None:
-        raise VoiceDeletionNotFound("novel not found")
-    if novel.owner_id != LOCAL_OWNER_ID or novel.workspace_id != LOCAL_WORKSPACE_ID:
-        raise NarrationScopeMismatch("novel is outside fixed local scope")
-    return novel
+    try:
+        return (
+            lock_active_novel(session, novel_id)
+            if for_update
+            else require_active_novel(session, novel_id)
+        )
+    except NovelLifecycleNotFound as error:
+        raise VoiceDeletionNotFound("novel not found") from error
 
 
 def _profile_and_versions(
@@ -717,7 +718,13 @@ def _reconciliation_candidate_statement(
         )
     return (
         select(VoiceDeletionRequest.id)
+        .join(Novel, Novel.id == VoiceDeletionRequest.novel_id)
         .where(*conditions)
+        .where(
+            Novel.owner_id == VoiceDeletionRequest.owner_id,
+            Novel.workspace_id == VoiceDeletionRequest.workspace_id,
+            Novel.recycled_at.is_(None),
+        )
         .order_by(
             VoiceDeletionRequest.requested_at,
             VoiceDeletionRequest.id,
@@ -1463,6 +1470,7 @@ class VoiceDeletionService:
         candidates: tuple[_AssetCandidate, ...],
         identities: dict[UUID, StoredFileIdentity | None],
     ) -> VoiceDeletionRequestSnapshot:
+        _require_local_novel(session, novel_id, for_update=True)
         row = _request_by_id(
             session,
             request_id,

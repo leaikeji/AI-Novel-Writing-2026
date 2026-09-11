@@ -13,6 +13,7 @@ from sqlalchemy import select, update, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from ..novel_lifecycle import lock_active_novel
 from .contracts import ActionIdentity, FrozenModel, FrozenRouteRequest, Scope, SkillInjectionPacketV1
 from .models import WritingSkillDispatch
 
@@ -84,6 +85,11 @@ def _identity_query(identity: ActionIdentity):
     )
 
 
+def _lock_scope_novel(session: Session, scope: Scope) -> None:
+    if scope.kind == "novel":
+        lock_active_novel(session, scope.scope_id)
+
+
 def lookup_action(session: Session, identity: ActionIdentity, scope: Scope,
                   client_input_hash: str, *, authorize: Callable[[Session, Scope], None]) -> Claim | PendingAction | None:
     """Check stable identity BEFORE calling any projection/config/model supplier.
@@ -122,6 +128,7 @@ def read_action(session: Session, identity: ActionIdentity, scope: Scope, *,
 def claim_pending_action(session: Session, identity: ActionIdentity, scope: Scope,
                          client_input_hash: str, *, authorize: Callable[[Session, Scope], None]) -> Claim | PendingAction:
     """Commit the stable identity BEFORE input/configuration/network preparation."""
+    _lock_scope_novel(session, scope)
     existing = lookup_action(session, identity, scope, client_input_hash, authorize=authorize)
     if existing is not None:
         session.commit()
@@ -146,6 +153,7 @@ def freeze_prepared_action(session: Session, pending: PendingAction,
     """One-time fenced freeze. A failed/cancelled pending action cannot resume."""
     if not isinstance(pending, PendingAction) or pending.state != "claimed":
         raise StaleFence("input is no longer pending")
+    _lock_scope_novel(session, pending.scope)
     if request.identity != pending.identity or request.projection.scope != pending.scope:
         raise ActionConflict("frozen_scope_mismatch")
     row = session.execute(update(WritingSkillDispatch).where(
@@ -166,6 +174,7 @@ def freeze_prepared_action(session: Session, pending: PendingAction,
 def claim_action(session: Session, identity: ActionIdentity, scope: Scope,
                  client_input_hash: str, *, authorize: Callable[[Session, Scope], None],
                  freeze: Callable[[], FrozenRouteRequest]) -> Claim | PendingAction:
+    _lock_scope_novel(session, scope)
     existing = lookup_action(session, identity, scope, client_input_hash, authorize=authorize)
     if existing:
         session.commit()
@@ -222,6 +231,7 @@ def lock_assembled_action(session: Session, claim: Claim, *,
     Never dispatch from the returned value until the caller has committed both
     job and dispatch. A cancellation or another worker wins by the same fence.
     """
+    _lock_scope_novel(session, claim.request.projection.scope)
     authorize(session, claim.request.projection.scope)
     row = session.scalar(_identity_query(claim.request.identity).with_for_update())
     if row is None:
@@ -244,6 +254,7 @@ def advance_in_transaction(session: Session, claim: Claim | PendingAction, targe
     the SAME transaction. The returned value is not dispatch authority until
     that transaction commits. Ordinary callers should use ``advance``.
     """
+    _lock_scope_novel(session, claim.scope)
     if isinstance(claim, PendingAction) and (target not in {"failed", "cancelled", "stale"}
                                             or packet is not None or job_ref is not None):
         raise ValueError("pending input must be frozen before routing")

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..embedding.chunking import estimate_token_count
 from ..models import Document, Novel, NovelCreationDraft
+from ..novel_lifecycle import require_active_novel
 from .button import current_catalog
 from .composer import compose_writing_request
 from .contracts import (
@@ -78,9 +79,9 @@ def _scope_and_labels(
     document_id: UUID | None,
     tab_id: str,
 ) -> tuple[Scope, str, str]:
-    novel = session.get(Novel, novel_id)
+    novel = require_active_novel(session, novel_id)
     document = session.get(Document, document_id) if document_id is not None else None
-    if novel is None or (
+    if (
         document_id is not None
         and (document is None or document.novel_id != novel.id)
     ):

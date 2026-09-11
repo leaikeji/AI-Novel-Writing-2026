@@ -14,8 +14,6 @@ from .character_profile_services import (
     CharacterProfileValidationError,
     normalize_character_profile_output,
 )
-from .narration.novel_deletion import delete_novel_with_narration
-from .narration.production_runtime import current_narration_cache_runtime
 from .creative_authority import AuthorityIdempotencyConflict
 from .creative_schemas import (
     ApplyOutlineGenerationRequest,
@@ -33,6 +31,8 @@ from .creative_schemas import (
     CreateStorylineRequest,
     DeleteVolumeRequest,
     GenerateCharacterProfileCompletionRequest,
+    NovelLifecycleActionRequest,
+    PurgeRecycledNovelRequest,
     ReorderChaptersRequest,
     ReorderVolumesRequest,
     RestoreCharacterProfileBatchRequest,
@@ -156,7 +156,13 @@ from .model_runtime import (
     parse_model_json,
     reply_final_text,
 )
-from .services import NotFoundError, ValidationError, delete_novel
+from .novel_lifecycle import list_recycled_novels, recycle_novel, restore_novel
+from .novel_lifecycle_errors import NovelLifecycleError
+from .narration.novel_deletion import (
+    author_confirmed_deletion_context,
+    delete_novel_with_narration,
+)
+from .services import NotFoundError, ValidationError
 from .models import ChapterBrief
 from .story_state import StoryStateError
 from .volume_chapter_titles import VolumeChapterContractError, contract_error_detail
@@ -309,6 +315,11 @@ async def _creative_generation_context(
 
 
 def _raise(error: Exception) -> None:
+    if isinstance(error, NovelLifecycleError):
+        raise HTTPException(
+            status_code=error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     if isinstance(error, VolumeChapterContractError):
         raise HTTPException(
             status_code=error.status_code, detail=contract_error_detail(error)
@@ -378,25 +389,109 @@ def novels_delete(
     expected_version: int = Query(ge=1),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
+    del novel_id, expected_version, session
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "type": "permanent_delete_moved_to_recycle_bin",
+            "message": "永久删除已移至受控维护流程，请先将小说移入回收站",
+        },
+    )
+
+
+@router.post("/novels/{novel_id}/recycle")
+def novels_recycle(
+    novel_id: UUID,
+    request: NovelLifecycleActionRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
     try:
-        narration_runtime = current_narration_cache_runtime()
-        if narration_runtime is None:
-            delete_novel(session, novel_id, expected_version=expected_version)
-            return {
-                "deleted": True,
-                "media_cleanup_pending": False,
-                "deleted_media_count": 0,
-                "deleted_document_ids": [],
-            }
-        return delete_novel_with_narration(
-            narration_runtime,
+        result = recycle_novel(
+            session,
             novel_id,
-            expected_version=expected_version,
+            request.expected_version,
+            request.idempotency_key,
         )
+        session.commit()
+        return result
     except Exception as error:
         session.rollback()
         _raise(error)
         raise
+
+
+@router.get("/recycle-bin/novels")
+def recycle_bin_index(
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: str | None = None,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return list_recycled_novels(session, limit=limit, cursor=cursor)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"type": "invalid_recycle_bin_cursor", "message": str(error)},
+        ) from error
+
+
+@router.post("/recycle-bin/novels/{novel_id}/restore")
+def recycle_bin_restore(
+    novel_id: UUID,
+    request: NovelLifecycleActionRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        result = restore_novel(
+            session,
+            novel_id,
+            request.expected_version,
+            request.idempotency_key,
+        )
+        session.commit()
+        return result
+    except Exception as error:
+        session.rollback()
+        _raise(error)
+        raise
+
+
+@router.post("/recycle-bin/novels/{novel_id}/purge")
+def recycle_bin_purge(
+    novel_id: UUID,
+    request: PurgeRecycledNovelRequest,
+) -> dict[str, object]:
+    # The exact phrase is validated by the strict request schema and converted
+    # into a server-owned, target-bound context.  The request never accepts a
+    # path, hash, actor or generic verification flag.
+    from .narration.production_runtime import current_narration_cache_runtime
+
+    runtime = current_narration_cache_runtime()
+    if runtime is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "type": "novel_purge_runtime_unavailable",
+                "message": "完整删除运行时暂不可用，请稍后重试",
+            },
+        )
+    try:
+        maintenance = author_confirmed_deletion_context(
+            novel_id,
+            expected_version=request.expected_version,
+            confirmation_text=request.confirmation_text,
+        )
+        return delete_novel_with_narration(
+            runtime,
+            novel_id,
+            expected_version=request.expected_version,
+            maintenance=maintenance,
+        )
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"type": "novel_purge_blocked", "message": str(error)},
+        ) from error
 
 
 @router.post("/creation-drafts", status_code=status.HTTP_201_CREATED)

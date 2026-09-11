@@ -29,6 +29,7 @@ from sqlalchemy import (
     func,
     or_,
     select,
+    text,
 )
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session, SessionTransaction
@@ -43,7 +44,9 @@ from ..models import (
     BackgroundResourceClassSlot,
     BackgroundResourceLock,
     NarrationRequest,
+    Novel,
 )
+from ..novel_lifecycle import lock_active_novel
 
 from . import resource_locks as _resource_locks
 from .contracts import NarrationRequestScope
@@ -458,6 +461,7 @@ def build_claim_statement(
     job_kinds: Sequence[str] | None = None,
     aging_quantum_seconds: int = DEFAULT_AGING_QUANTUM_SECONDS,
     dialect_name: str = "postgresql",
+    lifecycle_guard: bool = True,
 ):
     """Build the production fair-claim statement for inspection/integration."""
 
@@ -505,6 +509,9 @@ def build_claim_statement(
             BackgroundManualRetryCommand.state == "pending",
         )
     )
+    lifecycle_conditions = (
+        (_active_novel_job_predicate(),) if lifecycle_guard else ()
+    )
     statement = (
         select(BackgroundJob)
         .where(
@@ -519,6 +526,7 @@ def build_claim_statement(
                 BackgroundJob.next_retry_at.is_(None),
                 BackgroundJob.next_retry_at <= current_param,
             ),
+            *lifecycle_conditions,
         )
         .order_by(
             effective_priority.desc(),
@@ -535,6 +543,37 @@ def build_claim_statement(
         document_ids=document_ids,
         resource_classes=resource_classes,
         job_kinds=job_kinds,
+    )
+
+
+def _active_novel_job_predicate():  # type: ignore[no-untyped-def]
+    """Keep true global jobs runnable while excluding recycled novel work."""
+
+    return or_(
+        BackgroundJob.novel_id.is_(None),
+        exists(
+            select(Novel.id).where(
+                Novel.id == BackgroundJob.novel_id,
+                Novel.owner_id == BackgroundJob.owner_id,
+                Novel.workspace_id == BackgroundJob.workspace_id,
+                Novel.recycled_at.is_(None),
+            )
+        ),
+    )
+
+
+def _novel_lifecycle_table_available(session: Session) -> bool:
+    """Legacy narrow SQLite job tests omit the aggregate table entirely."""
+
+    if _dialect_name(session) != "sqlite":
+        return True
+    return bool(
+        session.scalar(
+            text(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'novels' LIMIT 1"
+            )
+        )
     )
 
 
@@ -832,6 +871,8 @@ def enqueue_job(
         novel_id=resolved_novel,
         request_id=resolved_request,
     )
+    if resolved_novel is not None and _novel_lifecycle_table_available(session):
+        lock_active_novel(session, resolved_novel)
     values = {
         "id": uuid4(),
         "owner_id": fixed_scope.owner_id,
@@ -926,6 +967,18 @@ def _job_for_update(
     job_id: UUID,
 ) -> BackgroundJob:
     identifier = _uuid(job_id, field_name="job_id")
+    identity = session.execute(
+        select(BackgroundJob.id, BackgroundJob.novel_id).where(
+            BackgroundJob.id == identifier,
+            BackgroundJob.owner_id == scope.owner_id,
+            BackgroundJob.workspace_id == scope.workspace_id,
+        )
+    ).one_or_none()
+    if identity is None:
+        raise JobNotFoundError("job was not found in the fixed scope")
+    if identity.novel_id is not None and _novel_lifecycle_table_available(session):
+        # Lifecycle lock must precede the job/attempt/resource lock chain.
+        lock_active_novel(session, identity.novel_id)
     job = session.scalar(
         select(BackgroundJob)
         .where(
@@ -1455,6 +1508,7 @@ def claim_next_job(
         job_kinds=job_kinds,
         aging_quantum_seconds=aging_quantum_seconds,
         dialect_name=_dialect_name(session),
+        lifecycle_guard=_novel_lifecycle_table_available(session),
     )
     job = session.scalar(statement)
     if job is None:
@@ -1852,6 +1906,11 @@ def promote_due_retries(
         limit, field_name="limit", minimum=1, maximum=1_000
     )
     selection_current = _selection_clock(session, test_only_now)
+    lifecycle_conditions = (
+        (_active_novel_job_predicate(),)
+        if _novel_lifecycle_table_available(session)
+        else ()
+    )
     statement = (
         select(BackgroundJob)
         .where(
@@ -1861,6 +1920,7 @@ def promote_due_retries(
             BackgroundJob.next_retry_at.is_not(None),
             BackgroundJob.next_retry_at <= selection_current,
             BackgroundJob.attempt_count < BackgroundJob.max_attempts,
+            *lifecycle_conditions,
         )
         .order_by(BackgroundJob.next_retry_at.asc(), BackgroundJob.id.asc())
         .limit(batch_limit)
@@ -2129,6 +2189,11 @@ def reconcile_expired_attempts(
         cap_seconds=retry_cap_seconds,
     )
     selection_current = _selection_clock(session, test_only_now)
+    lifecycle_conditions = (
+        (_active_novel_job_predicate(),)
+        if _novel_lifecycle_table_available(session)
+        else ()
+    )
     statement = (
         select(BackgroundJob)
         .join(
@@ -2144,6 +2209,7 @@ def reconcile_expired_attempts(
             BackgroundJob.state.in_(("running", "cancel_requested")),
             BackgroundJobAttempt.completed_at.is_(None),
             BackgroundJobAttempt.lease_until <= selection_current,
+            *lifecycle_conditions,
         )
         .order_by(
             BackgroundJobAttempt.lease_until.asc(), BackgroundJob.id.asc()

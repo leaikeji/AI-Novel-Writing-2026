@@ -71,6 +71,47 @@ export interface NovelSummary {
   updated_at: string | null;
 }
 
+export interface RecycledNovelSummary {
+  id: string;
+  title: string;
+  recycled_at: string;
+  version: number;
+  chapter_count: number | null;
+  visible_character_count: number | null;
+  media_bytes: number | null;
+}
+
+export interface RecycleBinNovelPage {
+  items: RecycledNovelSummary[];
+  next_cursor: string | null;
+  total_count: number;
+}
+
+export type NovelLifecycleAction = "recycled" | "restored";
+
+export interface NovelLifecycleActionResult {
+  event_id: string;
+  action: NovelLifecycleAction;
+  version: number;
+  recycled_at: string | null;
+  warning_codes: string[];
+  replayed: boolean;
+}
+
+export interface PurgeRecycledNovelResult {
+  deleted: true;
+  media_cleanup_pending: boolean;
+  deleted_media_count: number;
+  deleted_document_ids: string[];
+}
+
+export interface NovelLifecycleNotice {
+  novel_id: string;
+  event_id: string;
+  action: NovelLifecycleAction;
+  version: number;
+}
+
 export interface NovelRecord {
   id: string;
   title: string;

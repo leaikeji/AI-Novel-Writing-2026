@@ -17,6 +17,8 @@ from ..creative_data_models import (
 )
 from ..creative_services import validate_character_root_update
 from ..models import Novel, NovelCharacter
+from ..novel_lifecycle import lock_active_novel
+from ..novel_lifecycle_errors import NovelRecycledError
 from ..services import NotFoundError, ValidationError
 from ..story_state.revisions import (
     CharacterInstanceProfile,
@@ -53,11 +55,16 @@ def save_character_workspace(
     CAS is applied only to aggregates that are actually changing.
     """
 
-    novel = session.scalar(
-        select(Novel).where(Novel.id == novel_id).with_for_update()
-    )
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
+    if type(session).__module__.startswith("sqlalchemy."):
+        novel = lock_active_novel(session, novel_id)
+    else:
+        novel = session.scalar(
+            select(Novel).where(Novel.id == novel_id).with_for_update()
+        )
+        if novel is None:
+            raise NotFoundError(f"novel {novel_id} not found")
+        if getattr(novel, "recycled_at", None) is not None:
+            raise NovelRecycledError("小说已移入回收站")
     character = session.scalar(
         select(NovelCharacter)
         .where(

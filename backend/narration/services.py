@@ -16,6 +16,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..novel_lifecycle import require_active_novel
+from ..novel_lifecycle_errors import NovelLifecycleNotFound, NovelRecycledError
 from ..models import (
     BackgroundJob,
     Novel,
@@ -252,11 +254,22 @@ def require_fixed_scope(scope: NarrationRequestScope) -> NarrationRequestScope:
 def require_local_novel(
     store: NarrationStore, novel_id: UUID, *, for_update: bool = False
 ) -> Novel:
+    if isinstance(store, SqlAlchemyNarrationStore):
+        try:
+            return require_active_novel(
+                store.session,
+                novel_id,
+                for_update=for_update,
+            )
+        except NovelLifecycleNotFound as error:
+            raise NarrationNotFound("novel not found") from error
     novel = store.get(Novel, novel_id, for_update=for_update)
     if novel is None:
         raise NarrationNotFound("novel not found")
     if novel.owner_id != LOCAL_OWNER_ID or novel.workspace_id != LOCAL_WORKSPACE_ID:
         raise NarrationScopeMismatch("novel is outside the fixed local narration scope")
+    if getattr(novel, "recycled_at", None) is not None:
+        raise NovelRecycledError("小说已移入回收站")
     return novel
 
 

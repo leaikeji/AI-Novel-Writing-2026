@@ -19,6 +19,9 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..novel_lifecycle import require_active_novel
+from ..novel_lifecycle_errors import NovelLifecycleNotFound, NovelRecycledError
+
 from ..creative_data_models import (
     EmbeddingConfiguration,
     EmbeddingGeneration,
@@ -82,6 +85,7 @@ from ..models import (
     BackgroundJob,
     DerivedSourceBinding,
     IntelligenceCommitBatch,
+    Novel,
     StoryFact,
 )
 from ..narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID, NarrationRequestScope
@@ -295,6 +299,15 @@ def _masked_api_key(configuration: EmbeddingConfiguration | None) -> str | None:
 
 
 def _raise(error: Exception) -> None:
+    if isinstance(error, NovelRecycledError):
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            detail={
+                "type": "novel_recycled",
+                "code": "novel_recycled",
+                "message": "小说已移入回收站",
+            },
+        ) from error
     if isinstance(error, IntegrityError):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -317,6 +330,17 @@ def _raise(error: Exception) -> None:
     raise error
 
 
+def _require_active_http_novel(session: Session, novel_id: UUID) -> None:
+    if not isinstance(session, Session):
+        return
+    try:
+        require_active_novel(session, novel_id)
+    except NovelRecycledError as error:
+        _raise(error)
+    except NovelLifecycleNotFound as error:
+        _raise(EmbeddingLifecycleError("novel_not_found", "novel is outside local scope"))
+
+
 def _generation_payload(
     session: Session, generation_id: UUID | None
 ) -> dict[str, object] | None:
@@ -328,8 +352,11 @@ def _generation_payload(
     profile = session.get(EmbeddingProfile, generation.profile_id)
     builds = tuple(
         session.scalars(
-            select(EmbeddingGenerationNovel).where(
-                EmbeddingGenerationNovel.generation_id == generation.id
+            select(EmbeddingGenerationNovel)
+            .join(Novel, Novel.id == EmbeddingGenerationNovel.novel_id)
+            .where(
+                EmbeddingGenerationNovel.generation_id == generation.id,
+                Novel.recycled_at.is_(None),
             )
         )
     )
@@ -360,8 +387,12 @@ def embedding_config_get(session: Session = Depends(get_session)) -> dict[str, o
     )
     active_consents = int(
         session.scalar(
-            select(func.count()).select_from(NovelEmbeddingConsent).where(
-                NovelEmbeddingConsent.revoked_at.is_(None)
+            select(func.count())
+            .select_from(NovelEmbeddingConsent)
+            .join(Novel, Novel.id == NovelEmbeddingConsent.novel_id)
+            .where(
+                NovelEmbeddingConsent.revoked_at.is_(None),
+                Novel.recycled_at.is_(None),
             )
         )
         or 0
@@ -748,9 +779,12 @@ def embedding_candidate_rebuild(session: Session = Depends(get_session)) -> dict
             raise EmbeddingLifecycleError("candidate_missing", "candidate generation is missing")
         builds = tuple(
             session.scalars(
-                select(EmbeddingGenerationNovel).where(
+                select(EmbeddingGenerationNovel)
+                .join(Novel, Novel.id == EmbeddingGenerationNovel.novel_id)
+                .where(
                     EmbeddingGenerationNovel.generation_id == configuration.candidate_generation_id,
                     EmbeddingGenerationNovel.state == "pending",
+                    Novel.recycled_at.is_(None),
                 )
             )
         )
@@ -886,6 +920,7 @@ def embedding_generation_rollback(
 def embedding_consent_get(
     novel_id: UUID, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     consent = session.scalar(
         select(NovelEmbeddingConsent)
         .where(NovelEmbeddingConsent.novel_id == novel_id)
@@ -918,6 +953,7 @@ def embedding_consent_put(
     request: ConsentUiRequest,
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     try:
         if request.action is ConsentAction.GRANT:
             if request.notice_version != NOVEL_EMBEDDING_CONSENT_NOTICE_VERSION:
@@ -961,6 +997,7 @@ def embedding_consent_put(
 def semantic_index_status(
     novel_id: UUID, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     consent = session.scalar(
         select(NovelEmbeddingConsent).where(
             NovelEmbeddingConsent.novel_id == novel_id,
@@ -1061,6 +1098,7 @@ def semantic_index_status(
 def semantic_index_rebuild(
     novel_id: UUID, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     try:
         configuration = get_configuration(
             session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID
@@ -1080,6 +1118,7 @@ def semantic_index_rebuild(
 def semantic_index_cancel(
     novel_id: UUID, request: CancelRequest, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     del request
     builds = tuple(
         session.scalars(
@@ -1122,6 +1161,7 @@ def semantic_index_cancel(
 def semantic_index_retry_failed(
     novel_id: UUID, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     configuration = get_configuration(
         session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID
     )
@@ -1163,6 +1203,7 @@ def semantic_index_retry_failed(
 def semantic_index_delete(
     novel_id: UUID, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     source_ids = select(SemanticSource.id).where(SemanticSource.novel_id == novel_id)
     chunk_ids = select(SemanticChunk.id).where(SemanticChunk.source_id.in_(source_ids))
     deleted = session.execute(
@@ -1413,6 +1454,7 @@ def _local_authority_search_payload(
 async def semantic_search(
     novel_id: UUID, request: SemanticSearchRequest, session: Session = Depends(get_session)
 ) -> dict[str, object]:
+    _require_active_http_novel(session, novel_id)
     try:
         configuration = get_configuration(
             session, owner_id=LOCAL_OWNER_ID, workspace_id=LOCAL_WORKSPACE_ID

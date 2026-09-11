@@ -36,6 +36,18 @@ PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)
 : "${AI_NOVEL_MAINTENANCE_STEP:?AI_NOVEL_MAINTENANCE_STEP is required}"
 
 case "$AI_NOVEL_MAINTENANCE_STEP" in
+    upgrade-20260911_0053)
+        [ "$#" -eq 2 ] \
+            && [ "$1" = upgrade ] \
+            && [ "$2" = 20260911_0053 ] \
+            || fail "upgrade step requires exact target 20260911_0053"
+        ;;
+    upgrade-20260910_0052)
+        [ "$#" -eq 2 ] \
+            && [ "$1" = upgrade ] \
+            && [ "$2" = 20260910_0052 ] \
+            || fail "upgrade step requires exact target 20260910_0052"
+        ;;
     upgrade-20260910_0051)
         [ "$#" -eq 2 ] \
             && [ "$1" = upgrade ] \

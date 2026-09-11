@@ -37,6 +37,25 @@ class Novel(Base):
     __table_args__ = (
         UniqueConstraint("id", "owner_id", "workspace_id", name="uq_novel_local_scope"),
         Index("ix_novels_local_scope", "owner_id", "workspace_id"),
+        Index(
+            "ix_novels_active_scope_updated",
+            "owner_id",
+            "workspace_id",
+            "updated_at",
+            postgresql_where=text("recycled_at IS NULL"),
+        ),
+        Index(
+            "ix_novels_recycled_scope_time",
+            "owner_id",
+            "workspace_id",
+            "recycled_at",
+            "id",
+            postgresql_where=text("recycled_at IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "(recycled_at IS NULL) = (recycled_by IS NULL)",
+            name="ck_novel_recycle_metadata_pair",
+        ),
         CheckConstraint(
             "owner_id = '29cf94d9-a5c9-54ec-912c-5dfff8738c4c'::uuid "
             "AND workspace_id = 'f0e2e632-bc99-52d2-9916-bb906aa4da6e'::uuid",
@@ -70,6 +89,8 @@ class Novel(Base):
     story_ledger_version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
     character_catalog_version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    recycled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recycled_by: Mapped[str | None] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -80,6 +101,43 @@ class Novel(Base):
     )
     documents: Mapped[list[Document]] = relationship(
         back_populates="novel", cascade="all, delete-orphan"
+    )
+
+
+class NovelLifecycleEvent(Base):
+    """Immutable, content-free receipt for a recycle or restore action."""
+
+    __tablename__ = "novel_lifecycle_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "novel_id", "idempotency_key", name="uq_novel_lifecycle_idempotency"
+        ),
+        CheckConstraint(
+            "action IN ('recycled','restored')", name="ck_novel_lifecycle_action"
+        ),
+        CheckConstraint(
+            "version_before >= 1 AND version_after = version_before + 1",
+            name="ck_novel_lifecycle_version_step",
+        ),
+        CheckConstraint(
+            "title_sha256 ~ '^[0-9a-f]{64}$' AND request_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_novel_lifecycle_hashes",
+        ),
+        Index("ix_novel_lifecycle_novel_time", "novel_id", "occurred_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    version_before: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    version_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -693,6 +751,10 @@ class NovelDeletionAudit(Base):
             name="ck_novel_deletion_media_totals",
         ),
         CheckConstraint(
+            "backup_receipt_sha256 IS NULL OR backup_receipt_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_novel_deletion_backup_receipt_hash",
+        ),
+        CheckConstraint(
             "state IN ('purging','database_deleted','completed','media_cleanup_failed')",
             name="ck_novel_deletion_state",
         ),
@@ -713,6 +775,7 @@ class NovelDeletionAudit(Base):
     media_count: Mapped[int] = mapped_column(Integer, nullable=False)
     media_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     confirmed_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    backup_receipt_sha256: Mapped[str | None] = mapped_column(String(64))
     failure_code: Mapped[str | None] = mapped_column(String(96))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

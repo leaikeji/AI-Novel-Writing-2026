@@ -63,6 +63,8 @@ from .models import (
     StoryFact,
     Volume,
 )
+from .novel_lifecycle import require_active_novel
+from .novel_lifecycle_errors import NovelRecycledError
 from .story_state import (
     StoryEventLinkRecord,
     StoryFactV2,
@@ -1838,9 +1840,14 @@ def assemble_writing_context_from_db(
 ) -> dict[str, Any]:
     """Select bounded authority refs, hydrate them in batches, then freeze V4."""
 
-    novel = session.get(Novel, position.novel_id)
-    if novel is None:
-        raise ValueError("novel not found")
+    if type(session).__module__.startswith("sqlalchemy."):
+        novel = require_active_novel(session, position.novel_id)
+    else:
+        novel = session.get(Novel, position.novel_id)
+        if novel is None:
+            raise ValueError("novel not found")
+        if getattr(novel, "recycled_at", None) is not None:
+            raise NovelRecycledError("小说已移入回收站")
     timeline_rows = tuple(
         session.scalars(
             select(StoryTimeline)

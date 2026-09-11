@@ -460,6 +460,13 @@ async def _uninstall_narration_runtime(*, plugin_id: str | None = None) -> None:
 
 
 def _raise_domain(error: Exception) -> None:
+    from .novel_lifecycle_errors import NovelLifecycleError
+
+    if isinstance(error, NovelLifecycleError):
+        raise HTTPException(
+            status_code=error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     if isinstance(error, VolumeChapterContractError):
         raise HTTPException(
             status_code=error.status_code, detail=contract_error_detail(error)

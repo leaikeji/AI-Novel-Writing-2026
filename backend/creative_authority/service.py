@@ -18,6 +18,8 @@ from ..creative_data_models import (
 )
 from ..models import CharacterAlias, Novel, NovelCharacter
 from ..narration.aliases import normalize_character_alias
+from ..novel_lifecycle import lock_active_novel
+from ..novel_lifecycle_errors import NovelRecycledError
 
 from .errors import (
     AuthorityConflictError,
@@ -90,11 +92,13 @@ def _json_list_of_dicts(
 
 
 def _lock_novel(session: Session, novel_id: UUID) -> Novel:
-    novel = session.scalar(
-        select(Novel).where(Novel.id == novel_id).with_for_update()
-    )
+    if type(session).__module__.startswith("sqlalchemy."):
+        return lock_active_novel(session, novel_id)
+    novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
     if novel is None:
         raise AuthorityNotFoundError(f"novel {novel_id} not found")
+    if getattr(novel, "recycled_at", None) is not None:
+        raise NovelRecycledError("小说已移入回收站")
     return novel
 
 
@@ -263,13 +267,7 @@ def _write_outline(
             restored_from_revision_id=restored_from_revision_id,
         )
     )
-    novel = (
-        session.get(Novel, novel_id)
-        if novel_already_locked
-        else _lock_novel(session, novel_id)
-    )
-    if novel is None:
-        raise AuthorityNotFoundError(f"novel {novel_id} not found")
+    novel = _lock_novel(session, novel_id)
     existing = _outline_idempotent_revision(session, novel_id, key)
     head = _outline_head(session, novel_id, for_update=True)
     if existing is not None:
@@ -501,13 +499,7 @@ def _write_settings(
             "change_set": changes,
         }
     )
-    novel = (
-        session.get(Novel, novel_id)
-        if novel_already_locked
-        else _lock_novel(session, novel_id)
-    )
-    if novel is None:
-        raise AuthorityNotFoundError(f"novel {novel_id} not found")
+    novel = _lock_novel(session, novel_id)
     existing = _setting_idempotent_revision(session, novel_id, key)
     head = _setting_head(session, novel_id, for_update=True)
     if existing is not None:

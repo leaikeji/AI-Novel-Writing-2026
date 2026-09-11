@@ -45,6 +45,7 @@ INSERT INTO pg_temp.ai_novel_protected_tables (table_name) VALUES
     ('narration_settings_snapshots'),
     ('novel_characters'),
     ('novel_deletion_audits'),
+    ('novel_lifecycle_events'),
     ('novel_narration_settings'),
     ('novels'),
     ('pronunciation_entries'),

@@ -54,6 +54,7 @@ from .refresh import (
 )
 from ..models import Document, DocumentRevision, DocumentWorkingCopy, Volume
 from ..models import Novel
+from ..novel_lifecycle import lock_active_novel, require_active_novel
 from ..volume_chapter_titles import embedding_chapter_title
 
 
@@ -676,6 +677,7 @@ def prepare_v1_novel_index(
 ) -> EmbeddingGenerationNovel:
     """Build local sources/chunks and enqueue batches; never calls the cloud."""
 
+    lock_active_novel(session, novel_id)
     build = session.scalar(
         select(EmbeddingGenerationNovel)
         .where(
@@ -1190,9 +1192,16 @@ def request_active_novel_refresh(
     active semantic index.
     """
 
-    novel = session.get(Novel, novel_id)
-    if not isinstance(novel, Novel):
-        return False
+    if isinstance(session, Session):
+        novel = require_active_novel(session, novel_id)
+    else:  # deterministic narrow unit fakes
+        novel = session.get(Novel, novel_id)
+        if not isinstance(novel, Novel):
+            return False
+        if getattr(novel, "recycled_at", None) is not None:
+            from ..novel_lifecycle_errors import NovelRecycledError
+
+            raise NovelRecycledError("小说已移入回收站")
     configuration = session.scalar(
         select(EmbeddingConfiguration).where(
             EmbeddingConfiguration.owner_id == novel.owner_id,

@@ -156,6 +156,8 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "20260909_0049": 59,
         "20260909_0050": 59,
         "20260910_0051": 60,
+        "20260910_0052": 61,
+        "20260911_0053": 61,
     }
     for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
         assert (
@@ -230,7 +232,13 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
     assert set(PROTECTED_TABLES_BY_HEAD["20260910_0051"]) - set(
         PROTECTED_TABLES_BY_HEAD["20260909_0050"]
     ) == {"novel_deletion_audits"}
-    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260910_0051"]
+    assert set(PROTECTED_TABLES_BY_HEAD["20260910_0052"]) - set(
+        PROTECTED_TABLES_BY_HEAD["20260910_0051"]
+    ) == {"novel_lifecycle_events"}
+    assert set(PROTECTED_TABLES_BY_HEAD["20260911_0053"]) == set(
+        PROTECTED_TABLES_BY_HEAD["20260910_0052"]
+    )
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260911_0053"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:
@@ -241,12 +249,12 @@ def test_sql_and_python_protected_table_contracts_match() -> None:
     assert "GRANT " not in executable_sql
 
 
-def test_current_protected_tables_are_59_orm_tables_plus_alembic_system_table() -> None:
+def test_current_protected_tables_are_60_orm_tables_plus_alembic_system_table() -> None:
     orm_tables = set(Base.metadata.tables)
     protected_tables = set(CURRENT_PROTECTED_TABLES)
 
     assert protected_tables - orm_tables == {"alembic_version"}
-    assert len(protected_tables - {"alembic_version"}) == 59
+    assert len(protected_tables - {"alembic_version"}) == 60
     assert protected_tables - {"alembic_version"} <= orm_tables
 
 

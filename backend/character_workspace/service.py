@@ -35,6 +35,7 @@ from ..models import (
     StoryFact,
     Volume,
 )
+from ..novel_lifecycle import require_active_novel
 from ..story_state import (
     CharacterInstanceRecord,
     StoryStateError,
@@ -186,7 +187,7 @@ class SqlAlchemyCharacterWorkspaceStore:
             return tuple(self.session.execute(statement).all())
 
     def novel(self, novel_id: UUID) -> Novel | None:
-        return self._scalar(select(Novel).where(Novel.id == novel_id))
+        return require_active_novel(self.session, novel_id)
 
     def character(self, novel_id: UUID, character_id: UUID) -> NovelCharacter | None:
         return self._scalar(

@@ -23,11 +23,17 @@ import {
 } from "./chapter-tree";
 import { CREATIVE_CENTER_CHAT_PATH } from "./contracts";
 import {
-  clearRecoveryDraft,
+  clearRecoveryDraftIfCurrent,
+  createRecoveryDraft,
   loadRecoveryDraft,
   RecoveryDraft,
   saveRecoveryDraft,
 } from "./recovery";
+import {
+  shouldApplyLifecycleNotice,
+  subscribeNovelLifecycleNotices,
+  subscribeNovelRecycledHttp,
+} from "./recycle-bin";
 import {
   chapterDisplayTitle as formatChapterDisplayTitle,
   chapterTitleName,
@@ -506,6 +512,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const [generationModelStatus, setGenerationModelStatus] = React.useState(null as GenerationModelStatus | null);
   const [generationModelStatusError, setGenerationModelStatusError] = React.useState(false);
   const [error, setError] = React.useState("");
+  const [lifecycleBlocked, setLifecycleBlocked] = React.useState(null as {
+    novelId: string;
+    title: string;
+  } | null);
   const [conflict, setConflict] = React.useState(null as DocumentRecord | null);
   const [recovery, setRecovery] = React.useState(null as RecoveryDraft | null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
@@ -528,8 +538,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const timerRef = React.useRef(null as ReturnType<typeof setTimeout> | null);
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
+  const recoveryDraftRef = React.useRef(null as RecoveryDraft | null);
   const documentGenerationRef = React.useRef(0);
   const novelGenerationRef = React.useRef(0);
+  const lifecycleVersionRef = React.useRef(0);
   const novelLoadAbortRef = React.useRef(null as AbortController | null);
   const chapterTreeNavRef = React.useRef(null as HTMLElement | null);
   const chapterTreeAutoFocusDocumentRef = React.useRef(null as string | null);
@@ -623,6 +635,91 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     if (!current || ["idle", "ended"].includes(current.phase)) return;
     publishBookNarrationState(Object.freeze({ ...current, phase: "failed", message }));
   }, [publishBookNarrationState]);
+
+  const blockRecycledNovel = React.useCallback((novelId: string | null) => {
+    const activeNovel = novel;
+    const targetNovelId = novelId || activeNovel?.id || queryNovelId;
+    if (!targetNovelId) return;
+    if (activeNovel && targetNovelId.toLowerCase() !== activeNovel.id.toLowerCase()) return;
+    const activeDocument = documentRef.current;
+    if (activeDocument && contentRef.current !== activeDocument.content_markdown) {
+      const draft = createRecoveryDraft(
+        activeDocument.id,
+        activeDocument.draft_version,
+        contentRef.current,
+        activeDocument.content_hash,
+      );
+      recoveryDraftRef.current = draft;
+      void saveRecoveryDraft(draft).catch(() => undefined);
+    }
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    documentGenerationRef.current += 1;
+    novelGenerationRef.current += 1;
+    novelLoadAbortRef.current?.abort("novel recycled");
+    novelLoadAbortRef.current = null;
+    narrationActionAbortRef.current?.abort("novel recycled");
+    narrationActionAbortRef.current = null;
+    const activeQueue = bookNarrationRef.current;
+    if (activeQueue) publishBookNarrationState(stopBookNarrationQueue(activeQueue));
+    scriptReviewActionAbortRef.current?.abort("novel recycled");
+    scriptReviewActionAbortRef.current = null;
+    failedSegmentRetryControllerRef.current?.reset("novel recycled");
+    narrationSessionRef.current?.dispose();
+    narrationSessionRef.current = null;
+    paragraphGutterControllerRef.current?.dispose();
+    paragraphGutterControllerRef.current = null;
+    setBodyGenerationState({ active: false, stage: "" });
+    setNarrationBusy(false);
+    setEditorOpen(false);
+    setBusy(false);
+    documentRef.current = null;
+    setDocument(null);
+    setNovel(null);
+    setLifecycleBlocked({
+      novelId: targetNovelId,
+      title: activeNovel?.title || "这本作品",
+    });
+  }, [novel, publishBookNarrationState, queryNovelId]);
+
+  React.useEffect(() => {
+    const unsubscribeLifecycle = subscribeNovelLifecycleNotices((notice) => {
+      const targetId = novel?.id || queryNovelId;
+      if (!targetId) return;
+      if (!shouldApplyLifecycleNotice(notice, targetId, lifecycleVersionRef.current)) return;
+      lifecycleVersionRef.current = notice.version;
+      if (notice.action === "recycled") blockRecycledNovel(notice.novel_id);
+    });
+    const unsubscribeHttp = subscribeNovelRecycledHttp((detail) => {
+      blockRecycledNovel(detail.novelId);
+    });
+    return () => {
+      unsubscribeLifecycle();
+      unsubscribeHttp();
+    };
+  }, [blockRecycledNovel, novel?.id, queryNovelId]);
+
+  React.useEffect(() => {
+    const novelId = novel?.id || queryNovelId;
+    if (!novelId || lifecycleBlocked) return;
+    let checking = false;
+    const verify = () => {
+      if (checking || window.document.visibilityState === "hidden") return;
+      checking = true;
+      void apiRequest(`/novels/${encodeURIComponent(novelId)}`)
+        .catch(() => undefined)
+        .finally(() => { checking = false; });
+    };
+    const onVisibility = () => { if (window.document.visibilityState === "visible") verify(); };
+    window.addEventListener("focus", verify);
+    window.document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", verify);
+      window.document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [lifecycleBlocked, novel?.id, queryNovelId]);
 
   const assistantChapterNumber = novel && document?.kind === "chapter"
     && novel.id === document.novel_id
@@ -753,6 +850,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       const loaded = await apiRequest<DocumentRecord>(`/documents/${documentId}`);
       if (documentGenerationRef.current !== generation) return;
       documentRef.current = loaded;
+      recoveryDraftRef.current = null;
       contentRef.current = loaded.content_markdown;
       setDocument(loaded);
       setContent(loaded.content_markdown);
@@ -775,11 +873,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         || documentRef.current?.id !== loaded.id
       ) return;
       if (local && local.contentMarkdown !== loaded.content_markdown) {
+        recoveryDraftRef.current = local;
         setRecovery(local);
         setSaveState("发现未同步本地草稿");
       } else {
         setRecovery(null);
-        await clearRecoveryDraft(loaded.id);
+        if (local) await clearRecoveryDraftIfCurrent(local);
       }
     } catch (reason) {
       if (documentGenerationRef.current === generation) {
@@ -811,6 +910,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       });
       if (novelGenerationRef.current !== generation || controller.signal.aborted) return;
       setNovel(loaded);
+      lifecycleVersionRef.current = Math.max(lifecycleVersionRef.current, loaded.version);
       setError("");
       if (queryDocumentId) {
         await documentLoad;
@@ -976,6 +1076,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     const active = documentRef.current;
     if (!active) return null;
     const generation = documentGenerationRef.current;
+    const localDraft = recoveryDraftRef.current?.documentId === active.id
+      && recoveryDraftRef.current.contentMarkdown === markdown
+      ? recoveryDraftRef.current
+      : null;
     if (active.content_markdown === markdown) {
       setSaveState("已保存");
       return active;
@@ -999,7 +1103,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         setDocument(merged);
         if (contentRef.current === markdown) {
           setSaveState("已保存");
-          await clearRecoveryDraft(merged.id);
+          if (localDraft) {
+            const cleared = await clearRecoveryDraftIfCurrent(localDraft);
+            if (cleared && recoveryDraftRef.current?.draftId === localDraft.draftId) {
+              recoveryDraftRef.current = null;
+            }
+          }
         } else {
           setSaveState("有新内容待保存");
           timerRef.current = setTimeout(() => {
@@ -1076,20 +1185,32 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const applyContentChange = React.useCallback((markdown: string) => {
     if (markdown === contentRef.current) return;
     const active = documentRef.current;
+    const activeQueue = bookNarrationRef.current;
+    if (activeQueue && !["idle", "ended"].includes(activeQueue.phase)) {
+      narrationSessionRef.current?.pause();
+      publishBookNarrationState(stopBookNarrationQueue(
+        activeQueue,
+        "已因正文开始修改停止全书朗读；重新点击可按最新保存内容开始。",
+      ));
+    }
     setContent(markdown);
     contentRef.current = markdown;
     assistantBodyBindingRef.current?.notifyFieldChanged();
     setSaveState("本地草稿");
     if (!active) return;
-    void saveRecoveryDraft({
-      documentId: active.id,
-      draftVersion: active.draft_version,
-      contentMarkdown: markdown,
-      updatedAt: Date.now(),
+    const draft = createRecoveryDraft(
+      active.id,
+      active.draft_version,
+      markdown,
+      active.content_hash,
+    );
+    recoveryDraftRef.current = draft;
+    void saveRecoveryDraft(draft).catch(() => {
+      setSaveState("本地恢复稿写入失败，请先复制正文留存");
     });
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void saveNow(markdown), 600);
-  }, [saveNow]);
+  }, [publishBookNarrationState, saveNow]);
 
   const editorShouldMount = editorOpen
     && !bodyGenerationState.active
@@ -2610,7 +2731,14 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           ? `已恢复正文，并重新启用 ${preview.will_reactivate.length} 条故事资料`
           : "已恢复为新版本",
       );
-      await clearRecoveryDraft(result.document.id);
+      const localDraft = recoveryDraftRef.current;
+      if (localDraft?.documentId === result.document.id
+        && localDraft.contentMarkdown === result.document.content_markdown) {
+        const cleared = await clearRecoveryDraftIfCurrent(localDraft);
+        if (cleared && recoveryDraftRef.current?.draftId === localDraft.draftId) {
+          recoveryDraftRef.current = null;
+        }
+      }
     } catch (reason) {
       if (
         reason instanceof ApiError
@@ -2745,6 +2873,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     if (!recovery) return;
     setContent(recovery.contentMarkdown);
     contentRef.current = recovery.contentMarkdown;
+    recoveryDraftRef.current = recovery;
     setRecovery(null);
     setSaveState("已恢复本地草稿，正在同步");
     void saveNow(recovery.contentMarkdown);
@@ -2759,7 +2888,15 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     setConflict(null);
     setRecovery(null);
     setSaveState(status);
-    void clearRecoveryDraft(updated.id);
+    const localDraft = recoveryDraftRef.current;
+    if (localDraft?.documentId === updated.id
+      && localDraft.contentMarkdown === updated.content_markdown) {
+      void clearRecoveryDraftIfCurrent(localDraft).then((cleared) => {
+        if (cleared && recoveryDraftRef.current?.draftId === localDraft.draftId) {
+          recoveryDraftRef.current = null;
+        }
+      });
+    }
   };
 
   const openTitleEditor = () => {
@@ -3767,6 +3904,21 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
             : h(Empty, { description: "暂无版本" }),
         ),
       ),
+    );
+  }
+
+  if (lifecycleBlocked) {
+    return h(
+      "main",
+      { className: "anw-app anw-empty-state", role: "status", "aria-live": "assertive" },
+      h("strong", null, `《${lifecycleBlocked.title}》已移入回收站`),
+      h("p", null, "当前编辑会话已停止保存、生成轮询与朗读操作；本地未同步稿仍保留在此浏览器。"),
+      h(Button, {
+        onClick: () => {
+          clearWorkbenchRoute();
+          navigateNovelSurface(`${CREATIVE_CENTER_CHAT_PATH}&view=recycle-bin`);
+        },
+      }, "打开回收站"),
     );
   }
 

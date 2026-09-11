@@ -54,6 +54,7 @@ from ..models import (
     NovelCreationDraft,
     OutlineDraft,
 )
+from ..novel_lifecycle import require_active_novel
 from ..services import ValidationError
 from .api import method_status
 from .button import current_catalog
@@ -172,7 +173,7 @@ def _validate_managed_selection(
     session: Session,
     request: StartCreativeGenerationRequest,
 ) -> tuple[Novel, Document, DocumentWorkingCopy]:
-    novel = session.get(Novel, request.novel_id)
+    novel = require_active_novel(session, request.novel_id)
     document = session.get(Document, request.document_id)
     working_copy = session.get(DocumentWorkingCopy, request.document_id)
     snapshot = request.input_snapshot
@@ -243,7 +244,7 @@ def _scope(session: Session, request: StartCreativeGenerationRequest) -> Scope:
             scope_id=draft.id,
             tab_id=request.writing_action.tab_id,
         )
-    novel = session.get(Novel, request.novel_id)
+    novel = require_active_novel(session, request.novel_id)
     if request.kind in CHARACTER_PROFILE_KINDS:
         if (
             novel is None
@@ -355,7 +356,7 @@ def _authorize(session: Session, scope: Scope) -> None:
         ):
             raise ValidationError("managed creation helper scope changed")
         return
-    novel = session.get(Novel, scope.scope_id)
+    novel = require_active_novel(session, scope.scope_id)
     document = (
         session.get(Document, scope.document_id)
         if scope.document_id is not None

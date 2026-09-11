@@ -101,6 +101,8 @@ from backend.models import (
     Volume,
 )
 from backend.embedding.writing import resolve_writing_position
+from backend.novel_lifecycle import recycle_novel, restore_novel
+from backend.novel_lifecycle_errors import NovelLifecycleVersionConflict
 from backend.volume_chapter_titles import VolumeChapterContractError
 from backend.services import (
     CandidateConflictError,
@@ -118,7 +120,6 @@ from backend.services import (
     create_document,
     create_novel,
     create_volume,
-    delete_novel,
     get_chapter_brief,
     get_document,
     get_novel,
@@ -2582,7 +2583,7 @@ def test_six_step_creation_accepts_a_text_only_cover(session: Session) -> None:
     assert novel["cover_image_data"] == ""
 
 
-def test_novel_delete_requires_current_version_and_removes_the_exact_novel(
+def test_novel_recycle_requires_current_version_and_restores_the_exact_novel(
     session: Session,
 ) -> None:
     completed = _create_long_novel_via_wizard(
@@ -2593,13 +2594,34 @@ def test_novel_delete_requires_current_version_and_removes_the_exact_novel(
     novel = completed["novel"]
     novel_id = UUID(novel["id"])
 
-    with pytest.raises(ValidationError, match="其他位置更新"):
-        delete_novel(session, novel_id, expected_version=novel["version"] + 1)
+    with pytest.raises(NovelLifecycleVersionConflict, match="其他位置更新"):
+        recycle_novel(
+            session,
+            novel_id,
+            novel["version"] + 1,
+            "domain-recycle-stale",
+        )
     session.rollback()
     assert session.get(Novel, novel_id) is not None
 
-    delete_novel(session, novel_id, expected_version=novel["version"])
-    assert session.get(Novel, novel_id) is None
+    recycled = recycle_novel(
+        session,
+        novel_id,
+        novel["version"],
+        "domain-recycle",
+    )
+    session.commit()
+    assert session.get(Novel, novel_id).recycled_at is not None
+
+    restored = restore_novel(
+        session,
+        novel_id,
+        int(recycled["version"]),
+        "domain-restore",
+    )
+    session.commit()
+    assert restored["version"] == novel["version"] + 2
+    assert session.get(Novel, novel_id).recycled_at is None
 
 
 def test_private_library_presets_produce_immutable_generation_snapshots(

@@ -6,6 +6,8 @@ from pydantic import Field
 from sqlalchemy.orm import Session
 
 from ..database import get_session
+from ..novel_lifecycle import require_active_novel
+from ..novel_lifecycle_errors import NovelRecycledError
 from .contracts import FrozenModel, ActionIdentity
 from .persistence import Claim, PendingAction, read_action
 from .evidence import MethodDetails, method_details
@@ -144,11 +146,14 @@ def _read_creation_action(session, draft_id, action_id, tab_id):
 
 
 def _novel_scope(session, novel_id, tab_id):
-    from ..models import Novel
     from .contracts import Scope
-    novel = session.get(Novel, novel_id)
-    if novel is None:
-        raise HTTPException(404, "novel not found")
+    try:
+        novel = require_active_novel(session, novel_id)
+    except NovelRecycledError as error:
+        raise HTTPException(
+            error.http_status,
+            {"type": error.code, "message": str(error)},
+        ) from error
     return Scope(
         owner_id=novel.owner_id,
         workspace_id=novel.workspace_id,
@@ -192,7 +197,7 @@ def _read_native_action(
         action_id=action_id,
     )
     def authorize(current_session: Session, current_scope) -> None:
-        novel = current_session.get(Novel, current_scope.scope_id)
+        novel = require_active_novel(current_session, current_scope.scope_id)
         document = (
             current_session.get(Document, current_scope.document_id)
             if current_scope.document_id is not None

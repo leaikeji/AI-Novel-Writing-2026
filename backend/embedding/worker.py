@@ -57,6 +57,7 @@ from ..models import (
     DocumentWorkingCopy,
     ModelRunRecord,
 )
+from ..novel_lifecycle import lock_active_novel
 from ..volume_chapter_titles import embedding_chapter_title
 
 
@@ -131,6 +132,14 @@ def _hash(value: object) -> str:
 
 
 def _load_call(session: Session, *, lease: JobLease) -> BatchCallSnapshot:
+    batch_identity = session.scalar(
+        select(EmbeddingIndexBatch).where(
+            EmbeddingIndexBatch.background_job_id == lease.fence.job_id
+        )
+    )
+    if batch_identity is None:
+        raise EmbeddingLifecycleError("batch_not_found", "embedding batch was not found")
+    lock_active_novel(session, batch_identity.novel_id)
     batch = session.scalar(
         select(EmbeddingIndexBatch)
         .where(EmbeddingIndexBatch.background_job_id == lease.fence.job_id)
@@ -519,6 +528,7 @@ def _record_success(
     result: EmbeddingBatchResult,
     duration_ms: int,
 ) -> None:
+    lock_active_novel(session, snapshot.novel_id)
     batch = session.scalar(
         select(EmbeddingIndexBatch)
         .where(EmbeddingIndexBatch.id == snapshot.batch_id)

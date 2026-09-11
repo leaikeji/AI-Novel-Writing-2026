@@ -22,6 +22,8 @@ from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy.orm import Session
+
+from ..novel_lifecycle_errors import NovelRecycledError
 from starlette.responses import JSONResponse, Response
 
 from ..database import DatabaseNotConfigured, get_session
@@ -767,6 +769,15 @@ def _run(
 ) -> _ResponseModel:
     try:
         return response_model.model_validate(backend.dispatch(command))
+    except NovelRecycledError as error:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={
+                "type": "novel_recycled",
+                "code": "novel_recycled",
+                "message": "小说已移入回收站",
+            },
+        ) from error
     except ScriptApiFault as fault:
         raise HTTPException(
             status_code=SCRIPT_API_ERROR_HTTP_STATUS[fault.code],

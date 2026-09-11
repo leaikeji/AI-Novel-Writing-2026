@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from ..database import get_session
+from ..novel_lifecycle_errors import NovelLifecycleError
 
 from .contracts import (
     CharacterContinuityKind,
@@ -183,6 +184,11 @@ class RevisionTimelineMappingSaveRequest(_Strict):
 
 
 def _raise(error: Exception) -> None:
+    if isinstance(error, NovelLifecycleError):
+        raise HTTPException(
+            error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     if isinstance(error, RevisionServiceError):
         http_status = (
             status.HTTP_404_NOT_FOUND

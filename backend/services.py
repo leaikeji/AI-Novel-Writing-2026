@@ -191,10 +191,23 @@ def _mark_active_novel_index_outdated(session: Session, novel_id: UUID) -> None:
         EmbeddingGenerationNovel,
     )
 
-    novel = session.get(Novel, novel_id)
-    if novel is None:
-        session.commit()
-        return
+    from .novel_lifecycle import require_active_novel
+    from .novel_lifecycle_errors import NovelLifecycleError
+
+    if isinstance(session, Session):
+        try:
+            novel = require_active_novel(session, novel_id)
+        except NovelLifecycleError:
+            session.commit()
+            return
+    else:
+        # Compatibility for the deliberately minimal unit-test session used
+        # by this post-commit derived-index helper. Production always takes
+        # the lifecycle-scoped branch above.
+        novel = session.get(Novel, novel_id)
+        if novel is None:
+            session.commit()
+            return
     configuration = session.scalar(
         select(EmbeddingConfiguration).where(
             EmbeddingConfiguration.owner_id == novel.owner_id,
@@ -840,25 +853,30 @@ def _intelligence_commit_batch_payload(batch: IntelligenceCommitBatch) -> dict[s
 
 
 def _require_novel(session: Session, novel_id: UUID) -> Novel:
-    novel = session.get(Novel, novel_id)
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
-    return novel
+    from .novel_lifecycle import require_active_novel
+    from .novel_lifecycle_errors import NovelLifecycleNotFound
+
+    try:
+        return require_active_novel(session, novel_id)
+    except NovelLifecycleNotFound as error:
+        raise NotFoundError(f"novel {novel_id} not found") from error
 
 
 def _lock_novel(session: Session, novel_id: UUID) -> Novel:
-    novel = session.scalar(
-        select(Novel).where(Novel.id == novel_id).with_for_update()
-    )
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
-    return novel
+    from .novel_lifecycle import lock_active_novel
+    from .novel_lifecycle_errors import NovelLifecycleNotFound
+
+    try:
+        return lock_active_novel(session, novel_id)
+    except NovelLifecycleNotFound as error:
+        raise NotFoundError(f"novel {novel_id} not found") from error
 
 
 def _require_document(session: Session, document_id: UUID) -> Document:
     document = session.get(Document, document_id)
     if document is None:
         raise NotFoundError(f"document {document_id} not found")
+    _require_novel(session, document.novel_id)
     return document
 
 
@@ -1005,6 +1023,7 @@ def list_novels(session: Session) -> list[dict[str, Any]]:
             func.coalesce(chapter_stats.c.visible_character_count, 0),
         )
         .outerjoin(chapter_stats, chapter_stats.c.novel_id == Novel.id)
+        .where(Novel.recycled_at.is_(None))
         .order_by(Novel.updated_at.desc(), Novel.created_at.desc())
     ).all()
     result: list[dict[str, Any]] = []
@@ -1030,23 +1049,6 @@ def list_novels(session: Session) -> list[dict[str, Any]]:
             }
         )
     return result
-
-
-def delete_novel(
-    session: Session,
-    novel_id: UUID,
-    *,
-    expected_version: int,
-) -> None:
-    novel = session.scalar(
-        select(Novel).where(Novel.id == novel_id).with_for_update()
-    )
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
-    if novel.version != expected_version:
-        raise ValidationError("小说已在其他位置更新，请刷新后重试")
-    session.delete(novel)
-    session.commit()
 
 
 def get_novel(session: Session, novel_id: UUID) -> dict[str, Any]:
@@ -2916,11 +2918,7 @@ def complete_intelligence_proposal(
         proposal.state = "superseded"
         session.commit()
         raise ProposalSupersededError(_intelligence_proposal_payload(session, proposal))
-    novel = session.scalar(
-        select(Novel).where(Novel.id == proposal.novel_id).with_for_update()
-    )
-    if novel is None:
-        raise NotFoundError(f"novel {proposal.novel_id} not found")
+    novel = _lock_novel(session, proposal.novel_id)
     existing = session.scalar(
         select(func.count(IntelligenceProposalItem.id)).where(
             IntelligenceProposalItem.proposal_id == proposal_id
@@ -3684,11 +3682,7 @@ def commit_intelligence_items(
     proposal_snapshot = session.get(IntelligenceProposal, proposal_id)
     if proposal_snapshot is None:
         raise NotFoundError(f"intelligence proposal {proposal_id} not found")
-    novel = session.scalar(
-        select(Novel).where(Novel.id == proposal_snapshot.novel_id).with_for_update()
-    )
-    if novel is None:
-        raise NotFoundError(f"novel {proposal_snapshot.novel_id} not found")
+    novel = _lock_novel(session, proposal_snapshot.novel_id)
     proposal = session.scalar(
         select(IntelligenceProposal)
         .where(IntelligenceProposal.id == proposal_id)

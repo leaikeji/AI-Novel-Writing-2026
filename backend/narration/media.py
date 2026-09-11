@@ -21,6 +21,7 @@ from uuid import UUID
 from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.orm import Session
 
+from ..novel_lifecycle import lock_active_novel
 from ..models import (
     ActiveJobAsset,
     AssetTombstone,
@@ -289,6 +290,7 @@ def plan_media_read_in_session(
 ) -> MediaReadDecision:
     """Refresh and share-lock the DB row while producing an HTTP plan."""
 
+    _lock_active_asset_novel(session, asset_id)
     asset = session.scalar(
         select(MediaAsset)
         .where(MediaAsset.id == asset_id)
@@ -387,6 +389,7 @@ def apply_ready_evidence_in_session(
 ) -> MediaAsset:
     """Re-verify caller evidence and publish exactly one reserved DB owner."""
 
+    _lock_active_asset_novel(session, asset_id)
     asset = _locked_asset(session, asset_id)
     owners = session.scalars(
         select(MediaAsset)
@@ -587,11 +590,27 @@ def _locked_asset(session: Session, asset_id: UUID) -> MediaAsset:
     return asset
 
 
+def _lock_active_asset_novel(session: Session, asset_id: UUID) -> UUID | None:
+    """Acquire the lifecycle row before any asset row in the shared lock order."""
+
+    novel_id = session.scalar(
+        select(MediaAsset.novel_id).where(MediaAsset.id == asset_id)
+    )
+    if novel_id is not None:
+        lock_active_novel(session, novel_id)
+    return novel_id
+
+
 def attach_active_job_asset_in_session(
     session: Session, *, job_id: UUID, asset_id: UUID, role: str
 ) -> ActiveJobAsset:
     if role not in ACTIVE_JOB_ASSET_ROLES:
         raise MediaPolicyError("invalid active job asset role")
+    job_novel_id = session.scalar(
+        select(BackgroundJob.novel_id).where(BackgroundJob.id == job_id)
+    )
+    if job_novel_id is not None:
+        lock_active_novel(session, job_novel_id)
     job = session.scalar(
         select(BackgroundJob)
         .where(BackgroundJob.id == job_id)
@@ -794,6 +813,7 @@ def mark_gc_candidate(asset: MediaAsset, roots: ReferenceRoots, *, now: datetime
 
 
 def mark_gc_candidate_in_session(session: Session, *, asset_id: UUID) -> int:
+    _lock_active_asset_novel(session, asset_id)
     asset = _locked_asset(session, asset_id)
     roots = load_reference_roots_in_session(session, asset_ids=(asset.id,))
     generation = mark_gc_candidate(asset, roots, now=_db_clock(session))
@@ -891,6 +911,7 @@ def begin_gc_deletion_in_session(
     expected_generation: int,
     policy: GcPolicy = GcPolicy(),
 ) -> GcDeletionPlan:
+    _lock_active_asset_novel(session, asset_id)
     asset = _locked_asset(session, asset_id)
     same_path = session.scalars(
         select(MediaAsset)

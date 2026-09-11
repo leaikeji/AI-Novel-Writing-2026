@@ -962,7 +962,7 @@ export function ensureNovelStyles(): void {
     .mb-center-inner { position:relative; width:min(1100px,100%); min-height:760px; margin:0 auto; }
     .mb-center-header { display:flex; align-items:center; justify-content:space-between; min-height:42px; }
     .mb-center-header h1 { margin:0; font-size:18px; font-weight:600; }
-    .mb-center-actions { display:flex; gap:22px; margin-top:15px; }
+    .mb-center-actions { display:flex; flex-wrap:wrap; gap:22px; margin-top:15px; }
     .mb-center-action { display:grid; justify-items:center; gap:8px; border:0; color:#52545a; background:transparent; cursor:pointer; font-size:12px; }
     .mb-center-action-icon { display:flex; width:46px; height:46px; align-items:center; justify-content:center; border-radius:50%; color:#fff; background:linear-gradient(145deg,#ef5b87,#d93f72); box-shadow:0 8px 18px rgba(218,63,114,.22); font-size:23px; }
     .mb-center-action:hover .mb-center-action-icon { transform:translateY(-1px); }
@@ -997,7 +997,7 @@ export function ensureNovelStyles(): void {
     .mb-novel-tags span { border-radius:5px; padding:6px 12px; color:#777c85; background:#e9edf1; font-size:12px; }
     .mb-novel-tags span.is-audience { color:#5366cc; background:#e1e7ff; }
     .mb-latest-chapter { min-height:38px; padding:10px 22px; color:#656a71; background:#f6f8fa; font-size:12px; }
-    .mb-novel-tool-row { display:grid; grid-template-columns:repeat(4,1fr); padding:17px 72px 10px; }
+    .mb-novel-tool-row { display:grid; grid-template-columns:repeat(5,1fr); padding:17px 48px 10px; }
     .mb-novel-tool-row button { display:grid; justify-items:center; gap:4px; border:0; color:#4d5056; background:transparent; cursor:pointer; font-size:12px; }
     .mb-novel-tool-row button > span:first-child { font-size:19px; }
     .mb-novel-tool-row button:hover { color:#f36a3d; }
@@ -1016,6 +1016,37 @@ export function ensureNovelStyles(): void {
     .mb-empty-center > .qwenpawicon { color:#ff7a4a; font-size:42px; }
     .mb-empty-center h2 { margin:6px 0 0; font-size:20px; }
     .mb-empty-center p { margin:0 0 10px; color:#8c8e93; font-size:13px; }
+    .mb-recycle-page .mb-center-inner { width:min(900px,100%); }
+    .mb-recycle-header { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:20px; margin-bottom:18px; }
+    .mb-recycle-header h1,.mb-recycle-header p { margin:0; }
+    .mb-recycle-header h1 { color:#25282e; font-size:26px; }
+    .mb-recycle-header p { margin-top:4px; color:#8b8f96; font-size:12px; }
+    .mb-recycle-list { display:grid; gap:14px; margin-top:18px; }
+    .mb-recycle-card { display:grid; grid-template-columns:64px minmax(0,1fr) auto; align-items:center; gap:18px; border:1px solid #e9e9eb; border-radius:12px; padding:18px 20px; background:#fff; box-shadow:0 5px 16px rgba(31,37,46,.05); }
+    .mb-recycle-cover { display:grid; width:64px; height:82px; place-items:center; border-radius:7px; color:#8a8f97; background:#f0f2f4; font-size:25px; }
+    .mb-recycle-meta { min-width:0; }
+    .mb-recycle-meta h2 { margin:0; overflow:hidden; color:#292c32; font-size:18px; text-overflow:ellipsis; white-space:nowrap; }
+    .mb-recycle-meta p { margin:7px 0; color:#868a91; font-size:12px; }
+    .mb-recycle-meta ul { display:flex; flex-wrap:wrap; gap:8px 18px; margin:0; padding:0; color:#686d75; font-size:12px; list-style:none; }
+    .mb-recycle-restore.qwenpaw-btn { min-width:88px; color:#ed6c42!important; border-color:#f5b49d!important; background:#fffaf7!important; }
+    .mb-recycle-actions { display:flex; align-items:center; gap:10px; }
+    .mb-recycle-more.qwenpaw-btn { justify-self:center; min-width:160px; margin-top:4px; }
+
+    @media (max-width:720px) {
+      .mb-center-page { padding:16px 14px 48px; }
+      .mb-center-actions { gap:12px; }
+      .mb-novel-card { margin-top:48px; }
+      .mb-novel-card-hero { grid-template-columns:96px minmax(0,1fr); gap:16px; min-height:188px; padding:18px 16px; }
+      .mb-novel-cover { width:96px; height:132px; }
+      .mb-novel-tool-row { grid-template-columns:repeat(5,minmax(0,1fr)); padding:14px 4px 8px; }
+      .mb-novel-tool-row button { min-width:0; font-size:10px; }
+      .mb-recycle-header { grid-template-columns:auto minmax(0,1fr); gap:10px; }
+      .mb-recycle-header > .qwenpaw-btn:last-child { grid-column:1/-1; justify-self:end; }
+      .mb-recycle-card { grid-template-columns:48px minmax(0,1fr); gap:12px; padding:14px; }
+      .mb-recycle-cover { width:48px; height:64px; }
+      .mb-recycle-actions { grid-column:1/-1; width:100%; }
+      .mb-recycle-actions > .qwenpaw-btn { flex:1; }
+    }
 
     .mb-private-page { min-height:100%; overflow:auto; padding:28px 34px 72px; background:#fff; }
     .mb-private-inner { width:min(1180px,100%); margin:0 auto; }

@@ -21,6 +21,9 @@ from .assistant_context_registry import (
 )
 from .database import get_session
 from .creative_services import get_novel_creation_draft
+from .models import Document, Novel
+from .novel_lifecycle import require_active_novel
+from .novel_lifecycle_errors import NovelRecycledError
 from .services import NotFoundError, get_document, get_novel
 
 
@@ -109,11 +112,33 @@ def _verify_local_novel_scope(
 
     try:
         novel_uuid = UUID(novel_id)
-        get_novel(session, novel_uuid)
+        if type(session).__module__.startswith("sqlalchemy."):
+            require_active_novel(session, novel_uuid)
+            novel = None
+        elif not hasattr(session, "get"):
+            get_novel(session, novel_uuid)
+            novel = None
+        else:
+            novel = session.get(Novel, novel_uuid)
+            if novel is None:
+                raise NotFoundError("novel is outside the selected scope")
+            if getattr(novel, "recycled_at", None) is not None:
+                raise NovelRecycledError("小说已移入回收站")
         if document_id is not None:
-            document = get_document(session, UUID(document_id))
-            if str(document.get("novel_id") or "") != novel_id:
-                raise NotFoundError("document is outside the selected novel")
+            document_uuid = UUID(document_id)
+            if type(session).__module__.startswith("sqlalchemy.") or hasattr(session, "get"):
+                document_row = session.get(Document, document_uuid)
+                if document_row is None or document_row.novel_id != novel_uuid:
+                    raise NotFoundError("document is outside the selected novel")
+            else:
+                document = get_document(session, document_uuid)
+                if str(document.get("novel_id") or "") != novel_id:
+                    raise NotFoundError("document is outside the selected novel")
+    except NovelRecycledError as error:
+        raise HTTPException(
+            status_code=error.http_status,
+            detail={"type": error.code, "message": str(error)},
+        ) from error
     except (ValueError, NotFoundError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

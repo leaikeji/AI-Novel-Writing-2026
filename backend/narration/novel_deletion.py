@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+import stat
 from typing import Callable, Protocol
 from uuid import UUID, uuid4
 
@@ -20,6 +23,175 @@ from .storage import NarrationStorage, StorageError, StoredFileIdentity
 class NovelDeletionRuntime(Protocol):
     session_factory: Callable[[], Session]
     storage: NarrationStorage
+
+
+@dataclass(frozen=True, slots=True)
+class MaintenanceDeletionContext:
+    """Trusted local maintenance proof; never accepted from an HTTP payload."""
+
+    novel_id: UUID
+    expected_version: int
+    manifest_sha256: str
+    backup_receipt_sha256: str
+    isolated_restore_verified: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthorConfirmedDeletionContext:
+    """Server-created proof for the recycle-bin typed confirmation flow."""
+
+    novel_id: UUID
+    expected_version: int
+
+
+PURGE_BACKUP_ROOT_ENV = "AI_NOVEL_PURGE_BACKUP_ROOT"
+DEFAULT_PURGE_BACKUP_ROOT = Path("/app/working.backups/ai-novel-world-2026")
+PURGE_RECEIPT_SCHEMA = "novel-purge-backup-receipt/2"
+PURGE_RESTORE_EVIDENCE_SCHEMA = "novel-purge-restore-evidence/1"
+_MAX_CONTROL_FILE_BYTES = 1_048_576
+
+
+def author_confirmed_deletion_context(
+    novel_id: UUID,
+    *,
+    expected_version: int,
+    confirmation_text: str,
+) -> _AuthorConfirmedDeletionContext:
+    """Build the narrow authorization produced by the exact UI phrase.
+
+    The HTTP body never supplies filesystem paths, hashes, actors or a generic
+    verification flag.  A maintenance receipt remains supported for operator
+    workflows, but it is not a hidden prerequisite for the author's explicit
+    two-step recycle-bin deletion.
+    """
+
+    if type(novel_id) is not UUID or type(expected_version) is not int or expected_version < 1:
+        raise ValueError("novel deletion requires an exact UUID and positive version")
+    if confirmation_text != "确认删除":
+        raise ValidationError("请逐字输入“确认删除”")
+    return _AuthorConfirmedDeletionContext(
+        novel_id=novel_id,
+        expected_version=expected_version,
+    )
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _trusted_file(
+    root: Path,
+    relative_path: object,
+    *,
+    max_bytes: int | None = None,
+) -> Path:
+    if not isinstance(relative_path, str) or not relative_path or Path(relative_path).is_absolute():
+        raise ValidationError("永久删除备份回执包含无效路径")
+    unresolved = root / relative_path
+    if unresolved.is_symlink():
+        raise ValidationError("永久删除备份回执不得引用软链接")
+    try:
+        resolved = unresolved.resolve(strict=True)
+    except OSError as error:
+        raise ValidationError("永久删除备份文件不存在或不可读取") from error
+    try:
+        resolved.relative_to(root)
+    except ValueError as error:
+        raise ValidationError("永久删除备份路径越出受信目录") from error
+    info = resolved.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValidationError("永久删除备份回执只能引用普通文件")
+    if max_bytes is not None and info.st_size > max_bytes:
+        raise ValidationError("永久删除控制文件超过大小限制")
+    return resolved
+
+
+def _read_json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError("永久删除备份回执格式无效") from error
+    if not isinstance(value, dict):
+        raise ValidationError("永久删除备份回执格式无效")
+    return value
+
+
+def load_ui_maintenance_context(
+    novel_id: UUID,
+    *,
+    expected_version: int,
+    backup_root: Path | None = None,
+) -> MaintenanceDeletionContext:
+    """Load and verify the exact server-owned backup grant for one UI purge."""
+
+    configured_root = os.environ.get(PURGE_BACKUP_ROOT_ENV, "").strip()
+    root = (
+        backup_root
+        if backup_root is not None
+        else Path(configured_root) if configured_root else DEFAULT_PURGE_BACKUP_ROOT
+    ).resolve()
+    receipt_relative = f"purge-receipts/{novel_id}.v{expected_version}.json"
+    receipt_path = _trusted_file(root, receipt_relative, max_bytes=_MAX_CONTROL_FILE_BYTES)
+    raw = receipt_path.read_bytes()
+    data = _read_json(receipt_path)
+    if data.get("schema") != PURGE_RECEIPT_SCHEMA:
+        raise ValidationError("永久删除备份回执版本不受支持")
+    if data.get("novel_id") != str(novel_id) or data.get("expected_version") != expected_version:
+        raise ValidationError("永久删除备份回执与当前小说版本不一致")
+    manifest_sha256 = data.get("target_manifest_sha256")
+    if not _is_sha256(manifest_sha256):
+        raise ValidationError("永久删除备份回执缺少目标清单摘要")
+
+    verified_hashes: dict[str, str] = {}
+    for field in ("database_backup", "media_backup"):
+        item = data.get(field)
+        if not isinstance(item, dict):
+            raise ValidationError("永久删除备份回执不完整")
+        target = _trusted_file(root, item.get("path"))
+        expected = item.get("sha256")
+        actual = _sha256_file(target)
+        if not _is_sha256(expected) or expected != actual:
+            raise ValidationError("永久删除备份文件摘要校验失败")
+        verified_hashes[field] = actual
+
+    restore = data.get("isolated_restore")
+    if not isinstance(restore, dict) or restore.get("result") != "PASS":
+        raise ValidationError("永久删除缺少隔离恢复通过证据")
+    evidence_path = _trusted_file(
+        root, restore.get("evidence_path"), max_bytes=_MAX_CONTROL_FILE_BYTES
+    )
+    evidence_expected = restore.get("evidence_sha256")
+    if not _is_sha256(evidence_expected) or _sha256_file(evidence_path) != evidence_expected:
+        raise ValidationError("永久删除隔离恢复证据摘要校验失败")
+    evidence = _read_json(evidence_path)
+    if (
+        evidence.get("schema") != PURGE_RESTORE_EVIDENCE_SCHEMA
+        or evidence.get("result") != "PASS"
+        or evidence.get("novel_id") != str(novel_id)
+        or evidence.get("expected_version") != expected_version
+        or evidence.get("database_backup_sha256") != verified_hashes["database_backup"]
+        or evidence.get("media_backup_sha256") != verified_hashes["media_backup"]
+    ):
+        raise ValidationError("永久删除隔离恢复证据与目标不一致")
+    return MaintenanceDeletionContext(
+        novel_id=novel_id,
+        expected_version=expected_version,
+        manifest_sha256=manifest_sha256,
+        backup_receipt_sha256=hashlib.sha256(raw).hexdigest(),
+        isolated_restore_verified=True,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +226,8 @@ def _require_novel(session: Session, novel_id: UUID, expected_version: int) -> N
         raise ValidationError("小说不存在或已删除")
     if novel.version != expected_version:
         raise ValidationError("小说已在其他位置更新，请刷新后重试")
+    if novel.recycled_at is None:
+        raise ValidationError("小说必须先移入回收站才能永久删除")
     return novel
 
 
@@ -181,12 +355,38 @@ def delete_novel_with_narration(
     novel_id: UUID,
     *,
     expected_version: int,
+    maintenance: MaintenanceDeletionContext | _AuthorConfirmedDeletionContext,
     actor: str = "local-author",
 ) -> dict[str, object]:
     """Delete one exact novel, then unlink only its frozen local media files."""
 
     if type(novel_id) is not UUID or type(expected_version) is not int or expected_version < 1:
         raise ValueError("novel deletion requires an exact UUID and positive version")
+    receipt_sha256: str | None
+    expected_manifest_sha256: str | None
+    if isinstance(maintenance, MaintenanceDeletionContext):
+        valid_context = (
+            maintenance.novel_id == novel_id
+            and maintenance.expected_version == expected_version
+            and maintenance.isolated_restore_verified
+            and len(maintenance.manifest_sha256) == 64
+            and len(maintenance.backup_receipt_sha256) == 64
+        )
+        receipt_sha256 = maintenance.backup_receipt_sha256
+        expected_manifest_sha256 = maintenance.manifest_sha256
+    elif isinstance(maintenance, _AuthorConfirmedDeletionContext):
+        valid_context = (
+            maintenance.novel_id == novel_id
+            and maintenance.expected_version == expected_version
+        )
+        receipt_sha256 = None
+        expected_manifest_sha256 = None
+    else:
+        valid_context = False
+        receipt_sha256 = None
+        expected_manifest_sha256 = None
+    if not valid_context:
+        raise ValidationError("永久删除缺少与目标绑定的可信确认上下文")
     actor = actor.strip()
     if not actor or len(actor) > 120:
         raise ValueError("novel deletion actor is invalid")
@@ -208,6 +408,11 @@ def delete_novel_with_narration(
 
     request_id = uuid4()
     manifest = [item.payload() for item in media]
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if expected_manifest_sha256 is not None and manifest_sha256 != expected_manifest_sha256:
+        raise ValidationError("小说媒体清单与维护回执不一致")
     with session_factory() as session:  # type: ignore[operator]
         with session.begin():
             novel = _require_novel(session, novel_id, expected_version)
@@ -238,9 +443,9 @@ def delete_novel_with_narration(
                 text(
                     "INSERT INTO novel_deletion_audits "
                     "(id,novel_id,expected_version,title_sha256,state,media_manifest_json,"
-                    "media_count,media_bytes,confirmed_actor,created_at,updated_at) "
+                    "media_count,media_bytes,confirmed_actor,backup_receipt_sha256,created_at,updated_at) "
                     "VALUES (:id,:novel_id,:version,:title_sha256,'purging',"
-                    "CAST(:manifest AS jsonb),:media_count,:media_bytes,:actor,:now,:now)"
+                    "CAST(:manifest AS jsonb),:media_count,:media_bytes,:actor,:receipt_sha256,:now,:now)"
                 ),
                 {
                     "id": request_id,
@@ -251,6 +456,7 @@ def delete_novel_with_narration(
                     "media_count": len(media),
                     "media_bytes": sum(item.byte_size for item in media),
                     "actor": actor,
+                    "receipt_sha256": receipt_sha256,
                     "now": now,
                 },
             )
@@ -318,4 +524,9 @@ def delete_novel_with_narration(
     }
 
 
-__all__ = ["delete_novel_with_narration"]
+__all__ = [
+    "MaintenanceDeletionContext",
+    "author_confirmed_deletion_context",
+    "delete_novel_with_narration",
+    "load_ui_maintenance_context",
+]

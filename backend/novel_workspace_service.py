@@ -14,6 +14,8 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Session
 
 from .models import Document, DocumentWorkingCopy, Novel, Volume
+from .novel_lifecycle import require_active_novel
+from .novel_lifecycle_errors import NovelRecycledError
 from .services import NotFoundError
 
 
@@ -147,9 +149,14 @@ def get_workspace_manifest(
             "workspace_limit_invalid",
             f"工作区分页大小必须在 1..{MANIFEST_MAX_LIMIT} 之间",
         )
-    novel = session.get(Novel, novel_id)
-    if novel is None:
-        raise NotFoundError(f"novel {novel_id} not found")
+    if type(session).__module__.startswith("sqlalchemy."):
+        novel = require_active_novel(session, novel_id)
+    else:
+        novel = session.get(Novel, novel_id)
+        if novel is None:
+            raise NotFoundError(f"novel {novel_id} not found")
+        if getattr(novel, "recycled_at", None) is not None:
+            raise NovelRecycledError("小说已移入回收站")
     manifest_etag, visible_count = _manifest_material(session, novel)
     decoded: dict[str, object] | None = None
     if cursor:

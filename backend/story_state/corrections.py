@@ -22,6 +22,7 @@ from ..models import (
     Novel,
     StoryFact,
 )
+from ..novel_lifecycle import lock_active_novel
 from .contracts import StoryFactV2
 from .fact_authority import resolve_fact_authority_rows
 
@@ -170,9 +171,7 @@ def correct_story_fact(
     reason: str,
     replacement: Mapping[str, object],
 ) -> dict[str, object]:
-    novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
-    if novel is None:
-        raise StoryCorrectionError(StoryCorrectionErrorCode.NOT_FOUND, "小说不存在")
+    novel = lock_active_novel(session, novel_id)
     target = session.scalar(
         select(StoryFact)
         .where(StoryFact.id == fact_id, StoryFact.novel_id == novel_id)
@@ -488,9 +487,7 @@ def revert_intelligence_batch(
     operation_key: str,
     reason: str | None = None,
 ) -> dict[str, object]:
-    novel = session.scalar(select(Novel).where(Novel.id == novel_id).with_for_update())
-    if novel is None:
-        raise StoryCorrectionError(StoryCorrectionErrorCode.BATCH_NOT_FOUND, "小说不存在")
+    novel = lock_active_novel(session, novel_id)
     batch, _proposal = _batch_scope(session, novel_id, batch_id, lock=True)
     cleaned_reason = reason.strip() if reason is not None else None
     operation_hash = _canonical_hash(

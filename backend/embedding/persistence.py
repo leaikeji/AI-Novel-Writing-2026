@@ -26,6 +26,8 @@ from .chunking import V1_CHUNKER_VERSION
 from .contracts import SUPPORTED_EMBEDDING_DIMENSIONS
 from .lifecycle import EmbeddingLifecycleError
 from ..models import Novel
+from ..novel_lifecycle import require_active_novel
+from ..novel_lifecycle_errors import NovelLifecycleNotFound
 
 
 DEFAULT_RENDERER_BUNDLE_VERSION = "semantic-renderers/1"
@@ -49,15 +51,13 @@ def require_novel_in_scope(
     workspace_id: UUID,
     for_update: bool = False,
 ) -> Novel:
-    statement = select(Novel).where(
-        Novel.id == novel_id,
-        Novel.owner_id == owner_id,
-        Novel.workspace_id == workspace_id,
-    )
-    if for_update:
-        statement = statement.with_for_update()
-    novel = session.scalar(statement)
-    if novel is None:
+    try:
+        novel = require_active_novel(session, novel_id, for_update=for_update)
+    except NovelLifecycleNotFound as error:
+        raise EmbeddingLifecycleError(
+            "novel_not_found", "novel is outside the local scope"
+        ) from error
+    if novel.owner_id != owner_id or novel.workspace_id != workspace_id:
         raise EmbeddingLifecycleError("novel_not_found", "novel is outside the local scope")
     return novel
 
@@ -283,6 +283,7 @@ def create_verified_candidate(
             .where(
                 Novel.owner_id == owner_id,
                 Novel.workspace_id == workspace_id,
+                Novel.recycled_at.is_(None),
                 NovelEmbeddingConsent.revoked_at.is_(None),
             )
             .order_by(NovelEmbeddingConsent.novel_id)
@@ -640,6 +641,7 @@ def _attach_consent_to_candidate(
             .where(
                 Novel.owner_id == owner_id,
                 Novel.workspace_id == workspace_id,
+                Novel.recycled_at.is_(None),
                 NovelEmbeddingConsent.revoked_at.is_(None),
             )
             .order_by(NovelEmbeddingConsent.novel_id)
@@ -748,6 +750,7 @@ def activate_candidate_generation(
             .where(
                 Novel.owner_id == owner_id,
                 Novel.workspace_id == workspace_id,
+                Novel.recycled_at.is_(None),
                 NovelEmbeddingConsent.revoked_at.is_(None),
             )
         )

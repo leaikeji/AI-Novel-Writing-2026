@@ -27,6 +27,13 @@ export class ApiError extends Error {
   }
 }
 
+export const NOVEL_RECYCLED_HTTP_EVENT = "ai-novel-world-2026:novel-recycled-http";
+
+export interface NovelRecycledHttpEventDetail {
+  readonly novelId: string | null;
+  readonly requestPath: string;
+}
+
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object"
     ? value as Record<string, unknown>
@@ -97,11 +104,20 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   if (!response.ok) {
     const detail = payload?.detail ?? payload;
     const provisional = new ApiError(response.status, `HTTP ${response.status}`, detail);
-    throw new ApiError(
+    const error = new ApiError(
       response.status,
       apiErrorMessage(provisional, `HTTP ${response.status}`),
       detail,
     );
+    const record = objectRecord(detail);
+    if (response.status === 410 && record?.type === "novel_recycled") {
+      const novelId = typeof record.novel_id === "string" ? record.novel_id : null;
+      window.dispatchEvent(new CustomEvent<NovelRecycledHttpEventDetail>(
+        NOVEL_RECYCLED_HTTP_EVENT,
+        { detail: { novelId, requestPath: path } },
+      ));
+    }
+    throw error;
   }
   return payload as T;
 }

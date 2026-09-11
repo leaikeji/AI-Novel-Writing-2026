@@ -32,6 +32,7 @@ from ..models import (
     StoryFact,
     Storyline,
 )
+from ..novel_lifecycle import require_active_novel
 from ..story_state import (
     StoryStateError,
     StoryTimelineRecord,
@@ -263,11 +264,7 @@ class StoryLedgerService:
         stale_page: bool = False,
     ) -> _ReadScope:
         _begin_repeatable_read(self.session)
-        novel = self.session.scalar(select(Novel).where(Novel.id == novel_id))
-        if novel is None:
-            raise StoryLedgerError(
-                StoryLedgerErrorCode.NOVEL_NOT_FOUND, "小说不存在"
-            )
+        novel = require_active_novel(self.session, novel_id)
         current_token = encode_snapshot(novel.id, novel.story_ledger_version)
         if expected_snapshot_token is not None:
             try:

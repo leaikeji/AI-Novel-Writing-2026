@@ -13,6 +13,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from ..models import Document, Novel, ChapterGenerationJob
+from ..novel_lifecycle import require_active_novel
+from ..novel_lifecycle_errors import NovelRecycledError
 from ..schemas import GenerateChapterRequest
 from ..services import (
     prepare_chapter_generation, start_chapter_generation, build_chapter_generation_prompt,
@@ -53,6 +55,13 @@ def _scope(session, document_id: UUID, tab_id: str) -> Scope:
         .where(Document.id == document_id)).first()
     if row is None or row.kind != "chapter":
         raise HTTPException(404, "chapter not found")
+    try:
+        require_active_novel(session, row.novel_id)
+    except NovelRecycledError as error:
+        raise HTTPException(
+            error.http_status,
+            {"type": error.code, "message": str(error)},
+        ) from error
     return Scope(owner_id=row.owner_id, workspace_id=row.workspace_id, kind="novel",
                  scope_id=row.novel_id, document_id=document_id, tab_id=tab_id)
 
