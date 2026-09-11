@@ -2161,6 +2161,44 @@ function ChapterCreationWizard({
     }
   };
 
+  const completeManualEntry = async () => {
+    if (!draft || saving || generating || recommending) return;
+    setSaving(true);
+    setInnerError("");
+    try {
+      const saved = await persist(draft, 6, {
+        outline_text: expectationText.trim() || "作者选择跳过 AI，直接填写正文；本章章纲以作者最终保存的正文为准。",
+        data_patch: {
+          manual_entry: true,
+          allow_new_role: false,
+          allow_exit_role: false,
+          auto_select_foreshadows: false,
+        },
+      });
+      const result = await apiRequest<ChapterCreationCompleteRecord>(`/chapter-drafts/${saved.id}/complete`, {
+        method: "POST",
+        body: JSON.stringify({ expected_version: saved.version }),
+      });
+      setDraft(result.draft);
+      draftKeyRef.current = "";
+      window.sessionStorage.removeItem(`anw-chapter-draft:${novel.id}`);
+      closeWizard();
+      onCompleted(result.document);
+    } catch (reason) {
+      const current = chapterDraftVolumeStaleCurrent(reason, novel.id);
+      if (current) {
+        setDraft(current);
+        hydrateDraft(current);
+        setRequestPhase("failed");
+      }
+      const message = readableError(reason, "创建手写章节失败");
+      setInnerError(message);
+      onError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const toggleStoryline = (id: string) => setSelectedStorylineIds((current: string[]) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const toggleOptionalRole = (id: string) => setOptionalRoleIds((current: string[]) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const toggleForeshadow = (id: string) => setSelectedForeshadowIds((current: string[]) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -2246,7 +2284,7 @@ function ChapterCreationWizard({
         );
       }),
     ),
-    h("button", { type: "button", className: "mb-chapter-direct-link", disabled: saving, onClick: () => void changeStep(4) }, "我已有正文，点击直接填写"),
+    h("button", { type: "button", className: "mb-chapter-direct-link", disabled: saving, onClick: () => void completeManualEntry() }, "跳过 AI，创建空白章节并直接填写"),
     h(Button, { size: "large", block: true, className: "anw-primary-button mb-chapter-next", disabled: !selectedStorylineIds.length, loading: saving, onClick: () => void changeStep(2) }, "下一步：配置角色"),
   );
 
@@ -2278,7 +2316,10 @@ function ChapterCreationWizard({
       h("label", null, h(Checkbox, { checked: allowNewRole, onChange: (event: any) => setAllowNewRole(event.target.checked) }), h("span", null, h("strong", null, "允许AI新增角色"), h("small", null, "AI可能会根据情节需要引入新角色"))),
       h("label", null, h(Checkbox, { checked: allowExitRole, onChange: (event: any) => setAllowExitRole(event.target.checked) }), h("span", null, h("strong", null, "允许AI退场角色"), h("small", null, "AI可能会让某些角色在本章退场"))),
     ),
-    h(Button, { size: "large", block: true, className: "anw-primary-button mb-chapter-next", loading: saving, onClick: () => void changeStep(3) }, "下一步：配置伏笔"),
+    h("div", { className: "mb-chapter-footer-actions" },
+      h(Button, { size: "large", disabled: saving, onClick: () => void changeStep(1) }, "返回线索选择"),
+      h(Button, { size: "large", className: "anw-primary-button", loading: saving, onClick: () => void changeStep(3) }, "下一步：配置伏笔"),
+    ),
   );
 
   const renderStepThree = () => h(
@@ -2533,6 +2574,7 @@ interface StudioProps {
   onSectionChange: (section: WorkbenchSection) => void;
   onReadingPanelChange: (section: ReadingSectionKey) => void;
   onSelectDocument: (documentId: string) => void;
+  onStartBookNarration?: () => void;
   onNovelChanged: (novel: NovelMetadataRecord) => void;
   onReload: () => Promise<NovelRecord | null>;
   onBack: () => void;
@@ -2550,6 +2592,7 @@ export function StudioProjectView({
   onSectionChange,
   onReadingPanelChange,
   onSelectDocument,
+  onStartBookNarration,
   onNovelChanged,
   onReload,
   onBack,
@@ -4536,6 +4579,7 @@ export function StudioProjectView({
         roleType: character.role_type,
       })),
     onSectionChange: onReadingPanelChange,
+    onStartBookNarration,
   });
 
   const panelActions = studioSection === "chapters"

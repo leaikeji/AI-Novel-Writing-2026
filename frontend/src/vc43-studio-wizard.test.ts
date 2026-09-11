@@ -38,4 +38,16 @@ describe("VC43 studio chapter wizard integration", () => {
     expect(source).toContain("title: chapterTitleForStorage(chapterNumber, overrides.title ?? chapterTitle)");
     expect(source).toContain("const storedTitle = volumeTitleForStorage(volumeNumber, volumeTitle)");
   });
+
+  it("lets authors with existing prose create a blank chapter without invoking AI", () => {
+    expect(source).toContain("const completeManualEntry = async () => {");
+    expect(source).toContain('manual_entry: true');
+    expect(source).toContain('outline_text: expectationText.trim() || "作者选择跳过 AI，直接填写正文；本章章纲以作者最终保存的正文为准。"');
+    expect(source).toContain("onClick: () => void completeManualEntry()");
+    expect(source).toContain("跳过 AI，创建空白章节并直接填写");
+  });
+
+  it("lets a resumed chapter wizard return from role configuration to manual entry", () => {
+    expect(source).toContain('onClick: () => void changeStep(1) }, "返回线索选择"');
+  });
 });

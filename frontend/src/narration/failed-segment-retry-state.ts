@@ -160,6 +160,15 @@ function isAbort(reason: unknown): boolean {
 }
 
 
+function isProjectionCasConflict(reason: unknown): boolean {
+  if (reason === null || typeof reason !== "object" || !("detail" in reason)) return false;
+  const detail = (reason as { readonly detail?: unknown }).detail;
+  if (detail === null || typeof detail !== "object" || !("code" in detail)) return false;
+  const code = (detail as { readonly code?: unknown }).code;
+  return code === "VERSION_CONFLICT" || code === "STALE_INPUT";
+}
+
+
 function projectionMatchesScope(
   projection: FailedNarrationSegmentsProjection,
   scope: FailedSegmentRetryScope,
@@ -260,9 +269,9 @@ implements FailedSegmentRetryController {
     this.assertActive();
     const current = this.snapshot;
     const scope = current.scope;
-    const projection = current.projection;
+    let projection = current.projection;
     if (current.phase !== "ready" || !scope || !projection) return;
-    const item = projection.items.find((candidate) => candidate.segment_id === segmentId);
+    let item = projection.items.find((candidate) => candidate.segment_id === segmentId);
     if (!item || !item.retryable) return;
 
     const sequence = this.beginOperation("failed-segment retry superseded");
@@ -277,16 +286,47 @@ implements FailedSegmentRetryController {
       errorMessage: null,
     });
     try {
-      const response = await this.dependencies.retry(
-        scope.editionId,
-        {
-          segment_ids: [item.segment_id],
-          expected_request_version: projection.request_version,
-          expected_manifest_revision: projection.manifest_revision,
-        },
-        this.dependencies.createIdempotencyKey(),
-        controller.signal,
-      );
+      let response: RetryFailedNarrationSegmentsResponse | null = null;
+      for (let casAttempt = 0; response === null; casAttempt += 1) {
+        try {
+          response = await this.dependencies.retry(
+            scope.editionId,
+            {
+              segment_ids: [item.segment_id],
+              expected_request_version: projection.request_version,
+              expected_manifest_revision: projection.manifest_revision,
+            },
+            this.dependencies.createIdempotencyKey(),
+            controller.signal,
+          );
+        } catch (reason) {
+          if (!isProjectionCasConflict(reason) || casAttempt >= 2) throw reason;
+          const fresh = await this.dependencies.getProjection(scope.editionId, controller.signal);
+          if (!projectionMatchesScope(fresh, scope)) {
+            throw new Error("并发刷新后的失败句段投影与当前章节朗读版本不一致。");
+          }
+          projection = fresh;
+          const freshItem = projection.items.find(
+            (candidate) => candidate.segment_id === segmentId,
+          );
+          if (!freshItem) {
+            this.activeAbort = null;
+            this.publish({
+              phase: "ready",
+              scope,
+              projection,
+              busySegmentIds: [],
+              statusMessage: "失败句段已经由后台恢复，可继续播放。",
+              errorMessage: null,
+            });
+            return;
+          }
+          if (!freshItem.retryable) {
+            throw new Error(failedSegmentRetryReasonMessage(freshItem.retry_reason_code));
+          }
+          item = freshItem;
+        }
+      }
       if (!this.isCurrent(sequence, controller)) return;
       if (response.request_id !== projection.request_id) {
         throw new Error("失败句段重试响应与当前请求不一致。");
@@ -354,6 +394,7 @@ implements FailedSegmentRetryController {
     const sequence = this.beginOperation("failed-segment bulk retry superseded");
     const controller = this.requireActiveAbort();
     let acceptedGroupCount = 0;
+    let casRefreshAttempts = 0;
     try {
       while (pendingJobs.size > 0 || pendingFanouts.size > 0) {
         const remaining = retryableFailedSegmentRepresentatives(projection.items).filter(
@@ -370,16 +411,29 @@ implements FailedSegmentRetryController {
           statusMessage: `正在恢复第 ${acceptedGroupCount + 1}–${acceptedGroupCount + batch.length} 组失败音频…`,
           errorMessage: null,
         });
-        const response = await this.dependencies.retry(
-          scope.editionId,
-          {
-            segment_ids: batch.map((item) => item.segment_id),
-            expected_request_version: projection.request_version,
-            expected_manifest_revision: projection.manifest_revision,
-          },
-          this.dependencies.createIdempotencyKey(),
-          controller.signal,
-        );
+        let response: RetryFailedNarrationSegmentsResponse;
+        try {
+          response = await this.dependencies.retry(
+            scope.editionId,
+            {
+              segment_ids: batch.map((item) => item.segment_id),
+              expected_request_version: projection.request_version,
+              expected_manifest_revision: projection.manifest_revision,
+            },
+            this.dependencies.createIdempotencyKey(),
+            controller.signal,
+          );
+        } catch (reason) {
+          if (!isProjectionCasConflict(reason) || casRefreshAttempts >= 2) throw reason;
+          const fresh = await this.dependencies.getProjection(scope.editionId, controller.signal);
+          if (!projectionMatchesScope(fresh, scope)) {
+            throw new Error("并发刷新后的失败句段投影与当前章节朗读版本不一致。");
+          }
+          projection = fresh;
+          casRefreshAttempts += 1;
+          continue;
+        }
+        casRefreshAttempts = 0;
         if (!this.isCurrent(sequence, controller)) return;
         if (response.request_id !== projection.request_id) {
           throw new Error("失败句段批量重试响应与当前请求不一致。");

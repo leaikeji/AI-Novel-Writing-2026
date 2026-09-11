@@ -282,11 +282,30 @@ describe("chapter narration panel", () => {
       currentEditionId: null,
       onGenerate,
     }));
-    const generate = findAll(root, (item) => item.type === "button" && textContent(item) === "智能朗读")[0];
+    const generate = findAll(root, (item) => item.type === "button" && textContent(item) === "一键朗读本章")[0];
     expect(generate).toBeDefined();
     (generate.props.onClick as () => void)();
     expect(onGenerate).toHaveBeenCalledTimes(1);
     expect(findAll(root, (item) => item.type === "input" && item.props.type === "range")).toHaveLength(0);
+  });
+
+  it("shows the active whole-book position and exposes an explicit stop action", () => {
+    const onStopBookPlayback = vi.fn();
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({
+      bookPlaybackStatus: "正在朗读 1/9 · 第一章 继承危楼那天，街上开始咬人",
+      onStopBookPlayback,
+    }));
+
+    expect(textContent(root)).toContain("全书朗读");
+    expect(textContent(root)).toContain("正在朗读 1/9");
+    const stop = findAll(
+      root,
+      (item) => item.type === "button" && textContent(item) === "停止全书朗读",
+    );
+    expect(stop).toHaveLength(1);
+    (stop[0]?.props.onClick as (() => void))();
+    expect(onStopBookPlayback).toHaveBeenCalledTimes(1);
   });
 
   it("uses a phase-neutral busy label while preparing a real narration", () => {

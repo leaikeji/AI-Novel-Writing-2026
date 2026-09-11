@@ -615,6 +615,44 @@ function createHarness(options: HarnessOptions = {}) {
 
 
 describe("chapter narration bundle gates", () => {
+  it("uses the pinned Manifest while non-terminal aggregate counters continue advancing", async () => {
+    const resources = fixture(["ready", "queued"]);
+    const advancedEdition = Object.freeze({
+      ...resources.edition,
+      queued_segment_count: 0,
+      rendering_segment_count: 0,
+      ready_segment_count: 2,
+    });
+    const harness = createHarness({
+      resources: Object.freeze({ ...resources, edition: advancedEdition }),
+    });
+
+    await expect(harness.session.load()).resolves.toMatchObject({ status: "ready" });
+    expect(harness.session.readSnapshot()).toMatchObject({
+      phase: "ready",
+      bundle: { manifest: resources.manifest },
+      error: null,
+    });
+  });
+
+  it("keeps exact aggregate counter checks after production is terminal", async () => {
+    const resources = fixture();
+    const inconsistentEdition = Object.freeze({
+      ...resources.edition,
+      queued_segment_count: 1,
+      ready_segment_count: 1,
+    });
+    const harness = createHarness({
+      resources: Object.freeze({ ...resources, edition: inconsistentEdition }),
+      maxPollAttempts: 1,
+    });
+
+    await expect(harness.session.load()).rejects.toThrow(
+      "edition.queued_segment_count does not match",
+    );
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "error", bundle: null });
+  });
+
   it("retries a transient Edition aggregate read skew before constructing playback", async () => {
     const resources = fixture();
     const staleEdition = Object.freeze({

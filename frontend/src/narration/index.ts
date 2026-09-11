@@ -69,6 +69,7 @@ export interface NarrationReadingPageProps {
   readonly scopeTargets: readonly ReadingScopeTarget[];
   readonly characters: readonly NarrationCharacterSummary[];
   readonly onSectionChange?: (section: ReadingSectionKey) => void;
+  readonly onStartBookNarration?: () => void;
 }
 
 
@@ -630,6 +631,7 @@ export function createNarrationReadingPage(
       ),
       renderSectionContent,
       onSectionChange: props.onSectionChange,
+      onStartBookNarration: props.onStartBookNarration,
     };
     return h(ReadingPage, { ...readingProps });
   };

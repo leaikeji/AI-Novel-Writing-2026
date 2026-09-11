@@ -2532,6 +2532,42 @@ def test_six_step_creation_is_persisted_validated_and_idempotent(
     session.rollback()
 
 
+def test_six_step_creation_accepts_manual_template_route_without_ai_idea(
+    session: Session,
+) -> None:
+    draft = get_or_create_novel_creation_draft(session, "pytest-手工模板建书")
+    ready = update_novel_creation_draft(
+        session,
+        UUID(draft["id"]),
+        expected_version=draft["version"],
+        step=6,
+        data_patch={
+            "writing_type": "long",
+            "audience": "male",
+            "genre": "都市",
+            "subgenre": "末日生存",
+            "idea": "",
+            "manual_template_entry": True,
+            "template_key": "custom-longform",
+            "template_name": "自定义长篇",
+            "template_data": {"core_hook": "危楼避难所"},
+            "title": "pytest-手工模板成品",
+            "author_name": "pytest-作者",
+            "cover_mode": "text",
+            "cover_image_data": "",
+        },
+    )
+
+    completed = complete_novel_creation_draft(
+        session,
+        UUID(ready["id"]),
+        expected_version=ready["version"],
+    )
+
+    assert completed["novel"]["idea"] == ""
+    assert completed["novel"]["template_key"] == "custom-longform"
+
+
 def test_six_step_creation_accepts_a_text_only_cover(session: Session) -> None:
     completed = _create_long_novel_via_wizard(
         session,

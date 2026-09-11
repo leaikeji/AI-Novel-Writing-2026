@@ -113,6 +113,7 @@ export interface NarrationPlayerController {
   ): Promise<PlaybackDecision>;
   pause(): void;
   resume(): Promise<PlaybackDecision>;
+  markPreparationTimedOut?(segmentId: string): void;
   setRate(rate: number): void;
   setVolume(volume: number): void;
   updateManifest(manifest: NarrationManifestV2): void;
@@ -624,6 +625,26 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
       this.finishRequest(lease);
       return Object.freeze({ kind: "error", lease, failure: currentFailure });
     }
+  }
+
+  markPreparationTimedOut(segmentId: string): void {
+    this.assertUsable();
+    if (
+      this.state.phase !== "preparing"
+      || this.state.currentSegmentId !== segmentId
+    ) return;
+    const target = this.manifest?.segments.find((segment) => segment.segment_id === segmentId) ?? null;
+    this.cancelCurrentRequest();
+    this.publish({
+      phase: "blocked",
+      backend: null,
+      failure: playerFailure(
+        "PENDING_GAP",
+        "目标句段仍在合成，可稍后再次点击播放。",
+        true,
+        target,
+      ),
+    });
   }
 
   setRate(rate: number): void {

@@ -141,6 +141,7 @@ export interface ReadingPageProps {
     context: ReadingSectionRenderContext,
   ) => unknown;
   readonly onSectionChange?: (section: ReadingSectionKey) => void;
+  readonly onStartBookNarration?: () => void;
 }
 
 
@@ -794,12 +795,27 @@ export function createReadingPage(
             : "管理作品旁白、人物声音和朗读规则；章节播放与校听将在对应产品能力通过门禁后开放。"),
         ),
         h(
-          "span",
-          {
-            className: `anw-reading-product-state is-${productCapability.state}`,
-            "data-reason-code": productCapability.reason_code ?? undefined,
-          },
-          productCapability.actionable ? "朗读设置可用" : capabilityStatusText(productCapability),
+          "div",
+          { className: "anw-reading-page-actions" },
+          chapterPlaybackReady && props.onStartBookNarration
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "anw-reading-book-start",
+                  onClick: props.onStartBookNarration,
+                },
+                "一键朗读全书",
+              )
+            : null,
+          h(
+            "span",
+            {
+              className: `anw-reading-product-state is-${productCapability.state}`,
+              "data-reason-code": productCapability.reason_code ?? undefined,
+            },
+            productCapability.actionable ? "朗读设置可用" : capabilityStatusText(productCapability),
+          ),
         ),
       ),
       h(

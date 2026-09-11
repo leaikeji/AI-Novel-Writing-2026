@@ -622,20 +622,28 @@ function assembleBundle(
     failed: 0,
     cancelled: 0,
   });
-  requireEqual(edition.pending_segment_count, renderCounts.pending, "edition.pending_segment_count", "CONTRACT_MISMATCH");
-  requireEqual(edition.queued_segment_count, renderCounts.queued, "edition.queued_segment_count", "CONTRACT_MISMATCH");
-  requireEqual(edition.rendering_segment_count, renderCounts.rendering, "edition.rendering_segment_count", "CONTRACT_MISMATCH");
-  requireEqual(edition.ready_segment_count, renderCounts.ready, "edition.ready_segment_count", "CONTRACT_MISMATCH");
-  requireEqual(edition.failed_segment_count, renderCounts.failed, "edition.failed_segment_count", "CONTRACT_MISMATCH");
   const historyItem = context.edition_history.editions.find(
     (item) => item.edition_id === edition.edition_id,
   );
-  requireEqual(
-    historyItem?.ready_segment_count,
-    renderCounts.ready,
-    "edition_history.ready_segment_count",
-    "CONTRACT_MISMATCH",
-  );
+  // While a worker is publishing segments, the Edition aggregate and history
+  // are live projections fetched in separate requests. They can legitimately
+  // advance beyond the exact immutable Manifest revision requested above.
+  // Playback is therefore governed by that pinned Manifest. Once production is
+  // terminal, no projection may still be moving and exact aggregate equality
+  // remains a hard contract gate.
+  if (edition.state === "ready" || edition.state === "unavailable") {
+    requireEqual(edition.pending_segment_count, renderCounts.pending, "edition.pending_segment_count", "CONTRACT_MISMATCH");
+    requireEqual(edition.queued_segment_count, renderCounts.queued, "edition.queued_segment_count", "CONTRACT_MISMATCH");
+    requireEqual(edition.rendering_segment_count, renderCounts.rendering, "edition.rendering_segment_count", "CONTRACT_MISMATCH");
+    requireEqual(edition.ready_segment_count, renderCounts.ready, "edition.ready_segment_count", "CONTRACT_MISMATCH");
+    requireEqual(edition.failed_segment_count, renderCounts.failed, "edition.failed_segment_count", "CONTRACT_MISMATCH");
+    requireEqual(
+      historyItem?.ready_segment_count,
+      renderCounts.ready,
+      "edition_history.ready_segment_count",
+      "CONTRACT_MISMATCH",
+    );
+  }
   const mapped = buildSegments(edition, script, manifest);
   return Object.freeze({
     context,
@@ -1341,6 +1349,7 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
         }
         const elapsed = this.dependencies.now() - startedAt;
         if (elapsed >= this.pollTimeoutMs) {
+          this.currentPlayer?.markPreparationTimedOut?.(segmentId);
           return this.recordPlay({ status: "timeout", segmentId, attempts }, sequence);
         }
         const delay = this.pollSchedule[Math.min(attempts, this.pollSchedule.length - 1)];
@@ -1350,6 +1359,7 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
         }
         attempts += 1;
         if (this.dependencies.now() - startedAt >= this.pollTimeoutMs) {
+          this.currentPlayer?.markPreparationTimedOut?.(segmentId);
           return this.recordPlay({ status: "timeout", segmentId, attempts }, sequence);
         }
         const bundle = this.currentBundle;
@@ -1383,10 +1393,12 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
         const replay = await this.issuePlayback(segmentId, source, sequence, startOffsetMs);
         return this.recordPlay(replay, sequence);
       }
+      this.currentPlayer?.markPreparationTimedOut?.(segmentId);
       return this.recordPlay({ status: "timeout", segmentId, attempts }, sequence);
     } catch (reason) {
       if (isAbort(reason)) {
         if (timedOut && !this.disposed && sequence === this.playSequence) {
+          this.currentPlayer?.markPreparationTimedOut?.(segmentId);
           return this.recordPlay({ status: "timeout", segmentId, attempts }, sequence);
         }
         return this.recordPlay({ status: "superseded", segmentId }, sequence);

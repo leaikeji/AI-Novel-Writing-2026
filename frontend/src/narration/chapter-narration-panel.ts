@@ -63,6 +63,8 @@ export interface ChapterNarrationPanelProps {
     state: "idle" | "saving" | "saved" | "conflict" | "error";
     message?: string;
   }> | null;
+  readonly bookPlaybackStatus?: string | null;
+  readonly onStopBookPlayback?: () => void;
   readonly onGenerate: () => void;
   readonly onUpdate: () => void;
   readonly onTogglePlayback: () => void;
@@ -580,6 +582,17 @@ export function createChapterNarrationPanel(
           closeDetails();
         },
       },
+      props.bookPlaybackStatus
+        ? h(
+            "div",
+            { className: "anw-book-narration-status", role: "status", "aria-live": "polite" },
+            h("strong", null, "全书朗读"),
+            h("span", null, props.bookPlaybackStatus),
+            props.onStopBookPlayback
+              ? h("button", { type: "button", onClick: props.onStopBookPlayback }, "停止全书朗读")
+              : null,
+          )
+        : null,
       noticeKind
         ? h(
             "div",
@@ -726,7 +739,7 @@ export function createChapterNarrationPanel(
                   disabled: !model.canGenerate,
                   onClick: props.onGenerate,
                 },
-                props.busy ? "正在准备朗读…" : "智能朗读",
+                props.busy ? "正在准备朗读…" : "一键朗读本章",
               )
             : h("span", { className: "anw-chapter-narration-player__phase" }, view.contentLabel),
           model.hasEdition

@@ -78,6 +78,29 @@ export const T2_B_READING_STYLES = String.raw`
     color: #2f9e44;
   }
 
+  .anw-reading-page-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .anw-reading-book-start {
+    min-height: 44px;
+    border: 1px solid #bd4f24;
+    border-radius: 10px;
+    padding: 9px 18px;
+    color: #fff;
+    background: #d76832;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .anw-reading-book-start:hover {
+    background: #bf5529;
+  }
+
   .anw-reading-layout {
     display: grid;
     grid-template-columns: minmax(168px, 208px) minmax(0, 1fr);

@@ -393,4 +393,48 @@ describe("failed-segment retry state", () => {
       busySegmentIds: [],
     });
   });
+
+  it("refreshes projection CAS and retries a bulk click during manifest publication", async () => {
+    const conflict = Object.assign(new Error("version conflict"), {
+      detail: { code: "VERSION_CONFLICT" },
+    });
+    const freshProjection = projection(EDITION_A, REQUEST_A, {
+      request_version: 9,
+      manifest_revision: 12,
+    });
+    const getProjection = vi.fn()
+      .mockResolvedValueOnce(projection())
+      .mockResolvedValueOnce(freshProjection)
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, { items: Object.freeze([]) }));
+    const retry = vi.fn()
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce(response());
+    const controller = createFailedSegmentRetryController({
+      getProjection,
+      retry,
+      afterAccepted: vi.fn().mockResolvedValue(undefined),
+      createIdempotencyKey: vi.fn()
+        .mockReturnValueOnce("retry-cas-0001")
+        .mockReturnValueOnce("retry-cas-0002"),
+      formatFailure: (reason) => reason instanceof Error ? reason.message : "失败",
+    });
+    await controller.load({
+      editionId: EDITION_A,
+      requestId: REQUEST_A,
+      documentGeneration: 1,
+      manifestRevision: 7,
+    });
+    await controller.retryAll();
+
+    expect(retry).toHaveBeenCalledTimes(2);
+    expect(retry.mock.calls[1]?.[1]).toMatchObject({
+      expected_request_version: 9,
+      expected_manifest_revision: 12,
+    });
+    expect(controller.readSnapshot()).toMatchObject({
+      phase: "ready",
+      projection: { items: [] },
+      errorMessage: null,
+    });
+  });
 });

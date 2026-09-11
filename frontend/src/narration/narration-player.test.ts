@@ -425,6 +425,25 @@ describe("ProductionNarrationPlayerController boundary state", () => {
 
 
 describe("ProductionNarrationPlayerController fencing and prepare-range", () => {
+  it("turns a timed-out preparation into a retryable pending gap", async () => {
+    const harness = createHarness(manifest(["pending", "pending", "pending"]));
+
+    await harness.controller.playFromSegment(segmentId(1), "command");
+    harness.controller.markPreparationTimedOut(segmentId(1));
+
+    expect(harness.controller.readState()).toMatchObject({
+      phase: "blocked",
+      currentSegmentId: segmentId(1),
+      failure: {
+        code: "PENDING_GAP",
+        retryable: true,
+        segmentId: segmentId(1),
+        ordinal: 1,
+      },
+    });
+    expect(harness.queue.stopCount).toBeGreaterThan(0);
+  });
+
   it("sends pending targets to prepare-range with requestGeneration and AbortSignal", async () => {
     const harness = createHarness(manifest(["pending", "pending", "pending"]));
 

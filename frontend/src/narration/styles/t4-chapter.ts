@@ -144,6 +144,34 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     gap: 14px;
   }
 
+  .anw-book-narration-status {
+    display: flex;
+    min-height: 38px;
+    align-items: center;
+    gap: 10px;
+    border-radius: 9px;
+    padding: 7px 10px;
+    color: #6d3b25;
+    background: #fff1e8;
+    font-size: 13px;
+  }
+
+  .anw-book-narration-status span {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .anw-book-narration-status button {
+    min-height: 32px;
+    flex: 0 0 auto;
+    border: 1px solid #d9b39f;
+    border-radius: 8px;
+    padding: 4px 10px;
+    color: inherit;
+    background: #fff;
+    cursor: pointer;
+  }
+
   .anw-chapter-narration-player__identity,
   .anw-chapter-narration-player__controls,
   .anw-chapter-narration-player__tools,

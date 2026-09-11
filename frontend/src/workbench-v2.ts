@@ -109,6 +109,18 @@ import {
   type ScriptReviewSpeakerChoice,
 } from "./narration/script-review-panel";
 import { continueApprovedScriptProduction } from "./narration/script-review-continue";
+import { prepareBasicSingleNarrator } from "./narration/basic-single-narrator";
+import {
+  advanceBookNarrationQueue,
+  bookNarrationEditionIsCurrent,
+  createBookNarrationQueue,
+  currentBookNarrationChapter,
+  markBookNarrationPaused,
+  markBookNarrationPlaying,
+  selectNarratableBookChapters,
+  stopBookNarrationQueue,
+  type BookNarrationQueueState,
+} from "./narration/book-narration-queue";
 import type {
   NarrationEditionResource,
   NarrationWorkflowResource,
@@ -350,6 +362,13 @@ interface ScriptReviewEditDraft {
 }
 
 
+interface NarrationLaunchOptions {
+  readonly basicSingleNarrator?: boolean;
+  readonly autoPlay?: boolean;
+  readonly bookRunId?: number;
+}
+
+
 function scriptReviewScope(review: ScriptReviewResource): ScriptReviewVersionScope {
   return {
     novel_id: review.novel_id,
@@ -564,6 +583,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const [scriptReviewCharacterBindings, setScriptReviewCharacterBindings] = React.useState(
     [] as ScriptReviewActiveCharacterBinding[],
   );
+  const [bookNarrationState, setBookNarrationState] = React.useState(
+    null as BookNarrationQueueState | null,
+  );
+  const [bookNarrationRecoveryTick, setBookNarrationRecoveryTick] = React.useState(0);
   const narrationSessionRef = React.useRef(null as ChapterNarrationSession | null);
   const paragraphGutterControllerRef = React.useRef(null as ParagraphGutterController | null);
   const narrationActionAbortRef = React.useRef(null as AbortController | null);
@@ -576,6 +599,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const failedSegmentRetryWasSubmittingRef = React.useRef(false);
   const scriptReviewActionAbortRef = React.useRef(null as AbortController | null);
   const scriptReviewTriggerRef = React.useRef(null) as ScriptReviewFocusRef;
+  const bookNarrationRef = React.useRef(null as BookNarrationQueueState | null);
+  const bookNarrationRunIdRef = React.useRef(0);
+  const bookNarrationLaunchBusyRef = React.useRef(false);
   const titleDraftRef = React.useRef("");
   const titleBaselineRef = React.useRef("");
   const titleInputRef = React.useRef(null as AssistantTitleInputRef | null);
@@ -586,6 +612,17 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   );
   const assistantPageLocationFingerprintRef = React.useRef("");
   const chapterGenerateActionRef = React.useRef(null as (() => void) | null);
+
+  const publishBookNarrationState = React.useCallback((next: BookNarrationQueueState | null) => {
+    bookNarrationRef.current = next;
+    setBookNarrationState(next);
+  }, []);
+
+  const failActiveBookNarration = React.useCallback((message: string) => {
+    const current = bookNarrationRef.current;
+    if (!current || ["idle", "ended"].includes(current.phase)) return;
+    publishBookNarrationState(Object.freeze({ ...current, phase: "failed", message }));
+  }, [publishBookNarrationState]);
 
   const assistantChapterNumber = novel && document?.kind === "chapter"
     && novel.id === document.novel_id
@@ -1231,9 +1268,23 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
             if (progress.workflow) setNarrationWorkflow(progress.workflow);
           },
         });
-        if (workflow) await presentNarrationWorkflow(
-          workflow, session, activeNovel.id, activeDocument.id, generation, recoveryController,
-        );
+        if (workflow) {
+          const activeQueue = bookNarrationRef.current;
+          const queueOwnsChapter = activeQueue !== null
+            && activeQueue.phase === "preparing"
+            && currentBookNarrationChapter(activeQueue).documentId === activeDocument.id;
+          await presentNarrationWorkflow(
+            workflow,
+            session,
+            activeNovel.id,
+            activeDocument.id,
+            generation,
+            recoveryController,
+            queueOwnsChapter
+              ? { basicSingleNarrator: true, autoPlay: true, bookRunId: activeQueue.runId }
+              : undefined,
+          );
+        }
       } finally {
         if (narrationActionAbortRef.current === recoveryController) {
           narrationActionAbortRef.current = null;
@@ -1367,15 +1418,112 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     const snapshot = narrationSnapshot;
     const edition = snapshot?.bundle?.edition;
     const playerPhase = snapshot?.playerState?.phase;
+    const activeBookQueue = bookNarrationRef.current;
+    const activeDocument = documentRef.current;
+    const pendingBookGapSegmentId = (
+      ["preparing", "playing"].includes(activeBookQueue?.phase ?? "")
+      && activeDocument
+      && currentBookNarrationChapter(activeBookQueue).documentId === activeDocument.id
+      && playerPhase === "blocked"
+      && snapshot?.playerState?.failure !== null
+    )
+      ? snapshot.playerState.failure.segmentId ?? snapshot.playerState.currentSegmentId
+      : null;
+    const bookGapPlaybackSegmentId = pendingBookGapSegmentId;
+    const pendingBookGapRenderStatus = pendingBookGapSegmentId
+      ? snapshot?.bundle?.manifest.segments.find(
+        (segment: { readonly segment_id: string }) => (
+          segment.segment_id === pendingBookGapSegmentId
+        ),
+      )?.render_status
+      : undefined;
+    const hasPendingNarrationRenders = snapshot?.bundle?.manifest.segments.some(
+      (segment: { readonly render_status: SegmentRenderStatus }) => (
+        ["pending", "queued", "rendering"].includes(segment.render_status)
+      ),
+    ) ?? false;
+    const activeBookRunId = pendingBookGapSegmentId ? activeBookQueue?.runId : undefined;
+    const activeBookQueueOwnsSession = activeBookQueue !== null
+      && activeBookQueue !== undefined
+      && !["idle", "ended", "failed"].includes(activeBookQueue.phase);
     if (
       !session
       || snapshot?.phase !== "ready"
       || !edition
-      || !["created", "rendering"].includes(edition.state)
+      || !["created", "rendering", "partial_ready", "ready"].includes(edition.state)
       || ["preparing", "buffering", "playing", "paused"].includes(playerPhase ?? "idle")
+      || (pendingBookGapRenderStatus === "failed" && !hasPendingNarrationRenders)
+      || (!pendingBookGapSegmentId && !hasPendingNarrationRenders)
+      || (activeBookQueueOwnsSession && !pendingBookGapSegmentId)
     ) return;
     const handle = setTimeout(() => {
       if (narrationSessionRef.current !== session) return;
+      if (
+        pendingBookGapSegmentId
+        && bookGapPlaybackSegmentId
+        && activeBookRunId !== undefined
+      ) {
+        const currentQueue = bookNarrationRef.current;
+        const currentDocument = documentRef.current;
+        if (
+          !currentQueue
+          || currentQueue.runId !== activeBookRunId
+          || !["preparing", "playing"].includes(currentQueue.phase)
+          || !currentDocument
+          || currentBookNarrationChapter(currentQueue).documentId !== currentDocument.id
+          || narrationSessionRef.current !== session
+        ) return;
+        void (async () => {
+          const refreshed = await session.refresh();
+          if (
+            refreshed.status !== "ready"
+            || narrationSessionRef.current !== session
+          ) return;
+          const result = await session.playSegment(
+            bookGapPlaybackSegmentId,
+            "readonly-segment",
+            0,
+          );
+          const liveQueue = bookNarrationRef.current;
+          if (
+            !liveQueue
+            || liveQueue.runId !== activeBookRunId
+            || !["preparing", "playing"].includes(liveQueue.phase)
+            || narrationSessionRef.current !== session
+          ) return;
+          if (result.status === "completed" && result.decision.kind === "play") {
+            if (liveQueue.phase === "preparing") {
+              publishBookNarrationState(markBookNarrationPlaying(liveQueue));
+            }
+            setNarrationError(null);
+            setNarrationStatus("后续句段已就绪，全书朗读已从等待处自动继续。");
+          } else if (result.status === "timeout") {
+            setNarrationStatus("后续句段仍在合成，全书朗读会继续等待并自动重试。");
+            setBookNarrationRecoveryTick((value: number) => value + 1);
+          } else if (result.status === "completed" && result.decision.kind === "blocked") {
+            setNarrationStatus("后续句段仍在准备，全书朗读没有跳过缺口。");
+            const latestSegments = session.readSnapshot().bundle?.manifest.segments ?? [];
+            const latestHasPendingRenders = latestSegments.some(
+              (segment: { readonly render_status: SegmentRenderStatus }) => (
+              ["pending", "queued", "rendering"].includes(segment.render_status)
+              ),
+            );
+            if (
+              result.decision.failure.code === "PENDING_GAP"
+              || latestHasPendingRenders
+            ) {
+              setBookNarrationRecoveryTick((value: number) => value + 1);
+            }
+          } else if (result.status === "error") {
+            setNarrationError(narrationFailureMessage(result.error));
+          }
+        })().catch((reason: unknown) => {
+          if (!isAbortFailure(reason) && narrationSessionRef.current === session) {
+            setNarrationError(narrationFailureMessage(reason));
+          }
+        });
+        return;
+      }
       void session.refresh().catch((reason: unknown) => {
         if (!isAbortFailure(reason) && narrationSessionRef.current === session) {
           setNarrationError(narrationFailureMessage(reason));
@@ -1387,10 +1535,18 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     narrationSnapshot?.bundle?.edition.state,
     narrationSnapshot?.bundle?.manifest.manifest_revision,
     narrationSnapshot?.phase,
+    narrationSnapshot?.playerState?.currentSegmentId,
+    narrationSnapshot?.playerState?.failure,
+    narrationSnapshot?.playerState?.failure?.segmentId,
     narrationSnapshot?.playerState?.phase,
+    bookNarrationRecoveryTick,
+    publishBookNarrationState,
   ]);
 
-  const startNarration = async (intent: "create" | "update") => {
+  const startNarration = async (
+    intent: "create" | "update",
+    launch: NarrationLaunchOptions = {},
+  ) => {
     const activeNovel = novel;
     const activeDocument = documentRef.current;
     const session = narrationSessionRef.current;
@@ -1399,10 +1555,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         ? narrationGateState.gate.reasonCode
         : "NARRATION_CAPABILITY_UNVERIFIED";
       setNarrationError(`章节智能朗读尚未通过产品门禁（${reasonCode ?? "CAPABILITY_DISABLED"}）。`);
+      if (launch.bookRunId) failActiveBookNarration("全书朗读能力尚未通过产品门禁。");
       return;
     }
     if (!activeNovel || !activeDocument || activeDocument.kind !== "chapter" || !session) {
       setNarrationError("章节正文编辑器尚未准备完成，暂时不能创建朗读。");
+      if (launch.bookRunId) failActiveBookNarration("章节正文编辑器尚未准备完成。");
       return;
     }
     const generation = documentGenerationRef.current;
@@ -1437,6 +1595,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         setNarrationError(
           `章节智能朗读运行态尚未就绪（${liveGate.reasonCode ?? "CAPABILITY_DISABLED"}）。`,
         );
+        if (launch.bookRunId) failActiveBookNarration("全书朗读运行态尚未就绪。");
         return;
       }
       const result = await startChapterNarrationWorkflow({
@@ -1467,11 +1626,19 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         || documentGenerationRef.current !== generation
       ) return;
       await presentNarrationWorkflow(
-        result.workflow, session, activeNovel.id, activeDocument.id, generation, controller,
+        result.workflow,
+        session,
+        activeNovel.id,
+        activeDocument.id,
+        generation,
+        controller,
+        launch,
       );
     } catch (reason) {
       if (!controller.signal.aborted && !isAbortFailure(reason)) {
-        setNarrationError(narrationFailureMessage(reason));
+        const message = narrationFailureMessage(reason);
+        setNarrationError(message);
+        if (launch.bookRunId) failActiveBookNarration(message);
       }
     } finally {
       if (narrationActionAbortRef.current === controller) {
@@ -1488,6 +1655,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     documentId: string,
     generation: number,
     controller: AbortController,
+    launch: NarrationLaunchOptions = {},
   ): Promise<void> {
     const current = () => !controller.signal.aborted
       && narrationSessionRef.current === session
@@ -1506,6 +1674,46 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       if (!current()) return;
       setScriptReview(review);
       setScriptReviewRequestId(workflow.request_id);
+      if (launch.basicSingleNarrator) {
+        setScriptReviewOpen(false);
+        setNarrationStatus("正在使用作品默认旁白建立基础朗读脚本…");
+        const prepared = await prepareBasicSingleNarrator({
+          review,
+          requestId: workflow.request_id,
+          requestVersion: workflow.request_version,
+          signal: controller.signal,
+          onProgress: (progress) => {
+            if (current()) setNarrationStatus(progress.message);
+          },
+        });
+        if (!current()) return;
+        setScriptReview(prepared.approvedReview);
+        setNarrationStatus("基础旁白脚本已冻结，正在等待首批音频…");
+        const production = await continueApprovedScriptProduction({
+          requestId: workflow.request_id,
+          approvedReview: prepared.approvedReview,
+          dependencies: { getWorkflow: getNarrationWorkflow },
+          signal: controller.signal,
+          pollTimeoutMs: 10 * 60_000,
+          maxPollAttempts: 600,
+          onWorkflow: (nextWorkflow) => {
+            if (current()) {
+              setNarrationWorkflow(nextWorkflow);
+              setNarrationStatus(nextWorkflow.workflow_state === "rendering"
+                ? "基础旁白脚本已冻结，正在合成首批音频…"
+                : "基础旁白脚本已冻结，正在建立可播放版本…");
+            }
+          },
+        });
+        if (!current()) return;
+        setNarrationWorkflow(production.workflow);
+        await session.load(production.editionId);
+        if (!current()) return;
+        setScriptReview(null);
+        setScriptReviewRequestId(null);
+        if (launch.autoPlay) await autoPlayNarrationSession(session, launch.bookRunId);
+        return;
+      }
       setScriptReviewOpen(true);
       setNarrationStatus(review.blocker_count > 0
         ? `人物识别发现 ${review.blocker_count} 个阻塞；音频尚未生成。`
@@ -1521,7 +1729,32 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     setScriptReview(null);
     setScriptReviewRequestId(null);
     await session.load(workflow.edition_id);
-    if (current()) setNarrationStatus("朗读版本已建立；可从任一句或任一段开始准备并播放。");
+    if (!current()) return;
+    if (launch.autoPlay) await autoPlayNarrationSession(session, launch.bookRunId);
+    else setNarrationStatus("朗读版本已建立；可从任一句或任一段开始准备并播放。");
+  }
+
+  async function autoPlayNarrationSession(
+    session: ChapterNarrationSession,
+    bookRunId?: number,
+  ): Promise<void> {
+    if (bookRunId !== undefined) {
+      const queue = bookNarrationRef.current;
+      if (!queue || queue.runId !== bookRunId || queue.phase !== "preparing") return;
+    }
+    const snapshot = session.readSnapshot();
+    const segment = snapshot.bundle?.script.segments[0];
+    if (!segment) throw new Error("朗读版本没有可播放句段。");
+    setNarrationError(null);
+    setNarrationStatus("首批音频已就绪，正在自动开始朗读…");
+    const result = await session.playSegment(segment.segment_id, "readonly-segment", 0);
+    reportPlaybackResult(result);
+    if (result.status === "completed" && result.decision.kind === "play") {
+      const queue = bookNarrationRef.current;
+      if (queue && queue.phase === "preparing") {
+        publishBookNarrationState(markBookNarrationPlaying(queue));
+      }
+    }
   }
 
   const reportPlaybackResult = (result: ChapterNarrationSessionPlayResult): void => {
@@ -1567,6 +1800,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     if (snapshot.playerState?.phase === "playing") {
       session.pause();
       setNarrationStatus("朗读已暂停。");
+      const queue = bookNarrationRef.current;
+      if (queue?.phase === "playing") publishBookNarrationState(markBookNarrationPaused(queue));
       return;
     }
     const segmentCount = snapshot.bundle?.script.segments.length ?? 0;
@@ -1580,11 +1815,120 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     );
     setNarrationError(null);
     if (start.resumeExistingSession) {
-      void session.resume().then(reportPlaybackResult);
+      void session.resume().then((result: ChapterNarrationSessionPlayResult) => {
+        reportPlaybackResult(result);
+        const queue = bookNarrationRef.current;
+        if (result.status === "completed" && result.decision.kind === "play" && queue?.phase === "paused") {
+          publishBookNarrationState(markBookNarrationPlaying(queue));
+        }
+      });
       return;
     }
-    playNarrationOrdinal(start.ordinal, "readonly-segment", start.offsetMs);
+    const segment = snapshot.bundle?.script.segments[start.ordinal];
+    if (!segment) return;
+    void session.playSegment(segment.segment_id, "readonly-segment", start.offsetMs).then((result: ChapterNarrationSessionPlayResult) => {
+      reportPlaybackResult(result);
+      const queue = bookNarrationRef.current;
+      if (result.status === "completed" && result.decision.kind === "play" && queue?.phase === "paused") {
+        publishBookNarrationState(markBookNarrationPlaying(queue));
+      }
+    });
   };
+
+  React.useEffect(() => {
+    const queue = bookNarrationRef.current;
+    const activeDocument = documentRef.current;
+    const session = narrationSessionRef.current;
+    if (
+      !queue
+      || queue.phase !== "preparing"
+      || !activeDocument
+      || currentBookNarrationChapter(queue).documentId !== activeDocument.id
+      || narrationBusy
+      || bookNarrationLaunchBusyRef.current
+      || !session
+    ) return;
+    if (activeDocument.content_hash !== currentBookNarrationChapter(queue).sourceContentHash) {
+      failActiveBookNarration("章节正文已在全书朗读开始后变化；请重新点击并按最新内容开始。");
+      return;
+    }
+    if (narrationSnapshot?.phase === "no-edition") {
+      bookNarrationLaunchBusyRef.current = true;
+      void startNarration("create", {
+        basicSingleNarrator: true,
+        autoPlay: true,
+        bookRunId: queue.runId,
+      }).finally(() => {
+        bookNarrationLaunchBusyRef.current = false;
+      });
+      return;
+    }
+    if (narrationSnapshot?.phase === "ready") {
+      bookNarrationLaunchBusyRef.current = true;
+      const launch = bookNarrationEditionIsCurrent(
+        queue,
+        activeDocument.id,
+        activeDocument.content_hash,
+        narrationSnapshot.bundle.script.source_content_hash,
+      )
+        ? autoPlayNarrationSession(session, queue.runId)
+        : startNarration("update", {
+            basicSingleNarrator: true,
+            autoPlay: true,
+            bookRunId: queue.runId,
+          });
+      void launch.catch((reason: unknown) => {
+        if (!isAbortFailure(reason)) {
+          const message = narrationFailureMessage(reason);
+          setNarrationError(message);
+          failActiveBookNarration(message);
+        }
+      }).finally(() => {
+        bookNarrationLaunchBusyRef.current = false;
+      });
+    }
+  }, [
+    bookNarrationState?.index,
+    bookNarrationState?.phase,
+    document?.id,
+    failActiveBookNarration,
+    narrationBusy,
+    narrationSnapshot?.bundle?.edition.edition_id,
+    narrationSnapshot?.phase,
+  ]);
+
+  React.useEffect(() => {
+    const queue = bookNarrationRef.current;
+    const activeDocument = documentRef.current;
+    const editionId = narrationSnapshot?.bundle?.edition.edition_id;
+    if (
+      !queue
+      || queue.phase !== "playing"
+      || !activeDocument
+      || !editionId
+      || narrationSnapshot?.playerState?.phase !== "ended"
+      || currentBookNarrationChapter(queue).documentId !== activeDocument.id
+    ) return;
+    const next = advanceBookNarrationQueue(
+      queue,
+      `${queue.runId}:${activeDocument.id}:${editionId}`,
+    );
+    if (next === queue) return;
+    publishBookNarrationState(next);
+    if (next.phase === "preparing") {
+      bookNarrationLaunchBusyRef.current = false;
+      void loadDocument(currentBookNarrationChapter(next).documentId);
+    } else if (next.phase === "ended") {
+      setNarrationStatus(next.message);
+    }
+  }, [
+    bookNarrationState?.index,
+    bookNarrationState?.phase,
+    loadDocument,
+    narrationSnapshot?.bundle?.edition.edition_id,
+    narrationSnapshot?.playerState?.phase,
+    publishBookNarrationState,
+  ]);
 
   const closeScriptReview = (): void => {
     const action = scriptReviewActionAbortRef.current;
@@ -2081,12 +2425,77 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   };
 
   const selectDocument = (documentId: string) => {
+    const activeQueue = bookNarrationRef.current;
+    if (activeQueue && !["idle", "ended"].includes(activeQueue.phase)) {
+      publishBookNarrationState(stopBookNarrationQueue(activeQueue, "已因手动切换章节停止全书朗读。"));
+    }
     const active = documentRef.current;
     if (active && contentRef.current !== active.content_markdown) void saveNow(contentRef.current);
     void loadDocument(documentId);
   };
 
+  const startBookNarration = async (): Promise<void> => {
+    const activeNovel = novel;
+    if (!activeNovel || bookNarrationLaunchBusyRef.current) return;
+    const generation = novelGenerationRef.current;
+    bookNarrationLaunchBusyRef.current = true;
+    try {
+      const activeDocument = documentRef.current;
+      if (activeDocument && contentRef.current !== activeDocument.content_markdown) {
+        const saved = await saveNow(contentRef.current);
+        if (!saved) {
+          setError("当前章节尚未稳定保存，未开始全书朗读。");
+          return;
+        }
+      }
+      const latestNovel = await loadNovelWorkspace(activeNovel.id);
+      if (novelGenerationRef.current !== generation) return;
+      setNovel(latestNovel);
+      const chapters = selectNarratableBookChapters(canonicalChapterDocuments(latestNovel)
+        .map((item: DocumentRecord) => ({
+          documentId: item.id,
+          label: documentDisplayTitle(latestNovel, item),
+          sourceContentHash: item.content_hash,
+          visibleCharacterCount: item.visible_character_count,
+        })));
+      if (chapters.length === 0) {
+        setError("全书没有可朗读的已保存章节。");
+        return;
+      }
+      narrationSessionRef.current?.pause();
+      bookNarrationRunIdRef.current += 1;
+      const queue = createBookNarrationQueue(
+        latestNovel.id,
+        chapters,
+        bookNarrationRunIdRef.current,
+      );
+      publishBookNarrationState(queue);
+      setError("");
+      setNarrationError(null);
+      setNarrationStatus(queue.message);
+      await loadDocument(currentBookNarrationChapter(queue).documentId);
+    } catch (reason) {
+      setError(narrationFailureMessage(reason));
+    } finally {
+      bookNarrationLaunchBusyRef.current = false;
+    }
+  };
+
+  const stopBookNarration = (): void => {
+    const queue = bookNarrationRef.current;
+    if (!queue) return;
+    narrationSessionRef.current?.pause();
+    bookNarrationLaunchBusyRef.current = false;
+    publishBookNarrationState(stopBookNarrationQueue(queue));
+    setNarrationStatus("全书朗读已停止；已生成的朗读版本仍安全保留。");
+  };
+
   const navigateToChapter = async (documentId: string) => {
+    const activeQueue = bookNarrationRef.current;
+    if (activeQueue && !["idle", "ended"].includes(activeQueue.phase)) {
+      publishBookNarrationState(stopBookNarrationQueue(activeQueue, "已因手动切换章节停止全书朗读。"));
+      narrationSessionRef.current?.pause();
+    }
     const active = documentRef.current;
     if (active?.id === documentId) return;
     if (timerRef.current) {
@@ -2900,9 +3309,15 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
             narrationSnapshot?.workingCopyDiverged
             || narrationContext?.explicit_update_required,
           ),
-          onGenerate: () => { void startNarration("create"); },
-          onUpdate: () => { void startNarration("update"); },
+          onGenerate: () => { void startNarration("create", { basicSingleNarrator: true, autoPlay: true }); },
+          onUpdate: () => { void startNarration("update", { basicSingleNarrator: true, autoPlay: true }); },
           onTogglePlayback: toggleNarrationPlayback,
+          bookPlaybackStatus: bookNarrationState && bookNarrationState.phase !== "idle"
+            ? bookNarrationState.message
+            : null,
+          onStopBookPlayback: bookNarrationState && !["idle", "ended"].includes(bookNarrationState.phase)
+            ? stopBookNarration
+            : undefined,
           onSeekOrdinal: (ordinal: number) => playNarrationOrdinal(ordinal),
           cursorPlaybackAvailable: editorSurfaceRef.current?.kind === "textarea-fallback",
           onPlaybackFromCursor: () => {
@@ -3366,6 +3781,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     onSectionChange: (next: WorkbenchSection) => { void switchSection(next); },
     onReadingPanelChange: switchReadingPanel,
     onSelectDocument: selectDocument,
+    onStartBookNarration: startBookNarration,
     onNovelChanged: (updated: NovelMetadataRecord) => {
       setNovel((current: NovelRecord | null) => (
         current ? { ...current, ...updated, tree: current.tree } : current

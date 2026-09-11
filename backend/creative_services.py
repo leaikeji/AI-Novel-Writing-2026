@@ -345,7 +345,8 @@ def complete_novel_creation_draft(
     if not genre:
         raise ValidationError("请选择小说题材")
     idea = str(data.get("idea", "")).strip()
-    if not idea:
+    manual_template_entry = data.get("manual_template_entry") is True
+    if not idea and not manual_template_entry:
         raise ValidationError("请填写或生成创作思路")
     template_key = str(data.get("template_key", "")).strip()
     template_name = str(data.get("template_name", "")).strip()

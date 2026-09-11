@@ -949,7 +949,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     if (busy) return;
     setBusy(true);
     try {
-      await persist(3, data);
+      await persist(3, { ...data, manual_template_entry: true });
       setError("");
     } catch (reason) {
       setError(readableError(reason, "进入模板填写失败"));
@@ -1329,7 +1329,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
           maxLength: 2000,
           value: data.idea || "",
           placeholder: "例如：一个现代都市青年穿越到古代，成为了一名书生，凭借现代知识在古代混得风生水起...",
-          onChange: (event: any) => updateData({ idea: event.target.value }),
+          onChange: (event: any) => updateData({ idea: event.target.value, manual_template_entry: false }),
         }),
         h(
           "div",

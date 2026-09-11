@@ -562,6 +562,7 @@ describe("reading page controller and navigation", () => {
 
   it("replaces the fixed T4 unavailable copy when chapter playback capabilities are enabled", async () => {
     const harness = createReactHarness();
+    const onStartBookNarration = vi.fn();
     const enabledKeys = new Set([
       "narration_product",
       "reading_settings",
@@ -593,14 +594,20 @@ describe("reading page controller and navigation", () => {
       putScopeOverride: vi.fn(),
     };
     const ReadingPage = createReadingPage(harness.React, api);
-    harness.render(ReadingPage, { novelId: NOVEL_ID });
+    harness.render(ReadingPage, { novelId: NOVEL_ID, onStartBookNarration });
     harness.flushEffects();
     await Promise.resolve();
     await Promise.resolve();
-    const tree = harness.render(ReadingPage, { novelId: NOVEL_ID });
+    const tree = harness.render(ReadingPage, { novelId: NOVEL_ID, onStartBookNarration });
 
     expect(textContent(tree)).toContain("章节播放与校听已在章节写作页开放");
     expect(textContent(tree)).not.toContain("T4 完成后接入，目前不可用");
+    const startButton = findAll(tree, (element) => (
+      element.type === "button" && textContent(element) === "一键朗读全书"
+    ));
+    expect(startButton).toHaveLength(1);
+    (startButton[0]?.props.onClick as (() => void))();
+    expect(onStartBookNarration).toHaveBeenCalledTimes(1);
   });
 
   it("renders integrated panels from the exact loaded overview and shared navigation", async () => {
