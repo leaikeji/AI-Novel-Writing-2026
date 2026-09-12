@@ -288,7 +288,7 @@ export function classifyReadingRulesFailure(reason: unknown): ReadingRulesFailur
   if (["CAPABILITY_DISABLED", "MODEL_UNAVAILABLE"].includes(code)) {
     return {
       code,
-      message: "该朗读能力尚未通过当前产品门禁。",
+      message: "该朗读功能暂不可用，请检查运行状态后重试。",
       retryable: false,
       refreshRequired: false,
     };
@@ -526,6 +526,10 @@ export function createReadingRulesPanel(
         "div",
         { className: "anw-reading-rules-panel__error", role: "alert" },
         h("p", null, operation.failure.message),
+        h("details", null,
+          h("summary", null, "错误详情"),
+          h("code", null, operation.failure.code),
+        ),
         operation.failure.refreshRequired
           ? h("button", { type: "button", onClick: props.onRefresh }, "刷新最新配置")
           : null,
@@ -538,16 +542,9 @@ export function createReadingRulesPanel(
       "section",
       {
         className: "anw-reading-rules-panel",
-        "aria-labelledby": "anw-reading-rules-title",
+        "aria-label": "识别与复核",
         "aria-busy": operation.busy || undefined,
       },
-      h("header", null,
-        h("div", null,
-          h("p", { className: "anw-reading-rules-panel__eyebrow" }, "作品级朗读设置"),
-          h("h2", { id: "anw-reading-rules-title" }, "识别、选角与复核规则"),
-        ),
-        h("span", null, `设置版本 ${props.settings.version}`),
-      ),
       model.productReason === null
         ? null
         : h("p", { className: "anw-reading-rules-panel__notice", role: "note" },
@@ -556,7 +553,7 @@ export function createReadingRulesPanel(
       h(
         "fieldset",
         { disabled: !model.canEditSettings },
-        h("legend", null, "脚本复核策略"),
+        h("legend", null, "什么时候需要你确认"),
         h("label", null,
           h("input", {
             type: "radio",
@@ -568,8 +565,8 @@ export function createReadingRulesPanel(
               scriptReviewPolicy: event.target.value as ScriptReviewPolicy,
             })),
           }),
-          h("span", null, "仅阻断项必须复核"),
-          h("small", null, "没有 blocker 时可自动冻结脚本；warning 仍保留证据。"),
+          h("span", null, "遇到必须处理的问题时（推荐）"),
+          h("small", null, "没有必须处理的问题时自动继续；其他提醒仍可查看。"),
         ),
         h("label", null,
           h("input", {
@@ -583,13 +580,17 @@ export function createReadingRulesPanel(
             })),
           }),
           h("span", null, "每次都由作者复核"),
-          h("small", null, "分析完成后暂停，确认人物、匿名说话人和选角再生成。"),
+          h("small", null, "先确认人物、未具名说话人和声音分配，再生成音频。"),
         ),
       ),
-      h(
+      !model.cloudVisible && draft.analysisMode === "local_rules_only"
+        ? h("p", { role: "note" },
+          "说话人识别：仅本地规则。不向云端发送正文；不改变语音生成渠道。",
+        )
+        : h(
         "fieldset",
         { disabled: !model.canEditSettings },
-        h("legend", null, "正文分析隐私模式"),
+        h("legend", null, "说话人识别方式"),
         h("label", null,
           h("input", {
             type: "radio",
@@ -602,7 +603,7 @@ export function createReadingRulesPanel(
             })),
           }),
           h("span", null, "仅本地规则（默认）"),
-          h("small", null, "正文不发送给云端模型；不确定片段按复核策略处理。"),
+          h("small", null, "识别说话人时不向云端发送正文；不确定的片段按上方规则处理。此项不改变音频生成的本地／云端选择。"),
         ),
         model.cloudVisible
           ? h("label", null,
@@ -628,11 +629,17 @@ export function createReadingRulesPanel(
           : null,
       ),
       model.cloudUnavailableReasonVisible
-        ? h("p", {
-          className: "anw-reading-rules-panel__notice",
+        ? h("div", {
           role: "note",
           "data-cloud-unavailable": "true",
-        }, `云端辅助识别当前不可用：${model.cloudReason}`)
+          "data-reason-code": model.cloudReason,
+        },
+        h("details", null,
+          h("summary", null, "查看识别能力说明"),
+          h("p", null, "云端辅助识别尚未开放；这不会影响本地识别，也不改变音频生成渠道。"),
+          h("code", null, model.cloudReason),
+        ),
+        )
         : null,
       model.cloudActionable || consent.state === "active"
         ? h(
@@ -684,7 +691,7 @@ export function createReadingRulesPanel(
         : null,
       operationNode,
       h("footer", null,
-        h("p", null, "规则变更只影响后续脚本/Edition；历史 Edition 不会被改写。"),
+        h("p", null, "保存后用于新建的朗读版本；正文和已有音频保持不变。"),
         h("button", {
           type: "button",
           className: "anw-reading-rules-panel__save",

@@ -358,7 +358,9 @@ describe("reading route and replacement contracts", () => {
     expect(readingSectionFromSearch("?reading_panel=narrator")).toBe("narrator");
     expect(readingSectionFromSearch("?reading_panel=voice-generator")).toBe("narrator");
     expect(readingSectionSearch("?novel_id=novel-1&section=roles&x=1", "audio-cache"))
-      .toBe("?novel_id=novel-1&section=reading&x=1&reading_panel=private-voices");
+      .toBe("?novel_id=novel-1&section=reading&x=1&reading_panel=storage-privacy");
+    expect(readingSectionFromSearch("?reading_panel=advanced-tuning")).toBe("reading-rules");
+    expect(readingSectionFromSearch("?reading_panel=pronunciation")).toBe("reading-rules");
     expect(readingSectionSearch("?novel_id=novel-1&reading_panel=narrator", "overview"))
       .toBe("?novel_id=novel-1&reading_panel=narrator&section=reading");
   });
@@ -431,7 +433,7 @@ describe("reading route and replacement contracts", () => {
 
 
 describe("reading page controller and navigation", () => {
-  it("loads overview and overrides together, then exposes five task-oriented navigation items", async () => {
+  it("loads overview and overrides together, then exposes six task-oriented navigation items", async () => {
     const harness = createReactHarness();
     const api: ReadingPageApi = {
       getOverview: vi.fn(async () => overviewFixture()),
@@ -454,7 +456,7 @@ describe("reading page controller and navigation", () => {
     expect(tree.props["data-active-section"]).toBe("narrator");
     const nav = findAll(tree, (element) => element.type === "nav")[0];
     const buttons = findAll(nav, (element) => element.type === "button");
-    expect(buttons).toHaveLength(5);
+    expect(buttons.map(textContent)).toEqual(["基础朗读", "旁白音色", "人物配音", "私人音色", "朗读规则", "运行与存储"]);
     expect(buttons.filter((button) => button.props["aria-current"] === "page"))
       .toHaveLength(1);
 
@@ -464,6 +466,39 @@ describe("reading page controller and navigation", () => {
     tree = harness.render(ReadingPage, { novelId: NOVEL_ID, onSectionChange });
     expect(tree.props["data-active-section"]).toBe("narrator");
     expect(onSectionChange).toHaveBeenCalledWith("narrator");
+  });
+
+  it("keeps visited panels mounted with stable keys and hides inactive form controls", async () => {
+    const harness = createReactHarness();
+    const api: ReadingPageApi = {
+      getOverview: vi.fn(async () => overviewFixture()),
+      listScopeOverrides: vi.fn(async () => scopeList()),
+      putSettings: vi.fn(), putScopeOverride: vi.fn(),
+    };
+    const Page = createReadingPage(harness.React, api);
+    const props = { novelId: NOVEL_ID };
+    harness.render(Page, props);
+    harness.flushEffects();
+    await Promise.resolve(); await Promise.resolve();
+    let tree = harness.render(Page, props);
+    const before = findAll(tree, (node) => node.props["data-reading-panel"] === "narrator")[0]!;
+    const open = (section: string) => {
+      const button = findAll(tree, (node) => node.props["data-reading-section"] === section)[0]!;
+      (button.props.onClick as () => void)();
+      tree = harness.render(Page, props);
+    };
+    open("reading-rules");
+    let basic = findAll(tree, (node) => node.props["data-reading-panel"] === "narrator")[0]!;
+    expect(basic.props.key).toBe(before.props.key);
+    expect(basic.props.hidden).toBe(true);
+    expect(findAll(basic, (node) => typeof node.type === "function").length).toBeGreaterThan(0);
+    expect(findAll(tree, (node) => Boolean(node.props["data-reading-panel"]) && !node.props.hidden)).toHaveLength(1);
+    open("narrator");
+    basic = findAll(tree, (node) => node.props["data-reading-panel"] === "narrator")[0]!;
+    expect(basic.props.key).toBe(before.props.key);
+    expect(basic.props.hidden).toBe(false);
+    expect(findAll(tree, (node) => node.props["data-reading-panel"] === "reading-rules")[0]!.props.hidden).toBe(true);
+    expect(api.putSettings).not.toHaveBeenCalled();
   });
 
   it("keeps loaded section content during refresh and a network failure, but not a scope change", async () => {
@@ -600,7 +635,7 @@ describe("reading page controller and navigation", () => {
     await Promise.resolve();
     const tree = harness.render(ReadingPage, { novelId: NOVEL_ID, onStartBookNarration });
 
-    expect(textContent(tree)).toContain("章节播放与校听已在章节写作页开放");
+    expect(textContent(tree)).toContain("播放与逐句校听，请回到章节页面");
     expect(textContent(tree)).not.toContain("T4 完成后接入，目前不可用");
     const startButton = findAll(tree, (element) => (
       element.type === "button" && textContent(element) === "一键朗读全书"

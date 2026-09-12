@@ -225,7 +225,7 @@ function createHarness(
 
 
 describe("Narration manifest decisions", () => {
-  it("uses only an authoritative ready range and never crosses a failed gap", () => {
+  it("starts only from an authoritative ready range and lets the queue cross terminal gaps", () => {
     const ready = manifest(["ready", "ready", "ready", "pending", "ready"]);
     expect(decideManifestPlayback(ready, segmentId(0))).toMatchObject({
       kind: "play",
@@ -239,6 +239,14 @@ describe("Narration manifest decisions", () => {
       kind: "blocked",
       reason: "gap_failed",
       failedSegment: { ordinal: 2 },
+    });
+    expect(decideManifestPlayback(
+      manifest(["ready", "ready", "ready", "failed", "ready"]),
+      segmentId(0),
+    )).toMatchObject({
+      kind: "play",
+      target: { ordinal: 0 },
+      readyRange: { start_ordinal: 0, end_ordinal_exclusive: 3 },
     });
   });
 });
@@ -420,6 +428,56 @@ describe("ProductionNarrationPlayerController boundary state", () => {
       failure: { code: "PENDING_GAP", ordinal: 3 },
     });
     expect(harness.queue.starts).toHaveLength(1);
+  });
+
+  it("exposes an explicit skipped-terminal notice without blocking continued playback", async () => {
+    const harness = createHarness(manifest(["ready", "ready", "ready", "failed", "ready"]));
+    const snapshots: unknown[] = [];
+    harness.controller.subscribe((state) => snapshots.push(state));
+    await harness.controller.playFromSegment(segmentId(0), "default");
+    const activeLease = harness.queue.starts[0].lease;
+
+    expect(harness.queue.starts[0].endOrdinalExclusive).toBe(5);
+    harness.queue.emit({
+      type: "segment-skipped",
+      lease: activeLease,
+      backend: "media-element",
+      failure: {
+        code: "FAILED_GAP",
+        message: "第 4 句音频失败，已跳过。",
+        retryable: false,
+        segmentId: segmentId(3),
+        ordinal: 3,
+      },
+    });
+
+    expect(harness.controller.readState()).toMatchObject({
+      phase: "playing",
+      failure: {
+        code: "FAILED_GAP",
+        message: "第 4 句音频失败，已跳过。",
+        ordinal: 3,
+      },
+    });
+    harness.queue.emit({
+      type: "segment-start",
+      lease: activeLease,
+      backend: "media-element",
+      segmentId: segmentId(4),
+      ordinal: 4,
+      offsetMs: 0,
+      durationMs: 3_000,
+    });
+    expect(harness.controller.readState()).toMatchObject({
+      phase: "playing",
+      currentSegmentId: segmentId(4),
+      currentOrdinal: 4,
+      failure: null,
+    });
+    expect(snapshots).toContainEqual(expect.objectContaining({
+      phase: "playing",
+      failure: expect.objectContaining({ code: "FAILED_GAP", ordinal: 3 }),
+    }));
   });
 });
 

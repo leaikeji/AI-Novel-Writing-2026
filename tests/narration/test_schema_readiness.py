@@ -27,7 +27,7 @@ def test_repository_unique_head_uses_the_canonical_repository_only() -> None:
     chain = _linear_repository_chain(str(ALEMBIC_CONFIG_PATH.resolve()))
 
     assert chain[-1] == REPOSITORY_BASE_REVISION
-    assert repository_unique_head() == chain[0] == "20260912_0054"
+    assert repository_unique_head() == chain[0] == "20260912_0055"
     assert repository_head_or_fail() == chain[0]
 
 
@@ -40,8 +40,8 @@ def test_current_schema_gate_requires_an_exact_database_head() -> None:
             return self.revision
 
     assert assert_database_at_repository_head(  # type: ignore[arg-type]
-        FakeConnection("20260912_0054")
-    ) == "20260912_0054"
+        FakeConnection("20260912_0055")
+    ) == "20260912_0055"
     with pytest.raises(AssertionError, match="does not match repository"):
         assert_database_at_repository_head(FakeConnection("20260905_0041"))
     with pytest.raises(AssertionError, match="does not match repository"):

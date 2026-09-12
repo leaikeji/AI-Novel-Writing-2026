@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Final, Literal, Mapping, Protocol
@@ -40,7 +41,9 @@ from .audio_pipeline import (
     AudioFormatError,
     AudioPipelineError,
     AudioQualityError,
+    DEFAULT_SHORT_CHINESE_DURATION_POLICY,
     ProcessedPcmWav,
+    SHORT_CHINESE_DURATION_POLICY_VERSION,
     process_provider_synthesis_wav,
 )
 from .contracts import (
@@ -215,6 +218,7 @@ class SegmentWorkItem:
     input_digest_key_id: str
     input_digest: str
     reference_media: ReferenceMedia | None = field(default=None, repr=False)
+    reference_text: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +262,17 @@ def _qwen_voice_parameters(
         "provider_voice_ids",
         "instruction",
         "official_preset",
+        "reference_text",
+        "reference_policy_version",
+        "normalization_fingerprint",
+        "validation_fingerprint",
+        "design_policy_version",
+        "design_seed",
+        "design_model_id",
+        "design_model_revision",
+        "design_artifact_tree_sha256",
+        "design_model_fingerprint",
+        "anchor_text_sha256",
     }
     if (
         set(parameters) - allowed_keys
@@ -665,6 +680,7 @@ class SqlAlchemyNarrationWorkerRepository:
             ):
                 raise WorkerSecurityError("voice belongs to another TTS model")
             reference: ReferenceMedia | None = None
+            reference_text: str | None = None
             if voice.reference_asset_id is not None:
                 asset = session.get(MediaAsset, voice.reference_asset_id)
                 if (
@@ -687,6 +703,21 @@ class SqlAlchemyNarrationWorkerRepository:
                     byte_size=asset.byte_size,
                     content_type=asset.mime_type,
                 )
+                raw_reference_text = voice.parameters_json.get("reference_text")
+                if (
+                    type(raw_reference_text) is not str
+                    or not raw_reference_text.strip()
+                    or raw_reference_text != unicodedata.normalize("NFC", raw_reference_text)
+                    or len(raw_reference_text) > 500
+                ):
+                    raise WorkerSecurityError(
+                        "voice reference text is not authoritative"
+                    )
+                reference_text = raw_reference_text
+                if selection.provider_id != "local_qwen3_tts":
+                    raise WorkerVoiceUnavailableError(
+                        "private reference voices require the local Qwen Provider"
+                    )
             request_parameters = {
                 "schema_version": "qwen-tts-worker-synthesis/1",
                 "render_fingerprint": render.render_fingerprint,
@@ -719,6 +750,11 @@ class SqlAlchemyNarrationWorkerRepository:
                     "reference_size_bytes": (
                         reference.byte_size if reference else None
                     ),
+                    "reference_text_sha256": (
+                        canonical_sha256({"reference_text": reference_text})
+                        if reference_text is not None
+                        else None
+                    ),
                 }
             )
             input_digest_key_id, input_digest = derive_model_input_digest(
@@ -749,6 +785,7 @@ class SqlAlchemyNarrationWorkerRepository:
                 input_digest_key_id=input_digest_key_id,
                 input_digest=input_digest,
                 reference_media=reference,
+                reference_text=reference_text,
             )
 
         result = self._transaction(operation)
@@ -1246,17 +1283,47 @@ class SqlAlchemyNarrationWorkerRepository:
         failure_evidence: Mapping[str, object] | None = None,
     ) -> FailureResult:
         if failure_evidence is not None:
-            if (
+            base_evidence_keys = {"schema_version", "reason_code"}
+            short_duration_evidence_keys = base_evidence_keys | {
+                "actual_duration_ms",
+                "allowed_duration_ms",
+                "evaluated_codepoint_count",
+                "policy_version",
+            }
+            evidence_keys = (
+                set(failure_evidence) if type(failure_evidence) is dict else set()
+            )
+            base_invalid = (
                 classification != "non_retryable"
                 or error_code != "TTS_AUDIO_INVALID"
                 or type(failure_evidence) is not dict
-                or set(failure_evidence) != {"schema_version", "reason_code"}
+                or evidence_keys not in (base_evidence_keys, short_duration_evidence_keys)
                 or failure_evidence.get("schema_version")
                 != "narration-audio-validation-failure/1"
                 or type(failure_evidence.get("reason_code")) is not str
                 or failure_evidence["reason_code"]
                 not in AUDIO_VALIDATION_FAILURE_REASON_CODES
-            ):
+            )
+            short_duration_details_invalid = (
+                evidence_keys == short_duration_evidence_keys
+                and (
+                    failure_evidence.get("reason_code")
+                    != "SHORT_CHINESE_DURATION_IMPLAUSIBLE"
+                    or type(failure_evidence.get("actual_duration_ms")) is not int
+                    or type(failure_evidence.get("allowed_duration_ms")) is not int
+                    or type(failure_evidence.get("evaluated_codepoint_count"))
+                    is not int
+                    or failure_evidence.get("policy_version")
+                    != SHORT_CHINESE_DURATION_POLICY_VERSION
+                    or failure_evidence["actual_duration_ms"]
+                    <= failure_evidence["allowed_duration_ms"]
+                    or failure_evidence["allowed_duration_ms"] <= 0
+                    or not 0
+                    < failure_evidence["evaluated_codepoint_count"]
+                    <= DEFAULT_SHORT_CHINESE_DURATION_POLICY.maximum_codepoints
+                )
+            )
+            if base_invalid or short_duration_details_invalid:
                 raise WorkerContractError("worker failure evidence is invalid")
             frozen_failure_evidence = dict(failure_evidence)
         else:
@@ -1422,6 +1489,7 @@ class NarrationSegmentWorker:
                 kind=work.voice_kind,
                 provider_voice_id=work.provider_voice_id,
                 reference_audio=reference,
+                reference_text=work.reference_text,
             ),
             seed=work.seed,
             instruction=work.instruction,

@@ -17,6 +17,8 @@ NARRATION_SCOPE_CONTRACT_VERSION: Final = "narration-scope/1"
 NARRATION_REVIEW_TAXONOMY_VERSION: Final = "narration-review-taxonomy/1"
 TTS_PROVIDER_CONTRACT_VERSION: Final = "qwen-tts-provider/1"
 TTS_MODEL_FINGERPRINT_SCHEMA_VERSION: Final = "qwen-tts-model-fingerprint/1"
+QWEN_TTS_PRODUCT_LANGUAGE: Final = "zh-CN"
+QWEN_TTS_VOICE_DESIGN_POLICY_VERSION: Final = "qwen-tts-mandarin-only/1"
 EDITION_FINGERPRINT_SCHEMA_VERSION: Final = "narration-edition-fingerprint/1"
 RENDER_FINGERPRINT_SCHEMA_VERSION: Final = "narration-render-fingerprint/1"
 APP_ID: Final = "ai-novel-world-2026"
@@ -27,10 +29,56 @@ LOCAL_OWNER_ACTOR_ID: Final = "owner"
 
 _SAFE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
+_NON_MANDARIN_VOICE_TERMS: Final[tuple[str, ...]] = (
+    "方言",
+    "口音",
+    "粤语",
+    "广东话",
+    "四川话",
+    "四川腔",
+    "东北话",
+    "东北腔",
+    "上海话",
+    "沪语",
+    "闽南语",
+    "客家话",
+    "吴语",
+    "陕西话",
+    "河南话",
+    "山东话",
+    "天津话",
+    "北京腔",
+    "台湾腔",
+    "港腔",
+    "日语",
+    "韩语",
+    "英语",
+    "英文",
+)
 
 
 class ContractError(ValueError):
     """Raised when a caller violates a frozen narration contract."""
+
+
+def require_mandarin_language(value: str) -> str:
+    """Accept the only product TTS language without silently normalizing it."""
+
+    if value != QWEN_TTS_PRODUCT_LANGUAGE:
+        raise ContractError("Qwen TTS product language must be zh-CN")
+    return value
+
+
+def require_mandarin_voice_design(value: str) -> str:
+    """Reject explicit dialect or foreign-language voice-design instructions."""
+
+    normalized = value.strip()
+    _ensure_nonempty(normalized, field_name="description")
+    if any(term in normalized for term in _NON_MANDARIN_VOICE_TERMS):
+        raise ContractError(
+            "voice design must describe a Mandarin voice without dialect instructions"
+        )
+    return normalized
 
 
 class UnknownTaxonomyCodeError(ContractError):
@@ -413,7 +461,7 @@ class TTSVoicePreparationRequest:
     def __post_init__(self) -> None:
         self.scope.ensure_fixed_local()
         _ensure_nonempty(self.preview_text, field_name="preview_text")
-        _ensure_nonempty(self.language, field_name="language")
+        require_mandarin_language(self.language)
         has_design = self.description is not None
         has_clone = self.reference_audio is not None
         if has_design == has_clone:
@@ -421,7 +469,7 @@ class TTSVoicePreparationRequest:
                 "voice preparation requires exactly one of description or reference audio"
             )
         if self.description is not None:
-            _ensure_nonempty(self.description, field_name="description")
+            require_mandarin_voice_design(self.description)
             if self.reference_text is not None:
                 raise ContractError("voice design cannot carry reference_text")
         elif self.reference_text is not None:

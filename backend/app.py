@@ -86,6 +86,7 @@ from .narration.production_runtime import (
     current_narration_cache_runtime,
     current_official_voice_preview_service,
     current_narration_production_policy,
+    current_voice_product_port,
     current_validation_runtime_scope,
     launch_narration_production_runtime,
     narration_feature_readiness_status,
@@ -279,6 +280,7 @@ def _t4_product_release_runtime_ready() -> bool:
         and production.get("digest_keyring_loaded") is True
         and production.get("production_backend_installed") is True
         and production.get("worker_running") is True
+        and production.get("reference_clone_ready") is True
         and _production_runtime_accessible(production)
     )
 
@@ -302,6 +304,7 @@ def _t4_hidden_validation_runtime_ready() -> bool:
         and production.get("digest_keyring_loaded") is True
         and production.get("production_backend_installed") is True
         and production.get("worker_running") is True
+        and production.get("reference_clone_ready") is True
         and _production_runtime_accessible(production)
         and current_validation_runtime_scope() is not None
     )
@@ -354,7 +357,8 @@ def _build_fixed_local_owner_narration_backend(
     )
     base_capabilities = (
         t4_product_capabilities(
-            reference_clone_released=False,
+            reference_clone_released=True,
+            voice_design_released=True,
             official_presets_released=True,
         )
         if product_ready
@@ -376,7 +380,7 @@ def _build_fixed_local_owner_narration_backend(
         runtime_status_provider=narration_production_runtime_status,
         profile_creation_receipts=SqlAlchemyVoiceActionReceiptPort(session),
         cache_runtime=current_narration_cache_runtime(),
-        voice_product=None,
+        voice_product=(current_voice_product_port() if product_ready else None),
         official_voice_selection=(
             OfficialVoiceSelectionService(lambda: Session(get_engine()))
             if product_ready

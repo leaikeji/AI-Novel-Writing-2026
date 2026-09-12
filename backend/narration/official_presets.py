@@ -101,12 +101,13 @@ class OfficialPreset:
         return {**value, "provenance_fingerprint_sha256": canonical_sha256(value)}
 
 
-# Product IDs and ordering are a public catalog contract.  The two legacy
-# entries retain their old language, Provider maps, and provenance bytes.
+# Product IDs and ordering are a public catalog contract. Native-language
+# metadata remains descriptive, while every selectable product voice renders
+# the author's text as Mandarin (zh-CN).
 OFFICIAL_PRESETS: Final[tuple[OfficialPreset, ...]] = (
     OfficialPreset(
         preset_id="qwen.WarmFemale",
-        display_name="温暖女声",
+        display_name="Serena｜温暖女声",
         group="中文女声",
         language="zh-CN",
         official_speaker="Serena",
@@ -141,29 +142,29 @@ OFFICIAL_PRESETS: Final[tuple[OfficialPreset, ...]] = (
     ),
     OfficialPreset(
         preset_id="qwen.Dylan",
-        display_name="Dylan｜北京口音年轻男声",
+        display_name="Dylan｜年轻男声",
         group="中文男声",
         language="zh-CN",
         official_speaker="Dylan",
         native_language="zh-CN",
-        dialect="北京口音",
+        dialect=None,
         local_voice_id="Dylan",
-        description="带北京口音的年轻中文男声。",
+        description="自然、有活力的普通话年轻男声。",
     ),
     OfficialPreset(
         preset_id="qwen.Eric",
-        display_name="Eric｜四川口音男声",
+        display_name="Eric｜沉稳男声",
         group="中文男声",
         language="zh-CN",
         official_speaker="Eric",
         native_language="zh-CN",
-        dialect="四川口音",
+        dialect=None,
         local_voice_id="Eric",
-        description="带四川口音的中文男声。",
+        description="沉稳、有亲和力的普通话男声。",
     ),
     OfficialPreset(
         preset_id="qwen.ClearMale",
-        display_name="明亮男声",
+        display_name="Aiden｜明亮男声",
         group="中文男声",
         language="zh-CN",
         official_speaker="Aiden",
@@ -177,35 +178,35 @@ OFFICIAL_PRESETS: Final[tuple[OfficialPreset, ...]] = (
     OfficialPreset(
         preset_id="qwen.Ryan",
         display_name="Ryan｜节奏感男声",
-        group="英语男声",
-        language="en",
+        group="普通话男声",
+        language="zh-CN",
         official_speaker="Ryan",
         native_language="en",
         dialect=None,
         local_voice_id="Ryan",
-        description="富有节奏感的英语男声。",
+        description="富有节奏感的普通话男声。",
     ),
     OfficialPreset(
         preset_id="qwen.OnoAnna",
         display_name="Ono_Anna｜轻快女声",
-        group="日语女声",
-        language="ja-JP",
+        group="普通话女声",
+        language="zh-CN",
         official_speaker="Ono_Anna",
         native_language="ja-JP",
         dialect=None,
         local_voice_id="Ono_Anna",
-        description="轻快的日语女声。",
+        description="轻快的普通话女声。",
     ),
     OfficialPreset(
         preset_id="qwen.Sohee",
         display_name="Sohee｜温暖女声",
-        group="韩语女声",
-        language="ko-KR",
+        group="普通话女声",
+        language="zh-CN",
         official_speaker="Sohee",
         native_language="ko-KR",
         dialect=None,
         local_voice_id="Sohee",
-        description="温暖的韩语女声。",
+        description="温暖的普通话女声。",
     ),
 )
 OFFICIAL_PRESETS_BY_ID: Final[Mapping[str, OfficialPreset]] = {

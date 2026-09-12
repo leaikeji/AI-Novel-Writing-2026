@@ -596,6 +596,67 @@ describe("SegmentPlaybackQueue gaps, cancellation and controls", () => {
     });
   });
 
+  it("skips failed and cancelled terminal gaps but continues with the next ready segment", async () => {
+    const manifest = createManifest([
+      "ready",
+      "failed",
+      "cancelled",
+      "ready",
+      "pending",
+      "ready",
+    ]);
+    const driver = new FakeDriver();
+    const events: SegmentPlaybackQueueEvent[] = [];
+    const queue = new SegmentPlaybackQueue({
+      fetchMedia: (async (request: { url: string }) => {
+        const segment = manifest.segments.find((candidate) => candidate.audio?.url === request.url);
+        if (!segment) throw new Error("unknown URL");
+        return responseFor(segment);
+      }) as never,
+      createMediaElementDriver: () => driver,
+      onEvent: (event) => events.push(event),
+    });
+
+    await expect(queue.start({
+      lease: lease(),
+      manifest,
+      startOrdinal: 0,
+      rate: 1,
+      volume: 1,
+    })).resolves.toMatchObject({ kind: "started" });
+    await vi.waitFor(() => {
+      expect(events.some((event) => event.type === "blocked")).toBe(true);
+    });
+
+    expect(driver.played).toEqual([0, 3]);
+    expect(events.filter((event) => event.type === "segment-skipped")).toEqual([
+      expect.objectContaining({
+        type: "segment-skipped",
+        failure: {
+          code: "FAILED_GAP",
+          message: "第 2 句音频失败，已跳过。",
+          ordinal: 1,
+          segmentId: segmentId(1),
+          retryable: true,
+        },
+      }),
+      expect.objectContaining({
+        type: "segment-skipped",
+        failure: {
+          code: "CANCELLED_GAP",
+          message: "第 3 句音频已取消，已跳过。",
+          ordinal: 2,
+          segmentId: segmentId(2),
+          retryable: false,
+        },
+      }),
+    ]);
+    expect(events[events.length - 1]).toMatchObject({
+      type: "blocked",
+      failure: { code: "PENDING_GAP", ordinal: 4 },
+    });
+  });
+
   it("forwards pause, resume, bounded rate and bounded volume to the active backend", async () => {
     const manifest = createManifest(["ready"]);
     const driver = new FakeDriver(true);

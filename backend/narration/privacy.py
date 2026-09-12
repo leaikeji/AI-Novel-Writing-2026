@@ -130,6 +130,7 @@ _MUTATION_CAPABILITY: Final[dict[NarrationSettingsOperation, wire.CapabilityKey]
     NarrationSettingsOperation.ARCHIVE_VOICE_PROFILE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION: wire.CapabilityKey.PRESET_VOICE_SOURCE,
     NarrationSettingsOperation.CREATE_UPLOADED_VOICE_VERSION: wire.CapabilityKey.REFERENCE_CLONE,
+    NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION: wire.CapabilityKey.VOICE_DESIGN,
     NarrationSettingsOperation.CREATE_VOICE_PREVIEW: wire.CapabilityKey.VOICE_PREVIEW,
     NarrationSettingsOperation.LOCK_VOICE_PROFILE: wire.CapabilityKey.READING_SETTINGS,
     NarrationSettingsOperation.PUT_CHARACTER_VOICE_BINDING: wire.CapabilityKey.READING_SETTINGS,
@@ -149,6 +150,7 @@ _TRANSACTIONAL_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
         # normalization/publication and model work must never run while the
         # request-scoped settings transaction is open.
         NarrationSettingsOperation.CREATE_UPLOADED_VOICE_VERSION,
+        NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
         NarrationSettingsOperation.LOCK_VOICE_PROFILE,
@@ -225,6 +227,7 @@ def t2_settings_capabilities() -> wire.NarrationCapabilities:
 def t4_product_capabilities(
     *,
     reference_clone_released: bool = False,
+    voice_design_released: bool = False,
     official_presets_released: bool = False,
 ) -> wire.NarrationCapabilities:
     """Expose only the core T4 chain after an explicit product release flag.
@@ -239,6 +242,8 @@ def t4_product_capabilities(
 
     if type(reference_clone_released) is not bool:
         raise TypeError("reference_clone_released must be an exact boolean")
+    if type(voice_design_released) is not bool:
+        raise TypeError("voice_design_released must be an exact boolean")
     if type(official_presets_released) is not bool:
         raise TypeError("official_presets_released must be an exact boolean")
     enabled = wire.T4_PRODUCT_CAPABILITY_KEYS
@@ -249,6 +254,8 @@ def t4_product_capabilities(
                 wire.CapabilityKey.VOICE_PREVIEW,
             }
         )
+    if voice_design_released:
+        enabled = enabled | frozenset({wire.CapabilityKey.VOICE_DESIGN})
     if official_presets_released:
         enabled = enabled | frozenset(
             {
@@ -307,6 +314,7 @@ _VOICE_ASSET_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozense
         NarrationSettingsOperation.PUT_VOICE_PROFILE,
         NarrationSettingsOperation.ARCHIVE_VOICE_PROFILE,
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
+        NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
     }
 )

@@ -8,6 +8,7 @@ import {
   createNarrationCloudConsent,
   createNarrationCloudTTSConsent,
   getOfficialVoicePreviewAudio,
+  createDesignedVoiceVersion,
   createPresetVoiceVersion,
   createNarrationWorkflow,
   createUploadedVoiceVersion,
@@ -71,7 +72,7 @@ function officialCatalog(
       }
       return {
         preset_id: evidence.presetId,
-        display_name: female ? "温暖女声" : "明亮男声",
+        display_name: `${evidence.localVoiceId}｜${female ? "温暖女声" : "官方音色"}`,
         official_speaker: evidence.localVoiceId,
         native_language: evidence.nativeLanguage,
         dialect: evidence.dialect,
@@ -112,7 +113,7 @@ function response(payload: unknown, status = 200): Response {
 function settingsValues() {
   return {
     narrator: null,
-    language: "zh-CN",
+    language: "zh-CN" as const,
     output_format: "m4a_aac_lc" as const,
     script_review_policy: "blockers_only" as const,
     analysis_mode: "local_rules_only" as const,
@@ -180,7 +181,7 @@ function uploadedVersion() {
     model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
     model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
     preset_key: null,
-    language: "zh-CN",
+    language: "zh-CN" as const,
     fingerprint: "a".repeat(64),
     quality_state: "pending",
     activation_basis: "preview_confirmed",
@@ -212,9 +213,10 @@ function uploadedVersion() {
 function uploadMetadata() {
   return {
     expected_profile_version: 1,
-    language: "zh-CN",
+    language: "zh-CN" as const,
     original_filename: "authorized-reference.wav",
     reference_sha256: "b".repeat(64),
+    reference_text: "这是一段准确对应参考录音的普通话文字。",
     rights: {
       notice_version: "voice-rights/1",
       source_identifier: "local-recording-1",
@@ -225,6 +227,23 @@ function uploadMetadata() {
       subject_consent_reference: "consent-local-1",
       confirmed: true as const,
     },
+  };
+}
+
+function designedVersion() {
+  return {
+    ...uploadedVersion(),
+    source_type: "generated",
+    state: "draft",
+    provider_id: null,
+    model_id: null,
+    model_revision: null,
+    rights: {
+      ...uploadedVersion().rights,
+      source_kind: "qwen_synthetic_design",
+    },
+    reference_asset_id: null,
+    description_available: true,
   };
 }
 
@@ -604,10 +623,10 @@ describe("narration settings API client", () => {
   });
 
   it.each([
-    ["qwen.OnoAnna", "ja-JP"],
-    ["qwen.Sohee", "ko-KR"],
+    ["qwen.OnoAnna", "zh-CN"],
+    ["qwen.Sohee", "zh-CN"],
   ] as const)(
-    "validates %s selection language evidence from the pinned catalog",
+    "validates %s as Mandarin product output while preserving native metadata",
     async (presetId, targetLanguage) => {
       const preset = officialCatalog().items.find((item) => item.preset_id === presetId)!;
       const version = {
@@ -923,6 +942,35 @@ describe("narration settings API client", () => {
     });
   });
 
+  it("creates a Mandarin designed candidate with exact JSON and idempotency", async () => {
+    fetchMock.mockResolvedValue(response(designedVersion(), 201));
+
+    const result = await createDesignedVoiceVersion(
+      PROFILE_ID,
+      {
+        expected_profile_version: 1,
+        description: "沉稳、清晰的青年男声，语速适中。",
+        language: "zh-CN",
+        seed: null,
+      },
+      "voice-designed-0001",
+    );
+
+    expect(result.source_type).toBe("generated");
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe(`/ai-novel-world-2026/voice-profiles/${PROFILE_ID}/versions/designed`);
+    expect(init?.headers).toMatchObject({
+      "Content-Type": "application/json",
+      "Idempotency-Key": "voice-designed-0001",
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      expected_profile_version: 1,
+      description: "沉稳、清晰的青年男声，语速适中。",
+      language: "zh-CN",
+      seed: null,
+    });
+  });
+
   it("provides a pollable preview resource instead of treating 202 as ready audio", async () => {
     const previewId = "10000000-0000-4000-8000-000000000007";
     fetchMock.mockResolvedValue(response({
@@ -955,6 +1003,7 @@ describe("narration settings API client", () => {
         "X-TTS-Model-Id": OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
         "X-TTS-Model-Revision": OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
         "X-TTS-Speaker-Id": OFFICIAL_PRESET_EVIDENCE[0].localVoiceId,
+        "X-TTS-Preview-Cache": "miss",
       },
     }));
 
@@ -965,6 +1014,7 @@ describe("narration settings API client", () => {
 
     expect(result.audio).toBeInstanceOf(Blob);
     expect(result.official_speaker).toBe("Serena");
+    expect(result.cache_status).toBe("miss");
     expect(fetchMock).toHaveBeenCalledWith(
       `/ai-novel-world-2026/novels/${NOVEL_ID}/official-voice-preview-audio`,
       expect.objectContaining({
@@ -990,6 +1040,7 @@ describe("narration settings API client", () => {
       "X-TTS-Model-Id": OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
       "X-TTS-Model-Revision": OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
       "X-TTS-Speaker-Id": "wrong-speaker",
+      "X-TTS-Preview-Cache": "miss",
     };
     fetchMock.mockResolvedValueOnce(new Response(new Uint8Array([1]), {
       status: 200,
@@ -1003,7 +1054,7 @@ describe("narration settings API client", () => {
     await expect(getOfficialVoicePreviewAudio(NOVEL_ID, {
       preset_id: "qwen.WarmFemale",
       language: "en-US",
-    } as never)).rejects.toThrow(/expected one of/u);
+    } as never)).rejects.toThrow(/expected literal zh-CN/u);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     fetchMock.mockResolvedValueOnce(new Response(

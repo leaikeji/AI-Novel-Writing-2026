@@ -64,6 +64,7 @@ class NarrationSettingsOperation(str, Enum):
     ARCHIVE_VOICE_PROFILE = "archive_voice_profile"
     CREATE_PRESET_VOICE_VERSION = "create_preset_voice_version"
     CREATE_UPLOADED_VOICE_VERSION = "create_uploaded_voice_version"
+    CREATE_DESIGNED_VOICE_VERSION = "create_designed_voice_version"
     CREATE_VOICE_PREVIEW = "create_voice_preview"
     GET_VOICE_PREVIEW = "get_voice_preview"
     LOCK_VOICE_PROFILE = "lock_voice_profile"
@@ -144,6 +145,7 @@ NARRATION_ERROR_HTTP_STATUS: Final[dict[wire.NarrationErrorCode, int]] = {
     wire.NarrationErrorCode.VOICE_RIGHTS_REQUIRED: status.HTTP_403_FORBIDDEN,
     wire.NarrationErrorCode.VOICE_RIGHTS_UNAVAILABLE: status.HTTP_403_FORBIDDEN,
     wire.NarrationErrorCode.VOICE_SOURCE_UNAVAILABLE: status.HTTP_409_CONFLICT,
+    wire.NarrationErrorCode.VOICE_LANGUAGE_UNSUPPORTED: status.HTTP_422_UNPROCESSABLE_CONTENT,
     wire.NarrationErrorCode.REFERENCE_AUDIO_INVALID: status.HTTP_422_UNPROCESSABLE_CONTENT,
     wire.NarrationErrorCode.PREVIEW_UNAVAILABLE: status.HTTP_503_SERVICE_UNAVAILABLE,
     wire.NarrationErrorCode.PREVIEW_FAILED: status.HTTP_502_BAD_GATEWAY,
@@ -848,6 +850,34 @@ async def uploaded_voice_version_create(
             idempotency_key=idempotency_key,
             multipart_content_type=content_type,
             multipart_body=body,
+        ),
+        wire.VoiceProfileVersionResource,
+    )
+
+
+@router.post(
+    "/voice-profiles/{profile_id}/versions/designed",
+    response_model=wire.VoiceProfileVersionResource,
+    status_code=status.HTTP_201_CREATED,
+)
+def designed_voice_version_create(
+    profile_id: UUID,
+    payload: wire.CreateDesignedVoiceVersionRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=128,
+        pattern=_IDEMPOTENCY_HEADER_PATTERN,
+    ),
+    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
+) -> wire.VoiceProfileVersionResource:
+    return _run(
+        backend,
+        NarrationSettingsApiCommand(
+            operation=NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION,
+            profile_id=profile_id,
+            payload=payload,
+            idempotency_key=idempotency_key,
         ),
         wire.VoiceProfileVersionResource,
     )

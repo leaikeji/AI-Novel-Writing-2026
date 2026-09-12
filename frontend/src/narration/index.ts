@@ -21,13 +21,14 @@ import {
   createCharacterVoiceRoster,
   type CharacterVoiceRosterReactRuntime,
 } from "./character-voice-roster";
-import type {
-  CharacterVoiceBindingPolicy,
-  CharacterVoiceBindingResource,
-  NarrationOverviewResponse,
-  VoiceProfileResource,
+import {
+  type CharacterVoiceBindingPolicy,
+  type CharacterVoiceBindingResource,
+  type NarrationOverviewResponse,
+  type VoiceProfileResource,
 } from "./contracts";
 import { NarrationContractError } from "./contracts";
+import { officialVoiceProfileDisplayName } from "./voice-display-name";
 import type { PronunciationPanelReactRuntime } from "./pronunciation-panel";
 import {
   createOfficialVoiceSelectionPanel,
@@ -158,11 +159,14 @@ type CurrentVoiceSummary =
 
 function voiceLanguageLabel(language: string): string {
   const normalized = language.trim().toLocaleLowerCase("en-US");
-  if (normalized === "zh" || normalized.startsWith("zh-")) return "中文";
+  if (normalized === "zh" || normalized.startsWith("zh-")) return "普通话";
   if (normalized === "ja" || normalized.startsWith("ja-")) return "日本語";
   if (normalized === "en" || normalized.startsWith("en-")) return "English";
   return language.trim() || "语言未设置";
 }
+
+
+export { officialVoiceProfileDisplayName } from "./voice-display-name";
 
 
 function currentVoiceSummary(
@@ -183,10 +187,12 @@ function currentVoiceSummary(
     ? "官方音色"
     : version.source_type === "uploaded"
       ? "参考录音音色"
-      : "旧音色不可用";
+      : "文字设计音色";
   return Object.freeze({
     kind: "resolved",
-    name: profile.name,
+    name: version.source_type === "preset"
+      ? officialVoiceProfileDisplayName(profile.name, version.preset_key)
+      : profile.name,
     sourceLabel,
     languageLabel: voiceLanguageLabel(version.language || language),
   });
@@ -235,7 +241,7 @@ function characterVoiceBindingPolicy(
 
 function initialCharacterVoiceBindingProjection(
   props: CharacterVoiceCardPanelProps,
-  fallbackLanguage: string,
+  fallbackLanguage: "zh-CN",
 ): CharacterVoiceBindingProjection | undefined {
   const initial = props.initialBinding;
   if (initial === undefined) return undefined;
@@ -247,7 +253,7 @@ function initialCharacterVoiceBindingProjection(
       binding_policy: "unset",
       profile_id: null,
       version_id: null,
-      language: fallbackLanguage,
+      language: "zh-CN",
       version: 0,
     });
   }
@@ -264,7 +270,7 @@ function initialCharacterVoiceBindingProjection(
     || !hasCompletePair
     || !validVersion
     || !validConfigured
-    || !initial.language.trim()
+    || initial.language !== "zh-CN"
   ) return undefined;
   return Object.freeze({
     binding_id: policy === "unset" ? null : initial.binding_id,
@@ -273,7 +279,7 @@ function initialCharacterVoiceBindingProjection(
     binding_policy: policy,
     profile_id: initial.profile_id,
     version_id: initial.voice_version_id,
-    language: initial.language,
+    language: "zh-CN",
     version: initial.version,
   });
 }
@@ -425,7 +431,6 @@ export function createNarrationReadingPage(
   }
 
   function VoiceLibrarySection(props: VoiceLibrarySectionProps): unknown {
-    const [editorOpen, setEditorOpen] = React.useState(false);
     const overview = props.context.overview;
     const editorId = `anw-narrator-voice-library-${props.novelId}`;
     const currentVoice = props.context.voiceProfilesError === null
@@ -452,7 +457,7 @@ export function createNarrationReadingPage(
         h(
           "div",
           { className: "anw-narrator-current-voice__copy" },
-          h("span", null, "作品旁白"),
+          h("span", null, "当前旁白"),
           props.context.voiceProfilesError !== null
             ? h("strong", null, "当前声音暂不可用")
             : currentVoice?.kind === "resolved"
@@ -464,41 +469,32 @@ export function createNarrationReadingPage(
             ? h("small", null, `${currentVoice.sourceLabel} · ${currentVoice.languageLabel}`)
             : props.context.voiceProfilesError !== null
               ? h("small", { role: "alert" }, props.context.voiceProfilesError)
-              : h("small", null, "从 Qwen 官方音色中直接选择，不需要先试听。"),
+              : h("small", null, "尚未选择时，将在下方直接设置。"),
         ),
-        h(
-          "div",
-          { className: "anw-narrator-current-voice__actions" },
-          props.context.voiceProfilesError !== null
-            ? h("button", {
+        props.context.voiceProfilesError !== null
+          ? h(
+            "div",
+            { className: "anw-narrator-current-voice__actions" },
+            h("button", {
               type: "button",
               className: "anw-narration-secondary-action",
               onClick: props.context.onRefresh,
             }, "重新读取")
-            : null,
-          h("button", {
-            type: "button",
-            className: "anw-narration-primary-action",
-            "aria-expanded": editorOpen,
-            "aria-controls": editorId,
-            onClick: () => setEditorOpen((value) => !value),
-          }, editorOpen ? "收起音色列表" : "更换旁白音色"),
-        ),
+          )
+          : null,
       ),
-      editorOpen
-        ? h("div", { id: editorId, className: "anw-narrator-voice-library-editor" },
-          h(OfficialVoiceSelectionPanel, {
-            key: "narrator",
-            novelId: props.novelId,
-            settings: overview.settings,
-            target: { kind: "narrator" },
-            capabilities: overview.capabilities,
-            authorization: overview.authorization,
-            projection: profileProjection,
-            onChanged: publishChanged,
-          }),
-        )
-        : null,
+      h("div", { id: editorId, className: "anw-narrator-voice-library-editor" },
+        h(OfficialVoiceSelectionPanel, {
+          key: "narrator",
+          novelId: props.novelId,
+          settings: overview.settings,
+          target: { kind: "narrator" },
+          capabilities: overview.capabilities,
+          authorization: overview.authorization,
+          projection: profileProjection,
+          onChanged: publishChanged,
+        }),
+      ),
     );
   }
 
@@ -521,16 +517,9 @@ export function createNarrationReadingPage(
           context,
         });
       }
-      if (section === "advanced-tuning") {
-        return h(
-          "p",
-          { className: "anw-reading-section-note" },
-          "Qwen TTS 通过自然语言指令控制语气和表达方式。",
-        );
-      }
       if (section === "private-voices") {
         const privateSourceCreationAvailable = overview.voice_sources.some((source) => (
-          source.available && source.source_type === "uploaded"
+          source.available && (source.source_type === "uploaded" || source.source_type === "generated")
         ));
         return h(
           "div",
@@ -544,20 +533,14 @@ export function createNarrationReadingPage(
               suggestedProfileName: "我的朗读音色",
               onProfileLocked: context.onRefresh,
             })
-            : null,
-          h(CachePanel, {
-            novelId: props.novelId,
-            capabilities: overview.capabilities,
-            authorization: overview.authorization,
-            onCleaned: context.onRefresh,
-          }),
+            : h("p", { role: "status", className: "anw-reading-empty" },
+              "私人音色暂不可用，请在运行与存储中检查本地语音服务。"),
         );
       }
       if (section === "reading-rules" || section === "casting-rules" || section === "pronunciation") {
         return h(
           "div",
           { className: "anw-reading-rules-stack" },
-          h(ReadingStatus, { overview, onOpenSection: context.onNavigate }),
           h(ReadingRulesWorkspace, {
             novelId: props.novelId,
             settings: overview.settings,
@@ -582,12 +565,14 @@ export function createNarrationReadingPage(
         );
       }
       if (section !== "storage-privacy" && section !== "audio-cache") return null;
-      return h(CachePanel, {
+      return h("div", { className: "anw-narration-private-stack" },
+      h(ReadingStatus, { overview, onOpenSection: context.onNavigate }),
+      h(CachePanel, {
         novelId: props.novelId,
         capabilities: overview.capabilities,
         authorization: overview.authorization,
         onCleaned: context.onRefresh,
-      });
+      }));
     };
 
     const readingProps: ReadingPageProps = {
@@ -602,33 +587,21 @@ export function createNarrationReadingPage(
           characterId: character.characterId,
           label: character.characterName,
         })),
-      renderNarratorVoiceWorkspace: (context) => h(
-        "div",
-        { className: "anw-narration-narrator-voice-stack" },
-        h(ReadingStatus, {
-          overview: context.overview,
-          onOpenSection: context.onNavigate,
-        }),
-        h(ReadingRulesWorkspace, {
-          novelId: props.novelId,
-          settings: context.overview.settings,
-          capabilities: context.overview.capabilities,
-          authorization: context.overview.authorization,
-          pronunciationScopeOptions: props.scopeTargets
-            .filter((target) => target.novelId === props.novelId)
-            .map((target) => ({
-              kind: target.scopeKind,
-              id: target.scopeId,
-              label: target.label,
-            })),
-          initialSection: "recognition",
-          onSettingsSaved: context.onRefresh,
-          onConsentChanged: context.onRefresh,
-          onPronunciationSaved: context.onRefresh,
-          onRefresh: context.onRefresh,
-          onOpenReadingPreferences: () => undefined,
-        }),
-      ),
+      renderNarratorVoiceWorkspace: (context) => {
+        const voice = context.voiceProfilesError === null
+          ? currentNarratorVoiceSummary(context.overview.settings.values.narrator,
+            context.overview.settings.values.language, context.voiceProfiles)
+          : null;
+        return h("section", { className: "anw-narrator-current-voice", "aria-label": "当前旁白" },
+          h("div", { className: "anw-narrator-current-voice__copy" },
+            h("span", null, "当前旁白"),
+            h("strong", null, voice?.kind === "resolved" ? voice.name
+              : voice?.kind === "unbound" ? "尚未选择旁白" : "声音详情暂不可用"),
+            h("small", null, "更换声音后，请在章节页更新朗读。")),
+          h("div", { className: "anw-narrator-current-voice__actions" },
+            h("button", { type: "button", onClick: () => context.onNavigate("voice-library") }, "选择旁白音色")),
+        );
+      },
       renderSectionContent,
       onSectionChange: props.onSectionChange,
       onStartBookNarration: props.onStartBookNarration,

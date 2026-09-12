@@ -232,7 +232,7 @@ function enabledOverride(): NarrationScopeOverrideResource {
     scope_id: VOLUME_ID,
     enabled: true,
     version: 1,
-    overrides: { ...emptyScopeOverrideValues(), language: "en" },
+    overrides: { ...emptyScopeOverrideValues(), language: "zh-CN" },
   };
 }
 
@@ -262,12 +262,16 @@ describe("scope override helpers", () => {
   it("builds exact CAS replacements and clears disabled overrides", () => {
     expect(buildScopeOverrideRequest(NOVEL_ID, volumeTarget, undefined, true, {
       ...emptyScopeOverrideValues(),
-      language: "en",
+      language: "zh-CN",
     })).toEqual({
       expected_version: 0,
       enabled: true,
-      overrides: { ...emptyScopeOverrideValues(), language: "en" },
+      overrides: { ...emptyScopeOverrideValues(), language: "zh-CN" },
     });
+    expect(() => buildScopeOverrideRequest(NOVEL_ID, volumeTarget, undefined, true, {
+      ...emptyScopeOverrideValues(),
+      language: "en",
+    })).toThrow("范围覆盖仅支持普通话");
     expect(buildScopeOverrideRequest(NOVEL_ID, volumeTarget, enabledOverride(), false, enabledOverride().overrides)).toEqual({
       expected_version: 1,
       enabled: false,
@@ -287,7 +291,34 @@ describe("scope override helpers", () => {
 
 
 describe("scope overrides panel", () => {
-  it("is folded by default and saves a controlled-language override", async () => {
+  it("blocks invalid timing without losing raw input and clears errors when inheritance resumes", () => {
+    const saveOverride = vi.fn();
+    const harness = createReactHarness();
+    const Panel = createScopeOverridesPanel(harness.React);
+    const current = enabledOverride();
+    const panelProps = props({ saveOverride, overrides: [{ ...current,
+      overrides: { ...current.overrides, timing: settings().values.timing },
+    }] });
+    let tree = harness.render(Panel, panelProps);
+    harness.commitEffects();
+    tree = harness.render(Panel, panelProps);
+    const input = () => findAll(tree, (item) => item.type === "input" && item.props.max === 5000)[0]!;
+    (input().props.onChange as (event: unknown) => void)({ target: { value: "6000" } });
+    tree = harness.render(Panel, panelProps);
+    expect(input().props.value).toBe("6000");
+    expect(input().props["aria-invalid"]).toBe(true);
+    expect(findButton(tree, "保存单独设置").props.disabled).toBe(true);
+    (findButton(tree, "保存单独设置").props.onClick as () => void)();
+    expect(saveOverride).not.toHaveBeenCalled();
+    const timingToggle = findAll(tree, (item) => item.type === "label" && textContent(item).includes("单独设置停顿节奏"))[0]!;
+    const checkbox = findAll(timingToggle, (item) => item.type === "input")[0]!;
+    (checkbox.props.onChange as (event: unknown) => void)({ target: { checked: false } });
+    tree = harness.render(Panel, panelProps);
+    expect(textContent(tree)).not.toContain("请输入 0–5000");
+    expect(findButton(tree, "保存单独设置").props.disabled).toBe(false);
+  });
+
+  it("is folded by default, fixes Mandarin, and saves another scoped override", async () => {
     const response = enabledOverride();
     const saveOverride = vi.fn(async () => response);
     const harness = createReactHarness();
@@ -301,12 +332,14 @@ describe("scope overrides panel", () => {
     const enabled = findAll(tree, (item) => item.type === "input" && item.props.type === "checkbox")[0]!;
     (enabled.props.onChange as (event: unknown) => void)({ target: { checked: true, value: "" } });
     tree = harness.render(Panel, panelProps);
-    const language = findAll(tree, (item) => (
-      item.type === "select" && findAll(item, (option) => option.type === "option" && option.props.value === "ja-JP").length > 0
+    expect(textContent(tree)).toContain("普通话（固定）");
+    const textRules = findAll(tree, (item) => (
+      item.type === "label" && textContent(item).includes("单独设置朗读内容")
     ))[0]!;
-    (language.props.onChange as (event: unknown) => void)({ target: { value: "en", checked: false } });
+    const textRulesCheckbox = findAll(textRules, (item) => item.type === "input")[0]!;
+    (textRulesCheckbox.props.onChange as (event: unknown) => void)({ target: { checked: true, value: "" } });
     tree = harness.render(Panel, panelProps);
-    (findButton(tree, "保存范围覆盖").props.onClick as () => void)();
+    (findButton(tree, "保存单独设置").props.onClick as () => void)();
     await settle();
     expect(saveOverride).toHaveBeenCalledWith(
       NOVEL_ID,
@@ -315,7 +348,7 @@ describe("scope overrides panel", () => {
       {
         expected_version: 0,
         enabled: true,
-        overrides: { ...emptyScopeOverrideValues(), language: "en" },
+        overrides: { ...emptyScopeOverrideValues(), text_rules: settings().values.text_rules },
       },
       expect.any(AbortSignal),
     );
@@ -340,16 +373,17 @@ describe("scope overrides panel", () => {
     let tree = harness.render(Panel, panelProps);
     harness.commitEffects();
     tree = harness.render(Panel, panelProps);
-    const language = findAll(tree, (item) => (
-      item.type === "select" && findAll(item, (option) => option.type === "option" && option.props.value === "ja-JP").length > 0
+    const textRules = findAll(tree, (item) => (
+      item.type === "label" && textContent(item).includes("单独设置朗读内容")
     ))[0]!;
-    (language.props.onChange as (event: unknown) => void)({ target: { value: "ja-JP", checked: false } });
+    const textRulesCheckbox = findAll(textRules, (item) => item.type === "input")[0]!;
+    (textRulesCheckbox.props.onChange as (event: unknown) => void)({ target: { checked: true, value: "" } });
     tree = harness.render(Panel, panelProps);
-    (findButton(tree, "保存范围覆盖").props.onClick as () => void)();
+    (findButton(tree, "保存单独设置").props.onClick as () => void)();
     await settle();
     tree = harness.render(Panel, panelProps);
     expect(textContent(tree)).toContain("本地草稿仍保留");
-    (findButton(tree, "刷新最新覆盖").props.onClick as () => void)();
+    (findButton(tree, "刷新最新设置").props.onClick as () => void)();
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
@@ -371,13 +405,13 @@ describe("scope overrides panel", () => {
     let tree = harness.render(Panel, panelProps);
     harness.commitEffects();
     tree = harness.render(Panel, panelProps);
-    const language = findAll(tree, (item) => (
-      item.type === "select"
-      && findAll(item, (option) => option.type === "option" && option.props.value === "ja-JP").length > 0
+    const textRules = findAll(tree, (item) => (
+      item.type === "label" && textContent(item).includes("单独设置朗读内容")
     ))[0]!;
-    (language.props.onChange as (event: unknown) => void)({ target: { value: "ja-JP", checked: false } });
+    const textRulesCheckbox = findAll(textRules, (item) => item.type === "input")[0]!;
+    (textRulesCheckbox.props.onChange as (event: unknown) => void)({ target: { checked: true, value: "" } });
     tree = harness.render(Panel, panelProps);
-    (findButton(tree, "保存范围覆盖").props.onClick as () => void)();
+    (findButton(tree, "保存单独设置").props.onClick as () => void)();
     expect(signal?.aborted).toBe(false);
     harness.unmount();
     expect(signal?.aborted).toBe(true);

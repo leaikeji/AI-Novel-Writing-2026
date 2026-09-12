@@ -399,7 +399,16 @@ describe("reading rules surface", () => {
     let tree = harness.render(Panel, panelProps);
     harness.commitEffects();
     tree = harness.render(Panel, panelProps);
-    expect(textContent(tree)).toContain("云端辅助识别当前不可用");
+    expect(textContent(tree)).toContain("说话人识别：仅本地规则。");
+    expect(findAll(tree, (element) => element.type === "input" && element.props.name === "narration-analysis-mode")).toHaveLength(0);
+    const unavailable = findAll(tree, (element) => element.props["data-cloud-unavailable"] === "true")[0]!;
+    expect(unavailable.props.role).toBe("note");
+    expect(unavailable.props.className).not.toBe("anw-reading-rules-panel__notice");
+    expect(unavailable.props["data-reason-code"]).toBeTruthy();
+    const explanation = findAll(unavailable, (element) => element.type === "details")[0]!;
+    expect(explanation.props.open).toBeUndefined();
+    expect(textContent(explanation)).toContain("查看识别能力说明");
+    expect(findAll(explanation, (element) => element.type === "code")).toHaveLength(1);
     expect(findAll(tree, (element) => (
       element.type === "input" && element.props.value === "cloud_assisted"
     ))).toHaveLength(0);

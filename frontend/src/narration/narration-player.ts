@@ -263,8 +263,9 @@ function contiguousReadyEnd(manifest: NarrationManifestV2, startOrdinal: number)
 
 
 /**
- * Consumes only server-authoritative ready ranges.  It never searches past the
- * first gap for a later ready island.
+ * Starts only inside a server-authoritative ready range. Once started, the
+ * queue may cross terminal failed/cancelled gaps, but it still stops at the
+ * first pending/queued/rendering segment.
  */
 export function decideManifestPlayback(
   manifest: NarrationManifestV2,
@@ -565,7 +566,7 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
       lease,
       manifest: this.manifest,
       startOrdinal: plan.target.ordinal,
-      endOrdinalExclusive: plan.readyRange.end_ordinal_exclusive,
+      endOrdinalExclusive: this.manifest.segments.length,
       rate: this.state.rate,
       volume: boundedVolume(this.state.volume),
       startOffsetMs,
@@ -863,6 +864,14 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
         offsetMs: event.offsetMs,
         durationMs: event.durationMs,
         backend: event.backend,
+      });
+      return;
+    }
+    if (event.type === "segment-skipped") {
+      this.publish({
+        phase: this.state.phase === "paused" ? "paused" : this.state.phase,
+        backend: event.backend,
+        failure: event.failure,
       });
       return;
     }

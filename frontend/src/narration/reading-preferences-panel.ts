@@ -1,4 +1,5 @@
 import { NarrationApiError } from "./api";
+import { TIMING_INPUT_FIELDS, parseTimingInput, updateInvalidTimingInputs, type InvalidTimingInputs } from "./timing-input";
 import type {
   CapabilityKey,
   FeatureCapability,
@@ -23,7 +24,7 @@ import {
 } from "./tts-provider";
 
 
-export const SUPPORTED_READING_LANGUAGES = ["zh-CN", "en", "ja-JP"] as const;
+export const SUPPORTED_READING_LANGUAGES = ["zh-CN"] as const;
 export type SupportedReadingLanguage = typeof SUPPORTED_READING_LANGUAGES[number];
 
 export type ReadingPausePreset = "compact" | "natural" | "relaxed" | "custom";
@@ -77,7 +78,7 @@ export interface ReadingPreferencesReactRuntime {
 
 
 export interface ReadingBasePreferencesDraft {
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly textRules: NarrationTextRules;
   readonly timing: NarrationTimingSettings;
   readonly ttsProvider: TTSProviderSelection;
@@ -361,6 +362,7 @@ export function createReadingPreferencesPanel(
       props.settings.values.playback,
     );
     const [operation, setOperation] = React.useState<ReadingPreferencesOperation>(IDLE_OPERATION);
+    const [invalidTimingInputs, setInvalidTimingInputs] = React.useState<InvalidTimingInputs>({});
     const controllers = React.useRef<Set<AbortController>>(new Set());
     const novelRef = React.useRef(props.novelId);
     novelRef.current = props.novelId;
@@ -369,6 +371,7 @@ export function createReadingPreferencesPanel(
       for (const controller of controllers.current) controller.abort();
       controllers.current.clear();
       const sameScope = baseline.novel_id === props.novelId;
+      if (!sameScope) setInvalidTimingInputs({});
       const previousBase = readingBasePreferencesFromSettings(baseline);
       const nextBase = readingBasePreferencesFromSettings(props.settings);
       setBaseline(props.settings);
@@ -399,7 +402,8 @@ export function createReadingPreferencesPanel(
     const selectedFirstPersonCharacter = baseDraft.textRules.first_person_character_id;
     const firstPersonCharacterValid = baseDraft.textRules.first_person_mode === "narrator"
       || characters.some((character) => character.characterId === selectedFirstPersonCharacter);
-    const baseDirty = !baseDraftEqual(baseDraft, readingBasePreferencesFromSettings(baseline));
+    const timingValid = Object.keys(invalidTimingInputs).length === 0;
+    const baseDirty = !timingValid || !baseDraftEqual(baseDraft, readingBasePreferencesFromSettings(baseline));
     const playbackDirty = !playbackEqual(playbackDraft, baseline.values.playback);
     const disabled = !scopeMatches || !canConfigure || busy;
     const prefix = `anw-reading-preferences-${props.novelId}`;
@@ -430,7 +434,7 @@ export function createReadingPreferencesPanel(
     };
 
     const saveBase = (): void => {
-      if (disabled || !baseDirty || !languageSupported) return;
+      if (disabled || !baseDirty || !languageSupported || !timingValid || !firstPersonCharacterValid) return;
       const controller = begin("base");
       const snapshot = baseDraft;
       const baselineVersion = baseline.version;
@@ -443,6 +447,7 @@ export function createReadingPreferencesPanel(
         }
         setBaseline(resource);
         setBaseDraft(readingBasePreferencesFromSettings(resource));
+        setInvalidTimingInputs({});
         setOperation({ kind: null, message: "基础朗读设置已保存。", failure: null });
         props.onSettingsSaved?.(resource);
       }).catch((reason: unknown) => fail(controller, reason));
@@ -473,13 +478,13 @@ export function createReadingPreferencesPanel(
         role: "region",
         "aria-labelledby": `${prefix}-heading`,
       },
-      h("h2", { id: `${prefix}-heading` }, "旁白与朗读偏好"),
+      h("h2", { id: `${prefix}-heading` }, "基础朗读"),
       h("p", { role: "alert" }, "朗读设置与当前作品不一致，已拒绝显示。"),
       );
     }
 
     const reason = blockedReason(props);
-    const pausePreset = pausePresetForTiming(baseDraft.timing);
+    const pausePreset = timingValid ? pausePresetForTiming(baseDraft.timing) : "custom";
     const providerPresentation = TTS_PROVIDER_PRESENTATIONS[baseDraft.ttsProvider.providerId];
     const operationNode = operation.failure
       ? h("div", { className: "anw-reading-preferences-panel__error", role: "alert" },
@@ -505,13 +510,12 @@ export function createReadingPreferencesPanel(
     },
     h("header", { className: "anw-reading-preferences-panel__header" },
       h("div", null,
-        h("p", { className: "anw-reading-preferences-panel__eyebrow" }, "作品级设置"),
-        h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "旁白与朗读偏好"),
+        h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "基础朗读"),
       ),
       h("span", { className: "anw-reading-preferences-panel__version" }, `设置版本 ${baseline.version}`),
     ),
     h("p", { className: "anw-reading-preferences-panel__intro" },
-      "倍速和音量只改变播放器；语言、正文规则和停顿只影响以后生成的新脚本与 Edition。",
+      "播放偏好随时调整；生成设置只用于之后生成的音频，不改变正文或已有朗读。",
     ),
     reason
       ? h("p", { className: "anw-reading-preferences-panel__notice", role: "note" }, reason)
@@ -523,9 +527,9 @@ export function createReadingPreferencesPanel(
     h("div", { className: "anw-reading-preferences-panel__section-heading" },
       h("div", null,
         h("h3", { id: `${prefix}-playback-heading` }, "播放偏好"),
-        h("p", null, "调整后立即作用于当前播放器，保存使用独立窄 PATCH，不会覆盖旁白和规则。"),
+        h("p", null, "保存倍速和音量偏好后，请到章节页播放。无需重新生成音频。"),
       ),
-      h("span", { className: playbackDirty ? "is-unsaved" : "" }, playbackDirty ? "本地未同步" : "已同步"),
+      h("span", { className: playbackDirty ? "is-unsaved" : "" }, playbackDirty ? "尚未保存" : "已保存"),
     ),
     h("fieldset", { disabled },
       h("legend", { className: "anw-reading-preferences-panel__sr-only" }, "播放器倍速与音量"),
@@ -577,18 +581,18 @@ export function createReadingPreferencesPanel(
     },
     h("div", { className: "anw-reading-preferences-panel__section-heading" },
       h("div", null,
-        h("h3", { id: `${prefix}-base-heading` }, "新朗读版本的基础规则"),
-        h("p", null, "这些选项不会改写正文或历史 Edition。"),
+        h("h3", { id: `${prefix}-base-heading` }, "生成设置"),
+        h("p", null, "保存后，在章节页更新朗读时生效。已有音频保持不变。"),
       ),
       h("span", { className: baseDirty ? "is-unsaved" : "" }, baseDirty ? "有未保存更改" : "已同步"),
     ),
-    h("fieldset", { disabled },
+    h("fieldset", { disabled, className: "anw-reading-preferences-panel__providers" },
       h("legend", null, "语音生成位置"),
       ...(["local_qwen3_tts", "aliyun_qwen_audio_tts"] as const).map((providerId) => {
         const presentation = TTS_PROVIDER_PRESENTATIONS[providerId];
         return h("label", {
           key: providerId,
-          className: baseDraft.ttsProvider.providerId === providerId ? "is-selected" : "",
+          className: `anw-reading-provider-option${baseDraft.ttsProvider.providerId === providerId ? " is-selected" : ""}`,
         },
         h("input", {
           type: "radio",
@@ -626,24 +630,10 @@ export function createReadingPreferencesPanel(
       h("p", { role: "note" }, `当前选择：${providerPresentation.modelLabel}`),
     ),
     h("fieldset", { disabled },
-      h("legend", null, "语言与正文"),
-      h("label", { className: "anw-reading-preferences-panel__select" },
-        h("span", null, "作品朗读语言"),
-        h("select", {
-          value: baseDraft.language,
-          "aria-invalid": !languageSupported,
-          onChange: (event: ValueChangeEvent) => setBaseDraft((current) => ({
-            ...current,
-            language: event.target.value,
-          })),
-        },
-        !languageSupported
-          ? h("option", { value: baseDraft.language, disabled: true }, `旧值 ${baseDraft.language}（请重新选择）`)
-          : null,
-        h("option", { value: "zh-CN" }, "中文（简体）"),
-        h("option", { value: "en" }, "英语"),
-        h("option", { value: "ja-JP" }, "日语"),
-        ),
+      h("legend", null, "朗读内容"),
+      h("div", { className: "anw-reading-preferences-panel__select" },
+        h("span", null, "所有声音统一使用"),
+        h("strong", null, "普通话（固定）"),
       ),
       ...([
         ["read_chapter_title", "朗读章节标题"],
@@ -664,7 +654,7 @@ export function createReadingPreferencesPanel(
       h("span", null, label),
       )),
       h("details", { className: "anw-reading-preferences-panel__advanced" },
-        h("summary", null, "高级：叙述与内心独白声音"),
+        h("summary", null, "叙述与内心独白的声音"),
         h("div", null,
           h("label", null,
             h("span", null, "第一人称叙述"),
@@ -744,10 +734,10 @@ export function createReadingPreferencesPanel(
         name: `${prefix}-pause-preset`,
         value: preset,
         checked: pausePreset === preset,
-        onChange: () => setBaseDraft((current) => ({
-          ...current,
-          timing: READING_PAUSE_PRESETS[preset],
-        })),
+        onChange: () => {
+          setInvalidTimingInputs({});
+          setBaseDraft((current) => ({ ...current, timing: READING_PAUSE_PRESETS[preset] }));
+        },
       }),
       h("span", null, PAUSE_LABELS[preset]),
       h("small", null, PAUSE_DESCRIPTIONS[preset]),
@@ -757,37 +747,41 @@ export function createReadingPreferencesPanel(
         : null,
     ),
     h("details", { className: "anw-reading-preferences-panel__advanced" },
-      h("summary", null, "高级：精确停顿毫秒"),
-      h("p", null, "仅在预设不能满足时调整；保存后会显示为“自定义”。"),
+      h("summary", null, "自定义停顿时长"),
+      h("p", null, "按整数毫秒填写，1000 毫秒 = 1 秒；0 表示不额外停顿。也可直接选择上方节奏预设。"),
       h("div", null,
-        ...([
-          ["sentence_gap_ms", "句间", 5_000],
-          ["paragraph_gap_ms", "段间", 10_000],
-          ["section_gap_ms", "分隔", 15_000],
-        ] as const).map(([key, label, maximum]) => h("label", { key },
+        ...TIMING_INPUT_FIELDS.map(([key, label, maximum]) => h("label", { key },
           h("span", null, `${label}（毫秒）`),
           h("input", {
             type: "number",
             min: 0,
             max: maximum,
-            step: 10,
-            value: baseDraft.timing[key],
+            step: 1,
+            value: invalidTimingInputs[key] ?? baseDraft.timing[key],
+            "aria-label": `${label}（毫秒）`,
+            "aria-invalid": invalidTimingInputs[key] !== undefined,
+            "aria-describedby": `${prefix}-${key}-hint`,
             disabled,
             onChange: (event: ValueChangeEvent) => {
-              const parsed = Number(event.target.value);
-              if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) return;
+              const raw = event.target.value;
+              setInvalidTimingInputs((current) => updateInvalidTimingInputs(current, key, raw, maximum));
+              const parsed = parseTimingInput(raw, maximum);
+              if (parsed === null) return;
               setBaseDraft((current) => ({
                 ...current,
                 timing: { ...current.timing, [key]: parsed },
               }));
             },
           }),
+          h("small", { id: `${prefix}-${key}-hint`, role: invalidTimingInputs[key] !== undefined ? "alert" : undefined },
+            invalidTimingInputs[key] !== undefined ? `请输入 0–${maximum} 的整数，不能为空。` : `0–${maximum} 毫秒`,
+          ),
         )),
       ),
     ),
     !languageSupported
       ? h("p", { className: "anw-reading-preferences-panel__error", role: "alert" },
-        "当前旧语言值不在受控列表中；请选择中文、英语或日语后再保存。",
+        "当前旧语言值不是普通话，请刷新后重试。",
       )
       : null,
     !firstPersonCharacterValid
@@ -798,7 +792,7 @@ export function createReadingPreferencesPanel(
     h("button", {
       type: "button",
       className: "anw-reading-preferences-panel__save",
-      disabled: disabled || !baseDirty || !languageSupported || !firstPersonCharacterValid,
+      disabled: disabled || !baseDirty || !languageSupported || !firstPersonCharacterValid || !timingValid,
       onClick: saveBase,
     }, operation.kind === "base" ? "保存中…" : "保存基础朗读设置"),
     ),

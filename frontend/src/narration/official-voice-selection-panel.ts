@@ -213,7 +213,7 @@ export async function getAndPlayOfficialVoicePreviewAudio(
   presetId: OfficialPresetId,
   language: OfficialPresetLanguage,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<OfficialVoicePreviewAudioResponse["cache_status"] | void> {
   const preview = await api.getOfficialVoicePreviewAudio(
     novelId,
     { preset_id: presetId, language },
@@ -221,6 +221,7 @@ export async function getAndPlayOfficialVoicePreviewAudio(
   );
   if (signal.aborted) return;
   await player.play(preview, signal);
+  return preview.cache_status;
 }
 
 

@@ -32,10 +32,11 @@ export interface ReadingSectionDefinition {
 
 export const READING_SECTIONS: readonly ReadingSectionDefinition[] = [
   { key: "narrator", label: "基础朗读" },
-  { key: "voice-library", label: "官方音色" },
+  { key: "voice-library", label: "旁白音色" },
   { key: "characters", label: "人物配音" },
-  { key: "advanced-tuning", label: "高级调音" },
   { key: "private-voices", label: "私人音色" },
+  { key: "reading-rules", label: "朗读规则" },
+  { key: "storage-privacy", label: "运行与存储" },
 ] as const;
 
 
@@ -46,11 +47,9 @@ export function canonicalReadingSection(
     section === null
     || section === undefined
     || section === "overview"
-    || section === "reading-rules"
-    || section === "casting-rules"
-    || section === "pronunciation"
   ) return "narrator";
-  if (section === "storage-privacy" || section === "audio-cache") return "private-voices";
+  if (section === "casting-rules" || section === "pronunciation" || section === "advanced-tuning") return "reading-rules";
+  if (section === "audio-cache") return "storage-privacy";
   return section;
 }
 

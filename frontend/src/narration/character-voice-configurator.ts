@@ -137,7 +137,7 @@ export function createCharacterVoiceConfigurator(
       initialMatchState(props.scopeId)
     ));
     const [officialActivated, setOfficialActivated] = React.useState(
-      props.officialVoicesOpenByDefault === true,
+      props.officialVoicesOpenByDefault !== false,
     );
     const [advancedActivated, setAdvancedActivated] = React.useState(false);
     const state = matchState.scopeId === props.scopeId
@@ -161,7 +161,7 @@ export function createCharacterVoiceConfigurator(
       const reset = initialMatchState(props.scopeId);
       stateRef.current = reset;
       setMatchState(reset);
-      setOfficialActivated(props.officialVoicesOpenByDefault === true);
+      setOfficialActivated(props.officialVoicesOpenByDefault !== false);
       setAdvancedActivated(false);
     }, [props.scopeId]);
 
@@ -317,7 +317,7 @@ export function createCharacterVoiceConfigurator(
           "details",
           {
             className: "anw-character-voice-configurator__disclosure",
-            open: props.officialVoicesOpenByDefault === true,
+            open: props.officialVoicesOpenByDefault !== false,
             onToggle: (event: { readonly currentTarget: { readonly open: boolean } }) => {
               if (event.currentTarget.open) setOfficialActivated(true);
             },
@@ -325,7 +325,7 @@ export function createCharacterVoiceConfigurator(
           h("summary", null,
             h("span", null,
               h("strong", null, "浏览全部官方音色"),
-              h("small", null, "选中即使用，试听不会更改绑定。"),
+              h("small", null, "选中即保存，试听不更换声音。已有音频保持不变。"),
             ),
           ),
           officialActivated

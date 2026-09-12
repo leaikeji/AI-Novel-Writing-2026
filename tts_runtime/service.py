@@ -16,7 +16,11 @@ from typing import Any, Callable, Mapping, Protocol, TypeVar
 from uuid import UUID
 import wave
 
-from backend.narration.contracts import TTSVoiceKind
+from backend.narration.contracts import (
+    TTSVoiceKind,
+    require_mandarin_language,
+    require_mandarin_voice_design,
+)
 from backend.narration.providers.local import (
     LOCAL_QWEN_CAPABILITIES_SHA256,
     _canonical_sha256,
@@ -291,7 +295,11 @@ class MLXAudioBackend:
             # Segmentation and ordering remain owned by the narration service.
             "split_pattern": "",
         }
-        if voice_id:
+        # Base reference cloning is fully described by the durable reference
+        # WAV and its transcript.  ``provider_voice_id`` is an application-side
+        # identity, not an mlx-audio speaker name, so never forward it together
+        # with reference material.
+        if voice_id and reference_audio is None:
             kwargs["voice"] = voice_id
         if instruction:
             kwargs["instruct"] = instruction
@@ -373,8 +381,6 @@ class LocalRuntimeService:
 
     def __init__(self, manager: ModelManager) -> None:
         self._manager = manager
-        self._voice_roles: dict[str, ModelRole] = {}
-        self._voice_descriptions: dict[str, str] = {}
         self._cancelled: set[UUID] = set()
 
     def health_payload(self) -> dict[str, object]:
@@ -411,22 +417,28 @@ class LocalRuntimeService:
             raise ValueError("INVALID_REQUEST")
         kind = TTSVoiceKind(_required_str(voice, "kind"))
         voice_id = _required_str(voice, "provider_voice_id")
-        role = self._role_for_voice(kind, voice_id)
-        designed_instruction = (
-            self._voice_descriptions.get(voice_id)
-            if kind is TTSVoiceKind.DESIGNED
-            else None
-        )
+        role = self._role_for_voice(kind)
+        language = require_mandarin_language(_required_str(payload, "language"))
+        reference_audio = _optional_base64(voice.get("reference_audio_base64"))
+        reference_text = _optional_str(voice.get("reference_text"))
+        reference_sha256 = _optional_str(voice.get("reference_audio_sha256"))
+        if kind is TTSVoiceKind.REFERENCE_CLONE and (
+            reference_audio is None
+            or reference_text is None
+            or reference_sha256 is None
+            or hashlib.sha256(reference_audio).hexdigest() != reference_sha256
+        ):
+            raise ValueError("INVALID_REQUEST")
         generated = await self._manager.run(
             role,
             lambda model: self._manager._backend.generate(
                 model,
                 text=_required_str(payload, "text"),
-                language=_required_str(payload, "language"),
-                voice_id=voice_id,
-                instruction=designed_instruction or _optional_str(payload.get("instruction")),
-                reference_audio=_optional_base64(voice.get("reference_audio_base64")),
-                reference_text=_optional_str(voice.get("reference_text")),
+                language=language,
+                voice_id=(None if kind is TTSVoiceKind.REFERENCE_CLONE else voice_id),
+                instruction=_optional_str(payload.get("instruction")),
+                reference_audio=reference_audio,
+                reference_text=reference_text,
                 seed=_optional_int(payload.get("seed")),
             ),
         )
@@ -440,31 +452,45 @@ class LocalRuntimeService:
     ) -> dict[str, object]:
         request_id = UUID(_required_str(payload, "request_id"))
         role = ModelRole.BASE if kind is TTSVoiceKind.REFERENCE_CLONE else ModelRole.VOICE_DESIGN
+        preview_text = _required_str(payload, "preview_text")
+        language = require_mandarin_language(_required_str(payload, "language"))
+        reference_audio = _optional_base64(payload.get("reference_audio_base64"))
+        reference_text = _optional_str(payload.get("reference_text"))
         material = (
             _required_str(payload, "reference_audio_sha256")
             if kind is TTSVoiceKind.REFERENCE_CLONE
             else _required_str(payload, "description")
         )
-        voice_id = f"local:{kind.value}:{hashlib.sha256(material.encode('utf-8')).hexdigest()}"
+        if kind is TTSVoiceKind.REFERENCE_CLONE:
+            if reference_audio is None or reference_text is None:
+                raise ValueError("INVALID_REQUEST")
+            if hashlib.sha256(reference_audio).hexdigest() != material:
+                raise ValueError("INVALID_REQUEST")
+        else:
+            require_mandarin_voice_design(material)
         generated = await self._manager.run(
             role,
             lambda model: self._manager._backend.generate(
                 model,
-                text=_required_str(payload, "preview_text"),
-                language=_required_str(payload, "language"),
+                text=preview_text,
+                language=language,
                 voice_id=None,
                 instruction=_optional_str(payload.get("description")),
-                reference_audio=_optional_base64(payload.get("reference_audio_base64")),
-                reference_text=_optional_str(payload.get("reference_text")),
+                reference_audio=reference_audio,
+                reference_text=reference_text,
                 seed=_optional_int(payload.get("seed")),
             ),
         )
-        self._voice_roles[voice_id] = role
-        if kind is TTSVoiceKind.DESIGNED:
-            self._voice_descriptions[voice_id] = material
+        digest = hashlib.sha256(generated.audio_bytes).hexdigest()
+        if kind is TTSVoiceKind.REFERENCE_CLONE:
+            voice_id = f"local:{kind.value}:{material}"
+        else:
+            anchor_fingerprint = hashlib.sha256(
+                generated.audio_bytes + b"\x00" + preview_text.encode("utf-8")
+            ).hexdigest()
+            voice_id = f"local:designed_reference:{anchor_fingerprint}"
         identity = self._identity_payload()
         assert identity is not None
-        digest = hashlib.sha256(generated.audio_bytes).hexdigest()
         import base64
 
         return {
@@ -480,15 +506,15 @@ class LocalRuntimeService:
         self._cancelled.add(request_id)
         return {"disposition": "requested"}
 
-    def _role_for_voice(self, kind: TTSVoiceKind, voice_id: str) -> ModelRole:
+    def _role_for_voice(self, kind: TTSVoiceKind) -> ModelRole:
         if kind is TTSVoiceKind.PRESET:
             return ModelRole.CUSTOM_VOICE
         if kind is TTSVoiceKind.REFERENCE_CLONE:
             return ModelRole.BASE
-        role = self._voice_roles.get(voice_id)
-        if role is None:
-            raise RuntimeUnavailable("TTS_VOICE_UNAVAILABLE")
-        return role
+        # VoiceDesign output is an anchor WAV, not a process-local production
+        # voice.  The caller must persist that WAV plus its transcript and use
+        # REFERENCE_CLONE for previews and chapter synthesis.
+        raise RuntimeUnavailable("TTS_VOICE_UNAVAILABLE")
 
     def _audio_result(self, request_id: UUID, generated: GeneratedAudio) -> dict[str, object]:
         import base64

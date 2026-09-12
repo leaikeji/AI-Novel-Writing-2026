@@ -415,7 +415,7 @@ describe("reading page accessibility contract", () => {
     expect(nav.props.className).toBe("anw-reading-nav");
     expect(nav.props["aria-label"]).toBe("朗读设置");
     const buttons = findAll(nav, (element) => element.type === "button");
-    expect(buttons).toHaveLength(5);
+    expect(buttons).toHaveLength(6);
     expect(buttons.every((button) => button.props.type === "button")).toBe(true);
     expect(buttons.every((button) => button.props.role === undefined)).toBe(true);
     expect(buttons.every((button) => button.props.tabIndex !== -1)).toBe(true);
@@ -423,12 +423,14 @@ describe("reading page accessibility contract", () => {
     expect(findAll(tree, (element) => element.props.role === "button")).toHaveLength(0);
 
     expect(T2_B_READING_STYLES).toContain("@media (max-width: 760px)");
-    expect(T2_B_READING_STYLES).toContain("@container (max-width: 900px)");
     expect(T2_B_READING_STYLES).toContain(".anw-reading-layout");
     expect(T2_B_READING_STYLES).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(T2_B_READING_STYLES).toContain(".anw-reading-nav");
-    expect(T2_B_READING_STYLES).toContain("@container (max-width: 520px)");
-    expect(T2_B_READING_STYLES).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    const navRules = [...T2_B_READING_STYLES.matchAll(/\.anw-reading-nav\s*\{([^}]+)\}/g)];
+    expect(navRules).toHaveLength(1);
+    expect(navRules[0]![1]).toContain("flex-direction: row");
+    expect(navRules[0]![1]).toContain("position: sticky");
+    expect(T2_B_READING_STYLES).not.toContain("grid-template-columns: 164px");
     expect(T2_B_READING_STYLES).toContain("overflow-x: auto");
     expect(T2_B_READING_STYLES).toContain(":focus-visible");
     expect(T2_B_READING_STYLES).toContain("prefers-reduced-motion");
@@ -466,7 +468,7 @@ describe("reading page accessibility contract", () => {
       element.type === "button" && textContent(element) === "选择来源"
     ));
     expect(sourceButtons).toHaveLength(0);
-    expect(textContent(voiceSource)).toContain("官方音色请在上方音色库直接使用");
+    expect(textContent(voiceSource)).toContain("官方声音在“旁白音色”中选择");
 
     const pronunciationHarness = createReactHarness();
     const PronunciationPanel = createPronunciationPanel(pronunciationHarness.React);
@@ -501,10 +503,10 @@ describe("reading page accessibility contract", () => {
       capabilities: overview.capabilities,
       authorization: overview.authorization,
     });
-    expect(elementById(rules, rules.props["aria-labelledby"])).toBeDefined();
-    expect(findAll(rules, (element) => element.props.role === "note")).toHaveLength(1);
+    expect(rules.props["aria-label"]).toBe("识别与复核");
+    expect(findAll(rules, (element) => element.props.role === "note").length).toBeGreaterThan(0);
     const ruleFieldsets = findAll(rules, (element) => element.type === "fieldset");
-    expect(ruleFieldsets).toHaveLength(2);
+    expect(ruleFieldsets).toHaveLength(1);
     expect(ruleFieldsets.every((fieldset) => fieldset.props.disabled === true)).toBe(true);
     const ruleButtons = findAll(rules, (element) => element.type === "button");
     expect(ruleButtons.length).toBeGreaterThan(0);

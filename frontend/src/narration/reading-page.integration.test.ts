@@ -499,7 +499,7 @@ describe("reading page local-module integration", () => {
       element.type === "button" && textContent(element) === "选择来源"
     ));
     expect(sourceButtons).toHaveLength(0);
-    expect(textContent(tree)).toContain("官方音色请在上方音色库直接使用");
+    expect(textContent(tree)).toContain("官方声音在“旁白音色”中选择");
 
     const navButtons = findAll(tree, (element) => element.type === "button"
       && typeof element.props["data-reading-section"] === "string");
@@ -514,10 +514,10 @@ describe("reading page local-module integration", () => {
     expect(textContent(tree)).toContain("发音与停顿");
     expect(textContent(tree)).toContain("无权查看发音与停顿设置");
     expect(textContent(tree)).toContain("朗读运行状态");
-    expect(textContent(tree)).toContain("识别、选角与复核规则");
+    expect(textContent(tree)).toContain("识别与复核");
     expect(textContent(tree)).toContain("当前只读：T2_GATE_REQUIRED");
     const ruleFieldsets = findAll(tree, (element) => element.type === "fieldset");
-    expect(ruleFieldsets).toHaveLength(2);
+    expect(ruleFieldsets).toHaveLength(1);
     expect(ruleFieldsets.every((fieldset) => fieldset.props.disabled === true)).toBe(true);
 
     open("private-voices");
@@ -538,7 +538,7 @@ describe("reading page local-module integration", () => {
     const ReadingPage = createReadingPage(harness.React, api);
     const props = {
       novelId: NOVEL_ID,
-      initialSection: "narrator" as const,
+      initialSection: "reading-rules" as const,
       scopeTargets: [target()],
     };
     harness.render(ReadingPage, props);

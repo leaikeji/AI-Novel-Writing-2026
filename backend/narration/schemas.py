@@ -223,6 +223,7 @@ class NarrationErrorCode(str, Enum):
     UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE"
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     VALIDATION_FAILED = "VALIDATION_FAILED"
+    VOICE_LANGUAGE_UNSUPPORTED = "VOICE_LANGUAGE_UNSUPPORTED"
 
 
 class NarrationApiErrorDetail(_StrictModel):
@@ -575,7 +576,7 @@ class NarrationPlaybackPreferences(_StrictModel):
 
 class NarrationSettingsValues(_StrictModel):
     narrator: NarratorVoiceSelection | None
-    language: str = Field(min_length=2, max_length=40)
+    language: Literal["zh-CN"] = "zh-CN"
     output_format: OutputAudioFormat
     script_review_policy: ScriptReviewPolicy
     analysis_mode: AnalysisMode
@@ -700,6 +701,8 @@ class PutNarrationScopeOverrideRequest(_StrictModel):
     def validate_override(self) -> "PutNarrationScopeOverrideRequest":
         if self.enabled == self.overrides.is_empty():
             raise ValueError("enabled override must contain values; disabled must be empty")
+        if self.overrides.language not in (None, "zh-CN"):
+            raise ValueError("scope override language must be zh-CN or inherited")
         return self
 
 
@@ -756,6 +759,7 @@ class VoiceRightsSummary(_StrictModel):
     source_kind: Literal[
         "official_preset",
         "user_upload",
+        "qwen_synthetic_design",
     ]
     source_identifier_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     purpose: Literal["private_novel_narration"]
@@ -849,7 +853,7 @@ class OfficialPresetCatalogItem(_StrictModel):
     preset_id: str = Field(pattern=r"^qwen\.[A-Za-z][A-Za-z0-9]{0,79}$")
     display_name: str = Field(min_length=1, max_length=160)
     group: str = Field(min_length=1, max_length=80)
-    language: str = Field(min_length=2, max_length=40)
+    language: Literal["zh-CN"] = "zh-CN"
     official_speaker: str = Field(min_length=1, max_length=160)
     native_language: Literal["zh-CN", "en", "ja-JP", "ko-KR"]
     dialect: str | None = Field(default=None, min_length=1, max_length=80)
@@ -858,7 +862,7 @@ class OfficialPresetCatalogItem(_StrictModel):
     validation_tier: Literal[
         "canonical_chapter_verified", "pinned_catalog_unreviewed"
     ]
-    language_scope: Literal["zh-CN", "en", "ja-JP", "ko-KR"]
+    language_scope: Literal["zh-CN"] = "zh-CN"
     selectable_now: bool = Field(strict=True)
     previewable_now: bool = Field(strict=True)
     renderable_existing: bool = Field(strict=True)
@@ -922,7 +926,7 @@ class VoiceProfileVersionResource(_StrictModel):
     model_id: str | None = Field(default=None, max_length=160)
     model_revision: str | None = Field(default=None, max_length=160)
     preset_key: str | None = Field(default=None, max_length=160)
-    language: str = Field(min_length=2, max_length=40)
+    language: Literal["zh-CN"] = "zh-CN"
     fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     quality_state: VoiceQualityState
     activation_basis: VoiceActivationBasis
@@ -935,27 +939,21 @@ class VoiceProfileVersionResource(_StrictModel):
     locked_at: datetime | None = None
     created_at: datetime
 
-    @field_validator("language")
-    @classmethod
-    def validate_language(cls, value: str) -> str:
-        if not _LANGUAGE.fullmatch(value):
-            raise ValueError("language must be a conservative BCP-47 tag")
-        return value
-
     @model_validator(mode="after")
     def validate_version_shape(self) -> "VoiceProfileVersionResource":
         if self.source_type is VoiceSourceType.PRESET and self.preset_key is None:
             raise ValueError("preset source requires preset_key")
         if self.source_type is not VoiceSourceType.PRESET and self.preset_key is not None:
             raise ValueError("non-preset source cannot carry preset_key")
-        if self.source_type is VoiceSourceType.UPLOADED and self.reference_asset_id is None:
-            raise ValueError("uploaded source requires a reference asset")
+        if (
+            self.source_type in {VoiceSourceType.UPLOADED, VoiceSourceType.GENERATED}
+            and self.state in {VoiceVersionState.PREVIEW_READY, VoiceVersionState.LOCKED}
+            and self.reference_asset_id is None
+        ):
+            raise ValueError("ready private source requires a durable reference asset")
         if self.rights.source_kind == "official_preset":
             if (
-                self.source_type not in {
-                    VoiceSourceType.PRESET,
-                    VoiceSourceType.GENERATED,
-                }
+                self.source_type is not VoiceSourceType.PRESET
                 or self.official_preset is None
                 or self.official_preset.preset_id != self.preset_key
             ):
@@ -964,7 +962,16 @@ class VoiceProfileVersionResource(_StrictModel):
             raise ValueError("only official preset rights can publish preset provenance")
         if (
             self.source_type is VoiceSourceType.GENERATED
-            and not experimental
+            and self.rights.source_kind != "qwen_synthetic_design"
+        ):
+            raise ValueError("generated source requires Qwen synthetic-design rights")
+        if (
+            self.source_type is VoiceSourceType.UPLOADED
+            and self.rights.source_kind != "user_upload"
+        ):
+            raise ValueError("uploaded source requires user-upload rights")
+        if (
+            self.source_type is VoiceSourceType.GENERATED
             and not self.description_available
         ):
             raise ValueError("generated source requires a private description record")
@@ -1062,16 +1069,17 @@ class CreatePresetVoiceVersionRequest(_StrictModel):
 
 class UploadedVoiceVersionMetadata(_StrictModel):
     expected_profile_version: int = Field(ge=1, strict=True)
-    language: str = Field(min_length=2, max_length=40)
+    language: Literal["zh-CN"] = "zh-CN"
     original_filename: str = Field(min_length=1, max_length=240)
     reference_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reference_text: str = Field(min_length=1, max_length=500)
     rights: VoiceRightsDeclarationRequest
 
-    @field_validator("language")
+    @field_validator("reference_text")
     @classmethod
-    def validate_language(cls, value: str) -> str:
-        if not _LANGUAGE.fullmatch(value):
-            raise ValueError("language must be a conservative BCP-47 tag")
+    def validate_reference_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("reference_text cannot be blank")
         return value
 
     @field_validator("original_filename")
@@ -1080,6 +1088,23 @@ class UploadedVoiceVersionMetadata(_StrictModel):
         if "/" in value or "\\" in value or value in {".", ".."}:
             raise ValueError("original_filename must not contain a path")
         return value
+
+
+class CreateDesignedVoiceVersionRequest(_StrictModel):
+    expected_profile_version: int = Field(ge=1, strict=True)
+    description: str = Field(min_length=1, max_length=500)
+    language: Literal["zh-CN"] = "zh-CN"
+    seed: int | None = Field(default=None, ge=0, le=2**63 - 1, strict=True)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        from .contracts import ContractError, require_mandarin_voice_design
+
+        try:
+            return require_mandarin_voice_design(value)
+        except ContractError as error:
+            raise ValueError(str(error)) from error
 
 
 class VoicePreviewStatus(str, Enum):
@@ -1167,17 +1192,10 @@ class CharacterVoiceBindingResource(_StrictModel):
     binding_policy: CharacterVoiceBindingPolicy
     profile_id: UUID | None = None
     version_id: UUID | None = None
-    language: str = Field(default="zh-CN", min_length=2, max_length=40)
+    language: Literal["zh-CN"] = "zh-CN"
     version: int = Field(ge=0, strict=True)
     impact: VoiceBindingImpact
     updated_at: datetime | None = None
-
-    @field_validator("language")
-    @classmethod
-    def validate_language(cls, value: str) -> str:
-        if not _LANGUAGE.fullmatch(value):
-            raise ValueError("language must be a conservative BCP-47 tag")
-        return value
 
     @model_validator(mode="after")
     def validate_binding_shape(self) -> "CharacterVoiceBindingResource":
@@ -1219,14 +1237,7 @@ class PutCharacterVoiceBindingRequest(_StrictModel):
     binding_policy: CharacterVoiceBindingPolicy
     profile_id: UUID | None = None
     version_id: UUID | None = None
-    language: str = Field(min_length=2, max_length=40)
-
-    @field_validator("language")
-    @classmethod
-    def validate_language(cls, value: str) -> str:
-        if not _LANGUAGE.fullmatch(value):
-            raise ValueError("language must be a conservative BCP-47 tag")
-        return value
+    language: Literal["zh-CN"] = "zh-CN"
 
     @model_validator(mode="after")
     def validate_binding_shape(self) -> "PutCharacterVoiceBindingRequest":
@@ -1273,7 +1284,7 @@ class OfficialVoiceSelectionResult(_StrictModel):
     version_id: UUID
     settings_version: int = Field(ge=1, strict=True)
     binding_version: int | None = Field(default=None, ge=1, strict=True)
-    target_language: str = Field(min_length=2, max_length=40)
+    target_language: Literal["zh-CN"] = "zh-CN"
     language_mismatch: bool = Field(strict=True)
     completed_at: datetime
 

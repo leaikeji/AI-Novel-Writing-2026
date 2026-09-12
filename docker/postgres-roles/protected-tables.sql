@@ -1,5 +1,6 @@
 -- T1-G runtime roles may read these authority tables but may not issue raw DML.
--- Keep this list in sync with scripts/tts/validate_database_roles.py.
+-- Plan 76 head 0055 keeps the same protected table set. Keep this list in
+-- sync with scripts/tts/validate_database_roles.py.
 INSERT INTO pg_temp.ai_novel_protected_tables (table_name) VALUES
     ('active_job_assets'),
     ('alembic_version'),

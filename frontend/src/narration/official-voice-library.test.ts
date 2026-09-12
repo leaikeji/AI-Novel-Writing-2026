@@ -101,6 +101,14 @@ function elements(root: unknown): FakeElement[] {
 }
 
 
+function textContent(root: unknown): string {
+  if (typeof root === "string" || typeof root === "number") return String(root);
+  if (Array.isArray(root)) return root.map(textContent).join("");
+  if (root === null || typeof root !== "object" || !("children" in root)) return "";
+  return (root as FakeElement).children.map(textContent).join("");
+}
+
+
 function previewButton(tree: FakeElement, presetId: string): FakeElement {
   const article = elements(tree).find((element) => (
     element.props["data-official-preset-id"] === presetId
@@ -129,16 +137,18 @@ function wireCatalog(): OfficialPresetCatalogResponse {
       }
       return {
         preset_id: evidence.presetId,
-        display_name: female ? "温暖女声" : `${evidence.localVoiceId} 官方音色`,
+        display_name: female
+          ? "Serena｜温暖女声"
+          : `${evidence.localVoiceId}｜官方音色`,
         official_speaker: evidence.localVoiceId,
         native_language: evidence.nativeLanguage,
         dialect: evidence.dialect,
         group: female ? "中文女声" : "中文男声",
-        language: evidence.languageScope,
+        language: "zh-CN" as const,
         local_use_status: "available",
         commercial_distribution_status: "not_evaluated",
         validation_tier: evidence.validationTier,
-        language_scope: evidence.languageScope,
+        language_scope: "zh-CN" as const,
         selectable_now: true,
         previewable_now: true,
         renderable_existing: true,
@@ -170,16 +180,14 @@ describe("Qwen official voice library", () => {
     ]).toBe("longanlufeng");
   });
 
-  it("builds dynamic four-language groups and rejects reordered inventory", () => {
+  it("keeps native-language history but exposes one Mandarin-only selection group", () => {
     const catalog = officialVoiceCatalogFromWire(wireCatalog());
     const model = createOfficialVoiceLibraryModel(catalog, "zh-CN");
     expect(model.status).toBe("ready");
     if (model.status !== "ready") throw new Error("expected ready Qwen catalog");
     expect(model.itemCount).toBe(9);
-    expect(model.groups.map((group) => group.items.length)).toEqual([6, 1, 1, 1]);
-    expect(model.groups.map((group) => group.label)).toEqual([
-      "中文（6）", "English（1）", "日本語（1）", "한국어（1）",
-    ]);
+    expect(model.groups.map((group) => group.items.length)).toEqual([9]);
+    expect(model.groups.map((group) => group.label)).toEqual(["普通话（9）"]);
     const filtered = filterOfficialVoiceLibraryGroups(model.groups, "Aiden", "all");
     expect(filtered[0]?.items.map((item) => item.item.presetId)).toEqual([
       "qwen.ClearMale",
@@ -248,6 +256,10 @@ describe("Qwen official voice library", () => {
     expect(vivianPreview.type).toBe("button");
     expect(vivianPreview.props.type).toBe("button");
     expect(vivianPreview.props.disabled).toBe(false);
+    const availability = all.filter((element) => String(element.props.id ?? "").endsWith("-availability"));
+    expect(availability.some((element) => element.props.className === "anw-official-voice-card__provider is-local-only")).toBe(true);
+    expect(availability.some((element) => element.props.className === "anw-official-voice-library__filter-status")).toBe(true);
+    expect(all.some((element) => element.children.includes("选中即保存，试听不更换声音。已有音频保持不变。"))).toBe(true);
   });
 
   it("aborts the previous card preview on repeated or cross-card clicks and cleans up on unmount", async () => {
@@ -297,6 +309,31 @@ describe("Qwen official voice library", () => {
     ]).toBe("ready");
     harness.unmount();
     expect(pending[1]!.signal.aborted).toBe(true);
+  });
+
+  it("explains when a cached preset preview starts without another inference", async () => {
+    const harness = createComponentHarness();
+    const Library = createOfficialVoiceLibrary(harness.React);
+    const props = {
+      novelId: "novel-1",
+      catalog: officialVoiceCatalogFromWire(wireCatalog()),
+      target: {
+        kind: "narrator" as const,
+        targetLanguage: "zh-CN",
+        expectedSettingsVersion: 1,
+      },
+      onUse: vi.fn(),
+      onPreview: vi.fn(async () => "hit" as const),
+    };
+    harness.render(Library, props);
+    harness.flushEffects();
+    let tree = harness.render(Library, props);
+    (previewButton(tree, "qwen.WarmFemale").props.onClick as () => void)();
+    for (let index = 0; index < 4; index += 1) await Promise.resolve();
+    tree = harness.render(Library, props);
+
+    expect(textContent(tree)).toContain("已直接播放缓存试听");
+    expect(textContent(previewButton(tree, "qwen.WarmFemale"))).toBe("再次试听");
   });
 
   it("keeps the current binding when a local preview fails", async () => {

@@ -89,6 +89,30 @@ def test_voice_preparation_requires_exactly_one_source() -> None:
         )
 
 
+@pytest.mark.parametrize("language", ["en", "ja-JP", "zh-HK", "yue-CN"])
+def test_voice_preparation_rejects_every_non_mandarin_language(language: str) -> None:
+    with pytest.raises(ContractError, match="must be zh-CN"):
+        TTSVoicePreparationRequest(
+            request_id=uuid4(),
+            scope=NarrationRequestScope.fixed_local(),
+            preview_text="试听文本",
+            language=language,
+            description="年轻清晰女声",
+        )
+
+
+@pytest.mark.parametrize("description", ["四川话女声", "粤语旁白", "带一点北京腔"])
+def test_voice_preparation_rejects_dialect_designs(description: str) -> None:
+    with pytest.raises(ContractError, match="without dialect"):
+        TTSVoicePreparationRequest(
+            request_id=uuid4(),
+            scope=NarrationRequestScope.fixed_local(),
+            preview_text="试听文本",
+            language="zh-CN",
+            description=description,
+        )
+
+
 def test_capabilities_reject_hidden_non_ready_mismatch() -> None:
     with pytest.raises(ContractError, match="product-visible"):
         TTSProviderCapabilities(

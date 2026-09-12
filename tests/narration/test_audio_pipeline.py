@@ -17,7 +17,9 @@ from backend.narration.audio_pipeline import (
     AudioPipelineError,
     AudioPipelinePolicy,
     AudioQualityError,
+    SHORT_CHINESE_DURATION_POLICY_VERSION,
     ShortChineseDurationPolicy,
+    audio_validation_failure_evidence,
     inspect_pcm_wav,
     process_provider_synthesis_wav,
     process_synthesis_wav,
@@ -201,11 +203,21 @@ def test_pcm_pipeline_rejects_confirmed_short_chinese_duration_runaways(
 ) -> None:
     assert short_chinese_duration_limit_ms(spoken_text) == 3_200
 
-    with pytest.raises(AudioQualityError, match="short Chinese text"):
+    with pytest.raises(AudioQualityError, match="short Chinese text") as caught:
         process_synthesis_wav(
             _wav_bytes(duration_ms=duration_ms),
             spoken_text=spoken_text,
         )
+
+    assert audio_validation_failure_evidence(caught.value) == {
+        "schema_version": "narration-audio-validation-failure/1",
+        "reason_code": "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+        "actual_duration_ms": duration_ms,
+        "allowed_duration_ms": 3_200,
+        "evaluated_codepoint_count": 5,
+        "policy_version": SHORT_CHINESE_DURATION_POLICY_VERSION,
+    }
+    assert spoken_text not in repr(audio_validation_failure_evidence(caught.value))
 
 
 @pytest.mark.parametrize(

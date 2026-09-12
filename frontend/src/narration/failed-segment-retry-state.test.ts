@@ -192,25 +192,34 @@ describe("failed-segment retry state", () => {
     });
   });
 
-  it("refreshes CAS after failure and creates a new root key for the next click", async () => {
-    const keys = ["retry-root-0001", "retry-root-0002"];
+  it("keeps refreshing after the completion waiter fails until the projection is terminal", async () => {
     const retry = vi.fn().mockResolvedValue(response());
-    const afterAccepted = vi.fn()
-      .mockRejectedValueOnce(new Error("render failed again"))
-      .mockResolvedValueOnce(undefined);
+    const afterAccepted = vi.fn().mockRejectedValue(new Error("render failed again"));
+    const waitForProjectionRefresh = vi.fn().mockResolvedValue(undefined);
     const getProjection = vi.fn()
       .mockResolvedValueOnce(projection())
       .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, {
         request_version: 5,
         manifest_revision: 8,
+        items: Object.freeze([]),
       }))
-      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, { items: Object.freeze([]) }));
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, {
+        request_version: 6,
+        manifest_revision: 8,
+        items: Object.freeze([Object.freeze({
+          ...projection().items[0],
+          failure_code: "TTS_AUDIO_INVALID",
+          retryable: false,
+          retry_reason_code: "LATEST_MANUAL_ATTEMPT_NON_RETRYABLE",
+        })]),
+      }));
     const controller = createFailedSegmentRetryController({
       getProjection,
       retry,
       afterAccepted,
-      createIdempotencyKey: () => keys.shift() ?? "unexpected-key",
+      createIdempotencyKey: () => "retry-root-0001",
       formatFailure: (reason) => reason instanceof Error ? reason.message : "失败",
+      waitForProjectionRefresh,
     });
     await controller.load({
       editionId: EDITION_A,
@@ -222,18 +231,60 @@ describe("failed-segment retry state", () => {
     await controller.retrySegment(SEGMENT_A);
     expect(controller.readSnapshot()).toMatchObject({
       phase: "ready",
-      projection: { request_version: 5, manifest_revision: 8 },
+      projection: {
+        request_version: 6,
+        manifest_revision: 8,
+        items: [{
+          retryable: false,
+          retry_reason_code: "LATEST_MANUAL_ATTEMPT_NON_RETRYABLE",
+        }],
+      },
       errorMessage: "render failed again",
     });
+    expect(getProjection).toHaveBeenCalledTimes(3);
+    expect(waitForProjectionRefresh).toHaveBeenCalledOnce();
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("does not trust an early completion callback while the worker projection is still transient", async () => {
+    const waitForProjectionRefresh = vi.fn().mockResolvedValue(undefined);
+    const getProjection = vi.fn()
+      .mockResolvedValueOnce(projection())
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, {
+        request_version: 5,
+        items: Object.freeze([Object.freeze({
+          ...projection().items[0],
+          retryable: false,
+          retry_reason_code: "LATEST_ATTEMPT_NOT_COMPLETE",
+        })]),
+      }))
+      .mockResolvedValueOnce(projection(EDITION_A, REQUEST_A, {
+        request_version: 6,
+        items: Object.freeze([]),
+      }));
+    const controller = createFailedSegmentRetryController({
+      getProjection,
+      retry: vi.fn().mockResolvedValue(response()),
+      afterAccepted: vi.fn().mockResolvedValue(undefined),
+      createIdempotencyKey: () => "retry-root-0001",
+      formatFailure: (reason) => reason instanceof Error ? reason.message : "失败",
+      waitForProjectionRefresh,
+    });
+    await controller.load({
+      editionId: EDITION_A,
+      requestId: REQUEST_A,
+      documentGeneration: 1,
+      manifestRevision: 7,
+    });
+
     await controller.retrySegment(SEGMENT_A);
 
-    expect(retry.mock.calls.map((call) => call[2])).toEqual([
-      "retry-root-0001",
-      "retry-root-0002",
-    ]);
-    expect(retry.mock.calls[1]?.[1]).toMatchObject({
-      expected_request_version: 5,
-      expected_manifest_revision: 8,
+    expect(waitForProjectionRefresh).toHaveBeenCalledOnce();
+    expect(controller.readSnapshot()).toMatchObject({
+      phase: "ready",
+      projection: { request_version: 6, items: [] },
+      statusMessage: "失败句段已经恢复，可继续播放。",
+      errorMessage: null,
     });
   });
 

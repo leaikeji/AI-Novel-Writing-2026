@@ -405,17 +405,6 @@ export function replaceScopeOverride(
   ];
 }
 
-
-function mutationBlockReason(
-  capability: FeatureCapability,
-  canConfigure: boolean,
-): string | null {
-  if (!capability.actionable) return capabilityStatusText(capability);
-  if (!canConfigure) return "当前作品授权不允许修改朗读配置（AUTHORIZATION_READ_ONLY）";
-  return null;
-}
-
-
 function apiErrorMessage(reason: unknown, fallback: string): string {
   if (reason instanceof NarrationApiError) {
     if (reason.detail.code === "VERSION_CONFLICT") {
@@ -441,14 +430,23 @@ export function createReadingPage(
       canonicalReadingSection(props.initialSection),
     );
     const [reloadVersion, setReloadVersion] = React.useState(0);
+    const [visited, setVisited] = React.useState({
+      novelId: props.novelId,
+      sections: [canonicalReadingSection(props.initialSection)] as ReadingSectionKey[],
+    });
     const [loadState, setLoadState] = React.useState<ReadingPageLoadState>({ phase: "loading" });
     const [operation, setOperation] = React.useState<OperationState>(EMPTY_OPERATION);
-    const currentNovelRef = React.useRef(props.novelId);
-    const mutationAbortRef = React.useRef<AbortController | null>(null);
-    currentNovelRef.current = props.novelId;
+    const pageRef = React.useRef<HTMLElement | null>(null);
 
     React.useEffect(() => {
       setActiveSection(canonicalReadingSection(props.initialSection));
+      setVisited((current) => current.novelId === props.novelId ? {
+        ...current,
+        sections: [...new Set([...current.sections, canonicalReadingSection(props.initialSection)])],
+      } : {
+        novelId: props.novelId,
+        sections: [canonicalReadingSection(props.initialSection)],
+      });
     }, [props.novelId, props.initialSection]);
 
     React.useEffect(() => {
@@ -504,15 +502,18 @@ export function createReadingPage(
       return () => controller.abort();
     }, [props.novelId, reloadVersion]);
 
-    React.useEffect(() => () => {
-      mutationAbortRef.current?.abort();
-      mutationAbortRef.current = null;
-    }, [props.novelId]);
-
     const reload = () => setReloadVersion((version) => version + 1);
     const navigate = (section: ReadingSectionKey) => {
-      setActiveSection(section);
-      props.onSectionChange?.(section);
+      const next = canonicalReadingSection(section);
+      setVisited((current) => ({
+        novelId: props.novelId,
+        sections: [...new Set([
+          ...(current.novelId === props.novelId ? current.sections : []), next,
+        ])],
+      }));
+      setActiveSection(next);
+      props.onSectionChange?.(next);
+      pageRef.current?.scrollTo({ top: 0 });
     };
 
     if (loadState.phase === "loading" || (loadState.phase === "ready"
@@ -572,10 +573,6 @@ export function createReadingPage(
       );
     }
 
-    const settingsCapability = capabilityFor(overview, "reading_settings");
-    const configurationCapability = productCapability.actionable
-      ? settingsCapability
-      : productCapability;
     const chapterPlaybackReady = [
       "narration_synthesis",
       "product_player",
@@ -619,167 +616,104 @@ export function createReadingPage(
         }
         : current);
     };
-    const saveSettings = (values: NarrationSettingsValues) => {
-      if (mutationBlockReason(configurationCapability, overview.authorization.can_configure)) return;
-      mutationAbortRef.current?.abort();
-      const controller = new AbortController();
-      mutationAbortRef.current = controller;
-      setOperation({ saving: true, message: null, kind: null });
-      void api.putSettings(
-        props.novelId,
-        buildNarrationSettingsReplacement(overview.settings, values),
-        controller.signal,
-      ).then((saved) => {
-        if (controller.signal.aborted) return;
-        if (currentNovelRef.current !== props.novelId) return;
-        if (saved.novel_id !== props.novelId) {
-          throw new Error("settings scope mismatch");
-        }
-        setLoadState((current) => current.phase === "ready"
-          && current.overview.novel_id === props.novelId
-          ? { ...current, overview: { ...current.overview, settings: saved } }
-          : current);
-        setOperation({ saving: false, message: "作品旁白设置已保存。", kind: "success" });
-      }).catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
-        if (currentNovelRef.current !== props.novelId) return;
-        setOperation({
-          saving: false,
-          message: apiErrorMessage(reason, "保存作品旁白失败，请刷新后重试。"),
-          kind: "error",
-        });
-      });
-    };
-    const saveScopeOverride = (
-      target: ReadingScopeTarget,
-      request: PutNarrationScopeOverrideRequest,
-    ) => {
-      if (mutationBlockReason(configurationCapability, overview.authorization.can_configure)) return;
-      mutationAbortRef.current?.abort();
-      const controller = new AbortController();
-      mutationAbortRef.current = controller;
-      setOperation({ saving: true, message: null, kind: null });
-      void api.putScopeOverride(
-        props.novelId,
-        target.scopeKind,
-        target.scopeId,
-        request,
-        controller.signal,
-      ).then((saved) => {
-        if (controller.signal.aborted) return;
-        if (currentNovelRef.current !== props.novelId) return;
-        const nextOverrides = replaceScopeOverride(
-          props.novelId,
-          target,
-          loadState.overrides,
-          saved,
-        );
-        setLoadState((current) => current.phase === "ready"
-          && current.overview.novel_id === props.novelId
-          ? {
-            ...current,
-            overrides: nextOverrides,
-          }
-          : current);
-        setOperation({ saving: false, message: "范围覆盖已保存。", kind: "success" });
-      }).catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
-        if (currentNovelRef.current !== props.novelId) return;
-        setOperation({
-          saving: false,
-          message: apiErrorMessage(reason, "保存范围覆盖失败，请刷新后重试。"),
-          kind: "error",
-        });
-      });
-    };
 
-    const externalContent = activeSection !== "overview" && activeSection !== "narrator"
-      ? props.renderSectionContent?.(
-        activeSection,
-        {
-          overview,
-          voiceProfiles: loadState.voiceProfiles,
-          voiceProfilesError: loadState.voiceProfilesError,
-          onRefresh: reload,
-          onNavigate: navigate,
-        },
-      ) ?? props.sectionContent?.[activeSection]
-      : undefined;
-    const sectionBody = activeSection === "overview"
-      ? h(ReadingOverview, {
-        state: {
-          phase: "ready",
-          overview,
-          onRetry: reload,
-          onNavigate: navigate,
-        },
-      })
-      : activeSection === "narrator"
-        ? h(
-          "div",
-          { className: "anw-reading-narrator-stack" },
-          loadState.voiceProfilesError
-            ? h(
-                "p",
-                { className: "anw-reading-inline-error", role: "alert" },
-                loadState.voiceProfilesError,
-              )
-            : null,
-          h(ReadingPreferencesPanel, {
-            novelId: props.novelId,
-            settings: overview.settings,
-            capabilities: overview.capabilities,
-            authorization: overview.authorization,
-            characterOptions: props.characterOptions ?? [],
-            saveSettings: api.putSettings,
-            savePlaybackPreferences: api.putPlaybackPreferences
-              ?? putNarrationPlaybackPreferences,
-            onSettingsSaved: applySavedSettings,
-            onPlaybackPreferencesSaved: applySavedSettings,
-            onRefresh: reload,
-          }),
-          props.renderNarratorVoiceWorkspace?.({
+    const renderSection = (section: ReadingSectionKey): unknown => {
+      const externalContent = section !== "overview" && section !== "narrator"
+        ? props.renderSectionContent?.(
+          section,
+          {
             overview,
             voiceProfiles: loadState.voiceProfiles,
             voiceProfilesError: loadState.voiceProfilesError,
             onRefresh: reload,
             onNavigate: navigate,
-          }) ?? null,
-          h(ScopeOverridesPanel, {
-            novelId: props.novelId,
-            settings: overview.settings,
-            capabilities: overview.capabilities,
-            authorization: overview.authorization,
-            targets: props.scopeTargets ?? [],
-            overrides: loadState.overrides,
-            narratorOptions: narratorOptions.map((option) => ({
-              novelId: option.novelId,
-              profileId: option.profileId,
-              versionId: option.versionId,
-              label: option.label,
-              usable: option.locked && option.rightsActive,
-            })),
-            characterOptions: props.characterOptions ?? [],
-            saveOverride: api.putScopeOverride,
-            onSaved: applySavedOverride,
-            onRefresh: reload,
-          }),
-        )
-        : externalContent ?? h(
-          "section",
-          {
-            className: "anw-reading-integration-slot",
-            role: "status",
-            "data-reading-integration-slot": activeSection,
           },
-          h("h2", null, READING_SECTIONS.find((item) => item.key === activeSection)?.label ?? "朗读设置"),
-          h("p", null, "该局部模块将在 T2-GATE 汇合后接入；这里不会提供不可用的演示按钮。"),
-        );
+        ) ?? props.sectionContent?.[section]
+        : undefined;
+      const sectionBody = section === "overview"
+        ? h(ReadingOverview, {
+          state: {
+            phase: "ready",
+            overview,
+            onRetry: reload,
+            onNavigate: navigate,
+          },
+        })
+        : section === "narrator"
+          ? h(
+            "div",
+            { className: "anw-reading-narrator-stack" },
+            loadState.voiceProfilesError
+              ? h(
+                  "p",
+                  { className: "anw-reading-inline-error", role: "alert" },
+                  loadState.voiceProfilesError,
+                )
+              : null,
+            h(ReadingPreferencesPanel, {
+              novelId: props.novelId,
+              settings: overview.settings,
+              capabilities: overview.capabilities,
+              authorization: overview.authorization,
+              characterOptions: props.characterOptions ?? [],
+              saveSettings: api.putSettings,
+              savePlaybackPreferences: api.putPlaybackPreferences
+                ?? putNarrationPlaybackPreferences,
+              onSettingsSaved: applySavedSettings,
+              onPlaybackPreferencesSaved: applySavedSettings,
+              onRefresh: reload,
+            }),
+            props.renderNarratorVoiceWorkspace?.({
+              overview,
+              voiceProfiles: loadState.voiceProfiles,
+              voiceProfilesError: loadState.voiceProfilesError,
+              onRefresh: reload,
+              onNavigate: navigate,
+            }) ?? null,
+          )
+          : section === "reading-rules"
+            ? h("div", { className: "anw-reading-narrator-stack" }, externalContent,
+            h(ScopeOverridesPanel, {
+              novelId: props.novelId,
+              settings: overview.settings,
+              capabilities: overview.capabilities,
+              authorization: overview.authorization,
+              targets: props.scopeTargets ?? [],
+              overrides: loadState.overrides,
+              narratorOptions: narratorOptions.map((option) => ({
+                novelId: option.novelId,
+                profileId: option.profileId,
+                versionId: option.versionId,
+                label: option.label,
+                usable: option.locked && option.rightsActive,
+              })),
+              characterOptions: props.characterOptions ?? [],
+              saveOverride: api.putScopeOverride,
+              onSaved: applySavedOverride,
+              onRefresh: reload,
+            }),
+          )
+          : externalContent ?? h(
+            "section",
+            {
+              className: "anw-reading-integration-slot",
+              role: "status",
+              "data-reading-integration-slot": section,
+            },
+            h("h2", null, READING_SECTIONS.find((item) => item.key === section)?.label ?? "朗读设置"),
+            h("p", null, "此设置暂时无法加载，请稍后重试。"),
+          );
+      return sectionBody;
+    };
+    const visibleSections = [...new Set([
+      ...(visited.novelId === props.novelId ? visited.sections : []), activeSection,
+    ])];
 
     return h(
       "main",
       {
         className: "anw-reading-page",
+        ref: pageRef,
         "data-narration-reading-page": "v1",
         "data-novel-id": props.novelId,
         "data-active-section": activeSection,
@@ -791,8 +725,8 @@ export function createReadingPage(
           h("p", { className: "anw-reading-eyebrow" }, props.novelTitle ?? "当前作品"),
           h("h1", null, "朗读"),
           h("p", null, chapterPlaybackReady
-            ? "管理作品旁白、人物声音和朗读规则；章节播放与校听已在章节写作页开放。"
-            : "管理作品旁白、人物声音和朗读规则；章节播放与校听将在对应产品能力通过门禁后开放。"),
+            ? "选好声音，按自己的节奏听故事。播放与逐句校听，请回到章节页面。"
+            : "为作品选择旁白、人物声音和朗读方式。章节播放暂未开放。"),
         ),
         h(
           "div",
@@ -854,7 +788,12 @@ export function createReadingPage(
                 : null,
             )
             : null,
-          sectionBody,
+          ...visibleSections.map((section) => h("div", {
+            key: `${props.novelId}:${section}`,
+            hidden: section !== activeSection,
+            "data-reading-panel": section,
+            className: "anw-reading-section-body",
+          }, renderSection(section))),
         ),
       ),
     );

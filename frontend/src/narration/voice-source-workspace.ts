@@ -1,5 +1,6 @@
 import {
   NarrationApiError,
+  createDesignedVoiceVersion,
   createUploadedVoiceVersion,
   createVoicePreview,
   createVoiceProfile,
@@ -26,6 +27,7 @@ import {
   createVoiceSourcePanelModel,
   pollVoicePreview,
   submitAuthorizedVoiceUpload,
+  submitDesignedVoiceVersion,
   type BlobHasher,
   type VoiceSourceFailure,
   type VoiceSourceWorkflowState,
@@ -37,7 +39,6 @@ import {
 } from "./voice-preview-playback";
 
 
-const LANGUAGE_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/;
 const PREVIEW_TEXT_MAX_LENGTH = 500;
 
 
@@ -59,6 +60,7 @@ export interface VoiceSourceWorkspaceApi {
   listVoiceProfiles: typeof listVoiceProfiles;
   createVoiceProfile: typeof createVoiceProfile;
   getVoiceProfile: typeof getVoiceProfile;
+  createDesignedVoiceVersion: typeof createDesignedVoiceVersion;
   createUploadedVoiceVersion: typeof createUploadedVoiceVersion;
   createVoicePreview: typeof createVoicePreview;
   getVoicePreview: typeof getVoicePreview;
@@ -81,6 +83,7 @@ export type VoiceSourceWorkspacePhase =
   | "loading"
   | "ready"
   | "creating-profile"
+  | "designing"
   | "uploading"
   | "creating-preview"
   | "polling-preview"
@@ -97,8 +100,10 @@ export interface VoiceSourceWorkspaceState {
   readonly selectedVersionId: string | null;
   readonly selectedSource: VoiceSourceType | null;
   readonly profileName: string;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly referenceAudio: File | null;
+  readonly referenceText: string;
+  readonly designDescription: string;
   readonly uploadRights: VoiceUploadRightsDraft;
   readonly previewText: string;
   readonly workflow: VoiceSourceWorkflowState;
@@ -126,6 +131,7 @@ const DEFAULT_API: VoiceSourceWorkspaceApi = {
   listVoiceProfiles,
   createVoiceProfile,
   getVoiceProfile,
+  createDesignedVoiceVersion,
   createUploadedVoiceVersion,
   createVoicePreview,
   getVoicePreview,
@@ -149,6 +155,8 @@ function initialState(novelId: string, suggestedName: string): VoiceSourceWorksp
     profileName: suggestedName,
     language: "zh-CN",
     referenceAudio: null,
+    referenceText: "",
+    designDescription: "",
     uploadRights: EMPTY_VOICE_UPLOAD_RIGHTS,
     previewText: "你好，这是当前音色的朗读试听。",
     workflow: IDLE_VOICE_SOURCE_WORKFLOW,
@@ -174,7 +182,15 @@ export function novelScopedVoiceProfiles(
       throw new Error("音色列表包含重复档案，已拒绝显示。");
     }
     seen.add(profile.profile_id);
-    if (profile.status !== "archived" && profile.status !== "unavailable") scoped.push(profile);
+    const onlyOfficialPresets = profile.versions.length > 0 && profile.versions.every((version) => (
+      version.profile_id === profile.profile_id
+      && version.source_type === "preset"
+      && voiceSourceEvidenceIsUsable(version)
+    ));
+    // This is a view filter, never deletion: empty drafts and mixed/private histories remain editable.
+    if (profile.status !== "archived" && profile.status !== "unavailable" && !onlyOfficialPresets) {
+      scoped.push(profile);
+    }
   }
   return scoped.sort((left, right) => (
     left.name.localeCompare(right.name, "zh-CN")
@@ -196,6 +212,11 @@ function replaceProfile(
 
 
 function isWorkspaceSelectableVersion(version: VoiceProfileVersionResource): boolean {
+  if (
+    version.source_type === "generated"
+    && version.rights.source_kind === "qwen_synthetic_design"
+    && version.description_available
+  ) return true;
   return voiceSourceEvidenceIsUsable(version);
 }
 
@@ -380,7 +401,7 @@ export function createVoiceSourceWorkspace(
         sequence,
         controller,
         null,
-        "私人音色档案已加载。",
+        "",
       ).catch((reason: unknown) => {
         if (!ownsScope(generation, sequence, controller) || isAbortLike(reason)) return;
         commit((current) => ({
@@ -424,6 +445,7 @@ export function createVoiceSourceWorkspace(
     });
     const busy = [
       "creating-profile",
+      "designing",
       "uploading",
       "creating-preview",
       "polling-preview",
@@ -508,7 +530,7 @@ export function createVoiceSourceWorkspace(
             selectedProfileId: scoped.profile_id,
             selectedVersionId: defaultVersionId(scoped),
             selectedSource: null,
-            message: "作品专属音色档案已创建。下一步选择官方预设或上传有权使用的参考录音。",
+            message: "作品专属音色档案已创建。下一步选择文字设计或上传有权使用的参考录音。",
             failure: null,
           }));
           focusStatus();
@@ -539,12 +561,109 @@ export function createVoiceSourceWorkspace(
         selectedVersionId: defaultVersionId(profile),
         selectedSource: null,
         referenceAudio: null,
+        referenceText: "",
+        designDescription: "",
         workflow: IDLE_VOICE_SOURCE_WORKFLOW,
         previewPlayed: false,
         qualityConfirmed: false,
         message: "已切换音色档案。尚未改变旁白或人物绑定。",
         failure: null,
       }));
+    };
+
+    const createDesignedAction = () => {
+      const current = stateRef.current;
+      const profile = current.profiles.find((item) => item.profile_id === current.selectedProfileId) ?? null;
+      const currentModel = createVoiceSourcePanelModel({
+        capabilities: props.capabilities,
+        authorization: props.authorization,
+        voiceSources: props.voiceSources,
+        profile,
+        selectedVersionId: current.selectedVersionId,
+      });
+      const description = current.designDescription.trim();
+      if (
+        profile === null
+        || current.selectedSource !== "generated"
+        || description.length < 1
+        || description.length > 500
+        || !previewTextValid
+        || actionsBlocked
+      ) return;
+      operationAbortRef.current?.abort();
+      const generation = scopeGenerationRef.current;
+      const sequence = ++operationSequenceRef.current;
+      const controller = new AbortController();
+      operationAbortRef.current = controller;
+      const intent = operationIntent(
+        "designed",
+        profile.profile_id,
+        profile.version,
+        description,
+        "zh-CN",
+        null,
+      );
+      const key = idempotencyKey(intent, "designed");
+      commit((latest) => ({
+        ...latest,
+        phase: "designing",
+        workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+        previewPlayed: false,
+        qualityConfirmed: false,
+        message: "正在创建普通话设计候选…",
+        failure: null,
+      }));
+      const requestDesigned = () => submitDesignedVoiceVersion(currentModel, {
+        profileId: profile.profile_id,
+        expectedProfileVersion: profile.version,
+        description,
+        language: "zh-CN",
+        seed: null,
+        idempotencyKey: key,
+        signal: controller.signal,
+      }, { createDesignedVoiceVersion: api.createDesignedVoiceVersion });
+      void requestDesigned().catch(async (reason: unknown) => {
+        if (!ownsScope(generation, sequence, controller) || !networkFailure(reason)) throw reason;
+        return requestDesigned();
+      }).then(async (created) => {
+        if (!ownsScope(generation, sequence, controller)) return;
+        const refreshed = await refreshOneProfile(
+          profile.profile_id,
+          generation,
+          sequence,
+          controller,
+          "普通话设计候选已创建。下一步生成试听。",
+        );
+        if (!ownsScope(generation, sequence, controller)) return;
+        if (!refreshed.versions.some((item) => item.version_id === created.version_id)) {
+          throw new Error("设计响应未出现在刷新后的音色档案中。");
+        }
+        idempotencyRef.current.delete(intent);
+        commit((latest) => ({
+          ...latest,
+          phase: "ready",
+          selectedVersionId: created.version_id,
+          workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+          previewPlayed: false,
+          qualityConfirmed: false,
+          message: "普通话设计候选已创建。点击“生成试听”后将由本地模型生成试听。",
+          failure: null,
+        }));
+        focusStatus();
+      }).catch((reason: unknown) => {
+        if (!ownsScope(generation, sequence, controller) || isAbortLike(reason)) return;
+        const failure = workspaceFailure(reason);
+        commit((latest) => ({
+          ...latest,
+          phase: failure.kind === "conflict" ? "conflict" : "error",
+          workflow: { status: "failed", preview: null, failure },
+          message: failure.kind === "conflict"
+            ? "音色档案版本已变化。请刷新后重新创建设计候选。"
+            : "创建设计候选失败；描述和试听文本已保留。",
+          failure,
+        }));
+        focusStatus();
+      });
     };
 
     const uploadAction = () => {
@@ -572,6 +691,7 @@ export function createVoiceSourceWorkspace(
         file.size,
         file.lastModified,
         current.language,
+        current.referenceText.trim(),
         current.uploadRights,
       );
       const key = idempotencyKey(intent, "upload");
@@ -590,6 +710,7 @@ export function createVoiceSourceWorkspace(
         language: current.language,
         originalFilename: file.name,
         referenceAudio: file,
+        referenceText: current.referenceText,
         rights: current.uploadRights,
         idempotencyKey: key,
         signal: controller.signal,
@@ -619,6 +740,7 @@ export function createVoiceSourceWorkspace(
             ...latest,
             selectedVersionId: created.version_id,
             referenceAudio: null,
+            referenceText: "",
             workflow: IDLE_VOICE_SOURCE_WORKFLOW,
             previewPlayed: false,
             message: "候选音色版本已上传。请选择版本并生成试听。",
@@ -912,18 +1034,44 @@ export function createVoiceSourceWorkspace(
       focusStatus();
     };
 
+    const createProfileControls = h("div", { className: "anw-voice-workspace__create-row" },
+      h("label", { className: "anw-voice-workspace__field" },
+        h("span", null, "音色名称"),
+        h("input", {
+          type: "text",
+          value: scopedState.profileName,
+          maxLength: 240,
+          placeholder: "例如：温柔女旁白、陈屿的声音",
+          disabled: actionsBlocked || !panelModel.actions.canCreateProfile,
+          onChange: (event: InputEvent) => commit((current) => ({
+            ...current,
+            profileName: event.target.value,
+            failure: null,
+          })),
+        }),
+      ),
+      h("button", {
+        type: "button",
+        disabled: actionsBlocked
+          || !panelModel.actions.canCreateProfile
+          || scopedState.profileName.trim().length < 1
+          || scopedState.profileName.trim().length > 240,
+        onClick: createProfileAction,
+      }, scopedState.phase === "creating-profile" ? "创建中…" : "创建音色档案"),
+    );
+
     const renderProfileControls = () => h(
       "section",
       { className: "anw-voice-workspace__profiles", "aria-labelledby": `${prefix}-profile-heading` },
       h("div", { className: "anw-voice-workspace__section-heading" },
         h("div", null,
-          h("h3", { id: `${prefix}-profile-heading` }, "1. 作品音色档案"),
-          h("p", null, "音色档案只创建在当前作品内；创建或锁定不会自动设为旁白或人物声音。"),
+          h("h3", { id: `${prefix}-profile-heading` }, "1. 选择或新建音色"),
+          h("p", null, "先取名建立档案，再设计声音或上传录音；创建档案不会启动语音模型。"),
         ),
       ),
       scopedState.profiles.length > 0
         ? h("label", { className: "anw-voice-workspace__field" },
-          h("span", null, "当前音色档案"),
+          h("span", null, "当前音色"),
           h("select", {
             value: scopedState.selectedProfileId ?? "",
             disabled: actionsBlocked,
@@ -932,55 +1080,35 @@ export function createVoiceSourceWorkspace(
           ...scopedState.profiles.map((profile) => h(
             "option",
             { key: profile.profile_id, value: profile.profile_id },
-            `${profile.name} · 档案版本 ${profile.version}`,
+            `${profile.name}${profile.current_version_id ? " · 已锁定" : " · 待完成"}`,
           )),
           ),
         )
         : h("p", { className: "anw-voice-workspace__empty", role: "status" },
-          "当前作品还没有私人音色档案。需要时可创建后上传有权使用的参考录音。",
+          "还没有私人音色。你可以用文字设计，也可以上传有权使用的录音。",
         ),
-      h("div", { className: "anw-voice-workspace__create-row" },
-        h("label", { className: "anw-voice-workspace__field" },
-          h("span", null, "新档案名称"),
-          h("input", {
-            type: "text",
-            value: scopedState.profileName,
-            maxLength: 240,
-            disabled: actionsBlocked || !panelModel.actions.canCreateProfile,
-            onChange: (event: InputEvent) => commit((current) => ({
-              ...current,
-              profileName: event.target.value,
-              failure: null,
-            })),
-          }),
-        ),
-        h("button", {
-          type: "button",
-          disabled: actionsBlocked
-            || !panelModel.actions.canCreateProfile
-            || scopedState.profileName.trim().length < 1
-            || scopedState.profileName.trim().length > 240,
-          onClick: createProfileAction,
-        }, scopedState.phase === "creating-profile" ? "创建中…" : "创建作品音色档案"),
-      ),
+      scopedState.profiles.length > 0
+        ? h("details", { className: "anw-voice-workspace__new-profile" },
+          h("summary", null, "新建另一个音色"),
+          createProfileControls,
+        )
+        : createProfileControls,
     );
 
-    const versionControls = selectedProfile === null || scopedState.selectedSource === null
+    const versionControls = selectedProfile === null || scopedState.selectedSource === null || sourceVersions.length === 0
       ? null
       : h(
         "section",
         { className: "anw-voice-workspace__preview", "aria-labelledby": `${prefix}-preview-heading` },
         h("div", { className: "anw-voice-workspace__section-heading" },
           h("div", null,
-            h("h3", { id: `${prefix}-preview-heading` }, "3. 试听、确认并锁定"),
-            h("p", null, "先选择候选版本并生成真实 Qwen TTS 试听；播放后仍需单独勾选质量确认。"),
+            h("h3", { id: `${prefix}-preview-heading` }, "3. 试听并确认"),
+            h("p", null, selectedVersion?.state === "locked"
+              ? "这个音色已锁定。请到旁白或人物配音中选择使用，不会自动替换现有声音。"
+              : "生成试听，听过满意后确认锁定。创建和试听不会改变已有配音。"),
           ),
         ),
-        sourceVersions.length === 0
-          ? h("p", { className: "anw-voice-workspace__empty", role: "status" },
-            "还没有可试听的上传版本。请先完成参考录音与权利表单。",
-          )
-          : h("div", { className: "anw-voice-workspace__preview-grid" },
+        h("div", { className: "anw-voice-workspace__preview-grid" },
             h("label", { className: "anw-voice-workspace__field" },
               h("span", null, "候选音色版本"),
               h("select", {
@@ -999,28 +1127,30 @@ export function createVoiceSourceWorkspace(
               ...sourceVersions.map((version) => h(
                 "option",
                 { key: version.version_id, value: version.version_id },
-                `v${version.version_number} · ${version.preset_key ?? version.language} · ${version.state === "locked" ? "已锁定" : "候选"}`,
+                `版本 ${version.version_number} · 普通话 · ${version.state === "locked" ? "已锁定" : "待确认"}`,
               )),
               ),
             ),
-            h("label", { className: "anw-voice-workspace__field" },
-              h("span", null, "试听文本（1–500 字）"),
-              h("textarea", {
-                value: scopedState.previewText,
-                maxLength: PREVIEW_TEXT_MAX_LENGTH,
-                rows: 3,
-                disabled: actionsBlocked,
-                "aria-invalid": !previewTextValid,
-                onChange: (event: InputEvent) => commit((current) => ({
-                  ...current,
-                  previewText: event.target.value,
-                  workflow: IDLE_VOICE_SOURCE_WORKFLOW,
-                  previewPlayed: false,
-                  qualityConfirmed: false,
-                  failure: null,
-                })),
-              }),
-            ),
+            scopedState.selectedSource === "generated"
+              ? null
+              : h("label", { className: "anw-voice-workspace__field" },
+                h("span", null, "试听文本（1–500 字）"),
+                h("textarea", {
+                  value: scopedState.previewText,
+                  maxLength: PREVIEW_TEXT_MAX_LENGTH,
+                  rows: 3,
+                  disabled: actionsBlocked,
+                  "aria-invalid": !previewTextValid,
+                  onChange: (event: InputEvent) => commit((current) => ({
+                    ...current,
+                    previewText: event.target.value,
+                    workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+                    previewPlayed: false,
+                    qualityConfirmed: false,
+                    failure: null,
+                  })),
+                }),
+              ),
           ),
         h(PreviewPlayback, {
           preview: scopedState.workflow.status === "preview_ready"
@@ -1055,9 +1185,9 @@ export function createVoiceSourceWorkspace(
       },
       h("header", { className: "anw-voice-workspace__header" },
         h("div", null,
-          h("p", { className: "anw-voice-workspace__eyebrow" }, "我的音色 · 私人来源"),
-          h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "管理私人朗读音色"),
-          h("p", null, "这里只管理当前作品的私人音色；官方音色请在上方直接使用。"),
+          h("p", { className: "anw-voice-workspace__eyebrow" }, "我的声音 · 普通话"),
+          h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "私人音色"),
+          h("p", null, "为这部作品定制声音。官方声音请在“旁白音色”中选择。"),
         ),
         h("span", { className: "anw-voice-workspace__scope" }, "当前作品专属"),
       ),
@@ -1072,6 +1202,7 @@ export function createVoiceSourceWorkspace(
         "aria-live": "polite",
         "aria-atomic": "true",
         tabIndex: -1,
+        hidden: !scopedState.failure && !scopedState.message,
       }, scopedState.failure?.message ?? scopedState.message),
       scopedState.phase === "loading"
         ? h("p", { className: "anw-voice-workspace__loading" }, "正在读取作品音色档案…")
@@ -1099,23 +1230,6 @@ export function createVoiceSourceWorkspace(
         ? null
         : h("div", { className: "anw-voice-workspace__source" },
           h("h3", { id: `${prefix}-source-heading` }, "2. 选择音色来源"),
-          scopedState.selectedSource === "uploaded"
-            ? h("label", { className: "anw-voice-workspace__field anw-voice-workspace__language" },
-              h("span", null, "声音语言"),
-              h("input", {
-                type: "text",
-                value: scopedState.language,
-                maxLength: 40,
-                disabled: actionsBlocked,
-                "aria-invalid": !LANGUAGE_PATTERN.test(scopedState.language),
-                onChange: (event: InputEvent) => commit((current) => ({
-                  ...current,
-                  language: event.target.value.trim(),
-                  failure: null,
-                })),
-              }),
-            )
-            : null,
           h(VoiceSourcePanel, {
             embedded: true,
             ariaLabelledBy: `${prefix}-source-heading`,
@@ -1123,6 +1237,9 @@ export function createVoiceSourceWorkspace(
             selectedSource: scopedState.selectedSource,
             workflow: scopedState.workflow,
             uploadRights: scopedState.uploadRights,
+            referenceText: scopedState.referenceText,
+            designDescription: scopedState.designDescription,
+            previewText: scopedState.previewText,
             busy: actionsBlocked,
             cancelAllowed: busy && scopedState.phase !== "locking",
             referenceAudioSelected: scopedState.referenceAudio !== null,
@@ -1130,8 +1247,9 @@ export function createVoiceSourceWorkspace(
               && scopedState.workflow.status !== "preview_timeout",
             qualityConfirmationAllowed: scopedState.previewPlayed,
             qualityConfirmed: scopedState.qualityConfirmed,
+            previewContent: versionControls,
             onSelectSource: (source: VoiceSourceType) => {
-              if (source !== "uploaded" || actionsBlocked) return;
+              if (!["generated", "uploaded"].includes(source) || actionsBlocked) return;
               commit((current) => ({
                 ...current,
                 selectedSource: source,
@@ -1140,10 +1258,33 @@ export function createVoiceSourceWorkspace(
                 workflow: IDLE_VOICE_SOURCE_WORKFLOW,
                 previewPlayed: false,
                 qualityConfirmed: false,
-                message: "已选择上传参考录音。请完整填写权利表单。",
+                message: source === "generated"
+                  ? "已选择文字设计。语言固定为普通话，请填写描述和试听文本。"
+                  : "已选择上传参考录音。语言固定为普通话，请完整填写录音文字和权利表单。",
                 failure: null,
               }));
             },
+            onDesignDescriptionChange: (description: string) => commit((current) => ({
+              ...current,
+              designDescription: description,
+              workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+              previewPlayed: false,
+              qualityConfirmed: false,
+              failure: null,
+            })),
+            onPreviewTextChange: (text: string) => commit((current) => ({
+              ...current,
+              previewText: text,
+              workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+              previewPlayed: false,
+              qualityConfirmed: false,
+              failure: null,
+            })),
+            onReferenceTextChange: (referenceText: string) => commit((current) => ({
+              ...current,
+              referenceText,
+              failure: null,
+            })),
             onUploadRightsChange: (patch: Partial<VoiceUploadRightsDraft>) => commit((current) => ({
               ...current,
               uploadRights: { ...current.uploadRights, ...patch },
@@ -1155,6 +1296,7 @@ export function createVoiceSourceWorkspace(
               failure: null,
             })),
             onUpload: uploadAction,
+            onCreateDesigned: createDesignedAction,
             onPreview: createPreviewAction,
             onQualityConfirmationChange: (confirmed: boolean) => commit((current) => ({
               ...current,
@@ -1167,7 +1309,6 @@ export function createVoiceSourceWorkspace(
             onCancel: cancelAction,
           }),
         ),
-      versionControls,
     );
   };
 }

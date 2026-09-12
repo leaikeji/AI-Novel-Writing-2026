@@ -119,6 +119,26 @@ function props(changes: Partial<CharacterVoiceConfiguratorProps> = {}): Characte
 
 
 describe("CharacterVoiceConfigurator", () => {
+  it("opens official choices by default but keeps advanced content lazy", () => {
+    const harness = createHarness();
+    const Configurator = createCharacterVoiceConfigurator(harness.React);
+    const tree = harness.render(Configurator, props());
+    const groups = findAll(tree, (element) => element.type === "details");
+    expect(groups[0]!.props.open).toBe(true);
+    expect(groups[1]!.props.open).toBeUndefined();
+    expect(textContent(tree)).toContain("OFFICIAL_LIBRARY");
+    expect(textContent(tree)).not.toContain("ADVANCED_PRIVATE");
+    expect(textContent(tree)).toContain("选中即保存");
+  });
+
+  it("preserves an explicit opt-out from opening official choices", () => {
+    const harness = createHarness();
+    const Configurator = createCharacterVoiceConfigurator(harness.React);
+    const tree = harness.render(Configurator, props({ officialVoicesOpenByDefault: false }));
+    expect(findAll(tree, (element) => element.type === "details")[0]!.props.open).toBe(false);
+    expect(textContent(tree)).not.toContain("OFFICIAL_LIBRARY");
+  });
+
   it("keeps the same five-level hierarchy for card and drawer consumers", () => {
     const harness = createHarness();
     const Configurator = createCharacterVoiceConfigurator(harness.React);

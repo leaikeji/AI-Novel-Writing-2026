@@ -565,6 +565,28 @@ describe("chapter narration panel", () => {
     )).toHaveLength(1);
   });
 
+  it("announces a terminal gap skip while playback continues", () => {
+    const Panel = createChapterNarrationPanel(React);
+    const continuing: NarrationPlayerState = Object.freeze({
+      ...playerState("playing"),
+      failure: Object.freeze({
+        code: "FAILED_GAP",
+        message: "第 2 句音频失败，已跳过。",
+        retryable: false,
+        segmentId: SEGMENT_2,
+        ordinal: 1,
+      }),
+    });
+    const root = Panel(props({ playerState: continuing, failedSegments: failedSegments(false) }));
+    const notice = findAll(
+      root,
+      (item) => item.props.role === "status"
+        && String(item.props.className).includes("anw-chapter-narration-notice"),
+    )[0];
+    expect(textContent(notice)).toContain("第 2 句音频失败，已跳过。");
+    expect(findAll(root, (item) => item.props["data-player-phase"] === "playing")).toHaveLength(1);
+  });
+
   it("labels an ended Edition as a restart instead of a generic play action", () => {
     const Panel = createChapterNarrationPanel(React);
     const root = Panel(props({ playerState: playerState("ended") }));

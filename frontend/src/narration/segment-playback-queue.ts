@@ -79,6 +79,12 @@ export type SegmentPlaybackQueueEvent = Readonly<
       durationMs: number;
     }
   | {
+      type: "segment-skipped";
+      lease: PlaybackLease;
+      backend: SegmentPlaybackBackendKind;
+      failure: SegmentPlaybackFailure;
+    }
+  | {
       type: "blocked";
       lease: PlaybackLease;
       backend: SegmentPlaybackBackendKind;
@@ -287,6 +293,27 @@ function blockingFailure(segment: ManifestSegmentV2): SegmentPlaybackFailure {
     return failure("CANCELLED_GAP", "句段生成已取消，播放已在缺口前停止。", true, segment);
   }
   return failure("PENDING_GAP", "后续句段尚未准备好，播放不会跳过该缺口。", true, segment);
+}
+
+
+function terminalGapFailure(segment: ManifestSegmentV2): SegmentPlaybackFailure | null {
+  if (segment.render_status === "failed") {
+    return failure(
+      "FAILED_GAP",
+      `第 ${segment.ordinal + 1} 句音频失败，已跳过。`,
+      segment.failure?.retryable ?? false,
+      segment,
+    );
+  }
+  if (segment.render_status === "cancelled") {
+    return failure(
+      "CANCELLED_GAP",
+      `第 ${segment.ordinal + 1} 句音频已取消，已跳过。`,
+      false,
+      segment,
+    );
+  }
+  return null;
 }
 
 
@@ -658,10 +685,10 @@ export function createMediaElementPlaybackDriver(): SegmentPlaybackDriver | null
 
 
 /**
- * Fetches 3-5 contiguous ready segment assets and uses exactly two
+ * Fetches 3-5 ready segment assets and uses exactly two
  * pitch-preserving HTMLAudioElements as the sole product playback backend.
- * It deliberately stops at the first non-ready segment instead of searching
- * for a later ready island.
+ * Terminal failed/cancelled gaps are announced and skipped. Pending work is
+ * still an authoritative stop and is never skipped.
  */
 export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
   private readonly prefetchSegments: number;
@@ -864,6 +891,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
     );
     for (let ordinal = fromOrdinal; ordinal < limit; ordinal += 1) {
       const segment = operation.manifest.segments[ordinal];
+      if (terminalGapFailure(segment)) continue;
       if (segment.render_status !== "ready" || !segment.audio) break;
       if (operation.media.has(ordinal)) continue;
       const mediaPromise = this.fetchSegment(operation, segment)
@@ -1006,6 +1034,16 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
         this.assertCurrent(operation);
         currentSegment = operation.manifest.segments[ordinal];
         operation.currentSegment = currentSegment;
+        const skippedFailure = terminalGapFailure(currentSegment);
+        if (skippedFailure) {
+          this.emit(operation, {
+            type: "segment-skipped",
+            lease: operation.lease,
+            backend: operation.driver.kind,
+            failure: skippedFailure,
+          });
+          continue;
+        }
         if (currentSegment.render_status !== "ready" || !currentSegment.audio) {
           this.block(operation, currentSegment);
           return;
@@ -1070,7 +1108,7 @@ export class SegmentPlaybackQueue implements SegmentPlaybackQueuePort {
         const nextOrdinal = ordinal + 1;
         if (nextOrdinal < operation.endOrdinalExclusive) {
           const next = operation.manifest.segments[nextOrdinal];
-          if (next.render_status !== "ready" || !next.audio) {
+          if (!terminalGapFailure(next) && (next.render_status !== "ready" || !next.audio)) {
             this.block(operation, next);
             return;
           }

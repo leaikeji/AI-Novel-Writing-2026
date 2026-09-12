@@ -21,6 +21,7 @@ from backend.narration.contracts import (
 from backend.narration.official_preview_audio import (
     OfficialVoicePreviewAudioService,
     OfficialVoicePreviewFailure,
+    PREVIEW_CACHE_MAX_ENTRIES,
     PREVIEW_ROUTE,
     build_official_voice_preview_audio_router,
     require_narration_t4_http_access,
@@ -168,10 +169,8 @@ def _router(service: OfficialVoicePreviewAudioService):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("language", ["zh-CN", "en", "ja-JP", "ko-KR"])
-async def test_preview_forces_local_fixed_text_and_returns_valid_wav(
-    language: str,
-) -> None:
+async def test_preview_forces_local_fixed_mandarin_text_and_returns_valid_wav() -> None:
+    language = "zh-CN"
     session = RecordingSession()
     execution = RecordingExecution(session)
     service = _service(execution, session)
@@ -188,6 +187,7 @@ async def test_preview_forces_local_fixed_text_and_returns_valid_wav(
     assert result.model_id == MODEL_ID
     assert result.model_revision == MODEL_REVISION
     assert result.speaker_id == require_official_preset("qwen.WarmFemale").local_voice_id
+    assert result.cache_status == "miss"
     assert session.write_calls == []
     assert len(execution.requests) == 1
     novel_id, selection, request = execution.requests[0]
@@ -199,6 +199,16 @@ async def test_preview_forces_local_fixed_text_and_returns_valid_wav(
     assert request.voice.provider_voice_id == result.speaker_id
     assert request.text
     assert "novel text supplied by client" not in request.text
+
+    cached = await service.preview(
+        novel_id=NOVEL_ID,
+        preset_id="qwen.WarmFemale",
+        language=language,  # type: ignore[arg-type]
+    )
+    assert cached.audio_bytes == result.audio_bytes
+    assert cached.cache_status == "hit"
+    assert len(execution.requests) == 1
+    assert PREVIEW_CACHE_MAX_ENTRIES == 9
 
 
 @pytest.mark.asyncio
@@ -228,6 +238,42 @@ async def test_missing_novel_scope_closes_session_and_never_calls_provider() -> 
     assert execution.requests == []
 
 
+@pytest.mark.asyncio
+async def test_cached_preview_still_revalidates_novel_scope() -> None:
+    session = RecordingSession()
+    execution = RecordingExecution(session)
+    validation_count = 0
+
+    def changing_scope(_session: RecordingSession, _novel_id: UUID) -> object:
+        nonlocal validation_count
+        validation_count += 1
+        if validation_count > 1:
+            raise NovelLifecycleNotFound("missing")
+        return object()
+
+    service = OfficialVoicePreviewAudioService(
+        session_factory=lambda: session,  # type: ignore[arg-type,return-value]
+        execution_service=execution,
+        novel_scope_validator=changing_scope,  # type: ignore[arg-type]
+    )
+    first = await service.preview(
+        novel_id=NOVEL_ID,
+        preset_id="qwen.WarmFemale",
+        language="zh-CN",
+    )
+    assert first.cache_status == "miss"
+
+    with pytest.raises(OfficialVoicePreviewFailure) as captured:
+        await service.preview(
+            novel_id=NOVEL_ID,
+            preset_id="qwen.WarmFemale",
+            language="zh-CN",
+        )
+
+    assert captured.value.code == "TTS_PREVIEW_NOVEL_NOT_FOUND"
+    assert len(execution.requests) == 1
+
+
 def test_router_returns_wav_identity_headers_and_no_store() -> None:
     session = RecordingSession()
     execution = RecordingExecution(session)
@@ -242,6 +288,11 @@ def test_router_returns_wav_identity_headers_and_no_store() -> None:
             + PREVIEW_ROUTE.format(novel_id=NOVEL_ID),
             json={"preset_id": "qwen.WarmFemale", "language": "zh-CN"},
         )
+        cached_response = client.post(
+            "/api/ai-novel-world-2026"
+            + PREVIEW_ROUTE.format(novel_id=NOVEL_ID),
+            json={"preset_id": "qwen.WarmFemale", "language": "zh-CN"},
+        )
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
@@ -250,7 +301,12 @@ def test_router_returns_wav_identity_headers_and_no_store() -> None:
     assert response.headers["x-tts-model-id"] == MODEL_ID
     assert response.headers["x-tts-model-revision"] == MODEL_REVISION
     assert response.headers["x-tts-speaker-id"] == "Serena"
+    assert response.headers["x-tts-preview-cache"] == "miss"
     assert response.content[:4] == b"RIFF"
+    assert cached_response.status_code == 200
+    assert cached_response.headers["x-tts-preview-cache"] == "hit"
+    assert cached_response.content == response.content
+    assert len(execution.requests) == 1
 
 
 def test_router_rejects_unknown_language_extra_text_and_unknown_preset() -> None:

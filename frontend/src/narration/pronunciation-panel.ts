@@ -641,7 +641,7 @@ export function createPronunciationPanel(
           phase: "ready",
           profile: saved,
           drafts: pronunciationDraftsFromProfile(saved),
-          message: "发音配置已保存。它只影响以后新建的脚本/版本，不改正文，也不改写历史 Edition。",
+          message: "发音配置已保存。只用于以后新建的朗读版本，不改正文或已有音频。",
           conflictVersion: null,
         });
         props.onSaved?.(saved);
@@ -700,8 +700,7 @@ export function createPronunciationPanel(
       },
       h("header", { className: "anw-pronunciation-panel__header" },
         h("div", null,
-          h("span", { className: "anw-pronunciation-panel__eyebrow" }, "朗读设置"),
-          h("h3", { id: headingId, tabIndex: -1 }, "发音与停顿"),
+          h("h3", { id: headingId, tabIndex: -1 }, "发音词典"),
         ),
         profile
           ? h("span", { className: "anw-pronunciation-panel__version" }, `发音版本 ${profile.version}`)
@@ -746,7 +745,7 @@ export function createPronunciationPanel(
           h("div", { className: "anw-pronunciation-panel__section-heading" },
             h("div", null,
               h("h4", { id: `${prefix}-pause-heading` }, "基础停顿"),
-              h("p", null, "停顿属于作品基础朗读设置；本面板只显示真实值，不另存一份。"),
+              h("p", null, "沿用基础朗读的停顿节奏，可前往调整。"),
             ),
             props.onOpenReadingSettings
               ? h("button", {
@@ -769,12 +768,12 @@ export function createPronunciationPanel(
           h("div", { className: "anw-pronunciation-panel__section-heading" },
             h("div", null,
               h("h4", { id: `${prefix}-rules-heading` }, "发音与不朗读规则"),
-              h("p", null, "替换只改变 spoken_text，不会修改正文。"),
+              h("p", null, "为人名、多音字指定读法，或跳过不适合朗读的内容。只改变读出来的内容，不修改正文。"),
             ),
             h("button", { type: "button", disabled: fieldsDisabled, onClick: addDraft }, "新增规则"),
           ),
           drafts.length === 0
-            ? h("p", { className: "anw-pronunciation-panel__empty" }, "还没有发音规则。空表是有效的作品级配置。")
+            ? h("p", { className: "anw-pronunciation-panel__empty" }, "暂无特殊读法，系统将按原文朗读。遇到读错的人名或多音字时，再添加规则即可。")
             : h("div", { className: "anw-pronunciation-panel__rule-list" },
               ...drafts.map((draft, index) => {
                 const itemPrefix = `${prefix}-${draft.clientKey}`;
@@ -794,13 +793,14 @@ export function createPronunciationPanel(
                       id: `${itemPrefix}-source`,
                       type: "text",
                       maxLength: 160,
+                      placeholder: "例如：单先生",
                       value: draft.sourceText,
                       "aria-invalid": Boolean(validation.errors[`${draft.clientKey}:source`]),
                       onChange: (event: ValueChangeEvent) => updateDraft(index, { sourceText: event.target.value }),
                     }),
                   ),
                   h("label", null,
-                    h("span", null, "动作"),
+                    h("span", null, "处理方式"),
                     h("select", {
                       value: draft.action,
                       onChange: (event: ValueChangeEvent) => {
@@ -816,10 +816,11 @@ export function createPronunciationPanel(
                     ),
                   ),
                   h("label", null,
-                    h("span", null, "朗读文本"),
+                    h("span", null, "读作"),
                     h("input", {
                       type: "text",
                       maxLength: 240,
+                      placeholder: "例如：善先生",
                       value: draft.spokenText,
                       disabled: fieldsDisabled || draft.action === "skip",
                       "aria-invalid": Boolean(validation.errors[`${draft.clientKey}:spoken`]),
@@ -836,9 +837,7 @@ export function createPronunciationPanel(
                     !SUPPORTED_READING_LANGUAGES.includes(draft.language as SupportedReadingLanguage)
                       ? h("option", { value: draft.language, disabled: true }, `旧值 ${draft.language}（请重新选择）`)
                       : null,
-                    h("option", { value: "zh-CN" }, "中文（简体）"),
-                    h("option", { value: "en" }, "英语"),
-                    h("option", { value: "ja-JP" }, "日语"),
+                    h("option", { value: "zh-CN" }, "普通话（固定）"),
                     ),
                   ),
                   h("label", null,
@@ -915,8 +914,8 @@ export function createPronunciationPanel(
           },
           h("div", { className: "anw-pronunciation-panel__section-heading" },
             h("div", null,
-              h("h4", { id: `${prefix}-preview-heading` }, "发音命中预览"),
-              h("p", null, "在本地检查当前草稿会命中哪些规则；不上传正文，也不修改小说。"),
+              h("h4", { id: `${prefix}-preview-heading` }, "试试看规则效果"),
+              h("p", null, "粘贴一小段文字，查看替换后的读法。这里只预览文字，不启动语音模型，也不上传正文。"),
             ),
           ),
           h("div", { className: "anw-pronunciation-panel__preview-controls" },
@@ -967,16 +966,13 @@ export function createPronunciationPanel(
               disabled: previewText.trim() === "" || !validation.valid,
               onClick: () => props.onPreviewHits?.(preview),
             }, "试听命中结果")
-            : h("p", { className: "anw-pronunciation-panel__preview-note" },
-              "当前只提供命中预览；接入真实试听能力后才会显示试听按钮。",
-            ),
+            : null,
           ),
           state.phase === "save-error"
             ? h("div", { className: "anw-pronunciation-panel__error", role: "alert" }, state.message)
             : null,
           h("aside", { className: "anw-pronunciation-panel__history" },
-            h("strong", null, "版本与历史安全"),
-            h("p", null, "保存采用 CAS 并创建全量不可变发音版本。历史 Edition 继续引用原版本；只有作者主动重新生成时，新配置才进入新脚本。"),
+            h("p", null, "保存后用于新建的朗读版本。已有音频保持原样，需主动重新生成才会采用新读法。"),
           ),
           h("footer", { className: "anw-pronunciation-panel__footer" },
             h("span", null, dirty ? "有未保存更改" : "配置已同步"),

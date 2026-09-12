@@ -51,12 +51,12 @@ export const OFFICIAL_PRESET_EVIDENCE: readonly OfficialPresetEvidence[] = Objec
   { presetId: "qwen.WarmFemale", localVoiceId: "Serena", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "canonical_chapter_verified", aliyunPlusVoiceId: "longanlingxin", aliyunFlashVoiceId: "longanhuan_v3.6" },
   { presetId: "qwen.Vivian", localVoiceId: "Vivian", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
   { presetId: "qwen.UncleFu", localVoiceId: "Uncle_Fu", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
-  { presetId: "qwen.Dylan", localVoiceId: "Dylan", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: "北京口音", validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
-  { presetId: "qwen.Eric", localVoiceId: "Eric", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: "四川口音", validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.Dylan", localVoiceId: "Dylan", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.Eric", localVoiceId: "Eric", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
   { presetId: "qwen.ClearMale", localVoiceId: "Aiden", languageScope: "zh-CN", nativeLanguage: "en", dialect: null, validationTier: "canonical_chapter_verified", aliyunPlusVoiceId: "longanlufeng", aliyunFlashVoiceId: "loongjohn" },
-  { presetId: "qwen.Ryan", localVoiceId: "Ryan", languageScope: "en", nativeLanguage: "en", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
-  { presetId: "qwen.OnoAnna", localVoiceId: "Ono_Anna", languageScope: "ja-JP", nativeLanguage: "ja-JP", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
-  { presetId: "qwen.Sohee", localVoiceId: "Sohee", languageScope: "ko-KR", nativeLanguage: "ko-KR", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.Ryan", localVoiceId: "Ryan", languageScope: "zh-CN", nativeLanguage: "en", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.OnoAnna", localVoiceId: "Ono_Anna", languageScope: "zh-CN", nativeLanguage: "ja-JP", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.Sohee", localVoiceId: "Sohee", languageScope: "zh-CN", nativeLanguage: "ko-KR", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
 ]);
 export const REFERENCE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 export const REFERENCE_UPLOAD_MIME_TYPES = ["audio/wav", "audio/flac"] as const;
@@ -131,6 +131,7 @@ export const NARRATION_ERROR_CODES = [
   "UNSUPPORTED_MEDIA_TYPE",
   "PAYLOAD_TOO_LARGE",
   "VALIDATION_FAILED",
+  "VOICE_LANGUAGE_UNSUPPORTED",
 ] as const;
 
 export type NarrationErrorCode = typeof NARRATION_ERROR_CODES[number];
@@ -267,7 +268,7 @@ export interface NarrationPlaybackPreferences {
 
 export interface NarrationSettingsValues {
   readonly narrator: NarratorVoiceSelection | null;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly output_format: OutputAudioFormat;
   readonly script_review_policy: ScriptReviewPolicy;
   readonly analysis_mode: AnalysisMode;
@@ -352,7 +353,7 @@ export interface VoiceRightsSummary {
   readonly rights_record_id: string;
   readonly state: VoiceRightsState;
   readonly notice_version: string;
-  readonly source_kind: "official_preset" | "user_upload";
+  readonly source_kind: "official_preset" | "user_upload" | "qwen_synthetic_design";
   readonly source_identifier_sha256: string;
   readonly purpose: "private_novel_narration";
   readonly commercial_use: boolean;
@@ -442,11 +443,11 @@ export interface OfficialPresetCatalogItem {
   readonly native_language: OfficialPresetLanguage;
   readonly dialect: string | null;
   readonly group: string;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly local_use_status: "available";
   readonly commercial_distribution_status: "not_evaluated";
   readonly validation_tier: "canonical_chapter_verified" | "pinned_catalog_unreviewed";
-  readonly language_scope: OfficialPresetLanguage;
+  readonly language_scope: "zh-CN";
   readonly selectable_now: boolean;
   readonly previewable_now: boolean;
   readonly renderable_existing: boolean;
@@ -470,7 +471,7 @@ export interface VoiceProfileVersionResource {
   readonly model_id: string | null;
   readonly model_revision: string | null;
   readonly preset_key: string | null;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly fingerprint: string;
   readonly quality_state: VoiceQualityState;
   readonly activation_basis: "preview_confirmed" | "explicit_official_preset_selection";
@@ -500,7 +501,9 @@ export function voiceSourceEvidenceIsUsable(
     return version.rights.source_kind === "user_upload"
       && version.reference_asset_id !== null;
   }
-  return false;
+  return version.rights.source_kind === "qwen_synthetic_design"
+    && version.reference_asset_id !== null
+    && version.description_available;
 }
 
 
@@ -560,10 +563,19 @@ export interface CreatePresetVoiceVersionRequest {
 
 export interface UploadedVoiceVersionMetadata {
   readonly expected_profile_version: number;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly original_filename: string;
   readonly reference_sha256: string;
+  readonly reference_text: string;
   readonly rights: VoiceRightsDeclarationRequest;
+}
+
+/** The product deliberately exposes Mandarin only; dialects are not normalized. */
+export interface CreateDesignedVoiceVersionRequest {
+  readonly expected_profile_version: number;
+  readonly description: string;
+  readonly language: "zh-CN";
+  readonly seed: number | null;
 }
 
 export type VoicePreviewStatus = "queued" | "running" | "ready" | "failed" | "cancelled" | "unavailable";
@@ -609,7 +621,7 @@ export interface CharacterVoiceBindingResource {
   readonly binding_policy: CharacterVoiceBindingPolicy;
   readonly profile_id: string | null;
   readonly version_id: string | null;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly version: number;
   readonly impact: VoiceBindingImpact;
   readonly updated_at: string | null;
@@ -626,7 +638,7 @@ export interface PutCharacterVoiceBindingRequest {
   readonly binding_policy: CharacterVoiceBindingPolicy;
   readonly profile_id: string | null;
   readonly version_id: string | null;
-  readonly language: string;
+  readonly language: "zh-CN";
 }
 
 export type OfficialVoiceSelectionTargetKind = "narrator" | "character";
@@ -643,6 +655,7 @@ export interface OfficialVoicePreviewAudioResponse {
   readonly model_id: string;
   readonly model_revision: string;
   readonly official_speaker: string;
+  readonly cache_status: "hit" | "miss";
 }
 
 export interface OfficialVoiceSelectionRequest {
@@ -662,7 +675,7 @@ export interface OfficialVoiceSelectionResult {
   readonly version_id: string;
   readonly settings_version: number;
   readonly binding_version: number | null;
-  readonly target_language: string;
+  readonly target_language: "zh-CN";
   readonly language_mismatch: boolean;
   readonly completed_at: string;
 }
@@ -1399,7 +1412,7 @@ function validateRights(value: unknown, path: string): void {
   uuid(item.rights_record_id, `${path}.rights_record_id`);
   oneOf(item.state, ["active", "revoked", "expired", "review_blocked"] as const, `${path}.state`);
   string(item.notice_version, `${path}.notice_version`, 1, 120);
-  oneOf(item.source_kind, ["official_preset", "user_upload"] as const, `${path}.source_kind`);
+  oneOf(item.source_kind, ["official_preset", "user_upload", "qwen_synthetic_design"] as const, `${path}.source_kind`);
   sha256(item.source_identifier_sha256, `${path}.source_identifier_sha256`);
   literal(item.purpose, "private_novel_narration", `${path}.purpose`);
   boolean(item.commercial_use, `${path}.commercial_use`);
@@ -1490,7 +1503,7 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
       fail(`${itemPath}.dialect`, "official speaker dialect changed");
     }
     string(preset.group, `${itemPath}.group`, 1, 80);
-    language(preset.language, `${itemPath}.language`);
+    literal(preset.language, "zh-CN", `${itemPath}.language`);
     literal(preset.local_use_status, "available", `${itemPath}.local_use_status`);
     literal(preset.commercial_distribution_status, "not_evaluated", `${itemPath}.commercial_distribution_status`);
     const validationTier = oneOf(
@@ -1502,11 +1515,8 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
     if (validationTier !== expectedValidationTier) {
       fail(`${itemPath}.validation_tier`, "official preset validation tier changed");
     }
-    const languageScope = oneOf(
-      preset.language_scope,
-      ["zh-CN", "en", "ja-JP", "ko-KR"] as const,
-      `${itemPath}.language_scope`,
-    );
+    literal(preset.language_scope, "zh-CN", `${itemPath}.language_scope`);
+    const languageScope = "zh-CN";
     if (
       languageScope !== preset.language
       || languageScope !== expectedEvidence.languageScope
@@ -1530,11 +1540,7 @@ function validateOfficialVoicePreviewAudioRequest(value: unknown, path: string):
   if (!OFFICIAL_PRESET_IDS.includes(presetId as OfficialPresetId)) {
     fail(`${path}.preset_id`, "expected exact Qwen preset id");
   }
-  oneOf(
-    item.language,
-    ["zh-CN", "en", "ja-JP", "ko-KR"] as const,
-    `${path}.language`,
-  );
+  literal(item.language, "zh-CN", `${path}.language`);
 }
 
 function parseMediaAssetLink(value: unknown, path: string): MediaAssetLink {
@@ -1752,7 +1758,8 @@ function validateOfficialVoiceSelection(value: unknown, path: string): void {
   const bindingVersion = result.binding_version === null
     ? null
     : integer(result.binding_version, `${path}.frozen_result.binding_version`, 1);
-  const targetLanguage = language(result.target_language, `${path}.frozen_result.target_language`);
+  literal(result.target_language, "zh-CN", `${path}.frozen_result.target_language`);
+  const targetLanguage = "zh-CN";
   const languageMismatch = boolean(result.language_mismatch, `${path}.frozen_result.language_mismatch`);
   timestamp(result.completed_at, `${path}.frozen_result.completed_at`);
   if ((target === "character") !== (characterId !== null && bindingVersion !== null)) {

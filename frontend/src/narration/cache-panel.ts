@@ -577,10 +577,7 @@ export function createCachePanel(
             )
             : null,
           h("dl", { className: "anw-cache-panel__metrics" },
-            h("div", null, h("dt", null, "源资产（不可清理）"), h("dd", null, capacity(status.source_asset_bytes))),
-            h("div", null, h("dt", null, "锁定音色（不可清理）"), h("dd", null, capacity(status.locked_voice_bytes))),
-            h("div", null, h("dt", null, "历史 Edition 引用（不可清理）"), h("dd", null, capacity(status.referenced_edition_bytes))),
-            h("div", null, h("dt", null, "派生缓存"), h("dd", null, capacity(status.derived_cache_bytes))),
+            h("div", null, h("dt", null, "已有朗读版本使用中（保留）"), h("dd", null, capacity(status.referenced_edition_bytes))),
             h("div", { className: "is-reclaimable" }, h("dt", null, "当前可回收"), h("dd", null, capacity(status.reclaimable_bytes))),
             h("div", null, h("dt", null, "待处理任务"), h("dd", null, status.pending_job_count)),
             h("div", null, h("dt", null, "媒体盘可用 / 总量"), h("dd", null,
@@ -590,11 +587,11 @@ export function createCachePanel(
             )),
           ),
           h("details", { className: "anw-cache-panel__exact-capacity" },
-            h("summary", null, "查看精确容量"),
+            h("summary", null, "容量明细（含原始录音与锁定音色）"),
             h("dl", null,
-              h("div", null, h("dt", null, "源资产"), h("dd", null, formatExactBytes(status.source_asset_bytes))),
-              h("div", null, h("dt", null, "锁定音色"), h("dd", null, formatExactBytes(status.locked_voice_bytes))),
-              h("div", null, h("dt", null, "历史 Edition 引用"), h("dd", null, formatExactBytes(status.referenced_edition_bytes))),
+              h("div", null, h("dt", null, "原始录音（保留）"), h("dd", null, formatExactBytes(status.source_asset_bytes))),
+              h("div", null, h("dt", null, "锁定音色（保留）"), h("dd", null, formatExactBytes(status.locked_voice_bytes))),
+              h("div", null, h("dt", null, "已有朗读版本使用中"), h("dd", null, formatExactBytes(status.referenced_edition_bytes))),
               h("div", null, h("dt", null, "派生缓存"), h("dd", null, formatExactBytes(status.derived_cache_bytes))),
               h("div", null, h("dt", null, "当前可回收"), h("dd", null, formatExactBytes(status.reclaimable_bytes))),
               h("div", null, h("dt", null, "媒体盘可用"), h("dd", null, formatExactBytes(status.disk_free_bytes))),
@@ -602,8 +599,8 @@ export function createCachePanel(
             ),
           ),
           h("aside", { className: "anw-cache-panel__guard" },
-            h("strong", null, "清理保护线"),
-            h("p", null, "清理只允许处理派生且未引用的缓存。源资产、锁定音色和被历史 Edition 引用的资产，删除数在服务契约中永远为 0。"),
+            h("strong", null, "哪些内容会保留？"),
+            h("p", null, "原始录音、锁定音色和已有朗读版本使用的音频都会保留。只清理不再使用的临时缓存，先预览，再确认。"),
           ),
           preview && state.phase === "preview-ready"
             ? h("section", {
@@ -670,7 +667,7 @@ export function createCachePanel(
               h("strong", null, "清理结果（服务端实际值）"),
               h("p", null, `删除 ${result.deleted_asset_count} 个派生资产，回收 ${formatReadableBytes(result.reclaimed_bytes)}。`),
               h("small", null, `精确回收：${formatExactBytes(result.reclaimed_bytes)}`),
-              h("p", null, "源资产 0 个、锁定音色 0 个、历史 Edition 引用资产 0 个。上方快照已过期，请刷新状态。"),
+              h("p", null, "原始录音、锁定音色和已有朗读版本的音频均未删除。上方状态已过期，请刷新。"),
             )
             : null,
         )

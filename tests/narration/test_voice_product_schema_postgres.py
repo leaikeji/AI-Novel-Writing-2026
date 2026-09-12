@@ -37,7 +37,7 @@ MIGRATION = (
 )
 REVISION = "20260827_0021"
 DOWN_REVISION = "20260827_0020"
-HEAD_REVISION = "20260912_0054"
+HEAD_REVISION = "20260912_0055"
 EXPECTED_DATABASE = "ai_novel_world_2026_tts_test"
 EXPECTED_USER = "tts_test"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -59,10 +59,10 @@ def _index_names(table_name: str) -> set[str]:
     }
 
 
-def test_voice_product_revision_is_followed_by_official_preset_and_retry_head() -> None:
+def test_voice_product_revision_is_followed_by_qwen_mandarin_head() -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260911_0053"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260912_0054"
     assert scripts.get_revision("20260911_0053").down_revision == "20260910_0052"
     assert scripts.get_revision("20260909_0049").down_revision == "20260909_0048"
     assert scripts.get_revision("20260909_0045").down_revision == "20260908_0044"

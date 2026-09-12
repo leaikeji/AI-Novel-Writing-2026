@@ -516,6 +516,13 @@ export function createChapterNarrationPanel(
     } else if (props.sourceKind === "historical") {
       noticeKind = "warning";
       noticeText = "正在播放历史朗读版本";
+    } else if (
+      playerState?.failure
+      && ["FAILED_GAP", "CANCELLED_GAP"].includes(playerState.failure.code)
+      && ["playing", "paused", "buffering"].includes(playerState.phase)
+    ) {
+      noticeKind = "info";
+      noticeText = playerState.failure.message;
     } else if (failedItems.length > 0) {
       noticeKind = "error";
       noticeText = `有 ${failedItems.length} 个句段生成失败`;

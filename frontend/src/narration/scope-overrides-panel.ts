@@ -1,4 +1,5 @@
 import { NarrationApiError } from "./api";
+import { TIMING_INPUT_FIELDS, parseTimingInput, updateInvalidTimingInputs, type InvalidTimingInputs } from "./timing-input";
 import type {
   CapabilityKey,
   FeatureCapability,
@@ -173,6 +174,9 @@ export function buildScopeOverrideRequest(
     || current.scope_kind !== target.scopeKind
     || current.scope_id !== target.scopeId
   )) throw new Error("范围覆盖版本与目标不匹配");
+  if (enabled && values.language !== null && values.language !== "zh-CN") {
+    throw new Error("范围覆盖仅支持普通话");
+  }
   return {
     expected_version: current?.version ?? 0,
     enabled,
@@ -272,6 +276,7 @@ export function createScopeOverridesPanel(
       current?.overrides ?? emptyScopeOverrideValues(),
     );
     const [operation, setOperation] = React.useState<ScopeOperation>(IDLE_OPERATION);
+    const [invalidTimingInputs, setInvalidTimingInputs] = React.useState<InvalidTimingInputs>({});
     const controllerRef = React.useRef<AbortController | null>(null);
     const novelRef = React.useRef(props.novelId);
     const selectedRef = React.useRef("");
@@ -293,6 +298,7 @@ export function createScopeOverridesPanel(
     }, [props.overrides]);
 
     React.useEffect(() => {
+      setInvalidTimingInputs({});
       if (!selected) {
         setDraftScopeKey("");
         setEnabled(false);
@@ -302,7 +308,12 @@ export function createScopeOverridesPanel(
       const active = scopeOverrideForTarget(selected, localOverrides);
       setDraftScopeKey(selectedIdentity);
       setEnabled(active?.enabled ?? false);
-      setDraft(active?.overrides ?? emptyScopeOverrideValues());
+      const next = active?.overrides ?? emptyScopeOverrideValues();
+      setDraft({
+        ...next,
+        // 旧版本可能保存过外语范围覆盖；新规则下安全降级为继承作品普通话。
+        language: next.language === "zh-CN" ? "zh-CN" : null,
+      });
       setOperation(IDLE_OPERATION);
     }, [selectedIdentity, current?.version]);
 
@@ -310,7 +321,8 @@ export function createScopeOverridesPanel(
     const scopeChanging = selectedIdentity !== draftScopeKey;
     const baselineEnabled = current?.enabled ?? false;
     const baselineValues = current?.overrides ?? emptyScopeOverrideValues();
-    const dirty = enabled !== baselineEnabled || !valuesEqual(draft, baselineValues);
+    const timingValid = !enabled || draft.timing === null || Object.keys(invalidTimingInputs).length === 0;
+    const dirty = !timingValid || enabled !== baselineEnabled || !valuesEqual(draft, baselineValues);
     const languageValid = draft.language === null || SUPPORTED_READING_LANGUAGES.includes(
       draft.language as SupportedReadingLanguage,
     );
@@ -336,6 +348,7 @@ export function createScopeOverridesPanel(
       || !dirty
       || invalidEnabled
       || !languageValid
+      || !timingValid
       || !narratorValid
       || !firstPersonCharacterValid;
     const prefix = `anw-scope-overrides-${props.novelId}`;
@@ -403,7 +416,7 @@ export function createScopeOverridesPanel(
         role: "region",
         "aria-labelledby": `${prefix}-heading`,
       },
-      h("h2", { id: `${prefix}-heading` }, "范围覆盖"),
+      h("h2", { id: `${prefix}-heading` }, "分卷与章节例外"),
       h("p", { role: "alert" }, "当前身份无权查看范围覆盖。"),
       );
     }
@@ -414,7 +427,7 @@ export function createScopeOverridesPanel(
         role: "region",
         "aria-labelledby": `${prefix}-heading`,
       },
-      h("h2", { id: `${prefix}-heading` }, "范围覆盖"),
+      h("h2", { id: `${prefix}-heading` }, "分卷与章节例外"),
       h("p", null, "当前作品还没有可配置的分卷或章节。"),
       );
     }
@@ -428,8 +441,8 @@ export function createScopeOverridesPanel(
       "data-reading-panel": "scope-overrides",
     },
     h("summary", null,
-      h("span", null, "范围覆盖"),
-      h("small", null, `${countEnabledScopeOverrides(props.novelId, localOverrides)} 个已启用 · 默认继承作品设置`),
+      h("span", null, "分卷与章节例外"),
+      h("small", null, `${countEnabledScopeOverrides(props.novelId, localOverrides)} 处单独设置 · 其余沿用作品设置`),
     ),
     h("div", {
       className: "anw-scope-overrides-panel__body",
@@ -439,10 +452,9 @@ export function createScopeOverridesPanel(
     },
     h("header", null,
       h("div", null,
-        h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "分卷与章节范围覆盖"),
-        h("p", null, "只在某一范围确实需要不同设置时启用；关闭后恢复继承。"),
+        h("h3", { id: `${prefix}-heading`, tabIndex: -1 }, "为特定分卷或章节单独设置"),
+        h("p", null, "需要不同的旁白、朗读内容或停顿时再启用；已有音频不会改变。"),
       ),
-      h("span", null, `覆盖版本 ${current?.version ?? 0}`),
     ),
     reason ? h("p", { className: "anw-scope-overrides-panel__notice", role: "note" }, reason) : null,
     h("fieldset", { disabled },
@@ -463,9 +475,12 @@ export function createScopeOverridesPanel(
         h("input", {
           type: "checkbox",
           checked: enabled,
-          onChange: (event: ValueChangeEvent) => setEnabled(event.target.checked),
+          onChange: (event: ValueChangeEvent) => {
+            setInvalidTimingInputs({});
+            setEnabled(event.target.checked);
+          },
         }),
-        h("span", null, "为这个范围启用覆盖"),
+        h("span", null, "单独设置这个分卷或章节"),
       ),
     ),
     h("section", {
@@ -481,7 +496,7 @@ export function createScopeOverridesPanel(
     ),
     enabled
       ? h("fieldset", { disabled },
-        h("legend", null, "覆盖内容"),
+        h("legend", null, "需要调整的内容"),
         h("label", null,
           h("span", null, "旁白音色"),
           h("select", {
@@ -509,24 +524,10 @@ export function createScopeOverridesPanel(
           }, item.label)),
           ),
         ),
-        h("label", null,
+        h("div", { className: "anw-scope-overrides-panel__fixed-value" },
           h("span", null, "朗读语言"),
-          h("select", {
-            value: draft.language ?? "",
-            "aria-invalid": !languageValid,
-            onChange: (event: ValueChangeEvent) => setDraft((currentDraft) => ({
-              ...currentDraft,
-              language: event.target.value || null,
-            })),
-          },
-          h("option", { value: "" }, `继承作品语言（${props.settings.values.language}）`),
-          !languageValid && draft.language
-            ? h("option", { value: draft.language, disabled: true }, `旧值 ${draft.language}（请重新选择）`)
-            : null,
-          h("option", { value: "zh-CN" }, "中文（简体）"),
-          h("option", { value: "en" }, "英语"),
-          h("option", { value: "ja-JP" }, "日语"),
-          ),
+          h("strong", null, "普通话（固定）"),
+          h("small", null, "与整本作品一致，使用普通话。"),
         ),
         h("label", { className: "anw-scope-overrides-panel__check" },
           h("input", {
@@ -537,7 +538,7 @@ export function createScopeOverridesPanel(
               text_rules: event.target.checked ? props.settings.values.text_rules : null,
             })),
           }),
-          h("span", null, "覆盖正文朗读规则（从作品当前值开始）"),
+          h("span", null, "单独设置朗读内容"),
         ),
         draft.text_rules
           ? h("div", { className: "anw-scope-overrides-panel__checks" },
@@ -559,7 +560,7 @@ export function createScopeOverridesPanel(
               h("span", null, label),
             )),
             h("details", { className: "anw-scope-overrides-panel__advanced" },
-              h("summary", null, "高级：叙述与内心独白声音"),
+              h("summary", null, "叙述与内心独白的声音"),
               h("div", null,
                 h("label", null,
                   h("span", null, "第一人称叙述"),
@@ -639,53 +640,55 @@ export function createScopeOverridesPanel(
           h("input", {
             type: "checkbox",
             checked: draft.timing !== null,
-            onChange: (event: ValueChangeEvent) => setDraft((currentDraft) => ({
-              ...currentDraft,
-              timing: event.target.checked ? props.settings.values.timing : null,
-            })),
+            onChange: (event: ValueChangeEvent) => {
+              setInvalidTimingInputs({});
+              setDraft((currentDraft) => ({ ...currentDraft, timing: event.target.checked ? props.settings.values.timing : null }));
+            },
           }),
-          h("span", null, "覆盖停顿节奏（从作品当前值开始）"),
+          h("span", null, "单独设置停顿节奏"),
         ),
         draft.timing
           ? h("div", { className: "anw-scope-overrides-panel__pause-presets" },
             ...(["compact", "natural", "relaxed"] as const).map((preset) => h("label", {
               key: preset,
-              className: timingPreset === preset ? "is-selected" : "",
+              className: timingValid && timingPreset === preset ? "is-selected" : "",
             },
             h("input", {
               type: "radio",
               name: `${prefix}-timing-preset`,
               value: preset,
-              checked: timingPreset === preset,
-              onChange: () => setDraft((currentDraft) => ({
-                ...currentDraft,
-                timing: READING_PAUSE_PRESETS[preset],
-              })),
+              checked: timingValid && timingPreset === preset,
+              onChange: () => {
+                setInvalidTimingInputs({});
+                setDraft((currentDraft) => ({ ...currentDraft, timing: READING_PAUSE_PRESETS[preset] }));
+              },
             }),
             h("span", null, preset === "compact" ? "紧凑" : preset === "natural" ? "自然" : "舒缓"),
             )),
-            timingPreset === "custom" ? h("span", null, "自定义毫秒") : null,
+            !timingValid || timingPreset === "custom" ? h("span", null, "自定义毫秒") : null,
           )
           : null,
         draft.timing
           ? h("details", { className: "anw-scope-overrides-panel__advanced" },
-            h("summary", null, "高级：精确停顿毫秒"),
+            h("summary", null, "精确调整停顿"),
+            h("p", null, "按整数毫秒填写，1000 毫秒 = 1 秒；0 表示不额外停顿。"),
             h("div", null,
-              ...([
-                ["sentence_gap_ms", "句间", 5_000],
-                ["paragraph_gap_ms", "段间", 10_000],
-                ["section_gap_ms", "分隔", 15_000],
-              ] as const).map(([key, label, maximum]) => h("label", { key },
+              ...TIMING_INPUT_FIELDS.map(([key, label, maximum]) => h("label", { key },
                 h("span", null, `${label}（毫秒）`),
                 h("input", {
                   type: "number",
                   min: 0,
                   max: maximum,
-                  step: 10,
-                  value: draft.timing?.[key] ?? 0,
+                  step: 1,
+                  value: invalidTimingInputs[key] ?? draft.timing?.[key] ?? 0,
+                  "aria-label": `${label}（毫秒）`,
+                  "aria-invalid": invalidTimingInputs[key] !== undefined,
+                  "aria-describedby": `${prefix}-${key}-hint`,
                   onChange: (event: ValueChangeEvent) => {
-                    const value = Number(event.target.value);
-                    if (!Number.isInteger(value) || value < 0 || value > maximum) return;
+                    const raw = event.target.value;
+                    setInvalidTimingInputs((currentInputs) => updateInvalidTimingInputs(currentInputs, key, raw, maximum));
+                    const value = parseTimingInput(raw, maximum);
+                    if (value === null) return;
                     setDraft((currentDraft) => ({
                       ...currentDraft,
                       timing: currentDraft.timing
@@ -694,22 +697,25 @@ export function createScopeOverridesPanel(
                     }));
                   },
                 }),
+                h("small", { id: `${prefix}-${key}-hint`, role: invalidTimingInputs[key] !== undefined ? "alert" : undefined },
+                  invalidTimingInputs[key] !== undefined ? `请输入 0–${maximum} 的整数，不能为空。` : `0–${maximum} 毫秒`,
+                ),
               )),
             ),
           )
           : null,
       )
       : h("p", { className: "anw-scope-overrides-panel__inherited" },
-        "该范围完全继承上一级设置。保存关闭后，服务端会清空旧覆盖值。",
+        "当前沿用上一级设置。保存后将移除这里原有的单独设置，不影响其他章节或已有音频。",
       ),
     invalidEnabled
       ? h("p", { className: "anw-scope-overrides-panel__error", role: "alert" },
-        "启用覆盖前，至少选择旁白、语言、正文规则或停顿节奏中的一项。",
+        "请至少调整一项：旁白音色、朗读内容或停顿节奏。",
       )
       : null,
     !languageValid
       ? h("p", { className: "anw-scope-overrides-panel__error", role: "alert" },
-        "范围语言必须从中文、英语或日语中选择。",
+        "朗读语言仅支持普通话，请恢复沿用作品设置后重新保存。",
       )
       : null,
     !narratorValid
@@ -732,18 +738,18 @@ export function createScopeOverridesPanel(
       },
       h("p", null, operation.message),
       operation.conflict && props.onRefresh
-        ? h("button", { type: "button", onClick: props.onRefresh }, "刷新最新覆盖")
+        ? h("button", { type: "button", onClick: props.onRefresh }, "刷新最新设置")
         : null,
       )
       : null,
     h("footer", null,
-      h("span", null, dirty ? "有未保存更改" : "覆盖配置已同步"),
+      h("span", null, dirty ? "有未保存更改" : "设置已同步"),
       h("button", {
         type: "button",
         className: "anw-scope-overrides-panel__save",
         disabled: saveDisabled,
         onClick: save,
-      }, operation.saving ? "保存中…" : enabled ? "保存范围覆盖" : "关闭并清空覆盖"),
+      }, operation.saving ? "保存中…" : enabled ? "保存单独设置" : "保存为沿用上一级"),
     ),
     ),
     );

@@ -80,6 +80,7 @@ VOICE_SETTINGS_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
         NarrationSettingsOperation.ARCHIVE_VOICE_PROFILE,
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_UPLOADED_VOICE_VERSION,
+        NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
         NarrationSettingsOperation.GET_VOICE_PREVIEW,
         NarrationSettingsOperation.LOCK_VOICE_PROFILE,
@@ -165,6 +166,14 @@ class VoiceProductPort(Protocol):
         *,
         profile_id: UUID,
         parsed: ParsedUploadedVoice,
+        idempotency_key: str,
+    ) -> wire.VoiceProfileVersionResource: ...
+
+    def create_designed_version(
+        self,
+        *,
+        profile_id: UUID,
+        request: wire.CreateDesignedVoiceVersionRequest,
         idempotency_key: str,
     ) -> wire.VoiceProfileVersionResource: ...
 
@@ -315,7 +324,7 @@ def _required_rights(
     expected_kinds = {
         "preset": "official_preset",
         "uploaded": "user_upload",
-        "generated": set(),
+        "generated": "qwen_synthetic_design",
     }.get(version.source_type)
     if expected_kinds is None or rights.source_kind not in (
         expected_kinds if isinstance(expected_kinds, set) else {expected_kinds}
@@ -1227,6 +1236,20 @@ class VoiceSettingsHandler:
             if profile.version != parsed.metadata.expected_profile_version:
                 raise NarrationCasConflict("voice profile version changed")
             raise _source_unavailable(wire.VoiceSourceType.UPLOADED)
+        if operation is NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION:
+            payload = _payload(command, wire.CreateDesignedVoiceVersionRequest)
+            profile_id = _required_uuid(command.profile_id, "profile_id")
+            key = _required_idempotency_key(command.idempotency_key)
+            if self.voice_product is not None:
+                return self.voice_product.create_designed_version(
+                    profile_id=profile_id,
+                    request=payload,
+                    idempotency_key=key,
+                )
+            profile = _required_profile(self.store, profile_id)
+            if profile.version != payload.expected_profile_version:
+                raise NarrationCasConflict("voice profile version changed")
+            raise _source_unavailable(wire.VoiceSourceType.GENERATED)
         if operation is NarrationSettingsOperation.CREATE_VOICE_PREVIEW:
             payload = _payload(command, wire.CreateVoicePreviewRequest)
             key = _required_idempotency_key(command.idempotency_key)

@@ -29,6 +29,7 @@ from backend.narration.audio_pipeline import (
     AudioFormatError,
     AudioQualityError,
     ProcessedPcmWav,
+    SHORT_CHINESE_DURATION_POLICY_VERSION,
 )
 from backend.narration.contracts import (
     CancelDisposition,
@@ -1227,6 +1228,38 @@ def test_non_audio_failure_never_creates_audio_validation_evidence(
         },
         {
             "schema_version": "narration-audio-validation-failure/1",
+            "reason_code": "WAV_SILENT",
+            "actual_duration_ms": 3_201,
+            "allowed_duration_ms": 3_200,
+            "evaluated_codepoint_count": 5,
+            "policy_version": SHORT_CHINESE_DURATION_POLICY_VERSION,
+        },
+        {
+            "schema_version": "narration-audio-validation-failure/1",
+            "reason_code": "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+            "actual_duration_ms": 3_200,
+            "allowed_duration_ms": 3_200,
+            "evaluated_codepoint_count": 5,
+            "policy_version": SHORT_CHINESE_DURATION_POLICY_VERSION,
+        },
+        {
+            "schema_version": "narration-audio-validation-failure/1",
+            "reason_code": "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+            "actual_duration_ms": True,
+            "allowed_duration_ms": 3_200,
+            "evaluated_codepoint_count": 5,
+            "policy_version": SHORT_CHINESE_DURATION_POLICY_VERSION,
+        },
+        {
+            "schema_version": "narration-audio-validation-failure/1",
+            "reason_code": "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+            "actual_duration_ms": 3_201,
+            "allowed_duration_ms": 3_200,
+            "evaluated_codepoint_count": 5,
+            "policy_version": "qwen-tts-short-chinese-duration/future",
+        },
+        {
+            "schema_version": "narration-audio-validation-failure/1",
             "reason_code": "X" * 97,
         },
     ),
@@ -1365,6 +1398,10 @@ async def test_short_chinese_duration_runaway_is_non_retryable_and_never_publish
         {
             "schema_version": "narration-audio-validation-failure/1",
             "reason_code": "SHORT_CHINESE_DURATION_IMPLAUSIBLE",
+            "actual_duration_ms": duration_ms,
+            "allowed_duration_ms": 3_200,
+            "evaluated_codepoint_count": 5,
+            "policy_version": SHORT_CHINESE_DURATION_POLICY_VERSION,
         }
     ]
     assert repository.published == []

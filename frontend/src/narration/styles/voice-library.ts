@@ -4,6 +4,8 @@ export const OFFICIAL_VOICE_LIBRARY_STYLE_ID = "anw-official-voice-library-style
 
 export const OFFICIAL_VOICE_LIBRARY_STYLES = `
 .anw-official-voice-library {
+  /* This library also lives inside a fixed-width character drawer. */
+  container: anw-voice-library / inline-size;
   display: grid;
   gap: 14px;
   min-width: 0;
@@ -148,28 +150,29 @@ export const OFFICIAL_VOICE_LIBRARY_STYLES = `
 }
 .anw-official-voice-library__grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
   min-width: 0;
   margin: 0;
-  border: 1px solid var(--ant-color-border-secondary, #e5e6e8);
-  border-radius: 12px;
   padding: 0;
-  overflow: hidden;
-  background: var(--ant-color-bg-container, #fff);
   list-style: none;
 }
 .anw-official-voice-library__item {
   min-width: 0;
 }
 .anw-official-voice-library__item + .anw-official-voice-library__item {
-  border-top: 1px solid var(--ant-color-border-secondary, #e5e6e8);
+  border-top: 0;
 }
 .anw-official-voice-card {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(76px, auto) minmax(76px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(76px, auto) minmax(76px, auto);
   align-items: center;
   gap: 12px;
   min-width: 0;
   box-sizing: border-box;
+  height: 100%;
+  border: 1px solid var(--ant-color-border-secondary, #e5e6e8);
+  border-radius: 12px;
   padding: 12px 14px;
   background: var(--ant-color-bg-container, #fff);
 }
@@ -222,20 +225,13 @@ export const OFFICIAL_VOICE_LIBRARY_STYLES = `
   display: grid;
   min-width: 0;
 }
-.anw-official-voice-card__heading strong,
-.anw-official-voice-card__group {
+.anw-official-voice-card__heading strong {
   margin: 0;
 }
 .anw-official-voice-card__heading strong {
   overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.4;
-}
-.anw-official-voice-card__group {
-  margin-top: 2px;
-  color: var(--ant-color-text-secondary, #5f6670);
-  font-size: 12px;
-  overflow-wrap: anywhere;
 }
 .anw-official-voice-card__current {
   flex: 0 0 auto;
@@ -357,7 +353,7 @@ export const OFFICIAL_VOICE_LIBRARY_STYLES = `
   outline: 3px solid color-mix(in srgb, var(--ant-color-primary, #d95d36) 42%, transparent);
   outline-offset: 2px;
 }
-@media (max-width: 860px) {
+@container anw-voice-library (max-width: 960px) {
   .anw-official-voice-library__filters {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
@@ -365,8 +361,11 @@ export const OFFICIAL_VOICE_LIBRARY_STYLES = `
   .anw-official-voice-library__language-tabs {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+  .anw-official-voice-library__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
-@media (max-width: 680px) {
+@container anw-voice-library (max-width: 560px) {
   .anw-official-voice-library__header {
     display: grid;
   }
@@ -394,7 +393,7 @@ export const OFFICIAL_VOICE_LIBRARY_STYLES = `
     width: 100%;
   }
 }
-@media (max-width: 390px) {
+@container anw-voice-library (max-width: 390px) {
   .anw-official-voice-library__language-tabs button {
     padding-inline: 5px;
     font-size: 11px;

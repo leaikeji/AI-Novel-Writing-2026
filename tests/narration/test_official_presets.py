@@ -59,6 +59,10 @@ def test_product_catalog_publishes_complete_qwen_catalog_without_audio_payloads(
         "Ono_Anna",
         "Sohee",
     ]
+    assert all(
+        item.display_name.startswith(f"{item.official_speaker}｜")
+        for item in catalog.items
+    )
     serialized = json.dumps(catalog.model_dump(mode="json"), ensure_ascii=False)
     assert "prompt_audio_codes" not in serialized
     assert "audio_file" not in serialized
@@ -115,14 +119,9 @@ def test_low_level_inventory_and_get_by_id_cover_qwen_presets() -> None:
     assert tuple(
         require_official_preset(preset_id).preset_id for preset_id in OFFICIAL_PRESET_IDS
     ) == OFFICIAL_PRESET_IDS
-    assert {preset.language for preset in OFFICIAL_PRESETS} == {
-        "zh-CN",
-        "en",
-        "ja-JP",
-        "ko-KR",
-    }
+    assert {preset.language for preset in OFFICIAL_PRESETS} == {"zh-CN"}
     assert require_official_preset("qwen.ClearMale").native_language == "en"
-    assert require_official_preset("qwen.Dylan").dialect == "北京口音"
+    assert require_official_preset("qwen.Dylan").dialect is None
 
 
 def test_new_presets_have_local_only_provider_maps_and_display_fields_stay_out_of_provenance() -> None:

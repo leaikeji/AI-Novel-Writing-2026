@@ -254,11 +254,12 @@ describe("official voice selection panel adapters", () => {
       model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
       model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
       official_speaker: EVIDENCE.localVoiceId,
+      cache_status: "hit",
     } as const;
     const get = vi.fn(async () => ready);
     const play = vi.fn(async () => undefined);
     const signal = new AbortController().signal;
-    await getAndPlayOfficialVoicePreviewAudio(
+    const cacheStatus = await getAndPlayOfficialVoicePreviewAudio(
       { getOfficialVoicePreviewAudio: get },
       { play },
       NOVEL_ID,
@@ -273,6 +274,7 @@ describe("official voice selection panel adapters", () => {
       signal,
     );
     expect(play).toHaveBeenCalledWith(ready, signal);
+    expect(cacheStatus).toBe("hit");
   });
 
   it("stops audio and revokes its Blob URL when a preview is aborted", async () => {
@@ -298,6 +300,7 @@ describe("official voice selection panel adapters", () => {
       model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
       model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
       official_speaker: EVIDENCE.localVoiceId,
+      cache_status: "miss",
     }, controller.signal);
 
     controller.abort();

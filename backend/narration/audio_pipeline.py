@@ -58,6 +58,25 @@ class AudioQualityError(AudioPipelineError):
     """The decoded samples fail a frozen quality boundary."""
 
 
+class ShortChineseDurationError(AudioQualityError):
+    """A bounded short-Chinese duration failure with no source text attached."""
+
+    def __init__(
+        self,
+        *,
+        actual_duration_ms: int,
+        allowed_duration_ms: int,
+        evaluated_codepoint_count: int,
+    ) -> None:
+        super().__init__(
+            "synthesis WAV duration is implausible for short Chinese text"
+        )
+        self.actual_duration_ms = actual_duration_ms
+        self.allowed_duration_ms = allowed_duration_ms
+        self.evaluated_codepoint_count = evaluated_codepoint_count
+        self.policy_version = SHORT_CHINESE_DURATION_POLICY_VERSION
+
+
 def audio_validation_failure_evidence(error: BaseException) -> dict[str, object] | None:
     """Return the shared bounded diagnostic, never arbitrary exception text."""
 
@@ -82,10 +101,29 @@ def audio_validation_failure_evidence(error: BaseException) -> dict[str, object]
         "synthesis WAV has no measurable programme loudness": "WAV_LOUDNESS_UNMEASURABLE",
         "audio processing changed the segment duration": "POSTPROCESS_DURATION_CHANGED",
     }
-    return {
+    evidence: dict[str, object] = {
         "schema_version": "narration-audio-validation-failure/1",
         "reason_code": reasons.get(str(error), "AUDIO_VALIDATION_UNKNOWN"),
     }
+    if (
+        isinstance(error, ShortChineseDurationError)
+        and type(error.actual_duration_ms) is int
+        and type(error.allowed_duration_ms) is int
+        and type(error.evaluated_codepoint_count) is int
+        and error.actual_duration_ms > error.allowed_duration_ms > 0
+        and 0 < error.evaluated_codepoint_count
+        <= DEFAULT_SHORT_CHINESE_DURATION_POLICY.maximum_codepoints
+        and error.policy_version == SHORT_CHINESE_DURATION_POLICY_VERSION
+    ):
+        evidence.update(
+            {
+                "actual_duration_ms": error.actual_duration_ms,
+                "allowed_duration_ms": error.allowed_duration_ms,
+                "evaluated_codepoint_count": error.evaluated_codepoint_count,
+                "policy_version": error.policy_version,
+            }
+        )
+    return evidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -471,6 +509,17 @@ def short_chinese_duration_limit_ms(
     to protect every synthesis result independently.
     """
 
+    evaluation = _short_chinese_duration_evaluation(text, policy=policy)
+    return evaluation[0] if evaluation is not None else None
+
+
+def _short_chinese_duration_evaluation(
+    text: str,
+    *,
+    policy: ShortChineseDurationPolicy,
+) -> tuple[int, int] | None:
+    """Return the duration ceiling and counted codepoints without retaining text."""
+
     policy.validate()
     if type(text) is not str or not text:
         raise AudioPipelineError("spoken text must be a non-empty string")
@@ -494,7 +543,10 @@ def short_chinese_duration_limit_ms(
         if len(compact) <= policy.ultrashort_maximum_codepoints
         else policy.onset_allowance_ms
     )
-    return onset_allowance_ms + len(compact) * policy.per_codepoint_allowance_ms
+    return (
+        onset_allowance_ms + len(compact) * policy.per_codepoint_allowance_ms,
+        len(compact),
+    )
 
 
 def validate_synthesis_duration_for_text(
@@ -507,10 +559,12 @@ def validate_synthesis_duration_for_text(
 
     if type(duration_ms) is not int or duration_ms <= 0:
         raise AudioPipelineError("synthesis duration must be a positive exact integer")
-    limit_ms = short_chinese_duration_limit_ms(text, policy=policy)
-    if limit_ms is not None and duration_ms > limit_ms:
-        raise AudioQualityError(
-            "synthesis WAV duration is implausible for short Chinese text"
+    evaluation = _short_chinese_duration_evaluation(text, policy=policy)
+    if evaluation is not None and duration_ms > evaluation[0]:
+        raise ShortChineseDurationError(
+            actual_duration_ms=duration_ms,
+            allowed_duration_ms=evaluation[0],
+            evaluated_codepoint_count=evaluation[1],
         )
 
 

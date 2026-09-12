@@ -1,10 +1,12 @@
 import {
   NarrationApiError,
+  createDesignedVoiceVersion,
   createUploadedVoiceVersion,
   getVoicePreview,
 } from "./api";
 import type {
   CapabilityKey,
+  CreateDesignedVoiceVersionRequest,
   FeatureCapability,
   NarrationAuthorizationState,
   NarrationCapabilities,
@@ -20,6 +22,7 @@ import type {
 import {
   REFERENCE_UPLOAD_MAX_BYTES,
   REFERENCE_UPLOAD_MIME_TYPES,
+  voiceSourceEvidenceIsUsable,
 } from "./contracts";
 export {
   T2_D_NARRATION_STYLE_ID,
@@ -27,7 +30,7 @@ export {
 } from "./styles/t2-d";
 
 
-type PrivateVoiceSourceType = Extract<VoiceSourceType, "uploaded">;
+type PrivateVoiceSourceType = Extract<VoiceSourceType, "uploaded" | "generated">;
 
 
 const SOURCE_DEFINITIONS: Readonly<Record<PrivateVoiceSourceType, {
@@ -35,14 +38,19 @@ const SOURCE_DEFINITIONS: Readonly<Record<PrivateVoiceSourceType, {
   readonly label: string;
   readonly description: string;
 }>> = Object.freeze({
+  generated: {
+    capability: "voice_design",
+    label: "文字设计音色",
+    description: "描述年龄感、声音质感和表达方式，设计一个新声音。",
+  },
   uploaded: {
     capability: "reference_clone",
     label: "上传参考录音",
-    description: "仅处理作者有权用于声音克隆的 WAV 或 FLAC 私人录音。",
+    description: "用你有权使用的普通话录音，复刻熟悉的声音。",
   },
 });
 
-const SOURCE_ORDER: readonly PrivateVoiceSourceType[] = ["uploaded"];
+const SOURCE_ORDER: readonly PrivateVoiceSourceType[] = ["generated", "uploaded"];
 
 export type VoiceSourceWorkflowStatus =
   | "idle"
@@ -184,7 +192,9 @@ export function createVoiceSourcePanelModel(
         && selectedVersion.official_preset !== null
         && selectedVersion.official_preset.preset_id === selectedVersion.preset_key
       : selectedVersion.source_type === "uploaded"
-        && selectedVersion.rights.source_kind === "user_upload";
+        ? selectedVersion.rights.source_kind === "user_upload"
+        : selectedVersion.rights.source_kind === "qwen_synthetic_design"
+          && selectedVersion.description_available;
   const profileCanChange = profile !== null
     && !["archived", "unavailable"].includes(profile.status);
   const selectedSourceCard = selectedVersion === null
@@ -208,6 +218,8 @@ export function createVoiceSourcePanelModel(
     && selectedVersion?.state === "preview_ready"
     && rightsAreActive
     && selectedVersionSourceIsValid
+    && selectedVersion !== null
+    && voiceSourceEvidenceIsUsable(selectedVersion)
     && selectedSourceCard?.enabled,
   );
   const canCreateProfile = Boolean(
@@ -250,10 +262,21 @@ export interface VoiceUploadRightsDraft {
 export interface AuthorizedVoiceUploadInput {
   readonly profileId: string;
   readonly expectedProfileVersion: number;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly originalFilename: string;
   readonly referenceAudio: Blob;
+  readonly referenceText: string;
   readonly rights: VoiceUploadRightsDraft;
+  readonly idempotencyKey: string;
+  readonly signal?: AbortSignal;
+}
+
+export interface DesignedVoiceVersionInput {
+  readonly profileId: string;
+  readonly expectedProfileVersion: number;
+  readonly description: string;
+  readonly language: "zh-CN";
+  readonly seed: number | null;
   readonly idempotencyKey: string;
   readonly signal?: AbortSignal;
 }
@@ -330,6 +353,7 @@ function requireUploadInput(input: AuthorizedVoiceUploadInput): void {
     ));
   }
   const rights = input.rights;
+  const referenceText = input.referenceText.trim();
   if (
     !rights.rightsConfirmed
     || !rights.voiceCloningConfirmed
@@ -340,9 +364,11 @@ function requireUploadInput(input: AuthorizedVoiceUploadInput): void {
     || (rights.subjectConsentReference?.trim().length ?? 0) > 240
     || typeof rights.commercialUse !== "boolean"
     || typeof rights.redistribution !== "boolean"
+    || referenceText.length < 1
+    || referenceText.length > 500
     || !Number.isSafeInteger(input.expectedProfileVersion)
     || input.expectedProfileVersion < 1
-    || !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(input.language)
+    || input.language !== "zh-CN"
   ) {
     throw new VoiceSourcePanelActionError(panelFailure(
       "rights",
@@ -350,6 +376,74 @@ function requireUploadInput(input: AuthorizedVoiceUploadInput): void {
       "上传前必须明确确认来源、授权声明和声音克隆许可。",
     ));
   }
+}
+
+function requireDesignedVoiceInput(
+  input: DesignedVoiceVersionInput,
+): CreateDesignedVoiceVersionRequest {
+  const description = input.description.trim();
+  if (
+    description.length < 1
+    || description.length > 500
+    || input.language !== "zh-CN"
+    || !Number.isSafeInteger(input.expectedProfileVersion)
+    || input.expectedProfileVersion < 1
+    || (input.seed !== null && (
+      !Number.isSafeInteger(input.seed)
+      || input.seed < 0
+      || input.seed > Number.MAX_SAFE_INTEGER
+    ))
+  ) {
+    throw new VoiceSourcePanelActionError(panelFailure(
+      "validation",
+      "ACTION_NOT_ALLOWED",
+      "请填写 1–500 字的普通话音色描述。",
+    ));
+  }
+  return Object.freeze({
+    expected_profile_version: input.expectedProfileVersion,
+    description,
+    language: "zh-CN",
+    seed: input.seed,
+  });
+}
+
+export interface VoiceSourceDesignApi {
+  createDesignedVoiceVersion: typeof createDesignedVoiceVersion;
+}
+
+export async function submitDesignedVoiceVersion(
+  model: VoiceSourcePanelModel,
+  input: DesignedVoiceVersionInput,
+  api: VoiceSourceDesignApi = { createDesignedVoiceVersion },
+): Promise<VoiceProfileVersionResource> {
+  const designed = model.cards.find((card) => card.sourceType === "generated");
+  if (designed?.visible !== true || designed.enabled !== true) {
+    throw new VoiceSourcePanelActionError(panelFailure(
+      "capability",
+      "ACTION_NOT_ALLOWED",
+      "文字设计音色当前不可用。",
+    ));
+  }
+  if (
+    model.profile === null
+    || input.profileId !== model.profile.profile_id
+    || input.expectedProfileVersion !== model.profile.version
+  ) {
+    throw new VoiceSourcePanelActionError(panelFailure(
+      "conflict",
+      "ACTION_NOT_ALLOWED",
+      "音色档案已切换或版本已变化，请刷新后重试。",
+    ));
+  }
+  if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const payload = requireDesignedVoiceInput(input);
+  return api.createDesignedVoiceVersion(
+    input.profileId,
+    payload,
+    input.idempotencyKey,
+    input.signal,
+  );
 }
 
 export async function sha256Blob(blob: Blob): Promise<string> {
@@ -395,6 +489,7 @@ export async function buildAuthorizedUploadMetadata(
     language: input.language,
     original_filename: input.originalFilename,
     reference_sha256: referenceSha256,
+    reference_text: input.referenceText.trim(),
     rights: declaration,
   };
 }
@@ -478,6 +573,9 @@ export function classifyVoiceSourceFailure(reason: unknown): VoiceSourceFailure 
   }
   if (["REQUEST_VALIDATION_FAILED", "REFERENCE_AUDIO_INVALID", "VALIDATION_FAILED"].includes(code)) {
     return panelFailure("validation", code, "音色请求未通过安全校验。", retryable);
+  }
+  if (code === "VOICE_LANGUAGE_UNSUPPORTED") {
+    return panelFailure("validation", code, "音色设计和参考录音仅支持普通话。", retryable);
   }
   if (["VERSION_CONFLICT", "IDEMPOTENCY_CONFLICT", "INVALID_STATE", "VOICE_VERSION_NOT_LOCKED"].includes(code)) {
     return panelFailure("conflict", code, "音色状态已变化，请刷新后重试。", retryable);
@@ -639,16 +737,24 @@ interface VoiceSourcePanelBaseProps {
   readonly selectedSource: VoiceSourceType | null;
   readonly workflow: VoiceSourceWorkflowState;
   readonly uploadRights: VoiceUploadRightsDraft;
+  readonly referenceText?: string;
+  readonly designDescription?: string;
+  readonly previewText?: string;
   readonly busy?: boolean;
   readonly cancelAllowed?: boolean;
   readonly referenceAudioSelected?: boolean;
   readonly previewTextValid?: boolean;
   readonly qualityConfirmationAllowed?: boolean;
   readonly qualityConfirmed?: boolean;
+  readonly previewContent?: unknown;
   readonly onSelectSource?: (source: VoiceSourceType) => void;
   readonly onUploadRightsChange?: (patch: Partial<VoiceUploadRightsDraft>) => void;
+  readonly onReferenceTextChange?: (referenceText: string) => void;
+  readonly onDesignDescriptionChange?: (description: string) => void;
+  readonly onPreviewTextChange?: (previewText: string) => void;
   readonly onReferenceAudioChange?: (file: File | null) => void;
   readonly onUpload?: () => void;
+  readonly onCreateDesigned?: () => void;
   readonly onPreview?: () => void;
   readonly onQualityConfirmationChange?: (confirmed: boolean) => void;
   readonly onLock?: () => void;
@@ -729,13 +835,19 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
       h("p", null, card.description),
       card.reasonCode === null
         ? null
-        : h("p", { id: reasonId }, `当前不可用：${card.reasonCode}`),
+        : h("p", { id: reasonId, title: card.reasonCode },
+          card.reasonCode.includes("PERMISSION")
+            ? "当前身份没有使用权限。"
+            : "此功能暂未就绪，请在“运行与存储”检查模型状态。",
+        ),
       h(
         "button",
         {
           type: "button",
           disabled: !card.enabled || busy,
           "aria-disabled": !card.enabled || busy ? true : undefined,
+          "aria-pressed": props.selectedSource === card.sourceType,
+          "aria-label": `${props.selectedSource === card.sourceType ? "已选择" : "选择"}${card.label}`,
           "aria-describedby": card.reasonCode === null ? undefined : reasonId,
           onClick: () => props.onSelectSource?.(card.sourceType),
         },
@@ -744,12 +856,25 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
     );
   });
   const uploaded = props.model.cards.find((card) => card.sourceType === "uploaded");
+  const generated = props.model.cards.find((card) => card.sourceType === "generated");
   const showRights = props.selectedSource === "uploaded" && uploaded?.visible === true;
+  const showDesign = props.selectedSource === "generated" && generated?.visible === true;
   const rights = props.uploadRights;
+  const designDescription = props.designDescription?.trim() ?? "";
+  const canCreateDesigned = Boolean(
+    showDesign
+    && generated?.enabled
+    && designDescription.length > 0
+    && designDescription.length <= 500
+    && props.previewTextValid !== false
+    && !busy,
+  );
   const canUpload = Boolean(
     showRights
     && uploaded?.enabled
     && props.referenceAudioSelected
+    && (props.referenceText?.trim().length ?? 0) > 0
+    && (props.referenceText?.trim().length ?? 0) <= 500
     && rights.voiceCloningConfirmed
     && rights.rightsConfirmed
     && rights.noticeVersion.trim().length > 0
@@ -774,25 +899,70 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
           "div",
           null,
           h("h2", { id: "anw-narration-voice-source-title" }, "音色来源"),
-          h("p", null, "官方音色请在上方音色库直接使用；这里仅管理私人音色来源。"),
+          h("p", null, "官方声音在“旁白音色”中选择；这里创建自己的声音。"),
         ),
       ),
     props.model.permissionNotice === null
       ? null
       : h("p", { role: "note" }, props.model.permissionNotice),
-    h("ul", { className: "anw-narration-voice-source-grid" }, ...sourceCards),
+    sourceCards.length > 0
+      ? h("ul", { className: "anw-narration-voice-source-grid", "aria-label": "音色创建方式" }, ...sourceCards)
+      : h("p", { className: "anw-voice-workspace__empty", role: "status" }, "私人音色功能暂未就绪。你仍可在“旁白音色”中使用官方声音。"),
+    showDesign
+      ? h(
+        "fieldset",
+        { className: "anw-narration-voice-rights", disabled: !generated?.enabled || busy },
+        h("legend", null, "描述你想要的声音"),
+        h("p", { role: "note" }, "声音语言：普通话（固定）"),
+        h("label", null,
+          "音色描述（1–500 字）",
+          h("textarea", {
+            value: props.designDescription ?? "",
+            maxLength: 500,
+            rows: 4,
+            placeholder: "例如：沉稳、清晰的青年男声，语速适中，情绪克制。",
+            "aria-invalid": designDescription.length < 1 || designDescription.length > 500,
+            onChange: (event: VoiceInputEvent) => props.onDesignDescriptionChange?.(
+              event.target.value,
+            ),
+          }),
+        ),
+        h("label", null,
+          "试听文本（1–500 字）",
+          h("textarea", {
+            value: props.previewText ?? "",
+            maxLength: 500,
+            rows: 3,
+            "aria-invalid": props.previewTextValid === false,
+            onChange: (event: VoiceInputEvent) => props.onPreviewTextChange?.(
+              event.target.value,
+            ),
+          }),
+        ),
+        h("button", {
+          type: "button",
+          disabled: !canCreateDesigned,
+          onClick: props.onCreateDesigned,
+        }, "创建设计候选"),
+      )
+      : null,
     showRights
       ? h(
         "fieldset",
         { className: "anw-narration-voice-rights", disabled: !uploaded?.enabled || busy },
         h("legend", null, "参考录音与授权确认"),
+        h("p", { role: "note" }, "声音语言：普通话（固定）"),
         h("label", null,
-          "授权声明版本",
-          h("input", {
-            type: "text",
-            value: rights.noticeVersion,
-            readOnly: true,
-            "aria-readonly": "true",
+          "参考录音文字（1–500 字）",
+          h("textarea", {
+            value: props.referenceText ?? "",
+            maxLength: 500,
+            rows: 3,
+            placeholder: "请准确填写录音中实际说出的普通话内容。",
+            "aria-invalid": (props.referenceText?.trim().length ?? 0) < 1,
+            onChange: (event: VoiceInputEvent) => props.onReferenceTextChange?.(
+              event.target.value,
+            ),
           }),
         ),
         h("label", null,
@@ -801,13 +971,14 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
             type: "text",
             value: rights.sourceIdentifier,
             maxLength: 240,
+            placeholder: "例如：本人录音，或已获授权的配音素材",
             onChange: (event: VoiceInputEvent) => props.onUploadRightsChange?.({
               sourceIdentifier: event.target.value,
             }),
           }),
         ),
         h("label", null,
-          "主体同意记录（可选）",
+          "声音本人同意使用的记录（可选）",
           h("input", {
             type: "text",
             value: rights.subjectConsentReference ?? "",
@@ -855,7 +1026,7 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
               rightsConfirmed: event.target.checked,
             }),
           }),
-          "我已阅读并确认当前版本的音色授权声明。",
+          `我已阅读并确认音色授权声明（${rights.noticeVersion}）。`,
         ),
         h("label", null,
           "WAV / FLAC（最大 16 MiB）",
@@ -871,18 +1042,19 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
           type: "button",
           disabled: !canUpload,
           onClick: props.onUpload,
-        }, "上传并创建候选版本"),
+        }, "上传并创建候选"),
       )
       : null,
-    h(
+    props.previewContent ?? null,
+    (props.selectedSource !== null && props.model.selectedVersion !== null) || busy ? h(
       "div",
       { className: "anw-narration-voice-actions" },
-      h("button", {
+      props.selectedSource !== null && props.model.selectedVersion !== null ? h("button", {
         type: "button",
         disabled: !props.model.actions.canPreview || props.previewTextValid === false || busy,
         onClick: props.onPreview,
-      }, "生成试听"),
-      props.workflow.status === "preview_ready"
+      }, props.workflow.status === "preview_ready" ? "重新生成试听" : "生成试听") : null,
+      props.workflow.status === "preview_ready" && props.model.selectedVersion?.state !== "locked"
         ? h("label", { className: "anw-narration-voice-quality-confirmation" },
           h("input", {
             type: "checkbox",
@@ -893,22 +1065,21 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
             ),
           }),
           props.qualityConfirmationAllowed === true
-            ? "我已播放并确认当前试听的音质、清晰度和人物适配度。"
-            : "请先播放当前试听，再确认音质、清晰度和人物适配度。",
+            ? "我已听过，声音清晰，适合这个角色。"
+            : "请先播放试听，再确认声音效果。",
         )
         : null,
-      h("button", {
+      props.workflow.status === "preview_ready" && props.model.selectedVersion?.state !== "locked" ? h("button", {
         type: "button",
         disabled: !props.model.actions.canLock || props.qualityConfirmed !== true || busy,
         onClick: props.onLock,
-      }, "确认并锁定版本"),
-      h("button", {
+      }, "确认并锁定音色") : null,
+      busy && props.cancelAllowed !== false ? h("button", {
         type: "button",
-        disabled: !busy || props.cancelAllowed === false,
         onClick: props.onCancel,
-      }, "取消"),
-    ),
-    h(
+      }, "取消等待") : null,
+    ) : null,
+    !props.embedded || props.workflow.status !== "idle" ? h(
       "div",
       {
         className: statusClass,
@@ -916,6 +1087,6 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
         "aria-live": "polite",
       },
       workflowLabel(props.workflow),
-    ),
+    ) : null,
   );
 }

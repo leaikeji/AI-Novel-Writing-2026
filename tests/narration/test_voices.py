@@ -282,6 +282,7 @@ def upload_metadata(audio: bytes, *, filename: str = "voice.wav") -> wire.Upload
         language="zh-CN",
         original_filename=filename,
         reference_sha256=hashlib.sha256(audio).hexdigest(),
+        reference_text="这是上传参考录音的准确普通话文本。",
         rights=rights_request(),
     )
 
@@ -868,6 +869,7 @@ def test_handler_owns_exact_frozen_voice_operations_only() -> None:
         NarrationSettingsOperation.ARCHIVE_VOICE_PROFILE,
         NarrationSettingsOperation.CREATE_PRESET_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_UPLOADED_VOICE_VERSION,
+        NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION,
         NarrationSettingsOperation.CREATE_VOICE_PREVIEW,
         NarrationSettingsOperation.GET_VOICE_PREVIEW,
         NarrationSettingsOperation.LOCK_VOICE_PROFILE,

@@ -218,6 +218,20 @@ def test_scope_override_uses_replace_semantics_and_exact_cas() -> None:
     )
     assert enabled.overrides.language == "zh-CN"
 
+    with pytest.raises(ValidationError, match="must be zh-CN or inherited"):
+        wire.PutNarrationScopeOverrideRequest.model_validate(
+            {
+                "expected_version": 0,
+                "enabled": True,
+                "overrides": {
+                    "narrator": None,
+                    "language": "en",
+                    "text_rules": None,
+                    "timing": None,
+                },
+            }
+        )
+
     with pytest.raises(ValidationError, match="enabled override must contain"):
         wire.PutNarrationScopeOverrideRequest.model_validate(
             {
@@ -692,8 +706,9 @@ def test_router_freezes_all_t2_paths_and_methods() -> None:
         ("PUT", "/voice-profiles/{profile_id}"),
         ("DELETE", "/voice-profiles/{profile_id}"),
         ("POST", "/voice-profiles/{profile_id}/versions/preset"),
-        ("POST", "/voice-profiles/{profile_id}/versions/uploaded"),
-        ("POST", "/voice-profiles/{profile_id}/previews"),
+            ("POST", "/voice-profiles/{profile_id}/versions/uploaded"),
+            ("POST", "/voice-profiles/{profile_id}/versions/designed"),
+            ("POST", "/voice-profiles/{profile_id}/previews"),
         ("GET", "/voice-previews/{preview_id}"),
         ("POST", "/voice-profiles/{profile_id}/lock"),
         ("GET", "/novels/{novel_id}/character-voice-bindings"),

@@ -63,6 +63,7 @@ import type {
   CharacterVoiceBindingResource,
   CreateNarrationCloudConsentRequest,
   CreateNarrationCloudTTSConsentRequest,
+  CreateDesignedVoiceVersionRequest,
   CreatePresetVoiceVersionRequest,
   CreateVoicePreviewRequest,
   CreateVoiceProfileRequest,
@@ -524,6 +525,7 @@ export async function getOfficialVoicePreviewAudio(
   const modelId = response.headers.get("X-TTS-Model-Id")?.trim() ?? "";
   const modelRevision = response.headers.get("X-TTS-Model-Revision")?.trim() ?? "";
   const officialSpeaker = response.headers.get("X-TTS-Speaker-Id")?.trim() ?? "";
+  const previewCacheStatus = response.headers.get("X-TTS-Preview-Cache")?.trim() ?? "";
   const cacheControl = response.headers.get("Cache-Control")?.toLowerCase() ?? "";
   const expected = OFFICIAL_PRESET_EVIDENCE.find((item) => item.presetId === payload.preset_id);
   if (
@@ -532,6 +534,7 @@ export async function getOfficialVoicePreviewAudio(
     || modelId !== OFFICIAL_PRESET_MANIFEST_IDENTITY.repository
     || modelRevision !== OFFICIAL_PRESET_MANIFEST_IDENTITY.revision
     || officialSpeaker !== expected?.localVoiceId
+    || (previewCacheStatus !== "hit" && previewCacheStatus !== "miss")
     || !cacheControl.split(",").some((directive) => directive.trim() === "no-store")
   ) {
     throw new NarrationContractError(
@@ -557,6 +560,7 @@ export async function getOfficialVoicePreviewAudio(
     model_id: modelId,
     model_revision: modelRevision,
     official_speaker: officialSpeaker,
+    cache_status: previewCacheStatus,
   });
 }
 
@@ -699,6 +703,22 @@ export function createUploadedVoiceVersion(
     parseVoiceProfileVersionResource,
     idempotencyKey,
     signal,
+  );
+}
+
+export function createDesignedVoiceVersion(
+  profileId: string,
+  payload: CreateDesignedVoiceVersionRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<VoiceProfileVersionResource> {
+  return parsedRequest(
+    `/voice-profiles/${pathSegment(profileId)}/versions/designed`,
+    parseVoiceProfileVersionResource,
+    {
+      ...jsonInit("POST", payload, signal),
+      headers: idempotencyHeaders(idempotencyKey),
+    },
   );
 }
 

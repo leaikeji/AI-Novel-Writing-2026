@@ -320,9 +320,12 @@ describe("cache panel", () => {
     harness.beginRender();
     let tree = Panel(panelProps);
     harness.commitEffects();
-    expect(textContent(tree)).toContain("源资产（不可清理）100 B");
+    expect(textContent(tree)).toContain("原始录音（保留）100 B");
     expect(textContent(tree)).toContain("当前可回收2.00 KiB");
-    expect(textContent(tree)).toContain("查看精确容量");
+    expect(textContent(tree)).toContain("容量明细（含原始录音与锁定音色）");
+    const metrics = findAll(tree, (element) => element.props.className === "anw-cache-panel__metrics")[0];
+    expect(findAll(metrics, (element) => element.type === "dt")).toHaveLength(4);
+    expect(textContent(metrics)).not.toContain("原始录音");
     expect(textContent(tree)).toContain("当前可回收2,048 B");
 
     (findButton(tree, "预览可清理项").props.onClick as () => void)();
@@ -366,7 +369,7 @@ describe("cache panel", () => {
     harness.commitEffects();
     expect(textContent(tree)).toContain("实际回收 1.50 KiB");
     expect(textContent(tree)).toContain("精确回收：1,536 B");
-    expect(textContent(tree)).toContain("源资产 0 个、锁定音色 0 个");
+    expect(textContent(tree)).toContain("原始录音、锁定音色和已有朗读版本的音频均未删除");
   });
 
   it("is status-only under HOLD even if reclaimable bytes exist", async () => {

@@ -5,6 +5,14 @@ export const T2_B_READING_STYLES = String.raw`
     --anw-reading-accent-soft: #fff3eb;
     --anw-reading-border: color-mix(in srgb, currentColor 14%, transparent);
     --anw-reading-muted: color-mix(in srgb, currentColor 62%, transparent);
+    --anw-accent: #c26035;
+    --anw-accent-soft: #fcf2ec;
+    --anw-ink: var(--ant-color-text, #24262b);
+    --anw-text: var(--ant-color-text, #343844);
+    --anw-muted: var(--ant-color-text-secondary, #686e78);
+    --anw-line: var(--ant-color-border-secondary, #e8e8ec);
+    --anw-card: var(--ant-color-bg-container, #fff);
+    --anw-panel-soft: var(--ant-color-fill-quaternary, #f7f7f8);
     box-sizing: border-box;
     min-height: 100%;
     padding: 24px;
@@ -19,13 +27,21 @@ export const T2_B_READING_STYLES = String.raw`
     box-sizing: border-box;
   }
 
+  .anw-reading-page .anw-pronunciation-panel__history,
+  .anw-reading-page .anw-cache-panel__guard {
+    background: var(--anw-panel-soft);
+    color: var(--anw-muted);
+    border-color: var(--anw-line);
+  }
+
   .anw-reading-page-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 24px;
+    gap: 16px;
     max-width: 1320px;
-    margin: 0 auto 20px;
+    margin: 0 auto 16px;
   }
 
   .anw-reading-page-header h1,
@@ -103,8 +119,8 @@ export const T2_B_READING_STYLES = String.raw`
 
   .anw-reading-layout {
     display: grid;
-    grid-template-columns: minmax(168px, 208px) minmax(0, 1fr);
-    gap: 20px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
     width: 100%;
     max-width: 1320px;
     margin: 0 auto;
@@ -113,14 +129,18 @@ export const T2_B_READING_STYLES = String.raw`
   .anw-reading-nav {
     position: sticky;
     top: 0;
+    z-index: 2;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    min-width: 0;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
     align-self: start;
     gap: 4px;
-    padding: 8px;
-    border: 1px solid var(--anw-reading-border);
+    padding: 4px;
+    border: 0;
     border-radius: 14px;
-    background: color-mix(in srgb, Canvas 95%, transparent);
+    background: var(--anw-card);
   }
 
   .anw-reading-nav button,
@@ -131,6 +151,9 @@ export const T2_B_READING_STYLES = String.raw`
   }
 
   .anw-reading-nav button {
+    flex: 0 0 auto;
+    min-width: max-content;
+    scroll-snap-align: start;
     min-height: 42px;
     padding: 8px 12px;
     border: 0;
@@ -162,6 +185,93 @@ export const T2_B_READING_STYLES = String.raw`
 
   .anw-reading-content {
     min-width: 0;
+  }
+
+  .anw-reading-section-body[hidden],
+  .anw-reading-rules-workspace__section[hidden] {
+    display: none !important;
+  }
+
+  .anw-reading-page input[type="radio"],
+  .anw-reading-page input[type="checkbox"],
+  .anw-reading-page input[type="range"] {
+    accent-color: var(--anw-accent);
+  }
+
+  .anw-reading-page :is(button, summary, select, input, textarea):focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--anw-accent) 45%, transparent);
+    outline-offset: 3px;
+  }
+
+  .anw-reading-page button {
+    transition: background-color .12s, border-color .12s;
+  }
+
+  .anw-reading-page button:disabled {
+    opacity: .5;
+    box-shadow: none;
+  }
+
+  .anw-character-voice-roster__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 14px;
+    margin: 20px 0;
+  }
+
+  .anw-character-voice-roster__search {
+    display: grid;
+    flex: 1 1 220px;
+    gap: 6px;
+    color: var(--anw-muted);
+    font-size: 13px;
+  }
+
+  .anw-character-voice-roster__search input {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid var(--anw-line);
+    border-radius: 10px;
+    padding: 9px 12px;
+    color: var(--anw-ink);
+    background: var(--anw-card);
+  }
+
+  .anw-character-voice-roster__filters {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 11px;
+    background: var(--anw-panel-soft);
+  }
+
+  .anw-character-voice-roster__filters button {
+    min-height: 34px;
+    border: 0;
+    background: transparent;
+  }
+
+  .anw-character-voice-roster__filters button.is-active {
+    color: var(--anw-accent);
+    background: var(--anw-card);
+    box-shadow: 0 1px 4px #0000000d;
+  }
+
+  .anw-voice-workspace__new-profile {
+    border: 1px solid var(--anw-line);
+    border-radius: 10px;
+    padding: 12px;
+  }
+
+  .anw-voice-workspace__new-profile summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .anw-voice-workspace__new-profile[open] summary {
+    margin-bottom: 12px;
   }
 
   .anw-reading-overview,
@@ -444,69 +554,12 @@ export const T2_B_READING_STYLES = String.raw`
     }
   }
 
-  @container (max-width: 900px) {
-    .anw-reading-page-header,
-    .anw-reading-section-heading {
-      flex-direction: column;
-    }
-
-    .anw-reading-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-reading-nav {
-      position: static;
-      flex-direction: row;
-      overflow-x: auto;
-      scroll-snap-type: x proximity;
-    }
-
-    .anw-reading-nav button {
-      flex: 0 0 auto;
-      min-width: max-content;
-      scroll-snap-align: start;
-    }
-  }
-
-  @container (max-width: 520px) {
-    .anw-reading-nav {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      overflow: visible;
-      scroll-snap-type: none;
-    }
-
-    .anw-reading-nav button {
-      min-width: 0;
-      min-height: 44px;
-      text-align: center;
-      white-space: normal;
-    }
-  }
-
   @media (max-width: 760px) {
     .anw-reading-page { padding: 16px; }
 
     .anw-reading-page-header,
     .anw-reading-section-heading {
       flex-direction: column;
-    }
-
-    .anw-reading-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-reading-nav {
-      position: static;
-      flex-direction: row;
-      overflow-x: auto;
-      scroll-snap-type: x proximity;
-    }
-
-    .anw-reading-nav button {
-      flex: 0 0 auto;
-      min-width: max-content;
-      scroll-snap-align: start;
     }
 
     .anw-reading-form-grid {

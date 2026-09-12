@@ -451,7 +451,7 @@ describe("character voice eligibility", () => {
         profile_id: PROFILE_B_ID,
         version_id: VERSION_B_ID,
         preset_key: "qwen.ClearMale",
-        language: "en",
+        language: "zh-CN",
         official_preset: officialProvenance("qwen.ClearMale"),
       },
     );

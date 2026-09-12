@@ -51,7 +51,7 @@ function officialCatalog(
       }
       return {
         preset_id: evidence.presetId,
-        display_name: female ? "温暖女声" : "明亮男声",
+        display_name: `${evidence.localVoiceId}｜${female ? "温暖女声" : "官方音色"}`,
         official_speaker: evidence.localVoiceId,
         native_language: evidence.nativeLanguage,
         dialect: evidence.dialect,
@@ -214,7 +214,7 @@ function lockedVersion() {
     model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
     model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
     preset_key: null,
-    language: "zh-CN",
+    language: "zh-CN" as const,
     fingerprint: "c".repeat(64),
     quality_state: "accepted",
     activation_basis: "preview_confirmed",
@@ -404,18 +404,18 @@ describe("narration T2 wire contract", () => {
     })).toBe(false);
   });
 
-  it("keeps the stateless preview request narrow and supports Korean", () => {
+  it("keeps the stateless preview request narrow and Mandarin-only", () => {
     expect(parseOfficialVoicePreviewAudioRequest({
       preset_id: "qwen.Sohee",
-      language: "ko-KR",
-    })).toEqual({ preset_id: "qwen.Sohee", language: "ko-KR" });
-    expect(() => parseOfficialVoicePreviewAudioRequest({
-      preset_id: "qwen.Sohee",
-      language: "en-US",
-    })).toThrow(/expected one of/u);
+      language: "zh-CN",
+    })).toEqual({ preset_id: "qwen.Sohee", language: "zh-CN" });
     expect(() => parseOfficialVoicePreviewAudioRequest({
       preset_id: "qwen.Sohee",
       language: "ko-KR",
+    })).toThrow(/expected literal/u);
+    expect(() => parseOfficialVoicePreviewAudioRequest({
+      preset_id: "qwen.Sohee",
+      language: "zh-CN",
       text: "must never accept article text",
     })).toThrow(/expected exact keys/u);
   });

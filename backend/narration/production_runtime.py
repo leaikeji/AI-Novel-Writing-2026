@@ -46,6 +46,12 @@ from .narration_api import (
     uninstall_narration_production_backend_factory,
 )
 from .official_preview_audio import OfficialVoicePreviewAudioService
+from .qwen_voice_product import (
+    QwenVoicePreviewProcessor,
+    QwenVoiceProductPolicy,
+    QwenVoiceProductService,
+    process_qwen_voice_preview_job,
+)
 from .playback_api import (
     PlaybackApiBackendFactory,
     build_playback_api_backend_factory,
@@ -84,6 +90,7 @@ from .voice_lifecycle import (
     PrivateVoiceLifecycleService,
     VoiceDeletionReconciler,
 )
+from .voice_media import normalize_reference_audio
 from .worker import (
     FixedFfmpegTranscoder,
     NarrationSegmentWorker,
@@ -110,7 +117,7 @@ REFERENCE_CLONE_ENABLE_ENV = "AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED"
 NORMALIZER_FINGERPRINT_VERSION = "narration-spoken-text-normalizer/1"
 WORKER_TASK_NAME = "ai-novel-qwen-tts-production-worker"
 WORKER_CYCLE_TASK_NAME = "ai-novel-qwen-tts-worker-cycle"
-MINIMUM_DATABASE_REVISION = "20260908_0043"
+MINIMUM_DATABASE_REVISION = "20260912_0055"
 PRODUCTION_TRANSCODING_POLICY = replace(
     DEFAULT_TRANSCODING_POLICY,
     allow_wav_fallback=False,
@@ -937,6 +944,54 @@ def _publish_feature_dependencies(
     )
 
 
+async def _run_qwen_job_loop(
+    *,
+    scheduler: NarrationJobScheduler,
+    segment_worker: NarrationSegmentWorker,
+    preview_processor: QwenVoicePreviewProcessor,
+    stop_event: asyncio.Event,
+    on_error: Callable[[Exception], None] | None = None,
+    idle_poll_seconds: float = 0.5,
+    maintenance_interval_seconds: float = 30.0,
+) -> None:
+    """Fairly dispatch the two Qwen job kinds through one inference slot."""
+
+    loop = asyncio.get_running_loop()
+    next_maintenance = 0.0
+    while not stop_event.is_set():
+        try:
+            current = loop.time()
+            if current >= next_maintenance:
+                await asyncio.to_thread(scheduler.maintain_once)
+                next_maintenance = current + maintenance_interval_seconds
+            scheduled = await asyncio.to_thread(scheduler.claim_next_typed_job)
+            if scheduled is None:
+                wait_seconds = idle_poll_seconds
+            else:
+                wait_seconds = 0.0
+                if scheduled.job_kind == "narration.segment_render":
+                    await segment_worker.process(scheduled.lease)
+                elif scheduled.job_kind == "narration.voice_preview":
+                    await process_qwen_voice_preview_job(
+                        preview_processor, scheduled.lease
+                    )
+                else:
+                    raise RuntimeError("Qwen worker claimed an unsupported job kind")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            if on_error is not None:
+                on_error(error)
+            wait_seconds = idle_poll_seconds
+        if wait_seconds <= 0:
+            await asyncio.sleep(0)
+            continue
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=wait_seconds)
+        except TimeoutError:
+            pass
+
+
 async def _run_qwen_production(
     values: Mapping[str, str],
     storage: NarrationStorage,
@@ -947,6 +1002,7 @@ async def _run_qwen_production(
     """Run the segment-only Qwen Provider pipeline without startup inference."""
 
     global _production_factory, _production_policy, _runtime_task, _snapshot
+    global _voice_product_port
     global _disk_guard, _cache_runtime
     global _official_voice_preview_service
     global _private_voice_deletion_service, _private_voice_lifecycle_service
@@ -992,11 +1048,14 @@ async def _run_qwen_production(
 
         ffmpeg_path = _absolute_path(values, FFMPEG_PATH_ENV)
         ffprobe_path = _absolute_path(values, FFPROBE_PATH_ENV)
+        expected_ffmpeg_build_id = _required_exact_value(
+            values, FFMPEG_BUILD_ID_ENV
+        )
         await asyncio.to_thread(
             validate_fixed_toolchain,
             ffmpeg_path=ffmpeg_path,
             ffprobe_path=ffprobe_path,
-            expected_build_id=_required_exact_value(values, FFMPEG_BUILD_ID_ENV),
+            expected_build_id=expected_ffmpeg_build_id,
             policy=PRODUCTION_TRANSCODING_POLICY,
         )
         session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -1097,6 +1156,30 @@ async def _run_qwen_production(
             registry,
             authorize_cloud_tts=authorize_cloud_tts,
         )
+        voice_product_policy = QwenVoiceProductPolicy(
+            actor="narration-qwen-voice-product"
+        )
+        voice_product = QwenVoiceProductService(
+            session_factory,
+            storage=storage,
+            normalize_reference=lambda parsed: normalize_reference_audio(
+                parsed.reference_audio,
+                mime_type=parsed.mime_type,
+                declared_sha256=parsed.checksum_sha256,
+                ffmpeg_path=ffmpeg_path,
+                ffprobe_path=ffprobe_path,
+                expected_ffmpeg_build_id=expected_ffmpeg_build_id,
+            ),
+            digest_keyring=keyring,
+            policy=voice_product_policy,
+        )
+        preview_processor = QwenVoicePreviewProcessor(
+            repository=voice_product.repository,
+            execution=execution,
+            storage=storage,
+            policy=voice_product_policy,
+            disk_guard=disk_guard.require_available,
+        )
         preview_service = OfficialVoicePreviewAudioService(
             session_factory=session_factory,
             execution_service=execution,
@@ -1122,10 +1205,16 @@ async def _run_qwen_production(
                 novel_ids=(validation_scope.novel_id,) if validation_scope else None,
                 document_ids=(validation_scope.document_id,) if validation_scope else None,
                 not_after=validation_scope.expires_at if validation_scope else None,
-                job_kinds=("narration.segment_render",),
+                job_kinds=(
+                    "narration.segment_render",
+                    "narration.voice_preview",
+                ),
             ),
             terminalizers={
                 "narration.segment_render": repository.terminalize_job_in_session,
+                "narration.voice_preview": (
+                    voice_product.repository.terminalize_job_in_session
+                ),
             },
             claim_guard=disk_guard.claim_allowed,
             job_kind_claim_gate=(
@@ -1154,6 +1243,7 @@ async def _run_qwen_production(
                 return
             _production_factory = installed_factory
             _production_policy = policy
+            _voice_product_port = voice_product
             _official_voice_preview_service = preview_service
             _validation_token_digest = validation_token_digest
             _validation_runtime_scope = validation_scope
@@ -1171,15 +1261,18 @@ async def _run_qwen_production(
             digest_keyring_loaded=True,
             production_backend_installed=True,
             worker_running=True,
-            reference_clone_ready=False,
+            reference_clone_ready=True,
             provider_selection_fingerprint_sha256=selection_fingerprint(
                 default_selection
             ),
         )
         if not await _set_snapshot_if_current(current_task, ready):
             return
-        await worker.run_until_stopped(
-            stop_event,
+        await _run_qwen_job_loop(
+            scheduler=scheduler,
+            segment_worker=worker,
+            preview_processor=preview_processor,
+            stop_event=stop_event,
             on_error=lambda error: logger.error(
                 "Qwen TTS worker iteration failed: %s",
                 _safe_reason(error, "TTS_WORKER_ITERATION_FAILED"),
@@ -1214,6 +1307,7 @@ async def _run_qwen_production(
             if _runtime_task is current_task:
                 _disk_guard = None
                 _cache_runtime = None
+                _voice_product_port = None
                 _official_voice_preview_service = None
                 _private_voice_deletion_service = None
                 _private_voice_lifecycle_service = None

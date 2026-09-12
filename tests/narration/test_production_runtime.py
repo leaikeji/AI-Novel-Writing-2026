@@ -629,7 +629,7 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
     assert status["digest_keyring_loaded"] is True
     assert status["production_backend_installed"] is True
     assert status["worker_running"] is True
-    assert status["reference_clone_ready"] is False
+    assert status["reference_clone_ready"] is True
     assert not ({"path", "secret", "key_id"} & set(status))
     if validation:
         armed = production_owner.arm_validation_segment_claim_gate(

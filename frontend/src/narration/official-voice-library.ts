@@ -15,6 +15,7 @@ import {
   type OfficialPresetCatalogResponse,
   type OfficialPresetId,
   type OfficialPresetLanguage,
+  type OfficialVoicePreviewAudioResponse,
 } from "./contracts";
 import {
   DEFAULT_ALIYUN_TTS_MODEL_ID,
@@ -203,7 +204,8 @@ export interface OfficialVoiceLibraryProps {
     novelId: string,
     item: OfficialVoiceCatalogItem,
     signal: AbortSignal,
-  ) => void | Promise<void>;
+  ) => void | OfficialVoicePreviewAudioResponse["cache_status"]
+    | Promise<void | OfficialVoicePreviewAudioResponse["cache_status"]>;
   readonly onApplied?: (
     result: OfficialVoiceSelectionResult,
     item: OfficialVoiceCatalogItem,
@@ -274,7 +276,6 @@ export function filterOfficialVoiceLibraryGroups(
           item.presetId,
           item.officialSpeaker,
           item.group,
-          item.dialect ?? "",
           languageLabel,
         ]
           .some((value) => value.toLocaleLowerCase("en-US").includes(normalizedQuery))
@@ -298,25 +299,16 @@ const IDLE_PREVIEW_STATE: PreviewState = Object.freeze({
 });
 
 
-const LANGUAGE_ORDER: readonly OfficialVoiceLanguageScope[] = ["zh-CN", "en", "ja-JP", "ko-KR"];
-const LANGUAGE_LABELS: Readonly<Record<OfficialVoiceLanguageScope, string>> = Object.freeze({
-  "zh-CN": "中文",
-  en: "English",
-  "ja-JP": "日本語",
-  "ko-KR": "한국어",
-});
+const LANGUAGE_ORDER: readonly OfficialVoiceLanguageScope[] = ["zh-CN"];
+const MANDARIN_LANGUAGE_LABEL = "普通话";
 const EVIDENCE_BY_PRESET = new Map(
   OFFICIAL_PRESET_EVIDENCE.map((evidence) => [evidence.presetId, evidence] as const),
 );
 
 
 export function officialVoiceLanguageFilterForTarget(
-  targetLanguage: string,
+  _targetLanguage: string,
 ): OfficialVoiceLanguageScope {
-  const normalized = targetLanguage.trim().toLocaleLowerCase("en-US");
-  if (normalized === "ja" || normalized.startsWith("ja-")) return "ja-JP";
-  if (normalized === "ko" || normalized.startsWith("ko-")) return "ko-KR";
-  if (normalized === "en" || normalized.startsWith("en-")) return "en";
   return "zh-CN";
 }
 
@@ -394,7 +386,7 @@ function catalogIntegrityIssue(catalog: OfficialVoiceCatalog): string | null {
       || item.displayName.trim() === ""
       || item.group.trim() === ""
       || item.language !== item.languageScope
-      || item.languageScope !== expectedEvidence.languageScope
+      || item.languageScope !== "zh-CN"
       || item.officialSpeaker !== expectedEvidence.localVoiceId
       || item.nativeLanguage !== expectedEvidence.nativeLanguage
       || item.localUseStatus !== "available"
@@ -451,16 +443,12 @@ export function createOfficialVoiceLibraryModel(
         const mismatch = !officialVoiceLanguageMatches(item.languageScope, targetLanguage);
         return Object.freeze({
           item,
-          languageLabel: LANGUAGE_LABELS[item.languageScope],
+          languageLabel: MANDARIN_LANGUAGE_LABEL,
           validationLabel: validationLabel(item.validationTier),
           languageMismatch: mismatch,
           languageNotice: mismatch
-            ? item.languageScope === "zh-CN"
-              ? `当前朗读语言为 ${targetLanguage || "未设置"}；${LANGUAGE_LABELS[item.languageScope]}音色仍可直接使用。`
-              : `跨语言 · 本项目未专项听检。当前朗读语言为 ${targetLanguage || "未设置"}；${LANGUAGE_LABELS[item.languageScope]}音色仍可直接使用。`
-            : item.languageScope === "zh-CN"
-              ? null
-              : "跨语言 · 本项目未专项听检；这不会阻止直接使用。",
+            ? `当前朗读语言为 ${targetLanguage || "未设置"}；新选择固定使用普通话。`
+            : null,
           availabilityLabel: availabilityLabel(item),
           providerAvailable: officialVoiceIsAvailableForProvider(item, providerSelection),
           providerAvailabilityLabel: providerAvailabilityLabel(item, providerSelection),
@@ -468,15 +456,16 @@ export function createOfficialVoiceLibraryModel(
       });
     return Object.freeze({
       languageScope,
-      label: `${LANGUAGE_LABELS[languageScope]}（${items.length}）`,
+      label: `${MANDARIN_LANGUAGE_LABEL}（${items.length}）`,
       items: Object.freeze(items),
     });
   });
+  const itemCount = groups.reduce((count, group) => count + group.items.length, 0);
   return Object.freeze({
     status: "ready",
     groups: Object.freeze(groups),
-    itemCount: catalog.items.length,
-    message: "Qwen 官方音色已加载；使用范围以当前 Provider 映射为准。",
+    itemCount,
+    message: "Qwen 普通话官方音色已加载；外语与方言不会作为新选择展示。",
   });
 }
 
@@ -819,12 +808,16 @@ export function createOfficialVoiceLibrary(
       }));
       void Promise.resolve()
         .then(() => previewHandler(props.novelId, item, controller.signal))
-        .then(() => {
+        .then((cacheStatus) => {
           if (controller.signal.aborted || sequence !== previewSequenceRef.current) return;
           commitPreview(Object.freeze({
             phase: "ready",
             presetId: item.presetId,
-            message: `${item.displayName} 本地试听已开始。`,
+            message: cacheStatus === "hit"
+              ? `${item.displayName} 已直接播放缓存试听。`
+              : cacheStatus === "miss"
+                ? `${item.displayName} 试听已生成并播放，后续将直接复用。`
+                : `${item.displayName} 本地试听已开始。`,
           }));
         })
         .catch((reason: unknown) => {
@@ -924,18 +917,17 @@ export function createOfficialVoiceLibrary(
                 h("strong", { id: headingId }, item.displayName),
                 h(
                   "span",
-                  { className: "anw-official-voice-card__group" },
-                  `${itemModel.languageLabel} · ${item.officialSpeaker}`,
+                  { className: "anw-official-voice-library__filter-status" },
+                  itemModel.languageLabel,
                 ),
               ),
               h(
                 "span",
                 {
                   id: unavailableId,
-                  className: [
-                    "anw-official-voice-card__provider",
-                    itemModel.providerAvailable ? "" : "is-local-only",
-                  ].filter(Boolean).join(" "),
+                  className: itemModel.providerAvailable
+                    ? "anw-official-voice-library__filter-status"
+                    : "anw-official-voice-card__provider is-local-only",
                 },
                 itemModel.providerAvailabilityLabel,
               ),
@@ -955,9 +947,9 @@ export function createOfficialVoiceLibrary(
               onClick: () => previewVoice(item),
             },
             previewing
-              ? "加载本地模型…"
+              ? "准备试听…"
               : item.previewableNow && props.onPreview !== undefined
-                ? "本地试听"
+                ? previewPhase === "ready" ? "再次试听" : "试听"
                 : "本地试听暂不可用",
           ),
           h(
@@ -987,17 +979,7 @@ export function createOfficialVoiceLibrary(
                 ),
               h("div", null, h("dt", null, "Preset ID"), h("dd", null, item.presetId)),
               h("div", null, h("dt", null, "官方 speaker"), h("dd", null, item.officialSpeaker)),
-              h(
-                "div",
-                null,
-                h("dt", null, "母语／方言"),
-                h(
-                  "dd",
-                  null,
-                  `${LANGUAGE_LABELS[item.nativeLanguage]}${item.dialect ? ` · ${item.dialect}` : ""}`,
-                ),
-              ),
-              h("div", null, h("dt", null, "来源语言"), h("dd", null, item.language)),
+              h("div", null, h("dt", null, "朗读语言"), h("dd", null, "普通话（固定）")),
               h("div", null, h("dt", null, "本地模型"), h("dd", null, item.provenance.localModelId)),
               h("div", null, h("dt", null, "模型 revision"), h("dd", null, item.provenance.localModelRevision)),
               h("div", null, h("dt", null, "映射目录"), h("dd", null, item.provenance.catalogId)),
@@ -1087,12 +1069,11 @@ export function createOfficialVoiceLibrary(
         ? props.headerAction ?? null
         : h("header", { className: "anw-official-voice-library__header" },
           h("div", null,
-            h("p", { className: "anw-official-voice-library__eyebrow" }, "官方固定音色"),
-            h("h2", { id: `${prefix}-heading` }, "官方音色库"),
+            h("h2", { id: `${prefix}-heading` }, "选择旁白音色"),
             h(
               "p",
               { id: `${prefix}-summary` },
-              "按语言查看并直接使用；试听可选，技术来源收在详情中。",
+              "选中即保存，试听不更换声音。已有音频保持不变。",
             ),
           ),
           h("div", { className: "anw-official-voice-library__header-actions" },
@@ -1114,37 +1095,20 @@ export function createOfficialVoiceLibrary(
           h(
             "label",
             null,
-            h("span", null, "搜索官方音色"),
+            h("span", null, "搜索音色"),
             h("input", {
               type: "search",
               value: searchQuery,
-              placeholder: "名称或分组",
+              placeholder: "名称或音色特点",
               onChange: (event: { target: { value: string } }) => {
                 setSearchQuery(event.target.value);
               },
             }),
           ),
-          h(
-            "div",
-            {
-              className: "anw-official-voice-library__language-tabs",
-              role: "group",
-              "aria-label": "官方音色语言",
-            },
-            ...LANGUAGE_ORDER.map((languageScope) => h(
-              "button",
-              {
-                key: languageScope,
-                type: "button",
-                "aria-pressed": languageFilter === languageScope,
-                className: languageFilter === languageScope ? "is-active" : "",
-                onClick: () => setLanguageFilter(languageScope),
-              },
-              `${LANGUAGE_LABELS[languageScope]}（${
-                model.groups.find((group) => group.languageScope === languageScope)?.items.length ?? 0
-              }）`,
-            )),
-          ),
+          h("span", {
+            className: "anw-official-voice-library__language-fixed",
+            role: "note",
+          }, "普通话 · 本地试听，首次生成后复用"),
           searchQuery.trim() === ""
             ? null
             : h(

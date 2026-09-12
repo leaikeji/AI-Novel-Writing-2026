@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { NarrationApiError, createUploadedVoiceVersion } from "./api";
+import {
+  NarrationApiError,
+  createDesignedVoiceVersion,
+  createUploadedVoiceVersion,
+} from "./api";
 import {
   CAPABILITY_KEYS,
   NARRATION_CAPABILITY_SCHEMA_VERSION,
@@ -28,6 +32,7 @@ import {
   createVoiceSourcePanelModel,
   pollVoicePreview,
   submitAuthorizedVoiceUpload,
+  submitDesignedVoiceVersion,
 } from "./voice-source-panel";
 import type {
   AuthorizedVoiceUploadInput,
@@ -98,6 +103,7 @@ function authorization(
 
 function voiceSources(
   uploadedAvailable = false,
+  generatedAvailable = false,
 ): readonly VoiceSourceAvailability[] {
   return [
     {
@@ -119,8 +125,8 @@ function voiceSources(
     {
       source_type: "generated",
       capability: "voice_design",
-      available: false,
-      reason_code: "VOICE_GENERATOR_NO_GO",
+      available: generatedAvailable,
+      reason_code: generatedAvailable ? null : "VOICE_DESIGN_RUNTIME_UNAVAILABLE",
       accepted_mime_types: [],
       maximum_bytes: null,
     },
@@ -137,9 +143,9 @@ function version(
     version_number: 1,
     source_type: "uploaded",
     state: "preview_ready",
-    provider_id: "moss",
-    model_id: "moss-tts-nano",
-    model_revision: "candidate-only",
+    provider_id: "local_qwen3_tts",
+    model_id: "Qwen3-TTS-12Hz-1.7B-Base-8bit",
+    model_revision: "pinned",
     preset_key: null,
     language: "zh-CN",
     fingerprint: SHA_A,
@@ -231,6 +237,7 @@ function uploadInput(
     language: "zh-CN",
     originalFilename: "authorized.wav",
     referenceAudio: new Blob(["RIFF0000WAVEfmt "], { type: "audio/wav" }),
+    referenceText: "这是一段准确对应参考录音的普通话文字。",
     rights: {
       noticeVersion: "voice-rights/1",
       sourceIdentifier: "owner-recording-2026-08",
@@ -317,7 +324,7 @@ describe("T2-D voice source panel", () => {
           state: "unavailable",
           visible: false,
           actionable: false,
-          reason_code: "VOICE_GENERATOR_NO_GO",
+          reason_code: "VOICE_DESIGN_RUNTIME_UNAVAILABLE",
         },
       }),
       authorization: authorization(),
@@ -326,7 +333,7 @@ describe("T2-D voice source panel", () => {
       selectedVersionId: null,
     });
     expect(model.visibleCards).toEqual([]);
-    expect(model.cards.map((card) => card.sourceType)).toEqual(["uploaded"]);
+    expect(model.cards.map((card) => card.sourceType)).toEqual(["generated", "uploaded"]);
     expect(model.actions).toEqual({
       canCreateProfile: false,
       canPreview: false,
@@ -534,6 +541,7 @@ describe("T2-D voice source panel", () => {
       language: "zh-CN",
       original_filename: "authorized.wav",
       reference_sha256: SHA_A,
+      reference_text: "这是一段准确对应参考录音的普通话文字。",
       rights: {
         notice_version: "voice-rights/1",
         source_identifier: "owner-recording-2026-08",
@@ -547,6 +555,70 @@ describe("T2-D voice source panel", () => {
     });
     expect(calls[0][2]).toBe(input.referenceAudio);
     expect(calls[0][3]).toBe("upload-key-0001");
+  });
+
+  it("creates a Mandarin designed candidate only when its gate and profile CAS are current", async () => {
+    const generatedVersion = version({
+      version_id: UUID_C,
+      version_number: 2,
+      source_type: "generated",
+      state: "draft",
+      provider_id: null,
+      model_id: null,
+      model_revision: null,
+      rights: {
+        ...version().rights,
+        source_kind: "qwen_synthetic_design",
+      },
+      reference_asset_id: null,
+      description_available: true,
+    });
+    const model = createVoiceSourcePanelModel({
+      capabilities: capabilities({
+        voice_design: {
+          state: "enabled",
+          visible: true,
+          actionable: true,
+          reason_code: null,
+          required_gate: null,
+        },
+      }),
+      authorization: authorization(),
+      voiceSources: voiceSources(false, true),
+      profile: profile(),
+      selectedVersionId: null,
+    });
+    const create = vi.fn(async (..._args: Parameters<typeof createDesignedVoiceVersion>) => generatedVersion);
+    const result = await submitDesignedVoiceVersion(model, {
+      profileId: UUID_A,
+      expectedProfileVersion: 1,
+      description: "  沉稳、清晰的青年男声，语速适中。  ",
+      language: "zh-CN",
+      seed: null,
+      idempotencyKey: "designed-key-0001",
+    }, { createDesignedVoiceVersion: create });
+
+    expect(result.version_id).toBe(UUID_C);
+    expect(create).toHaveBeenCalledWith(
+      UUID_A,
+      {
+        expected_profile_version: 1,
+        description: "沉稳、清晰的青年男声，语速适中。",
+        language: "zh-CN",
+        seed: null,
+      },
+      "designed-key-0001",
+      undefined,
+    );
+  });
+
+  it("maps the backend Mandarin-only rejection to a clear validation failure", () => {
+    expect(classifyVoiceSourceFailure(apiError("VOICE_LANGUAGE_UNSUPPORTED"))).toEqual({
+      kind: "validation",
+      code: "VOICE_LANGUAGE_UNSUPPORTED",
+      message: "音色设计和参考录音仅支持普通话。",
+      retryable: false,
+    });
   });
 
   it("classifies permission, rights, format, limit, capability, conflict, storage, and abort safely", () => {
@@ -667,7 +739,7 @@ describe("T2-D voice source panel", () => {
             state: "unavailable",
             visible: false,
             actionable: false,
-            reason_code: "VOICE_GENERATOR_NO_GO",
+            reason_code: "VOICE_DESIGN_RUNTIME_UNAVAILABLE",
           },
         }),
         authorization: authorization(),
@@ -683,11 +755,14 @@ describe("T2-D voice source panel", () => {
       }) as FakeElement;
       const serialized = JSON.stringify(tree);
       expect(tree.props["aria-labelledby"]).toBe("anw-narration-voice-source-title");
-      expect(serialized).toContain("官方音色请在上方音色库直接使用");
+      expect(serialized).toContain("官方声音在“旁白音色”中选择");
       expect(serialized).not.toContain("系统预设");
       expect(serialized).not.toContain("上传参考录音");
       expect(serialized).not.toContain("文字描述生成");
       expect(serialized).toContain("aria-live");
+      expect(serialized).not.toContain("生成试听");
+      expect(serialized).not.toContain("确认并锁定音色");
+      expect(serialized).not.toContain("取消等待");
 
       const embeddedTree = VoiceSourcePanel({
         embedded: true,
@@ -699,10 +774,106 @@ describe("T2-D voice source panel", () => {
       }) as FakeElement;
       expect(embeddedTree.props["aria-labelledby"]).toBe("outer-private-source-heading");
       expect(JSON.stringify(embeddedTree)).not.toContain("anw-narration-voice-source-title");
-      expect(JSON.stringify(embeddedTree)).not.toContain("官方音色请在上方音色库直接使用");
+      expect(JSON.stringify(embeddedTree)).not.toContain("官方声音在“旁白音色”中选择");
     } finally {
       if (descriptor === undefined) delete (globalThis as { window?: unknown }).window;
       else Object.defineProperty(globalThis, "window", descriptor);
+    }
+  });
+
+  it("renders designed and uploaded sources with fixed Mandarin fields and no language selector", () => {
+    interface FakeElement {
+      readonly type: unknown;
+      readonly props: Record<string, unknown>;
+      readonly children: readonly unknown[];
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        QwenPaw: {
+          host: {
+            React: {
+              createElement: (
+                type: unknown,
+                props: Record<string, unknown> | null,
+                ...children: unknown[]
+              ): FakeElement => ({ type, props: props ?? {}, children }),
+            },
+          },
+        },
+      },
+    });
+    try {
+      const model = createVoiceSourcePanelModel({
+        capabilities: capabilities({
+          voice_design: {
+            state: "enabled",
+            visible: true,
+            actionable: true,
+            reason_code: null,
+            required_gate: null,
+          },
+          reference_clone: {
+            state: "enabled",
+            visible: true,
+            actionable: true,
+            reason_code: null,
+            required_gate: null,
+          },
+        }),
+        authorization: authorization(),
+        voiceSources: voiceSources(true, true),
+        profile: profile(),
+        selectedVersionId: null,
+      });
+      const designedTree = VoiceSourcePanel({
+        model,
+        selectedSource: "generated",
+        workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+        uploadRights: uploadInput().rights,
+        designDescription: "沉稳清晰的青年男声",
+        previewText: "你好，这是普通话试听。",
+        previewTextValid: true,
+      });
+      const uploadTree = VoiceSourcePanel({
+        model,
+        selectedSource: "uploaded",
+        workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+        uploadRights: uploadInput().rights,
+        referenceText: "你好，这是参考录音。",
+        referenceAudioSelected: true,
+      });
+      const serialized = JSON.stringify([designedTree, uploadTree]);
+      expect(serialized).toContain("文字设计音色");
+      expect(serialized).toContain("普通话（固定）");
+      expect(serialized).toContain("参考录音文字");
+      expect(serialized).not.toContain("English");
+      expect(serialized).not.toContain("方言");
+      expect(serialized).not.toContain('"type":"select"');
+      const pending = JSON.stringify(VoiceSourcePanel({
+        model: enabledModel(),
+        selectedSource: "uploaded",
+        workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+        uploadRights: uploadInput().rights,
+      }));
+      expect(pending).toContain("生成试听");
+      expect(pending).not.toContain("确认并锁定音色");
+      expect(pending).not.toContain("取消等待");
+      const ready = JSON.stringify(VoiceSourcePanel({
+        model: enabledModel(),
+        selectedSource: "uploaded",
+        workflow: { status: "preview_ready", preview: preview("ready"), failure: null },
+        uploadRights: uploadInput().rights,
+        previewContent: "真实试听播放器",
+        qualityConfirmationAllowed: false,
+      }));
+      expect(ready.indexOf("真实试听播放器")).toBeLessThan(ready.indexOf("确认并锁定音色"));
+      expect(ready).toContain("请先播放试听，再确认声音效果");
+      expect(ready).toContain('"aria-pressed":true');
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "window", descriptor);
+      else Reflect.deleteProperty(globalThis, "window");
     }
   });
 

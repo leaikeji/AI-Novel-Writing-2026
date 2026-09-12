@@ -5,6 +5,8 @@ import {
   NARRATION_CAPABILITY_SCHEMA_VERSION,
   NARRATION_SETTINGS_API_VERSION,
   NARRATION_VOICE_SCHEMA_VERSION,
+  OFFICIAL_PRESET_EVIDENCE,
+  OFFICIAL_PRESET_MANIFEST_IDENTITY,
   type FeatureCapability,
   type NarrationAuthorizationState,
   type NarrationCapabilities,
@@ -144,7 +146,7 @@ function capability(key: FeatureCapability["key"]): FeatureCapability {
     return { key, state: "hold", visible: true, actionable: false, reason_code: "OFFICIAL_PRESET_RUNTIME_UNAVAILABLE", required_gate: "T5-GATE" };
   }
   if (key === "voice_design") {
-    return { key, state: "unavailable", visible: false, actionable: false, reason_code: "VOICE_GENERATOR_NO_GO", required_gate: "T5-GATE" };
+    return { key, state: "unavailable", visible: false, actionable: false, reason_code: "VOICE_DESIGN_RUNTIME_UNAVAILABLE", required_gate: "T5-GATE" };
   }
   return { key, state: "hold", visible: false, actionable: false, reason_code: "NOT_IN_T4_VOICE_SCOPE", required_gate: "T5-GATE" };
 }
@@ -198,7 +200,7 @@ const voiceSources: readonly VoiceSourceAvailability[] = [
     source_type: "generated",
     capability: "voice_design",
     available: false,
-    reason_code: "VOICE_GENERATOR_NO_GO",
+    reason_code: "VOICE_DESIGN_RUNTIME_UNAVAILABLE",
     accepted_mime_types: [],
     maximum_bytes: null,
   },
@@ -215,6 +217,19 @@ const officialCapabilities: NarrationCapabilities = {
 
 const officialVoiceSources: readonly VoiceSourceAvailability[] = voiceSources.map((source) => (
   source.source_type === "preset"
+    ? { ...source, available: true, reason_code: null }
+    : source
+));
+
+const designedCapabilities: NarrationCapabilities = {
+  ...capabilities,
+  items: capabilities.items.map((item) => item.key === "voice_design"
+    ? { ...item, state: "enabled", visible: true, actionable: true, reason_code: null, required_gate: null }
+    : item),
+};
+
+const designedVoiceSources: readonly VoiceSourceAvailability[] = voiceSources.map((source) => (
+  source.source_type === "generated"
     ? { ...source, available: true, reason_code: null }
     : source
 ));
@@ -251,9 +266,9 @@ function version(
     version_number: 1,
     source_type: "uploaded",
     state,
-    provider_id: previewReady ? "openmoss" : null,
-    model_id: previewReady ? "MOSS-TTS-Nano" : null,
-    model_revision: previewReady ? "rev-1" : null,
+    provider_id: previewReady ? "local_qwen3_tts" : null,
+    model_id: previewReady ? "Qwen3-TTS-12Hz-1.7B-Base-8bit" : null,
+    model_revision: previewReady ? "pinned" : null,
     preset_key: null,
     language: "zh-CN",
     fingerprint: "b".repeat(64),
@@ -274,6 +289,22 @@ function version(
     description_available: false,
     locked_at: locked ? NOW : null,
     created_at: NOW,
+  };
+}
+
+function generatedVersion(): VoiceProfileVersionResource {
+  return {
+    ...version("draft"),
+    source_type: "generated",
+    provider_id: null,
+    model_id: null,
+    model_revision: null,
+    rights: {
+      ...rights(),
+      source_kind: "qwen_synthetic_design",
+    },
+    reference_asset_id: null,
+    description_available: true,
   };
 }
 
@@ -340,6 +371,39 @@ describe("voice source workspace", () => {
       .toThrow("范围之外");
   });
 
+  it("hides only exact official-only profiles without losing drafts or mixed private histories", () => {
+    const evidence = OFFICIAL_PRESET_EVIDENCE[0];
+    const officialVersion: VoiceProfileVersionResource = {
+      ...version("locked"),
+      source_type: "preset",
+      preset_key: evidence.presetId,
+      rights: { ...rights(), source_kind: "official_preset" },
+      official_preset: {
+        schema_version: "qwen-tts-preset-provenance/1",
+        catalog_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath,
+        preset_id: evidence.presetId,
+        local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+        local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+        provider_voice_ids: {
+          local_qwen3_tts: evidence.localVoiceId,
+          "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": evidence.aliyunPlusVoiceId,
+          "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": evidence.aliyunFlashVoiceId,
+        },
+        model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
+        provenance_fingerprint_sha256: "a".repeat(64),
+      },
+    };
+    const official = profile(2, officialVersion);
+    expect(novelScopedVoiceProfiles(NOVEL_ID, [official])).toEqual([]);
+    expect(official.versions).toEqual([officialVersion]);
+    const mixed = { ...official, versions: [officialVersion, version()] };
+    expect(novelScopedVoiceProfiles(NOVEL_ID, [mixed])).toEqual([mixed]);
+    const empty = profile();
+    expect(novelScopedVoiceProfiles(NOVEL_ID, [empty])).toEqual([empty]);
+    const incomplete = profile(2, { ...officialVersion, official_preset: null });
+    expect(novelScopedVoiceProfiles(NOVEL_ID, [incomplete])).toEqual([incomplete]);
+  });
+
   it("runs create → explicit uploaded source → rights upload → poll/get → quality confirm → lock", async () => {
     const empty = { contract_version: NARRATION_SETTINGS_API_VERSION, items: [] } as const;
     const uploaded = profile(2, version("draft"));
@@ -352,6 +416,7 @@ describe("voice source workspace", () => {
         .mockResolvedValueOnce(uploaded)
         .mockResolvedValueOnce(previewReady)
         .mockResolvedValueOnce(locked),
+      createDesignedVoiceVersion: vi.fn(),
       createUploadedVoiceVersion: vi.fn(async () => version("draft")),
       createVoicePreview: vi.fn(async () => preview("queued")),
       getVoicePreview: vi.fn()
@@ -380,7 +445,7 @@ describe("voice source workspace", () => {
     await settle();
     tree = harness.render(Workspace, props);
     const createButton = findAll(tree, (element) => (
-      element.type === "button" && textContent(element) === "创建作品音色档案"
+      element.type === "button" && textContent(element) === "创建音色档案"
     ))[0];
     (createButton.props.onClick as () => void)();
     await settle();
@@ -390,7 +455,7 @@ describe("voice source workspace", () => {
       expect.stringMatching(/^voice-profile-/),
       expect.any(AbortSignal),
     );
-    expect(textContent(tree)).toContain("下一步选择官方预设或上传有权使用的参考录音");
+    expect(textContent(tree)).toContain("下一步选择文字设计或上传有权使用的参考录音");
 
     let panel = sourcePanel(tree);
     expect(panel.props.selectedSource).toBeNull();
@@ -402,6 +467,9 @@ describe("voice source workspace", () => {
       { name: "authorized.wav", lastModified: 1 },
     ) as File;
     (panel.props.onReferenceAudioChange as (file: File) => void)(reference);
+    (panel.props.onReferenceTextChange as (text: string) => void)(
+      "这是一段准确对应参考录音的普通话文字。",
+    );
     (panel.props.onUploadRightsChange as (patch: Record<string, unknown>) => void)({
       sourceIdentifier: "owner-recording-2026-08",
       subjectConsentReference: "consent-record-1",
@@ -435,7 +503,7 @@ describe("voice source workspace", () => {
     panel = sourcePanel(tree);
     expect(panel.props.qualityConfirmed).toBe(false);
     expect(panel.props.qualityConfirmationAllowed).toBe(false);
-    const playback = findAll(tree, (element) => (
+    const playback = findAll(panel.props.previewContent, (element) => (
       typeof element.props.onPlayed === "function" && "preview" in element.props
     ))[0];
     (playback.props.onPlayed as () => void)();
@@ -462,12 +530,75 @@ describe("voice source workspace", () => {
     expect(textContent(tree)).toContain("旁白和人物绑定尚未改变");
   });
 
+  it("creates a Mandarin text-designed candidate and keeps the update inside the workspace", async () => {
+    const draft = profile();
+    const designed = profile(2, generatedVersion());
+    const api: VoiceSourceWorkspaceApi = {
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [draft],
+      })),
+      createVoiceProfile: vi.fn(),
+      getVoiceProfile: vi.fn(async () => designed),
+      createDesignedVoiceVersion: vi.fn(async () => generatedVersion()),
+      createUploadedVoiceVersion: vi.fn(),
+      createVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+      lockVoiceProfile: vi.fn(),
+    };
+    const harness = createHarness();
+    const Workspace = createVoiceSourceWorkspace(harness.React, api);
+    const props = {
+      novelId: NOVEL_ID,
+      capabilities: designedCapabilities,
+      authorization,
+      voiceSources: designedVoiceSources,
+    };
+
+    let tree = harness.render(Workspace, props);
+    await settle();
+    tree = harness.render(Workspace, props);
+    let panel = sourcePanel(tree);
+    (panel.props.onSelectSource as (source: string) => void)("generated");
+    tree = harness.render(Workspace, props);
+    panel = sourcePanel(tree);
+    (panel.props.onDesignDescriptionChange as (description: string) => void)(
+      "沉稳、清晰的青年男声，语速适中，情绪克制。",
+    );
+    (panel.props.onPreviewTextChange as (text: string) => void)(
+      "夜色沉下来，他终于听见门外那阵脚步声。",
+    );
+    tree = harness.render(Workspace, props);
+    panel = sourcePanel(tree);
+    (panel.props.onCreateDesigned as () => void)();
+    await settle();
+    tree = harness.render(Workspace, props);
+
+    expect(api.createDesignedVoiceVersion).toHaveBeenCalledWith(
+      PROFILE_ID,
+      {
+        expected_profile_version: 1,
+        description: "沉稳、清晰的青年男声，语速适中，情绪克制。",
+        language: "zh-CN",
+        seed: null,
+      },
+      expect.stringMatching(/^voice-designed-/),
+      expect.any(AbortSignal),
+    );
+    expect(textContent(tree)).toContain("普通话设计候选已创建");
+    expect(textContent(tree)).not.toContain("English");
+    expect((
+      sourcePanel(tree).props.model as { readonly actions: { readonly canPreview: boolean } }
+    ).actions.canPreview).toBe(true);
+  });
+
   it("keeps the retired official candidate workflow out of the private-source workspace", async () => {
     const draft = profile();
     const api: VoiceSourceWorkspaceApi = {
       listVoiceProfiles: vi.fn(async () => ({ contract_version: NARRATION_SETTINGS_API_VERSION, items: [draft] })),
       createVoiceProfile: vi.fn(),
       getVoiceProfile: vi.fn(async () => draft),
+      createDesignedVoiceVersion: vi.fn(),
       createUploadedVoiceVersion: vi.fn(),
       createVoicePreview: vi.fn(),
       getVoicePreview: vi.fn(),
@@ -495,10 +626,9 @@ describe("voice source workspace", () => {
     });
     (panel.props.onSelectSource as (source: string) => void)("preset");
     tree = harness.render(Workspace, props);
-    expect(textContent(tree)).toContain("我的音色 · 私人来源");
-    expect(textContent(tree)).toContain("官方音色请在上方直接使用");
-    expect(textContent(tree)).toContain("私人音色档案已加载。");
-    expect(textContent(tree)).not.toContain("私人音色档案已加载。官方音色");
+    expect(textContent(tree)).toContain("我的声音 · 普通话");
+    expect(textContent(tree)).toContain("官方声音请在“旁白音色”中选择");
+    expect(textContent(tree)).not.toContain("私人音色档案已加载。");
     expect(textContent(tree)).not.toContain("官方中文预设（6 项）");
     expect(findAll(tree, (element) => element.props["data-voice-source"] === "preset"))
       .toHaveLength(0);
@@ -510,6 +640,7 @@ describe("voice source workspace", () => {
       listVoiceProfiles: vi.fn(async () => ({ contract_version: NARRATION_SETTINGS_API_VERSION, items: [uploaded] })),
       createVoiceProfile: vi.fn(),
       getVoiceProfile: vi.fn(async () => uploaded),
+      createDesignedVoiceVersion: vi.fn(),
       createUploadedVoiceVersion: vi.fn(),
       createVoicePreview: vi.fn(async () => preview("queued")),
       getVoicePreview: vi.fn(async () => preview("running")),
@@ -532,7 +663,9 @@ describe("voice source workspace", () => {
     tree = harness.render(Workspace, props);
     expect(tree.props["data-voice-workspace-phase"]).toBe("error");
     expect(textContent(tree)).toContain("继续等待试听");
-    expect(findAll(tree, (element) => textContent(element) === "继续等待试听")).not.toHaveLength(0);
+    expect(findAll(sourcePanel(tree).props.previewContent, (element) => (
+      element.type === "button" && textContent(element) === "继续等待试听"
+    ))).toHaveLength(1);
   });
 
   it("replays a lost upload once with the exact same idempotency key", async () => {
@@ -542,6 +675,7 @@ describe("voice source workspace", () => {
       listVoiceProfiles: vi.fn(async () => ({ contract_version: NARRATION_SETTINGS_API_VERSION, items: [draft] })),
       createVoiceProfile: vi.fn(),
       getVoiceProfile: vi.fn(async () => draft),
+      createDesignedVoiceVersion: vi.fn(),
       createUploadedVoiceVersion: upload,
       createVoicePreview: vi.fn(),
       getVoicePreview: vi.fn(),
@@ -562,6 +696,9 @@ describe("voice source workspace", () => {
       { name: "authorized.wav", lastModified: 1 },
     ) as File;
     (sourcePanel(tree).props.onReferenceAudioChange as (file: File) => void)(reference);
+    (sourcePanel(tree).props.onReferenceTextChange as (text: string) => void)(
+      "这是一段准确对应参考录音的普通话文字。",
+    );
     (sourcePanel(tree).props.onUploadRightsChange as (patch: Record<string, unknown>) => void)({
       sourceIdentifier: "owner-recording-2026-08",
       voiceCloningConfirmed: true,
@@ -593,6 +730,7 @@ describe("voice source workspace", () => {
       listVoiceProfiles: vi.fn((options = {}) => options.novelId === NOVEL_ID ? first : second),
       createVoiceProfile: vi.fn(),
       getVoiceProfile: vi.fn(),
+      createDesignedVoiceVersion: vi.fn(),
       createUploadedVoiceVersion: vi.fn(),
       createVoicePreview: vi.fn(),
       getVoicePreview: vi.fn(),

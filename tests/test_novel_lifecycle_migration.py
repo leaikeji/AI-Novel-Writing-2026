@@ -15,7 +15,7 @@ PURGE_MIGRATION = ROOT / "backend/migrations/versions/20260911_0053_novel_purge_
 
 def test_recycle_migration_is_linear_and_forward_only() -> None:
     scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert scripts.get_current_head() == "20260911_0053"
+    assert scripts.get_current_head() == "20260912_0055"
     assert scripts.get_revision("20260910_0052").down_revision == "20260910_0051"
     assert scripts.get_revision("20260911_0053").down_revision == "20260910_0052"
     source = MIGRATION.read_text(encoding="utf-8")

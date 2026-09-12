@@ -811,6 +811,21 @@ def test_reference_clone_has_an_independent_exact_release_gate() -> None:
         t4_product_capabilities(reference_clone_released=1)  # type: ignore[arg-type]
 
 
+def test_voice_design_has_an_independent_exact_release_gate() -> None:
+    baseline = t4_product_capabilities()
+    released = t4_product_capabilities(voice_design_released=True)
+
+    assert released.item(wire.CapabilityKey.VOICE_DESIGN).state is (
+        wire.CapabilityState.ENABLED
+    )
+    assert released.item(wire.CapabilityKey.VOICE_DESIGN).actionable is True
+    assert baseline.item(wire.CapabilityKey.VOICE_DESIGN).state is (
+        wire.CapabilityState.UNAVAILABLE
+    )
+    with pytest.raises(TypeError, match="exact boolean"):
+        t4_product_capabilities(voice_design_released=1)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(
     "operation",
     [
@@ -1477,7 +1492,7 @@ def test_dispatcher_owns_exact_operations_and_preserves_specific_holds() -> None
         | PronunciationSettingsHandler.operations
     )
     assert owned == set(NarrationSettingsOperation)
-    assert len(owned) == 31
+    assert len(owned) == 32
 
     store = MemoryStore(novel())
     blocked = authorized_backend(store)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import io
 from typing import Final, Literal, Protocol
@@ -43,20 +43,18 @@ from .tts_execution import TTSExecutionService
 PREVIEW_TIMEOUT_SECONDS: Final = 45.0
 PREVIEW_MAX_AUDIO_BYTES: Final = 16 * 1024 * 1024
 PREVIEW_DISCONNECT_POLL_SECONDS: Final = 0.1
+PREVIEW_CACHE_MAX_ENTRIES: Final = 9
 PREVIEW_ROUTE: Final = (
     "/novels/{novel_id}/official-voice-preview-audio"
 )
 
-PreviewLanguage = Literal["zh-CN", "en", "ja-JP", "ko-KR"]
+PreviewLanguage = Literal["zh-CN"]
 SessionFactory = Callable[[], Session]
 NovelScopeValidator = Callable[[Session, UUID], object]
 DisconnectProbe = Callable[[], Awaitable[bool]]
 
 _PREVIEW_TEXT: Final[dict[str, str]] = {
     "zh-CN": "你好，这是一段本地声音试听，愿故事在文字与声音之间自然展开。",
-    "en": "Hello. This is a local voice preview for a clear and natural story.",
-    "ja-JP": "こんにちは。これは物語のための短い音声サンプルです。",
-    "ko-KR": "안녕하세요. 이야기 낭독을 위한 짧은 음성 미리듣기입니다.",
 }
 
 
@@ -80,6 +78,7 @@ class OfficialVoicePreviewAudio:
     model_id: str
     model_revision: str
     speaker_id: str
+    cache_status: Literal["hit", "miss"] = "miss"
 
     @property
     def response_headers(self) -> dict[str, str]:
@@ -89,6 +88,7 @@ class OfficialVoicePreviewAudio:
             "X-TTS-Model-Id": self.model_id,
             "X-TTS-Model-Revision": self.model_revision,
             "X-TTS-Speaker-Id": self.speaker_id,
+            "X-TTS-Preview-Cache": self.cache_status,
         }
 
 
@@ -144,6 +144,12 @@ class OfficialVoicePreviewAudioService:
         self._timeout_seconds = float(timeout_seconds)
         self._max_audio_bytes = max_audio_bytes
         self._disconnect_poll_seconds = float(disconnect_poll_seconds)
+        # The request accepts nine pinned presets in the product's only language,
+        # so this process-local cache is naturally bounded to nine immutable WAVs.
+        # It avoids repeated inference without creating database or media records.
+        self._preview_cache: dict[
+            tuple[str, PreviewLanguage], OfficialVoicePreviewAudio
+        ] = {}
 
     async def preview(
         self,
@@ -154,6 +160,10 @@ class OfficialVoicePreviewAudioService:
         disconnect_probe: DisconnectProbe | None = None,
     ) -> OfficialVoicePreviewAudio:
         preset = self._validate_request_scope(novel_id, preset_id)
+        cache_key = (preset.preset_id, language)
+        cached = self._preview_cache.get(cache_key)
+        if cached is not None:
+            return replace(cached, cache_status="hit")
         selection = wire.TTSProviderSelection(
             provider_id=TTSProviderId.LOCAL_QWEN3_TTS.value
         )
@@ -192,7 +202,10 @@ class OfficialVoicePreviewAudioService:
             )
             if synthesis_task in done:
                 result = synthesis_task.result()
-                return self._validated_audio(result, synthesis_request, preset)
+                validated = self._validated_audio(result, synthesis_request, preset)
+                if len(self._preview_cache) < PREVIEW_CACHE_MAX_ENTRIES:
+                    self._preview_cache[cache_key] = validated
+                return validated
             if disconnect_task is not None and disconnect_task in done:
                 await self._abort(selection, request_id, synthesis_task)
                 raise OfficialVoicePreviewFailure("TTS_PREVIEW_CLIENT_DISCONNECTED")
@@ -434,6 +447,7 @@ __all__ = [
     "OfficialVoicePreviewAudioRequest",
     "OfficialVoicePreviewAudioService",
     "OfficialVoicePreviewFailure",
+    "PREVIEW_CACHE_MAX_ENTRIES",
     "PREVIEW_MAX_AUDIO_BYTES",
     "PREVIEW_ROUTE",
     "PREVIEW_TIMEOUT_SECONDS",

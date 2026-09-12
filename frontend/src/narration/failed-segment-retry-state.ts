@@ -8,6 +8,18 @@ import type {
 export const FAILED_SEGMENT_RETRY_BATCH_LIMIT = 100;
 
 
+const FAILED_SEGMENT_TERMINAL_REFRESH_ATTEMPTS = 8;
+const FAILED_SEGMENT_TERMINAL_REFRESH_DELAY_MS = 1_500;
+
+
+const TRANSIENT_RETRY_REASON_CODES = new Set([
+  "AGGREGATE_FULL_FAILURE_STATE_INVALID",
+  "AGGREGATE_PARTIAL_FAILURE_STATE_INVALID",
+  "JOB_NOT_MANUALLY_RETRYABLE",
+  "LATEST_ATTEMPT_NOT_COMPLETE",
+]);
+
+
 export type FailedSegmentFailureGroup = "recoverable" | "audio-quality" | "blocked";
 
 
@@ -128,6 +140,10 @@ export interface FailedSegmentRetryControllerDependencies {
   ) => Promise<void>;
   readonly createIdempotencyKey: () => string;
   readonly formatFailure: (reason: unknown) => string;
+  readonly waitForProjectionRefresh?: (
+    delayMs: number,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly onState?: (snapshot: FailedSegmentRetrySnapshot) => void;
 }
 
@@ -175,6 +191,60 @@ function projectionMatchesScope(
 ): boolean {
   return projection.edition_id === scope.editionId
     && projection.request_id === scope.requestId;
+}
+
+
+function retryItemIsTerminal(item: FailedNarrationSegmentRetryItem): boolean {
+  return !item.retryable
+    && !TRANSIENT_RETRY_REASON_CODES.has(item.retry_reason_code ?? "");
+}
+
+
+function affectedSegmentsAreTerminal(
+  projection: FailedNarrationSegmentsProjection,
+  affectedSegmentIds: readonly string[],
+  allowMissing: boolean,
+): boolean {
+  const itemsById = new Map(projection.items.map((item) => [item.segment_id, item]));
+  return affectedSegmentIds.every((segmentId) => {
+    const item = itemsById.get(segmentId);
+    return item ? retryItemIsTerminal(item) : allowMissing;
+  });
+}
+
+
+function visibleAffectedSegmentIds(
+  projection: FailedNarrationSegmentsProjection,
+  affectedSegmentIds: readonly string[],
+): readonly string[] {
+  const visible = new Set(projection.items.map((item) => item.segment_id));
+  return affectedSegmentIds.filter((segmentId) => visible.has(segmentId));
+}
+
+
+function defaultProjectionRefreshWait(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      globalThis.clearTimeout(timer);
+      const reason = typeof DOMException === "function"
+        ? new DOMException("failed-segment refresh aborted", "AbortError")
+        : Object.assign(new Error("failed-segment refresh aborted"), { name: "AbortError" });
+      reject(reason);
+    };
+    if (signal.aborted) {
+      globalThis.clearTimeout(timer);
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 
@@ -337,13 +407,22 @@ implements FailedSegmentRetryController {
           ? "重试请求已受理，正在恢复句段音频（幂等重放）。"
           : "重试请求已受理，正在恢复句段音频。",
       });
-      await this.dependencies.afterAccepted(response, scope, controller.signal);
-      if (!this.isCurrent(sequence, controller)) return;
-      const fresh = await this.dependencies.getProjection(scope.editionId, controller.signal);
-      if (!this.isCurrent(sequence, controller)) return;
-      if (!projectionMatchesScope(fresh, scope)) {
-        throw new Error("重试后的失败句段投影与当前章节朗读版本不一致。");
+      let completionFailure: unknown = null;
+      try {
+        await this.dependencies.afterAccepted(response, scope, controller.signal);
+      } catch (reason) {
+        if (isAbort(reason)) throw reason;
+        completionFailure = reason;
       }
+      if (!this.isCurrent(sequence, controller)) return;
+      const fresh = await this.refreshUntilAffectedSegmentsAreTerminal(
+        scope,
+        visibleAffectedSegmentIds(projection, response.affected_segment_ids),
+        completionFailure === null,
+        sequence,
+        controller,
+      );
+      if (!this.isCurrent(sequence, controller)) return;
       this.activeAbort = null;
       this.publish({
         phase: "ready",
@@ -353,7 +432,9 @@ implements FailedSegmentRetryController {
         statusMessage: fresh.items.length > 0
           ? `句段状态已更新，仍有 ${fresh.items.length} 个失败句段。`
           : "失败句段已经恢复，可继续播放。",
-        errorMessage: null,
+        errorMessage: completionFailure === null
+          ? null
+          : this.dependencies.formatFailure(completionFailure),
       });
     } catch (reason) {
       if (!this.isCurrent(sequence, controller) || isAbort(reason)) return;
@@ -450,12 +531,24 @@ implements FailedSegmentRetryController {
           pendingFanouts.delete(fanoutSignature(item));
         });
         acceptedGroupCount += batch.length;
-        await this.dependencies.afterAccepted(response, scope, controller.signal);
+        let completionFailure: unknown = null;
+        try {
+          await this.dependencies.afterAccepted(response, scope, controller.signal);
+        } catch (reason) {
+          if (isAbort(reason)) throw reason;
+          completionFailure = reason;
+        }
         if (!this.isCurrent(sequence, controller)) return;
-        const fresh = await this.dependencies.getProjection(scope.editionId, controller.signal);
+        const fresh = await this.refreshUntilAffectedSegmentsAreTerminal(
+          scope,
+          visibleAffectedSegmentIds(projection, response.affected_segment_ids),
+          completionFailure === null,
+          sequence,
+          controller,
+        );
         if (!this.isCurrent(sequence, controller)) return;
-        if (!projectionMatchesScope(fresh, scope)) {
-          throw new Error("批量重试后的失败句段投影与当前章节朗读版本不一致。");
+        if (completionFailure !== null) {
+          throw completionFailure;
         }
         projection = fresh;
       }
@@ -545,6 +638,30 @@ implements FailedSegmentRetryController {
   private publish(next: FailedSegmentRetrySnapshot): void {
     this.snapshot = frozenSnapshot(next);
     this.dependencies.onState?.(this.snapshot);
+  }
+
+  private async refreshUntilAffectedSegmentsAreTerminal(
+    scope: FailedSegmentRetryScope,
+    affectedSegmentIds: readonly string[],
+    allowMissing: boolean,
+    sequence: number,
+    controller: AbortController,
+  ): Promise<FailedNarrationSegmentsProjection> {
+    let latest: FailedNarrationSegmentsProjection | null = null;
+    const wait = this.dependencies.waitForProjectionRefresh ?? defaultProjectionRefreshWait;
+    for (let attempt = 0; attempt < FAILED_SEGMENT_TERMINAL_REFRESH_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) {
+        await wait(FAILED_SEGMENT_TERMINAL_REFRESH_DELAY_MS, controller.signal);
+      }
+      if (!this.isCurrent(sequence, controller)) throw controller.signal.reason;
+      latest = await this.dependencies.getProjection(scope.editionId, controller.signal);
+      if (!projectionMatchesScope(latest, scope)) {
+        throw new Error("重试后的失败句段投影与当前章节朗读版本不一致。");
+      }
+      if (affectedSegmentsAreTerminal(latest, affectedSegmentIds, allowMissing)) return latest;
+    }
+    if (!latest) throw new Error("未能读取重试后的失败句段状态。");
+    return latest;
   }
 
   private assertActive(): void {

@@ -22,7 +22,6 @@ import {
 } from "./contracts";
 
 
-const LANGUAGE_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/;
 const MUTATION_CAPABILITY_KEYS = ["narration_product", "reading_settings"] as const;
 
 
@@ -87,7 +86,7 @@ export interface CharacterVoiceOption {
   readonly versionId: string;
   readonly profileName: string;
   readonly versionNumber: number;
-  readonly language: string;
+  readonly language: "zh-CN";
   readonly sourceType: VoiceSourceType;
   readonly sourceLabel: string;
 }
@@ -97,7 +96,7 @@ export interface CharacterVoiceDraft {
   readonly bindingPolicy: CharacterVoiceBindingPolicy;
   readonly profileId: string | null;
   readonly versionId: string | null;
-  readonly language: string;
+  readonly language: "zh-CN";
 }
 
 
@@ -279,7 +278,7 @@ export function buildCharacterVoiceBindingRequest(
   draft: CharacterVoiceDraft,
   options: readonly CharacterVoiceOption[],
 ): PutCharacterVoiceBindingRequest | null {
-  if (!LANGUAGE_PATTERN.test(draft.language)) return null;
+  if (draft.language !== "zh-CN") return null;
   if (draft.bindingPolicy === "unset") {
     if (draft.profileId !== null || draft.versionId !== null) return null;
     return {
@@ -519,7 +518,6 @@ export function createCharacterVoicePanel(
     const headingId = `${prefix}-heading`;
     const statusId = `${prefix}-status`;
     const voiceSelectId = `${prefix}-voice`;
-    const languageId = `${prefix}-language`;
 
     const updateDraft = (draft: CharacterVoiceDraft) => {
       if (fieldsDisabled) return;
@@ -563,11 +561,6 @@ export function createCharacterVoicePanel(
         versionId: option.versionId,
         language: option.language,
       });
-    };
-
-    const onLanguageChange = (event: ValueChangeEvent) => {
-      if (fieldsDisabled) return;
-      updateDraft({ ...stateRef.current.draft, language: event.target.value.trim() });
     };
 
     const save = () => {
@@ -772,22 +765,8 @@ export function createCharacterVoicePanel(
               "暂不配置不会删除任何音色资产，也不会改写历史朗读。",
             ),
           h("div", { className: "anw-character-voice-panel__field" },
-            h("label", { htmlFor: languageId }, "默认语言"),
-            h("input", {
-              id: languageId,
-              type: "text",
-              value: state.draft.language,
-              pattern: "[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}",
-              maxLength: 40,
-              disabled: fieldsDisabled,
-              "aria-invalid": !LANGUAGE_PATTERN.test(state.draft.language),
-              onChange: onLanguageChange,
-            }),
-            !LANGUAGE_PATTERN.test(state.draft.language)
-              ? h("span", { className: "anw-character-voice-panel__validation", role: "alert" },
-                "请输入受支持的语言标签，例如 zh-CN。",
-              )
-              : null,
+            h("span", null, "默认语言"),
+            h("strong", null, "普通话（固定）"),
           ),
           impact
             ? h("aside", {

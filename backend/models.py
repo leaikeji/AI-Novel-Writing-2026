@@ -1492,6 +1492,10 @@ class NarrationScopeOverride(Base):
     __table_args__ = (
         UniqueConstraint("novel_id", "scope_kind", "scope_id", name="uq_narration_scope_override"),
         CheckConstraint("scope_kind IN ('volume','chapter')", name="ck_narration_scope_override_kind"),
+        CheckConstraint(
+            "settings_json->>'language' IS NULL OR settings_json->>'language' = 'zh-CN'",
+            name="ck_narration_scope_override_mandarin",
+        ),
     )
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="CASCADE"), nullable=False)
@@ -1703,6 +1707,15 @@ class VoiceProfileVersion(Base):
         CheckConstraint(
             "source_type <> 'uploaded' OR reference_asset_id IS NOT NULL",
             name="ck_voice_profile_version_uploaded_reference",
+        ),
+        CheckConstraint(
+            "language = 'zh-CN'",
+            name="ck_voice_profile_version_product_language",
+        ),
+        CheckConstraint(
+            "source_type <> 'generated' OR state NOT IN ('preview_ready','locked') "
+            "OR reference_asset_id IS NOT NULL",
+            name="ck_voice_profile_version_generated_reference",
         ),
         CheckConstraint(
             "model_run_id IS NULL",

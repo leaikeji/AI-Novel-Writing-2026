@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 from uuid import uuid4
 
@@ -133,6 +134,120 @@ async def test_clone_design_cancel_and_model_switches_share_one_runtime_slot() -
     ]
     assert backend.unloads == [DEFAULT_MODELS[ModelRole.BASE].model_id]
     await provider.aclose()
+
+
+@pytest.mark.asyncio
+async def test_designed_anchor_survives_restart_and_base_uses_only_durable_material() -> None:
+    class RecordingBackend(DeterministicFakeBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[dict[str, object]] = []
+
+        def generate(self, model: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            self.calls.append(dict(kwargs))
+            return super().generate(model, **kwargs)
+
+    backend = RecordingBackend()
+    anchor_text = "晨光落在窗边，她用清晰自然的普通话讲述故事。"
+    first_process = LocalRuntimeService(ModelManager(backend))
+    designed = await first_process.prepare_voice(
+        {
+            "request_id": str(uuid4()),
+            "preview_text": anchor_text,
+            "language": "zh-CN",
+            "description": "温和清晰的青年女声",
+            "seed": 2026,
+        },
+        kind=TTSVoiceKind.DESIGNED,
+    )
+    anchor_audio = base64.b64decode(str(designed["preview_audio_base64"]), validate=True)
+    anchor_sha256 = hashlib.sha256(anchor_audio).hexdigest()
+
+    assert designed["provider_voice_id"].startswith("local:designed_reference:")
+    assert designed["actual_output_sha256"] == anchor_sha256
+    assert backend.loads == [DEFAULT_MODELS[ModelRole.VOICE_DESIGN].model_id]
+
+    # A new service has no process-local voice registry.  Base can still clone
+    # from the persisted anchor WAV and the original anchor text alone.
+    await first_process.shutdown()
+    restarted_process = LocalRuntimeService(ModelManager(backend))
+    result = await restarted_process.synthesize(
+        {
+            "request_id": str(uuid4()),
+            "text": "这是服务重启后的另一段试听文本。",
+            "language": "zh-CN",
+            "voice": {
+                "kind": TTSVoiceKind.REFERENCE_CLONE.value,
+                "provider_voice_id": f"local:reference_clone:{anchor_sha256}",
+                "reference_audio_base64": base64.b64encode(anchor_audio).decode("ascii"),
+                "reference_audio_sha256": anchor_sha256,
+                "reference_audio_content_type": "audio/wav",
+                "reference_text": anchor_text,
+            },
+            "seed": 2026,
+        }
+    )
+
+    assert base64.b64decode(str(result["audio_base64"]), validate=True).startswith(b"RIFF")
+    assert backend.loads == [
+        DEFAULT_MODELS[ModelRole.VOICE_DESIGN].model_id,
+        DEFAULT_MODELS[ModelRole.BASE].model_id,
+    ]
+    assert backend.unloads == [DEFAULT_MODELS[ModelRole.VOICE_DESIGN].model_id]
+    assert backend.calls[1]["voice_id"] is None
+    assert backend.calls[1]["reference_audio"] == anchor_audio
+    assert backend.calls[1]["reference_text"] == anchor_text
+
+
+@pytest.mark.asyncio
+async def test_designed_voice_id_cannot_be_used_for_production_synthesis() -> None:
+    backend = DeterministicFakeBackend()
+    service = LocalRuntimeService(ModelManager(backend))
+
+    with pytest.raises(RuntimeError, match="TTS_VOICE_UNAVAILABLE"):
+        await service.synthesize(
+            {
+                "request_id": str(uuid4()),
+                "text": "不能直接使用声音设计临时身份。",
+                "language": "zh-CN",
+                "voice": {
+                    "kind": TTSVoiceKind.DESIGNED.value,
+                    "provider_voice_id": "local:designed_reference:not-a-production-voice",
+                },
+            }
+        )
+
+    assert backend.loads == []
+
+
+@pytest.mark.asyncio
+async def test_reference_clone_rejects_missing_text_or_mismatched_audio_digest() -> None:
+    backend = DeterministicFakeBackend()
+    service = LocalRuntimeService(ModelManager(backend))
+    reference_audio = b"RIFF-durable-reference"
+    encoded = base64.b64encode(reference_audio).decode("ascii")
+
+    for reference_text, digest in (
+        (None, hashlib.sha256(reference_audio).hexdigest()),
+        ("准确的参考文本", "0" * 64),
+    ):
+        with pytest.raises(ValueError, match="INVALID_REQUEST"):
+            await service.synthesize(
+                {
+                    "request_id": str(uuid4()),
+                    "text": "复刻试听",
+                    "language": "zh-CN",
+                    "voice": {
+                        "kind": TTSVoiceKind.REFERENCE_CLONE.value,
+                        "provider_voice_id": "local:reference_clone:test",
+                        "reference_audio_base64": encoded,
+                        "reference_audio_sha256": digest,
+                        "reference_text": reference_text,
+                    },
+                }
+            )
+
+    assert backend.loads == []
 
 
 @pytest.mark.asyncio

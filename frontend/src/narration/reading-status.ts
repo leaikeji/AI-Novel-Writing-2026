@@ -6,6 +6,7 @@ import type {
   RuntimeLifecycleStatus,
 } from "./contracts";
 import type { ReadingSectionKey } from "./reading-overview";
+import { DEFAULT_TTS_PROVIDER_ID, TTS_PROVIDER_PRESENTATIONS } from "./tts-provider";
 
 
 export type ReadingStatusReactRuntime = Pick<QwenPawReactRuntime, "createElement">;
@@ -26,9 +27,7 @@ export interface ReadingStatusModel {
   readonly modelFingerprintShort: string | null;
   readonly privacyLabel: string;
   readonly reviewLabel: string;
-  readonly diskLabel: string;
-  readonly diskPercentFree: number;
-  readonly cacheLabel: string;
+  readonly synthesisLabel: string;
   readonly characterCoverageLabel: string;
   readonly productionLabel: string;
   readonly issues: readonly ReadingStatusIssue[];
@@ -44,7 +43,7 @@ export interface ReadingStatusProps {
 const RUNTIME_LABELS: Readonly<Record<RuntimeLifecycleStatus, string>> = {
   disabled: "本地 TTS 未启用",
   starting: "本地 TTS 正在启动",
-  ready: "本地 TTS 技术就绪",
+  ready: "本地语音服务就绪",
   unavailable: "本地 TTS 不可用",
   stopping: "本地 TTS 正在停止",
 };
@@ -60,20 +59,6 @@ function capability(
 
 function capabilityActionable(item: FeatureCapability | null): boolean {
   return item?.state === "enabled" && item.visible && item.actionable;
-}
-
-
-export function formatNarrationBytes(bytes: number): string {
-  if (!Number.isSafeInteger(bytes) || bytes < 0) return "不可用";
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KiB", "MiB", "GiB", "TiB"] as const;
-  let value = bytes / 1024;
-  let unit: (typeof units)[number] = units[0];
-  for (let index = 1; index < units.length && value >= 1024; index += 1) {
-    value /= 1024;
-    unit = units[index];
-  }
-  return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${unit}`;
 }
 
 
@@ -96,15 +81,6 @@ export function buildReadingStatusModel(
     && overview.runtime.provider_reachable
     && overview.runtime.model_ready
     && overview.runtime.model_fingerprint_sha256 !== null;
-  const diskTotal = overview.cache.disk_total_bytes;
-  const diskFree = overview.cache.disk_free_bytes;
-  const diskPercentFree = Number.isSafeInteger(diskTotal)
-    && diskTotal > 0
-    && Number.isSafeInteger(diskFree)
-    && diskFree >= 0
-    && diskFree <= diskTotal
-    ? Math.max(0, Math.min(100, Math.round((diskFree / diskTotal) * 100)))
-    : 0;
   const issues: ReadingStatusIssue[] = [];
   const product = capability(overview, "narration_product");
   const reading = capability(overview, "reading_settings");
@@ -150,13 +126,15 @@ export function buildReadingStatusModel(
         cleanup?.reason_code ?? "CACHE_CLEANUP_DISABLED",
       ),
       severity: "info",
-      message: "缓存清理当前不可操作；受保护音色和历史 Edition 不受影响。",
+      message: "暂时无法清理缓存；音色和已有朗读版本不受影响。",
       section: "audio-cache",
     });
   }
   return {
     novelId: overview.novel_id,
-    runtimeLabel: RUNTIME_LABELS[overview.runtime.lifecycle_status],
+    runtimeLabel: overview.runtime.lifecycle_status === "ready" && !runtimeReady
+      ? "本地语音服务尚未就绪"
+      : RUNTIME_LABELS[overview.runtime.lifecycle_status],
     runtimeReady,
     modelFingerprintShort: overview.runtime.model_fingerprint_sha256?.slice(0, 12) ?? null,
     privacyLabel: overview.settings.values.analysis_mode === "local_rules_only"
@@ -167,9 +145,9 @@ export function buildReadingStatusModel(
     reviewLabel: overview.settings.values.script_review_policy === "always_review"
       ? "每次作者复核"
       : "仅阻断项复核",
-    diskLabel: `${formatNarrationBytes(diskFree)} 可用 / ${formatNarrationBytes(diskTotal)}`,
-    diskPercentFree,
-    cacheLabel: `${formatNarrationBytes(overview.cache.reclaimable_bytes)} 可回收`,
+    synthesisLabel: TTS_PROVIDER_PRESENTATIONS[
+      overview.settings.values.tts_provider?.provider_id ?? DEFAULT_TTS_PROVIDER_ID
+    ].label,
     characterCoverageLabel: `${overview.coverage.locked_character_voice_count}/${overview.coverage.character_count}`,
     productionLabel: `${overview.coverage.generated_chapter_count} 章已生成 · ${overview.coverage.pending_review_script_count} 份待复核`,
     issues: Object.freeze(issues),
@@ -194,12 +172,12 @@ export function createReadingStatus(
       );
     }
     const cards = [
-      ["本地模型", model.runtimeLabel, model.modelFingerprintShort ? `指纹 ${model.modelFingerprintShort}…` : "无可用模型指纹"],
-      ["隐私模式", model.privacyLabel, model.reviewLabel],
-      ["磁盘", model.diskLabel, `可用 ${model.diskPercentFree}%`],
-      ["派生缓存", model.cacheLabel, `待处理任务 ${props.overview.cache.pending_job_count}`],
-      ["人物配音", model.characterCoverageLabel, "已锁定 / 全部人物"],
-      ["制作状态", model.productionLabel, `待复核 ${props.overview.coverage.pending_review_script_count} 份`],
+      ["语音生成", model.synthesisLabel, "已保存的生成位置；在基础朗读中修改"],
+      ["本地服务", model.runtimeLabel, "仅表示本地服务状态，不代表云端已通过测试"],
+      ["说话人识别", model.privacyLabel, "仅指识别方式，不改变语音生成位置"],
+      ["复核方式", model.reviewLabel, "在朗读规则中修改"],
+      ["人物配音", model.characterCoverageLabel, "已配置 / 全部人物"],
+      ["制作状态", model.productionLabel, "生成数量不代表所有句段均已通过"],
     ] as const;
     return h(
       "section",
@@ -210,7 +188,7 @@ export function createReadingStatus(
       },
       h("header", null,
         h("div", null,
-          h("p", { className: "anw-reading-status__eyebrow" }, "状态只反映真实后端证据"),
+          h("p", { className: "anw-reading-status__eyebrow" }, "服务与制作概况"),
           h("h2", { id: "anw-reading-status-title" }, "朗读运行状态"),
         ),
       ),
@@ -246,24 +224,19 @@ export function createReadingStatus(
             )),
           ),
         ),
-      props.overview.coverage.failed_job_count > 0
-        ? h(
-          "details",
-          { className: "anw-reading-status__diagnostics" },
-          h("summary", null, `历史与诊断（${props.overview.coverage.failed_job_count}）`),
-          h(
-            "p",
-            null,
-            `${props.overview.coverage.failed_job_count} 个历史朗读任务记录为失败；这些记录不会改写正文，也不代表当前 Edition 无法播放。`,
-          ),
-          props.onOpenSection === undefined
-            ? null
-            : h("button", {
-              type: "button",
-              onClick: () => props.onOpenSection?.("audio-cache"),
-            }, "查看音频与缓存"),
-        )
-        : null,
+      h(
+        "details",
+        { className: "anw-reading-status__diagnostics" },
+        h("summary", null, props.overview.coverage.failed_job_count > 0
+          ? `历史与诊断（${props.overview.coverage.failed_job_count}）`
+          : "技术诊断"),
+        h("p", null, model.modelFingerprintShort ? `本地模型指纹：${model.modelFingerprintShort}…` : "无可用模型指纹"),
+        props.overview.coverage.failed_job_count > 0 ? h(
+          "p",
+          null,
+          `${props.overview.coverage.failed_job_count} 个历史朗读任务记录为失败，不代表当前朗读版本无法播放。具体失败句段请到章节播放器查看；正文和已有音频不会因此改变。`,
+        ) : null,
+      ),
     );
   };
 }

@@ -24,7 +24,7 @@ from backend.story_ledger.query import LedgerQueryFilters, raw_page_ids_statemen
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260902_0037"
 DOWN_REVISION = "20260901_0036"
-HEAD_REVISION = "20260911_0053"
+HEAD_REVISION = "20260912_0055"
 VISIBLE_COUNT_REVISION = "20260902_0039"
 SINGLE_CONTRACT_REVISION = "20260902_0038"
 INDEX_NAME = "ix_story_facts_novel_created_v2"
@@ -49,7 +49,8 @@ def _model_index():
 def test_story_ledger_page_index_precedes_the_single_contract_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260910_0052"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260912_0054"
+    assert scripts.get_revision("20260911_0053").down_revision == "20260910_0052"
     assert scripts.get_revision("20260909_0049").down_revision == "20260909_0048"
     assert scripts.get_revision("20260909_0045").down_revision == "20260908_0044"
     assert scripts.get_revision("20260908_0044").down_revision == "20260908_0043"

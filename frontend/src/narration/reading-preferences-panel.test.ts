@@ -174,7 +174,7 @@ function authorization(): NarrationAuthorizationState {
 
 function settings(input: {
   readonly version?: number;
-  readonly language?: string;
+  readonly language?: "zh-CN";
   readonly rate?: number;
   readonly volume?: number;
 } = {}): NarrationSettingsResource {
@@ -243,13 +243,13 @@ describe("reading preferences requests", () => {
   it("keeps playback out of the base mutation and emits an exact narrow PATCH", () => {
     const resource = settings();
     const base = buildReadingBaseSettingsRequest(resource, {
-      language: "en",
+      language: "zh-CN",
       textRules: { ...resource.values.text_rules, read_author_notes: true },
       timing: READING_PAUSE_PRESETS.compact,
       ttsProvider: createDefaultTTSProviderSelection(),
     });
     expect(base.values.playback).toEqual(resource.values.playback);
-    expect(base.values.language).toBe("en");
+    expect(base.values.language).toBe("zh-CN");
     expect(buildReadingPlaybackPreferencesRequest(resource, {
       playback_rate: 2.25,
       volume: 0.42,
@@ -285,6 +285,32 @@ describe("reading preferences requests", () => {
 
 
 describe("reading preferences panel", () => {
+  it("retains invalid timing drafts, blocks saving, and recovers when corrected", () => {
+    const saveSettings = vi.fn();
+    const harness = createReactHarness();
+    const Panel = createReadingPreferencesPanel(harness.React);
+    const panelProps = props({ saveSettings });
+    let tree = harness.render(Panel, panelProps);
+    harness.commitEffects();
+    const input = () => findAll(tree, (item) => item.type === "input" && item.props.max === 5000)[0]!;
+    for (const value of ["6000", ""]) {
+      tree = harness.render(Panel, panelProps);
+      (input().props.onChange as (event: unknown) => void)({ target: { value } });
+      tree = harness.render(Panel, panelProps);
+      expect(input().props.value).toBe(value);
+      expect(input().props["aria-invalid"]).toBe(true);
+      expect(textContent(tree)).toContain("请输入 0–5000 的整数，不能为空。");
+      expect(findButton(tree, "保存基础朗读设置").props.disabled).toBe(true);
+      (findButton(tree, "保存基础朗读设置").props.onClick as () => void)();
+      expect(saveSettings).not.toHaveBeenCalled();
+    }
+    (input().props.onChange as (event: unknown) => void)({ target: { value: "221" } });
+    tree = harness.render(Panel, panelProps);
+    expect(input().props.value).toBe(221);
+    expect(input().props["aria-invalid"]).toBe(false);
+    expect(findButton(tree, "保存基础朗读设置").props.disabled).toBe(false);
+  });
+
   it("applies playback immediately and persists only the narrow playback payload", async () => {
     const onImmediatePlaybackChange = vi.fn();
     const response = settings({ version: 4, rate: 1.5, volume: 1 });
@@ -308,10 +334,12 @@ describe("reading preferences panel", () => {
       expect.any(AbortSignal),
     );
     expect(textContent(tree)).toContain("无需重新合成");
+    expect(textContent(tree)).toContain("请到章节页播放");
+    expect(textContent(tree)).not.toContain("调整后立即试听");
   });
 
-  it("uses a controlled language select and keeps exact milliseconds folded", async () => {
-    const response = settings({ version: 4, language: "en" });
+  it("keeps Mandarin fixed and exact milliseconds folded", async () => {
+    const response = settings({ version: 4 });
     const saveSettings = vi.fn(async () => response);
     const harness = createReactHarness();
     const Panel = createReadingPreferencesPanel(harness.React);
@@ -319,20 +347,27 @@ describe("reading preferences panel", () => {
     let tree = harness.render(Panel, panelProps);
     harness.commitEffects();
     tree = harness.render(Panel, panelProps);
-    const language = findAll(tree, (item) => (
-      item.type === "select" && findAll(item, (option) => option.type === "option" && option.props.value === "ja-JP").length > 0
-    ))[0]!;
-    (language.props.onChange as (event: unknown) => void)({ target: { value: "en", checked: false } });
-    tree = harness.render(Panel, panelProps);
-    const advanced = findAll(tree, (item) => item.type === "details" && textContent(item).includes("精确停顿毫秒"))[0]!;
+    expect(textContent(tree)).toContain("普通话（固定）");
+    const advanced = findAll(tree, (item) => item.type === "details" && textContent(item).includes("自定义停顿时长"))[0]!;
     expect(advanced.props.open).toBeUndefined();
+    const authorNotes = findAll(tree, (item) => (
+      item.type === "label" && textContent(item).includes("朗读作者的话")
+    ))[0]!;
+    const checkbox = findAll(authorNotes, (item) => item.type === "input")[0]!;
+    (checkbox.props.onChange as (event: unknown) => void)({
+      target: { checked: true, value: "" },
+    });
+    tree = harness.render(Panel, panelProps);
     (findButton(tree, "保存基础朗读设置").props.onClick as () => void)();
     await settle();
     expect(saveSettings).toHaveBeenCalledWith(
       NOVEL_ID,
       {
         expected_version: 3,
-        values: { ...settings().values, language: "en" },
+        values: {
+          ...settings().values,
+          text_rules: { ...settings().values.text_rules, read_author_notes: true },
+        },
       },
       expect.any(AbortSignal),
     );

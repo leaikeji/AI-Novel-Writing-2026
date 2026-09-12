@@ -318,6 +318,9 @@ describe("character voice roster projection", () => {
 
     expect(rows.map((row) => [row.characterName, row.configured, row.sourceGroup]))
       .toEqual([["林夏", true, "official"], ["周野", true, "private"]]);
+    expect(rows[0].voiceName).toBe("Serena｜Lingyu");
+    expect(rows[1].voiceName).toBe("林夏专属");
+    expect(profile().name).toBe("Lingyu");
   });
 
   it("keeps unresolved historical bindings visible instead of calling them unconfigured", () => {
@@ -356,11 +359,14 @@ describe("CharacterVoiceRoster", () => {
     expect(findAll(tree, (element) => textContent(element) === "已配置")).toHaveLength(0);
     expect(textContent(tree)).not.toContain("智能配音全书");
     expect(findAll(tree, (element) => (
-      element.type === "button" && textContent(element) === "更换"
-    ))).toHaveLength(2);
+      element.type === "button" && textContent(element) === "更换声音"
+    ))).toHaveLength(1);
+    expect(findButton(tree, "更换声音").props["aria-label"]).toBe("更换林夏的声音");
+    expect(findButton(tree, "选择声音").props["aria-label"]).toBe("为周野选择声音");
     expect(textContent(tree)).not.toContain("根据人物生成并使用");
     expect(textContent(tree)).not.toContain("根据人物卡匹配并使用");
     const preview = findButton(tree, "试听");
+    expect(preview.props["aria-label"]).toBe("试听林夏的声音");
     expect(preview.props.disabled).toBe(false);
     (preview.props.onClick as () => void)();
     expect(onPreviewVoice).toHaveBeenCalledWith(
@@ -379,8 +385,51 @@ describe("CharacterVoiceRoster", () => {
       authorization: { ...authorization, can_configure: false },
     }));
 
-    expect(findButton(tree, "更换").props.disabled).toBe(true);
+    expect(findButton(tree, "更换声音").props.disabled).toBe(true);
+    expect(findButton(tree, "选择声音").props.disabled).toBe(true);
     expect(textContent(tree)).toContain("当前人物声音设置为只读");
+  });
+
+  it("filters locally by name and configuration without changing bindings or opening a drawer", () => {
+    const harness = createHarness();
+    const Roster = createCharacterVoiceRoster(harness.React);
+    const rosterProps = props();
+    let tree = harness.render(Roster, rosterProps);
+    (findButton(tree, "待配置（1）").props.onClick as () => void)();
+    tree = harness.render(Roster, rosterProps);
+    expect(findButton(tree, "待配置（1）").props["aria-pressed"]).toBe(true);
+    expect(textContent(tree)).toContain("周野");
+    expect(textContent(tree)).not.toContain("林夏");
+    const search = findAll(tree, (element) => element.type === "input" && element.props.type === "search")[0];
+    (search.props.onChange as (event: unknown) => void)({ currentTarget: { value: "  林夏  " } });
+    tree = harness.render(Roster, rosterProps);
+    expect(textContent(tree)).toContain("没有找到符合条件的人物");
+    (findButton(tree, "全部（2）").props.onClick as () => void)();
+    tree = harness.render(Roster, rosterProps);
+    expect(textContent(tree)).toContain("林夏");
+    expect(textContent(tree)).not.toContain("周野");
+    expect(rosterProps.onConfigureCharacter).not.toHaveBeenCalled();
+    expect(rosterProps.bindings).toEqual([binding(CHARACTER_A), binding(CHARACTER_B, false)]);
+  });
+
+  it("provides a recoverable empty filter and refreshes coverage without losing search", () => {
+    const harness = createHarness();
+    const Roster = createCharacterVoiceRoster(harness.React);
+    let rosterProps = props();
+    let tree = harness.render(Roster, rosterProps);
+    (findButton(tree, "待配置（1）").props.onClick as () => void)();
+    rosterProps = { ...rosterProps, bindings: [binding(CHARACTER_A), binding(CHARACTER_B)] };
+    tree = harness.render(Roster, rosterProps);
+    expect(textContent(tree)).toContain("所有人物都已配置声音");
+    (findButton(tree, "查看全部人物").props.onClick as () => void)();
+    tree = harness.render(Roster, rosterProps);
+    expect(findButton(tree, "全部（2）").props["aria-pressed"]).toBe(true);
+    const search = findAll(tree, (element) => element.type === "input")[0];
+    (search.props.onChange as (event: unknown) => void)({ currentTarget: { value: "周" } });
+    tree = harness.render(Roster, { ...rosterProps, profiles: [...rosterProps.profiles] });
+    expect(findAll(tree, (element) => element.type === "input")[0].props.value).toBe("周");
+    expect(textContent(tree)).toContain("周野");
+    expect(textContent(tree)).not.toContain("林夏");
   });
 
   it("opens an accessible drawer, keeps it mounted when closed and restores focus", async () => {
@@ -393,7 +442,7 @@ describe("CharacterVoiceRoster", () => {
       renderConfigurator: (character) => `配置：${character.characterName}`,
     });
     let tree = harness.render(Roster, drawerProps);
-    const change = findButton(tree, "更换");
+    const change = findButton(tree, "更换声音");
     (change.props.onClick as (event: { currentTarget: typeof trigger }) => void)({ currentTarget: trigger });
     tree = harness.render(Roster, drawerProps);
 
@@ -435,7 +484,7 @@ describe("CharacterVoiceRoster", () => {
     const Roster = createCharacterVoiceRoster(harness.React);
     const drawerProps = props({ renderConfigurator: () => "配置" });
     let tree = harness.render(Roster, drawerProps);
-    (findButton(tree, "更换").props.onClick as (event: unknown) => void)({ currentTarget: { focus: vi.fn() } });
+    (findButton(tree, "更换声音").props.onClick as (event: unknown) => void)({ currentTarget: { focus: vi.fn() } });
     tree = harness.render(Roster, drawerProps);
     const dialog = findAll(tree, (element) => element.props.role === "dialog")[0];
     const first = { focus: vi.fn(), getClientRects: () => [{}] };

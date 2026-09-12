@@ -217,13 +217,15 @@ describe("reading rules workspace", () => {
     expect(buttons).toHaveLength(2);
     expect(buttons.map((item) => [textContent(item), item.props["aria-current"]])).toEqual([
       ["识别与复核", undefined],
-      ["发音命中", "page"],
+      ["发音词典", "page"],
     ]);
     const sections = findAll(tree, (item) => item.props["data-rules-section"] !== undefined);
     expect(sections.map((item) => item.props["data-rules-section"])).toEqual([
       "recognition",
       "pronunciation",
     ]);
+    expect(sections.map((item) => item.props.hidden)).toEqual([true, false]);
+    expect(sections.every((item) => item.props.role === "region")).toBe(true);
     const pronunciationComponent = findAll(
       sections[1],
       (item) => typeof item.type === "function",
@@ -231,7 +233,7 @@ describe("reading rules workspace", () => {
     expect(pronunciationComponent.props.timing).toEqual(settings().values.timing);
   });
 
-  it("changes the in-page current section without hiding either authoring surface", () => {
+  it("shows only the active section while keeping both authoring components mounted", async () => {
     const onSectionChange = vi.fn();
     const harness = createReactHarness();
     const Workspace = createReadingRulesWorkspace(harness.React);
@@ -239,12 +241,24 @@ describe("reading rules workspace", () => {
     let tree = harness.render(Workspace, workspaceProps);
     harness.commitEffects();
     tree = harness.render(Workspace, workspaceProps);
-    const pronunciation = findAll(tree, (item) => item.type === "button" && textContent(item) === "发音命中")[0]!;
+    const initialSections = findAll(tree, (item) => item.props["data-rules-section"] !== undefined);
+    const initialComponents = initialSections.map((section) => findAll(section, (item) => typeof item.type === "function")[0]!.type);
+    const focus = vi.fn();
+    (initialSections[1]!.props.ref as { current: unknown }).current = { focus };
+    const pronunciation = findAll(tree, (item) => item.type === "button" && textContent(item) === "发音词典")[0]!;
     (pronunciation.props.onClick as () => void)();
     tree = harness.render(Workspace, workspaceProps);
     expect(tree.props["data-active-rules-section"]).toBe("pronunciation");
     expect(onSectionChange).toHaveBeenCalledWith("pronunciation");
-    expect(findAll(tree, (item) => item.props["data-rules-section"] !== undefined)).toHaveLength(2);
+    const switchedSections = findAll(tree, (item) => item.props["data-rules-section"] !== undefined);
+    expect(switchedSections).toHaveLength(2);
+    expect(switchedSections.map((item) => item.props.hidden)).toEqual([true, false]);
+    expect(switchedSections.map((section) => findAll(section, (item) => typeof item.type === "function")[0]!.type)).toEqual(initialComponents);
+    await Promise.resolve();
+    expect(focus).toHaveBeenCalledWith({ preventScroll: false });
+    (findAll(tree, (item) => item.type === "button" && textContent(item) === "识别与复核")[0]!.props.onClick as () => void)();
+    tree = harness.render(Workspace, workspaceProps);
+    expect(findAll(tree, (item) => item.props["data-rules-section"] !== undefined).map((item) => item.props.hidden)).toEqual([false, true]);
   });
 
   it("fails closed when settings belong to another novel", () => {

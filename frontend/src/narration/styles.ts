@@ -122,6 +122,12 @@ export const NARRATION_STYLES = [
       gap: 16px;
     }
 
+    .anw-narration-voice-library-section {
+      display: grid;
+      gap: 24px;
+      min-width: 0;
+    }
+
     .anw-narrator-current-voice {
       display: flex;
       align-items: center;
@@ -130,7 +136,7 @@ export const NARRATION_STYLES = [
       border: 1px solid var(--ant-color-border-secondary, #e5e6e8);
       border-radius: 13px;
       padding: 14px 16px;
-      background: var(--ant-color-bg-container, #fff);
+      background: var(--ant-color-fill-quaternary, #fafafa);
     }
 
     .anw-narrator-current-voice__copy {
@@ -166,12 +172,6 @@ export const NARRATION_STYLES = [
       font: inherit;
       font-weight: 650;
       cursor: pointer;
-    }
-
-    .anw-narrator-current-voice__actions .anw-narration-primary-action {
-      border-color: transparent;
-      color: #fff;
-      background: linear-gradient(135deg, #ff7043, #ff5d2a);
     }
 
     .anw-narrator-voice-library-editor {

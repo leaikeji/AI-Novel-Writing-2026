@@ -8,6 +8,7 @@ import type {
   VoiceProfileVersionResource,
   VoiceSourceType,
 } from "./contracts";
+import { officialVoiceProfileDisplayName } from "./voice-display-name";
 import {
   voiceActivationEvidenceIsUsable,
   voiceSourceEvidenceIsUsable,
@@ -233,7 +234,12 @@ export function buildCharacterVoiceRosterRows(
       configured,
       profile,
       version,
-      voiceName: configured ? profile?.name ?? "绑定音色不可用" : "尚未配置",
+      voiceName: configured
+        ? profile === null ? "绑定音色不可用"
+          : group === "official"
+            ? officialVoiceProfileDisplayName(profile.name, version?.official_preset?.preset_id ?? null)
+            : profile.name
+        : "尚未配置",
       sourceGroup: group,
       sourceLabel: configured
         ? sourceLabel(group, version?.source_type ?? null)
@@ -284,6 +290,8 @@ export function createCharacterVoiceRoster(
     const [previewStates, setPreviewStates] = React.useState<Readonly<Record<string, PreviewState>>>({});
     const [drawerOpen, setDrawerOpen] = React.useState(false);
     const [selectedCharacterId, setSelectedCharacterId] = React.useState<string | null>(null);
+    const [search, setSearch] = React.useState("");
+    const [onlyUnconfigured, setOnlyUnconfigured] = React.useState(false);
     const mountedRef = React.useRef(true);
     const drawerRef = React.useRef<DrawerElement | null>(null);
     const openerRef = React.useRef<FocusableElement | null>(null);
@@ -292,6 +300,11 @@ export function createCharacterVoiceRoster(
       return () => { mountedRef.current = false; };
     }, []);
     const unconfigured = rows.filter((row) => !row.configured);
+    const normalizedSearch = search.trim().toLocaleLowerCase();
+    const visibleRows = rows.filter((row) => (
+      (!onlyUnconfigured || !row.configured)
+      && row.characterName.toLocaleLowerCase().includes(normalizedSearch)
+    ));
     const configureEnabled = configurationIsActionable(props);
     const statusId = `anw-character-voice-roster-${props.novelId}-status`;
     const selectedCharacter = selectedCharacterId === null
@@ -412,12 +425,43 @@ export function createCharacterVoiceRoster(
         role: "status",
         "aria-live": "polite",
       }, configureEnabled ? "为每位人物选择 Qwen 官方音色或已授权的私人音色。" : "当前人物声音设置为只读。"),
+      rows.length > 0 ? h("div", { className: "anw-character-voice-roster__toolbar" },
+        h("label", { className: "anw-character-voice-roster__search" },
+          h("span", null, "查找人物"),
+          h("input", {
+            type: "search",
+            value: search,
+            placeholder: "输入人物姓名",
+            "aria-label": "搜索人物姓名",
+            onChange: (event: { currentTarget: { value: string } }) => setSearch(event.currentTarget.value),
+          }),
+        ),
+        h("div", { className: "anw-character-voice-roster__filters", role: "group", "aria-label": "人物配置筛选" },
+          ...([false, true] as const).map((pending) => h("button", {
+            key: String(pending),
+            type: "button",
+            className: `anw-character-voice-roster__filter${onlyUnconfigured === pending ? " is-active" : ""}`,
+            "aria-pressed": onlyUnconfigured === pending,
+            onClick: () => setOnlyUnconfigured(pending),
+          }, pending ? `待配置（${unconfigured.length}）` : `全部（${rows.length}）`)),
+        ),
+      ) : null,
       rows.length === 0
         ? h("p", { className: "anw-character-voice-roster__empty", role: "status" },
           "当前作品还没有可配置声音的人物。请先在人物卡中新建人物。",
         )
-        : h("ul", { className: "anw-character-voice-roster__list" },
-          ...rows.map((row) => {
+        : visibleRows.length === 0
+          ? h("div", { className: "anw-character-voice-roster__empty" },
+            h("p", { role: "status" }, normalizedSearch
+              ? "没有找到符合条件的人物。试试其他姓名，或查看全部人物。"
+              : "所有人物都已配置声音。"),
+            h("button", {
+              type: "button",
+              onClick: () => { setSearch(""); setOnlyUnconfigured(false); },
+            }, "查看全部人物"),
+          )
+          : h("ul", { className: "anw-character-voice-roster__list" },
+          ...visibleRows.map((row) => {
             const previewState = previewStates[row.characterId];
             const character = props.characters.find((item) => item.characterId === row.characterId)
               ?? { characterId: row.characterId, characterName: row.characterName };
@@ -461,6 +505,7 @@ export function createCharacterVoiceRoster(
                 ? h("button", {
                   type: "button",
                   disabled: !previewEnabled,
+                  "aria-label": `试听${row.characterName}的声音`,
                   title: previewEnabled ? "试听当前声音" : "当前声音暂无可试听音频",
                   onClick: () => {
                     if (row.profile && row.version && previewEnabled) {
@@ -474,8 +519,9 @@ export function createCharacterVoiceRoster(
                 disabled: !configureEnabled,
                 title: configureEnabled ? undefined : "当前人物声音设置为只读。",
                 "aria-haspopup": props.renderConfigurator ? "dialog" : undefined,
+                "aria-label": row.configured ? `更换${row.characterName}的声音` : `为${row.characterName}选择声音`,
                 onClick: (event: ButtonEvent) => openDrawer(character, event.currentTarget),
-              }, "更换"),
+              }, row.configured ? "更换声音" : "选择声音"),
             ));
           }),
         ),

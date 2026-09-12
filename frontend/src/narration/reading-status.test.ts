@@ -12,7 +12,6 @@ import {
 import {
   buildReadingStatusModel,
   createReadingStatus,
-  formatNarrationBytes,
   type ReadingStatusReactRuntime,
 } from "./reading-status";
 import { T2_G_NARRATION_READING_RULES_STYLES } from "./styles/t2-g";
@@ -128,7 +127,7 @@ function overviewFixture(
       provider_reachable: false,
       model_ready: false,
       product_visible: false,
-      protocol_version: "moss-tts-sidecar/1.1",
+      protocol_version: "qwen-tts-local-runtime/1",
       model_fingerprint_sha256: null,
       reason_code: "TTS_RUNTIME_DISABLED",
     },
@@ -225,19 +224,11 @@ function overviewFixture(
 
 
 describe("reading status model", () => {
-  it("formats bounded byte values without accepting unsafe input", () => {
-    expect(formatNarrationBytes(0)).toBe("0 B");
-    expect(formatNarrationBytes(1024)).toBe("1.00 KiB");
-    expect(formatNarrationBytes(5 * 1024 ** 3)).toBe("5.00 GiB");
-    expect(formatNarrationBytes(-1)).toBe("不可用");
-    expect(formatNarrationBytes(Number.MAX_SAFE_INTEGER + 1)).toBe("不可用");
-  });
-
   it("reports current product holds, runtime, cache and failed jobs from server evidence", () => {
     const model = buildReadingStatusModel(overviewFixture());
     expect(model.runtimeReady).toBe(false);
     expect(model.runtimeLabel).toBe("本地 TTS 未启用");
-    expect(model.diskPercentFree).toBe(50);
+    expect(model.synthesisLabel).toBe("本地 Qwen3-TTS");
     expect(model.characterCoverageLabel).toBe("1/3");
     expect(model.issues.map((issue) => issue.code)).toEqual([
       "T2_GATE_REQUIRED",
@@ -298,7 +289,7 @@ describe("reading status surface", () => {
     const tree = Status({ overview: overviewFixture(), onOpenSection }) as FakeElement;
     expect(tree.props["aria-labelledby"]).toBe("anw-reading-status-title");
     expect(tree.props["data-runtime-ready"]).toBe("false");
-    expect(textContent(tree)).toContain("状态只反映真实后端证据");
+    expect(textContent(tree)).toContain("服务与制作概况");
     expect(textContent(tree)).toContain("历史与诊断（1）");
     expect(textContent(tree)).not.toContain("失败任务 1");
     expect(textContent(tree)).not.toContain("通用音色");
@@ -317,6 +308,30 @@ describe("reading status surface", () => {
     const tree = Status({ overview: drifted }) as FakeElement;
     expect(findAll(tree, (element) => element.props.role === "alert")).toHaveLength(1);
     expect(textContent(tree)).toContain("已拒绝显示");
+  });
+
+  it("separates saved cloud synthesis from local speaker analysis without claiming cloud readiness", () => {
+    const base = overviewFixture();
+    const tree = Status({ overview: {
+      ...base,
+      settings: { ...base.settings, values: { ...base.settings.values,
+        tts_provider: { provider_id: "aliyun_qwen_audio_tts", aliyun_model_id: "qwen-audio-3.0-tts-plus" },
+      } },
+    } });
+    const text = textContent(tree);
+    expect(text).toContain("语音生成阿里云 Qwen-Audio 3.0");
+    expect(text).toContain("说话人识别仅本地规则");
+    expect(text).toContain("不代表云端已通过测试");
+    expect(text).not.toContain("隐私模式");
+    expect(text).not.toContain("当前 Edition");
+    expect(findAll(tree, (element) => element.type === "button" && textContent(element) === "查看音频与缓存")).toHaveLength(0);
+  });
+
+  it("does not announce ready when provider evidence contradicts the lifecycle label", () => {
+    const base = overviewFixture();
+    const model = buildReadingStatusModel({ ...base, runtime: { ...base.runtime, lifecycle_status: "ready" } });
+    expect(model.runtimeReady).toBe(false);
+    expect(model.runtimeLabel).toBe("本地语音服务尚未就绪");
   });
 
   it("keeps styles scoped, responsive and keyboard-visible", () => {

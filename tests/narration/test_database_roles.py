@@ -159,6 +159,7 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "20260910_0052": 61,
         "20260911_0053": 61,
         "20260912_0054": 61,
+        "20260912_0055": 61,
     }
     for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
         assert (
@@ -242,7 +243,10 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
     assert set(PROTECTED_TABLES_BY_HEAD["20260912_0054"]) == set(
         PROTECTED_TABLES_BY_HEAD["20260911_0053"]
     )
-    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260912_0054"]
+    assert set(PROTECTED_TABLES_BY_HEAD["20260912_0055"]) == set(
+        PROTECTED_TABLES_BY_HEAD["20260912_0054"]
+    )
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260912_0055"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:
@@ -349,8 +353,10 @@ def test_bootstrap_contract_never_embeds_runtime_passwords() -> None:
     assert "bootstrap-20260909_0049" in shell_source
     assert "bootstrap-20260909_0050" in shell_source
     assert "bootstrap-20260910_0051" in shell_source
+    assert "bootstrap-20260912_0055" in shell_source
     assert "upgrade-20260909_0050" in migration_source
     assert "upgrade-20260910_0051" in migration_source
+    assert "upgrade-20260912_0055" in migration_source
     assert "upgrade-20260903_0040" in migration_source
     assert "downgrade-20260902_0038" in migration_source
     assert "downgrade-20260830_0035" in migration_source

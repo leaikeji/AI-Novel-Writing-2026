@@ -382,7 +382,7 @@ describe("pronunciation panel", () => {
     noPreviewHarness.beginRender();
     const noPreviewTree = NoPreviewPanel(props());
     expect(findAll(noPreviewTree, (element) => element.type === "button" && textContent(element) === "试听命中结果")).toHaveLength(0);
-    expect(textContent(noPreviewTree)).toContain("接入真实试听能力后");
+    expect(textContent(noPreviewTree)).toContain("这里只预览文字");
   });
 
   it("loads actual pause values and saves edited pronunciation with current CAS", async () => {
@@ -404,7 +404,10 @@ describe("pronunciation panel", () => {
     harness.commitEffects();
 
     expect(textContent(tree)).toContain("句间180 ms");
-    expect(textContent(tree)).toContain("停顿属于作品基础朗读设置");
+    expect(textContent(tree)).toContain("沿用基础朗读的停顿节奏");
+    expect(textContent(tree)).toContain("普通话（固定）");
+    expect(findAll(tree, (element) => element.type === "option" && ["en", "ja-JP"].includes(String(element.props.value)))).toHaveLength(0);
+    expect(textContent(tree)).not.toMatch(/spoken_text|\bCAS\b|Edition/);
     const source = findAll(tree, (element) => (
       element.type === "input" && String(element.props.id).endsWith("-source")
     ))[0];
@@ -434,7 +437,7 @@ describe("pronunciation panel", () => {
     tree = Panel(panelProps);
     harness.commitEffects();
     expect(textContent(tree)).toContain("发音版本 2");
-    expect(textContent(tree)).toContain("不改写历史 Edition");
+    expect(textContent(tree)).toContain("不改正文或已有音频");
   });
 
   it("keeps the local draft through a CAS conflict and refresh", async () => {

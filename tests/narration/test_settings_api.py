@@ -305,6 +305,7 @@ def _api_cases() -> list[ApiCase]:
                                 "language": "zh-CN",
                                 "original_filename": "reference.wav",
                                 "reference_sha256": "b" * 64,
+                                "reference_text": "这是上传参考录音的准确普通话文本。",
                                 "rights": {
                                     "notice_version": "voice-rights/1",
                                     "source_identifier": "owned reference recording",
@@ -327,6 +328,23 @@ def _api_cases() -> list[ApiCase]:
                 },
             },
             {"profile_id": PROFILE_ID, "idempotency_key": "tts-api-case-0001"},
+        ),
+        ApiCase(
+            "designed-version-create",
+            settings_api.NarrationSettingsOperation.CREATE_DESIGNED_VOICE_VERSION,
+            "POST",
+            f"/voice-profiles/{PROFILE_ID}/versions/designed",
+            {
+                "headers": idempotency,
+                "json": {
+                    "expected_profile_version": 1,
+                    "description": "沉稳清晰的青年男声",
+                    "language": "zh-CN",
+                    "seed": 2026,
+                },
+            },
+            {"profile_id": PROFILE_ID, "idempotency_key": "tts-api-case-0001"},
+            wire.CreateDesignedVoiceVersionRequest,
         ),
         ApiCase(
             "voice-preview-create",
@@ -444,7 +462,7 @@ def _api_cases() -> list[ApiCase]:
             wire.ExecuteNarrationCacheCleanupRequest,
         ),
     ]
-    assert len(cases) == 31
+    assert len(cases) == 32
     assert {case.operation for case in cases} == set(
         settings_api.NarrationSettingsOperation
     )
@@ -713,7 +731,7 @@ def test_surface_has_no_removed_tts_mode_routes() -> None:
     }
     paths = {path for _, path in operations}
 
-    assert len(operations) == 31
+    assert len(operations) == 32
     assert "/novels/{novel_id}/official-voice-previews" not in paths
     assert all("synthesis" not in path for path in paths)
     assert all("player" not in path for path in paths)
@@ -732,7 +750,7 @@ def test_narration_gate_router_and_factory_are_installed_by_pawapp_lifecycle() -
         "install_narration_settings_backend_factory(",
         "uninstall_narration_settings_backend_factory(",
         "profile_creation_receipts=SqlAlchemyVoiceActionReceiptPort(session)",
-        "voice_product=None",
+        "voice_product=(current_voice_product_port() if product_ready else None)",
         "runtime_status_provider=narration_production_runtime_status",
         "def _t4_product_release_runtime_ready()",
         "install_narration_t4_http_access_policy(",
@@ -746,7 +764,8 @@ def test_narration_gate_router_and_factory_are_installed_by_pawapp_lifecycle() -
     )
     assert "authorization=FIXED_LOCAL_OWNER_NARRATION_AUTHORIZATION" in source
     assert "t4_product_capabilities(" in source
-    assert "reference_clone_released=False" in source
+    assert "reference_clone_released=True" in source
+    assert "voice_design_released=True" in source
     assert "official_presets_released=True" in source
     assert "OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256" not in source
     assert 'os.environ.get(REFERENCE_CLONE_ENABLE_ENV, "false")' in source
@@ -837,6 +856,7 @@ def test_qwen_gate_factory_uses_one_production_runtime_and_keeps_legacy_voice_mo
         "digest_keyring_loaded": True,
         "production_backend_installed": True,
         "worker_running": True,
+        "reference_clone_ready": True,
         "provider_selection_fingerprint_sha256": "d" * 64,
         "reason_code": None,
     }
@@ -846,20 +866,29 @@ def test_qwen_gate_factory_uses_one_production_runtime_and_keeps_legacy_voice_mo
         lambda: dict(ready),
     )
     monkeypatch.setenv("AI_NOVEL_TTS_PRODUCT_ENABLED", "true")
+    product = object()
+    monkeypatch.setattr(backend_app, "current_voice_product_port", lambda: product)
     captured.clear()
     assert backend_app._build_fixed_local_owner_narration_backend(session) is expected_backend
     released = captured["capabilities"]
     assert released.item(
         wire.CapabilityKey.NARRATION_SYNTHESIS
     ).state is wire.CapabilityState.ENABLED
+    assert captured["voice_product"] is product
+    assert released.item(
+        wire.CapabilityKey.REFERENCE_CLONE
+    ).state is wire.CapabilityState.ENABLED
+    assert released.item(
+        wire.CapabilityKey.VOICE_DESIGN
+    ).state is wire.CapabilityState.ENABLED
     for key in (
         wire.CapabilityKey.VOICE_PREVIEW,
         wire.CapabilityKey.REFERENCE_CLONE,
         wire.CapabilityKey.VOICE_DESIGN,
     ):
-        assert released.item(key).actionable is False
+        assert released.item(key).actionable is True
     assert released.item(wire.CapabilityKey.PRESET_VOICE_SOURCE).actionable is True
-    assert captured["voice_product"] is None
+    assert captured["voice_product"] is product
     assert isinstance(
         captured["official_voice_selection"],
         backend_app.OfficialVoiceSelectionService,
