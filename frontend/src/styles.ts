@@ -567,11 +567,11 @@ export function ensureNovelStyles(): void {
     .anw-editor-empty .anw-editor-empty-generate.qwenpaw-btn { min-width:164px; height:42px; border-radius:8px; color:#fff!important; border-color:#ef7046!important; background:#ef7046!important; font-weight:700; box-shadow:0 8px 18px rgba(239,112,70,.2); }
     .anw-editor-direct-link { margin-top:12px; border:0; padding:4px 8px; color:#ef7046; background:transparent; cursor:pointer; font-size:12px; }
     .anw-editor-direct-link:hover { text-decoration:underline; }
-    .anw-editor-generating { display:flex; min-height:500px; flex:1; flex-direction:column; align-items:center; justify-content:center; padding:48px 24px 24px; color:#888d95; text-align:center; }
-    .anw-editor-generating strong { margin-top:22px; color:#4b4f56; font-size:18px; }
-    .anw-editor-generating p { margin:10px 0 5px; color:#6f747d; }
-    .anw-editor-generating span { font-size:13px; }
-    .anw-editor-generating small { margin-top:18px; border-radius:999px; padding:6px 13px; color:#ef7046; background:#fff2ec; }
+    .anw-editor-generating { display:flex; min-height:64px; align-items:center; gap:12px; margin:12px 16px 0; border:1px solid #ffd8c8; border-radius:10px; padding:10px 14px; color:#6b4a3d; background:#fff8f4; text-align:left; }
+    .anw-editor-generating > div { min-width:0; flex:1; }
+    .anw-editor-generating strong { color:#51372e; font-size:14px; }
+    .anw-editor-generating p { overflow:hidden; margin:3px 0 0; color:#7b675f; font-size:12px; line-height:1.5; text-overflow:ellipsis; white-space:nowrap; }
+    .anw-editor-generating small { flex:0 0 auto; border-radius:999px; padding:5px 10px; color:#ef7046; background:#fff2ec; white-space:nowrap; }
     .anw-editor-footer {
       display:flex;
       width:100%;

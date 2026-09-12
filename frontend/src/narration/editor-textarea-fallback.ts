@@ -37,6 +37,7 @@ export interface TextareaNarrationAdapter {
   readValue(): string;
   readSelection(): NarrationEditorSelection;
   setValue(nextValue: string, origin: EditorChangeOrigin): boolean;
+  setEditable(editable: boolean): void;
   focusSelection(selection: NarrationEditorSelection): boolean;
   focus(): void;
   dispose(): void;
@@ -332,6 +333,11 @@ export function createTextareaNarrationAdapter(
         options.element.value = previousValue;
         throw error;
       }
+    },
+    setEditable(editable) {
+      if (disposed) return;
+      options.element.readOnly = !editable;
+      options.element.setAttribute("aria-readonly", editable ? "false" : "true");
     },
     focusSelection(selection) {
       if (disposed || !bridge.readSnapshot().active) return false;

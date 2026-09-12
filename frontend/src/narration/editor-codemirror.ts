@@ -1,6 +1,7 @@
 import { history, historyKeymap, redo, undo } from "@codemirror/commands";
 import {
   Annotation,
+  Compartment,
   EditorSelection as CodeMirrorSelection,
   EditorState,
   StateEffect,
@@ -69,6 +70,7 @@ export interface CodeMirrorNarrationAdapter {
   readValue(): string;
   readSelection(): NarrationEditorSelection;
   setValue(nextValue: string, origin: EditorChangeOrigin): boolean;
+  setEditable(editable: boolean): void;
   focusSelection(selection: NarrationEditorSelection): boolean;
   focus(): void;
   undo(): boolean;
@@ -424,13 +426,21 @@ export function createCodeMirrorNarrationAdapter(
     isLeaseCurrent: options.isLeaseCurrent,
   };
   const bridge = createNarrationEditorBridge(bridgeOptions);
+  const editableCompartment = new Compartment();
   const originalChildren = new Set(Array.from(options.parent.childNodes));
   let view: EditorView;
   try {
     const state = createCodeMirrorNarrationState(
       options.initialValue,
       bridge,
-      options.extensions,
+      [
+        editableCompartment.of([
+          EditorState.readOnly.of(false),
+          EditorView.editable.of(true),
+          EditorView.contentAttributes.of({ "aria-readonly": "false" }),
+        ]),
+        ...(options.extensions ?? []),
+      ],
       options,
     );
     view = new EditorView({ state, parent: options.parent });
@@ -534,6 +544,18 @@ export function createCodeMirrorNarrationAdapter(
         annotations: narrationChangeOrigin.of(origin),
       });
       return true;
+    },
+    setEditable(editable) {
+      if (disposed) return;
+      view.dispatch({
+        effects: editableCompartment.reconfigure([
+          EditorState.readOnly.of(!editable),
+          EditorView.editable.of(editable),
+          EditorView.contentAttributes.of({
+            "aria-readonly": editable ? "false" : "true",
+          }),
+        ]),
+      });
     },
     focusSelection(selection) {
       if (disposed || !bridge.readSnapshot().active) return false;

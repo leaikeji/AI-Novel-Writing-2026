@@ -803,6 +803,10 @@ export interface ChapterNarrationSession {
   readonly follow: SegmentFollowController | null;
   load(activeEditionId?: string): Promise<ChapterNarrationBundleLoadResult>;
   refresh(): Promise<ChapterNarrationBundleLoadResult>;
+  refreshManifestInPlace(): Promise<Readonly<{
+    changed: boolean;
+    manifestRevision: number;
+  }>>;
   readSnapshot(): ChapterNarrationSessionSnapshot;
   playSegment(
     segmentId: string,
@@ -811,6 +815,7 @@ export interface ChapterNarrationSession {
   ): Promise<ChapterNarrationSessionPlayResult>;
   pause(): void;
   resume(): Promise<ChapterNarrationSessionPlayResult>;
+  continuePendingGap(): Promise<ChapterNarrationSessionPlayResult>;
   setRate(rate: number): void;
   setVolume(volume: number): void;
   noteAuthorInteraction(interruption: AuthorFollowInterruption): boolean;
@@ -893,8 +898,14 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
   private requestedActiveEditionId: string | undefined;
   private loadAbort: AbortController | null = null;
   private pollAbort: AbortController | null = null;
+  private manifestRefreshAbort: AbortController | null = null;
+  private manifestRefreshPromise: Promise<Readonly<{
+    changed: boolean;
+    manifestRevision: number;
+  }>> | null = null;
   private loadSequence = 0;
   private playSequence = 0;
+  private continuousPlaybackIntent = false;
   private liveDivergenceObserved = false;
   private runtimeEpoch = 0;
   private progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -953,8 +964,10 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
     this.requestedActiveEditionId = activeEditionId;
     const sequence = ++this.loadSequence;
     ++this.playSequence;
+    this.continuousPlaybackIntent = false;
     this.loadAbort?.abort("superseded");
     this.cancelPolling();
+    this.cancelManifestRefresh();
     this.flushProgressSave();
     this.runtimeEpoch += 1;
     this.teardownRuntime();
@@ -1072,6 +1085,69 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
     return this.load(this.requestedActiveEditionId);
   }
 
+  refreshManifestInPlace(): Promise<Readonly<{
+    changed: boolean;
+    manifestRevision: number;
+  }>> {
+    this.assertReady();
+    if (this.manifestRefreshPromise) return this.manifestRefreshPromise;
+    const bundle = this.currentBundle;
+    const player = this.currentPlayer;
+    if (!bundle || !player) {
+      fail("SESSION_NOT_READY", "session Manifest refresh is unavailable");
+    }
+    if (this.pollAbort) {
+      return Promise.resolve(Object.freeze({
+        changed: false,
+        manifestRevision: bundle.manifest.manifest_revision,
+      }));
+    }
+    const controller = new AbortController();
+    this.manifestRefreshAbort = controller;
+    const request = (async () => {
+      const fetched = await awaitWithAbort(
+        this.dependencies.getNarrationManifest(
+          bundle.edition.edition_id,
+          { ifNoneMatch: bundle.manifest.etag, signal: controller.signal },
+        ),
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted
+        || this.disposed
+        || !this.isSessionCurrent()
+        || this.currentBundle !== bundle
+        || this.currentPlayer !== player
+      ) {
+        throw abortError("Manifest refresh superseded");
+      }
+      if (fetched.not_modified) {
+        if (fetched.etag !== bundle.manifest.etag) {
+          fail("CONTRACT_MISMATCH", "not-modified Manifest ETag changed");
+        }
+        return Object.freeze({
+          changed: false,
+          manifestRevision: bundle.manifest.manifest_revision,
+        });
+      }
+      this.adoptPolledManifest(fetched, bundle, player);
+      return Object.freeze({
+        changed: this.currentBundle?.manifest.manifest_revision
+          !== bundle.manifest.manifest_revision,
+        manifestRevision: this.currentBundle?.manifest.manifest_revision
+          ?? bundle.manifest.manifest_revision,
+      });
+    })();
+    this.manifestRefreshPromise = request;
+    void request.finally(() => {
+      if (this.manifestRefreshAbort === controller) this.manifestRefreshAbort = null;
+      if (this.manifestRefreshPromise === request) this.manifestRefreshPromise = null;
+    }).catch(() => {
+      // The caller owns error presentation; this branch only closes the finally chain.
+    });
+    return request;
+  }
+
   async playSegment(
     segmentId: string,
     source: "gutter" | "command" | "readonly-segment" = "readonly-segment",
@@ -1079,6 +1155,7 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
   ): Promise<ChapterNarrationSessionPlayResult> {
     this.assertReady();
     if (!this.currentBundle?.segmentById.has(segmentId)) {
+      this.continuousPlaybackIntent = false;
       return this.recordPlay(
         { status: "rejected", reason: "segment_not_in_bundle" },
         this.playSequence,
@@ -1086,7 +1163,18 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
     }
     const sequence = ++this.playSequence;
     this.cancelPolling();
+    this.cancelManifestRefresh();
+    this.continuousPlaybackIntent = true;
     const initial = await this.issuePlayback(segmentId, source, sequence, startOffsetMs);
+    if (
+      initial.status === "error"
+      || initial.status === "rejected"
+      || (initial.status === "completed"
+        && ["blocked", "error", "missing", "noop"].includes(initial.decision.kind)
+        && initial.decision.kind !== "blocked")
+    ) {
+      this.continuousPlaybackIntent = false;
+    }
     if (initial.status !== "completed" || initial.decision.kind !== "preparing") {
       return this.recordPlay(initial, sequence);
     }
@@ -1095,6 +1183,7 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
 
   pause(): void {
     this.assertReady();
+    this.continuousPlaybackIntent = false;
     ++this.playSequence;
     this.cancelPolling();
     this.currentPlayer?.pause();
@@ -1103,10 +1192,32 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
 
   async resume(): Promise<ChapterNarrationSessionPlayResult> {
     this.assertReady();
+    this.continuousPlaybackIntent = true;
+    return this.resumeCurrentPlayback();
+  }
+
+  continuePendingGap(): Promise<ChapterNarrationSessionPlayResult> {
+    this.assertReady();
+    const state = this.currentPlayer?.readState();
+    if (
+      !this.continuousPlaybackIntent
+      || state?.phase !== "blocked"
+      || state.failure?.code !== "PENDING_GAP"
+    ) {
+      return Promise.resolve(Object.freeze({
+        status: "rejected",
+        reason: "continuous_playback_not_requested",
+      }));
+    }
+    return this.resumeCurrentPlayback();
+  }
+
+  private async resumeCurrentPlayback(): Promise<ChapterNarrationSessionPlayResult> {
     const player = this.currentPlayer;
     if (!player) fail("SESSION_NOT_READY", "session player is unavailable");
     const sequence = ++this.playSequence;
     this.cancelPolling();
+    this.cancelManifestRefresh();
     const decision = await player.resume();
     if (sequence !== this.playSequence) {
       return this.recordPlay({
@@ -1173,6 +1284,8 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
     this.loadAbort?.abort("disposed");
     this.loadAbort = null;
     this.cancelPolling();
+    this.cancelManifestRefresh();
+    this.continuousPlaybackIntent = false;
     if (this.preferenceSaveTimer !== null) clearTimeout(this.preferenceSaveTimer);
     this.preferenceSaveTimer = null;
     this.pendingPlaybackPreferences = null;
@@ -1265,6 +1378,12 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
     this.unsubscribePlayer = player.subscribe(() => {
       if (player !== this.currentPlayer || this.disposed) return;
       const nextState = player.readState();
+      if (
+        ["ended", "error"].includes(nextState.phase)
+        || (nextState.phase === "blocked" && nextState.failure?.code !== "PENDING_GAP")
+      ) {
+        this.continuousPlaybackIntent = false;
+      }
       this.publish({ playerState: nextState });
       if (
         nextState.currentSegmentId !== null
@@ -1403,6 +1522,7 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
         }
         return this.recordPlay({ status: "superseded", segmentId }, sequence);
       }
+      this.currentPlayer?.markPreparationTimedOut?.(segmentId);
       return this.recordPlay({ status: "error", segmentId, error: reason }, sequence);
     } finally {
       clearTimeout(timeoutHandle);
@@ -1761,7 +1881,6 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
       && lease.documentId === this.options.documentId
       && lease.documentGeneration === this.options.generation
       && lease.editionId === bundle.edition.edition_id
-      && lease.manifestRevision === bundle.manifest.manifest_revision
       && playbackLeasesEqual(lease, player.lease);
   }
 
@@ -1796,6 +1915,11 @@ export class ProductionChapterNarrationSession implements ChapterNarrationSessio
   private cancelPolling(): void {
     this.pollAbort?.abort("superseded");
     this.pollAbort = null;
+  }
+
+  private cancelManifestRefresh(): void {
+    this.manifestRefreshAbort?.abort("superseded");
+    this.manifestRefreshAbort = null;
   }
 
   private unbindBridge(): void {

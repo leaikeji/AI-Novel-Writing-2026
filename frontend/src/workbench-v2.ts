@@ -550,6 +550,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const editorSurfaceRef = React.useRef(null as ChapterEditorSurfaceHandle | null);
   const editorControlRef = React.useRef(null as AssistantTextControl | null);
   const [editorSurfaceGeneration, setEditorSurfaceGeneration] = React.useState(0);
+  const narrationManifestRefreshAtRef = React.useRef(0);
+  const narrationPlayingRefreshSegmentRef = React.useRef(null as string | null);
   const [narrationSnapshot, setNarrationSnapshot] = React.useState(
     null as ChapterNarrationSessionSnapshot | null,
   );
@@ -598,7 +600,6 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const [bookNarrationState, setBookNarrationState] = React.useState(
     null as BookNarrationQueueState | null,
   );
-  const [bookNarrationRecoveryTick, setBookNarrationRecoveryTick] = React.useState(0);
   const narrationSessionRef = React.useRef(null as ChapterNarrationSession | null);
   const paragraphGutterControllerRef = React.useRef(null as ParagraphGutterController | null);
   const narrationActionAbortRef = React.useRef(null as AbortController | null);
@@ -1213,7 +1214,6 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   }, [publishBookNarrationState, saveNow]);
 
   const editorShouldMount = editorOpen
-    && !bodyGenerationState.active
     && (Boolean(content.trim()) || manualEditorOpen);
 
   React.useLayoutEffect(() => {
@@ -1295,6 +1295,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     if (!surface || surface.readValue() === content) return;
     surface.setValue(content, "external");
   }, [content, document?.id, editorSurfaceGeneration]);
+
+  React.useLayoutEffect(() => {
+    editorSurfaceRef.current?.setEditable(!bodyGenerationState.active);
+  }, [bodyGenerationState.active, document?.id, editorSurfaceGeneration]);
 
   React.useEffect(() => {
     const activeNovel = novel;
@@ -1537,130 +1541,127 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   React.useEffect(() => {
     const session = narrationSessionRef.current;
     const snapshot = narrationSnapshot;
-    const edition = snapshot?.bundle?.edition;
-    const playerPhase = snapshot?.playerState?.phase;
-    const activeBookQueue = bookNarrationRef.current;
-    const activeDocument = documentRef.current;
-    const pendingBookGapSegmentId = (
-      ["preparing", "playing"].includes(activeBookQueue?.phase ?? "")
-      && activeDocument
-      && currentBookNarrationChapter(activeBookQueue).documentId === activeDocument.id
-      && playerPhase === "blocked"
-      && snapshot?.playerState?.failure !== null
-    )
-      ? snapshot.playerState.failure.segmentId ?? snapshot.playerState.currentSegmentId
-      : null;
-    const bookGapPlaybackSegmentId = pendingBookGapSegmentId;
-    const pendingBookGapRenderStatus = pendingBookGapSegmentId
-      ? snapshot?.bundle?.manifest.segments.find(
-        (segment: { readonly segment_id: string }) => (
-          segment.segment_id === pendingBookGapSegmentId
-        ),
-      )?.render_status
-      : undefined;
+    const playerPhase = snapshot?.playerState?.phase ?? "idle";
+    if (playerPhase !== "playing") narrationPlayingRefreshSegmentRef.current = null;
     const hasPendingNarrationRenders = snapshot?.bundle?.manifest.segments.some(
       (segment: { readonly render_status: SegmentRenderStatus }) => (
         ["pending", "queued", "rendering"].includes(segment.render_status)
       ),
     ) ?? false;
-    const activeBookRunId = pendingBookGapSegmentId ? activeBookQueue?.runId : undefined;
-    const activeBookQueueOwnsSession = activeBookQueue !== null
-      && activeBookQueue !== undefined
-      && !["idle", "ended", "failed"].includes(activeBookQueue.phase);
     if (
       !session
       || snapshot?.phase !== "ready"
-      || !edition
-      || !["created", "rendering", "partial_ready", "ready"].includes(edition.state)
-      || ["preparing", "buffering", "playing", "paused"].includes(playerPhase ?? "idle")
-      || (pendingBookGapRenderStatus === "failed" && !hasPendingNarrationRenders)
-      || (!pendingBookGapSegmentId && !hasPendingNarrationRenders)
-      || (activeBookQueueOwnsSession && !pendingBookGapSegmentId)
+      || !snapshot.bundle
+      || !hasPendingNarrationRenders
+      || ["preparing", "buffering"].includes(playerPhase)
     ) return;
-    const handle = setTimeout(() => {
-      if (narrationSessionRef.current !== session) return;
-      if (
-        pendingBookGapSegmentId
-        && bookGapPlaybackSegmentId
-        && activeBookRunId !== undefined
-      ) {
-        const currentQueue = bookNarrationRef.current;
-        const currentDocument = documentRef.current;
-        if (
-          !currentQueue
-          || currentQueue.runId !== activeBookRunId
-          || !["preparing", "playing"].includes(currentQueue.phase)
-          || !currentDocument
-          || currentBookNarrationChapter(currentQueue).documentId !== currentDocument.id
-          || narrationSessionRef.current !== session
-        ) return;
+
+    let handle: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    const schedule = (delayMs: number) => {
+      if (cancelled) return;
+      handle = setTimeout(() => {
+        if (narrationSessionRef.current !== session) return;
         void (async () => {
-          const refreshed = await session.refresh();
-          if (
-            refreshed.status !== "ready"
-            || narrationSessionRef.current !== session
-          ) return;
-          const result = await session.playSegment(
-            bookGapPlaybackSegmentId,
-            "readonly-segment",
-            0,
-          );
-          const liveQueue = bookNarrationRef.current;
-          if (
-            !liveQueue
-            || liveQueue.runId !== activeBookRunId
-            || !["preparing", "playing"].includes(liveQueue.phase)
-            || narrationSessionRef.current !== session
-          ) return;
-          if (result.status === "completed" && result.decision.kind === "play") {
-            if (liveQueue.phase === "preparing") {
-              publishBookNarrationState(markBookNarrationPlaying(liveQueue));
-            }
-            setNarrationError(null);
-            setNarrationStatus("后续句段已就绪，全书朗读已从等待处自动继续。");
-          } else if (result.status === "timeout") {
-            setNarrationStatus("后续句段仍在合成，全书朗读会继续等待并自动重试。");
-            setBookNarrationRecoveryTick((value: number) => value + 1);
-          } else if (result.status === "completed" && result.decision.kind === "blocked") {
-            setNarrationStatus("后续句段仍在准备，全书朗读没有跳过缺口。");
-            const latestSegments = session.readSnapshot().bundle?.manifest.segments ?? [];
-            const latestHasPendingRenders = latestSegments.some(
-              (segment: { readonly render_status: SegmentRenderStatus }) => (
+          const liveSnapshot = session.readSnapshot();
+          const livePlayer = liveSnapshot.playerState;
+          if (liveSnapshot.phase !== "ready" || !liveSnapshot.bundle || !livePlayer) return;
+          const stillPending = liveSnapshot.bundle.manifest.segments.some(
+            (segment: { readonly render_status: SegmentRenderStatus }) => (
               ["pending", "queued", "rendering"].includes(segment.render_status)
-              ),
-            );
-            if (
-              result.decision.failure.code === "PENDING_GAP"
-              || latestHasPendingRenders
-            ) {
-              setBookNarrationRecoveryTick((value: number) => value + 1);
+            ),
+          );
+          if (!stillPending) return;
+
+          if (
+            livePlayer.phase === "blocked"
+            && livePlayer.failure?.code === "PENDING_GAP"
+          ) {
+            const activeBookRunId = bookNarrationRef.current?.runId;
+            const result = await session.continuePendingGap();
+            if (narrationSessionRef.current !== session) return;
+            if (result.status === "rejected") {
+              const refreshed = await session.refreshManifestInPlace();
+              narrationManifestRefreshAtRef.current = Date.now();
+              if (!refreshed.changed && narrationSessionRef.current === session) {
+                schedule(2_500);
+              }
+              return;
             }
-          } else if (result.status === "error") {
-            setNarrationError(narrationFailureMessage(result.error));
+            const liveQueue = bookNarrationRef.current;
+            const currentDocument = documentRef.current;
+            const queueStillCurrent = activeBookRunId !== undefined
+              && liveQueue?.runId === activeBookRunId
+              && ["preparing", "playing"].includes(liveQueue.phase)
+              && currentDocument !== null
+              && currentBookNarrationChapter(liveQueue).documentId === currentDocument.id;
+            if (result.status === "completed" && result.decision.kind === "play") {
+              if (queueStillCurrent && liveQueue?.phase === "preparing") {
+                publishBookNarrationState(markBookNarrationPlaying(liveQueue));
+              }
+              setNarrationError(null);
+              setNarrationStatus(queueStillCurrent
+                ? "后续句段已就绪，全书朗读已从等待处自动继续。"
+                : "后续句段已就绪，本章朗读已从等待处自动继续。");
+            } else if (result.status === "timeout") {
+              setNarrationStatus(queueStillCurrent
+                ? "后续句段仍在合成，全书朗读会继续等待。"
+                : "后续句段仍在合成，本章朗读会继续等待。");
+            } else if (
+              result.status === "completed"
+              && result.decision.kind === "blocked"
+            ) {
+              setNarrationStatus("后续句段仍在准备，朗读没有跳过缺口。");
+            } else if (result.status === "error") {
+              setNarrationError(narrationFailureMessage(result.error));
+            }
+            return;
+          }
+
+          if (!["idle", "paused", "playing", "blocked"].includes(livePlayer.phase)) return;
+          const refreshed = await session.refreshManifestInPlace();
+          narrationManifestRefreshAtRef.current = Date.now();
+          if (
+            !refreshed.changed
+            && narrationSessionRef.current === session
+            && ["idle", "paused", "blocked"].includes(
+              session.readSnapshot().playerState?.phase ?? "idle",
+            )
+          ) {
+            schedule(2_500);
           }
         })().catch((reason: unknown) => {
           if (!isAbortFailure(reason) && narrationSessionRef.current === session) {
             setNarrationError(narrationFailureMessage(reason));
+            schedule(2_500);
           }
         });
-        return;
-      }
-      void session.refresh().catch((reason: unknown) => {
-        if (!isAbortFailure(reason) && narrationSessionRef.current === session) {
-          setNarrationError(narrationFailureMessage(reason));
-        }
-      });
-    }, 2_500);
-    return () => clearTimeout(handle);
+      }, delayMs);
+    };
+
+    if (playerPhase === "playing") {
+      const segmentKey = `${snapshot.bundle.edition.edition_id}:${
+        snapshot.playerState?.currentSegmentId ?? "unknown"
+      }`;
+      if (narrationPlayingRefreshSegmentRef.current === segmentKey) return;
+      narrationPlayingRefreshSegmentRef.current = segmentKey;
+      const elapsed = Date.now() - narrationManifestRefreshAtRef.current;
+      schedule(Math.max(0, 2_500 - elapsed));
+    } else {
+      schedule(2_500);
+    }
+    return () => {
+      cancelled = true;
+      if (handle !== null) clearTimeout(handle);
+    };
   }, [
-    narrationSnapshot?.bundle?.edition.state,
+    narrationSnapshot?.bundle?.edition.edition_id,
     narrationSnapshot?.bundle?.manifest.manifest_revision,
     narrationSnapshot?.phase,
     narrationSnapshot?.playerState?.currentSegmentId,
-    narrationSnapshot?.playerState?.failure,
+    narrationSnapshot?.playerState?.failure?.code,
     narrationSnapshot?.playerState?.failure?.segmentId,
     narrationSnapshot?.playerState?.phase,
-    bookNarrationRecoveryTick,
     publishBookNarrationState,
   ]);
 
@@ -2880,6 +2881,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   };
 
   const applyWorkflowDocument = (updated: DocumentRecord, status: string) => {
+    if (
+      documentRef.current?.id === updated.id
+      && contentRef.current !== updated.content_markdown
+    ) {
+      narrationSessionRef.current?.noteWorkingCopyChanged();
+    }
     documentRef.current = updated;
     contentRef.current = updated.content_markdown;
     setDocument(updated);
@@ -3749,14 +3756,22 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
             bodyGenerationState.active
               ? h(
                   "section",
-                  { className: "anw-editor-generating", "aria-label": "AI 正在创作章节内容" },
-                  h(Spin, { size: "large" }),
-                  h("strong", null, "AI 正在创作章节内容..."),
-                  h("p", null, bodyGenerationState.stage || "正在分析角色关系、伏笔推进和章节情节"),
-                  h("span", null, "请稍候，精彩内容即将呈现"),
-                  h("small", null, "预计需要 30-60 秒"),
+                  {
+                    className: "anw-editor-generating",
+                    "aria-label": "AI 正在创作章节内容",
+                    "aria-live": "polite",
+                  },
+                  h(Spin, { size: "small" }),
+                  h(
+                    "div",
+                    null,
+                    h("strong", null, "AI 正在创作章节内容"),
+                    h("p", null, bodyGenerationState.stage || "正在分析角色关系、伏笔推进和章节情节"),
+                  ),
+                  h("small", null, "现有正文暂时只读，朗读可以继续"),
                 )
-              : showEditor
+              : null,
+            showEditor
               ? (SelectionEditReviewHost
                 ? h(
                   SelectionEditReviewHost,
@@ -3776,11 +3791,13 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                   h(Button, {
                     className: "anw-primary-button anw-editor-empty-generate",
                     icon: h(BookOutlined),
+                    disabled: bodyGenerationState.active,
                     onClick: () => chapterGenerateActionRef.current?.(),
                   }, "生成章节内容"),
                   h("button", {
                     type: "button",
                     className: "anw-editor-direct-link",
+                    disabled: bodyGenerationState.active,
                     onClick: () => setManualEditorOpen(true),
                   }, "我已有正文，点击直接填写"),
                 ),

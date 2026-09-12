@@ -154,7 +154,10 @@ function asParent(parent: FakeParent): HTMLElement {
 function createFakeCodeMirrorAdapter(
   options: CodeMirrorNarrationAdapterOptions,
   root: FakeNode,
-): CodeMirrorNarrationAdapter & { readonly focusCalls: () => number } {
+): CodeMirrorNarrationAdapter & {
+  readonly focusCalls: () => number;
+  readonly editable: () => boolean;
+} {
   const parent = options.parent as unknown as FakeParent;
   parent.appendChild(root);
   const bridge = createNarrationEditorBridge({
@@ -168,6 +171,7 @@ function createFakeCodeMirrorAdapter(
   });
   let focusCalls = 0;
   let disposed = false;
+  let editable = true;
 
   const setSelection = (selection: NarrationEditorSelection): boolean => {
     if (disposed) return false;
@@ -199,6 +203,7 @@ function createFakeCodeMirrorAdapter(
         origin,
       }).applied;
     },
+    setEditable(nextEditable) { editable = nextEditable; },
     setParagraphGutter() {
       return !disposed;
     },
@@ -214,6 +219,7 @@ function createFakeCodeMirrorAdapter(
       bridge.dispose();
     },
     focusCalls: () => focusCalls,
+    editable: () => editable,
   };
 }
 
@@ -238,11 +244,13 @@ describe("chapter editor surface CodeMirror owner", () => {
     const editorRoot = new FakeNode();
     const onDocChanged = vi.fn();
     let readFocusCalls = () => -1;
+    let readEditable = () => true;
     const createTextareaElement = vi.fn(() => new FakeTextarea() as unknown as HTMLTextAreaElement);
     const handle = createChapterEditorSurface(commonOptions(parent, onDocChanged), {
       createCodeMirrorAdapter(options) {
         const adapter = createFakeCodeMirrorAdapter(options, editorRoot);
         readFocusCalls = adapter.focusCalls;
+        readEditable = adapter.editable;
         return adapter;
       },
       createTextareaElement,
@@ -252,6 +260,10 @@ describe("chapter editor surface CodeMirror owner", () => {
     expect(createTextareaElement).not.toHaveBeenCalled();
     expect(parent.childNodes).toEqual([preserved, editorRoot]);
     expect(handle.readValue()).toBe("甲🙂乙");
+    handle.setEditable(false);
+    expect(readEditable()).toBe(false);
+    handle.setEditable(true);
+    expect(readEditable()).toBe(true);
 
     handle.assistantControl.setSelectionRange(1, 3, "backward");
     expect(handle.assistantControl.selectionStart).toBe(1);

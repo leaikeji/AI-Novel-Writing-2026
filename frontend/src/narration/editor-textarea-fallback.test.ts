@@ -22,10 +22,12 @@ const TEXT = "甲🙂乙\n第二段。";
 
 class FakeTextarea extends EventTarget {
   value: string;
+  readOnly = false;
   selectionStart = 0;
   selectionEnd = 0;
   selectionDirection: "forward" | "backward" | "none" = "none";
   focusCalls = 0;
+  readonly attributes = new Map<string, string>();
 
   constructor(value: string) {
     super();
@@ -44,6 +46,10 @@ class FakeTextarea extends EventTarget {
 
   focus(): void {
     this.focusCalls += 1;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
   }
 }
 
@@ -100,6 +106,20 @@ function bind(harness: ReturnType<typeof createHarness>) {
 
 
 describe("textarea UTF-16 diff", () => {
+  it("keeps selection available while toggling native read-only mode", () => {
+    const harness = createHarness();
+
+    harness.adapter.setEditable(false);
+    expect(harness.element.readOnly).toBe(true);
+    expect(harness.element.attributes.get("aria-readonly")).toBe("true");
+    expect(harness.adapter.setValue("服务端新正文", "external")).toBe(true);
+    expect(harness.adapter.readValue()).toBe("服务端新正文");
+
+    harness.adapter.setEditable(true);
+    expect(harness.element.readOnly).toBe(false);
+    expect(harness.element.attributes.get("aria-readonly")).toBe("false");
+  });
+
   it("keeps an entire surrogate pair inside an emoji replacement", () => {
     expect(computeTextareaTextChange("甲🙂乙", "甲😃乙")).toEqual({
       startUtf16: 1,

@@ -30,6 +30,7 @@ import type {
 } from "./narration-player";
 import type {
   SegmentPlaybackQueuePort,
+  SegmentPlaybackQueueEvent,
   SegmentPlaybackQueueStartOptions,
   SegmentPlaybackQueueStartResult,
 } from "./segment-playback-queue";
@@ -383,9 +384,147 @@ class TestQueue implements SegmentPlaybackQueuePort {
       offsetMs: start.startOffsetMs ?? 0,
     });
   }
+  emit(event: SegmentPlaybackQueueEvent): void { this.hooks.onEvent(event); }
   stop(): void { this.stopCount += 1; }
   dispose(): void { this.disposeCount += 1; }
 }
+
+
+describe("chapter narration in-place Manifest refresh", () => {
+  it("keeps five not-modified refreshes completely snapshot- and player-stable", async () => {
+    const resources = fixture(["ready", "pending"]);
+    const onState = vi.fn();
+    const getManifest = vi.fn<ChapterNarrationSessionDependencies["getNarrationManifest"]>(
+      async (_editionId, options) => options?.ifNoneMatch
+        ? { not_modified: true, etag: resources.manifest.etag, manifest: null }
+        : { not_modified: false, etag: resources.manifest.etag, manifest: resources.manifest },
+    );
+    const harness = createHarness({ resources, getManifest, onState });
+    await harness.session.load();
+    const player = harness.session.player;
+    onState.mockClear();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(harness.session.refreshManifestInPlace()).resolves.toEqual({
+        changed: false,
+        manifestRevision: 1,
+      });
+    }
+
+    expect(harness.session.player).toBe(player);
+    expect(harness.queues).toHaveLength(1);
+    expect(harness.queues[0].pauseCount).toBe(0);
+    expect(harness.queues[0].disposeCount).toBe(0);
+    expect(onState).not.toHaveBeenCalled();
+  });
+
+  it("coalesces concurrent refresh callers into one Manifest request", async () => {
+    const resources = fixture(["ready", "pending"]);
+    let resolveRefresh!: (result: ManifestFetchResult) => void;
+    const getManifest = vi.fn<ChapterNarrationSessionDependencies["getNarrationManifest"]>(
+      async (_editionId, options) => {
+        if (!options?.ifNoneMatch) {
+          return { not_modified: false, etag: resources.manifest.etag, manifest: resources.manifest };
+        }
+        return new Promise<ManifestFetchResult>((resolve) => { resolveRefresh = resolve; });
+      },
+    );
+    const harness = createHarness({ resources, getManifest });
+    await harness.session.load();
+    const first = harness.session.refreshManifestInPlace();
+    const second = harness.session.refreshManifestInPlace();
+
+    expect(second).toBe(first);
+    expect(getManifest.mock.calls.filter((call) => call[1]?.ifNoneMatch)).toHaveLength(1);
+    resolveRefresh({ not_modified: true, etag: resources.manifest.etag, manifest: null });
+    await expect(first).resolves.toEqual({ changed: false, manifestRevision: 1 });
+  });
+
+  it("keeps the active old playback lease valid while the observed Manifest advances", async () => {
+    const resources = fixture();
+    const advanced = manifest(["ready", "ready"], 2, "2");
+    const getManifest = vi.fn<ChapterNarrationSessionDependencies["getNarrationManifest"]>(
+      async (_editionId, options) => options?.ifNoneMatch
+        ? { not_modified: false, etag: advanced.etag, manifest: advanced }
+        : { not_modified: false, etag: resources.manifest.etag, manifest: resources.manifest },
+    );
+    const harness = createHarness({ resources, getManifest });
+    await harness.session.load();
+    await harness.session.playSegment(SEGMENT_IDS[0], "command");
+    const activeLease = harness.session.player?.lease;
+    expect(activeLease?.manifestRevision).toBe(1);
+
+    await expect(harness.session.refreshManifestInPlace()).resolves.toEqual({
+      changed: true,
+      manifestRevision: 2,
+    });
+    expect(harness.session.readSnapshot().bundle?.manifest.manifest_revision).toBe(2);
+    expect(harness.session.player?.lease).toEqual(activeLease);
+
+    if (!activeLease) throw new Error("expected active playback lease");
+    harness.queues[0].emit({
+      type: "segment-start",
+      lease: activeLease,
+      backend: "media-element",
+      segmentId: SEGMENT_IDS[1],
+      ordinal: 1,
+      offsetMs: 0,
+      durationMs: 1_000,
+    });
+    expect(harness.bridge.readSnapshot().currentSegmentId).toBe(SEGMENT_IDS[1]);
+  });
+
+  it("does not auto-continue a pending gap after the author pauses", async () => {
+    const harness = createHarness();
+    await harness.session.load();
+    await harness.session.playSegment(SEGMENT_IDS[0]);
+    const lease = harness.session.player?.lease;
+    if (!lease) throw new Error("expected active playback lease");
+    harness.queues[0].emit({
+      type: "blocked",
+      lease,
+      backend: "media-element",
+      failure: {
+        code: "PENDING_GAP",
+        message: "still rendering",
+        retryable: true,
+        segmentId: SEGMENT_IDS[1],
+        ordinal: 1,
+      },
+    });
+    harness.session.pause();
+
+    await expect(harness.session.continuePendingGap()).resolves.toEqual({
+      status: "rejected",
+      reason: "continuous_playback_not_requested",
+    });
+    expect(harness.prepareRange).not.toHaveBeenCalled();
+    expect(harness.queues[0].starts).toHaveLength(1);
+  });
+
+  it("returns a failed target poll to a retryable pending-gap state", async () => {
+    const resources = fixture(["pending", "pending"]);
+    const getManifest = vi.fn<ChapterNarrationSessionDependencies["getNarrationManifest"]>(
+      async (_editionId, options) => {
+        if (!options?.ifNoneMatch) {
+          return { not_modified: false, etag: resources.manifest.etag, manifest: resources.manifest };
+        }
+        throw new Error("temporary Manifest network failure");
+      },
+    );
+    const harness = createHarness({ resources, getManifest });
+    await harness.session.load();
+
+    await expect(harness.session.playSegment(SEGMENT_IDS[0])).resolves.toMatchObject({
+      status: "error",
+      segmentId: SEGMENT_IDS[0],
+    });
+    expect(harness.session.readSnapshot().playerState).toMatchObject({
+      phase: "blocked",
+      failure: { code: "PENDING_GAP", segmentId: SEGMENT_IDS[0] },
+    });
+  });
+});
 
 
 interface FixtureResources {

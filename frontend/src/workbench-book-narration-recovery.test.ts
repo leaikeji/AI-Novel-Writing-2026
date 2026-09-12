@@ -4,82 +4,89 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 
-describe("workbench full-book narration gap recovery", () => {
+describe("workbench narration manifest refresh and gap recovery", () => {
   const source = readFileSync(new URL("./workbench-v2.ts", import.meta.url), "utf8");
 
-  it("resumes a partial-ready gap through the session polling path", () => {
-    const recoveryStart = source.indexOf("const pendingBookGapSegmentId = (");
-    const refreshStart = source.indexOf(
-      "const refreshed = await session.refresh();",
-      recoveryStart,
-    );
-
-    expect(recoveryStart).toBeGreaterThan(-1);
-    expect(refreshStart).toBeGreaterThan(recoveryStart);
-    expect(source.slice(recoveryStart, refreshStart + 120)).toContain(
-      "snapshot?.playerState?.failure !== null",
-    );
-    expect(source).toContain("await session.playSegment(");
-    expect(source).toContain(
-      '["created", "rendering", "partial_ready", "ready"].includes(edition.state)',
-    );
+  it("uses in-place Manifest refresh instead of rebuilding the session", () => {
+    expect(source).toContain("await session.refreshManifestInPlace()");
+    expect(source).not.toContain("const refreshed = await session.refresh();");
+    expect(source).toContain("narrationManifestRefreshAtRef.current = Date.now()");
   });
 
-  it("limits automatic recovery to the live full-book run and current chapter", () => {
-    expect(source).toContain('["preparing", "playing"].includes(activeBookQueue?.phase ?? "")');
-    expect(source).toContain("activeBookQueueOwnsSession && !pendingBookGapSegmentId");
-    expect(source).toContain("currentQueue.runId !== activeBookRunId");
-    expect(source).toContain('["preparing", "playing"].includes(currentQueue.phase)');
-    expect(source).toContain("currentBookNarrationChapter(currentQueue).documentId !== currentDocument.id");
-    expect(source).toContain("narrationSessionRef.current !== session");
+  it("continues an exact pending gap through the session intent fence", () => {
+    expect(source).toContain('livePlayer.failure?.code === "PENDING_GAP"');
+    expect(source).toContain("const result = await session.continuePendingGap();");
+    expect(source).toContain('result.status === "rejected"');
   });
 
-  it("re-arms recovery when the same pending gap remains after a bounded attempt", () => {
+  it("limits full-book promotion to the same live run", () => {
+    expect(source).toContain("const activeBookRunId = bookNarrationRef.current?.runId;");
+    expect(source).toContain("liveQueue?.runId === activeBookRunId");
+    expect(source).toContain('["preparing", "playing"].includes(liveQueue.phase)');
     expect(source).toContain(
-      "const [bookNarrationRecoveryTick, setBookNarrationRecoveryTick] = React.useState(0)",
+      "currentBookNarrationChapter(liveQueue).documentId === currentDocument.id",
     );
-    expect(source).toContain(
-      "setBookNarrationRecoveryTick((value: number) => value + 1);",
-    );
-    expect(source).toContain("bookNarrationRecoveryTick,");
-  });
-
-  it("promotes an initially partial chapter to playing after recovery starts", () => {
-    expect(source).toContain('if (liveQueue.phase === "preparing")');
     expect(source).toContain(
       "publishBookNarrationState(markBookNarrationPlaying(liveQueue));",
     );
   });
 
-  it("keeps explicit render failures stable so the user can open recovery controls", () => {
-    const renderStatusStart = source.indexOf("const pendingBookGapRenderStatus =");
-    const recoveryTimerStart = source.indexOf("const handle = setTimeout(() => {", renderStatusStart);
-
-    expect(renderStatusStart).toBeGreaterThan(-1);
-    expect(recoveryTimerStart).toBeGreaterThan(renderStatusStart);
-    expect(source.slice(renderStatusStart, recoveryTimerStart)).toContain(
-      'pendingBookGapRenderStatus === "failed" && !hasPendingNarrationRenders',
-    );
+  it("re-arms unchanged idle, paused, or blocked polling without a second loop", () => {
+    const refreshStart = source.indexOf("const hasPendingNarrationRenders =");
+    const refreshEnd = source.indexOf("const startNarration =", refreshStart);
+    const refreshEffect = source.slice(refreshStart, refreshEnd);
+    expect(source).toContain("if (!refreshed.changed && narrationSessionRef.current === session)");
+    expect(source).toContain("schedule(2_500);");
+    expect(source).not.toContain("bookNarrationRecoveryTick");
+    expect(refreshEffect).not.toContain("setInterval(");
   });
 
-  it("rechecks a transient failed gap while the rest of the chapter is still rendering", () => {
-    expect(source).toContain("snapshot?.playerState?.failure !== null");
-    expect(source).toContain(
-      "const bookGapPlaybackSegmentId = pendingBookGapSegmentId;",
-    );
-    expect(source).toContain("const refreshed = await session.refresh();");
-    expect(source).toContain("const latestHasPendingRenders = latestSegments.some");
+  it("refreshes while playing only once per segment boundary", () => {
+    expect(source).toContain("narrationPlayingRefreshSegmentRef.current === segmentKey");
+    expect(source).toContain("narrationPlayingRefreshSegmentRef.current = segmentKey");
+    expect(source).toContain("Math.max(0, 2_500 - elapsed)");
   });
 
-  it("refreshes a stale partial manifest even when the live Edition is already ready", () => {
-    expect(source).toContain(
+  it("does not refresh while buffering or preparing", () => {
+    expect(source).toContain('["preparing", "buffering"].includes(playerPhase)');
+  });
+
+  it("continues polling from Manifest segment truth rather than stale Edition counters", () => {
+    expect(source).toContain("const hasPendingNarrationRenders =");
+    expect(source).toContain('["pending", "queued", "rendering"].includes(segment.render_status)');
+    expect(source).not.toContain(
       '["created", "rendering", "partial_ready", "ready"].includes(edition.state)',
     );
   });
 
-  it("stops generic manifest polling after only terminal failures remain", () => {
-    expect(source).toContain("const hasPendingNarrationRenders =");
-    expect(source).toContain('["pending", "queued", "rendering"].includes(segment.render_status)');
-    expect(source).toContain("(!pendingBookGapSegmentId && !hasPendingNarrationRenders)");
+  it("cancels the one-shot timer when the effect scope changes", () => {
+    expect(source).toContain("cancelled = true;");
+    expect(source).toContain("if (handle !== null) clearTimeout(handle);");
+    expect(source).toContain("if (narrationSessionRef.current !== session) return;");
+  });
+
+  it("keeps the editor mounted and only toggles its editable state during generation", () => {
+    const mountStart = source.indexOf("const editorShouldMount = editorOpen");
+    const mountEnd = source.indexOf("React.useLayoutEffect", mountStart);
+    const mountContract = source.slice(mountStart, mountEnd);
+
+    expect(mountContract).not.toContain("!bodyGenerationState.active");
+    expect(source).toContain(
+      "editorSurfaceRef.current?.setEditable(!bodyGenerationState.active);",
+    );
+    expect(source).toContain("现有正文暂时只读，朗读可以继续");
+  });
+
+  it("marks adopted server text as diverged before applying it to the live surface", () => {
+    const applyStart = source.indexOf("const applyWorkflowDocument =");
+    const divergence = source.indexOf(
+      "narrationSessionRef.current?.noteWorkingCopyChanged();",
+      applyStart,
+    );
+    const documentUpdate = source.indexOf("documentRef.current = updated;", applyStart);
+
+    expect(applyStart).toBeGreaterThan(-1);
+    expect(divergence).toBeGreaterThan(applyStart);
+    expect(documentUpdate).toBeGreaterThan(divergence);
   });
 });

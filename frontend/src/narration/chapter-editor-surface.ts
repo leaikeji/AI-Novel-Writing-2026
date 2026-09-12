@@ -55,6 +55,7 @@ export interface ChapterEditorSurfaceHandle {
   readonly assistantControl: AssistantTextControl;
   readValue(): string;
   setValue(nextValue: string, origin: EditorChangeOrigin): boolean;
+  setEditable(editable: boolean): void;
   setParagraphGutter(entries: readonly EditorParagraphGutterEntry[]): boolean;
   requestPlaybackFromCursor(): boolean;
   focus(): void;
@@ -67,6 +68,7 @@ interface ChapterEditorAdapter {
   readValue(): string;
   readSelection(): NarrationEditorSelection;
   setValue(nextValue: string, origin: EditorChangeOrigin): boolean;
+  setEditable(editable: boolean): void;
   setParagraphGutter?(entries: readonly EditorParagraphGutterEntry[]): boolean;
   focusSelection(selection: NarrationEditorSelection): boolean;
   focus(): void;
@@ -387,6 +389,9 @@ export function createChapterEditorSurface(
       if (disposed) return false;
       assertWellFormedUtf16(nextValue, "Chapter editor nextValue");
       return adapter.setValue(nextValue, origin);
+    },
+    setEditable(editable) {
+      if (!disposed) adapter.setEditable(editable);
     },
     setParagraphGutter(entries) {
       if (disposed || !adapter.setParagraphGutter) return false;
