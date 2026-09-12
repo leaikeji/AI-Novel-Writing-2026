@@ -10,6 +10,8 @@ MARKER = "S58_PAWAPP_METHOD_BYTES"
 REPLY_TEXT = "S58_PROBE_OK"
 EXPECTED_BLOCKS = {}
 SEMANTIC_THEN_CHAPTER = False
+SEMANTIC_SELECT_GOLDEN = False
+MAX_RECEIPTS = 12
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -29,7 +31,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         size = int(self.headers.get("Content-Length", "0"))
-        if self.path != "/v1/chat/completions" or not 0 < size < 500000 or len(RECEIPTS) >= 12:
+        if self.path != "/v1/chat/completions" or not 0 < size < 500000 or len(RECEIPTS) >= MAX_RECEIPTS:
             self.send_error(400)
             return
         request = json.loads(self.rfile.read(size))
@@ -57,7 +59,12 @@ class Handler(BaseHTTPRequestHandler):
                     "schema_version": "semantic-route-response/1",
                     "decisions": [{
                         "skill_id": item["skill_id"],
-                        "decision": "reject",
+                        "decision": (
+                            "select"
+                            if SEMANTIC_SELECT_GOLDEN
+                            and item["skill_id"] == "golden-finger-writing"
+                            else "reject"
+                        ),
                         "evidence_refs": [source_key],
                     } for item in route["candidates"]],
                 }, ensure_ascii=False)
@@ -108,6 +115,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--chapter", action="store_true")
     parser.add_argument("--semantic-then-chapter", action="store_true")
+    parser.add_argument("--plan70-writing-ab", action="store_true")
     parser.add_argument("--creative-template", action="store_true")
     parser.add_argument("--creative-naming", action="store_true")
     parser.add_argument("--creative-outline-background", action="store_true")
@@ -126,6 +134,10 @@ if __name__ == "__main__":
     parser.add_argument("--methods-root", type=Path)
     options = parser.parse_args()
     SEMANTIC_THEN_CHAPTER = options.semantic_then_chapter
+    if options.plan70_writing_ab:
+        SEMANTIC_THEN_CHAPTER = True
+        SEMANTIC_SELECT_GOLDEN = True
+        REPLY_TEXT = "测" * 2500
     if options.chapter:
         REPLY_TEXT = "测" * 1000
     if options.creative_template:

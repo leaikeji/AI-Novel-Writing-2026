@@ -39,6 +39,14 @@ describe("VC43 studio chapter wizard integration", () => {
     expect(source).toContain("const storedTitle = volumeTitleForStorage(volumeNumber, volumeTitle)");
   });
 
+  it("creates in the selected volume and keeps that target visible through confirmation", () => {
+    expect(source).toContain("targetVolumeId: selectedChapterVolume?.id ? String(selectedChapterVolume.id) : null");
+    expect(source).toContain("String(volume.id) === requestedTargetVolumeId");
+    expect(source).toContain('"aria-label": "目标分卷"');
+    expect(source).toContain('h("dt", null, "目标分卷"), h("dd", null, targetVolumeLabel)');
+    expect(source).toContain("requestedTargetVolumeId, volumeScopeKey");
+  });
+
   it("lets authors with existing prose create a blank chapter without invoking AI", () => {
     expect(source).toContain("const completeManualEntry = async () => {");
     expect(source).toContain('manual_entry: true');

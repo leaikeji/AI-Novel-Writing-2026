@@ -63,7 +63,13 @@ import {
 } from "./chapter-intelligence";
 import { chapterOrdinalFor } from "./chapter-tree";
 import { chapterDisplayTitle } from "./presenters";
-import { ChapterMethodClient, chapterMethodCatalog, writingPageTabId } from "./writing-skills/chapter";
+import {
+  ChapterGenerationInProgressError,
+  ChapterMethodClient,
+  chapterMethodCatalog,
+  type ChapterMethodResult,
+  writingPageTabId,
+} from "./writing-skills/chapter";
 import type { WritingMethodSnapshot } from "./writing-skills/api";
 import type { WritingMethodStatus } from "./writing-skills/contracts";
 import {
@@ -687,6 +693,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [generationStage, setGenerationStage] = React.useState("正在分析前文、章纲和章节情节");
   const [jobsOpen, setJobsOpen] = React.useState(false);
   const [jobs, setJobs] = React.useState([] as GenerationJobRecord[]);
+  const [activeGenerationJob, setActiveGenerationJob] = React.useState(
+    null as GenerationJobRecord | null,
+  );
   const [featuredCandidateId, setFeaturedCandidateId] = React.useState("");
   const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
   const [selectedProposal, setSelectedProposal] = React.useState(null as IntelligenceProposalRecord | null);
@@ -708,6 +717,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const bodySubmissionRef = React.useRef(null as string | null);
   const [methodSnapshot, setMethodSnapshot] = React.useState(null as WritingMethodSnapshot | null);
   const [methodAvailability, setMethodAvailability] = React.useState("loading" as "loading" | "available" | "legacy" | "unavailable");
+  const [methodSemanticAvailable, setMethodSemanticAvailable] = React.useState(false);
   // A return to the same document is a new visit; old modal callbacks stay revoked.
   const chapterVisit = React.useMemo(() => ({ active: false }), [novel.id, document.id]);
   const requireChapterVisit = () => {
@@ -725,18 +735,29 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     bodySubmissionRef.current = null;
     setMethodSnapshot(null);
     setMethodAvailability("loading");
+    setMethodSemanticAvailable(false);
     const ready = Promise.resolve().then(() => chapterMethodCatalog(document.id, novel.id, writingPageTabId())).then(catalog => {
       if (!active) throw new Error("章节已切换，写作方法目录结果已隔离");
       setMethodAvailability(!catalog.catalogAvailable ? "unavailable" : catalog.available ? "available" : "legacy");
+      setMethodSemanticAvailable(catalog.semanticAvailable);
       client = new ChapterMethodClient(catalog.binding, snapshot => {
         if (active) setMethodSnapshot(snapshot);
-      }, apiRequest, sessionStorage, { managed: catalog.available, catalog: catalog.catalogAvailable });
+      }, apiRequest, sessionStorage, { managed: catalog.available, catalog: catalog.catalogAvailable,
+        semantic: catalog.semanticAvailable });
       methodClientRef.current = client;
-      if (client.getSnapshot().action) void client.recover().catch(() => undefined); // GET-only refresh recovery.
+      if (client.getSnapshot().action) void client.recover().then(result => {
+        if (active && result.state === "running") {
+          setActiveGenerationJob(result as GenerationJobRecord);
+        }
+      }).catch(() => undefined); // GET-only refresh recovery.
       return client;
     });
     methodReadyRef.current = ready;
     void ready.catch(() => { if (active) setMethodAvailability("unavailable"); }); // No silent fallback.
+    void apiRequest<GenerationJobRecord[]>(`/documents/${document.id}/generation-jobs`).then(loaded => {
+      if (!active) return;
+      setActiveGenerationJob(loaded.find(job => job.state === "running") ?? null);
+    }).catch(() => undefined); // The authoritative POST guard still fails closed.
     return () => { active = false; client?.dispose(); };
   }, [document.id, novel.id]);
 
@@ -762,6 +783,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     setGeneratingOpen(false);
     setJobsOpen(false);
     setJobs([]);
+    setActiveGenerationJob(null);
     setFeaturedCandidateId("");
     setIntelligenceOpen(false);
     setSelectedProposal(null);
@@ -967,8 +989,58 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     }
   };
 
+  const refreshActiveGeneration = async () => {
+    if (!chapterVisit.active) return;
+    setBusyAction("generation-status");
+    try {
+      const loaded = await apiRequest<GenerationJobRecord[]>(`/documents/${document.id}/generation-jobs`);
+      requireChapterVisit();
+      setJobs(loaded);
+      const active = loaded.find(job => job.state === "running") ?? null;
+      setActiveGenerationJob(active);
+      if (active) {
+        onStatus("原任务仍在生成；本次只刷新状态，没有再次调用模型。");
+      } else {
+        const latest = activeGenerationJob
+          ? loaded.find(job => job.id === activeGenerationJob.id)
+          : loaded[0];
+        if (activeGenerationJob) {
+          methodClientRef.current?.acknowledgeExternalJobFinished(activeGenerationJob.id);
+        }
+        if (latest?.state === "ready") {
+          setFeaturedCandidateId(latest.candidate?.id ?? "");
+          setJobsOpen(true);
+          onStatus("原任务已生成候选，可在历史中查看。");
+        } else {
+          onStatus("原任务已结束；正式正文未被自动修改，可以重新生成。");
+        }
+      }
+    } catch (reason) {
+      if (chapterVisit.active) onError(errorMessage(reason, "刷新原任务状态失败"));
+    } finally {
+      if (chapterVisit.active) setBusyAction("");
+    }
+  };
+
   const openGenerationOptions = () => {
     if (!chapterVisit.active) return;
+    const client = methodClientRef.current;
+    if (activeGenerationJob?.state === "running") {
+      void refreshActiveGeneration();
+      return;
+    }
+    if (client?.getRetryPolicy()?.decision === "blocked_active") {
+      void client.recover().then((result: ChapterMethodResult) => {
+        if (!chapterVisit.active) return;
+        if (result.state === "running") setActiveGenerationJob(result as GenerationJobRecord);
+        onStatus(result.state === "running"
+          ? "原任务仍在生成；本次没有再次调用模型。"
+          : "原任务状态已刷新。");
+      }).catch((reason: unknown) => {
+        if (chapterVisit.active) onError(errorMessage(reason, "查询原任务失败"));
+      });
+      return;
+    }
     if (document.visible_character_count === 0) {
       void openAssetPicker();
       return;
@@ -1001,7 +1073,8 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     return saved;
   };
 
-  const generateBody = async (assetIds: string[] = selectedAssetIds) => {
+  const generateBody = async (assetIds: string[] = selectedAssetIds,
+    methodMode: "auto" | "generic_only" = "auto", confirmedUnknownRetry = false) => {
     if (!chapterVisit.active || bodySubmissionRef.current) return;
     const submissionId = crypto.randomUUID();
     bodySubmissionRef.current = submissionId;
@@ -1010,7 +1083,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       if (bodySubmissionRef.current !== submissionId) throw new Error("章节已切换，原任务结果不会写入当前章节");
     };
     setAssetPickerOpen(false);
-    const bodyStage = "正在分析角色关系、伏笔推进和章节情节";
+    const bodyStage = methodSemanticAvailable && methodMode === "auto"
+      ? "正在判断本章适用方法并准备正文"
+      : "正在分析角色关系、伏笔推进和章节情节";
     setGenerationStage(bodyStage);
     onBodyGenerationStateChange?.(true, bodyStage);
     setBusyAction("generate");
@@ -1038,7 +1113,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
 
       for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
         const attemptStage = attempt === 1
-          ? "正在分析角色关系、伏笔推进和章节情节"
+          ? bodyStage
           : `第 ${attempt} 次整章重写：正在校准 ${lengthWindow.label}`;
         setGenerationStage(attemptStage);
         onBodyGenerationStateChange?.(true, attemptStage);
@@ -1052,8 +1127,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
             force_new: true,
             asset_ids: assetIds,
           };
-          const job = methodClient?.managedAvailable ? await methodClient.start({ ...input, method_mode: "auto",
-            ...(retryOfActionId ? { retry_of_action_id: retryOfActionId } : {}) }) : await apiRequest<GenerationJobRecord>(
+          const job = methodClient?.managedAvailable ? await methodClient.start({ ...input, method_mode: methodMode,
+            ...(retryOfActionId ? { retry_of_action_id: retryOfActionId } : {}),
+            ...(confirmedUnknownRetry ? { confirmed_unknown_retry: true } : {}) }) : await apiRequest<GenerationJobRecord>(
             `/documents/${document.id}/generation-jobs/body`,
             {
               method: "POST",
@@ -1098,6 +1174,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       await confirmSyncProgress(result.document);
     } catch (reason) {
       if (!chapterVisit.active || bodySubmissionRef.current !== submissionId) return;
+      if (reason instanceof ChapterGenerationInProgressError) {
+        setActiveGenerationJob(reason.job);
+        setGenerationStage("原任务仍在生成；本次没有再次调用模型");
+        onStatus("该章节正在生成，已保留原任务；点击“查看生成进度”可刷新状态。");
+        return;
+      }
       const message = errorMessage(reason, "生成正文失败");
       const lengthFailure = isRetryableChapterLengthFailure(reason);
       onError(message);
@@ -1143,23 +1225,35 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       onError(errorMessage(reason, "读取当前有效模型失败"));
       return;
     }
+    let methodMode: "auto" | "generic_only" = "auto";
+    const confirmedUnknownRetry = methodClientRef.current?.getRetryPolicy()?.decision === "confirm_required";
     Modal.confirm({
       className: "anw-modal anw-generation-confirm",
       title: "确认",
       width: 520,
       centered: true,
       content: h("div", { className: "anw-generation-confirm-copy" },
-        h("strong", null, "⚠️ 请确保当前模型连接可用，并避免重复发起生成"),
+        h("strong", null, confirmedUnknownRetry
+          ? "上一次生成结果无法完全确认；你正在明确发起一次新的生成"
+          : "⚠️ 请确保当前模型连接可用，并避免重复发起生成"),
+        confirmedUnknownRetry ? h("p", null, "原任务已无进行中的正文任务，但远端调用可能已经计费；继续会产生一次新的模型调用。") : null,
         h("p", null, "页面可以留在后台；若模型长时间无响应，系统会安全结束任务并显示失败原因。"),
         h("p", null, "生成开始后请勿重复发起；失败时系统会保留正式正文不变。"),
-        h("p", null, "若完整正文未进入字数硬范围，系统最多自动整章重写两次（本次最多 3 次模型调用）。"),
+        h("p", null, methodSemanticAvailable
+          ? "若完整正文未进入字数硬范围，系统最多自动整章重写两次（正文最多 3 次模型调用）；未勾选下方“本次仅用通用方法”时，另可能增加 1 次方法判断（合计最多 4 次）。"
+          : "若完整正文未进入字数硬范围，系统最多自动整章重写两次（正文最多 3 次模型调用）。"),
         h("p", null, `本次将使用 ${generationModelLabel(currentModel)}。`),
+        methodSemanticAvailable ? h(Checkbox, {
+          onChange: (event: { target: { checked: boolean } }) => {
+            methodMode = event.target.checked ? "generic_only" : "auto";
+          },
+        }, "本次仅用通用方法") : null,
         h("p", null, "若多次出现生成失败，请检查当前有效模型连接。"),
         h("b", null, "确定继续生成吗？"),
       ),
       okText: "确定",
       cancelText: "取消",
-      onOk: () => { void generateBody(assetIds); },
+      onOk: () => { void generateBody(assetIds, methodMode, confirmedUnknownRetry); },
     });
   };
 
@@ -1603,7 +1697,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     React.Fragment,
     null,
     h("div", { className: "anw-workflow-panel" },
-      h(Button, { className: "anw-generate-button", icon: h(BookOutlined), onClick: openGenerationOptions, loading: busyAction === "generate" || busyAction === "assets-load" }, document.visible_character_count > 0 ? "重新生成" : "生成正文"),
+      h(Button, { className: "anw-generate-button", icon: h(BookOutlined), onClick: openGenerationOptions,
+        loading: busyAction === "generate" || busyAction === "assets-load" || busyAction === "generation-status" },
+      activeGenerationJob?.state === "running" || methodClientRef.current?.getRetryPolicy()?.decision === "blocked_active"
+        ? "查看生成进度"
+        : methodClientRef.current?.getRetryPolicy()?.decision === "confirm_required"
+          ? "确认重新生成"
+          : document.visible_character_count > 0 ? "重新生成" : "生成正文"),
       h(Button, { ref: briefTriggerRef, className: "anw-outline-button", icon: h(EditOutlined), onClick: openBrief, loading: busyAction === "brief-load" }, "修改章纲"),
       h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: () => { void confirmSyncProgress(); }, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
       h(Button, { className: "anw-history-button", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load" }, "历史"),
@@ -1613,7 +1713,22 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       novelId: novel.id,
       compact: true,
     }),
+    methodSemanticAvailable ? h("div", {
+      className: "anw-writing-method-ready",
+      role: "status",
+      "aria-label": "自动写作方法",
+      style: { minWidth: 0, overflowWrap: "anywhere", lineHeight: 1.5 },
+    }, "自动选择写作方法已就绪；必要时会增加一次方法判断。") : null,
     methodSnapshot ? h(WritingMethodStatusNotice, { snapshot: methodSnapshot }) : null,
+    activeGenerationJob?.state === "running" ? h("section", {
+      className: "anw-chapter-generation-status",
+      role: "status",
+      "aria-live": "polite",
+      "aria-label": "章节生成进度",
+    }, h("div", null,
+      h("strong", null, "本章正文正在生成"),
+      h("p", null, "重复点击不会创建新任务；可以把页面留在后台，稍后刷新状态。"),
+    ), h(Button, { loading: busyAction === "generation-status", onClick: () => { void refreshActiveGeneration(); } }, "刷新状态")) : null,
     !reviewOpen && reviewMethodStatus
       ? h(WritingMethodReceiptNotice, {
           status: reviewMethodStatus,

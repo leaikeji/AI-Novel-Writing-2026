@@ -20,6 +20,7 @@ TASK_SKILLS = {
 CAPABILITY_SKILLS = {a.skill_id for a in packaged_approvals()}
 EXPECTED_SKILLS = published_skill_ids(SKILLS_ROOT)
 EXPECTED_SKILL_VERSION = "0.4.0"
+EXPECTED_CAPABILITY_VERSION = "1.0.1"
 REFERENCE_LINK = re.compile(r"\[[^\]]+\]\((references/[^)]+\.md)\)")
 
 
@@ -67,7 +68,7 @@ def test_capability_skills_are_author_released_not_empirically_promoted() -> Non
     for name in CAPABILITY_SKILLS:
         text = (SKILLS_ROOT / name / "SKILL.md").read_text(encoding="utf-8")
         metadata = dict(re.findall(r'^  (\w+): "?([^"\n]+)"?$', text.split("---", 2)[1], re.MULTILINE))
-        assert metadata["capability_version"] == "1.0.0"
+        assert metadata["capability_version"] == EXPECTED_CAPABILITY_VERSION
         assert metadata["release_status"] == "author_approved"
         assert metadata["empirical_status"] == "inconclusive"
         # Capability modules cannot supplant the product's final-write contract.

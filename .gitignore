@@ -16,6 +16,16 @@
 *.secret
 working.secret
 
+# Local research workfiles and dependency cache
+/.plan66*
+/.pnpm-store/
+
+# Local-only Plan 70 planning, review, and acceptance evidence (author decision 2026-09-12)
+/audit/plan68/审查整改报告.md
+/audit/plan70/
+/docs/开发文档/70-章节正文专属Skill智能调用最小可靠闭环计划.md
+/audit/plan68/recovery/index.before-B002.js
+
 # Generated dependencies and build output
 node_modules/
 .venv/

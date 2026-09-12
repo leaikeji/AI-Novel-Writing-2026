@@ -16,11 +16,13 @@ from .middleware import NativeTaskRoute
 
 def chapter_projection(scope: Scope, snapshot: Mapping[str, Any],
                        task_prompt: str, *, required_ids: tuple[str, ...] = ()) -> TaskModelInputProjectionV1:
-    """Project the exact existing chapter prompt plus its visible genre fields.
+    """Project the chapter's already-frozen story blocks for method routing.
 
     The caller supplies a server-built snapshot and its actual prompt, not a
-    second story query. Full-prompt identity remains frozen even when routing's
-    bounded view is truncated. Audit/unused snapshot fields never enter sources.
+    second story query.  The full prompt remains the CAS visibility identity,
+    while prose-generation instructions, output formatting and budget
+    diagnostics stay outside the semantic router.  Only Context V4 blocks that
+    generation already sees can become routing content.
     """
     novel, chapter, brief = snapshot["novel"], snapshot["chapter"], snapshot["brief"]
     if (scope.kind != "novel" or str(scope.scope_id) != novel["id"]
@@ -35,23 +37,86 @@ def chapter_projection(scope: Scope, snapshot: Mapping[str, Any],
         "分类资料：" + json.dumps(classification, ensure_ascii=False, sort_keys=True)
     ) not in task_prompt:
         raise ValueError("classification absent from generation prompt")
-    sources = [SourceItem(key=key, text=value, kind=key)
-               for key, value in classification.items() if value]
+    writing_context = snapshot.get("writing_context")
+    envelope = (
+        writing_context.get("envelope")
+        if isinstance(writing_context, Mapping) else None
+    )
+    blocks = envelope.get("included_blocks") if isinstance(envelope, Mapping) else None
+    if not isinstance(blocks, (list, tuple)):
+        raise ValueError("chapter projection requires frozen Context V4 blocks")
+
+    sources: list[SourceItem] = []
     if required_ids:
-        sources.insert(0, SourceItem(key="author_method_requirements", kind="author_request",
-            text=json.dumps({"required_method_ids": list(required_ids)}, ensure_ascii=False, sort_keys=True)))
+        sources.append(SourceItem(
+            key="author_method_requirements",
+            kind="author_request",
+            text=json.dumps(
+                {"required_method_ids": list(required_ids)},
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        ))
+    sources.extend(
+        SourceItem(key=key, text=value, kind=key)
+        for key, value in classification.items() if value
+    )
     remaining = 80000 - sum(len(source.text) for source in sources)
-    clipped = task_prompt[:remaining]
-    for offset in range(0, len(clipped), 40000):
-        sources.append(SourceItem(key=f"task_prompt.{offset // 40000}",
-                                  text=clipped[offset:offset + 40000], kind="content"))
+    truncated = False
+    for block_index, block in enumerate(blocks):
+        if not isinstance(block, Mapping):
+            raise ValueError("chapter Context V4 block must be an object")
+        content = block.get("content")
+        if not isinstance(content, str):
+            raise ValueError("chapter Context V4 block content must be text")
+        if not content:
+            continue
+        if remaining <= 0:
+            truncated = True
+            continue
+        clipped = content[:remaining]
+        truncated |= len(clipped) != len(content)
+        for offset in range(0, len(clipped), 40000):
+            sources.append(SourceItem(
+                key=f"context_block.{block_index}.{offset // 40000}",
+                text=clipped[offset:offset + 40000],
+                kind="content",
+            ))
+        remaining -= len(clipped)
     return TaskModelInputProjectionV1(
         scope=scope, task="chapter_body", intent="write",
         source_version=canonical_hash({"brief_version": brief["version"],
             "draft_version": chapter["base_draft_version"],
             "revision_id": chapter["base_revision_id"], "content_hash": chapter["base_content_hash"]}),
         visibility_key=canonical_hash(task_prompt), sources=tuple(sources),
-        truncated=len(clipped) != len(task_prompt),
+        truncated=truncated,
+    )
+
+
+def chapter_has_semantic_story_content(snapshot: Mapping[str, Any]) -> bool:
+    """Ignore fixed prompt scaffolding when deciding whether routing needs IO."""
+
+    brief = snapshot.get("brief")
+    chapter = snapshot.get("chapter")
+    if not isinstance(brief, Mapping) or not isinstance(chapter, Mapping):
+        return False
+    direct = (
+        brief.get("expectation_text"),
+        brief.get("outline_text"),
+        brief.get("forbidden_text"),
+        chapter.get("base_content_markdown"),
+    )
+    if any(isinstance(value, str) and value.strip() for value in direct):
+        return True
+    writing_context = snapshot.get("writing_context")
+    envelope = writing_context.get("envelope") if isinstance(writing_context, Mapping) else None
+    blocks = envelope.get("included_blocks", ()) if isinstance(envelope, Mapping) else ()
+    return any(
+        isinstance(item, Mapping)
+        and item.get("source_kind") not in {"chapter_brief", "current_chapter_draft"}
+        and isinstance(item.get("content"), str)
+        and item["content"].strip()
+        for item in blocks
     )
 
 

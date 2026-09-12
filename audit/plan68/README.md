@@ -15,6 +15,7 @@
 - `shelter-state.md`：故事连续性账目。
 - `narration-checks.md`：朗读与声音验收。
 - `skill-review.md`：金手指Skill静态与UI可用性检查。
+- [S001原因诊断](./S001/诊断报告.md)：历史隔离复现强制重装丢失、普通重启保持；正式11项已在R019经UI恢复。9月12日计划69真实隔离生命周期与清理均PASS；作者随后取消桌面键盘专项，S001按范围决定关闭。见[最新续验](./S001/plan69-revalidation-20260912.md)、[历史代码验证](./S001/plan69-validation.md)和[逐步UI截图](./S001/plan69-ui.md)。
 - `issues/`：阻断及修复记录。
 
 执行结果：唯一小说已经通过真实可见 UI 完成，3 卷 9 章共 24,092 字，最短章 2,525 字；一键全书朗读、自动跨章/跨卷、部分生成后的缺口恢复均通过真实 UI 复验。第 5、6 章仍有 7 个本地 TTS `SHORT_CHINESE_DURATION_IMPLAUSIBLE` 质量失败，安全门禁没有放行可疑音频，因此九章零缺口完整实听尚未通过。完整结论见 `final-report.md`。

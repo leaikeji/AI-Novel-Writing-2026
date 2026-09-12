@@ -74,7 +74,7 @@ async def test_success_is_one_call_and_returns_immutable_content_free_evidence()
     assert len(evidence.decision_hash) == 64
     assert evidence.schema_version == "semantic-route-evidence/2"
     assert evidence.request_schema == "semantic-route-request/2"
-    assert evidence.prompt_contract == "semantic-routing-prompt/2"
+    assert evidence.prompt_contract == "semantic-routing-prompt/3"
     assert len(evidence.request_hash) == len(evidence.prompt_hash) == 64
     assert projection.sources[0].text not in evidence.model_dump_json()
 
@@ -122,6 +122,30 @@ async def test_default_closed_and_uncertain_remote_outcome_stop_generation():
     assert uncertain.value.remote_outcome_uncertain is True
 
 
+@pytest.mark.asyncio
+async def test_unobserved_cancellation_is_not_remote_outcome_uncertainty():
+    _, catalog, projection, preferences, plan = _case_and_plan()
+
+    async def cancelled_before_model(_prompt, _request):
+        return SemanticAdapterObservationV1(
+            status="cancelled",
+            text=None,
+            model_rounds=0,
+            tool_calls=0,
+            transport_attempts=1,
+        )
+
+    with pytest.raises(SemanticRouteIncomplete, match="cancelled") as stopped:
+        await complete_button_route(
+            projection,
+            catalog,
+            plan,
+            preferences,
+            semantic_call=cancelled_before_model,
+        )
+    assert stopped.value.remote_outcome_uncertain is False
+
+
 def test_semantic_evidence_participates_in_packet_identity():
     _, catalog, _, _, plan = _case_and_plan()
     # This test needs no loaded capability blocks: the unresolved deterministic
@@ -166,6 +190,14 @@ def test_semantic_evidence_participates_in_packet_identity():
     assert isinstance(
         restored_current.semantic_evidence, SemanticRouteEvidenceV2
     )
+    assert restored_current.semantic_evidence.prompt_contract == (
+        "semantic-routing-prompt/3"
+    )
+    legacy_evidence = SemanticRouteEvidenceV2.model_validate({
+        **restored_current.semantic_evidence.model_dump(mode="json"),
+        "prompt_contract": "semantic-routing-prompt/2",
+    })
+    assert legacy_evidence.prompt_contract == "semantic-routing-prompt/2"
     assert current.method_input_hash != semantic.method_input_hash
 
 

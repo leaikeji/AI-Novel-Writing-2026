@@ -1,4 +1,4 @@
-"""Shared server-only orchestration for the unreleased semantic branch."""
+"""Shared server-only orchestration for the default-closed semantic branch."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ async def complete_button_route(
     """Optionally complete unresolved dimensions with one injected call.
 
     ``semantic_call`` is server-owned and never accepted from an HTTP body.
-    Product endpoints pass ``None`` until a separate release gate is approved.
+    Product endpoints pass ``None`` unless their server-owned release gate is open.
     """
 
     if preferences.semantic_mode == "off":

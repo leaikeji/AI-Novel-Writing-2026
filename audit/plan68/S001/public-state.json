@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-09-11T08:25:00.649708+00:00",
+  "base_url": "http://127.0.0.1:18088",
+  "agent_id": "ai-novel-writer",
+  "public_gets_only": true,
+  "skills": {
+    "chapter-outline": false,
+    "character-craft": false,
+    "continuity-check": false,
+    "dialogue-craft": false,
+    "golden-finger-writing": false,
+    "novel-direction": false,
+    "prose-writing": false,
+    "scene-craft": false,
+    "story-foundation": false,
+    "style-review": false,
+    "suspense-writing": false
+  },
+  "other_agents": {
+    "default": {"installed_project_skill_count": 11, "enabled_project_skill_count": 0},
+    "QwenPaw_QA_Agent_0.2": {"installed_project_skill_count": 11, "enabled_project_skill_count": 0}
+  },
+  "catalog": {
+    "schema_version": "writing-skill-catalog/1",
+    "catalog_version": null,
+    "agent_id": "ai-novel-writer",
+    "chapter_body_available": false,
+    "creation_helper_available": false,
+    "novel_creative_available": false,
+    "document_creative_available": false,
+    "catalog_available": false,
+    "semantic_available": false,
+    "scope": null,
+    "capabilities": []
+  }
+}

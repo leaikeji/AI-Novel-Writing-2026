@@ -135,6 +135,7 @@ from .schemas import (
 )
 from .services import (
     BriefConflictError,
+    ChapterGenerationInProgressError,
     ChapterLengthValidationError,
     CandidateConflictError,
     DraftConflictError,
@@ -558,6 +559,15 @@ def _raise_domain(error: Exception) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail={"type": "restoration_plan_conflict", "current": error.current},
         ) from error
+    if isinstance(error, ChapterGenerationInProgressError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "chapter_generation_in_progress",
+                "message": str(error),
+                "job": error.job,
+            },
+        ) from error
     if isinstance(error, ChapterLengthValidationError):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -865,10 +875,41 @@ async def generation_jobs_create_body(
     http_request: Request = None,
 ) -> dict[str, object]:
     if request.writing_action is not None:
-        from .writing_skills.button import generate_managed_chapter
+        from .writing_skills.button import (
+            CHAPTER_CAPABILITIES,
+            chapter_semantic_routing_enabled,
+            generate_managed_chapter,
+        )
+        semantic_call_factory = None
+        if (
+            request.writing_action.preferences.semantic_mode == "auto"
+            and chapter_semantic_routing_enabled()
+        ):
+            from .writing_skills.semantic_runtime import public_semantic_call
+
+            def semantic_call_factory(session_id, verify_current, configured):
+                started_monotonic = time.monotonic()
+
+                async def verify_reply(reply):
+                    await verify_novel_model_reply(
+                        reply,
+                        configured=configured,
+                        probe=model_probe,
+                        started_monotonic=started_monotonic,
+                    )
+                    return reply_final_text(reply)
+
+                return public_semantic_call(
+                    ctx=ctx,
+                    session_id=session_id,
+                    capabilities=CHAPTER_CAPABILITIES,
+                    verify_current=verify_current,
+                    verify_reply=verify_reply,
+                )
         return await generate_managed_chapter(
             document_id=document_id, request=request, ctx=ctx,
             model_probe=model_probe, session=session, asgi_app=http_request.app if http_request else None,
+            semantic_call_factory=semantic_call_factory,
         )
     from .writing_skills.button import CHAPTER_CAPABILITIES
     from .writing_skills.load_policy import public_entry_released

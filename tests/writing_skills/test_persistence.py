@@ -2,9 +2,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import os
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
@@ -20,6 +23,16 @@ from backend.writing_skills.api import method_status
 
 OWNER = UUID("29cf94d9-a5c9-54ec-912c-5dfff8738c4c")
 WORKSPACE = UUID("f0e2e632-bc99-52d2-9916-bb906aa4da6e")
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def current_migration_head() -> str:
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "backend" / "migrations"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    if head is None:
+        raise RuntimeError("project migration head is unavailable")
+    return head
 
 
 @pytest.fixture(scope="module")
@@ -32,7 +45,7 @@ def engine():
         pytest.fail("refusing non-isolated S58 database")
     result = create_engine(url)
     with result.connect() as conn:
-        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "20260905_0042"
+        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == current_migration_head()
     yield result
     result.dispose()
 

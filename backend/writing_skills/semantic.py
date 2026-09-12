@@ -207,7 +207,7 @@ def apply_semantic_transport(
         status = transport.status if transport.status in {
             "timeout", "cancelled", "unknown", "failed"
         } else "failed"
-        return _unchanged(plan, status, 1)
+        return _unchanged(plan, status, 1 if transport.model_rounds == 1 else 0)
     if (
         transport.model_rounds != 1
         or transport.transport_attempts != 1

@@ -4,6 +4,7 @@ No client flag can open a release gate. The host model and enabled Skills are
 read through public APIs; no alternate Agent, Provider or runtime is created.
 """
 import asyncio
+import os
 from pathlib import Path
 import time
 from uuid import UUID
@@ -19,7 +20,8 @@ from ..schemas import GenerateChapterRequest
 from ..services import (
     prepare_chapter_generation, start_chapter_generation, build_chapter_generation_prompt,
     get_chapter_brief, complete_chapter_generation, fail_chapter_generation,
-    _generation_job_payload, ChapterLengthValidationError,
+    get_active_chapter_generation_job, _generation_job_payload,
+    ChapterGenerationInProgressError, ChapterLengthValidationError,
 )
 from ..embedding.contracts import RetrievalPurpose
 from ..embedding.writing import resolve_writing_position, retrieve_for_writing, deterministic_query
@@ -30,7 +32,7 @@ from .catalog import load_catalog, packaged_approvals
 from .loader import load_primary_blocks
 from .resolver import resolve_methods
 from .composer import compose_writing_request
-from .projection import chapter_routing_projection
+from .projection import chapter_has_semantic_story_content, chapter_routing_projection
 from .persistence import (Claim, lookup_action, read_action, claim_pending_action,
                           freeze_prepared_action, advance, ActionConflict, StaleFence)
 from .load_policy import PublicLoadCapabilities, ManagedMethodPolicy, MethodPolicyViolation, managed_method_request
@@ -40,8 +42,9 @@ from .semantic_runtime import SemanticCallFactory
 from .semantic_orchestration import complete_button_route, SemanticRouteIncomplete
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2] / "skills"
-# Server-owned, button-only release decision for the pinned QwenPaw 2.1.x
-# public middleware contract. Runtime observation still fails closed unless the
+CHAPTER_SEMANTIC_ROUTING_ENV = "AI_NOVEL_CHAPTER_SEMANTIC_ROUTING_ENABLED"
+# Server-owned, button-only release decision for the verified public middleware
+# contract. Runtime observation still fails closed unless the
 # factory and exactly one raw model call are seen. Native history/compression
 # capabilities remain false and cannot pass this same value's native gate.
 CHAPTER_CAPABILITIES = PublicLoadCapabilities(
@@ -49,6 +52,15 @@ CHAPTER_CAPABILITIES = PublicLoadCapabilities(
     pre_io_tool_control=True,
     no_unobserved_load_path=True,
 )
+
+
+def chapter_semantic_routing_enabled(environ=None) -> bool:
+    """Return the server-owned, fail-closed chapter semantic release gate."""
+
+    values = os.environ if environ is None else environ
+    return values.get(CHAPTER_SEMANTIC_ROUTING_ENV, "false").strip().lower() == "true"
+
+
 def _scope(session, document_id: UUID, tab_id: str) -> Scope:
     row = session.execute(select(Document.id, Document.kind, Novel.id.label("novel_id"),
         Novel.owner_id, Novel.workspace_id).join(Novel, Novel.id == Document.novel_id)
@@ -135,6 +147,36 @@ async def current_catalog(asgi_app, *, primary_skill: str = "prose-writing"):
     return catalog, primary
 
 
+def _retry_policy(claim, job):
+    job_state = str(job.get("state")) if isinstance(job, dict) else None
+    job_id = str(job.get("id")) if isinstance(job, dict) and job.get("id") else None
+    if job_state == "running":
+        return {
+            "decision": "blocked_active",
+            "reason": "该章节正在生成；重复操作只查看原任务，不会再次调用模型。",
+            "active_job_id": job_id,
+        }
+    if claim.state == "unknown":
+        return {
+            "decision": "confirm_required",
+            "reason": "上一次远端结果无法完全确认；重新生成前需作者确认可能产生重复模型调用。",
+            "active_job_id": None,
+        }
+    if claim.state in {"failed", "cancelled", "stale"} or (
+        claim.state == "dispatched" and job_state in {"ready", "failed"}
+    ):
+        return {
+            "decision": "allowed",
+            "reason": "原任务已结束，可以发起新的生成。",
+            "active_job_id": None,
+        }
+    return {
+        "decision": "blocked_active",
+        "reason": "原任务尚未结束；请继续查询，不会自动重新生成。",
+        "active_job_id": job_id,
+    }
+
+
 def _response(session, claim, *, job=None):
     _authorize(session, claim.scope)
     if job is None and claim.job_ref is not None:
@@ -149,6 +191,7 @@ def _response(session, claim, *, job=None):
     result.pop("generation_context_snapshot", None)
     result.pop("should_execute", None)
     result["writing_method"] = method_status(claim).model_dump(mode="json")
+    result["retry_policy"] = _retry_policy(claim, job)
     return result
 
 
@@ -187,6 +230,18 @@ async def generate_managed_chapter(*, document_id, request: GenerateChapterReque
         existing = lookup_action(session, identity, scope, client_hash, authorize=_authorize)
         if existing is not None:
             return _response(session, existing)
+        active = get_active_chapter_generation_job(session, document_id)
+        if active is not None:
+            raise HTTPException(409, {
+                "type": "chapter_generation_in_progress",
+                "message": "该章节已有正文生成任务正在进行，已保留原任务；不会重复调用模型。",
+                "job": active,
+                "retry_policy": {
+                    "decision": "blocked_active",
+                    "reason": "请查看或刷新原任务进度。",
+                    "active_job_id": active["id"],
+                },
+            })
         session.rollback()
         capabilities.require("button")
         if action.preferences.semantic_mode != "off" and semantic_call_factory is None:
@@ -254,7 +309,8 @@ async def generate_managed_chapter(*, document_id, request: GenerateChapterReque
         else:
             plan = resolve_methods(projection, catalog, action.preferences, primary_skill="prose-writing")
             semantic_evidence = None
-            if action.preferences.semantic_mode == "auto":
+            if (action.preferences.semantic_mode == "auto"
+                    and chapter_has_semantic_story_content(snapshot)):
                 claim = advance(session, claim, "routing_started")
                 await verify_current()
                 plan, semantic_evidence = await complete_button_route(
@@ -328,12 +384,43 @@ async def generate_managed_chapter(*, document_id, request: GenerateChapterReque
             raise
         if isinstance(error, HTTPException):
             raise
-        detail = (error.as_detail(job=_response(session, claim, job=job) if job is not None else None)
-                  if isinstance(error, ChapterLengthValidationError)
-                  else {"type": "managed_chapter_failed", "message": str(error)})
+        if isinstance(error, ChapterLengthValidationError):
+            detail = error.as_detail(
+                job=_response(session, claim, job=job) if job is not None else None
+            )
+        elif isinstance(error, ChapterGenerationInProgressError):
+            detail = {
+                "type": "chapter_generation_in_progress",
+                "message": str(error),
+                "job": error.job,
+                "retry_policy": {
+                    "decision": "blocked_active",
+                    "reason": "请查看或刷新原任务进度。",
+                    "active_job_id": error.job.get("id"),
+                },
+            }
+        elif isinstance(error, SemanticRouteIncomplete):
+            detail = {
+                "type": "semantic_route_incomplete",
+                "message": (
+                    "原请求结果尚未确认，未开始正文生成；请先查询原任务，不能自动重试。"
+                    if error.remote_outcome_uncertain
+                    else "未能确认本章适用方法，未开始正文生成；可选择“本次仅用通用方法”重新发起。"
+                ),
+            }
+        else:
+            detail = {"type": "managed_chapter_failed", "message": str(error)}
+        if job is not None and "job" not in detail:
+            detail["job"] = {
+                key: value for key, value in job.items()
+                if key not in {"generation_context_snapshot", "should_execute"}
+            }
         if claim is not None:
             detail["writing_method"] = method_status(claim).model_dump(mode="json")
-        status = 409 if isinstance(error, (ActionConflict, StaleFence)) else 502
+            detail.setdefault("retry_policy", _retry_policy(claim, job))
+        status = 409 if isinstance(
+            error, (ActionConflict, StaleFence, ChapterGenerationInProgressError)
+        ) else 502
         if isinstance(error, MethodPolicyViolation) and claim is None:
             status = 503
         if isinstance(error, ChapterLengthValidationError):

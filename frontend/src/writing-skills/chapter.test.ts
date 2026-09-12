@@ -16,7 +16,8 @@ function output(action: string, state = "dispatched") {
     method_input_hash: ["dispatched", "unknown"].includes(state) ? "a".repeat(64) : null,
     job_ref: `chapter:${JOB}`, selected_ids: ["suspense-writing"], omitted_ids: [],
     semantic_enabled: false, auxiliary_calls: 0,
-  } };
+  }, retry_policy: { decision: state === "unknown" ? "confirm_required" : "allowed",
+    reason: state === "unknown" ? "请先查询；重新生成需要作者确认" : "可以重新生成", active_job_id: null } };
 }
 function transport(handler: (path: string, init?: RequestInit) => Promise<unknown>): ChapterMethodRequest {
   return handler as ChapterMethodRequest;
@@ -37,6 +38,32 @@ describe("managed chapter HTTP adapter", () => {
     expect(sent[0]).not.toHaveProperty("method_mode");
     expect(sent[0]).toMatchObject({ writing_action: { preferences: { mode: "generic_only", semantic_mode: "off" } } });
     finish(null); await pending;
+  });
+  it("requests one semantic decision only when the server catalog released it", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const semantic = new ChapterMethodClient(binding, () => undefined, transport(async (_path, init) => {
+      const body = JSON.parse(String(init?.body)); bodies.push(body);
+      return output(body.writing_action.action_id);
+    }), undefined, { managed: true, catalog: true, semantic: true });
+    expect(semantic.semanticAvailable).toBe(true);
+    await semantic.start({ ...input, method_mode: "auto" });
+    await semantic.start({ ...input, method_mode: "generic_only" });
+    expect((bodies[0].writing_action as { preferences: unknown }).preferences).toEqual({
+      mode: "auto", semantic_mode: "auto",
+    });
+    expect((bodies[1].writing_action as { preferences: unknown }).preferences).toEqual({
+      mode: "generic_only", semantic_mode: "off",
+    });
+
+    const closed = new ChapterMethodClient(binding, () => undefined, transport(async (_path, init) => {
+      const body = JSON.parse(String(init?.body)); bodies.push(body);
+      return output(body.writing_action.action_id);
+    }), undefined, { managed: true, catalog: true, semantic: false });
+    expect(closed.semanticAvailable).toBe(false);
+    await closed.start({ ...input, method_mode: "auto" });
+    expect((bodies[2].writing_action as { preferences: unknown }).preferences).toEqual({
+      mode: "auto", semantic_mode: "off",
+    });
   });
   it("closed release gate preserves GET recovery and never hides an unresolved ticket", async () => {
     const values = new Map<string, string>();
@@ -69,9 +96,10 @@ describe("managed chapter HTTP adapter", () => {
   it("a dispatched method is not proof that its business job completed", async () => {
     const client = new ChapterMethodClient(binding, () => undefined, transport(async (_path, init) => ({
       ...output(JSON.parse(String(init?.body)).writing_action.action_id), state: "running", candidate: null,
+      retry_policy: { decision: "blocked_active", reason: "仍在生成", active_job_id: JOB },
     })));
     await client.start(input);
-    await expect(client.start(input)).rejects.toThrow("先查询");
+    await expect(client.start(input)).rejects.toThrow("仍在生成");
   });
   it("reload resumes its tab ID but a duplicated navigation replaces the inherited ID", async () => {
     const values = new Map<string, string>([["anw-writing-tab/1", DOC]]);
@@ -105,7 +133,8 @@ describe("managed chapter HTTP adapter", () => {
     const get = client.recover();
     finishPost(output(actionId));
     await post;
-    finishGet({ state: "method_pending", writing_method: { ...output(actionId, "claimed").writing_method, job_ref: null } });
+    finishGet({ state: "method_pending", writing_method: { ...output(actionId, "claimed").writing_method, job_ref: null },
+      retry_policy: { decision: "blocked_active", reason: "仍在处理", active_job_id: null } });
     await expect(get).rejects.toThrow("迟到");
     expect(client.getSnapshot().status?.state).toBe("dispatched");
     expect(client.getSnapshot().error).toBeNull();
@@ -167,6 +196,7 @@ describe("managed chapter HTTP adapter", () => {
         throw new ApiError(422, "too short", { type: "chapter_length_out_of_range",
           direction: "below_target", validation_state: "below_target", retryable: true,
           writing_method: output(action).writing_method,
+          retry_policy: output(action).retry_policy,
           job: { ...output(action), state: "failed", candidate: null } });
       }
       return output(action);
@@ -204,13 +234,42 @@ describe("managed chapter HTTP adapter", () => {
   it("keeps known unknown state and blocks automatic new generation", async () => {
     const call = vi.fn(async (_path: string, init?: RequestInit) => {
       const action = JSON.parse(String(init?.body)).writing_action.action_id;
-      throw new ApiError(502, "uncertain", { writing_method: output(action, "unknown").writing_method });
+      throw new ApiError(502, "uncertain", { writing_method: output(action, "unknown").writing_method,
+        retry_policy: output(action, "unknown").retry_policy });
     });
     const client = new ChapterMethodClient(binding, () => undefined, transport(call));
     await expect(client.start(input)).rejects.toThrow();
     expect(client.getSnapshot().status?.state).toBe("unknown");
     await expect(client.start(input)).rejects.toThrow("先查询");
     expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows an uncertain terminal result only after explicit author confirmation", async () => {
+    let calls = 0;
+    const client = new ChapterMethodClient(binding, () => undefined, transport(async (_path, init) => {
+      calls += 1;
+      const action = JSON.parse(String(init?.body)).writing_action.action_id;
+      if (calls === 1) throw new ApiError(502, "uncertain", {
+        writing_method: output(action, "unknown").writing_method,
+        retry_policy: output(action, "unknown").retry_policy,
+      });
+      return output(action);
+    }));
+    await expect(client.start(input)).rejects.toThrow("uncertain");
+    await expect(client.start(input)).rejects.toThrow("需要作者确认");
+    await client.start({ ...input, confirmed_unknown_retry: true });
+    expect(calls).toBe(2);
+  });
+
+  it("turns a cross-tab active-job conflict into progress instead of a failed ticket", async () => {
+    const client = new ChapterMethodClient(binding, () => undefined, transport(async () => {
+      throw new ApiError(409, "active", { type: "chapter_generation_in_progress",
+        message: "active", job: { ...output(DOC), id: JOB, kind: "body", state: "running", candidate: null },
+        retry_policy: { decision: "blocked_active", reason: "仍在生成", active_job_id: JOB } });
+    }));
+    await expect(client.start(input)).rejects.toMatchObject({ job: { id: JOB, state: "running" } });
+    expect(client.getSnapshot()).toMatchObject({ action: null, status: null, error: null });
+    expect(client.getRetryPolicy()?.decision).toBe("blocked_active");
   });
 
   it("rejects cross-action replies and revokes a switched chapter before sending", async () => {
@@ -231,7 +290,13 @@ describe("managed chapter HTTP adapter", () => {
       scope: { kind: "novel", scope_id: NOVEL, document_id: DOC, tab_id: "tab", owner_id: DOC, workspace_id: NOVEL } }));
     const catalog = await chapterMethodCatalog(DOC, NOVEL, "tab", get);
     expect(catalog.available).toBe(false);
+    expect(catalog.semanticAvailable).toBe(false);
     expect(catalog.displayNames["fixture-third"]).toBe("测试第三类");
     await expect(chapterMethodCatalog(DOC, NOVEL, "other", get)).rejects.toThrow("范围");
+
+    const contradictory = transport(async () => ({ schema_version: "writing-skill-catalog/1", agent_id: "ai-novel-writer",
+      chapter_body_available: false, semantic_available: true, capabilities: [],
+      scope: { kind: "novel", scope_id: NOVEL, document_id: DOC, tab_id: "tab", owner_id: DOC, workspace_id: NOVEL } }));
+    await expect(chapterMethodCatalog(DOC, NOVEL, "tab", contradictory)).rejects.toThrow("语义状态矛盾");
   });
 });

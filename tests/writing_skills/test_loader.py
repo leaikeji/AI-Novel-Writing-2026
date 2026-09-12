@@ -14,6 +14,8 @@ from backend.writing_skills.loader import (
 
 PROJECT = Path(__file__).resolve().parents[2]
 SKILL_ID = "suspense-writing"
+CURRENT_CAPABILITY_VERSION = "1.0.1"
+CURRENT_APPROVAL_REF = "plan70-routing-boundary-20260912"
 
 
 def test_primary_blocks_include_exact_explicit_dependencies_once():
@@ -42,8 +44,8 @@ def package(tmp_path):
     shutil.copytree(PROJECT / "skills" / SKILL_ID, module)
     candidate = inspect_release_candidate(root, SKILL_ID)
     approval = create_approval_record(candidate,
-                                     approval_ref="s57-suspense-golden-finger-20260903",
-                                     capability_version="1.0.0")
+                                     approval_ref=CURRENT_APPROVAL_REF,
+                                     capability_version=CURRENT_CAPABILITY_VERSION)
     return root, module, approval
 
 
@@ -132,11 +134,11 @@ def test_in_package_symlink_is_also_rejected(package):
 
 
 @pytest.mark.parametrize("before,after,error", [
-    ('capability_version: "1.0.0"', 'capability_version: "1.1.0"', "frontmatter_mismatch"),
+    ('capability_version: "1.0.1"', 'capability_version: "1.1.0"', "frontmatter_mismatch"),
     ("name: suspense-writing", "name: other-skill", "frontmatter_mismatch"),
     ("release_status: author_approved", "release_status: draft", "frontmatter_mismatch"),
     ("name: suspense-writing", "name: suspense-writing\nname: suspense-writing", "duplicate_frontmatter_key"),
-    ('capability_version: "1.0.0"', 'capability_version: &version "1.0.0"', "unsupported_frontmatter"),
+    ('capability_version: "1.0.1"', 'capability_version: &version "1.0.1"', "unsupported_frontmatter"),
 ])
 def test_frontmatter_contract_not_just_routing_self_assertion(package, before, after, error):
     root, module, approval = package
@@ -197,7 +199,7 @@ def test_crlf_bytes_are_not_normalized_before_hashing(package):
     path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
     candidate = inspect_release_candidate(root, SKILL_ID)
     approval = create_approval_record(candidate, approval_ref=candidate.declaration.approval_ref,
-                                     capability_version="1.0.0")
+                                     capability_version=candidate.declaration.capability_version)
     assert load_capability(root, SKILL_ID, approval).body.text.encode() == path.read_bytes()
 
 

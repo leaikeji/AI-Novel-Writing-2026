@@ -1,0 +1,35 @@
+{
+  "date": "2026-09-11",
+  "kind": "public-read-only-summary",
+  "base_url": "http://127.0.0.1:18088",
+  "command": ".venv/bin/python scripts/verify_qwenpaw_lab.py --skills-only",
+  "exit_code": 0,
+  "state_preserved": null,
+  "writing_skills_ready": true,
+  "scope_isolated": true,
+  "current_skill_state": {
+    "chapter-outline": true,
+    "character-craft": true,
+    "continuity-check": true,
+    "dialogue-craft": true,
+    "golden-finger-writing": true,
+    "novel-direction": true,
+    "prose-writing": true,
+    "scene-craft": true,
+    "story-foundation": true,
+    "style-review": true,
+    "suspense-writing": true
+  },
+  "missing_primary_skills": [],
+  "missing_methods": {},
+  "other_agent_enabled_skills": {
+    "QwenPaw_QA_Agent_0.2": [],
+    "default": []
+  },
+  "model_calls": 0,
+  "limits": [
+    "No pre-install baseline was supplied; preservation is unverified, not true.",
+    "Method files were checked in the local candidate tree; exact installed file identity was not compared.",
+    "This check does not verify model selection, method injection, or literary quality."
+  ]
+}

@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """Run the T1 isolated QwenPaw plugin lifecycle gate.
 
-The real mode deliberately creates exactly two disposable containers: one
+The real mode deliberately creates two disposable runtime containers: one
 QwenPaw 2.2.0 candidate host and one PostgreSQL 18 database.  Every mutable
 resource has a unique name and two ownership labels.  The candidate PawApp is
 installed through QwenPaw's public runtime API, force-reinstalled, uninstalled
 through the public DELETE endpoint, and installed again.
 
-This runner never invokes the repository Compose project or the legacy lab
-helper because both own long-lived project resources. It also never starts a
-TTS provider runtime, mounts model/token paths, or prints command output.
+The opt-in Skill gate binds project installer functions to this run's isolated
+resources and uses their one-shot offline installer. It never invokes Compose.
+It never starts a TTS provider runtime, mounts model/token paths, or prints
+command output.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import ExitStack
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -28,8 +31,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import quote
+from urllib.error import HTTPError
 
 try:
     from scripts.tts.candidate_migration_identity import (
@@ -226,6 +231,7 @@ class GateConfig:
     startup_timeout_seconds: int = 180
     registry_timeout_seconds: int = 45
     candidate_skill_ids: frozenset[str] = NOVEL_SKILLS
+    skill_state_check: bool = False
 
 
 @dataclass(frozen=True)
@@ -881,7 +887,7 @@ def validate_candidate(candidate: Path) -> tuple[Path, str, str]:
 def build_dry_run_plan(config: GateConfig, names: ResourceNames) -> dict[str, object]:
     """Return a secret-free plan.  This function performs no Docker calls."""
 
-    return {
+    plan = {
         "schema_version": 1,
         "gate": "T1-GATE-INSTALL",
         "mode": "dry-run",
@@ -951,6 +957,29 @@ def build_dry_run_plan(config: GateConfig, names: ResourceNames) -> dict[str, ob
             "formal_resources_allowed": False,
         },
     }
+    if config.skill_state_check:
+        plan["skill_state_check"] = True
+        plan["topology"]["offline_installer"] = {
+            "name": f"{names.qwenpaw_container}-plugin-installer",
+            "temporary": True, "network": "none", "ownership_labels": True,
+        }
+        plan["lifecycle"] = [
+            "initial-install-and-public-agent-initialization",
+            "mixed-hot-replacement-restart-and-repeat",
+            "all-disabled-replacement-preserves-state-but-not-ready",
+            "uninstall-zero-residue-and-mixed-snapshot-reinstall",
+            "stop-offline-install-still-stopped-start-narrow-restore",
+            "other-agents-unchanged-and-final-methods-ready",
+            "finally-remove-only-owned-run-resources",
+        ]
+        plan["public_api_operations"] = [
+            {"method": "POST", "path": "/api/plugins/install"},
+            {"method": "POST", "path": "/api/agents"},
+            {"method": "POST", "path": "/api/skills/batch-enable"},
+            {"method": "POST", "path": "/api/skills/batch-disable"},
+            {"method": "DELETE", "path": f"/api/plugins/{APP_ID}"},
+        ]
+    return plan
 
 
 class LifecycleGate:
@@ -985,6 +1014,7 @@ class LifecycleGate:
     def run(self) -> dict[str, object]:
         failure: GateError | None = None
         cleanup_failure: GateError | None = None
+        skill_locks = ExitStack()
         try:
             self._phase("preflight")
             self._preflight()
@@ -997,17 +1027,23 @@ class LifecycleGate:
             self._phase("install")
             self._install(force=False, step="initial-install")
             self._migrate_and_verify_head()
+            if self.config.skill_state_check:
+                self._initialize_skill_gate()
+                skill_locks.enter_context(self.skill_installer.installation_lock())
             initial_registry = self._wait_for_installed_contract()
             sentinels = self._create_sentinels()
             self._verify_sentinels(sentinels)
 
-            self._phase("force-reinstall")
-            self._install(force=True, step="force-reinstall")
-            self._migrate_and_verify_head()
-            force_registry = self._wait_for_installed_contract()
-            if force_registry != initial_registry:
-                raise GateError("FORCE_REINSTALL_REGISTRY_NOT_IDEMPOTENT")
-            self._verify_sentinels(sentinels)
+            if self.config.skill_state_check:
+                self._skill_replacements(initial_registry, sentinels)
+            else:
+                self._phase("force-reinstall")
+                self._install(force=True, step="force-reinstall")
+                self._migrate_and_verify_head()
+                force_registry = self._wait_for_installed_contract()
+                if force_registry != initial_registry:
+                    raise GateError("FORCE_REINSTALL_REGISTRY_NOT_IDEMPOTENT")
+                self._verify_sentinels(sentinels)
 
             self._phase("uninstall")
             status, payload = self._http_json(
@@ -1019,16 +1055,26 @@ class LifecycleGate:
             if status != 200 or not isinstance(payload, dict) or payload.get("id") != APP_ID:
                 raise GateError("PUBLIC_UNINSTALL_RESPONSE_INVALID")
             self._wait_for_uninstalled_contract()
+            if self.config.skill_state_check:
+                self._check_other_skill_states(uninstalled=True)
             self._verify_sentinels(sentinels)
 
             self._phase("reinstall")
             self._install(force=False, step="reinstall")
             self._migrate_and_verify_head()
+            if self.config.skill_state_check:
+                previous = self.skill_configuration.load_previous_skill_state(self.mixed_skill_snapshot)
+                if previous != self.mixed_skill_state:
+                    raise GateError("SKILL_SNAPSHOT_CHANGED")
+                self.skill_configuration.restore_skill_state(previous)
+                self._check_skill_state("mixed-reinstall", self.mixed_skill_state, ready=True)
             reinstall_registry = self._wait_for_installed_contract()
             if reinstall_registry != initial_registry:
                 raise GateError("REINSTALL_REGISTRY_NOT_RESTORED")
             self._verify_sentinels(sentinels)
             self._verify_novel_route(sentinels["novel_id"])
+            if self.config.skill_state_check:
+                self._skill_offline_roundtrip(initial_registry, sentinels)
             self.evidence.status = "passed"
         except GateError as error:
             failure = error
@@ -1046,6 +1092,7 @@ class LifecycleGate:
             self.evidence.checks["failure-context"] = {"detail": None}
             self._collect_failure_diagnostics()
         finally:
+            skill_locks.close()
             try:
                 self._cleanup()
             except GateError as error:
@@ -1074,6 +1121,286 @@ class LifecycleGate:
 
     def _phase(self, name: str) -> None:
         self.evidence.phases.append(name)
+
+    def _load_skill_adapters(self) -> None:
+        """Load private instances of project scripts, never patch host modules.
+
+        Bind the configuration factory directly. Snapshot selection, parsing
+        and restoration remain project functions; imports need no interception.
+        """
+        validate_resource_names(self.names)
+        if self.config.transcript is None or not self.config.transcript.is_absolute():
+            raise GateError("SKILL_GATE_REQUIRES_DURABLE_TRANSCRIPT")
+        self.config.transcript.parent.mkdir(parents=True, exist_ok=True)
+
+        def load(name: str) -> ModuleType:
+            spec = importlib.util.spec_from_file_location(
+                f"s69_{self.config.run_id}_{name}", PROJECT_ROOT / "scripts" / f"{name}.py"
+            )
+            if spec is None or spec.loader is None:
+                raise GateError("SKILL_PROJECT_SCRIPT_UNAVAILABLE")
+            module = importlib.util.module_from_spec(spec)
+            # Installer CLI logs may contain arbitrary host output. The gate
+            # records only its command hashes and explicit public-state data.
+            module.__dict__["print"] = lambda *_args, **_kwargs: None
+            spec.loader.exec_module(module)
+            module.BASE_URL = f"http://{self.names.qwenpaw_container}:8088"
+            return module
+
+        configuration = load("configure_qwenpaw_novel_agent")
+        configuration.SKILLS = sorted(self.config.candidate_skill_ids)
+        configuration.request_json = self._skill_request_json
+        installer = load("qwenpaw_lab_plugin")
+        installer.skill_configuration = lambda: configuration
+        installer.CONTAINER = self.names.qwenpaw_container
+        installer.INSTALLER_CONTAINER = f"{self.names.qwenpaw_container}-plugin-installer"
+        installer.QWENPAW_DATA_VOLUME = self.names.qwenpaw_data
+        installer.QWENPAW_SECRETS_VOLUME = self.names.qwenpaw_secrets
+        installer.QWENPAW_BACKUPS_VOLUME = self.names.qwenpaw_backups
+        installer.VOLUMES = (
+            f"{self.names.qwenpaw_data}:/app/working",
+            f"{self.names.qwenpaw_secrets}:/app/working.secret",
+            f"{self.names.qwenpaw_backups}:/app/working.backups",
+        )
+        installer.PLUGIN_DIR = self.config.candidate
+        installer.run = self._skill_installer_command
+        installer.wait_until_healthy = self._wait_for_services
+        verifier = load("verify_qwenpaw_lab")
+        verifier.SKILLS_ROOT = self.config.candidate / "skills"
+        verifier.NOVEL_SKILLS = set(self.config.candidate_skill_ids)
+        verifier.get_json = lambda path, *, agent_id=None: self._skill_request_json(path, agent_id=agent_id)
+        from backend.writing_skills.contracts import ApprovalRecord
+
+        approval_path = self.config.candidate / "backend/writing_skills/approved-capabilities.json"
+        approvals = tuple(ApprovalRecord.model_validate(item) for item in
+                          json.loads(approval_path.read_text(encoding="utf-8")))
+        verifier.packaged_approvals = lambda: approvals
+        self.skill_configuration = configuration
+        self.skill_installer = installer
+        self.skill_verifier = verifier
+        self.evidence.checks["skill-adapter-identity"] = {
+            "base_url": configuration.BASE_URL, "container": installer.CONTAINER,
+            "volumes": list(installer.VOLUMES), "installer": installer.INSTALLER_CONTAINER,
+            "transport": "existing-gate-container-loopback", "model_calls": 0,
+        }
+
+    def _skill_request_json(self, path: str, *, method: str = "GET",
+                            body: object = None, agent_id: str | None = None) -> object:
+        if path not in {"/api/agents", "/api/skills", "/api/skills/batch-enable", "/api/skills/batch-disable"}:
+            raise GateError("SKILL_ADAPTER_HTTP_OUT_OF_SCOPE")
+        if method != "GET" and path != "/api/agents" and agent_id != "ai-novel-writer":
+            raise GateError("SKILL_ADAPTER_WRITE_SCOPE_INVALID")
+        status, payload = self._http_json(
+            method, path, body=body, headers={"X-Agent-Id": agent_id} if agent_id else None,
+            expected_statuses=tuple(range(200, 600)), step=f"skill-{method}-{path.rsplit('/', 1)[-1]}",
+        )
+        if status not in (200, 201):
+            # Preserve the project's lost-acknowledgement/readback compensation
+            # behavior; never include response contents in the exception.
+            raise HTTPError(path, status, "isolated public Skill request failed", None, None)
+        return payload
+
+    def _skill_installer_command(self, *args: str, capture: bool = False,
+                                 capture_stderr: bool = False,
+                                 timeout_seconds: float | None = None, **kwargs) -> str:
+        """Bind the existing installer's Docker vectors to exact owned resources."""
+        installer = self.skill_installer
+        if (installer.CONTAINER != self.names.qwenpaw_container
+                or installer.INSTALLER_CONTAINER != f"{self.names.qwenpaw_container}-plugin-installer"
+                or installer.BASE_URL != f"http://{self.names.qwenpaw_container}:8088"
+                or installer.VOLUMES != (
+                    f"{self.names.qwenpaw_data}:/app/working",
+                    f"{self.names.qwenpaw_secrets}:/app/working.secret",
+                    f"{self.names.qwenpaw_backups}:/app/working.backups",
+                )):
+            raise GateError("SKILL_ADAPTER_IDENTITY_CHANGED")
+        command = list(args)
+        if kwargs or len(command) < 3 or command[0] != "docker":
+            raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        verb = command[1]
+        target = installer.CONTAINER
+        helper = installer.INSTALLER_CONTAINER
+        if verb == "create":
+            if (command[2:4] != ["--name", helper] or "--network" not in command
+                    or command[command.index("--network") + 1] != "none"):
+                raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+            mounted = [command[index + 1] for index, value in enumerate(command) if value == "-v"]
+            if mounted != list(installer.VOLUMES):
+                raise GateError("SKILL_INSTALL_VOLUME_SCOPE_INVALID")
+            command[2:2] = ["--label", self.ownership_labels[0], "--label", self.ownership_labels[1],
+                            "-e", "PIP_NO_INDEX=1", "-e", "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                            "-e", "AI_NOVEL_TTS_RUNTIME_ENABLED=false",
+                            "-e", "AI_NOVEL_TTS_PRODUCT_ENABLED=false",
+                            "-e", "AI_NOVEL_TTS_VALIDATION_ENABLED=false",
+                            "-e", "AI_NOVEL_TTS_REFERENCE_CLONE_ENABLED=false"]
+            self._remember("container", helper)
+        elif verb == "cp":
+            endpoints = [value.split(":", 1)[0] for value in command[2:] if ":" in value]
+            if len(command) != 4 or len(endpoints) != 1 or endpoints[0] not in {target, helper}:
+                raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        elif verb == "exec":
+            if command[2] != target:
+                raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        elif verb == "inspect":
+            if command[2] != target:
+                raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        elif verb in {"start", "wait", "logs"}:
+            if command[2:] != [helper]:
+                raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        elif verb == "rm":
+            if command[2:] != ["-f", helper]:
+                raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        elif verb == "ps":
+            if f"name=^/{helper}$" not in command:
+                raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        else:
+            raise GateError("SKILL_INSTALL_COMMAND_OUT_OF_SCOPE")
+        result = self._run_command(command, step=f"skill-installer-{verb}",
+                                   timeout=timeout_seconds or 120)
+        return (result.stdout + (result.stderr if capture_stderr else "")).strip() if capture else ""
+
+    def _other_skill_states(self) -> dict[str, dict[str, bool]]:
+        agents = self._skill_request_json("/api/agents")
+        if not isinstance(agents, dict) or not isinstance(agents.get("agents"), list):
+            raise GateError("SKILL_AGENT_INVENTORY_INVALID")
+        states: dict[str, dict[str, bool]] = {}
+        for agent in agents["agents"]:
+            agent_id = agent.get("id") if isinstance(agent, dict) else None
+            if not isinstance(agent_id, str) or not agent_id or agent_id in states:
+                raise GateError("SKILL_AGENT_INVENTORY_INVALID")
+            if agent_id == "ai-novel-writer":
+                continue
+            rows = self._skill_request_json("/api/skills", agent_id=agent_id)
+            if not isinstance(rows, list):
+                raise GateError("SKILL_STATE_INVENTORY_INVALID")
+            states[agent_id] = {}
+            for item in rows:
+                if (not isinstance(item, dict) or not isinstance(item.get("source"), str)
+                        or not isinstance(item.get("name"), str) or not item["name"]
+                        or type(item.get("enabled")) is not bool):
+                    raise GateError("SKILL_STATE_INVENTORY_INVALID")
+                key = f"{item['source']}:{item['name']}"
+                if key in states[agent_id]:
+                    raise GateError("SKILL_STATE_INVENTORY_INVALID")
+                states[agent_id][key] = item["enabled"]
+        return states
+
+    def _check_other_skill_states(self, *, uninstalled: bool = False, step: str | None = None) -> None:
+        observed = self._other_skill_states()
+        expected = self.other_skill_baseline
+        if uninstalled:
+            expected = {agent: {name: enabled for name, enabled in skills.items()
+                                if not name.startswith(f"plugin:{APP_ID}:")}
+                        for agent, skills in expected.items()}
+        self.evidence.checks[f"other-skills:{step or self.evidence.phases[-1]}"] = observed
+        if observed != expected:
+            raise GateError("OTHER_AGENT_SKILL_STATE_CHANGED")
+
+    def _check_skill_state(self, step: str, previous: dict[str, bool], *, ready: bool) -> None:
+        report = self.skill_verifier.verify_skill_state(previous)
+        self.evidence.checks[f"skills:{step}"] = report
+        if (report["state_preserved"] is not True or report["current_skill_state"] != previous
+                or report["writing_skills_ready"] is not ready or report["scope_isolated"] is not True):
+            raise GateError("SKILL_STATE_CONTRACT_FAILED", step)
+        self._check_other_skill_states(step=step)
+
+    def _save_skill_snapshot(self, step: str) -> Path:
+        path = self.config.transcript.parent / f"{self.config.run_id}-{step}-skill-state.json"
+        self.skill_installer.save_preinstall_skill_state(path)
+        self.evidence.checks[f"skill-snapshot:{step}"] = {
+            "path": str(path), "sha256": _sha256_bytes(path.read_bytes()),
+        }
+        return path
+
+    def _initialize_skill_gate(self) -> None:
+        self._phase("skill-initialization")
+        self._load_skill_adapters()
+        configuration = self.skill_configuration
+        with self.skill_installer.installation_lock():
+            agents = self._skill_request_json("/api/agents")
+            ids = {item["id"] for item in agents["agents"]}
+            if configuration.AGENT_ID in ids or "default" not in ids:
+                raise GateError("SKILL_INITIAL_AGENT_PRECONDITION_FAILED")
+            for agent_id in ("QwenPaw_QA_Agent_0.2", f"s69-observer-{self.config.run_id}"):
+                if agent_id not in ids:
+                    self._skill_request_json("/api/agents", method="POST", body={
+                        "id": agent_id, "name": agent_id, "language": "zh", "skill_names": [],
+                    })
+            self.other_skill_baseline = self._other_skill_states()
+            self.evidence.checks["other-skills:baseline"] = self.other_skill_baseline
+            self._skill_request_json("/api/agents", method="POST", body={
+                **configuration.desired_agent_payload(), "skill_names": [],
+            })
+            configuration.restore_skill_state(None, created=True)
+            all_on = {name: True for name in configuration.SKILLS}
+            self._check_skill_state("initialized", all_on, ready=True)
+            self._save_skill_snapshot("initialized")
+
+    def _skill_replacements(self, initial: RegistrySnapshot, sentinels: Mapping[str, str]) -> None:
+        self._phase("skill-mixed-setup")
+        self.mixed_skill_state = {name: True for name in self.skill_configuration.SKILLS}
+        optional = sorted(set(self.mixed_skill_state) - NOVEL_SKILLS)
+        if not optional:
+            raise GateError("SKILL_MIXED_OPTIONAL_MODULE_REQUIRED")
+        self.mixed_skill_state[optional[0]] = False
+        self.skill_configuration.restore_skill_state(self.mixed_skill_state)
+        self.mixed_skill_snapshot = self._save_skill_snapshot("mixed")
+        for step, expected, ready in (
+            ("mixed-hot", self.mixed_skill_state, True),
+            ("mixed-repeat", self.mixed_skill_state, True),
+            ("all-off-hot", {name: False for name in self.mixed_skill_state}, False),
+        ):
+            self._phase(step)
+            if not ready:
+                self.skill_configuration.restore_skill_state(expected)
+            snapshot = self._save_skill_snapshot(step)
+            self._check_skill_state(f"{step}-before", expected, ready=ready)
+            _, digest, head = validate_candidate(self.config.candidate)
+            if (digest, head) != (self.config.candidate_tree_sha256, self.config.candidate_migration_head):
+                raise GateError("CANDIDATE_TREE_IDENTITY_CHANGED")
+            self._read_staged_candidate_digest(step=f"candidate-{step}")
+            self.skill_installer.hot_install_packaged_plugin(snapshot)
+            self._check_skill_state(f"{step}-after", expected, ready=ready)
+            self._run_command(["docker", "restart", self.names.qwenpaw_container], step=f"restart-{step}", timeout=90)
+            self._wait_for_services()
+            self._migrate_and_verify_head()
+            if self._wait_for_installed_contract() != initial:
+                raise GateError("FORCE_REINSTALL_REGISTRY_NOT_IDEMPOTENT")
+            self._check_skill_state(f"{step}-restart", expected, ready=ready)
+            self._verify_sentinels(sentinels)
+
+    def _skill_offline_roundtrip(self, initial: RegistrySnapshot, sentinels: Mapping[str, str]) -> None:
+        self._phase("skill-offline")
+        snapshot = self._save_skill_snapshot("offline")
+        frozen = self.skill_configuration.load_previous_skill_state(snapshot)
+        descriptor = self._run_command(["docker", "inspect", self.names.qwenpaw_container],
+                                       step="freeze-offline-identity")
+        identity = json.loads(descriptor.stdout)[0]
+        self._run_command(["docker", "stop", "--timeout", "30", self.names.qwenpaw_container],
+                          step="stop-for-offline", timeout=90)
+        installer = self.skill_installer
+        installer.inspect_offline_maintenance_target(expected_container_id=identity["Id"],
+                                                     expected_image_id=identity["Image"])
+        result = installer.offline_install_stopped_candidate(
+            candidate=self.config.candidate, expected_tree_sha256=self.config.candidate_tree_sha256,
+            expected_head=self.config.candidate_migration_head, expected_container_id=identity["Id"],
+            expected_image_id=identity["Image"], confirm=installer.OFFLINE_MAINTENANCE_CONFIRMATION,
+            previous_skill_state=snapshot,
+        )
+        installer.inspect_offline_maintenance_target(expected_container_id=identity["Id"],
+                                                     expected_image_id=identity["Image"])
+        self.evidence.checks["skill-offline-install"] = {**result, "host_still_stopped": True}
+        if result.get("restore_status") != "pending_skill_restore":
+            raise GateError("OFFLINE_SKILL_RESTORE_MUST_BE_PENDING")
+        self._run_command(["docker", "start", self.names.qwenpaw_container], step="start-after-offline", timeout=90)
+        self._wait_for_services()
+        self._migrate_and_verify_head()
+        self.skill_configuration.restore_skill_state(frozen)
+        self._check_skill_state("offline-restored-final", frozen, ready=True)
+        if self._wait_for_installed_contract() != initial:
+            raise GateError("OFFLINE_REGISTRY_NOT_RESTORED")
+        self._verify_sentinels(sentinels)
+        self._verify_novel_route(sentinels["novel_id"])
 
     def _run_command(
         self,
@@ -1195,7 +1522,9 @@ class LifecycleGate:
                 timeout=30,
             )
         for kind, names in (
-            ("container", self.names.containers),
+            ("container", self.names.containers + (
+                (f"{self.names.qwenpaw_container}-plugin-installer",) if self.config.skill_state_check else ()
+            )),
             ("volume", self.names.volumes),
             ("network", (self.names.network,)),
         ):
@@ -1265,6 +1594,11 @@ class LifecycleGate:
             "network_internal": True,
             "outbound_network_route": False,
         }
+        if self.config.skill_state_check:
+            self.evidence.checks["isolated-topology"]["offline_installer"] = {
+                "name": f"{self.names.qwenpaw_container}-plugin-installer",
+                "temporary": True, "network": "none", "ownership_labels": True,
+            }
 
     def _postgres_run_command(self) -> list[str]:
         labels = self.ownership_labels
@@ -2090,7 +2424,7 @@ class LifecycleGate:
         method: str,
         path: str,
         *,
-        body: Mapping[str, object] | None = None,
+        body: object = None,
         headers: Mapping[str, str] | None = None,
     ) -> tuple[int, str | None, bytes]:
         if self.base_url != "http://127.0.0.1:8088":
@@ -2173,7 +2507,7 @@ class LifecycleGate:
         method: str,
         path: str,
         *,
-        body: Mapping[str, object] | None = None,
+        body: object = None,
         headers: Mapping[str, str] | None = None,
     ) -> tuple[int, bytes]:
         status, _cache_control, raw = self._raw_http_response(
@@ -2189,7 +2523,7 @@ class LifecycleGate:
         method: str,
         path: str,
         *,
-        body: Mapping[str, object] | None = None,
+        body: object = None,
         headers: Mapping[str, str] | None = None,
     ) -> tuple[int, object | None]:
         status, raw = self._raw_http_bytes(
@@ -2211,7 +2545,7 @@ class LifecycleGate:
         method: str,
         path: str,
         *,
-        body: Mapping[str, object] | None = None,
+        body: object = None,
         headers: Mapping[str, str] | None = None,
         expected_statuses: Sequence[int],
         step: str,
@@ -2235,7 +2569,7 @@ class LifecycleGate:
         method: str,
         path: str,
         *,
-        body: Mapping[str, object] | None = None,
+        body: object = None,
         headers: Mapping[str, str] | None = None,
         expected_statuses: Sequence[int],
         step: str,
@@ -2353,6 +2687,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="8-20 lowercase alphanumeric characters; generated when omitted.",
     )
     parser.add_argument("--transcript", type=Path, default=None)
+    parser.add_argument("--skill-state-check", action="store_true",
+                        help="Run Plan69 enablement preservation and offline restore gates.")
     parser.add_argument("--confirm", default=None)
     parser.add_argument("--startup-timeout-seconds", type=int, default=180)
     parser.add_argument("--registry-timeout-seconds", type=int, default=45)
@@ -2376,6 +2712,8 @@ def _validated_config(arguments: argparse.Namespace) -> tuple[GateConfig, str]:
         raise GateError("TRANSCRIPT_PATH_MUST_BE_ABSOLUTE")
     if arguments.transcript is not None and arguments.transcript.exists():
         raise GateError("TRANSCRIPT_ALREADY_EXISTS")
+    if arguments.skill_state_check and arguments.transcript is None:
+        raise GateError("SKILL_GATE_REQUIRES_DURABLE_TRANSCRIPT")
     return (
         GateConfig(
             mode=arguments.mode,
@@ -2388,6 +2726,7 @@ def _validated_config(arguments: argparse.Namespace) -> tuple[GateConfig, str]:
             startup_timeout_seconds=arguments.startup_timeout_seconds,
             registry_timeout_seconds=arguments.registry_timeout_seconds,
             candidate_skill_ids=candidate_skill_ids,
+            skill_state_check=arguments.skill_state_check,
         ),
         candidate_digest,
     )

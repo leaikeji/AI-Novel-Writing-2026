@@ -15,6 +15,25 @@ function status(state = "assembled") {
     method_input_hash: ["claimed", "routing_started", "route_ready"].includes(state) ? null : "a".repeat(64),
     job_ref: state === "dispatched" ? "job-1" : null })!;
 }
+function detailedStatus(state = "dispatched") {
+  return parseWritingMethodStatus({
+    schema_version: "writing-method-status/1", action_id: A, dispatch_id: D, state,
+    selected_ids: ["golden-finger-writing", "future-module"], omitted_ids: ["future-module"],
+    method_input_hash: "a".repeat(64), job_ref: state === "dispatched" ? "job-1" : null,
+    semantic_enabled: true, auxiliary_calls: 1,
+    details: {
+      schema_version: "writing-method-details/1", primary_skill: "prose-writing",
+      methods: [
+        { skill_id: "prose-writing", display_name: "正文写作", version: "0.4.0",
+          body_sha256: "b".repeat(64), reference_count: 2, basis: "primary", evidence_refs: [] },
+        { skill_id: "golden-finger-writing", display_name: "金手指机制", version: "1.0.0",
+          body_sha256: "c".repeat(64), reference_count: 1, basis: "semantic",
+          evidence_refs: ["task_prompt.0"] },
+      ],
+      reasons: ["semantic:golden-finger-writing"], estimated_tokens: 1200,
+    },
+  })!;
+}
 interface Element {
   type: unknown;
   props: Record<string, unknown>;
@@ -45,7 +64,7 @@ describe("actionable generation notices", () => {
 
   it.each([
     ["failed", "请查看任务失败原因"],
-    ["unknown", "不能自动重试"],
+    ["unknown", "明确重新生成"],
     ["stale", "请核对当前资料"],
   ])("preserves the action needed for %s without technical records", (state, action) => {
     const Receipt = createWritingMethodReceiptNotice(React);
@@ -80,5 +99,27 @@ describe("actionable generation notices", () => {
   it("does not manufacture a status when no evidence exists", () => {
     expect(writingMethodPresentation(null)).toBeNull();
     expect(createWritingMethodReceiptNotice(React)({ status: null })).toBeNull();
+  });
+
+  it("shows actual dispatched method blocks only when the chapter opts into success receipts", () => {
+    expect(writingMethodPresentation(detailedStatus("assembled"), true)).toBeNull();
+    const Receipt = createWritingMethodReceiptNotice(React);
+    expect(Receipt({ status: detailedStatus() })).toBeNull();
+    const root = Receipt({ status: detailedStatus(), showSuccess: true }) as Element;
+    const rendered = text(root);
+    expect(rendered).toContain("本次请求已提供：正文写作 · 金手指机制");
+    expect(rendered).toContain("金手指机制 v1.0.0 · 本章资料判断 · 依据：本章任务资料");
+    expect(rendered).toContain("因预算未装载：future-module");
+    expect(rendered).toContain("本次方法判断调用：1 次");
+    expect(JSON.stringify(root)).toContain('"type":"details"');
+    expect(JSON.stringify(root)).toContain('"type":"summary"');
+    expect(JSON.stringify(root)).not.toContain("这是一段小说正文");
+  });
+
+  it("uses the chapter-specific generic-only recovery hint without changing shared receipts", () => {
+    const shared = writingMethodPresentation(status("failed"))!;
+    const chapter = writingMethodPresentation(status("failed"), true)!;
+    expect(shared.description).not.toContain("仅用通用方法");
+    expect(chapter.description).toContain("本次仅用通用方法");
   });
 });

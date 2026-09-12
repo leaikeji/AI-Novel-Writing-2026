@@ -1554,6 +1554,7 @@ interface ChapterCreationWizardProps {
   novel: NovelRecord;
   open: boolean;
   volumes: VolumeRecord[];
+  targetVolumeId: string | null;
   characters: NovelCharacterRecord[];
   storylines: StorylineRecord[];
   foreshadows: ForeshadowRecord[];
@@ -1598,6 +1599,7 @@ function ChapterCreationWizard({
   novel,
   open,
   volumes,
+  targetVolumeId: requestedTargetVolumeId,
   characters,
   storylines,
   foreshadows,
@@ -1650,12 +1652,20 @@ function ChapterCreationWizard({
   );
 
   const chapterDocuments = canonicalChapterDocuments(novel);
-  const volumeScopeKey = [...volumes]
-    .sort((left: VolumeRecord, right: VolumeRecord) => left.position - right.position)
+  const orderedTargetVolumes = [...volumes]
+    .sort((left: VolumeRecord, right: VolumeRecord) => left.position - right.position);
+  const volumeScopeKey = orderedTargetVolumes
     .map((volume: VolumeRecord) => `${volume.id}:${volume.position}`)
     .join("|");
-  const targetVolume = [...volumes]
-    .sort((left: VolumeRecord, right: VolumeRecord) => right.position - left.position)[0];
+  const targetVolume = orderedTargetVolumes.find(
+    (volume: VolumeRecord) => String(volume.id) === requestedTargetVolumeId,
+  ) ?? orderedTargetVolumes[orderedTargetVolumes.length - 1];
+  const targetVolumeNumber = targetVolume
+    ? orderedTargetVolumes.findIndex((volume: VolumeRecord) => volume.id === targetVolume.id) + 1
+    : 0;
+  const targetVolumeLabel = targetVolume
+    ? volumeDisplayTitle(targetVolumeNumber, targetVolume.title)
+    : "未选择分卷";
   const targetVolumeId = draft?.volume_id ?? targetVolume?.id ?? null;
   const chapterNumber = targetVolumeId
     ? nextChapterOrdinalForVolume(novel, targetVolumeId) ?? chapterDocuments.length + 1
@@ -1849,7 +1859,7 @@ function ChapterCreationWizard({
       controller.abort();
       if (preparationAbortRef.current === controller) preparationAbortRef.current = null;
     };
-  }, [open, novel.id, preparationAttempt, volumeScopeKey]);
+  }, [open, novel.id, preparationAttempt, requestedTargetVolumeId, volumeScopeKey]);
 
   const closeWizard = () => {
     preparationAbortRef.current?.abort();
@@ -2235,6 +2245,7 @@ function ChapterCreationWizard({
     React.Fragment,
     null,
     h("div", { className: "mb-chapter-step-chip" }, `${step === 6 ? "最后一步" : `第${["一", "二", "三", "四", "五"][step - 1]}步`}：${CHAPTER_STEP_TITLES[step - 1]}`),
+    h("div", { className: "mb-chapter-target-volume", "aria-label": "目标分卷" }, h("span", null, "目标分卷"), h("strong", null, targetVolumeLabel)),
     h(
       "div",
       { className: "mb-chapter-steps", style: { "--mb-chapter-progress": `${((step - 1) / 5) * 100}%` } as any },
@@ -2412,6 +2423,7 @@ function ChapterCreationWizard({
     h("div", { className: "mb-chapter-result-heading" }, h("h3", null, "确认章节信息"), h("p", null, "请确认以下信息无误后创建章节")),
     h("article", { className: "mb-chapter-final-card" },
       h("dl", null,
+        h("div", null, h("dt", null, "目标分卷"), h("dd", null, targetVolumeLabel)),
         h("div", null, h("dt", null, "章节标题"), h("dd", null, chapterDisplayTitle(chapterNumber, chapterTitle))),
         h("div", null, h("dt", null, "目标字数"), h("dd", null, `${targetCharacterCount} 字`)),
         h("div", null, h("dt", null, "角色配置"), h("dd", null, `已选 ${requiredRoleIds.length + optionalRoleIds.length} 人，${allowNewRole ? "允许AI新增" : "不允许AI新增"}，${allowExitRole ? "允许AI退场" : "不允许AI退场"}`)),
@@ -4708,6 +4720,7 @@ export function StudioProjectView({
       novel,
       open: chapterWizardOpen,
       volumes,
+      targetVolumeId: selectedChapterVolume?.id ? String(selectedChapterVolume.id) : null,
       characters,
       storylines,
       foreshadows,

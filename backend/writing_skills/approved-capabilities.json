@@ -1,13 +1,13 @@
 [
   {
     "skill_id": "golden-finger-writing",
-    "capability_version": "1.0.0",
-    "approval_ref": "s57-suspense-golden-finger-20260903",
-    "routing_hash": "38661dbb8bf5aea1121ab1a75dce3b95eb63695e0710c6a8947fa6ccd4162745",
+    "capability_version": "1.0.1",
+    "approval_ref": "plan70-routing-boundary-20260912",
+    "routing_hash": "2ecab88f5564e1d475b17e769cbf26b1ce0cb5a6fa14b80779b4ff5396158293",
     "assets": [
       {
         "path": "SKILL.md",
-        "sha256": "8a633d560524c21d44674f596519a5c28a10c83786fb4fdb12804e629ea7640e"
+        "sha256": "0bb8ddba793282e2f3a905df2ce33141919d6d5316f91fd8f37c986adb1403fe"
       },
       {
         "path": "references/mechanisms.md",
@@ -17,13 +17,13 @@
   },
   {
     "skill_id": "suspense-writing",
-    "capability_version": "1.0.0",
-    "approval_ref": "s57-suspense-golden-finger-20260903",
-    "routing_hash": "2caf4857bd4b30f82b3f45dc28e24b609c34a95233332dd45299667e580f3804",
+    "capability_version": "1.0.1",
+    "approval_ref": "plan70-routing-boundary-20260912",
+    "routing_hash": "cb6cf84266828cf0ee5f74f78b4077fffe7c031bad34261765012cd6d0f78b7f",
     "assets": [
       {
         "path": "SKILL.md",
-        "sha256": "b4ebda9650032659078146790c11aa2dd4f7361cb353bd63babb8c4ca4d772a5"
+        "sha256": "ecd276c62089e60bbc37ce3ca1def4a4ee075f98949f59f3ec6f0db34291d28d"
       },
       {
         "path": "references/mystery-mechanisms.md",

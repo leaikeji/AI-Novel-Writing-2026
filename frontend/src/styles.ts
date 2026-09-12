@@ -591,6 +591,11 @@ export function ensureNovelStyles(): void {
     .anw-app .anw-workflow-panel > .qwenpaw-btn.anw-sync-button { color:#fff!important; border-color:#10b77a!important; background:#10b77a!important; }
     .anw-app .anw-workflow-panel > .qwenpaw-btn.anw-sync-button:disabled { color:#9aa09f!important; border-color:#dfe5e2!important; background:#eef3f1!important; }
     .anw-app .anw-workflow-panel > .qwenpaw-btn.anw-history-button { color:#4d5158!important; border-color:#d9dcdf!important; background:#fff!important; }
+    .anw-chapter-generation-status { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:12px; border:1px solid #ffd8c8; border-radius:10px; padding:12px 14px; color:#6b4a3d; background:#fff8f4; }
+    .anw-chapter-generation-status > div { min-width:0; }
+    .anw-chapter-generation-status strong { color:#51372e; }
+    .anw-chapter-generation-status p { margin:3px 0 0; color:#7b675f; font-size:12px; line-height:1.5; }
+    .anw-chapter-generation-status .qwenpaw-btn { flex:0 0 auto; }
     html .qwenpaw-modal-root .qwenpaw-modal.anw-save-volume-modal .qwenpaw-modal-body { padding:10px 26px 28px!important; }
     .anw-save-volume-body { display:grid; gap:18px; }
     .anw-save-volume-body > p { margin:0; color:#858991; line-height:1.7; }
@@ -1600,6 +1605,8 @@ export function ensureNovelStyles(): void {
     .mb-chapter-wizard { display:grid; min-height:470px; align-content:start; }
     .mb-chapter-wizard > .qwenpaw-alert { margin-bottom:14px; }
     .mb-chapter-step-chip { width:max-content; margin:0 auto 13px; border:1px solid #ffd8c9; border-radius:999px; padding:5px 14px; color:#ef7249; background:#fff1eb; font-size:12px; font-weight:700; }
+    .mb-chapter-target-volume { display:flex; align-items:center; justify-content:center; gap:8px; margin:-3px auto 15px; color:#8a8f98; font-size:12px; }
+    .mb-chapter-target-volume strong { color:#3d4148; font-size:13px; }
     .mb-chapter-steps { position:relative; display:flex; justify-content:space-between; margin:0 0 54px; }
     .mb-chapter-steps::before,.mb-chapter-steps::after { position:absolute; z-index:0; top:14px; left:14px; height:3px; content:""; }
     .mb-chapter-steps::before { right:14px; background:#e8e9eb; }

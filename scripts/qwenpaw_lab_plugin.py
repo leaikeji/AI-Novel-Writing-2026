@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+import fcntl
+from functools import wraps
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
@@ -79,6 +84,58 @@ VOLUMES = (
     f"{QWENPAW_SECRETS_VOLUME}:/app/working.secret",
     f"{QWENPAW_BACKUPS_VOLUME}:/app/working.backups",
 )
+
+_INSTALL_MUTEX = threading.RLock()
+_INSTALL_DEPTH = 0
+
+
+@contextmanager
+def installation_lock():
+    """Serialize project installation paths; never delete the shared lock file."""
+    global _INSTALL_DEPTH
+    with _INSTALL_MUTEX:
+        if _INSTALL_DEPTH:
+            yield
+            return
+        identity = hashlib.sha256(CONTAINER.encode()).hexdigest()[:24]
+        path = Path(tempfile.gettempdir()) / f"ai-novel-install-{identity}.lock"
+        descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise RuntimeError("another project install is in progress") from error
+            _INSTALL_DEPTH = 1
+            try:
+                yield
+            finally:
+                _INSTALL_DEPTH = 0
+        finally:
+            os.close(descriptor)
+
+
+def serialized_install(function):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        with installation_lock():
+            return function(*args, **kwargs)
+    return guarded
+
+
+def skill_configuration():
+    from scripts import configure_qwenpaw_novel_agent as configuration
+    configuration.BASE_URL = BASE_URL
+    return configuration
+
+
+def require_skill_baseline(path: Path | None, *, allow_new: bool = False) -> dict[str, bool]:
+    if path is None:
+        raise RuntimeError("plugin replacement requires --previous-skill-state")
+    previous = skill_configuration().load_previous_skill_state(select_preinstall_skill_state(path))
+    if not previous:
+        if not allow_new or skill_configuration().capture_skill_state()["skills"]:
+            raise RuntimeError("empty Skill baseline cannot replace an existing Agent")
+    return previous
 
 
 def run(
@@ -628,11 +685,13 @@ def reject_reported_plugin_install_failure(output: str) -> None:
         )
 
 
-def hot_install_packaged_plugin() -> None:
+@serialized_install
+def hot_install_packaged_plugin(previous_skill_state: Path | None = None) -> dict[str, object]:
     """Install through QwenPaw's public hot-load CLI in the running container."""
 
     if not PLUGIN_DIR.is_dir():
         raise RuntimeError(f"packaged plugin is missing: {PLUGIN_DIR}")
+    previous = require_skill_baseline(previous_skill_state, allow_new=True)
     wait_until_healthy()
     stage_path = f"/tmp/{PLUGIN_ID}-install-{uuid4().hex}"
     try:
@@ -654,12 +713,19 @@ def hot_install_packaged_plugin() -> None:
         reject_reported_plugin_install_failure(install_output)
     finally:
         run("docker", "exec", CONTAINER, "rm", "-rf", "--", stage_path)
+    if not previous:
+        return {"restore_status": "pending_agent_initialization", "state_preserved": None}
+    return skill_configuration().restore_skill_state(previous)
 
 
+@serialized_install
 def offline_plugin_command(
     *plugin_args: str,
     stage_plugin: bool = False,
+    previous_skill_state: Path | None = None,
 ) -> None:
+    replacing = bool(plugin_args and plugin_args[0] == "install")
+    previous = require_skill_baseline(previous_skill_state) if replacing else None
     image = run(
         "docker",
         "inspect",
@@ -718,6 +784,8 @@ def offline_plugin_command(
     finally:
         run("docker", "start", CONTAINER)
     wait_until_healthy()
+    if replacing:
+        skill_configuration().restore_skill_state(previous)
 
 
 def validate_offline_maintenance_candidate(
@@ -835,6 +903,7 @@ def validate_installer_candidate_copy(
         )
 
 
+@serialized_install
 def offline_install_stopped_candidate(
     *,
     candidate: Path,
@@ -843,7 +912,8 @@ def offline_install_stopped_candidate(
     expected_container_id: str,
     expected_image_id: str,
     confirm: str,
-) -> None:
+    previous_skill_state: Path | None = None,
+) -> dict[str, object]:
     """Install one immutable candidate while leaving the formal host stopped.
 
     This is the maintenance-window primitive used only after schema and role
@@ -856,6 +926,7 @@ def offline_install_stopped_candidate(
             "offline maintenance install requires --confirm "
             f"{OFFLINE_MAINTENANCE_CONFIRMATION}"
         )
+    require_skill_baseline(previous_skill_state)
     package = validate_offline_maintenance_candidate(
         candidate,
         expected_tree_sha256=expected_tree_sha256,
@@ -915,18 +986,20 @@ def offline_install_stopped_candidate(
         expected_tree_sha256=expected_tree_sha256,
         expected_head=expected_head,
     )
+    return {"restore_status": "pending_skill_restore", "state_preserved": None,
+            "previous_skill_state": str(previous_skill_state)}
 
 
-def save_preinstall_skill_state() -> Path:
+def save_preinstall_skill_state(output: Path | None = None) -> Path:
     """Keep a recoverable, public-only enablement snapshot before replacement."""
-    from scripts import configure_qwenpaw_novel_agent as configuration
-
-    configuration.BASE_URL = BASE_URL
-    state = configuration.capture_skill_state()
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="ai-novel-skill-state-",
-                                     suffix=".json", delete=False) as output:
-        json.dump(state, output, ensure_ascii=False, sort_keys=True)
-        path = Path(output.name)
+    if output is None or not output.is_absolute():
+        raise RuntimeError("capture requires an absolute durable --skill-state-output path")
+    state = skill_configuration().capture_skill_state()
+    with output.open("x", encoding="utf-8") as stream:
+        json.dump(state, stream, ensure_ascii=False, sort_keys=True)
+        stream.flush()
+        os.fsync(stream.fileno())
+    path = output
     print(f"Pre-install Skill state (retain for recovery): {path}")
     return path
 
@@ -947,15 +1020,12 @@ def select_preinstall_skill_state(provided: Path | None) -> Path:
     if not resolved.is_file():
         raise RuntimeError("--previous-skill-state must be a regular file")
 
-    from scripts import configure_qwenpaw_novel_agent as configuration
-
-    configuration.BASE_URL = BASE_URL
-    configuration.load_previous_skill_state(resolved)
+    skill_configuration().load_previous_skill_state(resolved)
     print(f"Pre-install Skill state (provided frozen snapshot): {resolved}")
     return resolved
 
 
-def install(previous_skill_state: Path | None = None) -> None:
+def install(previous_skill_state: Path | None = None, *, skill_state_output: Path | None = None) -> None:
     validate_install_intent()
     pnpm = pnpm_bin()
     pnpm_environ = pnpm_environment(pnpm)
@@ -964,28 +1034,37 @@ def install(previous_skill_state: Path | None = None) -> None:
     run(pnpm, "build", environ=pnpm_environ)
     run(sys.executable, "-m", "pytest", environ=test_environment())
     run(sys.executable, str(ROOT / "scripts" / "package_plugin.py"))
-    require_live_tts_flags_disabled()
-    previous_skill_state = select_preinstall_skill_state(previous_skill_state)
-    hot_install_packaged_plugin()
-    migrate_installed_plugin()
-    provision_installed_embedding_secret_store()
-    bootstrap_installed_digest_keyring()
-    provision_installed_validation_token()
-    run(sys.executable, str(ROOT / "scripts" / "configure_qwenpaw_novel_agent.py"),
-        "--previous-skill-state", str(previous_skill_state))
-    run(
-        "docker",
-        "exec",
-        CONTAINER,
-        "sh",
-        "-lc",
-        "if [ -f /app/working/workspaces/ai-novel-writer/BOOTSTRAP.md ]; then "
-        "mv /app/working/workspaces/ai-novel-writer/BOOTSTRAP.md "
-        "/app/working/workspaces/ai-novel-writer/BOOTSTRAP.md.completed; fi",
-    )
-    reload_installed_plugin()
-    wait_until_expected_tts_runtime()
-    verify()
+    with installation_lock():
+        require_live_tts_flags_disabled()
+        if previous_skill_state is not None and skill_state_output is not None:
+            raise RuntimeError("choose a frozen baseline or a new capture output, not both")
+        previous_skill_state = (save_preinstall_skill_state(skill_state_output) if skill_state_output is not None
+                                else select_preinstall_skill_state(previous_skill_state))
+        hot_install_packaged_plugin(previous_skill_state)
+        migrate_installed_plugin()
+        provision_installed_embedding_secret_store()
+        bootstrap_installed_digest_keyring()
+        provision_installed_validation_token()
+        run(sys.executable, str(ROOT / "scripts" / "configure_qwenpaw_novel_agent.py"),
+            "--previous-skill-state", str(previous_skill_state))
+        run(
+            "docker",
+            "exec",
+            CONTAINER,
+            "sh",
+            "-lc",
+            "if [ -f /app/working/workspaces/ai-novel-writer/BOOTSTRAP.md ]; then "
+            "mv /app/working/workspaces/ai-novel-writer/BOOTSTRAP.md "
+            "/app/working/workspaces/ai-novel-writer/BOOTSTRAP.md.completed; fi",
+        )
+        reload_installed_plugin()
+        wait_until_expected_tts_runtime()
+        previous = skill_configuration().load_previous_skill_state(previous_skill_state)
+        observed = skill_configuration().read_skill_state()
+        expected_enabled = set(skill_configuration().skill_enable_plan(created=not previous, previous=previous))
+        if any(observed.get(name) is not (name in expected_enabled) for name in skill_configuration().SKILLS):
+            raise RuntimeError("Skill state changed after restart; baseline retained, release stopped")
+        verify()
 
 
 def migrate_installed_plugin() -> None:
@@ -1202,6 +1281,7 @@ def verify() -> None:
     run(sys.executable, str(ROOT / "scripts" / "verify_qwenpaw_lab.py"))
 
 
+@serialized_install
 def uninstall(confirm: str) -> None:
     if confirm != PLUGIN_ID:
         raise RuntimeError(f"uninstall requires --confirm {PLUGIN_ID}")
@@ -1220,6 +1300,11 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
     install_parser = subparsers.add_parser("install")
     install_parser.add_argument("--previous-skill-state", type=Path)
+    install_parser.add_argument("--skill-state-output", type=Path)
+    capture_parser = subparsers.add_parser("capture-skills")
+    capture_parser.add_argument("--skill-state-output", required=True, type=Path)
+    restore_parser = subparsers.add_parser("restore-skills")
+    restore_parser.add_argument("--previous-skill-state", required=True, type=Path)
     subparsers.add_parser("verify")
     maintenance_parser = subparsers.add_parser("offline-install-stopped")
     maintenance_parser.add_argument("--candidate", required=True, type=Path)
@@ -1228,6 +1313,7 @@ def parse_args() -> argparse.Namespace:
     maintenance_parser.add_argument("--expected-container-id", required=True)
     maintenance_parser.add_argument("--expected-image-id", required=True)
     maintenance_parser.add_argument("--confirm", default="")
+    maintenance_parser.add_argument("--previous-skill-state", required=True, type=Path)
     uninstall_parser = subparsers.add_parser("uninstall")
     uninstall_parser.add_argument("--confirm", default="")
     return parser.parse_args()
@@ -1236,18 +1322,27 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.command == "install":
-        install(args.previous_skill_state)
+        install(args.previous_skill_state, skill_state_output=args.skill_state_output)
+    elif args.command == "capture-skills":
+        with installation_lock():
+            save_preinstall_skill_state(args.skill_state_output)
+    elif args.command == "restore-skills":
+        with installation_lock():
+            previous = require_skill_baseline(args.previous_skill_state)
+            print(json.dumps(skill_configuration().restore_skill_state(previous), ensure_ascii=False, indent=2))
     elif args.command == "verify":
         verify()
     elif args.command == "offline-install-stopped":
-        offline_install_stopped_candidate(
+        result = offline_install_stopped_candidate(
             candidate=args.candidate,
             expected_tree_sha256=args.expected_tree_sha256,
             expected_head=args.expected_head,
             expected_container_id=args.expected_container_id,
             expected_image_id=args.expected_image_id,
             confirm=args.confirm,
+            previous_skill_state=args.previous_skill_state,
         )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         uninstall(args.confirm)
 

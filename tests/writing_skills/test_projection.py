@@ -6,6 +6,7 @@ import pytest
 from backend.writing_skills.contracts import Scope
 from backend.creative_services import build_creative_generation_prompt
 from backend.writing_skills.projection import (
+    chapter_has_semantic_story_content,
     chapter_projection,
     creative_projection,
     native_projection,
@@ -97,15 +98,25 @@ def chapter_input():
     snapshot = {"novel": {"id": str(bound.scope_id), "genre": "悬疑", "subgenre": ""},
                 "chapter": {"document_id": str(bound.document_id), "base_draft_version": 1,
                             "base_revision_id": None, "base_content_hash": "a" * 64},
-                "brief": {"version": 1}, "audit_context": "不允许参与的旧稿"}
-    prompt = '分类资料：{"genre": "悬疑", "subgenre": ""}\n实际正文任务'
+                "brief": {"version": 1}, "audit_context": "不允许参与的旧稿",
+                "writing_context": {"envelope": {"included_blocks": [{
+                    "section": "chapter_requirements", "source_kind": "chapter_brief",
+                    "title": "章前要求", "content": "实际正文任务",
+                }]}}}
+    prompt = (
+        '只输出小说正文，不要解释。\n'
+        '分类资料：{"genre": "悬疑", "subgenre": ""}\n实际正文任务'
+    )
     return bound, snapshot, prompt
 
 
 def test_chapter_uses_actual_prompt_and_never_unused_snapshot_fields():
     bound, snapshot, prompt = chapter_input()
     first = chapter_projection(bound, snapshot, prompt)
-    assert [(s.kind, s.text) for s in first.sources] == [("genre", "悬疑"), ("content", prompt)]
+    assert [(s.kind, s.text) for s in first.sources] == [
+        ("genre", "悬疑"), ("content", "实际正文任务"),
+    ]
+    assert "只输出小说正文" not in "\n".join(s.text for s in first.sources)
     snapshot["audit_context"] = "改变禁止资料不能影响路由"
     snapshot["chapter"]["unused_private_copy"] = "另一份完整正文"
     assert chapter_projection(bound, snapshot, prompt) == first
@@ -121,12 +132,50 @@ def test_chapter_classification_and_scope_cannot_come_from_extra_context():
 
 def test_chapter_clipped_content_still_detects_full_prompt_drift():
     bound, snapshot, prompt = chapter_input()
-    first = chapter_projection(bound, snapshot, prompt + "文" * 90000)
-    second = chapter_projection(bound, snapshot, prompt + "文" * 90000 + "新")
+    snapshot["writing_context"]["envelope"]["included_blocks"][0]["content"] = (
+        "当前章要求" + "文" * 90000
+    )
+    first = chapter_projection(bound, snapshot, prompt + "旧生成封套")
+    second = chapter_projection(bound, snapshot, prompt + "新生成封套")
     assert first.truncated and sum(len(s.text) for s in first.sources) == 80000
     assert all(len(s.text) <= 40000 for s in first.sources)
     assert first.sources == second.sources
     assert first.visibility_key != second.visibility_key
+
+
+def test_chapter_uses_only_frozen_context_blocks_and_rejects_malformed_blocks():
+    bound, snapshot, prompt = chapter_input()
+    snapshot["writing_context"]["envelope"]["included_blocks"].append({
+        "section": "story_state", "source_kind": "story_fact",
+        "title": "已知事实", "content": "能力只能标记风险，不能直接修复。",
+    })
+    result = chapter_projection(bound, snapshot, prompt)
+    assert [item.text for item in result.sources if item.kind == "content"] == [
+        "实际正文任务", "能力只能标记风险，不能直接修复。",
+    ]
+    snapshot["writing_context"]["envelope"]["included_blocks"][1]["content"] = object()
+    with pytest.raises(ValueError, match="block content must be text"):
+        chapter_projection(bound, snapshot, prompt)
+
+
+def test_chapter_semantic_story_content_ignores_only_fixed_brief_scaffolding():
+    empty = {
+        "brief": {"expectation_text": "", "outline_text": "", "forbidden_text": ""},
+        "chapter": {"base_content_markdown": ""},
+        "writing_context": {"envelope": {"included_blocks": [{
+            "source_kind": "chapter_brief",
+            "content": '{"role_constraints":{"_v3":{}}}',
+        }]}},
+    }
+    assert chapter_has_semantic_story_content(empty) is False
+    assert chapter_has_semantic_story_content({
+        **empty, "brief": {**empty["brief"], "outline_text": "主角看见异常裂纹"},
+    }) is True
+    assert chapter_has_semantic_story_content({
+        **empty, "writing_context": {"envelope": {"included_blocks": [{
+            "source_kind": "outline_revision", "content": "能力只能标记风险",
+        }]}},
+    }) is True
 
 
 def creative_prompt(kind: str, snapshot: dict) -> str:

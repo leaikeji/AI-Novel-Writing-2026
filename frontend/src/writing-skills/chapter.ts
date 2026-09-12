@@ -13,15 +13,29 @@ export interface ChapterMethodInput {
   readonly method_mode?: "auto" | "generic_only";
   /** Immediate prior managed action, only for a server-verified length retry. */
   readonly retry_of_action_id?: string;
+  /** Local author acknowledgement for a server-declared uncertain prior result. */
+  readonly confirmed_unknown_retry?: boolean;
+}
+export type ChapterRetryDecision = "allowed" | "blocked_active" | "confirm_required";
+export interface ChapterRetryPolicy {
+  readonly decision: ChapterRetryDecision;
+  readonly reason: string;
+  readonly active_job_id: string | null;
 }
 export type ChapterMethodResult = (GenerationJobRecord | { state: "method_pending" }) & {
   writing_method: NonNullable<WritingMethodSnapshot["status"]>;
+  retry_policy: ChapterRetryPolicy;
 };
 export type ChapterMethodRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 export type ChapterTicketStorage = Pick<Storage, "getItem" | "setItem">;
 
 let pageTabId: string | null = null;
 class StaleMethodResponse extends Error {}
+export class ChapterGenerationInProgressError extends Error {
+  constructor(readonly job: GenerationJobRecord) {
+    super("该章节正在生成，已保留原任务；不会重复调用模型。");
+  }
+}
 /** A duplicated/new tab must not inherit another tab's recovery ticket.
  * Reload/back-forward may resume this tab; ordinary SPA transitions reuse it.
  */
@@ -42,9 +56,31 @@ function record(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null;
 }
 
+function retryPolicy(value: unknown): ChapterRetryPolicy | null {
+  const item = record(value);
+  if (!item || !["allowed", "blocked_active", "confirm_required"].includes(String(item.decision))
+    || typeof item.reason !== "string"
+    || (item.active_job_id !== null && item.active_job_id !== undefined && !isWritingActionId(item.active_job_id))) {
+    return null;
+  }
+  return Object.freeze({
+    decision: item.decision as ChapterRetryDecision,
+    reason: item.reason,
+    active_job_id: typeof item.active_job_id === "string" ? item.active_job_id : null,
+  });
+}
+
+function generationJob(value: unknown, documentId: string): GenerationJobRecord | null {
+  const job = record(value);
+  return job && isWritingActionId(job.id) && job.document_id === documentId
+    && job.kind === "body" && ["running", "ready", "failed"].includes(String(job.state))
+    ? job as unknown as GenerationJobRecord : null;
+}
+
 export interface ChapterMethodCatalog {
   readonly available: boolean;
   readonly catalogAvailable: boolean;
+  readonly semanticAvailable: boolean;
   readonly displayNames: Readonly<Record<string, string>>;
   readonly binding: WritingActionBinding;
 }
@@ -55,7 +91,7 @@ export async function chapterMethodCatalog(documentId: string, novelId: string, 
   const data = record(await request<unknown>(`/writing-skills?${query}`));
   const scope = record(data?.scope);
   if (data?.schema_version !== "writing-skill-catalog/1" || data.agent_id !== "ai-novel-writer"
-    || typeof data.chapter_body_available !== "boolean" || data.semantic_available !== false
+    || typeof data.chapter_body_available !== "boolean" || typeof data.semantic_available !== "boolean"
     || !Array.isArray(data.capabilities) || !scope || scope.kind !== "novel"
     || scope.scope_id !== novelId || scope.document_id !== documentId || scope.tab_id !== tabId
     || !isWritingActionId(scope.owner_id) || !isWritingActionId(scope.workspace_id)) {
@@ -74,7 +110,9 @@ export async function chapterMethodCatalog(documentId: string, novelId: string, 
   }
   const catalogAvailable = data.catalog_available !== false;
   if (data.chapter_body_available && !catalogAvailable) throw new Error("写作方法目录状态矛盾");
-  return { available: data.chapter_body_available, catalogAvailable, displayNames: names,
+  if (data.semantic_available && !data.chapter_body_available) throw new Error("写作方法语义状态矛盾");
+  return { available: data.chapter_body_available, catalogAvailable,
+    semanticAvailable: data.semantic_available, displayNames: names,
     binding: { ownerKey: scope.owner_id, workspaceKey: scope.workspace_id, scopeKind: "novel",
       scopeId: novelId, documentId, tabId, agentId: "ai-novel-writer" } };
 }
@@ -85,12 +123,14 @@ export class ChapterMethodClient {
   private pendingInput = "";
   private disposed = false;
   private jobState: string | null = null;
+  private retry: ChapterRetryPolicy | null = null;
 
   constructor(readonly binding: WritingActionBinding,
     private readonly onChange: (snapshot: WritingMethodSnapshot) => void,
     private readonly request: ChapterMethodRequest = apiRequest,
     private readonly storage?: ChapterTicketStorage,
-    private readonly availability = { managed: true, catalog: true }) {
+    private readonly availability: { managed: boolean; catalog: boolean; semantic?: boolean }
+      = { managed: true, catalog: true, semantic: false }) {
     const saved = storage?.getItem(this.ticketKey());
     if (saved) {
       if (saved.length > 4096) throw new Error("原写作动作恢复记录无效，请先核查历史任务");
@@ -109,13 +149,22 @@ export class ChapterMethodClient {
   }
 
   getSnapshot(): WritingMethodSnapshot { return this.snapshot; }
+  getRetryPolicy(): ChapterRetryPolicy | null { return this.retry; }
+  acknowledgeExternalJobFinished(jobId: string): void {
+    if (this.snapshot.action || this.retry?.decision !== "blocked_active"
+      || this.retry.active_job_id !== jobId) return;
+    this.jobState = null;
+    this.retry = Object.freeze({ decision: "allowed", reason: "原任务已结束，可以重新生成。",
+      active_job_id: null });
+  }
   get managedAvailable(): boolean { return this.availability.managed && this.availability.catalog; }
+  get semanticAvailable(): boolean { return this.managedAvailable && this.availability.semantic === true; }
 
-  private canBeginNextAction(): boolean {
+  private canBeginNextAction(confirmedUnknownRetry = false): boolean {
+    if (this.retry?.decision === "blocked_active") return false;
     if (!this.snapshot.action) return true;
-    const state = this.snapshot.status?.state;
-    return state === "failed" || state === "cancelled" || state === "stale"
-      || (state === "dispatched" && (this.jobState === "ready" || this.jobState === "failed"));
+    return this.retry?.decision === "allowed"
+      || (this.retry?.decision === "confirm_required" && confirmedUnknownRetry);
   }
 
   /** Called only by an explicit new author submission on the legacy branch. */
@@ -139,11 +188,13 @@ export class ChapterMethodClient {
     if (input.retry_of_action_id !== undefined && !isWritingActionId(input.retry_of_action_id)) {
       return Promise.reject(new Error("字数重写的原任务标识无效"));
     }
-    const encoded = JSON.stringify({ ...input, method_mode: mode });
+    const { confirmed_unknown_retry = false, ...requestInput } = input;
+    const encoded = JSON.stringify({ ...requestInput, method_mode: mode });
     if (this.pending) return encoded === this.pendingInput ? this.pending
       : Promise.reject(new Error("原操作仍在处理中，不能替换本次输入"));
-    if (!this.canBeginNextAction()) {
-      return Promise.reject(new Error("原任务结果尚未确认，请先查询原任务；不会自动重新生成。"));
+    if (!this.canBeginNextAction(confirmed_unknown_retry)) {
+      return Promise.reject(new Error(this.retry?.reason
+        || "原任务结果尚未确认，请先查询原任务；不会自动重新生成。"));
     }
     this.pendingInput = encoded;
     // Freeze the exact serialized input before hashing or other async work.
@@ -159,11 +210,13 @@ export class ChapterMethodClient {
     const action = createWritingAction(this.binding, fingerprint);
     this.storage?.setItem(this.ticketKey(), JSON.stringify(action));
     this.jobState = null;
+    this.retry = null;
     this.update({ action, status: null, connected: true, loading: true, error: null });
     const { method_mode, retry_of_action_id, ...chapterInput } = input;
     const body = JSON.stringify({ ...chapterInput, writing_action: { action_id: action.action_id,
       tab_id: this.binding.tabId, ...(retry_of_action_id ? { retry_of_action_id } : {}),
-      preferences: { mode: method_mode ?? "auto", semantic_mode: "off" } } });
+      preferences: { mode: method_mode ?? "auto",
+        semantic_mode: this.semanticAvailable && (method_mode ?? "auto") === "auto" ? "auto" : "off" } } });
     return this.execute(`/documents/${this.binding.documentId}/generation-jobs/body`,
       { method: "POST", body }, action.action_id);
   }
@@ -185,7 +238,9 @@ export class ChapterMethodClient {
       const raw = await this.request<unknown>(path, init);
       const data = record(raw);
       const status = parseWritingMethodStatus(data?.writing_method);
+      const policy = retryPolicy(data?.retry_policy);
       if (!data || !status || status.action_id !== actionId
+        || !policy
         || (data.state !== "method_pending" && (!isWritingActionId(data.id)
           || data.document_id !== this.binding.documentId || !["running", "ready", "failed"].includes(String(data.state))))) {
         throw new Error("写作结果与当前动作不匹配");
@@ -195,16 +250,31 @@ export class ChapterMethodClient {
         throw new StaleMethodResponse("忽略迟到的方法状态；当前记录保持不变");
       }
       this.jobState = String(data.state);
+      this.retry = policy;
       this.update({ ...this.snapshot, status, loading: false, error: null });
       return { ...data, writing_method: status } as ChapterMethodResult;
     } catch (error) {
       if (!(error instanceof StaleMethodResponse) && !this.disposed && this.snapshot.action?.action_id === actionId) {
-        const status = parseWritingMethodStatus(error instanceof ApiError ? record(error.detail)?.writing_method : null);
+        const detail = error instanceof ApiError ? record(error.detail) : null;
+        const activeJob = detail?.type === "chapter_generation_in_progress"
+          ? generationJob(detail.job, this.binding.documentId ?? "") : null;
+        if (activeJob?.state === "running") {
+          this.storage?.setItem(this.ticketKey(), "");
+          this.jobState = "running";
+          this.retry = retryPolicy(detail?.retry_policy) ?? {
+            decision: "blocked_active", reason: "该章节正在生成，请查看原任务进度。",
+            active_job_id: activeJob.id,
+          };
+          this.update({ action: null, status: null, connected: true, loading: false, error: null });
+          throw new ChapterGenerationInProgressError(activeJob);
+        }
+        const status = parseWritingMethodStatus(detail?.writing_method);
         if (this.snapshot.status && ((status && !canAdvanceWritingMethodStatus(this.snapshot.status, status))
           || (!status && this.snapshot.status.state === "dispatched"))) throw error;
-        const failedJob = error instanceof ApiError ? record(record(error.detail)?.job) : null;
+        const failedJob = record(detail?.job);
         if (status?.action_id === actionId && failedJob && failedJob.document_id === this.binding.documentId
           && failedJob.state === "failed") this.jobState = "failed";
+        this.retry = retryPolicy(detail?.retry_policy) ?? retryPolicy(failedJob?.retry_policy);
         this.update({ ...this.snapshot, status: status?.action_id === actionId ? status : this.snapshot.status,
           loading: false, error: status?.action_id === actionId ? null : "status_unavailable" });
       }

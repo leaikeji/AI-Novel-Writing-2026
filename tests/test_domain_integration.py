@@ -106,6 +106,7 @@ from backend.novel_lifecycle_errors import NovelLifecycleVersionConflict
 from backend.volume_chapter_titles import VolumeChapterContractError
 from backend.services import (
     CandidateConflictError,
+    ChapterGenerationInProgressError,
     ChapterLengthValidationError,
     ValidationError,
     adopt_candidate,
@@ -3218,7 +3219,7 @@ def test_stale_chapter_generation_is_failed_before_new_attempt(
     )
     stale = session.get(ChapterGenerationJob, UUID(first["id"]))
     assert stale is not None
-    stale.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stale.created_at = datetime.now(timezone.utc) - timedelta(minutes=15)
     session.commit()
 
     second = start_chapter_generation(
@@ -3270,7 +3271,7 @@ def test_fail_path_preserves_known_actual_model_and_terminal_state(
     assert replayed["failure_message"] == failed["failure_message"]
 
 
-def test_concurrent_forced_generation_allocates_unique_attempts(
+def test_concurrent_forced_generation_keeps_one_active_owner(
     session: Session,
 ) -> None:
     novel = create_novel(session, "pytest-并发生成尝试")
@@ -3288,24 +3289,33 @@ def test_concurrent_forced_generation_allocates_unique_attempts(
     barrier = Barrier(2)
     worker_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
 
-    def create_attempt() -> dict[str, object]:
+    def create_attempt() -> tuple[str, dict[str, object]]:
         with Session(worker_engine, expire_on_commit=False) as worker_session:
             barrier.wait(timeout=5)
-            return start_chapter_generation(
-                worker_session,
-                document_id,
-                expected_brief_version=brief["version"],
-                force_new=True,
-            )
+            try:
+                return "created", start_chapter_generation(
+                    worker_session,
+                    document_id,
+                    expected_brief_version=brief["version"],
+                    force_new=True,
+                )
+            except ChapterGenerationInProgressError as error:
+                return "blocked", error.job
 
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
-            jobs = list(executor.map(lambda _: create_attempt(), range(2)))
+            outcomes = list(executor.map(lambda _: create_attempt(), range(2)))
     finally:
         worker_engine.dispose()
 
-    assert sorted(int(job["attempt"]) for job in jobs) == [1, 2]
-    assert len({str(job["id"]) for job in jobs}) == 2
+    assert sorted(kind for kind, _ in outcomes) == ["blocked", "created"]
+    assert {str(job["id"]) for _, job in outcomes} == {
+        str(next(job["id"] for kind, job in outcomes if kind == "created"))
+    }
+    assert session.scalar(select(func.count(ChapterGenerationJob.id)).where(
+        ChapterGenerationJob.document_id == document_id,
+        ChapterGenerationJob.state == "running",
+    )) == 1
 
 
 def test_cover_settings_and_narrative_foreshadow_progress_persist(

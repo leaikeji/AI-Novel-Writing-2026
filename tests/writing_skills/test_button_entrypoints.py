@@ -14,7 +14,10 @@ from sqlalchemy.orm import Session
 from backend.embedding.writing import resolve_writing_position
 from backend.models import ChapterGenerationJob, Novel
 from backend.services import (build_chapter_generation_prompt, create_novel,
-                              save_chapter_brief, start_chapter_generation, prepare_chapter_generation, ValidationError)
+                              ChapterGenerationInProgressError,
+                              fail_chapter_generation, save_chapter_brief,
+                              start_chapter_generation, prepare_chapter_generation,
+                              ValidationError)
 from backend.writing_skills.contracts import (
     ActionIdentity, FrozenRouteRequest, MethodBlock, MethodPreferences, Scope,
     SkillInvocationPlanV1, SkillInjectionPacketV1,
@@ -46,6 +49,9 @@ def chapter(engine, monkeypatch):
         scope = Scope(owner_id=novel.owner_id, workspace_id=novel.workspace_id,
             kind="novel", scope_id=novel.id, document_id=document_id, tab_id="s58-button")
         projection = chapter_projection(scope, snapshot, build_chapter_generation_prompt(snapshot))
+        # The legacy job exists only to freeze a real Context V4 fixture.  It
+        # must be terminal before a managed action can claim the chapter.
+        fail_chapter_generation(session, UUID(legacy["id"]), "fixture snapshot captured")
     return document_id, kwargs, projection, legacy
 
 
@@ -85,22 +91,26 @@ def test_job_and_dispatch_commit_together_and_method_changes_hash(engine, chapte
     assert job["input_hash"] != legacy["input_hash"]
     assert "skill_invocation" not in legacy["generation_context_snapshot"]
     assert "dispatch_id" not in build_chapter_generation_prompt(job["generation_context_snapshot"])
+    with Session(engine) as session:
+        fail_chapter_generation(session, UUID(job["id"]), "first method fixture complete")
     other = assembled(engine, projection, text="new method version")
     with Session(engine) as session:
         changed = start_chapter_generation(session, document_id, **kwargs, method_dispatch=other)
     assert changed["input_hash"] != job["input_hash"]
 
 
-def test_new_action_same_methods_reuses_existing_job_without_rewriting_it(engine, chapter):
+def test_new_action_same_methods_cannot_attach_to_an_active_job(engine, chapter):
     document_id, kwargs, projection, _ = chapter
     first, second = assembled(engine, projection), assembled(engine, projection)
     with Session(engine) as session:
         job = start_chapter_generation(session, document_id, **kwargs, method_dispatch=first)
     with Session(engine) as session:
-        reused = start_chapter_generation(session, document_id, **kwargs, method_dispatch=second)
-    assert reused["id"] == job["id"] and reused["should_execute"] is False
-    assert reused["generation_context_snapshot"]["skill_invocation"]["dispatch_id"] == str(first.id)
-    assert read_claim(engine, second).job_ref == f"chapter:{job['id']}"
+        with pytest.raises(ChapterGenerationInProgressError) as caught:
+            start_chapter_generation(session, document_id, **kwargs, method_dispatch=second)
+        session.rollback()
+    assert caught.value.job["id"] == job["id"]
+    assert read_claim(engine, second).state == "assembled"
+    assert read_claim(engine, second).job_ref is None
 
 
 def test_failed_commit_leaves_no_orphan_job_or_false_dispatch(engine, chapter):

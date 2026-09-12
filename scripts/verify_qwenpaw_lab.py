@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping
 import json
 import os
@@ -19,7 +20,15 @@ NOVEL_AGENT_ID = "ai-novel-writer"
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
-from backend.writing_skills.catalog import published_skill_ids
+from backend.writing_skills.catalog import (
+    load_catalog, packaged_approvals, published_skill_ids,
+)
+from backend.writing_skills.loader import CatalogError, load_primary_blocks
+from backend.writing_skills.primary import (
+    CREATIVE_PRIMARY_BY_KIND,
+    PRIMARY_REFERENCES_BY_SKILL,
+    SELECTION_PRIMARY_BY_OPERATION,
+)
 from backend.narration.official_presets import (
     CANONICAL_CHAPTER_VERIFIED_PRESET_IDS,
     OFFICIAL_PRESET_IDS,
@@ -27,6 +36,7 @@ from backend.narration.official_presets import (
 )
 
 NOVEL_SKILLS = set(published_skill_ids(_PROJECT_ROOT / "skills"))
+SKILLS_ROOT = _PROJECT_ROOT / "skills"
 NOVEL_TOOLS = {
     "novel_get_context",
     "novel_get_document",
@@ -389,11 +399,138 @@ def verify_tts_http_contracts() -> dict[str, object]:
 def plugin_skills(agent_id: str) -> dict[str, dict[str, object]]:
     payload = get_json("/api/skills", agent_id=agent_id)
     assert isinstance(payload, list)
-    return {
-        str(item["name"]): item
-        for item in payload
-        if isinstance(item, dict) and item.get("source") == f"plugin:{APP_ID}"
+    skills: dict[str, dict[str, object]] = {}
+    for item in payload:
+        if not isinstance(item, dict) or item.get("source") != f"plugin:{APP_ID}":
+            continue
+        name = item.get("name")
+        assert isinstance(name, str) and name, "invalid public Skill name"
+        assert name not in skills, "duplicate public Skill name"
+        assert type(item.get("enabled")) is bool, "unknown public Skill state"
+        skills[name] = item
+    return skills
+
+
+def _agent_ids() -> set[str]:
+    payload = get_json("/api/agents")
+    assert isinstance(payload, dict) and isinstance(payload.get("agents"), list)
+    agent_ids: set[str] = set()
+    for agent in payload["agents"]:
+        assert isinstance(agent, dict)
+        agent_id = agent.get("id")
+        assert isinstance(agent_id, str) and agent_id
+        assert agent_id not in agent_ids, "duplicate public Agent id"
+        agent_ids.add(agent_id)
+    return agent_ids
+
+
+def verify_skill_state(previous: dict[str, bool] | None = None) -> dict[str, object]:
+    """Read public Agent scopes and trusted local methods; never restore state.
+
+    Readiness covers method availability only, not model execution or quality.
+    Scope isolation is the current public state; lifecycle callers must retain
+    their before/after inventories to prove other Agents were unchanged.
+    """
+    return _verify_skill_state(previous, agent_ids=_agent_ids())
+
+
+def _verify_skill_state(
+    previous: dict[str, bool] | None, *, agent_ids: set[str],
+) -> dict[str, object]:
+    if previous is not None and (
+        not isinstance(previous, dict) or not previous
+        or any(not isinstance(name, str) or not name or type(enabled) is not bool
+               for name, enabled in previous.items())
+    ):
+        raise ValueError("previous Skill state must be a nonempty explicit boolean snapshot")
+    scopes = {agent_id: plugin_skills(agent_id) for agent_id in sorted(agent_ids)}
+    target = scopes.get(NOVEL_AGENT_ID, {})
+    current = {name: item["enabled"] for name, item in target.items()}
+    enabled_scope = {
+        agent_id: sorted(name for name, item in skills.items() if item["enabled"] is True)
+        for agent_id, skills in scopes.items()
     }
+    differences = {
+        name: {"previous": previous[name], "current": current.get(name)}
+        for name in sorted(set(previous or {}) & NOVEL_SKILLS)
+        if current.get(name) is not previous[name]
+    }
+    # Only supported old items participate; absent supported items are failures.
+    state_preserved = None if previous is None else not differences
+    task_skills = {
+        "chapter_body": "prose-writing",
+        **CREATIVE_PRIMARY_BY_KIND,
+        **{f"selection_edit:{operation}": skill
+           for operation, skill in SELECTION_PRIMARY_BY_OPERATION.items()},
+    }
+    primary_status: dict[str, dict[str, object]] = {}
+    missing_methods: dict[str, str] = {}
+    for skill_id in sorted(set(task_skills.values())):
+        reason = None
+        references = PRIMARY_REFERENCES_BY_SKILL.get(skill_id)
+        try:
+            if references is None:
+                raise CatalogError("unsupported_primary_skill")
+            load_primary_blocks(SKILLS_ROOT, skill_id, references)
+        except CatalogError as error:
+            missing_methods[skill_id] = str(error)
+            reason = str(error)
+        if skill_id not in target:
+            reason = "not_registered"
+        elif current[skill_id] is not True:
+            reason = "disabled"
+        primary_status[skill_id] = {"ready": reason is None, "reason": reason}
+    task_readiness = {
+        task: {"primary_skill": skill_id, **primary_status[skill_id]}
+        for task, skill_id in sorted(task_skills.items())
+    }
+    # Optional classification methods retain their own approval/file checks;
+    # disabling one never turns every unrelated writing task into a failure.
+    approvals = packaged_approvals()
+    optional_ids = {record.skill_id for record in approvals}
+    optional_errors: dict[str, str] = {}
+    try:
+        catalog = load_catalog(SKILLS_ROOT, approvals, frozenset(optional_ids))
+        available_optional = {item.declaration.skill_id for item in catalog.capabilities}
+        optional_errors = dict(item.split(":", 1) for item in catalog.rejected)
+    except CatalogError as error:
+        available_optional = set()
+        optional_errors = {name: str(error) for name in optional_ids}
+    optional_status = {
+        name: {
+            "registered": name in target,
+            "enabled": current.get(name),
+            "method_available": name in available_optional,
+            "ready": current.get(name) is True and name in available_optional,
+            "method_error": optional_errors.get(name),
+        }
+        for name in sorted(optional_ids)
+    }
+    return {
+        "state_preserved": state_preserved,
+        "writing_skills_ready": all(item["ready"] for item in primary_status.values()),
+        "scope_isolated": all(not names for agent_id, names in enabled_scope.items()
+                              if agent_id != NOVEL_AGENT_ID),
+        "current_skill_state": current,
+        "skill_state_differences": differences,
+        "added_skills": sorted(NOVEL_SKILLS - set(previous)) if previous is not None else [],
+        "removed_skills": sorted(set(previous) - NOVEL_SKILLS) if previous is not None else [],
+        "missing_primary_skills": sorted(name for name, item in primary_status.items()
+                                         if not item["ready"]),
+        "missing_methods": missing_methods,
+        "task_readiness": task_readiness,
+        "optional_skill_status": optional_status,
+        "registered_novel_skills": {agent_id: sorted(skills) for agent_id, skills in scopes.items()},
+        "enabled_novel_skills": enabled_scope,
+    }
+
+
+def _assert_skills_ready(result: dict[str, object]) -> None:
+    assert (
+        result["writing_skills_ready"] is True
+        and result["state_preserved"] is not False
+        and result["scope_isolated"] is True
+    ), "Skill verification failed: " + json.dumps(result, ensure_ascii=False)
 
 
 def expected_narration_production() -> dict[str, object]:
@@ -423,7 +560,7 @@ def expected_narration_production() -> dict[str, object]:
     }
 
 
-def verify() -> dict[str, object]:
+def verify(previous: dict[str, bool] | None = None) -> dict[str, object]:
     assert EXPECTED_TTS_RUNTIME in {"disabled", "ready"}
     assert EXPECTED_TTS_PRODUCT in {"disabled", "ready"}
     assert EXPECTED_TTS_VALIDATION in {"disabled", "ready"}
@@ -513,10 +650,7 @@ def verify() -> dict[str, object]:
         assert production_selection_fingerprint is None
     tts_http_contracts = verify_tts_http_contracts()
 
-    agent_payload = get_json("/api/agents")
-    assert isinstance(agent_payload, dict)
-    agents = {agent["id"]: agent for agent in agent_payload.get("agents", [])}
-    agent_ids = set(agents)
+    agent_ids = _agent_ids()
     assert NOVEL_AGENT_ID in agent_ids
     assert {"default", "QwenPaw_QA_Agent_0.2"}.issubset(agent_ids)
     effective_model = get_json(
@@ -534,17 +668,11 @@ def verify() -> dict[str, object]:
     assert runtime_model.get("provider_id") == active_llm.get("provider_id")
     assert runtime_model.get("model_id") == active_llm.get("model")
 
-    enabled_scope: dict[str, list[str]] = {}
+    skill_result = _verify_skill_state(previous, agent_ids=agent_ids)
+    _assert_skills_ready(skill_result)
+    registered = skill_result["registered_novel_skills"]
     for agent_id in ("default", "QwenPaw_QA_Agent_0.2", NOVEL_AGENT_ID):
-        skills = plugin_skills(agent_id)
-        assert set(skills) == NOVEL_SKILLS, f"unexpected novel skills in {agent_id}"
-        enabled_scope[agent_id] = sorted(
-            name for name, item in skills.items() if item.get("enabled") is True
-        )
-
-    assert enabled_scope["default"] == []
-    assert enabled_scope["QwenPaw_QA_Agent_0.2"] == []
-    assert set(enabled_scope[NOVEL_AGENT_ID]) <= NOVEL_SKILLS
+        assert set(registered[agent_id]) == NOVEL_SKILLS, f"unexpected novel skills in {agent_id}"
 
     enabled_tools: dict[str, list[str]] = {}
     for agent_id in sorted(agent_ids):
@@ -601,16 +729,28 @@ def verify() -> dict[str, object]:
         "tts_http_contracts": tts_http_contracts,
         "agents": sorted(agent_ids),
         "novel_model": active_llm,
-        "enabled_novel_skills": enabled_scope,
+        **skill_result,
         "enabled_novel_tools": enabled_tools,
         "system_prompt_files": system_prompt_files,
     }
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--skills-only", action="store_true")
+    parser.add_argument("--previous-skill-state", type=Path)
+    args = parser.parse_args()
     try:
-        print(json.dumps(verify(), ensure_ascii=False, indent=2))
-    except (AssertionError, HTTPError, URLError, TimeoutError) as error:
+        previous = None
+        if args.previous_skill_state is not None:
+            from scripts import configure_qwenpaw_novel_agent as configuration
+
+            configuration.BASE_URL = BASE_URL
+            previous = configuration.load_previous_skill_state(args.previous_skill_state)
+        result = verify_skill_state(previous) if args.skills_only else verify(previous)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        _assert_skills_ready(result)
+    except (AssertionError, OSError, ValueError, RuntimeError) as error:
         print(f"QwenPaw lab verification failed: {error}", file=sys.stderr)
         raise SystemExit(1) from error
 

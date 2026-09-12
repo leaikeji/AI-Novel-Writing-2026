@@ -1,0 +1,676 @@
+{
+  "checks": {
+    "S001:after-force-reinstall": {
+      "chapter-outline": false,
+      "character-craft": false,
+      "continuity-check": false,
+      "dialogue-craft": false,
+      "golden-finger-writing": false,
+      "novel-direction": false,
+      "prose-writing": false,
+      "scene-craft": false,
+      "story-foundation": false,
+      "style-review": false,
+      "suspense-writing": false
+    },
+    "S001:before-force-reinstall-readback": {
+      "chapter-outline": true,
+      "character-craft": true,
+      "continuity-check": true,
+      "dialogue-craft": true,
+      "golden-finger-writing": true,
+      "novel-direction": true,
+      "prose-writing": true,
+      "scene-craft": true,
+      "story-foundation": true,
+      "style-review": true,
+      "suspense-writing": false
+    },
+    "S001:before-restart-readback": {
+      "chapter-outline": true,
+      "character-craft": true,
+      "continuity-check": true,
+      "dialogue-craft": true,
+      "golden-finger-writing": true,
+      "novel-direction": true,
+      "prose-writing": true,
+      "scene-craft": true,
+      "story-foundation": true,
+      "style-review": true,
+      "suspense-writing": false
+    },
+    "S001:initial-disabled": {
+      "chapter-outline": false,
+      "character-craft": false,
+      "continuity-check": false,
+      "dialogue-craft": false,
+      "golden-finger-writing": false,
+      "novel-direction": false,
+      "prose-writing": false,
+      "scene-craft": false,
+      "story-foundation": false,
+      "style-review": false,
+      "suspense-writing": false
+    },
+    "candidate-alembic-head": "20260911_0053",
+    "candidate-staging": {
+      "container_path": "/gate/candidate",
+      "helper_container_count": 0,
+      "host_bind_mount_count": 0,
+      "host_copy_detached": true,
+      "integrity_rechecked_before_each_install": true,
+      "method": "docker-cp",
+      "migration_head": "20260911_0053",
+      "tree_sha256": "07c3cb63833cdf516e53fde99db0dd0884482d8c6d94ad96879e9c3d1e2191c2"
+    },
+    "candidate-tree-sha256": "07c3cb63833cdf516e53fde99db0dd0884482d8c6d94ad96879e9c3d1e2191c2",
+    "command:container-http-get-2d2fdcfcdab9": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-3b86c658c0bf": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1d546ec2a6dd7da5c96a1f189196a3f7da0f7d96f1ad93a711b44df7b523d724"
+    },
+    "command:container-http-get-75823c550d2b": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4159ab7e2eb685eba3b6c0c081b03a06111fbb17035f5d6f507cd0283e6ccd0d"
+    },
+    "command:container-http-get-ac3174e3d5a7": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6090ea021228b47b3d3bdf7034bae193ab187ad78727606a0206b3f46e2a29c6"
+    },
+    "command:container-http-get-cf82f7f72284": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-cff6c79375f2": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1d434ca19beb32009bb5b484719325183d20360b1cbb55de967d466ad76b4cd7"
+    },
+    "command:container-http-get-d67b39af99d7": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c363ab3c8a985b042a6296e680c92a6772647302cdf10679cc9436dd02baa66d"
+    },
+    "command:container-http-get-de2fd1b89ba9": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-e93542073f21": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "26a266f1d6da31d7bd370e1de6a2f6e3ad218aac6ee726545eea93ac2785380b"
+    },
+    "command:container-http-get-f13e665a7941": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1a816c559e5e8a2aedefb7e3b92c8fdf2c9b596b8d9dae409bbdd7251113e2ac"
+    },
+    "command:container-http-post-1b6750056d76": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c11e33eaeadb09105b278e3fb7d5f5929abffe2fb8135774b6791f7536abd935"
+    },
+    "command:container-http-post-6bb341f23885": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "5b5997b5eb69b76fda1d051e51a0c748723d700d383198044663c57a78a0cd4c"
+    },
+    "command:container-http-post-d7ad856a3c75": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e0c2ce0ddba39817983c05936f8ada203c7b9450ab2d0056333d18a01d069ca5"
+    },
+    "command:container-http-post-f13e665a7941": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9da2f5fcc6f3f467e1cb7447bf31fb13c1bce4b7470edaae05f7a3d20166f984"
+    },
+    "command:create-network": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "910ca8fab6f0c11214a71ff34e85c6b69ca4082d47117b819d7ff62e64349b69"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-s001diag0911-novel-media": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "25497e0d96c7dc29a68e3283a5f16fda1c83ebf8be4355da3365e584d16ff1b1"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-s001diag0911-postgres-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3fac676d3f94a7596bc59a7137f8aee29b711cb1a26a1d2b80e57aa54af61fa9"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-s001diag0911-qwen-backups": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d4b09bf01fa635b43dd81fff291f33fb86ae2a76751ecbc664045623282ee6bd"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-s001diag0911-qwen-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f44d06979c93daee1eb60add078ed330baeec7d19bdd021c305f00ba8651b53d"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-s001diag0911-qwen-secrets": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "625750847844d24e5ae016daec876173707a2032300a5e234a100158dac077a9"
+    },
+    "command:create-volume-sentinels": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:docker-cp-candidate": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:docker-server-available": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "aaa3c9962de64c23cb8de5e57eb229d404b0c35bf1efa3565b1f1e77933b25ef"
+    },
+    "command:hash-staged-candidate": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "115bcd67189a98d39187f38c11878f3654213e8f715f0869d43fb04e07c98538"
+    },
+    "command:image-present-postgres": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e9266002cea916b56f48d207564b32da673f1c0fe994aa748e19cca03a7b61f3"
+    },
+    "command:image-present-qwenpaw": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "47697cd53b6915cafb10e0dead7bac06894d68e0c5d7b33ea1c5c047bcf567a4"
+    },
+    "command:inspect-qwenpaw-topology": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a7307d16bf98124d6516c595e46ec153c9055a56b4654a22f271f7a46e29d4f7"
+    },
+    "command:list-owned-containers": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "05e4cb7557d19b834d0f8f9ba14d19178a7518afe9efbffc44878650af70795f"
+    },
+    "command:migrate-plugin-to-head": {
+      "returncode": 0,
+      "stderr_sha256": "478fb2cc7b57a068e9f50664540a82ca6c0b552d1425f81b8391794585a1bb13",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:prepare-candidate-staging-directory": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:read-candidate-alembic-head": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "b3d64947f4c47e2ec22f42886d54aa4e5f0be6165452250ed85ad038efc0cce8"
+    },
+    "command:read-db-sentinel": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6d70ac22eac7656f04ceb16fae6d33e516019fb97df65bfad4479653e00820bc"
+    },
+    "command:read-migration-head": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "145d6d155a603c11c4c8e7414442b9708d324435d5f9bd6435aa6d2c25dd2517"
+    },
+    "command:read-volume-sentinels": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3f573ee2ac51241e41d33eb1ecc7a181a3268c1715231c6912501d8011923828"
+    },
+    "command:start-postgres": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ba548fb672b1d00c32345f32f6a1b6b0735e0ad537225e3a45834d1b2b32df2d"
+    },
+    "command:start-qwenpaw": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "94c13e3f91a30c950b0d62b19ee8ac23b3501e32f57969c83fe51e3d37a39852"
+    },
+    "command:verify-candidate-before-force-reinstall": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "115bcd67189a98d39187f38c11878f3654213e8f715f0869d43fb04e07c98538"
+    },
+    "command:verify-candidate-before-initial-install": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "115bcd67189a98d39187f38c11878f3654213e8f715f0869d43fb04e07c98538"
+    },
+    "command:verify-internal-network": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+    },
+    "expected-published-skill-ids": [
+      "chapter-outline",
+      "character-craft",
+      "continuity-check",
+      "dialogue-craft",
+      "golden-finger-writing",
+      "novel-direction",
+      "prose-writing",
+      "scene-craft",
+      "story-foundation",
+      "style-review",
+      "suspense-writing"
+    ],
+    "failure-context": {
+      "detail": null
+    },
+    "failure-diagnostics": {
+      "postgres": {
+        "dead": false,
+        "exit_code": 0,
+        "image_id": "sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a",
+        "inspect_returncode": 0,
+        "inspect_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "inspect_stdout_sha256": "ec70deee4360cf43d5d6a982778a2acb4b7d73317651920c7d22a00a7d5ea7ce",
+        "logs": {
+          "markers": {
+            "address_in_use": false,
+            "database_error": false,
+            "module_not_found": false,
+            "permission_denied": false,
+            "traceback": false
+          },
+          "returncode": 0,
+          "stderr_bytes": 2560,
+          "stderr_sha256": "c7a29c6722207517504444dbbe9a9c4e748eae4e17c51b91e6097b5b66ad54b7",
+          "stdout_bytes": 2410,
+          "stdout_sha256": "6fef6caddfad7328ea4f9e82f67677eff9ce8c8a15ba2e87d6c85a4c05bc0f84"
+        },
+        "oom_killed": false,
+        "status": "running"
+      },
+      "qwenpaw": {
+        "dead": false,
+        "exit_code": 0,
+        "image_id": "sha256:a7430e32833b6211f37200ee4e8c798946d8719772efcd650b92c1f663834fb3",
+        "inspect_returncode": 0,
+        "inspect_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "inspect_stdout_sha256": "fb65a10ae8470d84683a86f9270b36333160779071b111d43094fb3720aea658",
+        "logs": {
+          "markers": {
+            "address_in_use": false,
+            "database_error": false,
+            "module_not_found": false,
+            "permission_denied": false,
+            "traceback": false
+          },
+          "returncode": 0,
+          "stderr_bytes": 7139,
+          "stderr_sha256": "504dff85d0f706c662e0125a8c79e899dc2faa1a0edf9685562dab84fa063bcb",
+          "stdout_bytes": 5095,
+          "stdout_sha256": "ecd86fd7f1133b343189a2278010e90ded73f8c86089cb88e38e6618e921414b"
+        },
+        "oom_killed": false,
+        "status": "running"
+      }
+    },
+    "http:S001-create-isolated-agent": {
+      "method": "POST",
+      "path": "/api/agents",
+      "response_sha256": "e4c483a92bccbddf0c126dc264e7d37f662001c241ad22f3f539628e54385afe",
+      "status": 201
+    },
+    "http:after-force-reinstall": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "cbc1459488d329c9b59f63c577272126ae4dd034311351f2c2142342a4729ae0",
+      "status": 200
+    },
+    "http:app-health-installed": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/health",
+      "response_sha256": "198aa1340e45a9c1483e69ad7f81314dfb7552ea654622f7337c56aa373c34a6",
+      "status": 200
+    },
+    "http:before-force-reinstall": {
+      "method": "POST",
+      "path": "/api/skills/batch-enable",
+      "response_sha256": "cf8d4040b379dc6399ef3cf27f5ea0354452df79194f77a841475e96856bd35c",
+      "status": 200
+    },
+    "http:before-force-reinstall-readback": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "727462678dfb01d4b6d3ba08a99b3a9d552173144b2fe7b85aee2f106feb001e",
+      "status": 200
+    },
+    "http:before-restart": {
+      "method": "POST",
+      "path": "/api/skills/batch-enable",
+      "response_sha256": "cf8d4040b379dc6399ef3cf27f5ea0354452df79194f77a841475e96856bd35c",
+      "status": 200
+    },
+    "http:before-restart-readback": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "727462678dfb01d4b6d3ba08a99b3a9d552173144b2fe7b85aee2f106feb001e",
+      "status": 200
+    },
+    "http:create-db-sentinel": {
+      "method": "POST",
+      "path": "/api/ai-novel-world-2026/novels",
+      "response_sha256": "4a2128f1ea2712ac13be70b6070cfd24a181045921635fdeb41447ff80790b9d",
+      "status": 201
+    },
+    "http:force-reinstall": {
+      "attempts": 1,
+      "method": "POST",
+      "path": "/api/plugins/install",
+      "response_sha256": "e0233be48ca722c0fed94eef6c649cd5ad5e565423646f63485a4541e3b26706",
+      "status": 200
+    },
+    "http:frontend-asset-installed": {
+      "method": "GET",
+      "path": "/api/plugins/ai-novel-world-2026/files/frontend/dist/index.js",
+      "response_bytes": 3526449,
+      "response_sha256": "23e3cf00d11580e6441403988608b4a241117c888db547abd585b34a0d3bd403",
+      "status": 200
+    },
+    "http:initial-disabled": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "cbc1459488d329c9b59f63c577272126ae4dd034311351f2c2142342a4729ae0",
+      "status": 200
+    },
+    "http:initial-install": {
+      "attempts": 1,
+      "method": "POST",
+      "path": "/api/plugins/install",
+      "response_sha256": "e0233be48ca722c0fed94eef6c649cd5ad5e565423646f63485a4541e3b26706",
+      "status": 200
+    },
+    "http:list-agents": {
+      "method": "GET",
+      "path": "/api/agents",
+      "response_sha256": "d3dd4a679bde58da14eed71508321d4347eafd60cf131968d1fca3e3faec882e",
+      "status": 200
+    },
+    "http:list-pawapps-installed": {
+      "method": "GET",
+      "path": "/api/pawapps",
+      "response_sha256": "554f6119bdc4c2bba1156a4c3496dd5777f7dad607448f0dde6ea7f63d039cee",
+      "status": 200
+    },
+    "http:list-plugins-installed": {
+      "method": "GET",
+      "path": "/api/plugins",
+      "response_sha256": "905f2f69b0d8591b518f3550860024291629384c686547d0907329118df03bff",
+      "status": 200
+    },
+    "http:list-skills-37a8eec1": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "d5017f3a9f29b11ac6b8fd9c76fb0ecc503a9a5a7ec8734487ded8ee33a1d86d",
+      "status": 200
+    },
+    "http:list-skills-7990cb90": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "727462678dfb01d4b6d3ba08a99b3a9d552173144b2fe7b85aee2f106feb001e",
+      "status": 200
+    },
+    "http:list-skills-a609982d": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "fa1a6abbbae056093125e07651bcea1d379fc53a021263f902e3337de15fe7bd",
+      "status": 200
+    },
+    "http:list-tools-37a8eec1": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "7918d3d52e517cfd45a563f89ae144ed83c84b862c19fa63cf57ce5788da880f",
+      "status": 200
+    },
+    "http:list-tools-7990cb90": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "da65b5276b9de9003c633ecadaacddd61779cea6fbcb6040968156b7075b585e",
+      "status": 200
+    },
+    "http:list-tools-a609982d": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "eb389ad0de6f2578ceb4566dff2ccbee28130d5cd71f693ecf6694ded6128964",
+      "status": 200
+    },
+    "http:t4-narration-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-requests/00000000-0000-4000-8000-000000000001",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "http:t4-playback-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-editions/00000000-0000-4000-8000-000000000001/manifest",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "http:t4-script-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-scripts/00000000-0000-4000-8000-000000000001",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "installed-registry": {
+      "agent_ids": [
+        "QwenPaw_QA_Agent_0.2",
+        "ai-novel-writer",
+        "default"
+      ],
+      "skills_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "tools_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ],
+        "ai-novel-writer": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ],
+        "default": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ]
+      }
+    },
+    "isolated-topology": {
+      "container_count": 2,
+      "host_bind_mount_count": 0,
+      "model_mount_count": 0,
+      "network_internal": true,
+      "outbound_network_route": false,
+      "postgres_host_port": false,
+      "qwenpaw_host_port": false,
+      "sidecar_started": false,
+      "token_mount_count": 0
+    },
+    "migration-head": "20260911_0053",
+    "narration-disabled": {
+      "digest_keyring_loaded": false,
+      "lifecycle_status": "disabled",
+      "playback_installed": false,
+      "product_requested": false,
+      "production_backend_installed": false,
+      "provider_selection_fingerprint_sha256": null,
+      "reason_code": null,
+      "reference_clone_ready": false,
+      "worker_running": false
+    },
+    "narration-production-disabled": {
+      "digest_keyring_loaded": false,
+      "lifecycle_status": "disabled",
+      "playback_installed": false,
+      "product_requested": false,
+      "production_backend_installed": false,
+      "provider_selection_fingerprint_sha256": null,
+      "reason_code": null,
+      "reference_clone_ready": false,
+      "worker_running": false
+    },
+    "postgres-ready": {
+      "attempts": 2
+    },
+    "preflight-absent:container:ai-novel-2026-t1gate-s001diag0911-postgres": true,
+    "preflight-absent:container:ai-novel-2026-t1gate-s001diag0911-qwenpaw": true,
+    "preflight-absent:network:ai-novel-2026-t1gate-s001diag0911-net": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-s001diag0911-novel-media": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-s001diag0911-postgres-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-s001diag0911-qwen-backups": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-s001diag0911-qwen-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-s001diag0911-qwen-secrets": true,
+    "qwenpaw-ready": {
+      "attempts": 8
+    },
+    "sentinels-created": {
+      "db_digest": "6c5d0d190e99a4a7a519db6c0872ba706203c20904bf6480f9e982cd915ef4fd",
+      "file_digest": "342e8cffdcacd60a43051507485ae58c4b7684c8e7a3a027a05cae806f86a0c1",
+      "volume_sentinel_count": 4
+    },
+    "sentinels-preserved": {
+      "db_digest": "6c5d0d190e99a4a7a519db6c0872ba706203c20904bf6480f9e982cd915ef4fd",
+      "file_digest": "342e8cffdcacd60a43051507485ae58c4b7684c8e7a3a027a05cae806f86a0c1",
+      "volume_sentinel_count": 4
+    },
+    "t4-routes-disabled-without-token": {
+      "narration": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      },
+      "playback": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      },
+      "script": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      }
+    },
+    "tts-disabled-by-construction": {
+      "host_bind_mount_count": 0,
+      "model_mount_count": 0,
+      "moss_env_count": 0,
+      "outbound_network_route": false,
+      "product_env": false,
+      "public_api_probe": "container-loopback",
+      "python_package_index_access": false,
+      "qwenpaw_host_port": false,
+      "reference_clone_env": false,
+      "runtime_env": false,
+      "sidecar_network_present": false,
+      "storage_root_env_count": 0,
+      "token_mount_count": 0,
+      "validation_env": false
+    }
+  },
+  "cleanup": {
+    "already_absent": [],
+    "broad_cleanup_used": false,
+    "failures": [],
+    "removed_exact_resources": [
+      "container:ai-novel-2026-t1gate-s001diag0911-qwenpaw",
+      "container:ai-novel-2026-t1gate-s001diag0911-postgres",
+      "volume:ai-novel-2026-t1gate-s001diag0911-postgres-data",
+      "volume:ai-novel-2026-t1gate-s001diag0911-novel-media",
+      "volume:ai-novel-2026-t1gate-s001diag0911-qwen-backups",
+      "volume:ai-novel-2026-t1gate-s001diag0911-qwen-secrets",
+      "volume:ai-novel-2026-t1gate-s001diag0911-qwen-data",
+      "network:ai-novel-2026-t1gate-s001diag0911-net"
+    ],
+    "status": "passed"
+  },
+  "failure_code": "UNEXPECTED_GATE_FAILURE",
+  "gate": "T1-GATE-INSTALL",
+  "mode": "real",
+  "phases": [
+    "preflight",
+    "create-isolated-runtime",
+    "stage-candidate-with-docker-cp",
+    "install",
+    "force-reinstall"
+  ],
+  "run_id": "s001diag0911",
+  "schema_version": 1,
+  "status": "failed"
+}

@@ -28,6 +28,93 @@ def load_script(name: str):
     return module
 
 
+def stub_install_skill_boundary(monkeypatch, lab):
+    """These tests isolate Docker ordering; real restore contracts are separate."""
+    from types import SimpleNamespace
+    state = {"prose-writing": True}
+    monkeypatch.setattr(lab, "require_skill_baseline", lambda *args, **kwargs: state.copy())
+    monkeypatch.setattr(lab, "skill_configuration", lambda: SimpleNamespace(
+        SKILLS=["prose-writing"],
+        load_previous_skill_state=lambda path: state.copy(),
+        read_skill_state=lambda: state.copy(),
+        skill_enable_plan=lambda **kwargs: ["prose-writing"],
+        restore_skill_state=lambda previous: {"state_preserved": True},
+    ))
+
+
+def test_replacement_paths_reject_missing_baseline_before_any_command(monkeypatch, tmp_path):
+    lab = load_script("qwenpaw_lab_plugin")
+    monkeypatch.setattr(lab, "PLUGIN_DIR", tmp_path)
+    monkeypatch.setattr(lab, "run", lambda *args, **kwargs: pytest.fail("no mutation before baseline"))
+    with pytest.raises(RuntimeError, match="previous-skill-state"):
+        lab.hot_install_packaged_plugin()
+    with pytest.raises(RuntimeError, match="previous-skill-state"):
+        lab.offline_plugin_command("install", "--force", "/plugin")
+    with pytest.raises(RuntimeError, match="previous-skill-state"):
+        lab.offline_install_stopped_candidate(candidate=tmp_path, expected_tree_sha256="a" * 64,
+            expected_head="frozen", expected_container_id="b" * 64, expected_image_id="c" * 64,
+            confirm=lab.OFFLINE_MAINTENANCE_CONFIRMATION)
+
+
+def test_hot_replacement_restores_from_real_scoped_snapshot(monkeypatch, tmp_path):
+    lab = load_script("qwenpaw_lab_plugin")
+    from scripts import configure_qwenpaw_novel_agent as configuration
+    state = {name: i % 2 == 0 for i, name in enumerate(configuration.SKILLS)}
+    expected = state.copy()
+    snapshot = tmp_path / "baseline.json"
+    snapshot.write_text(json.dumps({"schema": "skill-enable-state/1", "base_url": lab.BASE_URL,
+        "agent_id": configuration.AGENT_ID, "skills": state}), encoding="utf-8")
+    def public(path, *, method="GET", body=None, agent_id=None):
+        assert agent_id == configuration.AGENT_ID
+        if method == "GET":
+            assert path == "/api/skills"
+            return [{"name": name, "source": "plugin:ai-novel-world-2026", "enabled": value}
+                    for name, value in state.items()]
+        assert path == "/api/skills/batch-enable"
+        state.update({name: True for name in body})
+        return {"results": {}}
+    def install_run(*args, **kwargs):
+        if "--force" in args:
+            state.update({name: False for name in state})
+        return ""
+    monkeypatch.setattr(configuration, "request_json", public)
+    monkeypatch.setattr(lab, "PLUGIN_DIR", tmp_path)
+    monkeypatch.setattr(lab, "wait_until_healthy", lambda: None)
+    monkeypatch.setattr(lab, "run", install_run)
+    result = lab.hot_install_packaged_plugin(snapshot)
+    assert result["state_preserved"] is True
+    assert state == expected
+
+
+def test_skill_snapshot_requires_explicit_output_and_never_overwrites(monkeypatch, tmp_path):
+    lab = load_script("qwenpaw_lab_plugin")
+    from scripts import configure_qwenpaw_novel_agent as configuration
+    monkeypatch.setattr(configuration, "capture_skill_state", lambda: {"skills": {"prose-writing": True}})
+    with pytest.raises(RuntimeError, match="durable"):
+        lab.save_preinstall_skill_state()
+    output = tmp_path / "frozen.json"
+    assert lab.save_preinstall_skill_state(output) == output
+    before = output.read_bytes()
+    with pytest.raises(FileExistsError):
+        lab.save_preinstall_skill_state(output)
+    assert output.read_bytes() == before
+
+
+def test_install_mutex_reentrant_and_rejects_external_holder(monkeypatch, tmp_path):
+    lab = load_script("qwenpaw_lab_plugin")
+    monkeypatch.setattr(lab.tempfile, "gettempdir", lambda: str(tmp_path))
+    with lab.installation_lock():
+        with lab.installation_lock():
+            assert lab._INSTALL_DEPTH == 1
+    identity = lab.hashlib.sha256(lab.CONTAINER.encode()).hexdigest()[:24]
+    with (tmp_path / f"ai-novel-install-{identity}.lock").open("r+") as stream:
+        lab.fcntl.flock(stream, lab.fcntl.LOCK_EX | lab.fcntl.LOCK_NB)
+        with pytest.raises(RuntimeError, match="another project install"):
+            with lab.installation_lock():
+                pytest.fail("must not acquire competing lock")
+    assert lab._INSTALL_DEPTH == 0
+
+
 def test_chat_wrapper_is_surface_gated_and_uses_public_route_api() -> None:
     source = (ROOT / "frontend" / "src" / "index.ts").read_text(encoding="utf-8")
     wrapper = (ROOT / "frontend" / "src" / "assistant-route-wrap.ts").read_text(
@@ -393,6 +480,7 @@ def test_existing_agent_is_refreshed_after_plugin_reinstall(monkeypatch) -> None
                 {
                     "name": name,
                     "source": "plugin:ai-novel-world-2026",
+                    "enabled": False,
                 }
                 for name in configure.SKILLS
             ]
@@ -709,6 +797,7 @@ def test_offline_installer_stages_package_without_host_bind(
     tmp_path: Path,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     package = tmp_path / lab.PLUGIN_ID
     package.mkdir()
     monkeypatch.setattr(lab, "PLUGIN_DIR", package)
@@ -786,6 +875,7 @@ def test_offline_maintenance_installer_requires_stopped_host_and_keeps_it_stoppe
     tmp_path: Path,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     package = (tmp_path / lab.PLUGIN_ID).resolve()
     package.mkdir()
     validations: list[tuple[Path, str, str]] = []
@@ -911,6 +1001,7 @@ def test_offline_maintenance_installer_rejects_running_host(
     tmp_path: Path,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     package = (tmp_path / lab.PLUGIN_ID).resolve()
     package.mkdir()
     monkeypatch.setattr(
@@ -967,6 +1058,7 @@ def test_offline_maintenance_installer_binds_frozen_target_before_create(
     message: str,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     package = (tmp_path / lab.PLUGIN_ID).resolve()
     package.mkdir()
     monkeypatch.setattr(
@@ -1022,6 +1114,7 @@ def test_offline_maintenance_installer_rejects_staged_copy_before_cli_start(
     tmp_path: Path,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     package = (tmp_path / lab.PLUGIN_ID).resolve()
     package.mkdir()
     monkeypatch.setattr(
@@ -1113,6 +1206,7 @@ def test_hot_installer_uses_public_cli_and_exact_unique_stage_cleanup(
     tmp_path: Path,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     package = tmp_path / lab.PLUGIN_ID
     package.mkdir()
     monkeypatch.setattr(lab, "PLUGIN_DIR", package)
@@ -1169,6 +1263,7 @@ def test_hot_installer_rejects_false_success_and_still_cleans_exact_stage(
     reported_output: str,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     package = tmp_path / lab.PLUGIN_ID
     package.mkdir()
     monkeypatch.setattr(lab, "PLUGIN_DIR", package)
@@ -1222,7 +1317,7 @@ def test_install_does_not_migrate_or_configure_after_hot_install_failure(
     monkeypatch.setattr(
         lab,
         "hot_install_packaged_plugin",
-        lambda: (_ for _ in ()).throw(RuntimeError("public CLI reported failure")),
+        lambda _baseline: (_ for _ in ()).throw(RuntimeError("public CLI reported failure")),
     )
     monkeypatch.setattr(lab, "save_preinstall_skill_state", lambda: None)
     monkeypatch.setattr(lab, "require_live_tts_flags_disabled", lambda: None)
@@ -2101,6 +2196,7 @@ def test_install_waits_for_expected_runtime_before_final_verify(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     events: list[str] = []
     monkeypatch.setattr(lab, "save_preinstall_skill_state", lambda: events.append("skill-state") or Path("/tmp/test-skill-state.json"))
     monkeypatch.setattr(lab, "pnpm_bin", lambda: "pnpm")
@@ -2114,7 +2210,7 @@ def test_install_waits_for_expected_runtime_before_final_verify(
     monkeypatch.setattr(
         lab,
         "hot_install_packaged_plugin",
-        lambda: events.append("hot-install"),
+        lambda _baseline: events.append("hot-install"),
     )
     monkeypatch.setattr(
         lab,
@@ -2169,6 +2265,7 @@ def test_install_uses_provided_frozen_skill_state(
     tmp_path: Path,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     state = tmp_path / "skill-state.json"
     state.write_text(
         json.dumps(
@@ -2191,7 +2288,7 @@ def test_install_uses_provided_frozen_skill_state(
     monkeypatch.setattr(lab, "pnpm_environment", lambda _pnpm: {})
     monkeypatch.setattr(lab, "run", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(lab, "require_live_tts_flags_disabled", lambda: None)
-    monkeypatch.setattr(lab, "hot_install_packaged_plugin", lambda: None)
+    monkeypatch.setattr(lab, "hot_install_packaged_plugin", lambda _baseline: None)
     monkeypatch.setattr(lab, "migrate_installed_plugin", lambda: None)
     monkeypatch.setattr(lab, "provision_installed_embedding_secret_store", lambda: None)
     monkeypatch.setattr(lab, "bootstrap_installed_digest_keyring", lambda: None)
@@ -2214,6 +2311,7 @@ def test_install_runs_pytest_in_disabled_tts_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lab = load_script("qwenpaw_lab_plugin")
+    stub_install_skill_boundary(monkeypatch, lab)
     monkeypatch.setattr(lab, "save_preinstall_skill_state", lambda: Path("/tmp/test-skill-state.json"))
     monkeypatch.setenv(lab.TTS_RUNTIME_EXPECTATION_ENV, "ready")
     monkeypatch.setenv(lab.TTS_PRODUCT_EXPECTATION_ENV, "disabled")
@@ -2248,7 +2346,7 @@ def test_install_runs_pytest_in_disabled_tts_environment(
     monkeypatch.setattr(lab, "pnpm_environment", lambda _pnpm: {})
     monkeypatch.setattr(lab, "run", fake_run)
     monkeypatch.setattr(lab, "require_live_tts_flags_disabled", lambda: None)
-    monkeypatch.setattr(lab, "hot_install_packaged_plugin", lambda: None)
+    monkeypatch.setattr(lab, "hot_install_packaged_plugin", lambda _baseline: None)
     monkeypatch.setattr(lab, "migrate_installed_plugin", lambda: None)
     monkeypatch.setattr(lab, "provision_installed_embedding_secret_store", lambda: None)
     monkeypatch.setattr(lab, "bootstrap_installed_digest_keyring", lambda: None)

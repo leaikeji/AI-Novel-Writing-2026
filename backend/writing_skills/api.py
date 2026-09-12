@@ -387,7 +387,11 @@ async def writing_skill_catalog(request: Request, document_id: UUID | None = Non
                                 ),
                                 tab_id: str | None = Query(default=None, min_length=1, max_length=160),
                                 session: Session = Depends(get_session)):
-    from .button import current_catalog, CHAPTER_CAPABILITIES
+    from .button import (
+        CHAPTER_CAPABILITIES,
+        chapter_semantic_routing_enabled,
+        current_catalog,
+    )
     from .button import _scope
     from .creative import (
         CREATION_HELPER_CAPABILITIES,
@@ -474,6 +478,17 @@ async def writing_skill_catalog(request: Request, document_id: UUID | None = Non
         )
     except MethodPolicyViolation:
         document_creative_available = False
+    semantic_available = (
+        chapter_available
+        and chapter_semantic_routing_enabled()
+        and catalog is not None
+        and any(
+            "chapter_body" in item.declaration.applicable_tasks
+            and item.declaration.auto_eligible
+            and bool(item.declaration.semantic_criteria)
+            for item in catalog.capabilities
+        )
+    )
     return {
         "schema_version": "writing-skill-catalog/1", "catalog_version": catalog.version if catalog else None,
         "agent_id": "ai-novel-writer", "chapter_body_available": chapter_available,
@@ -481,7 +496,7 @@ async def writing_skill_catalog(request: Request, document_id: UUID | None = Non
         "novel_creative_available": novel_creative_available,
         "document_creative_available": document_creative_available,
         "catalog_available": catalog is not None,
-        "semantic_available": False,
+        "semantic_available": semantic_available,
         "scope": scope.model_dump(mode="json") if scope is not None else None,
         "capabilities": [{"skill_id": item.declaration.skill_id,
                           "display_name": item.declaration.display_name,

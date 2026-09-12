@@ -3,9 +3,19 @@ import asyncio
 import pytest
 
 from backend.generation_runtime import (
+    CHAPTER_GENERATION_STALE_GRACE_SECONDS,
+    CHAPTER_GENERATION_TIMEOUT_SECONDS,
     ChapterGenerationTimeoutError,
     await_chapter_generation,
 )
+
+
+def test_chapter_generation_default_timeout_is_twelve_minutes() -> None:
+    assert CHAPTER_GENERATION_TIMEOUT_SECONDS == 12 * 60
+    assert (
+        CHAPTER_GENERATION_TIMEOUT_SECONDS
+        + CHAPTER_GENERATION_STALE_GRACE_SECONDS
+    ) == 12 * 60 + 30
 
 
 @pytest.mark.asyncio

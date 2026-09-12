@@ -1487,3 +1487,340 @@ def test_orchestration_cleans_up_when_a_phase_fails(
     with pytest.raises(runner.GateError, match="EXPECTED_TEST_FAILURE"):
         gate.run()
     assert gate.cleaned is True
+
+
+@pytest.fixture
+def skill_gate(runner: ModuleType, candidate: Path, tmp_path: Path,
+               monkeypatch: pytest.MonkeyPatch):
+    """Run real project install/restore functions against in-memory public I/O."""
+    shutil.copytree(PROJECT_ROOT / "skills", candidate / "skills", dirs_exist_ok=True)
+    approval = candidate / "backend/writing_skills/approved-capabilities.json"
+    approval.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(PROJECT_ROOT / "backend/writing_skills/approved-capabilities.json", approval)
+    resolved, digest, head = runner.validate_candidate(candidate)
+    names = runner.create_resource_names("s69fake001")
+    config = runner.GateConfig(
+        "real", names.run_id, resolved, tmp_path / "transcript.json", runner.REAL_CONFIRMATION,
+        candidate_tree_sha256=digest, candidate_migration_head=head,
+        candidate_skill_ids=runner.candidate_published_skill_ids(candidate), skill_state_check=True,
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("fake Skill gate escaped to subprocess")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+
+    class SkillGate(runner.LifecycleGate):
+        def __init__(self):
+            super().__init__(config, names, executor=object())
+            self.agents = {"default": {}, "QwenPaw_QA_Agent_0.2": {}}
+            self.native = {"default": True, "QwenPaw_QA_Agent_0.2": False}
+            self.installed = False
+            self.running = True
+            self.helper_exists = False
+            self.cleaned = False
+            self.fault = None
+            self.ack_lost = False
+            self.http_calls = []
+            self.commands = []
+            self.events = []
+
+        def _preflight(self):
+            self.events.append("preflight")
+
+        def _create_resources(self):
+            self.events.append("create")
+
+        def _stage_candidate(self):
+            self.events.append("stage")
+
+        def _wait_for_services(self):
+            assert self.running
+            self.base_url = "http://127.0.0.1:8088"
+
+        def _read_staged_candidate_digest(self, *, step):
+            return digest
+
+        def _replace(self):
+            self.installed = True
+            for agent in self.agents:
+                self.agents[agent] = {name: False for name in config.candidate_skill_ids}
+
+        def _install(self, *, force, step):
+            self.events.append(step)
+            self._replace()
+
+        def _migrate_and_verify_head(self):
+            assert self.running
+            self.events.append("migrate")
+
+        def _wait_for_installed_contract(self):
+            assert self.installed
+            return self._registry_snapshot()
+
+        def _create_sentinels(self):
+            return {"novel_id": "sentinel"}
+
+        def _verify_sentinels(self, sentinels):
+            assert sentinels == {"novel_id": "sentinel"}
+            self.events.append("sentinels")
+
+        def _verify_novel_route(self, novel_id):
+            assert self.installed and novel_id == "sentinel"
+
+        def _http_json(self, method, path, *, body=None, headers=None, **kwargs):
+            assert self.running
+            agent_id = (headers or {}).get("X-Agent-Id")
+            self.http_calls.append((method, path, agent_id, body))
+            if path == "/api/agents":
+                if method == "POST":
+                    assert body["id"] not in self.agents
+                    assert not {"model", "provider_id", "model_id"} & body.keys()
+                    self.agents[body["id"]] = {name: False for name in config.candidate_skill_ids}
+                    self.native[body["id"]] = False
+                    return 200, {"id": body["id"]}
+                return 200, {"agents": [{"id": agent} for agent in sorted(self.agents)]}
+            if path == "/api/skills":
+                rows = [{"name": "native-helper", "source": "builtin", "enabled": self.native[agent_id]}]
+                rows.extend({"name": name, "source": f"plugin:{runner.APP_ID}", "enabled": enabled}
+                            for name, enabled in self.agents[agent_id].items())
+                return 200, rows
+            if path in {"/api/skills/batch-enable", "/api/skills/batch-disable"}:
+                assert method == "POST" and agent_id == "ai-novel-writer"
+                if self.fault != "lost-restore" or "hot-install" not in self.events:
+                    for name in body:
+                        self.agents[agent_id][name] = path.endswith("batch-enable")
+                if self.fault == "ack-lost" and "hot-install" in self.events and not self.ack_lost:
+                    self.ack_lost = True
+                    return 500, {"detail": "simulated lost acknowledgement after applying"}
+                return 200, {"results": {name: {"success": True} for name in body}}
+            if path == "/api/tools":
+                return 200, [{"name": name} for name in runner.NOVEL_TOOLS] if self.installed else []
+            if method == "DELETE" and path == f"/api/plugins/{runner.APP_ID}":
+                self.events.append("uninstall")
+                self.installed = False
+                for agent in self.agents:
+                    self.agents[agent] = {}
+                if self.fault == "uninstall-residue":
+                    self.agents["default"]["prose-writing"] = False
+                return 200, {"id": runner.APP_ID}
+            raise AssertionError((method, path))
+
+        def _wait_for_uninstalled_contract(self):
+            snapshot = self._registry_snapshot()
+            if any(snapshot.skills_by_agent.values()) or any(snapshot.tools_by_agent.values()):
+                raise runner.GateError("PLUGIN_SKILL_RESIDUE_PRESENT")
+            self.evidence.checks["uninstalled-zero-residue"] = snapshot.as_dict()
+
+        def _run_command(self, argv, *, step, **kwargs):
+            argv = list(argv)
+            self.commands.append(argv)
+            helper = f"{names.qwenpaw_container}-plugin-installer"
+            assert argv[0] == "docker"
+            verb = argv[1]
+            if verb == "restart":
+                assert argv[2:] == [names.qwenpaw_container]
+                self.events.append("restart")
+                if self.fault == "restart-drift":
+                    self.agents["ai-novel-writer"]["prose-writing"] = False
+            elif verb == "stop":
+                assert argv[-1] == names.qwenpaw_container
+                self.events.append("offline-stop")
+                self.running = False
+            elif verb == "inspect":
+                assert argv[2] == names.qwenpaw_container
+                return runner.CommandResult(0, json.dumps([{
+                    "Name": f"/{names.qwenpaw_container}", "Id": "a" * 64,
+                    "Image": "sha256:" + "b" * 64, "State": {"Running": self.running},
+                    "Mounts": [{"Type": "volume", "Name": name, "Destination": destination, "RW": True}
+                               for name, destination in (
+                                   (names.qwenpaw_data, "/app/working"),
+                                   (names.qwenpaw_secrets, "/app/working.secret"),
+                                   (names.qwenpaw_backups, "/app/working.backups"),
+                               )],
+                }]))
+            elif verb == "exec":
+                assert argv[2] == names.qwenpaw_container
+                if argv[3:6] == ["qwenpaw", "plugin", "install"]:
+                    self.events.append("hot-install")
+                    self._replace()
+                    if self.fault == "other-agent-drift":
+                        self.native["default"] = False
+                    return runner.CommandResult(0, "private log must not be printed")
+                assert argv[3:6] == ["rm", "-rf", "--"]
+                assert argv[-1].startswith(f"/tmp/{runner.APP_ID}-install-")
+            elif verb == "cp":
+                if argv[2].startswith(f"{helper}:"):
+                    shutil.copytree(candidate, Path(argv[3]), dirs_exist_ok=True)
+            elif verb == "create":
+                assert not self.running
+                assert argv[argv.index("--name") + 1] == helper
+                assert argv[argv.index("--network") + 1] == "none"
+                assert all(label in argv for label in self.ownership_labels)
+                assert "PIP_NO_INDEX=1" in argv
+                self.helper_exists = True
+                self.events.append("offline-create")
+            elif verb == "ps":
+                return runner.CommandResult(0, f"{helper}\tqwenpaw-plugin-installer" if self.helper_exists else "")
+            elif verb == "start":
+                if argv[2] == helper:
+                    assert not self.running
+                    self.events.append("offline-install")
+                    self._replace()
+                    if self.fault == "offline-started-host":
+                        self.running = True
+                else:
+                    assert argv[2] == names.qwenpaw_container and not self.running
+                    self.events.append("offline-start")
+                    self.running = True
+            elif verb == "wait":
+                assert argv[2] == helper
+                return runner.CommandResult(0, "0")
+            elif verb == "logs":
+                return runner.CommandResult(0, "private offline log must not be printed")
+            elif verb == "rm":
+                assert argv[2:] == ["-f", helper]
+                self.helper_exists = False
+            else:
+                raise AssertionError(argv)
+            return runner.CommandResult(0)
+
+        def _cleanup(self):
+            self.cleaned = True
+            self.evidence.cleanup = {"status": "passed"}
+
+        def _collect_failure_diagnostics(self):
+            pass
+
+    return SkillGate()
+
+
+def test_plan69_runs_actual_project_restore_hot_and_offline_functions(
+    skill_gate, capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = skill_gate.run()
+    assert result["status"] == "passed" and skill_gate.cleaned
+    assert skill_gate.events.count("hot-install") == 3
+    assert skill_gate.events.count("restart") == 3
+    assert skill_gate.events.index("offline-stop") < skill_gate.events.index("offline-create")
+    assert skill_gate.events.index("offline-install") < skill_gate.events.index("offline-start")
+    checks = result["checks"]
+    assert checks["skills:initialized"]["writing_skills_ready"] is True
+    assert all(checks["skills:initialized"]["current_skill_state"].values())
+    assert checks["skills:all-off-hot-restart"]["state_preserved"] is True
+    assert checks["skills:all-off-hot-restart"]["writing_skills_ready"] is False
+    assert checks["skills:mixed-reinstall"]["current_skill_state"] == skill_gate.mixed_skill_state
+    assert checks["skill-offline-install"]["host_still_stopped"] is True
+    assert checks["skill-offline-install"]["restore_status"] == "pending_skill_restore"
+    assert checks["skills:offline-restored-final"]["writing_skills_ready"] is True
+    assert checks["other-skills:offline-restored-final"] == checks["other-skills:baseline"]
+    snapshots = list(skill_gate.config.transcript.parent.glob("*-skill-state.json"))
+    assert len(snapshots) == 6
+    for path in snapshots:
+        snapshot = json.loads(path.read_text())
+        assert set(snapshot) == {"schema", "base_url", "agent_id", "skills"}
+        assert snapshot["schema"] == "skill-enable-state/1"
+        assert snapshot["base_url"] == f"http://{skill_gate.names.qwenpaw_container}:8088"
+    assert ("container", skill_gate.skill_installer.INSTALLER_CONTAINER) in skill_gate._attempted
+    assert skill_gate.helper_exists is False
+    assert skill_gate.skill_installer.skill_configuration() is skill_gate.skill_configuration
+    assert "private" not in capsys.readouterr().out
+    assert "private log must not be printed" not in skill_gate.config.transcript.read_text()
+    assert "private offline log must not be printed" not in skill_gate.config.transcript.read_text()
+    assert not any("model" in path for _method, path, _agent, _body in skill_gate.http_calls)
+    assert all(agent == "ai-novel-writer" for method, path, agent, _body in skill_gate.http_calls
+               if method != "GET" and path.startswith("/api/skills"))
+
+
+@pytest.mark.parametrize("fault", [
+    "lost-restore", "restart-drift", "other-agent-drift", "offline-started-host", "uninstall-residue",
+])
+def test_plan69_failures_cannot_be_reported_as_pass_and_cleanup_runs(runner, skill_gate, fault):
+    skill_gate.fault = fault
+    with pytest.raises(runner.GateError):
+        skill_gate.run()
+    assert skill_gate.cleaned
+    assert skill_gate.evidence.status == "failed"
+    assert skill_gate.evidence.failure_code
+    assert skill_gate.config.transcript.exists()
+
+
+def test_plan69_requires_snapshot_location_without_external_io(runner, candidate, capsys):
+    assert runner.main(["--candidate", str(candidate), "--skill-state-check"]) == 1
+    assert "SKILL_GATE_REQUIRES_DURABLE_TRANSCRIPT" in capsys.readouterr().err
+
+
+def test_plan69_dry_run_is_explicit_and_never_runs_installer(runner, skill_gate, capsys):
+    assert runner.main([
+        "--candidate", str(skill_gate.config.candidate), "--skill-state-check",
+        "--run-id", skill_gate.config.run_id, "--transcript", str(skill_gate.config.transcript),
+    ]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["skill_state_check"] is True
+    assert plan["topology"]["published_ports"] == []
+    assert plan["topology"]["offline_installer"]["network"] == "none"
+    assert skill_gate.commands == [] and not skill_gate.config.transcript.exists()
+
+
+@pytest.mark.parametrize("change", ["container", "volumes", "base_url"])
+def test_skill_adapter_rejects_identity_drift_before_commands(runner, skill_gate, change):
+    skill_gate._load_skill_adapters()
+    installer = skill_gate.skill_installer
+    if change == "container":
+        installer.CONTAINER = "ai-novel-2026-qwenpaw-lab"
+    elif change == "volumes":
+        installer.VOLUMES = ("ai-novel-2026-qwenpaw-data:/app/working",)
+    else:
+        installer.BASE_URL = "http://127.0.0.1:18088"
+    with pytest.raises(runner.GateError, match="SKILL_ADAPTER_IDENTITY_CHANGED"):
+        installer.run("docker", "inspect", installer.CONTAINER, capture=True)
+    assert skill_gate.commands == []
+
+
+def test_skill_snapshot_never_overwrites_existing_evidence(runner, skill_gate):
+    path = skill_gate.config.transcript.parent / f"{skill_gate.config.run_id}-initialized-skill-state.json"
+    path.write_text("existing evidence", encoding="utf-8")
+    with pytest.raises(runner.GateError):
+        skill_gate.run()
+    assert path.read_text() == "existing evidence"
+    assert "hot-install" not in skill_gate.events
+
+
+def test_skill_adapter_preserves_project_readback_after_lost_acknowledgement(skill_gate):
+    skill_gate.fault = "ack-lost"
+    assert skill_gate.run()["status"] == "passed"
+    assert skill_gate.ack_lost
+    assert skill_gate.events.count("hot-install") == 3
+
+
+def test_skill_adapter_keeps_shared_project_configuration_untouched(skill_gate):
+    from scripts import configure_qwenpaw_novel_agent as shared_configuration
+
+    original_url = shared_configuration.BASE_URL
+    original_request = shared_configuration.request_json
+    assert skill_gate.run()["status"] == "passed"
+    assert shared_configuration.BASE_URL == original_url
+    assert shared_configuration.request_json is original_request
+    assert skill_gate.skill_configuration is not shared_configuration
+    assert skill_gate.skill_installer.skill_configuration() is skill_gate.skill_configuration
+
+
+def test_skill_initialization_requires_public_agent_absence(runner, skill_gate):
+    skill_gate.agents["ai-novel-writer"] = {}
+    skill_gate.native["ai-novel-writer"] = False
+    with pytest.raises(runner.GateError, match="SKILL_INITIAL_AGENT_PRECONDITION_FAILED"):
+        skill_gate.run()
+    assert not any(method == "POST" and path == "/api/agents"
+                   for method, path, _agent, _body in skill_gate.http_calls)
+
+
+@pytest.mark.parametrize("args", [
+    ("docker", "exec", "ai-novel-2026-qwenpaw-lab", "true"),
+    ("docker", "start", "ai-novel-2026-qwenpaw-lab"),
+    ("docker", "compose", "up"),
+])
+def test_skill_installer_adapter_rejects_unscoped_vectors(runner, skill_gate, args):
+    skill_gate._load_skill_adapters()
+    with pytest.raises(runner.GateError, match="SKILL_INSTALL_COMMAND_OUT_OF_SCOPE"):
+        skill_gate.skill_installer.run(*args)
+    assert skill_gate.commands == []

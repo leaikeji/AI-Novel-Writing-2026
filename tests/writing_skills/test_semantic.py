@@ -153,6 +153,22 @@ def test_non_success_transport_never_becomes_an_empty_success(status):
     )
     assert outcome.status == status
     assert outcome.plan == original
+    assert outcome.auxiliary_calls == 0
+    assert outcome.decision_hash is None
+
+
+@pytest.mark.parametrize("status", ["timeout", "cancelled", "unknown", "failed"])
+def test_observed_non_success_transport_records_one_auxiliary_call(status):
+    value = scenarios()
+    catalog = evaluation_catalog(value)
+    case = value["s_scenarios"][0]
+    original = plan_for(case, catalog)
+    outcome = complete_semantic_selection(
+        projection(case), catalog, original, semantic_enabled=True,
+        invoke=lambda _request: transport(None, status=status, rounds=1, attempts=1),
+    )
+    assert outcome.status == status
+    assert outcome.plan == original
     assert outcome.auxiliary_calls == 1
     assert outcome.decision_hash is None
 

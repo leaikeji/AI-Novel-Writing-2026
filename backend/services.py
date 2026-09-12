@@ -139,6 +139,14 @@ class ChapterLengthValidationError(ValidationError):
         return detail
 
 
+class ChapterGenerationInProgressError(ValidationError):
+    """A second request tried to start while this chapter already has an owner."""
+
+    def __init__(self, job: dict[str, Any]):
+        super().__init__("该章节已有正文生成任务正在进行，请查看原任务进度")
+        self.job = dict(job)
+
+
 class DraftConflictError(DomainError):
     def __init__(self, current: dict[str, Any]):
         super().__init__("document draft version conflict")
@@ -1596,12 +1604,30 @@ def start_chapter_generation(
     )
     input_hash = content_hash(serialized)
     expire_stale_chapter_generation_jobs(session, document_id)
+    # Serialize every body-generation claim for this document, regardless of
+    # input hash or ``force_new``.  The model call runs after this transaction
+    # commits, so the lock never spans external I/O.
     _lock_generation_attempt(
         session,
         namespace="chapter-body",
         scope_key=str(document_id),
-        input_hash=input_hash,
+        input_hash="active-owner",
     )
+    active = session.scalar(
+        select(ChapterGenerationJob).where(
+            ChapterGenerationJob.document_id == document_id,
+            ChapterGenerationJob.kind == "body",
+            ChapterGenerationJob.state == "running",
+        ).order_by(ChapterGenerationJob.created_at.desc())
+    )
+    if active is not None:
+        if method_dispatch is None and not force_new and active.input_hash == input_hash:
+            payload = _generation_job_payload(session, active, include_snapshot=True)
+            payload["should_execute"] = False
+            return payload
+        raise ChapterGenerationInProgressError(
+            _generation_job_payload(session, active)
+        )
     existing = session.scalar(
         select(ChapterGenerationJob).where(
             ChapterGenerationJob.document_id == document_id,
@@ -2149,6 +2175,23 @@ def list_chapter_generation_jobs(session: Session, document_id: UUID) -> list[di
         .order_by(ChapterGenerationJob.created_at.desc())
     ).all()
     return [_generation_job_payload(session, job) for job in jobs]
+
+
+def get_active_chapter_generation_job(
+    session: Session, document_id: UUID
+) -> dict[str, Any] | None:
+    """Return the current request-scoped owner without creating or replaying work."""
+
+    _require_document(session, document_id)
+    expire_stale_chapter_generation_jobs(session, document_id)
+    job = session.scalar(
+        select(ChapterGenerationJob).where(
+            ChapterGenerationJob.document_id == document_id,
+            ChapterGenerationJob.kind == "body",
+            ChapterGenerationJob.state == "running",
+        ).order_by(ChapterGenerationJob.created_at.desc())
+    )
+    return _generation_job_payload(session, job) if job is not None else None
 
 
 def expire_stale_chapter_generation_jobs(

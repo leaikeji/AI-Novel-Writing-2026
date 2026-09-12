@@ -230,7 +230,9 @@ class SemanticRouteEvidenceV2(FrozenModel):
 
     schema_version: Literal["semantic-route-evidence/2"] = "semantic-route-evidence/2"
     request_schema: Literal["semantic-route-request/2"] = "semantic-route-request/2"
-    prompt_contract: Literal["semantic-routing-prompt/2"] = "semantic-routing-prompt/2"
+    prompt_contract: Literal[
+        "semantic-routing-prompt/2", "semantic-routing-prompt/3"
+    ] = "semantic-routing-prompt/3"
     status: Literal["applied", "rejected"]
     auxiliary_calls: Literal[1] = 1
     request_hash: Digest

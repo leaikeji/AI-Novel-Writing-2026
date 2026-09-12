@@ -14,8 +14,8 @@
       "skill_id": "future-time-loop",
       "kind": "mechanism",
       "label": "测试时间存档",
-      "description": "测试未来机制：处理角色保存并读取某一时间状态的能力、重置边界及跨轮次损失；普通回忆或日程重复不适用。",
-      "semantic_criteria": ["当前任务明确出现可保存、读取或重置时间状态的特殊能力，并要求处理其运用或代价。"],
+      "description": "测试未来机制：处理角色主动保存并读取某一时间状态的能力、重置边界及跨轮次损失；自动回到固定时间、普通回忆或日程重复不适用。",
+      "semantic_criteria": ["当前任务明确出现由角色主动保存并读取时间状态的特殊能力，并要求处理其运用或代价；只有自动复位而不能主动保存或读取时不满足。"],
       "negative_examples": ["只是回忆过去、重复日程或叙事倒叙，没有可操作的时间状态。", "死亡后自动回到固定清晨但角色不能主动保存或读取状态，属于通用特殊优势，不属于本测试专用存档模块。"],
       "supersedes": ["golden-finger-writing"]
     }
@@ -58,7 +58,7 @@
     {"id":"S13","task":"chapter_outline","sources":[["content","完成救援任务会获得可兑换工具的积分，兑换选择直接改变下一次行动能力。"]],"expected":["golden-finger-writing"]},
     {"id":"S14","task":"outline_background","sources":[["content","经营者能提前一天看到市场需求，利用信息安排库存和现金流，预测并不要求付出代价。"]],"expected":["golden-finger-writing"]},
     {"id":"S15","task":"character_profile_completion","sources":[["content","角色天生能看见谎言留下的颜色，他习惯依赖这一优势判断谈判对象。"]],"expected":["golden-finger-writing"]},
-    {"id":"S16","task":"chapter_body","sources":[["content","经验丰富的刑警凭训练、访谈和普通数据库分析锁定嫌疑人，没有超常优势。"]],"expected":[]},
+    {"id":"S16","task":"chapter_body","sources":[["content","经验丰富的刑警凭训练、访谈和普通数据库分析锁定嫌疑人，没有超常优势。"]],"expected":["suspense-writing"]},
     {"id":"S17","task":"review","sources":[["content","公司更换订单系统后出现库存错误，请检查职场剧情的因果是否连贯。"]],"expected":[]},
     {"id":"S18","task":"outline_characters","sources":[["content","修行者按公开功法训练多年取得进步，所有同门都能学习，没有独占资源或特殊机制。"]],"expected":[]},
     {"id":"S19","task":"chapter_storyline_recommendation","sources":[["content","停职刑警会收到下一起案件发生前的匿名画面，必须核验画面并阻止犯罪，同时找出发送者。"]],"expected":["suspense-writing","golden-finger-writing"]},

@@ -88,6 +88,11 @@ def _button_projection(case: dict[str, object]):
                 "base_content_hash": "a" * 64,
             },
             "brief": {"version": 1},
+            "writing_context": {"envelope": {"included_blocks": [{
+                "section": "chapter_requirements",
+                "source_kind": "chapter_brief",
+                "content": content or "本次章节正文任务",
+            }]}},
         }
         classification_text = {
             key: classification.get(key, "") for key in ("genre", "subgenre")
