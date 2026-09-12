@@ -13,23 +13,51 @@ export const NARRATION_SETTINGS_SCHEMA_VERSION = "narration-settings/1" as const
 export const NARRATION_CAPABILITY_SCHEMA_VERSION = "narration-capabilities/5" as const;
 export const NARRATION_VOICE_SCHEMA_VERSION = "narration-voice/2" as const;
 export const NARRATION_CACHE_SCHEMA_VERSION = "narration-cache/1" as const;
-export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "qwen-tts-preset-catalog/1" as const;
+export const OFFICIAL_PRESET_CATALOG_SCHEMA_VERSION = "qwen-tts-preset-catalog/2" as const;
 export const OFFICIAL_PRESET_PROVENANCE_SCHEMA_VERSION = "qwen-tts-preset-provenance/1" as const;
 export const OFFICIAL_PRESET_MANIFEST_IDENTITY = Object.freeze({
   repository: "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
   revision: "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
   manifestPath: "qwen-provider-voice-map/1",
-  manifestSha256: "f7ff3abde53817ac73aa3264325b3487462127baf28de0bc20a6380d07720c11",
   modelFingerprintSha256: "728e8b60b4cdb195a1379faf033b428bf93feaceccbdcf3c3a4bd3a6698b4fb6",
 } as const);
-export const OFFICIAL_PRESET_EVIDENCE = Object.freeze([
-  { presetId: "qwen.WarmFemale", localVoiceId: "Serena", aliyunPlusVoiceId: "longanlingxin", aliyunFlashVoiceId: "longanhuan_v3.6" },
-  { presetId: "qwen.ClearMale", localVoiceId: "Aiden", aliyunPlusVoiceId: "longanlufeng", aliyunFlashVoiceId: "loongjohn" },
+export const OFFICIAL_PRESET_IDS = Object.freeze([
+  "qwen.WarmFemale",
+  "qwen.Vivian",
+  "qwen.UncleFu",
+  "qwen.Dylan",
+  "qwen.Eric",
+  "qwen.ClearMale",
+  "qwen.Ryan",
+  "qwen.OnoAnna",
+  "qwen.Sohee",
 ] as const);
-export type OfficialPresetId = typeof OFFICIAL_PRESET_EVIDENCE[number]["presetId"];
-export const OFFICIAL_PRESET_IDS: readonly OfficialPresetId[] = Object.freeze(
-  OFFICIAL_PRESET_EVIDENCE.map((item) => item.presetId),
-);
+export type OfficialPresetId = typeof OFFICIAL_PRESET_IDS[number];
+export type OfficialPresetLanguage = "zh-CN" | "en" | "ja-JP" | "ko-KR";
+
+export interface OfficialPresetEvidence {
+  readonly presetId: OfficialPresetId;
+  readonly localVoiceId: string;
+  readonly languageScope: OfficialPresetLanguage;
+  readonly nativeLanguage: OfficialPresetLanguage;
+  readonly dialect: string | null;
+  readonly validationTier: "canonical_chapter_verified" | "pinned_catalog_unreviewed";
+  /** Empty means that no cloud mapping is asserted for this local speaker. */
+  readonly aliyunPlusVoiceId: string;
+  readonly aliyunFlashVoiceId: string;
+}
+
+export const OFFICIAL_PRESET_EVIDENCE: readonly OfficialPresetEvidence[] = Object.freeze([
+  { presetId: "qwen.WarmFemale", localVoiceId: "Serena", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "canonical_chapter_verified", aliyunPlusVoiceId: "longanlingxin", aliyunFlashVoiceId: "longanhuan_v3.6" },
+  { presetId: "qwen.Vivian", localVoiceId: "Vivian", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.UncleFu", localVoiceId: "Uncle_Fu", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.Dylan", localVoiceId: "Dylan", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: "北京口音", validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.Eric", localVoiceId: "Eric", languageScope: "zh-CN", nativeLanguage: "zh-CN", dialect: "四川口音", validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.ClearMale", localVoiceId: "Aiden", languageScope: "zh-CN", nativeLanguage: "en", dialect: null, validationTier: "canonical_chapter_verified", aliyunPlusVoiceId: "longanlufeng", aliyunFlashVoiceId: "loongjohn" },
+  { presetId: "qwen.Ryan", localVoiceId: "Ryan", languageScope: "en", nativeLanguage: "en", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.OnoAnna", localVoiceId: "Ono_Anna", languageScope: "ja-JP", nativeLanguage: "ja-JP", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+  { presetId: "qwen.Sohee", localVoiceId: "Sohee", languageScope: "ko-KR", nativeLanguage: "ko-KR", dialect: null, validationTier: "pinned_catalog_unreviewed", aliyunPlusVoiceId: "", aliyunFlashVoiceId: "" },
+]);
 export const REFERENCE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 export const REFERENCE_UPLOAD_MIME_TYPES = ["audio/wav", "audio/flac"] as const;
 
@@ -370,6 +398,11 @@ export interface OfficialPresetProvenance {
 const OFFICIAL_PRESET_EVIDENCE_BY_ID = new Map(
   OFFICIAL_PRESET_EVIDENCE.map((item) => [item.presetId, item] as const),
 );
+const OFFICIAL_PRESET_PROVIDER_KEYS = Object.freeze([
+  "local_qwen3_tts",
+  "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus",
+  "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash",
+] as const);
 
 /** Match a provider-aware provenance object against the pinned Qwen catalog. */
 export function officialPresetProvenanceIsExact(
@@ -377,17 +410,26 @@ export function officialPresetProvenanceIsExact(
   expectedPresetId: string = provenance.preset_id,
 ): boolean {
   const expected = OFFICIAL_PRESET_EVIDENCE_BY_ID.get(expectedPresetId as OfficialPresetId);
-  return expected !== undefined
-    && provenance.schema_version === OFFICIAL_PRESET_PROVENANCE_SCHEMA_VERSION
+  if (expected === undefined) return false;
+  const providerKeys = Object.keys(provenance.provider_voice_ids);
+  const providerKeysAreAllowed = providerKeys.length > 0
+    && providerKeys.every((key) => (OFFICIAL_PRESET_PROVIDER_KEYS as readonly string[]).includes(key));
+  const pinnedCloudMappingIsExact = expected.aliyunPlusVoiceId === ""
+    && expected.aliyunFlashVoiceId === ""
+    ? providerKeys.length === 1
+    : providerKeys.length === OFFICIAL_PRESET_PROVIDER_KEYS.length
+      && provenance.provider_voice_ids["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus"]
+        === expected.aliyunPlusVoiceId
+      && provenance.provider_voice_ids["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash"]
+        === expected.aliyunFlashVoiceId;
+  return provenance.schema_version === OFFICIAL_PRESET_PROVENANCE_SCHEMA_VERSION
     && provenance.catalog_id === OFFICIAL_PRESET_MANIFEST_IDENTITY.manifestPath
     && provenance.preset_id === expected.presetId
     && provenance.local_model_id === OFFICIAL_PRESET_MANIFEST_IDENTITY.repository
     && provenance.local_model_revision === OFFICIAL_PRESET_MANIFEST_IDENTITY.revision
+    && providerKeysAreAllowed
     && provenance.provider_voice_ids.local_qwen3_tts === expected.localVoiceId
-    && provenance.provider_voice_ids["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus"]
-      === expected.aliyunPlusVoiceId
-    && provenance.provider_voice_ids["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash"]
-      === expected.aliyunFlashVoiceId
+    && pinnedCloudMappingIsExact
     && provenance.model_fingerprint_sha256
       === OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256
     && /^[a-f0-9]{64}$/u.test(provenance.provenance_fingerprint_sha256);
@@ -396,12 +438,15 @@ export function officialPresetProvenanceIsExact(
 export interface OfficialPresetCatalogItem {
   readonly preset_id: string;
   readonly display_name: string;
+  readonly official_speaker: string;
+  readonly native_language: OfficialPresetLanguage;
+  readonly dialect: string | null;
   readonly group: string;
   readonly language: string;
   readonly local_use_status: "available";
   readonly commercial_distribution_status: "not_evaluated";
   readonly validation_tier: "canonical_chapter_verified" | "pinned_catalog_unreviewed";
-  readonly language_scope: "zh-CN" | "en" | "ja-JP";
+  readonly language_scope: OfficialPresetLanguage;
   readonly selectable_now: boolean;
   readonly previewable_now: boolean;
   readonly renderable_existing: boolean;
@@ -586,8 +631,18 @@ export interface PutCharacterVoiceBindingRequest {
 
 export type OfficialVoiceSelectionTargetKind = "narrator" | "character";
 
-export interface OfficialVoicePreviewRequest {
+export interface OfficialVoicePreviewAudioRequest {
   readonly preset_id: OfficialPresetId;
+  readonly language: OfficialPresetLanguage;
+}
+
+export interface OfficialVoicePreviewAudioResponse {
+  readonly audio: Blob;
+  readonly content_type: "audio/wav";
+  readonly provider_id: "local_qwen3_tts";
+  readonly model_id: string;
+  readonly model_revision: string;
+  readonly official_speaker: string;
 }
 
 export interface OfficialVoiceSelectionRequest {
@@ -1379,11 +1434,14 @@ function validateOfficialPresetProvenance(
   const revision = string(item.local_model_revision, `${path}.local_model_revision`, 40, 40);
   if (!GIT_REVISION_PATTERN.test(revision)) fail(`${path}.local_model_revision`, "expected lowercase Git revision");
   const providerVoiceIds = record(item.provider_voice_ids, `${path}.provider_voice_ids`);
-  exact(providerVoiceIds, [
-    "local_qwen3_tts",
-    "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus",
-    "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash",
-  ], `${path}.provider_voice_ids`);
+  const providerKeys = Object.keys(providerVoiceIds);
+  if (
+    providerKeys.length === 0
+    || !Object.prototype.hasOwnProperty.call(providerVoiceIds, "local_qwen3_tts")
+    || providerKeys.some((key) => !(OFFICIAL_PRESET_PROVIDER_KEYS as readonly string[]).includes(key))
+  ) {
+    fail(`${path}.provider_voice_ids`, "expected local mapping and known Provider keys only");
+  }
   Object.entries(providerVoiceIds).forEach(([key, voiceId]) => {
     string(voiceId, `${path}.provider_voice_ids.${key}`, 1, 160);
   });
@@ -1404,7 +1462,8 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
     const itemPath = `${path}.items[${index}]`;
     const preset = record(entry, itemPath);
     exact(preset, [
-      "preset_id", "display_name", "group", "language", "local_use_status",
+      "preset_id", "display_name", "official_speaker", "native_language", "dialect",
+      "group", "language", "local_use_status",
       "commercial_distribution_status", "validation_tier", "language_scope",
       "selectable_now", "previewable_now", "renderable_existing", "usage_notice",
       "provenance",
@@ -1416,6 +1475,20 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
       fail(`${itemPath}.preset_id`, `expected pinned catalog order item ${expectedPresetId}`);
     }
     string(preset.display_name, `${itemPath}.display_name`, 1, 160);
+    const expectedEvidence = OFFICIAL_PRESET_EVIDENCE_BY_ID.get(expectedPresetId)!;
+    literal(preset.official_speaker, expectedEvidence.localVoiceId, `${itemPath}.official_speaker`);
+    const nativeLanguage = oneOf(
+      preset.native_language,
+      ["zh-CN", "en", "ja-JP", "ko-KR"] as const,
+      `${itemPath}.native_language`,
+    );
+    if (nativeLanguage !== expectedEvidence.nativeLanguage) {
+      fail(`${itemPath}.native_language`, "official speaker native language changed");
+    }
+    const dialect = nullableString(preset.dialect, `${itemPath}.dialect`, 80);
+    if (dialect !== expectedEvidence.dialect) {
+      fail(`${itemPath}.dialect`, "official speaker dialect changed");
+    }
     string(preset.group, `${itemPath}.group`, 1, 80);
     language(preset.language, `${itemPath}.language`);
     literal(preset.local_use_status, "available", `${itemPath}.local_use_status`);
@@ -1425,16 +1498,19 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
       ["canonical_chapter_verified", "pinned_catalog_unreviewed"] as const,
       `${itemPath}.validation_tier`,
     );
-    const expectedValidationTier = "canonical_chapter_verified";
+    const expectedValidationTier = expectedEvidence.validationTier;
     if (validationTier !== expectedValidationTier) {
       fail(`${itemPath}.validation_tier`, "official preset validation tier changed");
     }
     const languageScope = oneOf(
       preset.language_scope,
-      ["zh-CN", "en", "ja-JP"] as const,
+      ["zh-CN", "en", "ja-JP", "ko-KR"] as const,
       `${itemPath}.language_scope`,
     );
-    if (languageScope !== preset.language) fail(itemPath, "catalog language scope changed");
+    if (
+      languageScope !== preset.language
+      || languageScope !== expectedEvidence.languageScope
+    ) fail(itemPath, "catalog language scope changed");
     boolean(preset.selectable_now, `${itemPath}.selectable_now`);
     boolean(preset.previewable_now, `${itemPath}.previewable_now`);
     boolean(preset.renderable_existing, `${itemPath}.renderable_existing`);
@@ -1445,6 +1521,20 @@ function validateOfficialPresetCatalog(value: unknown, path: string): void {
       fail(`${itemPath}.provenance`, "official preset provenance disagrees with pinned evidence");
     }
   });
+}
+
+function validateOfficialVoicePreviewAudioRequest(value: unknown, path: string): void {
+  const item = record(value, path);
+  exact(item, ["preset_id", "language"], path);
+  const presetId = string(item.preset_id, `${path}.preset_id`, 6, 85);
+  if (!OFFICIAL_PRESET_IDS.includes(presetId as OfficialPresetId)) {
+    fail(`${path}.preset_id`, "expected exact Qwen preset id");
+  }
+  oneOf(
+    item.language,
+    ["zh-CN", "en", "ja-JP", "ko-KR"] as const,
+    `${path}.language`,
+  );
 }
 
 function parseMediaAssetLink(value: unknown, path: string): MediaAssetLink {
@@ -1648,8 +1738,12 @@ function validateOfficialVoiceSelection(value: unknown, path: string): void {
   ], `${path}.frozen_result`);
   uuid(result.command_id, `${path}.frozen_result.command_id`);
   const presetId = string(result.preset_id, `${path}.frozen_result.preset_id`, 6, 85);
-  const presetIndex = OFFICIAL_PRESET_IDS.indexOf(presetId as OfficialPresetId);
-  if (presetIndex < 0) fail(`${path}.frozen_result.preset_id`, "unknown pinned preset");
+  const presetEvidence = OFFICIAL_PRESET_EVIDENCE_BY_ID.get(
+    presetId as OfficialPresetId,
+  );
+  if (presetEvidence === undefined) {
+    fail(`${path}.frozen_result.preset_id`, "unknown pinned preset");
+  }
   const target = oneOf(result.target_kind, ["narrator", "character"] as const, `${path}.frozen_result.target_kind`);
   const characterId = nullableUuid(result.character_id, `${path}.frozen_result.character_id`);
   const profileId = uuid(result.profile_id, `${path}.frozen_result.profile_id`);
@@ -1664,7 +1758,7 @@ function validateOfficialVoiceSelection(value: unknown, path: string): void {
   if ((target === "character") !== (characterId !== null && bindingVersion !== null)) {
     fail(`${path}.frozen_result`, "selection target shape mismatch");
   }
-  const presetLanguage = presetIndex < 6 ? "zh-CN" : presetIndex < 11 ? "en" : "ja-JP";
+  const presetLanguage = presetEvidence.languageScope;
   const targetLanguageBase = targetLanguage.split("-", 1)[0]!.toLocaleLowerCase("en-US");
   const presetLanguageBase = presetLanguage.split("-", 1)[0]!.toLocaleLowerCase("en-US");
   if (languageMismatch !== (targetLanguageBase !== presetLanguageBase)) {
@@ -2069,6 +2163,16 @@ export function parseVoiceProfileVersionResource(value: unknown): VoiceProfileVe
 
 export function parseOfficialPresetCatalogResponse(value: unknown): OfficialPresetCatalogResponse {
   return validated(value, validateOfficialPresetCatalog, "official_preset_catalog");
+}
+
+export function parseOfficialVoicePreviewAudioRequest(
+  value: unknown,
+): OfficialVoicePreviewAudioRequest {
+  return validated(
+    value,
+    validateOfficialVoicePreviewAudioRequest,
+    "official_voice_preview_audio_request",
+  );
 }
 
 export function parseVoicePreviewResource(value: unknown): VoicePreviewResource {

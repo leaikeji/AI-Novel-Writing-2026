@@ -21,6 +21,7 @@ from backend.narration.services import (
     NarrationScopeMismatch,
     StaleNarrationInput,
     VoiceRightsUnavailable,
+    VoiceSourceUnavailable,
 )
 
 
@@ -920,6 +921,11 @@ def test_failed_segment_write_rolls_back_domain_failure(
         (NarrationCasConflict("private version"), 409, "VERSION_CONFLICT"),
         (InvalidNarrationState("private state"), 409, "INVALID_STATE"),
         (IdempotencyConflict("private digest"), 409, "IDEMPOTENCY_CONFLICT"),
+        (
+            VoiceSourceUnavailable("private Provider mapping"),
+            409,
+            "VOICE_SOURCE_UNAVAILABLE",
+        ),
         (
             VoiceRightsUnavailable("private voice"),
             403,

@@ -22,6 +22,7 @@ from backend.models import (
     NarrationManifest,
     NarrationRequest,
     NarrationSegmentRender,
+    VoiceProfileVersion,
 )
 from backend.narration import document_state
 from backend.narration import edition_service as edition_service_module
@@ -43,6 +44,7 @@ from backend.narration.services import (
     InvalidNarrationState,
     NarrationCasConflict,
     StaleNarrationInput,
+    VoiceSourceUnavailable,
 )
 from backend.narration.tts_selection import selection_fingerprint
 from backend.narration import schemas as wire
@@ -171,6 +173,30 @@ def test_generation_creates_one_approved_edition_and_fenced_render_candidates() 
     assert len(store.find_all(NarrationSegmentRender, request_id=request.id)) == len(segments)
     assert len(result.job_ids) == len(segments)
     assert store.rows[MediaAsset] == []
+
+
+def test_cloud_provider_missing_official_mapping_blocks_before_edition_fanout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _novel, _document, _revision, _seed_request, command = _workflow_seed()
+    queue = MemoryRenderQueue(store)
+    for voice in store.rows[VoiceProfileVersion]:
+        voice.preset_key = "qwen.Vivian"
+    monkeypatch.setattr(
+        edition_service_module,
+        "selection_from_settings_snapshot",
+        lambda _snapshot: wire.TTSProviderSelection(
+            provider_id="aliyun_qwen_audio_tts",
+            aliyun_model_id="qwen-audio-3.0-tts-plus",
+        ),
+    )
+
+    with pytest.raises(VoiceSourceUnavailable, match="no verified mapping"):
+        orchestrate_narration_request(store, queue, command, POLICY)
+
+    assert store.rows[NarrationEdition] == []
+    assert store.rows[BackgroundJob] == []
+    assert queue.calls == []
 
 
 def test_legacy_edition_identity_uses_stable_ids_without_joining_mutable_name() -> None:

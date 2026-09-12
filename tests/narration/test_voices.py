@@ -25,6 +25,7 @@ from backend.narration.services import (
     NarrationCasConflict,
     NarrationScopeMismatch,
     VoiceRightsUnavailable,
+    VoiceSourceUnavailable,
 )
 from backend.narration.settings_api import (
     NarrationApiFault,
@@ -859,7 +860,6 @@ def test_lock_rechecks_rights_then_source_gate_without_mutating_version() -> Non
 def test_handler_owns_exact_frozen_voice_operations_only() -> None:
     expected = {
         NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
-        NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
         NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
         NarrationSettingsOperation.LIST_VOICE_PROFILES,
         NarrationSettingsOperation.CREATE_VOICE_PROFILE,
@@ -920,6 +920,17 @@ def test_handler_dispatches_official_selection_only_through_independent_port() -
         official_voice_selection=port,  # type: ignore[arg-type]
     ).dispatch(command) == "selected"
     assert port.calls == [(book.id, payload, "official-select-0001")]
+
+    class MissingMappingPort:
+        def select_official_voice(self, **_values: object) -> object:
+            raise VoiceSourceUnavailable("private Provider mapping")
+
+    with pytest.raises(NarrationApiFault) as missing_mapping:
+        VoiceSettingsHandler(
+            store,
+            official_voice_selection=MissingMappingPort(),  # type: ignore[arg-type]
+        ).dispatch(command)
+    assert missing_mapping.value.code is wire.NarrationErrorCode.VOICE_SOURCE_UNAVAILABLE
 
 
 def test_handler_fails_closed_without_durable_profile_creation_receipts() -> None:

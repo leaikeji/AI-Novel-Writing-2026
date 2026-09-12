@@ -45,6 +45,7 @@ from .narration_api import (
     install_narration_production_backend_factory,
     uninstall_narration_production_backend_factory,
 )
+from .official_preview_audio import OfficialVoicePreviewAudioService
 from .playback_api import (
     PlaybackApiBackendFactory,
     build_playback_api_backend_factory,
@@ -474,6 +475,7 @@ _playback_factory: PlaybackApiBackendFactory | None = None
 _production_factory: NarrationProductionBackendFactory | None = None
 _production_policy: NarrationProductionPolicy | None = None
 _voice_product_port: object | None = None
+_official_voice_preview_service: OfficialVoicePreviewAudioService | None = None
 _private_voice_deletion_service: VoiceDeletionService | None = None
 _private_voice_lifecycle_service: PrivateVoiceLifecycleService | None = None
 _voice_deletion_reconciler: VoiceDeletionReconciler | None = None
@@ -887,6 +889,14 @@ def current_voice_product_port() -> object | None:
     return _voice_product_port
 
 
+def current_official_voice_preview_service() -> OfficialVoicePreviewAudioService | None:
+    """Return the stateless local preview service owned by the live runtime."""
+
+    if _snapshot.lifecycle_status != "ready":
+        return None
+    return _official_voice_preview_service
+
+
 def current_private_voice_deletion_service() -> VoiceDeletionService | None:
     """Return the deletion service owned by the production runtime."""
 
@@ -938,6 +948,7 @@ async def _run_qwen_production(
 
     global _production_factory, _production_policy, _runtime_task, _snapshot
     global _disk_guard, _cache_runtime
+    global _official_voice_preview_service
     global _private_voice_deletion_service, _private_voice_lifecycle_service
     global _voice_deletion_reconciler
     global _validation_token_digest, _validation_runtime_scope
@@ -1086,6 +1097,10 @@ async def _run_qwen_production(
             registry,
             authorize_cloud_tts=authorize_cloud_tts,
         )
+        preview_service = OfficialVoicePreviewAudioService(
+            session_factory=session_factory,
+            execution_service=execution,
+        )
         default_selection = wire.TTSProviderSelection()
         policy = NarrationProductionPolicy(
             tts_fingerprint=selection_fingerprint(default_selection),
@@ -1139,6 +1154,7 @@ async def _run_qwen_production(
                 return
             _production_factory = installed_factory
             _production_policy = policy
+            _official_voice_preview_service = preview_service
             _validation_token_digest = validation_token_digest
             _validation_runtime_scope = validation_scope
 
@@ -1198,6 +1214,7 @@ async def _run_qwen_production(
             if _runtime_task is current_task:
                 _disk_guard = None
                 _cache_runtime = None
+                _official_voice_preview_service = None
                 _private_voice_deletion_service = None
                 _private_voice_lifecycle_service = None
                 _voice_deletion_reconciler = None
@@ -1315,6 +1332,7 @@ async def stop_narration_production_runtime() -> None:
 
     global _playback_factory, _production_factory, _production_policy
     global _voice_product_port, _disk_guard, _cache_runtime
+    global _official_voice_preview_service
     global _private_voice_deletion_service, _private_voice_lifecycle_service
     global _voice_deletion_reconciler
     global _validation_token_digest, _validation_runtime_scope
@@ -1332,6 +1350,7 @@ async def stop_narration_production_runtime() -> None:
         _production_factory = None
         _production_policy = None
         _voice_product_port = None
+        _official_voice_preview_service = None
         _private_voice_deletion_service = None
         _private_voice_lifecycle_service = None
         _voice_deletion_reconciler = None
@@ -1395,6 +1414,7 @@ __all__ = [
     "WORKER_TASK_NAME",
     "WORKER_CYCLE_TASK_NAME",
     "current_voice_product_port",
+    "current_official_voice_preview_service",
     "current_private_voice_deletion_service",
     "current_private_voice_lifecycle_service",
     "current_narration_cache_runtime",

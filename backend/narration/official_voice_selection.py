@@ -36,6 +36,7 @@ from .services import (
     NarrationScopeMismatch,
     NarrationServiceError,
     SqlAlchemyNarrationStore,
+    VoiceSourceUnavailable,
     canonical_sha256,
     require_local_novel,
 )
@@ -44,6 +45,7 @@ from .official_voice_records import (
     CanonicalOfficialPresetVoice,
     ensure_canonical_official_preset_voice,
 )
+from .official_presets import official_preset_provider_voice_id
 from .voice_receipts import (
     complete_voice_action_receipt as _complete_receipt,
     database_now as _db_now,
@@ -294,6 +296,29 @@ def _materialize_default_settings(
         ),
     )
     return get_narration_settings(store, novel_id=current.novel_id)
+
+
+def _require_current_provider_mapping(
+    *,
+    settings: wire.NarrationSettingsResource,
+    preset_ids: set[str],
+) -> None:
+    selection = settings.values.tts_provider
+    for preset_id in preset_ids:
+        try:
+            provider_voice_id = official_preset_provider_voice_id(
+                preset_id,
+                provider_id=selection.provider_id,
+                aliyun_model_id=selection.aliyun_model_id,
+            )
+        except ValueError as error:
+            raise InvalidNarrationState(
+                "narration settings select an unsupported TTS Provider"
+            ) from error
+        if provider_voice_id is None:
+            raise VoiceSourceUnavailable(
+                "official voice has no verified mapping for the selected Provider"
+            )
 
 
 def _apply_narrator(
@@ -578,6 +603,10 @@ class OfficialVoiceSelectionService:
             for selection in ordered
         ):
             raise NarrationCasConflict("narration settings version changed")
+        _require_current_provider_mapping(
+            settings=settings,
+            preset_ids={selection.request.preset_id for selection in ordered},
+        )
 
         character_selections = tuple(
             selection

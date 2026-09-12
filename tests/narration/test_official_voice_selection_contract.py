@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,6 +23,7 @@ from backend.models import (
     VoiceProfile,
     VoiceProfileVersion,
 )
+from backend.narration import schemas as wire
 from backend.narration.contracts import LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID
 from backend.narration.official_presets import (
     OFFICIAL_PRESET_IDENTITY_CONTRACT_VERSION,
@@ -32,6 +34,8 @@ from backend.narration.official_presets import (
     validate_official_version_evidence,
 )
 from backend.narration.official_voice_records import build_official_preset_version_rows
+from backend.narration.official_voice_selection import _require_current_provider_mapping
+from backend.narration.services import VoiceSourceUnavailable
 from tests.narration.current_schema_gate import assert_database_at_repository_head
 
 
@@ -137,6 +141,29 @@ def test_orm_freezes_truthful_activation_and_immutable_command_shape() -> None:
     assert "language_mismatch" in ddl
     assert "result_json" not in ddl
     assert "target_kind IN ('narrator','character')" in ddl
+    for preset in OFFICIAL_PRESETS:
+        assert preset.preset_id in ddl
+
+
+def test_official_selection_rejects_local_only_voice_for_cloud_before_writes() -> None:
+    cloud_settings = SimpleNamespace(
+        values=SimpleNamespace(
+            tts_provider=wire.TTSProviderSelection(
+                provider_id="aliyun_qwen_audio_tts",
+                aliyun_model_id="qwen-audio-3.0-tts-plus",
+            )
+        )
+    )
+    with pytest.raises(VoiceSourceUnavailable, match="no verified mapping"):
+        _require_current_provider_mapping(
+            settings=cloud_settings,
+            preset_ids={"qwen.Vivian"},
+        )
+
+    _require_current_provider_mapping(
+        settings=cloud_settings,
+        preset_ids={"qwen.WarmFemale", "qwen.ClearMale"},
+    )
 
 
 def test_migration_is_linear_io_free_and_keeps_source_specific_guards() -> None:
@@ -232,6 +259,41 @@ def test_shared_official_validator_rejects_model_parameters_and_rights_drift() -
     rows.rights.source_identifier = original_source
 
 
+def test_official_row_builder_persists_sparse_maps_for_all_nine_presets() -> None:
+    now = datetime.now(timezone.utc)
+    for preset in OFFICIAL_PRESETS:
+        profile = VoiceProfile(
+            id=uuid4(),
+            owner_id=LOCAL_OWNER_ID,
+            workspace_id=LOCAL_WORKSPACE_ID,
+            novel_id=uuid4(),
+            name=preset.display_name,
+            status="active",
+        )
+        version_id = official_preset_canonical_version_id(
+            profile_id=profile.id,
+            preset_id=preset.preset_id,
+        )
+        rows = build_official_preset_version_rows(
+            profile=profile,
+            preset=preset,
+            version_id=version_id,
+            version_number=1,
+            actor="local-owner",
+            at=now,
+            direct_selection=True,
+        )
+        assert rows.version.parameters_json["provider_voice_ids"] == (
+            preset.provider_voice_ids
+        )
+        assert rows.version.language == preset.language
+        validate_official_version_evidence(
+            rows.version,
+            rows.rights,
+            expected_model_fingerprint=OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
+        )
+
+
 def _live_url() -> str:
     raw = os.environ.get("TTS_TEST_DATABASE_URL", "").strip()
     if not raw:
@@ -256,7 +318,14 @@ def _live_url() -> str:
     return raw
 
 
-def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() -> None:
+@pytest.mark.parametrize(
+    "preset",
+    OFFICIAL_PRESETS,
+    ids=[item.preset_id for item in OFFICIAL_PRESETS],
+)
+def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence(
+    preset,
+) -> None:
     engine = create_engine(_live_url(), pool_pre_ping=True)
     try:
         with engine.connect() as connection:
@@ -270,11 +339,11 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                     owner_id=LOCAL_OWNER_ID,
                     workspace_id=LOCAL_WORKSPACE_ID,
                     novel_id=novel_id,
-                    preset_id="qwen.WarmFemale",
+                    preset_id=preset.preset_id,
                 )
                 version_id = official_preset_canonical_version_id(
                     profile_id=profile_id,
-                    preset_id="qwen.WarmFemale",
+                    preset_id=preset.preset_id,
                 )
                 now = datetime.now(timezone.utc)
                 session.add(
@@ -290,14 +359,14 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                     owner_id=LOCAL_OWNER_ID,
                     workspace_id=LOCAL_WORKSPACE_ID,
                     novel_id=novel_id,
-                    name="Warm Female",
+                    name=preset.display_name,
                     status="active",
                 )
                 session.add(profile)
                 session.flush()
                 rows = build_official_preset_version_rows(
                     profile=profile,
-                    preset=OFFICIAL_PRESETS[0],
+                    preset=preset,
                     version_id=version_id,
                     version_number=1,
                     actor="local-owner",
@@ -311,7 +380,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                 legacy_version_id = uuid4()
                 legacy_rows = build_official_preset_version_rows(
                     profile=profile,
-                    preset=OFFICIAL_PRESETS[0],
+                    preset=preset,
                     version_id=legacy_version_id,
                     version_number=2,
                     actor="local-owner",
@@ -376,7 +445,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                     operation="official_preset_selection",
                     target_kind="narrator",
                     target_character_id=None,
-                    preset_key="qwen.WarmFemale",
+                    preset_key=preset.preset_id,
                     request_hash=request_hash,
                     state="reserved",
                 )
@@ -386,7 +455,7 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                 command.profile_id = profile_id
                 command.voice_version_id = version_id
                 command.settings_version = 1
-                command.target_language = "zh-CN"
+                command.target_language = preset.language
                 command.language_mismatch = False
                 completed_at = datetime.now(timezone.utc)
                 command.completed_at = completed_at
@@ -417,13 +486,13 @@ def test_live_postgres_accepts_truthful_direct_use_and_rejects_false_evidence() 
                                 novel_id=novel_id,
                                 operation="official_preset_selection",
                                 target_kind="narrator",
-                                preset_key="qwen.WarmFemale",
+                                preset_key=preset.preset_id,
                                 request_hash="e" * 64,
                                 state="completed",
                                 profile_id=profile_id,
                                 voice_version_id=version_id,
                                 settings_version=1,
-                                target_language="zh-CN",
+                                target_language=preset.language,
                                 language_mismatch=False,
                                 completed_at=now,
                             )

@@ -1,0 +1,119 @@
+{
+  "checks": {
+    "candidate-migration-head": "20260912_0054",
+    "candidate-tree-sha256": "09560b6dab0b5d19952556b995c3a478cc2f4e8655f535fce1d1addb5286dfbf",
+    "command:create-network": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "93480b8dcf8bafc39c7eb1ae4e3e70faf70bd18c011234421e3b0a62e2dfa14d"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-q75lifecycle2-novel-media": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "dcc658f4bd5dd5ee52db3f64456aa377fccc6d66936186c6178ac7c1b82d4411"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-q75lifecycle2-postgres-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cdf29f03228e98b735c8b0ced225b5ed501797a5d829fda00a414992fe520bbf"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-q75lifecycle2-qwen-backups": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8427e11f16de61c452a23ae85555b1a57a041ec65ed383eb4c2f1d0ab8d0e02d"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-q75lifecycle2-qwen-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "bb476feba94cf33a77acc1e855a89e628cf38436c53c26a804f5eb299a59fa0e"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-q75lifecycle2-qwen-secrets": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9acfd7ea610274d77e2c2f388d98590570a30133e2b605179157bde9b5b5479f"
+    },
+    "command:docker-server-available": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "aaa3c9962de64c23cb8de5e57eb229d404b0c35bf1efa3565b1f1e77933b25ef"
+    },
+    "command:image-present-postgres": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e9266002cea916b56f48d207564b32da673f1c0fe994aa748e19cca03a7b61f3"
+    },
+    "command:image-present-qwenpaw": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "47697cd53b6915cafb10e0dead7bac06894d68e0c5d7b33ea1c5c047bcf567a4"
+    },
+    "command:start-postgres": {
+      "execution_failure_code": "COMMAND_EXECUTION_FAILED",
+      "returncode": null,
+      "stderr_sha256": null,
+      "stdout_sha256": null
+    },
+    "failure-context": {
+      "detail": "start-postgres"
+    },
+    "failure-diagnostics": {
+      "postgres": {
+        "dead": false,
+        "exit_code": 0,
+        "image_id": "sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a",
+        "inspect_returncode": 0,
+        "inspect_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "inspect_stdout_sha256": "c2c0bcce6cae95c944bfc2537c373bb42d7a677aee8c723e85f44c13293d671c",
+        "logs": {
+          "markers": {
+            "address_in_use": false,
+            "database_error": false,
+            "module_not_found": false,
+            "permission_denied": false,
+            "traceback": false
+          },
+          "returncode": 0,
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "oom_killed": false,
+        "status": "created"
+      }
+    },
+    "preflight-absent:container:ai-novel-2026-t1gate-q75lifecycle2-postgres": true,
+    "preflight-absent:container:ai-novel-2026-t1gate-q75lifecycle2-qwenpaw": true,
+    "preflight-absent:network:ai-novel-2026-t1gate-q75lifecycle2-net": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-q75lifecycle2-novel-media": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-q75lifecycle2-postgres-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-q75lifecycle2-qwen-backups": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-q75lifecycle2-qwen-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-q75lifecycle2-qwen-secrets": true
+  },
+  "cleanup": {
+    "already_absent": [],
+    "broad_cleanup_used": false,
+    "failures": [],
+    "removed_exact_resources": [
+      "container:ai-novel-2026-t1gate-q75lifecycle2-postgres",
+      "volume:ai-novel-2026-t1gate-q75lifecycle2-postgres-data",
+      "volume:ai-novel-2026-t1gate-q75lifecycle2-novel-media",
+      "volume:ai-novel-2026-t1gate-q75lifecycle2-qwen-backups",
+      "volume:ai-novel-2026-t1gate-q75lifecycle2-qwen-secrets",
+      "volume:ai-novel-2026-t1gate-q75lifecycle2-qwen-data",
+      "network:ai-novel-2026-t1gate-q75lifecycle2-net"
+    ],
+    "status": "passed"
+  },
+  "failure_code": "COMMAND_EXECUTION_FAILED",
+  "gate": "T1-GATE-INSTALL",
+  "mode": "real",
+  "phases": [
+    "preflight",
+    "create-isolated-runtime"
+  ],
+  "run_id": "q75lifecycle2",
+  "schema_version": 1,
+  "status": "failed"
+}

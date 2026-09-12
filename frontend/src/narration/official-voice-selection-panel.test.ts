@@ -14,8 +14,9 @@ import {
 } from "./contracts";
 import {
   activeOfficialPresetId,
-  createAndPlayOfficialVoicePreview,
+  createOfficialVoicePreviewPlayer,
   createOfficialVoiceSelectionPanel,
+  getAndPlayOfficialVoicePreviewAudio,
   officialVoiceSelectionDisabled,
   officialVoiceSelectionResult,
   officialVoiceSelectionWireRequest,
@@ -168,7 +169,7 @@ describe("official voice selection panel adapters", () => {
         reads.push({ resolve, signal });
       })),
       listVoiceProfiles: vi.fn(), getCharacterVoiceBinding: vi.fn(), selectOfficialVoice: vi.fn(),
-      createOfficialVoicePreview: vi.fn(), getVoicePreview: vi.fn(),
+      getOfficialVoicePreviewAudio: vi.fn(),
     } satisfies OfficialVoiceSelectionPanelApi;
     const Panel = createOfficialVoiceSelectionPanel(harness.React, api);
     const binding = { novel_id: NOVEL_ID, character_id: CHARACTER_ID, version: 7,
@@ -182,7 +183,7 @@ describe("official voice selection panel adapters", () => {
       projection: { phase: "ready", binding, profiles },
     };
     const resolve = async (index: number) => {
-      reads[index].resolve({ schema_version: "qwen-tts-preset-catalog/1", items: [] } as unknown as OfficialPresetCatalogResponse);
+      reads[index].resolve({ schema_version: "qwen-tts-preset-catalog/2", items: [] } as unknown as OfficialPresetCatalogResponse);
       for (let i = 0; i < 5; i++) await Promise.resolve();
     };
     return { harness, Panel, props, reads, resolve, binding, profiles };
@@ -245,60 +246,67 @@ describe("official voice selection panel adapters", () => {
     expect(harness.render(Panel, third).props.target).toMatchObject({ expectedBindingVersion: 7 });
   });
 
-  it("queues, polls, and plays an official preview without applying a binding", async () => {
-    const previewId = "66666666-6666-4666-8666-666666666666";
-    const queued = {
-      contract_version: "narration-settings-api/1",
-      preview_id: previewId,
-      profile_id: PROFILE_ID,
-      version_id: VERSION_ID,
-      status: "queued",
-      job_id: "77777777-7777-4777-8777-777777777777",
-      asset: null,
-      temporary: true,
-      expires_at: null,
-      failure_code: null,
-    } as const;
+  it("gets and plays one stateless local WAV without applying a binding", async () => {
     const ready = {
-      ...queued,
-      status: "ready",
-      asset: {
-        asset_id: "88888888-8888-4888-8888-888888888888",
-        mime_type: "audio/wav",
-        byte_size: 128,
-        duration_ms: 800,
-        checksum_algorithm: "sha256",
-        checksum_sha256: "a".repeat(64),
-        content_path: "/media-assets/88888888-8888-4888-8888-888888888888/content",
-      },
-      expires_at: "2026-08-29T00:05:00Z",
+      audio: new Blob([new Uint8Array([82, 73, 70, 70])], { type: "audio/wav" }),
+      content_type: "audio/wav",
+      provider_id: "local_qwen3_tts",
+      model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+      model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+      official_speaker: EVIDENCE.localVoiceId,
     } as const;
-    const create = vi.fn(async () => queued);
     const get = vi.fn(async () => ready);
     const play = vi.fn(async () => undefined);
-    vi.useFakeTimers();
-    try {
-      const promise = createAndPlayOfficialVoicePreview(
-        { createOfficialVoicePreview: create, getVoicePreview: get },
-        { play },
-        NOVEL_ID,
-        EVIDENCE.presetId,
-        new AbortController().signal,
-      );
-      await vi.advanceTimersByTimeAsync(800);
-      await promise;
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(create).toHaveBeenCalledWith(
+    const signal = new AbortController().signal;
+    await getAndPlayOfficialVoicePreviewAudio(
+      { getOfficialVoicePreviewAudio: get },
+      { play },
       NOVEL_ID,
-      { preset_id: EVIDENCE.presetId },
-      expect.stringMatching(/^official-voice-preview-/),
-      expect.any(AbortSignal),
+      EVIDENCE.presetId,
+      "zh-CN",
+      signal,
     );
-    expect(get).toHaveBeenCalledWith(previewId, expect.any(AbortSignal));
-    expect(play).toHaveBeenCalledWith(ready, expect.any(AbortSignal));
+
+    expect(get).toHaveBeenCalledWith(
+      NOVEL_ID,
+      { preset_id: EVIDENCE.presetId, language: "zh-CN" },
+      signal,
+    );
+    expect(play).toHaveBeenCalledWith(ready, signal);
+  });
+
+  it("stops audio and revokes its Blob URL when a preview is aborted", async () => {
+    const listeners = new Map<string, () => void>();
+    const audio = {
+      pause: vi.fn(),
+      play: vi.fn(async () => undefined),
+      load: vi.fn(),
+      removeAttribute: vi.fn(),
+      addEventListener: vi.fn((type: string, listener: () => void) => listeners.set(type, listener)),
+    };
+    const runtime = {
+      createObjectURL: vi.fn(() => "blob:qwen-preview"),
+      revokeObjectURL: vi.fn(),
+      createAudio: vi.fn(() => audio),
+    };
+    const controller = new AbortController();
+    const player = createOfficialVoicePreviewPlayer(runtime);
+    await player.play({
+      audio: new Blob([new Uint8Array([1])], { type: "audio/wav" }),
+      content_type: "audio/wav",
+      provider_id: "local_qwen3_tts",
+      model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+      model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+      official_speaker: EVIDENCE.localVoiceId,
+    }, controller.signal);
+
+    controller.abort();
+    expect(audio.pause).toHaveBeenCalledTimes(1);
+    expect(audio.removeAttribute).toHaveBeenCalledWith("src");
+    expect(audio.load).toHaveBeenCalledTimes(1);
+    expect(runtime.revokeObjectURL).toHaveBeenCalledWith("blob:qwen-preview");
+    listeners.get("ended")?.();
+    expect(runtime.revokeObjectURL).toHaveBeenCalledTimes(1);
   });
 
   it("maps narrator and character commands to the exact snake-case CAS request", () => {
@@ -402,8 +410,7 @@ describe("official voice selection panel adapters", () => {
       listVoiceProfiles: vi.fn(),
       getCharacterVoiceBinding: vi.fn(),
       selectOfficialVoice: vi.fn(),
-      createOfficialVoicePreview: vi.fn(),
-      getVoicePreview: vi.fn(),
+      getOfficialVoicePreviewAudio: vi.fn(),
     } as unknown as OfficialVoiceSelectionPanelApi;
     const binding = {
       novel_id: NOVEL_ID,

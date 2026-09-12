@@ -233,21 +233,6 @@ def _api_cases() -> list[ApiCase]:
             wire.OfficialVoiceSelectionRequest,
         ),
         ApiCase(
-            "official-voice-preview",
-            settings_api.NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
-            "POST",
-            f"/novels/{NOVEL_ID}/official-voice-previews",
-            {
-                "headers": idempotency,
-                "json": {"preset_id": "qwen.WarmFemale"},
-            },
-            {
-                "novel_id": NOVEL_ID,
-                "idempotency_key": "tts-api-case-0001",
-            },
-            wire.OfficialVoicePreviewRequest,
-        ),
-        ApiCase(
             "voice-profile-list",
             settings_api.NarrationSettingsOperation.LIST_VOICE_PROFILES,
             "GET",
@@ -459,7 +444,7 @@ def _api_cases() -> list[ApiCase]:
             wire.ExecuteNarrationCacheCleanupRequest,
         ),
     ]
-    assert len(cases) == 32
+    assert len(cases) == 31
     assert {case.operation for case in cases} == set(
         settings_api.NarrationSettingsOperation
     )
@@ -728,7 +713,8 @@ def test_surface_has_no_removed_tts_mode_routes() -> None:
     }
     paths = {path for _, path in operations}
 
-    assert len(operations) == 32
+    assert len(operations) == 31
+    assert "/novels/{novel_id}/official-voice-previews" not in paths
     assert all("synthesis" not in path for path in paths)
     assert all("player" not in path for path in paths)
     assert all("voice-generator" not in path for path in paths)

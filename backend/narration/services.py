@@ -68,6 +68,10 @@ class VoiceRightsUnavailable(NarrationServiceError):
     pass
 
 
+class VoiceSourceUnavailable(NarrationServiceError):
+    """The selected TTS Provider has no verified mapping for this voice."""
+
+
 class NarrationCasConflict(NarrationServiceError):
     pass
 

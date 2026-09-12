@@ -290,17 +290,20 @@ def verify_official_preset_catalog() -> dict[str, object]:
     assert response.status == 200
     assert isinstance(response.payload, dict)
     assert set(response.payload) == {"schema_version", "items"}
-    assert response.payload.get("schema_version") == "qwen-tts-preset-catalog/1"
+    assert response.payload.get("schema_version") == "qwen-tts-preset-catalog/2"
     items = response.payload.get("items")
     assert isinstance(items, list)
     assert [item.get("preset_id") for item in items if isinstance(item, dict)] == list(
         OFFICIAL_PRESET_IDS
     )
-    assert len(items) == len(OFFICIAL_PRESET_IDS) == 2
+    assert len(items) == len(OFFICIAL_PRESET_IDS) == 9
 
     item_keys = {
         "preset_id",
         "display_name",
+        "official_speaker",
+        "native_language",
+        "dialect",
         "group",
         "language",
         "local_use_status",
@@ -334,12 +337,18 @@ def verify_official_preset_catalog() -> dict[str, object]:
         )
         assert item.get("language_scope") == item.get("language")
         assert item.get("selectable_now") is True
-        assert item.get("previewable_now") is False
+        assert item.get("previewable_now") is True
         assert item.get("renderable_existing") is True
         assert item.get("usage_notice") == "private_local_writing_tool"
         assert all(
             isinstance(item.get(key), str) and bool(item[key])
-            for key in ("display_name", "group", "language")
+            for key in (
+                "display_name",
+                "official_speaker",
+                "native_language",
+                "group",
+                "language",
+            )
         )
         provenance = item.get("provenance")
         assert isinstance(provenance, dict) and set(provenance) == provenance_keys
@@ -349,7 +358,8 @@ def verify_official_preset_catalog() -> dict[str, object]:
         assert provenance == preset.provenance()
         provider_voice_ids = provenance.get("provider_voice_ids")
         assert isinstance(provider_voice_ids, dict)
-        assert set(provider_voice_ids) == {
+        assert provider_voice_ids.get("local_qwen3_tts") == preset.local_voice_id
+        assert set(provider_voice_ids) <= {
             "local_qwen3_tts",
             "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus",
             "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash",

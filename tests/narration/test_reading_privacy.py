@@ -1477,7 +1477,7 @@ def test_dispatcher_owns_exact_operations_and_preserves_specific_holds() -> None
         | PronunciationSettingsHandler.operations
     )
     assert owned == set(NarrationSettingsOperation)
-    assert len(owned) == 32
+    assert len(owned) == 31
 
     store = MemoryStore(novel())
     blocked = authorized_backend(store)

@@ -850,6 +850,9 @@ class OfficialPresetCatalogItem(_StrictModel):
     display_name: str = Field(min_length=1, max_length=160)
     group: str = Field(min_length=1, max_length=80)
     language: str = Field(min_length=2, max_length=40)
+    official_speaker: str = Field(min_length=1, max_length=160)
+    native_language: Literal["zh-CN", "en", "ja-JP", "ko-KR"]
+    dialect: str | None = Field(default=None, min_length=1, max_length=80)
     local_use_status: Literal["available"] = "available"
     commercial_distribution_status: Literal["not_evaluated"] = "not_evaluated"
     validation_tier: Literal[
@@ -871,12 +874,18 @@ class OfficialPresetCatalogItem(_StrictModel):
             self.display_name,
             self.group,
             self.language,
+            self.official_speaker,
+            self.native_language,
+            self.dialect,
             self.language_scope,
             self.provenance.preset_id,
         ) != (
             preset.display_name,
             preset.group,
             preset.language,
+            preset.official_speaker,
+            preset.native_language,
+            preset.dialect,
             preset.language,
             preset.preset_id,
         ):
@@ -887,8 +896,8 @@ class OfficialPresetCatalogItem(_StrictModel):
 
 
 class OfficialPresetCatalogResponse(_StrictModel):
-    schema_version: Literal["qwen-tts-preset-catalog/1"] = (
-        "qwen-tts-preset-catalog/1"
+    schema_version: Literal["qwen-tts-preset-catalog/2"] = (
+        "qwen-tts-preset-catalog/2"
     )
     items: list[OfficialPresetCatalogItem]
 
@@ -1234,17 +1243,6 @@ class PutCharacterVoiceBindingRequest(_StrictModel):
 class OfficialVoiceSelectionTargetKind(str, Enum):
     NARRATOR = "narrator"
     CHARACTER = "character"
-
-
-class OfficialVoicePreviewRequest(_StrictModel):
-    preset_id: str = Field(pattern=r"^qwen\.[A-Za-z][A-Za-z0-9]{0,79}$")
-
-    @field_validator("preset_id")
-    @classmethod
-    def validate_preset_id(cls, value: str) -> str:
-        if value not in OFFICIAL_PRESETS_BY_ID:
-            raise ValueError("preset_id is absent from the pinned ONNX manifest")
-        return value
 
 
 class OfficialVoiceSelectionRequest(_StrictModel):

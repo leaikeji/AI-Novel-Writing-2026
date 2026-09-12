@@ -24,7 +24,7 @@ from backend.narration.contracts import (
 ROOT = Path(__file__).resolve().parents[2]
 REVISION = "20260826_0010"
 DOWN_REVISION = "20260825_0009"
-HEAD_REVISION = "20260911_0053"
+HEAD_REVISION = "20260912_0054"
 NOVEL_DELETION_REVISION = "20260910_0051"
 RETIRED_MOSS_TTS_REVISION = "20260909_0049"
 RETIRED_SCOPE_GUARD_REVISION = "20260909_0050"
@@ -170,7 +170,8 @@ def _script_directory() -> ScriptDirectory:
 def test_revision_is_the_only_linear_head() -> None:
     scripts = _script_directory()
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260910_0052"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260911_0053"
+    assert scripts.get_revision("20260911_0053").down_revision == "20260910_0052"
     assert scripts.get_revision(RETIRED_SCOPE_GUARD_REVISION).down_revision == RETIRED_MOSS_TTS_REVISION
     assert scripts.get_revision(RETIRED_MOSS_TTS_REVISION).down_revision == "20260909_0048"
     assert scripts.get_revision("20260909_0048").down_revision == "20260909_0047"

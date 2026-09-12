@@ -13,6 +13,7 @@ import {
   T4_PRODUCT_CAPABILITY_KEYS,
   NarrationContractError,
   parseOfficialPresetCatalogResponse,
+  parseOfficialVoicePreviewAudioRequest,
   parseCharacterVoiceBindingListResponse,
   parseCharacterVoiceBindingResource,
   parseNarrationApiErrorDetail,
@@ -36,18 +37,30 @@ function officialCatalog(
   evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = OFFICIAL_PRESET_EVIDENCE,
 ) {
   return {
-    schema_version: "qwen-tts-preset-catalog/1",
+    schema_version: "qwen-tts-preset-catalog/2",
     items: evidenceRows.map((evidence) => {
       const female = evidence.presetId === "qwen.WarmFemale";
+      const providerVoiceIds: Record<string, string> = {
+        local_qwen3_tts: evidence.localVoiceId,
+      };
+      if (evidence.aliyunPlusVoiceId) {
+        providerVoiceIds["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus"] = evidence.aliyunPlusVoiceId;
+      }
+      if (evidence.aliyunFlashVoiceId) {
+        providerVoiceIds["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash"] = evidence.aliyunFlashVoiceId;
+      }
       return {
         preset_id: evidence.presetId,
         display_name: female ? "温暖女声" : "明亮男声",
+        official_speaker: evidence.localVoiceId,
+        native_language: evidence.nativeLanguage,
+        dialect: evidence.dialect,
         group: female ? "中文女声" : "中文男声",
-        language: "zh-CN",
+        language: evidence.languageScope,
         local_use_status: "available",
         commercial_distribution_status: "not_evaluated",
-        validation_tier: "canonical_chapter_verified",
-        language_scope: "zh-CN",
+        validation_tier: evidence.validationTier,
+        language_scope: evidence.languageScope,
         selectable_now: true,
         previewable_now: false,
         renderable_existing: true,
@@ -58,11 +71,7 @@ function officialCatalog(
           preset_id: evidence.presetId,
           local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
           local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-          provider_voice_ids: {
-            local_qwen3_tts: evidence.localVoiceId,
-            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": evidence.aliyunPlusVoiceId,
-            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": evidence.aliyunFlashVoiceId,
-          },
+          provider_voice_ids: providerVoiceIds,
           model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
           provenance_fingerprint_sha256: "a".repeat(64),
         },
@@ -262,9 +271,12 @@ describe("narration T2 wire contract", () => {
 
   it("accepts the exact Qwen catalog and rejects outer catalog drift", () => {
     const parsed = parseOfficialPresetCatalogResponse(officialCatalog());
-    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items).toHaveLength(9);
     expect(parsed.items.map((item) => item.preset_id)).toEqual(OFFICIAL_PRESET_IDS);
-    expect(OFFICIAL_PRESET_IDS).toEqual(["qwen.WarmFemale", "qwen.ClearMale"]);
+    expect(OFFICIAL_PRESET_IDS).toEqual([
+      "qwen.WarmFemale", "qwen.Vivian", "qwen.UncleFu", "qwen.Dylan", "qwen.Eric",
+      "qwen.ClearMale", "qwen.Ryan", "qwen.OnoAnna", "qwen.Sohee",
+    ]);
     expect(parsed.items.every((item) => item.local_use_status === "available")).toBe(true);
     expect(parsed.items.every((item) => item.commercial_distribution_status === "not_evaluated")).toBe(true);
 
@@ -324,6 +336,34 @@ describe("narration T2 wire contract", () => {
       expect(() => parseOfficialPresetCatalogResponse(drifted), field).toThrow();
     }
 
+    const unknownProvider = JSON.parse(JSON.stringify(officialCatalog())) as {
+      items: Array<{ provenance: { provider_voice_ids: Record<string, string> } }>;
+    };
+    unknownProvider.items[1]!.provenance.provider_voice_ids.third_party = "guessed-voice";
+    expect(() => parseOfficialPresetCatalogResponse(unknownProvider)).toThrow(/known Provider keys/u);
+
+    const inventedCloudMapping = JSON.parse(JSON.stringify(officialCatalog())) as {
+      items: Array<{ provenance: { provider_voice_ids: Record<string, string> } }>;
+    };
+    inventedCloudMapping.items[1]!.provenance.provider_voice_ids[
+      "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus"
+    ] = "invented-cloud-voice";
+    expect(() => parseOfficialPresetCatalogResponse(inventedCloudMapping)).toThrow(/pinned evidence/u);
+
+    const driftedDialect = JSON.parse(JSON.stringify(officialCatalog())) as {
+      items: Array<{ dialect: string | null }>;
+    };
+    driftedDialect.items[3]!.dialect = "四川口音";
+    expect(() => parseOfficialPresetCatalogResponse(driftedDialect)).toThrow(/dialect changed/u);
+
+    const driftedLegacyMapping = JSON.parse(JSON.stringify(officialCatalog())) as {
+      items: Array<{ provenance: { provider_voice_ids: Record<string, string> } }>;
+    };
+    driftedLegacyMapping.items[0]!.provenance.provider_voice_ids[
+      "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus"
+    ] = "not-the-pinned-legacy-id";
+    expect(() => parseOfficialPresetCatalogResponse(driftedLegacyMapping)).toThrow(/pinned evidence/u);
+
     const warm = parsed.items.find((item) => item.preset_id === "qwen.WarmFemale")!;
     expect(warm.preset_id).toBe("qwen.WarmFemale");
     for (const preset of parsed.items) {
@@ -362,6 +402,22 @@ describe("narration T2 wire contract", () => {
       official_preset: { ...warm.provenance, provider_voice_ids: {} },
       reference_asset_id: null,
     })).toBe(false);
+  });
+
+  it("keeps the stateless preview request narrow and supports Korean", () => {
+    expect(parseOfficialVoicePreviewAudioRequest({
+      preset_id: "qwen.Sohee",
+      language: "ko-KR",
+    })).toEqual({ preset_id: "qwen.Sohee", language: "ko-KR" });
+    expect(() => parseOfficialVoicePreviewAudioRequest({
+      preset_id: "qwen.Sohee",
+      language: "en-US",
+    })).toThrow(/expected one of/u);
+    expect(() => parseOfficialVoicePreviewAudioRequest({
+      preset_id: "qwen.Sohee",
+      language: "ko-KR",
+      text: "must never accept article text",
+    })).toThrow(/expected exact keys/u);
   });
   it("accepts exact default settings and rejects response drift", () => {
     expect(parseNarrationSettingsResource(settingsResource()).version).toBe(0);

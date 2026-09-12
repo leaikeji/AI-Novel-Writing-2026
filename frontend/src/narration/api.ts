@@ -30,6 +30,8 @@ import type {
 } from "./chapter-contracts";
 import {
   NarrationContractError,
+  OFFICIAL_PRESET_EVIDENCE,
+  OFFICIAL_PRESET_MANIFEST_IDENTITY,
   REFERENCE_UPLOAD_MAX_BYTES,
   REFERENCE_UPLOAD_MIME_TYPES,
   parseCharacterVoiceBindingListResponse,
@@ -45,6 +47,7 @@ import {
   parseNarrationScopeOverrideResource,
   parseNarrationSettingsResource,
   parseOfficialPresetCatalogResponse,
+  parseOfficialVoicePreviewAudioRequest,
   parseOfficialVoiceSelectionResponse,
   parsePrivateVoiceDeletionRequestResource,
   parsePrivateVoiceLifecycleResource,
@@ -77,7 +80,8 @@ import type {
   NarrationScopeOverrideResource,
   NarrationSettingsResource,
   OfficialPresetCatalogResponse,
-  OfficialVoicePreviewRequest,
+  OfficialVoicePreviewAudioRequest,
+  OfficialVoicePreviewAudioResponse,
   OfficialVoiceSelectionRequest,
   OfficialVoiceSelectionResponse,
   ConfirmPrivateVoiceDeletionRequest,
@@ -105,6 +109,7 @@ import type {
 type ResponseParser<T> = (value: unknown) => T;
 
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+export const OFFICIAL_VOICE_PREVIEW_AUDIO_MAX_BYTES = 16 * 1024 * 1024;
 
 export class NarrationApiError extends Error {
   readonly status: number;
@@ -482,20 +487,77 @@ export function selectOfficialVoice(
   );
 }
 
-export function createOfficialVoicePreview(
+export async function getOfficialVoicePreviewAudio(
   novelId: string,
-  payload: OfficialVoicePreviewRequest,
-  idempotencyKey: string,
+  request: OfficialVoicePreviewAudioRequest,
   signal?: AbortSignal,
-): Promise<VoicePreviewResource> {
-  return parsedRequest(
-    `/novels/${pathSegment(novelId)}/official-voice-previews`,
-    parseVoicePreviewResource,
+): Promise<OfficialVoicePreviewAudioResponse> {
+  const payload = parseOfficialVoicePreviewAudioRequest(request);
+  const response = await window.QwenPaw.host.fetch(
+    `/${APP_ID}/novels/${pathSegment(novelId)}/official-voice-preview-audio`,
     {
-      ...jsonInit("POST", payload, signal),
-      headers: idempotencyHeaders(idempotencyKey),
+      method: "POST",
+      headers: {
+        Accept: "audio/wav",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal,
     },
   );
+  if (!response.ok) {
+    const errorPayload: unknown = await response.json().catch(() => null);
+    const responseRecord = errorPayload !== null && typeof errorPayload === "object"
+      ? errorPayload as Record<string, unknown>
+      : null;
+    const detail = responseRecord?.detail ?? errorPayload;
+    const provisional = new ApiError(response.status, `HTTP ${response.status}`, detail);
+    normalizeNarrationError(new ApiError(
+      response.status,
+      apiErrorMessage(provisional, `HTTP ${response.status}`),
+      detail,
+    ));
+  }
+
+  const contentType = response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
+  const providerId = response.headers.get("X-TTS-Provider-Id")?.trim() ?? "";
+  const modelId = response.headers.get("X-TTS-Model-Id")?.trim() ?? "";
+  const modelRevision = response.headers.get("X-TTS-Model-Revision")?.trim() ?? "";
+  const officialSpeaker = response.headers.get("X-TTS-Speaker-Id")?.trim() ?? "";
+  const cacheControl = response.headers.get("Cache-Control")?.toLowerCase() ?? "";
+  const expected = OFFICIAL_PRESET_EVIDENCE.find((item) => item.presetId === payload.preset_id);
+  if (
+    contentType !== "audio/wav"
+    || providerId !== "local_qwen3_tts"
+    || modelId !== OFFICIAL_PRESET_MANIFEST_IDENTITY.repository
+    || modelRevision !== OFFICIAL_PRESET_MANIFEST_IDENTITY.revision
+    || officialSpeaker !== expected?.localVoiceId
+    || !cacheControl.split(",").some((directive) => directive.trim() === "no-store")
+  ) {
+    throw new NarrationContractError(
+      "official_voice_preview_audio.headers",
+      "response audio identity disagrees with the requested official preset",
+    );
+  }
+  const audio = await response.blob();
+  if (
+    audio.size < 1
+    || audio.size > OFFICIAL_VOICE_PREVIEW_AUDIO_MAX_BYTES
+    || (audio.type && audio.type.split(";", 1)[0]?.toLowerCase() !== "audio/wav")
+  ) {
+    throw new NarrationContractError(
+      "official_voice_preview_audio.audio",
+      "expected a non-empty audio/wav Blob no larger than 16 MiB",
+    );
+  }
+  return Object.freeze({
+    audio,
+    content_type: "audio/wav",
+    provider_id: "local_qwen3_tts",
+    model_id: modelId,
+    model_revision: modelRevision,
+    official_speaker: officialSpeaker,
+  });
 }
 
  export async function getPrivateVoiceLifecycle(

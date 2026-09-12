@@ -50,6 +50,7 @@ from .services import (
     NarrationScopeMismatch,
     NarrationServiceError,
     NarrationStore,
+    VoiceSourceUnavailable,
     VoiceRightsUnavailable,
     canonical_sha256,
     require_local_novel,
@@ -72,7 +73,6 @@ VOICE_SETTINGS_OPERATIONS: Final[frozenset[NarrationSettingsOperation]] = frozen
     {
         NarrationSettingsOperation.LIST_VOICE_PROFILES,
         NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
-        NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
         NarrationSettingsOperation.SELECT_OFFICIAL_VOICE,
         NarrationSettingsOperation.CREATE_VOICE_PROFILE,
         NarrationSettingsOperation.GET_VOICE_PROFILE,
@@ -181,14 +181,6 @@ class VoiceProductPort(Protocol):
         *,
         profile_id: UUID,
         request: wire.CreateVoicePreviewRequest,
-        idempotency_key: str,
-    ) -> wire.VoicePreviewResource: ...
-
-    def create_official_preset_preview(
-        self,
-        *,
-        novel_id: UUID,
-        request: wire.OfficialVoicePreviewRequest,
         idempotency_key: str,
     ) -> wire.VoicePreviewResource: ...
 
@@ -597,7 +589,7 @@ def list_voice_profiles(
 
 
 def list_official_presets() -> wire.OfficialPresetCatalogResponse:
-    """Return the small provider-aware Qwen preset catalog."""
+    """Return the complete provider-aware Qwen preset catalog."""
 
     return wire.OfficialPresetCatalogResponse(
         items=[
@@ -606,12 +598,15 @@ def list_official_presets() -> wire.OfficialPresetCatalogResponse:
                 display_name=preset.display_name,
                 group=preset.group,
                 language=preset.language,
+                official_speaker=preset.official_speaker,
+                native_language=preset.native_language,
+                dialect=preset.dialect,
                 local_use_status="available",
                 commercial_distribution_status="not_evaluated",
                 validation_tier=official_preset_validation_tier(preset.preset_id),
                 language_scope=preset.language,
                 selectable_now=True,
-                previewable_now=False,
+                previewable_now=True,
                 renderable_existing=True,
                 provenance=preset.provenance(),
             )
@@ -1134,6 +1129,8 @@ class VoiceSettingsHandler:
             raise KeyError(f"operation is not owned by T2-D: {command.operation.value}")
         try:
             return self._dispatch(command)
+        except VoiceSourceUnavailable as error:
+            raise _source_unavailable(wire.VoiceSourceType.PRESET) from error
         except (VoiceProfileNotFound, VoiceVersionNotFound, VoiceUploadValidationError) as error:
             raise _voice_profile_fault(error) from error
 
@@ -1141,19 +1138,6 @@ class VoiceSettingsHandler:
         operation = command.operation
         if operation is NarrationSettingsOperation.LIST_OFFICIAL_PRESETS:
             return list_official_presets()
-        if operation is NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW:
-            if self.voice_product is None:
-                raise NarrationApiFault(
-                    wire.NarrationErrorCode.PREVIEW_UNAVAILABLE,
-                    "官方音色试听服务尚未接线。",
-                    retryable=False,
-                    capability=wire.CapabilityKey.VOICE_PREVIEW,
-                )
-            return self.voice_product.create_official_preset_preview(
-                novel_id=_required_uuid(command.novel_id, "novel_id"),
-                request=_payload(command, wire.OfficialVoicePreviewRequest),
-                idempotency_key=_required_idempotency_key(command.idempotency_key),
-            )
         if operation is NarrationSettingsOperation.SELECT_OFFICIAL_VOICE:
             if self.official_voice_selection is None:
                 raise NarrationApiFault(

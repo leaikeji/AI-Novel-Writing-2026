@@ -74,12 +74,17 @@ from .narration.disk_guard import DISK_SPACE_INSUFFICIENT
 from .narration.narration_api import router as narration_production_router
 from .narration.feature_readiness import NARRATION_FEATURE_READINESS_PROVIDER
 from .narration.playback_api import router as narration_playback_router
+from .narration.official_preview_audio import (
+    OfficialVoicePreviewAudioService,
+    build_official_voice_preview_audio_router,
+)
 from .narration.production_runtime import (
     PRODUCT_ENABLE_ENV,
     REFERENCE_CLONE_ENABLE_ENV,
     ValidationRuntimeScope,
     VALIDATION_ENABLE_ENV,
     current_narration_cache_runtime,
+    current_official_voice_preview_service,
     current_narration_production_policy,
     current_validation_runtime_scope,
     launch_narration_production_runtime,
@@ -202,6 +207,22 @@ router.include_router(creative_router)
 router.include_router(creative_data_router)
 router.include_router(writing_skills_router)
 router.include_router(narration_settings_router)
+
+
+def _current_official_voice_preview_service(
+    _request: Request,
+) -> OfficialVoicePreviewAudioService:
+    service = current_official_voice_preview_service()
+    if service is None:
+        raise RuntimeError("official local voice preview runtime is unavailable")
+    return service
+
+
+router.include_router(
+    build_official_voice_preview_audio_router(
+        _current_official_voice_preview_service,
+    )
+)
 router.include_router(narration_health_router)
 router.include_router(narration_script_router)
 router.include_router(narration_production_router)

@@ -74,7 +74,10 @@ from .manifest import (
     publish_manifest,
 )
 from .providers.base import TTSProviderError
-from .official_presets import require_official_preset
+from .official_presets import (
+    official_preset_provider_voice_id,
+    require_official_preset,
+)
 from .publication import (
     ModelRunSuccessEvidence,
     RenderAudioEvidence,
@@ -174,6 +177,10 @@ class WorkerContractError(RuntimeError):
 
 class WorkerSecurityError(WorkerContractError):
     """A scope, model identity, or immutable-storage proof failed closed."""
+
+
+class WorkerVoiceUnavailableError(WorkerContractError):
+    """The selected Provider has no verified mapping for an official voice."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,10 +288,15 @@ def _qwen_voice_parameters(
         ):
             raise WorkerSecurityError("Qwen preset Provider mapping changed")
         active_selection = selection or wire.TTSProviderSelection()
-        provider_key = active_selection.provider_id
-        if provider_key == "aliyun_qwen_audio_tts":
-            provider_key = f"{provider_key}:{active_selection.aliyun_model_id}"
-        provider_voice_id = provider_voice_ids.get(provider_key)
+        provider_voice_id = official_preset_provider_voice_id(
+            preset.preset_id,
+            provider_id=active_selection.provider_id,
+            aliyun_model_id=active_selection.aliyun_model_id,
+        )
+        if provider_voice_id is None:
+            raise WorkerVoiceUnavailableError(
+                "official voice has no mapping for the selected Provider"
+            )
     if (
         type(provider_voice_id) is not str
         or not provider_voice_id
@@ -1551,6 +1563,8 @@ class NarrationSegmentWorker:
     ]:
         if isinstance(error, WorkerSecurityError):
             return "security_failure", "WORKER_SECURITY_FAILURE"
+        if isinstance(error, WorkerVoiceUnavailableError):
+            return "non_retryable", "TTS_VOICE_UNAVAILABLE"
         if isinstance(error, NarrationDiskGuardError):
             return "retryable", error.code
         if isinstance(error, (UnsafeStoragePath, StorageRootChanged)):
@@ -1794,5 +1808,6 @@ __all__ = [
     "WorkerOutcome",
     "WorkerRepository",
     "WorkerSecurityError",
+    "WorkerVoiceUnavailableError",
     "derive_model_input_digest",
 ]

@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 from backend.narration import schemas as wire
 from backend.narration.official_presets import (
-    OFFICIAL_PRESET_MANIFEST_SHA256,
     OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256,
     OFFICIAL_PRESET_REPOSITORY,
     OFFICIAL_PRESET_REVISION,
@@ -30,18 +29,36 @@ from backend.narration.privacy import t4_product_capabilities
 from backend.narration.voices import list_official_presets
 
 
-def test_product_catalog_publishes_small_qwen_catalog_without_audio_payloads() -> None:
+def test_product_catalog_publishes_complete_qwen_catalog_without_audio_payloads() -> None:
     catalog = list_official_presets()
 
-    assert catalog.schema_version == "qwen-tts-preset-catalog/1"
-    assert len(catalog.items) == 2
+    assert catalog.schema_version == "qwen-tts-preset-catalog/2"
+    assert len(catalog.items) == 9
     assert tuple(item.preset_id for item in catalog.items) == tuple(
         item.preset_id for item in OFFICIAL_PRESETS
     )
-    assert {item.preset_id for item in catalog.items} == {
+    assert [item.preset_id for item in catalog.items] == [
         "qwen.WarmFemale",
+        "qwen.Vivian",
+        "qwen.UncleFu",
+        "qwen.Dylan",
+        "qwen.Eric",
         "qwen.ClearMale",
-    }
+        "qwen.Ryan",
+        "qwen.OnoAnna",
+        "qwen.Sohee",
+    ]
+    assert [item.official_speaker for item in catalog.items] == [
+        "Serena",
+        "Vivian",
+        "Uncle_Fu",
+        "Dylan",
+        "Eric",
+        "Aiden",
+        "Ryan",
+        "Ono_Anna",
+        "Sohee",
+    ]
     serialized = json.dumps(catalog.model_dump(mode="json"), ensure_ascii=False)
     assert "prompt_audio_codes" not in serialized
     assert "audio_file" not in serialized
@@ -56,11 +73,14 @@ def test_product_catalog_publishes_small_qwen_catalog_without_audio_payloads() -
         item.preset_id
         for item in catalog.items
         if item.validation_tier == "canonical_chapter_verified"
-    } == CANONICAL_CHAPTER_VERIFIED_PRESET_IDS == set(OFFICIAL_PRESET_IDS)
+    } == CANONICAL_CHAPTER_VERIFIED_PRESET_IDS == {
+        "qwen.WarmFemale",
+        "qwen.ClearMale",
+    }
     assert all(
         item.language_scope == item.language
         and item.selectable_now
-        and not item.previewable_now
+        and item.previewable_now
         and item.renderable_existing
         and item.usage_notice == "private_local_writing_tool"
         for item in catalog.items
@@ -86,7 +106,7 @@ def test_product_catalog_outer_contract_rejects_missing_or_reordered_inventory()
 
 
 def test_low_level_inventory_and_get_by_id_cover_qwen_presets() -> None:
-    assert len(OFFICIAL_PRESETS) == 2
+    assert len(OFFICIAL_PRESETS) == 9
     warm = require_official_preset("qwen.WarmFemale")
     assert warm.local_voice_id == "Serena"
     assert validate_official_preset_provenance(warm.provenance()) is warm
@@ -95,7 +115,52 @@ def test_low_level_inventory_and_get_by_id_cover_qwen_presets() -> None:
     assert tuple(
         require_official_preset(preset_id).preset_id for preset_id in OFFICIAL_PRESET_IDS
     ) == OFFICIAL_PRESET_IDS
-    assert {preset.language for preset in OFFICIAL_PRESETS} == {"zh-CN"}
+    assert {preset.language for preset in OFFICIAL_PRESETS} == {
+        "zh-CN",
+        "en",
+        "ja-JP",
+        "ko-KR",
+    }
+    assert require_official_preset("qwen.ClearMale").native_language == "en"
+    assert require_official_preset("qwen.Dylan").dialect == "北京口音"
+
+
+def test_new_presets_have_local_only_provider_maps_and_display_fields_stay_out_of_provenance() -> None:
+    legacy_ids = {"qwen.WarmFemale", "qwen.ClearMale"}
+    for preset in OFFICIAL_PRESETS:
+        if preset.preset_id in legacy_ids:
+            assert set(preset.provider_voice_ids) == {
+                "local_qwen3_tts",
+                "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus",
+                "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash",
+            }
+        else:
+            assert preset.provider_voice_ids == {
+                "local_qwen3_tts": preset.official_speaker
+            }
+        provenance = preset.provenance()
+        assert "official_speaker" not in provenance
+        assert "native_language" not in provenance
+        assert "dialect" not in provenance
+
+
+def test_legacy_preset_provenance_bytes_remain_unchanged() -> None:
+    expected = {
+        "qwen.WarmFemale": (
+            '{"catalog_id":"qwen-provider-voice-map/1","local_model_id":"mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit","local_model_revision":"41d3337e8b7f2843a75841595fc14e4b9a7a4b96","model_fingerprint_sha256":"728e8b60b4cdb195a1379faf033b428bf93feaceccbdcf3c3a4bd3a6698b4fb6","preset_id":"qwen.WarmFemale","provenance_fingerprint_sha256":"daa7873178cfb83a67d19fc00fbccf73bef5269a79addb29098b1720e63e1e15","provider_voice_ids":{"aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash":"longanhuan_v3.6","aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus":"longanlingxin","local_qwen3_tts":"Serena"},"schema_version":"qwen-tts-preset-provenance/1"}'
+        ),
+        "qwen.ClearMale": (
+            '{"catalog_id":"qwen-provider-voice-map/1","local_model_id":"mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit","local_model_revision":"41d3337e8b7f2843a75841595fc14e4b9a7a4b96","model_fingerprint_sha256":"728e8b60b4cdb195a1379faf033b428bf93feaceccbdcf3c3a4bd3a6698b4fb6","preset_id":"qwen.ClearMale","provenance_fingerprint_sha256":"55abfe223530dee39987a93ebb517a3c15531131a377ee7b1c5fc916c70a2601","provider_voice_ids":{"aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash":"loongjohn","aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus":"longanlufeng","local_qwen3_tts":"Aiden"},"schema_version":"qwen-tts-preset-provenance/1"}'
+        ),
+    }
+    for preset_id, frozen_json in expected.items():
+        actual = json.dumps(
+            require_official_preset(preset_id).provenance(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        assert actual == frozen_json
 
 
 def test_provenance_tampering_and_name_guessing_fail_closed() -> None:
@@ -252,7 +317,7 @@ def test_shared_official_evidence_validator_covers_v1_and_direct_v2() -> None:
 
 
 def test_official_version_resource_requires_exact_provenance_and_rights_kind() -> None:
-    preset = OFFICIAL_PRESETS[1]
+    preset = require_official_preset("qwen.ClearMale")
     now = datetime.now(UTC)
     resource = wire.VoiceProfileVersionResource(
         version_id=uuid4(),

@@ -56,7 +56,6 @@ class NarrationSettingsOperation(str, Enum):
     CREATE_CLOUD_TTS_CONSENT = "create_cloud_tts_consent"
     REVOKE_CLOUD_TTS_CONSENT = "revoke_cloud_tts_consent"
     LIST_OFFICIAL_PRESETS = "list_official_presets"
-    CREATE_OFFICIAL_VOICE_PREVIEW = "create_official_voice_preview"
     SELECT_OFFICIAL_VOICE = "select_official_voice"
     LIST_VOICE_PROFILES = "list_voice_profiles"
     CREATE_VOICE_PROFILE = "create_voice_profile"
@@ -621,34 +620,6 @@ def official_voice_presets_get(
             operation=NarrationSettingsOperation.LIST_OFFICIAL_PRESETS,
         ),
         wire.OfficialPresetCatalogResponse,
-    )
-
-
-@router.post(
-    "/novels/{novel_id}/official-voice-previews",
-    response_model=wire.VoicePreviewResource,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-def official_voice_preview_create(
-    novel_id: UUID,
-    payload: wire.OfficialVoicePreviewRequest,
-    idempotency_key: str = Header(
-        alias="Idempotency-Key",
-        min_length=8,
-        max_length=128,
-        pattern=_IDEMPOTENCY_HEADER_PATTERN,
-    ),
-    backend: NarrationSettingsApiBackend = Depends(get_narration_settings_backend),
-) -> wire.VoicePreviewResource:
-    return _run(
-        backend,
-        NarrationSettingsApiCommand(
-            operation=NarrationSettingsOperation.CREATE_OFFICIAL_VOICE_PREVIEW,
-            novel_id=novel_id,
-            payload=payload,
-            idempotency_key=idempotency_key,
-        ),
-        wire.VoicePreviewResource,
     )
 
 

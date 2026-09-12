@@ -586,11 +586,14 @@ def test_verifier_checks_complete_official_catalog() -> None:
 
     verifier = load_script("verify_qwenpaw_lab")
     payload = {
-        "schema_version": "qwen-tts-preset-catalog/1",
+        "schema_version": "qwen-tts-preset-catalog/2",
         "items": [
             {
                 "preset_id": preset.preset_id,
                 "display_name": preset.display_name,
+                "official_speaker": preset.official_speaker,
+                "native_language": preset.native_language,
+                "dialect": preset.dialect,
                 "group": preset.group,
                 "language": preset.language,
                 "local_use_status": "available",
@@ -598,7 +601,7 @@ def test_verifier_checks_complete_official_catalog() -> None:
                 "validation_tier": official_preset_validation_tier(preset.preset_id),
                 "language_scope": preset.language,
                 "selectable_now": True,
-                "previewable_now": False,
+                "previewable_now": True,
                 "renderable_existing": True,
                 "usage_notice": "private_local_writing_tool",
                 "provenance": preset.provenance(),
@@ -615,8 +618,8 @@ def test_verifier_checks_complete_official_catalog() -> None:
     result = verifier.verify_official_preset_catalog()
 
     assert result["metadata_only"] is True
-    assert result["preset_count"] == 2
-    assert result["preset_ids"] == ["qwen.WarmFemale", "qwen.ClearMale"]
+    assert result["preset_count"] == 9
+    assert result["preset_ids"] == [preset.preset_id for preset in OFFICIAL_PRESETS]
 
     payload["items"][0]["audio_file"] = "must-not-leak.wav"
     with pytest.raises(AssertionError):

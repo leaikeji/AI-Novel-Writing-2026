@@ -73,6 +73,7 @@ from backend.narration.worker import (
     SqlAlchemyNarrationWorkerRepository,
     WorkerContractError,
     derive_model_input_digest,
+    WorkerVoiceUnavailableError,
 )
 from backend.narration.renders import render_job_input_hash
 from tests.narration.test_domain_services import (
@@ -141,6 +142,38 @@ def test_worker_resolves_provider_specific_qwen_preset_voice() -> None:
             aliyun_model_id="qwen-audio-3.0-tts-flash",
         ),
     ) == (TTSVoiceKind.PRESET, "longanhuan_v3.6", None)
+
+
+def test_worker_rejects_missing_official_provider_mapping_with_stable_code() -> None:
+    from backend.narration.official_presets import require_official_preset
+
+    preset = require_official_preset("qwen.Vivian")
+    voice = _qwen_voice(
+        preset_key=preset.preset_id,
+        parameters_json={
+            "schema_version": "qwen-tts-voice/1",
+            "voice_kind": "preset",
+            "provider_voice_ids": preset.provider_voice_ids,
+            "official_preset": preset.provenance(),
+        },
+    )
+
+    assert worker_module._qwen_voice_parameters(  # noqa: SLF001
+        voice,
+        wire.TTSProviderSelection(provider_id="local_qwen3_tts"),
+    ) == (TTSVoiceKind.PRESET, "Vivian", None)
+    with pytest.raises(WorkerVoiceUnavailableError, match="no mapping") as caught:
+        worker_module._qwen_voice_parameters(  # noqa: SLF001
+            voice,
+            wire.TTSProviderSelection(
+                provider_id="aliyun_qwen_audio_tts",
+                aliyun_model_id="qwen-audio-3.0-tts-plus",
+            ),
+        )
+    assert NarrationSegmentWorker._classification(caught.value) == (  # noqa: SLF001
+        "non_retryable",
+        "TTS_VOICE_UNAVAILABLE",
+    )
 
 
 @pytest.mark.parametrize(

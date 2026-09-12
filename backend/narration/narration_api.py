@@ -61,6 +61,7 @@ from .services import (
     StaleNarrationInput,
     SqlAlchemyNarrationStore,
     VoiceRightsUnavailable,
+    VoiceSourceUnavailable,
 )
 NARRATION_PRODUCTION_API_VERSION: Final = "narration-production-api/1"
 _IDEMPOTENCY_KEY_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
@@ -447,6 +448,7 @@ class NarrationProductionErrorCode(str, Enum):
     INVALID_STATE = "INVALID_STATE"
     IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
     STALE_INPUT = "STALE_INPUT"
+    VOICE_SOURCE_UNAVAILABLE = "VOICE_SOURCE_UNAVAILABLE"
     VOICE_RIGHTS_UNAVAILABLE = "VOICE_RIGHTS_UNAVAILABLE"
     VALIDATION_FAILED = "VALIDATION_FAILED"
 
@@ -536,6 +538,7 @@ NARRATION_PRODUCTION_ERROR_STATUS: Final[
     NarrationProductionErrorCode.INVALID_STATE: status.HTTP_409_CONFLICT,
     NarrationProductionErrorCode.IDEMPOTENCY_CONFLICT: status.HTTP_409_CONFLICT,
     NarrationProductionErrorCode.STALE_INPUT: status.HTTP_409_CONFLICT,
+    NarrationProductionErrorCode.VOICE_SOURCE_UNAVAILABLE: status.HTTP_409_CONFLICT,
     NarrationProductionErrorCode.VOICE_RIGHTS_UNAVAILABLE: status.HTTP_403_FORBIDDEN,
     NarrationProductionErrorCode.VALIDATION_FAILED: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
@@ -937,6 +940,11 @@ def _fault_from_service(error: NarrationServiceError) -> NarrationProductionApiF
         return NarrationProductionApiFault(
             NarrationProductionErrorCode.STALE_INPUT,
             "正文、设置或脚本快照已经变化。",
+        )
+    if isinstance(error, VoiceSourceUnavailable):
+        return NarrationProductionApiFault(
+            NarrationProductionErrorCode.VOICE_SOURCE_UNAVAILABLE,
+            "当前音色在所选 TTS 渠道下不可用，请切回本地或重新选择音色。",
         )
     if isinstance(error, VoiceRightsUnavailable) or (
         isinstance(error, InvalidNarrationState)

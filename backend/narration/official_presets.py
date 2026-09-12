@@ -1,8 +1,8 @@
 """Pinned, provider-aware Qwen TTS voices used by the lightweight selector.
 
-The product exposes two deliberately small logical voices. Each logical voice
-pins the local Qwen3-TTS speaker and a built-in Alibaba Cloud speaker for each
-supported cloud model. These mappings do not claim acoustic equivalence.
+Every logical voice pins one official local Qwen3-TTS speaker.  Cloud mappings
+are deliberately sparse: only mappings verified by product policy are
+published, and their presence does not claim acoustic equivalence.
 """
 
 from __future__ import annotations
@@ -20,9 +20,6 @@ OFFICIAL_PRESET_REPOSITORY: Final = (
 )
 OFFICIAL_PRESET_REVISION: Final = "41d3337e8b7f2843a75841595fc14e4b9a7a4b96"
 OFFICIAL_PRESET_MANIFEST_PATH: Final = "qwen-provider-voice-map/1"
-OFFICIAL_PRESET_MANIFEST_SHA256: Final = (
-    "f7ff3abde53817ac73aa3264325b3487462127baf28de0bc20a6380d07720c11"
-)
 OFFICIAL_PRESET_MODEL_FINGERPRINT_SHA256: Final = (
     "728e8b60b4cdb195a1379faf033b428bf93feaceccbdcf3c3a4bd3a6698b4fb6"
 )
@@ -67,22 +64,26 @@ class OfficialPreset:
     display_name: str
     group: str
     language: str
+    official_speaker: str
+    native_language: str
+    dialect: str | None
     local_voice_id: str
-    aliyun_plus_voice_id: str
-    aliyun_flash_voice_id: str
     description: str
+    aliyun_plus_voice_id: str | None = None
+    aliyun_flash_voice_id: str | None = None
 
     @property
     def provider_voice_ids(self) -> dict[str, str]:
-        return {
-            "local_qwen3_tts": self.local_voice_id,
-            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": (
+        mappings = {"local_qwen3_tts": self.local_voice_id}
+        if self.aliyun_plus_voice_id is not None:
+            mappings["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus"] = (
                 self.aliyun_plus_voice_id
-            ),
-            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": (
+            )
+        if self.aliyun_flash_voice_id is not None:
+            mappings["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash"] = (
                 self.aliyun_flash_voice_id
-            ),
-        }
+            )
+        return mappings
 
     def provenance_without_fingerprint(self) -> dict[str, object]:
         return {
@@ -100,27 +101,111 @@ class OfficialPreset:
         return {**value, "provenance_fingerprint_sha256": canonical_sha256(value)}
 
 
-# Two high-utility narration voices are intentional for the first release.
+# Product IDs and ordering are a public catalog contract.  The two legacy
+# entries retain their old language, Provider maps, and provenance bytes.
 OFFICIAL_PRESETS: Final[tuple[OfficialPreset, ...]] = (
     OfficialPreset(
         preset_id="qwen.WarmFemale",
         display_name="温暖女声",
         group="中文女声",
         language="zh-CN",
+        official_speaker="Serena",
+        native_language="zh-CN",
+        dialect=None,
         local_voice_id="Serena",
         aliyun_plus_voice_id="longanlingxin",
         aliyun_flash_voice_id="longanhuan_v3.6",
         description="温暖、自然，适合旁白与日常对话。",
     ),
     OfficialPreset(
+        preset_id="qwen.Vivian",
+        display_name="Vivian｜明亮年轻女声",
+        group="中文女声",
+        language="zh-CN",
+        official_speaker="Vivian",
+        native_language="zh-CN",
+        dialect=None,
+        local_voice_id="Vivian",
+        description="明亮、年轻的中文女声。",
+    ),
+    OfficialPreset(
+        preset_id="qwen.UncleFu",
+        display_name="Uncle_Fu｜成熟低沉男声",
+        group="中文男声",
+        language="zh-CN",
+        official_speaker="Uncle_Fu",
+        native_language="zh-CN",
+        dialect=None,
+        local_voice_id="Uncle_Fu",
+        description="成熟、低沉的中文男声。",
+    ),
+    OfficialPreset(
+        preset_id="qwen.Dylan",
+        display_name="Dylan｜北京口音年轻男声",
+        group="中文男声",
+        language="zh-CN",
+        official_speaker="Dylan",
+        native_language="zh-CN",
+        dialect="北京口音",
+        local_voice_id="Dylan",
+        description="带北京口音的年轻中文男声。",
+    ),
+    OfficialPreset(
+        preset_id="qwen.Eric",
+        display_name="Eric｜四川口音男声",
+        group="中文男声",
+        language="zh-CN",
+        official_speaker="Eric",
+        native_language="zh-CN",
+        dialect="四川口音",
+        local_voice_id="Eric",
+        description="带四川口音的中文男声。",
+    ),
+    OfficialPreset(
         preset_id="qwen.ClearMale",
         display_name="明亮男声",
         group="中文男声",
         language="zh-CN",
+        official_speaker="Aiden",
+        native_language="en",
+        dialect=None,
         local_voice_id="Aiden",
         aliyun_plus_voice_id="longanlufeng",
         aliyun_flash_voice_id="loongjohn",
         description="清晰、明亮，适合旁白与青年角色。",
+    ),
+    OfficialPreset(
+        preset_id="qwen.Ryan",
+        display_name="Ryan｜节奏感男声",
+        group="英语男声",
+        language="en",
+        official_speaker="Ryan",
+        native_language="en",
+        dialect=None,
+        local_voice_id="Ryan",
+        description="富有节奏感的英语男声。",
+    ),
+    OfficialPreset(
+        preset_id="qwen.OnoAnna",
+        display_name="Ono_Anna｜轻快女声",
+        group="日语女声",
+        language="ja-JP",
+        official_speaker="Ono_Anna",
+        native_language="ja-JP",
+        dialect=None,
+        local_voice_id="Ono_Anna",
+        description="轻快的日语女声。",
+    ),
+    OfficialPreset(
+        preset_id="qwen.Sohee",
+        display_name="Sohee｜温暖女声",
+        group="韩语女声",
+        language="ko-KR",
+        official_speaker="Sohee",
+        native_language="ko-KR",
+        dialect=None,
+        local_voice_id="Sohee",
+        description="温暖的韩语女声。",
     ),
 )
 OFFICIAL_PRESETS_BY_ID: Final[Mapping[str, OfficialPreset]] = {
@@ -130,7 +215,7 @@ OFFICIAL_PRESET_IDS: Final[tuple[str, ...]] = tuple(
     item.preset_id for item in OFFICIAL_PRESETS
 )
 CANONICAL_CHAPTER_VERIFIED_PRESET_IDS: Final[frozenset[str]] = frozenset(
-    OFFICIAL_PRESET_IDS
+    {"qwen.WarmFemale", "qwen.ClearMale"}
 )
 
 
@@ -155,7 +240,32 @@ def validate_official_preset_provenance(value: object) -> OfficialPreset:
 
 def official_preset_validation_tier(preset_id: str) -> str:
     require_official_preset(preset_id)
-    return "canonical_chapter_verified"
+    return (
+        "canonical_chapter_verified"
+        if preset_id in CANONICAL_CHAPTER_VERIFIED_PRESET_IDS
+        else "pinned_catalog_unreviewed"
+    )
+
+
+def official_preset_provider_voice_id(
+    preset_id: str,
+    *,
+    provider_id: str,
+    aliyun_model_id: str | None = None,
+) -> str | None:
+    """Return an exact verified mapping, never an inferred substitute voice."""
+
+    preset = require_official_preset(preset_id)
+    if provider_id == "local_qwen3_tts":
+        provider_key = provider_id
+    elif provider_id == "aliyun_qwen_audio_tts" and aliyun_model_id in {
+        "qwen-audio-3.0-tts-plus",
+        "qwen-audio-3.0-tts-flash",
+    }:
+        provider_key = f"{provider_id}:{aliyun_model_id}"
+    else:
+        raise ValueError("unsupported Qwen TTS Provider selection")
+    return preset.provider_voice_ids.get(provider_key)
 
 
 def official_preset_decode_parameters_fingerprint(preset_id: str) -> str:

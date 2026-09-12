@@ -1869,7 +1869,8 @@ class VoiceActionCommand(Base):
         ),
         CheckConstraint(
             "preset_key IS NULL OR preset_key IN "
-            "('qwen.WarmFemale','qwen.ClearMale')",
+            "('qwen.WarmFemale','qwen.Vivian','qwen.UncleFu','qwen.Dylan',"
+            "'qwen.Eric','qwen.ClearMale','qwen.Ryan','qwen.OnoAnna','qwen.Sohee')",
             name="ck_voice_action_command_preset_key",
         ),
         CheckConstraint(

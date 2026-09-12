@@ -604,6 +604,7 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
 
     status = production_owner.narration_production_runtime_status()
     cache_runtime = production_owner.current_narration_cache_runtime()
+    preview_service = production_owner.current_official_voice_preview_service()
     assert len(worker_instances) == 1
     assert len(scheduler_kwargs) == 1
     assert (
@@ -612,6 +613,11 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
         else scheduler_kwargs[0]["job_kind_claim_gate"] is None
     )
     assert isinstance(cache_runtime, production_owner.SqlAlchemyNarrationCacheRuntime)
+    assert isinstance(
+        preview_service,
+        production_owner.OfficialVoicePreviewAudioService,
+    )
+    assert preview_service._execution_service is worker_instances[0].kwargs["execution"]
     assert cache_runtime.cleanup_capability.state.value == "enabled"
     assert cache_runtime.cleanup_capability.visible is True
     assert cache_runtime.cleanup_capability.actionable is True
@@ -638,6 +644,7 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
         "default_allow"
     )
     assert production_owner.current_narration_cache_runtime() is None
+    assert production_owner.current_official_voice_preview_service() is None
     assert production_owner.narration_production_runtime_status()[
         "lifecycle_status"
     ] == "disabled"

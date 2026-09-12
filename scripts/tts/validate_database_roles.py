@@ -40,6 +40,7 @@ SUPPORTED_HEADS = (
     "20260910_0051",
     "20260910_0052",
     "20260911_0053",
+    "20260912_0054",
 )
 VALIDATION_STEPS = MappingProxyType(
     {
@@ -55,6 +56,7 @@ VALIDATION_STEPS = MappingProxyType(
         "validate-20260910_0051": "20260910_0051",
         "validate-20260910_0052": "20260910_0052",
         "validate-20260911_0053": "20260911_0053",
+        "validate-20260912_0054": "20260912_0054",
     }
 )
 
@@ -197,9 +199,10 @@ PROTECTED_TABLES_BY_HEAD = MappingProxyType(
         "20260910_0051": _PROTECTED_TABLES_0051,
         "20260910_0052": _PROTECTED_TABLES_0052,
         "20260911_0053": _PROTECTED_TABLES_0052,
+        "20260912_0054": _PROTECTED_TABLES_0052,
     }
 )
-CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260911_0053"]
+CURRENT_PROTECTED_TABLES = PROTECTED_TABLES_BY_HEAD["20260912_0054"]
 
 # These character-domain tables are not part of TTS authority. Keeping the
 # reviewed reasons next to the prefix audit makes a future character/voice

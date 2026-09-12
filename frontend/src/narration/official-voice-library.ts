@@ -9,25 +9,34 @@ import {
   type OfficialVoiceUseAction,
   type OfficialVoiceUseState,
 } from "./official-voice-use-state";
-import type { OfficialPresetCatalogResponse } from "./contracts";
+import {
+  OFFICIAL_PRESET_EVIDENCE,
+  OFFICIAL_PRESET_IDS,
+  type OfficialPresetCatalogResponse,
+  type OfficialPresetId,
+  type OfficialPresetLanguage,
+} from "./contracts";
+import {
+  DEFAULT_ALIYUN_TTS_MODEL_ID,
+  DEFAULT_TTS_PROVIDER_ID,
+  type AliyunTTSModelId,
+  type TTSProviderId,
+} from "./tts-provider";
 
 
 export const OFFICIAL_VOICE_CATALOG_SCHEMA_VERSION = (
-  "qwen-tts-preset-catalog/1"
+  "qwen-tts-preset-catalog/2"
 ) as const;
 export const OFFICIAL_VOICE_SELECTION_CONTRACT_VERSION = (
   "official-voice-selection/1.0"
 ) as const;
 
 
-export const OFFICIAL_VOICE_PRESET_IDS = Object.freeze([
-  "qwen.WarmFemale",
-  "qwen.ClearMale",
-] as const);
+export const OFFICIAL_VOICE_PRESET_IDS = OFFICIAL_PRESET_IDS;
 
 
-export type OfficialVoicePresetId = typeof OFFICIAL_VOICE_PRESET_IDS[number];
-export type OfficialVoiceLanguageScope = "zh-CN" | "en" | "ja-JP";
+export type OfficialVoicePresetId = OfficialPresetId;
+export type OfficialVoiceLanguageScope = OfficialPresetLanguage;
 export type OfficialVoiceValidationTier =
   | "canonical_chapter_verified"
   | "pinned_catalog_unreviewed";
@@ -48,6 +57,9 @@ export interface OfficialVoiceProvenance {
 export interface OfficialVoiceCatalogItem {
   readonly presetId: string;
   readonly displayName: string;
+  readonly officialSpeaker: string;
+  readonly nativeLanguage: OfficialVoiceLanguageScope;
+  readonly dialect: string | null;
   readonly group: string;
   readonly language: string;
   readonly localUseStatus: "available";
@@ -79,6 +91,9 @@ export function officialVoiceCatalogFromWire(
     items: Object.freeze(catalog.items.map((item): OfficialVoiceCatalogItem => Object.freeze({
       presetId: item.preset_id,
       displayName: item.display_name,
+      officialSpeaker: item.official_speaker,
+      nativeLanguage: item.native_language,
+      dialect: item.dialect,
       group: item.group,
       language: item.language,
       localUseStatus: item.local_use_status,
@@ -175,6 +190,7 @@ export interface OfficialVoiceLibraryProps {
   readonly className?: string;
   /** Embedded mode omits the duplicate library title inside a configurator disclosure. */
   readonly presentation?: "standalone" | "embedded";
+  readonly providerSelection?: OfficialVoiceProviderSelection;
   readonly headerAction?: unknown;
   readonly createIdempotencyKey?: () => string;
   readonly onUse: (
@@ -203,6 +219,14 @@ export interface OfficialVoiceLibraryItemModel {
   readonly languageMismatch: boolean;
   readonly languageNotice: string | null;
   readonly availabilityLabel: string;
+  readonly providerAvailable: boolean;
+  readonly providerAvailabilityLabel: string;
+}
+
+
+export interface OfficialVoiceProviderSelection {
+  readonly providerId: TTSProviderId;
+  readonly aliyunModelId: AliyunTTSModelId;
 }
 
 
@@ -245,7 +269,14 @@ export function filterOfficialVoiceLibraryGroups(
       ...group,
       items: Object.freeze(group.items.filter(({ item, languageLabel }) => (
         normalizedQuery === ""
-        || [item.displayName, item.presetId, item.group, languageLabel]
+        || [
+          item.displayName,
+          item.presetId,
+          item.officialSpeaker,
+          item.group,
+          item.dialect ?? "",
+          languageLabel,
+        ]
           .some((value) => value.toLocaleLowerCase("en-US").includes(normalizedQuery))
       ))),
     }))
@@ -267,23 +298,15 @@ const IDLE_PREVIEW_STATE: PreviewState = Object.freeze({
 });
 
 
-const LANGUAGE_ORDER: readonly OfficialVoiceLanguageScope[] = ["zh-CN"];
+const LANGUAGE_ORDER: readonly OfficialVoiceLanguageScope[] = ["zh-CN", "en", "ja-JP", "ko-KR"];
 const LANGUAGE_LABELS: Readonly<Record<OfficialVoiceLanguageScope, string>> = Object.freeze({
   "zh-CN": "中文",
   en: "English",
   "ja-JP": "日本語",
+  "ko-KR": "한국어",
 });
-const LANGUAGE_COUNTS: Readonly<Record<OfficialVoiceLanguageScope, number>> = Object.freeze({
-  "zh-CN": 2,
-  en: 0,
-  "ja-JP": 0,
-});
-const VERIFIED_PRESET_IDS = new Set(OFFICIAL_VOICE_PRESET_IDS);
-const EXPECTED_LANGUAGE_BY_PRESET: Readonly<Record<OfficialVoicePresetId, OfficialVoiceLanguageScope>> = (
-  Object.freeze(Object.fromEntries(OFFICIAL_VOICE_PRESET_IDS.map((presetId) => [
-    presetId,
-    "zh-CN",
-  ])) as Record<OfficialVoicePresetId, OfficialVoiceLanguageScope>)
+const EVIDENCE_BY_PRESET = new Map(
+  OFFICIAL_PRESET_EVIDENCE.map((evidence) => [evidence.presetId, evidence] as const),
 );
 
 
@@ -292,6 +315,7 @@ export function officialVoiceLanguageFilterForTarget(
 ): OfficialVoiceLanguageScope {
   const normalized = targetLanguage.trim().toLocaleLowerCase("en-US");
   if (normalized === "ja" || normalized.startsWith("ja-")) return "ja-JP";
+  if (normalized === "ko" || normalized.startsWith("ko-")) return "ko-KR";
   if (normalized === "en" || normalized.startsWith("en-")) return "en";
   return "zh-CN";
 }
@@ -321,6 +345,35 @@ function availabilityLabel(item: OfficialVoiceCatalogItem): string {
 }
 
 
+export function officialVoiceProviderMappingKey(
+  selection: OfficialVoiceProviderSelection,
+): string {
+  return selection.providerId === "local_qwen3_tts"
+    ? "local_qwen3_tts"
+    : `aliyun_qwen_audio_tts:${selection.aliyunModelId}`;
+}
+
+
+export function officialVoiceIsAvailableForProvider(
+  item: OfficialVoiceCatalogItem,
+  selection: OfficialVoiceProviderSelection,
+): boolean {
+  const voiceId = item.provenance.providerVoiceIds[officialVoiceProviderMappingKey(selection)];
+  return typeof voiceId === "string" && voiceId.trim() !== "";
+}
+
+
+function providerAvailabilityLabel(
+  item: OfficialVoiceCatalogItem,
+  selection: OfficialVoiceProviderSelection,
+): string {
+  if (selection.providerId === "local_qwen3_tts") return "本地可用";
+  return officialVoiceIsAvailableForProvider(item, selection)
+    ? "当前云端模型有映射（未实测）"
+    : "仅本地可用";
+}
+
+
 function catalogIntegrityIssue(catalog: OfficialVoiceCatalog): string | null {
   if (catalog.schemaVersion !== OFFICIAL_VOICE_CATALOG_SCHEMA_VERSION) {
     return "官方音色目录版本不兼容，已停止展示可操作卡片。";
@@ -332,14 +385,18 @@ function catalogIntegrityIssue(catalog: OfficialVoiceCatalog): string | null {
   for (let index = 0; index < catalog.items.length; index += 1) {
     const item = catalog.items[index];
     const expectedPresetId = OFFICIAL_VOICE_PRESET_IDS[index];
+    const expectedEvidence = EVIDENCE_BY_PRESET.get(expectedPresetId);
     if (
       item === undefined
+      || expectedEvidence === undefined
       || item.presetId !== expectedPresetId
       || seen.has(item.presetId)
       || item.displayName.trim() === ""
       || item.group.trim() === ""
       || item.language !== item.languageScope
-      || item.languageScope !== EXPECTED_LANGUAGE_BY_PRESET[expectedPresetId]
+      || item.languageScope !== expectedEvidence.languageScope
+      || item.officialSpeaker !== expectedEvidence.localVoiceId
+      || item.nativeLanguage !== expectedEvidence.nativeLanguage
       || item.localUseStatus !== "available"
       || item.commercialDistributionStatus !== "not_evaluated"
       || item.usageNotice !== "private_local_writing_tool"
@@ -352,9 +409,7 @@ function catalogIntegrityIssue(catalog: OfficialVoiceCatalog): string | null {
       || item.provenance.localModelRevision.trim() === ""
       || item.provenance.provenanceFingerprintSha256.trim() === ""
     ) return "官方音色目录身份或顺序校验失败，已停止展示可操作卡片。";
-    const expectedTier = VERIFIED_PRESET_IDS.has(item.presetId)
-      ? "canonical_chapter_verified"
-      : "pinned_catalog_unreviewed";
+    const expectedTier = expectedEvidence.validationTier;
     if (item.validationTier !== expectedTier) {
       return "官方音色目录验证等级与已知证据不一致，已停止展示可操作卡片。";
     }
@@ -367,6 +422,10 @@ function catalogIntegrityIssue(catalog: OfficialVoiceCatalog): string | null {
 export function createOfficialVoiceLibraryModel(
   catalog: OfficialVoiceCatalog | null,
   targetLanguage: string,
+  providerSelection: OfficialVoiceProviderSelection = {
+    providerId: DEFAULT_TTS_PROVIDER_ID,
+    aliyunModelId: DEFAULT_ALIYUN_TTS_MODEL_ID,
+  },
 ): OfficialVoiceLibraryModel {
   if (catalog === null || catalog.items.length === 0) {
     return Object.freeze({
@@ -403,19 +462,21 @@ export function createOfficialVoiceLibraryModel(
               ? null
               : "跨语言 · 本项目未专项听检；这不会阻止直接使用。",
           availabilityLabel: availabilityLabel(item),
+          providerAvailable: officialVoiceIsAvailableForProvider(item, providerSelection),
+          providerAvailabilityLabel: providerAvailabilityLabel(item, providerSelection),
         });
       });
     return Object.freeze({
       languageScope,
-      label: `${LANGUAGE_LABELS[languageScope]}（${LANGUAGE_COUNTS[languageScope]}）`,
+      label: `${LANGUAGE_LABELS[languageScope]}（${items.length}）`,
       items: Object.freeze(items),
     });
   });
   return Object.freeze({
     status: "ready",
     groups: Object.freeze(groups),
-    itemCount: OFFICIAL_VOICE_PRESET_IDS.length,
-    message: "Qwen 内置音色已加载；可直接用于本地或云端生成。",
+    itemCount: catalog.items.length,
+    message: "Qwen 官方音色已加载；使用范围以当前 Provider 映射为准。",
   });
 }
 
@@ -577,7 +638,15 @@ export function createOfficialVoiceLibrary(
     const useAbortRef = React.useRef<AbortController | null>(null);
     const previewAbortRef = React.useRef<AbortController | null>(null);
     const scopeIdentity = targetIdentity(props.novelId, props.target);
-    const model = createOfficialVoiceLibraryModel(props.catalog, props.target.targetLanguage);
+    const providerSelection = props.providerSelection ?? {
+      providerId: DEFAULT_TTS_PROVIDER_ID,
+      aliyunModelId: DEFAULT_ALIYUN_TTS_MODEL_ID,
+    };
+    const model = createOfficialVoiceLibraryModel(
+      props.catalog,
+      props.target.targetLanguage,
+      providerSelection,
+    );
     const filteredGroups = model.status === "ready"
       ? filterOfficialVoiceLibraryGroups(model.groups, searchQuery, languageFilter)
       : [];
@@ -634,6 +703,7 @@ export function createOfficialVoiceLibrary(
         props.disabled === true
         || !targetReady
         || !item.selectableNow
+        || !officialVoiceIsAvailableForProvider(item, providerSelection)
         || alreadyApplied
         || !canStartOfficialVoiceUse(current)
       ) return;
@@ -737,7 +807,6 @@ export function createOfficialVoiceLibrary(
         props.disabled === true
         || !item.previewableNow
         || previewHandler === undefined
-        || previewStateRef.current.phase === "loading"
       ) return;
       const sequence = ++previewSequenceRef.current;
       const controller = new AbortController();
@@ -755,7 +824,7 @@ export function createOfficialVoiceLibrary(
           commitPreview(Object.freeze({
             phase: "ready",
             presetId: item.presetId,
-            message: `${item.displayName} 试听已开始；仍可直接使用，无需确认。`,
+            message: `${item.displayName} 本地试听已开始。`,
           }));
         })
         .catch((reason: unknown) => {
@@ -763,7 +832,7 @@ export function createOfficialVoiceLibrary(
           commitPreview(Object.freeze({
             phase: "error",
             presetId: item.presetId,
-            message: `${item.displayName} 试听失败；这不影响直接使用。`,
+            message: `${item.displayName} 本地试听失败；未更改当前绑定。`,
           }));
         });
     };
@@ -772,11 +841,9 @@ export function createOfficialVoiceLibrary(
       || useState.phase === "error"
       || useState.phase === "conflict"
       ? useState.message
-      : previewState.phase !== "idle"
-        ? previewState.message
-        : useState.phase === "applied"
-          ? useState.message
-          : "";
+      : useState.phase === "applied"
+        ? useState.message
+        : "";
     const currentPresetId = useState.phase === "applied"
       ? useState.presetId
       : props.activePresetId ?? null;
@@ -791,21 +858,24 @@ export function createOfficialVoiceLibrary(
         && !useState.failure.retryable;
       const previewing = previewState.phase === "loading"
         && previewState.presetId === item.presetId;
+      const previewPhase = previewState.presetId === item.presetId
+        ? previewState.phase
+        : "idle";
       const warningId = `${prefix}-${safeDomToken(item.presetId)}-language-note`;
       const unavailableId = `${prefix}-${safeDomToken(item.presetId)}-availability`;
       const headingId = `${prefix}-${safeDomToken(item.presetId)}-heading`;
       const selectionDisabled = props.disabled === true
         || !targetReady
         || !item.selectableNow
+        || !itemModel.providerAvailable
         || nonRetryableSameItem;
       const selectionAriaDisabled = selectionDisabled || useTemporarilyBlocked;
       const previewDisabled = props.disabled === true
         || !item.previewableNow
-        || props.onPreview === undefined
-        || previewState.phase === "loading";
+        || props.onPreview === undefined;
       const describedBy = [
         itemModel.languageNotice === null ? null : warningId,
-        item.selectableNow ? null : unavailableId,
+        item.selectableNow && itemModel.providerAvailable ? null : unavailableId,
       ].filter(Boolean).join(" ") || undefined;
       return h(
         "li",
@@ -824,6 +894,9 @@ export function createOfficialVoiceLibrary(
             "data-selectable-now": String(item.selectableNow),
             "data-previewable-now": String(item.previewableNow),
             "data-renderable-existing": String(item.renderableExisting),
+            "data-provider-available": String(itemModel.providerAvailable),
+            "data-preview-phase": previewPhase,
+            "aria-busy": previewing ? true : undefined,
             "aria-labelledby": headingId,
           },
           h(
@@ -852,8 +925,19 @@ export function createOfficialVoiceLibrary(
                 h(
                   "span",
                   { className: "anw-official-voice-card__group" },
-                  itemModel.languageLabel,
+                  `${itemModel.languageLabel} · ${item.officialSpeaker}`,
                 ),
+              ),
+              h(
+                "span",
+                {
+                  id: unavailableId,
+                  className: [
+                    "anw-official-voice-card__provider",
+                    itemModel.providerAvailable ? "" : "is-local-only",
+                  ].filter(Boolean).join(" "),
+                },
+                itemModel.providerAvailabilityLabel,
               ),
               isCurrent
                 ? h("span", { className: "anw-official-voice-card__current" }, "当前使用")
@@ -867,14 +951,14 @@ export function createOfficialVoiceLibrary(
               className: "anw-official-voice-card__preview",
               disabled: previewDisabled,
               "aria-disabled": previewDisabled ? true : undefined,
-              "aria-label": `${item.previewableNow ? "试听" : "试听暂不可用"}${item.displayName}`,
+              "aria-label": `${item.previewableNow ? "本地试听" : "本地试听暂不可用"}${item.displayName}`,
               onClick: () => previewVoice(item),
             },
             previewing
-              ? "加载试听…"
+              ? "加载本地模型…"
               : item.previewableNow && props.onPreview !== undefined
-                ? "试听"
-                : "试听暂不可用",
+                ? "本地试听"
+                : "本地试听暂不可用",
           ),
           h(
             "details",
@@ -885,7 +969,7 @@ export function createOfficialVoiceLibrary(
                 "div",
                 null,
                 h("dt", null, "使用状态"),
-                h("dd", { id: unavailableId }, itemModel.availabilityLabel),
+                h("dd", null, itemModel.availabilityLabel),
               ),
               h(
                 "div",
@@ -902,6 +986,17 @@ export function createOfficialVoiceLibrary(
                   h("dd", { id: warningId }, itemModel.languageNotice),
                 ),
               h("div", null, h("dt", null, "Preset ID"), h("dd", null, item.presetId)),
+              h("div", null, h("dt", null, "官方 speaker"), h("dd", null, item.officialSpeaker)),
+              h(
+                "div",
+                null,
+                h("dt", null, "母语／方言"),
+                h(
+                  "dd",
+                  null,
+                  `${LANGUAGE_LABELS[item.nativeLanguage]}${item.dialect ? ` · ${item.dialect}` : ""}`,
+                ),
+              ),
               h("div", null, h("dt", null, "来源语言"), h("dd", null, item.language)),
               h("div", null, h("dt", null, "本地模型"), h("dd", null, item.provenance.localModelId)),
               h("div", null, h("dt", null, "模型 revision"), h("dd", null, item.provenance.localModelRevision)),
@@ -926,12 +1021,26 @@ export function createOfficialVoiceLibrary(
               ),
             ),
           ),
+          previewPhase === "idle"
+            ? null
+            : h(
+              "span",
+              {
+                className: [
+                  "anw-official-voice-card__preview-status",
+                  previewPhase === "error" ? "is-error" : "",
+                ].filter(Boolean).join(" "),
+                role: "status",
+                "aria-live": "polite",
+              },
+              previewState.message,
+            ),
         ),
       );
     };
 
     const content = props.loading === true
-      ? h("p", { className: "anw-official-voice-library__empty", role: "status" }, "正在加载 18 个官方音色…")
+      ? h("p", { className: "anw-official-voice-library__empty", role: "status" }, "正在加载官方音色…")
       : props.loadError
         ? h("p", { className: "anw-official-voice-library__empty is-error", role: "status" }, props.loadError)
         : model.status !== "ready"
@@ -988,7 +1097,7 @@ export function createOfficialVoiceLibrary(
           ),
           h("div", { className: "anw-official-voice-library__header-actions" },
             props.headerAction ?? null,
-            h("span", { className: "anw-official-voice-library__count" }, "18 项"),
+            h("span", { className: "anw-official-voice-library__count" }, `${model.itemCount} 项`),
           ),
         ),
       targetReady
@@ -1031,7 +1140,9 @@ export function createOfficialVoiceLibrary(
                 className: languageFilter === languageScope ? "is-active" : "",
                 onClick: () => setLanguageFilter(languageScope),
               },
-              `${LANGUAGE_LABELS[languageScope]}（${LANGUAGE_COUNTS[languageScope]}）`,
+              `${LANGUAGE_LABELS[languageScope]}（${
+                model.groups.find((group) => group.languageScope === languageScope)?.items.length ?? 0
+              }）`,
             )),
           ),
           searchQuery.trim() === ""

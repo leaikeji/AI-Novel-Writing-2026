@@ -1,7 +1,6 @@
 import {
-  createOfficialVoicePreview,
+  getOfficialVoicePreviewAudio,
   getCharacterVoiceBinding,
-  getVoicePreview,
   listOfficialVoicePresets,
   listVoiceProfiles,
   selectOfficialVoice,
@@ -13,11 +12,12 @@ import type {
   NarrationSettingsResource,
   OfficialPresetCatalogResponse,
   OfficialPresetId,
-  OfficialVoicePreviewRequest,
+  OfficialPresetLanguage,
+  OfficialVoicePreviewAudioRequest,
+  OfficialVoicePreviewAudioResponse,
   OfficialVoiceSelectionRequest as OfficialVoiceSelectionWireRequest,
   OfficialVoiceSelectionResponse,
   VoiceProfileResource,
-  VoicePreviewResource,
 } from "./contracts";
 import {
   voiceActivationEvidenceIsUsable,
@@ -26,13 +26,16 @@ import {
 import {
   createOfficialVoiceLibrary,
   officialVoiceCatalogFromWire,
+  officialVoiceLanguageFilterForTarget,
   type OfficialVoiceLibraryReactRuntime,
   type OfficialVoiceSelectionRequest,
   type OfficialVoiceSelectionResult,
 } from "./official-voice-library";
-import { createNarrationIdempotencyKey } from "./idempotency-key";
-import { pollVoicePreview } from "./voice-source-panel";
-import { playReadyVoicePreview } from "./voice-preview-playback";
+import {
+  DEFAULT_ALIYUN_TTS_MODEL_ID,
+  DEFAULT_TTS_PROVIDER_ID,
+  type TTSProviderSelection,
+} from "./tts-provider";
 
 
 export interface OfficialVoiceSelectionPanelApi {
@@ -53,21 +56,32 @@ export interface OfficialVoiceSelectionPanelApi {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<OfficialVoiceSelectionResponse>;
-  createOfficialVoicePreview(
+  getOfficialVoicePreviewAudio(
     novelId: string,
-    payload: OfficialVoicePreviewRequest,
-    idempotencyKey: string,
+    payload: OfficialVoicePreviewAudioRequest,
     signal?: AbortSignal,
-  ): Promise<VoicePreviewResource>;
-  getVoicePreview(
-    previewId: string,
-    signal?: AbortSignal,
-  ): Promise<VoicePreviewResource>;
+  ): Promise<OfficialVoicePreviewAudioResponse>;
 }
 
 
 export interface OfficialVoicePreviewPlayer {
-  play(preview: VoicePreviewResource, signal: AbortSignal): Promise<void>;
+  play(preview: OfficialVoicePreviewAudioResponse, signal: AbortSignal): Promise<void>;
+}
+
+
+export interface OfficialVoiceAudioElement {
+  pause(): void;
+  play(): Promise<void>;
+  load(): void;
+  removeAttribute(name: string): void;
+  addEventListener(type: "ended" | "error", listener: () => void, options?: { once: boolean }): void;
+}
+
+
+export interface OfficialVoiceAudioRuntime {
+  createObjectURL(audio: Blob): string;
+  revokeObjectURL(url: string): void;
+  createAudio(url: string): OfficialVoiceAudioElement;
 }
 
 
@@ -135,46 +149,89 @@ type LoadState =
 
 
 const DEFAULT_API: OfficialVoiceSelectionPanelApi = {
-  createOfficialVoicePreview,
+  getOfficialVoicePreviewAudio,
   listOfficialVoicePresets,
   listVoiceProfiles,
   getCharacterVoiceBinding,
   selectOfficialVoice,
-  getVoicePreview,
 };
 
 
-const DEFAULT_PREVIEW_PLAYER: OfficialVoicePreviewPlayer = {
-  play: playReadyVoicePreview,
+const DEFAULT_AUDIO_RUNTIME: OfficialVoiceAudioRuntime = {
+  createObjectURL: (audio) => URL.createObjectURL(audio),
+  revokeObjectURL: (url) => URL.revokeObjectURL(url),
+  createAudio: (url) => new Audio(url),
 };
 
 
-export async function createAndPlayOfficialVoicePreview(
-  api: Pick<
-    OfficialVoiceSelectionPanelApi,
-    "createOfficialVoicePreview" | "getVoicePreview"
-  >,
+export function createOfficialVoicePreviewPlayer(
+  runtime: OfficialVoiceAudioRuntime = DEFAULT_AUDIO_RUNTIME,
+): OfficialVoicePreviewPlayer {
+  return Object.freeze({
+    async play(preview: OfficialVoicePreviewAudioResponse, signal: AbortSignal): Promise<void> {
+      if (signal.aborted) return;
+      const objectUrl = runtime.createObjectURL(preview.audio);
+      let audio: OfficialVoiceAudioElement;
+      try {
+        audio = runtime.createAudio(objectUrl);
+      } catch (reason) {
+        runtime.revokeObjectURL(objectUrl);
+        throw reason;
+      }
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        runtime.revokeObjectURL(objectUrl);
+        signal.removeEventListener("abort", cleanup);
+      };
+      signal.addEventListener("abort", cleanup, { once: true });
+      audio.addEventListener("ended", cleanup, { once: true });
+      audio.addEventListener("error", cleanup, { once: true });
+      try {
+        await audio.play();
+      } catch (reason) {
+        cleanup();
+        throw reason;
+      }
+      if (signal.aborted) cleanup();
+    },
+  });
+}
+
+
+const DEFAULT_PREVIEW_PLAYER = createOfficialVoicePreviewPlayer();
+
+
+export async function getAndPlayOfficialVoicePreviewAudio(
+  api: Pick<OfficialVoiceSelectionPanelApi, "getOfficialVoicePreviewAudio">,
   player: OfficialVoicePreviewPlayer,
   novelId: string,
   presetId: OfficialPresetId,
+  language: OfficialPresetLanguage,
   signal: AbortSignal,
 ): Promise<void> {
-  const initial = await api.createOfficialVoicePreview(
+  const preview = await api.getOfficialVoicePreviewAudio(
     novelId,
-    { preset_id: presetId },
-    createNarrationIdempotencyKey("official-voice-preview"),
+    { preset_id: presetId, language },
     signal,
   );
-  const final = await pollVoicePreview(initial, {
-    api: { getVoicePreview: api.getVoicePreview },
-    signal,
-    delayMs: 800,
-    maximumPolls: 120,
+  if (signal.aborted) return;
+  await player.play(preview, signal);
+}
+
+
+export function officialVoiceProviderSelection(
+  settings: NarrationSettingsResource,
+): Pick<TTSProviderSelection, "providerId" | "aliyunModelId"> {
+  const selected = settings.values.tts_provider;
+  return Object.freeze({
+    providerId: selected?.provider_id ?? DEFAULT_TTS_PROVIDER_ID,
+    aliyunModelId: selected?.aliyun_model_id ?? DEFAULT_ALIYUN_TTS_MODEL_ID,
   });
-  if (final.status !== "preview_ready" || final.preview === null) {
-    throw new Error(final.failure?.message ?? "官方音色试听未能完成。");
-  }
-  await player.play(final.preview, signal);
 }
 
 
@@ -417,6 +474,7 @@ export function createOfficialVoiceSelectionPanel(
       disabled: officialVoiceSelectionDisabled(props.capabilities, props.authorization),
       headerAction: props.headerAction,
       presentation: props.presentation,
+      providerSelection: officialVoiceProviderSelection(props.settings),
       onUse: async (
         novelId: string,
         request: OfficialVoiceSelectionRequest,
@@ -432,11 +490,12 @@ export function createOfficialVoiceSelectionPanel(
         novelId: string,
         item: { readonly presetId: string },
         signal: AbortSignal,
-      ) => createAndPlayOfficialVoicePreview(
+      ) => getAndPlayOfficialVoicePreviewAudio(
         api,
         previewPlayer,
         novelId,
         item.presetId as OfficialPresetId,
+        officialVoiceLanguageFilterForTarget(target.targetLanguage),
         signal,
       ),
       onApplied: (result: OfficialVoiceSelectionResult) => {

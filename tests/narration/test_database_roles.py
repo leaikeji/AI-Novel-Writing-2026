@@ -158,6 +158,7 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
         "20260910_0051": 60,
         "20260910_0052": 61,
         "20260911_0053": 61,
+        "20260912_0054": 61,
     }
     for head, protected_tables in PROTECTED_TABLES_BY_HEAD.items():
         assert (
@@ -238,7 +239,10 @@ def test_role_names_and_versioned_protected_table_contract_are_fixed() -> None:
     assert set(PROTECTED_TABLES_BY_HEAD["20260911_0053"]) == set(
         PROTECTED_TABLES_BY_HEAD["20260910_0052"]
     )
-    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260911_0053"]
+    assert set(PROTECTED_TABLES_BY_HEAD["20260912_0054"]) == set(
+        PROTECTED_TABLES_BY_HEAD["20260911_0053"]
+    )
+    assert CURRENT_PROTECTED_TABLES is PROTECTED_TABLES_BY_HEAD["20260912_0054"]
 
 
 def test_sql_and_python_protected_table_contracts_match() -> None:

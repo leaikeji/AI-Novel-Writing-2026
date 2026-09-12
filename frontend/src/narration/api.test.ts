@@ -3,10 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api";
 import {
   NarrationApiError,
+  OFFICIAL_VOICE_PREVIEW_AUDIO_MAX_BYTES,
   buildUploadedVoiceVersionFormData,
   createNarrationCloudConsent,
   createNarrationCloudTTSConsent,
-  createOfficialVoicePreview,
+  getOfficialVoicePreviewAudio,
   createPresetVoiceVersion,
   createNarrationWorkflow,
   createUploadedVoiceVersion,
@@ -56,18 +57,30 @@ function officialCatalog(
   evidenceRows: readonly (typeof OFFICIAL_PRESET_EVIDENCE)[number][] = OFFICIAL_PRESET_EVIDENCE,
 ) {
   return {
-    schema_version: "qwen-tts-preset-catalog/1",
+    schema_version: "qwen-tts-preset-catalog/2",
     items: evidenceRows.map((evidence) => {
       const female = evidence.presetId === "qwen.WarmFemale";
+      const providerVoiceIds: Record<string, string> = {
+        local_qwen3_tts: evidence.localVoiceId,
+      };
+      if (evidence.aliyunPlusVoiceId) {
+        providerVoiceIds["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus"] = evidence.aliyunPlusVoiceId;
+      }
+      if (evidence.aliyunFlashVoiceId) {
+        providerVoiceIds["aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash"] = evidence.aliyunFlashVoiceId;
+      }
       return {
         preset_id: evidence.presetId,
         display_name: female ? "温暖女声" : "明亮男声",
+        official_speaker: evidence.localVoiceId,
+        native_language: evidence.nativeLanguage,
+        dialect: evidence.dialect,
         group: female ? "中文女声" : "中文男声",
-        language: "zh-CN",
+        language: evidence.languageScope,
         local_use_status: "available",
         commercial_distribution_status: "not_evaluated",
-        validation_tier: "canonical_chapter_verified",
-        language_scope: "zh-CN",
+        validation_tier: evidence.validationTier,
+        language_scope: evidence.languageScope,
         selectable_now: true,
         previewable_now: false,
         renderable_existing: true,
@@ -78,11 +91,7 @@ function officialCatalog(
           preset_id: evidence.presetId,
           local_model_id: OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
           local_model_revision: OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
-          provider_voice_ids: {
-            local_qwen3_tts: evidence.localVoiceId,
-            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-plus": evidence.aliyunPlusVoiceId,
-            "aliyun_qwen_audio_tts:qwen-audio-3.0-tts-flash": evidence.aliyunFlashVoiceId,
-          },
+          provider_voice_ids: providerVoiceIds,
           model_fingerprint_sha256: OFFICIAL_PRESET_MANIFEST_IDENTITY.modelFingerprintSha256,
           provenance_fingerprint_sha256: "a".repeat(64),
         },
@@ -425,17 +434,24 @@ describe("narration settings API client", () => {
     fetchMock.mockResolvedValueOnce(response(catalog));
 
     const loaded = await listOfficialVoicePresets();
-    expect(loaded.items).toHaveLength(2);
+    expect(loaded.items).toHaveLength(9);
     expect(loaded.items.map((item) => item.preset_id)).toEqual([
       "qwen.WarmFemale",
+      "qwen.Vivian",
+      "qwen.UncleFu",
+      "qwen.Dylan",
+      "qwen.Eric",
       "qwen.ClearMale",
+      "qwen.Ryan",
+      "qwen.OnoAnna",
+      "qwen.Sohee",
     ]);
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/ai-novel-world-2026/voice-presets",
       expect.objectContaining({ headers: expect.objectContaining({ Accept: "application/json" }) }),
     );
 
-    const preset = catalog.items[1]!;
+    const preset = catalog.items.find((item) => item.preset_id === "qwen.ClearMale")!;
     const created = {
       ...uploadedVersion(),
       source_type: "preset",
@@ -586,6 +602,95 @@ describe("narration settings API client", () => {
     expect(replayed.selection_still_current).toBe(false);
     expect(replayed.current_settings?.version).toBe(2);
   });
+
+  it.each([
+    ["qwen.OnoAnna", "ja-JP"],
+    ["qwen.Sohee", "ko-KR"],
+  ] as const)(
+    "validates %s selection language evidence from the pinned catalog",
+    async (presetId, targetLanguage) => {
+      const preset = officialCatalog().items.find((item) => item.preset_id === presetId)!;
+      const version = {
+        ...uploadedVersion(),
+        source_type: "preset",
+        state: "locked",
+        provider_id: "qwen-tts",
+        model_id: preset.provenance.local_model_id,
+        model_revision: preset.provenance.local_model_revision,
+        preset_key: preset.preset_id,
+        language: preset.language,
+        quality_state: "pending",
+        activation_basis: "explicit_official_preset_selection",
+        validation_basis: "not_required",
+        rights: {
+          ...uploadedVersion().rights,
+          source_kind: "official_preset",
+          voice_cloning: false,
+          subject_consent_recorded: false,
+        },
+        official_preset: preset.provenance,
+        reference_asset_id: null,
+        locked_at: null,
+      };
+      const profile = {
+        ...draftProfile(),
+        status: "active",
+        current_version_id: VERSION_ID,
+        versions: [version],
+      };
+      const settings = {
+        ...settingsResource(),
+        settings_id: ASSET_ID,
+        exists: true,
+        version: 1,
+        values: {
+          ...settingsValues(),
+          language: targetLanguage,
+          narrator: { profile_id: PROFILE_ID, version_id: VERSION_ID },
+        },
+        updated_at: NOW,
+      };
+      fetchMock.mockResolvedValueOnce(response({
+        contract_version: "official-voice-selection/1.0",
+        replayed: false,
+        selection_still_current: true,
+        frozen_result: {
+          command_id: RIGHTS_ID,
+          preset_id: presetId,
+          target_kind: "narrator",
+          character_id: null,
+          profile_id: PROFILE_ID,
+          version_id: VERSION_ID,
+          settings_version: 1,
+          binding_version: null,
+          target_language: targetLanguage,
+          language_mismatch: false,
+          completed_at: NOW,
+        },
+        profile,
+        current_settings: settings,
+        current_character_binding: null,
+      }));
+
+      const selected = await selectOfficialVoice(
+        NOVEL_ID,
+        {
+          preset_id: presetId,
+          target_kind: "narrator",
+          character_id: null,
+          expected_settings_version: 0,
+          expected_binding_version: null,
+        },
+        `official-select-${presetId}`,
+      );
+
+      expect(selected.frozen_result).toMatchObject({
+        preset_id: presetId,
+        target_language: targetLanguage,
+        language_mismatch: false,
+      });
+    },
+  );
 
   it("uses the PawApp namespace and validates every JSON response", async () => {
     fetchMock.mockResolvedValue(response(settingsResource()));
@@ -840,36 +945,78 @@ describe("narration settings API client", () => {
     expect(fetchMock.mock.calls[0][0]).toContain(`/voice-previews/${previewId}`);
   });
 
-  it("creates an optional official preview without sending binding state", async () => {
-    const previewId = "10000000-0000-4000-8000-000000000007";
-    fetchMock.mockResolvedValue(response({
-      contract_version: NARRATION_SETTINGS_API_VERSION,
-      preview_id: previewId,
-      profile_id: PROFILE_ID,
-      version_id: VERSION_ID,
-      status: "queued",
-      job_id: "10000000-0000-4000-8000-000000000008",
-      asset: null,
-      temporary: true,
-      expires_at: null,
-      failure_code: null,
-    }, 202));
+  it("reads a stateless official WAV preview with strict local identity and no idempotency key", async () => {
+    fetchMock.mockResolvedValue(new Response(new Uint8Array([82, 73, 70, 70]), {
+      status: 200,
+      headers: {
+        "Content-Type": "audio/wav",
+        "Cache-Control": "no-store",
+        "X-TTS-Provider-Id": "local_qwen3_tts",
+        "X-TTS-Model-Id": OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+        "X-TTS-Model-Revision": OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+        "X-TTS-Speaker-Id": OFFICIAL_PRESET_EVIDENCE[0].localVoiceId,
+      },
+    }));
 
-    const result = await createOfficialVoicePreview(
+    const result = await getOfficialVoicePreviewAudio(
       NOVEL_ID,
-      { preset_id: OFFICIAL_PRESET_EVIDENCE[0].presetId },
-      "official-preview-0001",
+      { preset_id: OFFICIAL_PRESET_EVIDENCE[0].presetId, language: "zh-CN" },
     );
 
-    expect(result.status).toBe("queued");
+    expect(result.audio).toBeInstanceOf(Blob);
+    expect(result.official_speaker).toBe("Serena");
     expect(fetchMock).toHaveBeenCalledWith(
-      `/ai-novel-world-2026/novels/${NOVEL_ID}/official-voice-previews`,
+      `/ai-novel-world-2026/novels/${NOVEL_ID}/official-voice-preview-audio`,
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ preset_id: OFFICIAL_PRESET_EVIDENCE[0].presetId }),
-        headers: expect.objectContaining({ "Idempotency-Key": "official-preview-0001" }),
+        body: JSON.stringify({
+          preset_id: OFFICIAL_PRESET_EVIDENCE[0].presetId,
+          language: "zh-CN",
+        }),
+        headers: {
+          Accept: "audio/wav",
+          "Content-Type": "application/json",
+        },
       }),
     );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("Idempotency-Key");
+  });
+
+  it("rejects preview identity drift, invalid language, and oversized WAV data", async () => {
+    const previewHeaders = {
+      "Content-Type": "audio/wav",
+      "Cache-Control": "no-store",
+      "X-TTS-Provider-Id": "local_qwen3_tts",
+      "X-TTS-Model-Id": OFFICIAL_PRESET_MANIFEST_IDENTITY.repository,
+      "X-TTS-Model-Revision": OFFICIAL_PRESET_MANIFEST_IDENTITY.revision,
+      "X-TTS-Speaker-Id": "wrong-speaker",
+    };
+    fetchMock.mockResolvedValueOnce(new Response(new Uint8Array([1]), {
+      status: 200,
+      headers: previewHeaders,
+    }));
+    await expect(getOfficialVoicePreviewAudio(NOVEL_ID, {
+      preset_id: "qwen.WarmFemale",
+      language: "zh-CN",
+    })).rejects.toThrow(/audio identity/u);
+
+    await expect(getOfficialVoicePreviewAudio(NOVEL_ID, {
+      preset_id: "qwen.WarmFemale",
+      language: "en-US",
+    } as never)).rejects.toThrow(/expected one of/u);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockResolvedValueOnce(new Response(
+      new Blob([new Uint8Array(OFFICIAL_VOICE_PREVIEW_AUDIO_MAX_BYTES + 1)], { type: "audio/wav" }),
+      {
+        status: 200,
+        headers: { ...previewHeaders, "X-TTS-Speaker-Id": "Serena" },
+      },
+    ));
+    await expect(getOfficialVoicePreviewAudio(NOVEL_ID, {
+      preset_id: "qwen.WarmFemale",
+      language: "zh-CN",
+    })).rejects.toThrow(/16 MiB/u);
   });
 
   it("rejects unsupported or empty reference audio before network I/O", async () => {

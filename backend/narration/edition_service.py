@@ -46,6 +46,10 @@ from .authority_locks import (
 from .digest_keyring import DigestKeyring
 from .editions import CreateEdition, EditionSegmentInput, create_edition
 from .manifest import BUFFER_POLICIES, INITIAL_BUFFER_POLICY
+from .official_presets import (
+    OFFICIAL_PRESETS_BY_ID,
+    official_preset_provider_voice_id,
+)
 from .render_cache import (
     RenderJobQueue,
     SqlAlchemyRenderJobQueue,
@@ -57,6 +61,7 @@ from .requests import (
     advance_request_state,
     create_request,
 )
+from .schemas import TTSProviderSelection
 from .script_analysis import AnalyzeNarrationScript, analyze_narration_script
 from .script_contracts import (
     CastingDecisionOrigin,
@@ -73,6 +78,7 @@ from .services import (
     NarrationStore,
     SqlAlchemyNarrationStore,
     StaleNarrationInput,
+    VoiceSourceUnavailable,
     canonical_payload,
     canonical_sha256,
     require_exact_bool,
@@ -703,6 +709,41 @@ def _edition_inputs(
     )
 
 
+def _require_official_provider_mappings(
+    store: NarrationStore,
+    *,
+    segments: tuple[EditionSegmentInput, ...],
+    selection: TTSProviderSelection,
+) -> None:
+    if type(selection) is not TTSProviderSelection:
+        raise InvalidNarrationState("TTS Provider selection is malformed")
+    for voice_version_id in {segment.voice_version_id for segment in segments}:
+        voice = require_row(
+            store.get(VoiceProfileVersion, voice_version_id, for_update=True),
+            label="resolved voice version",
+        )
+        if (
+            voice.source_type != "preset"
+            or voice.preset_key not in OFFICIAL_PRESETS_BY_ID
+        ):
+            continue
+        assert voice.preset_key is not None
+        try:
+            provider_voice_id = official_preset_provider_voice_id(
+                voice.preset_key,
+                provider_id=selection.provider_id,
+                aliyun_model_id=selection.aliyun_model_id,
+            )
+        except ValueError as error:
+            raise InvalidNarrationState(
+                "narration settings select an unsupported TTS Provider"
+            ) from error
+        if provider_voice_id is None:
+            raise VoiceSourceUnavailable(
+                "official voice has no verified mapping for the selected Provider"
+            )
+
+
 def _latest_pronunciation_profile(
     store: NarrationStore,
     *,
@@ -963,6 +1004,19 @@ def produce_approved_request(
         ),
     )
 
+    edition_segments = _edition_inputs(
+        store,
+        contract=contract,
+        settings_snapshot=settings_snapshot,
+        authority_lock=authority_lock,
+        request_id=request.id,
+    )
+    _require_official_provider_mappings(
+        store,
+        segments=edition_segments,
+        selection=tts_selection,
+    )
+
     request = advance_request_state(
         store,
         request.id,
@@ -989,13 +1043,7 @@ def produce_approved_request(
             buffer_policy_version=policy.buffer_policy_version,
             created_actor=policy.created_actor,
             digest_keyring=policy.digest_keyring,
-            segments=_edition_inputs(
-                store,
-                contract=contract,
-                settings_snapshot=settings_snapshot,
-                authority_lock=authority_lock,
-                request_id=request.id,
-            ),
+            segments=edition_segments,
         ),
     )
     render_plan = plan_edition_renders(
