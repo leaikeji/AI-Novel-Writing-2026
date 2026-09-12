@@ -1,0 +1,23 @@
+{
+  "schema_version": "plan66-local-recovery/1",
+  "updated_at": "2026-09-11T13:08:28+08:00",
+  "status": "superseded_resolved",
+  "historical_purpose": "This file was created while destination-specific authorization blocked writes to the external research root.",
+  "former_blocker": {
+    "type": "destination_specific_write_approval_required",
+    "destination": "/Users/liujia/Documents/小说扫榜"
+  },
+  "resolution": {
+    "actor": "author",
+    "instruction": "同意将15本正文及其拆解派生资料长期保存在 [$novel-deconstruction](/Users/liujia/Documents/小说扫榜/10-研究Skills/novel-deconstruction/SKILL.md)",
+    "record": "/Users/liujia/Documents/小说扫榜/00-治理与索引/计划66/authorization-destination-confirmation-v1.json",
+    "resolved_at": "2026-09-11T13:03:43+08:00"
+  },
+  "superseded_by": [
+    "/Users/liujia/Documents/小说扫榜/00-治理与索引/计划66/progress-v20.json",
+    "/Users/liujia/Documents/小说扫榜/00-治理与索引/计划66/dispatch-v15.json",
+    "/Users/liujia/Documents/小说扫榜/00-治理与索引/计划66/validation-v15.json"
+  ],
+  "current_summary": "Positions 1-5 opening are complete; F66-G5B-PILOT and budget-v6 passed; position 6 run nd-20260911-130722-3a2d31 is the current locked run.",
+  "resume_rule": "Do not resume from this local historical checkpoint. Read the highest numbered progress, dispatch, validation and budget files in the external Plan66 research directory."
+}
