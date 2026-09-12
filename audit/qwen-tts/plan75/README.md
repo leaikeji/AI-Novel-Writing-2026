@@ -1,6 +1,6 @@
 # 计划 75 候选验收记录
 
-状态：**V1.0 正式 `18088` 已发布并通过；隔离 QwenPaw 生命周期的 Docker Desktop 启动失败证据仍保留。**
+状态：**V1.0 与 V1.1 均已在正式 `18088` 发布并通过；隔离 QwenPaw 生命周期的 Docker Desktop 启动失败证据仍保留。**
 
 日期：2026-09-12（Asia/Shanghai）
 
@@ -30,6 +30,7 @@
 ## 正式发布
 
 - 正式发布已按作者授权完成，详细证据见 [`formal-release-20260912.md`](./formal-release-20260912.md)。
+- V1.1 旁白页、统一命名和试听内存缓存已按作者授权完成，详细证据见 [`v1.1-formal-release-20260912.md`](./v1.1-formal-release-20260912.md)。
 - 正式数据库 head 为 `20260912_0054`，目录为 `qwen-tts-preset-catalog/2` 且精确 9 项。
 - 正式 9 音色 HTTP 试听全部返回有效 WAV，Provider／模型／revision／speaker 响应身份精确匹配；桌面页面显示 9 项并真实点击 Sohee 进入播放。
 - 旧正文、Edition、渲染和媒体未被发布流程改写；停服前在线窗口新增的一条 WarmFemale 角色绑定作为正常用户数据保留。
