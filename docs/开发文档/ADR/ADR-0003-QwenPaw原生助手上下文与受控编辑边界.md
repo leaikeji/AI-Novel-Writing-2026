@@ -4,6 +4,8 @@
 
 决策日期：2026-08-25（Asia/Shanghai）。
 
+2026-09-12 计划74候选扩展（P0，本地验证中，未发布）：允许在同一个`AssistantContextRefRegistry`中试验`private-library-assistant-context/1`库级信封，绑定`private_library_id=personal`，与小说／建书草稿范围互斥；沿用原TTL、租约、限流、Agent／session及owner／tab校验。不伪造小说，不把票据等同于维护授权。新适配器仅收集当轮作者消息来源，尚未注册HTTP入口、Middleware或写工具；本地通过不能替代真实公开宿主门禁。原生产行为、正文采用与Skill作用域保持不变。范围与后续门禁见[计划74](../74-私有库分类用词与写作接入规划.md)，正式接线前仍须完成G1A并更新本ADR状态。
+
 关联证据：
 
 - [A0A 基线门禁](../证据/助手计划V2验证-2026-08-25/A0A-GATE.md)
