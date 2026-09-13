@@ -1,0 +1,7 @@
+{
+  "agent_id": "ai-novel-writer",
+  "effective_max_input_length": 131072,
+  "model_id": "glm-5.3-flash",
+  "policy": "follow-agent-effective",
+  "provider_id": "bigmodel"
+}

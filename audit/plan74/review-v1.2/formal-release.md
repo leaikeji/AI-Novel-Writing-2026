@@ -1,6 +1,22 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。最新状态：`7e382a1 RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。6f544df为未安装的F18候选。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+日期：2026-09-13。最新正式源：`2df5f17 RELEASED / F18保存与焦点PASS / G3 PARTIAL`，包含d171317与计划76已发布的年龄描述依赖。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 21:24合并焦点与现有年龄描述的公开更新
+
+- 精确源`2df5f174aa1ccb64346f60c3bfb627c6b49232fa`、tree `ec5d5c7f099a4b4b66ef5e6bc4310869efbcf7c6`、干净源`/private/tmp/plan74-focus-merged-source.7Fk1vB/code`。76提供其已部署临时源ddbe2e4；主代理逐文件cmp一致后，将9个已部署前端文件作为必要依赖独立提交，未纳入其计划文档、79／80候选。1554项前端、类型／204模块构建／打包通过，再进入正式门禁。
+- 备份`/private/tmp/plan74-focus-merged-release.1DU7HI`及耐久副本`/app/working.backups/plan74-focus-merged-release-20260913-1DU7HI`hash一致：DB `a720ff5dc28d948913c036fa4f77ff87193068ddd7d88cf344487e885bb35072`；候选`7718500b983a28371c6ca1cac8f7c5ae4ff9eb4092d486e9538a9c0665353d03`；旧插件`144d2ec753965e4cb931930c621cd22bb6d7b51afe8c5a05f597b1c106a6d6be`。只读目录核验，无数据库恢复。
+- 21:24:27公开hot-install成功，仅JS变化，SHA `e347aa28210c8b3f3587c95f54207ae3eb3aec7519c2ee7e8f1b27f6c966d1e5`。release verify及完整公开verify退出0、逐Agent选择及有效模型不变、schema0056／ready／TTS三项ready，无重启。见[清单](focus-release-manifest.json)、[回执](focus-install-result.json)、[健康](focus-health-after.json)、[模型](focus-model-after.json)；完整verify为实际工具退出0摘要，本轮未另存其原始终端全文。
+- 76明确释放窗口；66说明无客户端请求在途，不要求只前端更新等待，保留其服务端旧请求终态不确定说明，不冒称所有原生任务均已终态。PawApp自有活动门禁通过，不修改其模型／会话／研究数据。
+- 正式词项保存与当前按钮焦点恢复已通过，另完成当前正文检查和实际1080P／2K桌面分项，见桌面记录；不据此关闭真实大库或新候选确认面板全部矩阵。此后必要插件恢复必须保留76年龄描述及试听依赖、0056和新的创作版本，不能恢复旧DB抹去后续记录。
+
+## 21:08保存上下文修复与正式交接
+
+- 源`6f544df9326b4fa01cd9aa16844be95a59e201ed`、tree `55f98a7a64440b2f104311a0eddbcb54db6a88fc`、干净检出`/private/tmp/plan74-adoption-source.90xAJO/code`通过同源代码校验后，21:08:46经公开hot-install成功更新。仅`frontend/dist/index.js`变化，实际SHA `a871ffcc842379dd0145057d2198f47da09c17047d5fbe88aaa88346edccc2eb`；无重启、迁移、模型或逐Agent选择改变。
+- 备份`/private/tmp/plan74-save-context-release.78NdJW`及耐久副本`/app/working.backups/plan74-save-context-release-20260913-78NdJW`三份归档hash一致：DB `c2c3686cda481c482c3cc887398a7303d94e8b85d3c101863c41c65c46e468b0`；候选`f948bd0396426e3861302696d450beb657f8964ac8fc3cd22c3d5651b0143949`；旧插件`d9fe1017b9c0298aca630023a58b3c92f1a5a2d6d675e81f5c66a3e2e7d87db4`。只核验备份，未恢复数据库。
+- [来源清单](save-context-release-manifest.json)、[安装回执](save-context-install-result.json)、[健康](save-context-health-after.json)、[有效模型](save-context-model-after.json)、[完整公开校验](save-context-public-verify.log)均有原始记录。release prepare/install/verify及完整公开verify退出0，schema0056、PawApp0.4.0、TTS三项ready、逐Agent选择保持。
+- 正式管钳说明保存成功后正常关闭，无错误上下文提示；焦点却落到BODY，分开记录为保存关闭PASS／焦点FAIL，见[桌面记录](desktop-validation.md#f18正常保存与焦点返回分项6f544df)。不将代码焦点断言当产品PASS。
+- 随后释放唯一正式窗口给计划76。对方已通报年龄描述更新完成、无作品写入并释放窗口，其候选基于d4dd16b且不含d171317。下一次74更新须核对并保留该依赖来源，不直接用d171旧树覆盖；该协调不构成再次询问作者权限。
 
 ## 20:43采用预览与目录同步更新
 

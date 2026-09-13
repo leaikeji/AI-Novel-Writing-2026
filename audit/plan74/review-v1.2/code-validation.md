@@ -1,6 +1,19 @@
 # V1.2代码验证记录
 
-日期：2026-09-13。状态：`6f544df G2-B PASS / 正式7e382a1 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+日期：2026-09-13。状态：`2df5f17 G2-B PASS / 已正式发布且F18通过 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+
+## 2df5f17完整候选复验
+
+- 在d171317基础上保留76刚正式发布的9个前端文件，逐文件与其干净源`/private/tmp/plan76-age-release.T7nXDx/code`的ddbe2e4一致。只作为已部署依赖入Git，不扩大74功能、不纳入76文档。
+- 干净源`/private/tmp/plan74-focus-merged-source.7Fk1vB/code`执行固定锁离线安装、pnpm test（170文件1554项）、typecheck、build（204模块）、package_plugin全部退出0，status为空。JS SHA `e347aa28210c8b3f3587c95f54207ae3eb3aec7519c2ee7e8f1b27f6c966d1e5`；比d171多6项属于76独立覆盖，不计为74新增。
+- 相比6f544df，backend／tests／skills／manifest／Python及pnpm依赖文件无差异，继续引用Python3206／330跳过及数据库342的不变范围结果。正式发布与F18焦点PASS另见运行记录，不混同代码检查。
+
+## F18关闭动画后的焦点返回
+
+- 6f正式保存关闭通过，但真实activeElement为BODY。d171317移除closeEditor中立即聚焦旧节点的行为；捕获稳定按钮键和范围，在afterOpenChange(false)结束后解析当前按钮ref，且每次只执行一次。新面板已打开或范围变化时不抢焦点，保留现有CAS、输入及版本保护。
+- 精确源`d171317f56159649edf5a6ed210fe07e88d25fa4`、tree `9157c4e6ff1d96cc121c7e665495e071e61e3c8d`，三文件提交只含工作台、同名测试和当前计划。定向2文件36项通过；共享工作区全量170文件1554项含76新增覆盖，不作为74干净源计数。
+- 独立检出`/private/tmp/plan74-save-focus-source.6vUMsP/code`固定锁离线64包复用、零下载；前端169文件1548项、typecheck、203模块build、package_plugin全部退出0，status为空。JS SHA `acdb06e8307707080a133bf12fd57d7a8f6fb51fe3e01118aef86cfb680974a1`。此处记录实际工具完成结果摘要，没有另造终端原始日志。
+- `git diff --exit-code 6f544df d171317 -- backend tests skills plugin.json pyproject.toml pnpm-lock.yaml`无差异，Python3206／330跳过与数据库342沿用已有不变范围证据。正式焦点尚未验证；76新依赖若加入后必须重做该完整提交的前端G2-B，不把d171的包hash当合并包hash。
 
 ## F18正常保存后的版本刷新
 

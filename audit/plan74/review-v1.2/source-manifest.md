@@ -1,12 +1,13 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`7e382a1 RELEASED / 6f544df CANDIDATE / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`2df5f17 RELEASED / F18正式PASS / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
 
 ## 最新可复核来源
 
-- 本轮代码及32项证据／文档精确提交至`799ddaeff97206f7a7a8a5caec49e12baa988e7a`并已push；实际`git ls-remote origin refs/heads/main`返回该完整hash，包含6f544df和7e382a1来源。共享索引只暂存74行，其他任务改动保留；本条后续文档提交不改变已验证候选包。
-- 21:00更新：正式7e382a1已于20:43:19公开热更新并完成两命中按新规则／逐项保留／刷新恢复采用；包hash及配置证据见[发布清单](adoption-desktop-release-manifest.json)。必要依赖e5f1846由76独立提交并先行正式验证，之后释放窗口，未回退其试听修复。
-- 当前未发布F18候选`6f544df9326b4fa01cd9aa16844be95a59e201ed`，tree `55f98a7a64440b2f104311a0eddbcb54db6a88fc`；相同独立代码检出已从7e干净切换到6f（不再称该路径当前仍是7e），前端1546／类型／构建／打包通过，JS SHA `a871ffcc842379dd0145057d2198f47da09c17047d5fbe88aaa88346edccc2eb`。旧7e归档仍在jWwsFq备份及耐久目录可核验。只变同范围成功保存提示；不夹带其他任务新写的角色／音色文件。下列“未发布／等待76”仅保留当时来源历史。
+- 正式源`2df5f174aa1ccb64346f60c3bfb627c6b49232fa`、tree `ec5d5c7f099a4b4b66ef5e6bc4310869efbcf7c6`，干净源`/private/tmp/plan74-focus-merged-source.7Fk1vB/code`。包含d171317焦点修复与76已部署的9个年龄描述前端文件，后者逐文件cmp一致于76干净临时提交ddbe2e4，依赖来源独立标注，不纳入76计划文档。1554项前端／类型／构建／打包通过，JS SHA `e347aa28210c8b3f3587c95f54207ae3eb3aec7519c2ee7e8f1b27f6c966d1e5`。
+- 21:24:27仅JS公开更新，[最新发布清单](focus-release-manifest.json)包含旧树及候选逐文件hash，备份与耐久副本一致；健康、schema0056及逐Agent选择保持。真实F18保存及焦点PASS、当前正文双桌面分项已补齐；不外推剩余G3。
+- 6f544df于21:08:46已正式更新并验证保存正常关闭，原焦点BODY失败记录保留；其独立源`/private/tmp/plan74-adoption-source.90xAJO/code`及备份78NdJW仍可复核。d171317独立源`/private/tmp/plan74-save-focus-source.6vUMsP/code`前端1548项通过，未单独安装；直接发布完整2df5f17，保留76已有功能。
+- 上轮代码／证据已精确提交799ddae及d4dd16b并push，实际远端main最后核对`d4dd16b03f46f615241ae6f309cd0ac6b1b9f836`。本轮d171317／2df5f17及新证据的push结果在执行后单列，不将本地提交称为远端交付。后续文档提交不改变已安装包。
 
 ## 20:38及以前来源历史
 
