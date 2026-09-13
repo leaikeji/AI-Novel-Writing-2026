@@ -1,0 +1,7 @@
+{
+  "agent_id": "ai-novel-writer",
+  "effective_max_input_length": 1048576,
+  "model_id": "gemini-3.8-flash",
+  "policy": "follow-agent-effective",
+  "provider_id": "gemini"
+}

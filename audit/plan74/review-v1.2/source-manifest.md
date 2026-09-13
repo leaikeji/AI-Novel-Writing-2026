@@ -1,9 +1,10 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`15f4f5f RELEASED / F20目录与编辑器保持 / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`6837e1b RELEASED / F21历史计数修复 / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
 
 ## 最新可复核来源
 
+- F21源码`6837e1be0e0ed1516e04b1c2ba5b302a5053d327`，tree `4759634dbde21c2c1e40d7673f40c209335f7828`。两个前端文件精确提交，干净源1560项／类型／构建／打包通过；22:47公开更新唯一JS变化，SHA `d2876aa5d14505d24589e846874f8f79c00f36f0e34c8de312c0c1cfe542f5aa`。备份、配置保持与正式历史见[完整记录](history-count-release.md)及[来源清单](history-count-release-manifest.json)。此前候选桌面证据3008f63已实际push；本轮源码与证据随收口精确push，不夹带其他计划。
 - F20最终源`15f4f5f30eb27bab8bc4e665ea583d85c1717453`，tree `f0bbfbe8798d951c0ca2746a30aa93aead694744`，同一干净检出已从62bda84明确切至此提交重做前端G2-B。JS SHA `6e6399d85eb657004f4bb3d88f1c8c62d80f25ce919a71948150910d1f853e4c`，[完整最终来源](save-tree-stable-release-manifest.json)，22:06公开更新并正式验证目录／键入焦点保持。两个源码提交均只含工作台、对应测试与当前计划；Git证据随本轮收口提交推送，不夹带外任务。
 - F19精确源码`fbfc3e61b7f84a68000afbba5d0889b1fbfb2ccf`，tree `dfc7360dae498ce7b4abad310df1fa9476300f69`，干净源`/private/tmp/plan74-incomplete-source.7FA64V/code`。相对2df5f17只更新lexicon_reports.py运行文件，前端JS仍e347aa28；五文件源码提交没有其他任务改动。[完整来源](incomplete-release-manifest.json)及[代码验证](code-validation.md#f19显式引用未完成报告)可复核；21:46公开更新已通过，Git远端状态在本轮最终提交后核对。
 - 正式源`2df5f174aa1ccb64346f60c3bfb627c6b49232fa`、tree `ec5d5c7f099a4b4b66ef5e6bc4310869efbcf7c6`，干净源`/private/tmp/plan74-focus-merged-source.7Fk1vB/code`。包含d171317焦点修复与76已部署的9个年龄描述前端文件，后者逐文件cmp一致于76干净临时提交ddbe2e4，依赖来源独立标注，不纳入76计划文档。1554项前端／类型／构建／打包通过，JS SHA `e347aa28210c8b3f3587c95f54207ae3eb3aec7519c2ee7e8f1b27f6c966d1e5`。

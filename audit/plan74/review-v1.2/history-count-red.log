@@ -1,0 +1,65 @@
+Already up to date
+Done in 174ms using pnpm v11.19.0
+
+ RUN  v4.1.11 /Users/liujia/Documents/AI小说世界2026
+
+ ❯ frontend/src/writing-skills/chapter-panel.test.ts (27 tests | 3 failed) 1105ms
+     × does not label a kept forbidden hit as a watch warning in history 20ms
+     × keeps the scan total distinct from 1 unresolved history hits 17ms
+     × keeps the scan total distinct from 2 unresolved history hits 17ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  frontend/src/writing-skills/chapter-panel.test.ts > actual ChapterWorkflowPanel method integration > does not label a kept forbidden hit as a watch warning in history
+AssertionError: expected '生成时用词检查无待处理禁用项 · 共 1 处命中；采用前会复核当前规则' to contain '扫描共 1 处命中 · 当前无待处理禁用项'
+
+Expected: "扫描共 1 处命中 · 当前无待处理禁用项"
+Received: "生成时用词检查无待处理禁用项 · 共 1 处命中；采用前会复核当前规则"
+
+ ❯ frontend/src/writing-skills/chapter-panel.test.ts:443:29
+    441|     const label = hooks.nodes.find(node => node.type === "span"
+    442|       && node.children.some(child => typeof child === "string" && /^(生…
+    443|     expect(nodeText(label)).toContain("扫描共 1 处命中 · 当前无待处理禁用项");
+       |                             ^
+    444|     expect(nodeText(label)).not.toContain("慎用提醒");
+    445|     expect(nodeText(label)).toContain("采用前会复核当前规则");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  frontend/src/writing-skills/chapter-panel.test.ts > actual ChapterWorkflowPanel method integration > keeps the scan total distinct from 1 unresolved history hits
+AssertionError: expected '生成时检查 · 禁用表达 1 处' to contain '扫描共 2 处命中 · 当前 1 处禁用表达待处理'
+
+Expected: "扫描共 2 处命中 · 当前 1 处禁用表达待处理"
+Received: "生成时检查 · 禁用表达 1 处"
+
+ ❯ frontend/src/writing-skills/chapter-panel.test.ts:458:29
+    456|       && node.children.some(child => typeof child === "string" && /^(生…
+    457|     expect(label).toBeDefined();
+    458|     expect(nodeText(label)).toContain(`扫描共 2 处命中 · 当前 ${unresolved} 处禁…
+       |                             ^
+    459|     expect(nodeText(label)).toContain("采用前会复核当前规则");
+    460|     expect(nodeText(label)).not.toContain("生成时");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  frontend/src/writing-skills/chapter-panel.test.ts > actual ChapterWorkflowPanel method integration > keeps the scan total distinct from 2 unresolved history hits
+AssertionError: expected '生成时检查 · 禁用表达 2 处' to contain '扫描共 2 处命中 · 当前 2 处禁用表达待处理'
+
+Expected: "扫描共 2 处命中 · 当前 2 处禁用表达待处理"
+Received: "生成时检查 · 禁用表达 2 处"
+
+ ❯ frontend/src/writing-skills/chapter-panel.test.ts:458:29
+    456|       && node.children.some(child => typeof child === "string" && /^(生…
+    457|     expect(label).toBeDefined();
+    458|     expect(nodeText(label)).toContain(`扫描共 2 处命中 · 当前 ${unresolved} 处禁…
+       |                             ^
+    459|     expect(nodeText(label)).toContain("采用前会复核当前规则");
+    460|     expect(nodeText(label)).not.toContain("生成时");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 24 passed (27)
+   Start at  22:45:01
+   Duration  1.23s (transform 122ms, setup 0ms, import 53ms, tests 1.11s, environment 0ms)
