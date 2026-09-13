@@ -1,0 +1,20 @@
+$ vitest run
+
+ RUN  v4.1.11 /private/tmp/plan74-incomplete-source.7FA64V/code
+
+
+ Test Files  170 passed (170)
+      Tests  1558 passed (1558)
+   Start at  22:04:58
+   Duration  3.75s (transform 6.29s, setup 0ms, import 8.06s, tests 6.98s, environment 13ms)
+
+$ tsc --noEmit
+$ vite build
+vite v6.3.5 building for production...
+transforming...
+✓ 204 modules transformed.
+rendering chunks...
+computing gzip size...
+frontend/dist/index.js  3,665.65 kB │ gzip: 1,125.55 kB │ map: 9,119.05 kB
+✓ built in 1.98s
+/private/tmp/plan74-incomplete-source.7FA64V/code/build/ai-novel-world-2026

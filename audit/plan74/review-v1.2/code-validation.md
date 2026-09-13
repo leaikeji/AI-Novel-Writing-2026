@@ -1,6 +1,13 @@
 # V1.2代码验证记录
 
-日期：2026-09-13。状态：`fbfc3e6 G2-B PASS / F19已公开更新 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+日期：2026-09-13。状态：`15f4f5f G2-B PASS / F20已公开更新 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+
+## F20保存后目录同步与编辑器保持
+
+- 第一轮红测：普通／受控saveNow完成后目录仍是原文。62bda84把既有整章采用的目录映射提取为同一syncDirectoryDocument，在当前访问、应用回执、恢复CAS门禁通过之后共用；无新增请求或第二份投影逻辑，其他章引用与卷元数据保持。新增4项覆盖两种成功、失败、切章后迟到；定向21／全量170文件1558项、类型与构建通过。[干净源初轮日志](save-tree-source-frontend.log)。
+- 正式续验发现旧novel对象依赖会重建编辑器，新增两条断言均实际失败（预期surface建立1次，实际2次）。15f4f5f把编辑器挂载依赖收窄为文档身份、显示标题、可挂载状态和稳定回调；标题／章号仍影响标签，普通保存不因目录引用更新而清空光标／撤销栈。不修改编辑器依赖包、业务保存协议或QwenPaw上游。
+- 最终源`15f4f5f30eb27bab8bc4e665ea583d85c1717453`，tree `f0bbfbe8798d951c0ca2746a30aa93aead694744`。干净检出`/private/tmp/plan74-incomplete-source.7FA64V/code`（本次已明确从fbfc切至此提交），170文件1558项、类型、204模块构建、打包全部退出0，status为空，[完整日志](save-tree-stable-source-frontend.log)。JS SHA `6e6399d85eb657004f4bb3d88f1c8c62d80f25ce919a71948150910d1f853e4c`。
+- 相对fbfc3e6，backend／tests／Skill／manifest／Python与pnpm依赖无差异；引用其Python3210／331跳过与数据库357，不重复创建临时库或执行模型。正式普通保存分项另记，不将组件模拟的受控请求冒充新的正式AI链。
 
 ## F19显式引用未完成报告
 

@@ -1,6 +1,12 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。最新正式源：`fbfc3e6 RELEASED / F19门禁已部署 / G3 PARTIAL`，保留2df5f17全部功能与计划76年龄描述依赖。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+日期：2026-09-13。最新正式源：`15f4f5f RELEASED / F20目录与编辑器保持 / G3 PARTIAL`，保留fbfc3e6门禁与计划76年龄描述依赖。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 22:06目录同步与编辑器保持公开更新
+
+- 62bda84于22:00:59先公开更新目录同步；[初轮来源](save-tree-initial-release-manifest.json)／[安装](save-tree-initial-install-result.json)保留，备份`/private/tmp/plan74-save-tree-release.cD2vNl`及耐久`/app/working.backups/plan74-save-tree-release-20260913-cD2vNl`三个归档hash一致。正式保存后源码／红测发现编辑器重建，不将此中间版本记完整PASS。
+- 修订源15f4f5f于22:06:09公开更新；唯一安装差异仍是前端JS。[最终来源](save-tree-stable-release-manifest.json)、[安装](save-tree-stable-install-result.json)、[健康](save-tree-stable-health-after.json)、[模型](save-tree-stable-model-after.json)。两次prepare/install/verify均退出0，逐Agent选择、有效模型、容器身份、0056和TTS ready保持，无重启／迁移／模型调用；76两次明确不占用正式窗口。
+- 新备份`/private/tmp/plan74-save-tree-stable-release.5COg0g`及耐久副本`/app/working.backups/plan74-save-tree-stable-release-20260913-5COg0g`三份hash一致：DB `8f74f56c72aa3a41bb1f9424e952f2cc97ab55f9f1105b1346c21e216de52382`；候选`6497ec67b7633633b0b18e0faf4ea043fa199e167768742bd425e0b447e2c245`；旧插件`fcf99d24de4fb558d431e445270a01e6f3f9312518e166c658b260205cc79343`。该备份包含首轮手写后的正式数据；未恢复数据库，不倒灌旧正文。回退需保留新工作稿并按公开插件路径，不能回退到已知编辑器重建版本后宣称无风险。
 
 ## 21:46未完成报告门禁公开更新
 
