@@ -10,6 +10,7 @@ import {
   codeMirrorNarrationPresentationAnnotation,
   codeMirrorNarrationRanges,
   codeMirrorOriginAnnotation,
+  codeMirrorSelectionPresentation,
   codeMirrorTransactionOrigin,
   codeMirrorValueReplacement,
   createCodeMirrorNarrationState,
@@ -345,6 +346,48 @@ describe("CodeMirror docChanged isolation", () => {
 
 
 describe("CodeMirror author interaction and seek isolation", () => {
+  it.each([
+    { startUtf16: 1, endUtf16: 3, direction: "forward" },
+    { startUtf16: 1, endUtf16: 3, direction: "backward" },
+    { startUtf16: 3, endUtf16: 3, direction: "none" },
+  ] as const)("reveals $direction selections again without saving or starting playback", (selection) => {
+    const text = "甲🙂乙\n第二段。";
+    const harness = createHarness(text);
+    let state = createCodeMirrorNarrationState(text, harness.bridge);
+    const playback = vi.fn();
+    harness.bridge.registerPlaybackIntent(playback);
+    const scrollRequests = vi.fn();
+    const unsubscribe = harness.bridge.registerPresentationListener((event) => {
+      if (event.type !== "focus-selection") return;
+      const transaction = state.update(codeMirrorSelectionPresentation(event.selection));
+      expect(transaction.scrollIntoView).toBe(true);
+      expect(transaction.docChanged).toBe(false);
+      expect(codeMirrorAuthorInteraction(bridgeUpdate(transaction))).toBeNull();
+      expect(applyTransaction(harness.bridge, transaction)).toBeNull();
+      state = transaction.state;
+      scrollRequests();
+    });
+
+    for (let index = 0; index < 2; index += 1) {
+      expect(harness.bridge.focusSelection(selection)).toEqual({ applied: true });
+      expect(scrollRequests).toHaveBeenCalledTimes(index + 1);
+      expect(selectionFromCodeMirror(state)).toEqual(selection);
+      expect(state.selection.main.anchor).toBe(selection.direction === "backward" ? 3 : selection.startUtf16);
+      expect(state.selection.main.head).toBe(selection.direction === "backward" ? 1 : selection.endUtf16);
+      expect(state.doc.toString()).toBe(text);
+      expect(harness.bridge.readSnapshot()).toMatchObject({
+        text,
+        selection,
+        autoFollowPaused: false,
+        currentSegmentId: null,
+      });
+    }
+
+    expect(harness.onDocChanged).not.toHaveBeenCalled();
+    expect(playback).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it("dispatches only explicit non-composing, non-repeat paragraph commands", () => {
     const onCommand = vi.fn(() => true);
     expect(dispatchCodeMirrorKeyboardPlaybackCommand(

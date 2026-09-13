@@ -1,6 +1,6 @@
 /** Runs actual panel callbacks with deterministic hooks; not browser/layout evidence. */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import type { CandidateRecord, DocumentRecord, GenerationJobRecord, LibraryCheckReportRecord, NovelRecord } from "../types";
+import type { CandidateRecord, DocumentRecord, GenerationJobRecord, LibraryCheckHitRecord, LibraryCheckReportRecord, NovelRecord } from "../types";
 import { ApiError } from "../api";
 
 const transport = vi.hoisted(() => ({ request: vi.fn(), model: vi.fn() }));
@@ -93,6 +93,7 @@ describe("actual ChapterWorkflowPanel method integration", () => {
   let statuses: Mock<(message: string) => void>;
   let prepare: Mock<() => Promise<DocumentRecord | null>>;
   let bodyState: Mock<(active: boolean, stage: string) => void>;
+  let locate: Mock<(hit: LibraryCheckHitRecord) => void>;
   let activeDoc: string;
   let bodyReply: (path: string, init: RequestInit) => Promise<unknown>;
   let checkReply: () => Promise<LibraryCheckReportRecord>;
@@ -107,7 +108,8 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     activeDoc = id;
     hooks.render(() => Panel({ novel: { id: NOVEL, tree: [] } as unknown as NovelRecord,
       document: doc(id), chapterNumber: 1, onPrepareGeneration: prepare,
-      onDocumentChanged: changed, onError: errors, onStatus: statuses, onBodyGenerationStateChange: bodyState }));
+      onDocumentChanged: changed, onError: errors, onStatus: statuses, onBodyGenerationStateChange: bodyState,
+      onLocateLibraryHit: locate }));
   }
   async function confirm() {
     const picker = hooks.nodes.find(node => node.props.className === "anw-modal anw-asset-modal")!;
@@ -135,6 +137,7 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     activeDoc = DOC; prepare = vi.fn(async () => doc(DOC)); recoveryReply = null;
     catalogGate = true; semanticGate = false;
     bodyState = vi.fn();
+    locate = vi.fn();
     const values = new Map<string, string>();
     vi.stubGlobal("sessionStorage", { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => { values.set(k, v); } });
     const Modal = { confirm: (value: Record<string, unknown>) => { confirms.push(value); return { destroy: vi.fn() }; }, error: vi.fn() };
@@ -190,6 +193,40 @@ describe("actual ChapterWorkflowPanel method integration", () => {
   });
   afterEach(() => { hooks.dispose(); vi.unstubAllGlobals(); });
   const bodyCalls = () => transport.request.mock.calls.filter(([path]) => String(path).endsWith("/generation-jobs/body"));
+
+  it.each([false, true])("locates a library hit only after modal close, rejecting departed visits=%s", async (departed) => {
+    const hit = { hit_id: "hit", action: "forbid", matched_text: "微微", reason: "作者偏好",
+      start_utf16: 20, end_utf16: 22 } as LibraryCheckHitRecord;
+    checkReply = async () => ({ ...checkReport(), hits: [hit], total_hits: 1 });
+    const check = hooks.nodes.find(node => node.type === "Button" && node.children.includes("检查用词"))!;
+    await (check.props.onClick as () => Promise<void>)();
+    await flush();
+    render();
+    const modal = () => hooks.nodes.find(node => node.props.className === "anw-modal anw-library-check-results")!;
+    expect(modal().props.focusTriggerAfterClose).toBe(true);
+    const button = hooks.nodes.find(node => node.type === "Button" && node.children.includes("定位原句"))!;
+    (button.props.onClick as () => void)();
+    expect(locate).not.toHaveBeenCalled();
+    render();
+    expect(modal().props.focusTriggerAfterClose).toBe(false);
+    const closed = modal().props.afterClose as () => void;
+    if (departed) render(OTHER);
+    closed(); closed();
+    expect(locate).toHaveBeenCalledTimes(departed ? 0 : 1);
+    if (!departed) expect(locate).toHaveBeenCalledWith(hit);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("keeps normal modal-close focus restoration without scheduling a library location", async () => {
+    const check = hooks.nodes.find(node => node.type === "Button" && node.children.includes("检查用词"))!;
+    await (check.props.onClick as () => Promise<void>)(); await flush(); render();
+    const modal = hooks.nodes.find(node => node.props.className === "anw-modal anw-library-check-results")!;
+    (modal.props.onCancel as () => void)(); render();
+    expect(modal.props.focusTriggerAfterClose).toBe(true);
+    (modal.props.afterClose as () => void)();
+    expect(locate).not.toHaveBeenCalled();
+    expect(changed).not.toHaveBeenCalled();
+  });
 
   it("coalesces double confirmation and reaches the existing adoption path with a stable action", async () => {
     const prompt = await confirm();

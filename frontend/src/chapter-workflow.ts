@@ -810,6 +810,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [manualCheckReport, setManualCheckReport] = React.useState(
     null as LibraryCheckReportRecord | null,
   );
+  const manualCheckLocateRef = React.useRef(null as (() => void) | null);
   const [activeGenerationJob, setActiveGenerationJob] = React.useState(
     null as GenerationJobRecord | null,
   );
@@ -1198,6 +1199,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       );
       requireChapterVisit();
       setManualCheckReport(report);
+      manualCheckLocateRef.current = null;
       setManualCheckOpen(true);
       onStatus(report.total_hits
         ? `用词检查完成：发现 ${report.total_hits} 处需要查看`
@@ -1941,6 +1943,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       className: "anw-modal anw-library-check-results",
       width: 680,
       title: "用词检查",
+      focusTriggerAfterClose: manualCheckLocateRef.current === null,
+      afterClose: () => {
+        const locate = manualCheckLocateRef.current;
+        manualCheckLocateRef.current = null;
+        locate?.();
+      },
       footer: h(Button, { type: "primary", onClick: () => setManualCheckOpen(false) }, "关闭"),
       onCancel: () => setManualCheckOpen(false),
     }, manualCheckReport
@@ -1965,8 +1973,10 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
                   h(Button, {
                     type: "link",
                     onClick: () => {
+                      manualCheckLocateRef.current = () => {
+                        if (chapterVisit.active) onLocateLibraryHit?.(hit);
+                      };
                       setManualCheckOpen(false);
-                      onLocateLibraryHit?.(hit);
                     },
                   }, "定位原句"),
                 )))

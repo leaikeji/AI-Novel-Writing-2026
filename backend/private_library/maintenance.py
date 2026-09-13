@@ -296,41 +296,91 @@ def _strip_quoted_material(text: str) -> str:
     return re.sub(r"[‘’“”'\"].*?[‘’“”'\"]", "目标", without_fences)
 
 
+def _strip_safe_scope_constraints(text: str) -> str:
+    """Remove only complete trailing clauses that narrow an earlier write."""
+
+    explicit_write = re.search(
+        r"(?:^|[，。；：,:;])(?:请)?(?:把|将).+"
+        r"(?:设为|改(?:成|为)|归档|恢复|停用|启用|分类|合并|收藏)"
+        r"|(?:^|[，。；：,:;])(?:请)?(?:仅)?(?:修改|更改).+(?:为|成).+"
+        r"|(?:^|[，。；：,:;])(?:新增|添加|加上|收藏|归档|恢复|停用|启用|更新).+",
+        text,
+    )
+    if explicit_write is None:
+        return text
+    scope_target = r"(?:通用源包|其他(?:包|词包|词项|词条|资料)|其余(?:包|词包|词项|词条|资料))"
+    protected_prefix = text[: explicit_write.start()]
+    write_and_constraints = text[explicit_write.start() :]
+    return protected_prefix + re.sub(
+        rf"(^|[，。；,;])\s*(?:请)?(?:不要|无需|不必)(?:再)?\s*"
+        rf"(?:修改|更改|更新|改动|改|动)\s*{scope_target}"
+        rf"(?:[\s、和及或与]+{scope_target})*\s*(?=$|[，。；,;])",
+        r"\1",
+        write_and_constraints,
+    )
+
+
 def classify_author_intent(text: str) -> AuthorMaintenanceIntent:
     """Conservative intent gate over the trusted current author message only."""
 
     normalized = " ".join(str(text).strip().split())
     if not normalized:
         return AuthorMaintenanceIntent.AMBIGUOUS
-    command_text = _strip_quoted_material(normalized)
-    if re.search(r"(?:撤销|取消|恢复)(?:刚才|上次|这个|该)?(?:的)?(?:修改|变更|操作|提案)", command_text):
-        return AuthorMaintenanceIntent.UNDO
     if re.search(
-        r"(?:执行|接受|应用|采纳)(?:刚才|上次|这个|该|前面)?(?:的)?(?:方案|提案|建议|变更)",
-        command_text,
+        r"(?:^|[\s，。；,;])(?:引用(?:材料|原文|内容)?)\s*[：:‘“'\"]"
+        r"|(?:^|[\s，。；,;])(?:原文|材料|例句|示例|文档|资料)"
+        r"(?:中|里)?(?:写着|提到|内容是|[：:])"
+        r"|(?:^|[\s，。；,;])(?:例如|比如|譬如)\s*[：:‘“'\"]?"
+        r"|(?:他说|她说|对方说|有人说)\s*[：:,，]?[\s‘’“”'\"]",
+        normalized,
     ):
-        return AuthorMaintenanceIntent.ACCEPT_PROPOSAL
+        return AuthorMaintenanceIntent.CONSULTATION
+    command_text = _strip_quoted_material(normalized)
     if (
         "？" in command_text
         or "?" in command_text
         or re.search(
-            r"(?:应不应该|要不要|是否应该|是否适合|建议怎么|怎么看|合不合适)",
+            r"(?:应不应该|要不要|能不能|是否(?:应该|适合|可以|需要|要|接受|撤销|执行|应用|采纳)|建议怎么|怎么看|合不合适)",
             command_text,
         )
     ):
         return AuthorMaintenanceIntent.CONSULTATION
     if re.match(
-        r"^(?:请)?(?:分析|阅读|看看|检查)(?:以下|这段|这个)?(?:材料|内容|资料|例句)",
+        r"^(?:请)?(?:分析|阅读|看看|检查|评估|讨论|解释)(?:以下|这段|这个)?(?:材料|内容|资料|例句)",
         command_text,
     ):
         return AuthorMaintenanceIntent.CONSULTATION
+    mutation_words = r"(?:把|将|修改|更改|新增|添加|收藏|归档|恢复|撤销|取消|停用|启用|更新|执行|接受|应用|采纳)"
+    authorization_text = _strip_safe_scope_constraints(command_text)
+    non_authorizing_patterns = (
+        # A negated mutation is an instruction not to write, not a direct write.
+        rf"(?:不要|请勿|勿|别|不必|无需|暂不|先不|不能|不可|禁止)\s*(?:再|去)?\s*{mutation_words}",
+        rf"(?:没有|未)(?:要求|让|叫).{{0,20}}{mutation_words}",
+        # Hypothetical and advisory clauses remain discussion even when they
+        # contain an otherwise imperative-looking example.
+        rf"(?:^|[\s，。；：,:;])(?:如果|假如|假设|倘若|若是|要是).{{0,200}}{mutation_words}",
+        rf"(?:^|[\s，。；：,:;])(?:我)?(?:建议|提议|推荐|最好|不妨|可以考虑).{{0,80}}{mutation_words}",
+        # Commands quoted as source material never grant maintenance authority.
+        rf"(?:引用材料|原文|材料|例句|示例|文档|资料)(?:中|里)?(?:写着|提到|内容是|[：:]).{{0,200}}{mutation_words}",
+        rf"(?:他说|她说|对方说|有人说).{{0,200}}{mutation_words}",
+    )
+    if any(re.search(pattern, authorization_text) for pattern in non_authorizing_patterns):
+        return AuthorMaintenanceIntent.CONSULTATION
+    if re.search(r"(?:撤销|取消|恢复)(?:刚才|上次|这个|该)?(?:的)?(?:修改|变更|操作|提案)", authorization_text):
+        return AuthorMaintenanceIntent.UNDO
+    if re.search(
+        r"(?:执行|接受|应用|采纳)(?:刚才|上次|这个|该|前面)?(?:的)?(?:方案|提案|建议|变更)",
+        authorization_text,
+    ):
+        return AuthorMaintenanceIntent.ACCEPT_PROPOSAL
     direct_patterns = (
-        r"把.+(?:设为|改(?:成|为)|归档|恢复|停用|启用|分类|合并|收藏)",
+        r"(?:^|[，。；：,:;])(?:请)?(?:把|将).+(?:设为|改(?:成|为)|归档|恢复|停用|启用|分类|合并|收藏)",
+        r"(?:^|[，。；：,:;])(?:请)?(?:仅)?(?:修改|更改).+(?:为|成).+",
         r"(?:新增|添加|加上|收藏|归档|恢复|停用|启用|更新).+",
         r".+(?:只收藏|保存并用于本书|用于本书)",
         r"(?:这几个词|这些词|指定词项).+(?:分类|整理)",
     )
-    if any(re.search(pattern, command_text) for pattern in direct_patterns):
+    if any(re.search(pattern, authorization_text) for pattern in direct_patterns):
         return AuthorMaintenanceIntent.DIRECT
     return AuthorMaintenanceIntent.AMBIGUOUS
 

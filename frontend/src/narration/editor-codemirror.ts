@@ -198,6 +198,17 @@ function selectionToCodeMirror(selection: NarrationEditorSelection): CodeMirrorS
 }
 
 
+export function codeMirrorSelectionPresentation(
+  selection: NarrationEditorSelection,
+): TransactionSpec {
+  return {
+    selection: selectionToCodeMirror(selection),
+    scrollIntoView: true,
+    annotations: narrationPresentation.of(true),
+  };
+}
+
+
 export function codeMirrorValueReplacement(
   state: EditorState,
   nextValue: string,
@@ -492,13 +503,7 @@ export function createCodeMirrorNarrationAdapter(
       return;
     }
     if (event.type === "focus-selection") {
-      const selection = selectionToCodeMirror(event.selection);
-      if (!view.state.selection.eq(selection)) {
-        view.dispatch({
-          selection,
-          annotations: narrationPresentation.of(true),
-        });
-      }
+      view.dispatch(codeMirrorSelectionPresentation(event.selection));
       view.focus();
       return;
     }
@@ -527,6 +532,12 @@ export function createCodeMirrorNarrationAdapter(
   };
 
   const unsubscribePresentation = bridge.registerPresentationListener((event) => {
+    if (event.type === "focus-selection") {
+      // Author-requested selection must be readable immediately by the caller.
+      // Handle it once here, including repeat requests to reveal the same range.
+      applyPresentation(event);
+      return;
+    }
     presentationQueue.push(event);
     if (presentationScheduled) return;
     presentationScheduled = true;
@@ -576,17 +587,7 @@ export function createCodeMirrorNarrationAdapter(
     },
     focusSelection(selection) {
       if (disposed || !bridge.readSnapshot().active) return false;
-      const focused = bridge.focusSelection(selection);
-      if (!focused.applied) return false;
-      const codeMirrorSelection = selectionToCodeMirror(selection);
-      if (!view.state.selection.eq(codeMirrorSelection)) {
-        view.dispatch({
-          selection: codeMirrorSelection,
-          annotations: narrationPresentation.of(true),
-        });
-      }
-      view.focus();
-      return true;
+      return bridge.focusSelection(selection).applied;
     },
     focus() {
       if (!disposed && bridge.readSnapshot().active) view.focus();

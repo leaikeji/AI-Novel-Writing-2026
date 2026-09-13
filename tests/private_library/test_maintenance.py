@@ -250,8 +250,37 @@ def _proposal_id(result: dict) -> UUID:
             "仅为当前作品，把词条“封堵”的说明改为“紧急阻断”",
             AuthorMaintenanceIntent.DIRECT,
         ),
+        (
+            "直接执行：仅修改当前作品的《灾后设施抢修词（本书）》中‘封堵’的说明为"
+            "‘用于裂缝、缺口与管线泄漏的紧急阻断；写清缺口位置及采用的封堵材料’。"
+            "保持其余词项和通用源包不变，并让本书明确使用修改后的内容版本。"
+            "不读写文件。",
+            AuthorMaintenanceIntent.DIRECT,
+        ),
+        (
+            "仅修改‘封堵’的说明为‘紧急阻断’。不要修改通用源包。",
+            AuthorMaintenanceIntent.DIRECT,
+        ),
         ("这几个词按动作、情绪分类", AuthorMaintenanceIntent.DIRECT),
         ("这个词应不应该禁用？", AuthorMaintenanceIntent.CONSULTATION),
+        ("不要把‘封堵’的说明改为‘紧急阻断’", AuthorMaintenanceIntent.CONSULTATION),
+        ("如果把‘封堵’的说明改为‘紧急阻断’会更好吗", AuthorMaintenanceIntent.CONSULTATION),
+        ("我建议把‘封堵’的说明改为‘紧急阻断’", AuthorMaintenanceIntent.CONSULTATION),
+        ("引用材料：把‘封堵’的说明改为‘紧急阻断’", AuthorMaintenanceIntent.CONSULTATION),
+        ("引用：“把‘封堵’的说明改为‘紧急阻断’”", AuthorMaintenanceIntent.CONSULTATION),
+        ("他说：“把‘封堵’的说明改为‘紧急阻断’”", AuthorMaintenanceIntent.CONSULTATION),
+        ("是否可以把‘封堵’的说明改为‘紧急阻断’", AuthorMaintenanceIntent.CONSULTATION),
+        ("不要撤销刚才的修改", AuthorMaintenanceIntent.CONSULTATION),
+        ("不要接受该提案", AuthorMaintenanceIntent.CONSULTATION),
+        ("如果撤销刚才的修改", AuthorMaintenanceIntent.CONSULTATION),
+        ("如果接受该提案", AuthorMaintenanceIntent.CONSULTATION),
+        ("引用：“接受该提案”", AuthorMaintenanceIntent.CONSULTATION),
+        ("是否接受该提案", AuthorMaintenanceIntent.CONSULTATION),
+        (
+            "修改‘封堵’的说明为‘紧急阻断’，但不要接受该提案",
+            AuthorMaintenanceIntent.CONSULTATION,
+        ),
+        ("直接执行", AuthorMaintenanceIntent.AMBIGUOUS),
         ("整理一下", AuthorMaintenanceIntent.AMBIGUOUS),
         ("执行刚才的提案", AuthorMaintenanceIntent.ACCEPT_PROPOSAL),
         ("撤销刚才的修改", AuthorMaintenanceIntent.UNDO),

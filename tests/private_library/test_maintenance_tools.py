@@ -179,6 +179,156 @@ def test_direct_tool_flow_uses_only_current_access_and_receipt(monkeypatch) -> N
     session.commit.assert_not_called()
 
 
+def test_explicit_modify_to_tool_flow_applies_in_same_author_request(monkeypatch) -> None:
+    access = _access(
+        "直接执行：仅修改当前作品的《灾后设施抢修词（本书）》中‘封堵’的说明为"
+        "‘用于裂缝、缺口与管线泄漏的紧急阻断；写清缺口位置及采用的封堵材料’。"
+        "保持其余词项和通用源包不变，并让本书明确使用修改后的内容版本。"
+        "不读写文件。"
+    )
+    executor = RecordingExecutor()
+    tools, store, session = _tools(monkeypatch, access, executor=executor)
+
+    prepared = tools.novel_library_prepare_change({"actions": [_action()]})
+    applied = tools.novel_library_apply_change({
+        "proposal_id": prepared["proposal"]["proposal_id"],
+        "proposal_version": 1,
+    })
+
+    assert prepared["proposal"]["requires_review"] is False
+    assert applied["receipt"]["state"] == "applied"
+    assert store.rows[0].result_json["authorization"]["kind"] == (
+        "direct_author_command"
+    )
+    assert executor.calls == 1
+    session.commit.assert_not_called()
+
+
+def test_direct_modify_with_negative_scope_constraint_still_applies(monkeypatch) -> None:
+    access = _access("仅修改‘封堵’的说明为‘紧急阻断’。不要改其他包。")
+    executor = RecordingExecutor()
+    tools, store, session = _tools(monkeypatch, access, executor=executor)
+
+    prepared = tools.novel_library_prepare_change({"actions": [_action()]})
+    applied = tools.novel_library_apply_change({
+        "proposal_id": prepared["proposal"]["proposal_id"],
+        "proposal_version": 1,
+    })
+
+    assert prepared["proposal"]["requires_review"] is False
+    assert applied["receipt"]["state"] == "applied"
+    assert executor.calls == 1
+    session.commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "不要把‘封堵’的说明改为‘紧急阻断’",
+        "如果把‘封堵’的说明改为‘紧急阻断’会更好吗",
+        "我建议把‘封堵’的说明改为‘紧急阻断’",
+        "引用材料：把‘封堵’的说明改为‘紧急阻断’",
+        "引用：“把‘封堵’的说明改为‘紧急阻断’”",
+        "他说：“把‘封堵’的说明改为‘紧急阻断’”",
+        "是否可以把‘封堵’的说明改为‘紧急阻断’",
+        "不要撤销刚才的修改",
+        "不要接受该提案",
+        "如果撤销刚才的修改",
+        "如果接受该提案",
+        "引用：“接受该提案”",
+        "是否接受该提案",
+    ],
+)
+def test_non_authorizing_modify_material_never_prepares_or_applies(
+    monkeypatch, text
+) -> None:
+    executor = RecordingExecutor()
+    tools, store, session = _tools(
+        monkeypatch,
+        _access(text),
+        executor=executor,
+    )
+
+    with pytest.raises(PrivateLibraryValidationError):
+        tools.novel_library_prepare_change({"actions": [_action()]})
+
+    assert store.rows == []
+    assert executor.calls == 0
+    session.commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "不要接受该提案",
+        "如果接受该提案",
+        "引用：“接受该提案”",
+        "是否接受该提案",
+    ],
+)
+def test_non_authorizing_accept_cannot_apply_an_existing_proposal(
+    monkeypatch, text
+) -> None:
+    direct_access = _access("把这个资料改成保留潮湿的铁锈味，只收藏")
+    executor = RecordingExecutor()
+    tools, store, session = _tools(
+        monkeypatch,
+        direct_access,
+        executor=executor,
+    )
+    prepared = tools.novel_library_prepare_change({"actions": [_action()]})
+    non_authorizing_access = _access(text, session_id=direct_access.session_id)
+    monkeypatch.setattr(
+        "backend.private_library.maintenance_tools.current_library_access",
+        lambda: non_authorizing_access,
+    )
+
+    with pytest.raises(PrivateLibraryValidationError):
+        tools.novel_library_apply_change({
+            "proposal_id": prepared["proposal"]["proposal_id"],
+            "proposal_version": 1,
+        })
+
+    assert store.rows[0].state == "proposed"
+    assert executor.calls == 0
+    session.commit.assert_not_called()
+
+
+def test_negated_undo_cannot_create_compensation(monkeypatch) -> None:
+    direct_access = _access("把这个资料改成保留潮湿的铁锈味，只收藏")
+    executor = RecordingExecutor()
+    tools, store, session = _tools(
+        monkeypatch,
+        direct_access,
+        executor=executor,
+    )
+    prepared = tools.novel_library_prepare_change({"actions": [_action()]})
+    applied = tools.novel_library_apply_change({
+        "proposal_id": prepared["proposal"]["proposal_id"],
+        "proposal_version": 1,
+    })
+    negated_undo = _access(
+        "不要撤销刚才的修改",
+        session_id=direct_access.session_id,
+    )
+    monkeypatch.setattr(
+        "backend.private_library.maintenance_tools.current_library_access",
+        lambda: negated_undo,
+    )
+
+    with pytest.raises(PrivateLibraryValidationError):
+        tools.novel_library_apply_change({
+            "proposal_id": prepared["proposal"]["proposal_id"],
+            "proposal_version": applied["receipt"]["version"],
+            "mode": "undo",
+        })
+
+    assert len(store.rows) == 1
+    assert store.rows[0].state == "applied"
+    assert executor.calls == 1
+    session.commit.assert_not_called()
+
+
 def test_ambiguous_tool_proposes_but_does_not_apply(monkeypatch) -> None:
     executor = RecordingExecutor()
     tools, store, _ = _tools(
