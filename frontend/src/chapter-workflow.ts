@@ -2100,7 +2100,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
             ? `生成时用词检查未完成（漏扫 ${job.library_check.omitted_rule_count} 条）`
             : job.library_check.unresolved_forbid_hit_ids.length
               ? `生成时检查 · 禁用表达 ${job.library_check.unresolved_forbid_hit_ids.length} 处`
-              : `生成时用词检查通过 · 慎用提醒 ${job.library_check.total_hits} 处；采用前会复核当前规则`)
+              : `生成时用词检查无待处理禁用项 · 共 ${job.library_check.total_hits} 处命中；采用前会复核当前规则`)
           : h("span", null, "旧候选无生成时用词检查记录；采用前会检查当前规则"),
         ),
         h(RetrievalStatusNotice, {

@@ -431,6 +431,19 @@ describe("actual ChapterWorkflowPanel method integration", () => {
       expect(nodeText(label)).toContain(status === "failed" ? "失败" : status === "stale" ? "已失效" : "未完成");
     }
   });
+  it("does not label a kept forbidden hit as a watch warning in history", async () => {
+    const job = historicalJob();
+    job.library_check = {
+      ...checkReport(), total_hits: 1,
+      decisions: [{ kind: "keep_once", hit_id: "kept-physical-description" }],
+    };
+    await openHistory(job);
+    const label = hooks.nodes.find(node => node.type === "span"
+      && node.children.some(child => typeof child === "string" && child.startsWith("生成时用词检查")))!;
+    expect(nodeText(label)).toContain("无待处理禁用项 · 共 1 处命中");
+    expect(nodeText(label)).not.toContain("慎用提醒");
+    expect(nodeText(label)).toContain("采用前会复核当前规则");
+  });
   it("refuses a saved working copy belonging to a different chapter", async () => {
     prepare.mockResolvedValue(doc(OTHER));
     const prompt = await confirm(); (prompt.onOk as () => void)(); await flush();

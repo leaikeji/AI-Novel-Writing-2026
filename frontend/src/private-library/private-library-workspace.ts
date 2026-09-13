@@ -705,6 +705,11 @@ export function createPrivateLibraryWorkspace(
             onChange: (event: { target: { checked: boolean } }) => changeFilters({ includeArchived: event.target.checked }),
           }), "包含已归档资料",
         ) : null,
+        h(Button, {
+          disabled: busy || props.loading === true || editor !== null,
+          title: "重新查询当前筛选，查看 AI 助手或其他页面维护后的最新资料",
+          onClick: () => { void props.onRefresh(); },
+        }, "刷新资料"),
         props.loading && props.assets.length > 0 ? h(Spin, { size: "small", "aria-label": "正在刷新" }) : null,
       ),
       props.loadError

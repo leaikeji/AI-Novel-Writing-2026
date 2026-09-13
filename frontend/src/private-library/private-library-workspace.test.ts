@@ -199,6 +199,45 @@ describe("private library desktop workspace", () => {
     expect(onLoadMore).toHaveBeenCalledOnce();
   });
 
+  it("refreshes current filters without resending maintenance or resetting author inputs", () => {
+    const harness = createPrivateLibraryHarness();
+    const Workspace = createPrivateLibraryWorkspace(harness.React, TEST_ANTD);
+    const input = props();
+    let tree = harness.render(Workspace, input);
+    (findByLabel(tree, "搜索私有库").props.onChange as (event: { target: { value: string } }) => void)({
+      target: { value: "工程" },
+    });
+    tree = harness.render(Workspace, input);
+    expect(findButton(tree, "刷新资料").props.disabled).toBe(false);
+    (findButton(tree, "刷新资料").props.onClick as () => void)();
+    expect(input.onRefresh).toHaveBeenCalledOnce();
+    expect(input.onSaveAsset).not.toHaveBeenCalled();
+    tree = harness.render(Workspace, input);
+    expect(findByLabel(tree, "搜索私有库").props.value).toBe("工程");
+  });
+
+  it.each([{ loading: true }, { disabled: true }])("disables refresh during blocked operations: %o", (state) => {
+    const harness = createPrivateLibraryHarness();
+    const Workspace = createPrivateLibraryWorkspace(harness.React, TEST_ANTD);
+    const tree = harness.render(Workspace, { ...props(), ...state });
+    expect(findButton(tree, "刷新资料").props.disabled).toBe(true);
+  });
+
+  it("protects an open editor from refresh and enables refresh after closing it", () => {
+    const harness = createPrivateLibraryHarness();
+    const Workspace = createPrivateLibraryWorkspace(harness.React, TEST_ANTD);
+    const input = props();
+    let tree = harness.render(Workspace, input);
+    (findButton(tree, "编辑资料").props.onClick as (event: object) => void)({});
+    tree = harness.render(Workspace, input);
+    expect(findButton(tree, "刷新资料").props.disabled).toBe(true);
+    const drawer = findAll(tree, (element) => element.type === "drawer")[0]!;
+    (drawer.props.onClose as () => void)();
+    tree = harness.render(Workspace, input);
+    expect(findButton(tree, "刷新资料").props.disabled).toBe(false);
+    expect(input.onRefresh).not.toHaveBeenCalled();
+  });
+
   it("opens the creation drawer, focuses its first field and returns focus on close", () => {
     const harness = createPrivateLibraryHarness();
     const Workspace = createPrivateLibraryWorkspace(harness.React, TEST_ANTD);
