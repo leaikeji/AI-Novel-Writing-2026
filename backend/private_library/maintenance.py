@@ -387,6 +387,16 @@ def classify_author_intent(text: str) -> AuthorMaintenanceIntent:
         return AuthorMaintenanceIntent.CONSULTATION
     if re.search(r"(?:撤销|取消|恢复)(?:刚才|上次|这个|该)?(?:的)?(?:修改|变更|操作|提案)", authorization_text):
         return AuthorMaintenanceIntent.UNDO
+    # A receipt is also an explicit undo target. Only accept an imperative at
+    # the start of the trusted message, after all non-authorizing checks above.
+    # The actual receipt, scope and version are still checked by the undo path.
+    if re.match(
+        r"^(?:请)?(?:直接)?撤销(?:刚才|上次|这个|该)?(?:已应用)?(?:的)?回执\s*"
+        r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+        r"(?=$|[\s（(，。；,;])",
+        authorization_text,
+    ):
+        return AuthorMaintenanceIntent.UNDO
     if re.search(
         r"(?:执行|接受|应用|采纳)(?:刚才|上次|这个|该|前面)?(?:的)?(?:方案|提案|建议|变更)",
         authorization_text,
