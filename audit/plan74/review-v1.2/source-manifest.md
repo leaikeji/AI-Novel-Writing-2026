@@ -1,6 +1,6 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`96b8aed RELEASED / 6c63ac6 VERIFIED BUT SOURCE-HOLD / G3 OPEN`。作者本轮“同意”已解除原作品资料／续播来源HOLD；新的失败句段重制依赖在F01重发前出现，未在此前授权内，故暂停安装。详见[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`96b8aed RELEASED / 682fc60 VERIFIED BUT SOURCE-HOLD / G3 OPEN`。作者本轮“同意”已解除原作品资料／续播来源HOLD；新的失败句段重制依赖在F01重发前出现，未在此前授权内，故暂停安装。后续两项界面修复已并入682fc60，详见末节和[formal-release.md](formal-release.md)。
 
 ## 本轮批准与完整候选
 
@@ -44,3 +44,7 @@ G2-B发布前必须取得已上线外任务依赖的可重建Git来源；若仍�
 2026-09-13已执行`git push origin main`，随后`git ls-remote origin refs/heads/main`返回`ea02b99e9793fa8da1dee457ce0f62f3d8bf0129`，与本任务源码提交完全相同。本页和最终状态更新另作纯证据提交，不改变已验证代码树。
 
 2026-09-13本轮已将批准依赖`96b8aed`和F01修复`6c63ac6`一起push，随后实际`ls-remote`确认main为`6c63ac650044e0cdf663121208d8e57c1a59c737`。后续纯证据提交不改变该候选的源码／包内容；新朗读依赖与compose仍不在本轮提交范围。代码已push不解除F01重发来源HOLD、桌面裁切或未完成真实链门禁。
+
+后续界面候选为`682fc604366070db5f0daf7b6515ff48480fd7f6`（包含工具栏修复`859a643`），tree `c92efbc5c8c75ac4833c5b5f2254b7c1b24f3266`；独立源`/private/tmp/plan74-ui-source.2hohEa/code`与其build目录保留。前端1494／Python全量／类型／构建／打包通过，JS SHA `6c6827cd323cbc55bc873f87573c2f48ea1e032b783f71d93a27838a766aaf55`。未执行prepare/install，新朗读源码／测试／计划70索引hunk及compose继续留给所属任务，不使用工作区脏代码制作发布包。
+
+该轮`git push origin main`成功，实际`git ls-remote origin refs/heads/main`确认`682fc604366070db5f0daf7b6515ff48480fd7f6`。本轮文档／日志收口另作证据提交，不改变上述候选内容或未通过的正式门禁。

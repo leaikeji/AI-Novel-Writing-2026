@@ -1,0 +1,9 @@
+$ vitest run
+
+ RUN  v4.1.11 /private/tmp/plan74-ui-source.2hohEa/code
+
+
+ Test Files  167 passed (167)
+      Tests  1494 passed (1494)
+   Start at  15:39:28
+   Duration  3.54s (transform 5.58s, setup 0ms, import 7.94s, tests 5.89s, environment 11ms)
