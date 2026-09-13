@@ -142,3 +142,27 @@ def test_check_hit_uses_non_empty_utf16_range() -> None:
     assert LibraryCheckHit.model_validate(values).end_utf16 == 6
     with pytest.raises(ValidationError):
         LibraryCheckHit.model_validate({**values, "end_utf16": 4})
+
+
+def test_atomic_save_and_use_preserves_distinct_root_and_bound_version_contract() -> None:
+    asset_id, bound_version_id, unrelated_asset_id = uuid4(), uuid4(), uuid4()
+    action = LibraryChangeAction(
+        operation=LibraryChangeOperation.UPSERT_AND_USE_LEXICON_ENTRIES,
+        asset_id=asset_id,
+        asset_version_id=bound_version_id,
+        expected_root_version=4,
+        payload={
+            "entries": [_entry(action="forbid").model_dump(mode="json")],
+            "expected_binding_versions": {str(asset_id): 2, str(unrelated_asset_id): 7},
+            "copy_to_novel": False,
+        },
+    )
+    restored = LibraryChangeAction.model_validate_json(action.model_dump_json())
+    assert restored.asset_version_id == bound_version_id
+    assert restored.expected_root_version == 4
+    assert restored.payload["expected_binding_versions"] == {
+        str(asset_id): 2, str(unrelated_asset_id): 7,
+    }
+    assert restored.payload["copy_to_novel"] is False
+    with pytest.raises(ValidationError):
+        LibraryChangeAction.model_validate({**action.model_dump(), "novel_id": uuid4()})

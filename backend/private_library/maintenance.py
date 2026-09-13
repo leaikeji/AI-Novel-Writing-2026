@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..creative_data_models import LibraryChangeRequest, PrivateAssetVersion
 from ..models import PrivateAsset
+from ..novel_lifecycle import lock_active_novel
 from .access_context import LibraryAccessEvidence
 from .contracts import UsagePolicy, VersionSelection
 from .errors import (
@@ -94,6 +95,7 @@ class AppliedAction:
     changed: bool
     target: dict[str, Any]
     undo_action: LibraryChangeAction | None
+    undo_actions: tuple[LibraryChangeAction, ...] = ()
 
 
 class ChangeRequestStore(Protocol):
@@ -230,9 +232,26 @@ class SqlAlchemyChangeRequestStore:
         asset = self.session.get(PrivateAsset, asset_id)
         if asset is None or (asset.archived and not include_archived):
             return None
-        return _query_asset_view(get_scoped_asset_view(
+        result = _query_asset_view(get_scoped_asset_view(
             self.session, asset_id, novel_id=scope.novel_id,
         ))
+        result["bound_version"] = None
+        if scope.novel_id is not None:
+            bound = next((view for view in list_novel_bindings(
+                self.session, scope.novel_id
+            ) if view.asset.id == asset_id), None)
+            if bound is not None:
+                result["bound_version"] = {
+                    "asset_version_id": str(bound.asset_version.id),
+                    "binding_version": int(bound.binding.version),
+                    "usage_policy": str(bound.binding.usage_policy),
+                    "position": int(bound.binding.position),
+                    "lexicon_pack": (
+                        lexicon_pack_from_version(bound.asset_version).model_dump(mode="json")
+                        if asset.asset_type == "vocabulary" else None
+                    ),
+                }
+        return result
 
     def list_binding_details(
         self,
@@ -401,6 +420,11 @@ def _validate_actions(
     if not actions:
         raise PrivateLibraryValidationError("at least one maintenance action is required")
     result = tuple(actions)
+    if len(result) != 1 and any(
+        action.operation is LibraryChangeOperation.UPSERT_AND_USE_LEXICON_ENTRIES
+        for action in result
+    ):
+        raise PrivateLibraryValidationError("atomic save-and-use must be the only proposal action")
     for action in result:
         if _contains_protected_authority(action.payload):
             raise PrivateLibraryValidationError(
@@ -411,6 +435,7 @@ def _validate_actions(
             in {
                 LibraryChangeOperation.SET_NOVEL_BINDING,
                 LibraryChangeOperation.CREATE_NOVEL_COPY,
+                LibraryChangeOperation.UPSERT_AND_USE_LEXICON_ENTRIES,
             }
             and scope.kind is not LibraryScopeKind.NOVEL
         ):
@@ -451,6 +476,8 @@ def _receipt(row: Any, *, replayed: bool = False) -> dict[str, Any]:
             "counts", {"changed": 0, "unchanged": 0, "unsupported": 0}
         ),
         "error": result.get("error"),
+        "targets": result.get("targets", []),
+        "operations": result.get("operations", []),
         "undo_available": bool(
             row.state == "applied" and result.get("undo_actions")
         ),
@@ -922,6 +949,149 @@ class P1MaintenanceActionExecutor:
             _target(result_asset, result_version), undo,
         )
 
+    def _apply_upsert_and_use_lexicon_entries(
+        self, request: Any, action: LibraryChangeAction, index: int
+    ) -> AppliedAction:
+        scope = self._scope(request)
+        if scope.novel_id is None:
+            raise PrivateLibraryValidationError("trusted novel scope is required")
+        payload = action.payload
+        _require_payload_keys(
+            payload, required={"entries", "expected_binding_versions"},
+            allowed={"entries", "expected_binding_versions", "copy_to_novel"},
+        )
+        if not isinstance(payload["entries"], list) or not payload["entries"]:
+            raise PrivateLibraryValidationError("entries must be a non-empty list")
+        copy_to_novel = payload.get("copy_to_novel", False)
+        if not isinstance(copy_to_novel, bool):
+            raise PrivateLibraryValidationError("copy_to_novel must be a boolean")
+        try:
+            entries = tuple(LexiconEntry.model_validate(item) for item in payload["entries"])
+        except Exception as error:
+            raise PrivateLibraryValidationError("lexicon entries are invalid") from error
+        expected = _binding_versions(payload["expected_binding_versions"])
+        create_collection = all(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        ))
+        if create_collection:
+            if copy_to_novel:
+                raise PrivateLibraryValidationError("collection creation cannot copy a source")
+        elif any(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        )):
+            raise PrivateLibraryValidationError("asset id, base version and root CAS are required together")
+
+        # Membership and root changes share the same lock order and savepoint.
+        lock_active_novel(self.session, scope.novel_id)
+        before = list_novel_bindings(self.session, scope.novel_id)
+        inverse_selections = _binding_selections(before)
+        if expected != {view.asset.id: int(view.binding.version) for view in before}:
+            raise PrivateLibraryConflictError("novel_asset_bindings_conflict", current={})
+        asset_id = action.asset_id
+        target_binding = next((view for view in before if view.asset.id == asset_id), None)
+        if create_collection:
+            asset, base, created = get_or_create_collection_pack(
+                self.session, novel_id=scope.novel_id,
+                operation_key=self._key(request, index, "atomic-collection"),
+            )
+            if not created:
+                raise PrivateLibraryConflictError(
+                    "collection_already_exists", current={"asset_id": str(asset.id)}
+                )
+        else:
+            asset = self.session.scalar(
+                select(PrivateAsset).where(PrivateAsset.id == asset_id)
+                .with_for_update().execution_options(populate_existing=True)
+            )
+            if asset is None or asset.archived or asset.asset_type != "vocabulary":
+                raise PrivateLibraryNotFoundError("active lexicon asset not found")
+            require_asset_scope(asset, novel_id=scope.novel_id)
+            if int(asset.version) != self._expected(action):
+                raise PrivateLibraryConflictError(
+                    "asset_root_version_conflict",
+                    current={"asset_id": str(asset.id), "root_version": int(asset.version)},
+                )
+            required_base_id = (
+                target_binding.asset_version.id if target_binding else asset.current_version_id
+            )
+            if action.asset_version_id != required_base_id:
+                raise PrivateLibraryConflictError(
+                    "lexicon_binding_base_conflict",
+                    current={"asset_version_id": str(required_base_id)},
+                )
+            base = self.session.get(PrivateAssetVersion, action.asset_version_id)
+            if base is None or base.asset_id != asset_id:
+                raise PrivateLibraryNotFoundError("lexicon base version not found")
+        old_root_id = asset.current_version_id
+        is_copy = asset.scope_kind == "library"
+        if is_copy != copy_to_novel:
+            raise PrivateLibraryValidationError(
+                "library sources require copy_to_novel=true; novel assets must be edited directly"
+            )
+        merged = merge_lexicon_entries(lexicon_pack_from_version(base), entries)
+        if is_copy:
+            asset, _, created = create_novel_lexicon_copy(
+                self.session, novel_id=scope.novel_id,
+                source_asset_id=asset_id, source_version_id=base.id,
+                operation_key=self._key(request, index, "atomic-copy"),
+            )
+            if not created:
+                raise PrivateLibraryConflictError(
+                    "novel_copy_already_exists", current={"asset_id": str(asset.id)}
+                )
+        result_asset, result_version, replayed = save_lexicon_pack(
+            self.session, asset_id=asset.id,
+            expected_root_version=int(asset.version), pack=merged,
+            operation_key=self._key(request, index, "atomic-upsert"),
+            novel_id=scope.novel_id,
+        )
+        selections = [
+            _selection(value) for value in inverse_selections
+            if value["asset_id"] != str(asset_id)
+        ]
+        selections.append(VersionSelection(
+            asset_id=result_asset.id, asset_version_id=result_version.id,
+            usage_policy=(
+                UsagePolicy(target_binding.binding.usage_policy)
+                if target_binding and target_binding.binding.usage_policy != "prohibited"
+                else UsagePolicy.PREFERRED
+            ),
+            position=(
+                int(target_binding.binding.position) if target_binding else
+                max((int(view.binding.position) for view in before), default=-1) + 1
+            ),
+        ))
+        bindings = replace_novel_bindings(
+            self.session, scope.novel_id, expected_binding_versions=expected,
+            selections=selections, operation_key=self._key(request, index, "atomic-use"),
+        )
+        binding_undo = LibraryChangeAction(
+            operation=LibraryChangeOperation.SET_NOVEL_BINDING,
+            payload={
+                "expected_binding_versions": {
+                    str(view.asset.id): int(view.binding.version) for view in bindings.bindings
+                },
+                "selections": inverse_selections,
+            },
+        )
+        asset_undo = (
+            LibraryChangeAction(
+                operation=LibraryChangeOperation.ARCHIVE_ASSET,
+                asset_id=result_asset.id, expected_root_version=int(result_asset.version),
+            ) if is_copy or create_collection else _restore_version_action(result_asset, old_root_id)
+        )
+        actual_binding = next(view for view in bindings.bindings if view.asset.id == result_asset.id)
+        target = _target(result_asset, result_version)
+        target.update({
+            "binding_version": int(actual_binding.binding.version),
+            "bound_asset_version_id": str(actual_binding.asset_version.id),
+            "used_by_current_novel": actual_binding.binding.usage_policy != "prohibited",
+        })
+        return AppliedAction(
+            "upsert_and_use_lexicon_entries", not replayed or bindings.changed,
+            target, None, (binding_undo, asset_undo),
+        )
+
     def _apply_remove_lexicon_entries(
         self, request: Any, action: LibraryChangeAction, index: int
     ) -> AppliedAction:
@@ -963,18 +1133,11 @@ class P1MaintenanceActionExecutor:
             allowed={"expected_binding_versions", "selections"},
         )
         before = list_novel_bindings(self.session, scope.novel_id)
-        if not isinstance(payload["selections"], list) or not isinstance(
-            payload["expected_binding_versions"], Mapping
-        ):
+        inverse_selections = _binding_selections(before)
+        if not isinstance(payload["selections"], list):
             raise PrivateLibraryValidationError("binding payload is invalid")
         selections = tuple(_selection(item) for item in payload["selections"])
-        try:
-            expected = {
-                UUID(str(key)): _positive_integer(value, field="binding version")
-                for key, value in payload["expected_binding_versions"].items()
-            }
-        except (TypeError, ValueError) as error:
-            raise PrivateLibraryValidationError("binding payload is invalid") from error
+        expected = _binding_versions(payload["expected_binding_versions"])
         result = replace_novel_bindings(
             self.session,
             scope.novel_id,
@@ -986,15 +1149,6 @@ class P1MaintenanceActionExecutor:
             str(view.binding.asset_id): int(view.binding.version)
             for view in result.bindings
         }
-        inverse_selections = [
-            {
-                "asset_id": str(view.asset.id),
-                "asset_version_id": str(view.asset_version.id),
-                "usage_policy": view.binding.usage_policy,
-                "position": int(view.binding.position),
-            }
-            for view in before
-        ]
         undo = (
             LibraryChangeAction(
                 operation=LibraryChangeOperation.SET_NOVEL_BINDING,
@@ -1081,6 +1235,28 @@ def _restore_version_action(asset: Any, version_id: UUID) -> LibraryChangeAction
         expected_root_version=int(asset.version),
         payload={"target_version_id": str(version_id)},
     )
+
+
+def _binding_selections(views: Sequence[Any]) -> list[dict[str, Any]]:
+    # Freeze scalar values before replace_novel_bindings mutates ORM rows.
+    return [{
+        "asset_id": str(view.asset.id),
+        "asset_version_id": str(view.asset_version.id),
+        "usage_policy": str(view.binding.usage_policy),
+        "position": int(view.binding.position),
+    } for view in views]
+
+
+def _binding_versions(value: Any) -> dict[UUID, int]:
+    if not isinstance(value, Mapping):
+        raise PrivateLibraryValidationError("binding versions must be an object")
+    try:
+        return {
+            UUID(str(key)): _positive_integer(version, field="binding version")
+            for key, version in value.items()
+        }
+    except (TypeError, ValueError) as error:
+        raise PrivateLibraryValidationError("binding versions are invalid") from error
 
 
 def _selection(value: Mapping[str, Any]) -> VersionSelection:
@@ -1213,9 +1389,11 @@ def apply_library_change(
         "targets": [item.target for item in outcomes],
         "operations": [item.operation for item in outcomes],
         "undo_actions": [
-            item.undo_action.model_dump(mode="json")
+            inverse.model_dump(mode="json")
             for item in reversed(outcomes)
-            if item.undo_action is not None
+            for inverse in (
+                item.undo_actions or ((item.undo_action,) if item.undo_action is not None else ())
+            )
         ],
         "authorization": {
             "kind": (

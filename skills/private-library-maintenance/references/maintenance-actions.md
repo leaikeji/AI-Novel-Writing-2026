@@ -1,6 +1,6 @@
 # 维护动作与恢复合同
 
-本参考用于批量分类、合并、执行既有提案、撤销、冲突或写入结果未知的场景。普通单项查询和明确维护命令只需遵守 `SKILL.md`。
+单项查询遵守 `SKILL.md`；任何写入前读取本参考，尤其是保存并用于本书、执行既有提案、撤销或结果未知。
 
 ## 决策矩阵
 
@@ -35,19 +35,35 @@
 {"kind":"asset","asset_id":"<assets 查询返回的资料 ID>","include_archived":false}
 ```
 
-准备动作时，外层固定为 `actions`；每个动作固定为 `operation`、需要时的 `asset_id`／`asset_version_id`／`expected_root_version`，以及 `payload`。例如基于通用资料当前使用版本创建本书副本：
+准备动作时，外层固定为 `actions`；每个动作固定为 `operation`、需要时的 `asset_id`／`asset_version_id`／`expected_root_version`，以及 `payload`。一条作者消息只有一个维护提案；先完成必要查询，再把明确授权的动作一次准备。不要先应用创建副本，再为同一消息准备更新和换绑提案，也不要猜测尚未创建的版本 ID。
+
+### 修改词条并在本书使用
+
+先查询 `assets`、`asset` 和 `bindings`。已有本书副本时直接定位副本；本书已绑定目标时，读取 `asset` 返回的 `bound_version.lexicon_pack` 中原词条，以 `bound_version.asset_version_id` 为基线。未绑定时才使用当前根版本及其词条；不能把根上的其他未启用修改带入本书。
+
+按 `entry_id` 提交需要修改的完整词条，除作者指定字段外原样保留。调用一个 `upsert_and_use_lexicon_entries` 动作：
 
 ```json
-{"actions":[{"operation":"create_novel_copy","asset_id":"<query 返回的通用资料 ID>","asset_version_id":"<本书实际使用的资料版本 ID>","payload":{}}]}
+{"actions":[{"operation":"upsert_and_use_lexicon_entries","asset_id":"<查询所得目标资料 ID>","asset_version_id":"<本书固定基线版本；未绑定时用当前根版本>","expected_root_version":4,"payload":{"entries":[{"entry_id":"<原词条 ID>","term":"原词","action":"recommend","state":"active","match_mode":"phrase","case_sensitive":true,"variants":[],"categories":["原分类"],"genres":[],"eras":[],"positions":["any"],"note":"修改后的说明","example":"","counterexample":"","replacement_hint":"原改写方向","watch_threshold":null,"source_refs":[{"source_type":"author","label":"原来源","locator":null,"observed_at":null,"evidence_scope":null,"verified_popularity":false}]}],"expected_binding_versions":{"<每个现有绑定的资料 ID>":2},"copy_to_novel":false}}]}
 ```
 
-创建副本的提案应用成功后必须重新查询：先用 `assets` 找到本书副本，再用 `asset` 取得资料 ID、根版本和完整词条；不能在同一提案中预猜副本 ID。更新其中一个词条时，按 `entry_id` 提交修改后的完整词条，未修改的字段原样保留：
+示例中的版本数字也必须替换为查询值。`expected_binding_versions` 包含 `bindings` 返回的**全部**资料 ID 和 `binding_version`，无绑定时是 `{}`。`copy_to_novel=false` 仅用于已有本书资料；只改本书且目标仍是通用源时设为 `true`，服务端在同一原子动作内复制、修改、换绑，通用源保持不变。已有副本却仍以通用源创建的请求会冲突，不能覆盖已有副本。
+
+该动作由服务端使用实际生成的新版本，保留其他绑定，回执报告新资料版本和本书绑定版本；失败时整项回滚。撤销同一成功回执同时补偿资料和绑定，遇到后续编辑则拒绝整体撤销。不要在应用后再发一次绑定提案。
+
+原子保存并使用必须是提案唯一动作，同包多个词项放在其 `entries` 中。不与另一词包或归档等动作混用；遇到一次跨多个词包的保存并换绑要求，说明现有动作边界，不能拆成同一消息的多个提案或擅自只完成其中一包。
+
+首次新增并使用词项时，先查是否已有本书收藏包；有则以上述精确目标更新。确认不存在时，可在同一原子动作中同时省略 `asset_id`、`asset_version_id`、`expected_root_version`，提交非空 `entries`、完整绑定 CAS 和 `copy_to_novel=false`，由服务端创建本书收藏包。若实际已存在则冲突，不盲目覆盖。只要求把通用包中选定词项用于本书时，将选定词项及来源保存到本书收藏包，不以 `copy_to_novel=true` 复制并启用整包。
+
+### 仅保存，不启用
+
+作者只要求收藏或修改资料、不要求本书使用时，使用原有 `upsert_lexicon_entries`，不附带绑定。按查询所得当前根词条提交指定词项的完整对象，例如：
 
 ```json
 {"actions":[{"operation":"upsert_lexicon_entries","asset_id":"<本书副本 ID>","expected_root_version":1,"payload":{"entries":[{"entry_id":"<原词条 ID>","term":"原词","action":"recommend","state":"active","match_mode":"phrase","case_sensitive":true,"variants":[],"categories":["原分类"],"genres":[],"eras":[],"positions":["any"],"note":"修改后的说明","example":"","counterexample":"","replacement_hint":"原改写方向","watch_threshold":null,"source_refs":[{"source_type":"author","label":"原来源","locator":null,"observed_at":null,"evidence_scope":null,"verified_popularity":false}]}}]}}]}
 ```
 
-把 `novel_library_prepare_change` 返回的 `proposal_id` 和 `proposal_version` 原样交给应用工具：
+把 `novel_library_prepare_change` 返回的 `proposal.proposal_id` 交给应用工具的 `proposal_id`，把 `proposal.version` 交给 `proposal_version`，不自行加一或使用示例数字：
 
 ```json
 {"proposal_id":"<服务端提案 ID>","proposal_version":1,"mode":"apply"}
@@ -61,13 +77,13 @@
 {"kind":"bindings"}
 ```
 
-换绑提案必须携带全部现有绑定，不能只提交被替换的一条。`expected_binding_versions` 使用查询返回的每个 `asset_id` 与 `binding_version`；`selections` 原样保留其他条目，只把目标通用资料换成本书副本的 `asset_id`、`asset_version_id`，并按最终顺序给出连续的 `position`：
+仅切换已有资料版本或启停时使用 `set_novel_binding`，不用于引用本次尚未创建的版本。换绑提案必须携带全部保留的绑定，不能只提交被替换的一条。`expected_binding_versions` 使用查询返回的每个 `asset_id` 与 `binding_version`；`selections` 原样保留其他条目的版本、`usage_policy` 和 `position`，只更改作者指定的目标；停用时仅移除目标：
 
 ```json
 {"actions":[{"operation":"set_novel_binding","payload":{"expected_binding_versions":{"<现有资料 ID>":1},"selections":[{"asset_id":"<保留或替换后的资料 ID>","asset_version_id":"<固定版本 ID>","usage_policy":"preferred","position":0}]}}]}
 ```
 
-副本创建、词条更新和换绑是三个有各自回执的步骤；任一步失败时停止后续步骤并报告，不把部分成功说成全部完成。
+仅创建本书副本而不修改、不启用时仍可使用 `create_novel_copy`，提供查询所得源 `asset_id`、`asset_version_id` 和空 `payload`。它不自动启用。保存并使用则用上面的原子动作，不将部分成功说成全部完成。
 
 ## 范围矩阵
 
@@ -95,7 +111,7 @@
 | save_and_enable | atomic_save_and_current_novel_binding | mutate_library_and_novel_silently |
 <!-- semantic-matrix:end -->
 
-批量导入、分类或合并必须遵守服务端预算。超限时缩小范围或分批重新提案，不静默截断。相同词项重复提交时保留有价值的来源与例句；规则冲突时让作者选择，不能按强度自动覆盖。
+批量导入、分类或合并必须遵守服务端预算。超限时说明剩余范围，不能在同一消息下分批建立多个提案或静默截断。相同词项重复提交时保留有价值的来源与例句；规则冲突时让作者选择，不能按强度自动覆盖。
 
 ## 提案、应用与回执
 

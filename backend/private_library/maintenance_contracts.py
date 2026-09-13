@@ -56,6 +56,7 @@ class LibraryChangeOperation(str, Enum):
     ARCHIVE_ASSET = "archive_asset"
     RESTORE_ASSET = "restore_asset"
     UPSERT_LEXICON_ENTRIES = "upsert_lexicon_entries"
+    UPSERT_AND_USE_LEXICON_ENTRIES = "upsert_and_use_lexicon_entries"
     REMOVE_LEXICON_ENTRIES = "remove_lexicon_entries"
     SET_NOVEL_BINDING = "set_novel_binding"
     CREATE_NOVEL_COPY = "create_novel_copy"
