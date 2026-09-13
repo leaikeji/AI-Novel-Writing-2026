@@ -1,7 +1,7 @@
 const WORKBENCH_ROUTE_KEY = "ai-novel-world-2026.workbench-route";
 const WORKBENCH_ROUTE_STORAGE_VERSION = 1;
 const CHAT_ROOT_PATH = "/chat";
-const CREATIVE_CENTER_ROUTE_SCOPE_ID = "ai-novel-world-2026:creative-center";
+export const CREATIVE_CENTER_ROUTE_SCOPE_ID = "ai-novel-world-2026:creative-center";
 
 
 export const WORKBENCH_ROUTE_SECTIONS = [

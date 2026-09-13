@@ -48,6 +48,9 @@ def candidate(tmp_path: Path) -> Path:
                         {"name": "novel_search"},
                         {"name": "novel_get_workspace_context"},
                         {"name": "novel_prepare_selection_edit"},
+                        {"name": "novel_library_query"},
+                        {"name": "novel_library_prepare_change"},
+                        {"name": "novel_library_apply_change"},
                     ]
                 },
             }
@@ -87,6 +90,7 @@ def candidate(tmp_path: Path) -> Path:
         "prose-writing",
         "continuity-check",
         "style-review",
+        "private-library-maintenance",
     ):
         files[f"skills/{skill}/SKILL.md"] = f"# {skill}\n"
     for relative, content in files.items():

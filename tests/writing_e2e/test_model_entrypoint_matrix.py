@@ -495,7 +495,19 @@ def test_candidate_adoption_and_storyfact_commit_require_explicit_commands(
     assert adopted["candidate"]["state"] == "accepted"
     assert committed["state"] == "committed"
     assert calls == [
-        ("adopt", (candidate_id, {"expected_draft_version": 3})),
+        (
+            "adopt",
+            (
+                candidate_id,
+                {
+                    "expected_draft_version": 3,
+                    "library_check_report_id": None,
+                    "library_check_version": None,
+                    "keep_hit_ids": [],
+                    "skip_incomplete": False,
+                },
+            ),
+        ),
         (
             "commit",
             (

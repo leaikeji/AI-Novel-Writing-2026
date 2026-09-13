@@ -1,0 +1,236 @@
+{
+  "schema_version": "private-library-matching-fixtures/1",
+  "fixture_id": "plan74-matching-synthetic-v1",
+  "source": {
+    "kind": "synthetic-project-fixture",
+    "license": "synthetic-project-fixture",
+    "contains_external_text": false,
+    "contains_user_content": false
+  },
+  "cases": [
+    {
+      "id": "MATCH-ZH-EXACT",
+      "purpose": "中文短语只按精确可见文本命中",
+      "input": {"markdown": "风钻进门缝，眼底闪过迟疑。"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_zh01", "term": "眼底闪过", "action": "forbid"}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "风钻进门缝，眼底闪过迟疑。",
+        "visible_character_count": 13,
+        "hits": [
+          {"entry_id": "match_zh01", "matched_text": "眼底闪过", "start_utf16": 6, "end_utf16": 10, "count": 1, "window": null}
+        ]
+      }
+    },
+    {
+      "id": "MATCH-ASCII-WORD",
+      "purpose": "ASCII 词只匹配完整词并遵守大小写",
+      "input": {"markdown": "AI ai AIs xAI AI_2; AI."},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_en01", "term": "AI", "action": "forbid", "match_mode": "ascii_word", "case_sensitive": true}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "AI ai AIs xAI AI_2; AI.",
+        "visible_character_count": 18,
+        "hits": [
+          {"entry_id": "match_en01", "matched_text": "AI", "start_utf16": 0, "end_utf16": 2, "count": 2, "window": null},
+          {"entry_id": "match_en01", "matched_text": "AI", "start_utf16": 20, "end_utf16": 22, "count": 2, "window": null}
+        ]
+      }
+    },
+    {
+      "id": "MATCH-MARKDOWN-LABELS",
+      "purpose": "Markdown 标记不计入可见文本，链接标签可见，链接地址与裸地址排除",
+      "input": {"markdown": "**眼底闪过** [眼底闪过](https://fixture.invalid/眼底闪过) https://fixture.invalid/眼底闪过"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_md01", "term": "眼底闪过", "action": "forbid"}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "眼底闪过 眼底闪过 ",
+        "visible_character_count": 8,
+        "hits": [
+          {"entry_id": "match_md01", "matched_text": "眼底闪过", "start_utf16": 2, "end_utf16": 6, "count": 2, "window": null},
+          {"entry_id": "match_md01", "matched_text": "眼底闪过", "start_utf16": 10, "end_utf16": 14, "count": 2, "window": null}
+        ]
+      }
+    },
+    {
+      "id": "MATCH-EMOJI-UTF16",
+      "purpose": "emoji 之前的坐标按 UTF-16 代码单元计算",
+      "input": {"markdown": "🙂眼底闪过。"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_u1601", "term": "眼底闪过", "action": "forbid"}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "🙂眼底闪过。",
+        "visible_character_count": 6,
+        "hits": [
+          {"entry_id": "match_u1601", "matched_text": "眼底闪过", "start_utf16": 2, "end_utf16": 6, "count": 1, "window": null}
+        ]
+      }
+    },
+    {
+      "id": "MATCH-OVERLAP",
+      "purpose": "重叠短语各自保留并按区间稳定排序",
+      "input": {"markdown": "眼底闪过"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 1,
+          "entry": {"entry_id": "match_ov01", "term": "眼底", "action": "forbid"}
+        },
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000002",
+          "asset_version_id": "74000000-0000-4000-8000-000000001002",
+          "priority": 0,
+          "entry": {"entry_id": "match_ov02", "term": "眼底闪过", "action": "forbid"}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "眼底闪过",
+        "visible_character_count": 4,
+        "hits": [
+          {"entry_id": "match_ov01", "matched_text": "眼底", "start_utf16": 0, "end_utf16": 2, "count": 1, "window": null},
+          {"entry_id": "match_ov02", "matched_text": "眼底闪过", "start_utf16": 0, "end_utf16": 4, "count": 1, "window": null}
+        ]
+      }
+    },
+    {
+      "id": "MATCH-WATCH-DENSE",
+      "purpose": "慎用词在滚动窗口内达到阈值才报告",
+      "input": {"markdown": "仿佛，他停下。仿佛，雨更急。仿佛，门开了。"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_watch1", "term": "仿佛", "action": "watch", "watch_threshold": {"count": 3, "window_characters": 100}}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "仿佛，他停下。仿佛，雨更急。仿佛，门开了。",
+        "visible_character_count": 21,
+        "hits": [
+          {"entry_id": "match_watch1", "matched_text": "仿佛", "start_utf16": 0, "end_utf16": 2, "count": 3, "window": 100},
+          {"entry_id": "match_watch1", "matched_text": "仿佛", "start_utf16": 7, "end_utf16": 9, "count": 3, "window": 100},
+          {"entry_id": "match_watch1", "matched_text": "仿佛", "start_utf16": 14, "end_utf16": 16, "count": 3, "window": 100}
+        ]
+      }
+    },
+    {
+      "id": "MATCH-WATCH-SPARSE",
+      "purpose": "全文重复但任一滚动窗口未达阈值时允许表达",
+      "input": {"markdown": "仿佛甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲仿佛乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙仿佛"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_watch2", "term": "仿佛", "action": "watch", "watch_threshold": {"count": 3, "window_characters": 100}}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "仿佛甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲仿佛乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙仿佛",
+        "visible_character_count": 106,
+        "hits": []
+      }
+    },
+    {
+      "id": "MATCH-ALLOWED-RULES",
+      "purpose": "推荐词和停用词即使出现也不生成检查问题",
+      "input": {"markdown": "风从门缝灌进来，雨点敲着铁皮。"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_allow1", "term": "门缝", "action": "recommend"}
+        },
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_allow2", "term": "铁皮", "action": "forbid", "state": "inactive"}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "风从门缝灌进来，雨点敲着铁皮。",
+        "visible_character_count": 15,
+        "hits": []
+      }
+    },
+    {
+      "id": "MATCH-VARIANT-CASEFOLD",
+      "purpose": "同一词项的变体按不区分大小写策略命中且同区间去重",
+      "input": {"markdown": "Basically BASICALLY basically_2 xbasically"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_var01", "term": "Basically", "action": "forbid", "variants": ["basically"], "match_mode": "ascii_word", "case_sensitive": false}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "Basically BASICALLY basically_2 xbasically",
+        "visible_character_count": 39,
+        "hits": [
+          {"entry_id": "match_var01", "matched_text": "Basically", "start_utf16": 0, "end_utf16": 9, "count": 2, "window": null},
+          {"entry_id": "match_var01", "matched_text": "BASICALLY", "start_utf16": 10, "end_utf16": 19, "count": 2, "window": null}
+        ]
+      }
+    },
+    {
+      "id": "MATCH-RAW-LINK-EXCLUDED",
+      "purpose": "纯链接地址中的词不扫描，地址之外的正文仍命中",
+      "input": {"markdown": "查看 https://fixture.invalid/禁式 后继续，禁式仍要命中。"},
+      "rules": [
+        {
+          "asset_id": "74000000-0000-4000-8000-000000000001",
+          "asset_version_id": "74000000-0000-4000-8000-000000001001",
+          "priority": 0,
+          "entry": {"entry_id": "match_link1", "term": "禁式", "action": "forbid"}
+        }
+      ],
+      "expected": {
+        "status": "complete",
+        "visible_text": "查看  后继续，禁式仍要命中。",
+        "visible_character_count": 13,
+        "hits": [
+          {"entry_id": "match_link1", "matched_text": "禁式", "start_utf16": 34, "end_utf16": 36, "count": 1, "window": null}
+        ]
+      }
+    }
+  ]
+}

@@ -789,7 +789,51 @@ class NovelDeletionAudit(Base):
 
 class PrivateAsset(Base):
     __tablename__ = "private_assets"
-    __table_args__ = (Index("ix_private_assets_type_archived", "asset_type", "archived"),)
+    __table_args__ = (
+        Index("ix_private_assets_type_archived", "asset_type", "archived"),
+        Index("ix_private_assets_scope", "scope_kind", "scope_novel_id", "archived"),
+        Index(
+            "uq_private_assets_library_collection_key",
+            "collection_key",
+            unique=True,
+            postgresql_where=text(
+                "scope_kind='library' AND collection_key IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_private_assets_novel_collection_key",
+            "scope_novel_id",
+            "collection_key",
+            unique=True,
+            postgresql_where=text(
+                "scope_kind='novel' AND collection_key IS NOT NULL"
+            ),
+        ),
+        CheckConstraint(
+            "(scope_kind='library' AND scope_novel_id IS NULL) OR "
+            "(scope_kind='novel' AND scope_novel_id IS NOT NULL)",
+            name="ck_private_asset_scope",
+        ),
+        CheckConstraint(
+            "collection_key IS NULL OR "
+            "(char_length(collection_key) BETWEEN 1 AND 120)",
+            name="ck_private_asset_collection_key",
+        ),
+        CheckConstraint(
+            "(source_asset_id IS NULL AND source_version_id IS NULL) OR "
+            "(source_asset_id IS NOT NULL AND source_version_id IS NOT NULL)",
+            name="ck_private_asset_source_pair",
+        ),
+        Index(
+            "uq_private_assets_novel_source_copy",
+            "scope_novel_id",
+            "source_asset_id",
+            unique=True,
+            postgresql_where=text(
+                "scope_kind='novel' AND source_asset_id IS NOT NULL"
+            ),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     asset_type: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -797,6 +841,17 @@ class PrivateAsset(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scope_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="library", server_default="library"
+    )
+    scope_novel_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT")
+    )
+    collection_key: Mapped[str | None] = mapped_column(String(120))
+    source_asset_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("private_assets.id", ondelete="RESTRICT")
+    )
+    source_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     current_version_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     tags_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     source_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

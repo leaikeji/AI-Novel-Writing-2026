@@ -4,6 +4,7 @@ import {
   APP_ROUTE_ID,
   CORE_CHAT_ROUTE_ID,
 } from "./contracts";
+import { apiRequest } from "./api";
 import { registerAssistantRouteWrap } from "./assistant-route-wrap";
 import { registerAssistantRequestPayload } from "./assistant-request-payload";
 import {
@@ -31,7 +32,12 @@ import {
 } from "./writing-skills/native";
 import { CreativeCenterEntry } from "./creative-center-entry";
 import { NovelLibraryPage } from "./creative-center";
+import {
+  currentPrivateLibraryAssistantNovel,
+  subscribePrivateLibraryAssistantNovel,
+} from "./private-library";
 import { NovelWorkbench } from "./workbench-v2";
+import { reviewLibraryCheckReport } from "./chapter-workflow";
 import { activeWorkbenchRouteSession } from "./workbench-route";
 import { ensureNarrationStyles } from "./narration/styles";
 import { ensureNovelStyles } from "./styles";
@@ -60,6 +66,24 @@ const selectionEditRuntime = new SelectionEditRuntime({
   generationClient: new SelectionEditMethodGenerationClient(),
   copyText: (text) => navigator.clipboard.writeText(text),
   confirmExit: (prompt) => window.confirm(prompt),
+  checkSelectionResult: (input) => apiRequest(
+    `/novels/${input.novelId}/library-checks`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        source_kind: "selection_result",
+        source_id: input.jobId,
+        document_id: input.documentId,
+        source_version: input.attempt,
+        text_sha256: input.textSha256,
+        ...(input.acceptedSegmentIds !== undefined
+          ? { accepted_segment_ids: input.acceptedSegmentIds }
+          : {}),
+      }),
+    },
+  ),
+  reviewLibraryCheck: (novelId, report, isCurrent, sourceMarkdown) =>
+    reviewLibraryCheckReport(novelId, report, undefined, isCurrent, sourceMarkdown),
   onAssistantFallback: (selectionId, operation) => {
     if (!assistantSelectionController.prepareAssistantFallback(selectionId, operation)) {
       message.error("选区已失效，请重新框选后再发送到助手");
@@ -93,11 +117,16 @@ const assistantContextRefCoordinator = createAssistantContextRefCoordinator({
   getRouteSession: activeWorkbenchRouteSession,
   createRef: createAssistantContextRefHttpClient(),
   tabInstance: assistantTabInstance,
+  getPrivateLibraryActive: () => (
+    new URLSearchParams(window.location.search).get("view") === "private-library"
+  ),
+  getPrivateLibraryNovel: currentPrivateLibraryAssistantNovel,
   bindSelectionForSend: (input) => (
     assistantSelectionController.bindSelectionForSend(input)
   ),
   onWritingActionBound: (input) => nativeWritingMethodRuntime.bind(input),
 });
+subscribePrivateLibraryAssistantNovel(() => assistantContextRefCoordinator.refresh());
 registerAssistantRequestPayload({
   pluginId: APP_ID,
   requestPayload: window.QwenPaw.chat.requestPayload,

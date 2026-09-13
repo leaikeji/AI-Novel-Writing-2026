@@ -126,6 +126,107 @@ async function flushAsync(): Promise<void> {
 
 
 describe("assistant context_ref coordinator", () => {
+  it("creates a library-only ref without inventing a novel binding", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      const runtime = new NovelAssistantContextRuntime();
+      runtime.setHostBinding("ai-novel-writer", "session-1");
+      const createRef = vi.fn(async (input) => successRef(
+        input.snapshot.contextRevision,
+      ));
+      const onWritingActionBound = vi.fn();
+      const coordinator = createAssistantContextRefCoordinator({
+        runtime,
+        getRouteSession: () => ({
+          state: "workbench-session",
+          ownerToken: OWNER,
+          route: {
+            ownerToken: OWNER,
+            novelId: "ai-novel-world-2026:creative-center",
+          },
+        }),
+        getPrivateLibraryActive: () => true,
+        createRef,
+        onWritingActionBound,
+        tabInstance: "anw-tab-library",
+        now: () => NOW,
+        settleMs: 0,
+      });
+
+      coordinator.start();
+      await vi.runOnlyPendingTimersAsync();
+      await flushAsync();
+
+      expect(createRef).toHaveBeenCalledOnce();
+      expect(createRef.mock.calls[0]?.[0]).toMatchObject({
+        binding: {
+          ownerToken: OWNER,
+          scopeKind: "private_library",
+          scopeId: "personal",
+          sessionId: "session-1",
+        },
+        snapshot: {
+          schemaVersion: "private-library-assistant-context/1",
+          library: { id: "personal" },
+          page: { section: "private-library", view: "library" },
+        },
+      });
+      expect(createRef.mock.calls[0]?.[0].binding).not.toHaveProperty("novelId");
+      expect(coordinator.requestPatch({
+        selectedAgent: "ai-novel-writer",
+        sessionId: "session-1",
+      })).toEqual({ context_ref: successRef(0).contextRef });
+      expect(onWritingActionBound).not.toHaveBeenCalled();
+      coordinator.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("carries the selected private-library novel into the verified scope", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      const runtime = new NovelAssistantContextRuntime();
+      runtime.setHostBinding("ai-novel-writer", "session-1");
+      const createRef = vi.fn(async (input) => successRef(input.snapshot.contextRevision));
+      const coordinator = createAssistantContextRefCoordinator({
+        runtime,
+        getRouteSession: () => ({
+          state: "workbench-session",
+          ownerToken: OWNER,
+          route: { ownerToken: OWNER, novelId: "ai-novel-world-2026:creative-center" },
+        }),
+        getPrivateLibraryActive: () => true,
+        getPrivateLibraryNovel: () => ({ id: "novel-1", title: "潮声替我说晚安" }),
+        createRef,
+        tabInstance: "anw-tab-library-novel",
+        now: () => NOW,
+        settleMs: 0,
+      });
+
+      coordinator.start();
+      await vi.runOnlyPendingTimersAsync();
+      await flushAsync();
+
+      expect(createRef.mock.calls[0]?.[0]).toMatchObject({
+        binding: {
+          scopeKind: "private_library",
+          scopeId: "personal",
+          novelId: "novel-1",
+        },
+        snapshot: {
+          library: { id: "personal" },
+          novel: { id: "novel-1", title: "潮声替我说晚安" },
+        },
+      });
+      coordinator.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("waits for the 400ms settle window, captures once, and consumes a ready ref once", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

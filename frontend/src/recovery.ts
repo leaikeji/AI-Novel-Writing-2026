@@ -1,4 +1,11 @@
 import { DBSchema, IDBPDatabase, openDB } from "idb";
+import type { SelectionLibraryApplication } from "./types";
+
+/** Keep the AI snapshot separate from later typing until its guarded save is acknowledged. */
+export interface PendingLibrarySave {
+  contentMarkdown: string;
+  application: SelectionLibraryApplication;
+}
 
 export interface RecoveryDraft {
   documentId: string;
@@ -7,12 +14,13 @@ export interface RecoveryDraft {
   updatedAt: number;
   draftId?: string;
   baseContentHash?: string;
+  pendingLibrarySave?: PendingLibrarySave;
 }
 
 export type RecoveryDraftIdentity = Pick<
   RecoveryDraft,
   "documentId" | "draftVersion" | "contentMarkdown"
-> & Partial<Pick<RecoveryDraft, "draftId" | "baseContentHash">>;
+> & Partial<Pick<RecoveryDraft, "draftId" | "baseContentHash" | "pendingLibrarySave">>;
 
 interface RecoveryDatabase extends DBSchema {
   drafts: {
@@ -79,6 +87,58 @@ export function isCurrentRecoveryDraft(
     expected.baseContentHash !== undefined
     && current.baseContentHash !== expected.baseContentHash
   ) return false;
+  // A legacy acknowledgement must never delete a pending controlled application.
+  if (!samePendingLibrarySave(current.pendingLibrarySave, expected.pendingLibrarySave)) return false;
+  return true;
+}
+
+export function samePendingLibrarySave(
+  left: PendingLibrarySave | undefined,
+  right: PendingLibrarySave | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  return left.contentMarkdown === right.contentMarkdown
+    && JSON.stringify(left.application) === JSON.stringify(right.application);
+}
+
+export function clonePendingLibrarySave(pending: PendingLibrarySave): PendingLibrarySave {
+  return {
+    contentMarkdown: pending.contentMarkdown,
+    application: {
+      ...pending.application,
+      accepted_segment_ids: pending.application.accepted_segment_ids
+        ? [...pending.application.accepted_segment_ids] : pending.application.accepted_segment_ids,
+    },
+  };
+}
+
+/** Rebase only the acknowledged local record, retaining all later author text. */
+export function acknowledgePendingLibrarySave(
+  current: RecoveryDraft,
+  acknowledged: PendingLibrarySave,
+  saved: { draft_version: number; content_hash: string },
+): RecoveryDraft {
+  if (!samePendingLibrarySave(current.pendingLibrarySave, acknowledged)) return current;
+  return createRecoveryDraft(
+    current.documentId, saved.draft_version, current.contentMarkdown, saved.content_hash,
+  );
+}
+
+/** CAS update protects a newer recovery record written by another browser tab. */
+export async function replaceRecoveryDraftIfCurrent(
+  expected: RecoveryDraftIdentity,
+  replacement: RecoveryDraft,
+): Promise<boolean> {
+  if (expected.documentId !== replacement.documentId) return false;
+  const database = await recoveryDatabase();
+  const transaction = database.transaction("drafts", "readwrite");
+  const current = await transaction.store.get(expected.documentId);
+  if (!current || !isCurrentRecoveryDraft(current, expected)) {
+    await transaction.done;
+    return false;
+  }
+  await transaction.store.put(replacement);
+  await transaction.done;
   return true;
 }
 
@@ -104,6 +164,7 @@ export function createRecoveryDraft(
   contentMarkdown: string,
   baseContentHash: string,
   now = Date.now(),
+  pendingLibrarySave?: PendingLibrarySave,
 ): RecoveryDraft {
   const randomId = globalThis.crypto?.randomUUID?.();
   return {
@@ -113,5 +174,6 @@ export function createRecoveryDraft(
     updatedAt: now,
     ...(randomId ? { draftId: randomId } : {}),
     ...(baseContentHash ? { baseContentHash } : {}),
+    ...(pendingLibrarySave ? { pendingLibrarySave: clonePendingLibrarySave(pendingLibrarySave) } : {}),
   };
 }

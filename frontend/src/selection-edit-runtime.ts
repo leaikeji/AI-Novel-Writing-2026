@@ -37,7 +37,8 @@ import {
   selectionEditReviewEventForSurfaceAction,
   type SelectionEditReviewSurfaceAction,
 } from "./selection-edit-review-surface";
-import type { CreativeGenerationRecord } from "./types";
+import type { CreativeGenerationRecord, LibraryCheckReportRecord, SelectionLibraryApplication } from "./types";
+import { canCompleteLibraryCheck } from "./private-library/candidate-adoption";
 import type { WritingMethodStatus } from "./writing-skills/contracts";
 import {
   retrievalSummaryFromJob,
@@ -71,6 +72,20 @@ export interface SelectionEditRuntimeOptions {
   ) => void;
   readonly uuid?: () => string;
   readonly sha256?: (value: string) => Promise<string>;
+  readonly checkSelectionResult?: (input: {
+    novelId: string;
+    documentId: string;
+    jobId: string;
+    attempt: number;
+    textSha256: string;
+    acceptedSegmentIds?: readonly string[];
+  }) => Promise<LibraryCheckReportRecord>;
+  readonly reviewLibraryCheck?: (
+    novelId: string,
+    report: LibraryCheckReportRecord,
+    isCurrent: () => boolean,
+    sourceMarkdown: string,
+  ) => Promise<LibraryCheckReportRecord | null>;
 }
 
 
@@ -82,8 +97,10 @@ interface ActiveSelectionEdit {
   readonly customInstruction?: string;
   readonly useNovelContext?: boolean;
   jobId?: string;
+  jobAttempt?: number;
   abort?: AbortController;
   generation: number;
+  libraryCheck?: LibraryCheckReportRecord;
 }
 
 
@@ -213,6 +230,8 @@ export class SelectionEditRuntime {
   private readonly onAssistantFallback?: SelectionEditRuntimeOptions["onAssistantFallback"];
   private readonly uuid: () => string;
   private readonly sha256: (value: string) => Promise<string>;
+  private readonly checkSelectionResult?: SelectionEditRuntimeOptions["checkSelectionResult"];
+  private readonly reviewLibraryCheck?: SelectionEditRuntimeOptions["reviewLibraryCheck"];
   private readonly coordinator = createSelectionEditReviewCoordinator();
   private active?: ActiveSelectionEdit;
   private retrievalSummary: RetrievalSummaryV1 | null = null;
@@ -237,6 +256,8 @@ export class SelectionEditRuntime {
     this.onAssistantFallback = options.onAssistantFallback;
     this.uuid = options.uuid ?? defaultUuid;
     this.sha256 = options.sha256 ?? defaultSha256;
+    this.checkSelectionResult = options.checkSelectionResult;
+    this.reviewLibraryCheck = options.reviewLibraryCheck;
   }
 
   getState(): SelectionEditReviewSessionState {
@@ -442,6 +463,7 @@ export class SelectionEditRuntime {
       this.publishRetrievalSummary(retrievalSummaryFromJob(job));
       this.publishMethodStatus(job.writing_method ?? this.generationClient.currentStatus ?? null);
       active.jobId = job.id;
+      active.jobAttempt = job.attempt;
       const bindingInput = {
         selectionId: active.record.selectionId,
         jobId: job.id,
@@ -616,6 +638,50 @@ export class SelectionEditRuntime {
       this.coordinator.dispatch({ type: "apply-conflict", message: "应用前字段或页面已经变化，原文未被覆盖。" });
       return;
     }
+    const controlledBody = active.record.fieldId === "chapter.body" && active.adapter.persistence === "autosave";
+    if (controlledBody) {
+      if (!active.record.documentId || !active.jobId || active.jobAttempt === undefined || !this.checkSelectionResult) {
+        this.coordinator.dispatch({
+          type: "apply-conflict",
+          message: "该正文候选缺少持久编辑任务或检查依据；请复制后手工编辑，或重新框选创建编辑任务。",
+        });
+        return;
+      }
+      try {
+        const checked = await this.checkSelectionResult({
+          novelId: active.record.novelId,
+          documentId: active.record.documentId,
+          jobId: active.jobId,
+          attempt: active.jobAttempt,
+          textSha256: await this.sha256(effect.request.replacementText),
+          acceptedSegmentIds: effect.request.acceptedSegmentIds,
+        });
+        if (!await this.validateCurrent(active)) throw new Error("检查期间正文或页面已经变化。");
+        const reviewed = canCompleteLibraryCheck(checked) ? checked
+          : await this.reviewLibraryCheck?.(active.record.novelId, checked,
+            () => this.active === active && sameContext(this.contextRuntime.getEditableFieldContext(active.record.fieldId), active),
+            applySelectionOperation(active.adapter.getValue(), {
+              startUtf16: active.record.startUtf16, endUtf16: active.record.endUtf16,
+              direction: active.record.direction,
+            }, effect.request.replacementText, "replace-selection").value);
+        if (!reviewed || !canCompleteLibraryCheck(reviewed)
+          || reviewed.id !== checked.id || reviewed.rules_sha256 !== checked.rules_sha256
+          || reviewed.text_sha256 !== checked.text_sha256) {
+          this.coordinator.dispatch({
+            type: "apply-conflict",
+            message: "候选已保留，待处理用词检查；尚未应用到正文。",
+          });
+          return;
+        }
+        active.libraryCheck = reviewed;
+      } catch (reason) {
+        this.coordinator.dispatch({
+          type: "apply-conflict",
+          message: apiErrorMessage(reason, "无法检查最终采用内容，候选已保留，正文未改变。"),
+        });
+        return;
+      }
+    }
     const context = this.contextRuntime.getEditableFieldContext(active.record.fieldId);
     if (!sameContext(context, active)) {
       this.coordinator.dispatch({ type: "apply-conflict", message: "应用前编辑目标已经变化。" });
@@ -631,6 +697,25 @@ export class SelectionEditRuntime {
       effect.request.replacementText,
       "replace-selection",
     );
+    let libraryApplication: SelectionLibraryApplication | undefined;
+    if (controlledBody) {
+      if (context.persistenceBaseline.kind !== "draft" || context.persistenceBaseline.version === null || !active.libraryCheck
+        || active.libraryCheck.text_sha256 !== await this.sha256(next.value)) {
+        this.coordinator.dispatch({ type: "apply-conflict", message: "最终正文与检查报告不一致，候选已保留。" });
+        return;
+      }
+      libraryApplication = {
+        schema_version: "selection-library-application/1",
+        application_id: this.uuid(),
+        job_id: active.jobId!, attempt: active.jobAttempt!,
+        base_draft_version: context.persistenceBaseline.version,
+        base_content_hash: active.record.sourceValueSha256,
+        replacement_sha256: await this.sha256(effect.request.replacementText),
+        accepted_segment_ids: effect.request.acceptedSegmentIds ? [...effect.request.acceptedSegmentIds] : undefined,
+        library_check_report_id: active.libraryCheck.id,
+        library_check_version: active.libraryCheck.version,
+      };
+    }
     const applied = await this.transactions.apply({
       adapter: context.adapter,
       operation: "replace-selection",
@@ -643,6 +728,7 @@ export class SelectionEditRuntime {
         ? active.record.documentId
         : undefined,
       afterSelection: next.selection,
+      libraryApplication,
     });
     this.coordinator.dispatch(applied.ok
       ? {

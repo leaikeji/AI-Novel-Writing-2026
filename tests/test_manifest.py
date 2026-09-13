@@ -54,4 +54,7 @@ def test_project_tools_are_declared_for_clean_uninstall() -> None:
         "novel_get_workspace_context",
         "novel_prepare_selection_edit",
         "novel_search",
+        "novel_library_query",
+        "novel_library_prepare_change",
+        "novel_library_apply_change",
     }

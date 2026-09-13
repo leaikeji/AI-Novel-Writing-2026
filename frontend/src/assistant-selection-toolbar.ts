@@ -6,6 +6,12 @@ import {
   type AssistantSelectionToolbarState,
 } from "./assistant-selection-controller";
 import type { QwenPawReactRuntime } from "./assistant-pane";
+import { apiRequest } from "./api";
+import {
+  createSelectionQuickCapture,
+  type SelectionCaptureInput,
+  type SelectionCaptureTarget,
+} from "./private-library";
 
 
 export interface AssistantSelectionToolbarProps {
@@ -24,6 +30,20 @@ export function createAssistantSelectionToolbar(
   portal?: AssistantSelectionPortalRuntime,
 ): (props?: AssistantSelectionToolbarProps) => unknown {
   const h = React.createElement;
+  const SelectionQuickCapture = typeof window !== "undefined"
+    && window.QwenPaw?.host?.antd
+    ? createSelectionQuickCapture(React, window.QwenPaw.host.antd)
+    : null;
+
+  const sha256 = async (value: string): Promise<string> => {
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(value),
+    );
+    return [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  };
 
   return function AssistantSelectionToolbar(
     props: AssistantSelectionToolbarProps = {},
@@ -33,6 +53,10 @@ export function createAssistantSelectionToolbar(
     );
     const [customInstruction, setCustomInstruction] = React.useState("");
     const [useNovelContext, setUseNovelContext] = React.useState(false);
+    const [captureOpen, setCaptureOpen] = React.useState(false);
+    const [captureTargets, setCaptureTargets] = React.useState<SelectionCaptureTarget[]>([]);
+    const [captureNovelTitle, setCaptureNovelTitle] = React.useState("");
+    const [captureError, setCaptureError] = React.useState("");
     const toolbarRef = React.useRef<HTMLElement | null>(null);
 
     React.useEffect(() => controller.subscribe(setState), []);
@@ -53,6 +77,40 @@ export function createAssistantSelectionToolbar(
 
     const choose = (operation: AssistantSelectionOperation) => {
       if (!controller.selectOperation(operation)) return;
+    };
+    const openCapture = () => {
+      const record = controller.getActiveSelectionRecord();
+      if (!record) return;
+      setCaptureOpen(true);
+      setCaptureError("");
+      void Promise.all([
+        apiRequest<{ items: Array<Record<string, unknown>> }>(
+          `/private-library/assets?novel_id=${encodeURIComponent(record.novelId)}&limit=100`,
+        ),
+        apiRequest<{ title?: unknown }>(`/novels/${encodeURIComponent(record.novelId)}`),
+      ]).then(([page, novel]) => {
+        setCaptureNovelTitle(typeof novel.title === "string" ? novel.title : "当前作品");
+        setCaptureTargets(page.items.flatMap((item) => {
+          const category = item.asset_type;
+          const scopeKind = item.scope_kind;
+          if (
+            typeof item.id !== "string"
+            || typeof item.title !== "string"
+            || !["vocabulary", "writing_style", "plot", "idea"].includes(String(category))
+            || !["library", "novel"].includes(String(scopeKind))
+          ) return [];
+          return [{
+            assetId: item.id,
+            title: item.title,
+            category: category as SelectionCaptureTarget["category"],
+            scopeKind: scopeKind as SelectionCaptureTarget["scopeKind"],
+            scopeNovelId: typeof item.scope_novel_id === "string"
+              ? item.scope_novel_id : undefined,
+          }];
+        }));
+      }).catch((reason: unknown) => {
+        setCaptureError(reason instanceof Error ? reason.message : "读取私有库目标失败");
+      });
     };
     const onToolbarKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -92,6 +150,16 @@ export function createAssistantSelectionToolbar(
           },
           ASSISTANT_SELECTION_OPERATION_LABELS[operation],
         )),
+        SelectionQuickCapture ? h(
+          "button",
+          {
+            type: "button",
+            className: captureOpen ? "is-active" : "",
+            disabled: state.phase === "capturing" || state.phase === "failed",
+            onClick: openCapture,
+          },
+          "加入私有库",
+        ) : null,
         h(
           "button",
           {
@@ -103,6 +171,41 @@ export function createAssistantSelectionToolbar(
           "×",
         ),
       ),
+      captureOpen && SelectionQuickCapture && controller.getActiveSelectionRecord()
+        ? h(SelectionQuickCapture, {
+            selectedText: controller.getActiveSelectionRecord()!.text,
+            activeNovel: {
+              id: controller.getActiveSelectionRecord()!.novelId,
+              title: captureNovelTitle || "当前作品",
+            },
+            targets: captureTargets,
+            onCancel: () => setCaptureOpen(false),
+            onSave: async (input: SelectionCaptureInput) => {
+              const record = controller.getActiveSelectionRecord();
+              if (!record) throw new Error("选区已失效，请重新选择。");
+              await apiRequest("/private-library/captures", {
+                method: "POST",
+                body: JSON.stringify({
+                  selection_id: record.selectionId,
+                  selected_text: record.text,
+                  selected_text_sha256: await sha256(record.text),
+                  source_value_sha256: record.sourceValueSha256,
+                  source_document_id: record.documentId,
+                  field_id: record.fieldId,
+                  category: input.category,
+                  action: input.action,
+                  destination: input.destination,
+                  novel_id: input.novelId ?? null,
+                  target_asset_id: input.targetAssetId ?? null,
+                  operation_key: `selection-capture:${record.selectionId}`,
+                }),
+              });
+              setCaptureOpen(false);
+              controller.hideToolbar();
+            },
+          })
+        : null,
+      captureError ? h("p", { className: "anw-assistant-selection-error" }, captureError) : null,
       state.phase === "customizing"
         ? h(
           "form",

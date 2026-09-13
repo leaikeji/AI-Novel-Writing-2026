@@ -326,7 +326,9 @@ def _valid_binding(binding: ContextRefBinding, *, lease: bool) -> bool:
     )
     library_scope = (
         binding.private_library_id == "personal"
-        and binding.novel_id is None
+        and (binding.novel_id is None or _bounded_string(
+            binding.novel_id, 1, 200, stripped=True
+        ))
         and binding.document_id is None
         and binding.creation_draft_id is None
     )
@@ -913,7 +915,7 @@ def _validate_private_library_snapshot(
             "schemaVersion", "contextRevision", "capturedAt", "expiresAt",
             "agentId", "library", "page",
         }),
-        optional=frozenset({"sessionId"}),
+        optional=frozenset({"sessionId", "budget", "novel"}),
     ):
         raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_SNAPSHOT)
     revision = snapshot.get("contextRevision")
@@ -940,11 +942,30 @@ def _validate_private_library_snapshot(
         raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
     if snapshot.get("page") != {"section": "private-library", "view": "library"}:
         raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_SNAPSHOT)
+    snapshot_novel = snapshot.get("novel")
+    if binding.novel_id is None:
+        if snapshot_novel is not None:
+            raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
+    elif (
+        not isinstance(snapshot_novel, Mapping)
+        or not _only_keys(
+            snapshot_novel,
+            required=frozenset({"id", "title"}),
+        )
+        or snapshot_novel.get("id") != binding.novel_id
+        or not _bounded_string(snapshot_novel.get("title"), 0, 240)
+    ):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BINDING)
+    if "budget" in snapshot and not _validate_budget(snapshot.get("budget")):
+        raise ContextRefCreateError(ContextRefCreateErrorCode.INVALID_BUDGET)
     serialized = json.dumps(dict(snapshot), ensure_ascii=False, sort_keys=True,
                             separators=(",", ":"), allow_nan=False)
+    payload_characters = _utf16_length(serialized)
+    if payload_characters > MAX_CONTEXT_CHARACTERS:
+        raise ContextRefCreateError(ContextRefCreateErrorCode.CONTEXT_TOO_LARGE)
     return _ValidatedSnapshot(
         serialized=serialized, expires_at=expires_at,
-        context_revision=revision, payload_characters=_utf16_length(serialized),
+        context_revision=revision, payload_characters=payload_characters,
     )
 
 
@@ -1161,6 +1182,8 @@ def _canonical_request_size(
         envelope.update({
             "scopeKind": "private_library", "scopeId": binding.private_library_id,
         })
+        if binding.novel_id is not None:
+            envelope["novelId"] = binding.novel_id
     elif binding.creation_draft_id is not None:
         envelope.update({
             "scopeKind": "creation_draft",

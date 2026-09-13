@@ -23,7 +23,7 @@ from .database import get_session
 from .creative_services import get_novel_creation_draft
 from .models import Document, Novel
 from .novel_lifecycle import require_active_novel
-from .novel_lifecycle_errors import NovelRecycledError
+from .novel_lifecycle_errors import NovelLifecycleNotFound, NovelRecycledError
 from .services import NotFoundError, get_document, get_novel
 
 
@@ -39,6 +39,10 @@ _REQUIRED_CREATION_CREATE_KEYS = frozenset({
     "ownerToken", "tabInstance", "agentId", "scopeKind", "scopeId", "snapshot",
 })
 _OPTIONAL_CREATION_CREATE_KEYS = frozenset({"sessionId"})
+_REQUIRED_LIBRARY_CREATE_KEYS = frozenset({
+    "ownerToken", "tabInstance", "agentId", "scopeKind", "scopeId", "snapshot",
+})
+_OPTIONAL_LIBRARY_CREATE_KEYS = frozenset({"sessionId", "novelId"})
 
 
 async def _bounded_body(request: Request) -> bytes:
@@ -78,7 +82,13 @@ def _safe_create_payload(raw: bytes) -> Mapping[str, Any]:
         and keys <= _REQUIRED_CREATION_CREATE_KEYS | _OPTIONAL_CREATION_CREATE_KEYS
         and value.get("scopeKind") == "creation_draft"
     )
-    if not (novel_shape or creation_shape):
+    library_shape = (
+        _REQUIRED_LIBRARY_CREATE_KEYS <= keys
+        and keys <= _REQUIRED_LIBRARY_CREATE_KEYS | _OPTIONAL_LIBRARY_CREATE_KEYS
+        and value.get("scopeKind") == "private_library"
+        and value.get("scopeId") == "personal"
+    )
+    if not (novel_shape or creation_shape or library_shape):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"type": "assistant_context_rejected", "reason": "invalid-request"},
@@ -139,7 +149,7 @@ def _verify_local_novel_scope(
             status_code=error.http_status,
             detail={"type": error.code, "message": str(error)},
         ) from error
-    except (ValueError, NotFoundError):
+    except (ValueError, NotFoundError, NovelLifecycleNotFound):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"type": "assistant_context_scope_unavailable"},
@@ -204,15 +214,29 @@ async def assistant_contexts_create(
         )
 
     creation_scope = payload.get("scopeKind") == "creation_draft"
+    library_scope = payload.get("scopeKind") == "private_library"
     binding = ContextRefBinding(
         owner_token=_required_string(payload, "ownerToken"),
         tab_instance=_required_string(payload, "tabInstance"),
         agent_id=_required_string(payload, "agentId"),
-        novel_id=None if creation_scope else _required_string(payload, "novelId"),
-        document_id=None if creation_scope else _optional_string(payload, "documentId"),
+        novel_id=(
+            None if creation_scope else (
+                _optional_string(payload, "novelId")
+                if library_scope
+                else _required_string(payload, "novelId")
+            )
+        ),
+        document_id=(
+            None
+            if creation_scope or library_scope
+            else _optional_string(payload, "documentId")
+        ),
         session_id=_optional_string(payload, "sessionId"),
         creation_draft_id=(
             _required_string(payload, "scopeId") if creation_scope else None
+        ),
+        private_library_id=(
+            _required_string(payload, "scopeId") if library_scope else None
         ),
     )
     if binding.agent_id != TARGET_AGENT_ID:
@@ -227,6 +251,22 @@ async def assistant_contexts_create(
             draft_id=binding.creation_draft_id,
             snapshot=snapshot,
         )
+    elif library_scope:
+        if binding.novel_id is not None:
+            snapshot_novel = snapshot.get("novel")
+            if (
+                not isinstance(snapshot_novel, Mapping)
+                or snapshot_novel.get("id") != binding.novel_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={"type": "assistant_context_rejected", "reason": "invalid-binding"},
+                )
+            _verify_local_novel_scope(
+                session,
+                novel_id=binding.novel_id,
+                document_id=None,
+            )
     else:
         assert binding.novel_id is not None
         _verify_local_novel_scope(

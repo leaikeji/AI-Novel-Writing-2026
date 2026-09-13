@@ -431,6 +431,11 @@ export class AssistantSelectionController {
     return this.state;
   }
 
+  getActiveSelectionRecord(): SelectionRegistryRecord | null {
+    const active = this.validActive();
+    return active ? active.record : null;
+  }
+
   subscribe(listener: AssistantSelectionToolbarListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

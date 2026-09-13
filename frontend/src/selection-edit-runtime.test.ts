@@ -8,9 +8,10 @@ import {
   createSelectionEditReviewHost,
   SelectionEditRuntime,
   type SelectionEditGenerationClient,
+  type SelectionEditRuntimeOptions,
 } from "./selection-edit-runtime";
 import type { QwenPawReactRuntime } from "./assistant-pane";
-import type { CreativeGenerationRecord } from "./types";
+import type { CreativeGenerationRecord, LibraryCheckReportRecord } from "./types";
 
 
 const SELECTION_ID = "00000000-0000-4000-8000-000000000021";
@@ -79,7 +80,13 @@ function readyJob(
 }
 
 
-async function harness(client?: SelectionEditGenerationClient) {
+async function harness(
+  client?: SelectionEditGenerationClient,
+  options: {
+    document?: boolean;
+    runtime?: Partial<SelectionEditRuntimeOptions>;
+  } = {},
+) {
   let value = "旧句留在这里。";
   const applyValue = vi.fn(async (nextValue: string) => { value = nextValue; });
   const selection: SelectionSnapshot = {
@@ -91,9 +98,9 @@ async function harness(client?: SelectionEditGenerationClient) {
     after: "留在这里。",
   };
   const adapter: EditableFieldAdapter = {
-    id: "settings.idea",
-    label: "创作思路",
-    persistence: "explicit-save",
+    id: options.document ? "chapter.body" : "settings.idea",
+    label: options.document ? "正文" : "创作思路",
+    persistence: options.document ? "autosave" : "explicit-save",
     undoPolicy: "ai-transaction",
     getValue: () => value,
     applyValue,
@@ -107,19 +114,35 @@ async function harness(client?: SelectionEditGenerationClient) {
   const scope = contextRuntime.mountScope({
     id: "modal:settings",
     kind: "modal",
-    persistenceBaseline: { kind: "entity", version: 7 },
+    persistenceBaseline: options.document
+      ? { kind: "draft", version: 7 }
+      : { kind: "entity", version: 7 },
     envelope: {
       agentId: "ai-novel-writer",
       novel: {
         id: "00000000-0000-4000-8000-000000000031",
         title: "潮声替我说晚安",
       },
-      page: { section: "settings", view: "novel-settings" },
+      page: options.document
+        ? { section: "chapters", view: "chapter-editor" }
+        : { section: "settings", view: "novel-settings" },
       entity: {
-        type: "setting",
-        id: "00000000-0000-4000-8000-000000000031",
-        title: "小说设定",
+        type: options.document ? "document" : "setting",
+        id: options.document
+          ? "00000000-0000-4000-8000-000000000032"
+          : "00000000-0000-4000-8000-000000000031",
+        title: options.document ? "第一章 潮声" : "小说设定",
       },
+      ...(options.document ? {
+        document: {
+          id: "00000000-0000-4000-8000-000000000032",
+          kind: "chapter",
+          title: "第一章 潮声",
+          draftVersion: 7,
+          savedContentHash: "a".repeat(64),
+          dirty: false,
+        },
+      } : {}),
     },
   });
   scope.registerField(adapter);
@@ -170,6 +193,7 @@ async function harness(client?: SelectionEditGenerationClient) {
     uuid: () => REVIEW_ID,
     sha256,
     onAssistantFallback: fallback,
+    ...options.runtime,
   });
   return {
     runtime,
@@ -287,6 +311,108 @@ describe("SelectionEditRuntime", () => {
     await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("discarded"));
     expect(values.getValue()).toBe("旧句留在这里。");
     expect(values.applyValue).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks a chapter selection candidate and keeps it unapplied until forbidden hits are explicitly kept", async () => {
+    const documentId = "00000000-0000-4000-8000-000000000032";
+    const checkSelectionResult = vi.fn(async () => ({
+      schema_version: "library-check/1" as const,
+      id: "00000000-0000-4000-8000-000000000041",
+      version: 1,
+      status: "complete" as const,
+      text_sha256: "a".repeat(64),
+      rules_sha256: "b".repeat(64),
+      hits: [{
+        hit_id: "00000000-0000-4000-8000-000000000042",
+        entry_id: "entry_forbid",
+        asset_id: "00000000-0000-4000-8000-000000000043",
+        asset_version_id: "00000000-0000-4000-8000-000000000044",
+        action: "forbid" as const,
+        matched_text: "新句",
+        start_utf16: 0,
+        end_utf16: 2,
+        reason: "本书禁用",
+        count: 1,
+      }],
+      unresolved_forbid_hit_ids: ["00000000-0000-4000-8000-000000000042"],
+      scanned_rule_count: 1,
+      omitted_rule_count: 0,
+      visible_character_count: 2,
+      offset: 0,
+      limit: 200,
+      total_hits: 1,
+      has_more: false,
+    }));
+    const client: SelectionEditGenerationClient = {
+      start: vi.fn(async (payload) => readyJob(payload.input_snapshot, {
+        scope_type: "document",
+        scope_id: documentId,
+        document_id: documentId,
+      })),
+    };
+    const values = await harness(client, {
+      document: true,
+      runtime: {
+        checkSelectionResult,
+        reviewLibraryCheck: async () => null,
+      },
+    });
+
+    await values.runtime.start({
+      record: values.record,
+      fieldLabel: "正文",
+      operation: "polish",
+    });
+    expect(checkSelectionResult).not.toHaveBeenCalled();
+    values.runtime.handleSurfaceAction({ type: "accept-all" });
+    await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("conflict"));
+    expect(checkSelectionResult).toHaveBeenCalledOnce();
+    expect(checkSelectionResult).toHaveBeenLastCalledWith(expect.objectContaining({
+      acceptedSegmentIds: expect.any(Array),
+    }));
+    expect(values.applyValue).not.toHaveBeenCalled();
+    expect(values.getValue()).toBe("旧句留在这里。");
+  });
+
+  it("passes the exact approved full-body report and diff choices through the controlled transaction", async () => {
+    const report: LibraryCheckReportRecord = {
+      schema_version: "library-check/1", id: RETRY_JOB_ID, version: 4, status: "complete",
+      text_sha256: await sha256("新句留在这里。"), rules_sha256: "b".repeat(64),
+      hits: [], unresolved_forbid_hit_ids: [], scanned_rule_count: 0, omitted_rule_count: 0,
+      visible_character_count: 7, offset: 0, limit: 200, total_hits: 0, has_more: false,
+    };
+    const values = await harness({ start: vi.fn(async (payload) => readyJob(payload.input_snapshot, {
+      scope_type: "document", scope_id: "00000000-0000-4000-8000-000000000032",
+      document_id: "00000000-0000-4000-8000-000000000032",
+    })) }, { document: true, runtime: { checkSelectionResult: async () => report } });
+    await values.runtime.start({ record: values.record, fieldLabel: "正文", operation: "polish" });
+    values.runtime.handleSurfaceAction({ type: "accept-all" });
+    await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("applied"));
+    expect(values.applyValue).toHaveBeenCalledWith("新句留在这里。", expect.objectContaining({
+      transactionId: REVIEW_ID,
+      libraryApplication: expect.objectContaining({
+        application_id: REVIEW_ID, job_id: JOB_ID, attempt: 1,
+        base_draft_version: 7, base_content_hash: await sha256("旧句留在这里。"),
+        replacement_sha256: await sha256("新句"), accepted_segment_ids: ["change-1"],
+        library_check_report_id: report.id, library_check_version: 4,
+      }),
+    }));
+  });
+
+  it.each(["missing", "failed"])("keeps a generated body candidate when check is %s without starting another model job", async (kind) => {
+    const client = { start: vi.fn(async (payload: Parameters<SelectionEditGenerationClient["start"]>[0]) => readyJob(payload.input_snapshot, {
+      scope_type: "document", scope_id: "00000000-0000-4000-8000-000000000032",
+      document_id: "00000000-0000-4000-8000-000000000032",
+    })) };
+    const values = await harness(client, { document: true, runtime: {
+      ...(kind === "failed" ? { checkSelectionResult: async () => { throw new Error("无法连接检查服务"); } } : {}),
+    } });
+    await values.runtime.start({ record: values.record, fieldLabel: "正文", operation: "polish" });
+    expect(values.runtime.getState().phase).toBe("reviewing");
+    values.runtime.handleSurfaceAction({ type: "accept-all" });
+    await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("conflict"));
+    expect(values.applyValue).not.toHaveBeenCalled();
+    expect(client.start).toHaveBeenCalledOnce();
   });
 
   it("publishes only the frozen retrieval summary for the active selection task", async () => {

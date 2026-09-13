@@ -350,6 +350,32 @@ def _delete_database_closure(session: Session, novel_id: UUID) -> None:
         session.execute(text(statement), {"novel_id": novel_id})
 
 
+def _require_private_library_purge_safe(session: Session, novel_id: UUID) -> None:
+    """Stop a purge that would silently destroy Plan 74 author-owned evidence.
+
+    Recycle and restore remain available.  A future explicit export/restore
+    contract may replace this guard, but a database cascade is not accepted as
+    proof that novel-scoped library data can be recovered.
+    """
+
+    protected_count = session.scalar(
+        text(
+            "SELECT "
+            "(SELECT count(*) FROM private_assets "
+            " WHERE scope_kind='novel' AND scope_novel_id=:novel_id) + "
+            "(SELECT count(*) FROM library_check_reports WHERE novel_id=:novel_id) + "
+            "(SELECT count(*) FROM library_change_requests "
+            " WHERE scope_kind='novel' AND scope_novel_id=:novel_id)"
+        ),
+        {"novel_id": novel_id},
+    )
+    if int(protected_count or 0):
+        raise ValidationError(
+            "该作品仍有作品级私有库资料或用词检查证据。为避免不可恢复的数据丢失，"
+            "当前禁止永久删除；你仍可保留在回收站，待私有库导出与恢复能力完成后再处理。"
+        )
+
+
 def delete_novel_with_narration(
     runtime: NovelDeletionRuntime,
     novel_id: UUID,
@@ -395,6 +421,7 @@ def delete_novel_with_narration(
     storage = runtime.storage
     with session_factory() as session:  # type: ignore[operator]
         novel = _require_novel(session, novel_id, expected_version)
+        _require_private_library_purge_safe(session, novel_id)
         document_ids = tuple(
             str(value)
             for value in session.scalars(
@@ -416,6 +443,7 @@ def delete_novel_with_narration(
     with session_factory() as session:  # type: ignore[operator]
         with session.begin():
             novel = _require_novel(session, novel_id, expected_version)
+            _require_private_library_purge_safe(session, novel_id)
             active_count = session.scalar(
                 text(
                     "SELECT count(*) FROM background_jobs "

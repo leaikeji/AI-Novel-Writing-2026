@@ -487,6 +487,17 @@ async def _uninstall_narration_runtime(*, plugin_id: str | None = None) -> None:
 
 def _raise_domain(error: Exception) -> None:
     from .novel_lifecycle_errors import NovelLifecycleError
+    from .private_library.errors import PrivateLibraryConflictError, PrivateLibraryNotFoundError, PrivateLibraryValidationError
+
+    if isinstance(error, PrivateLibraryConflictError):
+        raise HTTPException(status_code=409, detail={
+            "type": error.code, "message": error.current.get("message", "私有库检查依据已变化，请重新检查。"),
+            "current": error.current,
+        }) from error
+    if isinstance(error, PrivateLibraryNotFoundError):
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if isinstance(error, PrivateLibraryValidationError):
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
     if isinstance(error, NovelLifecycleError):
         raise HTTPException(
@@ -724,6 +735,7 @@ def documents_save_draft(
             expected_draft_version=request.expected_draft_version,
             content_markdown=request.content_markdown,
             client_hash=request.content_hash,
+            library_application=request.library_application,
         )
     except Exception as error:
         session.rollback()
@@ -1070,6 +1082,10 @@ def candidates_adopt(
             session,
             candidate_id,
             expected_draft_version=request.expected_draft_version,
+            library_check_report_id=request.library_check_report_id,
+            library_check_version=request.library_check_version,
+            keep_hit_ids=request.keep_hit_ids,
+            skip_incomplete=request.skip_incomplete,
         )
     except Exception as error:
         session.rollback()

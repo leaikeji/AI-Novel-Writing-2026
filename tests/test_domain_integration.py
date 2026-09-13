@@ -1784,7 +1784,7 @@ def test_create_novel_is_ready_to_write(session: Session) -> None:
     narrator = session.get(VoiceProfileVersion, settings.narrator_version_id)
     assert narrator is not None
     assert narrator.profile_id == settings.narrator_profile_id
-    assert narrator.preset_key == "onnx.Junhao"
+    assert narrator.preset_key == "qwen.WarmFemale"
 
 
 def test_wizard_created_novel_uses_the_project_default_narrator(
@@ -1807,7 +1807,7 @@ def test_wizard_created_novel_uses_the_project_default_narrator(
     narrator = session.get(VoiceProfileVersion, settings.narrator_version_id)
     assert narrator is not None
     assert narrator.profile_id == settings.narrator_profile_id
-    assert narrator.preset_key == "onnx.Junhao"
+    assert narrator.preset_key == "qwen.WarmFemale"
 
 
 def test_chapter_creation_without_valid_volume_is_structured_and_zero_write(

@@ -29,6 +29,7 @@ from .embedding.chunking import estimate_token_count
 from .embedding.writing import WritingPosition, resolve_writing_position
 from .creative_data_models import (
     CharacterInstance,
+    LibraryCheckReport,
     RevisionTimelineMappingHead,
     RevisionTimelineMappingSegment,
     StoryTimeline,
@@ -39,6 +40,27 @@ from .private_library import (
     UsagePolicy,
     build_generation_asset_snapshot,
 )
+from .private_library.lexicon_contracts import (
+    LEXICON_MATCHER_VERSION,
+    MAX_PROMPT_RECOMMENDATIONS,
+    LexiconAction,
+)
+from .private_library.lexicon_reports import (
+    append_application_receipt,
+    check_report_payload,
+    create_or_reuse_check_report,
+    find_application_receipt,
+    prepare_check_scan,
+    require_application_report,
+)
+from .private_library.lexicon_service import (
+    effective_policy_from_snapshot,
+    effective_policy_snapshot,
+    resolve_effective_lexicon_policy,
+)
+from .private_library.maintenance_contracts import LibraryCheckTextRef, SelectionLibraryApplication
+from .private_library.errors import PrivateLibraryConflictError
+from .private_library.selection_application import resolve_selection_application_source
 
 from .generation_runtime import (
     CHAPTER_GENERATION_STALE_GRACE_SECONDS,
@@ -697,6 +719,23 @@ def _generation_job_payload(
     candidate = session.scalar(
         select(CandidateRevision).where(CandidateRevision.generation_job_id == job.id)
     )
+    library_check = None
+    frozen_lexicon = (job.generation_context_snapshot or {}).get("lexicon_policy")
+    if candidate is not None and isinstance(frozen_lexicon, dict):
+        report = session.scalar(
+            select(LibraryCheckReport)
+            .where(
+                LibraryCheckReport.document_id == job.document_id,
+                LibraryCheckReport.source_kind == "candidate",
+                LibraryCheckReport.source_id == candidate.id,
+                LibraryCheckReport.source_version == 1,
+                LibraryCheckReport.text_hash == candidate.content_hash,
+                LibraryCheckReport.rules_hash == frozen_lexicon.get("rules_hash"),
+                LibraryCheckReport.scanner_version == LEXICON_MATCHER_VERSION,
+            )
+        )
+        if report is not None:
+            library_check = check_report_payload(report)
     minimum_count, maximum_count, requested_count = _generation_acceptance_window(job)
     payload: dict[str, Any] = {
         "id": str(job.id),
@@ -735,6 +774,7 @@ def _generation_job_payload(
         "attempt": job.attempt,
         "failure_message": job.failure_message,
         "candidate": _candidate_payload(candidate) if candidate else None,
+        "library_check": library_check,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         "retrieval_summary": retrieval_summary(
@@ -1459,6 +1499,7 @@ def prepare_chapter_generation(
     asset_snapshot = _generation_asset_snapshot(
         session, novel_id=document.novel_id, asset_ids=asset_ids, preset_id=preset_id
     )
+    lexicon_policy = resolve_effective_lexicon_policy(session, document.novel_id)
     if effective_context_window_tokens <= 0:
         raise ValidationError("当前正文模型没有提供可核验的有效上下文窗口")
     writing_context = assemble_writing_context_from_db(
@@ -1473,12 +1514,20 @@ def prepare_chapter_generation(
         reserved_output_tokens=max(1, int(brief.target_word_count) * 2),
         chapter_brief=brief,
         current_draft_markdown=working.content_markdown,
-        private_assets=asset_snapshot,
+        private_assets=[
+            item for item in asset_snapshot
+            if not (
+                item.get("asset_type") == "vocabulary"
+                and isinstance(item.get("metadata"), dict)
+                and item["metadata"].get("schema_version") == "lexicon-pack/1"
+            )
+        ],
         writing_retrieval=writing_retrieval,
     )
     snapshot = _generation_snapshot(
         session, document, working, brief, writing_retrieval, writing_context
     )
+    snapshot["lexicon_policy"] = effective_policy_snapshot(lexicon_policy)
     requested_count = int(brief.target_word_count)
     minimum_count, maximum_count = _chapter_length_window(requested_count)
     snapshot["acceptance"] = {
@@ -1677,6 +1726,73 @@ def start_chapter_generation(
     return payload
 
 
+def _lexicon_prompt_text(snapshot: dict[str, Any]) -> str:
+    raw = snapshot.get("lexicon_policy")
+    if not isinstance(raw, dict):
+        return "- 本书未启用结构化用词规则"
+    rules = raw.get("rules")
+    if not isinstance(rules, list):
+        raise ValidationError("正文生成的用词规则快照无效")
+    grouped: dict[str, list[dict[str, Any]]] = {
+        "recommend": [], "watch": [], "forbid": [],
+    }
+    for item in rules:
+        if not isinstance(item, dict) or not isinstance(item.get("entry"), dict):
+            raise ValidationError("正文生成的用词规则快照无效")
+        entry = item["entry"]
+        action = entry.get("action")
+        if action not in grouped:
+            raise ValidationError("正文生成的用词规则动作无效")
+        grouped[action].append(entry)
+
+    def describe(entry: dict[str, Any], *, include_threshold: bool = False) -> str:
+        term = str(entry.get("term") or "").strip()
+        if not term:
+            raise ValidationError("正文生成的用词规则缺少词语")
+        variants = [
+            str(item).strip() for item in entry.get("variants", [])
+            if str(item).strip()
+        ]
+        value = term + (f"（变体：{'、'.join(variants)}）" if variants else "")
+        if include_threshold and isinstance(entry.get("watch_threshold"), dict):
+            threshold = entry["watch_threshold"]
+            value += (
+                f"；连续{int(threshold.get('window_characters') or 0)}个可见字符内"
+                f"达到{int(threshold.get('count') or 0)}次才提示"
+            )
+        note = str(entry.get("note") or "").strip()
+        if note:
+            value += f"；作者说明：{note}"
+        return "- " + value
+
+    recommendations = grouped[LexiconAction.RECOMMEND.value][
+        :MAX_PROMPT_RECOMMENDATIONS
+    ]
+    omitted = len(grouped[LexiconAction.RECOMMEND.value]) - len(recommendations)
+    sections = [
+        "以下是作者的表达偏好，只约束措辞，不是情节事实，也不能生硬塞词。",
+        "【推荐表达（按语境自然选用，最多使用少量合适项）】",
+        *(describe(item) for item in recommendations),
+    ]
+    if not recommendations:
+        sections.append("- 无")
+    if omitted:
+        sections.append(f"- 另有{omitted}条推荐按首发预算未进入本次提示")
+    sections.extend((
+        "【慎用表达（只在达到所列密度阈值时减少）】",
+        *(describe(item, include_threshold=True) for item in grouped["watch"]),
+    ))
+    if not grouped["watch"]:
+        sections.append("- 无")
+    sections.extend((
+        "【禁用表达（完整负向清单；不要在正文中出现，也不要复述本清单）】",
+        *(describe(item) for item in grouped["forbid"]),
+    ))
+    if not grouped["forbid"]:
+        sections.append("- 无")
+    return "\n".join(sections)
+
+
 def _prompt_budget_ledger(
     snapshot: dict[str, Any],
     prompt: str,
@@ -1722,7 +1838,7 @@ def _prompt_budget_ledger(
     final_prompt_tokens = max(1, estimate_token_count(prompt))
     scaffold_tokens = max(0, final_prompt_tokens - rendered_block_tokens)
     has_classification = "genre" in snapshot.get("novel", {}) or "subgenre" in snapshot.get("novel", {})
-    renderer_version = "chapter-prompt-renderer/5" if has_classification else "chapter-prompt-renderer/4"
+    renderer_version = "chapter-prompt-renderer/6"
     scaffold_identity = json.dumps(
         {
             "renderer": renderer_version,
@@ -1731,6 +1847,11 @@ def _prompt_budget_ledger(
             "acceptance": snapshot.get("acceptance", {}),
             "length_control": snapshot.get("length_control", {}),
             "context_assembly_hash": writing_context.get("assembly_hash"),
+            "lexicon_rules_hash": (
+                snapshot.get("lexicon_policy", {}).get("rules_hash")
+                if isinstance(snapshot.get("lexicon_policy"), dict)
+                else None
+            ),
             **({"classification": {key: snapshot["novel"].get(key, "") for key in ("genre", "subgenre")}}
                if has_classification else {}),
         },
@@ -1741,7 +1862,7 @@ def _prompt_budget_ledger(
     components.insert(
         0,
         {
-            "component_id": "chapter-prompt-template/v5" if has_classification else "chapter-prompt-template/v4",
+            "component_id": "chapter-prompt-template/v6",
             "kind": "fixed_prompt",
             "source_kind": "pawapp_prompt_renderer",
             "source_id": str(snapshot.get("chapter", {}).get("document_id") or ""),
@@ -1865,6 +1986,7 @@ def build_chapter_generation_prompt(snapshot: dict[str, Any]) -> str:
     character_text = v4_section_text("character_state")
     facts_text = v4_section_text("story_state")
     asset_text = v4_section_text("private_assets")
+    lexicon_text = _lexicon_prompt_text(snapshot)
     semantic_text = v4_section_text("semantic_evidence")
     chapter_timeline_text = json.dumps(
         envelope.get("chapter_timeline", {}), ensure_ascii=False, sort_keys=True
@@ -1953,6 +2075,9 @@ contract=chapter-prose-candidate/v3
 本次作者选用的私有库资料：
 {asset_text or '- 未选择，按章纲与前文创作'}
 
+本书启用的用词规则：
+{lexicon_text}
+
 当前章旧稿（{current_draft_count} 个可见字符，仅用于保留事实、人物声音和连续性；它不是本次最终答案。必须依照任务书生成一份完整的新候选，达到上述目标范围，不得原样返回旧稿）：
 {current_draft_text or '当前章尚无旧稿'}
 
@@ -2026,10 +2151,40 @@ def complete_chapter_generation(
     actual_model_id: str | None = None,
     model_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Freeze the immutable model output and generation-time rule evidence before
+    # taking write locks. The final transaction re-reads job state/snapshot and
+    # commits candidate + original generation evidence together.
+    read_job = session.get(ChapterGenerationJob, job_id)
+    if read_job is None:
+        raise NotFoundError(f"generation job {job_id} not found")
+    read_document = _require_document(session, read_job.document_id)
+    scoped_novel_id, scoped_document_id = read_document.novel_id, read_job.document_id
+    if read_job.state != "running":
+        return _generation_job_payload(session, read_job)
+    frozen_snapshot_hash = content_hash(json.dumps(read_job.generation_context_snapshot, sort_keys=True))
+    frozen_policy = None
+    raw_policy = (read_job.generation_context_snapshot or {}).get("lexicon_policy")
+    if isinstance(raw_policy, dict):
+        frozen_policy = effective_policy_from_snapshot(scoped_novel_id, raw_policy)
+    candidate_text = _clean_model_candidate(content_markdown)
+    prepared = None
+    if any(len(values) for values in (session.new, session.dirty, session.deleted)):
+        raise ValidationError("正文完成处理不能丢弃未提交的写入")
+    session.rollback()
+    if frozen_policy is not None and candidate_text:
+        prepared = prepare_check_scan(
+            text_ref=LibraryCheckTextRef(
+                source_kind="candidate", novel_id=scoped_novel_id,
+                document_id=scoped_document_id, version=1,
+                text_sha256=content_hash(candidate_text),
+            ),
+            source_markdown=candidate_text, policy=frozen_policy,
+        )
+    _lock_novel(session, scoped_novel_id)
     job = session.scalar(
         select(ChapterGenerationJob)
         .where(ChapterGenerationJob.id == job_id)
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
     if job is None:
         raise NotFoundError(f"generation job {job_id} not found")
@@ -2040,6 +2195,11 @@ def complete_chapter_generation(
         return _generation_job_payload(session, job)
     if job.state != "running":
         return _generation_job_payload(session, job)
+    if (
+        job.document_id != scoped_document_id
+        or content_hash(json.dumps(job.generation_context_snapshot, sort_keys=True)) != frozen_snapshot_hash
+    ):
+        raise ValidationError("正文生成任务快照已变化，请重试")
     if model_evidence is not None:
         try:
             actual_provider_id, actual_model_id = candidate_actual_identity(
@@ -2070,7 +2230,6 @@ def complete_chapter_generation(
         raise ValidationError(job.failure_message)
     job.actual_provider_id = actual_provider_id
     job.actual_model_id = actual_model_id
-    candidate_text = _clean_model_candidate(content_markdown)
     output_visible_character_count = visible_character_count(candidate_text)
     minimum_visible_character_count, maximum_visible_character_count, requested_visible_character_count = (
         _generation_acceptance_window(job)
@@ -2132,6 +2291,23 @@ def complete_chapter_generation(
     job.validation_state = "meets_target"
     job.completed_at = datetime.now(timezone.utc)
     session.add(candidate)
+    session.flush()
+    if frozen_policy is not None and prepared is not None:
+        create_or_reuse_check_report(
+            session,
+            text_ref=LibraryCheckTextRef(
+                source_kind="candidate",
+                novel_id=scoped_novel_id,
+                document_id=scoped_document_id,
+                version=1,
+                text_sha256=candidate.content_hash,
+            ),
+            source_markdown=candidate.content_markdown,
+            policy=frozen_policy,
+            source_id=candidate.id,
+            prepared=prepared,
+            require_current_policy=False,
+        )
     session.commit()
     return _generation_job_payload(session, job, include_snapshot=True)
 
@@ -2235,7 +2411,14 @@ def get_candidate(session: Session, candidate_id: UUID) -> dict[str, Any]:
 
 
 def adopt_candidate(
-    session: Session, candidate_id: UUID, *, expected_draft_version: int
+    session: Session,
+    candidate_id: UUID,
+    *,
+    expected_draft_version: int,
+    library_check_report_id: UUID | None = None,
+    library_check_version: int | None = None,
+    keep_hit_ids: list[UUID] | tuple[UUID, ...] = (),
+    skip_incomplete: bool = False,
 ) -> dict[str, Any]:
     candidate_scope = session.get(CandidateRevision, candidate_id)
     if candidate_scope is None:
@@ -2253,6 +2436,16 @@ def adopt_candidate(
         raise NotFoundError(f"candidate {candidate_id} not found")
     if candidate.document_id != scoped_document_id:
         raise ValidationError("正文候选的作品范围已变化，请重试")
+    # An accepted candidate is an immutable result, even after new rules or
+    # later manual edits. Replay precedes length, report and draft CAS checks.
+    if candidate.state == "accepted" and candidate.adopted_revision_id:
+        return {
+            "document": get_document(session, candidate.document_id),
+            "candidate": _candidate_payload(candidate),
+            "revision": get_revision(session, candidate.document_id, candidate.adopted_revision_id),
+        }
+    if candidate.state != "ready":
+        raise ValidationError(f"candidate cannot be adopted from state {candidate.state}")
     generation_job = session.get(ChapterGenerationJob, candidate.generation_job_id)
     if generation_job is None:
         raise ValidationError("正文候选缺少对应生成任务，不能采用")
@@ -2269,23 +2462,15 @@ def adopt_candidate(
                 actual_count=candidate_count,
             )
         )
+    if content_hash(candidate.content_markdown) != candidate.content_hash:
+        raise ValidationError("正文候选内容校验不一致，候选已保留，不能采用")
     working = session.scalar(
         select(DocumentWorkingCopy)
         .where(DocumentWorkingCopy.document_id == candidate.document_id)
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
     if working is None:
         raise NotFoundError(f"working copy for document {candidate.document_id} not found")
-    if candidate.state == "accepted" and candidate.adopted_revision_id:
-        return {
-            "document": get_document(session, candidate.document_id),
-            "candidate": _candidate_payload(candidate),
-            "revision": get_revision(
-                session, candidate.document_id, candidate.adopted_revision_id
-            ),
-        }
-    if candidate.state != "ready":
-        raise ValidationError(f"candidate cannot be adopted from state {candidate.state}")
     if (
         working.draft_version != expected_draft_version
         or working.draft_version != candidate.base_draft_version
@@ -2299,6 +2484,20 @@ def adopt_candidate(
             ),
             _candidate_payload(candidate),
         )
+    current_policy = resolve_effective_lexicon_policy(session, document.novel_id, lock=False)
+    library_check = require_application_report(
+        session, novel_id=document.novel_id, document_id=document.id,
+        source_kind="candidate", source_id=candidate.id, source_version=1,
+        text_hash=candidate.content_hash, policy=current_policy,
+        report_id=library_check_report_id, expected_version=library_check_version,
+        allow_without_forbid=True, keep_hit_ids=keep_hit_ids,
+        skip_incomplete=skip_incomplete,
+    )
+    generation_policy = generation_job.generation_context_snapshot.get("lexicon_policy")
+    rules_changed = (
+        not isinstance(generation_policy, dict)
+        or generation_policy.get("rules_hash") != current_policy.rules_hash
+    )
     latest_number = session.scalar(
         select(func.max(DocumentRevision.revision_number)).where(
             DocumentRevision.document_id == candidate.document_id
@@ -2330,6 +2529,13 @@ def adopt_candidate(
     candidate.state = "accepted"
     candidate.adopted_revision_id = revision.id
     candidate.decided_at = datetime.now(timezone.utc)
+    if library_check is not None:
+        append_application_receipt(
+            library_check, application_id=candidate.id,
+            input_sha256=candidate.base_content_hash, output_sha256=candidate.content_hash,
+            request_sha256=content_hash(f"candidate:{candidate.id}:{candidate.content_hash}"),
+            revision_id=revision.id, draft_version=int(working.draft_version),
+        )
     from .embedding.indexing import SourceRefreshHint, request_active_novel_refresh
     request_active_novel_refresh(
         session,
@@ -2337,13 +2543,17 @@ def adopt_candidate(
         source_hints=(SourceRefreshHint("chapter_revision", document.id),),
     )
     session.commit()
-    return {
+    result = {
         "document": get_document(session, candidate.document_id),
         "candidate": _candidate_payload(candidate),
         "revision": _revision_payload(revision, include_content=True),
         "story_ledger_version": novel.story_ledger_version,
         "reconciliation": reconciliation,
     }
+    if library_check is not None:
+        result["library_check"] = check_report_payload(library_check)
+        result["lexicon_rules_changed"] = rules_changed
+    return result
 
 
 def reject_candidate(session: Session, candidate_id: UUID) -> dict[str, Any]:
@@ -3983,33 +4193,101 @@ def save_draft(
     expected_draft_version: int,
     content_markdown: str,
     client_hash: str | None = None,
+    library_application: SelectionLibraryApplication | None = None,
 ) -> dict[str, Any]:
     document = _require_document(session, document_id)
+    if library_application is not None:
+        # All binding/rule mutations take this same novel lock. Ordinary manual
+        # saves keep their prior contract and do not acquire a library gate.
+        _lock_novel(session, document.novel_id)
     working = session.scalar(
         select(DocumentWorkingCopy)
         .where(DocumentWorkingCopy.document_id == document_id)
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
     if working is None:
         raise NotFoundError(f"working copy for document {document_id} not found")
     base_revision = _document_base_revision(session, working)
+    server_hash = content_hash(content_markdown)
+    if client_hash is not None and client_hash != server_hash:
+        raise ValidationError("content_hash does not match content_markdown")
+    request_sha256 = ""
+    if library_application is not None:
+        request_sha256 = content_hash(json.dumps({
+            "application": library_application.model_dump(mode="json"),
+            "document_id": str(document_id),
+            "expected_draft_version": expected_draft_version,
+            "content_hash": server_hash,
+        }, sort_keys=True, separators=(",", ":")))
+        prior = find_application_receipt(
+            session, novel_id=document.novel_id, document_id=document_id,
+            application_id=library_application.application_id,
+        )
+        if prior is not None:
+            if prior.get("request_sha256") != request_sha256:
+                raise PrivateLibraryConflictError(
+                    "library_application_idempotency_conflict",
+                    current={"message": "该选区应用标识已用于不同的正文或审阅决定"},
+                )
+            return {
+                **_versioned_document_payload(document, working, base_revision),
+                "library_application": {**prior, "replayed": True},
+            }
     if working.draft_version != expected_draft_version:
         raise DraftConflictError(
             _versioned_document_payload(document, working, base_revision)
         )
-    server_hash = content_hash(content_markdown)
-    if client_hash is not None and client_hash != server_hash:
-        raise ValidationError("content_hash does not match content_markdown")
-    if working.content_hash == server_hash:
+    library_check = None
+    if library_application is not None:
+        application = library_application
+        if (
+            application.base_draft_version != expected_draft_version
+            or application.base_content_hash != working.content_hash
+        ):
+            raise PrivateLibraryConflictError(
+                "library_check_source_changed",
+                current={"message": "选区应用的正文基线已变化，候选和本地稿仍可恢复"},
+            )
+        final_markdown, _ = resolve_selection_application_source(
+            session, document.novel_id, document_id,
+            application.job_id, application.attempt, application.replacement_sha256,
+            application.accepted_segment_ids,
+        )
+        if final_markdown != content_markdown:
+            raise PrivateLibraryConflictError(
+                "library_check_source_changed",
+                current={"message": "待保存正文与已审阅选区不一致，请保留稿件并重新检查"},
+            )
+        policy = resolve_effective_lexicon_policy(session, document.novel_id, lock=False)
+        library_check = require_application_report(
+            session, novel_id=document.novel_id, document_id=document_id,
+            source_kind="selection_result", source_id=application.job_id,
+            source_version=application.attempt, text_hash=server_hash, policy=policy,
+            report_id=application.library_check_report_id,
+            expected_version=application.library_check_version,
+        )
+    if working.content_hash == server_hash and library_application is None:
         return _versioned_document_payload(document, working, base_revision)
-    _supersede_intelligence_for_document(session, document_id)
-    working.content_markdown = content_markdown
-    working.content_hash = server_hash
-    working.visible_character_count = visible_character_count(content_markdown)
-    working.draft_version += 1
-    document.novel.updated_at = func.now()
+    if working.content_hash != server_hash:
+        _supersede_intelligence_for_document(session, document_id)
+        working.content_markdown = content_markdown
+        working.content_hash = server_hash
+        working.visible_character_count = visible_character_count(content_markdown)
+        working.draft_version += 1
+        document.novel.updated_at = func.now()
+    receipt = None
+    if library_application is not None and library_check is not None:
+        receipt = append_application_receipt(
+            library_check, application_id=library_application.application_id,
+            input_sha256=library_application.base_content_hash,
+            output_sha256=server_hash, request_sha256=request_sha256,
+            draft_version=int(working.draft_version),
+        )
     session.commit()
-    return _versioned_document_payload(document, working, base_revision)
+    result = _versioned_document_payload(document, working, base_revision)
+    if receipt is not None:
+        result["library_application"] = {**receipt, "replayed": False}
+    return result
 
 
 def create_checkpoint(

@@ -73,8 +73,11 @@ export function createAssistantContextRefHttpClient(
         agentId: binding.agentId,
         ...("scopeKind" in binding
           ? {
-              scopeKind: "creation_draft",
+              scopeKind: binding.scopeKind,
               scopeId: binding.scopeId,
+              ...(binding.scopeKind === "private_library" && binding.novelId
+                ? { novelId: binding.novelId }
+                : {}),
             }
           : {
               novelId: binding.novelId,

@@ -8,7 +8,10 @@ import {
   type NovelAssistantContextRuntime,
 } from "./assistant-context-runtime";
 import type { AssistantRequestContextPatch } from "./assistant-request-payload";
-import type { RouteSessionSnapshot } from "./workbench-route";
+import {
+  CREATIVE_CENTER_ROUTE_SCOPE_ID,
+  type RouteSessionSnapshot,
+} from "./workbench-route";
 import { resolveSelectionDocumentId } from "./assistant-selection-registry";
 
 
@@ -61,6 +64,25 @@ export interface CreationDraftAssistantContextV1 {
 }
 
 
+export interface PrivateLibraryAssistantContextV1 {
+  schemaVersion: "private-library-assistant-context/1";
+  contextRevision: number;
+  capturedAt: string;
+  expiresAt: string;
+  agentId: typeof NOVEL_ASSISTANT_TARGET_AGENT_ID;
+  sessionId?: string;
+  library: { id: "personal" };
+  novel?: { id: string; title: string };
+  page: { section: "private-library"; view: "library" };
+  budget: {
+    maxCharacters: 24_000;
+    usedCharacters: number;
+    truncated: false;
+    omittedFieldIds: string[];
+  };
+}
+
+
 export interface NovelCreateAssistantContextRefInput {
   binding: AssistantContextRefBinding;
   snapshot: NovelAssistantContextV2;
@@ -82,9 +104,26 @@ export interface CreationDraftCreateAssistantContextRefInput {
 }
 
 
+export interface PrivateLibraryCreateAssistantContextRefInput {
+  binding: {
+    ownerToken: string;
+    tabInstance: string;
+    agentId: typeof NOVEL_ASSISTANT_TARGET_AGENT_ID;
+    scopeKind: "private_library";
+    scopeId: "personal";
+    novelId?: string;
+    novelTitle?: string;
+    sessionId?: string;
+  };
+  snapshot: PrivateLibraryAssistantContextV1;
+  serialized: string;
+}
+
+
 export type CreateAssistantContextRefInput =
   | NovelCreateAssistantContextRefInput
-  | CreationDraftCreateAssistantContextRefInput;
+  | CreationDraftCreateAssistantContextRefInput
+  | PrivateLibraryCreateAssistantContextRefInput;
 
 
 export interface CreatedAssistantContextRef {
@@ -108,6 +147,8 @@ export interface AssistantContextRefCoordinatorOptions {
   settleMs?: number;
   setTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
+  getPrivateLibraryActive?: () => boolean;
+  getPrivateLibraryNovel?: () => { id: string; title: string } | null;
   bindSelectionForSend?: (input: {
     selectionId: string;
     sessionId: string;
@@ -198,8 +239,12 @@ export function createAssistantTabInstance(options: {
 }
 
 
+type ReadyAssistantContextRefBinding = AssistantContextRefBinding
+  | PrivateLibraryCreateAssistantContextRefInput["binding"];
+
+
 interface ReadyAssistantContextRef extends CreatedAssistantContextRef {
-  binding: AssistantContextRefBinding;
+  binding: ReadyAssistantContextRefBinding;
   selection?: {
     selectionId: string;
     agentId: string;
@@ -220,7 +265,27 @@ function routeBinding(
   status: AssistantContextRuntimeStatus,
   route: RouteSessionSnapshot,
   tabInstance: string,
-): AssistantContextRefBinding | null {
+  privateLibraryActive: boolean,
+  privateLibraryNovel: { id: string; title: string } | null,
+): ReadyAssistantContextRefBinding | null {
+  if (privateLibraryActive
+    && status.supportedAgent
+    && route.route?.novelId === CREATIVE_CENTER_ROUTE_SCOPE_ID
+    && route.ownerToken
+    && (route.state === "workbench-no-session" || route.state === "workbench-session")) {
+    return {
+      ownerToken: route.ownerToken,
+      tabInstance,
+      agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
+      scopeKind: "private_library",
+      scopeId: "personal",
+      ...(privateLibraryNovel?.id ? {
+        novelId: privateLibraryNovel.id,
+        novelTitle: privateLibraryNovel.title,
+      } : {}),
+      sessionId: status.sessionId,
+    };
+  }
   if (!status.active
     || !status.supportedAgent
     || !status.novelId
@@ -242,15 +307,54 @@ function routeBinding(
 
 
 function sameBinding(
-  left: AssistantContextRefBinding,
-  right: AssistantContextRefBinding,
+  left: ReadyAssistantContextRefBinding,
+  right: ReadyAssistantContextRefBinding,
 ): boolean {
+  if (("scopeKind" in left) !== ("scopeKind" in right)) return false;
   return left.ownerToken === right.ownerToken
     && left.tabInstance === right.tabInstance
     && left.agentId === right.agentId
-    && left.novelId === right.novelId
-    && left.documentId === right.documentId
-    && left.sessionId === right.sessionId;
+    && left.sessionId === right.sessionId
+    && ("scopeKind" in left
+      ? "scopeKind" in right
+        && left.scopeKind === right.scopeKind
+        && left.scopeId === right.scopeId
+        && left.novelId === right.novelId
+        && left.novelTitle === right.novelTitle
+      : !("scopeKind" in right)
+        && left.novelId === right.novelId
+        && left.documentId === right.documentId);
+}
+
+
+function privateLibrarySnapshot(
+  binding: PrivateLibraryCreateAssistantContextRefInput["binding"],
+  contextRevision: number,
+  now: number,
+): PrivateLibraryCreateAssistantContextRefInput {
+  const snapshot: PrivateLibraryAssistantContextV1 = {
+    schemaVersion: "private-library-assistant-context/1",
+    contextRevision,
+    capturedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + 10 * 60 * 1_000).toISOString(),
+    agentId: NOVEL_ASSISTANT_TARGET_AGENT_ID,
+    ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
+    library: { id: "personal" },
+    ...(binding.novelId ? {
+      novel: {
+        id: binding.novelId,
+        title: binding.novelTitle ?? "",
+      },
+    } : {}),
+    page: { section: "private-library", view: "library" },
+    budget: {
+      maxCharacters: 24_000,
+      usedCharacters: 0,
+      truncated: false,
+      omittedFieldIds: [],
+    },
+  };
+  return { binding, snapshot, serialized: JSON.stringify(snapshot) };
 }
 
 
@@ -273,6 +377,7 @@ export function createAssistantContextRefCoordinator(
   let inFlight: AbortController | null = null;
   let unsubscribe: (() => void) | null = null;
   let observedRevision = -1;
+  let observedBindingKey = "";
   let generation = 0;
   let disposed = false;
 
@@ -295,11 +400,20 @@ export function createAssistantContextRefCoordinator(
     timer = null;
     if (disposed || generation !== expectedGeneration) return;
     const status = options.runtime.getStatus();
-    const binding = routeBinding(status, options.getRouteSession(), tabInstance);
+    const binding = routeBinding(
+      status,
+      options.getRouteSession(),
+      tabInstance,
+      options.getPrivateLibraryActive?.() === true,
+      options.getPrivateLibraryNovel?.() ?? null,
+    );
     if (!binding || status.contextRevision !== expectedRevision) return;
     options.runtime.setPreparation("preparing");
-    const capture = options.runtime.capture();
-    if (!capture || capture.context.contextRevision !== expectedRevision) {
+    const libraryInput = "scopeKind" in binding
+      ? privateLibrarySnapshot(binding, expectedRevision, now())
+      : null;
+    const capture = libraryInput ? null : options.runtime.capture();
+    if (!libraryInput && (!capture || capture.context.contextRevision !== expectedRevision)) {
       options.runtime.setPreparation("failed");
       return;
     }
@@ -307,17 +421,22 @@ export function createAssistantContextRefCoordinator(
     const controller = new AbortController();
     inFlight = controller;
     try {
-      const created = await options.createRef({
-        binding,
-        snapshot: capture.context,
-        serialized: capture.serialized,
-      }, controller.signal);
+      const created = await options.createRef(
+        libraryInput ?? {
+          binding: binding as AssistantContextRefBinding,
+          snapshot: capture!.context,
+          serialized: capture!.serialized,
+        },
+        controller.signal,
+      );
       if (disposed || controller.signal.aborted || generation !== expectedGeneration) return;
       const latestStatus = options.runtime.getStatus();
       const latestBinding = routeBinding(
         latestStatus,
         options.getRouteSession(),
         tabInstance,
+        options.getPrivateLibraryActive?.() === true,
+        options.getPrivateLibraryNovel?.() ?? null,
       );
       if (!latestBinding
         || !sameBinding(binding, latestBinding)
@@ -332,7 +451,7 @@ export function createAssistantContextRefCoordinator(
       ready = {
         ...created,
         binding,
-        selection: capture.context.selection ? {
+        selection: capture?.context.selection ? {
           selectionId: capture.context.selection.id,
           agentId: capture.context.agentId,
           novelId: capture.context.novel.id,
@@ -341,7 +460,7 @@ export function createAssistantContextRefCoordinator(
           contextRevision: capture.context.contextRevision,
         } : undefined,
       };
-      options.runtime.setPreparation("ready", capture.context.budget.truncated);
+      options.runtime.setPreparation("ready", capture?.context.budget.truncated ?? false);
     } catch (reason) {
       if (!controller.signal.aborted && !disposed && generation === expectedGeneration) {
         options.runtime.setPreparation("failed");
@@ -353,17 +472,28 @@ export function createAssistantContextRefCoordinator(
 
   const schedule = (status: AssistantContextRuntimeStatus, force = false) => {
     if (disposed) return;
-    const binding = routeBinding(status, options.getRouteSession(), tabInstance);
+    const binding = routeBinding(
+      status,
+      options.getRouteSession(),
+      tabInstance,
+      options.getPrivateLibraryActive?.() === true,
+      options.getPrivateLibraryNovel?.() ?? null,
+    );
     if (!binding) {
       observedRevision = status.contextRevision;
+      observedBindingKey = "";
       invalidate();
       if (status.active && status.preparation !== "idle") {
         options.runtime.setPreparation("idle");
       }
       return;
     }
-    if (!force && observedRevision === status.contextRevision) return;
+    const bindingKey = JSON.stringify(binding);
+    if (!force
+      && observedRevision === status.contextRevision
+      && observedBindingKey === bindingKey) return;
     observedRevision = status.contextRevision;
+    observedBindingKey = bindingKey;
     invalidate();
     const expectedGeneration = generation;
     options.runtime.setPreparation("settling");
@@ -392,7 +522,13 @@ export function createAssistantContextRefCoordinator(
     requestPatch(input) {
       if (disposed || !ready) return null;
       const status = options.runtime.getStatus();
-      const currentBinding = routeBinding(status, options.getRouteSession(), tabInstance);
+      const currentBinding = routeBinding(
+        status,
+        options.getRouteSession(),
+        tabInstance,
+        options.getPrivateLibraryActive?.() === true,
+        options.getPrivateLibraryNovel?.() ?? null,
+      );
       if (!currentBinding
         || !sameBinding(ready.binding, currentBinding)
         || status.contextRevision !== ready.contextRevision
@@ -416,14 +552,16 @@ export function createAssistantContextRefCoordinator(
         return null;
       }
       const contextRef = ready.contextRef;
-      options.onWritingActionBound?.({
-        actionId: ready.writingActionId,
-        contextRef,
-        sessionId: input.sessionId ?? "",
-        novelId: ready.binding.novelId,
-        documentId: ready.binding.documentId,
-        tabInstance,
-      });
+      if (!("scopeKind" in ready.binding)) {
+        options.onWritingActionBound?.({
+          actionId: ready.writingActionId,
+          contextRef,
+          sessionId: input.sessionId ?? "",
+          novelId: ready.binding.novelId,
+          documentId: ready.binding.documentId,
+          tabInstance,
+        });
+      }
       ready = null;
       options.runtime.setPreparation("settling");
       schedule(options.runtime.getStatus(), true);

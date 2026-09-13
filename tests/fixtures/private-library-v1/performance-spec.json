@@ -1,0 +1,36 @@
+{
+  "schema_version": "private-library-performance-spec/1",
+  "fixture_id": "plan74-performance-1000x10000-v1",
+  "source": {
+    "kind": "synthetic-project-fixture",
+    "license": "synthetic-project-fixture",
+    "contains_external_text": false,
+    "contains_user_content": false
+  },
+  "generator": "generate_performance_fixture.py",
+  "generator_contract": {
+    "deterministic": true,
+    "writes_files": false,
+    "rule_count": 1000,
+    "source_codepoint_count": 10000,
+    "visible_character_count": 10000,
+    "max_rules": 1000,
+    "max_hits": 2000
+  },
+  "expected": {
+    "status": "complete",
+    "scanned_rule_count": 1000,
+    "omitted_rule_count": 0,
+    "hit_count": 5,
+    "hit_entry_ids_in_order": ["perf_0000", "perf_0001", "perf_0001", "perf_0001", "perf_0999"],
+    "hit_start_utf16_in_order": [100, 300, 360, 420, 9000]
+  },
+  "measurement_protocol": {
+    "warmup_runs": 3,
+    "measured_runs": 30,
+    "record_machine_and_python": true,
+    "record_elapsed_ms_and_peak_memory_bytes": true,
+    "suggested_local_p95_ms": 500,
+    "timing_is_not_asserted_by_fixture_validator": true
+  }
+}

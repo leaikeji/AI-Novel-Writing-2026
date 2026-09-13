@@ -95,7 +95,16 @@ function cloneRange(range: SelectionRange): SelectionRange {
 
 
 function cloneMeta(meta: AIApplyMeta): Readonly<AIApplyMeta> {
-  return { ...meta };
+  return {
+    ...meta,
+    ...(meta.libraryApplication ? {
+      libraryApplication: {
+        ...meta.libraryApplication,
+        accepted_segment_ids: meta.libraryApplication.accepted_segment_ids
+          ? [...meta.libraryApplication.accepted_segment_ids] : meta.libraryApplication.accepted_segment_ids,
+      },
+    } : {}),
+  };
 }
 
 

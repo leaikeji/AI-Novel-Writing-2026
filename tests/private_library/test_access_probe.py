@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -35,7 +36,7 @@ def test_offline_report_cannot_claim_g1a():
 
 
 @pytest.mark.parametrize("field,value", [
-    ("novel_id", "another-book"), ("document_id", "a-document"),
+    ("document_id", "a-document"),
     ("creation_draft_id", "a-draft"), ("private_library_id", "another-owner"),
     ("agent_id", "default"), ("owner_token", "bad"), ("tab_instance", "bad"),
 ])
@@ -73,6 +74,27 @@ def test_runtime_identity_cannot_borrow_a_ticket(field, value):
     assert create_library_access_probe(ctx, None, registry=registry, probe_enabled=True) is None
 
 
+def test_blank_optional_request_identity_matches_public_host_semantics():
+    registry, _, ctx = prepared()
+    ctx.request.session_id = ""
+    ctx.request.agent_id = ""
+    assert create_library_access_probe(
+        ctx, None, registry=registry, probe_enabled=True,
+    ) is not None
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("session_id", "other-session"), ("agent_id", "default")],
+)
+def test_nonblank_request_identity_mismatch_is_rejected(field, value):
+    registry, _, ctx = prepared()
+    setattr(ctx.request, field, value)
+    assert create_library_access_probe(
+        ctx, None, registry=registry, probe_enabled=True,
+    ) is None
+
+
 def test_model_fields_do_not_change_scope_or_grant_writes():
     registry, _, ctx = prepared()
     ctx.request.request_context.update({"novel_id": "other-book", "authorized": True})
@@ -94,6 +116,34 @@ def test_model_fields_do_not_change_scope_or_grant_writes():
         ]}, downstream)]
     assert asyncio.run(run()) == ["ok"]
     assert current_library_access() is None
+
+
+def test_library_page_selected_novel_becomes_a_verified_novel_scope():
+    scope = replace(sample_scope(), novel_id="book-a")
+    snapshot = sample_snapshot(NOW)
+    snapshot["novel"] = {"id": "book-a", "title": "潮声替我说晚安"}
+    registry = AssistantContextRefRegistry(clock=lambda: NOW)
+    created = registry.create(binding=scope, snapshot=snapshot)
+    middleware = create_library_access_probe(
+        runtime_context(created.context_ref),
+        None,
+        registry=registry,
+        probe_enabled=True,
+    )
+    assert middleware is not None
+
+    async def run():
+        async def downstream():
+            value = current_library_access()
+            assert value is not None
+            assert value.scope_kind == "novel"
+            assert value.novel_id == "book-a"
+            yield "ok"
+        return [item async for item in middleware.on_reply(
+            None, {"inputs": "本书禁用这个词"}, downstream,
+        )]
+
+    assert asyncio.run(run()) == ["ok"]
 
 
 def test_novel_scope_is_recovered_from_existing_ticket_not_model_id():
@@ -164,6 +214,51 @@ def test_stream_scope_never_leaks(mode):
         await stream.aclose()
         assert current_library_access() is None
         assert closed == [True]
+    asyncio.run(run())
+
+
+def test_acting_reestablishes_request_evidence_for_tool_task():
+    registry, _, ctx = prepared()
+    middleware = create_library_access_probe(
+        ctx, None, registry=registry, probe_enabled=True,
+    )
+    assert middleware is not None
+
+    async def run():
+        acting_started = asyncio.Event()
+        release_acting = asyncio.Event()
+
+        async def acting_downstream():
+            acting_started.set()
+            await release_acting.wait()
+            evidence = current_library_access()
+            assert evidence is not None
+            assert evidence.author_text == "收藏这个词"
+            assert evidence.scope_kind == "library"
+            yield "tool-result"
+
+        async def reply_downstream():
+            # A separate task models the real AgentScope acting boundary.  It
+            # does not inherit the on_reply ContextVar after task creation, so
+            # on_acting must restore the per-request evidence itself.
+            task = asyncio.create_task(
+                _collect(middleware.on_acting(None, {}, acting_downstream)),
+                context=contextvars.Context(),
+            )
+            await acting_started.wait()
+            release_acting.set()
+            assert await task == ["tool-result"]
+            yield "reply-result"
+
+        result = await _collect(middleware.on_reply(
+            None, {"inputs": "收藏这个词"}, reply_downstream,
+        ))
+        assert result == ["reply-result"]
+        assert current_library_access() is None
+
+    async def _collect(stream):
+        return [item async for item in stream]
+
     asyncio.run(run())
 
 

@@ -172,7 +172,13 @@ def test_selection_edit_persists_result_model_evidence_failure_and_recovery(
     )
     other_novel_id = UUID(other_novel["id"])
     snapshot = _selection_snapshot(novel_id)
-    normalized_snapshot = {**snapshot, "use_novel_context": False}
+    normalized_snapshot = {
+        **snapshot, "use_novel_context": False, "genre": "", "subgenre": "",
+        "lexicon_policy": {
+            "schema_version": "effective-lexicon-policy/1", "novel_id": str(novel_id),
+            "rules_hash": content_hash("[]"), "rules": [], "conflicts": [],
+        },
+    }
 
     first = _start_selection_job(database_session, novel_id, snapshot)
     assert first["attempt"] == 1

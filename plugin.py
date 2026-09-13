@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Any
 
 from .backend.assistant_context import create_ai_novel_page_context_middleware
+from .backend.private_library.access_context import (
+    create_released_library_access_middleware,
+)
 from .backend.writing_skills.load_policy import create_managed_method_middleware
 from .backend.writing_skills.middleware import create_released_native_writing_middleware
 from .backend.app import pawapp
@@ -11,6 +14,9 @@ from .backend.tools import (
     novel_get_context,
     novel_get_document,
     novel_get_workspace_context,
+    novel_library_apply_change,
+    novel_library_prepare_change,
+    novel_library_query,
     novel_prepare_selection_edit,
     novel_search,
 )
@@ -26,6 +32,10 @@ class AINovelWorldPlugin:
         api.register_middleware(
             create_ai_novel_page_context_middleware,
             priority=80,
+        )
+        api.register_middleware(
+            create_released_library_access_middleware,
+            priority=77,
         )
         # Exact novel-workbench scope only. The factory returns None for other
         # agents, chats, sessions, missing server tickets and ordinary scopes.
@@ -81,6 +91,30 @@ class AINovelWorldPlugin:
                 "不写数据库或正文"
             ),
             icon="✏️",
+            enabled=False,
+            tool_type="internal",
+        )
+        api.register_tool(
+            tool_name="novel_library_query",
+            tool_func=novel_library_query,
+            description="读取当前作者范围内的私有库资料与维护回执（只读）",
+            icon="📖",
+            enabled=False,
+            tool_type="internal",
+        )
+        api.register_tool(
+            tool_name="novel_library_prepare_change",
+            tool_func=novel_library_prepare_change,
+            description="保存当前作者指令对应的私有库变更提案，不直接执行",
+            icon="📋",
+            enabled=False,
+            tool_type="internal",
+        )
+        api.register_tool(
+            tool_name="novel_library_apply_change",
+            tool_func=novel_library_apply_change,
+            description="在当前可信作者范围内执行或撤销一个精确的私有库提案",
+            icon="✅",
             enabled=False,
             tool_type="internal",
         )

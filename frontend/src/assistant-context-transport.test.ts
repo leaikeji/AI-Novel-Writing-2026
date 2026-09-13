@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { CreationDraftCreateAssistantContextRefInput, NovelCreateAssistantContextRefInput } from "./assistant-context-ref";
+import type {
+  CreationDraftCreateAssistantContextRefInput,
+  NovelCreateAssistantContextRefInput,
+  PrivateLibraryCreateAssistantContextRefInput,
+} from "./assistant-context-ref";
 import { createAssistantContextRefHttpClient } from "./assistant-context-transport";
 
 
@@ -37,6 +41,85 @@ function input(): NovelCreateAssistantContextRefInput {
 
 
 describe("assistant context_ref HTTP transport", () => {
+  it("posts a private-library scope without a fake novel", async () => {
+    const value: PrivateLibraryCreateAssistantContextRefInput = {
+      binding: {
+        ownerToken: "owner_token_0000000000000001",
+        tabInstance: "anw_tab_000000000000000000001",
+        agentId: "ai-novel-writer",
+        scopeKind: "private_library",
+        scopeId: "personal",
+        sessionId: "session-1",
+      },
+      snapshot: {
+        schemaVersion: "private-library-assistant-context/1",
+        contextRevision: 1,
+        capturedAt: "2026-09-13T10:00:00Z",
+        expiresAt: "2026-09-13T10:05:00Z",
+        agentId: "ai-novel-writer",
+        sessionId: "session-1",
+        library: { id: "personal" },
+        page: { section: "private-library", view: "library" },
+        budget: { maxCharacters: 24_000, usedCharacters: 0, truncated: false, omittedFieldIds: [] },
+      },
+      serialized: "not sent",
+    };
+    const request = vi.fn(async (): Promise<unknown> => ({
+      contextRef: "L".repeat(43),
+      writingActionId: "00000000-0000-4000-8000-000000000063",
+      expiresAt: "2026-09-13T10:05:00Z",
+      contextRevision: 1,
+      payloadCharacters: 0,
+    }));
+    await createAssistantContextRefHttpClient({ request })(
+      value,
+      new AbortController().signal,
+    );
+    const calls = request.mock.calls as unknown as Array<[string, RequestInit]>;
+    const body = JSON.parse(String(calls[0]?.[1]?.body));
+    expect(body).toEqual({ ...value.binding, snapshot: value.snapshot });
+    expect(body).not.toHaveProperty("novelId");
+  });
+
+  it("posts an explicitly selected private-library novel without its UI-only title", async () => {
+    const value: PrivateLibraryCreateAssistantContextRefInput = {
+      binding: {
+        ownerToken: "owner_token_0000000000000001",
+        tabInstance: "anw_tab_000000000000000000001",
+        agentId: "ai-novel-writer",
+        scopeKind: "private_library",
+        scopeId: "personal",
+        novelId: "novel-1",
+        novelTitle: "潮声替我说晚安",
+      },
+      snapshot: {
+        schemaVersion: "private-library-assistant-context/1",
+        contextRevision: 1,
+        capturedAt: "2026-09-13T10:00:00Z",
+        expiresAt: "2026-09-13T10:05:00Z",
+        agentId: "ai-novel-writer",
+        library: { id: "personal" },
+        novel: { id: "novel-1", title: "潮声替我说晚安" },
+        page: { section: "private-library", view: "library" },
+        budget: { maxCharacters: 24_000, usedCharacters: 0, truncated: false, omittedFieldIds: [] },
+      },
+      serialized: "not sent",
+    };
+    const request = vi.fn(async (): Promise<unknown> => ({
+      contextRef: "L".repeat(43),
+      writingActionId: "00000000-0000-4000-8000-000000000063",
+      expiresAt: "2026-09-13T10:05:00Z",
+      contextRevision: 1,
+      payloadCharacters: 0,
+    }));
+
+    await createAssistantContextRefHttpClient({ request })(value, new AbortController().signal);
+    const calls = request.mock.calls as unknown as Array<[string, RequestInit]>;
+    const body = JSON.parse(String(calls[0]?.[1]?.body));
+    expect(body.novelId).toBe("novel-1");
+    expect(body).not.toHaveProperty("novelTitle");
+  });
+
   it("posts a creation draft scope without inventing a novel or document binding", async () => {
     const value: CreationDraftCreateAssistantContextRefInput = {
       binding: {

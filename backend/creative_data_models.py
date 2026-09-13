@@ -442,6 +442,127 @@ class NovelAssetBinding(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class LibraryChangeRequest(Base):
+    """Durable, idempotent preview/apply/undo receipt for library mutations."""
+
+    __tablename__ = "library_change_requests"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_library_change_request_id"),
+        UniqueConstraint("idempotency_key", name="uq_library_change_idempotency"),
+        CheckConstraint(
+            "(scope_kind='library' AND scope_novel_id IS NULL) OR "
+            "(scope_kind='novel' AND scope_novel_id IS NOT NULL)",
+            name="ck_library_change_scope",
+        ),
+        CheckConstraint(
+            "state IN ('proposed','applied','cancelled','conflict')",
+            name="ck_library_change_state",
+        ),
+        CheckConstraint("version > 0", name="ck_library_change_version"),
+        CheckConstraint(
+            "char_length(author_text_hash)=64 AND char_length(content_hash)=64",
+            name="ck_library_change_hashes",
+        ),
+        Index("ix_library_change_scope_created", "scope_kind", "scope_novel_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    scope_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_novel_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("novels.id", ondelete="RESTRICT")
+    )
+    session_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    author_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    actions_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="proposed")
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    undo_of_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("library_change_requests.id", ondelete="RESTRICT")
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LibraryCheckReport(Base):
+    """Immutable scan evidence with CAS-appended author decisions."""
+
+    __tablename__ = "library_check_reports"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["document_id", "novel_id"],
+            ["documents.id", "documents.novel_id"],
+            name="fk_library_check_document_scope",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "source_kind IN ('working_copy','candidate','selection_result')",
+            name="ck_library_check_source_kind",
+        ),
+        CheckConstraint(
+            "status IN ('complete','incomplete','stale','failed')",
+            name="ck_library_check_status",
+        ),
+        CheckConstraint(
+            "source_version >= 0 AND version > 0",
+            name="ck_library_check_versions",
+        ),
+        CheckConstraint(
+            "scanned_rule_count >= 0 AND omitted_rule_count >= 0 "
+            "AND visible_character_count >= 0",
+            name="ck_library_check_coverage",
+        ),
+        CheckConstraint(
+            "char_length(text_hash)=64 AND char_length(rules_hash)=64",
+            name="ck_library_check_hashes",
+        ),
+        Index("ix_library_check_document_created", "novel_id", "document_id", "created_at"),
+        UniqueConstraint(
+            "novel_id",
+            "document_id",
+            "source_kind",
+            "source_id",
+            "source_version",
+            "text_hash",
+            "rules_hash",
+            "scanner_version",
+            name="uq_library_check_input",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    novel_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    source_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    source_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    rules_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    scanner_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    scanned_rule_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    omitted_rule_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    visible_character_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    hits_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    decisions_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class EmbeddingConfiguration(Base):
     __tablename__ = "embedding_configurations"
     __table_args__ = (
@@ -795,6 +916,17 @@ Base.metadata.tables["private_assets"].append_constraint(
         deferrable=True,
         initially="DEFERRED",
         use_alter=True,
+    )
+)
+Base.metadata.tables["private_assets"].append_constraint(
+    ForeignKeyConstraint(
+        [
+            Base.metadata.tables["private_assets"].c.source_version_id,
+            Base.metadata.tables["private_assets"].c.source_asset_id,
+        ],
+        [PrivateAssetVersion.__table__.c.id, PrivateAssetVersion.__table__.c.asset_id],
+        name="fk_private_asset_source_version_scope",
+        ondelete="RESTRICT",
     )
 )
 Base.metadata.tables["asset_preset_items"].append_constraint(

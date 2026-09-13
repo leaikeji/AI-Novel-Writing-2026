@@ -1,0 +1,155 @@
+{
+  "schema_version": "private-library-lifecycle-fixtures/1",
+  "fixture_id": "plan74-lifecycle-synthetic-v1",
+  "source": {
+    "kind": "synthetic-project-fixture",
+    "license": "synthetic-project-fixture",
+    "contains_external_text": false,
+    "contains_user_content": false
+  },
+  "identities": {
+    "novel_a": {"id": "74000000-0000-4000-8000-0000000000a1", "title": "危楼之下"},
+    "novel_b": {"id": "74000000-0000-4000-8000-0000000000b2", "title": "潮汐档案"},
+    "library_pack": {"id": "74000000-0000-4000-8000-000000000101", "title": "工程动作词"},
+    "novel_a_copy": {"id": "74000000-0000-4000-8000-0000000001a1", "title": "工程动作词 · 危楼之下"},
+    "novel_b_copy": {"id": "74000000-0000-4000-8000-0000000001b2", "title": "工程动作词 · 潮汐档案"}
+  },
+  "cases": [
+    {
+      "id": "LIFE-PINNED-OLD-VERSION",
+      "purpose": "通用词包已到 v3 时，两本书仍解析各自固定的 v1",
+      "input": {
+        "library_current_version": "74000000-0000-4000-8000-000000001003",
+        "novel_bindings": {
+          "74000000-0000-4000-8000-0000000000a1": "74000000-0000-4000-8000-000000001001",
+          "74000000-0000-4000-8000-0000000000b2": "74000000-0000-4000-8000-000000001001"
+        }
+      },
+      "expected": {
+        "resolved_versions": {
+          "74000000-0000-4000-8000-0000000000a1": "74000000-0000-4000-8000-000000001001",
+          "74000000-0000-4000-8000-0000000000b2": "74000000-0000-4000-8000-000000001001"
+        },
+        "auto_update": false,
+        "show_update_available": true
+      }
+    },
+    {
+      "id": "LIFE-A-LOCAL-COPY",
+      "purpose": "只改甲书一词时从甲书实际使用的 v1 建专用副本，不从通用 v3 复制",
+      "input": {
+        "novel_id": "74000000-0000-4000-8000-0000000000a1",
+        "bound_version": "74000000-0000-4000-8000-000000001001",
+        "library_current_version": "74000000-0000-4000-8000-000000001003",
+        "change": {"operation": "upsert_lexicon_entries", "terms": ["排水坡度"]}
+      },
+      "expected": {
+        "copy_asset_id": "74000000-0000-4000-8000-0000000001a1",
+        "copy_source_version": "74000000-0000-4000-8000-000000001001",
+        "replace_only_novel_binding": "74000000-0000-4000-8000-0000000000a1",
+        "library_current_version_unchanged": "74000000-0000-4000-8000-000000001003"
+      }
+    },
+    {
+      "id": "LIFE-B-UNAFFECTED",
+      "purpose": "甲书专用副本不能进入乙书绑定或检索",
+      "input": {
+        "request_novel_id": "74000000-0000-4000-8000-0000000000b2",
+        "candidate_assets": [
+          {"asset_id": "74000000-0000-4000-8000-000000000101", "scope_kind": "library", "scope_novel_id": null},
+          {"asset_id": "74000000-0000-4000-8000-0000000001a1", "scope_kind": "novel", "scope_novel_id": "74000000-0000-4000-8000-0000000000a1"},
+          {"asset_id": "74000000-0000-4000-8000-0000000001b2", "scope_kind": "novel", "scope_novel_id": "74000000-0000-4000-8000-0000000000b2"}
+        ]
+      },
+      "expected": {
+        "allowed_asset_ids": [
+          "74000000-0000-4000-8000-000000000101",
+          "74000000-0000-4000-8000-0000000001b2"
+        ],
+        "excluded_asset_ids": ["74000000-0000-4000-8000-0000000001a1"]
+      }
+    },
+    {
+      "id": "LIFE-REPORT-RULE-DRIFT",
+      "purpose": "检查后规则版本变化使未采用报告过期",
+      "input": {
+        "report": {"text_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "rules_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "status": "complete"},
+        "adoption_baseline": {"text_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "rules_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+      },
+      "expected": {"adoption_allowed": false, "report_status": "stale", "正文保持": true}
+    },
+    {
+      "id": "LIFE-REPORT-TEXT-DRIFT",
+      "purpose": "检查后正文变化使未采用报告过期",
+      "input": {
+        "report": {"text_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "rules_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "status": "complete"},
+        "adoption_baseline": {"text_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "rules_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+      },
+      "expected": {"adoption_allowed": false, "report_status": "stale", "正文保持": true}
+    },
+    {
+      "id": "LIFE-APPLIED-IDEMPOTENT-REPLAY",
+      "purpose": "已采用任务的同幂等键回放返回原回执，不被后来规则漂移改写",
+      "input": {
+        "idempotency_key": "plan74-applied-replay-0001",
+        "original_receipt_id": "74000000-0000-4000-8000-000000000901",
+        "rules_changed_after_commit": true
+      },
+      "expected": {"same_receipt_id": "74000000-0000-4000-8000-000000000901", "idempotent_replay": true, "new_write_count": 0}
+    },
+    {
+      "id": "LIFE-UNSYNCED-SELECTION-SOURCE",
+      "purpose": "未同步稿选区保留精确来源，不冒充已保存字段",
+      "input": {
+        "selected_text": "门轴发涩，他把撬棍压低半寸。",
+        "source": {
+          "kind": "unsynced_selection",
+          "text_sha256": "dc4bdbaa8290f72f8174a203e580ecb6d385900932ce17eba467728d1e1e420c",
+          "selection_id": "74000000-0000-4000-8000-000000000701",
+          "document_id": "74000000-0000-4000-8000-000000000702",
+          "field_id": "chapter-body",
+          "document_version": 12,
+          "label": "危楼之下 · 第四章当前未同步选区"
+        }
+      },
+      "expected": {
+        "source_kind": "unsynced_selection",
+        "copy_exact_selected_text": true,
+        "source_document_write_count": 0,
+        "requires_current_selection_ticket": true
+      }
+    },
+    {
+      "id": "LIFE-SELECTION-SWITCH-NOVEL",
+      "purpose": "切换作品后上一书选区票据失效，不能沿用专用目标",
+      "input": {
+        "ticket_novel_id": "74000000-0000-4000-8000-0000000000a1",
+        "current_novel_id": "74000000-0000-4000-8000-0000000000b2",
+        "target_asset_id": "74000000-0000-4000-8000-0000000001a1"
+      },
+      "expected": {"write_allowed": false, "reason": "scope_changed", "new_ticket_required": true}
+    },
+    {
+      "id": "LIFE-UNDO-COPY-CLEAN",
+      "purpose": "无后续编辑时撤销甲书专用副本恢复原绑定并保留追溯记录",
+      "input": {
+        "novel_id": "74000000-0000-4000-8000-0000000000a1",
+        "current_binding": "74000000-0000-4000-8000-000000001101",
+        "original_binding": "74000000-0000-4000-8000-000000001001",
+        "copy_has_later_versions": false
+      },
+      "expected": {"restored_binding": "74000000-0000-4000-8000-000000001001", "delete_history": false, "undo_state": "applied"}
+    },
+    {
+      "id": "LIFE-UNDO-COPY-CONFLICT",
+      "purpose": "专用副本已有后续编辑时撤销不得覆盖后来版本",
+      "input": {
+        "novel_id": "74000000-0000-4000-8000-0000000000a1",
+        "receipt_after_version": "74000000-0000-4000-8000-000000001101",
+        "current_binding": "74000000-0000-4000-8000-000000001102",
+        "copy_has_later_versions": true
+      },
+      "expected": {"binding_unchanged": "74000000-0000-4000-8000-000000001102", "undo_state": "conflict", "author_choice_required": true}
+    }
+  ]
+}

@@ -1,6 +1,7 @@
-"""Read-only QwenPaw Agent tools backed by the novel domain service."""
+"""QwenPaw Agent tools backed by the novel domain services."""
 
 import json
+from collections.abc import Callable
 from typing import Literal
 from uuid import UUID
 
@@ -20,6 +21,11 @@ from .assistant_workspace_service import (
 from .database import get_engine
 from .models import Document
 from .novel_lifecycle import require_active_novel
+from .private_library.maintenance_tools import (
+    novel_library_apply_change as _novel_library_apply_change,
+    novel_library_prepare_change as _novel_library_prepare_change,
+    novel_library_query as _novel_library_query,
+)
 from .services import get_document, get_novel_context, search_novel
 
 
@@ -47,6 +53,12 @@ SelectionEditOperation = Literal[
     "custom",
 ]
 
+LibraryQueryKind = Literal[
+    "assets", "asset", "bindings", "change", "recent_changes"
+]
+LibraryAssetType = Literal["plot", "writing_style", "vocabulary", "idea"]
+LibraryApplyMode = Literal["apply", "undo"]
+
 
 def _json(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -61,6 +73,86 @@ def _scope_uuid(value: str | None) -> UUID | None:
         return UUID(value)
     except (AttributeError, TypeError, ValueError):
         raise WorkspaceScopeError() from None
+
+
+def _run_library_tool(
+    operation: Callable[..., object], payload: dict[str, object]
+) -> str:
+    """Run one maintenance adapter in a tool-owned transaction."""
+
+    factory = sessionmaker(bind=get_engine(), expire_on_commit=False)
+    with factory() as session:
+        try:
+            result = operation(session, payload)
+            serialized = _json(result)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+    return serialized
+
+
+async def novel_library_query(
+    kind: LibraryQueryKind = "assets",
+    proposal_id: str = "",
+    asset_id: str = "",
+    asset_type: LibraryAssetType | None = None,
+    include_archived: bool = False,
+    search: str = "",
+    limit: int = 50,
+) -> str:
+    """Read bounded private-library lists, one asset's entries, or receipts.
+
+    Scope, session, request identity, author text, and authorization come only
+    from the current server-side request context.
+    """
+
+    payload: dict[str, object] = {
+        "kind": kind,
+        "include_archived": include_archived,
+        "limit": limit,
+    }
+    if proposal_id:
+        payload["proposal_id"] = proposal_id
+    if asset_id:
+        payload["asset_id"] = asset_id
+    if asset_type is not None:
+        payload["asset_type"] = asset_type
+    if search:
+        payload["search"] = search
+    return _run_library_tool(_novel_library_query, payload)
+
+
+async def novel_library_prepare_change(
+    actions: list[dict[str, object]],
+    source: dict[str, object] | None = None,
+    idempotency_key: str = "",
+) -> str:
+    """Persist a private-library proposal without granting write authority."""
+
+    payload: dict[str, object] = {"actions": actions}
+    if source is not None:
+        payload["source"] = source
+    if idempotency_key:
+        payload["idempotency_key"] = idempotency_key
+    return _run_library_tool(_novel_library_prepare_change, payload)
+
+
+async def novel_library_apply_change(
+    proposal_id: str,
+    proposal_version: int,
+    mode: LibraryApplyMode = "apply",
+) -> str:
+    """Apply or compensate one exact proposal under trusted current context."""
+
+    return _run_library_tool(
+        _novel_library_apply_change,
+        {
+            "proposal_id": proposal_id,
+            "proposal_version": proposal_version,
+            "mode": mode,
+        },
+    )
 
 
 async def novel_get_workspace_context(

@@ -1,6 +1,6 @@
 /** Runs actual panel callbacks with deterministic hooks; not browser/layout evidence. */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import type { DocumentRecord, NovelRecord } from "../types";
+import type { CandidateRecord, DocumentRecord, GenerationJobRecord, LibraryCheckReportRecord, NovelRecord } from "../types";
 import { ApiError } from "../api";
 
 const transport = vi.hoisted(() => ({ request: vi.fn(), model: vi.fn() }));
@@ -62,6 +62,20 @@ const DOC = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
 const NOVEL = "33333333-3333-4333-8333-333333333333";
 const JOB = "44444444-4444-4444-8444-444444444444";
+const REPORT = "55555555-5555-4555-8555-555555555555";
+const checkReport = (status: LibraryCheckReportRecord["status"] = "complete"): LibraryCheckReportRecord => ({
+  schema_version: "library-check/1", id: REPORT, version: 1, status,
+  text_sha256: "a".repeat(64), rules_sha256: "b".repeat(64), hits: [],
+  unresolved_forbid_hit_ids: [], scanned_rule_count: 0, omitted_rule_count: 0,
+  visible_character_count: 1000, offset: 0, limit: 200, total_hits: 0, has_more: false,
+});
+const candidateFor = (documentId: string, state: CandidateRecord["state"] = "ready"): CandidateRecord => ({
+  id: JOB, document_id: documentId, generation_job_id: JOB,
+  base_revision_id: null, base_draft_version: 1, base_content_hash: "c".repeat(64),
+  base_content_markdown: "", content_markdown: "她在灯塔下停步。", content_text: "她在灯塔下停步。",
+  content_hash: "a".repeat(64), state, adopted_revision_id: state === "accepted" ? JOB : null,
+  visible_character_count: 1000, unified_diff: "", created_at: null, decided_at: null,
+});
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 const flush = async () => { for (let i = 0; i < 12; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 function nodeText(value: unknown): string {
@@ -76,10 +90,15 @@ describe("actual ChapterWorkflowPanel method integration", () => {
   let confirms: Record<string, unknown>[];
   let errors: Mock<(message: string) => void>;
   let changed: Mock<(document: DocumentRecord, status: string) => void>;
+  let statuses: Mock<(message: string) => void>;
   let prepare: Mock<() => Promise<DocumentRecord | null>>;
   let bodyState: Mock<(active: boolean, stage: string) => void>;
   let activeDoc: string;
   let bodyReply: (path: string, init: RequestInit) => Promise<unknown>;
+  let checkReply: () => Promise<LibraryCheckReportRecord>;
+  let adoptReply: () => Promise<unknown>;
+  let restoreReply: () => Promise<unknown>;
+  let jobsReply: () => Promise<GenerationJobRecord[]>;
   let recoveryReply: unknown;
   let catalogGate: boolean;
   let semanticGate: boolean;
@@ -88,31 +107,51 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     activeDoc = id;
     hooks.render(() => Panel({ novel: { id: NOVEL, tree: [] } as unknown as NovelRecord,
       document: doc(id), chapterNumber: 1, onPrepareGeneration: prepare,
-      onDocumentChanged: changed, onError: errors, onStatus: vi.fn(), onBodyGenerationStateChange: bodyState }));
+      onDocumentChanged: changed, onError: errors, onStatus: statuses, onBodyGenerationStateChange: bodyState }));
   }
   async function confirm() {
     const picker = hooks.nodes.find(node => node.props.className === "anw-modal anw-asset-modal")!;
     await ((picker.props.footer as Node[])[0].props.onClick as () => Promise<void>)();
     return [...confirms].reverse().find(item => item.className === "anw-modal anw-generation-confirm")!;
   }
+  function historicalJob(
+    state: CandidateRecord["state"] = "ready",
+    status: LibraryCheckReportRecord["status"] = "complete",
+  ): GenerationJobRecord {
+    return { id: JOB, document_id: DOC, state: "ready", candidate: candidateFor(DOC, state),
+      attempt: 1, output_visible_character_count: 1000, minimum_visible_character_count: 850,
+      maximum_visible_character_count: 1150, asset_snapshot: [], library_check: checkReport(status),
+    } as unknown as GenerationJobRecord;
+  }
+  async function openHistory(job: GenerationJobRecord) {
+    jobsReply = async () => [job];
+    const history = hooks.nodes.find(node => node.props.className === "anw-history-button")!;
+    await (history.props.onClick as () => Promise<void>)();
+    render();
+    return hooks.nodes.find(node => node.type === "Button" && node.children.includes("恢复此版本"))!;
+  }
   beforeEach(async () => {
-    vi.resetModules(); hooks = new Hooks(); confirms = []; errors = vi.fn(); changed = vi.fn();
+    vi.resetModules(); hooks = new Hooks(); confirms = []; errors = vi.fn(); changed = vi.fn(); statuses = vi.fn();
     activeDoc = DOC; prepare = vi.fn(async () => doc(DOC)); recoveryReply = null;
     catalogGate = true; semanticGate = false;
     bodyState = vi.fn();
     const values = new Map<string, string>();
     vi.stubGlobal("sessionStorage", { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => { values.set(k, v); } });
-    const Modal = { confirm: (value: Record<string, unknown>) => { confirms.push(value); }, error: vi.fn() };
+    const Modal = { confirm: (value: Record<string, unknown>) => { confirms.push(value); return { destroy: vi.fn() }; }, error: vi.fn() };
     vi.stubGlobal("window", { QwenPaw: { host: { React: hooks.React, ReactDOM: {}, antd: {
       Modal, Input: { TextArea: "TextArea" }, Button: "Button", Card: "Card", Checkbox: "Checkbox",
       Empty: "Empty", Spin: "Spin", Tag: "Tag", Tabs: "Tabs", Alert: "Alert",
     }, antdIcons: {} } } });
     transport.model.mockReset().mockResolvedValue({}); transport.request.mockReset();
+    checkReply = async () => checkReport();
+    adoptReply = async () => ({ document: doc(activeDoc), candidate: candidateFor(activeDoc, "accepted") });
+    restoreReply = async () => ({ document: doc(activeDoc) });
+    jobsReply = async () => [];
     bodyReply = async (path, init) => {
       const requestBody = JSON.parse(String(init.body));
       const action = requestBody.writing_action.action_id;
       const semanticEnabled = requestBody.writing_action.preferences.semantic_mode === "auto";
-      return { id: JOB, document_id: path.split("/")[2], state: "ready", candidate: { id: JOB, base_draft_version: 1 },
+      return { id: JOB, document_id: path.split("/")[2], state: "ready", candidate: candidateFor(path.split("/")[2]!),
         retry_policy: { decision: "allowed", reason: "可以重新生成", active_job_id: null },
         writing_method: { schema_version: "writing-method-status/1", action_id: action, dispatch_id: JOB,
           state: "dispatched", method_input_hash: "a".repeat(64), job_ref: `chapter:${JOB}`,
@@ -139,9 +178,11 @@ describe("actual ChapterWorkflowPanel method integration", () => {
       if (path.endsWith("/chapter-brief")) return { document_id: path.split("/")[2], version: 1, target_word_count: 1000,
         expectation_text: "", outline_text: "合成测试大纲", forbidden_text: "", role_constraints: { required: [], allowed: [], context_only: [], forbidden: [] } };
       if (path.endsWith("/generation-jobs/body")) return bodyReply(path, init!);
-      if (path.endsWith("/generation-jobs")) return [];
+      if (path.endsWith("/generation-jobs")) return jobsReply();
       if (path.includes("/writing-method-actions/")) return recoveryReply;
-      if (path.endsWith("/adopt")) return { document: doc(activeDoc), candidate: { id: JOB, visible_character_count: 1000 } };
+      if (path.endsWith("/library-checks")) return checkReply();
+      if (path.endsWith("/adopt")) return adoptReply();
+      if (path.endsWith("/restore")) return restoreReply();
       throw new Error(`Unexpected request ${path}`);
     });
     ({ ChapterWorkflowPanel: Panel } = await import("../chapter-workflow"));
@@ -278,6 +319,80 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     expect(bodyCalls()).toHaveLength(1); render(OTHER); await flush(); pending.resolve(null); await flush();
     expect(transport.request.mock.calls.filter(([path]) => String(path).endsWith("/adopt"))).toHaveLength(0);
     expect(changed).not.toHaveBeenCalled(); expect(errors).not.toHaveBeenCalled();
+  });
+  it("does not apply or announce a late adoption after leaving and returning to the chapter", async () => {
+    const pending = deferred<unknown>();
+    adoptReply = () => pending.promise;
+    const prompt = await confirm(); (prompt.onOk as () => void)(); await flush();
+    expect(transport.request.mock.calls.filter(([path]) => String(path).endsWith("/adopt"))).toHaveLength(1);
+    render(OTHER); await flush(); render(DOC); await flush();
+    statuses.mockClear();
+    pending.resolve({ document: doc(DOC), candidate: candidateFor(DOC, "accepted") });
+    await flush();
+    expect(changed).not.toHaveBeenCalled();
+    expect(errors).not.toHaveBeenCalled();
+    expect(statuses).not.toHaveBeenCalled();
+  });
+  it("refreshes a report CAS conflict through the actual generation entry without another model call", async () => {
+    let checkCount = 0;
+    let adoptCount = 0;
+    checkReply = async () => ({ ...checkReport(), version: ++checkCount === 1 ? 1 : 3 });
+    adoptReply = async () => {
+      if (++adoptCount === 1) throw new ApiError(409, "报告决定已改变", { type: "library_check_report_version_conflict" });
+      return { document: doc(DOC), candidate: candidateFor(DOC, "accepted") };
+    };
+    const prompt = await confirm(); (prompt.onOk as () => void)(); await flush();
+    expect(bodyCalls()).toHaveLength(1);
+    expect(checkCount).toBe(2);
+    expect(adoptCount).toBe(2);
+    const requests = transport.request.mock.calls.filter(([path]) => String(path).endsWith("/adopt"));
+    expect(JSON.parse(String(requests[1]![1].body))).toEqual({
+      expected_draft_version: 1, library_check_report_id: REPORT, library_check_version: 3,
+    });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(errors).not.toHaveBeenCalled();
+  });
+  it.each(["ready", "accepted"] as const)("does not let a late %s history restore replace another chapter", async (state) => {
+    const pending = deferred<unknown>();
+    if (state === "ready") adoptReply = () => pending.promise;
+    else restoreReply = () => pending.promise;
+    const restore = await openHistory(historicalJob(state));
+    (restore.props.onClick as () => void)(); await flush();
+    const suffix = state === "ready" ? "/adopt" : "/restore";
+    expect(transport.request.mock.calls.filter(([path]) => String(path).endsWith(suffix))).toHaveLength(1);
+    render(OTHER); await flush();
+    pending.resolve({ document: doc(DOC), candidate: candidateFor(DOC, "accepted") });
+    await flush();
+    expect(changed).not.toHaveBeenCalled();
+    expect(errors).not.toHaveBeenCalled();
+    expect(statuses).not.toHaveBeenCalled();
+  });
+  it("does not open old generation history when its GET completes after switching", async () => {
+    const pending = deferred<GenerationJobRecord[]>();
+    jobsReply = () => pending.promise;
+    const history = hooks.nodes.find(node => node.props.className === "anw-history-button")!;
+    const opening = (history.props.onClick as () => Promise<void>)();
+    jobsReply = async () => [];
+    render(OTHER); await flush();
+    pending.resolve([historicalJob()]); await opening; await flush(); render();
+    const modal = hooks.nodes.find(node => node.props.className === "anw-modal anw-generation-history-modal")!;
+    expect(modal.props.open).toBe(false);
+    expect(hooks.nodes.some(node => String(node.props.className ?? "").startsWith("anw-history-card"))).toBe(false);
+    expect(errors).not.toHaveBeenCalled();
+  });
+  it.each(["complete", "incomplete", "stale", "failed"] as const)("labels %s history evidence as generation-time only", async (status) => {
+    await openHistory(historicalJob("ready", status));
+    const label = hooks.nodes.find(node => node.type === "span"
+      && node.children.some(child => typeof child === "string" && child.startsWith("生成时用词检查")))!;
+    expect(label).toBeDefined();
+    if (status === "complete") {
+      expect(label.props.className).toBe("is-ok");
+      expect(nodeText(label)).toContain("采用前会复核当前规则");
+    } else {
+      expect(label.props.className).toBe("is-warning");
+      expect(nodeText(label)).not.toContain("通过");
+      expect(nodeText(label)).toContain(status === "failed" ? "失败" : status === "stale" ? "已失效" : "未完成");
+    }
   });
   it("refuses a saved working copy belonging to a different chapter", async () => {
     prepare.mockResolvedValue(doc(OTHER));

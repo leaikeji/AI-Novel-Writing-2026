@@ -18,6 +18,9 @@ EXPECTED_TOOLS = {
     "novel_search",
     "novel_get_workspace_context",
     "novel_prepare_selection_edit",
+    "novel_library_query",
+    "novel_library_prepare_change",
+    "novel_library_apply_change",
 }
 
 
@@ -229,6 +232,8 @@ class VerifyApi:
                 "content": (
                     "正文生成或重写必须调用 `prose-writing`；"
                     "每条命令最多一次成功调用 `novel_prepare_selection_edit`；"
+                    "私有库维护、收藏、分类、启用、停用或撤销使用"
+                    "`private-library-maintenance`和`novel_library_apply_change`；"
                     "insufficient-shortening；insufficient-expansion；"
                     "review-size-mismatch"
                 ),
@@ -238,7 +243,7 @@ class VerifyApi:
         raise AssertionError(f"unexpected read: {path}")
 
 
-def test_scripts_freeze_the_same_five_tool_contract_without_model_fields() -> None:
+def test_scripts_freeze_the_same_project_tool_contract_without_model_fields() -> None:
     configure = load_script("configure_qwenpaw_novel_agent")
     verifier = load_script("verify_qwenpaw_lab")
 

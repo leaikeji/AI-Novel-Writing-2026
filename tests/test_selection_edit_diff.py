@@ -486,8 +486,18 @@ def test_operation_skill_mapping_and_prompt_contract(
         )
 
 
-def test_service_reuses_ready_job_and_force_new_increments_attempt() -> None:
+def test_service_reuses_ready_job_and_force_new_increments_attempt(monkeypatch) -> None:
     novel_id = uuid4()
+    from backend.private_library.lexicon_service import EffectiveLexiconPolicy
+    monkeypatch.setattr(
+        "backend.creative_services.resolve_effective_lexicon_policy",
+        lambda _session, target_novel_id: EffectiveLexiconPolicy(
+            novel_id=target_novel_id,
+            rules=(),
+            conflicts=(),
+            rules_hash="0" * 64,
+        ),
+    )
     snapshot = _snapshot(novel_id=novel_id)
     session = _GenerationSession(novel_id)
     arguments = {

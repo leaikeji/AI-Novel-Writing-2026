@@ -17,6 +17,7 @@ BASE_TASK_IDS = frozenset({
     "novel-direction", "story-foundation", "character-craft", "chapter-outline",
     "scene-craft", "dialogue-craft", "prose-writing", "continuity-check", "style-review",
 })
+GENERIC_PROJECT_SKILL_IDS = frozenset({"private-library-maintenance"})
 
 
 def packaged_approvals() -> tuple[ApprovalRecord, ...]:
@@ -31,10 +32,14 @@ def published_skill_ids(root: Path) -> frozenset[str]:
     catalog = load_catalog(root, approvals, frozenset(a.skill_id for a in approvals))
     if catalog.rejected:
         raise CatalogError("published_catalog_invalid:" + ",".join(catalog.rejected))
-    for skill_id in BASE_TASK_IDS:
+    for skill_id in BASE_TASK_IDS | GENERIC_PROJECT_SKILL_IDS:
         if not (root / skill_id / "SKILL.md").is_file():
             raise CatalogError("missing_base_task_skill")
-    return BASE_TASK_IDS | frozenset(c.declaration.skill_id for c in catalog.capabilities)
+    return (
+        BASE_TASK_IDS
+        | GENERIC_PROJECT_SKILL_IDS
+        | frozenset(c.declaration.skill_id for c in catalog.capabilities)
+    )
 
 
 def asset_inventory(capability: LoadedCapability) -> tuple[ApprovedAsset, ...]:

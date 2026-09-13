@@ -32,6 +32,17 @@ export interface DocumentRecord {
   updated_at: string | null;
   revisions: RevisionSummary[];
   revision_next_cursor?: string | null;
+  library_application?: {
+    kind: "application";
+    application_id: string;
+    report_id: string;
+    input_sha256: string;
+    output_sha256: string;
+    request_sha256: string;
+    draft_version: number;
+    at: string;
+    replayed: boolean;
+  };
 }
 
 export interface NovelSearchResultRecord {
@@ -306,6 +317,52 @@ export interface CandidateRecord {
   decided_at: string | null;
 }
 
+export interface LibraryCheckHitRecord {
+  hit_id: string;
+  entry_id: string;
+  asset_id: string;
+  asset_version_id: string;
+  action: "watch" | "forbid";
+  matched_text: string;
+  start_utf16: number;
+  end_utf16: number;
+  reason: string;
+  count: number;
+  window?: number | null;
+}
+
+export interface LibraryCheckReportRecord {
+  schema_version: "library-check/1";
+  id: string;
+  version: number;
+  status: "complete" | "incomplete" | "stale" | "failed";
+  text_sha256: string;
+  rules_sha256: string;
+  hits: LibraryCheckHitRecord[];
+  unresolved_forbid_hit_ids: string[];
+  scanned_rule_count: number;
+  omitted_rule_count: number;
+  visible_character_count: number;
+  offset: number;
+  limit: number;
+  total_hits: number;
+  has_more: boolean;
+  decisions?: Array<Record<string, unknown>>;
+}
+
+export interface SelectionLibraryApplication {
+  schema_version: "selection-library-application/1";
+  application_id: string;
+  job_id: string;
+  attempt: number;
+  base_draft_version: number;
+  base_content_hash: string;
+  replacement_sha256: string;
+  accepted_segment_ids?: string[] | null;
+  library_check_report_id: string;
+  library_check_version: number;
+}
+
 export interface GenerationJobRecord {
   id: string;
   document_id: string;
@@ -340,6 +397,7 @@ export interface GenerationJobRecord {
   attempt: number;
   failure_message: string | null;
   candidate: CandidateRecord | null;
+  library_check: LibraryCheckReportRecord | null;
   created_at: string | null;
   completed_at: string | null;
 }

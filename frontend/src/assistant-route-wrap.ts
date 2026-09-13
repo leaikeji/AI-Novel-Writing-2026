@@ -326,7 +326,7 @@ export function createAssistantRouteWrap(
     );
   }
 
-  function CreativeCenterAssistantStatusBar() {
+  function CreativeCenterAssistantStatusBar(props: { privateLibraryActive: boolean }) {
     return h(
       "section",
       {
@@ -335,13 +335,19 @@ export function createAssistantRouteWrap(
         "aria-live": "polite",
       },
       h("div", { className: "anw-assistant-context-status-main" },
-        h("strong", null, "创作中心"),
-        h("span", null, "未发送作品页面内容"),
+        h("strong", null, props.privateLibraryActive ? "私有库" : "创作中心"),
+        h("span", null, props.privateLibraryActive
+          ? "私有库维护范围已启用"
+          : "未发送作品页面内容"),
       ),
       h("div", { className: "anw-assistant-context-status-meta" },
-        h("span", null, "未进入具体作品"),
+        h("span", null, props.privateLibraryActive
+          ? "通用资料库 · 不借用小说范围"
+          : "未进入具体作品"),
       ),
-      h("small", null, "进入作品工作台后才会准备小说页面上下文"),
+      h("small", null, props.privateLibraryActive
+        ? "维护写入仍需服务端提案、范围和回执校验"
+        : "进入作品工作台后才会准备小说页面上下文"),
     );
   }
 
@@ -375,6 +381,8 @@ export function createAssistantRouteWrap(
       const creativeCenterActive = options.CreativeCenter !== undefined
         && isCreativeCenterRouteSession(routeSession);
       const workbenchActive = isNovelWorkbenchRouteSession(routeSession);
+      const privateLibraryActive = creativeCenterActive
+        && new URLSearchParams(getLocation().search).get("view") === "private-library";
       const shellActive = creativeCenterActive || workbenchActive;
 
       React.useEffect(() => {
@@ -435,9 +443,9 @@ export function createAssistantRouteWrap(
       ]);
 
       React.useEffect(() => {
-        if (!workbenchActive || !options.contextRefCoordinator) return undefined;
+        if ((!workbenchActive && !privateLibraryActive) || !options.contextRefCoordinator) return undefined;
         return options.contextRefCoordinator.start();
-      }, [workbenchActive]);
+      }, [workbenchActive, privateLibraryActive]);
 
       React.useEffect(() => {
         if (!options.selectionController) return undefined;
@@ -523,7 +531,7 @@ export function createAssistantRouteWrap(
           ),
           preferredWidth: assistantPreference.preferredWidth,
           statusBar: creativeCenterActive
-            ? h(CreativeCenterAssistantStatusBar)
+            ? h(CreativeCenterAssistantStatusBar, { privateLibraryActive })
             : h(
                 "div",
                 { className: "anw-assistant-status-stack" },

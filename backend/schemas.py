@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from .writing_skills.contracts import MethodPreferences
+from .private_library.maintenance_contracts import SelectionLibraryApplication
 
 
 class CreateNovelRequest(BaseModel):
@@ -27,6 +28,7 @@ class SaveDraftRequest(BaseModel):
     expected_draft_version: int = Field(ge=1)
     content_markdown: str = Field(max_length=2_000_000)
     content_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    library_application: SelectionLibraryApplication | None = None
 
 
 class CheckpointRequest(BaseModel):
@@ -64,7 +66,13 @@ class GenerateChapterRequest(BaseModel):
 
 
 class AdoptCandidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     expected_draft_version: int = Field(ge=1)
+    library_check_report_id: UUID | None = None
+    library_check_version: int | None = Field(default=None, ge=1)
+    keep_hit_ids: list[UUID] = Field(default_factory=list, max_length=200)
+    skip_incomplete: bool = False
 
 
 class ExtractIntelligenceRequest(BaseModel):

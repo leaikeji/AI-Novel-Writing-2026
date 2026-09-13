@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..creative_data_models import NovelAssetBinding, PrivateAssetVersion
+from ..creative_data_models import LibraryChangeRequest, NovelAssetBinding, PrivateAssetVersion
 from ..models import AssetPreset, AssetPresetItem, Novel, PrivateAsset
 from ..novel_lifecycle import lock_active_novel, require_active_novel
 from ..novel_lifecycle_errors import NovelRecycledError
@@ -293,13 +293,14 @@ def update_asset(
     if isinstance(expected_root_version, bool) or expected_root_version <= 0:
         raise PrivateLibraryValidationError("expected_root_version must be positive")
     key = _operation_key(operation_key)
+    normalized_tags = _tags(tags) if tags is not None else None
     operation_hash = canonical_hash(
         {
             "operation": "update",
             "asset_id": asset_id,
             "title": str(title).strip(),
             "content": str(content).strip(),
-            "tags": list(tags) if tags is not None else None,
+            "tags": normalized_tags,
             "metadata": metadata,
             "source": source,
             "rights": rights,
@@ -316,8 +317,10 @@ def update_asset(
             "asset_root_version_conflict", current=_asset_current(asset)
         )
     current = _current_asset_version(session, asset)
-    normalized_tags = (
-        _tags(tags) if tags is not None else deepcopy(asset.tags_json or [])
+    persisted_tags = (
+        normalized_tags
+        if normalized_tags is not None
+        else deepcopy(asset.tags_json or [])
     )
     normalized_content = _asset_content(
         title=title,
@@ -339,7 +342,7 @@ def update_asset(
     asset.title = version.title
     asset.content = version.content
     asset.current_version_id = version.id
-    asset.tags_json = normalized_tags
+    asset.tags_json = persisted_tags
     asset.source_json = deepcopy(version.source_json)
     asset.rights_json = deepcopy(version.rights_json)
     asset.version = int(asset.version) + 1
@@ -495,6 +498,31 @@ def _validate_version_selections(
     return result
 
 
+def _require_library_asset(asset: PrivateAsset) -> None:
+    """Keep legacy presets global; novel-scoped copies are never reusable presets."""
+
+    scope_kind = str(getattr(asset, "scope_kind", None) or "library")
+    scope_novel_id = getattr(asset, "scope_novel_id", None)
+    if scope_kind != "library" or scope_novel_id is not None:
+        raise PrivateLibraryNotFoundError(
+            f"private asset {asset.id} is outside the library scope"
+        )
+
+
+def _require_asset_for_novel(asset: PrivateAsset, novel_id: UUID) -> None:
+    """Allow global material or the exact novel's private copy, never another book."""
+
+    scope_kind = str(getattr(asset, "scope_kind", None) or "library")
+    scope_novel_id = getattr(asset, "scope_novel_id", None)
+    if scope_kind == "library" and scope_novel_id is None:
+        return
+    if scope_kind == "novel" and scope_novel_id == novel_id:
+        return
+    raise PrivateLibraryNotFoundError(
+        f"private asset {asset.id} is outside the selected novel scope"
+    )
+
+
 def replace_preset_items(
     session: Session,
     preset_id: UUID,
@@ -512,7 +540,11 @@ def replace_preset_items(
             "asset_preset_version_conflict",
             current={"preset_id": str(preset.id), "version": int(preset.version)},
         )
-    _validate_version_selections(session, selections, require_active_root=True)
+    pairs = _validate_version_selections(
+        session, selections, require_active_root=True
+    )
+    for asset, _version in pairs.values():
+        _require_library_asset(asset)
     existing = session.scalars(
         select(AssetPresetItem).where(AssetPresetItem.preset_id == preset_id)
     ).all()
@@ -558,6 +590,114 @@ def _binding_current(rows: Sequence[NovelAssetBinding]) -> dict[str, int]:
     return {str(row.asset_id): int(row.version) for row in rows}
 
 
+def _binding_set_hash(
+    novel_id: UUID,
+    expected_binding_versions: dict[UUID, int],
+    selections: Sequence[VersionSelection],
+) -> str:
+    return canonical_hash(
+        {
+            "operation": "replace_novel_bindings",
+            "novel_id": novel_id,
+            "expected_binding_versions": [
+                {"asset_id": asset_id, "version": version}
+                for asset_id, version in sorted(
+                    expected_binding_versions.items(), key=lambda item: str(item[0])
+                )
+            ],
+            "selections": [
+                {
+                    "asset_id": item.asset_id,
+                    "asset_version_id": item.asset_version_id,
+                    "usage_policy": _usage_policy(item.usage_policy).value,
+                    "position": item.position,
+                }
+                for item in sorted(selections, key=lambda value: value.position)
+            ],
+        }
+    )
+
+
+def _binding_operation_hash(
+    set_hash: str,
+    asset_id: UUID,
+    *,
+    state: str,
+    asset_version_id: UUID | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "set_hash": set_hash,
+        "asset_id": asset_id,
+        "state": state,
+    }
+    if asset_version_id is not None:
+        payload["asset_version_id"] = asset_version_id
+    return canonical_hash(payload)
+
+
+def _binding_replay_matches(
+    session: Session,
+    novel_id: UUID,
+    *,
+    operation_key: str,
+    set_hash: str,
+    expected_binding_versions: dict[UUID, int],
+    selections: Sequence[VersionSelection],
+    existing: dict[UUID, NovelAssetBinding],
+) -> bool:
+    """Prove a stale CAS request already established its exact desired state."""
+
+    desired = {selection.asset_id: selection for selection in selections}
+    if len(desired) != len(selections) or set(existing) != set(desired):
+        return False
+    for asset_id, row in existing.items():
+        selection = desired[asset_id]
+        if (
+            row.asset_version_id != selection.asset_version_id
+            or row.usage_policy != _usage_policy(selection.usage_policy).value
+            or int(row.position) != selection.position
+        ):
+            return False
+
+    operation_rows = session.scalars(
+        select(NovelAssetBinding).where(
+            NovelAssetBinding.novel_id == novel_id,
+            NovelAssetBinding.operation_key == operation_key,
+        )
+    ).all()
+    evidence = {
+        (row.asset_id, row.lifecycle_state, row.operation_hash)
+        for row in operation_rows
+    }
+    required: list[tuple[UUID, str, str]] = []
+    for asset_id, row in existing.items():
+        if (
+            asset_id not in expected_binding_versions
+            or int(row.version) != expected_binding_versions[asset_id]
+        ):
+            required.append(
+                (
+                    asset_id,
+                    "active",
+                    _binding_operation_hash(
+                        set_hash,
+                        asset_id,
+                        state="active",
+                        asset_version_id=desired[asset_id].asset_version_id,
+                    ),
+                )
+            )
+    for asset_id in expected_binding_versions.keys() - existing.keys():
+        required.append(
+            (
+                asset_id,
+                "archived",
+                _binding_operation_hash(set_hash, asset_id, state="archived"),
+            )
+        )
+    return bool(required) and all(item in evidence for item in required)
+
+
 def replace_novel_bindings(
     session: Session,
     novel_id: UUID,
@@ -582,31 +722,51 @@ def replace_novel_bindings(
     _lock_novel(session, novel_id)
     existing_rows = _active_bindings(session, novel_id)
     existing = {row.asset_id: row for row in existing_rows}
+    desired = {selection.asset_id: selection for selection in selections}
+
+    # Archiving a reusable root deliberately does not break books that already
+    # pin one of its immutable versions. A set replacement may therefore carry
+    # an archived binding forward unchanged while adding or removing other
+    # assets. It must not create, upgrade, reorder or repurpose a binding to an
+    # archived root.
+    pairs = _validate_version_selections(
+        session, selections, require_active_root=False
+    )
+    for asset_id, (asset, _version) in pairs.items():
+        _require_asset_for_novel(asset, novel_id)
+        if not asset.archived:
+            continue
+        row = existing.get(asset_id)
+        selection = desired[asset_id]
+        if row is None or not (
+            row.asset_version_id == selection.asset_version_id
+            and row.usage_policy == _usage_policy(selection.usage_policy).value
+            and int(row.position) == selection.position
+        ):
+            raise PrivateLibraryNotFoundError(
+                f"private asset {asset_id} not found"
+            )
+    global_hash = _binding_set_hash(
+        novel_id, expected_binding_versions, selections
+    )
     if expected_binding_versions != {
         asset_id: int(row.version) for asset_id, row in existing.items()
     }:
-        raise PrivateLibraryConflictError(
-            "novel_asset_bindings_conflict", current=_binding_current(existing_rows)
+        if not _binding_replay_matches(
+            session,
+            novel_id,
+            operation_key=key,
+            set_hash=global_hash,
+            expected_binding_versions=expected_binding_versions,
+            selections=selections,
+            existing=existing,
+        ):
+            raise PrivateLibraryConflictError(
+                "novel_asset_bindings_conflict", current=_binding_current(existing_rows)
+            )
+        return BindingSetResult(
+            tuple(_binding_views_from_rows(existing_rows, pairs)), False
         )
-    pairs = _validate_version_selections(
-        session, selections, require_active_root=True
-    )
-    desired = {selection.asset_id: selection for selection in selections}
-    global_hash = canonical_hash(
-        {
-            "operation": "replace_novel_bindings",
-            "novel_id": novel_id,
-            "selections": [
-                {
-                    "asset_id": item.asset_id,
-                    "asset_version_id": item.asset_version_id,
-                    "usage_policy": _usage_policy(item.usage_policy).value,
-                    "position": item.position,
-                }
-                for item in sorted(selections, key=lambda value: value.position)
-            ],
-        }
-    )
     changed_rows: list[NovelAssetBinding] = []
     removed_rows: list[NovelAssetBinding] = []
     unchanged_rows: list[NovelAssetBinding] = []
@@ -634,8 +794,8 @@ def replace_novel_bindings(
         row.lifecycle_state = "archived"
         row.version = int(row.version) + 1
         row.operation_key = key
-        row.operation_hash = canonical_hash(
-            {"set_hash": global_hash, "asset_id": row.asset_id, "state": "archived"}
+        row.operation_hash = _binding_operation_hash(
+            global_hash, row.asset_id, state="archived"
         )
         row.updated_at = now
     if changed_rows or removed_rows:
@@ -661,13 +821,11 @@ def replace_novel_bindings(
         row.position = selection.position
         row.lifecycle_state = "active"
         row.operation_key = key
-        row.operation_hash = canonical_hash(
-            {
-                "set_hash": global_hash,
-                "asset_id": asset_id,
-                "asset_version_id": selection.asset_version_id,
-                "state": "active",
-            }
+        row.operation_hash = _binding_operation_hash(
+            global_hash,
+            asset_id,
+            state="active",
+            asset_version_id=selection.asset_version_id,
         )
         row.updated_at = now
         active_rows.append(row)
@@ -733,7 +891,212 @@ def list_novel_bindings(session: Session, novel_id: UUID) -> list[BindingView]:
     pairs = _validate_version_selections(
         session, selections, require_active_root=False
     )
+    for asset, _version in pairs.values():
+        _require_asset_for_novel(asset, novel_id)
     return _binding_views_from_rows(rows, pairs)
+
+
+def set_novel_asset_enabled(
+    session: Session,
+    *,
+    novel_id: UUID,
+    asset_id: UUID,
+    expected_binding_version: int,
+    enabled: bool,
+    operation_key: str,
+) -> None:
+    """Toggle one binding with a durable UI receipt in the caller's transaction."""
+    key = _operation_key(operation_key)
+    if type(expected_binding_version) is not int or expected_binding_version < 0:
+        raise PrivateLibraryValidationError("binding version must be non-negative")
+    if not isinstance(enabled, bool):
+        raise PrivateLibraryValidationError("enabled must be boolean")
+    _lock_novel(session, novel_id)
+    asset = _lock_asset(session, asset_id)
+    _require_asset_for_novel(asset, novel_id)
+    command = {
+        "operation": "set_novel_asset_enabled", "novel_id": novel_id,
+        "asset_id": asset_id, "expected_binding_version": expected_binding_version,
+        "enabled": enabled,
+    }
+    operation_hash = canonical_hash(command)
+    receipt_key = "binding-toggle:" + canonical_hash({"novel_id": novel_id, "operation_key": key})
+    ui_session_id = f"private-library-ui:{novel_id}"
+    prior = session.scalar(select(LibraryChangeRequest).where(
+        LibraryChangeRequest.idempotency_key == receipt_key,
+    ))
+    if prior is not None:
+        if (
+            prior.scope_kind != "novel" or prior.scope_novel_id != novel_id
+            or prior.session_id != ui_session_id or prior.content_hash != operation_hash
+            or prior.state != "applied"
+            or (prior.source_json or {}).get("channel") != "structured_author_ui"
+        ):
+            raise PrivateLibraryIdempotencyConflict(key)
+        # The receipt outlives changes to mutable binding rows. Return without
+        # reapplying an old intent over a later author's enable/disable choice.
+        return
+    views = list_novel_bindings(session, novel_id)
+    current = next((item for item in views if item.asset.id == asset_id), None)
+    actual_version = int(current.binding.version) if current is not None else 0
+    if actual_version != expected_binding_version:
+        raise PrivateLibraryConflictError("novel_asset_binding_conflict", current={
+            "asset_id": str(asset_id), "binding_version": actual_version,
+        })
+    current_enabled = current is not None and current.binding.usage_policy != "prohibited"
+    if enabled and not current_enabled and (asset.archived or asset.current_version_id is None):
+        raise PrivateLibraryValidationError("已归档资料不能新增启用，请先恢复归档。")
+    before_target = None if current is None else {
+        "asset_id": str(current.asset.id), "asset_version_id": str(current.asset_version.id),
+        "usage_policy": str(current.binding.usage_policy),
+        "binding_version": int(current.binding.version), "position": int(current.binding.position),
+        "enabled": current_enabled,
+    }
+    expected_versions = {item.asset.id: int(item.binding.version) for item in views}
+    selections = [VersionSelection(
+        asset_id=item.asset.id, asset_version_id=item.asset_version.id,
+        usage_policy=UsagePolicy(item.binding.usage_policy), position=int(item.binding.position),
+    ) for item in views if item.asset.id != asset_id or enabled == current_enabled]
+    if enabled and not current_enabled:
+        selections.append(VersionSelection(
+            asset_id=asset.id, asset_version_id=asset.current_version_id,
+            usage_policy=UsagePolicy.PREFERRED,
+            position=int(current.binding.position) if current else max((item.position for item in selections), default=-1) + 1,
+        ))
+    result = replace_novel_bindings(
+        session, novel_id,
+        expected_binding_versions=expected_versions,
+        selections=tuple(selections), operation_key=key,
+    )
+    after = next((item for item in result.bindings if item.asset.id == asset_id), None)
+    after_target = None if after is None else {
+        "asset_id": str(after.asset.id), "asset_version_id": str(after.asset_version.id),
+        "usage_policy": str(after.binding.usage_policy),
+        "binding_version": int(after.binding.version), "position": int(after.binding.position),
+        "enabled": after.binding.usage_policy != "prohibited",
+    }
+    now = _now()
+    session.add(LibraryChangeRequest(
+        id=uuid4(), request_id=uuid4(), scope_kind="novel", scope_novel_id=novel_id,
+        session_id=ui_session_id,
+        # This hashes the structured author action, not invented chat text.
+        author_text_hash=operation_hash, content_hash=operation_hash,
+        idempotency_key=receipt_key, state="applied", version=1,
+        source_json={
+            "channel": "structured_author_ui", "schema_version": "library-binding-toggle/1",
+            "operation_key": key, "author_hash_kind": "structured_command",
+            "_maintenance": {"requires_review": False, "intent": "direct"},
+            "command": {**command, "novel_id": str(novel_id), "asset_id": str(asset_id)},
+        },
+        actions_json=[{
+            "operation": "set_novel_binding", "payload": {
+                "expected_binding_versions": {str(k): v for k, v in expected_versions.items()},
+                "selections": [{
+                    "asset_id": str(item.asset_id), "asset_version_id": str(item.asset_version_id),
+                    "usage_policy": item.usage_policy.value, "position": item.position,
+                } for item in selections],
+            },
+        }],
+        result_json={
+            "schema_version": "library-binding-toggle/1", "asset_id": str(asset_id),
+            "before": before_target, "after": after_target, "changed": bool(result.changed),
+            "counts": {"changed": int(result.changed), "unchanged": int(not result.changed), "unsupported": 0},
+            "undo_actions": [],
+        },
+        undo_of_id=None, applied_at=now, created_at=now, updated_at=now,
+    ))
+    session.flush()
+
+
+def list_preset_views(session: Session) -> list[dict[str, Any]]:
+    """Expose legacy combinations as read-only, fixed-version selections."""
+
+    presets = session.scalars(
+        select(AssetPreset)
+        .where(AssetPreset.archived.is_(False))
+        .order_by(AssetPreset.created_at, AssetPreset.id)
+    ).all()
+    result: list[dict[str, Any]] = []
+    for preset in presets:
+        items = session.scalars(
+            select(AssetPresetItem)
+            .where(AssetPresetItem.preset_id == preset.id)
+            .order_by(AssetPresetItem.position, AssetPresetItem.id)
+        ).all()
+        payload_items: list[dict[str, Any]] = []
+        for item in items:
+            asset = session.get(PrivateAsset, item.asset_id)
+            version = session.get(PrivateAssetVersion, item.asset_version_id)
+            if asset is None or version is None or version.asset_id != item.asset_id:
+                raise PrivateLibraryConflictError(
+                    "asset_preset_item_version_missing",
+                    current={"preset_id": str(preset.id), "item_id": str(item.id)},
+                )
+            _require_library_asset(asset)
+            payload_items.append({
+                "asset_id": str(asset.id),
+                "asset_version_id": str(version.id),
+                "version_number": int(version.version_number),
+                "asset_type": asset.asset_type,
+                "title": version.title,
+                "usage_policy": item.usage_policy,
+                "position": int(item.position),
+                "archived": bool(asset.archived),
+                "update_available": asset.current_version_id != version.id,
+            })
+        result.append({
+            "id": str(preset.id),
+            "title": preset.title,
+            "description": preset.description,
+            "version": int(preset.version),
+            "items": payload_items,
+        })
+    return result
+
+
+def apply_preset_to_novel(
+    session: Session,
+    novel_id: UUID,
+    preset_id: UUID,
+    *,
+    operation_key: str,
+) -> BindingSetResult:
+    """Add one legacy combination to a novel while pinning every exact version."""
+
+    preset = _lock_preset(session, preset_id)
+    items = session.scalars(
+        select(AssetPresetItem)
+        .where(AssetPresetItem.preset_id == preset.id)
+        .order_by(AssetPresetItem.position, AssetPresetItem.id)
+    ).all()
+    existing = list_novel_bindings(session, novel_id)
+    preset_asset_ids = {item.asset_id for item in items}
+    selections: list[VersionSelection] = []
+    for item in items:
+        selections.append(VersionSelection(
+            asset_id=item.asset_id,
+            asset_version_id=item.asset_version_id,
+            usage_policy=UsagePolicy(item.usage_policy),
+            position=len(selections),
+        ))
+    for view in existing:
+        if view.asset.id in preset_asset_ids:
+            continue
+        selections.append(VersionSelection(
+            asset_id=view.asset.id,
+            asset_version_id=view.asset_version.id,
+            usage_policy=UsagePolicy(view.binding.usage_policy),
+            position=len(selections),
+        ))
+    return replace_novel_bindings(
+        session,
+        novel_id,
+        expected_binding_versions={
+            view.asset.id: int(view.binding.version) for view in existing
+        },
+        selections=tuple(selections),
+        operation_key=operation_key,
+    )
 
 
 def _snapshot_item(
@@ -829,6 +1192,7 @@ def build_generation_asset_snapshot(
             selection.asset_version_id,
             require_active_root=True,
         )
+        _require_asset_for_novel(asset, novel_id)
         snapshot.append(
             _snapshot_item(
                 asset=asset,
@@ -861,6 +1225,7 @@ def build_generation_asset_snapshot(
                 item.asset_version_id,
                 require_active_root=False,
             )
+            _require_library_asset(asset)
             snapshot.append(
                 _snapshot_item(
                     asset=asset,

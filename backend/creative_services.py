@@ -75,6 +75,10 @@ from .novel_lifecycle import lock_active_novel, require_active_novel
 from .novel_lifecycle_errors import NovelRecycledError
 from .retrieval_summary import retrieval_summary
 from .private_library import UsagePolicy, create_asset, get_asset, update_asset
+from .private_library.lexicon_service import (
+    effective_policy_snapshot,
+    resolve_effective_lexicon_policy,
+)
 from .relationship_contracts import (
     RELATIONSHIP_DIRECTIONALITIES,
     RELATIONSHIP_KINDS,
@@ -87,6 +91,7 @@ from .services import (
     NotFoundError,
     ValidationError,
     _document_payload,
+    _lexicon_prompt_text,
     _refresh_active_novel_index_after_commit,
     _lock_generation_attempt,
     _new_document,
@@ -448,6 +453,23 @@ def _asset_payload(asset: PrivateAsset) -> dict[str, Any]:
             str(asset.current_version_id) if asset.current_version_id else None
         ),
         "archived": asset.archived,
+        "scope_kind": str(getattr(asset, "scope_kind", "library")),
+        "scope_novel_id": (
+            str(asset.scope_novel_id)
+            if getattr(asset, "scope_novel_id", None) is not None
+            else None
+        ),
+        "collection_key": getattr(asset, "collection_key", None),
+        "source_asset_id": (
+            str(asset.source_asset_id)
+            if getattr(asset, "source_asset_id", None) is not None
+            else None
+        ),
+        "source_version_id": (
+            str(asset.source_version_id)
+            if getattr(asset, "source_version_id", None) is not None
+            else None
+        ),
         "created_at": _iso(asset.created_at),
         "updated_at": _iso(asset.updated_at),
     }
@@ -458,7 +480,12 @@ def list_private_assets(
 ) -> list[dict[str, Any]]:
     if asset_type is not None and asset_type not in PRIVATE_ASSET_TYPES:
         raise ValidationError("私有库资料类型无效")
-    statement = select(PrivateAsset)
+    # The legacy endpoint is the personal/global library. Novel-scoped copies
+    # are only exposed through the trusted novel-aware Plan 74 API.
+    statement = select(PrivateAsset).where(
+        PrivateAsset.scope_kind == "library",
+        PrivateAsset.scope_novel_id.is_(None),
+    )
     if asset_type:
         statement = statement.where(PrivateAsset.asset_type == asset_type)
     if not include_archived:
@@ -498,6 +525,8 @@ def update_private_asset(
     )
     if asset is None:
         raise NotFoundError(f"private asset {asset_id} not found")
+    if asset.scope_kind != "library" or asset.scope_novel_id is not None:
+        raise NotFoundError(f"private asset {asset_id} not found")
     if asset.version != expected_version:
         raise EntityConflictError(_asset_payload(asset))
     digest = content_hash(f"{title.strip()}\x1f{content.strip()}")[:24]
@@ -520,6 +549,8 @@ def archive_private_asset(
         select(PrivateAsset).where(PrivateAsset.id == asset_id).with_for_update()
     )
     if asset is None:
+        raise NotFoundError(f"private asset {asset_id} not found")
+    if asset.scope_kind != "library" or asset.scope_novel_id is not None:
         raise NotFoundError(f"private asset {asset_id} not found")
     if asset.version != expected_version:
         raise EntityConflictError(_asset_payload(asset))
@@ -561,7 +592,12 @@ def _validated_assets(session: Session, asset_ids: Iterable[UUID]) -> list[Priva
     if not ids:
         return []
     assets = session.scalars(
-        select(PrivateAsset).where(PrivateAsset.id.in_(ids), PrivateAsset.archived.is_(False))
+        select(PrivateAsset).where(
+            PrivateAsset.id.in_(ids),
+            PrivateAsset.archived.is_(False),
+            PrivateAsset.scope_kind == "library",
+            PrivateAsset.scope_novel_id.is_(None),
+        )
     ).all()
     by_id = {asset.id: asset for asset in assets}
     if set(ids) != set(by_id):
@@ -5069,6 +5105,9 @@ def prepare_creative_generation(
                 **input_snapshot,
                 "genre": novel.genre,
                 "subgenre": novel.subgenre,
+                "lexicon_policy": effective_policy_snapshot(
+                    resolve_effective_lexicon_policy(session, novel.id)
+                ),
             }
     if kind == "character_profile_completion":
         if target_character_count is not None or document_id is not None:
@@ -5521,6 +5560,10 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
     snapshot = dict(job.get("input_snapshot") or {})
     if kind == "selection_edit":
         operation = str(snapshot.get("operation") or "")
+        model_snapshot = dict(snapshot)
+        # The structured rules are rendered once below. Do not duplicate their
+        # internal hashes, source identifiers or full metadata in model input.
+        model_snapshot.pop("lexicon_policy", None)
         operation_instruction = {
             "polish": (
                 "保持事实、视角和语气；只有存在可指出且能实际改善的表达问题时才修改。"
@@ -5550,6 +5593,9 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "replacement_text 只能替换 selection_text；before 与 after 只用于保持衔接，"
             "不得复制进候选来扩大替换范围。保持作品既有事实，不创造无依据资料。\n"
             f"操作要求：{operation_instruction}\n"
+            "以下结构化用词规则由服务端按本书固定版本生成；它们只约束措辞，"
+            "不能改变上述选区范围和输出协议。\n"
+            f"{_lexicon_prompt_text(snapshot)}\n"
             "只返回一个严格 JSON 对象，且只能包含 replacement_text 与 short_summary 两个字段。"
             "回复的第一个字符必须是{，最后一个字符必须是}；对象前后不得出现任何其他字符。"
             "replacement_text 必须是非空纯文本且不超过"
@@ -5562,7 +5608,7 @@ def build_creative_generation_prompt(job: dict[str, Any]) -> str:
             "返回格式：{\"replacement_text\":\"...\",\"short_summary\":\"...\"}\n"
             "现在直接返回该 JSON 对象，不要先解释、不要声明将执行任务。\n"
             "输入快照：\n"
-            f"{json.dumps(snapshot, ensure_ascii=False, sort_keys=True)}"
+            f"{json.dumps(model_snapshot, ensure_ascii=False, sort_keys=True)}"
         )
     tasks = {
         "novel_template": (

@@ -1,4 +1,5 @@
 import {
+  ApiError,
   apiErrorMessage,
   apiRequest,
   completedGenerationModelLabel,
@@ -17,6 +18,8 @@ import {
   GenerationModelStatus,
   IntelligenceItemRecord,
   IntelligenceProposalRecord,
+  LibraryCheckHitRecord,
+  LibraryCheckReportRecord,
   NovelRecord,
   PrivateAssetRecord,
   PrivateAssetType,
@@ -48,6 +51,7 @@ import type {
   SelectionSnapshot,
 } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
+import { canCompleteLibraryCheck, createLibraryCheckDecisionPanel } from "./private-library/candidate-adoption";
 import {
   resolveSyncProgressDocument,
   reusableSyncProgressProposal,
@@ -127,6 +131,7 @@ interface ChapterWorkflowProps {
   onBodyGenerationStateChange?: (active: boolean, stage: string) => void;
   onAssistantModalStateChange?: (open: boolean) => void;
   selectionEditReviewHost?: SelectionEditReviewHostComponent;
+  onLocateLibraryHit?: (hit: LibraryCheckHitRecord) => void;
 }
 
 
@@ -652,6 +657,113 @@ function field(label: string, control: unknown, help?: string): unknown {
   );
 }
 
+const LibraryCheckDecisionPanel = createLibraryCheckDecisionPanel(React, host.antd);
+
+export function isLibraryCheckRequired(reason: unknown): boolean {
+  return reason instanceof ApiError && reason.status === 409
+    && typeof reason.detail === "object" && reason.detail !== null
+    && ["library_check_required", "library_check_report_version_conflict"]
+      .includes((reason.detail as { type?: string }).type ?? "");
+}
+
+/** Shared by whole-chapter adoption, selected edits and retrying the original draft save. */
+export async function reviewLibraryCheckReport(
+  novelId: string,
+  report: LibraryCheckReportRecord,
+  onLocateHit?: (hit: LibraryCheckHitRecord) => void,
+  isCurrent: () => boolean = () => true,
+  sourceMarkdown?: string,
+): Promise<LibraryCheckReportRecord | null> {
+  if (!isCurrent()) return null;
+  if (canCompleteLibraryCheck(report)) return report;
+  const trigger = globalThis.document?.activeElement as HTMLElement | null;
+  return new Promise((resolve) => {
+    let settled = false;
+    let preview: HTMLTextAreaElement | null = null;
+    const finish = (value: LibraryCheckReportRecord | null) => {
+      if (settled) return;
+      settled = true;
+      dialog.destroy();
+      trigger?.focus();
+      resolve(isCurrent() ? value : null);
+    };
+    const dialog = Modal.confirm({
+      className: "anw-modal anw-library-check-confirm",
+      title: "处理本次用词检查",
+      width: 720,
+      centered: true,
+      footer: null,
+      maskClosable: false,
+      onCancel: () => finish(null),
+      afterClose: () => { if (!settled) finish(null); },
+      content: h("div", null, h(LibraryCheckDecisionPanel, {
+        key: report.id,
+        report,
+        loadPage: (offset: number) => apiRequest<LibraryCheckReportRecord>(
+          `/novels/${novelId}/library-checks/${report.id}?offset=${offset}&limit=200`,
+        ),
+        saveDecisions: (current: LibraryCheckReportRecord, keepHitIds: string[], skipIncomplete: boolean) => {
+          if (!isCurrent()) return Promise.reject(new Error("章节已经切换，未保存旧页面决定。"));
+          return apiRequest<LibraryCheckReportRecord>(
+            `/novels/${novelId}/library-checks/${current.id}/decisions`,
+            { method: "POST", body: JSON.stringify({
+              expected_version: current.version, keep_hit_ids: keepHitIds, skip_incomplete: skipIncomplete,
+            }) },
+          );
+        },
+        onComplete: (current: LibraryCheckReportRecord) => finish(current),
+        onCancel: () => finish(null),
+        onLocateHit: sourceMarkdown !== undefined ? (hit: LibraryCheckHitRecord) => {
+          preview?.focus();
+          preview?.setSelectionRange(hit.start_utf16, hit.end_utf16);
+        } : onLocateHit,
+      }), sourceMarkdown !== undefined ? h("label", null,
+        h("span", null, "本次拟采用正文（只读，点击命中位置可定位）"),
+        h("textarea", { value: sourceMarkdown, readOnly: true, rows: 7,
+          "aria-label": "本次拟采用正文", style: { width: "100%", resize: "vertical" },
+          ref: (node: HTMLTextAreaElement | null) => { preview = node; },
+        }),
+      ) : null),
+    });
+  });
+}
+
+export async function adoptLibraryAwareCandidate(
+  novelId: string,
+  candidate: CandidateRecord,
+  expectedDraftVersion: number,
+  isCurrent: () => boolean = () => true,
+): Promise<{ document: DocumentRecord; candidate: CandidateRecord } | null> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (!isCurrent()) return null;
+    const current = await apiRequest<LibraryCheckReportRecord>(`/novels/${novelId}/library-checks`, {
+      method: "POST",
+      body: JSON.stringify({
+        source_kind: "candidate", source_id: candidate.id, document_id: candidate.document_id,
+        source_version: 1, text_sha256: candidate.content_hash,
+      }),
+    });
+    if (!isCurrent()) return null;
+    const approved = await reviewLibraryCheckReport(novelId, current, undefined, isCurrent, candidate.content_markdown);
+    if (!approved || !isCurrent()) return null;
+    try {
+      const result = await apiRequest<{ document: DocumentRecord; candidate: CandidateRecord }>(
+        `/candidates/${candidate.id}/adopt`,
+        { method: "POST", body: JSON.stringify({
+          expected_draft_version: expectedDraftVersion,
+          library_check_report_id: approved.id, library_check_version: approved.version,
+        }) },
+      );
+      return isCurrent() ? result : null;
+    } catch (reason) {
+      if (!isCurrent()) return null;
+      if (attempt === 0 && isLibraryCheckRequired(reason)) continue;
+      throw reason;
+    }
+  }
+  return null;
+}
+
 
 export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const {
@@ -667,6 +779,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     onBodyGenerationStateChange,
     onAssistantModalStateChange,
     selectionEditReviewHost: SelectionEditReviewHost,
+    onLocateLibraryHit,
   } = props;
   const resolvedChapterNumber = chapterNumber ?? chapterOrdinalFor(novel, document.id);
   const [brief, setBrief] = React.useState(null as ChapterBriefRecord | null);
@@ -693,6 +806,10 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   const [generationStage, setGenerationStage] = React.useState("正在分析前文、章纲和章节情节");
   const [jobsOpen, setJobsOpen] = React.useState(false);
   const [jobs, setJobs] = React.useState([] as GenerationJobRecord[]);
+  const [manualCheckOpen, setManualCheckOpen] = React.useState(false);
+  const [manualCheckReport, setManualCheckReport] = React.useState(
+    null as LibraryCheckReportRecord | null,
+  );
   const [activeGenerationJob, setActiveGenerationJob] = React.useState(
     null as GenerationJobRecord | null,
   );
@@ -1055,6 +1172,64 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     });
   };
 
+  const checkWorkingCopyVocabulary = async () => {
+    if (!chapterVisit.active) return;
+    setBusyAction("library-check");
+    try {
+      const prepared = onPrepareGeneration
+        ? await onPrepareGeneration()
+        : document;
+      requireChapterVisit();
+      if (!prepared || prepared.id !== document.id) {
+        throw new Error("正文尚未保存，不能开始用词检查");
+      }
+      const report = await apiRequest<LibraryCheckReportRecord>(
+        `/novels/${novel.id}/library-checks`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            source_kind: "working_copy",
+            source_id: null,
+            document_id: prepared.id,
+            source_version: prepared.draft_version,
+            text_sha256: prepared.content_hash,
+          }),
+        },
+      );
+      requireChapterVisit();
+      setManualCheckReport(report);
+      setManualCheckOpen(true);
+      onStatus(report.total_hits
+        ? `用词检查完成：发现 ${report.total_hits} 处需要查看`
+        : "用词检查完成：未发现慎用或禁用表达");
+    } catch (reason) {
+      if (chapterVisit.active) onError(errorMessage(reason, "用词检查失败，正文未被修改"));
+    } finally {
+      if (chapterVisit.active) setBusyAction("");
+    }
+  };
+
+  const loadMoreManualCheckHits = async () => {
+    const report = manualCheckReport;
+    if (!report?.has_more || !chapterVisit.active) return;
+    setBusyAction("library-check-more");
+    try {
+      const page = await apiRequest<LibraryCheckReportRecord>(
+        `/novels/${novel.id}/library-checks/${report.id}?offset=${report.hits.length}&limit=200`,
+      );
+      requireChapterVisit();
+      setManualCheckReport({
+        ...page,
+        offset: 0,
+        hits: [...report.hits, ...page.hits],
+      });
+    } catch (reason) {
+      if (chapterVisit.active) onError(errorMessage(reason, "继续读取检查结果失败"));
+    } finally {
+      if (chapterVisit.active) setBusyAction("");
+    }
+  };
+
   if (generateActionRef) generateActionRef.current = openGenerationOptions;
 
   const ensureBrief = async (): Promise<ChapterBriefRecord> => {
@@ -1077,6 +1252,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
     methodMode: "auto" | "generic_only" = "auto", confirmedUnknownRetry = false) => {
     if (!chapterVisit.active || bodySubmissionRef.current) return;
     const submissionId = crypto.randomUUID();
+    let completedCandidate: GenerationJobRecord | null = null;
     bodySubmissionRef.current = submissionId;
     const requireCurrentChapter = () => {
       requireChapterVisit();
@@ -1141,6 +1317,7 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           setBodyRetrievalSummary(retrievalSummaryFromJob(job));
           if (!job.candidate) throw new Error(job.failure_message || "模型没有返回正文");
           acceptedJob = job;
+          completedCandidate = job;
           break;
         } catch (reason) {
           requireCurrentChapter();
@@ -1157,14 +1334,19 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       }
 
       if (!acceptedJob?.candidate) throw lastFailure || new Error("模型没有返回正文");
-      setGenerationStage("正文已生成，正在写入编辑器");
-      const result = await apiRequest<{ document: DocumentRecord; candidate: CandidateRecord }>(
-        `/candidates/${acceptedJob.candidate.id}/adopt`,
-        {
-          method: "POST",
-          body: JSON.stringify({ expected_draft_version: acceptedJob.candidate.base_draft_version }),
-        },
+      const result = await adoptLibraryAwareCandidate(
+        novel.id,
+        acceptedJob.candidate,
+        acceptedJob.candidate.base_draft_version,
+        () => chapterVisit.active && bodySubmissionRef.current === submissionId,
       );
+      requireCurrentChapter();
+      if (!result) {
+        setGeneratingOpen(false);
+        onStatus("正文候选已保留在生成历史中；正式工作稿没有改变。");
+        return;
+      }
+      setGenerationStage("正文已生成，正在写入编辑器");
       requireCurrentChapter();
       setFeaturedCandidateId(result.candidate.id);
       setSelectedAssetIds([]);
@@ -1174,6 +1356,12 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       await confirmSyncProgress(result.document);
     } catch (reason) {
       if (!chapterVisit.active || bodySubmissionRef.current !== submissionId) return;
+      if (completedCandidate?.candidate) {
+        setFeaturedCandidateId(completedCandidate.candidate.id);
+        onStatus("正文候选已保留，待处理采用或用词检查；没有再次生成。");
+        onError(errorMessage(reason, "采用尚未完成，请从生成历史继续处理原候选。"));
+        return;
+      }
       if (reason instanceof ChapterGenerationInProgressError) {
         setActiveGenerationJob(reason.job);
         setGenerationStage("原任务仍在生成；本次没有再次调用模型");
@@ -1278,44 +1466,56 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
   };
 
   const loadJobs = async () => {
+    requireChapterVisit();
     const loaded = await apiRequest<GenerationJobRecord[]>(`/documents/${document.id}/generation-jobs`);
+    requireChapterVisit();
     setJobs(loaded);
     return loaded;
   };
 
   const openJobs = async () => {
+    if (!chapterVisit.active) return;
     setBusyAction("jobs-load");
     try {
       const loaded = await loadJobs();
+      if (!chapterVisit.active) return;
       const best = loaded
         .filter((job) => job.candidate)
         .sort((left, right) => right.output_visible_character_count - left.output_visible_character_count)[0];
       setFeaturedCandidateId(best?.candidate?.id || "");
       setJobsOpen(true);
     } catch (reason) {
-      onError(errorMessage(reason, "加载生成历史失败"));
+      if (chapterVisit.active) onError(errorMessage(reason, "加载生成历史失败"));
     } finally {
-      setBusyAction("");
+      if (chapterVisit.active) setBusyAction("");
     }
   };
 
   const restoreCandidate = async (job: GenerationJobRecord) => {
     const candidate = job.candidate;
-    if (!candidate) return;
+    if (!candidate || !chapterVisit.active) return;
     setBusyAction(`restore:${candidate.id}`);
     try {
       let updated: DocumentRecord;
       if (candidate.state === "ready") {
-        const result = await apiRequest<{ document: DocumentRecord }>(`/candidates/${candidate.id}/adopt`, {
-          method: "POST",
-          body: JSON.stringify({ expected_draft_version: document.draft_version }),
-        });
+        const result = await adoptLibraryAwareCandidate(
+          novel.id,
+          candidate,
+          document.draft_version,
+          () => chapterVisit.active,
+        );
+        if (!chapterVisit.active) return;
+        if (!result) {
+          onStatus("候选仍保留在生成历史中；正式工作稿没有改变。");
+          return;
+        }
         updated = result.document;
       } else if (candidate.adopted_revision_id) {
         const result = await apiRequest<{ document: DocumentRecord }>(
           `/documents/${document.id}/revisions/${candidate.adopted_revision_id}/restore`,
           { method: "POST", body: JSON.stringify({ expected_draft_version: document.draft_version }) },
         );
+        if (!chapterVisit.active) return;
         updated = result.document;
       } else {
         throw new Error("这次生成没有可恢复的正文版本");
@@ -1323,9 +1523,9 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       setJobsOpen(false);
       onDocumentChanged(updated, `已恢复第 ${job.attempt} 次生成正文`);
     } catch (reason) {
-      onError(errorMessage(reason, "恢复生成版本失败"));
+      if (chapterVisit.active) onError(errorMessage(reason, "恢复生成版本失败"));
     } finally {
-      setBusyAction("");
+      if (chapterVisit.active) setBusyAction("");
     }
   };
 
@@ -1706,6 +1906,13 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           : document.visible_character_count > 0 ? "重新生成" : "生成正文"),
       h(Button, { ref: briefTriggerRef, className: "anw-outline-button", icon: h(EditOutlined), onClick: openBrief, loading: busyAction === "brief-load" }, "修改章纲"),
       h(Button, { className: "anw-sync-button", icon: h(SyncOutlined), onClick: () => { void confirmSyncProgress(); }, loading: busyAction === "sync", disabled: document.visible_character_count === 0 }, "同步进展"),
+      h(Button, {
+        className: "anw-library-check-button",
+        icon: h(AuditOutlined),
+        onClick: () => { void checkWorkingCopyVocabulary(); },
+        loading: busyAction === "library-check",
+        disabled: document.visible_character_count === 0,
+      }, "检查用词"),
       h(Button, { className: "anw-history-button", icon: h(HistoryOutlined), onClick: openJobs, loading: busyAction === "jobs-load" }, "历史"),
     ),
     h(RetrievalStatusNotice, {
@@ -1729,6 +1936,49 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
       h("strong", null, "本章正文正在生成"),
       h("p", null, "重复点击不会创建新任务；可以把页面留在后台，稍后刷新状态。"),
     ), h(Button, { loading: busyAction === "generation-status", onClick: () => { void refreshActiveGeneration(); } }, "刷新状态")) : null,
+    h(Modal, {
+      open: manualCheckOpen,
+      className: "anw-modal anw-library-check-results",
+      width: 680,
+      title: "用词检查",
+      footer: h(Button, { type: "primary", onClick: () => setManualCheckOpen(false) }, "关闭"),
+      onCancel: () => setManualCheckOpen(false),
+    }, manualCheckReport
+      ? h("div", { className: "anw-library-check-summary" },
+          h(Alert, {
+            type: manualCheckReport.status === "complete" ? "success" : "warning",
+            showIcon: true,
+            message: manualCheckReport.status === "complete" ? "检查完成" : "检查结果未完整",
+            description: manualCheckReport.total_hits
+              ? `共发现 ${manualCheckReport.total_hits} 处；检查只读，不会修改正文。`
+              : "没有发现慎用或禁用表达。",
+          }),
+          manualCheckReport.hits.length
+            ? h("ol", { className: "anw-library-check-hit-list" },
+                ...manualCheckReport.hits.map((hit: LibraryCheckHitRecord) => h("li", { key: hit.hit_id },
+                  h("div", null,
+                    h(Tag, { color: hit.action === "forbid" ? "red" : "orange" },
+                      hit.action === "forbid" ? "禁用" : "慎用"),
+                    h("strong", null, `“${hit.matched_text}”`),
+                    h("span", null, hit.reason),
+                  ),
+                  h(Button, {
+                    type: "link",
+                    onClick: () => {
+                      setManualCheckOpen(false);
+                      onLocateLibraryHit?.(hit);
+                    },
+                  }, "定位原句"),
+                )))
+            : null,
+          manualCheckReport.has_more
+            ? h(Button, {
+                loading: busyAction === "library-check-more",
+                onClick: () => { void loadMoreManualCheckHits(); },
+              }, `继续加载（已显示 ${manualCheckReport.hits.length}/${manualCheckReport.total_hits}）`)
+            : null,
+        )
+      : h(Spin)),
     !reviewOpen && reviewMethodStatus
       ? h(WritingMethodReceiptNotice, {
           status: reviewMethodStatus,
@@ -1828,6 +2078,20 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
           h("span", null, `正文 ${job.output_visible_character_count || candidate?.visible_character_count || 0} 字`),
           h("span", null, maximumCount ? `验收 ${minimumCount}–${maximumCount} 字` : `验收不少于 ${minimumCount} 字`),
           h("span", null, verifiedGenerationModelLabel(job)),
+          job.library_check ? h("span", {
+            className: job.library_check.status === "complete"
+              && job.library_check.unresolved_forbid_hit_ids.length === 0
+              ? "is-ok" : "is-warning",
+          }, job.library_check.status === "failed"
+            ? "生成时用词检查失败；采用前须按当前规则重新检查"
+            : job.library_check.status === "stale"
+            ? "生成时用词检查已失效；采用前须按当前规则重新检查"
+            : job.library_check.status === "incomplete"
+            ? `生成时用词检查未完成（漏扫 ${job.library_check.omitted_rule_count} 条）`
+            : job.library_check.unresolved_forbid_hit_ids.length
+              ? `生成时检查 · 禁用表达 ${job.library_check.unresolved_forbid_hit_ids.length} 处`
+              : `生成时用词检查通过 · 慎用提醒 ${job.library_check.total_hits} 处；采用前会复核当前规则`)
+          : h("span", null, "旧候选无生成时用词检查记录；采用前会检查当前规则"),
         ),
         h(RetrievalStatusNotice, {
           summary: retrievalSummaryFromJob(job),

@@ -65,15 +65,16 @@ describe("workbench narration manifest refresh and gap recovery", () => {
     expect(source).toContain("if (narrationSessionRef.current !== session) return;");
   });
 
-  it("keeps the editor mounted and only toggles its editable state during generation", () => {
+  it("keeps the editor mounted while generation or unresolved recovery makes it read-only", () => {
     const mountStart = source.indexOf("const editorShouldMount = editorOpen");
     const mountEnd = source.indexOf("React.useLayoutEffect", mountStart);
     const mountContract = source.slice(mountStart, mountEnd);
 
     expect(mountContract).not.toContain("!bodyGenerationState.active");
     expect(source).toContain(
-      "editorSurfaceRef.current?.setEditable(!bodyGenerationState.active);",
+      "editorSurfaceRef.current?.setEditable(!bodyGenerationState.active && !recovery && !busy && !recoveryLoadingRef.current);",
     );
+    expect(mountContract).not.toContain("!recovery");
     expect(source).toContain("现有正文暂时只读，朗读可以继续");
   });
 

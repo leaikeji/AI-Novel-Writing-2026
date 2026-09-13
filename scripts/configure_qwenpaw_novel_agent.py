@@ -24,6 +24,9 @@ TOOLS = [
     "novel_search",
     "novel_get_workspace_context",
     "novel_prepare_selection_edit",
+    "novel_library_query",
+    "novel_library_prepare_change",
+    "novel_library_apply_change",
 ]
 BASE_URL = os.environ.get("QWENPAW_BASE_URL", "http://127.0.0.1:18088").rstrip("/")
 ROOT = Path(__file__).resolve().parents[1]

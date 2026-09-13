@@ -1,3 +1,5 @@
+import type { SelectionLibraryApplication } from "./types";
+
 export type EditableFieldPersistence = "autosave" | "explicit-save";
 export type EditableFieldSelectionDirection = "forward" | "backward" | "none";
 
@@ -30,6 +32,7 @@ export interface AIApplyMeta {
   operation: string;
   sourceValueSha256: string;
   appliedAt: string;
+  libraryApplication?: SelectionLibraryApplication;
 }
 
 

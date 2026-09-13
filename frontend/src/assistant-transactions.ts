@@ -42,6 +42,7 @@ export interface ApplyAIEditInput {
   novelId: string;
   documentId?: string;
   afterSelection?: SelectionRange | null;
+  libraryApplication?: AIApplyMeta["libraryApplication"];
 }
 
 
@@ -159,7 +160,7 @@ export class AIEditTransactionManager {
       return { ok: false, reason: "concurrent-change" };
     }
 
-    const transactionId = this.uuid();
+    const transactionId = input.libraryApplication?.application_id ?? this.uuid();
     const appliedAt = new Date(this.now()).toISOString();
     const beforeSelection = selectionRange(input.adapter.getSelection());
     const meta: AIApplyMeta = {
@@ -170,6 +171,13 @@ export class AIEditTransactionManager {
       operation: input.operation,
       sourceValueSha256: input.sourceValueSha256,
       appliedAt,
+      ...(input.libraryApplication ? {
+        libraryApplication: {
+          ...input.libraryApplication,
+          accepted_segment_ids: input.libraryApplication.accepted_segment_ids
+            ? [...input.libraryApplication.accepted_segment_ids] : input.libraryApplication.accepted_segment_ids,
+        },
+      } : {}),
     };
     let adapterError: unknown;
     try {

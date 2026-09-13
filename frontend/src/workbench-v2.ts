@@ -7,6 +7,8 @@ import {
   mountChapterTitleAssistantScope,
   readAssistantTextSelection,
   restoreAssistantTextSelection,
+  isLibraryCheckRequired,
+  reviewLibraryCheckReport,
   type AssistantTextControl,
   type ChapterBodyAssistantBinding,
   type ChapterFormAssistantBinding,
@@ -28,6 +30,10 @@ import {
   loadRecoveryDraft,
   RecoveryDraft,
   saveRecoveryDraft,
+  acknowledgePendingLibrarySave,
+  replaceRecoveryDraftIfCurrent,
+  samePendingLibrarySave,
+  type PendingLibrarySave,
 } from "./recovery";
 import {
   shouldApplyLifecycleNotice,
@@ -44,6 +50,8 @@ import { workbenchStore } from "./store";
 import {
   DocumentRecord,
   GenerationModelStatus,
+  LibraryCheckHitRecord,
+  LibraryCheckReportRecord,
   NovelCharacterRecord,
   NovelMetadataRecord,
   NovelRecord,
@@ -518,6 +526,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   } | null);
   const [conflict, setConflict] = React.useState(null as DocumentRecord | null);
   const [recovery, setRecovery] = React.useState(null as RecoveryDraft | null);
+  const [librarySaveIssue, setLibrarySaveIssue] = React.useState("");
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [saveVolumeOpen, setSaveVolumeOpen] = React.useState(false);
   const [titleEditOpen, setTitleEditOpen] = React.useState(false);
@@ -539,6 +548,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const documentRef = React.useRef(null as DocumentRecord | null);
   const contentRef = React.useRef("");
   const recoveryDraftRef = React.useRef(null as RecoveryDraft | null);
+  // A discovered recovery is not an active save intent until the author chooses it.
+  const recoveryChoiceRef = React.useRef(null as RecoveryDraft | null);
+  const recoveryLoadingRef = React.useRef(false);
+  const recoveryWriteRef = React.useRef(Promise.resolve() as Promise<void>);
+  const pendingLibraryInFlightRef = React.useRef(null as string | null);
+  const librarySavePausedRef = React.useRef(false);
   const documentGenerationRef = React.useRef(0);
   const novelGenerationRef = React.useRef(0);
   const lifecycleVersionRef = React.useRef(0);
@@ -626,6 +641,15 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   const assistantPageLocationFingerprintRef = React.useRef("");
   const chapterGenerateActionRef = React.useRef(null as (() => void) | null);
 
+  const writeLocalRecovery = React.useCallback((draft: RecoveryDraft): Promise<void> => {
+    const write = recoveryWriteRef.current.catch(() => undefined).then(() => saveRecoveryDraft(draft));
+    recoveryWriteRef.current = write;
+    void write.catch(() => {
+      if (documentRef.current?.id === draft.documentId) setSaveState("本地恢复稿写入失败，请先复制正文留存");
+    });
+    return write;
+  }, []);
+
   const publishBookNarrationState = React.useCallback((next: BookNarrationQueueState | null) => {
     bookNarrationRef.current = next;
     setBookNarrationState(next);
@@ -649,9 +673,12 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         activeDocument.draft_version,
         contentRef.current,
         activeDocument.content_hash,
+        Date.now(),
+        recoveryDraftRef.current?.documentId === activeDocument.id
+          ? recoveryDraftRef.current.pendingLibrarySave : undefined,
       );
       recoveryDraftRef.current = draft;
-      void saveRecoveryDraft(draft).catch(() => undefined);
+      void writeLocalRecovery(draft).catch(() => undefined);
     }
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -822,8 +849,13 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       activeGeneration: documentGenerationRef.current,
       surfaceLease: editorSurfaceRef.current?.bridge.lease ?? null,
     })) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
     const generation = documentGenerationRef.current + 1;
     documentGenerationRef.current = generation;
+    recoveryLoadingRef.current = true;
+    recoveryChoiceRef.current = null;
+    setRecovery(null);
     narrationActionAbortRef.current?.abort("chapter switched");
     narrationActionAbortRef.current = null;
     failedSegmentRetryControllerRef.current?.reset("chapter switched");
@@ -864,6 +896,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       setBodyGenerationState({ active: false, stage: "" });
       setError("");
       setConflict(null);
+      setLibrarySaveIssue("");
+      librarySavePausedRef.current = false;
       setEditorOpen(true);
       setSaveState("已保存");
       workbenchStore.getState().select(loaded.novel_id, loaded.id);
@@ -873,8 +907,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         documentGenerationRef.current !== generation
         || documentRef.current?.id !== loaded.id
       ) return;
-      if (local && local.contentMarkdown !== loaded.content_markdown) {
-        recoveryDraftRef.current = local;
+      recoveryLoadingRef.current = false;
+      if (local && (local.contentMarkdown !== loaded.content_markdown || local.pendingLibrarySave)) {
+        recoveryChoiceRef.current = local;
         setRecovery(local);
         setSaveState("发现未同步本地草稿");
       } else {
@@ -886,7 +921,9 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         setError(reason instanceof Error ? reason.message : "加载章节失败");
       }
     } finally {
-      if (documentGenerationRef.current === generation) setBusy(false);
+      if (documentGenerationRef.current === generation) {
+        setBusy(false);
+      }
     }
   }, []);
 
@@ -1068,78 +1105,170 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     });
   }, [document?.id, document?.volume_id, novel?.id]);
 
-  const saveNow = React.useCallback(async (markdown: string): Promise<DocumentRecord | null> => {
+  const saveNow = React.useCallback(async (markdown: string, retryLibrary = false): Promise<DocumentRecord | null> => {
+    if (recoveryLoadingRef.current || recoveryChoiceRef.current) return null;
+    const requestedDocumentId = documentRef.current?.id;
+    const generation = documentGenerationRef.current;
     const previous = saveInFlightRef.current;
     if (previous) {
       await previous;
-      return saveNow(markdown);
+      if (documentGenerationRef.current !== generation || documentRef.current?.id !== requestedDocumentId) return null;
+      // A queued ordinary save represents "save my current draft", not a replay
+      // of an older keystroke snapshot. Controlled AI retains its separate snapshot.
+      return saveNow(contentRef.current, retryLibrary);
     }
     const active = documentRef.current;
     if (!active) return null;
-    const generation = documentGenerationRef.current;
-    const localDraft = recoveryDraftRef.current?.documentId === active.id
-      && recoveryDraftRef.current.contentMarkdown === markdown
-      ? recoveryDraftRef.current
-      : null;
-    if (active.content_markdown === markdown) {
-      setSaveState("已保存");
-      return active;
-    }
-    setSaveState("正在保存…");
+    const intendedApplication = recoveryDraftRef.current?.documentId === active.id
+      ? recoveryDraftRef.current.pendingLibrarySave : undefined;
+    if (retryLibrary) librarySavePausedRef.current = false;
+    if (intendedApplication && librarySavePausedRef.current) return null;
+    const currentVisit = () => documentGenerationRef.current === generation && documentRef.current?.id === active.id;
+    let guarded: PendingLibrarySave | undefined;
+    let completedGuard = false;
     const operation = (async (): Promise<DocumentRecord | null> => {
       try {
-        const saved = await apiRequest<DocumentRecord>(`/documents/${active.id}/draft`, {
-          method: "PATCH",
-          body: JSON.stringify({ expected_draft_version: active.draft_version, content_markdown: markdown }),
-        });
-        if (
-          documentGenerationRef.current !== generation
-          || documentRef.current?.id !== active.id
-        ) return null;
-        const merged = {
-          ...saved,
-          revisions: saved.revisions ?? active.revisions ?? [],
-        };
+        await recoveryWriteRef.current;
+        if (!currentVisit()) return null;
+        guarded = recoveryDraftRef.current?.documentId === active.id
+          ? recoveryDraftRef.current.pendingLibrarySave : undefined;
+        if (intendedApplication && !samePendingLibrarySave(guarded, intendedApplication)) return null;
+        const target = guarded?.contentMarkdown ?? contentRef.current;
+        if (!guarded && active.content_markdown === target) {
+          setSaveState("已保存");
+          return active;
+        }
+        pendingLibraryInFlightRef.current = guarded?.application.application_id ?? null;
+        setSaveState(guarded ? "正在核对并保存选区修改…" : "正在保存…");
+        let saved: DocumentRecord | null = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            saved = await apiRequest<DocumentRecord>(`/documents/${active.id}/draft`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                expected_draft_version: guarded?.application.base_draft_version ?? active.draft_version,
+                content_markdown: target,
+                ...(guarded ? { library_application: guarded.application } : {}),
+              }),
+            });
+            break;
+          } catch (reason) {
+            if (!guarded || attempt > 0 || !isLibraryCheckRequired(reason) || !currentVisit()) throw reason;
+            const original = guarded;
+            const application = original.application;
+            const checked = await apiRequest<LibraryCheckReportRecord>(`/novels/${active.novel_id}/library-checks`, {
+              method: "POST", body: JSON.stringify({
+                source_kind: "selection_result", source_id: application.job_id, document_id: active.id,
+                source_version: application.attempt, text_sha256: application.replacement_sha256,
+                ...(application.accepted_segment_ids !== undefined
+                  ? { accepted_segment_ids: application.accepted_segment_ids } : {}),
+              }),
+            });
+            if (!currentVisit()) return null;
+            const approved = await reviewLibraryCheckReport(active.novel_id, checked, undefined, currentVisit, target);
+            if (!approved || !currentVisit()) {
+              if (currentVisit()) {
+                setLibrarySaveIssue("本地稿与原候选已保留；用词检查尚未处理。");
+                librarySavePausedRef.current = true;
+                setSaveState("待处理用词检查，本地稿已保留");
+              }
+              return null;
+            }
+            const local = recoveryDraftRef.current;
+            if (!local || local.documentId !== active.id || !samePendingLibrarySave(local.pendingLibrarySave, original)) {
+              throw new Error("待保存应用已变化，已停止旧应用自动重试。");
+            }
+            guarded = { ...original, application: { ...application,
+              library_check_report_id: approved.id, library_check_version: approved.version,
+            } };
+            const updated = createRecoveryDraft(active.id, local.draftVersion, local.contentMarkdown,
+              local.baseContentHash ?? active.content_hash, Date.now(), guarded);
+            await recoveryWriteRef.current;
+            if (!currentVisit() || recoveryDraftRef.current !== local) throw new Error("恢复稿已继续更新，请重试原保存。");
+            if (!await replaceRecoveryDraftIfCurrent(local, updated)) throw new Error("另一标签页的恢复稿已变化，未覆盖它。");
+            if (!currentVisit()) return null;
+            if (recoveryDraftRef.current !== local) throw new Error("恢复稿已继续更新，请重试原保存。");
+            recoveryDraftRef.current = updated;
+          }
+        }
+        if (!saved || !currentVisit()) return null;
+        if (guarded && (!saved.library_application
+          || saved.library_application.application_id !== guarded.application.application_id
+          || saved.library_application.output_sha256 !== saved.content_hash)) {
+          // Replays intentionally return the latest document, which may have moved on.
+          if (saved.library_application?.replayed
+            && saved.draft_version > saved.library_application.draft_version) {
+            setConflict(saved);
+            throw new Error("这次AI修改此前已保存，但服务器已有更新正文；后续本地稿保留，未自动覆盖新稿。");
+          }
+          throw new Error("正文保存缺少匹配的应用回执，保留本地稿并停止后续自动上传。");
+        }
+        if (guarded && saved.library_application?.replayed
+          && saved.draft_version > saved.library_application.draft_version) {
+          setConflict(saved);
+          throw new Error("服务器已有较新的正文，请先处理本地恢复稿；未自动覆盖。");
+        }
+        const merged = { ...saved, revisions: saved.revisions ?? active.revisions ?? [] };
+        const local = recoveryDraftRef.current;
+        if (guarded && local?.documentId === active.id) {
+          const rebased = acknowledgePendingLibrarySave(local, guarded, merged);
+          await recoveryWriteRef.current;
+          if (!currentVisit() || recoveryDraftRef.current !== local) throw new Error("本地稿仍在更新，请保留页面并重试保存。");
+          if (rebased === local || !await replaceRecoveryDraftIfCurrent(local, rebased)) {
+            throw new Error("正文已保存，但恢复稿已在另一处变化；已停止后续自动保存。");
+          }
+          if (!currentVisit()) return null;
+          if (recoveryDraftRef.current !== local) throw new Error("本地稿已继续更新，保留全部文字，请重试保存。");
+          recoveryDraftRef.current = rebased;
+          completedGuard = true;
+        }
         documentRef.current = merged;
         setDocument(merged);
-        if (contentRef.current === markdown) {
+        setLibrarySaveIssue("");
+        librarySavePausedRef.current = false;
+        if (contentRef.current === target) {
           setSaveState("已保存");
-          if (localDraft) {
-            const cleared = await clearRecoveryDraftIfCurrent(localDraft);
-            if (cleared && recoveryDraftRef.current?.draftId === localDraft.draftId) {
-              recoveryDraftRef.current = null;
-            }
+          const acknowledged = recoveryDraftRef.current;
+          if (acknowledged?.documentId === active.id && acknowledged.contentMarkdown === target
+            && !acknowledged.pendingLibrarySave) {
+            const cleared = await clearRecoveryDraftIfCurrent(acknowledged);
+            if (cleared && recoveryDraftRef.current === acknowledged) recoveryDraftRef.current = null;
           }
         } else {
-          setSaveState("有新内容待保存");
-          timerRef.current = setTimeout(() => {
-            if (
-              documentGenerationRef.current === generation
-              && documentRef.current?.id === active.id
-            ) void saveNow(contentRef.current);
+          setSaveState("有后续手写内容待保存");
+          if (!completedGuard) timerRef.current = setTimeout(() => {
+            if (currentVisit()) void saveNow(contentRef.current);
           }, 100);
         }
         return merged;
       } catch (reason) {
-        if (
-          documentGenerationRef.current !== generation
-          || documentRef.current?.id !== active.id
-        ) return null;
-        if (reason instanceof ApiError && reason.status === 409) {
-          setConflict((reason.detail as ConflictDetail).current);
+        if (!currentVisit()) return null;
+        const detail = reason instanceof ApiError && typeof reason.detail === "object" && reason.detail !== null
+          ? reason.detail as { type?: string; current?: DocumentRecord } : null;
+        if (detail?.type === "draft_conflict" && detail.current) {
+          setConflict(detail.current);
           setSaveState("版本冲突，本地稿已保留");
         } else {
-          setSaveState("同步失败，本地稿已保留");
+          setSaveState(guarded ? "选区修改待同步，本地稿与检查依据已保留" : "同步失败，本地稿已保留");
+        }
+        if (guarded) {
+          librarySavePausedRef.current = true;
+          setLibrarySaveIssue(reason instanceof Error ? reason.message : "选区保存未完成，请重试或保留恢复稿。");
         }
         return null;
+      } finally {
+        pendingLibraryInFlightRef.current = null;
       }
     })();
     saveInFlightRef.current = operation;
-    try {
-      return await operation;
-    } finally {
-      if (saveInFlightRef.current === operation) saveInFlightRef.current = null;
+    let saved: DocumentRecord | null;
+    try { saved = await operation; }
+    finally { if (saveInFlightRef.current === operation) saveInFlightRef.current = null; }
+    // A later manual draft cannot absorb an unacknowledged AI application.
+    if (saved && completedGuard && currentVisit() && contentRef.current !== saved.content_markdown) {
+      return saveNow(contentRef.current);
     }
+    return saved;
   }, []);
 
   const saveStableNarrationSource = React.useCallback(async (): Promise<StableChapterNarrationSource> => {
@@ -1184,6 +1313,10 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   }, [saveNow]);
 
   const applyContentChange = React.useCallback((markdown: string) => {
+    if (recoveryLoadingRef.current || recoveryChoiceRef.current) {
+      setSaveState("请先处理本地恢复稿；未覆盖原稿，也未自动提交隐藏的AI修改");
+      return;
+    }
     if (markdown === contentRef.current) return;
     const active = documentRef.current;
     const activeQueue = bookNarrationRef.current;
@@ -1204,13 +1337,19 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       active.draft_version,
       markdown,
       active.content_hash,
+      Date.now(),
+      recoveryDraftRef.current?.documentId === active.id
+        ? recoveryDraftRef.current.pendingLibrarySave : undefined,
     );
     recoveryDraftRef.current = draft;
-    void saveRecoveryDraft(draft).catch(() => {
-      setSaveState("本地恢复稿写入失败，请先复制正文留存");
-    });
+    void writeLocalRecovery(draft).catch(() => undefined);
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => void saveNow(markdown), 600);
+    const generation = documentGenerationRef.current;
+    timerRef.current = setTimeout(() => {
+      if (documentRef.current?.id === active.id && documentGenerationRef.current === generation) {
+        void saveNow(contentRef.current);
+      }
+    }, 600);
   }, [publishBookNarrationState, saveNow]);
 
   const editorShouldMount = editorOpen
@@ -1297,8 +1436,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   }, [content, document?.id, editorSurfaceGeneration]);
 
   React.useLayoutEffect(() => {
-    editorSurfaceRef.current?.setEditable(!bodyGenerationState.active);
-  }, [bodyGenerationState.active, document?.id, editorSurfaceGeneration]);
+    editorSurfaceRef.current?.setEditable(!bodyGenerationState.active && !recovery && !busy && !recoveryLoadingRef.current);
+  }, [bodyGenerationState.active, document?.id, editorSurfaceGeneration, recovery, busy]);
 
   React.useEffect(() => {
     const activeNovel = novel;
@@ -2861,26 +3000,87 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
   };
 
   const loadServerConflict = () => {
-    if (!conflict) return;
+    if (!conflict || conflict.id !== documentRef.current?.id) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    const local = recoveryDraftRef.current;
+    if (local?.documentId === conflict.id) {
+      recoveryChoiceRef.current = local;
+      recoveryDraftRef.current = null;
+      setRecovery(local);
+    }
     documentRef.current = conflict;
     contentRef.current = conflict.content_markdown;
     setDocument(conflict);
     setContent(conflict.content_markdown);
     setConflict(null);
+    setLibrarySaveIssue("");
     setSaveState("已载入服务器版本；本地恢复稿仍保留");
   };
 
   const recoverLocal = () => {
-    if (!recovery) return;
+    if (!recovery || recoveryChoiceRef.current !== recovery || documentRef.current?.id !== recovery.documentId) return;
     setContent(recovery.contentMarkdown);
     contentRef.current = recovery.contentMarkdown;
     recoveryDraftRef.current = recovery;
+    recoveryChoiceRef.current = null;
     setRecovery(null);
     setSaveState("已恢复本地草稿，正在同步");
-    void saveNow(recovery.contentMarkdown);
+    void saveNow(recovery.contentMarkdown, true);
+  };
+
+  const convertPendingToManual = () => {
+    const active = documentRef.current;
+    const chosen = recoveryChoiceRef.current ?? recoveryDraftRef.current;
+    const pending = chosen?.pendingLibrarySave;
+    const generation = documentGenerationRef.current;
+    if (!active || !chosen || chosen.documentId !== active.id) return;
+    const confirmedBase = conflict?.id === active.id ? conflict : active;
+    Modal.confirm({
+      title: "转为作者手写稿并保存？",
+      content: h("div", null,
+        h("p", null, "将用下方本地稿替换当前显示的服务器版本，保留本地全部文字，退出该次受控AI采用，按普通手写保存，不记录为AI用词检查通过。若服务器再次变化，本次保存会停止。"),
+        h("details", { open: true }, h("summary", null, "待保存的本地全文"),
+          h(Input.TextArea, { value: chosen.contentMarkdown, readOnly: true, rows: 8, "aria-label": "转为手写的本地全文" })),
+        h("details", null, h("summary", null, "将被替换的服务器全文"),
+          h(Input.TextArea, { value: confirmedBase.content_markdown, readOnly: true, rows: 8, "aria-label": "转为手写前的服务器全文" }))),
+      okText: "转为手写稿", cancelText: "继续保留检查",
+      async onOk() {
+        if (saveInFlightRef.current) await saveInFlightRef.current;
+        const current = () => documentGenerationRef.current === generation && documentRef.current?.id === active.id;
+        if (!current()) return;
+        const server = await apiRequest<DocumentRecord>(`/documents/${active.id}`);
+        if (!current()) return;
+        if (server.draft_version !== confirmedBase.draft_version
+          || server.content_hash !== confirmedBase.content_hash) {
+          setConflict(server);
+          throw new Error("服务器已有新稿，请先核对服务器版本；当前本地稿没有丢失。");
+        }
+        await recoveryWriteRef.current;
+        const local = recoveryChoiceRef.current ?? recoveryDraftRef.current;
+        if (!current() || local !== chosen || !samePendingLibrarySave(local.pendingLibrarySave, pending)) {
+          throw new Error("待保存应用已变化，请重新确认。");
+        }
+        const manual = createRecoveryDraft(active.id, server.draft_version, local.contentMarkdown, server.content_hash);
+        if (!await replaceRecoveryDraftIfCurrent(local, manual) || !current()) {
+          throw new Error("恢复稿已在另一处变化，未覆盖它。");
+        }
+        if ((recoveryChoiceRef.current ?? recoveryDraftRef.current) !== local) throw new Error("本地稿已继续更新，请重新确认。");
+        recoveryDraftRef.current = manual;
+        recoveryChoiceRef.current = null;
+        contentRef.current = manual.contentMarkdown;
+        setContent(manual.contentMarkdown);
+        setRecovery(null);
+        setConflict(null);
+        documentRef.current = { ...server, revisions: server.revisions ?? active.revisions ?? [] };
+        setLibrarySaveIssue("");
+        await saveNow(manual.contentMarkdown, true);
+      },
+    });
   };
 
   const applyWorkflowDocument = (updated: DocumentRecord, status: string) => {
+    if (documentRef.current?.id !== updated.id || recoveryChoiceRef.current || recoveryLoadingRef.current) return;
     if (
       documentRef.current?.id === updated.id
       && contentRef.current !== updated.content_markdown
@@ -2897,7 +3097,8 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     setSaveState(status);
     const localDraft = recoveryDraftRef.current;
     if (localDraft?.documentId === updated.id
-      && localDraft.contentMarkdown === updated.content_markdown) {
+      && localDraft.contentMarkdown === updated.content_markdown
+      && !localDraft.pendingLibrarySave) {
       void clearRecoveryDraftIfCurrent(localDraft).then((cleared) => {
         if (cleared && recoveryDraftRef.current?.draftId === localDraft.draftId) {
           recoveryDraftRef.current = null;
@@ -3003,23 +3204,40 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         editorControlRef.current,
         contentRef.current,
       ),
-      applyEditorContent: (nextValue) => {
+      applyEditorContent: (nextValue, meta) => {
         const active = documentRef.current;
         if (!active || active.id !== document.id) {
           throw new Error("章节已切换，不能应用到旧正文");
         }
+        if (recoveryLoadingRef.current || recoveryChoiceRef.current) throw new Error("请先处理本地恢复稿，再应用AI修改。");
+        const prior = recoveryDraftRef.current?.documentId === active.id
+          ? recoveryDraftRef.current.pendingLibrarySave : undefined;
+        if (meta.operation !== "undo" && (!meta.libraryApplication || prior)) {
+          throw new Error(prior ? "请先处理上一份选区修改的同步或恢复。" : "该正文候选缺少持久检查依据，请复制后手工编辑。");
+        }
+        const pending = meta.operation === "undo"
+          ? (pendingLibraryInFlightRef.current === prior?.application.application_id ? prior : undefined)
+          : { contentMarkdown: nextValue, application: meta.libraryApplication! };
+        const draft = createRecoveryDraft(active.id, active.draft_version, nextValue, active.content_hash, Date.now(), pending);
+        recoveryDraftRef.current = draft;
+        void writeLocalRecovery(draft).catch(() => undefined);
         const surface = editorSurfaceRef.current;
         if (!surface || !surface.setValue(nextValue, "ai-apply")) {
           applyContentChange(nextValue);
         }
         setSaveState("已应用，正在自动保存");
       },
-      scheduleAutosave: (nextValue) => {
+      scheduleAutosave: (nextValue, _meta) => {
         const active = documentRef.current;
         if (!active || active.id !== document.id) return;
         if (timerRef.current) clearTimeout(timerRef.current);
         setSaveState("已应用，正在自动保存");
-        timerRef.current = setTimeout(() => void saveNow(nextValue), 600);
+        const generation = documentGenerationRef.current;
+        timerRef.current = setTimeout(() => {
+          if (documentRef.current?.id === active.id && documentGenerationRef.current === generation) {
+            void saveNow(contentRef.current);
+          }
+        }, 600);
       },
       restoreSelection: (range) => restoreAssistantTextSelection(
         editorControlRef.current,
@@ -3719,7 +3937,24 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
           h(Button, { icon: h(SaveOutlined), className: "anw-primary-button", onClick: document.kind === "chapter" ? () => setSaveVolumeOpen(true) : checkpoint, title: saveState }, "保存"),
         ),
         error ? h(Alert, { type: "error", closable: true, message: error, onClose: () => setError(""), style: { margin: "10px 16px 0" } }) : null,
-        recovery ? h(Alert, { type: "warning", showIcon: true, message: "发现未同步的崩溃恢复草稿", action: h(Button, { size: "small", onClick: recoverLocal }, "恢复本地稿"), style: { margin: "10px 16px 0" } }) : null,
+        recovery ? h(Alert, { type: "warning", showIcon: true,
+          message: "发现未同步的本地稿，请先选择处理方式",
+          description: h("div", null,
+            h("p", null, "正文暂为只读，不会自动上传隐藏的AI修改，也不会覆盖本地续写。可展开全文核对后恢复，或明确转为手写保存。"),
+            h("details", null, h("summary", null, "查看保留的本地全文"),
+              h(Input.TextArea, { value: recovery.contentMarkdown, readOnly: true, rows: 8, "aria-label": "保留的本地恢复全文" }))),
+          action: h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+            h(Button, { size: "small", onClick: recoverLocal }, "恢复本地稿"),
+            h(Button, { size: "small", onClick: convertPendingToManual }, "将本地稿按手写保存")),
+          style: { margin: "10px 16px 0" },
+        }) : null,
+        librarySaveIssue ? h(Alert, { type: "warning", showIcon: true,
+          message: "选区修改尚未完成保存", description: librarySaveIssue,
+          action: h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+            h(Button, { size: "small", onClick: () => void saveNow(contentRef.current, true) }, "重新检查并保存"),
+            h(Button, { size: "small", onClick: convertPendingToManual }, "转为手写稿")),
+          style: { margin: "10px 16px 0" },
+        }) : null,
         conflict ? h(Alert, { type: "error", showIcon: true, message: "服务器版本已经变化，未覆盖正文", action: h(Button, { size: "small", onClick: loadServerConflict }, "载入服务器版"), style: { margin: "10px 16px 0" } }) : null,
         h(
           "section",
@@ -3820,6 +4055,19 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
                       generateActionRef: chapterGenerateActionRef,
                       onBodyGenerationStateChange: (active: boolean, stage: string) => setBodyGenerationState({ active, stage }),
                       onAssistantModalStateChange: setChapterOutlineAssistantOpen,
+                      onLocateLibraryHit: (hit: LibraryCheckHitRecord) => {
+                        const control = editorControlRef.current;
+                        if (!control) {
+                          setError("正文编辑器尚未就绪，请稍后重试。");
+                          return;
+                        }
+                        const maximum = contentRef.current.length;
+                        const start = Math.max(0, Math.min(hit.start_utf16, maximum));
+                        const end = Math.max(start, Math.min(hit.end_utf16, maximum));
+                        control.focus();
+                        control.setSelectionRange(start, end, "forward");
+                        setSaveState(`已定位“${hit.matched_text}”`);
+                      },
                       selectionEditReviewHost: SelectionEditReviewHost,
                     })
                   : null,

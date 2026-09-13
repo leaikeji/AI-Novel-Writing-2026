@@ -1,0 +1,33 @@
+{
+  "schema_version": "private-library-fixture-manifest/1",
+  "fixture_id": "plan74-private-library-v1",
+  "source": {
+    "kind": "synthetic-project-fixture",
+    "license": "synthetic-project-fixture",
+    "contains_external_text": false,
+    "contains_user_content": false
+  },
+  "authorization": {
+    "model_calls": false,
+    "database_writes": false,
+    "formal_environment_use": false,
+    "automatic_rule_adoption": false
+  },
+  "coverage": {
+    "matching_cases": 10,
+    "lifecycle_cases": 10,
+    "maintenance_cases": 28,
+    "performance_rule_count": 1000,
+    "performance_visible_characters": 10000,
+    "coordinates": "UTF-16 half-open ranges"
+  },
+  "content_files": [
+    {"path": "README.md", "sha256": "80ac016c906300c479d5074c7b3f255f7263c7848f056b448018e5f68d61bd95"},
+    {"path": "generate_performance_fixture.py", "sha256": "e6eef2aa40105c41c8794a45388fc778d16753756403f36a89cecb80c325a42d"},
+    {"path": "lifecycle-cases.json", "sha256": "59e22617246566c6c9539baf6447eca37bf783438a870a0169a69b32ab9ceea0"},
+    {"path": "maintenance-cases.json", "sha256": "9a8d2295ea5c884a77103c2153cfdcb7aee7910b9e0a8e357c6f64fc5b35c4e0"},
+    {"path": "matching-cases.json", "sha256": "bf806b5289444f7466735dfd472b527995590ba96360c2c6634607e1212a85ab"},
+    {"path": "performance-spec.json", "sha256": "c5efea8a6f6d4cdad6cc657f8830e7023f933d32c31033307b4cf9dc1f06755b"},
+    {"path": "validate_fixtures.py", "sha256": "bbd711dd3629e2b9177c9094e897fff9543d627698e6772c1a7f5e90a9005af1"}
+  ]
+}

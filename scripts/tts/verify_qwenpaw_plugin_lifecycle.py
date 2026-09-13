@@ -85,6 +85,7 @@ NOVEL_SKILLS = frozenset(
         "prose-writing",
         "continuity-check",
         "style-review",
+        "private-library-maintenance",
     }
 )
 NOVEL_TOOLS = frozenset(
@@ -94,6 +95,9 @@ NOVEL_TOOLS = frozenset(
         "novel_search",
         "novel_get_workspace_context",
         "novel_prepare_selection_edit",
+        "novel_library_query",
+        "novel_library_prepare_change",
+        "novel_library_apply_change",
     }
 )
 

@@ -9,12 +9,10 @@ import {
 } from "./api";
 import { CHAT_PATH, CREATIVE_CENTER_CHAT_PATH } from "./contracts";
 import {
-  AssetPresetRecord,
   CreativeGenerationRecord,
   NovelCreationDraftRecord,
   NovelMetadataRecord,
   NovelSummary,
-  PrivateAssetRecord,
   PrivateAssetType,
 } from "./types";
 import { rememberWorkbenchRoute } from "./workbench-route";
@@ -35,6 +33,18 @@ import {
   publishNovelLifecycleNotice,
   recycleNovel,
 } from "./recycle-bin";
+import {
+  createPrivateLibraryWorkspace,
+  publishPrivateLibraryAssistantNovel,
+  type LexiconEntry,
+  type LexiconEntryDraft,
+  type PrivateLibraryAssetHistoryItem,
+  type PrivateLibraryAssetDraft,
+  type PrivateLibraryAssetView,
+  type LibraryQueryFilters,
+  type LibraryAssetPage,
+} from "./private-library";
+import { buildLibraryQuery, createLibraryRequestGate, mergeLibraryPage } from "./private-library/library-query";
 
 
 const host = window.QwenPaw.host;
@@ -44,6 +54,7 @@ const NovelCoverView = createNovelCoverView(React);
 const EmbeddingConfigPage = createEmbeddingConfigPage(React, host.antd);
 const TtsCloudConfigPage = createTtsCloudConfigPage(React, host.antd);
 const RecycleBinPage = createRecycleBinPage(React, host.antd, host.antdIcons);
+const PrivateLibraryWorkspace = createPrivateLibraryWorkspace(React, host.antd);
 const {
   Alert,
   Button,
@@ -73,7 +84,6 @@ const {
   RobotOutlined,
   SearchOutlined,
   SoundOutlined,
-  StarOutlined,
   TeamOutlined,
   UploadOutlined,
   WomanOutlined,
@@ -139,14 +149,6 @@ function TtsModelSettingsPage(props: { onBack: () => void }) {
     localRuntimeStatus,
   });
 }
-
-
-const ASSET_META: Record<PrivateAssetType, { label: string; singular: string; placeholder: string }> = {
-  plot: { label: "桥段配置", singular: "桥段", placeholder: "描述这个桥段的具体内容" },
-  writing_style: { label: "写作风格", singular: "写作风格", placeholder: "描述语言节奏、视角和表达偏好" },
-  vocabulary: { label: "特色词汇", singular: "特色词汇", placeholder: "填写词汇、口头禅或固定表达" },
-  idea: { label: "热梗奇思", singular: "热梗奇思", placeholder: "记录可以用于创作的灵感" },
-};
 
 
 const WIZARD_LABELS = ["受众", "思路", "模板", "命名", "封面", "完成"];
@@ -348,350 +350,441 @@ function NovelCard(props: {
 }
 
 
-function PrivateLibrary(props: { onBack: () => void }) {
-  const [assets, setAssets] = React.useState([] as PrivateAssetRecord[]) as [PrivateAssetRecord[], any];
-  const [presets, setPresets] = React.useState([] as AssetPresetRecord[]) as [AssetPresetRecord[], any];
-  const [activeType, setActiveType] = React.useState("plot" as PrivateAssetType) as [PrivateAssetType, any];
+
+
+export function PrivateLibraryV2(props: {
+  onBack: () => void;
+  novels: NovelSummary[];
+  activeNovelId: string;
+  onActiveNovelChange: (novelId: string) => void;
+}) {
+  type ExistingCombination = {
+    id: string;
+    title: string;
+    description: string;
+    version: number;
+    items: Array<{
+      asset_id: string;
+      asset_version_id: string;
+      version_number: number;
+      asset_type: PrivateAssetType;
+      title: string;
+      archived: boolean;
+      update_available: boolean;
+    }>;
+  };
+  const [assets, setAssets] = React.useState([] as PrivateLibraryAssetView[]);
+  const [combinations, setCombinations] = React.useState([] as ExistingCombination[]);
+  const [selectedAssetId, setSelectedAssetId] = React.useState("");
+  const [selectedAsset, setSelectedAsset] = React.useState(null as PrivateLibraryAssetView | null);
+  const [detailLoading, setDetailLoading] = React.useState(false);
+  const [detailError, setDetailError] = React.useState("");
+  const [assetHistory, setAssetHistory] = React.useState([] as PrivateLibraryAssetHistoryItem[]);
+  const [historyLoading, setHistoryLoading] = React.useState(false);
+  const [hasMoreAssets, setHasMoreAssets] = React.useState(false);
+  const [nextOffset, setNextOffset] = React.useState(null as number | null);
+  const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
-  const [assetModalOpen, setAssetModalOpen] = React.useState(false);
-  const [editingAsset, setEditingAsset] = React.useState(null as PrivateAssetRecord | null);
-  const [assetTitle, setAssetTitle] = React.useState("");
-  const [assetContent, setAssetContent] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-  const [presetListOpen, setPresetListOpen] = React.useState(false);
-  const [presetFormOpen, setPresetFormOpen] = React.useState(false);
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [editingPreset, setEditingPreset] = React.useState(null as AssetPresetRecord | null);
-  const [presetTitle, setPresetTitle] = React.useState("");
-  const [presetDescription, setPresetDescription] = React.useState("");
-  const [selectedAssetIds, setSelectedAssetIds] = React.useState([] as string[]);
-  const [pickerType, setPickerType] = React.useState("plot" as PrivateAssetType) as [PrivateAssetType, any];
-  const [pickerSearch, setPickerSearch] = React.useState("");
+  const [filters, setFilters] = React.useState({
+    category: "vocabulary", query: "", scope: "all", enabled: "all", includeArchived: true,
+  } as LibraryQueryFilters);
+  const activeNovel = props.novels.find((item) => item.id === props.activeNovelId) ?? null;
+  const currentFilters: LibraryQueryFilters = activeNovel
+    ? filters : { ...filters, scope: filters.scope === "novel" ? "all" : filters.scope, enabled: "all" };
+  const queryKey = buildLibraryQuery(currentFilters, activeNovel?.id);
+  const queryKeyRef = React.useRef(queryKey);
+  queryKeyRef.current = queryKey;
+  const listGate = React.useRef(createLibraryRequestGate());
+  const detailGate = React.useRef(createLibraryRequestGate());
+  const displayedQuery = React.useRef("");
 
-  const reload = React.useCallback(async () => {
+  React.useEffect(() => {
+    publishPrivateLibraryAssistantNovel(activeNovel
+      ? { id: activeNovel.id, title: activeNovel.title }
+      : null);
+    return () => publishPrivateLibraryAssistantNovel(null);
+  }, [activeNovel?.id, activeNovel?.title]);
+
+  const clearQuery = () => {
+    listGate.current.invalidate();
+    detailGate.current.invalidate();
+    displayedQuery.current = "";
+    setAssets([]);
+    setSelectedAssetId("");
+    setSelectedAsset(null);
+    setAssetHistory([]);
+    setHasMoreAssets(false);
+    setNextOffset(null);
+    setTotal(0);
     setLoading(true);
+    setError("");
+    setDetailError("");
+  };
+  const changeFilters = (next: LibraryQueryFilters) => {
+    clearQuery();
+    setFilters(next);
+  };
+
+  const loadPage = React.useCallback(async (offset = 0) => {
+    if (queryKeyRef.current !== queryKey) return;
+    const ticket = listGate.current.begin(queryKey, offset);
+    setLoading(true);
+    if (offset === 0) {
+      setSelectedAssetId("");
+      setSelectedAsset(null);
+      setAssetHistory([]);
+      detailGate.current.invalidate();
+    }
     try {
-      const [nextAssets, nextPresets] = await Promise.all([
-        apiRequest<PrivateAssetRecord[]>("/private-assets"),
-        apiRequest<AssetPresetRecord[]>("/asset-presets"),
-      ]);
-      setAssets(nextAssets);
-      setPresets(nextPresets);
+      const page = await apiRequest<LibraryAssetPage<PrivateLibraryAssetView>>(
+        `/private-library/assets?${buildLibraryQuery(currentFilters, activeNovel?.id, offset)}`,
+      );
+      if (!listGate.current.isCurrent(ticket) || queryKeyRef.current !== queryKey) return;
+      const append = offset > 0 && displayedQuery.current === queryKey;
+      const merged = mergeLibraryPage(append ? assets : [], page, append);
+      displayedQuery.current = queryKey;
+      setAssets(merged.items);
+      setTotal(merged.total);
+      setHasMoreAssets(merged.hasMore);
+      setNextOffset(merged.nextOffset);
+      if (!append) setSelectedAssetId(merged.items[0]?.id ?? "");
       setError("");
     } catch (reason) {
-      setError(readableError(reason, "加载私有库失败"));
+      if (listGate.current.isCurrent(ticket) && queryKeyRef.current === queryKey) {
+        setError(readableError(reason, "加载私有库失败；已加载的资料和筛选条件仍保留。"));
+      }
     } finally {
-      setLoading(false);
+      if (listGate.current.isCurrent(ticket) && queryKeyRef.current === queryKey) setLoading(false);
     }
+  }, [queryKey, assets]);
+  const reload = React.useCallback(() => loadPage(0), [loadPage]);
+
+  React.useEffect(() => {
+    clearQuery();
+    const timer = setTimeout(() => { void loadPage(0); }, currentFilters.query.trim() ? 200 : 0);
+    return () => {
+      clearTimeout(timer);
+      listGate.current.invalidate();
+      detailGate.current.invalidate();
+    };
+  }, [queryKey]);
+
+  React.useEffect(() => {
+    let active = true;
+    void apiRequest<{ items: ExistingCombination[] }>("/private-library/presets")
+      .then((page) => { if (active) setCombinations(page.items); })
+      .catch(() => { if (active) setError("已有组合加载失败，请刷新页面重试；资料查询仍可使用。"); });
+    return () => { active = false; };
   }, []);
 
-  React.useEffect(() => { void reload(); }, [reload]);
-
-  const openAssetForm = (asset?: PrivateAssetRecord) => {
-    setEditingAsset(asset ?? null);
-    setAssetTitle(asset?.title ?? "");
-    setAssetContent(asset?.content ?? "");
-    setAssetModalOpen(true);
+  const loadMoreAssets = () => {
+    if (!loading && hasMoreAssets && nextOffset !== null) void loadPage(nextOffset);
   };
 
-  const saveAsset = async () => {
-    if (!assetTitle.trim()) return;
-    setSaving(true);
+  const selectedSummary = assets.find((item: PrivateLibraryAssetView) => item.id === selectedAssetId);
+  React.useEffect(() => {
+    detailGate.current.invalidate();
+    setSelectedAsset(null);
+    setAssetHistory([]);
+    setDetailError("");
+    if (!selectedAssetId || displayedQuery.current !== queryKey) {
+      setDetailLoading(false);
+      setHistoryLoading(false);
+      return;
+    }
+    const ticket = detailGate.current.begin(`${queryKey}:${selectedAssetId}`);
+    setDetailLoading(true);
+    setHistoryLoading(true);
+    const suffix = activeNovel ? `?novel_id=${encodeURIComponent(activeNovel.id)}` : "";
+    const current = () => detailGate.current.isCurrent(ticket) && queryKeyRef.current === queryKey;
+    void apiRequest<PrivateLibraryAssetView & { content?: string }>(
+      `/private-library/assets/${selectedAssetId}${suffix}`,
+    ).then((asset) => {
+      if (current()) setSelectedAsset({ ...asset, summary: asset.content ?? asset.summary, detail_loaded: true });
+    }).catch((reason) => {
+      if (current()) setDetailError(readableError(reason, "资料详情加载失败，请重新选择或刷新后重试。"));
+    }).finally(() => { if (current()) setDetailLoading(false); });
+    void apiRequest<{ items: PrivateLibraryAssetHistoryItem[] }>(
+      `/private-library/assets/${selectedAssetId}/versions${suffix}`,
+    ).then((page) => {
+      if (current()) setAssetHistory(page.items);
+    }).catch(() => {
+      if (current()) setDetailError("资料历史读取失败，请重新选择或刷新后重试。");
+    }).finally(() => { if (current()) setHistoryLoading(false); });
+    return () => { detailGate.current.invalidate(); };
+  }, [selectedAssetId, selectedSummary?.version, queryKey]);
+
+  const saveAsset = async (draft: PrivateLibraryAssetDraft) => {
     try {
-      if (editingAsset) {
-        await apiRequest(`/private-assets/${editingAsset.id}`, {
+      const current = draft.assetId
+        ? (selectedAsset?.id === draft.assetId ? selectedAsset : undefined)
+        : undefined;
+      if (draft.assetId && !current) throw new Error("请先加载目标资料详情，再保存修改。");
+      if (current) {
+        const query = activeNovel ? `?novel_id=${encodeURIComponent(activeNovel.id)}` : "";
+        await apiRequest(`/private-library/assets/${current.id}${query}`, {
           method: "PUT",
           body: JSON.stringify({
-            expected_version: editingAsset.version,
-            title: assetTitle.trim(),
-            content: assetContent.trim(),
+            expected_root_version: current.version,
+            title: draft.title,
+            content: draft.summary,
+            tags: draft.tags,
+            operation_key: `ui-update:${crypto.randomUUID()}`,
           }),
         });
+        if (activeNovel && current.enabled !== draft.enabled) {
+          await apiRequest(
+            `/novels/${activeNovel.id}/private-library/assets/${current.id}/enabled`,
+            {
+              method: "PUT",
+              body: JSON.stringify({
+                expected_binding_version: current.binding_version ?? 0,
+                enabled: draft.enabled,
+                operation_key: `ui-enable:${crypto.randomUUID()}`,
+              }),
+            },
+          );
+        }
       } else {
-        await apiRequest("/private-assets", {
+        await apiRequest("/private-library/assets", {
           method: "POST",
-          body: JSON.stringify({ asset_type: activeType, title: assetTitle.trim(), content: assetContent.trim() }),
+          body: JSON.stringify({
+            asset_type: draft.assetType,
+            title: draft.title,
+            content: draft.summary,
+            tags: draft.tags,
+            scope_kind: draft.scopeKind,
+            scope_novel_id: draft.scopeKind === "novel" ? draft.scopeNovelId : null,
+            enable_for_novel_id: draft.enabled ? activeNovel?.id ?? null : null,
+            operation_key: `ui-create:${crypto.randomUUID()}`,
+          }),
         });
       }
-      setAssetModalOpen(false);
       await reload();
     } catch (reason) {
-      setError(readableError(reason, "保存私有库资料失败"));
-    } finally {
-      setSaving(false);
+      throw new Error(readableError(reason, "保存私有库资料失败"));
     }
   };
 
-  const deleteAsset = (asset: PrivateAssetRecord) => {
-    Modal.confirm({
-      className: "anw-modal mb-confirm-modal",
-      title: `删除“${asset.title}”`,
-      content: "删除后，这条资料不会再出现在生成选择中。",
-      okText: "删除",
-      cancelText: "取消",
-      okButtonProps: { danger: true },
-      async onOk() {
-        try {
-          await apiRequest(`/private-assets/${asset.id}?expected_version=${asset.version}`, { method: "DELETE" });
-          await reload();
-        } catch (reason) {
-          setError(readableError(reason, "删除私有库资料失败"));
-        }
-      },
-    });
-  };
-
-  const openPresetForm = (preset?: AssetPresetRecord) => {
-    setEditingPreset(preset ?? null);
-    setPresetTitle(preset?.title ?? "");
-    setPresetDescription(preset?.description ?? "");
-    setSelectedAssetIds((preset?.assets ?? []).map((asset) => asset.id));
-    setPresetListOpen(false);
-    setPresetFormOpen(true);
-  };
-
-  const savePreset = async () => {
-    if (!presetTitle.trim()) return;
-    setSaving(true);
+  const saveEntry = async (assetId: string, draft: LexiconEntryDraft) => {
+    const asset = selectedAsset?.id === assetId ? selectedAsset : undefined;
+    if (!asset) throw new Error("目标词包已经变化，请刷新后重试。");
+    const prior = asset.lexicon?.entries.find((item: LexiconEntry) => item.entry_id === draft.entryId);
+    const entry: LexiconEntry = {
+      entry_id: draft.entryId ?? `entry_${crypto.randomUUID().replace(/-/g, "")}`,
+      term: draft.term,
+      action: draft.action,
+      state: draft.state,
+      match_mode: draft.matchMode,
+      case_sensitive: prior?.case_sensitive ?? true,
+      variants: prior?.variants ?? [],
+      categories: [...draft.categories],
+      genres: prior?.genres ?? [],
+      eras: prior?.eras ?? [],
+      positions: prior?.positions ?? ["any"],
+      note: draft.note,
+      example: prior?.example ?? "",
+      counterexample: prior?.counterexample ?? "",
+      replacement_hint: draft.replacementHint,
+      watch_threshold: draft.action === "watch"
+        ? prior?.watch_threshold ?? { count: 3, window_characters: 1000 }
+        : undefined,
+      source_refs: prior?.source_refs ?? [{
+        source_type: "author",
+        label: "作者在私有库中添加",
+        verified_popularity: false,
+      }],
+    };
+    const query = activeNovel ? `?novel_id=${encodeURIComponent(activeNovel.id)}` : "";
     try {
-      const base = {
-        title: presetTitle.trim(),
-        description: presetDescription.trim(),
-        asset_ids: selectedAssetIds,
-      };
-      if (editingPreset) {
-        await apiRequest(`/asset-presets/${editingPreset.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ ...base, expected_version: editingPreset.version }),
-        });
-      } else {
-        await apiRequest("/asset-presets", { method: "POST", body: JSON.stringify(base) });
-      }
-      setPresetFormOpen(false);
-      setPresetListOpen(true);
+      await apiRequest(`/private-library/assets/${assetId}/entries${query}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          expected_root_version: asset.version,
+          operation_key: `ui-entry:${crypto.randomUUID()}`,
+          entry,
+        }),
+      });
       await reload();
     } catch (reason) {
-      setError(readableError(reason, "保存私有库预设失败"));
-    } finally {
-      setSaving(false);
+      throw new Error(readableError(reason, "保存词项失败"));
     }
   };
 
-  const deletePreset = (preset: AssetPresetRecord) => {
+  const toggleEnabled = async (asset: PrivateLibraryAssetView, enabled: boolean) => {
+    if (!activeNovel) { setError("请先选择要启用资料的作品。"); return; }
+    if (queryKeyRef.current !== queryKey) return;
+    setError("");
+    try {
+      await apiRequest(
+        `/novels/${activeNovel.id}/private-library/assets/${asset.id}/enabled`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            expected_binding_version: asset.binding_version ?? 0,
+            enabled,
+            operation_key: `ui-enable:${crypto.randomUUID()}`,
+          }),
+        },
+      );
+      await reload();
+    } catch (reason) {
+      if (queryKeyRef.current === queryKey) setError(readableError(reason, "更新本书启用状态失败；请刷新后重试"));
+    }
+  };
+
+  const applyCombination = (preset: ExistingCombination) => {
+    if (!activeNovel) {
+      setError("请先选择要应用组合的作品。");
+      return;
+    }
     Modal.confirm({
       className: "anw-modal mb-confirm-modal",
-      title: `删除预设“${preset.title}”`,
-      content: "预设会被删除，原有私有库资料不会受影响。",
-      okText: "删除",
+      width: 620,
+      title: `将“${preset.title}”应用到《${activeNovel.title}》`,
+      content: h("div", { className: "anw-private-library-combination-preview" },
+        h("p", null, "组合会按下列固定版本加入本书；不会跟随组合或通用资料以后自动更新。"),
+        h("ul", null, ...preset.items.map((item) => h("li", { key: item.asset_version_id },
+          `${item.title} · v${item.version_number}${item.update_available ? "（通用库已有新版）" : ""}${item.archived ? "（资料已归档，不能新应用）" : ""}`,
+        ))),
+      ),
+      okText: "明确应用到本书",
       cancelText: "取消",
-      okButtonProps: { danger: true },
+      okButtonProps: { disabled: preset.items.some((item) => item.archived) },
       async onOk() {
         try {
-          await apiRequest(`/asset-presets/${preset.id}?expected_version=${preset.version}`, { method: "DELETE" });
+          await apiRequest(
+            `/novels/${activeNovel.id}/private-library/presets/${preset.id}/apply`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                operation_key: `ui-preset-apply:${crypto.randomUUID()}`,
+              }),
+            },
+          );
           await reload();
         } catch (reason) {
-          setError(readableError(reason, "删除预设失败"));
+          setError(readableError(reason, "应用已有组合失败"));
+          throw reason;
         }
       },
     });
   };
 
-  const toggleAssetForPreset = (assetId: string) => {
-    setSelectedAssetIds((current: string[]) => current.includes(assetId)
-      ? current.filter((id) => id !== assetId)
-      : [...current, assetId]);
+  const setArchived = (asset: PrivateLibraryAssetView, archived: boolean) => {
+    Modal.confirm({
+      className: "anw-modal mb-confirm-modal",
+      title: archived ? `归档“${asset.title}”` : `恢复“${asset.title}”`,
+      content: archived
+        ? "归档后不再供新作品选择；已经固定使用它的作品仍保留原版本。"
+        : "恢复后，这项资料会重新进入可选列表。",
+      okText: archived ? "归档资料" : "恢复资料",
+      cancelText: "取消",
+      async onOk() {
+        const query = activeNovel ? `?novel_id=${encodeURIComponent(activeNovel.id)}` : "";
+        await apiRequest(`/private-library/assets/${asset.id}/archived${query}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            expected_root_version: asset.version,
+            archived,
+            operation_key: `ui-archive:${crypto.randomUUID()}`,
+          }),
+        });
+        await reload();
+      },
+    });
   };
 
-  const currentAssets = assets.filter((asset) => asset.asset_type === activeType);
-  const pickerAssets = assets.filter((asset) => asset.asset_type === pickerType
-    && (!pickerSearch.trim() || `${asset.title}${asset.content}`.includes(pickerSearch.trim())));
+  const restoreVersion = (asset: PrivateLibraryAssetView, version: PrivateLibraryAssetHistoryItem) => {
+    Modal.confirm({
+      className: "anw-modal mb-confirm-modal",
+      title: `恢复“${asset.title}”的 v${version.version_number}`,
+      content: "恢复会创建一个新版本，已有历史不会被覆盖；各作品现有的固定绑定也不会被静默更新。",
+      okText: "创建恢复版本",
+      cancelText: "取消",
+      async onOk() {
+        const query = activeNovel ? `?novel_id=${encodeURIComponent(activeNovel.id)}` : "";
+        await apiRequest(
+          `/private-library/assets/${asset.id}/versions/${version.id}/restore${query}`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              expected_root_version: asset.version,
+              operation_key: `ui-restore:${crypto.randomUUID()}`,
+            }),
+          },
+        );
+        await reload();
+      },
+    });
+  };
 
-  return h(
-    "main",
-    { className: "anw-app mb-private-page" },
-    h(
-      "div",
-      { className: "mb-private-inner" },
-      h(
-        "header",
-        { className: "mb-private-header" },
-        h(
-          "div",
-          { className: "mb-private-title-row" },
-          h("button", { type: "button", className: "mb-back-link", onClick: props.onBack }, h(ArrowLeftOutlined), "返回"),
-          h("h1", null, "私有库"),
+  return h("main", { className: "anw-app mb-private-page" },
+    h("div", { className: "mb-private-inner" },
+      h("header", { className: "mb-private-header" },
+        h("button", { type: "button", className: "mb-back-link", onClick: props.onBack }, h(ArrowLeftOutlined), "返回"),
+        h("label", { className: "anw-private-library-novel-picker" },
+          h("span", null, "当前作品"),
+          h(Select, {
+            value: activeNovel?.id,
+            allowClear: true,
+            placeholder: "仅管理通用库",
+            options: props.novels.map((item) => ({ value: item.id, label: item.title })),
+            onChange: (value: string | undefined) => {
+              clearQuery();
+              props.onActiveNovelChange(value ?? "");
+            },
+          }),
         ),
-        h(Button, { className: "mb-preset-button", icon: h(StarOutlined), onClick: () => setPresetListOpen(true) }, "预设"),
       ),
-      error ? h(Alert, { type: "error", showIcon: true, message: error, closable: true, onClose: () => setError("") }) : null,
-      h(
-        "nav",
-        { className: "mb-private-tabs", "aria-label": "私有库分类" },
-        ...(Object.keys(ASSET_META) as PrivateAssetType[]).map((type) => h(
-          "button",
-          { key: type, type: "button", className: type === activeType ? "is-active" : "", onClick: () => setActiveType(type) },
-          ASSET_META[type].label,
-        )),
-      ),
-      h(
-        "button",
-        { type: "button", className: "mb-add-asset", onClick: () => openAssetForm() },
-        h(PlusOutlined),
-        `新增${ASSET_META[activeType].label}`,
-      ),
-      loading
-        ? h("div", { className: "mb-private-loading" }, h(Spin), "正在加载私有库…")
-        : currentAssets.length === 0
-          ? h("div", { className: "mb-private-empty" }, h(Empty, { description: `还没有${ASSET_META[activeType].label}` }))
-          : h(
-              "section",
-              { className: "mb-asset-grid" },
-              ...currentAssets.map((asset) => h(
-                "article",
-                { key: asset.id, className: "mb-asset-card" },
-                h("h2", null, asset.title),
-                h("p", null, asset.content || "未填写内容"),
-                h(
-                  "div",
-                  { className: "mb-asset-actions" },
-                  h("button", { type: "button", onClick: () => openAssetForm(asset) }, h(EditOutlined), "编辑"),
-                  h("button", { type: "button", className: "is-danger", onClick: () => deleteAsset(asset) }, h(DeleteOutlined), "删除"),
+      combinations.length
+        ? h("details", { className: "anw-private-library-combinations" },
+            h("summary", null, `已有组合（${combinations.length}）`),
+            h("p", null, "旧组合仅供查看并明确应用；这里不再新增一套组合管理。"),
+            h("div", { className: "anw-private-library-combination-list" },
+              ...combinations.map((preset: ExistingCombination) => h("article", { key: preset.id },
+                h("div", null,
+                  h("strong", null, preset.title),
+                  h("p", null, preset.description || `${preset.items.length} 项固定资料`),
+                  h("small", null, preset.items.length
+                    ? preset.items.map((item: ExistingCombination["items"][number]) => `${item.title} v${item.version_number}`).join("、")
+                    : "空组合"),
                 ),
+                h(Button, {
+                  disabled: !activeNovel || preset.items.length === 0 || preset.items.some((item: ExistingCombination["items"][number]) => item.archived),
+                  onClick: () => applyCombination(preset),
+                }, activeNovel ? "应用到本书" : "先选择作品"),
               )),
             ),
-    ),
-    h(
-      Modal,
-      {
-        open: assetModalOpen,
-        className: "anw-modal mb-form-modal",
-        width: 500,
-        title: editingAsset ? "编辑" : "新增",
-        footer: null,
-        onCancel: () => setAssetModalOpen(false),
-        destroyOnClose: false,
-      },
-      h("label", { className: "mb-field-label" }, `${ASSET_META[activeType].singular}名称`),
-      h(Input, { value: assetTitle, maxLength: 240, placeholder: `例如：${activeType === "plot" ? "扮猪吃老虎" : ASSET_META[activeType].singular}`, onChange: (event: any) => setAssetTitle(event.target.value) }),
-      h("label", { className: "mb-field-label" }, `${ASSET_META[activeType].singular}内容`),
-      h(Input.TextArea, { value: assetContent, maxLength: 30000, rows: 5, placeholder: ASSET_META[activeType].placeholder, onChange: (event: any) => setAssetContent(event.target.value) }),
-      h(
-        "div",
-        { className: "mb-modal-actions" },
-        h(Button, { onClick: () => setAssetModalOpen(false) }, "取消"),
-        h(Button, { className: "mb-orange-button", loading: saving, disabled: !assetTitle.trim(), onClick: saveAsset }, editingAsset ? "保存" : "创建"),
-      ),
-    ),
-    h(
-      Modal,
-      {
-        open: presetListOpen,
-        className: "anw-modal mb-preset-list-modal",
-        width: 520,
-        title: "私有库预设",
-        footer: null,
-        onCancel: () => setPresetListOpen(false),
-      },
-      presets.length === 0
-        ? h("div", { className: "mb-preset-empty" }, h(StarOutlined), h("p", null, "暂无预设，点击下方按钮创建"))
-        : h(
-            "div",
-            { className: "mb-preset-list" },
-            ...presets.map((preset) => h(
-              "article",
-              { key: preset.id },
-              h("div", null, h("strong", null, preset.title), h("p", null, preset.description || `${preset.assets.length} 条私有库资料`)),
-              h("div", null,
-                h(Button, { type: "text", icon: h(EditOutlined), onClick: () => openPresetForm(preset) }),
-                h(Button, { type: "text", danger: true, icon: h(DeleteOutlined), onClick: () => deletePreset(preset) }),
-              ),
-            )),
-          ),
-      h(
-        "div",
-        { className: "mb-modal-actions" },
-        h(Button, { onClick: () => setPresetListOpen(false) }, "关闭"),
-        h(Button, { className: "mb-orange-button", icon: h(PlusOutlined), onClick: () => openPresetForm() }, "新建预设"),
-      ),
-    ),
-    h(
-      Modal,
-      {
-        open: presetFormOpen,
-        className: "anw-modal mb-form-modal",
-        width: 500,
-        title: editingPreset ? "编辑预设" : "新建预设",
-        footer: null,
-        onCancel: () => setPresetFormOpen(false),
-      },
-      h("label", { className: "mb-field-label" }, "预设名称"),
-      h(Input, { value: presetTitle, maxLength: 240, placeholder: "请输入预设名称", onChange: (event: any) => setPresetTitle(event.target.value) }),
-      h("label", { className: "mb-field-label" }, "预设介绍（可选）"),
-      h(Input.TextArea, { value: presetDescription, rows: 3, maxLength: 4000, placeholder: "请输入预设介绍", onChange: (event: any) => setPresetDescription(event.target.value) }),
-      h("label", { className: "mb-field-label" }, "私有库配置"),
-      h(
-        "button",
-        {
-          type: "button",
-          className: "mb-preset-picker-entry",
-          onClick: () => {
-            setPresetFormOpen(false);
-            setPickerOpen(true);
-          },
-        },
-        h(AppstoreOutlined),
-        selectedAssetIds.length ? `已选择 ${selectedAssetIds.length} 条资料` : "点击配置私有库",
-      ),
-      h(
-        "div",
-        { className: "mb-modal-actions" },
-        h(Button, { onClick: () => { setPresetFormOpen(false); setPresetListOpen(true); } }, "返回"),
-        h(Button, { className: "mb-orange-button", loading: saving, disabled: !presetTitle.trim(), onClick: savePreset }, "保存"),
-      ),
-    ),
-    h(
-      Modal,
-      {
-        open: pickerOpen,
-        className: "anw-modal mb-picker-modal",
-        width: 700,
-        title: "选择私有库配置",
-        footer: null,
-        onCancel: () => {
-          setPickerOpen(false);
-          setPresetFormOpen(true);
-        },
-      },
-      h("p", { className: "mb-picker-subtitle" }, "AI 将重点展示选中的内容到生成结果中"),
-      h(Input, { value: pickerSearch, prefix: h(SearchOutlined), placeholder: "搜索私有库配置", onChange: (event: any) => setPickerSearch(event.target.value) }),
-      h(
-        "nav",
-        { className: "mb-picker-tabs" },
-        ...(Object.keys(ASSET_META) as PrivateAssetType[]).map((type) => h(
-          "button",
-          { key: type, type: "button", className: pickerType === type ? "is-active" : "", onClick: () => setPickerType(type) },
-          ASSET_META[type].label,
-        )),
-      ),
-      h(
-        "div",
-        { className: "mb-picker-list" },
-        pickerAssets.length === 0
-          ? h(Empty, { description: "当前分类暂无资料" })
-          : pickerAssets.map((asset) => h(
-              "label",
-              { key: asset.id, className: "mb-picker-item" },
-              h(Checkbox, { checked: selectedAssetIds.includes(asset.id), onChange: () => toggleAssetForPreset(asset.id) }),
-              h("span", null, h("strong", null, asset.title), h("small", null, asset.content || "未填写内容")),
-            )),
-      ),
-      h(
-        "div",
-        { className: "mb-modal-actions" },
-        h(Button, { onClick: () => { setSelectedAssetIds([]); setPickerOpen(false); setPresetFormOpen(true); } }, "跳过"),
-        h(Button, { className: "mb-orange-button", onClick: () => { setPickerOpen(false); setPresetFormOpen(true); } }, "确定选择"),
-      ),
+          )
+        : null,
+      h(PrivateLibraryWorkspace, {
+        assets: displayedQuery.current === queryKey ? assets : [],
+        filters: currentFilters,
+        onFiltersChange: changeFilters,
+        total,
+        selectedAssetId,
+        selectedAsset,
+        detailLoading,
+        detailError: detailError || null,
+        history: assetHistory,
+        historyLoading,
+        hasMore: hasMoreAssets,
+        activeNovel: activeNovel ? { id: activeNovel.id, title: activeNovel.title } : null,
+        loading,
+        disabled: loading,
+        loadError: error || null,
+        onRefresh: reload,
+        onLoadMore: loadMoreAssets,
+        onSelectAsset: setSelectedAssetId,
+        onSaveAsset: saveAsset,
+        onSaveEntry: saveEntry,
+        onToggleEnabled: toggleEnabled,
+        onSetArchived: setArchived,
+        onRestoreVersion: restoreVersion,
+        onLocateHit: () => undefined,
+      }),
     ),
   );
 }
@@ -1653,7 +1746,12 @@ export function NovelLibraryPage() {
   };
 
   if (view === "private-library") {
-    return h(PrivateLibrary, { onBack: () => changeView("center") });
+    return h(PrivateLibraryV2, {
+      onBack: () => changeView("center"),
+      novels,
+      activeNovelId,
+      onActiveNovelChange: setActiveNovelId,
+    });
   }
   if (view === "embedding-settings") {
     return h(

@@ -43,6 +43,9 @@ NOVEL_TOOLS = {
     "novel_search",
     "novel_get_workspace_context",
     "novel_prepare_selection_edit",
+    "novel_library_query",
+    "novel_library_prepare_change",
+    "novel_library_apply_change",
 }
 NOVEL_PROMPT_FILE = "AI_NOVEL_WORLD.md"
 SELECTION_EDIT_OPERATIONS = [
@@ -710,6 +713,9 @@ def verify(previous: dict[str, bool] | None = None) -> dict[str, object]:
     )
     prompt_content = str(prompt_payload.get("content", ""))
     assert "每条命令最多一次成功调用 `novel_prepare_selection_edit`" in prompt_content
+    assert "私有库维护、收藏、分类、启用、停用或撤销" in prompt_content
+    assert "`private-library-maintenance`" in prompt_content
+    assert "`novel_library_apply_change`" in prompt_content
     assert "insufficient-shortening" in prompt_content
     assert "insufficient-expansion" in prompt_content
     assert "review-size-mismatch" in prompt_content
