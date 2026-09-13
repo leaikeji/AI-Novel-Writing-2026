@@ -2,6 +2,24 @@
 
 日期：2026-09-13。最新状态：`PARTIAL / F08定位、F09-F12一次保存换绑、F13完整撤销PASS / R5 OPEN`，不是整体G3通过。F11当前准备及发送链通过不证明所有历史上下文缺失根因已定位；下文旧FAIL与NOT_RUN保持其当时证明力，最新续验见末节。
 
+## 第二章当前规则、逐项保存与刷新恢复（5919bba）
+
+- 正常章节向导创建第2章《第一道裂缝》（document `e1344ea3-ea7e-4e4b-a391-4aae588ac8cc`），保存具体章纲：陈屿次晨查楼，分开记录裂缝／渗水，与赵德发协调通道，路小满提供水迹线索；点数仍0，未完成工程不得结算，铜钥匙未揭底。要求引用昨夜笔记“瓷砖微微错开”一次，以本书既有规则允许作者保留必要物理描述为创作意图，不设无意义占位作品。
+- 20:09:42一次正文job `cff15ae0-261d-4054-a9fd-692ad7f698b6`，20:15:56 ready，attempt1、2649字，2125–2875字目标通过。前后有效模型bigmodel/glm-5.3-flash一致，实际模型及usage未公开；373350ms。真实[生成快照](chapter-lexicon-skill-snapshot.json)含正文／金手指方法和7条规则，本书固定f01ad58e与抢修词固定0bbcffa7；不是未启用的最新根版本。
+- 候选`09e6e595-b587-4952-bb78-c4403ec5317b`按规则hash `b05a1c0f3a779fb7dbba38ec0aa0ca8068844fe3f732da7dcb2bf24b2b7e62e6`检查，唯一禁用“微微”位置307–309、hit `687908bd-d45d-589f-84bc-8e905d53eed6`。report `4cc9144f-75e9-4b2b-9ad5-3686e6e42379`v1默认未勾选，继续按钮禁用；[生成及报告](chapter-current-rules-before-decisions.json)、[截图23](desktop/23-chapter-current-forbid-unchecked.png)。这是一个真实命中，不外推多命中部分保留已经验收。
+- 勾选该项时显示1处未保存；20:17:08点“保存所选决定”得到report v2／keep_once，界面明确“尚未采用到正文”，候选仍ready，正文仍draft1／0字；[保存报告](chapter-current-rules-decisions-saved.json)、[正文](chapter-document-before-adoption.json)、[截图24](desktop/24-chapter-decision-saved-not-adopted.png)。
+- 刷新页面，从“历史→恢复此版本”继续同一候选，已保存决定保留，按当前规则采用成功；[最终job](chapter-current-rules-after-adoption.json)、[正文](chapter-document-after-adoption.json)：accepted、revision `2c4f1f19-2977-4f46-9d5d-c16390f5835d`、draft2／2649字、hash `1234c49baefa1fb135592d32e3ee5e85c6df68a0000c8da63c127f8aec64f8b1`，总job仍1，无再次模型生成。[截图25](desktop/25-chapter-adopted-after-refresh.png)。未触发进展同步或新朗读，作品及原revision保留。
+- 产出有可继续创作的调查／人际交涉／渗水线索；但“跳起够三层檐口”、手电照出时间、账本“三行／两本账”等细节仍值得作者校订。本次只证明私有库接入及安全采用，不宣称文学最优或事实完全一致。截图25章目录字数仍0、正文已2649，属目录显示迟滞；截图23点定位后未显示命中原句，整章确认预览仅setSelectionRange未显式滚动，不能援引原编辑器F08的PASS覆盖该新路径。两项保留后续复查，不抹去采用成功事实。
+- F15：刷新后的历史卡将已保留禁用项计为“慎用提醒1处”，代码候选863d4b5已改为中性总命中，不把分页total_hits当分类计数；正式复查待更新。
+
+## F10真实20分钟过期后重试（5919bba）
+
+- 第1章自定义编辑原段为工棚到大门、未贴砖且未装灯的样板间、陈屿凭记忆绕料堆和陌生市话。作者目标补足提箱和停步看屏幕的动作，不增加电话内容或人物。20:04:14创建job `d1e684cc-2e94-4f99-ab6e-38b514409af0`，20:04:48 ready，attempt1、33523ms、82字候选；selection `01499518-5c6a-4c4f-b9f1-f3276de29621`。前后有效bigmodel/glm-5.3-flash，实际model／usage不公开。
+- 保持原页面与候选，不刷新、不安装、不改时钟／TTL。决定接受第1处“把工具箱贴着腿”和第3处“停步掏出手机翻看屏幕”，拒绝重复转场“出了大门”，[采用前](desktop/26-expiry-review-decisions-before-apply.png)。20:25:20后（距job创建已超21分钟，选区注册只会更早）点“应用已接受修改（2处）”，进入冲突；正文不写。
+- 再点“重新检查后生成”，立即出现“选区已过期或失效…尚未发起新的模型调用”，两接受／一拒绝及原候选仍显示，[完整可见提示](desktop/28-expired-retry-message-visible.png)，初次视口只见下半部的[27](desktop/27-expired-retry-preserves-candidate.png)保留。点击“复制候选”并读取本次复制结果，完整82字模型候选可复制；复制功能包含原候选全量，不把它误称为仅已接受两项的最终稿。
+- [前](expired-selection-jobs-before.json)／[后](expired-selection-jobs-after.json)公开任务JSON结构完全相等，最新仍同job／attempt1；[正文](expired-selection-document-preserved.json)仍draft4、4394字、hash `0873af2850b92e0592295e2883133cade6e2b2831295cf7075534d6bde750d33`。由UI与后台读证据共同确认零新增生成，而非只信提示。F10真实TTL拒绝及候选／决定保留分项PASS；本轮未重新生成或强行应用旧绑定。
+- 原页面保留；全候选和决定证据持久保存，可在新选区人工校订复用。建议最终句为“工棚到大门要经过没贴砖的样板间，灯没装，他把工具箱贴着腿，凭记忆绕过料堆。走到马路边，兜里手机震了。他在路边停下脚步，掏出手机翻看屏幕，市话，陌生号。”，这里只记录已选择的可恢复文本，不声称已写入正文。
+
 ## 场景与实际操作
 
 唯一正式`18088`，QwenPaw2.2.1、PawApp0.4.0、0056；14:54安装完整来源`96b8aed`。作品为作者已有《缺氧：末日地下世界》，第1卷《地基》、第1章《签下这栋破楼》。写作意图是保留陈屿离职、七年工龄和工具箱损坏事实，用具体动作替代总结句；资料整理保留“管钳”“电工胶布”的工程细节，区分推荐／慎用／禁用，而非机械堆词。

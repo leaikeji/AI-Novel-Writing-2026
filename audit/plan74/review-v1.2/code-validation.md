@@ -2,6 +2,13 @@
 
 日期：2026-09-13。状态：`5919bba G2-B PASS / 正式已安装 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
 
+## F14显式刷新与F15历史计数
+
+- 源`863d4b5c33858988272c56f3c31e81e9a8398230`、tree `07d1091f22e016f1224d0c197d9e85e2a758ccaa`，独立检出`/private/tmp/plan74-refresh-source.mWGKuA/code`。只增加常驻刷新按钮与5项前端回归，历史卡不再把已保留禁用命中误称为慎用提醒；没有新增查询接口或自动重发助手消息。
+- 原锁离线安装64包、零下载；前端168文件1536项、typecheck、202模块build、package_plugin退出0，检出status为空。JS SHA256 `8f374abc2f2c992817163921467a11db98ed3eedfa560f81d4b04840905912b0`。初次指定文件的`pnpm test -- ...`实际仍执行全量，记录按真实168文件，不称定向。
+- [干净源Python全量](refresh-source-backend.log)3205通过、330跳过、4条既有警告。`git diff --exit-code 5919bba 863d4b5 -- backend tests skills plugin.json pyproject.toml pnpm-lock.yaml`无差异，数据库342项按不变范围复用，不另建库或接正式数据库跑pytest。
+- 此节仅代码校验；公开更新及正式桌面结果另记，不能将构建成功写为已上线。
+
 ## F13显式回执撤销识别
 
 - 先补2条正向句式红测，实测失败：旧分类器把明确“撤销已应用回执UUID”识别为DIRECT或AMBIGUOUS，无法走UNDO。修复仅加可信消息开头的完整UUID撤销句式，咨询、引用、否定、假设及不完整编号仍不授权；8条新增句式覆盖，既有成功补偿／后续编辑冲突用例各补1条新句式，并改用真实分类器输出而不是固定UNDO。

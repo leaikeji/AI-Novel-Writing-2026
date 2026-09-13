@@ -4,6 +4,7 @@
 
 ## 最新可复核来源
 
+- 新候选`863d4b5c33858988272c56f3c31e81e9a8398230`、tree `07d1091f22e016f1224d0c197d9e85e2a758ccaa`：仅F14常驻刷新及F15历史总命中文案，5文件精确提交。独立检出`/private/tmp/plan74-refresh-source.mWGKuA/code`前端1536、Python3205／330跳过、类型、构建及打包通过，源status为空，JS SHA `8f374abc2f2c992817163921467a11db98ed3eedfa560f81d4b04840905912b0`。当前尚未安装，计划66还有串行模型请求，已协调等全部终态再公开更新，不中断模型、不改变其配置、不夹带其文档或计划76四文件。
 - 最新正式源`5919bbae53e7b795b3cda5bce0ac2bb3b6bb605a`、tree `577f63d43c64a2d6c485668f9e96446de23fe239`，独立检出`/private/tmp/plan74-undo-source.3J220z/code`。F13仅补显式完整回执撤销句式，未改Skill／schema／工具注册；Python3205（330跳过）、类型、同源前端构建及打包退出0，前端hash与3bc完全相同。前端1531与数据库342沿用未变化代码的3bc证据。19:53:08公开更新，唯一运行差异`backend/private_library/maintenance.py`，逐文件及逐Agent保态通过。源码push后实际远端main核对5919bba一致；证据后续单独提交。
 - 以下3bc7fa1已于19:40:16公开更新，6e45e2f包含在其中；“待发布／尚未安装”仅描述它们形成候选时的历史状态，不是当前结论。3bc一次保存并使用已正式通过，5919bba完整补偿续验见桌面记录。
 
