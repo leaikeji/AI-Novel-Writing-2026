@@ -1,6 +1,13 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。最新状态：`5919bba RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+日期：2026-09-13。最新状态：`7e382a1 RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。6f544df为未安装的F18候选。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 20:43采用预览与目录同步更新
+
+- 计划66在途任务终态、计划76完成e5f1846独立公开更新和私人音色播放后释放正式窗口。主代理发布源`7e382a1eecba8c8b8e84513ad53961dc4ddc2fee`，tree `06f2c02396071c88eabd9af4579d12cc61ce8955`；保留76试听修复，仅JS变化，无重启、迁移、配置或模型切换。
+- 备份`/private/tmp/plan74-adoption-release.jWwsFq`及耐久副本`/app/working.backups/plan74-adoption-release-20260913-jWwsFq`的三个hash一致：DB `6c2359b27cbf0a2577183d659de94c7a9ab66780ab0c937fdf8f23f316c587d3`；候选`abfe7806f4d2b473e48b2f2996f177fe69aaffe3565e8cd93a07ce7ee8047c35`；旧插件`a8dbdd18f0e46efe3ff3e10d5344d380c1d5b7f8f82ad9b151ad60a69b6da016`。只核对备份，不恢复数据库。
+- 20:43:19公开hot-install成功，[来源清单](adoption-desktop-release-manifest.json)／[回执](adoption-desktop-install-result.json)／[健康](adoption-desktop-health-after.json)／[模型](adoption-desktop-model-after.json)。实际JS SHA `89de65fd1a7493943cbce1996c5f7fd6242ad978d5ed8152791ecf46fd252800`一致，schema0056，逐Agent选择保持。[完整公开校验](adoption-desktop-public-verify.log)退出0，TTS三项实际ready；不以此替代音质评价。
+- 已完成新版规则与两处逐项保留／刷新／采用／目录同步真实链，详见桌面记录；F18尚未安装。必要恢复使用本次旧插件保留76功能及0056，不退到缺少试听修复的旧树，不回滚数据库抹去后续稿件。
 
 ## 19:53显式回执撤销识别更新
 

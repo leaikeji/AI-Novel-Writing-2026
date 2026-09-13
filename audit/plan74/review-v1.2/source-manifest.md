@@ -1,9 +1,15 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`5919bba RELEASED / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`7e382a1 RELEASED / 6f544df CANDIDATE / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
 
 ## 最新可复核来源
 
+- 21:00更新：正式7e382a1已于20:43:19公开热更新并完成两命中按新规则／逐项保留／刷新恢复采用；包hash及配置证据见[发布清单](adoption-desktop-release-manifest.json)。必要依赖e5f1846由76独立提交并先行正式验证，之后释放窗口，未回退其试听修复。
+- 当前未发布F18候选`6f544df9326b4fa01cd9aa16844be95a59e201ed`，tree `55f98a7a64440b2f104311a0eddbcb54db6a88fc`；相同独立代码检出已从7e干净切换到6f（不再称该路径当前仍是7e），前端1546／类型／构建／打包通过，JS SHA `a871ffcc842379dd0145057d2198f47da09c17047d5fbe88aaa88346edccc2eb`。旧7e归档仍在jWwsFq备份及耐久目录可核验。只变同范围成功保存提示；不夹带其他任务新写的角色／音色文件。下列“未发布／等待76”仅保留当时来源历史。
+
+## 20:38及以前来源历史
+
+- 最新未发布候选`7e382a1eecba8c8b8e84513ad53961dc4ddc2fee`（F16／F17），tree `06f2c02396071c88eabd9af4579d12cc61ce8955`；干净源`/private/tmp/plan74-adoption-source.90xAJO/code`、前端1544／Python3206（330跳过）／类型／构建／包审核通过，JS SHA `89de65fd1a7493943cbce1996c5f7fd6242ad978d5ed8152791ecf46fd252800`。相邻47733df至7e382a1的Python代码不变、复用477的同源结果；详见代码记录。必要依赖e5f1846由计划76按作者授权独立提交7个试听修复文件，本任务未替其暂存或提交。76已prepare冻结e5包，74不夹带后续候选、不安装会退掉试听修复的863旧树；等待其正式证据和窗口释放。
 - 新候选`863d4b5c33858988272c56f3c31e81e9a8398230`、tree `07d1091f22e016f1224d0c197d9e85e2a758ccaa`：仅F14常驻刷新及F15历史总命中文案，5文件精确提交。独立检出`/private/tmp/plan74-refresh-source.mWGKuA/code`前端1536、Python3205／330跳过、类型、构建及打包通过，源status为空，JS SHA `8f374abc2f2c992817163921467a11db98ed3eedfa560f81d4b04840905912b0`。当前尚未安装，计划66还有串行模型请求，已协调等全部终态再公开更新，不中断模型、不改变其配置、不夹带其文档或计划76四文件。
 - 最新正式源`5919bbae53e7b795b3cda5bce0ac2bb3b6bb605a`、tree `577f63d43c64a2d6c485668f9e96446de23fe239`，独立检出`/private/tmp/plan74-undo-source.3J220z/code`。F13仅补显式完整回执撤销句式，未改Skill／schema／工具注册；Python3205（330跳过）、类型、同源前端构建及打包退出0，前端hash与3bc完全相同。前端1531与数据库342沿用未变化代码的3bc证据。19:53:08公开更新，唯一运行差异`backend/private_library/maintenance.py`，逐文件及逐Agent保态通过。源码push后实际远端main核对5919bba一致；证据后续单独提交。
 - 以下3bc7fa1已于19:40:16公开更新，6e45e2f包含在其中；“待发布／尚未安装”仅描述它们形成候选时的历史状态，不是当前结论。3bc一次保存并使用已正式通过，5919bba完整补偿续验见桌面记录。

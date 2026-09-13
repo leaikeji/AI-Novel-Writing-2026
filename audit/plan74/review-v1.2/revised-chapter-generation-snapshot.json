@@ -1,0 +1,299 @@
+{
+  "job_id": "b6d3288d-1e2d-46fc-a35f-9521c24e5dbe",
+  "brief": {
+    "version": 3,
+    "outline_text": "第2章《第一道裂缝》，承接陈屿把铜钥匙放进口袋、准备翌日量裂缝的章末。时间为继承后的第二天清晨，末日尚未发生。场景限于漾水巷十七号的院坝、外墙、楼梯与一楼铺面。本轮重写要把勘查动作和旧笔记的修正写清楚，保留现有交涉与渗水线索。\n\n1. 楼下卷帘门把陈屿叫醒，他看旧手机确认时间，清点随身工具与现金四百二十三元，在同一本账本里画老楼简图。先原样引用昨夜笔记“瓷砖微微错开”，标明这只是旧观察，不是测量结论。\n2. 从院坝辨认外墙裂缝的位置。地面够不到三层、四层的檐口就只记方位与待查，不跳起来够楼，不攀爬、不探半个身子出窗，不以铅笔尖推算缝宽。能安全看到的表皮和面板风险提示分开记录，不新增精确读数，不把抹灰层裂缝鉴定成结构问题。回到本子时，再单独引用“微微”这两个字，写出他给这个含糊说法划线，改记“砖边有高低差，尺寸待测”的动作。两次出现均为明确引用旧记录、纠正观察方法，普通叙述不使用该程度词。\n3. 赵德发担心小卖部生意和货物受影响，提旧欠账、卷帘门钥匙与通道安排。陈屿拿笔记里具体位置和可见掉灰回应，不许诺整楼安全，不碰对方货物；二人谈妥让开楼梯口，动工和进料前先打招呼。陈屿一直拿着自己的本子，不出现无来由的递本、接本。\n4. 路小满从六楼下来接水，指出墙根湿痕扩大。陈屿在同一个账本的不同页分别写“裂缝”“渗水”和资源清单，不能写成两本账。只从实际可见水迹提出待查路径，不凭气味断言管道来源。现有工具、材料和现金照前文清点，不凭空增加资源。\n5. 面板只能显示既定范围内的风险，红线外失效；点数仍0，勘查记账不是完工，不结算奖励。铜钥匙与院坝下的光点不揭底，不重复渲染光点闪烁。结尾确定第一项实际行动：寻找墙根渗水的来路，留下一滴水沿砖缝出现的具体线索，不用不一致的计时比喻。",
+    "forbidden_text": "不提前出现灰雾、丧尸、氧气骤降或末日预知；不新增系统能力、点数、图纸或无成本修复；不揭开铜钥匙和地下通道真相；不新增人物或宣布现有人物退场；不将目测写成可靠结构鉴定，不安排危险拆墙。",
+    "expectation_text": "第三人称贴近陈屿，保持第一章口语化、具体动作推进的节奏。笔记由含糊观察转成可核实问题，赵德发的利益顾虑与路小满的线索都要推动行动。两个旧记录引文有不同用途，分别留待作者作本次保留决定；不把用词处理过程写进故事。纠正手机计时、三层檐口不可从地面够到、同一本账本分页等细节，不复述整份设定，不堆术语。",
+    "role_constraints": {
+      "allowed": [
+        "陈屿",
+        "赵德发",
+        "路小满"
+      ],
+      "required": [
+        "陈屿",
+        "赵德发",
+        "路小满"
+      ],
+      "forbidden": [],
+      "context_only": [
+        "陈广源",
+        "马占魁",
+        "周律师"
+      ]
+    },
+    "target_word_count": 2500
+  },
+  "lexicon_policy": {
+    "rules": [
+      {
+        "entry": {
+          "eras": [],
+          "note": "本书默认不用笼统的程度修饰；具体物理位移有必要时由作者按命中位置保留。",
+          "term": "微微",
+          "state": "active",
+          "action": "forbid",
+          "genres": [],
+          "example": "",
+          "entry_id": "entry_e0db8fcef4d94dc7b0b071f85a757d11",
+          "variants": [],
+          "positions": [
+            "any"
+          ],
+          "categories": [
+            "程度",
+            "叙述"
+          ],
+          "match_mode": "phrase",
+          "source_refs": [
+            {
+              "label": "作者在私有库中添加",
+              "locator": null,
+              "observed_at": null,
+              "source_type": "author",
+              "evidence_scope": null,
+              "verified_popularity": false
+            }
+          ],
+          "case_sensitive": true,
+          "counterexample": "",
+          "watch_threshold": null,
+          "replacement_hint": "给出方向、距离或可观察的变化，不机械删除必要的物理细节。"
+        },
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "position": 2,
+        "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+      },
+      {
+        "entry": {
+          "eras": [],
+          "note": "动作本身已能表达自然衔接时，留意是否重复使用“顺手”；必要处由作者决定保留。",
+          "term": "顺手",
+          "state": "active",
+          "action": "watch",
+          "genres": [],
+          "example": "",
+          "entry_id": "entry_8c2e02474f1042ae8fbe9275748ffc1b",
+          "variants": [],
+          "positions": [
+            "any"
+          ],
+          "categories": [
+            "动作",
+            "叙述"
+          ],
+          "match_mode": "phrase",
+          "source_refs": [
+            {
+              "label": "作者在私有库中添加",
+              "locator": null,
+              "observed_at": null,
+              "source_type": "author",
+              "evidence_scope": null,
+              "verified_popularity": false
+            }
+          ],
+          "case_sensitive": true,
+          "counterexample": "",
+          "watch_threshold": {
+            "count": 3,
+            "window_characters": 1000
+          },
+          "replacement_hint": "直接写具体动作，不机械替换成别的副词。"
+        },
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "position": 2,
+        "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+      },
+      {
+        "entry": {
+          "eras": [],
+          "note": "用于裂缝、缺口与管线泄漏的紧急阻断",
+          "term": "封堵",
+          "state": "active",
+          "action": "recommend",
+          "genres": [],
+          "example": "",
+          "entry_id": "entry_7e8bdb61991a49d4b3ad99cf18c46012",
+          "variants": [],
+          "positions": [
+            "any"
+          ],
+          "categories": [
+            "动作",
+            "工程"
+          ],
+          "match_mode": "phrase",
+          "source_refs": [
+            {
+              "label": "作者在私有库中添加",
+              "locator": null,
+              "observed_at": null,
+              "source_type": "author",
+              "evidence_scope": null,
+              "verified_popularity": false
+            }
+          ],
+          "case_sensitive": true,
+          "counterexample": "",
+          "watch_threshold": null,
+          "replacement_hint": "结合对象与材料写出具体封堵动作"
+        },
+        "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+        "position": 1,
+        "asset_version_id": "0bbcffa7-640a-4ec8-8a6e-c374a0f6a03f"
+      },
+      {
+        "entry": {
+          "eras": [],
+          "note": "",
+          "term": "管钳",
+          "state": "active",
+          "action": "recommend",
+          "genres": [],
+          "example": "",
+          "entry_id": "selection_2ca8dee7f48f454c9aec00440e92970c",
+          "variants": [],
+          "positions": [
+            "any"
+          ],
+          "categories": [],
+          "match_mode": "phrase",
+          "source_refs": [
+            {
+              "label": "作者选区收藏",
+              "locator": "ae7343ad-592d-4cde-a04d-eebf12afc3b8:chapter.body:2ca8dee7-f48f-454c-9aec-00440e92970c",
+              "observed_at": null,
+              "source_type": "selection",
+              "evidence_scope": null,
+              "verified_popularity": false
+            }
+          ],
+          "case_sensitive": true,
+          "counterexample": "",
+          "watch_threshold": null,
+          "replacement_hint": ""
+        },
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "position": 2,
+        "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+      },
+      {
+        "entry": {
+          "eras": [],
+          "note": "",
+          "term": "电工胶布",
+          "state": "active",
+          "action": "recommend",
+          "genres": [],
+          "example": "",
+          "entry_id": "selection_3bc7889774884e2cb5eaeb3a868aec87",
+          "variants": [],
+          "positions": [
+            "any"
+          ],
+          "categories": [],
+          "match_mode": "phrase",
+          "source_refs": [
+            {
+              "label": "作者选区收藏",
+              "locator": "ae7343ad-592d-4cde-a04d-eebf12afc3b8:chapter.body:3bc78897-7488-4e2c-b5ea-eb3a868aec87",
+              "observed_at": null,
+              "source_type": "selection",
+              "evidence_scope": null,
+              "verified_popularity": false
+            }
+          ],
+          "case_sensitive": true,
+          "counterexample": "",
+          "watch_threshold": null,
+          "replacement_hint": ""
+        },
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "position": 2,
+        "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+      },
+      {
+        "entry": {
+          "eras": [],
+          "note": "",
+          "term": "检修签到表",
+          "state": "active",
+          "action": "recommend",
+          "genres": [],
+          "example": "",
+          "entry_id": "selection_5f7e27d722924d6a8c869391d7f97b38",
+          "variants": [],
+          "positions": [
+            "any"
+          ],
+          "categories": [],
+          "match_mode": "phrase",
+          "source_refs": [
+            {
+              "label": "作者选区收藏",
+              "locator": "ae7343ad-592d-4cde-a04d-eebf12afc3b8:chapter.body:5f7e27d7-2292-4d6a-8c86-9391d7f97b38",
+              "observed_at": null,
+              "source_type": "selection",
+              "evidence_scope": null,
+              "verified_popularity": false
+            }
+          ],
+          "case_sensitive": true,
+          "counterexample": "",
+          "watch_threshold": null,
+          "replacement_hint": ""
+        },
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "position": 2,
+        "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+      },
+      {
+        "entry": {
+          "eras": [],
+          "note": "",
+          "term": "配电柜",
+          "state": "active",
+          "action": "recommend",
+          "genres": [],
+          "example": "",
+          "entry_id": "selection_6167fedda91e40c98060ae85c8aed25a",
+          "variants": [],
+          "positions": [
+            "any"
+          ],
+          "categories": [],
+          "match_mode": "phrase",
+          "source_refs": [
+            {
+              "label": "作者选区收藏",
+              "locator": "ae7343ad-592d-4cde-a04d-eebf12afc3b8:chapter.body:6167fedd-a91e-40c9-8060-ae85c8aed25a",
+              "observed_at": null,
+              "source_type": "selection",
+              "evidence_scope": null,
+              "verified_popularity": false
+            }
+          ],
+          "case_sensitive": true,
+          "counterexample": "",
+          "watch_threshold": null,
+          "replacement_hint": ""
+        },
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "position": 2,
+        "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+      }
+    ],
+    "novel_id": "fc0c189c-0ab2-4016-b0b6-6fc4c2286e00",
+    "conflicts": [],
+    "rules_hash": "b05a1c0f3a779fb7dbba38ec0aa0ca8068844fe3f732da7dcb2bf24b2b7e62e6",
+    "schema_version": "effective-lexicon-policy/1"
+  },
+  "skill_invocation": {
+    "dispatch_id": "45f55160-932d-42ab-b328-08409430cb21",
+    "schema_version": "job-skill-invocation/1",
+    "method_input_hash": "2e392367116fdff5f757af0185dacee7a6ac375060ad4ec3ee2b075de3df961d",
+    "estimated_method_and_framing_tokens": 5998
+  }
+}

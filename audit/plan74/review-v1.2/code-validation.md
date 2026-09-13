@@ -1,6 +1,20 @@
 # V1.2代码验证记录
 
-日期：2026-09-13。状态：`5919bba G2-B PASS / 正式已安装 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+日期：2026-09-13。状态：`6f544df G2-B PASS / 正式7e382a1 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+
+## F18正常保存后的版本刷新
+
+- 正式词项保存已成功，但current_version_id随reload改变使contextKey不同，面板误留在“上下文切换”。修复将成功后的范围身份与版本基线分开；写入前仍检查完整contextKey（含版本），真正切书／切筛选／切资料后的迟到成功仍保留原输入，不放宽CAS或写入权限。
+- 定向组件／创作中心34项、工作区全量169文件1546项、类型、构建、打包均退出0；已有切书、版本变化、迟到响应和同步失败负向覆盖保留。新增资产／词项两条回归验证保存引起同资产版本变化时正常关闭并恢复焦点，不重复保存。
+- 精确三文件提交`6f544df9326b4fa01cd9aa16844be95a59e201ed`，tree `55f98a7a64440b2f104311a0eddbcb54db6a88fc`；独立检出`/private/tmp/plan74-adoption-source.90xAJO/code`从干净7e切到6f，20:59重跑前端169／1546、typecheck、203模块构建、package_plugin全部退出0，检出status为空。JS SHA `a871ffcc842379dd0145057d2198f47da09c17047d5fbe88aaa88346edccc2eb`。本节保存实际工具结果摘要，没有另造原始终端日志。
+- `git diff --exit-code 7e382a1 6f544df -- backend tests skills plugin.json pyproject.toml pnpm-lock.yaml`无差异；Python3206／330跳过及私有库临时数据库342沿用不变范围证据，未连接正式数据跑pytest。6f尚未安装，下一次更新只从该干净提交构建，不夹带工作区新增的角色／音色外任务改动。
+
+## F16确认预览定位与F17采用目录同步
+
+- 源47733df新增只读全文预览（纯字符串、UTF16精确mark、主动focus及scrollIntoView、无效位置不标记、卸载解除定位器），移除原来只setSelectionRange而不滚动的textarea。原逐项处理用例补真实接线断言，未复制另一套处置面板或改报告／采用请求。Workbench仅在现有当前页／恢复门禁通过后同步目录中相同ID的服务端结果，不查整库、不改他章和卷元数据。
+- 定向4文件55项、工作区全量169文件1544项及类型／构建通过；精确7文件提交后，独立检出`/private/tmp/plan74-adoption-source.90xAJO/code`完成同样前端1544／类型／构建／打包，以及[Python](adoption-desktop-source-backend.log)3206通过、330跳过、4条既有警告。该源包含76已明确提交的e5f1846，新增1项后端用例来自其独立提交，不计为74新覆盖。
+- 7e382a1再将确认内容限制在桌面可滚动高度内、预览高度随窗口收缩；同一干净检出切到`7e382a1eecba8c8b8e84513ad53961dc4ddc2fee`重跑[前端／类型／203模块构建／打包](adoption-desktop-source-frontend.log)全部退出0，status为空。tree `06f2c02396071c88eabd9af4579d12cc61ce8955`，JS SHA `89de65fd1a7493943cbce1996c5f7fd6242ad978d5ed8152791ecf46fd252800`。47733df至7e382a1后端／tests／Skill／manifest／依赖无差异，Python3206按同一不变范围引用。
+- 上述代码检查完成时尚未安装；后续7e于20:43正式公开更新，21:00新规则、两命中逐项恢复采用及目录同步通过，见桌面／发布记录。Python及数据库证据按不变源码范围引用，不当作新正式场景结果。
 
 ## F14显式刷新与F15历史计数
 

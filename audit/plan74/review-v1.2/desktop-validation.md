@@ -1,6 +1,19 @@
 # V1.2正式桌面与写作分项记录
 
-日期：2026-09-13。最新状态：`PARTIAL / F08定位、F09-F12一次保存换绑、F13完整撤销PASS / R5 OPEN`，不是整体G3通过。F11当前准备及发送链通过不证明所有历史上下文缺失根因已定位；下文旧FAIL与NOT_RUN保持其当时证明力，最新续验见末节。
+日期：2026-09-13。最新状态：`7e382a1 PARTIAL / 规则漂移、两命中逐项决定及刷新采用、F14/F15/F16/F17分项PASS / R5 OPEN`。F18保存成功误提示已修复为6f544df候选，尚未安装。下文旧FAIL与NOT_RUN保持当时证明力，不是整体G3通过。
+
+## 21:00规则变更后的第二章修订（7e382a1）
+
+- 写作目标：改正首稿手电显示时间、跳起够三层檐口、账本数量混乱等观察细节，保留查裂缝、与赵德发协调通道、路小满提供渗水线索。本次章纲v3明确区分陈屿引用旧笔记“瓷砖微微错开”和再次圈出“微微”改成可核验记录，两处引用各有叙事用途，不把检查过程写进小说。完整章纲和当时规则见[生成快照](revised-chapter-generation-snapshot.json)。
+- 一次正常UI任务`b6d3288d-1e2d-46fc-a35f-9521c24e5dbe`，20:51:52创建、20:57:40就绪，attempt1、347227ms、2537字（范围2125–2875）。请求及前后有效模型bigmodel/glm-5.3-flash相同，actual与usage未公开；正文／金手指方法dispatch `45f55160-932d-42ab-b328-08409430cb21`，hybrid检索3条。快照保留词包固定f01ad58e和规则hash b05a1c0f…，没有为了恢复再生成。
+- 在任务运行时正常编辑本书“微微”说明为“本书避免以笼统程度词代替可观察动作。人物原样引用或纠正旧记录时，须按每次命中由作者决定保留；普通叙述不自动豁免。”，仍为forbid。保存生成根v12／内容v10 `3ab961b8-2b90-42f2-8e33-7c8dba0193ff`。页面仅显示启停，故正常停用后再启用，显式换到新版；[实际绑定](revised-rule-bindings.json)为46fbce94／v1／位置2，抢修词原绑定bcbafebc／v3／固定0bbcffa7保持。此两步不冒称单按钮“使用新版”，也不冒称保存词项自动换绑。
+- 候选`ac9935fe-9eab-4f3c-8a76-2769d53a1c14`的[生成时报告](revised-chapter-before-decisions.json)为d4f92d43、旧hash b05a1c0f…；当前采用报告为`5566c187-b423-478f-a568-b4ad8dff01c8`、新hash `66f79a729bbbe2f0116fc932ccf60775b6aa0d32282fdacf033237f83e6bded5`。界面显示新版说明；两份证据分离，没有覆盖旧快照。
+- 两处命中373–375／883–885默认均未选，[第一处精确mark可见](desktop/30-two-hits-first-located-1267.png)。20:58:50只保留第一处，report升v2，仅有hit ddc6ee6f的keep_once；[原始报告](revised-chapter-first-kept.json)、[界面](desktop/31-only-first-kept-1267.png)显示仍有1处待处理、继续按钮禁用，[正文](revised-chapter-preserved-before-adopt.json)仍2649字／draft2。保存决定与写入正文明确分离。
+- 刷新后从历史恢复2537字同一候选，第一处仍已处理、第二处仍未选；[第二处定位](desktop/33-restored-second-located-1267.png)实际滚到“微微”被圈出的旧记录。21:00:13单独保存第二处c0a71d5b，待处理变0后才点击继续。21:00:21[采用回执](revised-chapter-application-report.json)report v4含两个keep_once及唯一application，revision `baefbf0c-74fa-4e56-99d3-1d0785551c77`，draft3，输入hash1234c49b…、输出`d5138bdb917ab176ccc2c9aaa15ed14d66cb7d5cd5e26770a0748ae47b42ac29`。[最终正文](revised-chapter-after-adoption.json)、[最终两次历史任务](revised-chapter-final-jobs.json)一致，未新增第三个任务。
+- F17：本次采用后未刷新，目录立即从2649更新为2537，第一章仍4394，[截图34](desktop/34-adopted-tree-synced-1267.png)。F16两处定位与刷新恢复均为实际1267×713桌面，原句可见、只读全文保留；初次截图命名曾误用1920，已按实际PNG尺寸更正，不冒称双尺寸已验。
+- F14：搜索词项说明“普通叙述”得到1项，点击“刷新资料”后查询文字和范围保留，详情仍新版，[截图29](desktop/29-refresh-filter-preserved-1901x1069.png)；请求1920×1080但实际DOM为1901×1069、截图栅格1900×1069，按实际记录，不计本次精确1920门禁。打开词项编辑时刷新按钮禁用。F15：[历史卡截图32](desktop/32-history-count-label-1267.png)正确显示旧稿“无待处理禁用项·共1处命中”，不再称慎用1处。
+- 另外公开GET独立核对前次采用的[持久报告](chapter-persistent-application-report.json)，v3中的application与旧revision2c4f1f19、draft2及输出hash1234c49b一致，补齐先前事件证据。
+- 产出修正了上述观察动作，保留调查推进和人物交涉，仍需文学校订，不宣称AI最佳。未触发进展同步／TTS，没有删除旧正文、revision、词项或媒体。F18：词项保存成功后的版本刷新被误报“上下文已切换”，输入未丢且未重复保存；6f544df已修复成功后的同范围判断，正式复验待下次集中更新。
 
 ## 第二章当前规则、逐项保存与刷新恢复（5919bba）
 

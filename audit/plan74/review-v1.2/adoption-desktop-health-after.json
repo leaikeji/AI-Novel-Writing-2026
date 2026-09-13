@@ -1,0 +1,71 @@
+{
+  "ai_authoritative_write_enabled": false,
+  "ai_candidate_generation_enabled": true,
+  "app_id": "ai-novel-world-2026",
+  "database": {
+    "connected": true,
+    "postgres_version": "18.6 (Debian 18.6-1.pgdg12+2)"
+  },
+  "embedding_runtime": {
+    "claimed_count": 0,
+    "completed_count": 0,
+    "error_code": null,
+    "last_job_at": null,
+    "state": "ready"
+  },
+  "generation_agent_id": "ai-novel-writer",
+  "generation_model_policy": "follow-agent-effective",
+  "model_verification_mode": "preflight-effective+provider-usage",
+  "narration": {
+    "digest_keyring_loaded": true,
+    "lifecycle_status": "ready",
+    "playback_installed": true,
+    "product_requested": true,
+    "production_backend_installed": true,
+    "provider_selection_fingerprint_sha256": "32ce6265c58a9f99d5a692d76faf40b19d77e76b0cda7f27ba6556e1b7b6d76e",
+    "reason_code": null,
+    "reference_clone_ready": true,
+    "worker_running": true
+  },
+  "narration_features": {
+    "capabilities": [
+      {
+        "actionable": true,
+        "key": "private_voice_deletion",
+        "reason_code": null,
+        "required_gate": null,
+        "state": "enabled",
+        "visible": true
+      }
+    ],
+    "generation": 2,
+    "lifecycle_status": "ready",
+    "reason_code": null,
+    "schema_version": "narration-feature-readiness/1",
+    "updated_at": "2026-09-13T12:43:21.054963Z"
+  },
+  "narration_production": {
+    "digest_keyring_loaded": true,
+    "lifecycle_status": "ready",
+    "playback_installed": true,
+    "product_requested": true,
+    "production_backend_installed": true,
+    "provider_selection_fingerprint_sha256": "32ce6265c58a9f99d5a692d76faf40b19d77e76b0cda7f27ba6556e1b7b6d76e",
+    "reason_code": null,
+    "reference_clone_ready": true,
+    "worker_running": true
+  },
+  "selection_edit_enabled": true,
+  "selection_edit_operations": [
+    "polish",
+    "rewrite",
+    "expand",
+    "shorten",
+    "dialogue",
+    "review",
+    "custom"
+  ],
+  "status": "ready",
+  "vector_retrieval_enabled": true,
+  "version": "0.4.0"
+}
