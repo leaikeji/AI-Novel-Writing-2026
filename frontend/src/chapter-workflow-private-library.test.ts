@@ -75,6 +75,7 @@ describe("whole chapter current-library adoption entry", () => {
     await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce());
     const modal = confirm.mock.calls[0]?.[0];
     expect(modal.footer).toBeNull();
+    expect(modal.content.props.style).toEqual({ maxHeight: "calc(100vh - 180px)", overflowY: "auto" });
     const panel = findAll(modal.content, (node) => node.props.report === blocked)[0]!;
     const preview = findAll(modal.content, (node) => typeof node.props.bindLocator === "function")[0]!;
     expect(preview.props.text).toBe(candidate.content_markdown);

@@ -698,7 +698,7 @@ export async function reviewLibraryCheckReport(
       maskClosable: false,
       onCancel: () => finish(null),
       afterClose: () => { if (!settled) finish(null); },
-      content: h("div", null, h(LibraryCheckDecisionPanel, {
+      content: h("div", { style: { maxHeight: "calc(100vh - 180px)", overflowY: "auto" } }, h(LibraryCheckDecisionPanel, {
         key: report.id,
         report,
         loadPage: (offset: number) => apiRequest<LibraryCheckReportRecord>(

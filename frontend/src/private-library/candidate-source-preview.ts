@@ -22,7 +22,7 @@ export function createCandidateSourcePreview(React: PrivateLibraryReactRuntime) 
       h("div", {
         role: "region", "aria-label": "本次拟采用正文", tabIndex: 0,
         style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere", overflow: "auto",
-          maxHeight: 220, minHeight: 110, padding: 8, border: "1px solid currentColor" },
+          maxHeight: "min(220px, 25vh)", minHeight: 110, padding: 8, border: "1px solid currentColor" },
         ref: (node: HTMLElement | null) => {
           props.bindLocator(node ? (hit) => setLocated({ ...hit }) : null);
         },
