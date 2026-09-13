@@ -1,0 +1,4215 @@
+{
+  "checks": {
+    "candidate-alembic-head": "20260913_0056",
+    "candidate-migration-head": "20260913_0056",
+    "candidate-staging": {
+      "container_path": "/gate/candidate",
+      "helper_container_count": 0,
+      "host_bind_mount_count": 0,
+      "host_copy_detached": true,
+      "integrity_rechecked_before_each_install": true,
+      "method": "docker-cp",
+      "migration_head": "20260913_0056",
+      "tree_sha256": "0687e038d709eeecbe2d0717fabd3779fce7efe5ce5f7214561c2e3b5c7de508"
+    },
+    "candidate-tree-sha256": "0687e038d709eeecbe2d0717fabd3779fce7efe5ce5f7214561c2e3b5c7de508",
+    "command:candidate-all-off-hot": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c19157a8f251647349b368221db761300aa33d899b20ff6ef96e801fa412516c"
+    },
+    "command:candidate-mixed-hot": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c19157a8f251647349b368221db761300aa33d899b20ff6ef96e801fa412516c"
+    },
+    "command:candidate-mixed-repeat": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c19157a8f251647349b368221db761300aa33d899b20ff6ef96e801fa412516c"
+    },
+    "command:container-http-delete-b1745c74d464": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "db540ba56d93fb3e1351ce601080f1052e20a2081b172545efdcc14f075b17aa"
+    },
+    "command:container-http-get-2d2fdcfcdab9": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-3b86c658c0bf": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "5954fa56ec2b0e587216eb261e254c35d6d3d5c4fbae3b8554cf1c849d5fab58"
+    },
+    "command:container-http-get-75823c550d2b": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4159ab7e2eb685eba3b6c0c081b03a06111fbb17035f5d6f507cd0283e6ccd0d"
+    },
+    "command:container-http-get-7e8f8b7629fd": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "173a59b8ca1d559aec36319713ed265a7234d8ff36c38dd146363950bdbb0439"
+    },
+    "command:container-http-get-85736ae1e233": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6f1b6bd5ba1fba736d80ced0d432db38b3f301924315754ef0bd54a9dfe904f4"
+    },
+    "command:container-http-get-a7fb52cbe313": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "58c14e721b7bc3a0be8caa0bf395eb60fa0903c3a4f4eecebda246fefa63ef07"
+    },
+    "command:container-http-get-ac3174e3d5a7": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6090ea021228b47b3d3bdf7034bae193ab187ad78727606a0206b3f46e2a29c6"
+    },
+    "command:container-http-get-cf82f7f72284": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-cff6c79375f2": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "dc7d7be696bc8c60675128a85e34bbf82e42107fd31ccbf226dcbde89c04682d"
+    },
+    "command:container-http-get-d67b39af99d7": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f458cb113a5e94cadb640447aca66d7ab3c5700e39961f35e28f53a47b321fe1"
+    },
+    "command:container-http-get-d7ad856a3c75": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4ca2921a4fb724a3e758a49bcd3e984b509190e2267c3b694cc1c14c901717f1"
+    },
+    "command:container-http-get-de2fd1b89ba9": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a4a915b56154725bb0355888b34a8898b7e1e1b1fe078047c8fe018714c54cc"
+    },
+    "command:container-http-get-e93542073f21": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3f21c43971ba0e4610e816762c9ab641d87695972cfdcfcb8931f4d30b40834e"
+    },
+    "command:container-http-get-f13e665a7941": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "dff49764ef26e4a3a837f185b905318e19538a24eb04a5ef60db993a6b0eef21"
+    },
+    "command:container-http-get-fb39bcd8d996": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ea95150985946cd9cfe473345911abd70d41ba1dd98874220b18c03ec8fd1441"
+    },
+    "command:container-http-post-1b6750056d76": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c11e33eaeadb09105b278e3fb7d5f5929abffe2fb8135774b6791f7536abd935"
+    },
+    "command:container-http-post-2fae9e1357ef": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c40ef18b49dc40c578e74e539abc39907752656d26d2d71ce030e893bd5fe8b4"
+    },
+    "command:container-http-post-6bb341f23885": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1b686321e0e13ada47b753d2f6fb6971c489c2d3cdf864d3e74a446243ccd7af"
+    },
+    "command:container-http-post-d7ad856a3c75": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "b94bcffdfbd6f0c12e67a2c398cd913db61592a6a48eeb485c1a6c71121985e6"
+    },
+    "command:container-http-post-f13e665a7941": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9da2f5fcc6f3f467e1cb7447bf31fb13c1bce4b7470edaae05f7a3d20166f984"
+    },
+    "command:create-network": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3922e721509af3c71ff580943a5ed4cfdab11cab1ccab9ce51505077c1a650d8"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-plan78221a-novel-media": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2113876b3a1d9a985c50ea06d80d9b53e2c5331bb3f543e67aee1ea14cbd5cb4"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-plan78221a-postgres-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "7cfc7207a9b6e28c8094a0151c3e40fb83e4265579edb0f7ec02ccd8457af6d2"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-plan78221a-qwen-backups": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "66e4022377b16ec9565ff393b19a5a6341b704161954865e6fbd8b7d4e470a2c"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-plan78221a-qwen-data": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c6db54988a0d4ab42466d1ad164737c3e7e9194dbd4984914abd0d81fa9ccc81"
+    },
+    "command:create-volume-ai-novel-2026-t1gate-plan78221a-qwen-secrets": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "95ddcf0e79540989b423037794e8a7607b541e25d19146f3cb8f1d5ecb5ee12b"
+    },
+    "command:create-volume-sentinels": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:docker-cp-candidate": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:docker-server-available": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "aaa3c9962de64c23cb8de5e57eb229d404b0c35bf1efa3565b1f1e77933b25ef"
+    },
+    "command:freeze-offline-identity": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cdff9b4b6a5ff094123fdf17b4cf65aac56714d426ba39a3f5af6bd0dcd88bec"
+    },
+    "command:hash-staged-candidate": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c19157a8f251647349b368221db761300aa33d899b20ff6ef96e801fa412516c"
+    },
+    "command:image-present-postgres": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e9266002cea916b56f48d207564b32da673f1c0fe994aa748e19cca03a7b61f3"
+    },
+    "command:image-present-qwenpaw": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "35be59e537aec746bb2718f96db539ad400561f92bb1b464314c500d80aceaec"
+    },
+    "command:inspect-qwenpaw-topology": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6935384feba1f28fc4027b4ffa0e153c99395225259c1a45ec7184c045b00a48"
+    },
+    "command:list-owned-containers": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f0b96a78a90b98fc665dad693cfafc8b577f92f0fb8ee1fc21332ef95a90980d"
+    },
+    "command:migrate-plugin-to-head": {
+      "returncode": 0,
+      "stderr_sha256": "84b9cfdaaae75628f3cbd7082d9c05399a66f8049b2a84369fcf326d0622ec92",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:plugin-directory-removed": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:prepare-candidate-staging-directory": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:read-candidate-alembic-head": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f0064e7e619ad9a4963682fd9215bb24bc189b66137d98b43c999a4f43e723cd"
+    },
+    "command:read-db-sentinel": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d28c5edcb14e3a2513d16f3eb107c57d678d3a579481fe0b673d83b20bf699dd"
+    },
+    "command:read-migration-head": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "36b79b0bff6ad8d42b5d29d5d4f52d7882f28ef33edfa132aebe39fd85e99f07"
+    },
+    "command:read-volume-sentinels": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cbf9902efe0941e041cd43ff42ac2c11788ed89e001e33d23268efe48a76c4e2"
+    },
+    "command:restart-all-off-hot": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4b6686ee48f3cb4fdce8eaacc58525cdee77f4dd33ddf5202d58a820232f8fbf"
+    },
+    "command:restart-mixed-hot": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4b6686ee48f3cb4fdce8eaacc58525cdee77f4dd33ddf5202d58a820232f8fbf"
+    },
+    "command:restart-mixed-repeat": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4b6686ee48f3cb4fdce8eaacc58525cdee77f4dd33ddf5202d58a820232f8fbf"
+    },
+    "command:skill-installer-cp": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:skill-installer-create": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "87441eeb28627a2b2ff4e06406391214906a43ce1136f9acedf4c10eca11166c"
+    },
+    "command:skill-installer-exec": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "command:skill-installer-inspect": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8f1678af04afe7ac28cf1fccb42145adcea051f27891d67202a793ca1b46817f"
+    },
+    "command:skill-installer-logs": {
+      "returncode": 0,
+      "stderr_sha256": "e0f68c2447aa0be92f1dbc5642b9fc0cfc44ac9c99af810e504d54ae748e945d",
+      "stdout_sha256": "0a1c9bcd8ccf4a5f890260d448352a8a7f27013bb98d734d7503ce9f7d827e86"
+    },
+    "command:skill-installer-ps": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82de729f01c61661e12cac47fc2b3c3521addb9fd70650f7c19a48fa3418f7fb"
+    },
+    "command:skill-installer-rm": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cc73d61a0d9673ea0f07e9c54ffd6156105493e99a26cd01269f58d9f5dbc320"
+    },
+    "command:skill-installer-start": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cc73d61a0d9673ea0f07e9c54ffd6156105493e99a26cd01269f58d9f5dbc320"
+    },
+    "command:skill-installer-wait": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "command:start-after-offline": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4b6686ee48f3cb4fdce8eaacc58525cdee77f4dd33ddf5202d58a820232f8fbf"
+    },
+    "command:start-postgres": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f8de50bffa7a17123f73756398eb42ef13579ade25a184444af802992fcd2181"
+    },
+    "command:start-qwenpaw": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "55743c45c9168a7d274f8c3f316437a078b4a340240b8e17ccd80889856de254"
+    },
+    "command:stop-for-offline": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4b6686ee48f3cb4fdce8eaacc58525cdee77f4dd33ddf5202d58a820232f8fbf"
+    },
+    "command:verify-candidate-before-initial-install": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c19157a8f251647349b368221db761300aa33d899b20ff6ef96e801fa412516c"
+    },
+    "command:verify-candidate-before-reinstall": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c19157a8f251647349b368221db761300aa33d899b20ff6ef96e801fa412516c"
+    },
+    "command:verify-internal-network": {
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+    },
+    "expected-published-skill-ids": [
+      "chapter-outline",
+      "character-craft",
+      "continuity-check",
+      "dialogue-craft",
+      "golden-finger-writing",
+      "novel-direction",
+      "private-library-maintenance",
+      "prose-writing",
+      "scene-craft",
+      "story-foundation",
+      "style-review",
+      "suspense-writing"
+    ],
+    "http:app-health-installed": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/health",
+      "response_sha256": "9d470451c2fc7c188f41c7b9fbf1983217bc7850d798771f03c58913fda32d12",
+      "status": 200
+    },
+    "http:create-db-sentinel": {
+      "method": "POST",
+      "path": "/api/ai-novel-world-2026/novels",
+      "response_sha256": "fc586380787df3349c4e2b706518a5482870f1c797aef08826a90a5a059034ba",
+      "status": 201
+    },
+    "http:frontend-asset-installed": {
+      "method": "GET",
+      "path": "/api/plugins/ai-novel-world-2026/files/frontend/dist/index.js",
+      "response_bytes": 3619255,
+      "response_sha256": "1701a774b03777c0bab6575896a23a3e157ba0faa67c7fc172f47c63c052b27b",
+      "status": 200
+    },
+    "http:frontend-static-route-removed": {
+      "method": "GET",
+      "path": "/api/plugins/ai-novel-world-2026/files/frontend/dist/index.js",
+      "response_bytes": 51,
+      "response_sha256": "824bbc54fe55738814d6200573334323961c8c867795c435dbe43365f86ab7f4",
+      "status": 404
+    },
+    "http:health-route-removed": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/health",
+      "response_bytes": 22,
+      "response_sha256": "37ec4665a8102d115ffd1ac20dae94c98b4dac64b0c1a68228aa2a531caeb35d",
+      "status": 404
+    },
+    "http:initial-install": {
+      "attempts": 1,
+      "method": "POST",
+      "path": "/api/plugins/install",
+      "response_sha256": "e0233be48ca722c0fed94eef6c649cd5ad5e565423646f63485a4541e3b26706",
+      "status": 200
+    },
+    "http:list-agents": {
+      "method": "GET",
+      "path": "/api/agents",
+      "response_sha256": "007bd3471ae94cb1a2d68b5fbec65a523db7c22f3c7ad4480946ca16c9c68ab3",
+      "status": 200
+    },
+    "http:list-pawapps-installed": {
+      "method": "GET",
+      "path": "/api/pawapps",
+      "response_sha256": "554f6119bdc4c2bba1156a4c3496dd5777f7dad607448f0dde6ea7f63d039cee",
+      "status": 200
+    },
+    "http:list-pawapps-uninstalled": {
+      "method": "GET",
+      "path": "/api/pawapps",
+      "response_sha256": "21250f1dcf541521e98d238ded196d5b73489f1b462d0fda184d8e574d39e063",
+      "status": 200
+    },
+    "http:list-plugins-installed": {
+      "method": "GET",
+      "path": "/api/plugins",
+      "response_sha256": "905f2f69b0d8591b518f3550860024291629384c686547d0907329118df03bff",
+      "status": 200
+    },
+    "http:list-plugins-uninstalled": {
+      "method": "GET",
+      "path": "/api/plugins",
+      "response_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "status": 200
+    },
+    "http:list-skills-37a8eec1": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "eb771041ec199008bb640a5327c762ffd5e972a2898ad4da5d3fbc0e2d52a119",
+      "status": 200
+    },
+    "http:list-skills-7990cb90": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "1dfd73c8d7579d092dfa305c51c399a259033c0635c06725006131d176da56d0",
+      "status": 200
+    },
+    "http:list-skills-a609982d": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "bb41243f43e95b98f8431237f1cccb5364b8f0ec97a914b1f174a5bdf0768840",
+      "status": 200
+    },
+    "http:list-skills-c56a981a": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "d44d1852299a09ebdc1ea98a3f9c8d8a11bbc8b21aa0f76890d62cac92f4e36d",
+      "status": 200
+    },
+    "http:list-tools-37a8eec1": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "f88f02be5cee29642a817628322d7416dd491afcf3c2be23f77fda96f7f0845f",
+      "status": 200
+    },
+    "http:list-tools-7990cb90": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "3d22c8f7a69d5cca6625411b3e81a4dadf4b078a5eb2bc0f3f894495c30a7114",
+      "status": 200
+    },
+    "http:list-tools-a609982d": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "4ab0998c236f6030a6baa861950284a8e591fb9097073abe637b7a228463655d",
+      "status": 200
+    },
+    "http:list-tools-c56a981a": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "3d22c8f7a69d5cca6625411b3e81a4dadf4b078a5eb2bc0f3f894495c30a7114",
+      "status": 200
+    },
+    "http:native-frontend-shell-after-uninstall": {
+      "method": "GET",
+      "path": "/frontend_plugin",
+      "response_bytes": 2289,
+      "response_sha256": "ae1a829f5e4ffdcd801b75ad8cb283ff928d31d47adee39b49435a508c5bc739",
+      "status": 200
+    },
+    "http:native-route-agents": {
+      "method": "GET",
+      "path": "/api/agents",
+      "response_sha256": "007bd3471ae94cb1a2d68b5fbec65a523db7c22f3c7ad4480946ca16c9c68ab3",
+      "status": 200
+    },
+    "http:native-route-skills": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "873a953075a2a39784f38aa6a8a048d22246ccd82f803949acaa87c9ae8864e4",
+      "status": 200
+    },
+    "http:native-route-tools": {
+      "method": "GET",
+      "path": "/api/tools",
+      "response_sha256": "54a78cb77d1ee6ef1e1ffba748c4e354c324261677022da1821e65e04e75415c",
+      "status": 200
+    },
+    "http:novel-route-removed": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/novels",
+      "response_bytes": 22,
+      "response_sha256": "37ec4665a8102d115ffd1ac20dae94c98b4dac64b0c1a68228aa2a531caeb35d",
+      "status": 404
+    },
+    "http:pawapp-detail-removed": {
+      "method": "GET",
+      "path": "/api/pawapps/ai-novel-world-2026",
+      "response_bytes": 51,
+      "response_sha256": "3e90ce84c41a3e7404e1e03776cd1c813a642e2638ca29e4f8654b87633a4adc",
+      "status": 404
+    },
+    "http:plugin-status-removed": {
+      "method": "GET",
+      "path": "/api/plugins/ai-novel-world-2026/status",
+      "response_bytes": 52,
+      "response_sha256": "69d1711d2c1ffbe14c4cca01f4187da79914002a4cc42a966f83334696ab6257",
+      "status": 404
+    },
+    "http:public-delete-uninstall": {
+      "method": "DELETE",
+      "path": "/api/plugins/ai-novel-world-2026",
+      "response_sha256": "d862d54f2b192cb9b3fb234fc20ab7750e10223cc867114c64ac82092ffd3779",
+      "status": 200
+    },
+    "http:read-db-sentinel-after-reinstall": {
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/novels/cf7182ab-3abc-4ec4-b72b-ffe48a7c0121",
+      "response_sha256": "b571eb1e04c15ad0d0c6a13a517079b3b0d3fd615357616bea67ff12958af07f",
+      "status": 200
+    },
+    "http:reinstall": {
+      "attempts": 1,
+      "method": "POST",
+      "path": "/api/plugins/install",
+      "response_sha256": "e0233be48ca722c0fed94eef6c649cd5ad5e565423646f63485a4541e3b26706",
+      "status": 200
+    },
+    "http:skill-GET-agents": {
+      "method": "GET",
+      "path": "/api/agents",
+      "response_sha256": "007bd3471ae94cb1a2d68b5fbec65a523db7c22f3c7ad4480946ca16c9c68ab3",
+      "status": 200
+    },
+    "http:skill-GET-skills": {
+      "method": "GET",
+      "path": "/api/skills",
+      "response_sha256": "d44d1852299a09ebdc1ea98a3f9c8d8a11bbc8b21aa0f76890d62cac92f4e36d",
+      "status": 200
+    },
+    "http:skill-POST-agents": {
+      "method": "POST",
+      "path": "/api/agents",
+      "response_sha256": "e4c483a92bccbddf0c126dc264e7d37f662001c241ad22f3f539628e54385afe",
+      "status": 201
+    },
+    "http:skill-POST-batch-disable": {
+      "method": "POST",
+      "path": "/api/skills/batch-disable",
+      "response_sha256": "f95c1a53347e12a69741ecb11cbdf3e282ed79dbfce11d9094d29ed6801e18dd",
+      "status": 200
+    },
+    "http:skill-POST-batch-enable": {
+      "method": "POST",
+      "path": "/api/skills/batch-enable",
+      "response_sha256": "570902bd941e80ea2964fbd88f18621012291f7091e3254fbccae638ab7ad7fb",
+      "status": 200
+    },
+    "http:t4-narration-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-requests/00000000-0000-4000-8000-000000000001",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "http:t4-playback-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-editions/00000000-0000-4000-8000-000000000001/manifest",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "http:t4-script-disabled-without-token": {
+      "cache_control": "no-store",
+      "method": "GET",
+      "path": "/api/ai-novel-world-2026/narration-scripts/00000000-0000-4000-8000-000000000001",
+      "response_bytes": 86,
+      "response_sha256": "a12a39312ec2c4ff9069a631a8388a4d5b0e00c88708fc6ab4e71768aaef7250",
+      "status": 404,
+      "validation_token_sent": false
+    },
+    "installed-registry": {
+      "agent_ids": [
+        "QwenPaw_QA_Agent_0.2",
+        "ai-novel-writer",
+        "default",
+        "s69-observer-plan78221a"
+      ],
+      "skills_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "tools_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_library_apply_change",
+          "novel_library_prepare_change",
+          "novel_library_query",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ],
+        "ai-novel-writer": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_library_apply_change",
+          "novel_library_prepare_change",
+          "novel_library_query",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ],
+        "default": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_library_apply_change",
+          "novel_library_prepare_change",
+          "novel_library_query",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ],
+        "s69-observer-plan78221a": [
+          "novel_get_context",
+          "novel_get_document",
+          "novel_get_workspace_context",
+          "novel_library_apply_change",
+          "novel_library_prepare_change",
+          "novel_library_query",
+          "novel_prepare_selection_edit",
+          "novel_search"
+        ]
+      }
+    },
+    "isolated-topology": {
+      "container_count": 2,
+      "host_bind_mount_count": 0,
+      "model_mount_count": 0,
+      "network_internal": true,
+      "offline_installer": {
+        "name": "ai-novel-2026-t1gate-plan78221a-qwenpaw-plugin-installer",
+        "network": "none",
+        "ownership_labels": true,
+        "temporary": true
+      },
+      "outbound_network_route": false,
+      "postgres_host_port": false,
+      "qwenpaw_host_port": false,
+      "sidecar_started": false,
+      "token_mount_count": 0
+    },
+    "migration-head": "20260913_0056",
+    "narration-disabled": {
+      "digest_keyring_loaded": false,
+      "lifecycle_status": "disabled",
+      "playback_installed": false,
+      "product_requested": false,
+      "production_backend_installed": false,
+      "provider_selection_fingerprint_sha256": null,
+      "reason_code": null,
+      "reference_clone_ready": false,
+      "worker_running": false
+    },
+    "narration-production-disabled": {
+      "digest_keyring_loaded": false,
+      "lifecycle_status": "disabled",
+      "playback_installed": false,
+      "product_requested": false,
+      "production_backend_installed": false,
+      "provider_selection_fingerprint_sha256": null,
+      "reason_code": null,
+      "reference_clone_ready": false,
+      "worker_running": false
+    },
+    "other-skills:all-off-hot-after": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:all-off-hot-before": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:all-off-hot-restart": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:baseline": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:initialized": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:mixed-hot-after": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:mixed-hot-before": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:mixed-hot-restart": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:mixed-reinstall": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:mixed-repeat-after": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:mixed-repeat-before": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:mixed-repeat-restart": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:offline-restored-final": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true,
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      },
+      "s69-observer-plan78221a": {
+        "plugin:ai-novel-world-2026:chapter-outline": false,
+        "plugin:ai-novel-world-2026:character-craft": false,
+        "plugin:ai-novel-world-2026:continuity-check": false,
+        "plugin:ai-novel-world-2026:dialogue-craft": false,
+        "plugin:ai-novel-world-2026:golden-finger-writing": false,
+        "plugin:ai-novel-world-2026:novel-direction": false,
+        "plugin:ai-novel-world-2026:private-library-maintenance": false,
+        "plugin:ai-novel-world-2026:prose-writing": false,
+        "plugin:ai-novel-world-2026:scene-craft": false,
+        "plugin:ai-novel-world-2026:story-foundation": false,
+        "plugin:ai-novel-world-2026:style-review": false,
+        "plugin:ai-novel-world-2026:suspense-writing": false
+      }
+    },
+    "other-skills:uninstall": {
+      "QwenPaw_QA_Agent_0.2": {
+        "builtin:QA_source_index": true,
+        "builtin:guidance": true
+      },
+      "default": {
+        "builtin:QA_source_index": true,
+        "builtin:browser": true,
+        "builtin:channel_message": true,
+        "builtin:chat_with_agent": true,
+        "builtin:cron": true,
+        "builtin:dingtalk_channel": true,
+        "builtin:docx": true,
+        "builtin:file_reader": true,
+        "builtin:guidance": true,
+        "builtin:mailbox": true,
+        "builtin:make-skill": true,
+        "builtin:make_plan": true,
+        "builtin:multi_agent_collaboration": true,
+        "builtin:pdf": true,
+        "builtin:pptx": true,
+        "builtin:xlsx": true
+      },
+      "s69-observer-plan78221a": {}
+    },
+    "postgres-ready": {
+      "attempts": 1
+    },
+    "preflight-absent:container:ai-novel-2026-t1gate-plan78221a-postgres": true,
+    "preflight-absent:container:ai-novel-2026-t1gate-plan78221a-qwenpaw": true,
+    "preflight-absent:container:ai-novel-2026-t1gate-plan78221a-qwenpaw-plugin-installer": true,
+    "preflight-absent:network:ai-novel-2026-t1gate-plan78221a-net": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-plan78221a-novel-media": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-plan78221a-postgres-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-plan78221a-qwen-backups": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-plan78221a-qwen-data": true,
+    "preflight-absent:volume:ai-novel-2026-t1gate-plan78221a-qwen-secrets": true,
+    "qwenpaw-ready": {
+      "attempts": 4
+    },
+    "sentinels-created": {
+      "db_digest": "2fcf9c226ae2add2d419f3d7325a460f683a6c6b7132ca96cb2f8ea80e040f2c",
+      "file_digest": "e72a27b5fbec2bd0e0c74ed8750a1b2b0c634a73c6ddf001992095af7eb3cf58",
+      "volume_sentinel_count": 4
+    },
+    "sentinels-preserved": {
+      "db_digest": "2fcf9c226ae2add2d419f3d7325a460f683a6c6b7132ca96cb2f8ea80e040f2c",
+      "file_digest": "e72a27b5fbec2bd0e0c74ed8750a1b2b0c634a73c6ddf001992095af7eb3cf58",
+      "volume_sentinel_count": 4
+    },
+    "skill-adapter-identity": {
+      "base_url": "http://ai-novel-2026-t1gate-plan78221a-qwenpaw:8088",
+      "container": "ai-novel-2026-t1gate-plan78221a-qwenpaw",
+      "installer": "ai-novel-2026-t1gate-plan78221a-qwenpaw-plugin-installer",
+      "model_calls": 0,
+      "transport": "existing-gate-container-loopback",
+      "volumes": [
+        "ai-novel-2026-t1gate-plan78221a-qwen-data:/app/working",
+        "ai-novel-2026-t1gate-plan78221a-qwen-secrets:/app/working.secret",
+        "ai-novel-2026-t1gate-plan78221a-qwen-backups:/app/working.backups"
+      ]
+    },
+    "skill-offline-install": {
+      "host_still_stopped": true,
+      "previous_skill_state": "/Users/liujia/Documents/AI小说世界2026/docs/开发文档/证据/计划78/plan78221a-offline-skill-state.json",
+      "restore_status": "pending_skill_restore",
+      "state_preserved": null
+    },
+    "skill-snapshot:all-off-hot": {
+      "path": "/Users/liujia/Documents/AI小说世界2026/docs/开发文档/证据/计划78/plan78221a-all-off-hot-skill-state.json",
+      "sha256": "b5488335098a5af3117e84d2d7f0fed1b0de40a476d95da4e680652a2f6a02d7"
+    },
+    "skill-snapshot:initialized": {
+      "path": "/Users/liujia/Documents/AI小说世界2026/docs/开发文档/证据/计划78/plan78221a-initialized-skill-state.json",
+      "sha256": "d5ce8f9cacbea22c7e85d6b0b94b6bdf3e6be7200f0d06b4a53c5609a64da5eb"
+    },
+    "skill-snapshot:mixed": {
+      "path": "/Users/liujia/Documents/AI小说世界2026/docs/开发文档/证据/计划78/plan78221a-mixed-skill-state.json",
+      "sha256": "7e4c8401b2547ad237b54d362e8c917419573305969360c2075bf3eade0d71d7"
+    },
+    "skill-snapshot:mixed-hot": {
+      "path": "/Users/liujia/Documents/AI小说世界2026/docs/开发文档/证据/计划78/plan78221a-mixed-hot-skill-state.json",
+      "sha256": "7e4c8401b2547ad237b54d362e8c917419573305969360c2075bf3eade0d71d7"
+    },
+    "skill-snapshot:mixed-repeat": {
+      "path": "/Users/liujia/Documents/AI小说世界2026/docs/开发文档/证据/计划78/plan78221a-mixed-repeat-skill-state.json",
+      "sha256": "7e4c8401b2547ad237b54d362e8c917419573305969360c2075bf3eade0d71d7"
+    },
+    "skill-snapshot:offline": {
+      "path": "/Users/liujia/Documents/AI小说世界2026/docs/开发文档/证据/计划78/plan78221a-offline-skill-state.json",
+      "sha256": "7e4c8401b2547ad237b54d362e8c917419573305969360c2075bf3eade0d71d7"
+    },
+    "skills:all-off-hot-after": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": false,
+        "character-craft": false,
+        "continuity-check": false,
+        "dialogue-craft": false,
+        "golden-finger-writing": false,
+        "novel-direction": false,
+        "private-library-maintenance": false,
+        "prose-writing": false,
+        "scene-craft": false,
+        "story-foundation": false,
+        "style-review": false,
+        "suspense-writing": false
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [
+        "chapter-outline",
+        "character-craft",
+        "novel-direction",
+        "prose-writing",
+        "story-foundation",
+        "style-review"
+      ],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        }
+      },
+      "writing_skills_ready": false
+    },
+    "skills:all-off-hot-before": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": false,
+        "character-craft": false,
+        "continuity-check": false,
+        "dialogue-craft": false,
+        "golden-finger-writing": false,
+        "novel-direction": false,
+        "private-library-maintenance": false,
+        "prose-writing": false,
+        "scene-craft": false,
+        "story-foundation": false,
+        "style-review": false,
+        "suspense-writing": false
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [
+        "chapter-outline",
+        "character-craft",
+        "novel-direction",
+        "prose-writing",
+        "story-foundation",
+        "style-review"
+      ],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        }
+      },
+      "writing_skills_ready": false
+    },
+    "skills:all-off-hot-restart": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": false,
+        "character-craft": false,
+        "continuity-check": false,
+        "dialogue-craft": false,
+        "golden-finger-writing": false,
+        "novel-direction": false,
+        "private-library-maintenance": false,
+        "prose-writing": false,
+        "scene-craft": false,
+        "story-foundation": false,
+        "style-review": false,
+        "suspense-writing": false
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [
+        "chapter-outline",
+        "character-craft",
+        "novel-direction",
+        "prose-writing",
+        "story-foundation",
+        "style-review"
+      ],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": false,
+          "reason": "disabled"
+        }
+      },
+      "writing_skills_ready": false
+    },
+    "skills:initialized": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": true,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:mixed-hot-after": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:mixed-hot-before": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:mixed-hot-restart": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:mixed-reinstall": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:mixed-repeat-after": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:mixed-repeat-before": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:mixed-repeat-restart": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "skills:offline-restored-final": {
+      "added_skills": [],
+      "current_skill_state": {
+        "chapter-outline": true,
+        "character-craft": true,
+        "continuity-check": true,
+        "dialogue-craft": true,
+        "golden-finger-writing": false,
+        "novel-direction": true,
+        "private-library-maintenance": true,
+        "prose-writing": true,
+        "scene-craft": true,
+        "story-foundation": true,
+        "style-review": true,
+        "suspense-writing": true
+      },
+      "enabled_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "missing_methods": {},
+      "missing_primary_skills": [],
+      "optional_skill_status": {
+        "golden-finger-writing": {
+          "enabled": false,
+          "method_available": true,
+          "method_error": null,
+          "ready": false,
+          "registered": true
+        },
+        "suspense-writing": {
+          "enabled": true,
+          "method_available": true,
+          "method_error": null,
+          "ready": true,
+          "registered": true
+        }
+      },
+      "registered_novel_skills": {
+        "QwenPaw_QA_Agent_0.2": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "ai-novel-writer": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "default": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ],
+        "s69-observer-plan78221a": [
+          "chapter-outline",
+          "character-craft",
+          "continuity-check",
+          "dialogue-craft",
+          "golden-finger-writing",
+          "novel-direction",
+          "private-library-maintenance",
+          "prose-writing",
+          "scene-craft",
+          "story-foundation",
+          "style-review",
+          "suspense-writing"
+        ]
+      },
+      "removed_skills": [],
+      "scope_isolated": true,
+      "skill_state_differences": {},
+      "state_preserved": true,
+      "task_readiness": {
+        "chapter_body": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_outline": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "chapter_storyline_recommendation": {
+          "primary_skill": "chapter-outline",
+          "ready": true,
+          "reason": null
+        },
+        "character_profile_completion": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "novel_naming": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "novel_template": {
+          "primary_skill": "novel-direction",
+          "ready": true,
+          "reason": null
+        },
+        "outline_background": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_characters": {
+          "primary_skill": "character-craft",
+          "ready": true,
+          "reason": null
+        },
+        "outline_highlight": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "outline_plot": {
+          "primary_skill": "story-foundation",
+          "ready": true,
+          "reason": null
+        },
+        "review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:custom": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:dialogue": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:expand": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:polish": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:review": {
+          "primary_skill": "style-review",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:rewrite": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        },
+        "selection_edit:shorten": {
+          "primary_skill": "prose-writing",
+          "ready": true,
+          "reason": null
+        }
+      },
+      "writing_skills_ready": true
+    },
+    "t4-routes-disabled-without-token": {
+      "narration": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      },
+      "playback": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      },
+      "script": {
+        "cache_control": "no-store",
+        "status": 404,
+        "validation_token_sent": false
+      }
+    },
+    "tts-disabled-by-construction": {
+      "host_bind_mount_count": 0,
+      "model_mount_count": 0,
+      "moss_env_count": 0,
+      "outbound_network_route": false,
+      "product_env": false,
+      "public_api_probe": "container-loopback",
+      "python_package_index_access": false,
+      "qwenpaw_host_port": false,
+      "reference_clone_env": false,
+      "runtime_env": false,
+      "sidecar_network_present": false,
+      "storage_root_env_count": 0,
+      "token_mount_count": 0,
+      "validation_env": false
+    },
+    "uninstalled-zero-residue": {
+      "agent_ids": [
+        "QwenPaw_QA_Agent_0.2",
+        "ai-novel-writer",
+        "default",
+        "s69-observer-plan78221a"
+      ],
+      "skills_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [],
+        "default": [],
+        "s69-observer-plan78221a": []
+      },
+      "tools_by_agent": {
+        "QwenPaw_QA_Agent_0.2": [],
+        "ai-novel-writer": [],
+        "default": [],
+        "s69-observer-plan78221a": []
+      }
+    }
+  },
+  "cleanup": {
+    "already_absent": [
+      "container:ai-novel-2026-t1gate-plan78221a-qwenpaw-plugin-installer"
+    ],
+    "broad_cleanup_used": false,
+    "failures": [],
+    "removed_exact_resources": [
+      "container:ai-novel-2026-t1gate-plan78221a-qwenpaw",
+      "container:ai-novel-2026-t1gate-plan78221a-postgres",
+      "volume:ai-novel-2026-t1gate-plan78221a-postgres-data",
+      "volume:ai-novel-2026-t1gate-plan78221a-novel-media",
+      "volume:ai-novel-2026-t1gate-plan78221a-qwen-backups",
+      "volume:ai-novel-2026-t1gate-plan78221a-qwen-secrets",
+      "volume:ai-novel-2026-t1gate-plan78221a-qwen-data",
+      "network:ai-novel-2026-t1gate-plan78221a-net"
+    ],
+    "status": "passed"
+  },
+  "failure_code": null,
+  "gate": "T1-GATE-INSTALL",
+  "mode": "real",
+  "phases": [
+    "preflight",
+    "create-isolated-runtime",
+    "stage-candidate-with-docker-cp",
+    "install",
+    "skill-initialization",
+    "skill-mixed-setup",
+    "mixed-hot",
+    "mixed-repeat",
+    "all-off-hot",
+    "uninstall",
+    "reinstall",
+    "skill-offline"
+  ],
+  "run_id": "plan78221a",
+  "schema_version": 1,
+  "status": "passed"
+}

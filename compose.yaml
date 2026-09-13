@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: docker/qwenpaw/Dockerfile
-    image: ai-novel-2026-qwenpaw-runtime:2.2.0-mvp0
+    image: ai-novel-2026-qwenpaw-runtime:2.2.1-mvp0
     container_name: ai-novel-2026-qwenpaw-lab
     platform: linux/arm64
     restart: unless-stopped

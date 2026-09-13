@@ -2,7 +2,7 @@
 """Run the T1 isolated QwenPaw plugin lifecycle gate.
 
 The real mode deliberately creates two disposable runtime containers: one
-QwenPaw 2.2.0 candidate host and one PostgreSQL 18 database.  Every mutable
+QwenPaw 2.2.1 candidate host and one PostgreSQL 18 database.  Every mutable
 resource has a unique name and two ownership labels.  The candidate PawApp is
 installed through QwenPaw's public runtime API, force-reinstalled, uninstalled
 through the public DELETE endpoint, and installed again.
@@ -57,7 +57,7 @@ CANDIDATE_TREE_MAX_FILE_BYTES = 64 * 1024 * 1024
 CANDIDATE_TREE_MAX_TOTAL_BYTES = 512 * 1024 * 1024
 CANDIDATE_HASH_CHUNK_BYTES = 1024 * 1024
 
-QWENPAW_IMAGE = "ai-novel-2026-qwenpaw-runtime:2.2.0-mvp0"
+QWENPAW_IMAGE = "ai-novel-2026-qwenpaw-runtime:2.2.1-mvp0"
 POSTGRES_IMAGE = (
     "pgvector/pgvector:0.8.6-pg18@"
     "sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a"
