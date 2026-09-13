@@ -1105,6 +1105,16 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     });
   }, [document?.id, document?.volume_id, novel?.id]);
 
+  const syncDirectoryDocument = React.useCallback((updated: DocumentRecord) => {
+    setNovel((current: NovelRecord | null) => current?.id === updated.novel_id ? {
+      ...current,
+      tree: current.tree.map((volume) => ({
+        ...volume,
+        documents: volume.documents.map((item) => item.id === updated.id ? updated : item),
+      })),
+    } : current);
+  }, []);
+
   const saveNow = React.useCallback(async (markdown: string, retryLibrary = false): Promise<DocumentRecord | null> => {
     if (recoveryLoadingRef.current || recoveryChoiceRef.current) return null;
     const requestedDocumentId = documentRef.current?.id;
@@ -1224,6 +1234,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         }
         documentRef.current = merged;
         setDocument(merged);
+        syncDirectoryDocument(merged);
         setLibrarySaveIssue("");
         librarySavePausedRef.current = false;
         if (contentRef.current === target) {
@@ -1269,7 +1280,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       return saveNow(contentRef.current);
     }
     return saved;
-  }, []);
+  }, [syncDirectoryDocument]);
 
   const saveStableNarrationSource = React.useCallback(async (): Promise<StableChapterNarrationSource> => {
     const active = documentRef.current;
@@ -3092,13 +3103,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     contentRef.current = updated.content_markdown;
     setDocument(updated);
     setContent(updated.content_markdown);
-    setNovel((current: NovelRecord | null) => current?.id === updated.novel_id ? {
-      ...current,
-      tree: current.tree.map((volume) => ({
-        ...volume,
-        documents: volume.documents.map((item) => item.id === updated.id ? updated : item),
-      })),
-    } : current);
+    syncDirectoryDocument(updated);
     setError("");
     setConflict(null);
     setRecovery(null);

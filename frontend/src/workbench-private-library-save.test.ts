@@ -335,6 +335,40 @@ describe("Workbench controlled selection save and recovery entry", () => {
     expect(server.get(DOC_A)?.content_markdown).toBe(`${BODY_A}林舟收紧绳结。`);
   });
 
+  it.each(["controlled AI", "manual"])("synchronizes the directory after a confirmed %s save", async (kind) => {
+    render(); await settle();
+    const previous = workflowProps().novel as NovelRecord;
+    const other = previous.tree[0]!.documents.find((item) => item.id === DOC_B);
+    const loads = io.loadNovel.mock.calls.length;
+    if (kind === "controlled AI") await applyAI();
+    else { manual(AI_TEXT); await settle(); }
+    await vi.advanceTimersByTimeAsync(600); await settle();
+    const current = workflowProps().novel as NovelRecord;
+    const row = current.tree[0]!.documents.find((item) => item.id === DOC_A);
+    expect(row?.content_markdown).toBe(AI_TEXT);
+    expect(row?.visible_character_count).toBe(server.get(DOC_A)?.visible_character_count);
+    expect(row?.draft_version).toBe(2);
+    expect(current.tree[0]!.documents.find((item) => item.id === DOC_B)).toBe(other);
+    expect(current.tree[0]!.title).toBe(previous.tree[0]!.title);
+    expect(io.loadNovel).toHaveBeenCalledTimes(loads);
+    expect(calls()).toHaveLength(1);
+  });
+
+  it.each(["failed", "late"])("does not publish a %s controlled save to the directory", async (outcome) => {
+    render(); await settle();
+    const reply = deferred<DocumentRecord>();
+    patchReply = async () => reply.promise;
+    await applyAI();
+    await vi.advanceTimersByTimeAsync(600); await settle();
+    if (outcome === "late") await projectSwitch(DOC_B);
+    const previous = workflowProps().novel;
+    if (outcome === "failed") reply.reject(new Error("connection lost"));
+    else reply.resolve(accepted(DOC_A, bodyOf(calls()[0]!)));
+    await settle();
+    expect(workflowProps().novel).toBe(previous);
+    expect(calls()).toHaveLength(1);
+  });
+
   it.each(["controlled AI", "manual"])("does not send a prior chapter's 600ms %s timer into the new chapter", async (kind) => {
     render(); await settle();
     if (kind === "controlled AI") await applyAI();
