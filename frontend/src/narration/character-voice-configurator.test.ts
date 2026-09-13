@@ -128,7 +128,7 @@ describe("CharacterVoiceConfigurator", () => {
     expect(groups[1]!.props.open).toBeUndefined();
     expect(textContent(tree)).toContain("OFFICIAL_LIBRARY");
     expect(textContent(tree)).not.toContain("ADVANCED_PRIVATE");
-    expect(textContent(tree)).toContain("选中即保存");
+    expect(textContent(tree)).toContain("选中后立即生效");
   });
 
   it("preserves an explicit opt-out from opening official choices", () => {
@@ -146,11 +146,11 @@ describe("CharacterVoiceConfigurator", () => {
     const copy = textContent(tree);
 
     const order = [
-      copy.indexOf("当前声音"),
+      copy.indexOf("当前实际声音"),
       copy.indexOf("智能匹配官方音色"),
       copy.indexOf("生成专属音色"),
-      copy.indexOf("浏览全部官方音色"),
-      copy.indexOf("私人音色与高级调音"),
+      copy.indexOf("浏览官方音色"),
+      copy.indexOf("定制私人音色"),
     ];
     expect(order.every((value) => value >= 0)).toBe(true);
     expect([...order].sort((left, right) => left - right)).toEqual(order);
@@ -189,7 +189,7 @@ describe("CharacterVoiceConfigurator", () => {
 
     expect(findButton(tree, "立即智能匹配").props.disabled).toBe(true);
     expect(textContent(tree)).toContain("人物卡尚未保存。");
-    expect(textContent(tree)).toContain("浏览全部官方音色");
+    expect(textContent(tree)).toContain("浏览官方音色");
   });
 
   it("does not create an empty dedicated-voice section when the generator is hidden", () => {

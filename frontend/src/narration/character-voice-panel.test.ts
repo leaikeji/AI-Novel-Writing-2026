@@ -412,6 +412,21 @@ function setup(
 
 
 describe("character voice eligibility", () => {
+  it("binds a locked synthetic reference through Base without requiring VoiceDesign", () => {
+    const generated = profile({}, {
+      source_type: "generated", preset_key: null, official_preset: null,
+      rights: { ...voiceVersion().rights, source_kind: "qwen_synthetic_design" },
+      reference_asset_id: "81111111-1111-4111-8111-111111111111", description_available: true,
+    });
+    expect(characterVoiceOptions([generated], NOVEL_ID, capabilities({ voice_design: false }), ["generated", "uploaded"])).toHaveLength(1);
+    expect(characterVoiceOptions([generated], NOVEL_ID, capabilities({ reference_clone: false }))).toEqual([]);
+    for (const change of [
+      { state: "draft" as const }, { reference_asset_id: null },
+      { rights: { ...generated.versions[0]!.rights, state: "revoked" as const } },
+    ]) {
+      expect(characterVoiceOptions([{ ...generated, versions: [{ ...generated.versions[0]!, ...change }] }], NOVEL_ID, capabilities())).toEqual([]);
+    }
+  });
   it("only exposes current locked, accepted, rights-active and capability-enabled versions", () => {
     const accepted = profile();
     const revoked = profile(
@@ -539,12 +554,64 @@ describe("CharacterVoicePanel", () => {
     const api = apiFor(binding(), [current]);
     const runtime = setup(api, defaultProps({ allowedSourceTypes: ["generated", "uploaded"] }));
     const tree = await runtime.load();
-    const select = findAll(tree, (element) => element.type === "select")[0];
-    expect(select.props["aria-invalid"]).toBe(revoked);
-    expect(textContent(tree)).toContain(revoked ? "（当前不可用）" : "请在上方官方音色列表更换");
-    expect(textContent(tree)).toContain("尚无可选私人音色。");
-    expect(findButton(tree, "保存人物声音").props.disabled).toBe(true);
+    expect(findAll(tree, (element) => element.type === "select")).toHaveLength(0);
+    expect(textContent(tree)).toContain("完成私人音色后再应用到林夏");
+    expect(textContent(tree)).not.toContain("4. 应用到林夏");
+    expect(textContent(tree)).not.toContain("使用专属声音");
+    if (revoked) expect(textContent(tree)).toContain("暂时不可用");
+    else expect(textContent(tree)).not.toContain("暂时不可用");
+    expect(findAll(tree, (element) => element.type === "button")).toHaveLength(0);
     expect(api.putCharacterVoiceBinding).not.toHaveBeenCalled();
+  });
+
+  it("keeps an official binding separate until a locked private voice is explicitly applied", async () => {
+    const privateVoice = profile(
+      { profile_id: PROFILE_B_ID, current_version_id: VERSION_B_ID, name: "林夏｜清亮青年女声" },
+      {
+        profile_id: PROFILE_B_ID,
+        version_id: VERSION_B_ID,
+        source_type: "generated",
+        preset_key: null,
+        official_preset: null,
+        rights: { ...voiceVersion().rights, source_kind: "qwen_synthetic_design" },
+        reference_asset_id: "81111111-1111-4111-8111-111111111111",
+        description_available: true,
+      },
+    );
+    const api = apiFor(binding(), [profile(), privateVoice]);
+    const runtime = setup(api, defaultProps({ allowedSourceTypes: ["generated", "uploaded"] }));
+    let tree = await runtime.load();
+    const select = findAll(tree, (element) => element.type === "select")[0]!;
+
+    expect(select.props.value).toBe("");
+    expect(textContent(tree)).toContain("选择要应用到林夏的私人音色");
+    expect(textContent(tree)).not.toContain("4. 应用到林夏");
+    expect(textContent(tree)).toContain("当前声音保持不变");
+    expect(textContent(tree)).not.toContain("本次更换会影响");
+    expect(textContent(tree)).not.toContain("使用专属声音");
+
+    (select.props.onChange as (event: { target: { value: string } }) => void)({
+      target: { value: `${PROFILE_B_ID}:${VERSION_B_ID}` },
+    });
+    tree = runtime.render();
+
+    expect(textContent(tree)).toContain("4. 应用到林夏");
+    expect(textContent(tree)).toContain("选择不会立即生效");
+    expect(textContent(tree)).toContain("本次更换会影响");
+    expect(findButton(tree, "应用到林夏").props.disabled).toBe(false);
+    (findButton(tree, "应用到林夏").props.onClick as () => void)();
+    await settle();
+    expect(api.putCharacterVoiceBinding).toHaveBeenCalledWith(
+      NOVEL_ID,
+      CHARACTER_ID,
+      expect.objectContaining({
+        expected_version: 4,
+        binding_policy: "dedicated",
+        profile_id: PROFILE_B_ID,
+        version_id: VERSION_B_ID,
+      }),
+      expect.any(AbortSignal),
+    );
   });
 
   it("renders native keyboard controls, live status and honest historical impact", async () => {
@@ -560,9 +627,9 @@ describe("CharacterVoicePanel", () => {
     expect(findAll(tree, (element) => element.type === "select")).toHaveLength(1);
     expect(findAll(tree, (element) => element.props.role === "status")).toHaveLength(1);
     expect(textContent(tree)).toContain("影响章节6");
-    expect(textContent(tree)).toContain("影响句段23");
-    expect(textContent(tree)).toContain("已有 2 个历史 Edition 不会被改写或替换");
-    expect(textContent(tree)).toContain("作者主动更新朗读时重生成受影响句段");
+    expect(textContent(tree)).toContain("句段23");
+    expect(textContent(tree)).toContain("历史朗读版本2");
+    expect(textContent(tree)).toContain("已有朗读不会改变");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(":focus-visible");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("repeat(4, minmax(0, 1fr))");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 768px)");

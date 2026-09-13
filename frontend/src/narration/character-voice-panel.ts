@@ -141,7 +141,7 @@ const defaultApi: CharacterVoicePanelApi = {
 
 
 const POLICY_LABELS: Readonly<Record<CharacterVoiceBindingPolicy, string>> = {
-  dedicated: "使用专属声音",
+  dedicated: "使用指定声音",
   inherited: "明确继承声音",
   unset: "暂不配置声音",
 };
@@ -157,7 +157,7 @@ const SOURCE_LABELS: Readonly<Record<VoiceSourceType, string>> = {
 const SOURCE_CAPABILITIES: Readonly<Record<VoiceSourceType, CapabilityKey>> = {
   preset: "preset_voice_source",
   uploaded: "reference_clone",
-  generated: "voice_design",
+  generated: "reference_clone",
 };
 
 
@@ -557,6 +557,7 @@ export function createCharacterVoicePanel(
       if (!option) return;
       updateDraft({
         ...stateRef.current.draft,
+        bindingPolicy: "dedicated",
         profileId: option.profileId,
         versionId: option.versionId,
         language: option.language,
@@ -644,6 +645,52 @@ export function createCharacterVoicePanel(
     const privateOnly = props.allowedSourceTypes !== undefined
       && !props.allowedSourceTypes.includes("preset");
     const blockMessage = capabilityBlockMessage(props);
+    const privateSelectedKey = selectedIsEligible ? selectedKey : "";
+    const privateVoicePicker = (hint: string) => h("div", { className: "anw-character-voice-panel__field" },
+      h("label", { htmlFor: voiceSelectId }, "选择已锁定的私人音色"),
+      h("select", {
+        id: voiceSelectId,
+        value: privateSelectedKey,
+        disabled: fieldsDisabled,
+        onChange: onVoiceChange,
+        "aria-invalid": currentUnavailable && !currentInOtherPicker,
+      },
+      privateSelectedKey === ""
+        ? h("option", { value: "", disabled: true }, "请选择要应用的私人音色")
+        : null,
+      ...options.map((option) => h(
+        "option",
+        { key: option.key, value: option.key },
+        `${option.profileName} · v${option.versionNumber}`,
+      )),
+      ),
+      h("p", { className: "anw-character-voice-panel__hint" }, hint),
+    );
+    const impactContent = impact
+      ? h("aside", {
+        className: "anw-character-voice-panel__impact",
+        "aria-labelledby": `${prefix}-impact-heading`,
+      },
+      h("h4", { id: `${prefix}-impact-heading` }, "本次更换会影响"),
+      h("dl", null,
+        h("div", null, h("dt", null, "章节"), h("dd", null, impact.affected_chapter_count)),
+        h("div", null, h("dt", null, "句段"), h("dd", null, impact.affected_segment_count)),
+        h("div", null, h("dt", null, "历史朗读版本"), h("dd", null, impact.historical_edition_count)),
+        h("div", null, h("dt", null, "需要更新朗读"), h("dd", null, impact.regeneration_required ? "是" : "否")),
+      ),
+      h("p", null,
+        "已有朗读不会改变。",
+        impact.regeneration_required
+          ? "只有你主动更新朗读后，新声音才会用于受影响句段。"
+          : "当前不需要重新生成已有朗读。",
+      ),
+      dirty
+        ? h("p", { className: "anw-character-voice-panel__hint" },
+          "数量来自当前服务端状态，保存时会再次核对。",
+        )
+        : null,
+      )
+      : null;
 
     return h(
       "section",
@@ -713,100 +760,144 @@ export function createCharacterVoicePanel(
         )
         : null,
       binding
-        ? h("div", { className: "anw-character-voice-panel__body" },
-          h("fieldset", { disabled: fieldsDisabled },
-            h("legend", null, "声音策略"),
-            ...(["dedicated", "inherited", "unset"] as const).map((policy) => h(
-              "label",
-              { key: policy, className: "anw-character-voice-panel__radio" },
-              h("input", {
-                type: "radio",
-                name: `${prefix}-policy`,
-                value: policy,
-                checked: state.draft.bindingPolicy === policy,
-                onChange: onPolicyChange,
-              }),
-              h("span", null, POLICY_LABELS[policy]),
-            )),
-          ),
-          state.draft.bindingPolicy !== "unset"
-            ? h("div", { className: "anw-character-voice-panel__field" },
-              h("label", { htmlFor: voiceSelectId }, "锁定音色版本"),
-              h("select", {
-                id: voiceSelectId,
-                value: selectedKey,
-                disabled: fieldsDisabled || options.length === 0,
-                onChange: onVoiceChange,
-                "aria-invalid": (currentUnavailable && !currentInOtherPicker) || selectedKey === "",
-              },
-              selectedKey === ""
-                ? h("option", { value: "", disabled: true }, "请选择可用音色")
-                : null,
-              currentUnavailable
-                ? h("option", { value: selectedKey, disabled: true },
-                  currentInOtherPicker
-                    ? `${currentProfile?.name ?? "当前音色"}（请在上方官方音色列表更换）`
-                    : `${currentProfile?.name ?? "当前音色"}（当前不可用）`,
-                )
-                : null,
-              ...options.map((option) => h(
-                "option",
-                { key: option.key, value: option.key },
-                `${option.profileName} · v${option.versionNumber} · ${option.sourceLabel}`,
-              )),
+        ? privateOnly
+          ? h("div", { className: "anw-character-voice-panel__body anw-character-voice-panel__body--private" },
+            privateSelectedKey !== ""
+              ? h("section", { className: "anw-character-voice-panel__apply", "aria-labelledby": `${prefix}-apply-heading` },
+                h("div", { className: "anw-character-voice-panel__section-heading" },
+                  h("h3", { id: `${prefix}-apply-heading` }, `4. 应用到${props.characterName}`),
+                  h("p", null, "只有已经试听、确认并锁定的私人音色可以应用。"),
+                ),
+                privateVoicePicker(dirty
+                  ? "选择不会立即生效，保存后才会应用。"
+                  : "这个私人音色正在使用。"),
+                currentUnavailable && !currentInOtherPicker
+                  ? h("p", { className: "anw-character-voice-panel__notice" },
+                    `${currentProfile?.name ?? "当前已保存的音色"}暂时不可用，请选择其他已锁定音色。`,
+                  )
+                  : null,
+                h("p", { className: "anw-character-voice-panel__language" }, "朗读语言：普通话（固定）"),
+              )
+              : h("div", { className: "anw-character-voice-panel__empty", role: "note" },
+                h("strong", null, options.length > 0
+                  ? `选择要应用到${props.characterName}的私人音色`
+                  : `完成私人音色后再应用到${props.characterName}`),
+                h("p", null, options.length > 0
+                  ? "已有试听确认并锁定的私人音色；明确选择后再核对影响和保存。"
+                  : "先完成上面的设计或上传流程，并试听确认；当前声音不会改变。"),
+                options.length > 0
+                  ? privateVoicePicker("选择不会立即生效；当前声音保持不变。")
+                  : null,
+                currentUnavailable && !currentInOtherPicker
+                  ? h("p", { className: "anw-character-voice-panel__notice" },
+                    `${currentProfile?.name ?? "当前已保存的音色"}暂时不可用，请完成或选择其他私人音色。`,
+                  )
+                  : null,
+                h("p", { className: "anw-character-voice-panel__language" }, "朗读语言：普通话（固定）"),
+              ),
+            h("details", { className: "anw-character-voice-panel__other" },
+              h("summary", null, "其他使用方式"),
+              h("fieldset", { disabled: fieldsDisabled },
+                h("legend", null, "不使用上方私人音色时"),
+                ...(["inherited", "unset"] as const).map((policy) => h(
+                  "label",
+                  { key: policy, className: "anw-character-voice-panel__radio" },
+                  h("input", {
+                    type: "radio",
+                    name: `${prefix}-policy`,
+                    value: policy,
+                    checked: state.draft.bindingPolicy === policy,
+                    disabled: policy === "inherited" && options.length === 0,
+                    onChange: onPolicyChange,
+                  }),
+                  h("span", null, POLICY_LABELS[policy]),
+                )),
               ),
               h("p", { className: "anw-character-voice-panel__hint" },
-                privateOnly
-                  ? options.length ? "选择已就绪的私人音色。" : "尚无可选私人音色。"
-                  : options.length ? "选择已就绪的音色。" : "尚无可选音色。",
+                "更改使用方式不会删除私人音色，也不会改写已有朗读。",
               ),
-            )
-            : h("p", { className: "anw-character-voice-panel__hint" },
-              "暂不配置不会删除任何音色资产，也不会改写历史朗读。",
             ),
-          h("div", { className: "anw-character-voice-panel__field" },
-            h("span", null, "默认语言"),
-            h("strong", null, "普通话（固定）"),
-          ),
-          impact
-            ? h("aside", {
-              className: "anw-character-voice-panel__impact",
-              "aria-labelledby": `${prefix}-impact-heading`,
-            },
-            h("h4", { id: `${prefix}-impact-heading` }, "保存影响预览（服务端基线）"),
-            h("dl", null,
-              h("div", null, h("dt", null, "影响章节"), h("dd", null, impact.affected_chapter_count)),
-              h("div", null, h("dt", null, "影响句段"), h("dd", null, impact.affected_segment_count)),
-              h("div", null, h("dt", null, "历史 Edition"), h("dd", null, impact.historical_edition_count)),
-              h("div", null, h("dt", null, "需重新生成"), h("dd", null, impact.regeneration_required ? "是" : "否")),
-            ),
-            h("p", null,
-              `已有 ${impact.historical_edition_count} 个历史 Edition 不会被改写或替换。`,
-              impact.regeneration_required
-                ? "保存后，也只会在作者主动更新朗读时重生成受影响句段。"
-                : "本次基线未标记必须重生成。",
-            ),
+            dirty && payload !== null ? impactContent : null,
+            state.phase === "save-error"
+              ? h("div", { className: "anw-character-voice-panel__error", role: "alert" }, state.message)
+              : null,
             dirty
-              ? h("p", { className: "anw-character-voice-panel__hint" },
-                "当前候选尚未保存；最终影响数量以 CAS 保存响应的重新计算结果为准。",
+              ? h("footer", { className: "anw-character-voice-panel__footer" },
+                h("span", null, payload === null ? "请选择可用的声音" : "尚未保存"),
+                h("button", {
+                  ref: saveButtonRef,
+                  type: "button",
+                  className: "anw-character-voice-panel__save",
+                  disabled: saveDisabled,
+                  onClick: save,
+                }, state.phase === "saving" ? "保存中…" : `应用到${props.characterName}`),
               )
               : null,
-            )
-            : null,
-          state.phase === "save-error"
-            ? h("div", { className: "anw-character-voice-panel__error", role: "alert" }, state.message)
-            : null,
-          h("footer", { className: "anw-character-voice-panel__footer" },
-            h("span", null, dirty ? "有未保存更改" : "设置已同步"),
-            h("button", {
-              ref: saveButtonRef,
-              type: "button",
-              className: "anw-character-voice-panel__save",
-              disabled: saveDisabled,
-              onClick: save,
-            }, state.phase === "saving" ? "保存中…" : "保存人物声音"),
-          ),
-        )
+          )
+          : h("div", { className: "anw-character-voice-panel__body" },
+            h("fieldset", { disabled: fieldsDisabled },
+              h("legend", null, "声音策略"),
+              ...(["dedicated", "inherited", "unset"] as const).map((policy) => h(
+                "label",
+                { key: policy, className: "anw-character-voice-panel__radio" },
+                h("input", {
+                  type: "radio",
+                  name: `${prefix}-policy`,
+                  value: policy,
+                  checked: state.draft.bindingPolicy === policy,
+                  onChange: onPolicyChange,
+                }),
+                h("span", null, POLICY_LABELS[policy]),
+              )),
+            ),
+            state.draft.bindingPolicy !== "unset"
+              ? h("div", { className: "anw-character-voice-panel__field" },
+                h("label", { htmlFor: voiceSelectId }, "锁定音色版本"),
+                h("select", {
+                  id: voiceSelectId,
+                  value: selectedKey,
+                  disabled: fieldsDisabled || options.length === 0,
+                  onChange: onVoiceChange,
+                  "aria-invalid": currentUnavailable || selectedKey === "",
+                },
+                selectedKey === ""
+                  ? h("option", { value: "", disabled: true }, "请选择可用音色")
+                  : null,
+                currentUnavailable
+                  ? h("option", { value: selectedKey, disabled: true }, `${currentProfile?.name ?? "当前音色"}（当前不可用）`)
+                  : null,
+                ...options.map((option) => h(
+                  "option",
+                  { key: option.key, value: option.key },
+                  `${option.profileName} · v${option.versionNumber} · ${option.sourceLabel}`,
+                )),
+                ),
+                h("p", { className: "anw-character-voice-panel__hint" },
+                  options.length ? "选择已就绪的音色。" : "尚无可选音色。",
+                ),
+              )
+              : h("p", { className: "anw-character-voice-panel__hint" },
+                "暂不配置不会删除任何音色资产，也不会改写历史朗读。",
+              ),
+            h("div", { className: "anw-character-voice-panel__field" },
+              h("span", null, "默认语言"),
+              h("strong", null, "普通话（固定）"),
+            ),
+            impactContent,
+            state.phase === "save-error"
+              ? h("div", { className: "anw-character-voice-panel__error", role: "alert" }, state.message)
+              : null,
+            h("footer", { className: "anw-character-voice-panel__footer" },
+              h("span", null, dirty ? "有未保存更改" : "设置已同步"),
+              h("button", {
+                ref: saveButtonRef,
+                type: "button",
+                className: "anw-character-voice-panel__save",
+                disabled: saveDisabled,
+                onClick: save,
+              }, state.phase === "saving" ? "保存中…" : "保存人物声音"),
+            ),
+          )
         : state.phase !== "load-error" && state.phase !== "blocked"
           ? h("p", { className: "anw-character-voice-panel__loading" }, "正在读取绑定和可用音色…")
           : null,

@@ -113,6 +113,18 @@ def test_voice_preparation_rejects_dialect_designs(description: str) -> None:
         )
 
 
+def test_voice_preparation_accepts_explicit_dialect_exclusion() -> None:
+    description = "26岁，青年男声；标准普通话，不使用方言。"
+    request = TTSVoicePreparationRequest(
+        request_id=uuid4(),
+        scope=NarrationRequestScope.fixed_local(),
+        preview_text="门外的脚步停了下来。你听见了吗？先别开门。",
+        language="zh-CN",
+        description=description,
+    )
+    assert request.description == description
+
+
 def test_capabilities_reject_hidden_non_ready_mismatch() -> None:
     with pytest.raises(ContractError, match="product-visible"):
         TTSProviderCapabilities(

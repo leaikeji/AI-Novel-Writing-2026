@@ -1335,14 +1335,17 @@ export function createCharacterWorkspaceDialog(
         ? props.voiceSlot({
             novelId: workspace.novel_id,
             characterId: workspace.character.id,
-            characterName: rootDraft.name,
-            characterAgeAtStoryStartNote: valueAsText(profileDraft.age_at_story_start_note),
-            characterGender: rootDraft.gender,
-            characterDescription: rootDraft.description,
-            characterPersonalitySource: valueAsText(profileDraft.personality),
+            characterName: workspace.character.name,
+            characterAgeAtStoryStartNote: valueAsText(profileDraftFromWorkspace(workspace).age_at_story_start_note),
+            characterGender: rootDraftFromWorkspace(workspace).gender,
+            characterDescription: workspace.character.description,
+            characterPersonalitySource: valueAsText(profileDraftFromWorkspace(workspace).personality),
             binding: workspace.voice_binding,
           })
         : h("div", { className: "anw-character-workspace-empty" }, "声音设置组件尚未接入。人物卡不会创建第二份声音数据。"),
+      activeTab === "voice" && dirty
+        ? h("p", { role: "note" }, "声音描述使用已保存的人物资料；保存人物资料后可更新声音描述。")
+        : null,
     );
 
     const firstErrorField = Object.keys(error?.field_errors ?? {})[0];
@@ -1522,7 +1525,7 @@ export function createCharacterWorkspaceDialog(
               : activeTab === "voice"
                 ? dirty
                   ? "其他栏目还有未保存修改；下方撤销和保存只处理人物卡字段。"
-                  : "声音设置由共用声音组件独立保存。"
+                  : null
                 : dirty
                   ? "修改尚未保存。"
                   : "人物卡已是最新状态。按 Esc 可关闭。",

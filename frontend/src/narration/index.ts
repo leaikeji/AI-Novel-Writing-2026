@@ -650,6 +650,7 @@ export function createCharacterVoiceCardPanel(
     readonly characterId: string;
     readonly characterName: string;
     readonly suggestedDesign: CharacterVoiceDesignSuggestion;
+    readonly targetProfileId: string | null;
     readonly overview: NarrationOverviewResponse;
     readonly profileRefreshVersion: number;
     readonly onProfileChanged: () => void;
@@ -669,6 +670,9 @@ export function createCharacterVoiceCardPanel(
       },
       h(VoiceSourceWorkspace, {
         novelId: advancedProps.novelId,
+        characterId: advancedProps.characterId,
+        characterName: advancedProps.characterName,
+        targetProfileId: advancedProps.targetProfileId,
         capabilities: advancedProps.overview.capabilities,
         authorization: advancedProps.overview.authorization,
         voiceSources: advancedProps.overview.voice_sources,
@@ -683,7 +687,7 @@ export function createCharacterVoiceCardPanel(
         capabilities: advancedProps.overview.capabilities,
         authorization: advancedProps.overview.authorization,
         presentation: "embedded",
-        allowedSourceTypes: ["uploaded"],
+        allowedSourceTypes: ["uploaded", "generated"],
         profileRefreshVersion: advancedProps.profileRefreshVersion,
         onSaved: advancedProps.onVoiceSaved,
         onReturnFocus: advancedProps.onReturnFocus,
@@ -694,6 +698,7 @@ export function createCharacterVoiceCardPanel(
   return function CharacterVoiceCardPanel(props: CharacterVoiceCardPanelProps): unknown {
     const scopeKey = `${props.novelId}:${props.characterId}`;
     const suggestedDesign = buildCharacterVoiceDesignSuggestion({
+      characterName: props.characterName,
       ageAtStoryStartNote: props.characterAgeAtStoryStartNote,
       gender: props.characterGender,
       description: props.characterDescription,
@@ -910,6 +915,7 @@ export function createCharacterVoiceCardPanel(
         characterId: props.characterId,
         characterName: props.characterName,
         suggestedDesign,
+        targetProfileId: state.voiceBindingPhase === "ready" ? state.binding?.profile_id ?? null : null,
         overview: state.overview,
         profileRefreshVersion,
         onProfileChanged: publishChanged,

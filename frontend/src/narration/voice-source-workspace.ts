@@ -42,6 +42,43 @@ import type { CharacterVoiceDesignSuggestion } from "./character-voice-design-su
 
 
 const PREVIEW_TEXT_MAX_LENGTH = 500;
+const DEFAULT_PREVIEW_TEXT = "门外的脚步停了下来。你听见了吗？先别开门，让我看看走廊。等灯重新亮起，我们再一起往楼下走。不管外面发生什么，大家都要平安回来。";
+
+interface PendingDesign {
+  readonly profileId: string;
+  readonly baselineVersion: number;
+  readonly requestId: string;
+  readonly versionId?: string;
+}
+
+function pendingDesignKey(novelId: string, characterId: string | undefined): string {
+  return `anw:voice-design:${novelId}:${characterId ?? "private"}`;
+}
+
+function readPendingDesign(key: string): PendingDesign | null {
+  try {
+    const value: unknown = JSON.parse(globalThis.sessionStorage.getItem(key) ?? "null");
+    if (value && typeof value === "object" && "profileId" in value && "baselineVersion" in value && "requestId" in value
+      && typeof value.profileId === "string" && typeof value.baselineVersion === "number"
+      && Number.isInteger(value.baselineVersion) && value.baselineVersion >= 1 && typeof value.requestId === "string"
+      && (!("versionId" in value) || typeof value.versionId === "string")) return value as PendingDesign;
+  } catch { /* Unavailable storage falls back to the server candidate list. */ }
+  return null;
+}
+
+function storePendingDesign(key: string, value: PendingDesign | null): boolean {
+  try {
+    if (value === null) globalThis.sessionStorage.removeItem(key);
+    else globalThis.sessionStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch { return false; }
+}
+
+function designSeed(): number {
+  const values = new Uint32Array(1);
+  if (globalThis.crypto?.getRandomValues) return globalThis.crypto.getRandomValues(values)[0]! & 0x7fffffff;
+  return Math.floor(Math.random() * 0x80000000);
+}
 
 
 export const EMPTY_VOICE_UPLOAD_RIGHTS: VoiceUploadRightsDraft = Object.freeze({
@@ -77,6 +114,9 @@ export interface VoiceSourceWorkspaceProps {
   readonly voiceSources: readonly VoiceSourceAvailability[];
   readonly suggestedProfileName?: string;
   readonly suggestedDesign?: CharacterVoiceDesignSuggestion;
+  readonly characterId?: string;
+  readonly characterName?: string;
+  readonly targetProfileId?: string | null;
   readonly className?: string;
   readonly onProfileLocked?: (profile: VoiceProfileResource) => void;
 }
@@ -97,6 +137,7 @@ export type VoiceSourceWorkspacePhase =
 
 export interface VoiceSourceWorkspaceState {
   readonly scopeNovelId: string;
+  readonly scopeCharacterId: string | null;
   readonly phase: VoiceSourceWorkspacePhase;
   readonly profiles: readonly VoiceProfileResource[];
   readonly selectedProfileId: string | null;
@@ -107,6 +148,9 @@ export interface VoiceSourceWorkspaceState {
   readonly referenceAudio: File | null;
   readonly referenceText: string;
   readonly designDescription: string;
+  readonly appliedSuggestion: string;
+  readonly designEdited: boolean;
+  readonly pendingDesign: PendingDesign | null;
   readonly uploadRights: VoiceUploadRightsDraft;
   readonly previewText: string;
   readonly workflow: VoiceSourceWorkflowState;
@@ -151,9 +195,11 @@ function initialState(
   novelId: string,
   suggestedName: string,
   suggestedDesign: CharacterVoiceDesignSuggestion | undefined,
+  characterId?: string,
 ): VoiceSourceWorkspaceState {
   return {
     scopeNovelId: novelId,
+    scopeCharacterId: characterId ?? null,
     phase: "loading",
     profiles: [],
     selectedProfileId: null,
@@ -164,8 +210,11 @@ function initialState(
     referenceAudio: null,
     referenceText: "",
     designDescription: suggestedDesign?.description ?? "",
+    appliedSuggestion: suggestedDesign?.description ?? "",
+    designEdited: false,
+    pendingDesign: readPendingDesign(pendingDesignKey(novelId, characterId)),
     uploadRights: EMPTY_VOICE_UPLOAD_RIGHTS,
-    previewText: "你好，这是当前音色的朗读试听。",
+    previewText: DEFAULT_PREVIEW_TEXT,
     workflow: IDLE_VOICE_SOURCE_WORKFLOW,
     previewPlayed: false,
     qualityConfirmed: false,
@@ -244,9 +293,7 @@ function selectableVersions(profile: VoiceProfileResource | null): readonly Voic
 
 function defaultVersionId(profile: VoiceProfileResource | null): string | null {
   const versions = selectableVersions(profile);
-  if (profile?.current_version_id && versions.some((item) => item.version_id === profile.current_version_id)) {
-    return profile.current_version_id;
-  }
+  // Display the newest candidate; this never changes the locked version or bindings.
   return versions[0]?.version_id ?? null;
 }
 
@@ -330,7 +377,7 @@ export function createVoiceSourceWorkspace(
     const suggestedName = props.suggestedProfileName?.trim() || "自定义朗读音色";
     const suggestedDesign = props.suggestedDesign;
     const [state, setState] = React.useState<VoiceSourceWorkspaceState>(() => (
-      initialState(props.novelId, suggestedName, suggestedDesign)
+      initialState(props.novelId, suggestedName, suggestedDesign, props.characterId)
     ));
     const stateRef = React.useRef(state);
     stateRef.current = state;
@@ -338,6 +385,13 @@ export function createVoiceSourceWorkspace(
     const operationSequenceRef = React.useRef(0);
     const operationAbortRef = React.useRef<AbortController | null>(null);
     const idempotencyRef = React.useRef(new Map<string, string>());
+    const designInFlightRef = React.useRef(false);
+    const retryDesignedRef = React.useRef<(() => void) | null>(null);
+    const lastDesignSeedRef = React.useRef<number | null>(null);
+    const descriptionDraftsRef = React.useRef(new Map<string, {
+      description: string; edited: boolean; applied: string;
+    }>());
+    const pendingKey = pendingDesignKey(props.novelId, props.characterId);
     const statusRef = React.useRef<FocusableElement | null>(null);
     const conflictRef = React.useRef<FocusableElement | null>(null);
 
@@ -345,11 +399,10 @@ export function createVoiceSourceWorkspace(
       update: VoiceSourceWorkspaceState
         | ((current: VoiceSourceWorkspaceState) => VoiceSourceWorkspaceState),
     ) => {
-      setState((current) => {
-        const next = typeof update === "function" ? update(current) : update;
-        stateRef.current = next;
-        return next;
-      });
+      // Keep action guards synchronous even when React batches state updates.
+      const next = typeof update === "function" ? update(stateRef.current) : update;
+      stateRef.current = next;
+      setState(next);
     };
 
     const ownsScope = (generation: number, sequence: number, controller: AbortController) => (
@@ -357,6 +410,7 @@ export function createVoiceSourceWorkspace(
       && generation === scopeGenerationRef.current
       && sequence === operationSequenceRef.current
       && stateRef.current.scopeNovelId === props.novelId
+      && stateRef.current.scopeCharacterId === (props.characterId ?? null)
     );
 
     const focusStatus = () => queueMicrotask(() => statusRef.current?.focus({ preventScroll: true }));
@@ -381,15 +435,23 @@ export function createVoiceSourceWorkspace(
       const current = stateRef.current;
       const selectedProfile = profiles.find((item) => item.profile_id === preferredProfileId)
         ?? profiles.find((item) => item.profile_id === current.selectedProfileId)
-        ?? profiles[0]
+        ?? (props.characterId === undefined ? profiles[0] : undefined)
         ?? null;
       const currentVersionStillExists = selectedProfile?.versions.some((version) => (
         version.version_id === current.selectedVersionId
       )) ?? false;
+      const recoveredVersion = current.pendingDesign?.versionId
+        && selectedProfile?.profile_id === current.pendingDesign.profileId
+        && selectedProfile.version > current.pendingDesign.baselineVersion
+        ? selectableVersions(selectedProfile).find((version) => version.version_id === current.pendingDesign?.versionId)
+        : undefined;
+      if (recoveredVersion) storePendingDesign(pendingKey, null);
       const selection = restoredVersionSelection(
         selectedProfile,
-        currentVersionStillExists ? current.selectedVersionId : null,
+        recoveredVersion?.version_id ?? (currentVersionStillExists ? current.selectedVersionId : null),
       );
+      const restoredExisting = current.selectedProfileId === null && selectedProfile !== null
+        && selectedProfile.versions.length > 0;
       commit({
         ...current,
         scopeNovelId: props.novelId,
@@ -398,7 +460,12 @@ export function createVoiceSourceWorkspace(
         selectedProfileId: selectedProfile?.profile_id ?? null,
         selectedVersionId: selection.versionId,
         selectedSource: selection.source,
-        message,
+        designDescription: restoredExisting ? "" : current.designDescription,
+        designEdited: restoredExisting || current.designEdited,
+        pendingDesign: recoveredVersion ? null : current.pendingDesign,
+        message: recoveredVersion ? "已找回上次创建的候选，可继续试听；没有重新设计或改变绑定。" : current.pendingDesign
+          ? "上次创建结果待核实。请先选择服务端已有候选；确认没有需要保留的候选后再设计新的一版。"
+          : message,
         failure: null,
       });
     };
@@ -424,16 +491,19 @@ export function createVoiceSourceWorkspace(
     React.useEffect(() => {
       operationAbortRef.current?.abort();
       idempotencyRef.current.clear();
+      descriptionDraftsRef.current.clear();
+      designInFlightRef.current = false;
+      retryDesignedRef.current = null;
       const generation = ++scopeGenerationRef.current;
       const sequence = ++operationSequenceRef.current;
       const controller = new AbortController();
       operationAbortRef.current = controller;
-      commit(initialState(props.novelId, suggestedName, suggestedDesign));
+      commit(initialState(props.novelId, suggestedName, suggestedDesign, props.characterId));
       void loadProfiles(
         generation,
         sequence,
         controller,
-        null,
+        stateRef.current.pendingDesign?.profileId ?? props.targetProfileId ?? null,
         "",
       ).catch((reason: unknown) => {
         if (!ownsScope(generation, sequence, controller) || isAbortLike(reason)) return;
@@ -445,7 +515,22 @@ export function createVoiceSourceWorkspace(
         }));
       });
       return () => controller.abort();
-    }, [props.novelId]);
+    }, [props.novelId, props.characterId]);
+
+    React.useEffect(() => {
+      const current = stateRef.current;
+      const description = suggestedDesign?.description ?? "";
+      if (current.appliedSuggestion === description || current.designEdited) return;
+      commit({ ...current, designDescription: description, appliedSuggestion: description });
+    }, [suggestedDesign?.description]);
+
+    React.useEffect(() => {
+      const current = stateRef.current;
+      if (current.selectedProfileId !== null || !props.targetProfileId || current.pendingDesign) return;
+      const target = current.profiles.find((profile) => profile.profile_id === props.targetProfileId);
+      if (!target) return;
+      applyProfiles(current.profiles, target.profile_id, "已读取此人物当前绑定的音色档案。");
+    }, [props.targetProfileId, state.profiles]);
 
     React.useEffect(() => () => {
       operationAbortRef.current?.abort();
@@ -456,9 +541,9 @@ export function createVoiceSourceWorkspace(
       if (state.phase === "conflict") conflictRef.current?.focus({ preventScroll: true });
     }, [state.phase]);
 
-    const scopedState = state.scopeNovelId === props.novelId
+    const scopedState = state.scopeNovelId === props.novelId && state.scopeCharacterId === (props.characterId ?? null)
       ? state
-      : initialState(props.novelId, suggestedName, suggestedDesign);
+      : initialState(props.novelId, suggestedName, suggestedDesign, props.characterId);
     const selectedProfile = scopedState.profiles.find((profile) => (
       profile.profile_id === scopedState.selectedProfileId
     )) ?? null;
@@ -489,7 +574,7 @@ export function createVoiceSourceWorkspace(
       || scopedState.phase === "conflict";
     const previewText = scopedState.previewText.trim();
     const previewTextValid = previewText.length > 0 && previewText.length <= PREVIEW_TEXT_MAX_LENGTH;
-    const prefix = `anw-voice-workspace-${props.novelId}`;
+    const prefix = `anw-voice-workspace-${props.novelId}-${props.characterId ?? "private"}`;
 
     const refreshOneProfile = async (
       profileId: string,
@@ -521,6 +606,7 @@ export function createVoiceSourceWorkspace(
     };
 
     const retryLoad = () => {
+      retryDesignedRef.current = null;
       operationAbortRef.current?.abort();
       const generation = scopeGenerationRef.current;
       const sequence = ++operationSequenceRef.current;
@@ -565,6 +651,15 @@ export function createVoiceSourceWorkspace(
             selectedProfileId: scoped.profile_id,
             selectedVersionId: defaultVersionId(scoped),
             selectedSource: null,
+            designDescription: current.selectedProfileId === null ? current.designDescription : suggestedDesign?.description ?? "",
+            appliedSuggestion: suggestedDesign?.description ?? "",
+            designEdited: current.selectedProfileId === null ? current.designEdited : false,
+            referenceAudio: null,
+            referenceText: "",
+            uploadRights: EMPTY_VOICE_UPLOAD_RIGHTS,
+            workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+            previewPlayed: false,
+            qualityConfirmed: false,
             message: "作品专属音色档案已创建。下一步选择文字设计或上传有权使用的参考录音。",
             failure: null,
           }));
@@ -586,10 +681,16 @@ export function createVoiceSourceWorkspace(
       if (actionsBlocked) return;
       const profile = scopedState.profiles.find((item) => item.profile_id === profileId);
       if (!profile) return;
+      retryDesignedRef.current = null;
       const selection = restoredVersionSelection(profile, null);
       operationAbortRef.current?.abort();
       operationSequenceRef.current += 1;
       idempotencyRef.current.clear();
+      const previous = stateRef.current;
+      descriptionDraftsRef.current.set(previous.selectedProfileId ?? "", {
+        description: previous.designDescription, edited: previous.designEdited, applied: previous.appliedSuggestion,
+      });
+      const draft = descriptionDraftsRef.current.get(profileId);
       commit((current) => ({
         ...current,
         phase: "ready",
@@ -598,13 +699,16 @@ export function createVoiceSourceWorkspace(
         selectedSource: selection.source,
         referenceAudio: null,
         referenceText: "",
-        designDescription: suggestedDesign?.description ?? "",
+        designDescription: draft && !draft.edited ? suggestedDesign?.description ?? "" : draft?.description ?? "",
+        appliedSuggestion: draft && !draft.edited ? suggestedDesign?.description ?? "" : draft?.applied ?? "",
+        designEdited: draft?.edited ?? true,
         workflow: IDLE_VOICE_SOURCE_WORKFLOW,
         previewPlayed: false,
         qualityConfirmed: false,
-        message: "已切换音色档案。尚未改变旁白或人物绑定。",
+        message: "已切换音色档案。已有声音可直接试听；设计另一版请核对描述。尚未改变任何人物绑定。",
         failure: null,
       }));
+      focusStatus();
     };
 
     const createDesignedAction = () => {
@@ -621,32 +725,46 @@ export function createVoiceSourceWorkspace(
       if (
         profile === null
         || current.selectedSource !== "generated"
+        || !currentModel.cards.some((card) => card.sourceType === "generated" && card.enabled)
         || description.length < 1
         || description.length > 500
         || !previewTextValid
         || actionsBlocked
+        || designInFlightRef.current
+        || current.pendingDesign !== null
       ) return;
+      designInFlightRef.current = true;
       operationAbortRef.current?.abort();
       const generation = scopeGenerationRef.current;
       const sequence = ++operationSequenceRef.current;
       const controller = new AbortController();
       operationAbortRef.current = controller;
+      const randomSeed = designSeed();
+      const seed = randomSeed === lastDesignSeedRef.current ? (randomSeed + 1) & 0x7fffffff : randomSeed;
+      lastDesignSeedRef.current = seed;
       const intent = operationIntent(
         "designed",
         profile.profile_id,
         profile.version,
         description,
         "zh-CN",
-        null,
+        seed,
       );
       const key = idempotencyKey(intent, "designed");
+      let pending: PendingDesign = {
+        profileId: profile.profile_id,
+        baselineVersion: profile.version,
+        requestId: key,
+      };
+      const stored = storePendingDesign(pendingKey, pending);
       commit((latest) => ({
         ...latest,
         phase: "designing",
+        pendingDesign: pending,
         workflow: IDLE_VOICE_SOURCE_WORKFLOW,
         previewPlayed: false,
         qualityConfirmed: false,
-        message: "正在创建普通话设计候选…",
+        message: stored ? "正在创建普通话设计候选…" : "正在创建候选；浏览器无法保存恢复标记，刷新后请从服务端候选列表核对结果。",
         failure: null,
       }));
       const requestDesigned = () => submitDesignedVoiceVersion(currentModel, {
@@ -654,15 +772,22 @@ export function createVoiceSourceWorkspace(
         expectedProfileVersion: profile.version,
         description,
         language: "zh-CN",
-        seed: null,
+        seed,
         idempotencyKey: key,
         signal: controller.signal,
       }, { createDesignedVoiceVersion: api.createDesignedVoiceVersion });
-      void requestDesigned().catch(async (reason: unknown) => {
-        if (!ownsScope(generation, sequence, controller) || !networkFailure(reason)) throw reason;
-        return requestDesigned();
-      }).then(async (created) => {
+      const runRequest = () => {
+      if (!ownsScope(generation, sequence, controller)) return;
+      designInFlightRef.current = true;
+      commit((latest) => ({ ...latest, phase: "designing", failure: null, message: stored
+        ? "正在核对并提交同一设计请求…"
+        : "正在创建候选；浏览器无法保存恢复标记，刷新后请从服务端候选列表核对结果。" }));
+      void requestDesigned().then(async (created) => {
         if (!ownsScope(generation, sequence, controller)) return;
+        if (created.profile_id !== profile.profile_id) throw new Error("设计响应与目标档案不一致。");
+        pending = { ...pending, versionId: created.version_id };
+        storePendingDesign(pendingKey, pending);
+        commit((latest) => ({ ...latest, pendingDesign: pending }));
         const refreshed = await refreshOneProfile(
           profile.profile_id,
           generation,
@@ -675,9 +800,12 @@ export function createVoiceSourceWorkspace(
           throw new Error("设计响应未出现在刷新后的音色档案中。");
         }
         idempotencyRef.current.delete(intent);
+        storePendingDesign(pendingKey, null);
+        retryDesignedRef.current = null;
         commit((latest) => ({
           ...latest,
           phase: "ready",
+          pendingDesign: null,
           selectedVersionId: created.version_id,
           workflow: IDLE_VOICE_SOURCE_WORKFLOW,
           previewPlayed: false,
@@ -689,17 +817,27 @@ export function createVoiceSourceWorkspace(
       }).catch((reason: unknown) => {
         if (!ownsScope(generation, sequence, controller) || isAbortLike(reason)) return;
         const failure = workspaceFailure(reason);
+        // A lost response is not a failed creation. Never silently submit a new candidate.
+        const uncertain = pending.versionId !== undefined || networkFailure(reason)
+          || (reason instanceof NarrationApiError && reason.status >= 500);
+        if (!uncertain) storePendingDesign(pendingKey, null);
         commit((latest) => ({
           ...latest,
           phase: failure.kind === "conflict" ? "conflict" : "error",
+          pendingDesign: uncertain ? pending : null,
           workflow: { status: "failed", preview: null, failure },
-          message: failure.kind === "conflict"
+          message: uncertain ? "创建结果待核实。请刷新服务端状态并核对已有候选，系统不会自动重复造声。" : failure.kind === "conflict"
             ? "音色档案版本已变化。请刷新后重新创建设计候选。"
             : "创建设计候选失败；描述和试听文本已保留。",
           failure,
         }));
         focusStatus();
+      }).finally(() => {
+        if (generation === scopeGenerationRef.current) designInFlightRef.current = false;
       });
+      };
+      retryDesignedRef.current = () => { if (!designInFlightRef.current) runRequest(); };
+      runRequest();
     };
 
     const uploadAction = () => {
@@ -1047,6 +1185,7 @@ export function createVoiceSourceWorkspace(
     };
 
     const cancelAction = () => {
+      retryDesignedRef.current = null;
       operationAbortRef.current?.abort();
       operationSequenceRef.current += 1;
       commit((current) => ({
@@ -1101,18 +1240,34 @@ export function createVoiceSourceWorkspace(
       { className: "anw-voice-workspace__profiles", "aria-labelledby": `${prefix}-profile-heading` },
       h("div", { className: "anw-voice-workspace__section-heading" },
         h("div", null,
-          h("h3", { id: `${prefix}-profile-heading` }, "1. 选择或新建音色"),
-          h("p", null, "先取名建立档案，再设计声音或上传录音；创建档案不会启动语音模型。"),
+          h("h3", { id: `${prefix}-profile-heading` }, "1. 选择音色档案"),
+          h("p", null, "继续已有档案，或新建一个；创建档案不会启动语音模型。"),
         ),
       ),
+      scopedState.profiles.filter((profile) => profile.current_version_id === null).length > 0
+        ? h("div", { className: "anw-voice-workspace__continue-list", role: "group", "aria-label": "未完成的私人音色档案" },
+          ...scopedState.profiles
+            .filter((profile) => profile.current_version_id === null)
+            .map((profile) => h("button", {
+              key: profile.profile_id,
+              type: "button",
+              className: "anw-voice-workspace__continue-profile",
+              disabled: actionsBlocked || profile.profile_id === scopedState.selectedProfileId,
+              onClick: () => selectProfile(profile.profile_id),
+            }, profile.profile_id === scopedState.selectedProfileId
+              ? `正在继续 ${profile.name}`
+              : `继续完成 ${profile.name}`)),
+        )
+        : null,
       scopedState.profiles.length > 0
         ? h("label", { className: "anw-voice-workspace__field" },
-          h("span", null, "当前音色"),
+          h("span", null, "正在编辑的私人音色档案"),
           h("select", {
             value: scopedState.selectedProfileId ?? "",
             disabled: actionsBlocked,
             onChange: (event: InputEvent) => selectProfile(event.target.value),
           },
+          h("option", { value: "", disabled: true }, "选择已有音色档案，或新建专属声音"),
           ...scopedState.profiles.map((profile) => h(
             "option",
             { key: profile.profile_id, value: profile.profile_id },
@@ -1156,7 +1311,7 @@ export function createVoiceSourceWorkspace(
                   workflow: IDLE_VOICE_SOURCE_WORKFLOW,
                   previewPlayed: false,
                   qualityConfirmed: false,
-                  message: "已切换候选版本，请重新生成试听。",
+                  message: "已切换候选版本；已有试听可直接播放，不会重新设计声音。",
                   failure: null,
                 })),
               },
@@ -1167,9 +1322,7 @@ export function createVoiceSourceWorkspace(
               )),
               ),
             ),
-            scopedState.selectedSource === "generated"
-              ? null
-              : h("label", { className: "anw-voice-workspace__field" },
+            h("label", { className: "anw-voice-workspace__field" },
                 h("span", null, "试听文本（1–500 字）"),
                 h("textarea", {
                   value: scopedState.previewText,
@@ -1188,6 +1341,9 @@ export function createVoiceSourceWorkspace(
                 }),
               ),
           ),
+        selectedVersion?.source_type === "generated"
+          ? h("p", { role: "note" }, "试听对应已保存候选。修改描述后需设计另一版；原描述不从服务器恢复。")
+          : null,
         scopedState.workflow.status === "preview_ready"
           ? h(PreviewPlayback, {
             preview: scopedState.workflow.preview,
@@ -1227,14 +1383,16 @@ export function createVoiceSourceWorkspace(
         "data-voice-workspace-phase": scopedState.phase,
         "data-voice-workspace-novel-id": props.novelId,
       },
-      h("header", { className: "anw-voice-workspace__header" },
-        h("div", null,
-          h("p", { className: "anw-voice-workspace__eyebrow" }, "我的声音 · 普通话"),
-          h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "私人音色"),
-          h("p", null, "为这部作品定制声音。官方声音请在“旁白音色”中选择。"),
-        ),
-        h("span", { className: "anw-voice-workspace__scope" }, "当前作品专属"),
-      ),
+      props.characterId === undefined
+        ? h("header", { className: "anw-voice-workspace__header" },
+          h("div", null,
+            h("p", { className: "anw-voice-workspace__eyebrow" }, "我的声音 · 普通话"),
+            h("h2", { id: `${prefix}-heading`, tabIndex: -1 }, "私人音色"),
+            h("p", null, "为这部作品定制声音。官方声音请在“旁白音色”中选择。"),
+          ),
+          h("span", { className: "anw-voice-workspace__scope" }, "当前作品专属"),
+        )
+        : h("h2", { id: `${prefix}-heading`, className: "anw-voice-workspace__embedded-heading", tabIndex: -1 }, "定制私人音色"),
       h("div", {
         id: `${prefix}-status`,
         ref: statusRef,
@@ -1270,6 +1428,20 @@ export function createVoiceSourceWorkspace(
         )
         : null,
       scopedState.phase !== "loading" ? renderProfileControls() : null,
+      scopedState.pendingDesign !== null && !busy
+        ? h("div", { className: "anw-voice-workspace__error", role: "status" },
+          h("p", null, "上次创建结果待核实。请先刷新并检查候选版本；已有版本可以继续试听，不必重复创建。"),
+          h("button", { type: "button", onClick: retryLoad }, "刷新服务端候选"),
+          retryDesignedRef.current === null ? null
+            : h("button", { type: "button", onClick: () => retryDesignedRef.current?.() }, "使用原请求重试"),
+          h("button", { type: "button", onClick: () => {
+            storePendingDesign(pendingKey, null);
+            retryDesignedRef.current = null;
+            commit((current) => ({ ...current, pendingDesign: null, phase: "ready", failure: null,
+              message: "已结束上次请求关联，候选和音频均保留。请核对已有版本；需要新声音时再显式设计另一版。" }));
+          } }, "已核对候选，继续操作"),
+        )
+        : null,
       selectedProfile === null
         ? null
         : h("div", { className: "anw-voice-workspace__source" },
@@ -1283,11 +1455,19 @@ export function createVoiceSourceWorkspace(
             uploadRights: scopedState.uploadRights,
             referenceText: scopedState.referenceText,
             designDescription: scopedState.designDescription,
-            designGuidance: suggestedDesign?.ageEvidence
-              ? `已把${suggestedDesign.ageEvidence}放在第一位；年龄感优先于沉稳、坚韧等气质。你可以继续编辑。`
-              : suggestedDesign === undefined
-                ? undefined
-                : "人物年龄未明确，系统不会根据姓名、职业或身份猜测。请先在人物卡填写开篇年龄，或手动写明年龄感。",
+            designGuidance: scopedState.designEdited
+              ? "当前描述由你编辑或尚待填写，未自动替换。已有版本的原描述不从服务器恢复；可手动填写或按最新人物资料整理。"
+              : suggestedDesign === undefined ? undefined
+                : [suggestedDesign.ageEvidence ? `依据已保存年龄${suggestedDesign.ageEvidence}整理` : "实际年龄未明确，不猜测年龄",
+                  suggestedDesign.perceivedAgeEvidence ? `保留作者明确的声音听感${suggestedDesign.perceivedAgeEvidence}` : "普通性格或沙哑音质不会自行改变年龄感",
+                  suggestedDesign.warning, "请核对后生成。"].filter(Boolean).join("；"),
+            onRefreshDesignSuggestion: suggestedDesign === undefined ? undefined : () => commit((current) => ({
+              ...current, designDescription: suggestedDesign.description, appliedSuggestion: suggestedDesign.description,
+              designEdited: false, previewPlayed: false, qualityConfirmed: false,
+              message: "已按最新已保存人物资料更新描述，已有候选和试听未改变。",
+            })),
+            designActionLabel: sourceVersions.length > 0 ? "设计另一版" : "创建设计候选",
+            designCreationBlocked: scopedState.pendingDesign !== null,
             previewText: scopedState.previewText,
             busy: actionsBlocked,
             cancelAllowed: busy && scopedState.phase !== "locking",
@@ -1302,20 +1482,13 @@ export function createVoiceSourceWorkspace(
               commit((current) => ({
                 ...current,
                 selectedSource: source,
-                designDescription: source === "generated" && current.designDescription.trim() === ""
-                  ? suggestedDesign?.description ?? ""
-                  : current.designDescription,
                 selectedVersionId: selectableVersions(selectedProfile)
                   .find((version) => version.source_type === source)?.version_id ?? null,
                 workflow: IDLE_VOICE_SOURCE_WORKFLOW,
                 previewPlayed: false,
                 qualityConfirmed: false,
                 message: source === "generated"
-                  ? suggestedDesign?.ageEvidence
-                    ? `已按人物年龄（${suggestedDesign.ageEvidence}）生成可编辑描述；年龄感优先于其他气质。`
-                    : suggestedDesign === undefined
-                      ? "已选择文字设计。语言固定为普通话，请填写描述和试听文本。"
-                      : "已选择文字设计。人物年龄未明确，系统不会按姓名或职业猜测；请先填写年龄或手动描述。"
+                  ? "已选择文字设计。请核对当前档案和描述；已有候选可继续试听，不需要重新设计。"
                   : "已选择上传参考录音。语言固定为普通话，请完整填写录音文字和权利表单。",
                 failure: null,
               }));
@@ -1323,6 +1496,7 @@ export function createVoiceSourceWorkspace(
             onDesignDescriptionChange: (description: string) => commit((current) => ({
               ...current,
               designDescription: description,
+              designEdited: true,
               workflow: IDLE_VOICE_SOURCE_WORKFLOW,
               previewPlayed: false,
               qualityConfirmed: false,

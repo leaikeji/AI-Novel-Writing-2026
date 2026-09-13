@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildCharacterVoiceDesignSuggestion } from "./character-voice-design-suggestion";
 
 import {
   CAPABILITY_KEYS,
@@ -136,6 +137,8 @@ const PREVIEW_ID = "51111111-1111-4111-8111-111111111111";
 const JOB_ID = "61111111-1111-4111-8111-111111111111";
 const ASSET_ID = "71111111-1111-4111-8111-111111111111";
 const NOW = "2026-08-27T08:00:00Z";
+
+afterEach(() => vi.unstubAllGlobals());
 
 
 function capability(key: FeatureCapability["key"]): FeatureCapability {
@@ -366,6 +369,178 @@ function sourcePanel(tree: FakeElement): FakeElement {
 
 
 describe("voice source workspace", () => {
+  function setup(items: readonly VoiceProfileResource[] = [profile()]) {
+    const api: VoiceSourceWorkspaceApi = {
+      listVoiceProfiles: vi.fn(async () => ({ contract_version: NARRATION_SETTINGS_API_VERSION, items })),
+      createVoiceProfile: vi.fn(), getVoiceProfile: vi.fn(), createDesignedVoiceVersion: vi.fn(),
+      createUploadedVoiceVersion: vi.fn(), createVoicePreview: vi.fn(), getVoicePreview: vi.fn(), lockVoiceProfile: vi.fn(),
+    };
+    const harness = createHarness();
+    const Workspace = createVoiceSourceWorkspace(harness.React, api);
+    const props = { novelId: NOVEL_ID, capabilities: designedCapabilities, authorization, voiceSources: designedVoiceSources };
+    return { api, harness, Workspace, props };
+  }
+
+  it("never assigns the first profile to an unbound character and follows an explicit binding", async () => {
+    const { api, harness, Workspace, props } = setup();
+    const characterProps = { ...props, characterId: "chen", characterName: "陈屿", targetProfileId: null as string | null };
+    harness.render(Workspace, characterProps);
+    await settle();
+    let tree = harness.render(Workspace, characterProps);
+    expect(findAll(tree, e => e.type === VoiceSourcePanel)).toHaveLength(0);
+    expect(textContent(tree)).toContain("继续完成 林夏专属声音");
+    expect(textContent(tree)).toContain("正在编辑的私人音色档案");
+    harness.render(Workspace, { ...characterProps, targetProfileId: PROFILE_ID });
+    tree = harness.render(Workspace, { ...characterProps, targetProfileId: PROFILE_ID });
+    expect(sourcePanel(tree).props.model).toMatchObject({ profile: { profile_id: PROFILE_ID } });
+    expect(api.createDesignedVoiceVersion).not.toHaveBeenCalled();
+  });
+
+  it("moves focus to the live status after continuing an unfinished profile", async () => {
+    const { harness, Workspace, props } = setup();
+    const characterProps = { ...props, characterId: "chen", characterName: "陈屿", targetProfileId: null };
+    harness.render(Workspace, characterProps);
+    await settle();
+    const tree = harness.render(Workspace, characterProps);
+    const status = findAll(tree, (element) => element.props.role === "status"
+      && element.props.id === `anw-voice-workspace-${NOVEL_ID}-chen-status`)[0]!;
+    const focus = vi.fn();
+    (status.props.ref as { current: unknown }).current = { focus };
+
+    (findAll(tree, (element) => (
+      element.type === "button" && textContent(element) === "继续完成 林夏专属声音"
+    ))[0]!.props.onClick as () => void)();
+    await settle();
+
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it("preserves edits across updated facts and isolates descriptions by profile and character", async () => {
+    const otherId = "other-profile";
+    const { harness, Workspace, props } = setup([profile(), { ...profile(), profile_id: otherId, name: "另一个声音" }]);
+    const suggestedDesign = buildCharacterVoiceDesignSuggestion({ ageAtStoryStartNote: "18岁", gender: "男" });
+    const first = { ...props, characterId: "chen", targetProfileId: PROFILE_ID, suggestedDesign };
+    harness.render(Workspace, first); await settle();
+    let tree = harness.render(Workspace, first);
+    (sourcePanel(tree).props.onDesignDescriptionChange as (text: string) => void)("作者手写的青年声音");
+    const updated = { ...first, suggestedDesign: buildCharacterVoiceDesignSuggestion({ ageAtStoryStartNote: "26岁", gender: "男" }) };
+    harness.render(Workspace, updated);
+    tree = harness.render(Workspace, updated);
+    expect(sourcePanel(tree).props.designDescription).toBe("作者手写的青年声音");
+    expect(sourcePanel(tree).props.designGuidance).toContain("由你编辑");
+    (findAll(tree, e => e.type === "select")[0]!.props.onChange as (event: unknown) => void)({ target: { value: otherId } });
+    tree = harness.render(Workspace, updated);
+    expect(sourcePanel(tree).props.designDescription).toBe("");
+    (findAll(tree, e => e.type === "select")[0]!.props.onChange as (event: unknown) => void)({ target: { value: PROFILE_ID } });
+    tree = harness.render(Workspace, updated);
+    expect(sourcePanel(tree).props.designDescription).toBe("作者手写的青年声音");
+    (sourcePanel(tree).props.onRefreshDesignSuggestion as () => void)();
+    tree = harness.render(Workspace, updated);
+    expect(sourcePanel(tree).props.designDescription).toBe(updated.suggestedDesign.description);
+    harness.render(Workspace, { ...updated, characterId: "lin", targetProfileId: null }); await settle();
+    tree = harness.render(Workspace, { ...updated, characterId: "lin", targetProfileId: null });
+    expect(findAll(tree, e => e.type === VoiceSourcePanel)).toHaveLength(0);
+  });
+
+  it("submits the actual suggestion once on a synchronous double click and preserves the snapshot on retry", async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    const { api, harness, Workspace, props } = setup();
+    const request = vi.fn().mockRejectedValueOnce(new TypeError("network interrupted")).mockResolvedValue(generatedVersion());
+    api.createDesignedVoiceVersion = request;
+    api.getVoiceProfile = vi.fn(async () => profile(2, generatedVersion()));
+    const generated = buildCharacterVoiceDesignSuggestion({ ageAtStoryStartNote: "18岁", description: "声音沙哑。" });
+    const input = { ...props, suggestedDesign: generated };
+    harness.render(Workspace, input); await settle();
+    let tree = harness.render(Workspace, input);
+    (sourcePanel(tree).props.onSelectSource as (source: string) => void)("generated");
+    tree = harness.render(Workspace, input);
+    const submit = sourcePanel(tree).props.onCreateDesigned as () => void;
+    submit(); submit();
+    await settle();
+    tree = harness.render(Workspace, input);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]![1].description).toBe(generated.description);
+    expect(request.mock.calls[0]![1].seed).toBeGreaterThanOrEqual(0);
+    expect(request.mock.calls[0]![1].seed).toBeLessThan(2 ** 31);
+    expect([...storage.values()].join()).not.toContain(generated.description);
+    expect(sourcePanel(tree).props.designCreationBlocked).toBe(true);
+    const again = createHarness();
+    const Restored = createVoiceSourceWorkspace(again.React, api);
+    again.render(Restored, input); await settle();
+    expect(textContent(again.render(Restored, input))).toContain("上次创建结果待核实");
+    expect(request).toHaveBeenCalledTimes(1);
+    (findAll(tree, e => e.type === "button" && textContent(e) === "使用原请求重试")[0]!.props.onClick as () => void)();
+    await settle();
+    tree = harness.render(Workspace, input);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1]!.slice(0, 3)).toEqual(request.mock.calls[0]!.slice(0, 3));
+    expect(storage.size).toBe(0);
+    expect(sourcePanel(tree).props.designActionLabel).toBe("设计另一版");
+    const previousSeed = request.mock.calls[1]![1].seed;
+    (sourcePanel(tree).props.onCreateDesigned as () => void)(); await settle();
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request.mock.calls[2]![2]).not.toBe(request.mock.calls[1]![2]);
+    expect(request.mock.calls[2]![1].expected_profile_version).toBe(2);
+    expect(request.mock.calls[2]![1].seed).not.toBe(previousSeed);
+    expect(api.lockVoiceProfile).not.toHaveBeenCalled();
+  });
+
+  it("ignores a design response after switching characters", async () => {
+    const { api, harness, Workspace, props } = setup();
+    let finish!: (value: VoiceProfileVersionResource) => void;
+    api.createDesignedVoiceVersion = vi.fn(() => new Promise<VoiceProfileVersionResource>(resolve => { finish = resolve; }));
+    const first = { ...props, characterId: "chen", targetProfileId: PROFILE_ID,
+      suggestedDesign: buildCharacterVoiceDesignSuggestion({ ageAtStoryStartNote: "18岁" }) };
+    harness.render(Workspace, first); await settle();
+    let tree = harness.render(Workspace, first);
+    (sourcePanel(tree).props.onSelectSource as (source: string) => void)("generated");
+    tree = harness.render(Workspace, first);
+    (sourcePanel(tree).props.onCreateDesigned as () => void)();
+    const other = { ...first, characterId: "lin", targetProfileId: null };
+    harness.render(Workspace, other); await settle();
+    finish(generatedVersion()); await settle();
+    tree = harness.render(Workspace, other);
+    expect(findAll(tree, e => e.type === VoiceSourcePanel)).toHaveLength(0);
+    expect(api.getVoiceProfile).not.toHaveBeenCalled();
+    expect(textContent(tree)).not.toContain("候选已创建");
+  });
+
+  it("recovers an acknowledged candidate by exact identity without a new design request", async () => {
+    const markerKey = `anw:voice-design:${NOVEL_ID}:chen`;
+    const storage = new Map([[markerKey, JSON.stringify({ profileId: PROFILE_ID, baselineVersion: 1,
+      requestId: "voice-designed-existing", versionId: VERSION_ID })]]);
+    vi.stubGlobal("sessionStorage", { getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) });
+    const { api, harness, Workspace, props } = setup([profile(2, generatedVersion())]);
+    const input = { ...props, characterId: "chen", targetProfileId: null };
+    harness.render(Workspace, input); await settle();
+    const tree = harness.render(Workspace, input);
+    expect(textContent(tree)).toContain("已找回上次创建的候选");
+    expect(sourcePanel(tree).props.model).toMatchObject({ selectedVersion: { version_id: VERSION_ID } });
+    expect(storage.size).toBe(0);
+    expect(api.createDesignedVoiceVersion).not.toHaveBeenCalled();
+  });
+
+  it("uses Base for an existing synthetic reference and does not pretend to restore its description", async () => {
+    const candidate = { ...version("preview_ready"), source_type: "generated" as const,
+      rights: { ...rights(), source_kind: "qwen_synthetic_design" as const }, description_available: true };
+    const { api, harness, Workspace, props } = setup([profile(3, candidate)]);
+    const input = { ...props, capabilities, voiceSources,
+      suggestedDesign: buildCharacterVoiceDesignSuggestion({ ageAtStoryStartNote: "18岁" }) };
+    harness.render(Workspace, input); await settle();
+    const tree = harness.render(Workspace, input);
+    const panel = sourcePanel(tree);
+    expect(panel.props.designDescription).toBe("");
+    expect(panel.props.model).toMatchObject({ actions: { canPreview: true, canLock: true } });
+    expect(api.createDesignedVoiceVersion).not.toHaveBeenCalled();
+    expect(api.createVoicePreview).not.toHaveBeenCalled();
+  });
+
   it("rejects cross-novel profile drift", () => {
     expect(() => novelScopedVoiceProfiles(NOVEL_ID, [{ ...profile(), novel_id: OTHER_NOVEL_ID }]))
       .toThrow("范围之外");
@@ -493,7 +668,7 @@ describe("voice source workspace", () => {
     tree = harness.render(Workspace, props);
     expect(api.createVoicePreview).toHaveBeenCalledWith(
       PROFILE_ID,
-      { version_id: VERSION_ID, preview_text: "你好，这是当前音色的朗读试听。" },
+      { version_id: VERSION_ID, preview_text: "门外的脚步停了下来。你听见了吗？先别开门，让我看看走廊。等灯重新亮起，我们再一起往楼下走。不管外面发生什么，大家都要平安回来。" },
       expect.stringMatching(/^voice-preview-/),
       expect.any(AbortSignal),
     );
@@ -580,7 +755,7 @@ describe("voice source workspace", () => {
         expected_profile_version: 1,
         description: "沉稳、清晰的青年男声，语速适中，情绪克制。",
         language: "zh-CN",
-        seed: null,
+        seed: expect.any(Number),
       },
       expect.stringMatching(/^voice-designed-/),
       expect.any(AbortSignal),
@@ -617,6 +792,7 @@ describe("voice source workspace", () => {
       suggestedDesign: {
         description: "26岁，年龄感为第一优先级，保持青年年龄感；标准普通话。",
         ageEvidence: "26岁",
+        perceivedAgeEvidence: null,
         ageSource: "profile" as const,
       },
     };
@@ -633,7 +809,7 @@ describe("voice source workspace", () => {
     panel = sourcePanel(tree);
     expect(panel.props.designDescription).toBe("26岁，年龄感为第一优先级，保持青年年龄感；标准普通话。");
     expect(String(panel.props.designGuidance)).toContain("26岁");
-    expect(textContent(tree)).toContain("年龄感优先于其他气质");
+    expect(String(panel.props.designGuidance)).toContain("不会自行改变年龄感");
     expect(api.createDesignedVoiceVersion).not.toHaveBeenCalled();
   });
 
@@ -722,7 +898,7 @@ describe("voice source workspace", () => {
     const sourceHeading = findAll(tree, (element) => (
       element.type === "h3" && textContent(element) === "2. 选择音色来源"
     ))[0];
-    expect(sourceHeading.props.id).toBe(`anw-voice-workspace-${NOVEL_ID}-source-heading`);
+    expect(sourceHeading.props.id).toBe(`anw-voice-workspace-${NOVEL_ID}-private-source-heading`);
     expect(panel.props).toMatchObject({
       embedded: true,
       ariaLabelledBy: sourceHeading.props.id,

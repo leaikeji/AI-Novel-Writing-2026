@@ -73,6 +73,60 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
     margin-top: 16px;
   }
 
+  .anw-character-voice-panel__body--private {
+    gap: 12px;
+    margin-top: 10px;
+  }
+
+  .anw-character-voice-panel__apply {
+    display: grid;
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .anw-character-voice-panel__section-heading h3,
+  .anw-character-voice-panel__section-heading p {
+    margin: 0;
+  }
+
+  .anw-character-voice-panel__section-heading h3 {
+    color: var(--anw-ink, #17191f);
+    font-size: 16px;
+  }
+
+  .anw-character-voice-panel__section-heading p,
+  .anw-character-voice-panel__language {
+    margin: 3px 0 0;
+    color: var(--anw-muted, #737987);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .anw-character-voice-panel__empty {
+    margin: 0;
+    border: 1px dashed var(--anw-line, #e7e9ee);
+    border-radius: 10px;
+    padding: 12px;
+    color: var(--anw-muted, #737987);
+    background: #fafafa;
+  }
+
+  .anw-character-voice-panel__other {
+    border-top: 1px solid var(--anw-line, #e7e9ee);
+    padding-top: 10px;
+  }
+
+  .anw-character-voice-panel__other > summary {
+    color: var(--anw-ink, #17191f);
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .anw-character-voice-panel__other[open] > summary {
+    margin-bottom: 10px;
+  }
+
   .anw-character-voice-panel fieldset {
     display: grid;
     min-width: 0;
@@ -130,7 +184,8 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
 
   .anw-character-voice-panel button:focus-visible,
   .anw-character-voice-panel input:focus-visible,
-  .anw-character-voice-panel select:focus-visible {
+  .anw-character-voice-panel select:focus-visible,
+  .anw-character-voice-panel summary:focus-visible {
     outline: 3px solid rgba(255, 93, 42, .28);
     outline-offset: 2px;
   }

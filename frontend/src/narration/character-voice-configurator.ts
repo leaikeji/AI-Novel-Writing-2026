@@ -258,7 +258,7 @@ export function createCharacterVoiceConfigurator(
         "section",
         { className: "anw-character-current-voice", "aria-labelledby": `${prefix}-current` },
         h("header", null,
-          h("h3", { id: `${prefix}-current` }, "当前声音"),
+          h("h3", { id: `${prefix}-current` }, "当前实际声音"),
           h("span", {
             className: ["anw-character-current-voice__badge", current.tone].filter(Boolean).join(" "),
           }, current.badge),
@@ -324,8 +324,8 @@ export function createCharacterVoiceConfigurator(
           },
           h("summary", null,
             h("span", null,
-              h("strong", null, "浏览全部官方音色"),
-              h("small", null, "选中即保存，试听不更换声音。已有音频保持不变。"),
+              h("strong", null, "浏览官方音色"),
+              h("small", null, "选中后立即生效；试听不会更换声音。已有朗读保持不变。"),
             ),
           ),
           officialActivated
@@ -346,8 +346,8 @@ export function createCharacterVoiceConfigurator(
           },
           h("summary", null,
             h("span", null,
-              h("strong", null, "私人音色与高级调音"),
-              h("small", null, "仅在需要时展开。"),
+              h("strong", null, "定制私人音色"),
+              h("small", null, "设计、试听并确认后，再应用给人物。"),
             ),
           ),
           advancedActivated

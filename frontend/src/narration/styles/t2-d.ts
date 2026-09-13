@@ -215,6 +215,31 @@ export const T2_D_NARRATION_STYLES = `
   border-top: 1px solid var(--ant-color-border-secondary, #e5e6e8);
   padding-top: 16px;
 }
+.anw-voice-workspace__embedded-heading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.anw-voice-workspace__continue-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.anw-voice-workspace button.anw-voice-workspace__continue-profile {
+  min-height: 36px;
+  border-color: color-mix(in srgb, var(--anw-orange, #ff7043) 34%, var(--ant-color-border, #d9dadd));
+  padding: 6px 11px;
+  color: #9f3d1d;
+  background: #fff8f4;
+}
+.anw-voice-workspace button.anw-voice-workspace__continue-profile:disabled {
+  color: var(--ant-color-text-secondary, #727780);
+  background: var(--ant-color-fill-tertiary, #f5f5f6);
+}
 .anw-voice-workspace__preset-catalog > button {
   justify-self: start;
 }

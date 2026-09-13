@@ -1,0 +1,14 @@
+[
+  {"id":"young_hoarse","evidence":{"ageAtStoryStartNote":"18岁","gender":"男","description":"他的声音沙哑而粗粝。"},"age":"18岁","perceived":null,"includes":["青年","沙哑","粗粝"],"excludes":["方言"]},
+  {"id":"explicit_contrast","evidence":{"ageAtStoryStartNote":"18岁","gender":"男","description":"他的声音沙哑，听起来像四十岁的男人。"},"age":"18岁","perceived":"四十岁","includes":["沙哑","四十岁"],"excludes":[]},
+  {"id":"other_person","evidence":{"description":"父亲四十岁，是镇上的木匠。他刚离开家，年龄尚未明确。"},"age":null,"perceived":null,"includes":[],"excludes":["四十岁"]},
+  {"id":"cross_sentence","evidence":{"ageAtStoryStartNote":"18岁","description":"声音清亮，像溪水一样。父亲四十岁，经营铁匠铺。"},"age":"18岁","perceived":null,"includes":["清亮"],"excludes":["四十岁"]},
+  {"id":"appearance","evidence":{"ageAtStoryStartNote":"18岁","description":"眼睛明亮，皮肤干涩，性格温柔。"},"age":"18岁","perceived":null,"includes":[],"excludes":["明亮","干涩"]},
+  {"id":"temporary","evidence":{"ageAtStoryStartNote":"18岁","description":"平时声音清亮，昨晚哭过后暂时沙哑。"},"age":"18岁","perceived":null,"includes":["清亮"],"excludes":["沙哑"]},
+  {"id":"negation","evidence":{"ageAtStoryStartNote":"18岁","description":"声音不要过于沙哑，保持清亮。"},"age":"18岁","perceived":null,"includes":["清亮"],"excludes":["沙哑"]},
+  {"id":"range","evidence":{"ageAtStoryStartNote":"18至22岁"},"age":"18至22岁","perceived":null,"includes":["18至22岁"],"excludes":[]},
+  {"id":"upper_bound","evidence":{"ageAtStoryStartNote":"不到十八岁"},"age":"不到十八岁","perceived":null,"includes":["不到十八岁"],"excludes":[]},
+  {"id":"same_age","evidence":{"ageAtStoryStartNote":"18岁","description":"声音听起来像十八岁。"},"age":"18岁","perceived":null,"includes":[],"excludes":["反差"]},
+  {"id":"unknown_actual","evidence":{"ageAtStoryStartNote":"不详，待补充","description":"他的声音像四十岁的男人，实际年龄未知。"},"age":null,"perceived":"四十岁","includes":["四十岁"],"excludes":[]},
+  {"id":"fantasy","evidence":{"ageAtStoryStartNote":"300岁"},"age":"300岁","perceived":null,"includes":["300岁"],"excludes":["老年"]}
+]

@@ -187,7 +187,7 @@ describe("formal character workspace", () => {
     ))[0];
     expect(findAll(footer, (element) => element.type === "button").map(textContent))
       .toEqual(["关闭"]);
-    expect(textContent(footer)).toContain("声音设置由共用声音组件独立保存");
+    expect(textContent(footer)).toBe("关闭");
 
     (findButton(root, "基础资料").props.onClick as () => void)();
     root = harness.render(Component, props);
@@ -205,6 +205,11 @@ describe("formal character workspace", () => {
       .toEqual(["撤销修改", "关闭", "保存人物卡"]);
     expect(textContent(footer)).toContain("其他栏目还有未保存修改");
     expect(textContent(footer)).toContain("只处理人物卡字段");
+    expect(voiceSlot).toHaveBeenLastCalledWith(expect.objectContaining({
+      characterName: props.workspace.character.name,
+      characterDescription: props.workspace.character.description,
+    }));
+    expect(textContent(root)).toContain("声音描述使用已保存的人物资料");
   });
 
   it("offers an explicit header close action", () => {

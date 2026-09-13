@@ -871,6 +871,12 @@ describe("T2-D voice source panel", () => {
       expect(ready.indexOf("真实试听播放器")).toBeLessThan(ready.indexOf("确认并锁定音色"));
       expect(ready).toContain("请先播放试听，再确认声音效果");
       expect(ready).toContain('"aria-pressed":true');
+      const restored = JSON.stringify(VoiceSourcePanel({
+        model: enabledModel(), selectedSource: "uploaded", workflow: IDLE_VOICE_SOURCE_WORKFLOW,
+        uploadRights: uploadInput().rights, qualityConfirmationAllowed: true, qualityConfirmed: true,
+      }));
+      expect(restored).toContain("确认并锁定音色");
+      expect(restored).toContain("我已听过");
     } finally {
       if (descriptor) Object.defineProperty(globalThis, "window", descriptor);
       else Reflect.deleteProperty(globalThis, "window");

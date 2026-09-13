@@ -200,6 +200,12 @@ export function createVoiceSourcePanelModel(
   const selectedSourceCard = selectedVersion === null
     ? null
     : cards.find((card) => card.sourceType === selectedVersion.source_type) ?? null;
+  // A published synthetic reference is consumed by Base, not VoiceDesign.
+  const referenceCapability = capabilityByKey(input.capabilities, "reference_clone");
+  const selectedSourceUsable = selectedVersion?.source_type === "generated"
+    && voiceSourceEvidenceIsUsable(selectedVersion)
+    ? referenceCapability?.state === "enabled" && referenceCapability.actionable
+    : selectedSourceCard?.visible === true && selectedSourceCard.enabled;
   const canPreview = Boolean(
     input.authorization.can_manage_voice_assets
     && previewCapability?.state === "enabled"
@@ -208,8 +214,7 @@ export function createVoiceSourcePanelModel(
     && selectedVersion !== null
     && rightsAreActive
     && selectedVersionSourceIsValid
-    && selectedSourceCard?.visible === true
-    && selectedSourceCard.enabled
+    && selectedSourceUsable
   );
   const canLock = Boolean(
     input.authorization.can_manage_voice_assets
@@ -220,7 +225,7 @@ export function createVoiceSourcePanelModel(
     && selectedVersionSourceIsValid
     && selectedVersion !== null
     && voiceSourceEvidenceIsUsable(selectedVersion)
-    && selectedSourceCard?.enabled,
+    && selectedSourceUsable,
   );
   const canCreateProfile = Boolean(
     input.authorization.can_manage_voice_assets
@@ -740,6 +745,9 @@ interface VoiceSourcePanelBaseProps {
   readonly referenceText?: string;
   readonly designDescription?: string;
   readonly designGuidance?: string;
+  readonly designActionLabel?: string;
+  readonly designCreationBlocked?: boolean;
+  readonly onRefreshDesignSuggestion?: () => void;
   readonly previewText?: string;
   readonly busy?: boolean;
   readonly cancelAllowed?: boolean;
@@ -931,7 +939,10 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
         props.designGuidance
           ? h("p", { className: "anw-narration-voice-design-guidance", role: "note" }, props.designGuidance)
           : null,
-        h("label", null,
+        props.onRefreshDesignSuggestion
+          ? h("button", { type: "button", disabled: busy, onClick: props.onRefreshDesignSuggestion }, "按最新人物资料更新描述")
+          : null,
+        props.previewContent ? null : h("label", null,
           "试听文本（1–500 字）",
           h("textarea", {
             value: props.previewText ?? "",
@@ -945,9 +956,9 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
         ),
         h("button", {
           type: "button",
-          disabled: !canCreateDesigned,
+          disabled: !canCreateDesigned || props.designCreationBlocked === true,
           onClick: props.onCreateDesigned,
-        }, "创建设计候选"),
+        }, props.designActionLabel ?? "创建设计候选"),
       )
       : null,
     showRights
@@ -1058,7 +1069,8 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
         disabled: !props.model.actions.canPreview || props.previewTextValid === false || busy,
         onClick: props.onPreview,
       }, props.workflow.status === "preview_ready" ? "重新生成试听" : "生成试听") : null,
-      props.workflow.status === "preview_ready" && props.model.selectedVersion?.state !== "locked"
+      (props.workflow.status === "preview_ready" || props.qualityConfirmationAllowed === true)
+        && props.model.selectedVersion?.state !== "locked"
         ? h("label", { className: "anw-narration-voice-quality-confirmation" },
           h("input", {
             type: "checkbox",
@@ -1073,7 +1085,8 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
             : "请先播放试听，再确认声音效果。",
         )
         : null,
-      props.workflow.status === "preview_ready" && props.model.selectedVersion?.state !== "locked" ? h("button", {
+      (props.workflow.status === "preview_ready" || props.qualityConfirmationAllowed === true)
+        && props.model.selectedVersion?.state !== "locked" ? h("button", {
         type: "button",
         disabled: !props.model.actions.canLock || props.qualityConfirmed !== true || busy,
         onClick: props.onLock,

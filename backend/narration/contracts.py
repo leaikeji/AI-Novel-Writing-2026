@@ -55,6 +55,32 @@ _NON_MANDARIN_VOICE_TERMS: Final[tuple[str, ...]] = (
     "英语",
     "英文",
 )
+# These are intentionally bounded instruction patterns, not a general language
+# parser. A negation ends at punctuation or a contrast: "不用方言但要四川口音"
+# must not let its first half authorize its second half.
+_VOICE_LANGUAGE_CLAUSES = re.compile(r"[，,。.;；!?！？\n]+|但是|然而|不过|而是|可是|反而|但|却")
+_NON_MANDARIN_PATTERN = "(?:" + "|".join(
+    re.escape(term) for term in _NON_MANDARIN_VOICE_TERMS
+) + ")"
+_LANGUAGE_MODIFIER = (
+    r"(?:任何|一点|明显|浓重|地方|地域|各地|四川|东北|北京|天津|"
+    r"广东|上海|河南|山东|陕西|台湾|香港){0,2}"
+)
+_LANGUAGE_REJECTION = (
+    r"(?:不能使用|不能带|不允许|不使用|不采用|不需要|不要|不用|"
+    r"不带有|不带|不含|没有|避免|禁止|杜绝|不说|不是|并非)"
+)
+_NEGATED_NON_MANDARIN = re.compile(
+    _LANGUAGE_REJECTION + r"\s*(?:使用|采用|带有|带|含有|说|用)?\s*" + _LANGUAGE_MODIFIER
+    + _NON_MANDARIN_PATTERN
+    + r"(?:(?:和|或|及|与|、)?" + _LANGUAGE_MODIFIER + _NON_MANDARIN_PATTERN + r")*"
+)
+_DOUBLE_NEGATION_PREFIX = re.compile(r"(?:不|不能|不要|并非|不是|无需|不必|没有必要)$")
+_REJECTED_MANDARIN = re.compile(
+    r"(?:" + _LANGUAGE_REJECTION + r"|拒绝|非)"
+    r"\s*(?:使用|采用|说|用)?\s*(?:标准)?(?:普通话|国语|Mandarin)",
+    re.IGNORECASE,
+)
 
 
 class ContractError(ValueError):
@@ -70,14 +96,33 @@ def require_mandarin_language(value: str) -> str:
 
 
 def require_mandarin_voice_design(value: str) -> str:
-    """Reject explicit dialect or foreign-language voice-design instructions."""
+    """Accept clear Mandarin requirements, including explicit dialect exclusions.
+
+    Classification alone masks recognized exclusions; the returned description
+    is never rewritten. Unrecognized uses of the known language terms require
+    rewriting; this does not attempt to understand arbitrary narrative intent.
+    """
 
     normalized = value.strip()
     _ensure_nonempty(normalized, field_name="description")
-    if any(term in normalized for term in _NON_MANDARIN_VOICE_TERMS):
-        raise ContractError(
-            "voice design must describe a Mandarin voice without dialect instructions"
-        )
+    for raw_clause in _VOICE_LANGUAGE_CLAUSES.split(normalized):
+        clause = raw_clause.strip()
+        if not clause:
+            continue
+
+        def mask_exclusion(match: re.Match[str]) -> str:
+            prefix = clause[:match.start()].rstrip()
+            # "不能不使用方言" is not an exclusion. Do not guess nested intent.
+            return match.group() if _DOUBLE_NEGATION_PREFIX.search(prefix) else " "
+
+        remaining = _NEGATED_NON_MANDARIN.sub(mask_exclusion, clause)
+        if _REJECTED_MANDARIN.search(clause) or any(
+            term in remaining for term in _NON_MANDARIN_VOICE_TERMS
+        ):
+            raise ContractError(
+                "voice design must describe a Mandarin voice without dialect instructions; "
+                f"请核对语言要求“{clause[:80]}”，改为明确的标准普通话描述"
+            )
     return normalized
 
 
