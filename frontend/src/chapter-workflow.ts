@@ -52,6 +52,7 @@ import type {
 } from "./assistant-fields";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import { canCompleteLibraryCheck, createLibraryCheckDecisionPanel } from "./private-library/candidate-adoption";
+import { createCandidateSourcePreview, type CandidateHitLocator } from "./private-library/candidate-source-preview";
 import {
   resolveSyncProgressDocument,
   reusableSyncProgressProposal,
@@ -658,6 +659,7 @@ function field(label: string, control: unknown, help?: string): unknown {
 }
 
 const LibraryCheckDecisionPanel = createLibraryCheckDecisionPanel(React, host.antd);
+const CandidateSourcePreview = createCandidateSourcePreview(React);
 
 export function isLibraryCheckRequired(reason: unknown): boolean {
   return reason instanceof ApiError && reason.status === 409
@@ -679,7 +681,7 @@ export async function reviewLibraryCheckReport(
   const trigger = globalThis.document?.activeElement as HTMLElement | null;
   return new Promise((resolve) => {
     let settled = false;
-    let preview: HTMLTextAreaElement | null = null;
+    let locateCandidateHit: CandidateHitLocator | null = null;
     const finish = (value: LibraryCheckReportRecord | null) => {
       if (settled) return;
       settled = true;
@@ -714,16 +716,12 @@ export async function reviewLibraryCheckReport(
         onComplete: (current: LibraryCheckReportRecord) => finish(current),
         onCancel: () => finish(null),
         onLocateHit: sourceMarkdown !== undefined ? (hit: LibraryCheckHitRecord) => {
-          preview?.focus();
-          preview?.setSelectionRange(hit.start_utf16, hit.end_utf16);
+          locateCandidateHit?.(hit);
         } : onLocateHit,
-      }), sourceMarkdown !== undefined ? h("label", null,
-        h("span", null, "本次拟采用正文（只读，点击命中位置可定位）"),
-        h("textarea", { value: sourceMarkdown, readOnly: true, rows: 7,
-          "aria-label": "本次拟采用正文", style: { width: "100%", resize: "vertical" },
-          ref: (node: HTMLTextAreaElement | null) => { preview = node; },
-        }),
-      ) : null),
+      }), sourceMarkdown !== undefined ? h(CandidateSourcePreview, {
+        text: sourceMarkdown,
+        bindLocator: (locate: CandidateHitLocator | null) => { locateCandidateHit = locate; },
+      }) : null),
     });
   });
 }

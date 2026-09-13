@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api";
-import type { CandidateRecord, LibraryCheckReportRecord } from "./types";
+import type { CandidateRecord, LibraryCheckHitRecord, LibraryCheckReportRecord } from "./types";
 import { findAll } from "./private-library/test-harness";
 
 const request = vi.hoisted(() => vi.fn());
@@ -76,6 +76,13 @@ describe("whole chapter current-library adoption entry", () => {
     const modal = confirm.mock.calls[0]?.[0];
     expect(modal.footer).toBeNull();
     const panel = findAll(modal.content, (node) => node.props.report === blocked)[0]!;
+    const preview = findAll(modal.content, (node) => typeof node.props.bindLocator === "function")[0]!;
+    expect(preview.props.text).toBe(candidate.content_markdown);
+    const locate = vi.fn();
+    (preview.props.bindLocator as (callback: typeof locate) => void)(locate);
+    const hit = { start_utf16: 0, end_utf16: 2, matched_text: "潮声" } as LibraryCheckHitRecord;
+    (panel.props.onLocateHit as (hit: LibraryCheckHitRecord) => void)(hit);
+    expect(locate).toHaveBeenCalledExactlyOnceWith(hit);
     (panel.props.onCancel as () => void)();
     expect(await operation).toBeNull();
     expect(request).toHaveBeenCalledOnce();

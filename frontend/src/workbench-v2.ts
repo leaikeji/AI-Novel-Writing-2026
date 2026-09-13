@@ -3092,6 +3092,13 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
     contentRef.current = updated.content_markdown;
     setDocument(updated);
     setContent(updated.content_markdown);
+    setNovel((current: NovelRecord | null) => current?.id === updated.novel_id ? {
+      ...current,
+      tree: current.tree.map((volume) => ({
+        ...volume,
+        documents: volume.documents.map((item) => item.id === updated.id ? updated : item),
+      })),
+    } : current);
     setError("");
     setConflict(null);
     setRecovery(null);

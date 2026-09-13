@@ -298,6 +298,33 @@ describe("Workbench controlled selection save and recovery entry", () => {
   });
   afterEach(() => { hooks.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+  it("updates the current directory row from an adopted document without reloading or changing other chapters", async () => {
+    render(); await settle();
+    const previous = workflowProps().novel as NovelRecord;
+    const other = previous.tree[0]!.documents.find((item) => item.id === DOC_B);
+    const loads = io.loadNovel.mock.calls.length;
+    const updated = documentRecord(DOC_A, AI_TEXT, 2);
+    (workflowProps().onDocumentChanged as (document: DocumentRecord, status: string) => void)(updated, "已采用");
+    await settle();
+    const current = workflowProps().novel as NovelRecord;
+    expect(current.tree[0]!.documents.find((item) => item.id === DOC_A)).toBe(updated);
+    expect(current.tree[0]!.documents.find((item) => item.id === DOC_B)).toBe(other);
+    expect(current.tree[0]!.title).toBe(previous.tree[0]!.title);
+    expect(io.loadNovel).toHaveBeenCalledTimes(loads);
+    expect(calls()).toHaveLength(0);
+  });
+
+  it("does not update directory rows from an old chapter callback after switching", async () => {
+    render(); await settle();
+    const apply = workflowProps().onDocumentChanged as (document: DocumentRecord, status: string) => void;
+    await projectSwitch(DOC_B);
+    const previous = workflowProps().novel;
+    apply(documentRecord(DOC_A, AI_TEXT, 2), "旧采用回调");
+    await settle();
+    expect(workflowProps().novel).toBe(previous);
+    expect(surfaceValue).toBe(BODY_B);
+  });
+
   it("drives actual editor and autosave callbacks without running narration", async () => {
     render(); await settle();
     expect(surfaceOptions?.lease.documentId).toBe(DOC_A);
