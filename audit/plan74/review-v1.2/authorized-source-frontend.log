@@ -1,0 +1,9 @@
+$ vitest run
+
+ RUN  v4.1.11 /private/tmp/plan74-authorized-source.oEyCy6/code
+
+
+ Test Files  167 passed (167)
+      Tests  1494 passed (1494)
+   Start at  16:11:16
+   Duration  3.83s (transform 6.05s, setup 0ms, import 9.08s, tests 6.55s, environment 21ms)

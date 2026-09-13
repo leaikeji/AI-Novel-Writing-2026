@@ -1,6 +1,14 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`96b8aed RELEASED / 682fc60 VERIFIED BUT SOURCE-HOLD / G3 OPEN`。作者本轮“同意”已解除原作品资料／续播来源HOLD；新的失败句段重制依赖在F01重发前出现，未在此前授权内，故暂停安装。后续两项界面修复已并入682fc60，详见末节和[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`1712883 RELEASED / SOURCE-HOLD CLOSED / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
+
+## 最新可复核来源
+
+- 正式先行的失败句段重试依赖单独补交`da36b47d475f46441f64cadea2389873457427f7`，已push并核对远端；不是新增私有库功能。其他任务随后提交7047067，原样保留。
+- 本任务四项正式缺陷修复精确提交`1712883aae92d3049c4b45e2a979d1d03d1e36e7`，9文件：收藏卡重测量、私有库容器布局、CodeMirror整文替换合法选区、导航通知及对应测试／工作包范围。tree `ef181ce5a16857a38ce22f1905b0670c69f15733`。
+- 独立检出`/private/tmp/plan74-desktop-source.NzhMUK/code`通过前端1515／类型／构建／Python串行全量／包审核后16:38公开更新；包SHA `998b7c021a7ea2eb52ec436622a99f7bafadcd5b32ae7de91bd4194322b348ab`，仅JS变化。源码和备份保留，见[manifest](desktop-release-manifest.json)。
+- 已执行`git push origin main`，随后实际`git ls-remote origin refs/heads/main`返回`1712883aae92d3049c4b45e2a979d1d03d1e36e7`；由远端核验确认源码已交付，不由部署成功推导push成功。
+- 新定位与指令识别修复精确提交`77870d41ebb24f666f5507a3527d6b6c34e5bfaf`，tree `b86287546122a5cb732b7c31bd6289e0f663629f`，8文件。独立检出`/private/tmp/plan74-final-source.jn7Nb1/code`前端1521／类型／构建、Python全量、临时数据库314项及包审核退出0，status为空。JS SHA `af2afdf5b46f12cb9e0858bed31d19227392a2546adf62075dc93e811eab5093`。新候选尚未安装；计划79未提交文件不归本任务，不通过脏工作区打包。
 
 ## 本轮批准与完整候选
 

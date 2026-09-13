@@ -1,6 +1,29 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。状态：`96b8aed RELEASED / 682fc60 SOURCE-HOLD / G3-F01-HOLD`。
+日期：2026-09-13。最新状态：`1712883 RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 16:38桌面与编辑器公开更新
+
+- 精确源`1712883aae92d3049c4b45e2a979d1d03d1e36e7`、tree `ef181ce5a16857a38ce22f1905b0670c69f15733`；独立检出`/private/tmp/plan74-desktop-source.NzhMUK/code`。前端168文件1515项、类型／构建／包检查通过。Python首次两项安装合同失败与prepare共享锁运行重叠；两项单独复跑退出0，随后停止并行prepare完整串行重跑退出0，见[日志](desktop-source-backend.log)。没有跳过两项或修改安装器。
+- 新备份`/private/tmp/plan74-desktop-release.Mj07IA`，持久副本`/app/working.backups/plan74-desktop-release-20260913-Mj07IA`；DB SHA `7795b9f4a2f0bc284151adcd802ba6e3c0c22d7f4b7ffb28b0e856c3c42ac251`，归档目录验证通过，未恢复数据库。
+- 包SHA `998b7c021a7ea2eb52ec436622a99f7bafadcd5b32ae7de91bd4194322b348ab`，仅`frontend/dist/index.js`与原正式树不同。[完整清单](desktop-release-manifest.json)、[更新回执](desktop-install-result.json)。16:38:38公开hot-install，随后release verify及[公开合同复核](desktop-public-verify.log)退出0；逐文件／逐Agent选择／模型／健康／0056保持，无重启。
+- F06受控恢复稿经正常“恢复本地稿”写入draft4、4394字，刷新保持；报告与正文同事务应用回执可复核，未转手写。进入写作后不执行旧数据库恢复或未经兼容核对的插件回退。
+- 助手查询／修改／补偿撤销和桌面复验见[分项记录](desktop-validation.md)。明确指令分类与定位滚动仍有后续候选，不宣称整体G3通过。
+- 16:50后本轮模型／工具操作已停止并协调释放唯一正式环境给计划79；其后续发布由所属任务负责，本记录只证明以上时点的1712883运行树，不能断言此后环境始终不变。新修复须等共享锁和新来源核对后再部署。
+
+## 16:16完整来源公开更新
+
+作者已全权授权本计划及正式测试，必要已部署依赖的来源协调与独立提交由主代理自主完成。已将正式现有失败句段重试依赖及测试单独提交`da36b47d475f46441f64cadea2389873457427f7`，未混入计划79未部署候选；与任务“设计 Qwen-TTS 云本地混合方案”协调独占正式安装窗口。
+
+- 独立源`/private/tmp/plan74-authorized-source.oEyCy6/code`：前端1494、Python全量、临时数据库277、类型／构建／包检查通过。日志见`authorized-source-*.log`；SQL代码检查未连接正式库。
+- 最新备份`/private/tmp/plan74-final-release.jF2lcX`，正式卷副本`/app/working.backups/plan74-final-release-20260913-jF2lcX`；数据库归档`5301fac1d9267c096fdbef437c28a8e65cf46ea0561f1a46efbc632b21446111`，插件前态`af535937c7fe49f71deaccdc826dd8866cd28610f081bf1c4a1d8a4579dbe4ba`。
+- [清单](authorized-release-manifest.json)记录commit/tree与全部文件hash；候选包SHA-256 `fb5541636bf6da7f0b8f91cb45a08f4635f80bcd60ba8085e4d70db156e04e38`；差异仅`creative_data_api.py`、`private_library/service.py`、`frontend/dist/index.js`。
+- 16:16[公开更新回执](authorized-install-result.json)成功；`release.py verify`及完整`verify_qwenpaw_lab.py`退出0。正式安装树精确一致，三个Agent的模型、12项Skill、8项工具及提示文件选择全部保持，schema0056、健康ready、TTS ready，无容器重启／镜像变化／数据库恢复。
+- 源码已push，实际远端main核对`da36b47d475f46441f64cadea2389873457427f7`。后续其他任务提交独立记录，不冒充本任务。
+
+正式续验已验证收藏v8与绑定同步、归档停用和恢复不自动启用、1280审阅按钮可见；另发现收藏展开定位、私有库窄容器、导航范围通知及CodeMirror整文替换选区问题，正在按本计划补充工作包修复，G3尚未整体通过。原稿draft3未被失败采用覆盖；本地受控恢复稿和持久候选保留，不回滚数据库。
+
+## 14:54及之后的历史过程
 
 14:54通过公开热更新发布完整提交`96b8aed`。安装文件逐项一致，三个Agent的Skill、工具、有效模型和提示文件选择完全保持，正式健康ready、schema0056、TTS生产链ready；容器ID、image和启动时间未改变。真实桌面写作链正在执行，不能据此宣布整体G3通过。
 
