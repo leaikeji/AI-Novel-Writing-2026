@@ -26,4 +26,4 @@
 - 刷新后从第二章历史查看2668字未采用候选：显示“扫描共2处命中 · 当前1处禁用表达待处理”，与报告v2一致。两个旧历史卡也分别展示总数／待处理数，不把本报告当已采用事实。[1080P画面](desktop/50-history-count-1080.jpg)实际CSS1920×1080、图片1919×1080。
 - 缩小到CSS1267×713后，当前候选卡clientWidth=scrollWidth=655，标签在卡片内，无横向溢出。Escape退出，恢复默认viewport；没有操作任何“恢复此版本”或改变保留决定。
 - [正文](history-count-document-after.json)、[任务及候选](history-count-jobs-after.json)、[词包绑定](history-count-bindings-after.json)分别与上一轮preview对应JSON完全相同：第二章draft11／2535；新候选仍ready，报告v2仍只保留第一项；没有新job、采用事件或revision。
-- F21关闭；上一轮完整2K截图受限和通用库total13不足真实101+数据继续保留。网络／CAS等未正式覆盖项按原分层记录，不将本次标签复验扩大为所有恢复路径PASS。AI维护统计、文学A/B与拆书仍不在本轮执行范围。
+- F21关闭。23:03后续已用独立Edge补齐原生2560×1440历史及候选逐项检查截图，见[桌面记录](desktop-validation.md#2303独立edge完整2k候选复验6837e1b)；通用库total13不足真实101+数据继续保留。网络／CAS等未正式覆盖项按原分层记录，不将本次标签复验扩大为所有恢复路径PASS。AI维护统计、文学A/B与拆书仍不在本轮执行范围。

@@ -1,6 +1,13 @@
 # V1.2正式桌面与写作分项记录
 
-日期：2026-09-13。最新正式验证：`6837e1b PARTIAL / F21历史计数PASS / R5 OPEN`。22:50正式显示扫描总数2及当前待处理1，正文、候选及绑定不变，见[F21记录](history-count-release.md)。22:40的[候选交互与恢复](candidate-preview-validation.md)保留；完整2K截图及大库门禁未闭合。下文旧FAIL与NOT_RUN保持当时证明力，不是整体G3通过。
+日期：2026-09-13。最新正式验证：`6837e1b PARTIAL / F21历史计数PASS / 完整2K候选截图PASS / R5长列表OPEN`。23:03独立Edge正式页补齐原生2560×1440历史及候选逐项检查，正文、候选及绑定不变；见下节。22:50[F21记录](history-count-release.md)及22:40的[候选交互与恢复](candidate-preview-validation.md)保留。真实101+资料门禁未闭合；下文旧FAIL与NOT_RUN保持当时证明力，不是整体G3通过。
+
+## 23:03独立Edge完整2K候选复验（6837e1b）
+
+- 新建临时Edge正式页面，从创作中心正常进入《缺氧：末日地下世界》第二章；浏览器能力设置CSS视口2560×1440，DOM `innerWidth/innerHeight`、根`scrollWidth/scrollHeight`均2560×1440，DPR 1。截图经`file`和`sips`独立核对均为JPEG 2560×1440，不是内嵌浏览器2450宽裁切、fullPage空白、后处理缩放或拼接。
+- [历史列表](desktop/51-edge-history-2560x1440.jpg)完整显示三条记录及新候选“扫描共2处命中／当前1处待处理”；[逐项检查](desktop/52-candidate-preview-edge-2560x1440.jpg)显示两处禁用命中、第一处已处理、第二处checkbox可用且未选、保存和继续禁用、只读候选可滚动。由此关闭候选确认预览的完整2K截图缺口；原45／48裁切图继续作为工具限制历史，不改写成PASS。
+- 只打开2668字未采用候选；未点击旧2537／2649字已采用记录，未选择第二处或保存决定。两层Escape安全退出，临时页关闭并重置viewport。随后正文／jobs／bindings与history-count对应JSON精确相同，未产生job、revision、应用事件或模型调用。
+- 正式有效模型在本次只读观察时为bigmodel/glm-5.3-flash；22:47发布窗口记录的gemini保持为当时事实。计划74没有执行模型切换，不把会话显示差异当配置保持失败。
 
 ## 22:12手写保存与目录即时同步（15f4f5f）
 
