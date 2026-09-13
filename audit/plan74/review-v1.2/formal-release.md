@@ -1,6 +1,21 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。最新状态：`33ca983 RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+日期：2026-09-13。最新状态：`5919bba RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 19:53显式回执撤销识别更新
+
+- F13源`5919bbae53e7b795b3cda5bce0ac2bb3b6bb605a`、tree `577f63d43c64a2d6c485668f9e96446de23fe239`，独立检出`/private/tmp/plan74-undo-source.3J220z/code`。唯一运行差异`backend/private_library/maintenance.py`；不改补偿执行器、Skill、schema、注册、前端或其他任务声音候选。
+- 备份`/private/tmp/plan74-undo-release.la2WFJ`及持久副本`/app/working.backups/plan74-undo-release-20260913-la2WFJ`的三份归档hash一致。DB SHA `115f7eda52bad178a3a5ce9d9274e30dbb2be33bc712c2052bd897115347e844`，旧插件SHA `da4bb9d1bad984f7581a33fcd31bc5147b712ca4b8d11938cf4a174ba97dc04a`，候选SHA `f517051269911fb28b9c8a74d151f93933cc24e1e51ed91bdef9fcefa35a2d6c`。目录核验通过，未恢复数据库。
+- 19:53:08公开更新成功，[清单](undo-release-manifest.json)、[回执](undo-install-result.json)、[健康](undo-health-after.json)、[模型](undo-model-after.json)。release verify及[完整公开校验](undo-public-verify.log)退出0，逐文件及逐Agent配置保持，无重启，schema0056保持。
+- 19:53:57在刷新后的私有库原会话发送与失败时完全相同的明确撤销命令；19:54:24真实补偿applied，19:55:07助手8步骤完成。旧回执只产生一条补偿，新根恢复原说明且本书恢复到原固定v2；不是绕过权限或修改数据库。详见桌面记录。剩余正式写作和真实大库门禁继续开放。
+
+## 19:40原子维护与上下文公开更新
+
+- 计划76明确释放共享正式窗口后，主代理安装独立检出`/private/tmp/plan74-atomic-source.SG7Xnb/code`的`3bc7fa159aba406603fe2ac5cba2a59a48621651`，tree `ee06773e3486785eb09c6bc1e86dddaf0ea6f7b4`。前端1531／Python3195／临时数据库342等代码证据见代码记录。
+- 新备份`/private/tmp/plan74-atomic-release.YxZtBs`，持久副本`/app/working.backups/plan74-atomic-release-20260913-YxZtBs`，三份归档本地及持久副本hash一致。DB SHA `798fef553433fa4b2811a4d11d225759d0005605446c3dc87de13c55068e87ed`；旧插件SHA `bb9b82001bc80b1216f8276fa68d1dbb63f75a67967efc0ce748052992abffe9`；候选SHA `dbdec80810c3b5e97a0244b38079932aabedadbed566d3021d5eeef8884f5662`。只验证归档目录，没有恢复数据库。
+- 19:40:16公开热更新成功，[清单](atomic-release-manifest.json)、[回执](atomic-install-result.json)、[健康](atomic-health-after.json)、[模型](atomic-model-after.json)。安装文件一致，逐Agent选择保持；0056／ready／bigmodel/glm-5.3-flash保持，容器无重启。运行差异仅维护服务、动作合同、JS及同一维护Skill的两份源文件；不包含计划76新写的私人音色播放修复四文件，已有声音与210句音频保留。
+- 完整公开校验首次直接调用沿用脚本默认TTS disabled期望而失败；按实际已启用runtime/product/reference-clone配置为ready后退出0，[原始成功输出](atomic-public-verify.log)。这是校验调用参数修正，不是修改产品／模型配置，也不证明私人试听503已修复。
+- 正式一次自然语言修改并换绑通过；随后精确回执撤销因句式识别拒绝，未补偿写入。见[续验](desktop-validation.md#3bc7fa1原子维护正式续验)。不把工程原子undo用例通过当成正式撤销成功。新F13只补显式回执识别，继续保留当前稿、历史和媒体，不回滚业务数据库。
 
 ## 17:47完整依赖合并后的公开更新
 

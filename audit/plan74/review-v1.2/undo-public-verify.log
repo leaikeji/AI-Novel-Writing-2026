@@ -1,0 +1,266 @@
+{
+  "base_url": "http://127.0.0.1:18088",
+  "pawapp": "ai-novel-world-2026@0.4.0",
+  "health": "ready",
+  "narration": {
+    "product_requested": true,
+    "lifecycle_status": "ready",
+    "playback_installed": true,
+    "digest_keyring_loaded": true,
+    "production_backend_installed": true,
+    "worker_running": true,
+    "reference_clone_ready": true,
+    "provider_selection_fingerprint_sha256": "32ce6265c58a9f99d5a692d76faf40b19d77e76b0cda7f27ba6556e1b7b6d76e",
+    "reason_code": null
+  },
+  "narration_production": {
+    "product_requested": true,
+    "lifecycle_status": "ready",
+    "playback_installed": true,
+    "digest_keyring_loaded": true,
+    "production_backend_installed": true,
+    "worker_running": true,
+    "reference_clone_ready": true,
+    "provider_selection_fingerprint_sha256": "32ce6265c58a9f99d5a692d76faf40b19d77e76b0cda7f27ba6556e1b7b6d76e",
+    "reason_code": null
+  },
+  "tts_http_contracts": {
+    "official_preset_catalog": {
+      "schema_version": "qwen-tts-preset-catalog/2",
+      "metadata_only": true,
+      "preset_count": 9,
+      "preset_ids": [
+        "qwen.WarmFemale",
+        "qwen.Vivian",
+        "qwen.UncleFu",
+        "qwen.Dylan",
+        "qwen.Eric",
+        "qwen.ClearMale",
+        "qwen.Ryan",
+        "qwen.OnoAnna",
+        "qwen.Sohee"
+      ]
+    }
+  },
+  "agents": [
+    "QwenPaw_QA_Agent_0.2",
+    "ai-novel-writer",
+    "default"
+  ],
+  "novel_model": {
+    "provider_id": "bigmodel",
+    "model": "glm-5.3-flash"
+  },
+  "state_preserved": null,
+  "writing_skills_ready": true,
+  "scope_isolated": true,
+  "current_skill_state": {
+    "chapter-outline": true,
+    "character-craft": true,
+    "continuity-check": true,
+    "dialogue-craft": true,
+    "golden-finger-writing": true,
+    "novel-direction": true,
+    "private-library-maintenance": true,
+    "prose-writing": true,
+    "scene-craft": true,
+    "story-foundation": true,
+    "style-review": true,
+    "suspense-writing": true
+  },
+  "skill_state_differences": {},
+  "added_skills": [],
+  "removed_skills": [],
+  "missing_primary_skills": [],
+  "missing_methods": {},
+  "task_readiness": {
+    "chapter_body": {
+      "primary_skill": "prose-writing",
+      "ready": true,
+      "reason": null
+    },
+    "chapter_outline": {
+      "primary_skill": "chapter-outline",
+      "ready": true,
+      "reason": null
+    },
+    "chapter_storyline_recommendation": {
+      "primary_skill": "chapter-outline",
+      "ready": true,
+      "reason": null
+    },
+    "character_profile_completion": {
+      "primary_skill": "character-craft",
+      "ready": true,
+      "reason": null
+    },
+    "novel_naming": {
+      "primary_skill": "novel-direction",
+      "ready": true,
+      "reason": null
+    },
+    "novel_template": {
+      "primary_skill": "novel-direction",
+      "ready": true,
+      "reason": null
+    },
+    "outline_background": {
+      "primary_skill": "story-foundation",
+      "ready": true,
+      "reason": null
+    },
+    "outline_characters": {
+      "primary_skill": "character-craft",
+      "ready": true,
+      "reason": null
+    },
+    "outline_highlight": {
+      "primary_skill": "story-foundation",
+      "ready": true,
+      "reason": null
+    },
+    "outline_plot": {
+      "primary_skill": "story-foundation",
+      "ready": true,
+      "reason": null
+    },
+    "review": {
+      "primary_skill": "style-review",
+      "ready": true,
+      "reason": null
+    },
+    "selection_edit:custom": {
+      "primary_skill": "prose-writing",
+      "ready": true,
+      "reason": null
+    },
+    "selection_edit:dialogue": {
+      "primary_skill": "prose-writing",
+      "ready": true,
+      "reason": null
+    },
+    "selection_edit:expand": {
+      "primary_skill": "prose-writing",
+      "ready": true,
+      "reason": null
+    },
+    "selection_edit:polish": {
+      "primary_skill": "prose-writing",
+      "ready": true,
+      "reason": null
+    },
+    "selection_edit:review": {
+      "primary_skill": "style-review",
+      "ready": true,
+      "reason": null
+    },
+    "selection_edit:rewrite": {
+      "primary_skill": "prose-writing",
+      "ready": true,
+      "reason": null
+    },
+    "selection_edit:shorten": {
+      "primary_skill": "prose-writing",
+      "ready": true,
+      "reason": null
+    }
+  },
+  "optional_skill_status": {
+    "golden-finger-writing": {
+      "registered": true,
+      "enabled": true,
+      "method_available": true,
+      "ready": true,
+      "method_error": null
+    },
+    "suspense-writing": {
+      "registered": true,
+      "enabled": true,
+      "method_available": true,
+      "ready": true,
+      "method_error": null
+    }
+  },
+  "registered_novel_skills": {
+    "QwenPaw_QA_Agent_0.2": [
+      "chapter-outline",
+      "character-craft",
+      "continuity-check",
+      "dialogue-craft",
+      "golden-finger-writing",
+      "novel-direction",
+      "private-library-maintenance",
+      "prose-writing",
+      "scene-craft",
+      "story-foundation",
+      "style-review",
+      "suspense-writing"
+    ],
+    "ai-novel-writer": [
+      "chapter-outline",
+      "character-craft",
+      "continuity-check",
+      "dialogue-craft",
+      "golden-finger-writing",
+      "novel-direction",
+      "private-library-maintenance",
+      "prose-writing",
+      "scene-craft",
+      "story-foundation",
+      "style-review",
+      "suspense-writing"
+    ],
+    "default": [
+      "chapter-outline",
+      "character-craft",
+      "continuity-check",
+      "dialogue-craft",
+      "golden-finger-writing",
+      "novel-direction",
+      "private-library-maintenance",
+      "prose-writing",
+      "scene-craft",
+      "story-foundation",
+      "style-review",
+      "suspense-writing"
+    ]
+  },
+  "enabled_novel_skills": {
+    "QwenPaw_QA_Agent_0.2": [],
+    "ai-novel-writer": [
+      "chapter-outline",
+      "character-craft",
+      "continuity-check",
+      "dialogue-craft",
+      "golden-finger-writing",
+      "novel-direction",
+      "private-library-maintenance",
+      "prose-writing",
+      "scene-craft",
+      "story-foundation",
+      "style-review",
+      "suspense-writing"
+    ],
+    "default": []
+  },
+  "enabled_novel_tools": {
+    "QwenPaw_QA_Agent_0.2": [],
+    "ai-novel-writer": [
+      "novel_get_context",
+      "novel_get_document",
+      "novel_get_workspace_context",
+      "novel_library_apply_change",
+      "novel_library_prepare_change",
+      "novel_library_query",
+      "novel_prepare_selection_edit",
+      "novel_search"
+    ],
+    "default": []
+  },
+  "system_prompt_files": [
+    "AGENTS.md",
+    "SOUL.md",
+    "PROFILE.md",
+    "AI_NOVEL_WORLD.md"
+  ]
+}

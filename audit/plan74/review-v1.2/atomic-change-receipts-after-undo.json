@@ -1,0 +1,214 @@
+[
+  {
+    "id": "b3e8c793-bb65-453e-b0cb-e89d77d6efd8",
+    "state": "applied",
+    "version": 2,
+    "scope_kind": "novel",
+    "scope_novel_id": "fc0c189c-0ab2-4016-b0b6-6fc4c2286e00",
+    "source_json": {
+      "capture": {},
+      "_maintenance": {
+        "intent": "direct",
+        "requires_review": false
+      }
+    },
+    "actions_json": [
+      {
+        "payload": {
+          "entries": [
+            {
+              "eras": [],
+              "note": "用于裂缝、缺口与管线泄漏的紧急阻断；写清缺口位置及采用的封堵材料",
+              "term": "封堵",
+              "state": "active",
+              "action": "recommend",
+              "genres": [],
+              "example": "",
+              "entry_id": "entry_7e8bdb61991a49d4b3ad99cf18c46012",
+              "variants": [],
+              "positions": [
+                "any"
+              ],
+              "categories": [
+                "动作",
+                "工程"
+              ],
+              "match_mode": "phrase",
+              "source_refs": [
+                {
+                  "label": "作者在私有库中添加",
+                  "locator": null,
+                  "observed_at": null,
+                  "source_type": "author",
+                  "evidence_scope": null,
+                  "verified_popularity": false
+                }
+              ],
+              "case_sensitive": true,
+              "counterexample": "",
+              "watch_threshold": null,
+              "replacement_hint": "结合对象与材料写出具体封堵动作"
+            }
+          ],
+          "copy_to_novel": false,
+          "expected_binding_versions": {
+            "0d221aab-b1f2-595f-b9f5-22417444f202": 1,
+            "bc32a938-a866-5ca8-8143-316b061af870": 2
+          }
+        },
+        "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+        "operation": "upsert_and_use_lexicon_entries",
+        "asset_version_id": "0bbcffa7-640a-4ec8-8a6e-c374a0f6a03f",
+        "expected_root_version": 4
+      }
+    ],
+    "result_json": {
+      "counts": {
+        "changed": 1,
+        "unchanged": 0,
+        "unsupported": 0
+      },
+      "targets": [
+        {
+          "archived": false,
+          "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+          "root_version": 5,
+          "binding_version": 2,
+          "asset_version_id": "db240e3b-f86f-4b12-8e11-136e105b23e0",
+          "used_by_current_novel": true,
+          "bound_asset_version_id": "db240e3b-f86f-4b12-8e11-136e105b23e0"
+        }
+      ],
+      "operations": [
+        "upsert_and_use_lexicon_entries"
+      ],
+      "undo_actions": [
+        {
+          "payload": {
+            "selections": [
+              {
+                "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+                "position": 1,
+                "usage_policy": "preferred",
+                "asset_version_id": "0bbcffa7-640a-4ec8-8a6e-c374a0f6a03f"
+              },
+              {
+                "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+                "position": 2,
+                "usage_policy": "preferred",
+                "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+              }
+            ],
+            "expected_binding_versions": {
+              "0d221aab-b1f2-595f-b9f5-22417444f202": 2,
+              "bc32a938-a866-5ca8-8143-316b061af870": 2
+            }
+          },
+          "asset_id": null,
+          "operation": "set_novel_binding",
+          "asset_version_id": null,
+          "expected_root_version": null
+        },
+        {
+          "payload": {
+            "target_version_id": "8337a5e4-7a89-4885-b9e5-9612c7c2276c"
+          },
+          "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+          "operation": "restore_asset",
+          "asset_version_id": null,
+          "expected_root_version": 5
+        }
+      ],
+      "authorization": {
+        "kind": "direct_author_command",
+        "author_text_hash": "41e2b91d1d6fef2503169c9801c49528c02dcf340423535561f4b63ec1857471",
+        "proposal_version": 1
+      }
+    },
+    "undo_of_id": null,
+    "applied_at": "2026-09-13 11:43:36.974146+00:00"
+  },
+  {
+    "id": "4e7e5279-021c-400e-bc96-154365e1a9d8",
+    "state": "applied",
+    "version": 2,
+    "scope_kind": "novel",
+    "scope_novel_id": "fc0c189c-0ab2-4016-b0b6-6fc4c2286e00",
+    "source_json": {
+      "capture": {},
+      "_maintenance": {
+        "intent": "undo",
+        "requires_review": false
+      }
+    },
+    "actions_json": [
+      {
+        "payload": {
+          "selections": [
+            {
+              "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+              "position": 1,
+              "usage_policy": "preferred",
+              "asset_version_id": "0bbcffa7-640a-4ec8-8a6e-c374a0f6a03f"
+            },
+            {
+              "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+              "position": 2,
+              "usage_policy": "preferred",
+              "asset_version_id": "f01ad58e-4117-4d9b-9c75-886ec5458633"
+            }
+          ],
+          "expected_binding_versions": {
+            "0d221aab-b1f2-595f-b9f5-22417444f202": 2,
+            "bc32a938-a866-5ca8-8143-316b061af870": 2
+          }
+        },
+        "asset_id": null,
+        "operation": "set_novel_binding",
+        "asset_version_id": null,
+        "expected_root_version": null
+      },
+      {
+        "payload": {
+          "target_version_id": "8337a5e4-7a89-4885-b9e5-9612c7c2276c"
+        },
+        "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+        "operation": "restore_asset",
+        "asset_version_id": null,
+        "expected_root_version": 5
+      }
+    ],
+    "result_json": {
+      "counts": {
+        "changed": 2,
+        "unchanged": 0,
+        "unsupported": 0
+      },
+      "targets": [
+        {
+          "novel_id": "fc0c189c-0ab2-4016-b0b6-6fc4c2286e00",
+          "binding_count": 2
+        },
+        {
+          "archived": false,
+          "asset_id": "0d221aab-b1f2-595f-b9f5-22417444f202",
+          "root_version": 6,
+          "asset_version_id": "7f5cdea2-46ea-4697-8570-1fe3d541d6a1"
+        }
+      ],
+      "operations": [
+        "set_novel_binding",
+        "restore_asset"
+      ],
+      "compensates": "b3e8c793-bb65-453e-b0cb-e89d77d6efd8",
+      "undo_actions": [],
+      "authorization": {
+        "kind": "undo_author_command",
+        "receipt_version": 2,
+        "author_text_hash": "ab4dd23d88f6824b898b0417ee707588c1aa33a50df37a9cd927fb02040ad404"
+      }
+    },
+    "undo_of_id": "b3e8c793-bb65-453e-b0cb-e89d77d6efd8",
+    "applied_at": "2026-09-13 11:54:24.230703+00:00"
+  }
+]

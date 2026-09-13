@@ -1,8 +1,11 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`33ca983 RELEASED / 6e45e2f CANDIDATE / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`5919bba RELEASED / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
 
 ## 最新可复核来源
+
+- 最新正式源`5919bbae53e7b795b3cda5bce0ac2bb3b6bb605a`、tree `577f63d43c64a2d6c485668f9e96446de23fe239`，独立检出`/private/tmp/plan74-undo-source.3J220z/code`。F13仅补显式完整回执撤销句式，未改Skill／schema／工具注册；Python3205（330跳过）、类型、同源前端构建及打包退出0，前端hash与3bc完全相同。前端1531与数据库342沿用未变化代码的3bc证据。19:53:08公开更新，唯一运行差异`backend/private_library/maintenance.py`，逐文件及逐Agent保态通过。源码push后实际远端main核对5919bba一致；证据后续单独提交。
+- 以下3bc7fa1已于19:40:16公开更新，6e45e2f包含在其中；“待发布／尚未安装”仅描述它们形成候选时的历史状态，不是当前结论。3bc一次保存并使用已正式通过，5919bba完整补偿续验见桌面记录。
 
 - 最新待发布完整候选`3bc7fa159aba406603fe2ac5cba2a59a48621651`，tree `ee06773e3486785eb09c6bc1e86dddaf0ea6f7b4`；独立检出`/private/tmp/plan74-atomic-source.SG7Xnb/code`已通过前端1531、Python3195（330跳过）、临时数据库342、类型/构建及打包。仅增加F12原子维护动作与同一维护Skill合同，包含下列F11前端；源及构建可重查，status为空。尚未安装，不替换下列33ca983正式事实；[代码与失败修正证据](code-validation.md#f12原子保存并使用含f11候选)。
 - 正式已安装源`33ca983bec44e0813f37f085826696c6ecd3d6d4`，tree `108e0231e67fd40647d6ef25cc53b4f28ab86bf5`，包含F08／F09／F10。该依赖提交精确保留计划79已经正式发布的13文件，逐文件与`/private/tmp/plan79-source.IYNMxy/code`cmp一致；79／80文档和证据仍由所属任务维护。独立完整检出`/private/tmp/plan74-integrated-source.HovjgJ/code`经G2-B后17:47公开更新，JS SHA `bb2be0bd369da46753c0d3388df35920165b8fde2ef999647c03df74f544019d`。[包及文件清单](integrated-release-manifest.json)。已push并查询真实远端main确认同一完整hash。
