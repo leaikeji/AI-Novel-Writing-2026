@@ -1,6 +1,17 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。最新状态：`1712883 RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+日期：2026-09-13。最新状态：`33ca983 RELEASED / SOURCE-HOLD CLOSED / G3 PARTIAL`。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 17:47完整依赖合并后的公开更新
+
+- 源`33ca983bec44e0813f37f085826696c6ecd3d6d4`、tree `108e0231e67fd40647d6ef25cc53b4f28ab86bf5`。计划79已发布的13个源码／测试文件逐文件与其冻结发布源cmp一致，由主代理独立依赖提交，未纳入79／80文档及审计目录。包含本任务F08／F09／F10，不退掉正在使用的朗读能力。
+- 独立检出`/private/tmp/plan74-integrated-source.HovjgJ/code`前端1530、类型／构建、Python全量、临时数据库相关回归及打包通过，status为空。包SHA `c124a3151a3754ac3dea00ce6d9a488f6d057827647597b0ab9810b420d05c9e`；安装差异仅`backend/private_library/maintenance.py`和`frontend/dist/index.js`，见[完整清单](integrated-release-manifest.json)。
+- 新备份`/private/tmp/plan74-integrated-release.x2LJU0`，持久副本`/app/working.backups/plan74-integrated-release-20260913-x2LJU0`。DB SHA `6269c165c7547d9667ceed2544fec4af5e8de322bcc289923ea0a2d358bf4cd4`；旧插件SHA `1a49cbec6806091d7f378340bffa75dff2ab1c7ba35dda8b9a1a6a6413cb80ab`；备份目录及持久副本hash校验通过，未恢复数据库。
+- 17:47:16经公开hot-install更新，[回执](integrated-install-result.json)state_preserved=true。release verify和完整公开验证脚本退出0，安装文件与候选一致；逐Agent选择文件cmp无差异，[健康](integrated-health-after.json)／[模型](integrated-model-after.json)保持0056、ready、bigmodel/glm-5.3-flash；容器ID、镜像及启动时间未变，无重启或迁移。公开完整校验结果为当次工具退出0，本次未另存它的终端全文，不伪造原始日志。
+- 计划79完成的210/210句新音频保留。18:48—18:50重新加载页面后实际核对原句定位和明确助手维护，结果见[桌面续验](desktop-validation.md#33ca983完整发布后的正式续验)。原句可见定位PASS，助手缺失可信上下文拒绝、零资料写入，G3未闭合。
+- 本轮结束后明确释放正式环境／数据库／本地模型／浏览器给计划76；对方承诺仅做私人音色链、不安装、不改74／私有库／第一章。后续维护上下文候选`6e45e2f`尚未安装，必须等待共享锁释放后再按同源／备份门禁更新，不为省事覆盖已安装副本。
+
+进入本轮新创作以后继续保留正文、报告和音频，不以旧数据库恢复作回退。源码push已通过实际远端确认；后续文档提交不改变发布包。
 
 ## 16:38桌面与编辑器公开更新
 

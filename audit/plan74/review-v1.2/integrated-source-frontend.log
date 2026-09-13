@@ -1,0 +1,44 @@
+✓ Lockfile passes supply-chain policies (verified 16h ago)
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +64
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Packages are cloned from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/liujia/Library/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Progress: resolved 64, reused 64, downloaded 0, added 64, done
+
+dependencies:
++ @codemirror/commands 6.11.0
++ @codemirror/state 6.7.1
++ @codemirror/view 6.43.9
++ idb 8.0.3
++ vis-data 8.0.5
++ vis-network 10.1.2
++ zustand 5.0.15
+
+devDependencies:
++ typescript 5.8.3
++ vite 6.3.5
++ vitest 4.1.11
+
+Done in 619ms using pnpm v11.19.0
+$ tsc --noEmit
+$ vitest run
+
+ RUN  v4.1.11 /private/tmp/plan74-integrated-source.HovjgJ/code
+
+
+ Test Files  168 passed (168)
+      Tests  1530 passed (1530)
+   Start at  17:45:23
+   Duration  3.61s (transform 5.66s, setup 0ms, import 8.19s, tests 6.70s, environment 10ms)
+
+$ vite build
+vite v6.3.5 building for production...
+transforming...
+✓ 202 modules transformed.
+rendering chunks...
+computing gzip size...
+frontend/dist/index.js  3,653.61 kB │ gzip: 1,122.52 kB │ map: 9,087.86 kB
+✓ built in 1.91s

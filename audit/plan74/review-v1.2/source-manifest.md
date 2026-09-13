@@ -1,8 +1,13 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`1712883 RELEASED / SOURCE-HOLD CLOSED / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`33ca983 RELEASED / 6e45e2f CANDIDATE / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
 
 ## 最新可复核来源
+
+- 正式已安装源`33ca983bec44e0813f37f085826696c6ecd3d6d4`，tree `108e0231e67fd40647d6ef25cc53b4f28ab86bf5`，包含F08／F09／F10。该依赖提交精确保留计划79已经正式发布的13文件，逐文件与`/private/tmp/plan79-source.IYNMxy/code`cmp一致；79／80文档和证据仍由所属任务维护。独立完整检出`/private/tmp/plan74-integrated-source.HovjgJ/code`经G2-B后17:47公开更新，JS SHA `bb2be0bd369da46753c0d3388df35920165b8fde2ef999647c03df74f544019d`。[包及文件清单](integrated-release-manifest.json)。已push并查询真实远端main确认同一完整hash。
+- 新候选`6e45e2f7df2d2440bb1829ef7b02e60732a157f9`、tree `e59073f8364bc33b5ef6ccb26c405b9387d03a27`仅修改私有库维护上下文的真实状态提示、闲置页面ref续期及失败重新准备；不改变后台写权限，不自动重发作者消息。独立检出`/private/tmp/plan74-context-source.oU9WC6/code`前端1531／类型／构建／Python全量／打包通过，status为空，JS SHA `f86fd50614765abc4c80017ac6393818ac255e167201ade023e497e2e110b4b5`。尚未安装，也未宣称本轮上下文丢失根因已关闭。
+
+## 17:15前来源记录（历史）
 
 - 最新候选为`3383bcd4b93f8922ac9392fd9f6ffb2c97dd187c`，tree `6404c9a88baff8361403879a6d0e2ff424e0d84c`；F10仅修复无效选区重试前检查与候选保留，包含77870d4的F08／F09。独立检出`/private/tmp/plan74-retry-source.GFAvOe/code`，前端1526／类型／构建／Python全量／打包退出0、status为空；JS SHA `90fa7041ae7e82cf8a78c808c2c56c05bd3a2fc9300a2580c549d56432c3ab54`。已push，实际远端main核验同为3383bcd完整hash。正式环境仍由计划79使用，本候选未安装；不得把干净代码检查当作正式复验。
 - 先前F08／F09及16:16—16:50证据已精确提交并push到`d361ea3f26ff80535f402aea6b82c5388652bb30`，当时实际远端main相同。共享开发索引只暂存计划74行，79／80行及其文件保持归属。

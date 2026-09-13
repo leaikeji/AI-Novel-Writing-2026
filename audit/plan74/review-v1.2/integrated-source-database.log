@@ -1,0 +1,72 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 20260823_0001, Create the MVP-0 novel authority ledger.
+INFO  [alembic.runtime.migration] Running upgrade 20260823_0001 -> 20260823_0002, Add the reviewed chapter generation and intelligence workflow.
+INFO  [alembic.runtime.migration] Running upgrade 20260823_0002 -> 20260823_0003, Add idempotent intelligence commits and revision-bound fact validity.
+INFO  [alembic.runtime.migration] Running upgrade 20260823_0003 -> 20260824_0004, Add the complete long-form creation workflow domain.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0004 -> 20260824_0005, Persist author and selected cover preview on novels.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0005 -> 20260824_0006, Persist narrative progress notes for foreshadows.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0006 -> 20260824_0007, Add versioned relationship semantics and saved graph layouts.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0007 -> 20260824_0008, Add auditable automatic relationship generation provenance.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0008 -> 20260825_0009, Follow the AI novelist Agent's effective model for every generation.
+INFO  [alembic.runtime.migration] Running upgrade 20260825_0009 -> 20260826_0010, Create the MOSS-TTS narration foundation schema.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0010 -> 20260826_0011, Harden narration media ownership, references, and recoverable GC.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0011 -> 20260826_0012, Close narration execution, source, and media publication races.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0012 -> 20260826_0013, Give every narration media asset an independent physical path.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0013 -> 20260826_0014, Seal the exact ordered source manifest of each narration request.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0014 -> 20260826_0015, Serialize narration aggregate decisions against concurrent child writes.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0015 -> 20260826_0016, Add recoverable character profile application audit batches.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0016 -> 20260827_0017, Close the analyzed-to-generation transaction and render-job identity gaps.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0017 -> 20260827_0018, Freeze the private-text HMAC key identity on each Edition segment.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0018 -> 20260827_0019, Permit cancelled model-run evidence at the live cancel-request fence.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0019 -> 20260827_0020, Persist narration review pointers and immutable owner-action evidence.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0020 -> 20260827_0021, Add the durable product voice upload and preview pipeline.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0021 -> 20260827_0022, Allow pinned official-preset previews without uploaded reference media.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0022 -> 20260827_0023, Allow a running voice preview while its failed job is re-queued.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0023 -> 20260828_0024, Permit proven manual retry of one failed narration segment.
+INFO  [alembic.runtime.migration] Running upgrade 20260828_0024 -> 20260829_0025, Add formal outline, setting and character authority revisions.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0025 -> 20260829_0026, Add multi-timeline story state and StoryFact v2.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0026 -> 20260829_0027, Add immutable private-asset versions and novel bindings.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0027 -> 20260829_0028, Add semantic-index generations, consent, sources, batches and embeddings.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0028 -> 20260829_0029, Bind character authority revisions to durable name aliases.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0029 -> 20260829_0030, Close the writing retrieval loop and add incremental source refreshes.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0030 -> 20260829_0031, Add truthful activation evidence and atomic voice action results.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0031 -> 20260829_0032, Add recoverable request-scoped private voice deletion plans.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0032 -> 20260829_0033, Add structured public model execution evidence to writing jobs.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0033 -> 20260829_0034, Close Nano experiments and recoverable private-voice deletion lifecycle.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0034 -> 20260830_0035, Add the durable VoiceGenerator design and one-click command authority.
+INFO  [alembic.runtime.migration] Running upgrade 20260830_0035 -> 20260901_0036, Add recoverable whole-book character cast planning authority.
+INFO  [alembic.runtime.migration] Running upgrade 20260901_0036 -> 20260902_0037, Add the bounded Story Ledger page index.
+INFO  [alembic.runtime.migration] Running upgrade 20260902_0037 -> 20260902_0038, Collapse the Story Ledger onto one physical and wire contract.
+INFO  [alembic.runtime.migration] Running upgrade 20260902_0038 -> 20260902_0039, Persist visible character counts for bounded novel-list aggregation.
+INFO  [alembic.runtime.migration] Running upgrade 20260902_0039 -> 20260903_0040, Add automatic voice preparation and workspace generic voice packs.
+INFO  [alembic.runtime.migration] Running upgrade 20260903_0040 -> 20260905_0041, Add immutable writing-method action snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 20260905_0041 -> 20260905_0042, Permit exactly one input freeze after a durable, content-free action claim.
+INFO  [alembic.runtime.migration] Running upgrade 20260905_0042 -> 20260908_0043, Register the Qwen TTS execution resource for new segment jobs.
+INFO  [alembic.runtime.migration] Running upgrade 20260908_0043 -> 20260908_0044, Add workspace-scoped Qwen TTS cloud provider profiles.
+INFO  [alembic.runtime.migration] Running upgrade 20260908_0044 -> 20260909_0045, Replace the retired MOSS official-voice database guards with Qwen guards.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0045 -> 20260909_0046, Correct the Qwen official-voice provenance revision key.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0046 -> 20260909_0047, Move active narration render closures to the Qwen resource class.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0047 -> 20260909_0048, Keep the review-action guard out of authorized failed-render retries.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0048 -> 20260909_0049, Remove retired MOSS/Nano/VoiceGenerator and generic voice-pool state.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0049 -> 20260909_0050, Remove retired pool/slot branches from the shared narration scope guard.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0050 -> 20260910_0051, Authorize exact whole-novel deletion across immutable narration evidence.
+INFO  [alembic.runtime.migration] Running upgrade 20260910_0051 -> 20260910_0052, Add recoverable novel lifecycle and immutable action receipts.
+INFO  [alembic.runtime.migration] Running upgrade 20260910_0052 -> 20260911_0053, Bind whole-novel purge audits to a verified backup receipt.
+INFO  [alembic.runtime.migration] Running upgrade 20260911_0053 -> 20260912_0054, Expand the pinned Qwen official-voice catalog to nine local speakers.
+INFO  [alembic.runtime.migration] Running upgrade 20260912_0054 -> 20260912_0055, Open the Qwen private-voice reference path and freeze Mandarin output.
+INFO  [alembic.runtime.migration] Running upgrade 20260912_0055 -> 20260913_0056, Add scoped lexicon assets, maintenance receipts, and check reports.
+Code-only disposable database ready: plan74_v12_0d5c031db3564773_test
+........................................................................ [ 17%]
+........................................................................ [ 34%]
+........................................................................ [ 52%]
+........................................................................ [ 69%]
+........................................................................ [ 87%]
+.....................................................                    [100%]
+=============================== warnings summary ===============================
+tests/private_library/test_creative_data_api_scope.py::test_selection_capture_requires_novel_exactly_for_use_current_novel
+  /private/tmp/plan74-integrated-source.HovjgJ/code/tests/private_library/test_creative_data_api_scope.py:253: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    creative_data_api.private_library_capture_create(request, session=MagicMock())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+Removed only disposable code-test database: plan74_v12_0d5c031db3564773_test

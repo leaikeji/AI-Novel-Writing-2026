@@ -1,6 +1,14 @@
 # V1.2代码验证记录
 
-日期：2026-09-13。状态：`3383bcd G2-B PASS / F08-F10正式复验待续`。新源前端1526／类型／构建／包检查、Python全量退出0，314项临时数据库结果按相同后端复用；下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+日期：2026-09-13。状态：`6e45e2f G2-B PASS / 33ca983正式已安装 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+
+## 完整依赖与维护上下文准备复验
+
+33ca983在`/private/tmp/plan74-integrated-source.HovjgJ/code`完成固定锁文件离线安装（64复用／0下载）、前端168文件1530项、typecheck、202模块build、Python全量及打包，全部退出0。[前端](integrated-source-frontend.log)／[后端](integrated-source-backend.log)。同一提交树临时库`plan74_v12_0d5c031db3564773_test`升级0056，私有库、受控选区、正文领域及新增依赖的narration worker／production_runtime数据库代码回归全部退出0，随后只删除该临时库，[日志](integrated-source-database.log)。没有连接正式业务库运行pytest。
+
+6e45e2f只改私有库ref协调器、状态条及测试（计划范围同步），未改后端／schema／Skill／注册／依赖。新增假时钟用例实际在旧代码失败：应准备第二份ref但仍只有1次；真实状态组件期望“等待维护上下文”却仍固定显示已启用。修复后定向20项通过；测试覆盖后续ref不复用已发送ref、失败停止自动重试、显式重准备、切书／切Agent／退出／卸载清理；正文／选区ref不新增闲置续期。它不证明宿主发送时一定携带ref，正式丢失原因仍待证据。
+
+独立源`/private/tmp/plan74-context-source.oU9WC6/code`前端168文件1531项、typecheck、202模块build、Python全量、package_plugin退出0，status为空。[前端](context-readiness-source-frontend.log)／[后端](context-readiness-source-backend.log)。`git diff --exit-code 33ca983 6e45e2f -- backend tests skills plugin.json pyproject.toml pnpm-lock.yaml`无差异，数据库代码结果按相同范围复用；没有为提示变更新建数据库或改变正式环境。UI保持原三行状态条高度，失败按钮放于说明行，视觉仍待正式复验。
 
 ## F10无效重试前置检查
 
