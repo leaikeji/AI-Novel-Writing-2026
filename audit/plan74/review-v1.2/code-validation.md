@@ -1,6 +1,19 @@
 # V1.2代码验证记录
 
-日期：2026-09-13。状态：`6e45e2f G2-B PASS / 33ca983正式已安装 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+日期：2026-09-13。状态：`3bc7fa1 G2-B PASS / 33ca983正式已安装 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+
+## F12原子保存并使用（含F11候选）
+
+提交`3bc7fa159aba406603fe2ac5cba2a59a48621651`、tree `ee06773e3486785eb09c6bc1e86dddaf0ea6f7b4`，独立代码检出`/private/tmp/plan74-atomic-source.SG7Xnb/code`，未建立另一套宿主。新动作保留一消息一提案，支持既有本书包、通用源复制及首次本书收藏包的保存/换绑；从固定基线取词条，完整绑定CAS，事务失败整项回滚，补偿同时恢复绑定与资料。资产查询提供真实bound_version，回执返回实际target版本。旧绑定动作的逆向标量在ORM修改前冻结，共用绑定版本解析，移除等价旧片段。
+
+- 工作区初轮临时库暴露三个冲突分支缺少`current`参数、一个注入异常同样漏参，以及跨书用例预先建立无效绑定，不能记为通过；[初轮失败](atomic-database-initial-failure.log)保留。主代理修正异常合同及跨书合法基线后，完整私有库/受控选区/正文领域临时库重跑退出0。
+- 提交树固定锁文件离线安装：64包复用、0下载；前端168文件1531项、typecheck、202模块build退出0，[日志](atomic-source-frontend.log)。JS SHA-256仍为`f86fd50614765abc4c80017ac6393818ac255e167201ade023e497e2e110b4b5`，包含尚未部署的F11前端。
+- 提交树Python全量：3195通过、330跳过、4项既有弃用警告，退出0，[日志](atomic-source-backend.log)。跳过项不冒充产品或数据库通过。
+- 提交树临时库`plan74_v12_44994a91ef7a4bc3_test`升级0056后，`tests/private_library tests/test_selection_edit_domain_integration.py tests/test_domain_integration.py -o addopts=`共342通过、1项既有警告、退出0，[数据库日志](atomic-source-database.log)。包含19项新增PostgreSQL用例：旧固定v2/根v4、完整未修改词条保持、各usage、复制/收藏、跨书/归档/版本拒绝、幂等、整体撤销及后续根/绑定冲突、故障注入回滚。只删除该精确临时库；此前两次工作区临时库也已精确删除，不涉及正式业务数据或卷。
+- `test_skill_contract`及私有库合同23项、维护Skill/注册/访问/工具80项通过。skill-creator验证器最初因项目及工具Python都缺PyYAML未运行成功；仅在`/private/tmp/plan74-skill-validator.URMBQa`安装验证工具依赖PyYAML 6.0.2后，最终Skill校验输出`Skill is valid!`。项目依赖、manifest、Skill名称/版本、注册和安装器无改动；参考更正唯一提案、固定基线和`proposal.version → proposal_version`映射。
+- 同源`package_plugin.py`退出0，源与包内Skill两文件SHA一致：主文件`9ca832b9902ca7d9d33f39441b603ee04a2bde78b237ef7945d023ff4634c752`，参考`1635bb3a3322848b13039ce1f0ef8ebf258c073234cba9a0f4e9d4de27f55c38`。独立检出status为空，diff检查通过。
+
+这些是代码证据，尚未公开更新或调用正式模型复验F11/F12；正式33ca983及计划76在途音色链保留。下一次更新需重新备份、复核逐Agent选择/模型及实际Skill内容，完成自然语言一次修改并生效和撤销，不能以新动作存在代替G3。新动作一次只处理一个词包（同包可多个词项），不承诺跨多个词包一次保存并换绑；本书包标题/标签仍沿用既有保存服务的当前根元信息行为，固定基线隔离的是词条与规则。
 
 ## 完整依赖与维护上下文准备复验
 

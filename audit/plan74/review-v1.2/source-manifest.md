@@ -4,6 +4,7 @@
 
 ## 最新可复核来源
 
+- 最新待发布完整候选`3bc7fa159aba406603fe2ac5cba2a59a48621651`，tree `ee06773e3486785eb09c6bc1e86dddaf0ea6f7b4`；独立检出`/private/tmp/plan74-atomic-source.SG7Xnb/code`已通过前端1531、Python3195（330跳过）、临时数据库342、类型/构建及打包。仅增加F12原子维护动作与同一维护Skill合同，包含下列F11前端；源及构建可重查，status为空。尚未安装，不替换下列33ca983正式事实；[代码与失败修正证据](code-validation.md#f12原子保存并使用含f11候选)。
 - 正式已安装源`33ca983bec44e0813f37f085826696c6ecd3d6d4`，tree `108e0231e67fd40647d6ef25cc53b4f28ab86bf5`，包含F08／F09／F10。该依赖提交精确保留计划79已经正式发布的13文件，逐文件与`/private/tmp/plan79-source.IYNMxy/code`cmp一致；79／80文档和证据仍由所属任务维护。独立完整检出`/private/tmp/plan74-integrated-source.HovjgJ/code`经G2-B后17:47公开更新，JS SHA `bb2be0bd369da46753c0d3388df35920165b8fde2ef999647c03df74f544019d`。[包及文件清单](integrated-release-manifest.json)。已push并查询真实远端main确认同一完整hash。
 - 新候选`6e45e2f7df2d2440bb1829ef7b02e60732a157f9`、tree `e59073f8364bc33b5ef6ccb26c405b9387d03a27`仅修改私有库维护上下文的真实状态提示、闲置页面ref续期及失败重新准备；不改变后台写权限，不自动重发作者消息。独立检出`/private/tmp/plan74-context-source.oU9WC6/code`前端1531／类型／构建／Python全量／打包通过，status为空，JS SHA `f86fd50614765abc4c80017ac6393818ac255e167201ade023e497e2e110b4b5`。尚未安装，也未宣称本轮上下文丢失根因已关闭。
 

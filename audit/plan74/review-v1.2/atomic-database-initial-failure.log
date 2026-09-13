@@ -1,0 +1,476 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 20260823_0001, Create the MVP-0 novel authority ledger.
+INFO  [alembic.runtime.migration] Running upgrade 20260823_0001 -> 20260823_0002, Add the reviewed chapter generation and intelligence workflow.
+INFO  [alembic.runtime.migration] Running upgrade 20260823_0002 -> 20260823_0003, Add idempotent intelligence commits and revision-bound fact validity.
+INFO  [alembic.runtime.migration] Running upgrade 20260823_0003 -> 20260824_0004, Add the complete long-form creation workflow domain.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0004 -> 20260824_0005, Persist author and selected cover preview on novels.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0005 -> 20260824_0006, Persist narrative progress notes for foreshadows.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0006 -> 20260824_0007, Add versioned relationship semantics and saved graph layouts.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0007 -> 20260824_0008, Add auditable automatic relationship generation provenance.
+INFO  [alembic.runtime.migration] Running upgrade 20260824_0008 -> 20260825_0009, Follow the AI novelist Agent's effective model for every generation.
+INFO  [alembic.runtime.migration] Running upgrade 20260825_0009 -> 20260826_0010, Create the MOSS-TTS narration foundation schema.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0010 -> 20260826_0011, Harden narration media ownership, references, and recoverable GC.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0011 -> 20260826_0012, Close narration execution, source, and media publication races.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0012 -> 20260826_0013, Give every narration media asset an independent physical path.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0013 -> 20260826_0014, Seal the exact ordered source manifest of each narration request.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0014 -> 20260826_0015, Serialize narration aggregate decisions against concurrent child writes.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0015 -> 20260826_0016, Add recoverable character profile application audit batches.
+INFO  [alembic.runtime.migration] Running upgrade 20260826_0016 -> 20260827_0017, Close the analyzed-to-generation transaction and render-job identity gaps.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0017 -> 20260827_0018, Freeze the private-text HMAC key identity on each Edition segment.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0018 -> 20260827_0019, Permit cancelled model-run evidence at the live cancel-request fence.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0019 -> 20260827_0020, Persist narration review pointers and immutable owner-action evidence.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0020 -> 20260827_0021, Add the durable product voice upload and preview pipeline.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0021 -> 20260827_0022, Allow pinned official-preset previews without uploaded reference media.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0022 -> 20260827_0023, Allow a running voice preview while its failed job is re-queued.
+INFO  [alembic.runtime.migration] Running upgrade 20260827_0023 -> 20260828_0024, Permit proven manual retry of one failed narration segment.
+INFO  [alembic.runtime.migration] Running upgrade 20260828_0024 -> 20260829_0025, Add formal outline, setting and character authority revisions.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0025 -> 20260829_0026, Add multi-timeline story state and StoryFact v2.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0026 -> 20260829_0027, Add immutable private-asset versions and novel bindings.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0027 -> 20260829_0028, Add semantic-index generations, consent, sources, batches and embeddings.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0028 -> 20260829_0029, Bind character authority revisions to durable name aliases.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0029 -> 20260829_0030, Close the writing retrieval loop and add incremental source refreshes.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0030 -> 20260829_0031, Add truthful activation evidence and atomic voice action results.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0031 -> 20260829_0032, Add recoverable request-scoped private voice deletion plans.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0032 -> 20260829_0033, Add structured public model execution evidence to writing jobs.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0033 -> 20260829_0034, Close Nano experiments and recoverable private-voice deletion lifecycle.
+INFO  [alembic.runtime.migration] Running upgrade 20260829_0034 -> 20260830_0035, Add the durable VoiceGenerator design and one-click command authority.
+INFO  [alembic.runtime.migration] Running upgrade 20260830_0035 -> 20260901_0036, Add recoverable whole-book character cast planning authority.
+INFO  [alembic.runtime.migration] Running upgrade 20260901_0036 -> 20260902_0037, Add the bounded Story Ledger page index.
+INFO  [alembic.runtime.migration] Running upgrade 20260902_0037 -> 20260902_0038, Collapse the Story Ledger onto one physical and wire contract.
+INFO  [alembic.runtime.migration] Running upgrade 20260902_0038 -> 20260902_0039, Persist visible character counts for bounded novel-list aggregation.
+INFO  [alembic.runtime.migration] Running upgrade 20260902_0039 -> 20260903_0040, Add automatic voice preparation and workspace generic voice packs.
+INFO  [alembic.runtime.migration] Running upgrade 20260903_0040 -> 20260905_0041, Add immutable writing-method action snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 20260905_0041 -> 20260905_0042, Permit exactly one input freeze after a durable, content-free action claim.
+INFO  [alembic.runtime.migration] Running upgrade 20260905_0042 -> 20260908_0043, Register the Qwen TTS execution resource for new segment jobs.
+INFO  [alembic.runtime.migration] Running upgrade 20260908_0043 -> 20260908_0044, Add workspace-scoped Qwen TTS cloud provider profiles.
+INFO  [alembic.runtime.migration] Running upgrade 20260908_0044 -> 20260909_0045, Replace the retired MOSS official-voice database guards with Qwen guards.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0045 -> 20260909_0046, Correct the Qwen official-voice provenance revision key.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0046 -> 20260909_0047, Move active narration render closures to the Qwen resource class.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0047 -> 20260909_0048, Keep the review-action guard out of authorized failed-render retries.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0048 -> 20260909_0049, Remove retired MOSS/Nano/VoiceGenerator and generic voice-pool state.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0049 -> 20260909_0050, Remove retired pool/slot branches from the shared narration scope guard.
+INFO  [alembic.runtime.migration] Running upgrade 20260909_0050 -> 20260910_0051, Authorize exact whole-novel deletion across immutable narration evidence.
+INFO  [alembic.runtime.migration] Running upgrade 20260910_0051 -> 20260910_0052, Add recoverable novel lifecycle and immutable action receipts.
+INFO  [alembic.runtime.migration] Running upgrade 20260910_0052 -> 20260911_0053, Bind whole-novel purge audits to a verified backup receipt.
+INFO  [alembic.runtime.migration] Running upgrade 20260911_0053 -> 20260912_0054, Expand the pinned Qwen official-voice catalog to nine local speakers.
+INFO  [alembic.runtime.migration] Running upgrade 20260912_0054 -> 20260912_0055, Open the Qwen private-voice reference path and freeze Mandarin output.
+INFO  [alembic.runtime.migration] Running upgrade 20260912_0055 -> 20260913_0056, Add scoped lexicon assets, maintenance receipts, and check reports.
+Code-only disposable database ready: plan74_v12_c6f8bae804e448ae_test
+........................................................................ [ 21%]
+........................................................................ [ 42%]
+....................................................FFF.F..F............ [ 63%]
+........................................................................ [ 84%]
+......................................................                   [100%]
+=================================== FAILURES ===================================
+_____________ test_postgres_atomic_conflict_changes_nothing[root] ______________
+
+capture_session = <sqlalchemy.orm.session.Session object at 0x10e34bf20>
+fault = 'root'
+
+    @pytest.mark.parametrize("fault", ["root", "binding", "base", "archived", "other_novel", "global_without_copy"])
+    def test_postgres_atomic_conflict_changes_nothing(capture_session, fault):
+        session = capture_session
+        novel, other_novel, target, _ = seed(session)
+        action = action_for(session, novel, target)
+        if fault == "root":
+            action = action.model_copy(update={"expected_root_version": 999})
+        elif fault == "binding":
+            action = action.model_copy(update={"payload": {**action.payload, "expected_binding_versions": {}}})
+        elif fault == "base":
+            action = action.model_copy(update={"asset_version_id": uuid4()})
+        elif fault == "archived":
+            target.asset.archived = True
+        elif fault == "other_novel":
+            target.asset.scope_novel_id = other_novel.id
+        else:
+            target.asset.scope_kind, target.asset.scope_novel_id = "library", None
+        session.flush()
+        before_root = target.asset.current_version_id
+        before = binding_state(session, novel.id)
+>       _, _, _, receipt = apply_action(session, novel, action)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/private_library/test_maintenance_atomic_use.py:183:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/private_library/test_maintenance_atomic_use.py:44: in apply_action
+    receipt = m.apply_library_change(store, executor, access, proposal_id=UUID(proposal["proposal_id"]),
+backend/private_library/maintenance.py:1363: in apply_library_change
+    executor.apply(row, action, action_index=index)
+backend/private_library/maintenance.py:761: in apply
+    return method(request, action, action_index)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <backend.private_library.maintenance.P1MaintenanceActionExecutor object at 0x10e3ca8d0>
+request = <backend.creative_data_models.LibraryChangeRequest object at 0x10eaeebd0>
+action = LibraryChangeAction(operation=<LibraryChangeOperation.UPSERT_AND_USE_LEXICON_ENTRIES: 'upsert_and_use_lexicon_entries'..., 'expected_binding_versions': {'4c9af932-c830-493e-85f8-233381d95503': 1, 'd3521851-8f93-4d3c-a904-fdd10fdb8ec0': 1}})
+index = 0
+
+    def _apply_upsert_and_use_lexicon_entries(
+        self, request: Any, action: LibraryChangeAction, index: int
+    ) -> AppliedAction:
+        scope = self._scope(request)
+        if scope.novel_id is None:
+            raise PrivateLibraryValidationError("trusted novel scope is required")
+        payload = action.payload
+        _require_payload_keys(
+            payload, required={"entries", "expected_binding_versions"},
+            allowed={"entries", "expected_binding_versions", "copy_to_novel"},
+        )
+        if not isinstance(payload["entries"], list) or not payload["entries"]:
+            raise PrivateLibraryValidationError("entries must be a non-empty list")
+        copy_to_novel = payload.get("copy_to_novel", False)
+        if not isinstance(copy_to_novel, bool):
+            raise PrivateLibraryValidationError("copy_to_novel must be a boolean")
+        try:
+            entries = tuple(LexiconEntry.model_validate(item) for item in payload["entries"])
+        except Exception as error:
+            raise PrivateLibraryValidationError("lexicon entries are invalid") from error
+        expected = _binding_versions(payload["expected_binding_versions"])
+        create_collection = all(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        ))
+        if create_collection:
+            if copy_to_novel:
+                raise PrivateLibraryValidationError("collection creation cannot copy a source")
+        elif any(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        )):
+            raise PrivateLibraryValidationError("asset id, base version and root CAS are required together")
+
+        # Membership and root changes share the same lock order and savepoint.
+        lock_active_novel(self.session, scope.novel_id)
+        before = list_novel_bindings(self.session, scope.novel_id)
+        inverse_selections = _binding_selections(before)
+        if expected != {view.asset.id: int(view.binding.version) for view in before}:
+            raise PrivateLibraryConflictError("novel_asset_bindings_conflict")
+        asset_id = action.asset_id
+        target_binding = next((view for view in before if view.asset.id == asset_id), None)
+        if create_collection:
+            asset, base, created = get_or_create_collection_pack(
+                self.session, novel_id=scope.novel_id,
+                operation_key=self._key(request, index, "atomic-collection"),
+            )
+            if not created:
+                raise PrivateLibraryConflictError(
+                    "collection_already_exists", current={"asset_id": str(asset.id)}
+                )
+        else:
+            asset = self.session.scalar(
+                select(PrivateAsset).where(PrivateAsset.id == asset_id)
+                .with_for_update().execution_options(populate_existing=True)
+            )
+            if asset is None or asset.archived or asset.asset_type != "vocabulary":
+                raise PrivateLibraryNotFoundError("active lexicon asset not found")
+            require_asset_scope(asset, novel_id=scope.novel_id)
+            if int(asset.version) != self._expected(action):
+>               raise PrivateLibraryConflictError("asset_root_version_conflict")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               TypeError: PrivateLibraryConflictError.__init__() missing 1 required keyword-only argument: 'current'
+
+backend/private_library/maintenance.py:1010: TypeError
+____________ test_postgres_atomic_conflict_changes_nothing[binding] ____________
+
+capture_session = <sqlalchemy.orm.session.Session object at 0x10eaefe90>
+fault = 'binding'
+
+    @pytest.mark.parametrize("fault", ["root", "binding", "base", "archived", "other_novel", "global_without_copy"])
+    def test_postgres_atomic_conflict_changes_nothing(capture_session, fault):
+        session = capture_session
+        novel, other_novel, target, _ = seed(session)
+        action = action_for(session, novel, target)
+        if fault == "root":
+            action = action.model_copy(update={"expected_root_version": 999})
+        elif fault == "binding":
+            action = action.model_copy(update={"payload": {**action.payload, "expected_binding_versions": {}}})
+        elif fault == "base":
+            action = action.model_copy(update={"asset_version_id": uuid4()})
+        elif fault == "archived":
+            target.asset.archived = True
+        elif fault == "other_novel":
+            target.asset.scope_novel_id = other_novel.id
+        else:
+            target.asset.scope_kind, target.asset.scope_novel_id = "library", None
+        session.flush()
+        before_root = target.asset.current_version_id
+        before = binding_state(session, novel.id)
+>       _, _, _, receipt = apply_action(session, novel, action)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/private_library/test_maintenance_atomic_use.py:183:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/private_library/test_maintenance_atomic_use.py:44: in apply_action
+    receipt = m.apply_library_change(store, executor, access, proposal_id=UUID(proposal["proposal_id"]),
+backend/private_library/maintenance.py:1363: in apply_library_change
+    executor.apply(row, action, action_index=index)
+backend/private_library/maintenance.py:761: in apply
+    return method(request, action, action_index)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <backend.private_library.maintenance.P1MaintenanceActionExecutor object at 0x10ed23ec0>
+request = <backend.creative_data_models.LibraryChangeRequest object at 0x10e9b2330>
+action = LibraryChangeAction(operation=<LibraryChangeOperation.UPSERT_AND_USE_LEXICON_ENTRIES: 'upsert_and_use_lexicon_entries'...tive': True, 'counterexample': '', 'watch_threshold': None, 'replacement_hint': ''}], 'expected_binding_versions': {}})
+index = 0
+
+    def _apply_upsert_and_use_lexicon_entries(
+        self, request: Any, action: LibraryChangeAction, index: int
+    ) -> AppliedAction:
+        scope = self._scope(request)
+        if scope.novel_id is None:
+            raise PrivateLibraryValidationError("trusted novel scope is required")
+        payload = action.payload
+        _require_payload_keys(
+            payload, required={"entries", "expected_binding_versions"},
+            allowed={"entries", "expected_binding_versions", "copy_to_novel"},
+        )
+        if not isinstance(payload["entries"], list) or not payload["entries"]:
+            raise PrivateLibraryValidationError("entries must be a non-empty list")
+        copy_to_novel = payload.get("copy_to_novel", False)
+        if not isinstance(copy_to_novel, bool):
+            raise PrivateLibraryValidationError("copy_to_novel must be a boolean")
+        try:
+            entries = tuple(LexiconEntry.model_validate(item) for item in payload["entries"])
+        except Exception as error:
+            raise PrivateLibraryValidationError("lexicon entries are invalid") from error
+        expected = _binding_versions(payload["expected_binding_versions"])
+        create_collection = all(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        ))
+        if create_collection:
+            if copy_to_novel:
+                raise PrivateLibraryValidationError("collection creation cannot copy a source")
+        elif any(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        )):
+            raise PrivateLibraryValidationError("asset id, base version and root CAS are required together")
+
+        # Membership and root changes share the same lock order and savepoint.
+        lock_active_novel(self.session, scope.novel_id)
+        before = list_novel_bindings(self.session, scope.novel_id)
+        inverse_selections = _binding_selections(before)
+        if expected != {view.asset.id: int(view.binding.version) for view in before}:
+>           raise PrivateLibraryConflictError("novel_asset_bindings_conflict")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: PrivateLibraryConflictError.__init__() missing 1 required keyword-only argument: 'current'
+
+backend/private_library/maintenance.py:989: TypeError
+_____________ test_postgres_atomic_conflict_changes_nothing[base] ______________
+
+capture_session = <sqlalchemy.orm.session.Session object at 0x10e9dd700>
+fault = 'base'
+
+    @pytest.mark.parametrize("fault", ["root", "binding", "base", "archived", "other_novel", "global_without_copy"])
+    def test_postgres_atomic_conflict_changes_nothing(capture_session, fault):
+        session = capture_session
+        novel, other_novel, target, _ = seed(session)
+        action = action_for(session, novel, target)
+        if fault == "root":
+            action = action.model_copy(update={"expected_root_version": 999})
+        elif fault == "binding":
+            action = action.model_copy(update={"payload": {**action.payload, "expected_binding_versions": {}}})
+        elif fault == "base":
+            action = action.model_copy(update={"asset_version_id": uuid4()})
+        elif fault == "archived":
+            target.asset.archived = True
+        elif fault == "other_novel":
+            target.asset.scope_novel_id = other_novel.id
+        else:
+            target.asset.scope_kind, target.asset.scope_novel_id = "library", None
+        session.flush()
+        before_root = target.asset.current_version_id
+        before = binding_state(session, novel.id)
+>       _, _, _, receipt = apply_action(session, novel, action)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/private_library/test_maintenance_atomic_use.py:183:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/private_library/test_maintenance_atomic_use.py:44: in apply_action
+    receipt = m.apply_library_change(store, executor, access, proposal_id=UUID(proposal["proposal_id"]),
+backend/private_library/maintenance.py:1363: in apply_library_change
+    executor.apply(row, action, action_index=index)
+backend/private_library/maintenance.py:761: in apply
+    return method(request, action, action_index)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <backend.private_library.maintenance.P1MaintenanceActionExecutor object at 0x10ed2bda0>
+request = <backend.creative_data_models.LibraryChangeRequest object at 0x10ec37590>
+action = LibraryChangeAction(operation=<LibraryChangeOperation.UPSERT_AND_USE_LEXICON_ENTRIES: 'upsert_and_use_lexicon_entries'..., 'expected_binding_versions': {'0aa224ca-71e1-4da1-97e0-428e6bcaa3ba': 1, '3d8f5297-7f11-49c6-965e-17539452b717': 1}})
+index = 0
+
+    def _apply_upsert_and_use_lexicon_entries(
+        self, request: Any, action: LibraryChangeAction, index: int
+    ) -> AppliedAction:
+        scope = self._scope(request)
+        if scope.novel_id is None:
+            raise PrivateLibraryValidationError("trusted novel scope is required")
+        payload = action.payload
+        _require_payload_keys(
+            payload, required={"entries", "expected_binding_versions"},
+            allowed={"entries", "expected_binding_versions", "copy_to_novel"},
+        )
+        if not isinstance(payload["entries"], list) or not payload["entries"]:
+            raise PrivateLibraryValidationError("entries must be a non-empty list")
+        copy_to_novel = payload.get("copy_to_novel", False)
+        if not isinstance(copy_to_novel, bool):
+            raise PrivateLibraryValidationError("copy_to_novel must be a boolean")
+        try:
+            entries = tuple(LexiconEntry.model_validate(item) for item in payload["entries"])
+        except Exception as error:
+            raise PrivateLibraryValidationError("lexicon entries are invalid") from error
+        expected = _binding_versions(payload["expected_binding_versions"])
+        create_collection = all(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        ))
+        if create_collection:
+            if copy_to_novel:
+                raise PrivateLibraryValidationError("collection creation cannot copy a source")
+        elif any(value is None for value in (
+            action.asset_id, action.asset_version_id, action.expected_root_version
+        )):
+            raise PrivateLibraryValidationError("asset id, base version and root CAS are required together")
+
+        # Membership and root changes share the same lock order and savepoint.
+        lock_active_novel(self.session, scope.novel_id)
+        before = list_novel_bindings(self.session, scope.novel_id)
+        inverse_selections = _binding_selections(before)
+        if expected != {view.asset.id: int(view.binding.version) for view in before}:
+            raise PrivateLibraryConflictError("novel_asset_bindings_conflict")
+        asset_id = action.asset_id
+        target_binding = next((view for view in before if view.asset.id == asset_id), None)
+        if create_collection:
+            asset, base, created = get_or_create_collection_pack(
+                self.session, novel_id=scope.novel_id,
+                operation_key=self._key(request, index, "atomic-collection"),
+            )
+            if not created:
+                raise PrivateLibraryConflictError(
+                    "collection_already_exists", current={"asset_id": str(asset.id)}
+                )
+        else:
+            asset = self.session.scalar(
+                select(PrivateAsset).where(PrivateAsset.id == asset_id)
+                .with_for_update().execution_options(populate_existing=True)
+            )
+            if asset is None or asset.archived or asset.asset_type != "vocabulary":
+                raise PrivateLibraryNotFoundError("active lexicon asset not found")
+            require_asset_scope(asset, novel_id=scope.novel_id)
+            if int(asset.version) != self._expected(action):
+                raise PrivateLibraryConflictError("asset_root_version_conflict")
+            required_base_id = (
+                target_binding.asset_version.id if target_binding else asset.current_version_id
+            )
+            if action.asset_version_id != required_base_id:
+>               raise PrivateLibraryConflictError("lexicon_binding_base_conflict")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               TypeError: PrivateLibraryConflictError.__init__() missing 1 required keyword-only argument: 'current'
+
+backend/private_library/maintenance.py:1015: TypeError
+__________ test_postgres_atomic_conflict_changes_nothing[other_novel] __________
+
+capture_session = <sqlalchemy.orm.session.Session object at 0x10ec2ecc0>
+fault = 'other_novel'
+
+    @pytest.mark.parametrize("fault", ["root", "binding", "base", "archived", "other_novel", "global_without_copy"])
+    def test_postgres_atomic_conflict_changes_nothing(capture_session, fault):
+        session = capture_session
+        novel, other_novel, target, _ = seed(session)
+        action = action_for(session, novel, target)
+        if fault == "root":
+            action = action.model_copy(update={"expected_root_version": 999})
+        elif fault == "binding":
+            action = action.model_copy(update={"payload": {**action.payload, "expected_binding_versions": {}}})
+        elif fault == "base":
+            action = action.model_copy(update={"asset_version_id": uuid4()})
+        elif fault == "archived":
+            target.asset.archived = True
+        elif fault == "other_novel":
+            target.asset.scope_novel_id = other_novel.id
+        else:
+            target.asset.scope_kind, target.asset.scope_novel_id = "library", None
+        session.flush()
+        before_root = target.asset.current_version_id
+>       before = binding_state(session, novel.id)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/private_library/test_maintenance_atomic_use.py:182:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/private_library/test_capture_saved_binding.py:69: in binding_state
+    for item in list_novel_bindings(session, novel_id)}
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/private_library/service.py:895: in list_novel_bindings
+    _require_asset_for_novel(asset, novel_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+asset = <backend.models.PrivateAsset object at 0x10ec2fd70>
+novel_id = UUID('1ea0c4c1-c2db-47f0-bc9b-717b6142c4ce')
+
+    def _require_asset_for_novel(asset: PrivateAsset, novel_id: UUID) -> None:
+        """Allow global material or the exact novel's private copy, never another book."""
+
+        scope_kind = str(getattr(asset, "scope_kind", None) or "library")
+        scope_novel_id = getattr(asset, "scope_novel_id", None)
+        if scope_kind == "library" and scope_novel_id is None:
+            return
+        if scope_kind == "novel" and scope_novel_id == novel_id:
+            return
+>       raise PrivateLibraryNotFoundError(
+            f"private asset {asset.id} is outside the selected novel scope"
+        )
+E       backend.private_library.errors.PrivateLibraryNotFoundError: private asset ad45cd66-fb72-4a22-87c7-5458be252009 is outside the selected novel scope
+
+backend/private_library/service.py:521: PrivateLibraryNotFoundError
+________ test_postgres_atomic_binding_failure_rolls_back_saved_version _________
+
+capture_session = <sqlalchemy.orm.session.Session object at 0x10edc6f90>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10edc79e0>
+
+    def test_postgres_atomic_binding_failure_rolls_back_saved_version(capture_session, monkeypatch):
+        session = capture_session
+        novel, _, target, _ = seed(session)
+        before = binding_state(session, novel.id)
+        root = target.asset.current_version_id
+        versions = tuple(session.scalars(select(PrivateAssetVersion.id).where(PrivateAssetVersion.asset_id == target.asset.id)))
+        def fail(*args, **kwargs):
+            raise m.PrivateLibraryConflictError("injected_binding_conflict")
+        monkeypatch.setattr(m, "replace_novel_bindings", fail)
+>       _, _, _, receipt = apply_action(session, novel, action_for(session, novel, target))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/private_library/test_maintenance_atomic_use.py:213:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/private_library/test_maintenance_atomic_use.py:44: in apply_action
+    receipt = m.apply_library_change(store, executor, access, proposal_id=UUID(proposal["proposal_id"]),
+backend/private_library/maintenance.py:1363: in apply_library_change
+    executor.apply(row, action, action_index=index)
+backend/private_library/maintenance.py:761: in apply
+    return method(request, action, action_index)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/private_library/maintenance.py:1058: in _apply_upsert_and_use_lexicon_entries
+    bindings = replace_novel_bindings(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+args = (<sqlalchemy.orm.session.Session object at 0x10edc6f90>, UUID('f7f8f141-d5ab-4d49-97aa-9f9ff90a1e8f'))
+kwargs = {'expected_binding_versions': {UUID('36d024d1-f69f-4385-9f54-63cb25ff7c00'): 1, UUID('6214fd94-ef3e-404e-a62d-70798d25...Policy.PREFERRED: 'preferred'>, position=4)], 'operation_key': 'l74:c06ceda9-14d4-4d55-89eb-6aca0edd423a:0:atomic-use'}
+
+    def fail(*args, **kwargs):
+>       raise m.PrivateLibraryConflictError("injected_binding_conflict")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: PrivateLibraryConflictError.__init__() missing 1 required keyword-only argument: 'current'
+
+tests/private_library/test_maintenance_atomic_use.py:211: TypeError
+=============================== warnings summary ===============================
+tests/private_library/test_creative_data_api_scope.py::test_selection_capture_requires_novel_exactly_for_use_current_novel
+  /Users/liujia/Documents/AI小说世界2026/tests/private_library/test_creative_data_api_scope.py:253: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    creative_data_api.private_library_capture_create(request, session=MagicMock())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/private_library/test_maintenance_atomic_use.py::test_postgres_atomic_conflict_changes_nothing[root]
+FAILED tests/private_library/test_maintenance_atomic_use.py::test_postgres_atomic_conflict_changes_nothing[binding]
+FAILED tests/private_library/test_maintenance_atomic_use.py::test_postgres_atomic_conflict_changes_nothing[base]
+FAILED tests/private_library/test_maintenance_atomic_use.py::test_postgres_atomic_conflict_changes_nothing[other_novel]
+FAILED tests/private_library/test_maintenance_atomic_use.py::test_postgres_atomic_binding_failure_rolls_back_saved_version
+Removed only disposable code-test database: plan74_v12_c6f8bae804e448ae_test
