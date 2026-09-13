@@ -1365,21 +1365,21 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
 
   const editorShouldMount = editorOpen
     && (Boolean(content.trim()) || manualEditorOpen);
+  const editorDisplayTitle = document && novel?.id === document.novel_id
+    ? documentDisplayTitle(novel, document)
+    : document?.title ?? "";
 
   React.useLayoutEffect(() => {
     const active = documentRef.current;
     const parent = editorSurfaceParentRef.current;
     if (!active || !parent || !editorShouldMount) return;
     const generation = documentGenerationRef.current;
-    const activeDisplayTitle = novel && novel.id === active.novel_id
-      ? documentDisplayTitle(novel, active)
-      : active.title;
     const handle = createChapterEditorSurface({
       parent,
       lease: { documentId: active.id, generation },
       initialValue: contentRef.current,
       currentContentHash: active.content_hash,
-      ariaLabel: `${activeDisplayTitle}正文编辑器`,
+      ariaLabel: `${editorDisplayTitle}正文编辑器`,
       onDocChanged: (event) => {
         if (
           event.lease.documentId !== documentRef.current?.id
@@ -1438,7 +1438,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
       if (editorControlRef.current === handle.assistantControl) editorControlRef.current = null;
       handle.dispose();
     };
-  }, [applyContentChange, document?.id, document?.title, editorShouldMount, novel]);
+  }, [applyContentChange, document?.id, editorDisplayTitle, editorShouldMount]);
 
   React.useEffect(() => {
     const surface = editorSurfaceRef.current;

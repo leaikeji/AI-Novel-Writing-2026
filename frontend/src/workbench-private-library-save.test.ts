@@ -342,6 +342,7 @@ describe("Workbench controlled selection save and recovery entry", () => {
     const loads = io.loadNovel.mock.calls.length;
     if (kind === "controlled AI") await applyAI();
     else { manual(AI_TEXT); await settle(); }
+    const surfaces = io.surface.mock.calls.length;
     await vi.advanceTimersByTimeAsync(600); await settle();
     const current = workflowProps().novel as NovelRecord;
     const row = current.tree[0]!.documents.find((item) => item.id === DOC_A);
@@ -352,6 +353,7 @@ describe("Workbench controlled selection save and recovery entry", () => {
     expect(current.tree[0]!.title).toBe(previous.tree[0]!.title);
     expect(io.loadNovel).toHaveBeenCalledTimes(loads);
     expect(calls()).toHaveLength(1);
+    expect(io.surface).toHaveBeenCalledTimes(surfaces);
   });
 
   it.each(["failed", "late"])("does not publish a %s controlled save to the directory", async (outcome) => {
