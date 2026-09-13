@@ -2091,14 +2091,14 @@ export function ChapterWorkflowPanel(props: ChapterWorkflowProps) {
               && job.library_check.unresolved_forbid_hit_ids.length === 0
               ? "is-ok" : "is-warning",
           }, job.library_check.status === "failed"
-            ? "生成时用词检查失败；采用前须按当前规则重新检查"
+            ? "用词报告：检查失败；采用前须按当前规则重新检查"
             : job.library_check.status === "stale"
-            ? "生成时用词检查已失效；采用前须按当前规则重新检查"
+            ? "用词报告：检查已失效；采用前须按当前规则重新检查"
             : job.library_check.status === "incomplete"
-            ? `生成时用词检查未完成（漏扫 ${job.library_check.omitted_rule_count} 条）`
+            ? `用词报告：检查未完成（漏扫 ${job.library_check.omitted_rule_count} 条）`
             : job.library_check.unresolved_forbid_hit_ids.length
-              ? `生成时检查 · 禁用表达 ${job.library_check.unresolved_forbid_hit_ids.length} 处`
-              : `生成时用词检查无待处理禁用项 · 共 ${job.library_check.total_hits} 处命中；采用前会复核当前规则`)
+              ? `用词报告：扫描共 ${job.library_check.total_hits} 处命中 · 当前 ${job.library_check.unresolved_forbid_hit_ids.length} 处禁用表达待处理；采用前会复核当前规则`
+              : `用词报告：扫描共 ${job.library_check.total_hits} 处命中 · 当前无待处理禁用项；采用前会复核当前规则`)
           : h("span", null, "旧候选无生成时用词检查记录；采用前会检查当前规则"),
         ),
         h(RetrievalStatusNotice, {

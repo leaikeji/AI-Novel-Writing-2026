@@ -417,10 +417,10 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     expect(hooks.nodes.some(node => String(node.props.className ?? "").startsWith("anw-history-card"))).toBe(false);
     expect(errors).not.toHaveBeenCalled();
   });
-  it.each(["complete", "incomplete", "stale", "failed"] as const)("labels %s history evidence as generation-time only", async (status) => {
+  it.each(["complete", "incomplete", "stale", "failed"] as const)("labels %s history evidence as a report, not adoption approval", async (status) => {
     await openHistory(historicalJob("ready", status));
     const label = hooks.nodes.find(node => node.type === "span"
-      && node.children.some(child => typeof child === "string" && child.startsWith("生成时用词检查")))!;
+      && node.children.some(child => typeof child === "string" && /^(生成时.*检查|用词报告)/.test(child)))!;
     expect(label).toBeDefined();
     if (status === "complete") {
       expect(label.props.className).toBe("is-ok");
@@ -439,10 +439,26 @@ describe("actual ChapterWorkflowPanel method integration", () => {
     };
     await openHistory(job);
     const label = hooks.nodes.find(node => node.type === "span"
-      && node.children.some(child => typeof child === "string" && child.startsWith("生成时用词检查")))!;
-    expect(nodeText(label)).toContain("无待处理禁用项 · 共 1 处命中");
+      && node.children.some(child => typeof child === "string" && /^(生成时.*检查|用词报告)/.test(child)))!;
+    expect(nodeText(label)).toContain("扫描共 1 处命中 · 当前无待处理禁用项");
     expect(nodeText(label)).not.toContain("慎用提醒");
     expect(nodeText(label)).toContain("采用前会复核当前规则");
+  });
+  it.each([1, 2])("keeps the scan total distinct from %i unresolved history hits", async (unresolved) => {
+    const job = historicalJob();
+    job.library_check = {
+      ...checkReport(), total_hits: 2,
+      unresolved_forbid_hit_ids: ["first", "second"].slice(0, unresolved),
+      decisions: unresolved === 1 ? [{ kind: "keep_once", hit_id: "second" }] : [],
+    };
+    await openHistory(job);
+    const label = hooks.nodes.find(node => node.type === "span"
+      && node.children.some(child => typeof child === "string" && /^(生成时.*检查|用词报告)/.test(child)))!;
+    expect(label).toBeDefined();
+    expect(nodeText(label)).toContain(`扫描共 2 处命中 · 当前 ${unresolved} 处禁用表达待处理`);
+    expect(nodeText(label)).toContain("采用前会复核当前规则");
+    expect(nodeText(label)).not.toContain("生成时");
+    expect(label.props.className).toBe("is-warning");
   });
   it("refuses a saved working copy belonging to a different chapter", async () => {
     prepare.mockResolvedValue(doc(OTHER));
