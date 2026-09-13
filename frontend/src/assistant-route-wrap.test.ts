@@ -13,6 +13,7 @@ import {
   RouteSessionStateMachine,
 } from "./workbench-route";
 import { NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
+import { publishPrivateLibraryAssistantNovel } from "./private-library/assistant-context";
 import {
   NOVEL_ASSISTANT_TARGET_AGENT_ID,
   NovelAssistantContextRuntime,
@@ -316,6 +317,42 @@ describe("assistant route wrap", () => {
       fieldCount: 0,
       selectionCharacters: 0,
     });
+  });
+
+  it("shows the selected private-library novel and follows switches without leaking subscriptions", () => {
+    const React = new HookTestReact();
+    const wrap = createAssistantRouteWrap({
+      React, Workbench: () => "workbench", CreativeCenter: () => "center",
+      getRouteSession: () => creativeCenterRoute(),
+      getLocation: () => ({ pathname: "/chat", search: "?novel_center=1&view=private-library" }),
+      eventTarget: null, createResizeObserver: () => null,
+      createAssistantPane: () => () => "assistant",
+    });
+    const shell = React.render(wrap(() => "native-chat") as () => unknown);
+    const status = elementChildren(shell)[1].props.statusBar as TestElement;
+    // Render the actual nested component in its own hook scope, as React does.
+    const child = new HookTestReact();
+    React.useState = child.useState.bind(child);
+    React.useEffect = child.useEffect.bind(child);
+    const Status = status.type as (props: Record<string, unknown>) => unknown;
+    const text = () => JSON.stringify(child.render(() => Status(status.props)));
+    try {
+      publishPrivateLibraryAssistantNovel({ id: "novel-1", title: "缺氧：末日地下世界" });
+      expect(text()).toContain("当前作品：《缺氧：末日地下世界》");
+      child.flushEffects();
+      publishPrivateLibraryAssistantNovel({ id: "novel-2", title: "潮声之后" });
+      expect(text()).toContain("当前作品：《潮声之后》");
+      expect(text()).not.toContain("缺氧：末日地下世界");
+      publishPrivateLibraryAssistantNovel(null);
+      expect(text()).toContain("通用资料库 · 不借用小说范围");
+      child.unmount();
+      const before = child.updates;
+      publishPrivateLibraryAssistantNovel({ id: "novel-3", title: "余火" });
+      expect(child.updates).toBe(before);
+    } finally {
+      child.unmount();
+      publishPrivateLibraryAssistantNovel(null);
+    }
   });
 
   it("starts context preparation only inside workbench and stops it on exit", () => {

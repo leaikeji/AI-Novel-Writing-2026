@@ -29,6 +29,10 @@ import { createAssistantSelectionToolbar } from "./assistant-selection-toolbar";
 import type { SelectionEditReviewHostComponent } from "./selection-edit-runtime";
 import { NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
 import {
+  currentPrivateLibraryAssistantNovel,
+  subscribePrivateLibraryAssistantNovel,
+} from "./private-library/assistant-context";
+import {
   createNativeWritingMethodNotice,
   type NativeWritingMethodRuntime,
 } from "./writing-skills/native";
@@ -327,6 +331,12 @@ export function createAssistantRouteWrap(
   }
 
   function CreativeCenterAssistantStatusBar(props: { privateLibraryActive: boolean }) {
+    const [libraryNovel, setLibraryNovel] = React.useState(currentPrivateLibraryAssistantNovel);
+    React.useEffect(() => {
+      const refresh = () => setLibraryNovel(currentPrivateLibraryAssistantNovel());
+      refresh();
+      return subscribePrivateLibraryAssistantNovel(refresh);
+    }, []);
     return h(
       "section",
       {
@@ -342,7 +352,7 @@ export function createAssistantRouteWrap(
       ),
       h("div", { className: "anw-assistant-context-status-meta" },
         h("span", null, props.privateLibraryActive
-          ? "通用资料库 · 不借用小说范围"
+          ? (libraryNovel ? `当前作品：《${libraryNovel.title}》` : "通用资料库 · 不借用小说范围")
           : "未进入具体作品"),
       ),
       h("small", null, props.privateLibraryActive
