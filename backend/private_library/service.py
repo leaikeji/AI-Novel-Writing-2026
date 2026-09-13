@@ -896,6 +896,57 @@ def list_novel_bindings(session: Session, novel_id: UUID) -> list[BindingView]:
     return _binding_views_from_rows(rows, pairs)
 
 
+def use_saved_asset_version(
+    session: Session,
+    *,
+    novel_id: UUID,
+    asset_id: UUID,
+    asset_version_id: UUID,
+    previous_version_id: UUID | None,
+    operation_key: str,
+    write_replayed: bool = False,
+) -> bool:
+    """Use this explicitly saved version, not the root's later/latest version.
+
+    The asset write and this binding action share the caller's transaction.
+    A replayed asset write must not restore an old binding over a subsequent
+    author decision. Unlike a repeated enable toggle, a fresh save-and-use is
+    explicit authority to advance only the target's pinned version.
+    """
+    _lock_novel(session, novel_id)
+    views = list_novel_bindings(session, novel_id)
+    target = next((item for item in views if item.asset.id == asset_id), None)
+    if not write_replayed:
+        if (target and target.binding.usage_policy != "prohibited"
+                and target.asset_version.id != previous_version_id):
+            raise PrivateLibraryConflictError(
+                "本书仍使用旧版本；请先查看词包尚未采用的修改，再明确更新本书绑定后重新收藏。",
+                current={"asset_id": str(asset_id),
+                         "bound_version_id": str(target.asset_version.id),
+                         "previous_version_id": str(previous_version_id)},
+            )
+        selections = [VersionSelection(
+            asset_id=item.asset.id, asset_version_id=item.asset_version.id,
+            usage_policy=UsagePolicy(item.binding.usage_policy), position=int(item.binding.position),
+        ) for item in views if item.asset.id != asset_id]
+        selections.append(VersionSelection(
+            asset_id=asset_id, asset_version_id=asset_version_id,
+            usage_policy=(UsagePolicy(target.binding.usage_policy)
+                          if target and target.binding.usage_policy != "prohibited"
+                          else UsagePolicy.PREFERRED),
+            position=(int(target.binding.position) if target
+                      else max((item.position for item in selections), default=-1) + 1),
+        ))
+        result = replace_novel_bindings(
+            session, novel_id,
+            expected_binding_versions={item.asset.id: int(item.binding.version) for item in views},
+            selections=tuple(selections), operation_key=operation_key,
+        )
+        target = next((item for item in result.bindings if item.asset.id == asset_id), None)
+    return bool(target and target.asset_version.id == asset_version_id
+                and target.binding.usage_policy != "prohibited")
+
+
 def set_novel_asset_enabled(
     session: Session,
     *,

@@ -33,7 +33,7 @@ from .models import (
     DocumentWorkingCopy,
     PrivateAsset,
 )
-from .novel_lifecycle import require_active_novel
+from .novel_lifecycle import lock_active_novel, require_active_novel
 from .novel_lifecycle_errors import NovelLifecycleError
 from .private_library import (
     PrivateLibraryConflictError,
@@ -70,7 +70,7 @@ from .private_library.lexicon_service import (
 )
 from .private_library.lexicon_renderer import render_lexicon_pack
 from .private_library.maintenance_contracts import LibraryCheckTextRef
-from .private_library.service import set_novel_asset_enabled
+from .private_library.service import set_novel_asset_enabled, use_saved_asset_version
 from .private_library.selection_application import resolve_selection_application_source
 
 
@@ -864,8 +864,6 @@ def private_library_capture_create(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="用于本书必须指定当前作品；仅收藏不能携带作品范围",
         )
-    if novel_id is not None:
-        _require_active(session, novel_id)
     source = {
         "kind": "unsynced_selection",
         "selection_id": str(request.selection_id),
@@ -875,6 +873,9 @@ def private_library_capture_create(
         "source_value_sha256": request.source_value_sha256,
     }
     try:
+        if novel_id is not None:
+            # One save-and-use transaction: novel lock precedes asset locks.
+            lock_active_novel(session, novel_id)
         if request.category == "vocabulary":
             if request.target_asset_id is None:
                 asset, version, _ = get_or_create_collection_pack(
@@ -910,7 +911,8 @@ def private_library_capture_create(
                 lexicon_pack_from_version(version),
                 [entry],
             )
-            save_lexicon_pack(
+            previous_version_id = version.id
+            asset, saved_version, write_replayed = save_lexicon_pack(
                 session,
                 asset_id=asset.id,
                 expected_root_version=int(asset.version),
@@ -920,6 +922,7 @@ def private_library_capture_create(
             )
         else:
             if request.target_asset_id is None:
+                previous_version_id = None
                 result = create_asset(
                     session,
                     asset_id=uuid4(),
@@ -935,6 +938,7 @@ def private_library_capture_create(
                 asset.scope_kind = "novel" if novel_id is not None else "library"
                 asset.scope_novel_id = novel_id
                 session.flush()
+                saved_version, write_replayed = result.asset_version, result.replayed
             else:
                 asset = session.get(PrivateAsset, request.target_asset_id)
                 if asset is None or asset.asset_type != request.category:
@@ -945,7 +949,8 @@ def private_library_capture_create(
                 current = session.get(PrivateAssetVersion, asset.current_version_id)
                 if current is None:
                     raise PrivateLibraryConflictError("asset_current_version_missing")
-                update_asset(
+                previous_version_id = current.id
+                result = update_asset(
                     session,
                     asset.id,
                     expected_root_version=int(asset.version),
@@ -954,24 +959,21 @@ def private_library_capture_create(
                     content=(current.content.rstrip() + "\n\n" + request.selected_text).strip(),
                     source=source,
                 )
+                saved_version, write_replayed = result.asset_version, result.replayed
+        used_by_current_novel = False
         if novel_id is not None:
-            views = list_novel_bindings(session, novel_id)
-            current = next((item for item in views if item.asset.id == asset.id), None)
-            if current is None:
-                set_novel_asset_enabled(
-                    session,
-                    novel_id=novel_id,
-                    asset_id=asset.id,
-                    expected_binding_version=0,
-                    enabled=True,
-                    operation_key=f"{request.operation_key}:enable",
-                )
+            used_by_current_novel = use_saved_asset_version(
+                session, novel_id=novel_id, asset_id=asset.id,
+                asset_version_id=saved_version.id, write_replayed=write_replayed,
+                previous_version_id=previous_version_id,
+                operation_key=f"{request.operation_key}:use-saved",
+            )
         session.commit()
         return {
             "saved": True,
             "source": source,
             "asset": get_scoped_asset_view(session, asset.id, novel_id=novel_id),
-            "used_by_current_novel": novel_id is not None,
+            "used_by_current_novel": used_by_current_novel,
         }
     except Exception as error:
         session.rollback(); _raise(error); raise
