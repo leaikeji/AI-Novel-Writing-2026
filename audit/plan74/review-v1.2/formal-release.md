@@ -1,6 +1,13 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。最新正式源：`6837e1b RELEASED / F21历史计数修复 / 完整2K候选截图PASS / G3 PARTIAL`，保留15f4f5f全部功能。22:47公开热更新、备份／保态／健康及真实历史复验通过；23:03独立Edge原生2560×1440历史和候选逐项检查补证通过。均无重启、迁移或本轮模型调用，详见[F21发布与恢复](history-count-release.md)和[桌面记录](desktop-validation.md#2303独立edge完整2k候选复验6837e1b)。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+日期：2026-09-13。最新正式源：`672f34e RELEASED / F22私有库双栏滚动PASS / G3 PARTIAL`，保留6837e1b及此前全部功能。23:32公开热更新、备份／保态／健康及实际桌面滚轮和滚动条拖拽复验通过；无重启、迁移、模型调用或创作数据写入。真实101+资料门禁仍开放，详见下节和[桌面记录](desktop-validation.md#f22私有库双栏独立滚动672f34e)。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 23:32私有库双栏滚动公开更新
+
+- 精确源`672f34ee33f86212532d15e19362732e1ed86fe2`、tree `8311b1c2093b10818c27e9c8568b41d14d537a52`；干净检出中定向5项、前端170文件／1561项、类型检查、204模块生产构建、打包和`git diff --check`均退出0。源码已push并以远端`refs/heads/main`同hash核对。
+- 计划76明确释放共享窗口后，23:32:10经公开hot-install更新；唯一安装差异为`frontend/dist/index.js`，SHA-256 `d7fbb272ec2f4d938ecf9bff26f6c928c6d0d5649ae06779d75360ab5555ae13`。[来源清单](library-scroll-release-manifest.json)、[安装回执](library-scroll-install-result.json)、[健康](library-scroll-health-after.json)、[模型](library-scroll-model-after.json)及[逐Agent选择](library-scroll-choices-after.json)已保存。release verify退出0，schema0056、PawApp0.4.0、bigmodel/glm-5.3-flash、Skill／工具选择、容器ID和启动时间保持，无重启或迁移。
+- 新备份`/private/tmp/plan74-library-scroll-release.6spvOK`及耐久副本`/app/working.backups/plan74-library-scroll-release-20260913-6spvOK`三份归档hash一致：DB `380726a444db159de5a81987f9b7b31ea413ec8141a72643a5e138bd151b1548`；候选`c33e3fbc27390132fd0c773a8c555c32a4144c0ff20ac51a6154e7d156b9b032`；旧插件`8db8b9b06d19bcb9a0be368b0cc3b7a6480b7fea2da134c1555265dc21bc66d3`。`pg_restore --list`已验证，未恢复数据库；必要回退只经公开路径恢复旧插件，不能倒灌数据库覆盖后续创作。
+- 正式桌面实际测量与拖拽结果见[桌面记录](desktop-validation.md#f22私有库双栏独立滚动672f34e)。页面最终恢复默认2146×1236视口、助手保持展开、左右栏回到顶部；没有编辑资料、切换模型或发送助手消息。F22关闭，不据此关闭101+真实长库门禁。
 
 ## 22:06目录同步与编辑器保持公开更新
 

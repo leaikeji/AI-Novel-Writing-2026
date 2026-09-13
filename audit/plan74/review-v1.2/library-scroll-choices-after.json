@@ -1,0 +1,108 @@
+{
+  "QwenPaw_QA_Agent_0.2": {
+    "model": {
+      "model": "MiniMax-M3",
+      "provider_id": "minimax-cn"
+    },
+    "skills": {
+      "chapter-outline": false,
+      "character-craft": false,
+      "continuity-check": false,
+      "dialogue-craft": false,
+      "golden-finger-writing": false,
+      "novel-direction": false,
+      "private-library-maintenance": false,
+      "prose-writing": false,
+      "scene-craft": false,
+      "story-foundation": false,
+      "style-review": false,
+      "suspense-writing": false
+    },
+    "system_prompt_files": [
+      "AGENTS.md",
+      "SOUL.md",
+      "PROFILE.md"
+    ],
+    "tools": {
+      "novel_get_context": false,
+      "novel_get_document": false,
+      "novel_get_workspace_context": false,
+      "novel_library_apply_change": false,
+      "novel_library_prepare_change": false,
+      "novel_library_query": false,
+      "novel_prepare_selection_edit": false,
+      "novel_search": false
+    }
+  },
+  "ai-novel-writer": {
+    "model": {
+      "model": "glm-5.3-flash",
+      "provider_id": "bigmodel"
+    },
+    "skills": {
+      "chapter-outline": true,
+      "character-craft": true,
+      "continuity-check": true,
+      "dialogue-craft": true,
+      "golden-finger-writing": true,
+      "novel-direction": true,
+      "private-library-maintenance": true,
+      "prose-writing": true,
+      "scene-craft": true,
+      "story-foundation": true,
+      "style-review": true,
+      "suspense-writing": true
+    },
+    "system_prompt_files": [
+      "AGENTS.md",
+      "SOUL.md",
+      "PROFILE.md",
+      "AI_NOVEL_WORLD.md"
+    ],
+    "tools": {
+      "novel_get_context": true,
+      "novel_get_document": true,
+      "novel_get_workspace_context": true,
+      "novel_library_apply_change": true,
+      "novel_library_prepare_change": true,
+      "novel_library_query": true,
+      "novel_prepare_selection_edit": true,
+      "novel_search": true
+    }
+  },
+  "default": {
+    "model": {
+      "model": "MiniMax-M3",
+      "provider_id": "minimax-cn"
+    },
+    "skills": {
+      "chapter-outline": false,
+      "character-craft": false,
+      "continuity-check": false,
+      "dialogue-craft": false,
+      "golden-finger-writing": false,
+      "novel-direction": false,
+      "private-library-maintenance": false,
+      "prose-writing": false,
+      "scene-craft": false,
+      "story-foundation": false,
+      "style-review": false,
+      "suspense-writing": false
+    },
+    "system_prompt_files": [
+      "AGENTS.md",
+      "SOUL.md",
+      "PROFILE.md"
+    ],
+    "tools": {
+      "novel_get_context": false,
+      "novel_get_document": false,
+      "novel_get_workspace_context": false,
+      "novel_library_apply_change": false,
+      "novel_library_prepare_change": false,
+      "novel_library_query": false,
+      "novel_prepare_selection_edit": false,
+      "novel_search": false
+    }
+  }
+}
