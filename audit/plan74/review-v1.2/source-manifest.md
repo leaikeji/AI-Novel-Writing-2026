@@ -4,6 +4,8 @@
 
 ## 最新可复核来源
 
+- 最新候选为`3383bcd4b93f8922ac9392fd9f6ffb2c97dd187c`，tree `6404c9a88baff8361403879a6d0e2ff424e0d84c`；F10仅修复无效选区重试前检查与候选保留，包含77870d4的F08／F09。独立检出`/private/tmp/plan74-retry-source.GFAvOe/code`，前端1526／类型／构建／Python全量／打包退出0、status为空；JS SHA `90fa7041ae7e82cf8a78c808c2c56c05bd3a2fc9300a2580c549d56432c3ab54`。已push，实际远端main核验同为3383bcd完整hash。正式环境仍由计划79使用，本候选未安装；不得把干净代码检查当作正式复验。
+- 先前F08／F09及16:16—16:50证据已精确提交并push到`d361ea3f26ff80535f402aea6b82c5388652bb30`，当时实际远端main相同。共享开发索引只暂存计划74行，79／80行及其文件保持归属。
 - 正式先行的失败句段重试依赖单独补交`da36b47d475f46441f64cadea2389873457427f7`，已push并核对远端；不是新增私有库功能。其他任务随后提交7047067，原样保留。
 - 本任务四项正式缺陷修复精确提交`1712883aae92d3049c4b45e2a979d1d03d1e36e7`，9文件：收藏卡重测量、私有库容器布局、CodeMirror整文替换合法选区、导航通知及对应测试／工作包范围。tree `ef181ce5a16857a38ce22f1905b0670c69f15733`。
 - 独立检出`/private/tmp/plan74-desktop-source.NzhMUK/code`通过前端1515／类型／构建／Python串行全量／包审核后16:38公开更新；包SHA `998b7c021a7ea2eb52ec436622a99f7bafadcd5b32ae7de91bd4194322b348ab`，仅JS变化。源码和备份保留，见[manifest](desktop-release-manifest.json)。
