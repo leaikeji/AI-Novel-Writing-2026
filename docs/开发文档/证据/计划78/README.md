@@ -29,6 +29,8 @@
 | 打包／Compose | `scripts/package_plugin.py`、`docker compose config --quiet` PASS |
 | 正式插件验证 | PawApp、Agent、模型、Skill、Tool、TTS 全部 PASS |
 
+隔离生命周期的 initialized、mixed、mixed-repeat、mixed-hot、all-off-hot 与 offline 六个 Skill 状态快照均随本目录保存；文件只记录隔离容器地址、Agent ID 和 12 个 Skill 的布尔启用状态，不含密钥或正式环境数据。
+
 ## 回退资产
 
 - 旧镜像：`ai-novel-2026-qwenpaw-runtime:2.2.0-mvp0` / `sha256:a7430e32833b6211f37200ee4e8c798946d8719772efcd650b92c1f663834fb3`
