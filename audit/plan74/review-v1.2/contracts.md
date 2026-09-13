@@ -4,6 +4,7 @@
 
 ## 采用与保存
 
+- F19补充：显式引用的incomplete报告不因没有禁用规则而放行，受控选区同样要求明确跳过并持久留痕，原状态不改为complete。仅保留当前无禁用规则且未引用报告的旧客户端采用兼容，不生成隐式跳过事件。普通手写／历史恢复及已成功应用的幂等重放不改变。
 - 整章采用继续`adopt_candidate`；当前规则检查缺失／过期使用`PrivateLibraryConflictError(code="library_check_required", current={message, rules_sha256, report_id?, candidate_id?})`，API统一映射HTTP409。已经采用的候选先按范围校验并返回原结果。
 - 当前政策读取`resolve_effective_lexicon_policy(session, novel_id, *, lock=True)`保持默认；`lock=False`只读取可信active作品，供扫描快照取数。取数之后释放事务再扫描，最终写回锁小说→候选／working copy→report并复核hash。LIST不得改变这个入口。
 - `save_draft(..., library_application: SelectionLibraryApplication | None=None)`为加法参数。结构见`maintenance_contracts.py`及前端同名DTO：应用ID、job/attempt、基线version/hash、replacement hash、可选精确Diff段ID、报告ID/version。应用的完整正文必须由服务端持久job重新合成并与请求相等。没有元信息的手写保存／撤销保持原合同。

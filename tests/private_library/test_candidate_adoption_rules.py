@@ -90,14 +90,39 @@ def test_noncomplete_reports_do_not_silently_authorize_adoption(status) -> None:
     assert error.value.current["report_id"] == str(report.id)
 
 
-def test_incomplete_skip_is_explicit_and_preserves_incomplete_status() -> None:
-    session, report, arguments = _gate_fixture()
+@pytest.mark.parametrize("forbid", [True, False])
+def test_incomplete_skip_is_explicit_and_preserves_incomplete_status(forbid) -> None:
+    session, report, arguments = _gate_fixture(forbid=forbid)
     report.status = "incomplete"
     result = require_application_report(
         session, **{**arguments, "report_id": report.id, "expected_version": 1}, skip_incomplete=True,
     )
     assert result.status == "incomplete"
     assert result.decisions_json[0]["kind"] == "skip_incomplete"
+
+
+@pytest.mark.parametrize("controlled_selection", [False, True])
+def test_explicit_incomplete_report_without_forbid_requires_skip(controlled_selection) -> None:
+    session, report, arguments = _gate_fixture(forbid=False)
+    report.status = "incomplete"
+    if controlled_selection:
+        report.source_kind = arguments["source_kind"] = "selection_result"
+        arguments["allow_without_forbid"] = False
+    with pytest.raises(PrivateLibraryConflictError) as error:
+        require_application_report(
+            session, **{**arguments, "report_id": report.id, "expected_version": 1},
+        )
+    assert error.value.code == "library_check_required"
+    assert report.decisions_json == []
+    session.commit.assert_not_called()
+
+
+def test_legacy_no_forbid_incomplete_report_does_not_create_implicit_skip() -> None:
+    session, report, arguments = _gate_fixture(forbid=False)
+    report.status = "incomplete"
+    assert require_application_report(session, **arguments) is report
+    assert report.status == "incomplete"
+    assert report.decisions_json == []
 
 
 def test_report_version_is_checked_even_without_new_decisions() -> None:

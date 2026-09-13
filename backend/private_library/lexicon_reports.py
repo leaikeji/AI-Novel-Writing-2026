@@ -507,10 +507,13 @@ def require_application_report(
             skip_incomplete=skip_incomplete,
         )
     skipped = any(item.get("kind") == "skip_incomplete" for item in report.decisions_json or [])
-    if report.status == "incomplete" and has_forbid and not skipped:
+    # Explicit report users follow the same completion gate as the review UI.
+    # Only legacy, unreferenced no-forbid adoption retains its compatibility.
+    requires_complete_check = has_forbid or report_id is not None or not allow_without_forbid
+    if report.status == "incomplete" and requires_complete_check and not skipped:
         raise PrivateLibraryConflictError(
             "library_check_required",
-            current={**current, "message": "禁用规则检查未完成，请重试或明确跳过并留痕"},
+            current={**current, "message": "用词检查未完成，请重试或明确跳过并留痕"},
         )
     unresolved = unresolved_forbid_hit_ids(report)
     if unresolved:

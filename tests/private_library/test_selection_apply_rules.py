@@ -18,7 +18,7 @@ from backend.models import CreativeGenerationJob, Document, DocumentWorkingCopy,
 from backend.private_library.contracts import VersionSelection
 from backend.private_library.errors import PrivateLibraryConflictError, PrivateLibraryValidationError
 from backend.private_library.lexicon_contracts import LexiconEntry, LexiconPack
-from backend.private_library.lexicon_reports import create_or_reuse_check_report
+from backend.private_library.lexicon_reports import append_check_decisions, create_or_reuse_check_report
 from backend.private_library.lexicon_service import resolve_effective_lexicon_policy
 from backend.private_library.maintenance_contracts import LibraryCheckTextRef, SelectionLibraryApplication
 from backend.private_library.selection_application import resolve_selection_application_source
@@ -213,6 +213,43 @@ def selection_application(session, novel_id, document_id, saved, job):
         library_check_report_id=result.report.id, library_check_version=result.report.version,
     )
     return final, application, result.report
+
+
+def test_postgres_selection_incomplete_without_forbid_requires_explicit_skip(postgres_session) -> None:
+    session = postgres_session
+    novel_id, document_id, saved = seed_novel(session)
+    job = seed_selection(session, novel_id, document_id, saved)
+    final, application, report = selection_application(session, novel_id, document_id, saved, job)
+    report_id = report.id
+    # Adversarial state is seeded only in the opt-in disposable workspace DB.
+    report.status = "incomplete"
+    session.commit()
+    with pytest.raises(PrivateLibraryConflictError) as error:
+        services.save_draft(
+            session, document_id, expected_draft_version=saved["draft_version"],
+            content_markdown=final, library_application=application,
+        )
+    assert error.value.code == "library_check_required"
+    session.rollback()
+    current = services.get_document(session, document_id)
+    assert current["content_markdown"] == saved["content_markdown"]
+    assert current["draft_version"] == saved["draft_version"]
+    assert session.get(LibraryCheckReport, report_id).decisions_json == []
+    decided = append_check_decisions(
+        session, novel_id=novel_id, report_id=report_id,
+        expected_version=application.library_check_version, skip_incomplete=True,
+    )
+    application = application.model_copy(update={"library_check_version": decided.version})
+    session.commit()
+    applied = services.save_draft(
+        session, document_id, expected_draft_version=saved["draft_version"],
+        content_markdown=final, library_application=application,
+    )
+    assert applied["content_markdown"] == final
+    assert applied["draft_version"] == saved["draft_version"] + 1
+    persisted = session.get(LibraryCheckReport, report_id)
+    assert persisted.status == "incomplete"
+    assert [item["kind"] for item in persisted.decisions_json] == ["skip_incomplete", "application"]
 
 
 def test_postgres_selection_application_replay_keeps_newer_manual_draft(postgres_session) -> None:
