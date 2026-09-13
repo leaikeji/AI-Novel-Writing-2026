@@ -658,7 +658,7 @@ export function ensureNovelStyles(): void {
     .anw-private-library-combination-list article p { margin:4px 0; color:#6f665d; }
     .anw-private-library-combination-list article small { color:#8c8175; }
     .anw-private-library-combination-preview ul { max-height:280px; overflow:auto; padding-left:22px; }
-    .anw-private-library { display:grid; min-width:0; gap:18px; container-type:inline-size; }
+    .anw-private-library { display:grid; min-width:0; min-height:0; flex:1 1 auto; grid-template-rows:auto auto auto minmax(0,1fr); gap:18px; overflow:hidden; container-type:inline-size; }
     .anw-private-library__header { display:flex; min-width:0; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:20px; }
     .anw-private-library__header > div { min-width:0; flex:1 1 260px; overflow-wrap:anywhere; }
     .anw-private-library__header > button { flex:0 0 auto; }
@@ -673,8 +673,8 @@ export function ensureNovelStyles(): void {
     .anw-private-library__filters > .qwenpaw-select { min-width:0; max-width:100%; flex:1 1 140px; }
     .anw-private-library__filters > label { display:flex; flex:0 0 auto; align-items:center; gap:6px; white-space:nowrap; }
     .anw-private-library__filters > label input { flex:0 0 auto; margin:0; }
-    .anw-private-library__desktop-layout { display:grid; min-height:560px; grid-template-columns:minmax(280px,34%) minmax(0,1fr); overflow:hidden; border:1px solid var(--anw-line); border-radius:14px; background:#fff; box-shadow:var(--anw-shadow-soft); }
-    .anw-private-library__master { min-width:0; overflow:auto; border-right:1px solid var(--anw-line); padding:12px; background:#fafbfc; }
+    .anw-private-library__desktop-layout { display:grid; min-height:0; grid-template-columns:minmax(280px,34%) minmax(0,1fr); overflow:hidden; border:1px solid var(--anw-line); border-radius:14px; background:#fff; box-shadow:var(--anw-shadow-soft); }
+    .anw-private-library__master { min-width:0; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; border-right:1px solid var(--anw-line); padding:12px; background:#fafbfc; }
     .anw-private-library__asset-list { display:grid; gap:9px; }
     .anw-private-library__asset-card.qwenpaw-card { border-color:#e8eaee; border-radius:10px; box-shadow:none; }
     .anw-private-library__asset-card.is-selected.qwenpaw-card { border-color:#ff9d7c; background:#fff8f4; box-shadow:0 0 0 2px rgba(255,112,67,.09); }
@@ -685,7 +685,7 @@ export function ensureNovelStyles(): void {
     .anw-private-library__asset-select span { color:#888e97; font-size:12px; }
     .anw-private-library__asset-select:focus-visible { border-radius:5px; outline:2px solid rgba(255,112,67,.35); outline-offset:3px; }
     .anw-private-library__asset-meta { display:flex; min-width:0; flex-wrap:wrap; align-items:center; gap:5px; color:#9a9ea5; font-size:10px; }
-    .anw-private-library__detail-pane { min-width:0; overflow:auto; padding:24px; }
+    .anw-private-library__detail-pane { min-width:0; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:24px; }
     .anw-private-library__detail { display:grid; min-width:0; gap:22px; overflow-wrap:anywhere; }
     .anw-private-library__detail-header { display:flex; min-width:0; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:18px; border-bottom:1px solid var(--anw-line); padding-bottom:18px; }
     .anw-private-library__detail-header > div:first-child { min-width:0; flex:1 1 220px; }
@@ -715,7 +715,7 @@ export function ensureNovelStyles(): void {
     /* The host sidebar and assistant can narrow this desktop page independently
        of the window. Keep this query anonymous for the inline CSS compactor. */
     @container (max-width:760px) {
-      .anw-private-library__desktop-layout { min-height:0; grid-template-columns:minmax(0,1fr); }
+      .anw-private-library__desktop-layout { min-height:0; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(160px,35%) minmax(0,1fr); }
       .anw-private-library__master { max-height:320px; border-right:0; border-bottom:1px solid var(--anw-line); }
       .anw-private-library__detail-pane { padding:18px; }
     }
@@ -1137,7 +1137,9 @@ export function ensureNovelStyles(): void {
     }
 
     .mb-private-page { min-height:100%; overflow:auto; padding:28px 34px 72px; background:#fff; }
+    .mb-private-page:has(.anw-private-library) { height:100%; min-height:0; overflow:hidden; padding-bottom:28px; }
     .mb-private-inner { width:min(1180px,100%); margin:0 auto; }
+    .mb-private-inner:has(> .anw-private-library) { display:flex; height:100%; min-height:0; flex-direction:column; }
     .mb-private-header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
     .mb-private-title-row { display:flex; align-items:center; gap:22px; }
     .mb-private-title-row h1 { margin:0; font-size:31px; }

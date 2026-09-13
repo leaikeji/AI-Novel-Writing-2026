@@ -16,15 +16,22 @@ describe("private library desktop container layout", () => {
 
   it("switches master and detail to stacked desktop panels using the library width", () => {
     // CSS contracts do not replace formal desktop screenshot and keyboard checks.
-    expect(styleSource).toContain(".anw-private-library { display:grid; min-width:0; gap:18px; container-type:inline-size; }");
+    expect(styleSource).toContain(".anw-private-library { display:grid; min-width:0; min-height:0; flex:1 1 auto; grid-template-rows:auto auto auto minmax(0,1fr); gap:18px; overflow:hidden; container-type:inline-size; }");
     const containerRules = [...styleSource.matchAll(/@container \(max-width:760px\) \{([^]*?)\n    \}/g)]
       .map((match) => match[1]);
     const libraryRules = containerRules.find((rules) => rules.includes(".anw-private-library__desktop-layout"));
-    expect(libraryRules).toContain(".anw-private-library__desktop-layout { min-height:0; grid-template-columns:minmax(0,1fr); }");
+    expect(libraryRules).toContain(".anw-private-library__desktop-layout { min-height:0; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(160px,35%) minmax(0,1fr); }");
     expect(libraryRules).toContain(".anw-private-library__master { max-height:320px; border-right:0; border-bottom:1px solid var(--anw-line); }");
     expect(libraryRules).toContain(".anw-private-library__detail-pane { padding:18px; }");
     expect(styleSource).toContain("grid-template-columns:minmax(280px,34%) minmax(0,1fr);");
-    expect(styleSource).toContain(".anw-private-library__master { min-width:0; overflow:auto;");
+  });
+
+  it("bounds the workspace and gives master and detail independent vertical scrollbars", () => {
+    expect(styleSource).toContain(".mb-private-page:has(.anw-private-library) { height:100%; min-height:0; overflow:hidden; padding-bottom:28px; }");
+    expect(styleSource).toContain(".mb-private-inner:has(> .anw-private-library) { display:flex; height:100%; min-height:0; flex-direction:column; }");
+    expect(styleSource).toContain(".anw-private-library__desktop-layout { display:grid; min-height:0;");
+    expect(styleSource).toContain(".anw-private-library__master { min-width:0; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable;");
+    expect(styleSource).toContain(".anw-private-library__detail-pane { min-width:0; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable;");
   });
 
   it("keeps library and detail titles readable when their controls need another row", () => {
