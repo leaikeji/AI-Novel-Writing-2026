@@ -155,6 +155,10 @@ export function createPrivateLibraryWorkspace(
     const [saveNotice, setSaveNotice] = React.useState<string | null>(null);
     const tabRefs = React.useRef<Array<FocusHandle | null>>([]);
     const returnFocusRef = React.useRef<FocusHandle | null>(null);
+    const returnFocusKeyRef = React.useRef<string | null>(null);
+    const returnFocusScopeRef = React.useRef<string | null>(null);
+    const focusTargetsRef = React.useRef(new Map<string, FocusHandle>());
+    const returnFocusPendingRef = React.useRef(false);
     const editorInputRef = React.useRef<FocusHandle | null>(null);
     const editorSessionRef = React.useRef<EditorSession | null>(null);
 
@@ -210,6 +214,13 @@ export function createPrivateLibraryWorkspace(
       props.onSelectAsset?.(assetId);
     };
 
+    const focusKey = (kind: string, assetId?: string, entryId?: string) =>
+      JSON.stringify([props.activeNovel?.id ?? null, kind, assetId ?? null, entryId ?? null]);
+    const bindFocusTarget = (key: string) => (node: FocusHandle | null) => {
+      if (node) focusTargetsRef.current.set(key, node);
+      else focusTargetsRef.current.delete(key);
+    };
+
     const openEditor = (state: EditorState, trigger?: FocusHandle | null) => {
       if (editorSessionRef.current) {
         setSaveError("请先处理当前表单，输入仍保留；关闭前可选中文字复制。");
@@ -223,6 +234,11 @@ export function createPrivateLibraryWorkspace(
         targetAssetId, pending: false, saved: false,
       };
       returnFocusRef.current = trigger ?? null;
+      returnFocusScopeRef.current = scopeKey;
+      returnFocusKeyRef.current = state.kind === "entry"
+        ? focusKey("entry", state.assetId, state.draft.entryId)
+        : focusKey("asset", state.draft.assetId);
+      returnFocusPendingRef.current = false;
       setSaveError(null);
       setSaveNotice(null);
       setEditor(state);
@@ -235,7 +251,7 @@ export function createPrivateLibraryWorkspace(
       setSaveError(null);
       setSaveNotice(null);
       setSaving(false);
-      returnFocusRef.current?.focus();
+      returnFocusPendingRef.current = true;
     };
 
     const saveEditor = () => {
@@ -372,6 +388,7 @@ export function createPrivateLibraryWorkspace(
           { className: "anw-private-library__section-title" },
           h("h3", { id: "anw-private-library-entry-title" }, `词项（${entries.length}）`),
           h(Button, {
+            ref: bindFocusTarget(focusKey("entry", asset.id)),
             disabled: busy || asset.archived,
             onClick: (event: { currentTarget?: FocusHandle }) => openEditor(
               { kind: "entry", assetId: asset.id, draft: newEntryDraft() },
@@ -394,6 +411,7 @@ export function createPrivateLibraryWorkspace(
                 ),
                 entry.note ? h("p", null, entry.note) : null,
                 h(Button, {
+                  ref: bindFocusTarget(focusKey("entry", asset.id, entry.entry_id)),
                   type: "link",
                   disabled: busy || asset.archived,
                   onClick: (event: { currentTarget?: FocusHandle }) => openEditor(
@@ -469,6 +487,7 @@ export function createPrivateLibraryWorkspace(
               }),
             ),
             h(Button, {
+              ref: bindFocusTarget(focusKey("asset", selected.id)),
               disabled: busy || !detailReady,
               onClick: (event: { currentTarget?: FocusHandle }) => {
                 if (detailReady && !busy) openEditor(
@@ -651,6 +670,7 @@ export function createPrivateLibraryWorkspace(
           h("p", null, "管理用词、文风、叙事机制与灵感；是否用于写作由你明确决定。"),
         ),
         h(Button, {
+          ref: bindFocusTarget(focusKey("asset")),
           type: "primary",
           disabled: busy,
           onClick: (event: { currentTarget?: FocusHandle }) => openEditor(
@@ -755,7 +775,16 @@ export function createPrivateLibraryWorkspace(
             ? editor.draft.entryId ? "编辑词项" : "添加词项"
             : editor?.draft.assetId ? "编辑资料" : "新建资料",
           onClose: closeEditor,
-          afterOpenChange: (open: boolean) => { if (open) editorInputRef.current?.focus(); },
+          afterOpenChange: (open: boolean) => {
+            if (open) editorInputRef.current?.focus();
+            else if (returnFocusPendingRef.current && !editorSessionRef.current) {
+              returnFocusPendingRef.current = false;
+              if (currentScopeRef.current !== returnFocusScopeRef.current) return;
+              const key = returnFocusKeyRef.current;
+              const target = key ? focusTargetsRef.current.get(key) : undefined;
+              (target ?? returnFocusRef.current)?.focus();
+            }
+          },
           footer: h("div", { className: "anw-private-library__drawer-footer" },
             h(Button, { disabled: saving, onClick: closeEditor }, "取消"),
             h(Button, {

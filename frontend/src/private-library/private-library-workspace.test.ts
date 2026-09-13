@@ -257,6 +257,9 @@ describe("private library desktop workspace", () => {
     (drawer.props.afterOpenChange as (open: boolean) => void)(true);
     expect(inputFocus).toHaveBeenCalledOnce();
     (drawer.props.onClose as () => void)();
+    expect(triggerFocus).not.toHaveBeenCalled();
+    (drawer.props.afterOpenChange as (open: boolean) => void)(false);
+    (drawer.props.afterOpenChange as (open: boolean) => void)(false);
     expect(triggerFocus).toHaveBeenCalledOnce();
   });
 
@@ -527,6 +530,29 @@ describe("private library desktop workspace", () => {
     tree = harness.render(Workspace, updated);
     expect(findAll(tree, (element) => element.type === "drawer" && element.props.open === true)).toHaveLength(0);
     expect(save).toHaveBeenCalledOnce();
-    expect(focus).toHaveBeenCalledOnce();
+    expect(focus).not.toHaveBeenCalled();
+    const currentFocus = vi.fn();
+    const currentTrigger = findButton(tree, kind === "asset" ? "编辑资料" : "添加词项");
+    (currentTrigger.props.ref as (node: { focus(): void }) => void)({ focus: currentFocus });
+    const closedDrawer = findAll(tree, (element) => element.type === "drawer")[0]!;
+    (closedDrawer.props.afterOpenChange as (open: boolean) => void)(false);
+    expect(currentFocus).toHaveBeenCalledOnce();
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it.each(["new_editor", "other_novel"])("does not steal focus after a delayed close callback and %s", (change) => {
+    const harness = createPrivateLibraryHarness();
+    const Workspace = createPrivateLibraryWorkspace(harness.React, TEST_ANTD);
+    const input = { ...props(), selectedAssetId: "pack-1" };
+    let tree = harness.render(Workspace, input);
+    const focus = vi.fn();
+    (findButton(tree, "编辑资料").props.onClick as (event: object) => void)({ currentTarget: { focus } });
+    tree = harness.render(Workspace, input);
+    const drawer = findAll(tree, (element) => element.type === "drawer")[0]!;
+    (drawer.props.onClose as () => void)();
+    tree = harness.render(Workspace, change === "other_novel" ? { ...input, activeNovel: { id: "novel-b", title: "山海旧站" } } : input);
+    if (change === "new_editor") (findButton(tree, "新建词包").props.onClick as (event: object) => void)({});
+    (drawer.props.afterOpenChange as (open: boolean) => void)(false);
+    expect(focus).not.toHaveBeenCalled();
   });
 });
