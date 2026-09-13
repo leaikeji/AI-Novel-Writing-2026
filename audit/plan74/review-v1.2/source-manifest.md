@@ -1,6 +1,6 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：施工中；尚无本轮发布commit、包hash或正式安装回执。
+日期：2026-09-13。状态：`SOURCE COMMITTED / CODE VERIFIED / RELEASE HOLD`；已有精确源码commit和独立构建包，尚无本轮正式安装回执。
 
 ## 已核实来源
 
@@ -22,6 +22,14 @@
 
 G2-B发布前必须取得已上线外任务依赖的可重建Git来源；若仍未提交，先解决来源协调，不偷偷夹带、也不发布会退掉现有功能的包。本表不是额外任务施工或提交授权。
 
-## 待填写的交付对应
+## 提交树与包
 
-提交树全量验证、前端构建、包审核通过后再记录候选commit/tree、包SHA-256、公开安装回执、正式schema和逐Agent配置保持快照。后续证据提交与候选源码提交分开记录，push之后重新确认实际远端引用。
+- 本任务源码提交：`ea02b99e9793fa8da1dee457ce0f62f3d8bf0129`；tree `23dd0d85fcbe022a0d9f70a0a3e8e4a96d455297`。共138文件；共享的app、workbench和开发索引按hunk暂存，计划70／compose改动仍在原工作区未提交。
+- 独立代码检出：`/private/tmp/plan74-committed-source.Qv4ure/code`，已通过[提交树复验](./code-validation.md#独立提交树复验)。保留该目录供复核，不含正式数据或密钥。
+- 包：`/private/tmp/plan74-committed-source.Qv4ure/ea02b99-plugin.tar.gz`，SHA-256 `ddf568e3c9327d7f18eda644c9128a2e062690732c9b1e0a115ea8ebd831ce52`。此包不包含外任务未提交功能，标为不可安装，不是正式发布包。
+- 正式安装：`NOT_RUN`；本轮没有重启、更新宿主、修改业务数据或调用模型。正式0056只读核验保持。
+- 已向作者请求窄范围决定：是否允许把正式已有的作品资料／朗读续播改动作为依赖单独提交。未得到回复，不夹带提交，也不让正式功能倒退。
+
+后续证据提交与源码提交分开。Git远端验证记录补在本页末尾；代码push本身不关闭正式G3或整项W5。
+
+2026-09-13已执行`git push origin main`，随后`git ls-remote origin refs/heads/main`返回`ea02b99e9793fa8da1dee457ce0f62f3d8bf0129`，与本任务源码提交完全相同。本页和最终状态更新另作纯证据提交，不改变已验证代码树。
