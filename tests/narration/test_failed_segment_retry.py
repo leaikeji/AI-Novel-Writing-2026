@@ -175,6 +175,67 @@ def test_repeated_manual_non_retryable_failure_stops_identical_retry_loop() -> N
         )
 
 
+@pytest.mark.parametrize(
+    ("earlier", "latest_code", "allowed"),
+    [
+        (["TTS_PROVIDER_UNAVAILABLE"] * 3, "TTS_AUDIO_INVALID", True),
+        (["TTS_PROVIDER_UNAVAILABLE", "TTS_AUDIO_INVALID"], "TTS_AUDIO_INVALID", False),
+        (["TTS_AUDIO_INVALID"], "TTS_AUDIO_INVALID", False),
+        (["TTS_PROVIDER_UNAVAILABLE"], "TTS_INPUT_INVALID", False),
+        (["TTS_PROVIDER_UNAVAILABLE"], "NANO_AUDIO_INVALID", False),
+        (["SECURITY_FAILURE"], "TTS_AUDIO_INVALID", False),
+        (["UNKNOWN_FAILURE"], "TTS_AUDIO_INVALID", False),
+        (["missing"], "TTS_AUDIO_INVALID", False),
+        (["unfinished"], "TTS_AUDIO_INVALID", False),
+        (["misclassified"], "TTS_AUDIO_INVALID", False),
+    ],
+)
+def test_audio_quality_retry_requires_complete_infrastructure_only_history(
+    earlier: list[str], latest_code: str, allowed: bool,
+) -> None:
+    store, _, request, edition, renders, rows = _foundation()
+    job = _fail(store, rows[0], renders[0], code=latest_code)
+    request.state = edition.state = "partial_ready"
+    job.attempt_count = len(earlier) + 1
+    # Replace only this fixture job's original successful publication attempt.
+    store.rows[BackgroundJobAttempt] = [
+        row for row in store.rows[BackgroundJobAttempt] if row.job_id != job.id
+    ]
+    for number, code in enumerate([*earlier, latest_code], start=1):
+        if code == "missing":
+            continue
+        latest = number == job.attempt_count
+        store.add(BackgroundJobAttempt(
+            id=uuid4(), job_id=job.id, attempt_number=number,
+            retry_kind="manual" if latest else "initial" if number == 1 else "automatic",
+            manual_retry_command_id=uuid4() if latest else None,
+            completed_at=None if code == "unfinished" else NOW,
+            error_classification=(
+                None if code == "unfinished" else
+                "retryable" if code == "TTS_PROVIDER_UNAVAILABLE" else "non_retryable"
+            ),
+            error_code="TTS_PROVIDER_UNAVAILABLE" if code == "misclassified" else code,
+        ))
+    # A different job's quality failures must not spend this job's allowance.
+    store.add(BackgroundJobAttempt(
+        id=uuid4(), job_id=uuid4(), attempt_number=1,
+        retry_kind="initial", completed_at=NOW,
+        error_classification="non_retryable", error_code="TTS_AUDIO_INVALID",
+    ))
+    before = [(row.id, row.render_state) for row in rows]
+    projection = project_failed_segment_retries(store, edition_id=edition.id)
+    assert projection.items[0].retryable is allowed
+    command = _command(request, edition.id, rows[0].segment_id)
+    if allowed:
+        plan = plan_failed_segment_retry(store, command)
+        assert len(plan.groups) == 1
+        assert plan.groups[0].job_id == job.id
+    else:
+        with pytest.raises(InvalidNarrationState, match="LATEST_MANUAL_ATTEMPT_NON_RETRYABLE"):
+            plan_failed_segment_retry(store, command)
+    assert [(row.id, row.render_state) for row in rows] == before
+
+
 def test_partial_failure_without_any_ready_segment_remains_retryable() -> None:
     store, _foundation_rows, request, edition, renders, rows = _foundation()
     _fail(store, rows[0], renders[0])

@@ -337,6 +337,32 @@ def _render_and_job(
     return render, job
 
 
+def _first_audio_failure_after_outage(
+    store: NarrationStore, job: BackgroundJob, attempt: BackgroundJobAttempt
+) -> bool:
+    """Do not spend the audio-quality retry on attempts that produced no audio.
+
+    This is a narrow exception, not a resettable retry counter: complete history
+    must prove that every earlier attempt only failed to reach the provider.
+    Any previous quality failure (or missing evidence) keeps the terminal gate.
+    """
+    if attempt.error_code != "TTS_AUDIO_INVALID" or job.attempt_count < 2:
+        return False
+    history = store.find_all(
+        BackgroundJobAttempt, job_id=job.id, order_by=("attempt_number",)
+    )
+    if [row.attempt_number for row in history] != list(
+        range(1, job.attempt_count + 1)
+    ):
+        return False
+    return all(
+        row.completed_at is not None
+        and row.error_classification == "retryable"
+        and row.error_code == "TTS_PROVIDER_UNAVAILABLE"
+        for row in history[:-1]
+    )
+
+
 def _group(
     store: NarrationStore,
     *,
@@ -369,11 +395,10 @@ def _group(
         elif (
             attempt.retry_kind == "manual"
             and attempt.error_classification == "non_retryable"
+            and not _first_audio_failure_after_outage(store, job, attempt)
         ):
-            # One explicit author retry remains useful for transient executor or
-            # model variance. If that manual attempt reaches the same terminal
-            # safety classification, repeating the identical frozen request is
-            # no longer a recovery action and must not create an endless loop.
+            # Repeated quality failures stay terminal; infrastructure-only
+            # history must not consume the first explicit audio-quality retry.
             reason = reason or "LATEST_MANUAL_ATTEMPT_NON_RETRYABLE"
     try:
         for voice_version_id in sorted({row.voice_version_id for row in fanout}, key=str):
