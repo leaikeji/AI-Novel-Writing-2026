@@ -592,6 +592,64 @@ describe("voice source workspace", () => {
     ).actions.canPreview).toBe(true);
   });
 
+  it("restores a generated preview and its player after the workspace reloads", async () => {
+    const restoredVersion: VoiceProfileVersionResource = {
+      ...generatedVersion(),
+      state: "preview_ready",
+      provider_id: "local_qwen3_tts",
+      model_id: "Qwen3-TTS-12Hz-1.7B-VoiceDesign-BF16",
+      model_revision: "pinned",
+      reference_asset_id: ASSET_ID,
+      preview_asset: {
+        asset_id: ASSET_ID,
+        content_path: `/media-assets/${ASSET_ID}/content`,
+        mime_type: "audio/wav",
+        byte_size: 4,
+        duration_ms: 800,
+        checksum_sha256: "c".repeat(64),
+      },
+    };
+    const restored = profile(3, restoredVersion);
+    const api: VoiceSourceWorkspaceApi = {
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [restored],
+      })),
+      createVoiceProfile: vi.fn(),
+      getVoiceProfile: vi.fn(),
+      createDesignedVoiceVersion: vi.fn(),
+      createUploadedVoiceVersion: vi.fn(),
+      createVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+      lockVoiceProfile: vi.fn(),
+    };
+    const harness = createHarness();
+    const Workspace = createVoiceSourceWorkspace(harness.React, api);
+    const props = {
+      novelId: NOVEL_ID,
+      capabilities: designedCapabilities,
+      authorization,
+      voiceSources: designedVoiceSources,
+    };
+
+    harness.render(Workspace, props);
+    await settle();
+    const tree = harness.render(Workspace, props);
+    const panel = sourcePanel(tree);
+    expect(panel.props.selectedSource).toBe("generated");
+    expect(textContent(panel.props.previewContent)).toContain("3. 试听并确认");
+    const restoredPlayback = findAll(panel.props.previewContent, (element) => (
+      element.props.versionId === VERSION_ID
+      && (element.props.asset as { readonly asset_id?: string } | null)?.asset_id === ASSET_ID
+      && typeof element.props.onPlayed === "function"
+    ))[0];
+    expect(restoredPlayback).toBeDefined();
+    (restoredPlayback.props.onPlayed as () => void)();
+    const rerendered = harness.render(Workspace, props);
+    expect(sourcePanel(rerendered).props.qualityConfirmationAllowed).toBe(true);
+    expect(textContent(rerendered)).toContain("已有试听已开始播放");
+  });
+
   it("keeps the retired official candidate workflow out of the private-source workspace", async () => {
     const draft = profile();
     const api: VoiceSourceWorkspaceApi = {

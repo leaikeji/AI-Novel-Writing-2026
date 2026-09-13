@@ -40,6 +40,14 @@ export interface VoicePreviewPlaybackProps {
 }
 
 
+export interface VoiceVersionPreviewPlaybackProps {
+  readonly versionId: string | null;
+  readonly asset: MediaAssetLink | null;
+  readonly className?: string;
+  readonly onPlayed?: () => void;
+}
+
+
 type PlaybackState =
   | { readonly phase: "idle"; readonly objectUrl: null; readonly message: string }
   | { readonly phase: "loading"; readonly objectUrl: null; readonly message: string }
@@ -319,6 +327,104 @@ export function createVoicePreviewPlayback(
           preload: "metadata",
           src: state.objectUrl,
           "aria-label": "播放当前音色试听",
+          onPlay: props.onPlayed,
+        })
+        : null,
+      h(
+        "p",
+        {
+          role: state.phase === "error" ? "alert" : "status",
+          "aria-live": "polite",
+        },
+        state.message,
+      ),
+    );
+  };
+}
+
+
+/** Restore an already-generated version preview after the workspace is reloaded. */
+export function createVoiceVersionPreviewPlayback(
+  React: VoicePreviewPlaybackReactRuntime,
+  dependencies: {
+    readonly host?: VoicePreviewHost;
+    readonly objectUrls?: VoicePreviewObjectUrlApi;
+  } = {},
+): (props: VoiceVersionPreviewPlaybackProps) => unknown {
+  const h = React.createElement;
+  const objectUrls = dependencies.objectUrls ?? URL;
+
+  return function VoiceVersionPreviewPlayback(props: VoiceVersionPreviewPlaybackProps): unknown {
+    const [state, setState] = React.useState<PlaybackState>({
+      phase: "idle",
+      objectUrl: null,
+      message: "这个版本还没有可播放的试听。",
+    });
+    const objectUrlRef = React.useRef<string | null>(null);
+    const generationRef = React.useRef(0);
+    const readyIdentity = props.versionId !== null && props.asset !== null
+      ? `${props.versionId}:${props.asset.asset_id}:${props.asset.checksum_sha256}`
+      : "";
+
+    React.useEffect(() => {
+      const generation = ++generationRef.current;
+      const controller = new AbortController();
+      if (objectUrlRef.current !== null) {
+        objectUrls.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+      if (readyIdentity === "" || props.versionId === null || props.asset === null) {
+        setState({
+          phase: "idle",
+          objectUrl: null,
+          message: "这个版本还没有可播放的试听。",
+        });
+        return () => controller.abort();
+      }
+      setState({ phase: "loading", objectUrl: null, message: "正在恢复已有试听…" });
+      void fetchVoiceVersionObjectUrl(props.versionId, props.asset, {
+        host: dependencies.host,
+        objectUrls,
+        signal: controller.signal,
+      }).then((objectUrl) => {
+        if (controller.signal.aborted || generation !== generationRef.current) {
+          objectUrls.revokeObjectURL(objectUrl);
+          return;
+        }
+        objectUrlRef.current = objectUrl;
+        setState({
+          phase: "ready",
+          objectUrl,
+          message: "已有试听已恢复。播放不会自动确认质量或绑定声音。",
+        });
+      }).catch((reason: unknown) => {
+        if (controller.signal.aborted || generation !== generationRef.current) return;
+        setState({ phase: "error", objectUrl: null, message: playbackErrorMessage(reason) });
+      });
+      return () => {
+        controller.abort();
+        if (objectUrlRef.current !== null) {
+          objectUrls.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+        }
+      };
+    }, [readyIdentity]);
+
+    return h(
+      "section",
+      {
+        className: ["anw-narration-voice-preview-playback", props.className ?? ""]
+          .filter(Boolean)
+          .join(" "),
+        "data-version-preview-playback-phase": state.phase,
+        "aria-label": "已有音色试听播放器",
+      },
+      state.phase === "ready" && state.objectUrl !== null
+        ? h("audio", {
+          controls: true,
+          preload: "metadata",
+          src: state.objectUrl,
+          "aria-label": "播放已有音色试听",
           onPlay: props.onPlayed,
         })
         : null,

@@ -612,6 +612,51 @@ async def test_playback_only_never_reads_keyring_or_starts_worker(
 
 
 @pytest.mark.asyncio
+async def test_product_runtime_wires_private_voice_media_resolvers(
+    production_owner,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    original = production_owner.build_playback_api_backend_factory
+
+    def capture_factory(storage, **kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return original(storage, **kwargs)
+
+    monkeypatch.setattr(
+        production_owner,
+        "build_playback_api_backend_factory",
+        capture_factory,
+    )
+    monkeypatch.setattr(
+        production_owner,
+        "load_digest_keyring",
+        lambda _path: (_ for _ in ()).throw(DigestKeyringError(
+            "DIGEST_KEYRING_UNAVAILABLE",
+            "narration digest keyring is unavailable",
+        )),
+    )
+
+    await production_owner.launch_narration_production_runtime(
+        _environment(tmp_path, product=True)
+    )
+    await _wait_until(
+        lambda: production_owner.narration_production_runtime_status()[
+            "lifecycle_status"
+        ]
+        == "unavailable"
+    )
+
+    assert captured["resolve_voice_preview_media"] is (
+        production_owner.resolve_qwen_voice_preview_media
+    )
+    assert captured["resolve_voice_version_media"] is (
+        production_owner.resolve_qwen_voice_version_media
+    )
+
+
+@pytest.mark.asyncio
 async def test_missing_keyring_fails_closed_before_database_provider_or_worker(
     production_owner,
     monkeypatch: pytest.MonkeyPatch,

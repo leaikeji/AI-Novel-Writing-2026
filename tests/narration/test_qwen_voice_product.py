@@ -42,6 +42,8 @@ from backend.narration.qwen_voice_product import (
     VOICE_DESIGN_ARTIFACT_SHA256,
     VOICE_DESIGN_MODEL_ID,
     VOICE_DESIGN_MODEL_REVISION,
+    resolve_qwen_voice_preview_media,
+    resolve_qwen_voice_version_media,
 )
 from backend.narration.resource_locks import ResourceFence
 from backend.narration.scheduler import NarrationJobScheduler, SchedulerConfig
@@ -500,6 +502,17 @@ def test_live_postgres_designed_voice_reaches_locked_durable_closure() -> None:
     assert outcome.status == "succeeded", outcome
     ready = service.get_preview(preview_id=preview.preview_id)
     assert ready.status is wire.VoicePreviewStatus.READY and ready.asset is not None
+    with sessions() as session:
+        assert resolve_qwen_voice_preview_media(
+            session,
+            ready.preview_id,
+            ready.asset.asset_id,
+        ).id == ready.asset.asset_id
+        assert resolve_qwen_voice_version_media(
+            session,
+            version.version_id,
+            ready.asset.asset_id,
+        ).id == ready.asset.asset_id
     locked = service.lock_profile(
         profile_id=profile_id,
         request=wire.LockVoiceProfileRequest(

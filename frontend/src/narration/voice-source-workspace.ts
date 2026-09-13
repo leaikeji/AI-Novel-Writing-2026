@@ -35,6 +35,7 @@ import {
 } from "./voice-source-panel";
 import {
   createVoicePreviewPlayback,
+  createVoiceVersionPreviewPlayback,
   type VoicePreviewPlaybackReactRuntime,
 } from "./voice-preview-playback";
 
@@ -244,6 +245,27 @@ function defaultVersionId(profile: VoiceProfileResource | null): string | null {
 }
 
 
+function sourceForVersion(
+  version: VoiceProfileVersionResource | null,
+): VoiceSourceType | null {
+  return version?.source_type === "generated" || version?.source_type === "uploaded"
+    ? version.source_type
+    : null;
+}
+
+
+function restoredVersionSelection(
+  profile: VoiceProfileResource | null,
+  preferredVersionId: string | null,
+): { readonly versionId: string | null; readonly source: VoiceSourceType | null } {
+  const versions = selectableVersions(profile);
+  const version = versions.find((item) => item.version_id === preferredVersionId)
+    ?? versions.find((item) => item.version_id === defaultVersionId(profile))
+    ?? null;
+  return { versionId: version?.version_id ?? null, source: sourceForVersion(version) };
+}
+
+
 function isAbortLike(reason: unknown): boolean {
   return reason !== null
     && typeof reason === "object"
@@ -296,6 +318,7 @@ export function createVoiceSourceWorkspace(
 ): (props: VoiceSourceWorkspaceProps) => unknown {
   const h = React.createElement;
   const PreviewPlayback = createVoicePreviewPlayback(React);
+  const VersionPreviewPlayback = createVoiceVersionPreviewPlayback(React);
 
   return function VoiceSourceWorkspace(props: VoiceSourceWorkspaceProps): unknown {
     const suggestedName = props.suggestedProfileName?.trim() || "自定义朗读音色";
@@ -356,15 +379,18 @@ export function createVoiceSourceWorkspace(
       const currentVersionStillExists = selectedProfile?.versions.some((version) => (
         version.version_id === current.selectedVersionId
       )) ?? false;
+      const selection = restoredVersionSelection(
+        selectedProfile,
+        currentVersionStillExists ? current.selectedVersionId : null,
+      );
       commit({
         ...current,
         scopeNovelId: props.novelId,
         phase: "ready",
         profiles,
         selectedProfileId: selectedProfile?.profile_id ?? null,
-        selectedVersionId: currentVersionStillExists
-          ? current.selectedVersionId
-          : defaultVersionId(selectedProfile),
+        selectedVersionId: selection.versionId,
+        selectedSource: selection.source,
         message,
         failure: null,
       });
@@ -470,17 +496,19 @@ export function createVoiceSourceWorkspace(
         await api.getVoiceProfile(profileId, controller.signal),
       );
       if (ownsScope(generation, sequence, controller)) {
-        commit((current) => ({
-          ...current,
-          phase: "ready",
-          profiles: replaceProfile(current.profiles, refreshed),
-          selectedProfileId: refreshed.profile_id,
-          selectedVersionId: refreshed.versions.some((item) => item.version_id === current.selectedVersionId)
-            ? current.selectedVersionId
-            : defaultVersionId(refreshed),
-          message,
-          failure: null,
-        }));
+        commit((current) => {
+          const selection = restoredVersionSelection(refreshed, current.selectedVersionId);
+          return {
+            ...current,
+            phase: "ready",
+            profiles: replaceProfile(current.profiles, refreshed),
+            selectedProfileId: refreshed.profile_id,
+            selectedVersionId: selection.versionId,
+            selectedSource: selection.source,
+            message,
+            failure: null,
+          };
+        });
       }
       return refreshed;
     };
@@ -551,6 +579,7 @@ export function createVoiceSourceWorkspace(
       if (actionsBlocked) return;
       const profile = scopedState.profiles.find((item) => item.profile_id === profileId);
       if (!profile) return;
+      const selection = restoredVersionSelection(profile, null);
       operationAbortRef.current?.abort();
       operationSequenceRef.current += 1;
       idempotencyRef.current.clear();
@@ -558,8 +587,8 @@ export function createVoiceSourceWorkspace(
         ...current,
         phase: "ready",
         selectedProfileId: profile.profile_id,
-        selectedVersionId: defaultVersionId(profile),
-        selectedSource: null,
+        selectedVersionId: selection.versionId,
+        selectedSource: selection.source,
         referenceAudio: null,
         referenceText: "",
         designDescription: "",
@@ -1152,16 +1181,24 @@ export function createVoiceSourceWorkspace(
                 }),
               ),
           ),
-        h(PreviewPlayback, {
-          preview: scopedState.workflow.status === "preview_ready"
-            ? scopedState.workflow.preview
-            : null,
-          onPlayed: () => commit((current) => ({
-            ...current,
-            previewPlayed: true,
-            message: "试听已开始播放。听检后请显式确认质量，再锁定版本。",
-          })),
-        }),
+        scopedState.workflow.status === "preview_ready"
+          ? h(PreviewPlayback, {
+            preview: scopedState.workflow.preview,
+            onPlayed: () => commit((current) => ({
+              ...current,
+              previewPlayed: true,
+              message: "试听已开始播放。听检后请显式确认质量，再锁定版本。",
+            })),
+          })
+          : h(VersionPreviewPlayback, {
+            versionId: selectedVersion?.version_id ?? null,
+            asset: selectedVersion?.preview_asset ?? null,
+            onPlayed: () => commit((current) => ({
+              ...current,
+              previewPlayed: true,
+              message: "已有试听已开始播放。听检后请显式确认质量，再锁定版本。",
+            })),
+          }),
         scopedState.workflow.status === "preview_timeout"
           ? h("button", {
             type: "button",

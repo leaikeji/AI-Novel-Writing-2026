@@ -52,6 +52,8 @@ from .qwen_voice_product import (
     QwenVoiceProductPolicy,
     QwenVoiceProductService,
     process_qwen_voice_preview_job,
+    resolve_qwen_voice_preview_media,
+    resolve_qwen_voice_version_media,
 )
 from .playback_api import (
     PlaybackApiBackendFactory,
@@ -1476,6 +1478,12 @@ async def launch_narration_production_runtime(
             playback_factory = build_playback_api_backend_factory(
                 storage,
                 can_promote_jobs=_production_job_promotion_allowed,
+                resolve_voice_preview_media=(
+                    resolve_qwen_voice_preview_media if requested else None
+                ),
+                resolve_voice_version_media=(
+                    resolve_qwen_voice_version_media if requested else None
+                ),
             )
             install_playback_api_backend_factory(playback_factory)
             _playback_factory = playback_factory

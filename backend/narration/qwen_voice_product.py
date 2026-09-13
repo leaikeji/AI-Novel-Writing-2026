@@ -542,6 +542,129 @@ def _preview_resource(
     )
 
 
+def resolve_qwen_voice_preview_media(
+    session: Session,
+    preview_id: UUID,
+    asset_id: UUID,
+) -> MediaAsset:
+    """Resolve one unexpired private preview through its exact authorization ID."""
+
+    now = _db_now(session)
+    preview = session.get(VoicePreview, preview_id)
+    scope = NarrationRequestScope.fixed_local()
+    if preview is None:
+        raise NarrationNotFound("voice preview not found")
+    if (
+        preview.owner_id != scope.owner_id
+        or preview.workspace_id != scope.workspace_id
+        or preview.result_asset_id != asset_id
+    ):
+        raise NarrationScopeMismatch(
+            "voice preview media is outside the requested scope"
+        )
+    if (
+        preview.status != "ready"
+        or preview.completed_at is None
+        or preview.expires_at is None
+        or preview.expires_at <= now
+        or preview.failure_code is not None
+    ):
+        raise InvalidNarrationState("voice preview media is unavailable")
+
+    profile = _required_profile(session, preview.profile_id, for_update=False)
+    version = _required_version(
+        session,
+        preview.profile_id,
+        preview.version_id,
+        for_update=False,
+    )
+    if (
+        preview.novel_id != profile.novel_id
+        or preview.rights_record_id != version.rights_record_id
+        or version.source_type not in {"uploaded", "generated"}
+        or version.state not in {"preview_ready", "locked"}
+    ):
+        raise NarrationScopeMismatch(
+            "voice preview media no longer matches its voice version"
+        )
+    rights = _required_active_rights(
+        session,
+        profile,
+        version,
+        at=now,
+        for_update=False,
+    )
+    if rights.id != preview.rights_record_id:
+        raise NarrationScopeMismatch("voice preview rights no longer match")
+
+    asset = session.get(MediaAsset, asset_id)
+    if (
+        asset is None
+        or asset.owner_id != profile.owner_id
+        or asset.workspace_id != profile.workspace_id
+        or asset.novel_id != profile.novel_id
+        or asset.kind != "narration_voice_preview"
+        or asset.asset_class != "preview"
+        or asset.retention_policy != "temporary_preview"
+        or asset.state != "ready"
+        or asset.expires_at != preview.expires_at
+        or asset.expires_at is None
+        or asset.expires_at <= now
+        or asset.mime_type != "audio/wav"
+        or not asset.byte_size
+        or not asset.duration_ms
+        or asset.checksum_algorithm != "sha256"
+        or _SHA256.fullmatch(asset.content_hash) is None
+        or asset.verified_at is None
+    ):
+        raise InvalidNarrationState("voice preview media is not authoritative")
+    return asset
+
+
+def resolve_qwen_voice_version_media(
+    session: Session,
+    version_id: UUID,
+    asset_id: UUID,
+) -> MediaAsset:
+    """Resolve the exact latest preview published for one private voice version."""
+
+    version = session.get(VoiceProfileVersion, version_id)
+    if version is None:
+        raise NarrationNotFound("voice version not found")
+    profile = _required_profile(session, version.profile_id, for_update=False)
+    version = _required_version(
+        session,
+        profile.id,
+        version_id,
+        for_update=False,
+    )
+    now = _db_now(session)
+    rights = _required_active_rights(
+        session,
+        profile,
+        version,
+        at=now,
+        for_update=False,
+    )
+    preview = session.scalar(
+        select(VoicePreview)
+        .where(
+            VoicePreview.profile_id == profile.id,
+            VoicePreview.version_id == version.id,
+            VoicePreview.rights_record_id == rights.id,
+            VoicePreview.result_asset_id == asset_id,
+            VoicePreview.status == "ready",
+            VoicePreview.expires_at.is_not(None),
+            VoicePreview.expires_at > now,
+        )
+        .order_by(VoicePreview.completed_at.desc(), VoicePreview.id.desc())
+        .execution_options(populate_existing=True)
+    )
+    if preview is None:
+        raise NarrationNotFound("voice version preview media not found")
+    return resolve_qwen_voice_preview_media(session, preview.id, asset_id)
+
+
 def _ready_media_row(
     *,
     asset_id: UUID,
@@ -2709,4 +2832,6 @@ __all__ = [
     "VOICE_DESIGN_MODEL_REVISION",
     "VOICE_PREVIEW_JOB_KIND",
     "process_qwen_voice_preview_job",
+    "resolve_qwen_voice_preview_media",
+    "resolve_qwen_voice_version_media",
 ]
