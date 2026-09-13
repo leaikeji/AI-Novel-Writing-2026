@@ -843,6 +843,11 @@ function isAbort(reason: unknown): boolean {
 
 
 function isTransientEditionProjectionMismatch(reason: unknown): boolean {
+  // A freshly published partial Edition can become visible a few milliseconds
+  // before every read projection behind the host bridge observes it.  Keep the
+  // existing bounded load retry for that one-way convergence window.  A
+  // persistent 404 still stops at maxPollAttempts / pollTimeoutMs.
+  if (reason instanceof PlaybackApiError && reason.status === 404) return true;
   if (
     !(reason instanceof ChapterNarrationSessionError)
     || reason.code !== "CONTRACT_MISMATCH"

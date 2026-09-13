@@ -159,7 +159,9 @@ export function deriveChapterNarrationPanelModel(
     ? null
     : rawOrdinal;
   const currentSegment = currentOrdinal === null ? null : props.segments[currentOrdinal] ?? null;
-  const canPlay = props.phase === "ready" && hasEdition && !props.busy;
+  // Background preparation belongs to the next Edition.  It must not disable
+  // transport for the already loaded immutable Edition.
+  const canPlay = props.phase === "ready" && hasEdition;
   const canSeek = canPlay;
   const lastManifestSegment = props.manifestSegments?.length === props.segments.length
     ? props.manifestSegments[props.manifestSegments.length - 1]
@@ -790,7 +792,6 @@ export function createChapterNarrationPanel(
                   {
                     className: "anw-chapter-narration-rate__select",
                     value: String(currentRate),
-                    disabled: props.busy,
                     onChange: (event: { target: { value: string } }) => {
                       props.onRateChange(Number(event.target.value));
                     },
@@ -812,7 +813,6 @@ export function createChapterNarrationPanel(
                     type: "button",
                     className: "anw-chapter-narration-tool-button",
                     ref: volumeTriggerRef,
-                    disabled: props.busy,
                     "aria-label": `章节朗读音量，当前 ${currentVolumePercent}%`,
                     "aria-controls": volumeId,
                     "aria-expanded": volumeOpen,
@@ -838,7 +838,6 @@ export function createChapterNarrationPanel(
                     max: 100,
                     step: 1,
                     value: currentVolumePercent,
-                    disabled: props.busy,
                     onChange: (event: { target: { value: string } }) => {
                       const percent = Math.min(100, Math.max(0, Number(event.target.value)));
                       props.onVolumeChange(percent / 100);

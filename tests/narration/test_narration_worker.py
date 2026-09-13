@@ -1372,14 +1372,14 @@ def test_repository_terminalizes_a_load_failure_in_the_same_transaction(
         ("沈川说道：", 22_080),
     ],
 )
-async def test_short_chinese_duration_runaway_is_non_retryable_and_never_published(
+async def test_short_chinese_duration_runaway_requests_one_automatic_regeneration(
     tmp_path: Path,
     spoken_text: str,
     duration_ms: int,
 ) -> None:
     execution = ControlledExecution(duration_ms=duration_ms)
     work = replace(await _work(execution, _lease()), text=spoken_text)
-    repository = FakeRepository(work, failure_state="failed")
+    repository = FakeRepository(work, failure_state="retry_wait")
     worker = await _worker(tmp_path, execution=execution, repository=repository)
     transcode_calls = 0
 
@@ -1391,8 +1391,46 @@ async def test_short_chinese_duration_runaway_is_non_retryable_and_never_publish
     worker._transcode = should_not_transcode
     outcome = await worker.run_once()
 
+    assert outcome.status == "retry_wait"
+    assert outcome.error_code == "TTS_AUDIO_REGENERATION_REQUIRED"
+    assert outcome.provider_id == "local_qwen3_tts"
+    assert repository.failures == [
+        ("retryable", "TTS_AUDIO_REGENERATION_REQUIRED")
+    ]
+    assert repository.failure_evidence == [None]
+    assert repository.published == []
+    assert transcode_calls == 0
+    assert not any(path.is_file() for path in (tmp_path / "media").rglob("*"))
+
+
+@pytest.mark.asyncio
+async def test_quality_regeneration_failure_is_terminal_and_keeps_diagnostics(
+    tmp_path: Path,
+) -> None:
+    duration_ms = 22_080
+    execution = ControlledExecution(duration_ms=duration_ms)
+    initial = await _work(execution, _lease())
+    recovery_lease = replace(
+        initial.lease,
+        attempt_number=2,
+        retry_kind="automatic",
+        fence=replace(initial.lease.fence, attempt_id=uuid4()),
+    )
+    work = replace(
+        initial,
+        lease=recovery_lease,
+        text="沈川说道：",
+        seed=worker_module.regenerated_qwen_seed(initial.seed),
+        quality_regeneration=True,
+    )
+    repository = FakeRepository(work, failure_state="failed")
+    worker = await _worker(tmp_path, execution=execution, repository=repository)
+
+    outcome = await worker.run_once()
+
     assert outcome.status == "failed"
     assert outcome.error_code == "TTS_AUDIO_INVALID"
+    assert outcome.provider_id == "local_qwen3_tts"
     assert repository.failures == [("non_retryable", "TTS_AUDIO_INVALID")]
     assert repository.failure_evidence == [
         {
@@ -1404,9 +1442,32 @@ async def test_short_chinese_duration_runaway_is_non_retryable_and_never_publish
             "policy_version": SHORT_CHINESE_DURATION_POLICY_VERSION,
         }
     ]
+    assert execution.calls[0][2].seed == worker_module.regenerated_qwen_seed(
+        initial.seed
+    )
     assert repository.published == []
-    assert transcode_calls == 0
-    assert not any(path.is_file() for path in (tmp_path / "media").rglob("*"))
+
+
+@pytest.mark.asyncio
+async def test_short_audio_regeneration_never_adds_an_unapproved_cloud_call() -> None:
+    execution = ControlledExecution()
+    work = replace(
+        await _work(execution, _lease()),
+        selection=wire.TTSProviderSelection(
+            provider_id="aliyun_qwen_audio_tts",
+            aliyun_model_id="qwen-audio-3.0-tts-plus",
+        ),
+    )
+    error = worker_module.ShortChineseDurationError(
+        actual_duration_ms=4_000,
+        allowed_duration_ms=3_200,
+        evaluated_codepoint_count=5,
+    )
+
+    assert NarrationSegmentWorker._classification_for_work(error, work) == (
+        "non_retryable",
+        "TTS_AUDIO_INVALID",
+    )
 
 
 @pytest.mark.asyncio

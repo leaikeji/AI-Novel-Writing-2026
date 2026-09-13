@@ -18,7 +18,7 @@ from pathlib import Path
 import re
 import stat
 from threading import Lock
-from typing import Callable, Mapping
+from typing import Awaitable, Callable, Mapping
 from uuid import UUID
 
 
@@ -32,6 +32,7 @@ from ..database import DatabaseNotConfigured, get_engine
 from ..models import Document
 from . import schemas as wire
 from .audio_pipeline import audio_processing_fingerprint
+from .contracts import AdapterHealthStatus, TTSProviderId
 from .digest_keyring import DigestKeyringError, load_digest_keyring
 from .disk_guard import NarrationDiskGuard
 from .edition_service import NarrationProductionPolicy
@@ -63,7 +64,7 @@ from .pronunciations import (
     SqlAlchemyNarrationCacheRuntime,
 )
 from .privacy import require_active_cloud_tts_consent
-from .providers.base import TTSProviderError
+from .providers.base import TTSProvider, TTSProviderError
 from .providers.registry import build_qwen_tts_provider_registry_from_env
 from .cloud_profiles import CloudProfileError
 from .cloud_profiles_runtime import (
@@ -127,6 +128,11 @@ _SAFE_REASON = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
 _VALIDATION_TOKEN = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 _VALIDATION_EXPIRY = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 MAX_VALIDATION_LIFETIME = timedelta(hours=24)
+LOCAL_PROVIDER_RECOVERY_DELAYS_SECONDS = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
+LOCAL_PROVIDER_RECOVERING_REASON = "TTS_PROVIDER_RECOVERING"
+LOCAL_PROVIDER_RECOVERY_ERROR_CODES = frozenset(
+    {"TTS_PROVIDER_UNAVAILABLE", "TTS_PROVIDER_TIMEOUT"}
+)
 
 
 class NarrationProductionRuntimeError(RuntimeError):
@@ -944,12 +950,60 @@ def _publish_feature_dependencies(
     )
 
 
+async def _wait_for_local_provider_recovery(
+    provider: TTSProvider,
+    stop_event: asyncio.Event,
+    *,
+    delays_seconds: tuple[float, ...] = LOCAL_PROVIDER_RECOVERY_DELAYS_SECONDS,
+) -> bool:
+    """Pause the shared queue until the native runtime is healthy again.
+
+    One already-claimed job may enter retry_wait. No later job is claimed while
+    the provider is unreachable, so a host restart cannot spend every job's
+    retry allowance. A reachable but cold runtime is warmed with CustomVoice.
+    """
+
+    if provider.capabilities.provider_id is not TTSProviderId.LOCAL_QWEN3_TTS:
+        raise TypeError("local provider recovery requires the local Qwen Provider")
+    if not delays_seconds or any(
+        isinstance(delay, bool)
+        or not isinstance(delay, (int, float))
+        or not 0 < float(delay) <= 60
+        for delay in delays_seconds
+    ):
+        raise ValueError("local provider recovery delays are invalid")
+    delay_index = 0
+    while not stop_event.is_set():
+        try:
+            health = await provider.health()
+            if health.status in {
+                AdapterHealthStatus.HEALTHY,
+                AdapterHealthStatus.DEGRADED,
+            }:
+                warmed = await provider.warmup()
+                if warmed.status is AdapterHealthStatus.HEALTHY:
+                    return True
+        except asyncio.CancelledError:
+            raise
+        except (TTSProviderError, RuntimeError, ValueError):
+            # Stable error details are already recorded on the failed job. The
+            # recovery loop deliberately exposes only its bounded public state.
+            pass
+        delay = float(delays_seconds[min(delay_index, len(delays_seconds) - 1)])
+        delay_index += 1
+        if await _wait_for_stop(stop_event, delay):
+            return False
+    return False
+
+
 async def _run_qwen_job_loop(
     *,
     scheduler: NarrationJobScheduler,
     segment_worker: NarrationSegmentWorker,
     preview_processor: QwenVoicePreviewProcessor,
     stop_event: asyncio.Event,
+    local_provider: TTSProvider | None = None,
+    on_local_recovery_state: Callable[[bool], Awaitable[None]] | None = None,
     on_error: Callable[[Exception], None] | None = None,
     idle_poll_seconds: float = 0.5,
     maintenance_interval_seconds: float = 30.0,
@@ -969,14 +1023,34 @@ async def _run_qwen_job_loop(
                 wait_seconds = idle_poll_seconds
             else:
                 wait_seconds = 0.0
+                local_provider_unavailable = False
                 if scheduled.job_kind == "narration.segment_render":
-                    await segment_worker.process(scheduled.lease)
+                    outcome = await segment_worker.process(scheduled.lease)
+                    local_provider_unavailable = (
+                        outcome.error_code in LOCAL_PROVIDER_RECOVERY_ERROR_CODES
+                        and outcome.provider_id
+                        == TTSProviderId.LOCAL_QWEN3_TTS.value
+                    )
                 elif scheduled.job_kind == "narration.voice_preview":
-                    await process_qwen_voice_preview_job(
+                    outcome = await process_qwen_voice_preview_job(
                         preview_processor, scheduled.lease
+                    )
+                    local_provider_unavailable = (
+                        outcome.error_code in LOCAL_PROVIDER_RECOVERY_ERROR_CODES
                     )
                 else:
                     raise RuntimeError("Qwen worker claimed an unsupported job kind")
+                if local_provider_unavailable and local_provider is not None:
+                    if on_local_recovery_state is not None:
+                        await on_local_recovery_state(True)
+                    recovered = await _wait_for_local_provider_recovery(
+                        local_provider,
+                        stop_event,
+                    )
+                    if recovered and on_local_recovery_state is not None:
+                        await on_local_recovery_state(False)
+                    if not recovered:
+                        return
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -999,7 +1073,7 @@ async def _run_qwen_production(
     *,
     validation_enabled: bool,
 ) -> None:
-    """Run the segment-only Qwen Provider pipeline without startup inference."""
+    """Run the Qwen pipeline after one bounded local CustomVoice warmup."""
 
     global _production_factory, _production_policy, _runtime_task, _snapshot
     global _voice_product_port
@@ -1132,6 +1206,9 @@ async def _run_qwen_production(
             environ=values,
             cloud_provider_resolver=cloud_provider_resolver,
         )
+        local_provider = registry.resolve(
+            provider_id=TTSProviderId.LOCAL_QWEN3_TTS,
+        )
 
         def authorize_cloud_tts(novel_id: UUID, model_id: str) -> None:
             try:
@@ -1248,12 +1325,6 @@ async def _run_qwen_production(
             _validation_token_digest = validation_token_digest
             _validation_runtime_scope = validation_scope
 
-        _publish_feature_dependencies(
-            schema_ready=feature_schema_ready,
-            deletion_reconciler_ready=(
-                installed_reconciler is not None and installed_reconciler.healthy
-            ),
-        )
         ready = NarrationProductionRuntimeSnapshot(
             product_requested=True,
             lifecycle_status="ready",
@@ -1266,13 +1337,46 @@ async def _run_qwen_production(
                 default_selection
             ),
         )
+        recovering = replace(
+            ready,
+            lifecycle_status="starting",
+            reference_clone_ready=False,
+            reason_code=LOCAL_PROVIDER_RECOVERING_REASON,
+        )
+        if not await _set_snapshot_if_current(current_task, recovering):
+            return
+        if not await _wait_for_local_provider_recovery(local_provider, stop_event):
+            return
+
+        _publish_feature_dependencies(
+            schema_ready=feature_schema_ready,
+            deletion_reconciler_ready=(
+                installed_reconciler is not None and installed_reconciler.healthy
+            ),
+        )
         if not await _set_snapshot_if_current(current_task, ready):
             return
+
+        async def publish_local_recovery_state(recovering: bool) -> None:
+            target = (
+                replace(
+                    ready,
+                    lifecycle_status="starting",
+                    reference_clone_ready=False,
+                    reason_code=LOCAL_PROVIDER_RECOVERING_REASON,
+                )
+                if recovering
+                else ready
+            )
+            await _set_snapshot_if_current(current_task, target)
+
         await _run_qwen_job_loop(
             scheduler=scheduler,
             segment_worker=worker,
             preview_processor=preview_processor,
             stop_event=stop_event,
+            local_provider=local_provider,
+            on_local_recovery_state=publish_local_recovery_state,
             on_error=lambda error: logger.error(
                 "Qwen TTS worker iteration failed: %s",
                 _safe_reason(error, "TTS_WORKER_ITERATION_FAILED"),

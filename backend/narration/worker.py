@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 from ..models import (
     BackgroundJob,
+    BackgroundJobAttempt,
     Document,
     MediaAsset,
     ModelRunRecord,
@@ -44,6 +45,7 @@ from .audio_pipeline import (
     DEFAULT_SHORT_CHINESE_DURATION_POLICY,
     ProcessedPcmWav,
     SHORT_CHINESE_DURATION_POLICY_VERSION,
+    ShortChineseDurationError,
     process_provider_synthesis_wav,
 )
 from .contracts import (
@@ -154,6 +156,20 @@ AUDIO_VALIDATION_FAILURE_REASON_CODES: Final[frozenset[str]] = frozenset(
         "WAV_SILENT",
     }
 )
+AUDIO_QUALITY_REGENERATION_ERROR_CODE: Final = "TTS_AUDIO_REGENERATION_REQUIRED"
+AUDIO_QUALITY_REGENERATION_POLICY_VERSION: Final = (
+    "qwen-tts-short-audio-regeneration/1"
+)
+_MAX_SIGNED_64_BIT: Final = 2**63 - 1
+_REGENERATION_SEED_OFFSET: Final = 104_729
+
+
+def regenerated_qwen_seed(seed: int | None) -> int:
+    """Return the stable second seed used by one bounded quality regeneration."""
+
+    if seed is not None and (type(seed) is not int or not 0 <= seed <= _MAX_SIGNED_64_BIT):
+        raise WorkerContractError("Qwen TTS seed is outside the signed 64-bit range")
+    return ((seed or 0) + _REGENERATION_SEED_OFFSET) & _MAX_SIGNED_64_BIT
 
 
 def derive_model_input_digest(
@@ -219,6 +235,7 @@ class SegmentWorkItem:
     input_digest: str
     reference_media: ReferenceMedia | None = field(default=None, repr=False)
     reference_text: str | None = field(default=None, repr=False)
+    quality_regeneration: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +261,7 @@ class WorkerOutcome:
     job_id: UUID | None = None
     render_id: UUID | None = None
     error_code: str | None = None
+    provider_id: str | None = None
 
 
 def _qwen_voice_parameters(
@@ -718,8 +736,25 @@ class SqlAlchemyNarrationWorkerRepository:
                     raise WorkerVoiceUnavailableError(
                         "private reference voices require the local Qwen Provider"
                     )
+            quality_regeneration = session.scalar(
+                select(BackgroundJobAttempt.id)
+                .where(
+                    BackgroundJobAttempt.job_id == job.id,
+                    BackgroundJobAttempt.attempt_number < lease.attempt_number,
+                    BackgroundJobAttempt.completed_at.is_not(None),
+                    BackgroundJobAttempt.error_classification == "retryable",
+                    BackgroundJobAttempt.error_code
+                    == AUDIO_QUALITY_REGENERATION_ERROR_CODE,
+                )
+                .limit(1)
+            ) is not None
+            effective_seed = (
+                regenerated_qwen_seed(voice.seed)
+                if quality_regeneration
+                else voice.seed
+            )
             request_parameters = {
-                "schema_version": "qwen-tts-worker-synthesis/1",
+                "schema_version": "qwen-tts-worker-synthesis/2",
                 "render_fingerprint": render.render_fingerprint,
                 "voice_version_id": str(voice.id),
                 "voice_fingerprint": voice.fingerprint,
@@ -727,7 +762,13 @@ class SqlAlchemyNarrationWorkerRepository:
                 "language": voice.language,
                 "voice_kind": voice_kind.value,
                 "provider_voice_id": provider_voice_id,
-                "seed": voice.seed,
+                "seed": effective_seed,
+                "base_seed": voice.seed,
+                "quality_regeneration_policy_version": (
+                    AUDIO_QUALITY_REGENERATION_POLICY_VERSION
+                    if quality_regeneration
+                    else None
+                ),
                 "instruction": instruction,
             }
             provider_metadata = canonical_json_bytes(
@@ -774,7 +815,7 @@ class SqlAlchemyNarrationWorkerRepository:
                 language=voice.language,
                 voice_kind=voice_kind,
                 provider_voice_id=provider_voice_id,
-                seed=voice.seed,
+                seed=effective_seed,
                 instruction=instruction,
                 requested_provider_id=selection.provider_id,
                 requested_model_id=requested_model_id,
@@ -786,6 +827,7 @@ class SqlAlchemyNarrationWorkerRepository:
                 input_digest=input_digest,
                 reference_media=reference,
                 reference_text=reference_text,
+                quality_regeneration=quality_regeneration,
             )
 
         result = self._transaction(operation)
@@ -1654,6 +1696,20 @@ class NarrationSegmentWorker:
             return "non_retryable", "RENDER_INPUT_INVALID"
         return "retryable", "WORKER_UNEXPECTED_FAILURE"
 
+    @staticmethod
+    def _classification_for_work(
+        error: BaseException,
+        work: SegmentWorkItem,
+    ) -> tuple[Literal["retryable", "non_retryable", "security_failure"], str]:
+        if (
+            isinstance(error, ShortChineseDurationError)
+            and not work.quality_regeneration
+            and work.lease.retry_kind != "manual"
+            and work.selection.provider_id == "local_qwen3_tts"
+        ):
+            return "retryable", AUDIO_QUALITY_REGENERATION_ERROR_CODE
+        return NarrationSegmentWorker._classification(error)
+
     _failure_evidence = staticmethod(audio_validation_failure_evidence)
 
     async def run_once(self) -> WorkerOutcome:
@@ -1703,6 +1759,7 @@ class NarrationSegmentWorker:
                     status="cancelled",
                     job_id=lease.fence.job_id,
                     render_id=work.render_id,
+                    provider_id=work.selection.provider_id,
                 )
             if state != "running":
                 raise JobFenceError("job stopped accepting a result")
@@ -1714,6 +1771,7 @@ class NarrationSegmentWorker:
                     status="cancelled",
                     job_id=lease.fence.job_id,
                     render_id=work.render_id,
+                    provider_id=work.selection.provider_id,
                 )
             if state != "running":
                 raise JobFenceError("job stopped accepting publication")
@@ -1727,6 +1785,7 @@ class NarrationSegmentWorker:
                 status="succeeded",
                 job_id=lease.fence.job_id,
                 render_id=work.render_id,
+                provider_id=work.selection.provider_id,
             )
         except JobFenceError:
             return WorkerOutcome(
@@ -1734,6 +1793,7 @@ class NarrationSegmentWorker:
                 job_id=lease.fence.job_id,
                 render_id=work.render_id if work else None,
                 error_code="STALE_WORKER_FENCE",
+                provider_id=(work.selection.provider_id if work else None),
             )
         except Exception as error:
             logger.exception(
@@ -1771,20 +1831,27 @@ class NarrationSegmentWorker:
                         status="cancelled",
                         job_id=lease.fence.job_id,
                         render_id=work.render_id,
+                        provider_id=work.selection.provider_id,
                     )
-                classification, error_code = self._classification(error)
+                classification, error_code = self._classification_for_work(error, work)
+                failure_evidence = (
+                    None
+                    if error_code == AUDIO_QUALITY_REGENERATION_ERROR_CODE
+                    else self._failure_evidence(error)
+                )
                 failure = await asyncio.to_thread(
                     self._repository.fail,
                     work,
                     classification=classification,
                     error_code=error_code,
-                    failure_evidence=self._failure_evidence(error),
+                    failure_evidence=failure_evidence,
                 )
                 return WorkerOutcome(
                     status=failure.state,
                     job_id=lease.fence.job_id,
                     render_id=work.render_id,
                     error_code=error_code,
+                    provider_id=work.selection.provider_id,
                 )
             except JobFenceError:
                 return WorkerOutcome(
@@ -1792,6 +1859,7 @@ class NarrationSegmentWorker:
                     job_id=lease.fence.job_id,
                     render_id=work.render_id,
                     error_code="STALE_WORKER_FENCE",
+                    provider_id=work.selection.provider_id,
                 )
             except Exception:
                 # The attempt remains recoverable by the lease reconciler.  Do
@@ -1802,6 +1870,7 @@ class NarrationSegmentWorker:
                     job_id=lease.fence.job_id,
                     render_id=work.render_id,
                     error_code="FAILURE_RECORDING_UNAVAILABLE",
+                    provider_id=work.selection.provider_id,
                 )
 
     async def run_until_stopped(

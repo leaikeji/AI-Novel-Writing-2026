@@ -46,3 +46,26 @@ Q0 本机技术门已通过：三个角色均在 16 GiB Apple Silicon 宿主逐�
 生成且全程 0 swap，CustomVoice 连续热路径 RTF 为 0.65–0.71。完整制品哈希、内存、
 性能和样音记录见 `audit/qwen-tts/Q0-本机MLX可行性记录-20260908.md`。Q0 通过不等于
 整体发布通过；云端真实 smoke、两端最小章、切换与恢复门完成前仍不得清理旧 TTS 链。
+
+## 用户级自动启动与保活
+
+计划 79 提供可重建的 macOS LaunchAgent。它显式固定 `LANG`、`LC_ALL`、
+`PYTHONUTF8`、`PYTHONIOENCODING` 和 macOS 用户会话的
+`__CF_USER_TEXT_ENCODING`，避免含中文的仓库路径在 Python codec 初始化阶段
+阻塞；配置中只保存 token 文件路径，不保存 token 内容。
+
+```bash
+.venv/bin/python scripts/qwen_tts/macos_runtime_service.py check
+.venv/bin/python scripts/qwen_tts/macos_runtime_service.py install
+.venv/bin/python scripts/qwen_tts/macos_runtime_service.py status
+```
+
+`install` 会校验三个冻结模型、专用 Python 和 `0600` token，然后安装并
+启动 `com.ai-novel-world-2026.qwen-tts`。正式交接前必须先停止占用 8766
+端口的手工进程，避免两个运行时竞争。
+
+```bash
+.venv/bin/python scripts/qwen_tts/macos_runtime_service.py uninstall
+```
+
+`uninstall` 只卸载服务并删除生成的 plist，不删除模型、token、日志、媒体或小说。

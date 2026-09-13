@@ -65,6 +65,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   OFFICIAL_PRESET_MANIFEST_HASH_MISMATCH: "Qwen 官方音色目录校验失败",
   OFFICIAL_PRESET_MODEL_FINGERPRINT_MISMATCH: "Qwen 模型指纹不一致",
   OFFICIAL_PRESET_RUNTIME_UNAVAILABLE: "官方预设本地推理运行时尚未就绪",
+  TTS_PROVIDER_RECOVERING: "本地语音服务正在自动恢复",
   REFERENCE_CLONE_PRODUCT_GATE_HOLD: "参考录音克隆仍处于产品门禁保留状态",
   CLOUD_CONSENT_FLOW_NOT_READY: "云端最小化分析授权流程尚未就绪",
 };

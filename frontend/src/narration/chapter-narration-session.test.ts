@@ -843,6 +843,47 @@ describe("chapter narration bundle gates", () => {
     expect(harness.session.player).not.toBeNull();
   });
 
+  it("retries a transient 404 while a freshly published Edition projection converges", async () => {
+    const resources = fixture();
+    const getManifest = vi.fn<ChapterNarrationSessionDependencies["getNarrationManifest"]>()
+      .mockRejectedValueOnce(new PlaybackApiError(404, null))
+      .mockResolvedValue({
+        not_modified: false,
+        etag: resources.manifest.etag,
+        manifest: resources.manifest,
+      });
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>(
+      async (_milliseconds, signal) => {
+        if (signal.aborted) throw new DOMException("aborted", "AbortError");
+      },
+    );
+    const harness = createHarness({ getManifest, delay });
+
+    await expect(harness.session.load()).resolves.toMatchObject({ status: "ready" });
+    expect(getManifest).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledOnce();
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "ready", error: null });
+    expect(harness.session.player).not.toBeNull();
+  });
+
+  it("stops retrying a persistent projection 404 at the configured attempt limit", async () => {
+    const getManifest = vi.fn<ChapterNarrationSessionDependencies["getNarrationManifest"]>(
+      async () => { throw new PlaybackApiError(404, null); },
+    );
+    const delay = vi.fn<ChapterNarrationSessionDependencies["delay"]>(
+      async (_milliseconds, signal) => {
+        if (signal.aborted) throw new DOMException("aborted", "AbortError");
+      },
+    );
+    const harness = createHarness({ getManifest, delay, maxPollAttempts: 3 });
+
+    await expect(harness.session.load()).rejects.toMatchObject({ status: 404 });
+    expect(getManifest).toHaveBeenCalledTimes(3);
+    expect(delay).toHaveBeenCalledTimes(2);
+    expect(harness.session.readSnapshot()).toMatchObject({ phase: "error", bundle: null });
+    expect(harness.session.player).toBeNull();
+  });
+
   it("stops transient projection retries at the configured attempt limit", async () => {
     const resources = fixture();
     const staleEdition = Object.freeze({

@@ -14,6 +14,7 @@ import {
   capabilityStatusText,
   createReadingOverview,
   formatNarrationBytes,
+  narrationReasonLabel,
   type ReadingOverviewReactRuntime,
 } from "./reading-overview";
 
@@ -260,6 +261,11 @@ describe("reading overview model", () => {
     expect(buildReadingOverviewModel(overviewFixture()).cacheLabel)
       .toBe("4.0 KiB 派生缓存 · 2.0 KiB 可回收");
     expect(capabilityStatusText(capability("cache_cleanup"))).toContain("T2_GATE_REQUIRED");
+  });
+
+  it("explains automatic local provider recovery in author-facing language", () => {
+    expect(narrationReasonLabel("TTS_PROVIDER_RECOVERING"))
+      .toBe("本地语音服务正在自动恢复");
   });
 });
 

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import importlib
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 from uuid import UUID
 
@@ -13,7 +14,10 @@ import pytest_asyncio
 from sqlalchemy import create_engine, text
 
 from backend.narration.digest_keyring import DigestKeyringError
+from backend.narration.contracts import AdapterHealth, AdapterHealthStatus
+from backend.narration.providers.local import LOCAL_QWEN_CAPABILITIES
 from backend.narration.transcoding import TranscodingUnavailable
+from backend.narration.worker import WorkerOutcome
 from tests.narration.digest_fixtures import TEST_DIGEST_KEYRING
 import backend.narration.narration_api as narration_api
 import backend.narration.playback_api as playback_api
@@ -38,6 +42,37 @@ class _IdleScheduler:
 class _SegmentRepositoryStub:
     def terminalize_job_in_session(self, _session, *, job_id):  # type: ignore[no-untyped-def]
         return job_id is not None
+
+
+def _local_health(status: AdapterHealthStatus) -> AdapterHealth:
+    return AdapterHealth(
+        status=status,
+        capabilities_sha256="a" * 64,
+        model_fingerprint_sha256=("b" * 64 if status is AdapterHealthStatus.HEALTHY else None),
+        reason_code=(
+            "TTS_PROVIDER_UNAVAILABLE"
+            if status is AdapterHealthStatus.UNAVAILABLE
+            else None
+        ),
+    )
+
+
+class _RecoveringLocalProvider:
+    capabilities = LOCAL_QWEN_CAPABILITIES
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.health_calls = 0
+        self.warmup_calls = 0
+
+    async def health(self) -> AdapterHealth:
+        self.health_calls += 1
+        await self.release.wait()
+        return _local_health(AdapterHealthStatus.HEALTHY)
+
+    async def warmup(self) -> AdapterHealth:
+        self.warmup_calls += 1
+        return _local_health(AdapterHealthStatus.HEALTHY)
 
 
 def _environment(
@@ -91,6 +126,98 @@ async def _wait_until(
             return
         await asyncio.sleep(0.005)
     raise AssertionError("production runtime did not settle")
+
+
+@pytest.mark.asyncio
+async def test_local_provider_recovery_warms_a_reachable_cold_runtime(
+    production_owner,
+) -> None:
+    class ColdLocalProvider(_RecoveringLocalProvider):
+        async def health(self) -> AdapterHealth:
+            self.health_calls += 1
+            return _local_health(AdapterHealthStatus.DEGRADED)
+
+    provider = ColdLocalProvider()
+    stop_event = asyncio.Event()
+
+    recovered = await production_owner._wait_for_local_provider_recovery(
+        provider,
+        stop_event,
+        delays_seconds=(0.001,),
+    )
+
+    assert recovered is True
+    assert provider.health_calls == 1
+    assert provider.warmup_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_local_outage_pauses_claims_until_provider_recovers(
+    production_owner,
+) -> None:
+    stop_event = asyncio.Event()
+    provider = _RecoveringLocalProvider()
+    claims = 0
+    processed = 0
+
+    class Scheduler:
+        def maintain_once(self) -> None:
+            return None
+
+        def claim_next_typed_job(self):  # type: ignore[no-untyped-def]
+            nonlocal claims
+            claims += 1
+            return SimpleNamespace(
+                job_kind="narration.segment_render",
+                lease=object(),
+            )
+
+    class Worker:
+        async def process(self, _lease: object) -> WorkerOutcome:
+            nonlocal processed
+            processed += 1
+            if processed == 1:
+                return WorkerOutcome(
+                    status="retry_wait",
+                    error_code="TTS_PROVIDER_UNAVAILABLE",
+                    provider_id="local_qwen3_tts",
+                )
+            stop_event.set()
+            return WorkerOutcome(
+                status="succeeded",
+                provider_id="local_qwen3_tts",
+            )
+
+    states: list[bool] = []
+
+    async def recovery_state(recovering: bool) -> None:
+        states.append(recovering)
+
+    task = asyncio.create_task(
+        production_owner._run_qwen_job_loop(
+            scheduler=Scheduler(),
+            segment_worker=Worker(),
+            preview_processor=object(),
+            stop_event=stop_event,
+            local_provider=provider,
+            on_local_recovery_state=recovery_state,
+            idle_poll_seconds=0.01,
+            maintenance_interval_seconds=1,
+        )
+    )
+    await _wait_until(lambda: provider.health_calls == 1)
+    await asyncio.sleep(0.02)
+
+    assert claims == 1
+    assert processed == 1
+    assert states == [True]
+
+    provider.release.set()
+    await asyncio.wait_for(task, timeout=1)
+
+    assert claims == 2
+    assert processed == 2
+    assert states == [True, False]
 
 
 @pytest_asyncio.fixture
@@ -591,6 +718,15 @@ async def test_ready_runtime_installs_one_backend_and_one_worker_then_cleans_up(
         lambda **_kwargs: (lambda _audio: None),
     )
     monkeypatch.setattr(production_owner, "NarrationSegmentWorker", Worker)
+
+    async def provider_ready(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        production_owner,
+        "_wait_for_local_provider_recovery",
+        provider_ready,
+    )
 
     await production_owner.launch_narration_production_runtime(
         _environment(tmp_path, product=product, validation=validation)

@@ -324,6 +324,34 @@ describe("chapter narration panel", () => {
     expect(textContent(root)).not.toContain("正在分析人物与选角…");
   });
 
+  it("keeps an existing immutable Edition playable while the next one is generated", () => {
+    const model = deriveChapterNarrationPanelModel(props({ busy: true }));
+    expect(model.hasEdition).toBe(true);
+    expect(model.canPlay).toBe(true);
+    expect(model.canSeek).toBe(true);
+    expect(model.canUpdate).toBe(false);
+
+    const Panel = createChapterNarrationPanel(React);
+    const root = Panel(props({ busy: true }));
+    const play = findAll(
+      root,
+      (item) => item.type === "button" && item.props["aria-label"] === "播放章节朗读",
+    )[0];
+    const rate = findAll(
+      root,
+      (item) => item.type === "select"
+        && item.props["aria-label"] === "朗读倍速，范围 0.5 到 3 倍",
+    )[0];
+    const volume = findAll(
+      root,
+      (item) => item.type === "button"
+        && String(item.props["aria-label"]).startsWith("章节朗读音量"),
+    )[0];
+    expect(play.props.disabled).toBe(false);
+    expect(rate.props.disabled).toBeUndefined();
+    expect(volume.props.disabled).toBeUndefined();
+  });
+
   it("dispatches sentence seek and applies volume immediately in normalized units", () => {
     const onSeekOrdinal = vi.fn();
     const onVolumeChange = vi.fn();
