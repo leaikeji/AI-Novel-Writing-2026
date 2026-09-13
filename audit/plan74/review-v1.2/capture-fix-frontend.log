@@ -1,0 +1,9 @@
+$ vitest run
+
+ RUN  v4.1.11 /private/tmp/plan74-capture-source.i7Vzhx/code
+
+
+ Test Files  167 passed (167)
+      Tests  1492 passed (1492)
+   Start at  15:23:14
+   Duration  4.89s (transform 9.04s, setup 0ms, import 12.63s, tests 8.11s, environment 16ms)

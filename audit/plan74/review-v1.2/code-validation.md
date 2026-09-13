@@ -1,6 +1,6 @@
 # V1.2代码验证记录
 
-日期：2026-09-13。状态：`G2-A PASS / COMMITTED-CODE PASS / RELEASE-SOURCE HOLD`。这不是正式产品验收；提交树已通过代码复验，但尚不包含正式环境的未提交外任务功能，不能部署替换正式环境。
+日期：2026-09-13。状态：`G2-A PASS / G2-B COMPLETE-SOURCE PASS`。本轮批准依赖后的`96b8aed`完整源树已复验、打包和发布；下面先保留此前代码检查及来源HOLD历史，最新完整复验在末节。这不是正式写作G3通过结论。
 
 ## 已执行
 
@@ -41,4 +41,22 @@
 - 同一提交树临时数据库运行上述263项领域／选区／私有库用例全部通过，库`plan74_v12_b685934865974fc4_test`已删除，正式库未改动。
 - `scripts/package_plugin.py`审核通过，检出树`git status --short`为空。前端JS SHA-256为`ecc1e4cf023979d8dbd0ff6688ee5ee14cd49142f8a7e6217888df01fb8f3b4a`；包及来源见[source-manifest.md](./source-manifest.md)。
 
-两组测试数量差异来自精确排除了外任务作品资料及朗读续播源码／测试，不是跳过私有库失败用例。提交树代码可独立构建，但部署它会遗漏正式已用外任务功能，因此G2-B发布源门禁仍HOLD；不能仅凭代码绿灯继续安装。
+两组测试数量差异来自精确排除了外任务作品资料及朗读续播源码／测试，不是跳过私有库失败用例。此时提交树代码可独立构建，但部署它会遗漏正式已用外任务功能，因此当时G2-B发布源门禁HOLD；不能仅凭代码绿灯继续安装。
+
+## 批准依赖后的完整提交树复验
+
+作者本轮同意单独提交正式已有依赖。`96b8aed`在`/private/tmp/plan74-complete-source.8dnb1X/code`重新检出，status为空。使用原项目解释器和原锁文件，前端离线复用64包、下载0，typecheck通过，167文件1492项通过，构建202模块；Python全量退出0（4项既有弃用警告），同一源树打包成功。日志见[前端](complete-source-frontend.log)、[后端](complete-source-backend.log)。
+
+该源树再次运行相同263项真实PostgreSQL代码用例，退出0；临时库`plan74_v12_423bc2982888442d_test`已精确删除，未连接正式业务库执行用例。见[日志](complete-source-database.log)。metadata的6项旧独立端口数据库用例本轮仍跳过，不计入这些私有库专项；其已上线行为来源为计划70现有正式证据。
+
+完整G2-B通过，随后安装的是这次构建，不是旧独立包或脏工作区。正式运行合同和真实桌面仍分开计数，见[发布记录](formal-release.md)。
+
+## F01修复提交的独立复验
+
+`6c63ac650044e0cdf663121208d8e57c1a59c737`，tree `a906436d416f947fe7c0998dd95a9b088740f898`；独立检出`/private/tmp/plan74-capture-source.i7Vzhx/code`。新增14项capture用例与既有10项绑定用例共24项定向通过；工作区Python全量及277项数据库代码检查退出0。随后在该精确提交树重跑：
+
+- `-m pytest -q`退出0、4项既有弃用警告；[后端日志](capture-fix-backend.log)。未把未提供数据库的跳过项记通过。
+- 相同领域／选区命令增加14项后共277项真实PostgreSQL代码检查通过；临时库`plan74_v12_7e4e59c563484a2e_test`已精确删除。[数据库日志](capture-fix-database.log)。
+- 离线固定依赖复用64包、0下载；167文件1492项通过、typecheck／202模块构建／package_plugin均退出0；[前端日志](capture-fix-frontend.log)。JS仍为`f5ae18bedceff76183d5736c58b494ef3bae1650ec95c6b52670706541a17595`，未夹带工作区新的朗读修复。
+
+本提交代码复验PASS；正式prepare发现新外任务来源漂移，未安装，因此不能记F01产品PASS。小窗口审阅工具栏裁切在正式截图复查中另记未修复项，不受这些代码结果覆盖。

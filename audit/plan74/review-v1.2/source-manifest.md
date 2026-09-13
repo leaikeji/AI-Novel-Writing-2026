@@ -1,6 +1,15 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`SOURCE COMMITTED / CODE VERIFIED / RELEASE HOLD`；已有精确源码commit和独立构建包，尚无本轮正式安装回执。
+日期：2026-09-13。状态：`96b8aed RELEASED / 6c63ac6 VERIFIED BUT SOURCE-HOLD / G3 OPEN`。作者本轮“同意”已解除原作品资料／续播来源HOLD；新的失败句段重制依赖在F01重发前出现，未在此前授权内，故暂停安装。详见[formal-release.md](formal-release.md)。
+
+## 本轮批准与完整候选
+
+- 仅补交正式已上线的作品资料和朗读续播：`96b8aed87baa1f370f76b5e34699d061b67909d5`，tree `bcc2dc9bb289c84f7d95ba78e7572d91c2e1b0e9`，16文件。未纳入compose语义路由配置；未继续计划70的新功能或质量修复。
+- 完整独立检出`/private/tmp/plan74-complete-source.8dnb1X/code`，前端1492项、Python全量、临时数据库263项、类型、构建及打包退出0。JS SHA-256 `f5ae18bedceff76183d5736c58b494ef3bae1650ec95c6b52670706541a17595`。
+- 新包`/private/tmp/plan74-v12-release.VlD8BU/candidate.tar.gz`，SHA-256 `8be7e89d651b8ac08761108c8d0ea7ed809793dab673e528ca12b0d2f46bd32a`。14:54正式公开热更新成功，安装文件与完整包一致。原`ea02b99`私有库单独包仍不可用于替换正式环境。
+- 本阶段按§14.6由主代理串行承担Git、备份、共享正式环境和最终集成，不再派发并行写入。下文未提交归属表和询问为批准前历史，以上批准只覆盖明确依赖。
+- F01修复`6c63ac650044e0cdf663121208d8e57c1a59c737`，tree `a906436d416f947fe7c0998dd95a9b088740f898`，4文件（2后端、14项用例、合同补记）。独立构建277项数据库／前端1492／Python全量／类型／打包通过；源码检出`/private/tmp/plan74-capture-source.i7Vzhx/code`，未安装。
+- 新未提交外任务文件为`backend/narration/failed_segment_retry.py`和`tests/narration/test_failed_segment_retry.py`；正式运行已含前者。与compose原样保留，不暂存、不混入私有库提交。需单独来源协调后重建完整候选，不把此前一次批准扩张为所有后续依赖授权。
 
 ## 已核实来源
 
@@ -33,3 +42,5 @@ G2-B发布前必须取得已上线外任务依赖的可重建Git来源；若仍�
 后续证据提交与源码提交分开。Git远端验证记录补在本页末尾；代码push本身不关闭正式G3或整项W5。
 
 2026-09-13已执行`git push origin main`，随后`git ls-remote origin refs/heads/main`返回`ea02b99e9793fa8da1dee457ce0f62f3d8bf0129`，与本任务源码提交完全相同。本页和最终状态更新另作纯证据提交，不改变已验证代码树。
+
+2026-09-13本轮已将批准依赖`96b8aed`和F01修复`6c63ac6`一起push，随后实际`ls-remote`确认main为`6c63ac650044e0cdf663121208d8e57c1a59c737`。后续纯证据提交不改变该候选的源码／包内容；新朗读依赖与compose仍不在本轮提交范围。代码已push不解除F01重发来源HOLD、桌面裁切或未完成真实链门禁。
