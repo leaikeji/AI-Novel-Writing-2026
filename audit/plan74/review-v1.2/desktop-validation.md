@@ -1,6 +1,15 @@
 # V1.2正式桌面与写作分项记录
 
-日期：2026-09-13。最新正式验证：`2df5f17 PARTIAL / F18保存与焦点PASS / R5 OPEN`。规则漂移、两命中逐项决定及刷新采用、F14/F15/F16/F17已有分项PASS。下文旧FAIL与NOT_RUN保持当时证明力，不是整体G3通过。
+日期：2026-09-13。最新正式验证：`fbfc3e6 PARTIAL / 正常选区部分采用PASS / R5 OPEN`。规则漂移、两命中逐项决定及刷新采用、F14/F15/F16/F17/F18已有分项PASS。下文旧FAIL与NOT_RUN保持当时证明力，不是整体G3通过。
+
+## 21:52开篇去重复与受控部分保存（fbfc3e6）
+
+- 写作意图：为《缺氧：末日地下世界》第一卷《地基》第二章《第一道裂缝》减少起床段“动静”的重复，保持六点四十、旧手机、行军床、潮气、披外套后等待声音停稳再起身。正式页面选择原段→自定义；不勾选向量参考，不修改模型／Skill。原选区实际包括前面的两换行、不包括末尾句号，以产品冻结的93字选择为准；没有因自动化选择偏差改写其他段落。
+- 第一次job `f2a28de2-052c-4113-88af-99c2e6ec45d2`在21:48:23因“必须包含唯一严格JSON候选对象”安全失败（26108ms），正文仍draft4／2537字。自定义要求中“只输出替换正文”可能与包装格式产生张力，但未取得原始模型输出，不能断言根因；不改解析器、不绕过候选校验。原UI显式重试一次形成attempt2 job `170bf9ae-6d93-4624-9c56-21be6cebd92b`，39689ms后ready，110字／6处Diff。[两次实际任务](incomplete-selection-jobs-after.json)保留；请求、前后有效模型均bigmodel/glm-5.3-flash，actual／usage未暴露。不以安装Skill保持代替本次实际加载证据，也不把一次成功归因于词包增益。
+- 逐项接受1、2、3、5、6，拒绝第4项额外的“听得出纸箱拖过地面，放稳一箱，再拖一箱。”；按“应用已接受修改（5处）”通过当前规则检查后沿受控PATCH保存。21:52:00正文draft4→5、2537→2534字，hash `7f6332bb4ede3d54e10781221192465e342762291198b0d7904dc19aa38eecea`；base revision仍`5a050e8b-c0fe-47b3-aed4-80131bc37a4b`，未倒写历史。[正文](incomplete-selection-document-after.json)与此前focus文档逐段比对，仅第2段变化，其他段落及分隔完全相同。
+- [本项目报告只读回执](incomplete-selection-reports-after.json)：`0b683fcb-8f1b-4523-9fa8-d75e4def7fcb`，source selection_result／attempt2，complete／v2，rules hash仍66f79a72。两处原文“微微”为preexisting_unchanged，应用事件 `11432042-3e65-4387-ad1d-fc8f982325dc`的input/output hash与draft5一致；不是把未修改正文的旧命中重新自动keep_once。此为正常complete受控写入PASS，F19非complete分支仅代码验证，正式NOT_RUN。
+- “继续编辑”后保存按钮title为“已保存”，[截图39](desktop/39-selection-partial-saved-1267.png)真实1267×713可继续编辑。当前目录仍2537，正文计数2534：这是选区自动保存后的目录刷新缺口，不能用整章采用F17的PASS覆盖，不影响服务端已经保存的事实；记录为待收口桌面项。未声称该路径目录同步通过。
+- [精确绑定](incomplete-bindings-after.json)与focus-bindings-after逐字段相同，根v14的两条新说明仍未换绑。不新增词库／模板／章节，不更改声音或其他正文；保留可继续创作的新工作稿及原revision。两次临时代码数据库均已精确移除，正式作品没有删除。
 
 ## 21:25焦点、历史恢复与双桌面分项（2df5f17）
 

@@ -1,9 +1,10 @@
 # V1.2源码与发布来源清单
 
-日期：2026-09-13。状态：`2df5f17 RELEASED / F18正式PASS / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
+日期：2026-09-13。状态：`fbfc3e6 RELEASED / F19门禁已部署 / G3 OPEN`。作者全权授权已明确，必要依赖来源由主代理协调，不再重复索要。下文早期HOLD／未提交状态保留历史证明力，最新来源如下及[formal-release.md](formal-release.md)。
 
 ## 最新可复核来源
 
+- F19精确源码`fbfc3e61b7f84a68000afbba5d0889b1fbfb2ccf`，tree `dfc7360dae498ce7b4abad310df1fa9476300f69`，干净源`/private/tmp/plan74-incomplete-source.7FA64V/code`。相对2df5f17只更新lexicon_reports.py运行文件，前端JS仍e347aa28；五文件源码提交没有其他任务改动。[完整来源](incomplete-release-manifest.json)及[代码验证](code-validation.md#f19显式引用未完成报告)可复核；21:46公开更新已通过，Git远端状态在本轮最终提交后核对。
 - 正式源`2df5f174aa1ccb64346f60c3bfb627c6b49232fa`、tree `ec5d5c7f099a4b4b66ef5e6bc4310869efbcf7c6`，干净源`/private/tmp/plan74-focus-merged-source.7Fk1vB/code`。包含d171317焦点修复与76已部署的9个年龄描述前端文件，后者逐文件cmp一致于76干净临时提交ddbe2e4，依赖来源独立标注，不纳入76计划文档。1554项前端／类型／构建／打包通过，JS SHA `e347aa28210c8b3f3587c95f54207ae3eb3aec7519c2ee7e8f1b27f6c966d1e5`。
 - 21:24:27仅JS公开更新，[最新发布清单](focus-release-manifest.json)包含旧树及候选逐文件hash，备份与耐久副本一致；健康、schema0056及逐Agent选择保持。真实F18保存及焦点PASS、当前正文双桌面分项已补齐；不外推剩余G3。
 - 6f544df于21:08:46已正式更新并验证保存正常关闭，原焦点BODY失败记录保留；其独立源`/private/tmp/plan74-adoption-source.90xAJO/code`及备份78NdJW仍可复核。d171317独立源`/private/tmp/plan74-save-focus-source.6vUMsP/code`前端1548项通过，未单独安装；直接发布完整2df5f17，保留76已有功能。

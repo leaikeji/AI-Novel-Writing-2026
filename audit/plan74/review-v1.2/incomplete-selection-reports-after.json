@@ -1,0 +1,62 @@
+[
+  {
+    "id": "0b683fcb-8f1b-4523-9fa8-d75e4def7fcb",
+    "source_kind": "selection_result",
+    "source_id": "170bf9ae-6d93-4624-9c56-21be6cebd92b",
+    "source_version": 2,
+    "version": 2,
+    "status": "complete",
+    "text_hash": "7f6332bb4ede3d54e10781221192465e342762291198b0d7904dc19aa38eecea",
+    "rules_hash": "66f79a729bbbe2f0116fc932ccf60775b6aa0d32282fdacf033237f83e6bded5",
+    "decisions_json": [
+      {
+        "at": "2026-09-13T13:51:59.898874+00:00",
+        "kind": "preexisting_unchanged",
+        "hit_id": "e2d99bb6-7f5c-571a-aeb8-811eef696529"
+      },
+      {
+        "at": "2026-09-13T13:51:59.898874+00:00",
+        "kind": "preexisting_unchanged",
+        "hit_id": "1d4a0b26-38ee-5023-ac9f-ec0e6611675e"
+      },
+      {
+        "at": "2026-09-13T13:52:00.706713+00:00",
+        "kind": "application",
+        "report_id": "0b683fcb-8f1b-4523-9fa8-d75e4def7fcb",
+        "input_sha256": "d5138bdb917ab176ccc2c9aaa15ed14d66cb7d5cd5e26770a0748ae47b42ac29",
+        "draft_version": 5,
+        "output_sha256": "7f6332bb4ede3d54e10781221192465e342762291198b0d7904dc19aa38eecea",
+        "application_id": "11432042-3e65-4387-ad1d-fc8f982325dc",
+        "request_sha256": "76e1e8929297e5f0b0ae21375cb15f99637bc26ed4c61d01e292f9732ad6862f"
+      }
+    ],
+    "hits_json": [
+      {
+        "count": 2,
+        "action": "forbid",
+        "hit_id": "e2d99bb6-7f5c-571a-aeb8-811eef696529",
+        "reason": "作者标记为禁用表达；本书避免以笼统程度词代替可观察动作。人物原样引用或纠正旧记录时，须按每次命中由作者决定保留；普通叙述不自动豁免。",
+        "window": null,
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "entry_id": "entry_e0db8fcef4d94dc7b0b071f85a757d11",
+        "end_utf16": 372,
+        "start_utf16": 370,
+        "matched_text": "微微",
+        "asset_version_id": "3ab961b8-2b90-42f2-8e33-7c8dba0193ff"
+      },
+      {
+        "count": 2,
+        "action": "forbid",
+        "hit_id": "1d4a0b26-38ee-5023-ac9f-ec0e6611675e",
+        "reason": "作者标记为禁用表达；本书避免以笼统程度词代替可观察动作。人物原样引用或纠正旧记录时，须按每次命中由作者决定保留；普通叙述不自动豁免。",
+        "window": null,
+        "asset_id": "bc32a938-a866-5ca8-8143-316b061af870",
+        "entry_id": "entry_e0db8fcef4d94dc7b0b071f85a757d11",
+        "end_utf16": 882,
+        "start_utf16": 880,
+        "matched_text": "微微",
+        "asset_version_id": "3ab961b8-2b90-42f2-8e33-7c8dba0193ff"
+      }
+    ]
+  }
+]

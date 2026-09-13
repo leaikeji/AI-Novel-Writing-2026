@@ -1,6 +1,12 @@
 # V1.2正式发布门禁
 
-日期：2026-09-13。最新正式源：`2df5f17 RELEASED / F18保存与焦点PASS / G3 PARTIAL`，包含d171317与计划76已发布的年龄描述依赖。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+日期：2026-09-13。最新正式源：`fbfc3e6 RELEASED / F19门禁已部署 / G3 PARTIAL`，保留2df5f17全部功能与计划76年龄描述依赖。下文旧HOLD记录是当时执行事实，不再构成再次索要作者授权的依据。
+
+## 21:46未完成报告门禁公开更新
+
+- 干净源fbfc3e6（tree dfc7360dae498ce7b4abad310df1fa9476300f69）于21:46:39公开热安装；唯一安装差异为`backend/private_library/lexicon_reports.py`。[来源及文件hash](incomplete-release-manifest.json)、[安装](incomplete-install-result.json)、[健康](incomplete-health-after.json)、[模型](incomplete-model-after.json)已保存。prepare/install/verify均退出0，逐Agent选择、有效模型、容器身份、0056和TTS ready保持，无重启／迁移。
+- 更新前备份`/private/tmp/plan74-incomplete-release.pHb2Sh`及耐久副本`/app/working.backups/plan74-incomplete-release-20260913-pHb2Sh`三份hash相同：DB `f5544d8a7d517ba1eeb87c364355135fa160711cf30c78f4f3d50d2e8f58f868`；候选`c317dbd3300b422b1031334bab51826800d5a6578ae6ddf460d06502089f662b`；旧插件`614e7fe72bf8d06f1b2c159f28efa93d0934306e857876813c9daef6130477ed`。归档可读，未恢复数据库。新写作前可按release.py rollback、相同source/backup/commit及--before-writing门禁回退插件；新写作后先保全兼容，不倒灌数据库。
+- 76明确释放正式窗口；66无新客户端任务，但旧原生流服务端终态未取得，不能声称其已终止。此次本项目活动门禁通过，只更新插件校验、不重启或切换共享模型，不操作该会话。更新后正常UI已启动第二章开篇去重复润色，运行结果另记，不把健康通过当成写作采用通过。
 
 ## 21:24合并焦点与现有年龄描述的公开更新
 

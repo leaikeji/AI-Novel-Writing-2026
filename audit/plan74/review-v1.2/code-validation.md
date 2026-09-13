@@ -1,6 +1,12 @@
 # V1.2代码验证记录
 
-日期：2026-09-13。状态：`2df5f17 G2-B PASS / 已正式发布且F18通过 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+日期：2026-09-13。状态：`fbfc3e6 G2-B PASS / F19已公开更新 / G3 PARTIAL`。下方旧代码检查及HOLD保留历史。正式分项不等于G3整体通过。
+
+## F19显式引用未完成报告
+
+- 红测：旧实现的两条新用例（整章／选区、无禁用规则、显式报告）均因未抛冲突失败。修复统一完成门禁，只有无禁用规则且未引用报告的旧客户端兼容例外；显式跳过保持incomplete，不伪造complete。未新增模块、DTO、迁移、Skill或依赖；既有跳过用例参数化扩展，保留独立兼容负例。
+- 精确源`fbfc3e61b7f84a68000afbba5d0889b1fbfb2ccf`、tree `dfc7360dae498ce7b4abad310df1fa9476300f69`，干净检出`/private/tmp/plan74-incomplete-source.7FA64V/code`。[全量Python](incomplete-source-backend.log)3210通过、331跳过、4条既有警告；[数据库](incomplete-source-database.log)357通过、1条既有警告。临时库`plan74_v12_0b9c5786901a4a97_test`仅用于代码校验并已精确删除；另一次工作区临时库f7a4160898514ade也已删除，正式创作数据未动。新增事务用例核对拒绝后正文／draft／报告不变，明确跳过后正文和应用事件正常提交且报告仍incomplete。非complete状态在临时库注入，不是正式产品证据。
+- 相比正式2df5f17，前端、锁、Skill、manifest、依赖无差异，引用170文件1554项及类型检查；干净源重新离线安装64包（零下载）、204模块构建和打包均退出0，status为空。JS SHA仍`e347aa28210c8b3f3587c95f54207ae3eb3aec7519c2ee7e8f1b27f6c966d1e5`。实际安装仅lexicon_reports.py一文件不同，发布另记，不外推真实incomplete分支PASS。
 
 ## 2df5f17完整候选复验
 
