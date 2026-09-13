@@ -94,6 +94,7 @@ type EditorState =
 
 interface EditorSession {
   readonly contextKey: string;
+  readonly scopeKey: string;
   readonly novel: ActiveLibraryNovel | null;
   readonly targetAssetId: string | null;
   pending: boolean;
@@ -185,13 +186,15 @@ export function createPrivateLibraryWorkspace(
     const detailReady = selected !== null && selected.detail_loaded !== false
       && !props.detailLoading && !props.detailError;
     const busy = props.disabled === true || saving;
-    const contextKey = JSON.stringify([
+    const scopeKey = JSON.stringify([
       props.activeNovel?.id ?? null, category, query, scope, enabled,
       filters.includeArchived === true, requestedSelectedId ?? null, selected?.id ?? null,
-      selected?.current_version_id ?? null,
     ]);
+    const contextKey = JSON.stringify([scopeKey, selected?.current_version_id ?? null]);
     const currentContextRef = React.useRef(contextKey);
     currentContextRef.current = contextKey;
+    const currentScopeRef = React.useRef(scopeKey);
+    currentScopeRef.current = scopeKey;
     const editorSession = editorSessionRef.current;
     const editorContextChanged = editor !== null && editorSession?.contextKey !== contextKey;
     const editorNovel = editorSession?.novel ?? null;
@@ -215,7 +218,7 @@ export function createPrivateLibraryWorkspace(
       }
       const targetAssetId = state.kind === "entry" ? state.assetId : state.draft.assetId ?? null;
       editorSessionRef.current = {
-        contextKey,
+        contextKey, scopeKey,
         novel: props.activeNovel ? { ...props.activeNovel } : null,
         targetAssetId, pending: false, saved: false,
       };
@@ -270,7 +273,8 @@ export function createPrivateLibraryWorkspace(
         session.pending = false;
         session.saved = true;
         setSaving(false);
-        if (currentContextRef.current === session.contextKey) closeEditor();
+        // The successful write itself advances the asset version during reload.
+        if (currentScopeRef.current === session.scopeKey) closeEditor();
         else setSaveNotice("资料已按原范围保存。当前界面已变化，原输入继续保留，可复制后关闭；不会重复保存到当前作品。");
       }).catch((error: unknown) => {
         if (editorSessionRef.current !== session) return;

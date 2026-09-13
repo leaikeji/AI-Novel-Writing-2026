@@ -502,4 +502,31 @@ describe("private library desktop workspace", () => {
     expect(drawer.props.closable).toBe(true);
     expect(findAll(tree, (element) => element.type === "alert").some((alert) => alert.props.message === "原资料已变化")).toBe(true);
   });
+
+  it.each(["asset", "entry"])("closes the %s editor after its successful save advances the same asset version", async (kind) => {
+    const harness = createPrivateLibraryHarness();
+    const Workspace = createPrivateLibraryWorkspace(harness.React, TEST_ANTD);
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const save = vi.fn(() => pending);
+    const input = { ...props(), selectedAssetId: "pack-1", onSaveAsset: save, onSaveEntry: save };
+    let tree = harness.render(Workspace, input);
+    const focus = vi.fn();
+    (findButton(tree, kind === "asset" ? "编辑资料" : "添加词项").props.onClick as (event: object) => void)({ currentTarget: { focus } });
+    tree = harness.render(Workspace, input);
+    if (kind === "entry") {
+      (findByLabel(tree, "词或短语").props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "阀座" } });
+      tree = harness.render(Workspace, input);
+    }
+    const drawer = findAll(tree, (element) => element.type === "drawer")[0]!;
+    (findButton(drawer.props.footer, "保存").props.onClick as () => void)();
+    const updated = { ...input, selectedAsset: { ...assets()[0]!, version: 4, current_version_id: "pack-1-v4" } };
+    harness.render(Workspace, updated);
+    finish();
+    for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    tree = harness.render(Workspace, updated);
+    expect(findAll(tree, (element) => element.type === "drawer" && element.props.open === true)).toHaveLength(0);
+    expect(save).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledOnce();
+  });
 });
