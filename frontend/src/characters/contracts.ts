@@ -277,5 +277,9 @@ export interface CharacterWorkspaceVoiceSlotProps {
   readonly novelId: string;
   readonly characterId: string;
   readonly characterName: string;
+  readonly characterAgeAtStoryStartNote: string;
+  readonly characterGender: string;
+  readonly characterDescription: string;
+  readonly characterPersonalitySource: string;
   readonly binding: CharacterVoiceBindingView | null;
 }

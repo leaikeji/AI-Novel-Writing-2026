@@ -1336,6 +1336,10 @@ export function createCharacterWorkspaceDialog(
             novelId: workspace.novel_id,
             characterId: workspace.character.id,
             characterName: rootDraft.name,
+            characterAgeAtStoryStartNote: valueAsText(profileDraft.age_at_story_start_note),
+            characterGender: rootDraft.gender,
+            characterDescription: rootDraft.description,
+            characterPersonalitySource: valueAsText(profileDraft.personality),
             binding: workspace.voice_binding,
           })
         : h("div", { className: "anw-character-workspace-empty" }, "声音设置组件尚未接入。人物卡不会创建第二份声音数据。"),

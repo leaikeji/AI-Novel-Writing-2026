@@ -4590,6 +4590,14 @@ export function StudioProjectView({
         characterId: character.id,
         characterName: character.name,
         roleType: character.role_type,
+        ageAtStoryStartNote: typeof character.details.age_at_story_start_note === "string"
+          ? character.details.age_at_story_start_note
+          : typeof character.details.age === "string" ? character.details.age : null,
+        gender: typeof character.details.gender === "string" ? character.details.gender : null,
+        description: character.description,
+        personality: typeof character.details.personality === "string"
+          ? character.details.personality
+          : null,
       })),
     onSectionChange: onReadingPanelChange,
     onStartBookNarration,
@@ -4926,6 +4934,10 @@ export function StudioProjectView({
         novelId,
         characterId,
         characterName,
+        characterAgeAtStoryStartNote,
+        characterGender,
+        characterDescription,
+        characterPersonalitySource,
         binding,
       }: CharacterWorkspaceVoiceSlotProps) => h(
         CharacterVoiceCardPanel,
@@ -4934,6 +4946,10 @@ export function StudioProjectView({
           novelId,
           characterId,
           characterName,
+          characterAgeAtStoryStartNote,
+          characterGender,
+          characterDescription,
+          characterPersonalitySource,
           initialBinding: binding,
         },
       ),

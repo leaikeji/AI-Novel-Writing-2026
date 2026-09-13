@@ -38,6 +38,7 @@ import {
   createVoiceVersionPreviewPlayback,
   type VoicePreviewPlaybackReactRuntime,
 } from "./voice-preview-playback";
+import type { CharacterVoiceDesignSuggestion } from "./character-voice-design-suggestion";
 
 
 const PREVIEW_TEXT_MAX_LENGTH = 500;
@@ -75,6 +76,7 @@ export interface VoiceSourceWorkspaceProps {
   readonly authorization: NarrationAuthorizationState;
   readonly voiceSources: readonly VoiceSourceAvailability[];
   readonly suggestedProfileName?: string;
+  readonly suggestedDesign?: CharacterVoiceDesignSuggestion;
   readonly className?: string;
   readonly onProfileLocked?: (profile: VoiceProfileResource) => void;
 }
@@ -145,7 +147,11 @@ export function createVoiceWorkspaceIdempotencyKey(kind: string): string {
 }
 
 
-function initialState(novelId: string, suggestedName: string): VoiceSourceWorkspaceState {
+function initialState(
+  novelId: string,
+  suggestedName: string,
+  suggestedDesign: CharacterVoiceDesignSuggestion | undefined,
+): VoiceSourceWorkspaceState {
   return {
     scopeNovelId: novelId,
     phase: "loading",
@@ -157,7 +163,7 @@ function initialState(novelId: string, suggestedName: string): VoiceSourceWorksp
     language: "zh-CN",
     referenceAudio: null,
     referenceText: "",
-    designDescription: "",
+    designDescription: suggestedDesign?.description ?? "",
     uploadRights: EMPTY_VOICE_UPLOAD_RIGHTS,
     previewText: "你好，这是当前音色的朗读试听。",
     workflow: IDLE_VOICE_SOURCE_WORKFLOW,
@@ -322,8 +328,9 @@ export function createVoiceSourceWorkspace(
 
   return function VoiceSourceWorkspace(props: VoiceSourceWorkspaceProps): unknown {
     const suggestedName = props.suggestedProfileName?.trim() || "自定义朗读音色";
+    const suggestedDesign = props.suggestedDesign;
     const [state, setState] = React.useState<VoiceSourceWorkspaceState>(() => (
-      initialState(props.novelId, suggestedName)
+      initialState(props.novelId, suggestedName, suggestedDesign)
     ));
     const stateRef = React.useRef(state);
     stateRef.current = state;
@@ -421,7 +428,7 @@ export function createVoiceSourceWorkspace(
       const sequence = ++operationSequenceRef.current;
       const controller = new AbortController();
       operationAbortRef.current = controller;
-      commit(initialState(props.novelId, suggestedName));
+      commit(initialState(props.novelId, suggestedName, suggestedDesign));
       void loadProfiles(
         generation,
         sequence,
@@ -451,7 +458,7 @@ export function createVoiceSourceWorkspace(
 
     const scopedState = state.scopeNovelId === props.novelId
       ? state
-      : initialState(props.novelId, suggestedName);
+      : initialState(props.novelId, suggestedName, suggestedDesign);
     const selectedProfile = scopedState.profiles.find((profile) => (
       profile.profile_id === scopedState.selectedProfileId
     )) ?? null;
@@ -591,7 +598,7 @@ export function createVoiceSourceWorkspace(
         selectedSource: selection.source,
         referenceAudio: null,
         referenceText: "",
-        designDescription: "",
+        designDescription: suggestedDesign?.description ?? "",
         workflow: IDLE_VOICE_SOURCE_WORKFLOW,
         previewPlayed: false,
         qualityConfirmed: false,
@@ -1276,6 +1283,11 @@ export function createVoiceSourceWorkspace(
             uploadRights: scopedState.uploadRights,
             referenceText: scopedState.referenceText,
             designDescription: scopedState.designDescription,
+            designGuidance: suggestedDesign?.ageEvidence
+              ? `已把${suggestedDesign.ageEvidence}放在第一位；年龄感优先于沉稳、坚韧等气质。你可以继续编辑。`
+              : suggestedDesign === undefined
+                ? undefined
+                : "人物年龄未明确，系统不会根据姓名、职业或身份猜测。请先在人物卡填写开篇年龄，或手动写明年龄感。",
             previewText: scopedState.previewText,
             busy: actionsBlocked,
             cancelAllowed: busy && scopedState.phase !== "locking",
@@ -1290,13 +1302,20 @@ export function createVoiceSourceWorkspace(
               commit((current) => ({
                 ...current,
                 selectedSource: source,
+                designDescription: source === "generated" && current.designDescription.trim() === ""
+                  ? suggestedDesign?.description ?? ""
+                  : current.designDescription,
                 selectedVersionId: selectableVersions(selectedProfile)
                   .find((version) => version.source_type === source)?.version_id ?? null,
                 workflow: IDLE_VOICE_SOURCE_WORKFLOW,
                 previewPlayed: false,
                 qualityConfirmed: false,
                 message: source === "generated"
-                  ? "已选择文字设计。语言固定为普通话，请填写描述和试听文本。"
+                  ? suggestedDesign?.ageEvidence
+                    ? `已按人物年龄（${suggestedDesign.ageEvidence}）生成可编辑描述；年龄感优先于其他气质。`
+                    : suggestedDesign === undefined
+                      ? "已选择文字设计。语言固定为普通话，请填写描述和试听文本。"
+                      : "已选择文字设计。人物年龄未明确，系统不会按姓名或职业猜测；请先填写年龄或手动描述。"
                   : "已选择上传参考录音。语言固定为普通话，请完整填写录音文字和权利表单。",
                 failure: null,
               }));

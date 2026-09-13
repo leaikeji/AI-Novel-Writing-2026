@@ -53,6 +53,10 @@ import {
   type VoiceSourceWorkspaceApi,
   type VoiceSourceWorkspaceReactRuntime,
 } from "./voice-source-workspace";
+import {
+  buildCharacterVoiceDesignSuggestion,
+  type CharacterVoiceDesignSuggestion,
+} from "./character-voice-design-suggestion";
 
 
 export interface NarrationCharacterSummary {
@@ -60,6 +64,10 @@ export interface NarrationCharacterSummary {
   readonly characterId: string;
   readonly characterName: string;
   readonly roleType?: "main" | "supporting" | string | null;
+  readonly ageAtStoryStartNote?: string | null;
+  readonly gender?: string | null;
+  readonly description?: string | null;
+  readonly personality?: string | null;
 }
 
 
@@ -78,6 +86,10 @@ export interface CharacterVoiceCardPanelProps {
   readonly novelId: string;
   readonly characterId: string;
   readonly characterName: string;
+  readonly characterAgeAtStoryStartNote?: string | null;
+  readonly characterGender?: string | null;
+  readonly characterDescription?: string | null;
+  readonly characterPersonalitySource?: string | null;
   readonly initialBinding?: CharacterVoiceCardInitialBinding | null;
   readonly initialOverview?: NarrationOverviewResponse;
   readonly initialProfiles?: readonly VoiceProfileResource[];
@@ -402,6 +414,9 @@ export function createNarrationReadingPage(
               readonly characterId: string;
               readonly characterName: string;
             }) => {
+              const characterSummary = scopedCharacters.find((item) => (
+                item.characterId === character.characterId
+              ));
               const binding = rosterState.bindings.find((item) => (
                 item.character_id === character.characterId
               ));
@@ -410,6 +425,10 @@ export function createNarrationReadingPage(
                 novelId: props.novelId,
                 characterId: character.characterId,
                 characterName: character.characterName,
+                characterAgeAtStoryStartNote: characterSummary?.ageAtStoryStartNote,
+                characterGender: characterSummary?.gender,
+                characterDescription: characterSummary?.description,
+                characterPersonalitySource: characterSummary?.personality,
                 initialOverview: overview,
                 initialProfiles: props.context.voiceProfiles,
                 initialBinding: binding === undefined
@@ -630,6 +649,7 @@ export function createCharacterVoiceCardPanel(
     readonly novelId: string;
     readonly characterId: string;
     readonly characterName: string;
+    readonly suggestedDesign: CharacterVoiceDesignSuggestion;
     readonly overview: NarrationOverviewResponse;
     readonly profileRefreshVersion: number;
     readonly onProfileChanged: () => void;
@@ -653,6 +673,7 @@ export function createCharacterVoiceCardPanel(
         authorization: advancedProps.overview.authorization,
         voiceSources: advancedProps.overview.voice_sources,
         suggestedProfileName: `${advancedProps.characterName}专属声音`,
+        suggestedDesign: advancedProps.suggestedDesign,
         onProfileLocked: advancedProps.onProfileChanged,
       }),
       h(CharacterVoicePanel, {
@@ -672,6 +693,12 @@ export function createCharacterVoiceCardPanel(
 
   return function CharacterVoiceCardPanel(props: CharacterVoiceCardPanelProps): unknown {
     const scopeKey = `${props.novelId}:${props.characterId}`;
+    const suggestedDesign = buildCharacterVoiceDesignSuggestion({
+      ageAtStoryStartNote: props.characterAgeAtStoryStartNote,
+      gender: props.characterGender,
+      description: props.characterDescription,
+      personality: props.characterPersonalitySource,
+    });
     const [reloadVersion, setReloadVersion] = React.useState(0);
     const [profileRefreshVersion, setProfileRefreshVersion] = React.useState(0);
     const projectionKey = `${scopeKey}:${reloadVersion}`;
@@ -882,6 +909,7 @@ export function createCharacterVoiceCardPanel(
         novelId: props.novelId,
         characterId: props.characterId,
         characterName: props.characterName,
+        suggestedDesign,
         overview: state.overview,
         profileRefreshVersion,
         onProfileChanged: publishChanged,

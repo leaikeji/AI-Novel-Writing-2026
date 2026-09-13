@@ -41,7 +41,7 @@ const SOURCE_DEFINITIONS: Readonly<Record<PrivateVoiceSourceType, {
   generated: {
     capability: "voice_design",
     label: "文字设计音色",
-    description: "描述年龄感、声音质感和表达方式，设计一个新声音。",
+    description: "先写明确年龄，再描述声音质感和表达方式，设计一个新声音。",
   },
   uploaded: {
     capability: "reference_clone",
@@ -739,6 +739,7 @@ interface VoiceSourcePanelBaseProps {
   readonly uploadRights: VoiceUploadRightsDraft;
   readonly referenceText?: string;
   readonly designDescription?: string;
+  readonly designGuidance?: string;
   readonly previewText?: string;
   readonly busy?: boolean;
   readonly cancelAllowed?: boolean;
@@ -920,13 +921,16 @@ export function VoiceSourcePanel(props: VoiceSourcePanelProps): unknown {
             value: props.designDescription ?? "",
             maxLength: 500,
             rows: 4,
-            placeholder: "例如：沉稳、清晰的青年男声，语速适中，情绪克制。",
+            placeholder: "例如：26岁青年男性，标准普通话；保持青年年龄感，再描述声线与情绪。",
             "aria-invalid": designDescription.length < 1 || designDescription.length > 500,
             onChange: (event: VoiceInputEvent) => props.onDesignDescriptionChange?.(
               event.target.value,
             ),
           }),
         ),
+        props.designGuidance
+          ? h("p", { className: "anw-narration-voice-design-guidance", role: "note" }, props.designGuidance)
+          : null,
         h("label", null,
           "试听文本（1–500 字）",
           h("textarea", {

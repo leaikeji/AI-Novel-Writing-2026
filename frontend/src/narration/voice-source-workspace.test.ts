@@ -592,6 +592,51 @@ describe("voice source workspace", () => {
     ).actions.canPreview).toBe(true);
   });
 
+  it("prefills an age-first suggestion for a character without starting the model", async () => {
+    const draft = profile();
+    const api: VoiceSourceWorkspaceApi = {
+      listVoiceProfiles: vi.fn(async () => ({
+        contract_version: NARRATION_SETTINGS_API_VERSION,
+        items: [draft],
+      })),
+      createVoiceProfile: vi.fn(),
+      getVoiceProfile: vi.fn(),
+      createDesignedVoiceVersion: vi.fn(),
+      createUploadedVoiceVersion: vi.fn(),
+      createVoicePreview: vi.fn(),
+      getVoicePreview: vi.fn(),
+      lockVoiceProfile: vi.fn(),
+    };
+    const harness = createHarness();
+    const Workspace = createVoiceSourceWorkspace(harness.React, api);
+    const props = {
+      novelId: NOVEL_ID,
+      capabilities: designedCapabilities,
+      authorization,
+      voiceSources: designedVoiceSources,
+      suggestedDesign: {
+        description: "26岁，年龄感为第一优先级，保持青年年龄感；标准普通话。",
+        ageEvidence: "26岁",
+        ageSource: "profile" as const,
+      },
+    };
+
+    let tree = harness.render(Workspace, props);
+    await settle();
+    tree = harness.render(Workspace, props);
+    let panel = sourcePanel(tree);
+    expect(panel.props.designDescription).toBe("26岁，年龄感为第一优先级，保持青年年龄感；标准普通话。");
+    expect(api.createDesignedVoiceVersion).not.toHaveBeenCalled();
+
+    (panel.props.onSelectSource as (source: string) => void)("generated");
+    tree = harness.render(Workspace, props);
+    panel = sourcePanel(tree);
+    expect(panel.props.designDescription).toBe("26岁，年龄感为第一优先级，保持青年年龄感；标准普通话。");
+    expect(String(panel.props.designGuidance)).toContain("26岁");
+    expect(textContent(tree)).toContain("年龄感优先于其他气质");
+    expect(api.createDesignedVoiceVersion).not.toHaveBeenCalled();
+  });
+
   it("restores a generated preview and its player after the workspace reloads", async () => {
     const restoredVersion: VoiceProfileVersionResource = {
       ...generatedVersion(),
