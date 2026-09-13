@@ -658,15 +658,21 @@ export function ensureNovelStyles(): void {
     .anw-private-library-combination-list article p { margin:4px 0; color:#6f665d; }
     .anw-private-library-combination-list article small { color:#8c8175; }
     .anw-private-library-combination-preview ul { max-height:280px; overflow:auto; padding-left:22px; }
-    .anw-private-library { display:grid; min-width:0; gap:18px; }
-    .anw-private-library__header { display:flex; min-width:0; align-items:flex-start; justify-content:space-between; gap:20px; }
+    .anw-private-library { display:grid; min-width:0; gap:18px; container-type:inline-size; }
+    .anw-private-library__header { display:flex; min-width:0; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:20px; }
+    .anw-private-library__header > div { min-width:0; flex:1 1 260px; overflow-wrap:anywhere; }
+    .anw-private-library__header > button { flex:0 0 auto; }
     .anw-private-library__header h1 { margin:0 0 6px; font-size:28px; }
     .anw-private-library__header p { margin:0; color:var(--anw-muted); font-size:13px; line-height:1.7; }
     .anw-private-library__categories { display:flex; min-width:0; gap:4px; overflow-x:auto; border-bottom:1px solid var(--anw-line); }
     .anw-private-library__categories > button { min-height:42px; flex:0 0 auto; border:0; border-bottom:2px solid transparent; padding:0 15px; color:#707681; background:transparent; cursor:pointer; font:inherit; font-size:13px; font-weight:700; }
     .anw-private-library__categories > button[aria-selected="true"] { border-bottom-color:var(--anw-orange); color:var(--anw-orange-strong); }
     .anw-private-library__categories > button:focus-visible { border-radius:7px 7px 0 0; outline:2px solid rgba(255,112,67,.28); outline-offset:-2px; }
-    .anw-private-library__filters { display:grid; grid-template-columns:minmax(260px,1fr) 150px 150px auto; align-items:center; gap:10px; }
+    .anw-private-library__filters { display:flex; min-width:0; flex-wrap:wrap; align-items:center; gap:10px; }
+    .anw-private-library__filters > .qwenpaw-input-affix-wrapper { min-width:0; max-width:100%; flex:1 1 240px; }
+    .anw-private-library__filters > .qwenpaw-select { min-width:0; max-width:100%; flex:1 1 140px; }
+    .anw-private-library__filters > label { display:flex; flex:0 0 auto; align-items:center; gap:6px; white-space:nowrap; }
+    .anw-private-library__filters > label input { flex:0 0 auto; margin:0; }
     .anw-private-library__desktop-layout { display:grid; min-height:560px; grid-template-columns:minmax(280px,34%) minmax(0,1fr); overflow:hidden; border:1px solid var(--anw-line); border-radius:14px; background:#fff; box-shadow:var(--anw-shadow-soft); }
     .anw-private-library__master { min-width:0; overflow:auto; border-right:1px solid var(--anw-line); padding:12px; background:#fafbfc; }
     .anw-private-library__asset-list { display:grid; gap:9px; }
@@ -680,29 +686,39 @@ export function ensureNovelStyles(): void {
     .anw-private-library__asset-select:focus-visible { border-radius:5px; outline:2px solid rgba(255,112,67,.35); outline-offset:3px; }
     .anw-private-library__asset-meta { display:flex; min-width:0; flex-wrap:wrap; align-items:center; gap:5px; color:#9a9ea5; font-size:10px; }
     .anw-private-library__detail-pane { min-width:0; overflow:auto; padding:24px; }
-    .anw-private-library__detail { display:grid; gap:22px; }
-    .anw-private-library__detail-header { display:flex; min-width:0; align-items:flex-start; justify-content:space-between; gap:18px; border-bottom:1px solid var(--anw-line); padding-bottom:18px; }
+    .anw-private-library__detail { display:grid; min-width:0; gap:22px; overflow-wrap:anywhere; }
+    .anw-private-library__detail-header { display:flex; min-width:0; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:18px; border-bottom:1px solid var(--anw-line); padding-bottom:18px; }
+    .anw-private-library__detail-header > div:first-child { min-width:0; flex:1 1 220px; }
     .anw-private-library__detail-header h2 { margin:0 0 5px; font-size:21px; }
     .anw-private-library__detail-header p,.anw-private-library__summary { margin:0; color:#858b94; font-size:12px; line-height:1.7; }
-    .anw-private-library__detail-actions { display:flex; flex:0 0 auto; align-items:center; gap:12px; }
-    .anw-private-library__detail-actions > label { display:flex; align-items:center; gap:7px; color:#696f78; font-size:12px; }
+    .anw-private-library__detail-actions { display:flex; min-width:0; max-width:100%; flex:0 1 auto; flex-wrap:wrap; align-items:center; gap:12px; }
+    .anw-private-library__detail-actions > label { display:flex; flex:0 0 auto; align-items:center; gap:7px; color:#696f78; font-size:12px; white-space:nowrap; }
+    .anw-private-library__detail-actions > button { flex:0 0 auto; }
     .anw-private-library__entries,.anw-private-library__check { display:grid; gap:12px; }
     .anw-private-library__history { display:grid; gap:10px; border-top:1px solid var(--anw-line); padding-top:16px; }
     .anw-private-library__history h3 { margin:0; font-size:16px; }
     .anw-private-library__history > p { margin:0; color:#858b94; }
     .anw-private-library__history ol { display:grid; gap:7px; margin:0; padding:0; list-style:none; }
-    .anw-private-library__history li { display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid #eceef1; border-radius:8px; padding:8px 10px; }
-    .anw-private-library__section-title { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .anw-private-library__history li { display:flex; min-width:0; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; border:1px solid #eceef1; border-radius:8px; padding:8px 10px; }
+    .anw-private-library__history li > span:first-child { min-width:0; flex:1 1 180px; }
+    .anw-private-library__section-title { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
     .anw-private-library__section-title h3,.anw-private-library__check h3 { margin:0; font-size:16px; }
     .anw-private-library__entry-list,.anw-private-library__hit-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
-    .anw-private-library__entry-list > li,.anw-private-library__hit-list > li { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:12px; border:1px solid #eceef1; border-radius:9px; padding:10px 12px; background:#fff; }
-    .anw-private-library__entry-list > li > div,.anw-private-library__hit-list > li > div { display:flex; min-width:0; flex-wrap:wrap; align-items:center; gap:7px; }
+    .anw-private-library__entry-list > li,.anw-private-library__hit-list > li { display:flex; min-width:0; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; border:1px solid #eceef1; border-radius:9px; padding:10px 12px; background:#fff; }
+    .anw-private-library__entry-list > li > div,.anw-private-library__hit-list > li > div { display:flex; min-width:0; flex:1 1 200px; flex-wrap:wrap; align-items:center; gap:7px; }
     .anw-private-library__entry-list p { flex:1 1 100%; margin:4px 0 0; color:#777d86; font-size:12px; line-height:1.6; }
     .anw-private-library__loading,.anw-private-library__empty,.anw-private-library__detail-empty { display:flex; min-height:280px; align-items:center; justify-content:center; gap:10px; color:#8a9099; text-align:center; }
     .anw-private-library__editor-fields { display:grid; gap:16px; padding-top:12px; }
     .anw-private-library__editor-fields > label { display:grid; gap:7px; color:#4c5159; font-size:12px; font-weight:700; }
     .anw-private-library__editor-fields > label:has(.qwenpaw-switch) { display:flex; align-items:center; }
     .anw-private-library__drawer-footer { display:flex; justify-content:flex-end; gap:9px; }
+    /* The host sidebar and assistant can narrow this desktop page independently
+       of the window. Keep this query anonymous for the inline CSS compactor. */
+    @container (max-width:760px) {
+      .anw-private-library__desktop-layout { min-height:0; grid-template-columns:minmax(0,1fr); }
+      .anw-private-library__master { max-height:320px; border-right:0; border-bottom:1px solid var(--anw-line); }
+      .anw-private-library__detail-pane { padding:18px; }
+    }
     .anw-private-library-capture.qwenpaw-card { width:min(460px,calc(100vw - 24px)); max-height:min(72vh,620px); overflow:auto; border:0; border-top:1px solid #f0f1f3; border-radius:0; box-shadow:none; }
     .anw-private-library-capture .qwenpaw-card-body { display:grid; gap:11px; padding:12px; }
     .anw-private-library-capture label { display:grid; gap:5px; color:#555b64; font-size:11px; font-weight:700; }

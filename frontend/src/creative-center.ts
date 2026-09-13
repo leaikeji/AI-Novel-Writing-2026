@@ -18,7 +18,7 @@ import {
 import { rememberWorkbenchRoute } from "./workbench-route";
 import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
-import { navigateNovelSurface } from "./novel-surface-navigation";
+import { navigateNovelSurface, NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
 import { createEmbeddingConfigPage } from "./embedding";
 import { createTtsCloudConfigPage } from "./narration/cloud-config";
 import {
@@ -256,10 +256,13 @@ function setLibraryUrl(view: LibraryView): void {
   if (view !== "center") query.set("view", view);
   else query.delete("view");
   window.history.replaceState(
-    null,
+    window.history.state,
     "",
     `${target.pathname}?${query.toString()}`,
   );
+  // replaceState does not notify the route wrapper that maintains the trusted
+  // assistant scope. Use the same public event as other PawApp navigation.
+  window.dispatchEvent(new Event(NOVEL_SURFACE_NAVIGATION_EVENT));
 }
 
 

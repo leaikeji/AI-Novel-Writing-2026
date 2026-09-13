@@ -11,14 +11,17 @@ import {
   codeMirrorNarrationRanges,
   codeMirrorOriginAnnotation,
   codeMirrorTransactionOrigin,
+  codeMirrorValueReplacement,
   createCodeMirrorNarrationState,
   dispatchCodeMirrorContextPlaybackCommand,
   dispatchCodeMirrorKeyboardPlaybackCommand,
+  selectionFromCodeMirror,
 } from "./editor-codemirror";
 import {
   ProductionNarrationEditorBridge,
   documentLeasesEqual,
   type DocumentLease,
+  type NarrationEditorSelection,
 } from "./editor-bridge";
 
 
@@ -26,13 +29,14 @@ const LEASE: DocumentLease = { documentId: "document-cm", generation: 3 };
 const HASH = "c".repeat(64);
 
 
-function createHarness(text = "甲🙂乙\n第二段。") {
+function createHarness(text = "甲🙂乙\n第二段。", selection?: NarrationEditorSelection) {
   let currentLease: DocumentLease = LEASE;
   const onDocChanged = vi.fn();
   const bridge = new ProductionNarrationEditorBridge({
     kind: "codemirror6",
     lease: LEASE,
     text,
+    selection,
     currentContentHash: HASH,
     onDocChanged,
     isLeaseCurrent: (candidate) => documentLeasesEqual(candidate, currentLease),
@@ -114,6 +118,75 @@ describe("CodeMirror narration public state", () => {
 });
 
 
+describe("CodeMirror whole-document replacement", () => {
+  it.each([
+    { name: "forward growth", start: 2, end: 6, direction: "forward", next: "ABCDEFGHIJK", expectedStart: 2, expectedEnd: 6 },
+    { name: "backward growth", start: 2, end: 6, direction: "backward", next: "ABCDEFGHIJK", expectedStart: 2, expectedEnd: 6 },
+    { name: "forward truncation", start: 2, end: 6, direction: "forward", next: "ABCD", expectedStart: 2, expectedEnd: 4 },
+    { name: "backward truncation", start: 2, end: 6, direction: "backward", next: "ABCD", expectedStart: 2, expectedEnd: 4 },
+    { name: "selection past new end", start: 2, end: 6, direction: "backward", next: "A", expectedStart: 1, expectedEnd: 1 },
+    { name: "empty replacement", start: 2, end: 6, direction: "forward", next: "", expectedStart: 0, expectedEnd: 0 },
+    { name: "forward surrogate boundaries", start: 2, end: 6, direction: "forward", next: "甲🙂乙丙🧰丁", expectedStart: 1, expectedEnd: 7 },
+    { name: "backward surrogate boundaries", start: 2, end: 6, direction: "backward", next: "甲🙂乙丙🧰丁", expectedStart: 1, expectedEnd: 7 },
+    { name: "caret inside new surrogate", start: 2, end: 2, direction: "none", next: "甲🙂乙", expectedStart: 1, expectedEnd: 1 },
+    { name: "empty document growth", initial: "", start: 0, end: 0, direction: "none", next: "甲🙂乙", expectedStart: 0, expectedEnd: 0 },
+  ] as const)("keeps $name ordered and UTF-16-safe in the real state and bridge", (example) => {
+    const initial = ("initial" in example ? example.initial : undefined) ?? "abcdefghi";
+    const harness = createHarness(initial, {
+      startUtf16: example.start,
+      endUtf16: example.end,
+      direction: example.direction,
+    });
+    const state = createCodeMirrorNarrationState(initial, harness.bridge);
+    const replacement = codeMirrorValueReplacement(state, example.next, "ai-apply");
+    expect(replacement).not.toBeNull();
+    const transaction = state.update(replacement!);
+    const expected = {
+      startUtf16: example.expectedStart,
+      endUtf16: example.expectedEnd,
+      direction: example.expectedStart === example.expectedEnd ? "none" : example.direction,
+    };
+
+    expect(selectionFromCodeMirror(transaction.state)).toEqual(expected);
+    expect(applyTransaction(harness.bridge, transaction)).toMatchObject({
+      applied: true,
+      text: example.next,
+    });
+    expect(harness.bridge.readSnapshot()).toMatchObject({ text: example.next, selection: expected });
+    expect(harness.onDocChanged).toHaveBeenCalledExactlyOnceWith({
+      lease: LEASE,
+      nextValue: example.next,
+      origin: "ai-apply",
+      composing: false,
+    });
+  });
+
+  it("preserves safe existing emoji selection offsets", () => {
+    const text = "甲🙂乙\n第二段。";
+    const harness = createHarness(text, { startUtf16: 1, endUtf16: 3, direction: "backward" });
+    const state = createCodeMirrorNarrationState(text, harness.bridge);
+    const transaction = state.update(codeMirrorValueReplacement(state, `${text}续写。`, "external")!);
+
+    expect(applyTransaction(harness.bridge, transaction)?.applied).toBe(true);
+    expect(harness.bridge.readSnapshot().selection).toEqual({
+      startUtf16: 1, endUtf16: 3, direction: "backward",
+    });
+    expect(harness.onDocChanged).toHaveBeenCalledOnce();
+  });
+
+  it("does not dispatch an unchanged value or accept malformed replacement text", () => {
+    const harness = createHarness("甲🙂乙");
+    const state = createCodeMirrorNarrationState("甲🙂乙", harness.bridge);
+    expect(codeMirrorValueReplacement(state, "甲🙂乙", "external")).toBeNull();
+    expect(() => codeMirrorValueReplacement(state, "甲\ud83d乙", "external"))
+      .toThrow("unpaired UTF-16 high surrogate");
+    expect(state.doc.toString()).toBe("甲🙂乙");
+    expect(harness.bridge.readSnapshot().text).toBe("甲🙂乙");
+    expect(harness.onDocChanged).not.toHaveBeenCalled();
+  });
+});
+
+
 describe("CodeMirror docChanged isolation", () => {
   it("converts one public ChangeSet into strict UTF-16 changes", () => {
     const state = EditorState.create({ doc: "甲🙂乙" });
@@ -165,25 +238,38 @@ describe("CodeMirror docChanged isolation", () => {
     expect(harness.onDocChanged).not.toHaveBeenCalled();
   });
 
-  it("preserves explicit AI apply and AI undo origins", () => {
-    const harness = createHarness("旧稿");
-    let state = createCodeMirrorNarrationState("旧稿", harness.bridge);
-    const aiApply = state.update({
-      changes: { from: 0, to: state.doc.length, insert: "新稿" },
-      annotations: codeMirrorOriginAnnotation("ai-apply"),
+  it("keeps one save per AI apply, undo and external replacement while allowing exact selection restoration", () => {
+    const harness = createHarness("旧稿第一段。", {
+      startUtf16: 2, endUtf16: 5, direction: "backward",
     });
-    applyTransaction(harness.bridge, aiApply);
-    state = aiApply.state;
-    const aiUndo = state.update({
-      changes: { from: 0, to: state.doc.length, insert: "旧稿" },
-      annotations: codeMirrorOriginAnnotation("ai-undo"),
-    });
-    applyTransaction(harness.bridge, aiUndo);
+    let state = createCodeMirrorNarrationState("旧稿第一段。", harness.bridge);
+    const replacements = [
+      { origin: "ai-apply", text: "新稿改写的段落。", anchor: 7, head: 2 },
+      { origin: "ai-undo", text: "旧稿第一段。", anchor: 5, head: 2 },
+      { origin: "external", text: "同步后的段落。", anchor: 0, head: 2 },
+    ] as const;
 
-    expect(harness.onDocChanged.mock.calls.map(([event]) => event.origin)).toEqual([
-      "ai-apply",
-      "ai-undo",
-    ]);
+    for (const [index, replacement] of replacements.entries()) {
+      const transaction = state.update(codeMirrorValueReplacement(state, replacement.text, replacement.origin)!);
+      expect(applyTransaction(harness.bridge, transaction)?.applied).toBe(true);
+      state = transaction.state;
+      const restored = state.update({
+        selection: { anchor: replacement.anchor, head: replacement.head },
+        annotations: codeMirrorNarrationPresentationAnnotation(),
+      });
+      expect(applyTransaction(harness.bridge, restored)).toBeNull();
+      state = restored.state;
+      expect(harness.bridge.readSnapshot().selection).toEqual(selectionFromCodeMirror(state));
+      expect(state.selection.main.anchor).toBe(replacement.anchor);
+      expect(state.selection.main.head).toBe(replacement.head);
+      expect(harness.onDocChanged).toHaveBeenCalledTimes(index + 1);
+      expect(harness.onDocChanged).toHaveBeenLastCalledWith({
+        lease: LEASE,
+        nextValue: replacement.text,
+        origin: replacement.origin,
+        composing: false,
+      });
+    }
   });
 
   it("recognizes public undo, redo, and composition user events", () => {

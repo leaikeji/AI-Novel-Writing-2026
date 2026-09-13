@@ -63,9 +63,32 @@ export function createAssistantSelectionToolbar(
     React.useEffect(() => {
       const toolbar = toolbarRef.current;
       if (!state.visible || !toolbar) return;
-      const rect = toolbar.getBoundingClientRect();
-      controller.setToolbarSize(rect.width, rect.height);
-    }, [state.visible, state.selectionId]);
+      let active = true;
+      let measuredWidth = 0;
+      let measuredHeight = 0;
+      const measure = () => {
+        if (!active || toolbarRef.current !== toolbar) return;
+        // Measure the whole border box: capture fields, asynchronous labels and
+        // child-owned errors can grow without changing the frozen selection.
+        const { width, height } = toolbar.getBoundingClientRect();
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+        if (width === measuredWidth && height === measuredHeight) return;
+        measuredWidth = width;
+        measuredHeight = height;
+        controller.setToolbarSize(width, height);
+      };
+      measure();
+      const observer = typeof ResizeObserver === "undefined"
+        ? null : new ResizeObserver(measure);
+      observer?.observe(toolbar, { box: "border-box" });
+      return () => {
+        active = false;
+        observer?.disconnect();
+      };
+    }, [
+      state.visible, state.selectionId, state.phase, state.message,
+      captureOpen, captureTargets, captureNovelTitle, captureError,
+    ]);
     React.useEffect(() => {
       if (state.phase !== "customizing") {
         setCustomInstruction("");

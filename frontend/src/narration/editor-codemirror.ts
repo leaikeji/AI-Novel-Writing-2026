@@ -9,6 +9,7 @@ import {
   Transaction,
   type ChangeSet,
   type Extension,
+  type TransactionSpec,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -33,6 +34,7 @@ import {
   type TransactionMappingReport,
   type Utf16Range,
 } from "./editor-bridge";
+import { normalizeTextareaSelection } from "./editor-textarea-fallback";
 import type { AuthorFollowInterruption } from "./segment-follow";
 import {
   isNarrationSeekKeyboardCommand,
@@ -193,6 +195,24 @@ function selectionToCodeMirror(selection: NarrationEditorSelection): CodeMirrorS
     ? selection.startUtf16
     : selection.endUtf16;
   return CodeMirrorSelection.single(anchor, head);
+}
+
+
+export function codeMirrorValueReplacement(
+  state: EditorState,
+  nextValue: string,
+  origin: EditorChangeOrigin,
+): TransactionSpec | null {
+  if (state.doc.toString() === nextValue) return null;
+  assertWellFormedUtf16(nextValue, "CodeMirror nextValue");
+  // A whole-document replacement has no useful default selection mapping. Keep
+  // bounded UTF-16 positions until the caller restores its exact AI selection.
+  const selection = normalizeTextareaSelection(nextValue, selectionFromCodeMirror(state));
+  return {
+    changes: { from: 0, to: state.doc.length, insert: nextValue },
+    selection: selectionToCodeMirror(selection),
+    annotations: narrationChangeOrigin.of(origin),
+  };
 }
 
 
@@ -537,12 +557,9 @@ export function createCodeMirrorNarrationAdapter(
     },
     setValue(nextValue, origin) {
       if (disposed || !bridge.readSnapshot().active) return false;
-      if (view.state.doc.toString() === nextValue) return false;
-      assertWellFormedUtf16(nextValue, "CodeMirror nextValue");
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: nextValue },
-        annotations: narrationChangeOrigin.of(origin),
-      });
+      const replacement = codeMirrorValueReplacement(view.state, nextValue, origin);
+      if (!replacement) return false;
+      view.dispatch(replacement);
       return true;
     },
     setEditable(editable) {

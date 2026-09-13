@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createReactHarness, findAll } from "./embedding/test-harness";
 import type { LibraryQueryFilters, PrivateLibraryAssetDraft, PrivateLibraryAssetView } from "./private-library";
 import type { NovelSummary } from "./types";
+import { NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock("./api", async (original) => ({ ...await original<typeof import("./api")>(), apiRequest: request }));
@@ -50,6 +51,29 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("private library real page wiring", () => {
+  it("notifies the route wrapper when entering and leaving private library without losing host history state", () => {
+    const location = { origin: "http://localhost", pathname: "/chat/current-session", search: "?novel_center=1" };
+    const hostState = { session: "current-session" };
+    const history = { state: hostState, replaceState: vi.fn((_state: unknown, _unused: string, target: string) => {
+      location.search = new URL(target, location.origin).search;
+    }) };
+    const notifiedQueries: string[] = [];
+    const dispatchEvent = vi.fn((event: Event) => {
+      expect(event.type).toBe(NOVEL_SURFACE_NAVIGATION_EVENT);
+      notifiedQueries.push(location.search);
+      return true;
+    });
+    Object.assign(window, { location, history, dispatchEvent });
+    const center = harness.render(page.NovelLibraryPage, {});
+    const enter = findAll(center, (node) => node.props.label === "私有库")[0]!;
+    (enter.props.onClick as () => void)();
+    expect(history.replaceState).toHaveBeenLastCalledWith(hostState, "", "/chat/current-session?novel_center=1&view=private-library");
+    const library = harness.render(page.NovelLibraryPage, {});
+    (library.props.onBack as () => void)();
+    expect(history.replaceState).toHaveBeenLastCalledWith(hostState, "", "/chat/current-session?novel_center=1");
+    expect(notifiedQueries).toEqual(["?novel_center=1&view=private-library", "?novel_center=1"]);
+  });
+
   it("uses server projection/filter/offset and preserves full detail text when editing", async () => {
     render();
     const state = await settlePage();
