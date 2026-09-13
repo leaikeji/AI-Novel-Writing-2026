@@ -16,6 +16,7 @@ from .assistant_api import router as assistant_router
 from .context_v4 import ContextAssemblyError, ContextAssemblyErrorCode
 from .contracts import APP_ID, APP_VERSION
 from .creative_api import router as creative_router
+from .novel_metadata_api import router as novel_metadata_router
 from .creative_schemas import SELECTION_EDIT_OPERATIONS
 from .creative_data_api import router as creative_data_router
 from .writing_skills.api import router as writing_skills_router
@@ -206,6 +207,7 @@ def _public_generation_job(payload: dict[str, Any]) -> dict[str, Any]:
     return public
 router.include_router(assistant_router)
 router.include_router(creative_router)
+router.include_router(novel_metadata_router)
 router.include_router(creative_data_router)
 router.include_router(writing_skills_router)
 router.include_router(narration_settings_router)

@@ -116,6 +116,25 @@ function options(deps: ChapterNarrationWorkflowDependencies) {
 
 
 describe("resumeChapterNarrationWorkflow", () => {
+  it("基础入口等分析完成后恢复旧音频，再等待可播放，不重复复核脚本", async () => {
+    const oldId = "99999999-9999-4999-8999-999999999999";
+    const recoverExisting = vi.fn(async () => ({ ...workflow("queued", EDITION_ID), request_id: oldId }));
+    const getWorkflow = vi.fn(async (requestId: string) => requestId === oldId
+      ? { ...workflow("partial_ready", EDITION_ID), request_id: oldId }
+      : workflow("review_required"));
+    const deps = dependencies({ createWorkflow: vi.fn(async () => workflow("analyzing")),
+      recoverExisting, getWorkflow });
+    const result = await startChapterNarrationWorkflow({ ...options(deps), reuseExistingAudio: true });
+    expect(recoverExisting).toHaveBeenCalledOnce();
+    expect(recoverExisting).toHaveBeenCalledWith(expect.objectContaining({
+      workflow: expect.objectContaining({ workflow_state: "review_required" }),
+      idempotencyKey: `chapter-tts:${ACTION_ID}:recover`,
+    }));
+    expect(result.workflow.request_id).toBe(oldId);
+    expect(result.workflow.workflow_state).toBe("partial_ready");
+    expect(deps.createWorkflow).toHaveBeenCalledOnce();
+  });
+
   it("刷新后只恢复已知朗读请求，不保存或新建任务", async () => {
     const deps = dependencies({
       getWorkflow: vi.fn(async () => workflow("partial_ready", EDITION_ID)),

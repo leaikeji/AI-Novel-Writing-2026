@@ -9,6 +9,7 @@ import type {
   NarrationWorkflowResource,
 } from "./chapter-contracts";
 import { createNarrationActionUuid } from "./idempotency-key";
+import { recoverExistingNarration } from "./recover-existing-narration";
 
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -60,6 +61,7 @@ export class ChapterNarrationWorkflowError extends Error {
 
 
 export interface ChapterNarrationWorkflowDependencies {
+  readonly recoverExisting?: typeof recoverExistingNarration;
   readonly getSettings: typeof getNarrationSettings;
   readonly createWorkflow: typeof createNarrationWorkflow;
   readonly getWorkflow: typeof getNarrationWorkflow;
@@ -82,6 +84,7 @@ export interface ChapterNarrationWorkflowScope {
 }
 
 export interface StartChapterNarrationWorkflowOptions extends ChapterNarrationWorkflowScope {
+  readonly reuseExistingAudio?: boolean;
   readonly intent: Exclude<NarrationWorkflowIntent, "analyze_only">;
   readonly forceReview: boolean;
   readonly saveStableSource: () => Promise<StableChapterNarrationSource>;
@@ -287,7 +290,19 @@ export async function startChapterNarrationWorkflow(
       idempotencyKey,
       controller.signal,
     );
+    assertCurrent(options);
     workflow = await waitForActionableWorkflow(options, dependencies, workflow, controller.signal);
+    if (options.reuseExistingAudio) {
+      workflow = await (dependencies.recoverExisting ?? recoverExistingNarration)({
+        novelId: options.novelId,
+        documentId: options.documentId,
+        workflow,
+        idempotencyKey: `${idempotencyKey}:recover`,
+        signal: controller.signal,
+        assertCurrent: () => assertCurrent(options),
+      });
+      workflow = await waitForActionableWorkflow(options, dependencies, workflow, controller.signal);
+    }
     return Object.freeze({ source, settings, workflow });
   } finally {
     options.signal?.removeEventListener("abort", abortFromParent);

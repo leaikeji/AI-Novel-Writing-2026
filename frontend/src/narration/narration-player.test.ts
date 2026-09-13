@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, type Mock } from "vitest";
+import { PlaybackApiError } from "./playback-api";
 
 import {
   deriveManifestStatus,
@@ -518,6 +519,26 @@ describe("ProductionNarrationPlayerController fencing and prepare-range", () => 
     expect(call[5]).toBeInstanceOf(AbortSignal);
     expect(harness.controller.lease.requestGeneration).toBe(1);
     expect(harness.queue.starts).toHaveLength(0);
+  });
+
+  it("keeps Manifest revision conflicts in bounded preparation instead of treating them as author cancellation", async () => {
+    const prepareRange = vi.fn<PrepareRange>().mockRejectedValue(new PlaybackApiError(409, {
+      contract_version: "narration-production-api/1", code: "MANIFEST_REVISION_CONFLICT",
+      message: "advanced", retryable: true, field: null, current_version: 5,
+    }));
+    const harness = createHarness(manifest(["pending", "pending"]), prepareRange);
+    await expect(harness.controller.playFromSegment(segmentId(0), "command")).resolves.toMatchObject({
+      kind: "preparing", segmentId: segmentId(0), promotedJobIds: [],
+    });
+    expect(harness.controller.readState()).toMatchObject({ phase: "preparing", failure: null });
+    expect(harness.queue.starts).toHaveLength(0);
+  });
+
+  it("does not turn an unrelated provider failure into Manifest polling", async () => {
+    const prepareRange = vi.fn<PrepareRange>().mockRejectedValue(new PlaybackApiError(503, null));
+    const harness = createHarness(manifest(["pending", "pending"]), prepareRange);
+    await expect(harness.controller.playFromSegment(segmentId(0), "command")).resolves.toMatchObject({ kind: "error" });
+    expect(harness.controller.readState()).toMatchObject({ phase: "error" });
   });
 
   it("aborts a rapid older seek and ignores its late completion", async () => {

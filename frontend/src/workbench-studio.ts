@@ -29,6 +29,7 @@ import {
   VolumeRecord,
 } from "./types";
 import type { AssistantWorkspaceLayout } from "./assistant-layout";
+import { NovelMetadataEditor } from "./novel-metadata";
 import type { NovelAssistantContextEnvelope } from "./assistant-context-schema";
 import {
   assistantContextRuntime,
@@ -4680,6 +4681,7 @@ export function StudioProjectView({
           { className: "mb-book-rail" },
           h("div", { className: "mb-book-cover-wrap" }, h(NovelCoverView, { novel, className: "mb-book-cover", fallbackSrc: defaultNovelCover }), h("div", { className: "mb-book-cover-actions" }, h(Button, { type: "text", icon: h(DownloadOutlined), onClick: downloadCover, "aria-label": "下载封面" }), h(Button, { type: "text", icon: h(EditOutlined), onClick: openCover, "aria-label": "修改封面" }))),
           h("h1", null, novel.title),
+          h(NovelMetadataEditor, { novel, onChanged: onNovelChanged }),
           h("p", null, [novel.genre, novel.subgenre].filter(Boolean).join(" / ") || "长篇小说"),
           h("div", { className: "mb-book-stats" }, h("span", null, `${chapterDocuments.reduce((sum: number, item: DocumentRecord) => sum + item.visible_character_count, 0)} 字`), h("span", null, `${chapterDocuments.length} 章节`)),
           h("section", { className: "anw-current-model-card", "aria-label": "当前有效模型" },

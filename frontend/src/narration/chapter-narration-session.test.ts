@@ -23,7 +23,7 @@ import {
   type NarrationManifestV2,
   type SegmentRenderStatus,
 } from "./playback-contracts";
-import type { ManifestFetchResult } from "./playback-api";
+import { PlaybackApiError, type ManifestFetchResult } from "./playback-api";
 import type { ScriptReviewResource } from "./script-contracts";
 import type {
   NarrationPlayerQueueHooks,
@@ -500,6 +500,32 @@ describe("chapter narration in-place Manifest refresh", () => {
     });
     expect(harness.prepareRange).not.toHaveBeenCalled();
     expect(harness.queues[0].starts).toHaveLength(1);
+  });
+
+  it("refreshes a naturally advanced Manifest and continues the same pending target", async () => {
+    const resources = fixture(["ready", "pending"]);
+    const advanced = manifest(["ready", "ready"], 2, "2");
+    const getManifest = vi.fn<ChapterNarrationSessionDependencies["getNarrationManifest"]>(
+      async (_edition, options) => options?.ifNoneMatch
+        ? { not_modified: false, etag: advanced.etag, manifest: advanced }
+        : { not_modified: false, etag: resources.manifest.etag, manifest: resources.manifest });
+    const harness = createHarness({ resources, getManifest });
+    harness.prepareRange.mockRejectedValue(new PlaybackApiError(409, {
+      contract_version: "narration-production-api/1", code: "MANIFEST_REVISION_CONFLICT",
+      message: "advanced", retryable: true, field: null, current_version: 2,
+    }));
+    await harness.session.load();
+    await harness.session.playSegment(SEGMENT_IDS[0]);
+    const lease = harness.session.player!.lease;
+    harness.queues[0].emit({ type: "blocked", lease, backend: "media-element",
+      failure: { code: "PENDING_GAP", message: "pending", retryable: true,
+        segmentId: SEGMENT_IDS[1], ordinal: 1 } });
+    await expect(harness.session.continuePendingGap()).resolves.toMatchObject({
+      status: "completed", decision: { kind: "play", segmentId: SEGMENT_IDS[1] },
+    });
+    expect(harness.session.readSnapshot().bundle?.manifest.manifest_revision).toBe(2);
+    expect(harness.prepareRange).toHaveBeenCalledOnce();
+    expect(harness.queues[0].starts).toHaveLength(2);
   });
 
   it("returns a failed target poll to a retryable pending-gap state", async () => {

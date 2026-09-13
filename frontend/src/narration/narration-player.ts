@@ -357,15 +357,6 @@ function defaultIdempotencyKey(lease: PlaybackLease, segmentId: string): string 
 
 function apiFailure(reason: unknown, segment: ManifestSegmentV2): SegmentPlaybackFailure {
   if (reason instanceof PlaybackApiError) {
-    const code = reason.detail?.code;
-    if (code === "MANIFEST_REVISION_CONFLICT") {
-      return playerFailure(
-        "STALE_PLAYBACK_LEASE",
-        "Manifest 已更新，请使用新版本重试。",
-        true,
-        segment,
-      );
-    }
     return playerFailure(
       "PLAYBACK_FAILED",
       reason.detail?.message ?? "准备播放范围失败。",
@@ -792,6 +783,17 @@ export class ProductionNarrationPlayerController implements NarrationPlayerContr
       });
     } catch (reason) {
       if (!this.isLeaseCurrent(lease)) return Object.freeze({ kind: "aborted", lease });
+      if (reason instanceof PlaybackApiError && reason.detail?.code === "MANIFEST_REVISION_CONFLICT") {
+        // Rendering advances the Manifest independently of playback. Keep the
+        // same target in preparation so the session's bounded poll adopts the
+        // latest immutable Manifest; this is not an author seek/cancellation.
+        this.publish({ phase: "preparing", failure: null });
+        this.finishRequest(lease);
+        return Object.freeze({
+          kind: "preparing", lease, segmentId: target.segment_id,
+          ordinal: target.ordinal, prepareState: "preparing", promotedJobIds: Object.freeze([]),
+        });
+      }
       const currentFailure = apiFailure(reason, target);
       if (currentFailure.code === "STALE_PLAYBACK_LEASE") {
         this.publish({ phase: "blocked", failure: currentFailure });

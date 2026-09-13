@@ -1865,6 +1865,7 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         generation,
         intent,
         forceReview: false,
+        reuseExistingAudio: launch.basicSingleNarrator === true,
         signal: controller.signal,
         saveStableSource: saveStableNarrationSource,
         isGenerationCurrent: (documentId, expectedGeneration) => (
