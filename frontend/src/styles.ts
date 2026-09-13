@@ -820,10 +820,12 @@ export function ensureNovelStyles(): void {
     .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-diff { grid-row:3; }
     .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-reviewing) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-footer,
     .anw-editor-paper:has(.anw-editor-selection-review-host .anw-selection-edit-review.is-applying) > .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-footer { grid-row:4; }
-    @media (max-width:1100px) {
+    /* The chapter tree and host assistant can squeeze a wide desktop viewport.
+       Wrap against the existing editor-content container, not the window. */
+    @container (max-width:840px) {
       .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar { position:static; min-height:auto; flex-wrap:wrap; overflow:visible; }
-      .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar > .anw-selection-edit-review-toolbar-summary { width:100%; flex:1 0 100%; margin-right:0; }
-      .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar > button { min-width:0; flex:1 1 62px; padding-inline:6px; }
+      .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar > .anw-selection-edit-review-toolbar-summary { width:100%; min-width:0; flex:1 0 100%; flex-wrap:wrap; margin-right:0; }
+      .anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar > button { min-width:0; max-width:100%; flex:1 0 auto; padding-inline:8px; white-space:normal; }
     }
     html .qwenpaw-modal-root .qwenpaw-modal:has(.anw-outline-selection-review-host.is-reviewing) .qwenpaw-modal-footer,
     html .qwenpaw-modal-root .qwenpaw-modal:has(.mb-relationship-selection-review-host.is-reviewing) .qwenpaw-modal-footer { display:none!important; }

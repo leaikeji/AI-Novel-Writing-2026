@@ -37,6 +37,21 @@ describe("workbench container responsive shell", () => {
     expect(styleSource).toMatch(/@media \(max-height:720px\) and \(min-width:721px\)[\s\S]*?\.mb-book-nav[\s\S]*?overflow-y:auto;/);
   });
 
+  it("wraps chapter review controls against the editor container, including long apply labels", () => {
+    // Code contract only: the formal desktop screenshot is the visual gate.
+    const reviewSelector = ".anw-editor-selection-review-host > .anw-selection-edit-review > .anw-selection-edit-review-toolbar";
+    const containerRules = [...styleSource.matchAll(/@container \(max-width:840px\) \{([^]*?)\n    \}/g)]
+      .map((match) => match[1]);
+    const reviewRules = containerRules.find((rules) => rules.includes(reviewSelector));
+    expect(reviewRules).toBeDefined();
+    expect(styleSource).toContain(".anw-editor-content { --anw-editor-inline-gutter:24px; min-width:0; min-height:0; height:100%; overflow:auto; container-type:inline-size;");
+    expect(reviewRules).toContain(`${reviewSelector} { position:static; min-height:auto; flex-wrap:wrap; overflow:visible; }`);
+    expect(reviewRules).toContain("width:100%; min-width:0; flex:1 0 100%; flex-wrap:wrap;");
+    expect(reviewRules).toContain("min-width:0; max-width:100%; flex:1 0 auto; padding-inline:8px; white-space:normal;");
+    const oldViewportRules = [...styleSource.matchAll(/@media \(max-width:1100px\) \{([^]*?)\n    \}/g)];
+    expect(oldViewportRules.some((match) => match[1].includes(reviewSelector))).toBe(false);
+  });
+
   it("reserves the visible strip when the host switches the assistant to overlay mode", () => {
     expect(styleSource).toMatch(/\.anw-workbench-frame \.mb-workbench\[data-assistant-overlay="true"\] \{[\s\S]*?container-type:inline-size;[\s\S]*?grid-template-columns:minmax\(0,1fr\);/);
     expect(studioSource).toContain("studioOverlayVisibleWidth(assistantWorkspaceLayout)");
