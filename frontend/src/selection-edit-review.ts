@@ -950,7 +950,9 @@ export function transitionSelectionEditReview(
     && (state.phase === "preparing"
       || state.phase === "generating"
       || state.phase === "reviewing"
-      || state.phase === "applying"))
+      || state.phase === "applying"
+      || state.phase === "failed"
+      || state.phase === "conflict"))
     || (event.type === "apply-conflict" && state.phase === "applying")) {
     const data = reviewData(state);
     const next: SelectionEditReviewConflictState = Object.freeze({

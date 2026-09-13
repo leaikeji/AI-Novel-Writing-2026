@@ -100,6 +100,7 @@ interface ActiveSelectionEdit {
   jobAttempt?: number;
   abort?: AbortController;
   generation: number;
+  retryPending?: boolean;
   libraryCheck?: LibraryCheckReportRecord;
 }
 
@@ -408,6 +409,11 @@ export class SelectionEditRuntime {
       return;
     }
     if (action.type === "cancel-waiting") this.active?.abort?.abort();
+    if (action.type === "retry") {
+      const active = this.active;
+      if (active) void this.retry(active);
+      return;
+    }
     const event = selectionEditReviewEventForSurfaceAction(action);
     if (!event) return;
     const result = this.coordinator.dispatch(event);
@@ -416,11 +422,6 @@ export class SelectionEditRuntime {
         && this.confirmExit(result.message)) {
         this.coordinator.dispatch({ type: "confirm-exit" });
       }
-      return;
-    }
-    if (action.type === "retry") {
-      const active = this.active;
-      if (active) void this.retry(active);
       return;
     }
     if (action.type === "dismiss-applied" && result.ok) {
@@ -448,6 +449,7 @@ export class SelectionEditRuntime {
   private async execute(
     active: ActiveSelectionEdit,
     forceNew: boolean,
+    preparedPayload?: StartCreativeGenerationPayload,
   ): Promise<void | AssistantSelectionEditorTaskStartResult> {
     const generation = ++active.generation;
     this.publishRetrievalSummary(null);
@@ -457,7 +459,9 @@ export class SelectionEditRuntime {
     active.abort = abort;
     this.coordinator.dispatch({ type: "generation-started", jobId: active.jobId });
     try {
-      const payload = await this.buildPayload(active, forceNew);
+      const payload = preparedPayload ?? await this.buildPayload(active, forceNew);
+      if (!this.isCurrent(active, generation) || abort.signal.aborted
+        || this.coordinator.getState().phase !== "generating") return;
       const job = await this.generationClient.start(payload, abort.signal);
       if (!this.isCurrent(active, generation)) return job.id ? { jobId: job.id } : undefined;
       this.publishRetrievalSummary(retrievalSummaryFromJob(job));
@@ -524,6 +528,9 @@ export class SelectionEditRuntime {
     const context = this.contextRuntime.getEditableFieldContext(active.record.fieldId);
     if (!sameContext(context, active)) throw new Error("选区上下文已经变化");
     const record = active.record;
+    if (!this.registry.get(record.selectionId)) {
+      throw new Error("选区已过期或失效；请先复制候选，再退出并重新框选。尚未发起新的模型调用。");
+    }
     const entityType = selectionEntityType(record.fieldId);
     const documentId = entityType === "document" ? context.envelope.document?.id ?? null : null;
     const entityId = entityType === "document"
@@ -537,10 +544,16 @@ export class SelectionEditRuntime {
     if (fieldValue.slice(record.startUtf16, record.endUtf16) !== record.text) {
       throw new Error("选区原文已经变化");
     }
-    const selectionTextSha256 = await this.sha256(record.text);
+    const [selectionTextSha256, fieldValueSha256] = await Promise.all([
+      this.sha256(record.text), this.sha256(fieldValue),
+    ]);
     if (!sameContext(this.contextRuntime.getEditableFieldContext(record.fieldId), active)
-      || context.adapter.getValue() !== fieldValue) {
-      throw new Error("建立任务期间字段已经变化");
+      || context.adapter.getValue() !== fieldValue
+      || fieldValueSha256 !== record.sourceValueSha256) {
+      throw new Error("选区对应的正文或页面已经变化；请先复制候选，再退出并重新框选。尚未发起新的模型调用。");
+    }
+    if (!this.registry.get(record.selectionId)) {
+      throw new Error("准备期间选区已失效；请退出并重新框选。尚未发起新的模型调用。");
     }
     const inputSnapshot: Record<string, unknown> = {
       schema_version: 1,
@@ -743,15 +756,30 @@ export class SelectionEditRuntime {
   }
 
   private async retry(active: ActiveSelectionEdit): Promise<void> {
+    const state = this.coordinator.getState();
+    if (active.retryPending || (state.phase !== "failed" && state.phase !== "conflict")) return;
     if (active.record.delivery.kind === "chat-session") {
       this.coordinator.dispatch({
-        type: "generation-failed",
+        type: "conflict",
         message: "聊天候选不能切换为编辑任务；请退出后重新框选。",
-        retryable: false,
       });
       return;
     }
-    await this.execute(active, true);
+    active.retryPending = true;
+    const generation = active.generation;
+    try {
+      // Keep the visible candidate and decisions until retry has a valid source.
+      const payload = await this.buildPayload(active, true);
+      if (!this.isCurrent(active, generation) || this.coordinator.getState() !== state) return;
+      const prepared = this.coordinator.dispatch({ type: "retry" });
+      if (prepared.ok) await this.execute(active, true, payload);
+    } catch (reason) {
+      if (this.isCurrent(active, generation) && this.coordinator.getState() === state) {
+        this.coordinator.dispatch({ type: "conflict", message: apiErrorMessage(reason, "无法重新生成；候选仍保留，请重新框选。") });
+      }
+    } finally {
+      active.retryPending = false;
+    }
   }
 
   private isCurrent(active: ActiveSelectionEdit, generation: number): boolean {

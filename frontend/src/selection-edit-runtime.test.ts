@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { NovelAssistantContextRuntime } from "./assistant-context-runtime";
-import { AssistantSelectionRegistry } from "./assistant-selection-registry";
+import { AssistantSelectionRegistry, type SelectionRegistryOptions } from "./assistant-selection-registry";
 import { AIEditTransactionManager } from "./assistant-transactions";
 import type { EditableFieldAdapter, SelectionSnapshot } from "./assistant-fields";
 import {
@@ -84,6 +84,7 @@ async function harness(
   client?: SelectionEditGenerationClient,
   options: {
     document?: boolean;
+    registry?: Partial<SelectionRegistryOptions>;
     runtime?: Partial<SelectionEditRuntimeOptions>;
   } = {},
 ) {
@@ -151,6 +152,7 @@ async function harness(
   const registry = new AssistantSelectionRegistry({
     idProvider: () => SELECTION_ID,
     sha256,
+    ...options.registry,
   });
   const record = await registry.create({
     agentId: initial.agentId,
@@ -524,6 +526,7 @@ describe("SelectionEditRuntime", () => {
     expect(values.registry.get(SELECTION_ID)?.jobId).toBe(JOB_ID);
 
     values.runtime.handleSurfaceAction({ type: "retry" });
+    values.runtime.handleSurfaceAction({ type: "retry" });
     await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("reviewing"));
 
     expect(client.start).toHaveBeenNthCalledWith(
@@ -535,5 +538,64 @@ describe("SelectionEditRuntime", () => {
       kind: "editor-task",
       jobId: RETRY_JOB_ID,
     });
+    expect(client.start).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["expired", "field-changed"] as const)("preserves a candidate and decisions on %s retry without another model call", async (reason) => {
+    let now = Date.now();
+    const values = await harness(undefined, { registry: { now: () => now, ttlMs: 1000 } });
+    await values.runtime.start({ record: values.record, fieldLabel: "创作思路", operation: "polish" });
+    values.runtime.handleSurfaceAction({ type: "decide", segmentId: "change-1", decision: "accept" });
+    if (reason === "expired") now += 1001;
+    else values.setValue("旧句留在这里。作者补了一句。");
+    values.runtime.handleSurfaceAction({ type: "apply-accepted" });
+    await vi.waitFor(() => expect(values.runtime.getState().phase).toBe("conflict"));
+    const before = values.runtime.getState();
+    if (before.phase !== "conflict") throw new Error("expected conflict");
+    expect(before.draft).toBeDefined();
+    values.runtime.handleSurfaceAction({ type: "retry" });
+    await vi.waitFor(() => expect(values.runtime.getState()).toMatchObject({
+      phase: "conflict", message: expect.stringContaining("重新框选"),
+    }));
+    const after = values.runtime.getState();
+    if (after.phase !== "conflict") throw new Error("expected conflict");
+    expect(after.draft).toBe(before.draft);
+    expect(values.generationClient.start).toHaveBeenCalledTimes(1);
+    expect(values.applyValue).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired initial selection before calling the model", async () => {
+    let now = Date.now();
+    const values = await harness(undefined, { registry: { now: () => now, ttlMs: 1000 } });
+    now += 1001;
+    await values.runtime.start({ record: values.record, fieldLabel: "创作思路", operation: "polish" });
+    expect(values.runtime.getState()).toMatchObject({ phase: "failed", message: expect.stringContaining("过期") });
+    expect(values.generationClient.start).not.toHaveBeenCalled();
+    expect(values.applyValue).not.toHaveBeenCalled();
+  });
+
+  it.each(["expire", "leave"] as const)("rechecks %s during retry hashing without calling the model", async (action) => {
+    let now = Date.now();
+    let pauseHash = false;
+    let release!: () => void;
+    const client: SelectionEditGenerationClient = { start: vi.fn(async (payload) => readyJob(payload.input_snapshot, {
+      state: "failed", failure_message: "模型暂时不可用", output_json: {}, output_text: "",
+    })) };
+    const values = await harness(client, { registry: { now: () => now, ttlMs: 1000 }, runtime: {
+      sha256: async (text) => {
+        if (pauseHash && text === "旧句留在这里。") await new Promise<void>(resolve => { release = resolve; });
+        return sha256(text);
+      },
+    } });
+    await values.runtime.start({ record: values.record, fieldLabel: "创作思路", operation: "polish" });
+    pauseHash = true;
+    values.runtime.handleSurfaceAction({ type: "retry" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    if (action === "expire") now += 1001;
+    else values.runtime.handleSurfaceAction({ type: "exit" });
+    release();
+    await vi.waitFor(() => expect(values.runtime.getState().phase).toBe(action === "expire" ? "conflict" : "discarded"));
+    expect(client.start).toHaveBeenCalledTimes(1);
+    expect(values.applyValue).not.toHaveBeenCalled();
   });
 });

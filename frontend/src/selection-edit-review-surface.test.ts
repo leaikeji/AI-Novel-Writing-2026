@@ -456,7 +456,7 @@ describe("SelectionEditReviewSurface non-review states", () => {
     expect(findAll(tree, (element) => element.props.role === "group"
       && String(element.props["aria-label"] ?? "").includes("修改决定"))).toHaveLength(0);
     (findButton(tree, "复制候选").props.onClick as () => void)();
-    (findButton(tree, "基于新稿重新生成").props.onClick as () => void)();
+    (findButton(tree, "重新检查后生成").props.onClick as () => void)();
     (findButton(tree, "放弃").props.onClick as () => void)();
     expect(onAction.mock.calls.map(([action]) => action)).toEqual([
       { type: "copy-candidate", candidateText: result.replacement_text },

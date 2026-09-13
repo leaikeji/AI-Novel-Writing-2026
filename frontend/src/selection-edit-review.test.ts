@@ -446,6 +446,10 @@ describe("review session state machine", () => {
     if (state.phase !== "failed") throw new Error("expected failed state");
     expect(state.identity.baseText).toBe("甲旧乙删丙");
     state = expectStatePhase(
+      transitionSelectionEditReview(state, { type: "conflict", message: "选区已过期，请重新框选" }),
+      "conflict",
+    );
+    state = expectStatePhase(
       transitionSelectionEditReview(state, { type: "retry" }),
       "preparing",
     );

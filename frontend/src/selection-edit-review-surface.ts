@@ -548,7 +548,7 @@ export function createSelectionEditReviewSurface(
               "复制候选",
             )
             : null,
-          h("button", { type: "button", onClick: () => emit({ type: "retry" }) }, "基于新稿重新生成"),
+          h("button", { type: "button", onClick: () => emit({ type: "retry" }) }, "重新检查后生成"),
           h("button", { type: "button", onClick: () => emit({ type: "exit" }) }, "放弃"),
         ),
       );
