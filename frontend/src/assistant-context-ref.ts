@@ -374,6 +374,7 @@ export function createAssistantContextRefCoordinator(
   const tabInstance = options.tabInstance?.trim() || defaultTabInstance();
   let ready: ReadyAssistantContextRef | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let libraryRenewalTimer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: AbortController | null = null;
   let unsubscribe: (() => void) | null = null;
   let observedRevision = -1;
@@ -385,6 +386,10 @@ export function createAssistantContextRefCoordinator(
     if (timer !== null) {
       clearTimer(timer);
       timer = null;
+    }
+    if (libraryRenewalTimer !== null) {
+      clearTimer(libraryRenewalTimer);
+      libraryRenewalTimer = null;
     }
     inFlight?.abort();
     inFlight = null;
@@ -461,6 +466,17 @@ export function createAssistantContextRefCoordinator(
         } : undefined,
       };
       options.runtime.setPreparation("ready", capture?.context.budget.truncated ?? false);
+      if (libraryInput) {
+        // Refresh only the page association for a future author send. Never
+        // extend a leased request, resend a message, or retry a failed request.
+        const prepared = ready;
+        const ttl = Date.parse(created.expiresAt) - now();
+        libraryRenewalTimer = setTimer(() => {
+          libraryRenewalTimer = null;
+          if (disposed || ready !== prepared) return;
+          schedule(options.runtime.getStatus(), true);
+        }, Math.max(1_000, ttl - Math.min(30_000, ttl / 10)));
+      }
     } catch (reason) {
       if (!controller.signal.aborted && !disposed && generation === expectedGeneration) {
         options.runtime.setPreparation("failed");

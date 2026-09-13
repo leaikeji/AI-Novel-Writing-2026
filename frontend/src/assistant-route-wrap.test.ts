@@ -321,12 +321,21 @@ describe("assistant route wrap", () => {
 
   it("shows the selected private-library novel and follows switches without leaking subscriptions", () => {
     const React = new HookTestReact();
+    const contextRuntime = new NovelAssistantContextRuntime();
+    contextRuntime.setHostBinding("ai-novel-writer", "session-1");
+    const refreshContext = vi.fn();
     const wrap = createAssistantRouteWrap({
       React, Workbench: () => "workbench", CreativeCenter: () => "center",
       getRouteSession: () => creativeCenterRoute(),
       getLocation: () => ({ pathname: "/chat", search: "?novel_center=1&view=private-library" }),
       eventTarget: null, createResizeObserver: () => null,
       createAssistantPane: () => () => "assistant",
+      contextRuntime,
+      contextRefCoordinator: {
+        start: vi.fn(() => vi.fn()), refresh: refreshContext,
+        requestPatch: vi.fn(() => null), getReadyRef: vi.fn(() => null),
+        getTabInstance: () => "tab-instance", dispose: vi.fn(),
+      },
     });
     const shell = React.render(wrap(() => "native-chat") as () => unknown);
     const status = elementChildren(shell)[1].props.statusBar as TestElement;
@@ -339,7 +348,26 @@ describe("assistant route wrap", () => {
     try {
       publishPrivateLibraryAssistantNovel({ id: "novel-1", title: "缺氧：末日地下世界" });
       expect(text()).toContain("当前作品：《缺氧：末日地下世界》");
+      expect(text()).toContain("等待维护上下文");
+      expect(text()).not.toContain("维护范围已启用");
       child.flushEffects();
+      contextRuntime.setPreparation("preparing");
+      expect(text()).toContain("正在准备维护上下文");
+      contextRuntime.setPreparation("ready");
+      expect(text()).toContain("维护上下文已就绪");
+      contextRuntime.setPreparation("failed");
+      expect(text()).toContain("维护上下文准备失败");
+      const retry = elementChildren(child.render(() => Status(status.props)))
+        .flatMap(elementChildren)
+        .find((element) => element.type === "button");
+      expect(retry).toBeDefined();
+      (retry!.props.onClick as () => void)();
+      expect(refreshContext).toHaveBeenCalledOnce();
+      contextRuntime.setPreparation("expired");
+      expect(text()).toContain("维护上下文已过期");
+      contextRuntime.setHostBinding("default", "session-1");
+      expect(text()).toContain("请切换到 AI小说作家");
+      expect(text()).not.toContain("重新准备维护上下文");
       publishPrivateLibraryAssistantNovel({ id: "novel-2", title: "潮声之后" });
       expect(text()).toContain("当前作品：《潮声之后》");
       expect(text()).not.toContain("缺氧：末日地下世界");
@@ -348,6 +376,7 @@ describe("assistant route wrap", () => {
       child.unmount();
       const before = child.updates;
       publishPrivateLibraryAssistantNovel({ id: "novel-3", title: "余火" });
+      contextRuntime.setPreparation("ready");
       expect(child.updates).toBe(before);
     } finally {
       child.unmount();

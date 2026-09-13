@@ -332,22 +332,37 @@ export function createAssistantRouteWrap(
 
   function CreativeCenterAssistantStatusBar(props: { privateLibraryActive: boolean }) {
     const [libraryNovel, setLibraryNovel] = React.useState(currentPrivateLibraryAssistantNovel);
+    const [contextStatus, setContextStatus] = React.useState(() => contextRuntime.getStatus());
+    React.useEffect(() => contextRuntime.subscribe(setContextStatus), []);
     React.useEffect(() => {
       const refresh = () => setLibraryNovel(currentPrivateLibraryAssistantNovel());
       refresh();
       return subscribePrivateLibraryAssistantNovel(refresh);
     }, []);
+    const preparationLabels = {
+      idle: "等待维护上下文",
+      settling: "正在准备维护上下文",
+      preparing: "正在准备维护上下文",
+      ready: "维护上下文已就绪",
+      failed: "维护上下文准备失败",
+      expired: "维护上下文已过期",
+    };
+    const canRetry = props.privateLibraryActive && contextStatus.supportedAgent
+      && options.contextRefCoordinator !== undefined
+      && ["idle", "failed", "expired"].includes(contextStatus.preparation);
     return h(
       "section",
       {
-        className: "anw-assistant-context-status is-supported",
+        className: `anw-assistant-context-status ${!props.privateLibraryActive || contextStatus.supportedAgent ? "is-supported" : "is-unsupported"}`,
         "aria-label": "QwenPaw 助手页面感知状态",
         "aria-live": "polite",
       },
       h("div", { className: "anw-assistant-context-status-main" },
         h("strong", null, props.privateLibraryActive ? "私有库" : "创作中心"),
         h("span", null, props.privateLibraryActive
-          ? "私有库维护范围已启用"
+          ? (contextStatus.supportedAgent
+            ? preparationLabels[contextStatus.preparation]
+            : "请切换到 AI小说作家")
           : "未发送作品页面内容"),
       ),
       h("div", { className: "anw-assistant-context-status-meta" },
@@ -355,9 +370,15 @@ export function createAssistantRouteWrap(
           ? (libraryNovel ? `当前作品：《${libraryNovel.title}》` : "通用资料库 · 不借用小说范围")
           : "未进入具体作品"),
       ),
-      h("small", null, props.privateLibraryActive
-        ? "维护写入仍需服务端提案、范围和回执校验"
-        : "进入作品工作台后才会准备小说页面上下文"),
+      h("small", null, canRetry
+        ? h("button", {
+          type: "button",
+          style: { font: "inherit" },
+          onClick: () => options.contextRefCoordinator?.refresh(),
+        }, "重新准备维护上下文（不会重发消息）")
+        : props.privateLibraryActive
+          ? "维护写入仍需服务端提案、范围和回执校验"
+          : "进入作品工作台后才会准备小说页面上下文"),
     );
   }
 

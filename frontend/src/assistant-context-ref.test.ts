@@ -126,6 +126,78 @@ async function flushAsync(): Promise<void> {
 
 
 describe("assistant context_ref coordinator", () => {
+  it("renews idle private-library refs, stops on failure, and does not renew sent authority", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const runtime = new NovelAssistantContextRuntime();
+    runtime.setHostBinding("ai-novel-writer", "session-1");
+    let libraryActive = true;
+    let selectedNovel = { id: "novel-1", title: "潮声替我说晚安" };
+    const createRef = vi.fn(async (input) => ({
+      ...successRef(input.snapshot.contextRevision, String(createRef.mock.calls.length)),
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
+    }));
+    const coordinator = createAssistantContextRefCoordinator({
+      runtime,
+      getRouteSession: () => ({
+        state: "workbench-session", ownerToken: OWNER,
+        route: { ownerToken: OWNER, novelId: "ai-novel-world-2026:creative-center" },
+      }),
+      getPrivateLibraryActive: () => libraryActive,
+      getPrivateLibraryNovel: () => selectedNovel,
+      createRef, tabInstance: "anw-tab-library", settleMs: 0,
+    });
+    try {
+      const stop = coordinator.start();
+      await vi.advanceTimersByTimeAsync(1);
+      const first = coordinator.getReadyRef();
+      expect(first).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(270_001);
+      expect(createRef).toHaveBeenCalledTimes(2);
+      expect(coordinator.getReadyRef()?.contextRef).not.toBe(first?.contextRef);
+      // A new ref is prepared for a future send; the already returned ref is
+      // never changed, replayed, or granted another author command.
+      const sent = coordinator.requestPatch({ selectedAgent: "ai-novel-writer", sessionId: "session-1" });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(createRef).toHaveBeenCalledTimes(3);
+      expect(coordinator.getReadyRef()?.contextRef).not.toBe(sent?.context_ref);
+
+      createRef.mockRejectedValueOnce(new Error("network unavailable"));
+      await vi.advanceTimersByTimeAsync(270_001);
+      expect(runtime.getStatus().preparation).toBe("failed");
+      expect(coordinator.getReadyRef()).toBeNull();
+      const failedCalls = createRef.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(createRef).toHaveBeenCalledTimes(failedCalls);
+
+      selectedNovel = { id: "novel-2", title: "潮声之后" };
+      coordinator.refresh();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(createRef.mock.lastCall?.[0].binding.novelId).toBe("novel-2");
+      runtime.setHostBinding("default", "session-1");
+      expect(coordinator.getReadyRef()).toBeNull();
+      const inactiveCalls = createRef.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(createRef).toHaveBeenCalledTimes(inactiveCalls);
+      runtime.setHostBinding("ai-novel-writer", "session-1");
+      await vi.advanceTimersByTimeAsync(1);
+      libraryActive = false;
+      coordinator.refresh();
+      const exitedCalls = createRef.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(createRef).toHaveBeenCalledTimes(exitedCalls);
+      libraryActive = true;
+      coordinator.refresh();
+      await vi.advanceTimersByTimeAsync(1);
+      stop();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(coordinator.getReadyRef()).toBeNull();
+    } finally {
+      coordinator.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("creates a library-only ref without inventing a novel binding", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -266,6 +338,7 @@ describe("assistant context_ref coordinator", () => {
         },
       });
       expect(runtime.getStatus().preparation).toBe("ready");
+      expect(vi.getTimerCount()).toBe(0); // No new idle renewal for manuscript/selection refs.
 
       const first = coordinator.requestPatch({
         selectedAgent: "ai-novel-writer",
