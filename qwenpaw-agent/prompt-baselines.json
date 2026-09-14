@@ -1,0 +1,62 @@
+{
+  "schema": "agent-prompt-baselines/2",
+  "serialization": "utf8-remove-single-trailing-lf/1",
+  "official_templates": [
+    {
+      "qwenpaw_version": "2.2.1",
+      "filename": "AGENTS.md",
+      "source_type": "official-github-tag",
+      "source_url": "https://github.com/agentscope-ai/QwenPaw/blob/v2.2.1/src/qwenpaw/agents/md_files/zh/AGENTS.md",
+      "source_bytes": 2478,
+      "source_sha256": "240b79beb71ca8799ce50f23b9c28615e99cdda8727543a70dd84ec6bb5f472c",
+      "installed_bytes": 2477,
+      "installed_sha256": "84340929b9aa5df7fa52a4b0f10fd244491a4f206b7fdb5cccf59770f50a6fc7"
+    },
+    {
+      "qwenpaw_version": "2.2.1",
+      "filename": "SOUL.md",
+      "source_type": "official-github-tag",
+      "source_url": "https://github.com/agentscope-ai/QwenPaw/blob/v2.2.1/src/qwenpaw/agents/md_files/zh/SOUL.md",
+      "source_bytes": 1598,
+      "source_sha256": "c9364e0c3d5911a30c9adb3da3197e0a34aadedb7f56d876b84c1aed1faf8688",
+      "installed_bytes": 1597,
+      "installed_sha256": "6da1cb358b16ae88214b6cbbfb478d7b5b1abc0ff40306a8053fee5094433489"
+    },
+    {
+      "qwenpaw_version": "2.2.1",
+      "filename": "PROFILE.md",
+      "source_type": "official-github-tag",
+      "source_url": "https://github.com/agentscope-ai/QwenPaw/blob/v2.2.1/src/qwenpaw/agents/md_files/zh/PROFILE.md",
+      "source_bytes": 645,
+      "source_sha256": "1dda68ba8a6d00e4b589676ebb05366b53ae49d1fad6f5676b85b78b3c8ad165",
+      "installed_bytes": 644,
+      "installed_sha256": "3b40f9b7c03403164ec55dba589010482a135f7c0a42b326a92be11823966b75"
+    }
+  ],
+  "managed_prompts": [
+    {
+      "prompt_version": "pre-plan83-v0.3",
+      "plugin_version": "0.4.0",
+      "qwenpaw_version": "2.2.1",
+      "filename": "AI_NOVEL_WORLD.md",
+      "source_type": "repository-managed",
+      "prompt_files_policy": "preserve-current",
+      "source_bytes": 14933,
+      "source_sha256": "2e8719939a39605c285ef51813931cd6795699285641cd4b97b4e2b9dd83cdce",
+      "installed_bytes": 14932,
+      "installed_sha256": "8dd5348bf8d90d2908e0a0b60d92a9d340b91f7da228ae49ddd1a75a73ef2fd9"
+    },
+    {
+      "prompt_version": "plan83-v0.4-candidate",
+      "plugin_version": "0.4.0",
+      "qwenpaw_version": "2.2.1",
+      "filename": "AI_NOVEL_WORLD.md",
+      "source_type": "repository-managed",
+      "prompt_files_policy": "exclude-exact-official-defaults",
+      "source_bytes": 9757,
+      "source_sha256": "93eb168817bd02786186706ff0b202e810c3f8d2ed2cfe50bb5c7b674dfe0237",
+      "installed_bytes": 9756,
+      "installed_sha256": "a4957671e639fa5f34dd97368d0fe0aa44211c9dce3adddf9eb72be8c7f7ecbc"
+    }
+  ]
+}

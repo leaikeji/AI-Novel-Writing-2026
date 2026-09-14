@@ -462,6 +462,12 @@ def test_skill_upgrade_preserves_disabled_and_requires_prior_inventory():
 def test_existing_agent_is_refreshed_after_plugin_reinstall(monkeypatch) -> None:
     configure = load_script("configure_qwenpaw_novel_agent")
     calls: list[tuple[str, str, object | None, str | None]] = []
+    workspace = {
+        "content": configure.serialize_prompt_source(
+            configure.PROMPT_SOURCE.read_bytes()
+        ).decode("utf-8"),
+        "system_prompt_files": [configure.PROMPT_FILE],
+    }
 
     def fake_request_json(
         path: str,
@@ -496,9 +502,15 @@ def test_existing_agent_is_refreshed_after_plugin_reinstall(monkeypatch) -> None
                 for name in configure.TOOLS
             ]
         if path.startswith("/api/workspace/files/"):
-            return {"ok": True}
+            if method == "PUT":
+                assert isinstance(body, dict) and isinstance(body.get("content"), str)
+                workspace["content"] = body["content"]
+            return {"content": workspace["content"]}
         if path == "/api/workspace/system-prompt-files":
-            return [configure.PROMPT_FILE]
+            if method == "PUT":
+                assert isinstance(body, list)
+                workspace["system_prompt_files"] = list(body)
+            return list(workspace["system_prompt_files"])
         if path.startswith("/api/models/active"):
             return {
                 "active_llm": {
@@ -525,6 +537,10 @@ def test_existing_agent_is_refreshed_after_plugin_reinstall(monkeypatch) -> None
     )
     assert refresh_index < tools_index
     assert result["created"] is False
+    assert not any(
+        path.startswith("/api/workspace/") and method != "GET"
+        for path, method, _body, _agent in calls
+    )
 
 
 def test_verifier_compares_runtime_model_with_agent_effective_model() -> None:

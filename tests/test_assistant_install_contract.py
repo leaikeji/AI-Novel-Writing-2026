@@ -42,6 +42,12 @@ class ConfigureApi:
             "model": "MiniMax-M3",
         }
         self.agent_updates: list[dict[str, object]] = []
+        self.workspace_files = {
+            configure.PROMPT_FILE: configure.serialize_prompt_source(
+                configure.PROMPT_SOURCE.read_bytes()
+            ).decode("utf-8"),
+        }
+        self.system_prompt_files = [configure.PROMPT_FILE]
         self.tool_states = {
             configure.AGENT_ID: {
                 name: name != "novel_get_workspace_context"
@@ -111,10 +117,18 @@ class ConfigureApi:
             return {"enabled": self.tool_states[agent_id][name]}
         if path.startswith("/api/workspace/files/"):
             assert agent_id == self.configure.AGENT_ID
-            return {"ok": True}
+            filename = path.rsplit("/", 1)[-1]
+            assert filename in self.workspace_files
+            if method == "PUT":
+                assert isinstance(body, dict) and isinstance(body.get("content"), str)
+                self.workspace_files[filename] = body["content"]
+            return {"content": self.workspace_files[filename]}
         if path == "/api/workspace/system-prompt-files":
             assert agent_id == self.configure.AGENT_ID
-            return [self.configure.PROMPT_FILE]
+            if method == "PUT":
+                assert isinstance(body, list)
+                self.system_prompt_files = list(body)
+            return list(self.system_prompt_files)
         if path.startswith("/api/models/active"):
             assert method == "GET"
             return {"active_llm": dict(self.model)}
@@ -288,6 +302,10 @@ def test_repeated_configuration_converges_scope_without_rewriting_model(
     )
     assert not any(
         path.startswith("/api/models") and method != "GET"
+        for path, method, _body, _agent in api.calls
+    )
+    assert not any(
+        path.startswith("/api/workspace/") and method != "GET"
         for path, method, _body, _agent in api.calls
     )
 

@@ -1,0 +1,65 @@
+{
+  "schema_version": "plan83-agent-ab-redacted-summary/1",
+  "state": "stopped",
+  "stop_reason": "RunnerError:malformed SSE status",
+  "automatic_retries": 0,
+  "maximum_model_calls": 4,
+  "model_calls_started": 1,
+  "snapshot_digest": {
+    "schema_version": "agent-prompt-snapshot-digest/1",
+    "captured_at": "2026-09-14T08:21:52.801651+00:00",
+    "agent_id": "ai-novel-writer",
+    "qwenpaw_version": "2.2.1",
+    "pawapp": {
+      "id": "ai-novel-world-2026",
+      "version": "0.4.0",
+      "health": "ready"
+    },
+    "model": {
+      "provider_id": "bigmodel",
+      "model_id": "glm-5.3-flash"
+    },
+    "skill_count": 12,
+    "tool_count": 35,
+    "system_prompt_files": [
+      "AGENTS.md",
+      "SOUL.md",
+      "PROFILE.md",
+      "AI_NOVEL_WORLD.md"
+    ],
+    "prompt_files": {
+      "AGENTS.md": {
+        "bytes": 2552,
+        "sha256": "578419aa9fbbad40c2c6003b9d7c12e3937ba4ea506ba2126d7483275ca5f91d"
+      },
+      "SOUL.md": {
+        "bytes": 1597,
+        "sha256": "6da1cb358b16ae88214b6cbbfb478d7b5b1abc0ff40306a8053fee5094433489"
+      },
+      "PROFILE.md": {
+        "bytes": 644,
+        "sha256": "3b40f9b7c03403164ec55dba589010482a135f7c0a42b326a92be11823966b75"
+      },
+      "AI_NOVEL_WORLD.md": {
+        "bytes": 14932,
+        "sha256": "8dd5348bf8d90d2908e0a0b60d92a9d340b91f7da228ae49ddd1a75a73ef2fd9"
+      }
+    },
+    "manifest_etag": "5aad76ae5fe2ff0e0961e74b5b816d1181a846af688810ca9548e62ddb428c31",
+    "document_sha256": "02c1d427f98de775f30965cd2e366ae6afc5c16fe65b5a344805a50c5e8dfa09",
+    "scene_slice_sha256": "8c747f8c7cdf19773977403df89381a5a76ea70869a3ffe954767f9dc995f3e4",
+    "scene_slice_visible_characters": 832
+  },
+  "attempts": [
+    {
+      "blind_label": "X",
+      "case_id": "C1-CREATIVE",
+      "state": "started",
+      "result": null
+    }
+  ],
+  "restoration": {
+    "state": "restored_and_verified",
+    "arm": "A"
+  }
+}
