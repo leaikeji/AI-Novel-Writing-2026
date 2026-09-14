@@ -1,0 +1,87 @@
+# 计划 81 主状态清单；UTF-8 TSV。00—82 共82份文档，39不存在。
+# columns: number, file, primary_state, g0_action, note
+number	file	primary_state	g0_action	note
+00	docs/开发文档/00-项目开工计划.md	REFERENCE	INDEX_ONLY	-
+01	docs/开发文档/01-架构边界与模型接入决策.md	REFERENCE	INDEX_ONLY	-
+02	docs/开发文档/02-依赖版本基线.md	REFERENCE	INDEX_ONLY	-
+03	docs/开发文档/03-向量模型本地与云端方案.md	SUPERSEDED	INDEX_ONLY	early vector方案已明确替代
+04	docs/开发文档/04-作家助手UI参考边界.md	REFERENCE	INDEX_ONLY	-
+05	docs/开发文档/05-创作中心与建书向导产品规格.md	REFERENCE	INDEX_ONLY	-
+06	docs/开发文档/06-总体架构与核心流程.md	REFERENCE	INDEX_ONLY	-
+07	docs/开发文档/07-分阶段大纲生成与作品初始化产品规格.md	REFERENCE	INDEX_ONLY	-
+08	docs/开发文档/08-阶段实施矩阵.md	CLOSED_PASS	INDEX_ONLY	-
+09	docs/开发文档/09-创作工作台内容模型与关系图产品规格.md	REFERENCE	INDEX_ONLY	-
+10	docs/开发文档/10-短篇创作与文本拆解产品规格.md	REFERENCE	INDEX_ONLY	-
+11	docs/开发文档/11-QwenPaw-Docker验证环境.md	REFERENCE	INDEX_ONLY	-
+12	docs/开发文档/12-QwenPaw原生UI盘点与小说工作台UI基线.md	REFERENCE	INDEX_ONLY	-
+13	docs/开发文档/13-新项目初始化与兼容性验证.md	CLOSED_PASS	INDEX_ONLY	-
+14	docs/开发文档/14-阶段3至6实现与验收.md	CLOSED_PASS	INDEX_ONLY	-
+15	docs/开发文档/15-阶段7章节候选与情报提案闭环.md	CLOSED_PASS	INDEX_ONLY	-
+16	docs/开发文档/16-妙笔神书一比一创作闭环与三书实写总目标计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	旧总目标由后续权威与专项计划接管
+17	docs/开发文档/17-妙笔神书一比一参考状态矩阵.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	冻结矩阵保留为历史参考
+18	docs/开发文档/18-MOSS-TTS-Nano多角色智能朗读产品与技术设计.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	MOSS/Nano架构由计划59替代
+19	docs/开发文档/19-跟随AI小说作家Agent模型切换开发计划.md	CLOSED_PASS	INDEX_ONLY	-
+20	docs/开发文档/20-QwenPaw原生助手与创作上下文联动施工计划.md	CLOSED_PASS	INDEX_ONLY	-
+21	docs/开发文档/21-选区AI中央统一Diff审阅施工计划.md	CLOSED_PASS	INDEX_ONLY	-
+22	docs/开发文档/22-小说写作能力Skill优化与评测计划.md	CLOSED_WITH_LIMITS	APPLIED_TERMINAL_BANNER	候选完成但写作增益未证明
+23	docs/开发文档/23-小说拆解驱动的通用与分类Skill架构计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	-
+24	docs/开发文档/24-小说语义检索与向量模型专项施工计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	-
+25	docs/开发文档/25-创作中心QwenPaw原生壳与AI助手专项施工计划.md	CLOSED_PASS	INDEX_ONLY	-
+26	docs/开发文档/26-角色卡性格补全与扩展字段安全保存开发计划.md	CLOSED_PASS	INDEX_ONLY	-
+27	docs/开发文档/27-人物状态轨迹与章节同步进展可靠化开发计划.md	NOT_ADOPTED	APPLIED_TERMINAL_BANNER	底层能力被后续计划吸收，旧专项未实施
+28	docs/开发文档/28-开书流程与AgentSkill轻量优化计划.md	NOT_ADOPTED	APPLIED_TERMINAL_BANNER	未获施工批准且页面/依赖基线已变化
+29	docs/开发文档/29-大纲正式化与角色档案单一权威优化计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	正式大纲与角色revision由计划31及现行代码接管
+30	docs/开发文档/30-TTS按需加载与DockerCPU优化计划.md	CLOSED_PASS	INDEX_ONLY	-
+31	docs/开发文档/31-创作数据权威多时间线私有库与向量模型统一施工计划.md	CLOSED_PASS	INDEX_ONLY	-
+32	docs/开发文档/32-创作账本缺口闭环与向量联合复验计划.md	CLOSED_PASS	INDEX_ONLY	-
+33	docs/开发文档/33-MOSS-TTS-Nano全预设直用人物专属音色与播放体验优化计划.md	SUPERSEDED	INDEX_ONLY	-
+34	docs/开发文档/34-向量模型写作主链闭环与检索质量优化计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	主要闭环完成，原长度门禁仅部分通过
+35	docs/开发文档/35-MOSS-TTS-Nano剩余能力闭环与正式验收计划.md	SUPERSEDED	INDEX_ONLY	-
+36	docs/开发文档/36-AI创作模型证据链与人物卡权威体验修复计划.md	CLOSED_PASS	INDEX_ONLY	-
+37	docs/开发文档/37-AI创作全链真实样书与发布稳定化计划.md	CLOSED_PASS	INDEX_ONLY	-
+38	docs/开发文档/38-拆书桥段候选进入私有库最小闭环计划.md	NOT_ADOPTED	APPLIED_TERMINAL_BANNER	未获批准；授权语料出现后按现行私有库重新立项
+40	docs/开发文档/40-MOSS-VoiceGenerator-16GiB安全运行与正式人物音色闭环计划.md	SUPERSEDED	INDEX_ONLY	旧MOSS机器闭环保留，现行架构已替代
+41	docs/开发文档/41-扫榜拆书到AI写作能力闭环优化计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	-
+42	docs/开发文档/42-章节同步进展与关系网增量投影施工计划.md	CLOSED_PASS	INDEX_ONLY	-
+43	docs/开发文档/43-卷章自动编号与无卷创建闭环优化计划.md	CLOSED_PASS	INDEX_ONLY	-
+44	docs/开发文档/44-人物声音页交互减重与可访问性收敛计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	旧人物声音页专项由后续安装树和Qwen TTS替代
+45	docs/开发文档/45-朗读播放器保音高倍速与听感验收优化计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	旧播放器听感专项由Qwen TTS现行链替代
+46	docs/开发文档/46-人物卡写作视图与故事账本纠错闭环全栈优化计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	人物卡/账本能力由计划51/54后继收敛
+47	docs/开发文档/47-TTS体验收口与整书智能配音优化计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	旧整书配音候选由Qwen TTS现行链替代
+48	docs/开发文档/48-人物卡宿主主题兼容与长期发布收口计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	宿主主题能力已被后续人物工作台吸收
+49	docs/开发文档/49-TTS复查收尾与部署前兼容性加固计划.md	CLOSED_PASS	INDEX_ONLY	-
+50	docs/开发文档/50-章节朗读播放器UI减重与状态语义收敛优化计划.md	CLOSED_PASS	INDEX_ONLY	-
+51	docs/开发文档/51-故事账本权威一致性与全局工作台优化计划.md	CLOSED_PASS	INDEX_ONLY	-
+52	docs/开发文档/52-百万至五百万字长篇写作链可扩展性全栈优化计划.md	CLOSED_PASS	INDEX_ONLY	-
+53	docs/开发文档/53-长期数据库四角色基线与计划51发布解阻施工计划.md	CLOSED_PASS	INDEX_ONLY	-
+54	docs/开发文档/54-故事账本单契约收缩与测试小说清理计划.md	CLOSED_PASS	INDEX_ONLY	-
+55	docs/开发文档/55-全局默认旁白人物卡自动专属音色与通用音色池开发计划.md	CLOSED_PASS	INDEX_ONLY	-
+56	docs/开发文档/56-TTS全链最终收尾与目标模式执行计划.md	SUPERSEDED	INDEX_ONLY	MOSS目标模式由计划59替代
+57	docs/开发文档/57-悬疑与金手指正式Skill作者采用发布计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	-
+58	docs/开发文档/58-写作Skill自动路由与可扩展分类接入优化计划.md	SUPERSEDED	APPLIED_TERMINAL_BANNER	限定派发由计划70承接，新原生方案为计划80
+59	docs/开发文档/59-Qwen-TTS本地云端双Provider迁移施工计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	本地链完成；云端真实凭据smoke为条件触发
+60	docs/开发文档/60-写作主流程减重优化方案.md	SUPERSEDED	INDEX_ONLY	作者明确不采纳，窄范围由计划64处理
+61	docs/开发文档/61-语音模型接入入口与多渠道配置页面计划.md	CLOSED_WITH_LIMITS	APPLIED_TERMINAL_BANNER	页面完成，旧500由计划62修复；云端smoke条件触发
+62	docs/开发文档/62-Qwen-TTS失败恢复与MOSS残留清理计划.md	CLOSED_PASS	INDEX_ONLY	-
+63	docs/开发文档/63-QwenPaw-2.2.0上游升级施工计划.md	CLOSED_PASS	INDEX_ONLY	-
+64	docs/开发文档/64-账本前端移除与系统自动维护收口.md	CLOSED_PASS	INDEX_ONLY	-
+65	docs/开发文档/65-创作中心整书删除修复与测试小说清理.md	CLOSED_PASS	INDEX_ONLY	-
+66	docs/开发文档/66-种田文十五部样本扫榜拆解与写作能力闭环计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	研究交付完成，自动链partial且增益未验证
+67	docs/开发文档/67-创作中心小说回收站与可恢复删除开发计划.md	CLOSED_WITH_LIMITS	APPLIED_TERMINAL_BANNER	删除链完成，不可逆点击按作者真实动作逐次确认
+68	docs/开发文档/68-真人操作三卷九章都市金手指创作与朗读验收计划.md	CLOSED_WITH_LIMITS	INDEX_ONLY	真实九章执行完成，结论PARTIAL/AUDIO_QUALITY_HOLD
+69	docs/开发文档/69-写作Skill启用状态保持与可用性验收修复计划.md	CLOSED_PASS	INDEX_ONLY	-
+70	docs/开发文档/70-章节正文专属Skill智能调用最小可靠闭环计划.md	CLOSED_WITH_LIMITS	APPLIED_TERMINAL_BANNER	限定Skill派发已验证、质量HOLD；现行残留转计划82；local-only
+71	docs/开发文档/71-章节正文模型等待上限调整记录.md	CLOSED_PASS	INDEX_ONLY	-
+72	docs/开发文档/72-章节正文重复生成与未知任务恢复闭环实施记录.md	CLOSED_PASS	INDEX_ONLY	-
+73	docs/开发文档/73-章节生成与朗读连续播放局部刷新优化计划.md	CLOSED_PASS	INDEX_ONLY	-
+74	docs/开发文档/74-私有库分类用词与写作接入规划.md	CLOSED_WITH_LIMITS	APPLIED_TERMINAL_BANNER	核心交付完成，101+规模和文学效果仅条件观测
+75	docs/开发文档/75-Qwen3-TTS官方音色全量开放与本地试听优化计划.md	CLOSED_PASS	INDEX_ONLY	-
+76	docs/开发文档/76-Qwen3-TTS本地声音设计与复刻最小闭环计划.md	CONDITIONAL	AUTHOR_LISTENING_GATE	既有候选Edge播放通过；作者明确采用或重生后才恢复窄任务
+77	docs/开发文档/77-朗读设置桌面体验优化实施计划.md	CLOSED_PASS	INDEX_ONLY	-
+78	docs/开发文档/78-QwenPaw-2.2.1补丁升级实施记录.md	CLOSED_PASS	INDEX_ONLY	-
+79	docs/开发文档/79-TTS全自动生成可靠性优化计划.md	CLOSED_PASS	INDEX_ONLY	正式闭环PASS；文档当前未跟踪，Git交付另裁决
+80	docs/开发文档/80-原生助手智能Skill路由与升级兼容优化计划.md	PROPOSED	KEEP_PROPOSED	方案待批准
+81	docs/开发文档/81-全量开发计划状态收敛与尾项裁决计划.md	CLOSED_PASS	GOVERNANCE_CLOSED	82份计划均有唯一状态；当前零ACTIVE，后续门禁明确
+82	docs/开发文档/82-计划70现行界面与朗读状态尾项收敛计划.md	PROPOSED	KEEP_PROPOSED	现行UI/保存/Edition尾项方案待批准
+76-V0.8	docs/开发文档/76-Qwen3-TTS本地声音设计与复刻最小闭环计划.md	CLOSED_PASS	INDEX_AS_CLOSED_SUBSCOPE	已获批准并正式生效；不替代V0.7.1 G3
+76-V0.8.1	docs/开发文档/76-Qwen3-TTS本地声音设计与复刻最小闭环计划.md	CLOSED_PASS	INDEX_AS_CLOSED_SUBSCOPE	同范围交互收尾已正式生效并交付Git；不替代V0.7.1 G3

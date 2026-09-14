@@ -1,5 +1,7 @@
 # 开发计划 47：TTS 体验收口与整书智能配音
 
+> **当前终态（2026-09-14）：`SUPERSEDED`。** 本文源码、自动化、隔离UI和客观探针保留历史证据，当时作者听感与Provider浏览器链HOLD不改写。现行整书朗读和Provider已迁移到计划59及后续Qwen TTS计划，本文候选未部署状态不再构成当前待施工任务。
+
 状态：**源码候选已在 `6748cb3` 提交并随 `main@84e4858e0a7f` 推送；自动化、隔离 PostgreSQL、四视口 UI 与客观保音高探针已完成。`TTS47-UX-FINAL=HOLD_AUTHOR_LISTENING`，`TTS47-CAST-FINAL=HOLD_BROWSER_MODEL_PROVIDER`；长期环境仍为 `0035`，本候选尚未部署。**
 
 ## 1. 目标与完成口径
