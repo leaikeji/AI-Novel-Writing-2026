@@ -19,8 +19,9 @@ function assets(): PrivateLibraryAssetView[] {
       id: "pack-1",
       asset_type: "vocabulary",
       title: "末日工程用词",
-      version: 3,
-      current_version_id: "pack-1-v3",
+      version: 14,
+      content_version_number: 12,
+      current_version_id: "pack-1-v12",
       archived: false,
       scope_kind: "novel",
       scope_novel_id: "novel-a",
@@ -28,7 +29,9 @@ function assets(): PrivateLibraryAssetView[] {
       binding_count: 1,
       updated_at: "2026-09-13T08:00:00Z",
       enabled: true,
-      summary: "用于避难所建造场景",
+      summary: "# 内部原始词包\\nsource: 18c3a6ea-f218-4ceb-8dce-69a933d2d871",
+      content: "# 内部原始词包\\nsource: 18c3a6ea-f218-4ceb-8dce-69a933d2d871",
+      detail_loaded: true,
       lexicon: {
         schema_version: "lexicon-pack/1",
         renderer_version: "lexicon-renderer/1",
@@ -57,6 +60,7 @@ function assets(): PrivateLibraryAssetView[] {
       asset_type: "vocabulary",
       title: "套话禁用词",
       version: 1,
+      content_version_number: 1,
       current_version_id: "pack-2-v1",
       archived: false,
       scope_kind: "library",
@@ -64,12 +68,15 @@ function assets(): PrivateLibraryAssetView[] {
       binding_count: 0,
       updated_at: "2026-09-13T09:00:00Z",
       enabled: false,
+      content: "套话禁用词完整内容",
+      detail_loaded: true,
     },
     {
       id: "style-1",
       asset_type: "writing_style",
       title: "短句动作风格",
       version: 1,
+      content_version_number: 1,
       current_version_id: "style-1-v1",
       archived: false,
       scope_kind: "library",
@@ -78,6 +85,8 @@ function assets(): PrivateLibraryAssetView[] {
       updated_at: "2026-09-13T10:00:00Z",
       enabled: true,
       summary: "动作段减少解释句",
+      content: "动作段减少解释句，保留人物可见的行动与环境反馈。",
+      detail_loaded: true,
     },
   ];
 }
@@ -139,6 +148,10 @@ describe("private library desktop workspace", () => {
     expect(textContent(tree)).toContain("排水坡度");
     expect(textContent(tree)).toContain("本书专用");
     expect(textContent(tree)).toContain("已启用");
+    expect(textContent(tree)).toContain("v12");
+    expect(textContent(tree)).not.toContain("v14");
+    expect(textContent(tree)).not.toContain("内部原始词包");
+    expect(textContent(tree)).not.toContain("18c3a6ea-f218-4ceb-8dce-69a933d2d871");
 
     const secondFocus = vi.fn();
     const firstRef = tabs[0]?.props.ref as (node: { focus(): void }) => void;
@@ -163,6 +176,25 @@ describe("private library desktop workspace", () => {
       start_utf16: 8,
       end_utf16: 12,
     } satisfies Partial<LibraryCheckHit>));
+  });
+
+  it("uses the current content version consistently in the list and history", () => {
+    const harness = createPrivateLibraryHarness();
+    const Workspace = createPrivateLibraryWorkspace(harness.React, TEST_ANTD);
+    const tree = harness.render(Workspace, {
+      ...props(),
+      history: [{
+        id: "pack-1-v12",
+        version_number: 12,
+        title: "末日工程用词",
+        content_hash: "a".repeat(64),
+        created_at: "2026-09-13T08:00:00Z",
+        current: true,
+      }],
+    });
+    expect(textContent(tree).match(/v12/g)).toHaveLength(2);
+    expect(textContent(tree)).not.toContain("v14");
+    expect(textContent(tree)).toContain("v12 · 末日工程用词当前");
   });
 
   it("preserves search and filters across a failed refresh and retries through props", () => {
@@ -344,6 +376,16 @@ describe("private library desktop workspace", () => {
     expect(findAll(tree, (element) => element.type === "button" && textContent(element) === "添加词项")).toHaveLength(0);
     tree = harness.render(Workspace, { ...input, detailError: "详情读取失败" });
     expect(findButton(tree, "编辑资料").props.disabled).toBe(true);
+    tree = harness.render(Workspace, {
+      ...input,
+      selectedAsset: { ...assets()[0]!, content: undefined, detail_loaded: true },
+    });
+    expect(findButton(tree, "编辑资料").props.disabled).toBe(true);
+    expect(findAll(tree, (element) => (
+      element.type === "alert"
+      && element.props.message === "资料详情不完整"
+      && String(element.props.description).includes("请刷新资料后重试")
+    ))).toHaveLength(1);
     tree = harness.render(Workspace, { ...input, selectedAsset: { ...assets()[2]!, detail_loaded: true } });
     expect(findButton(tree, "编辑资料").props.disabled).toBe(true);
     tree = harness.render(Workspace, { ...input, selectedAsset: { ...assets()[0]!, detail_loaded: true } });
@@ -523,7 +565,9 @@ describe("private library desktop workspace", () => {
     }
     const drawer = findAll(tree, (element) => element.type === "drawer")[0]!;
     (findButton(drawer.props.footer, "保存").props.onClick as () => void)();
-    const updated = { ...input, selectedAsset: { ...assets()[0]!, version: 4, current_version_id: "pack-1-v4" } };
+    const updated = { ...input, selectedAsset: {
+      ...assets()[0]!, version: 15, content_version_number: 13, current_version_id: "pack-1-v13",
+    } };
     harness.render(Workspace, updated);
     finish();
     for (let index = 0; index < 6; index += 1) await Promise.resolve();

@@ -218,6 +218,7 @@ def _asset_view(
         "content": version.content,
         "summary": version.content[:500],
         "version": int(asset.version),
+        "content_version_number": int(version.version_number),
         "current_version_id": str(version.id),
         "archived": bool(asset.archived),
         "scope_kind": asset.scope_kind,
@@ -335,6 +336,7 @@ def list_scoped_assets(
         PrivateAsset.created_at, PrivateAsset.updated_at,
         PrivateAssetVersion.id.label("resolved_version_id"),
         PrivateAssetVersion.title,
+        PrivateAssetVersion.version_number.label("content_version_number"),
         func.substr(PrivateAssetVersion.content, 1, 500).label("summary"),
         case(
             ((PrivateAssetVersion.metadata_json["schema_version"].astext == "lexicon-pack/1")

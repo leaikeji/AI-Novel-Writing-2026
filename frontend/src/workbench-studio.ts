@@ -101,6 +101,7 @@ import {
   chapterVersionPresentation,
   formatChapterUpdatedAt,
 } from "./chapter-list";
+import { templateFieldMeta } from "./template-field-meta";
 import { RelationshipEditor } from "./relationship-editor";
 import { RelationshipWorkspace } from "./relationship-workspace";
 import { CharacterProfileCompletionPanel } from "./character-profile-completion-panel";
@@ -349,8 +350,113 @@ export const STUDIO_SELECTION_REVIEW_FIELD_GROUPS = {
 } as const;
 
 
+const SETTINGS_TEMPLATE_FIELD_PREFIX = "settings.templateData.";
+const SETTINGS_TEMPLATE_FIELD_SUFFIX_PATTERN = /^[A-Za-z0-9_.!~*'()%\-]{1,160}$/;
+
+
+function encodedSettingsTemplateFieldSuffix(key: string): string | null {
+  try {
+    const suffix = encodeURIComponent(key);
+    const fieldId = `${SETTINGS_TEMPLATE_FIELD_PREFIX}${suffix}`;
+    return SETTINGS_TEMPLATE_FIELD_SUFFIX_PATTERN.test(suffix) && fieldId.length <= 200
+      ? suffix
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+
 function settingsTemplateFieldId(key: string): string {
-  return `settings.templateData.${encodeURIComponent(key)}`;
+  const suffix = encodedSettingsTemplateFieldSuffix(key);
+  if (suffix === null) throw new Error("invalid settings template field key");
+  return `${SETTINGS_TEMPLATE_FIELD_PREFIX}${suffix}`;
+}
+
+
+export function authorFacingTemplateEntries(
+  templateData: Readonly<Record<string, string | unknown>>,
+): Array<[string, unknown]> {
+  return Object.entries(templateData).filter(([key]) => !key.startsWith("cover_"));
+}
+
+
+export function settingsTemplateKeyIsWritable(key: string): boolean {
+  return encodedSettingsTemplateFieldSuffix(key) !== null;
+}
+
+
+export function settingsTemplateValueIsWritable(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+
+export function settingsTemplateDisplayValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null) return "null";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value, null, 2) ?? "undefined";
+  } catch {
+    return "无法显示的非文本值";
+  }
+}
+
+
+export interface WorkbenchSearchControllerCallbacks<Result> {
+  onOpenChange(open: boolean): void;
+  onBusyChange(busy: boolean): void;
+  onResults(results: readonly Result[]): void;
+  onError(reason: unknown): void;
+}
+
+
+export class WorkbenchSearchController<Result> {
+  private generation = 0;
+  private open = false;
+
+  constructor(private readonly callbacks: WorkbenchSearchControllerCallbacks<Result>) {}
+
+  openDialog(): void {
+    this.open = true;
+    this.callbacks.onOpenChange(true);
+  }
+
+  closeDialog(): void {
+    this.generation += 1;
+    this.open = false;
+    this.callbacks.onOpenChange(false);
+    this.callbacks.onBusyChange(false);
+  }
+
+  clearResults(): void {
+    this.generation += 1;
+    this.callbacks.onResults([]);
+    this.callbacks.onBusyChange(false);
+  }
+
+  invalidate(): void {
+    this.generation += 1;
+    this.open = false;
+  }
+
+  async run(request: () => Promise<readonly Result[]>): Promise<void> {
+    const requestGeneration = this.generation + 1;
+    this.generation = requestGeneration;
+    this.callbacks.onBusyChange(true);
+    try {
+      const results = await request();
+      if (this.isCurrent(requestGeneration)) this.callbacks.onResults(results);
+    } catch (reason) {
+      if (this.isCurrent(requestGeneration)) this.callbacks.onError(reason);
+    } finally {
+      if (requestGeneration === this.generation) this.callbacks.onBusyChange(false);
+    }
+  }
+
+  private isCurrent(requestGeneration: number): boolean {
+    return requestGeneration === this.generation && this.open;
+  }
 }
 
 
@@ -2683,7 +2789,7 @@ export function StudioProjectView({
   const [foreshadowEditing, setForeshadowEditing] = React.useState(null as ForeshadowRecord | null);
   const [foreshadowForm, setForeshadowForm] = React.useState({ title: "", content: "", latest_progress: "", status: "planned", progress: 0 });
   const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const [settingsForm, setSettingsForm] = React.useState({ genre: "", subgenre: "", idea: "", template_name: "", template_data: {} as Record<string, string> });
+  const [settingsForm, setSettingsForm] = React.useState({ genre: "", subgenre: "", idea: "", template_name: "", template_data: {} as Record<string, unknown> });
   const [coverOpen, setCoverOpen] = React.useState(false);
   const [coverMode, setCoverMode] = React.useState("ai" as NovelCoverMode);
   const [coverImageData, setCoverImageData] = React.useState("");
@@ -2691,6 +2797,29 @@ export function StudioProjectView({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState([] as NovelSearchResultRecord[]);
   const [searching, setSearching] = React.useState(false);
+  const searchTriggerRef = React.useRef(null as StudioFocusableControl | null) as StudioMutableRef<StudioFocusableControl | null>;
+  const searchErrorRef = React.useRef(onError) as StudioMutableRef<(message: string) => void>;
+  searchErrorRef.current = onError;
+  const searchControllerRef = React.useRef(
+    null as WorkbenchSearchController<NovelSearchResultRecord> | null,
+  ) as StudioMutableRef<WorkbenchSearchController<NovelSearchResultRecord> | null>;
+  if (searchControllerRef.current === null) {
+    searchControllerRef.current = new WorkbenchSearchController<NovelSearchResultRecord>({
+      onOpenChange: setSearchOpen,
+      onBusyChange: setSearching,
+      onResults: (results) => setSearchResults([...results]),
+      onError: (reason) => searchErrorRef.current(readableError(reason, "搜索全书失败")),
+    });
+  }
+  const searchController = searchControllerRef.current;
+
+  React.useLayoutEffect(() => {
+    searchController.invalidate();
+    setSearchOpen(false);
+    setSearching(false);
+    setSearchResults([]);
+    return () => searchController.invalidate();
+  }, [novel.id, searchController]);
 
   React.useLayoutEffect(() => {
     if (studioSection !== "chapters") return;
@@ -3345,16 +3474,20 @@ export function StudioProjectView({
         () => settingsFormRef.current.idea,
         (value) => setSettingsFieldValue("idea", value),
       ),
-      ...Object.keys(settingsFormRef.current.template_data).map((key) => (
-        controlledAssistantBinding(
-          settingsAssistantScopeRef,
-          settingsDirtyFieldsRef,
-          settingsTemplateFieldId(key),
-          key,
-          () => settingsFormRef.current.template_data[key] ?? "",
-          (value) => setSettingsTemplateValue(key, value),
-        )
-      )),
+      ...authorFacingTemplateEntries(settingsFormRef.current.template_data)
+        .filter(([key, value]) => (
+          settingsTemplateKeyIsWritable(key) && settingsTemplateValueIsWritable(value)
+        ))
+        .map(([key]) => (
+          controlledAssistantBinding(
+            settingsAssistantScopeRef,
+            settingsDirtyFieldsRef,
+            settingsTemplateFieldId(key),
+            templateFieldMeta(key).label,
+            () => settingsFormRef.current.template_data[key] as string,
+            (value) => setSettingsTemplateValue(key, value),
+          )
+        )),
     ];
     const mounted = mountStudioAssistantScope(
       assistantContextRuntime,
@@ -3650,24 +3783,38 @@ export function StudioProjectView({
   const runSearch = async () => {
     const query = searchQuery.trim();
     if (!query) {
-      setSearchResults([]);
+      searchController.clearResults();
       return;
     }
-    setSearching(true);
-    try {
-      const results = await apiRequest<NovelSearchResultRecord[]>(
+    await searchController.run(() => (
+      apiRequest<NovelSearchResultRecord[]>(
         `/novels/${novel.id}/search?q=${encodeURIComponent(query)}&limit=50`,
-      );
-      setSearchResults(results);
-    } catch (reason) {
-      onError(readableError(reason, "搜索全书失败"));
-    } finally {
-      setSearching(false);
+      )
+    ));
+  };
+
+  const openSearch = (runImmediately = true) => {
+    searchController.openDialog();
+    if (runImmediately) void runSearch();
+  };
+
+  const closeSearch = (restoreFocus = true) => {
+    searchController.closeDialog();
+    if (restoreFocus) {
+      window.setTimeout(() => searchTriggerRef.current?.focus?.(), 0);
     }
   };
 
+  const changeSearchQuery = (value: string) => {
+    setSearchQuery(value);
+    // Any edit changes the meaning of the visible result set. Invalidate an
+    // in-flight request immediately so results for the previous query can
+    // never appear under the new text, even before the author searches again.
+    searchController.clearResults();
+  };
+
   const openSearchResult = (result: NovelSearchResultRecord) => {
-    setSearchOpen(false);
+    closeSearch(false);
     onSelectDocument(result.document_id);
   };
 
@@ -4044,22 +4191,31 @@ export function StudioProjectView({
   }, "删除伏笔失败");
 
   const openSettings = () => {
-    const data: Record<string, string> = {};
-    Object.entries(novel.template_data || {}).forEach(([key, value]) => { data[key] = String(value ?? ""); });
+    const data: Record<string, unknown> = { ...(novel.template_data || {}) };
     settingsDirtyFieldsRef.current.clear();
     replaceStudioControlledState(settingsFormRef, setSettingsForm, { genre: novel.genre, subgenre: novel.subgenre, idea: novel.idea, template_name: novel.template_name, template_data: data });
     setSettingsOpen(true);
   };
 
-  const saveSettings = () => perform(async () => {
-    const updated = await apiRequest<NovelMetadataRecord>(`/novels/${novel.id}/settings`, {
-      method: "PUT",
-      body: JSON.stringify({ expected_version: novel.version, ...settingsFormRef.current }),
-    });
-    markExternalLedgerMutation(updated.story_ledger_version);
-    onNovelChanged(updated);
-    setSettingsOpen(false);
-  }, "保存模板设定失败");
+  const saveSettings = () => {
+    const invalidEntries = authorFacingTemplateEntries(settingsFormRef.current.template_data)
+      .filter(([key, value]) => (
+        !settingsTemplateKeyIsWritable(key) || !settingsTemplateValueIsWritable(value)
+      ));
+    if (invalidEntries.length > 0) {
+      onError("模板设定包含不受支持的字段键或非文本值；已为作者保留原值，但不能在修复前保存。");
+      return;
+    }
+    void perform(async () => {
+      const updated = await apiRequest<NovelMetadataRecord>(`/novels/${novel.id}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({ expected_version: novel.version, ...settingsFormRef.current }),
+      });
+      markExternalLedgerMutation(updated.story_ledger_version);
+      onNovelChanged(updated);
+      setSettingsOpen(false);
+    }, "保存模板设定失败");
+  };
 
   const renderChapterTableRow = (document: DocumentRecord) => {
     const version = chapterVersionPresentation(document.version_state);
@@ -4368,8 +4524,21 @@ export function StudioProjectView({
           h("header", null,
             h("h3", null, item.label),
             h("div", null,
-              h(Button, { type: "text", icon: h(CopyOutlined), disabled: !item.value, onClick: () => void navigator.clipboard.writeText(item.value) }),
-              h(Button, { type: "text", icon: h(EditOutlined), onClick: () => openOutline(item.step) }),
+              h(Button, {
+                type: "text",
+                icon: h(CopyOutlined),
+                disabled: !item.value,
+                title: `复制${item.label.replace("&", "")}`,
+                "aria-label": `复制${item.label.replace("&", "")}`,
+                onClick: () => void navigator.clipboard.writeText(item.value),
+              }),
+              h(Button, {
+                type: "text",
+                icon: h(EditOutlined),
+                title: `编辑${item.label.replace("&", "")}`,
+                "aria-label": `编辑${item.label.replace("&", "")}`,
+                onClick: () => openOutline(item.step),
+              }),
             ),
           ),
           h("p", null, item.value || "尚未生成"),
@@ -4493,12 +4662,28 @@ export function StudioProjectView({
           "article", { key: item.id, className: "mb-storyline-card" },
           h("span", { className: "mb-timeline-index" }, index + 1),
           h("div", { className: "mb-storyline-content" }, h("header", null, h("h3", null, item.title), h("span", null, `${item.progress}%`)), h("p", null, item.description || "尚未填写情节说明"), item.latest_progress ? h("small", null, `最近确认：${item.latest_progress}`) : null, h(Progress, { percent: item.progress, showInfo: false, strokeColor: "#ff7548" })),
-          h("div", { className: "mb-card-actions" }, h(Button, { type: "text", icon: h(EditOutlined), onClick: () => openStorylineForm(activeClueTab, item) }), h(Button, { type: "text", danger: true, icon: h(DeleteOutlined), onClick: () => void deleteStoryline(item) })),
+          h("div", { className: "mb-card-actions" },
+            h(Button, {
+              type: "text",
+              icon: h(EditOutlined),
+              title: `编辑${storylineLabels[activeClueTab]}“${item.title}”`,
+              "aria-label": `编辑${storylineLabels[activeClueTab]}“${item.title}”`,
+              onClick: () => openStorylineForm(activeClueTab, item),
+            }),
+            h(Button, {
+              type: "text",
+              danger: true,
+              icon: h(DeleteOutlined),
+              title: `删除${storylineLabels[activeClueTab]}“${item.title}”`,
+              "aria-label": `删除${storylineLabels[activeClueTab]}“${item.title}”`,
+              onClick: () => void deleteStoryline(item),
+            }),
+          ),
         )))
       : h("div", { className: "mb-large-empty" }, h(Empty, { description: `暂无${storylineLabels[activeClueTab]}，可以从真实创作计划中新增。` }), h(Button, { className: "anw-primary-button", icon: h(PlusOutlined), onClick: () => openStorylineForm(activeClueTab) }, `新增${storylineLabels[activeClueTab]}`)),
   );
 
-  const templateEntries = Object.entries(novel.template_data || {}).filter(([key]) => !key.startsWith("cover_"));
+  const templateEntries = authorFacingTemplateEntries(novel.template_data || {});
   const foreshadowStatusLabel: Record<string, string> = { planned: "待埋设", active: "进行中", resolved: "已解决", dropped: "已放弃" };
   const renderSettings = () => settingsTab === "template"
     ? h(
@@ -4507,7 +4692,14 @@ export function StudioProjectView({
         h("article", { className: "mb-template-card" },
           h("header", null, h("div", null, h("h3", null, novel.template_name || "自定义模板"), h("span", null, [novel.genre, novel.subgenre].filter(Boolean).join(" / ") || "未设置分类")), h(Button, { icon: h(EditOutlined), onClick: openSettings }, "编辑模板设定")),
           h("section", null, h("strong", null, "创作思路"), h("p", null, novel.idea || "尚未填写创作思路")),
-          h("div", { className: "mb-template-grid" }, ...(templateEntries.length ? templateEntries : [["模板字段", "尚未填写"]]).map(([key, value]) => h("div", { key }, h("span", null, key), h("strong", null, String(value || "未填写"))))),
+          h("div", { className: "mb-template-grid" }, ...(templateEntries.length
+            ? templateEntries.map(([key, value]) => h(
+                "div",
+                { key },
+                h("span", null, templateFieldMeta(key).label),
+                h("strong", null, value === "" ? "未填写" : settingsTemplateDisplayValue(value)),
+              ))
+            : [h("div", { key: "empty-template-fields" }, h("span", null, "扩展设定"), h("strong", null, "尚未添加"))])),
         ),
       )
     : settingsTab === "foreshadow" ? h(
@@ -4616,16 +4808,17 @@ export function StudioProjectView({
           "div",
           { className: "mb-chapter-header-search" },
           h(Input, {
+            ref: (control: StudioFocusableControl | null) => { searchTriggerRef.current = control; },
             value: searchQuery,
             prefix: h(SearchOutlined),
             allowClear: true,
             placeholder: "搜索全书",
             "aria-label": "搜索全书",
-            onChange: (event: { target: { value: string } }) => setSearchQuery(event.target.value),
+            onChange: (event: { target: { value: string } }) => changeSearchQuery(event.target.value),
+            onClick: () => openSearch(false),
             onPressEnter: () => {
               if (!searchQuery.trim()) return;
-              setSearchOpen(true);
-              void runSearch();
+              openSearch();
             },
           }),
         ),
@@ -4687,15 +4880,19 @@ export function StudioProjectView({
         h(
           "aside",
           { className: "mb-book-rail" },
-          h("div", { className: "mb-book-cover-wrap" }, h(NovelCoverView, { novel, className: "mb-book-cover", fallbackSrc: defaultNovelCover }), h("div", { className: "mb-book-cover-actions" }, h(Button, { type: "text", icon: h(DownloadOutlined), onClick: downloadCover, "aria-label": "下载封面" }), h(Button, { type: "text", icon: h(EditOutlined), onClick: openCover, "aria-label": "修改封面" }))),
-          h("h1", null, novel.title),
-          h(NovelMetadataEditor, { novel, onChanged: onNovelChanged }),
-          h("p", null, [novel.genre, novel.subgenre].filter(Boolean).join(" / ") || "长篇小说"),
-          h("div", { className: "mb-book-stats" }, h("span", null, `${chapterDocuments.reduce((sum: number, item: DocumentRecord) => sum + item.visible_character_count, 0)} 字`), h("span", null, `${chapterDocuments.length} 章节`)),
-          h("section", { className: "anw-current-model-card", "aria-label": "当前有效模型" },
-            h("strong", null, "当前有效模型"),
-            h("span", null, generationModelStatus ? generationModelLabel(generationModelStatus) : generationModelStatusError ? "暂时无法读取" : "正在读取…"),
-            h("small", null, "跟随 AI 小说作家 Agent；专属模型优先，未设置则继承 QwenPaw 全局模型。"),
+          h(
+            "div",
+            { className: "mb-book-rail-scroll" },
+            h("div", { className: "mb-book-cover-wrap" }, h(NovelCoverView, { novel, className: "mb-book-cover", fallbackSrc: defaultNovelCover }), h("div", { className: "mb-book-cover-actions" }, h(Button, { type: "text", icon: h(DownloadOutlined), onClick: downloadCover, "aria-label": "下载封面" }), h(Button, { type: "text", icon: h(EditOutlined), onClick: openCover, "aria-label": "修改封面" }))),
+            h("h1", null, novel.title),
+            h(NovelMetadataEditor, { novel, onChanged: onNovelChanged }),
+            h("p", null, [novel.genre, novel.subgenre].filter(Boolean).join(" / ") || "长篇小说"),
+            h("div", { className: "mb-book-stats" }, h("span", null, `${chapterDocuments.reduce((sum: number, item: DocumentRecord) => sum + item.visible_character_count, 0)} 字`), h("span", null, `${chapterDocuments.length} 章节`)),
+            h("section", { className: "anw-current-model-card", "aria-label": "当前有效模型" },
+              h("strong", null, "当前有效模型"),
+              h("span", null, generationModelStatus ? generationModelLabel(generationModelStatus) : generationModelStatusError ? "暂时无法读取" : "正在读取…"),
+              h("small", null, "跟随 AI 小说作家 Agent；专属模型优先，未设置则继承 QwenPaw 全局模型。"),
+            ),
           ),
           h(
             "nav",
@@ -4753,7 +4950,10 @@ export function StudioProjectView({
         footer: null,
         className: "anw-modal mb-search-modal",
         title: "搜索全书",
-        onCancel: () => setSearchOpen(false),
+        keyboard: true,
+        closable: true,
+        maskClosable: false,
+        onCancel: () => closeSearch(),
       },
       h(
         "div",
@@ -4766,7 +4966,7 @@ export function StudioProjectView({
           value: searchQuery,
           placeholder: "搜索章节标题或正文内容",
           "aria-label": "全书搜索词",
-          onChange: (event: any) => setSearchQuery(event.target.value),
+          onChange: (event: any) => changeSearchQuery(event.target.value),
           onPressEnter: () => void runSearch(),
         }),
         h(Button, { size: "large", className: "anw-primary-button", loading: searching, disabled: !searchQuery.trim(), onClick: () => void runSearch() }, "搜索"),
@@ -5038,7 +5238,12 @@ export function StudioProjectView({
       wrapSelectionReview(
         [
           ...STUDIO_SELECTION_REVIEW_FIELD_GROUPS.settings,
-          ...Object.keys(settingsForm.template_data).map(settingsTemplateFieldId),
+          ...authorFacingTemplateEntries(settingsForm.template_data)
+            .filter(([key, value]) => (
+              settingsTemplateKeyIsWritable(key) && settingsTemplateValueIsWritable(value)
+            ))
+            .map(([key]) => key)
+            .map(settingsTemplateFieldId),
         ],
         "mb-settings-selection-review-host",
         h("div", { className: "mb-form-stack" },
@@ -5048,8 +5253,41 @@ export function StudioProjectView({
           ),
           field("细分类", h(Input, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre), value: settingsForm.subgenre, onChange: (event: any) => changeSettingsFieldValue("subgenre", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsSubgenre) })),
           field("创作思路", h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea), rows: 5, value: settingsForm.idea, onChange: (event: any) => changeSettingsFieldValue("idea", event.target.value, STUDIO_ASSISTANT_FIELD_IDS.settingsIdea) })),
-          ...Object.entries(settingsForm.template_data).map(([key, value]) => field(key, h(Input.TextArea, { ...assistantControlProps(settingsAssistantScopeRef, settingsTemplateFieldId(key)), key, rows: 2, value, onChange: (event: any) => changeSettingsTemplateValue(key, event.target.value) }))),
-          h(Button, { size: "large", block: true, className: "anw-primary-button", onClick: () => void saveSettings() }, "保存"),
+          ...authorFacingTemplateEntries(settingsForm.template_data).map(([key, rawValue]) => {
+            const meta = templateFieldMeta(key);
+            const keyWritable = settingsTemplateKeyIsWritable(key);
+            const valueWritable = settingsTemplateValueIsWritable(rawValue);
+            const writable = keyWritable && valueWritable;
+            const fieldId = keyWritable ? settingsTemplateFieldId(key) : null;
+            return field(
+              meta.label,
+              h(Input.TextArea, {
+                ...(writable && fieldId ? assistantControlProps(settingsAssistantScopeRef, fieldId) : {}),
+                key,
+                rows: 2,
+                value: settingsTemplateDisplayValue(rawValue),
+                placeholder: meta.placeholder,
+                readOnly: !writable,
+                "aria-invalid": writable ? undefined : true,
+                onChange: writable ? (event: any) => changeSettingsTemplateValue(key, event.target.value) : undefined,
+              }),
+              writable
+                ? undefined
+                : !keyWritable
+                  ? "字段键不符合受控编辑合同，已保留原键值并切换为只读；修复前不能保存。"
+                  : "该字段保存的是非文本值，已原样保留并切换为只读；修复前不能保存。",
+            );
+          }),
+          h(Button, {
+            size: "large",
+            block: true,
+            className: "anw-primary-button",
+            disabled: authorFacingTemplateEntries(settingsForm.template_data)
+              .some(([key, value]) => (
+                !settingsTemplateKeyIsWritable(key) || !settingsTemplateValueIsWritable(value)
+              )),
+            onClick: () => saveSettings(),
+          }, "保存"),
         ),
       ),
     ),

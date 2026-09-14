@@ -51,6 +51,7 @@ def test_summary_is_a_column_projection_and_search_is_before_paging():
     assert "private_asset_versions.metadata_json AS metadata" not in sql
     assert "content" not in statement.selected_columns.keys()
     assert "metadata" not in statement.selected_columns.keys()
+    assert "content_version_number" in statement.selected_columns.keys()
     assert "substr(private_asset_versions.content" in sql
     assert sql.index("WHERE") < sql.index("LIMIT")
     assert "FOR UPDATE" not in sql
@@ -63,11 +64,12 @@ def test_summary_is_a_column_projection_and_search_is_before_paging():
 def test_prohibited_detail_retains_active_binding_version_for_enable_cas():
     novel_id, asset_id, version_id = uuid4(), uuid4(), uuid4()
     asset = PrivateAsset(
-        id=asset_id, asset_type="vocabulary", title="慎选用词", version=1,
+        id=asset_id, asset_type="vocabulary", title="慎选用词", version=11,
         current_version_id=version_id, scope_kind="library", tags_json=[], archived=False,
     )
     version = PrivateAssetVersion(
-        id=version_id, asset_id=asset_id, title=asset.title, content="词包说明", metadata_json={},
+        id=version_id, asset_id=asset_id, version_number=7,
+        title=asset.title, content="词包说明", metadata_json={},
     )
     binding = NovelAssetBinding(
         novel_id=novel_id, asset_id=asset_id, asset_version_id=version_id,
@@ -77,8 +79,60 @@ def test_prohibited_detail_retains_active_binding_version_for_enable_cas():
     session.get.side_effect = [asset, version]
     session.scalar.side_effect = [1, binding]
     view = get_scoped_asset_view(session, asset_id, novel_id=novel_id)
+    assert view["version"] == 11
+    assert view["content_version_number"] == 7
     assert view["enabled"] is False
     assert view["binding_version"] == 7
+
+
+def test_summary_and_full_pages_keep_root_cas_separate_from_content_version():
+    asset_id, version_id = uuid4(), uuid4()
+    content = "潮水拍上木阶。" * 120
+    base_row = {
+        "id": asset_id,
+        "asset_type": "writing_style",
+        "version": 14,
+        "content_version_number": 12,
+        "current_version_id": version_id,
+        "archived": False,
+        "scope_kind": "library",
+        "scope_novel_id": None,
+        "collection_key": None,
+        "source_asset_id": None,
+        "source_version_id": None,
+        "tags": [],
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "resolved_version_id": version_id,
+        "title": "潮声写法",
+        "summary": content[:500],
+        "entry_count": 0,
+    }
+
+    def session_for(row):
+        session = MagicMock(spec=Session)
+        session.scalar.return_value = 1
+        page_result, stats_result = MagicMock(), MagicMock()
+        page_result.mappings.return_value.all.return_value = [row]
+        stats_result.mappings.return_value.all.return_value = []
+        session.execute.side_effect = [page_result, stats_result]
+        return session
+
+    summary = list_scoped_assets(
+        session_for(dict(base_row)), projection="summary",
+    ).items[0]
+    assert summary["version"] == 14
+    assert summary["content_version_number"] == 12
+    assert len(summary["summary"]) == 500
+    assert "content" not in summary
+
+    full = list_scoped_assets(session_for({
+        **base_row, "content": content, "metadata": {},
+    }), projection="full").items[0]
+    assert full["version"] == 14
+    assert full["content_version_number"] == 12
+    assert full["content"] == content
+    assert len(full["content"]) > len(full["summary"])
 
 
 TEST_DATABASE_URL = os.environ.get("AI_NOVEL_TEST_DATABASE_URL", "").strip()
@@ -175,6 +229,11 @@ def test_postgres_catalog_searches_entire_library_and_uses_fixed_query_count(cat
             "replacement_hint": "跨页写出具体工具", "action": "recommend",
         }]},
     )
+    target.asset.version = 14
+    # Changing the root CAS activates the model's server-side on-update time;
+    # keep this target deterministically on the second page afterwards.
+    target.asset.updated_at = datetime.now(timezone.utc) - timedelta(days=200)
+    session.flush()
     first = list_scoped_assets(session, query=prefix, limit=100, projection="summary")
     assert first.total == 152 and first.next_offset == 100
     assert str(target.asset.id) not in {item["id"] for item in first.items}
@@ -188,6 +247,8 @@ def test_postgres_catalog_searches_entire_library_and_uses_fixed_query_count(cat
         assert [item["id"] for item in page.items] == [str(target.asset.id)]
         assert page.total == 1
         assert page.items[0]["entry_count"] == 1
+        assert page.items[0]["version"] == 14
+        assert page.items[0]["content_version_number"] == 1
         assert not {"content", "metadata", "lexicon"}.intersection(page.items[0])
         tool_page = query_library(SqlAlchemyChangeRequestStore(session), _access(), {
             "kind": "assets", "search": query, "projection": "summary", "offset": 0,
@@ -210,6 +271,8 @@ def test_postgres_catalog_searches_entire_library_and_uses_fixed_query_count(cat
     assert count50 == count100 == 3
     full = list_scoped_assets(session, query="跨页排水坡度")
     assert full.items[0]["detail_loaded"] is True
+    assert full.items[0]["content_version_number"] == 1
+    assert full.items[0]["content"] == "词包说明 200"
     assert full.items[0]["lexicon"]["entries"][0]["term"] == "跨页排水坡度"
 
 

@@ -187,8 +187,11 @@ export function createPrivateLibraryWorkspace(
     const selected = props.selectedAsset && props.selectedAsset.id === selectedSummary?.id
       ? props.selectedAsset
       : selectedSummary;
-    const detailReady = selected !== null && selected.detail_loaded !== false
+    const detailLoaded = selected !== null && selected.detail_loaded === true
       && !props.detailLoading && !props.detailError;
+    const detailReady = detailLoaded && typeof selected.content === "string";
+    const detailIncomplete = detailLoaded && selected !== null
+      && typeof selected.content !== "string";
     const busy = props.disabled === true || saving;
     const scopeKey = JSON.stringify([
       props.activeNovel?.id ?? null, category, query, scope, enabled,
@@ -372,7 +375,7 @@ export function createPrivateLibraryWorkspace(
               asset.scope_kind === "novel" ? "本书专用" : "通用库"),
             h(Tag, { color: asset.enabled ? "green" : "default" }, asset.enabled ? "已启用" : "未启用"),
             asset.archived ? h(Tag, null, "已归档") : null,
-            h("span", null, `v${asset.version}`),
+            h("span", null, `v${asset.content_version_number}`),
           ),
         )),
       );
@@ -509,9 +512,17 @@ export function createPrivateLibraryWorkspace(
           ? "资料已归档，本书仍使用固定版本；可直接停用。"
           : "资料已归档，恢复资料后才能重新启用。") : null,
         props.detailError ? h(Alert, { type: "error", showIcon: true, message: "资料详情加载失败", description: props.detailError }) : null,
+        detailIncomplete ? h(Alert, {
+          type: "error",
+          showIcon: true,
+          message: "资料详情不完整",
+          description: "完整内容没有加载成功，暂不可编辑或保存。请刷新资料后重试。",
+        }) : null,
         !detailReady && !props.detailError
+          && !detailIncomplete
           ? h("div", { role: "status" }, props.detailLoading ? h(Spin) : null, "正在等待资料详情，暂不可编辑。") : null,
-        detailReady && selected.summary ? h("p", { className: "anw-private-library__summary" }, selected.summary) : null,
+        detailReady && selected.asset_type !== "vocabulary" && selected.content
+          ? h("p", { className: "anw-private-library__summary" }, selected.content) : null,
         detailReady && selected.asset_type === "vocabulary" ? renderLexiconEntries(selected) : null,
         detailReady ? h("section", { className: "anw-private-library__history" },
           h("h3", null, "版本历史"),

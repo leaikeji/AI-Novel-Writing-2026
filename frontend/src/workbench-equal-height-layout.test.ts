@@ -11,7 +11,8 @@ describe("workbench equal-height layout styles", () => {
   it("stretches the desktop rail and main panel to the workbench row", () => {
     expect(styleSource).toMatch(/\.mb-workbench \{[\s\S]*?align-items:stretch;/);
     expect(styleSource).toMatch(/\.mb-book-rail \{[\s\S]*?align-self:stretch;/);
-    expect(styleSource).toContain(".mb-back-center-wrap { margin-top:auto;");
+    expect(styleSource).toContain(".mb-book-rail-scroll { display:flex; min-width:0; min-height:0; flex:1 1 auto;");
+    expect(styleSource).toContain(".mb-back-center-wrap { flex:0 0 auto;");
     expect(styleSource).toMatch(/\.mb-workbench-main \{[^}]*align-self:stretch;[^}]*flex-direction:column;/);
   });
 

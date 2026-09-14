@@ -50,7 +50,10 @@ export interface LibraryAssetSummary {
   id: string;
   asset_type: PrivateLibraryCategory;
   title: string;
+  /** Asset-root CAS version used only for concurrent mutation checks. */
   version: number;
+  /** Current immutable content version shown to the author. */
+  content_version_number: number;
   current_version_id: string;
   archived: boolean;
   scope_kind: "library" | "novel";

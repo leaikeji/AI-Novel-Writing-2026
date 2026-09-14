@@ -11,6 +11,7 @@ let harness: ReturnType<typeof createReactHarness>;
 const props = { onBack: vi.fn(), novels: [] as NovelSummary[], activeNovelId: "", onActiveNovelChange: vi.fn() };
 const asset: PrivateLibraryAssetView = {
   id: "asset", title: "潮汐描写", asset_type: "vocabulary", version: 2, archived: false,
+  content_version_number: 2,
   scope_kind: "library", tags: [], binding_count: 0, updated_at: "2026-09-13", enabled: false,
   detail_loaded: false, entry_count: 2, summary: "摘要", current_version_id: "asset-v2",
 };
@@ -81,10 +82,11 @@ describe("private library real page wiring", () => {
     const listCall = request.mock.calls.find(([path]) => String(path).includes("/assets?"))!;
     expect(String(listCall[0])).toContain("projection=summary");
     expect(String(listCall[0])).toContain("asset_type=vocabulary");
-    expect((state.selectedAsset as PrivateLibraryAssetView).summary).toHaveLength(750);
+    expect((state.selectedAsset as PrivateLibraryAssetView).summary).toBe("摘要");
+    expect((state.selectedAsset as PrivateLibraryAssetView & { content?: string }).content).toHaveLength(750);
     await (state.onSaveAsset as (draft: PrivateLibraryAssetDraft) => Promise<void>)({
       assetId: asset.id, assetType: "vocabulary", title: asset.title,
-      summary: (state.selectedAsset as PrivateLibraryAssetView).summary!, tags: [],
+      summary: (state.selectedAsset as PrivateLibraryAssetView & { content?: string }).content!, tags: [],
       scopeKind: "library", enabled: false,
     });
     const saved = request.mock.calls.find(([, init]) => init?.method === "PUT")!;

@@ -19,6 +19,7 @@ import { rememberWorkbenchRoute } from "./workbench-route";
 import { compressCover, generateSystemCover } from "./cover-utils";
 import { createNovelCoverView } from "./novel-cover";
 import { navigateNovelSurface, NOVEL_SURFACE_NAVIGATION_EVENT } from "./novel-surface-navigation";
+import { templateFieldMeta } from "./template-field-meta";
 import { createEmbeddingConfigPage } from "./embedding";
 import { createTtsCloudConfigPage } from "./narration/cloud-config";
 import {
@@ -192,28 +193,76 @@ const SYSTEM_TEMPLATES: Record<string, Array<{ key: string; name: string; fields
 };
 
 
-const TEMPLATE_FIELD_META: Record<string, { label: string; placeholder: string }> = {
-  protagonist_identity: { label: "主角身份", placeholder: "请输入主角身份" },
-  background_setting: { label: "背景设定", placeholder: "请输入背景设定" },
-  core_conflict: { label: "核心冲突", placeholder: "请输入核心冲突" },
-  emotional_mainline: { label: "情感主线", placeholder: "请输入情感主线" },
-  style_features: { label: "风格特点", placeholder: "请输入风格特点" },
-  male_name: { label: "男主名字", placeholder: "请输入男主名字" },
-  female_name: { label: "女主名字", placeholder: "请输入女主名字" },
-  lead_name: { label: "主角名字", placeholder: "请输入主角名字" },
-  core_hook: { label: "核心脑洞", placeholder: "一句话写清故事最重要的设定与冲突" },
-  male_identity: { label: "男主身份", placeholder: "身份、处境、欲望与限制" },
-  female_identity: { label: "女主身份", placeholder: "身份、处境、欲望与限制" },
-  lead_identity: { label: "主角身份", placeholder: "身份、处境、欲望与限制" },
-  romance_line: { label: "情感线", placeholder: "两人关系如何建立、误解、变化与确认" },
-  growth_line: { label: "成长线", placeholder: "主角如何付出代价并完成改变" },
-  mystery_line: { label: "谜团线", placeholder: "谜面、调查、反转和真相" },
-  world_rule: { label: "世界规则", placeholder: "能力、技术或时代规则及其代价" },
-};
-
-
 function readableError(reason: unknown, fallback: string): string {
   return apiErrorMessage(reason, fallback);
+}
+
+
+export interface CreationWizardCloseActions {
+  busy: boolean;
+  hasDraft: boolean;
+  lock: CreationWizardCloseLock;
+  save: () => Promise<void>;
+  close: () => void;
+  setBusy: (busy: boolean) => void;
+  reportError: (reason: unknown) => void;
+}
+
+
+export type CreationWizardCloseResult = "blocked" | "closed" | "save-failed";
+
+
+export interface CreationWizardCloseLock {
+  current: boolean;
+}
+
+
+async function withCreationWizardCloseLock(
+  lock: CreationWizardCloseLock,
+  action: () => Promise<Exclude<CreationWizardCloseResult, "blocked">>,
+): Promise<CreationWizardCloseResult> {
+  if (lock.current) return "blocked";
+  lock.current = true;
+  try {
+    return await action();
+  } finally {
+    lock.current = false;
+  }
+}
+
+
+export function creationWizardModalInteraction(busy: boolean) {
+  return {
+    keyboard: !busy,
+    closable: !busy,
+    maskClosable: false,
+    focusTriggerAfterClose: true,
+  };
+}
+
+
+export async function closeCreationWizardSafely(
+  actions: CreationWizardCloseActions,
+): Promise<CreationWizardCloseResult> {
+  if (actions.busy) return "blocked";
+  return withCreationWizardCloseLock(actions.lock, async () => {
+    if (!actions.hasDraft) {
+      actions.close();
+      return "closed";
+    }
+
+    actions.setBusy(true);
+    try {
+      await actions.save();
+      actions.close();
+      return "closed";
+    } catch (reason) {
+      actions.reportError(reason);
+      return "save-failed";
+    } finally {
+      actions.setBusy(false);
+    }
+  });
 }
 
 
@@ -504,7 +553,7 @@ export function PrivateLibraryV2(props: {
     void apiRequest<PrivateLibraryAssetView & { content?: string }>(
       `/private-library/assets/${selectedAssetId}${suffix}`,
     ).then((asset) => {
-      if (current()) setSelectedAsset({ ...asset, summary: asset.content ?? asset.summary, detail_loaded: true });
+      if (current()) setSelectedAsset({ ...asset, detail_loaded: true });
     }).catch((reason) => {
       if (current()) setDetailError(readableError(reason, "资料详情加载失败，请重新选择或刷新后重试。"));
     }).finally(() => { if (current()) setDetailLoading(false); });
@@ -837,6 +886,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
   const [data, setData] = React.useState({ writing_type: "", audience: "male", cover_mode: "ai", template_data: {} } as Record<string, any>);
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const closeLockRef = React.useRef(false) as CreationWizardCloseLock;
   const [error, setError] = React.useState("");
   const [templateModalOpen, setTemplateModalOpen] = React.useState(false);
   const [templateGenerating, setTemplateGenerating] = React.useState(false);
@@ -1014,25 +1064,25 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
   };
 
   const closeWizard = async () => {
+    if (busy) return;
     if (completedNovel) {
-      const novel = completedNovel;
-      setCompletedNovel(null);
-      await props.onCompleted(novel);
+      await withCreationWizardCloseLock(closeLockRef, async () => {
+        const novel = completedNovel;
+        setCompletedNovel(null);
+        await props.onCompleted(novel);
+        return "closed";
+      });
       return;
     }
-    if (!draft || busy) {
-      props.onClose();
-      return;
-    }
-    setBusy(true);
-    try {
-      await persist(step, data);
-    } catch (reason) {
-      setError(readableError(reason, "保存建书草稿失败"));
-    } finally {
-      setBusy(false);
-      props.onClose();
-    }
+    await closeCreationWizardSafely({
+      busy,
+      hasDraft: draft !== null,
+      lock: closeLockRef,
+      save: async () => { await persist(step, data); },
+      close: props.onClose,
+      setBusy,
+      reportError: (reason) => setError(readableError(reason, "保存建书草稿失败；向导仍保持打开，请重试。")),
+    });
   };
 
   const goBack = async () => {
@@ -1375,7 +1425,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
     ),
     h("div", { className: "mb-template-heading" }, h("strong", null, "模板设定"), h("span", null, "可修改")),
     ...templateFields.map((field) => {
-      const meta = TEMPLATE_FIELD_META[field] || { label: field, placeholder: "请填写" };
+      const meta = templateFieldMeta(field);
       return h(
         "label",
         { key: field, className: "mb-wizard-field" },
@@ -1568,8 +1618,7 @@ function CreateNovelWizard(props: { open: boolean; onClose: () => void; onComple
       width: 600,
       title: "创建新小说",
       footer: null,
-      maskClosable: false,
-      keyboard: false,
+      ...creationWizardModalInteraction(busy),
       onCancel: closeWizard,
       destroyOnClose: false,
     },

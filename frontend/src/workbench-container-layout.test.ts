@@ -33,8 +33,32 @@ describe("workbench container responsive shell", () => {
   it("keeps the compact rail and all panel scrolling inside the workbench", () => {
     expect(styleSource).toMatch(/@container \(max-width:760px\)[\s\S]*?\.mb-book-nav \{[\s\S]*?overflow-x:auto;/);
     expect(styleSource).toMatch(/@container \(max-width:760px\)[\s\S]*?\.mb-workbench \.mb-panel-body,[\s\S]*?overflow-y:auto;[\s\S]*?overflow-x:hidden;/);
-    expect(styleSource).toMatch(/@container \(max-width:520px\)[\s\S]*?\.mb-book-rail[\s\S]*?grid-template-columns:minmax\(0,1fr\);/);
+    expect(styleSource).toMatch(/@container \(max-width:520px\)[\s\S]*?\.mb-book-rail-scroll \{ grid-template-columns:minmax\(0,1fr\); \}/);
     expect(styleSource).toMatch(/@media \(max-height:720px\) and \(min-width:721px\)[\s\S]*?\.mb-book-nav[\s\S]*?overflow-y:auto;/);
+  });
+
+  it("keeps the complete navigation and one return control outside the scrollable rail metadata", () => {
+    const scrollIndex = studioSource.indexOf('className: "mb-book-rail-scroll"');
+    const navigationIndex = studioSource.indexOf('className: "mb-book-nav"', scrollIndex);
+    const backIndex = studioSource.indexOf('className: "mb-back-center-wrap"', navigationIndex);
+    expect(studioSource.match(/\"返回创作中心\"/g)).toHaveLength(1);
+    expect(scrollIndex).toBeGreaterThan(-1);
+    expect(navigationIndex).toBeGreaterThan(scrollIndex);
+    expect(backIndex).toBeGreaterThan(navigationIndex);
+    expect(studioSource.slice(scrollIndex, navigationIndex)).toContain(
+      '          ),\n          h(\n            "nav",\n            { ',
+    );
+    expect(styleSource).toContain(".mb-book-rail-scroll { display:flex; min-width:0; min-height:0; flex:1 1 auto;");
+    expect(styleSource).toContain(".mb-book-nav { display:grid; flex:0 0 auto;");
+    expect(styleSource).toMatch(/@container \(max-width:760px\)[\s\S]*?\.mb-back-center-wrap \{ position:sticky;[\s\S]*?display:block;/);
+    expect(styleSource).toMatch(/@container \(max-width:760px\)[\s\S]*?\.mb-book-nav \{[\s\S]*?flex:0 0 auto;[\s\S]*?margin:7px 0 0;/);
+    expect(styleSource).not.toContain(".mb-back-center-wrap { display:none;");
+  });
+
+  it("contains all three desktop density layouts without horizontal page overflow", () => {
+    expect(styleSource).toMatch(/\.mb-workbench \{[\s\S]*?box-sizing:border-box;[\s\S]*?overflow:hidden;/);
+    expect(styleSource).toMatch(/@container \(max-width:1040px\)[\s\S]*?\.mb-workbench[\s\S]*?overflow-x:hidden;/);
+    expect(styleSource).toMatch(/@container \(max-width:760px\)[\s\S]*?\.mb-workbench,[\s\S]*?grid-template-columns:minmax\(0,1fr\);[\s\S]*?overflow:hidden;/);
   });
 
   it("wraps chapter review controls against the editor container, including long apply labels", () => {

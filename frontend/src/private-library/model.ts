@@ -57,6 +57,8 @@ export type LibraryEnabledFilter = "all" | "enabled" | "disabled";
 export interface PrivateLibraryAssetView extends LibraryAssetSummary {
   readonly enabled: boolean;
   readonly summary?: string;
+  /** Present only after the full detail projection has loaded. */
+  readonly content?: string;
   readonly lexicon?: LexiconPack;
 }
 
@@ -123,6 +125,9 @@ export interface LexiconEntryDraft {
 
 
 export function assetDraftFromView(asset: PrivateLibraryAssetView): PrivateLibraryAssetDraft {
+  if (asset.detail_loaded !== true || typeof asset.content !== "string") {
+    throw new Error("资料详情不完整，无法建立编辑草稿");
+  }
   return {
     assetId: asset.id,
     title: asset.title,
@@ -131,7 +136,7 @@ export function assetDraftFromView(asset: PrivateLibraryAssetView): PrivateLibra
     scopeNovelId: asset.scope_novel_id,
     enabled: asset.enabled,
     tags: asset.tags,
-    summary: asset.summary ?? "",
+    summary: asset.content,
   };
 }
 

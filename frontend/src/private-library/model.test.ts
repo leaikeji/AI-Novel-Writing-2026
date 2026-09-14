@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PRIVATE_LIBRARY_CATEGORIES,
+  assetDraftFromView,
   filterPrivateLibraryAssets,
   splitTags,
   type PrivateLibraryAssetView,
@@ -17,6 +18,7 @@ function asset(
     asset_type: "vocabulary",
     title: id,
     version: 1,
+    content_version_number: 1,
     current_version_id: `${id}-v1`,
     archived: false,
     scope_kind: "library",
@@ -88,5 +90,29 @@ describe("private library view model", () => {
 
   it("normalizes comma-separated tags without silently keeping duplicates", () => {
     expect(splitTags("动作, 环境，动作，  工程  ")).toEqual(["动作", "环境", "工程"]);
+  });
+
+  it("builds an edit draft only from complete detail content without truncation", () => {
+    const content = "潮水拍上木阶。".repeat(120);
+    const detail = asset("long-style", {
+      asset_type: "writing_style",
+      summary: content.slice(0, 500),
+      content,
+      detail_loaded: true,
+    });
+    expect(assetDraftFromView(detail).summary).toBe(content);
+    expect(assetDraftFromView(detail).summary.length).toBeGreaterThan(500);
+    expect(() => assetDraftFromView({
+      ...detail,
+      content: undefined,
+    })).toThrow("资料详情不完整");
+    expect(() => assetDraftFromView({
+      ...detail,
+      detail_loaded: false,
+    })).toThrow("资料详情不完整");
+    expect(() => assetDraftFromView({
+      ...detail,
+      detail_loaded: undefined,
+    })).toThrow("资料详情不完整");
   });
 });

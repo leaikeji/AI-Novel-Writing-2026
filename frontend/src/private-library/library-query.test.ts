@@ -8,7 +8,8 @@ const filters: LibraryQueryFilters = {
 };
 function item(id: string): LibraryAssetSummary {
   return {
-    id, asset_type: "vocabulary", title: id, version: 1, current_version_id: `${id}-v1`,
+    id, asset_type: "vocabulary", title: id, version: 1,
+    content_version_number: 1, current_version_id: `${id}-v1`,
     archived: false, scope_kind: "library", tags: [], binding_count: 0,
     updated_at: "2026-09-13T08:00:00Z", detail_loaded: false,
   };
